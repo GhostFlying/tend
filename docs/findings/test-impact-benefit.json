@@ -1,0 +1,4200 @@
+{
+  "Format": 1,
+  "Decision": "do not merge; stop this experiment",
+  "DecisionDate": "2026-11-04",
+  "ImplementationCommit": "43a7606b07aeca3d77916497a690b89de80274e7",
+  "MeasuredToolCommit": "bf20bc80585ad39e23873a296e87e1b72dc2534f",
+  "MeasuredToolTree": "185dbf224e1de90b90d2ff17aced42a5ba0eac26",
+  "AcceptedNetSeconds": null,
+  "BenefitAccepted": false,
+  "CorrectnessAccepted": false,
+  "Merged": false,
+  "ChangedMainGate": false,
+  "MainObservations": 30,
+  "FailedMainChecks": 7,
+  "ReplayCompleted": false,
+  "SupplementaryWebObservations": [
+    {
+      "Round": 1,
+      "Mode": "full",
+      "Seconds": 897.59082403,
+      "Success": true,
+      "CompleteSourceReceipt": true,
+      "Interrupted": false
+    },
+    {
+      "Round": 1,
+      "Mode": "affected",
+      "Seconds": 1157.854433047,
+      "Success": false,
+      "CompleteSourceReceipt": true,
+      "Interrupted": false
+    },
+    {
+      "Round": 2,
+      "Mode": "affected",
+      "Seconds": 511.973826437,
+      "Success": false,
+      "CompleteSourceReceipt": false,
+      "Interrupted": true
+    }
+  ],
+  "Replay": {
+    "Format": 1,
+    "Manifest": {
+      "Baseline": "3f512173b4024a2dc0c99522752eddb483795447",
+      "Cases": [
+        {
+          "PR": 210,
+          "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e"
+        },
+        {
+          "PR": 211,
+          "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259"
+        },
+        {
+          "PR": 212,
+          "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5"
+        },
+        {
+          "PR": 213,
+          "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819"
+        },
+        {
+          "PR": 214,
+          "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4"
+        }
+      ],
+      "Web": {
+        "PR": 201,
+        "Commit": "90f873c1c3c357e7104d4ceb65f365969ec6f5ba",
+        "Base": "faa0888fce6975e19cba7fa853faec413de66181"
+      }
+    },
+    "Initial": {
+      "Seconds": 1090.600638216,
+      "UserSeconds": 9019.22562,
+      "SystemSeconds": 445.576236,
+      "LoadBefore": [
+        "20.75",
+        "19.23",
+        "16.85"
+      ],
+      "LoadAfter": [
+        "9.11",
+        "18.53",
+        "21.63"
+      ],
+      "StartedAt": "2026-11-03T18:41:11.943489169Z",
+      "FinishedAt": "2026-11-03T18:59:22.544373313Z",
+      "Success": false
+    },
+    "Refresh": {
+      "Seconds": 1089.611880762,
+      "UserSeconds": 8131.176605,
+      "SystemSeconds": 377.458119,
+      "LoadBefore": [
+        "7.57",
+        "13.89",
+        "18.35"
+      ],
+      "LoadAfter": [
+        "19.97",
+        "38.72",
+        "29.65"
+      ],
+      "StartedAt": "2026-11-04T11:53:56.782403643Z",
+      "FinishedAt": "2026-11-04T12:12:06.394391271Z",
+      "Success": true
+    },
+    "Cases": [
+      {
+        "Case": {
+          "PR": 210,
+          "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e"
+        },
+        "Pairs": [
+          {
+            "Full": {
+              "Seconds": 856.790266769,
+              "UserSeconds": 7998.676581,
+              "SystemSeconds": 356.240571,
+              "LoadBefore": [
+                "10.75",
+                "7.26",
+                "9.22"
+              ],
+              "LoadAfter": [
+                "7.94",
+                "12.98",
+                "12.51"
+              ],
+              "Stages": {
+                "api": 532.928053229,
+                "app": 791.068720013,
+                "e2e": 254.430995811,
+                "mainthread": 238.30766792,
+                "other": 741.805079927,
+                "quality": 60.090554868,
+                "web": 106.341260175
+              },
+              "StartedAt": "2026-11-04T03:55:15.122980036Z",
+              "FinishedAt": "2026-11-04T04:09:31.913415594Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+                "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 856.73285666,
+                "Stages": {
+                  "api": 532.928053229,
+                  "app": 791.068720013,
+                  "e2e": 254.430995811,
+                  "mainthread": 238.30766792,
+                  "other": 741.805079927,
+                  "quality": 60.090554868,
+                  "web": 106.341260175
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 826.283826468,
+              "UserSeconds": 7643.707033,
+              "SystemSeconds": 319.354484,
+              "LoadBefore": [
+                "7.94",
+                "12.98",
+                "12.51"
+              ],
+              "LoadAfter": [
+                "7.70",
+                "11.97",
+                "13.32"
+              ],
+              "Stages": {
+                "analysis": 4.419163261,
+                "api": 520.509533166,
+                "app": 780.387448577,
+                "e2e": 249.546425012,
+                "mainthread": 228.589368811,
+                "other": 703.44889426,
+                "quality": 15.004771714,
+                "web": 109.89707369
+              },
+              "StartedAt": "2026-11-04T04:09:31.915730352Z",
+              "FinishedAt": "2026-11-04T04:23:18.199691768Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+                "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 826.238726529,
+                "Stages": {
+                  "analysis": 4.419163261,
+                  "api": 520.509533166,
+                  "app": 780.387448577,
+                  "e2e": 249.546425012,
+                  "mainthread": 228.589368811,
+                  "other": 703.44889426,
+                  "quality": 15.004771714,
+                  "web": 109.89707369
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2304,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 806.813323713,
+              "UserSeconds": 7422.253169,
+              "SystemSeconds": 288.358165,
+              "LoadBefore": [
+                "8.37",
+                "11.48",
+                "12.88"
+              ],
+              "LoadAfter": [
+                "9.12",
+                "12.07",
+                "13.00"
+              ],
+              "Stages": {
+                "api": 509.914403068,
+                "app": 758.894795744,
+                "e2e": 242.819455735,
+                "mainthread": 216.421717061,
+                "other": 693.491824575,
+                "quality": 14.434534513,
+                "web": 104.660357033
+              },
+              "StartedAt": "2026-11-04T04:36:20.087848395Z",
+              "FinishedAt": "2026-11-04T04:49:46.901428415Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+                "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 806.773125579,
+                "Stages": {
+                  "api": 509.914403068,
+                  "app": 758.894795744,
+                  "e2e": 242.819455735,
+                  "mainthread": 216.421717061,
+                  "other": 693.491824575,
+                  "quality": 14.434534513,
+                  "web": 104.660357033
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 781.883388599,
+              "UserSeconds": 7244.219509,
+              "SystemSeconds": 292.067742,
+              "LoadBefore": [
+                "7.70",
+                "11.97",
+                "13.32"
+              ],
+              "LoadAfter": [
+                "8.37",
+                "11.48",
+                "12.88"
+              ],
+              "Stages": {
+                "analysis": 4.326523572,
+                "api": 498.669603704,
+                "app": 757.266455212,
+                "e2e": 240.636159291,
+                "mainthread": 219.35126053,
+                "other": 661.839509115,
+                "quality": 16.74552192,
+                "web": 106.965635849
+              },
+              "StartedAt": "2026-11-04T04:23:18.201635966Z",
+              "FinishedAt": "2026-11-04T04:36:20.085107091Z",
+              "Success": false,
+              "Error": "other: exit status 2",
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+                "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 781.8434326160001,
+                "Stages": {
+                  "analysis": 4.326523572,
+                  "api": 498.669603704,
+                  "app": 757.266455212,
+                  "e2e": 240.636159291,
+                  "mainthread": 219.35126053,
+                  "other": 661.839509115,
+                  "quality": 16.74552192,
+                  "web": 106.965635849
+                },
+                "FullVerified": false,
+                "SelectionDelegated": true,
+                "Error": "other: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2304,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 821.917552512,
+              "UserSeconds": 7467.499229,
+              "SystemSeconds": 291.51237,
+              "LoadBefore": [
+                "9.12",
+                "12.07",
+                "13.00"
+              ],
+              "LoadAfter": [
+                "9.46",
+                "13.45",
+                "14.05"
+              ],
+              "Stages": {
+                "api": 506.51649952,
+                "app": 754.827771288,
+                "e2e": 235.891537294,
+                "mainthread": 222.824606591,
+                "other": 706.276648154,
+                "quality": 14.906299303,
+                "web": 107.147342973
+              },
+              "StartedAt": "2026-11-04T04:49:46.903581277Z",
+              "FinishedAt": "2026-11-04T05:03:28.821337611Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+                "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 821.873666846,
+                "Stages": {
+                  "api": 506.51649952,
+                  "app": 754.827771288,
+                  "e2e": 235.891537294,
+                  "mainthread": 222.824606591,
+                  "other": 706.276648154,
+                  "quality": 14.906299303,
+                  "web": 107.147342973
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 786.624679778,
+              "UserSeconds": 7225.849192,
+              "SystemSeconds": 286.752365,
+              "LoadBefore": [
+                "9.46",
+                "13.45",
+                "14.05"
+              ],
+              "LoadAfter": [
+                "7.68",
+                "12.22",
+                "13.89"
+              ],
+              "Stages": {
+                "analysis": 4.276706073,
+                "api": 497.874065903,
+                "app": 745.612788951,
+                "e2e": 238.232007478,
+                "mainthread": 212.61159979,
+                "other": 675.530423687,
+                "quality": 14.541196447,
+                "web": 98.549587845
+              },
+              "StartedAt": "2026-11-04T05:03:28.823533983Z",
+              "FinishedAt": "2026-11-04T05:16:35.448325962Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+                "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 786.580994863,
+                "Stages": {
+                  "analysis": 4.276706073,
+                  "api": 497.874065903,
+                  "app": 745.612788951,
+                  "e2e": 238.232007478,
+                  "mainthread": 212.61159979,
+                  "other": 675.530423687,
+                  "quality": 14.541196447,
+                  "web": 98.549587845
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2304,
+            "FullFallback": true
+          }
+        ],
+        "Reasons": [
+          "Web filesystem or process boundary requires full source-dependent validation",
+          "foundation changed: cmd/tend-updater/main.go",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHistory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenancePreservesUnknownRunAndLinksTwoIndependentWindows",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceRejectsPreparationAndReceiptMismatch",
+          "new root: github.com/GhostFlying/tend/internal/app/TestManagerCloseIndexedCallbackIdentity",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestCommittedMaintenanceProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/store/TestCoordinationQueryIndexesUpgradeHistory",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualFailedCandidateForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterBootstrap",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterInterruptedBeforeStart",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceCanDeployAgainAfterLinkedReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceContinuationRejectsLiveOriginal",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceDoesNotReauthorizeAmbiguousLaunch",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceHistoryRemainsBoundedAcrossTwentyWindows",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceNotDrainedCanCancelWithoutReplacingServer",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchContinuationKeepsCandidateAndRequest",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchPhaseClassification",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRechecksHostedDrainBeforeStop",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRetainsOpenRunsAndLinksIndependentReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceActualProcessHealthAndLinkReplay",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceStartupVerifiesFailedParentHistory",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-server",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/api",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/app",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archive",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archiveseed",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/blobstore",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cfgfile",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cli",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/contextbuilder",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/dispatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/e2e",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/bridge",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/coordination",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/nativeusage",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/orca",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/remote",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/rollout",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/traex",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/mainthread",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging/telegram",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/netx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/procx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck/cmd",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/schemagen",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/release",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/reviewwatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentcontrol",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentexec",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentregistry",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/gitws",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/journal",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runnerapi",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/serverkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/store",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/check",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/racecheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/recoveryfixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/storefixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/tools",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/upgradectl",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/usagemaint",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/views",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webhookauth",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webui",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/agenthooks",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/appserver",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/tsnet"
+        ],
+        "Preparation": {
+          "dependencies": {
+            "Seconds": 3.454439623,
+            "UserSeconds": 11.793451,
+            "SystemSeconds": 3.50422,
+            "LoadBefore": [
+              "8.23",
+              "6.60",
+              "9.04"
+            ],
+            "LoadAfter": [
+              "10.85",
+              "7.17",
+              "9.21"
+            ],
+            "StartedAt": "2026-11-04T03:55:00.134008549Z",
+            "FinishedAt": "2026-11-04T03:55:03.588544235Z",
+            "Success": true
+          },
+          "go_compile": {
+            "Seconds": 68.788964153,
+            "UserSeconds": 253.104981,
+            "SystemSeconds": 26.599771,
+            "LoadBefore": [
+              "5.68",
+              "5.37",
+              "9.29"
+            ],
+            "LoadAfter": [
+              "7.74",
+              "6.06",
+              "9.24"
+            ],
+            "StartedAt": "2026-11-04T03:51:50.454927278Z",
+            "FinishedAt": "2026-11-04T03:52:59.244003156Z",
+            "Success": true
+          },
+          "go_race_compile": {
+            "Seconds": 120.889792873,
+            "UserSeconds": 316.375719,
+            "SystemSeconds": 27.946466,
+            "LoadBefore": [
+              "7.74",
+              "6.06",
+              "9.24"
+            ],
+            "LoadAfter": [
+              "8.23",
+              "6.60",
+              "9.04"
+            ],
+            "StartedAt": "2026-11-04T03:52:59.24402334Z",
+            "FinishedAt": "2026-11-04T03:55:00.133951635Z",
+            "Success": true
+          },
+          "web_modules": {
+            "Seconds": 11.534072791,
+            "UserSeconds": 21.032616,
+            "SystemSeconds": 5.055911,
+            "LoadBefore": [
+              "10.85",
+              "7.17",
+              "9.21"
+            ],
+            "LoadAfter": [
+              "10.75",
+              "7.26",
+              "9.22"
+            ],
+            "StartedAt": "2026-11-04T03:55:03.588663356Z",
+            "FinishedAt": "2026-11-04T03:55:15.122846596Z",
+            "Success": true
+          }
+        },
+        "HistoricalRootSeconds": 7520.229515599024
+      },
+      {
+        "Case": {
+          "PR": 211,
+          "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259"
+        },
+        "Pairs": [
+          {
+            "Full": {
+              "Seconds": 810.015341205,
+              "UserSeconds": 7464.26398,
+              "SystemSeconds": 312.705169,
+              "LoadBefore": [
+                "6.42",
+                "10.28",
+                "12.98"
+              ],
+              "LoadAfter": [
+                "13.13",
+                "16.22",
+                "15.73"
+              ],
+              "Stages": {
+                "api": 512.473793556,
+                "app": 755.935776867,
+                "e2e": 242.822560661,
+                "mainthread": 227.829777617,
+                "other": 696.314479518,
+                "quality": 29.858018688,
+                "web": 104.568180133
+              },
+              "StartedAt": "2026-11-04T05:18:32.840437024Z",
+              "FinishedAt": "2026-11-04T05:32:02.855870015Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+                "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 809.978318903,
+                "Stages": {
+                  "api": 512.473793556,
+                  "app": 755.935776867,
+                  "e2e": 242.822560661,
+                  "mainthread": 227.829777617,
+                  "other": 696.314479518,
+                  "quality": 29.858018688,
+                  "web": 104.568180133
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 881.884847656,
+              "UserSeconds": 7942.924432,
+              "SystemSeconds": 347.611283,
+              "LoadBefore": [
+                "13.13",
+                "16.22",
+                "15.73"
+              ],
+              "LoadAfter": [
+                "9.41",
+                "16.72",
+                "17.83"
+              ],
+              "Stages": {
+                "analysis": 4.547627354,
+                "api": 536.449858984,
+                "app": 802.123091502,
+                "e2e": 249.672240671,
+                "mainthread": 237.593299764,
+                "other": 758.730061119,
+                "quality": 14.805976157,
+                "web": 110.090736511
+              },
+              "StartedAt": "2026-11-04T05:32:02.862408383Z",
+              "FinishedAt": "2026-11-04T05:46:44.747363089Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+                "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 881.8422581330001,
+                "Stages": {
+                  "analysis": 4.547627354,
+                  "api": 536.449858984,
+                  "app": 802.123091502,
+                  "e2e": 249.672240671,
+                  "mainthread": 237.593299764,
+                  "other": 758.730061119,
+                  "quality": 14.805976157,
+                  "web": 110.090736511
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2307,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 1119.8808694,
+              "UserSeconds": 9006.126586,
+              "SystemSeconds": 437.13572,
+              "LoadBefore": [
+                "12.75",
+                "18.41",
+                "22.19"
+              ],
+              "LoadAfter": [
+                "14.71",
+                "39.93",
+                "41.54"
+              ],
+              "Stages": {
+                "api": 719.621839842,
+                "app": 1039.026155516,
+                "e2e": 414.488831726,
+                "mainthread": 305.275226091,
+                "other": 956.461878941,
+                "quality": 16.665108414,
+                "web": 148.705683791
+              },
+              "StartedAt": "2026-11-04T06:02:00.201831743Z",
+              "FinishedAt": "2026-11-04T06:20:40.082805627Z",
+              "Success": false,
+              "Error": "e2e: exit status 2\nother: exit status 2",
+              "Execution": {
+                "Mode": "full",
+                "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+                "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 1119.817440572,
+                "Stages": {
+                  "api": 719.621839842,
+                  "app": 1039.026155516,
+                  "e2e": 414.488831726,
+                  "mainthread": 305.275226091,
+                  "other": 956.461878941,
+                  "quality": 16.665108414,
+                  "web": 148.705683791
+                },
+                "FullVerified": false,
+                "SelectionDelegated": false,
+                "Error": "e2e: exit status 2\nother: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 915.449335456,
+              "UserSeconds": 7980.890946,
+              "SystemSeconds": 353.689162,
+              "LoadBefore": [
+                "9.41",
+                "16.72",
+                "17.83"
+              ],
+              "LoadAfter": [
+                "12.75",
+                "18.41",
+                "22.19"
+              ],
+              "Stages": {
+                "analysis": 4.9606434440000005,
+                "api": 573.459200379,
+                "app": 834.883670974,
+                "e2e": 264.572621802,
+                "mainthread": 263.260089572,
+                "other": 793.726363978,
+                "quality": 15.040952293,
+                "web": 107.176956173
+              },
+              "StartedAt": "2026-11-04T05:46:44.749698972Z",
+              "FinishedAt": "2026-11-04T06:02:00.199280398Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+                "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 915.402605252,
+                "Stages": {
+                  "analysis": 4.9606434440000005,
+                  "api": 573.459200379,
+                  "app": 834.883670974,
+                  "e2e": 264.572621802,
+                  "mainthread": 263.260089572,
+                  "other": 793.726363978,
+                  "quality": 15.040952293,
+                  "web": 107.176956173
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2307,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 930.886271842,
+              "UserSeconds": 8269.332045,
+              "SystemSeconds": 387.227228,
+              "LoadBefore": [
+                "14.71",
+                "39.93",
+                "41.54"
+              ],
+              "LoadAfter": [
+                "13.53",
+                "20.78",
+                "30.16"
+              ],
+              "Stages": {
+                "api": 590.716492327,
+                "app": 862.903287197,
+                "e2e": 283.222237339,
+                "mainthread": 263.816256675,
+                "other": 783.148141004,
+                "quality": 17.596856983,
+                "web": 138.148453622
+              },
+              "StartedAt": "2026-11-04T06:20:40.085608869Z",
+              "FinishedAt": "2026-11-04T06:36:10.971998848Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+                "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 930.844374191,
+                "Stages": {
+                  "api": 590.716492327,
+                  "app": 862.903287197,
+                  "e2e": 283.222237339,
+                  "mainthread": 263.816256675,
+                  "other": 783.148141004,
+                  "quality": 17.596856983,
+                  "web": 138.148453622
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 947.720705196,
+              "UserSeconds": 8392.15342,
+              "SystemSeconds": 408.772132,
+              "LoadBefore": [
+                "13.53",
+                "20.78",
+                "30.16"
+              ],
+              "LoadAfter": [
+                "15.25",
+                "22.07",
+                "25.97"
+              ],
+              "Stages": {
+                "analysis": 5.307891781,
+                "api": 570.115986563,
+                "app": 864.23763911,
+                "e2e": 275.074052674,
+                "mainthread": 250.776339049,
+                "other": 807.726504175,
+                "quality": 15.319754317,
+                "web": 125.451488618
+              },
+              "StartedAt": "2026-11-04T06:36:10.974774978Z",
+              "FinishedAt": "2026-11-04T06:51:58.69560082Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+                "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 947.68097523,
+                "Stages": {
+                  "analysis": 5.307891781,
+                  "api": 570.115986563,
+                  "app": 864.23763911,
+                  "e2e": 275.074052674,
+                  "mainthread": 250.776339049,
+                  "other": 807.726504175,
+                  "quality": 15.319754317,
+                  "web": 125.451488618
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2307,
+            "FullFallback": true
+          }
+        ],
+        "Reasons": [
+          "Web filesystem or process boundary requires full source-dependent validation",
+          "foundation changed: cmd/tend-updater/main.go",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHistory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenancePreservesUnknownRunAndLinksTwoIndependentWindows",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceRejectsPreparationAndReceiptMismatch",
+          "new root: github.com/GhostFlying/tend/internal/app/TestManagerCloseIndexedCallbackIdentity",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestCommittedMaintenanceProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/store/TestCoordinationQueryIndexesUpgradeHistory",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockActualKernelOwner",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockBtrfsDeviceIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockRequiresExactDescriptorStat",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualFailedCandidateForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterBootstrap",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterInterruptedBeforeStart",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceCanDeployAgainAfterLinkedReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceContinuationRejectsLiveOriginal",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceDoesNotReauthorizeAmbiguousLaunch",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceHistoryRemainsBoundedAcrossTwentyWindows",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceNotDrainedCanCancelWithoutReplacingServer",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchContinuationKeepsCandidateAndRequest",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchPhaseClassification",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRechecksHostedDrainBeforeStop",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRetainsOpenRunsAndLinksIndependentReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceActualProcessHealthAndLinkReplay",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceStartupVerifiesFailedParentHistory",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-server",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/api",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/app",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archive",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archiveseed",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/blobstore",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cfgfile",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cli",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/contextbuilder",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/dispatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/e2e",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/bridge",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/coordination",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/nativeusage",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/orca",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/remote",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/rollout",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/traex",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/mainthread",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging/telegram",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/netx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/procx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck/cmd",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/schemagen",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/release",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/reviewwatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentcontrol",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentexec",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentregistry",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/gitws",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/journal",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runnerapi",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/serverkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/store",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/check",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/racecheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/recoveryfixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/storefixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/tools",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/upgradectl",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/usagemaint",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/views",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webhookauth",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webui",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/agenthooks",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/appserver",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/tsnet"
+        ],
+        "Preparation": {
+          "dependencies": {
+            "Seconds": 1.038129765,
+            "UserSeconds": 1.234601,
+            "SystemSeconds": 0.186161,
+            "LoadBefore": [
+              "6.29",
+              "10.39",
+              "13.05"
+            ],
+            "LoadAfter": [
+              "6.29",
+              "10.39",
+              "13.05"
+            ],
+            "StartedAt": "2026-11-04T05:18:21.601213248Z",
+            "FinishedAt": "2026-11-04T05:18:22.639516273Z",
+            "Success": true
+          },
+          "go_compile": {
+            "Seconds": 34.162189353,
+            "UserSeconds": 107.672828,
+            "SystemSeconds": 13.898217,
+            "LoadBefore": [
+              "7.23",
+              "12.05",
+              "13.82"
+            ],
+            "LoadAfter": [
+              "7.12",
+              "11.50",
+              "13.57"
+            ],
+            "StartedAt": "2026-11-04T05:16:39.861054605Z",
+            "FinishedAt": "2026-11-04T05:17:14.023359202Z",
+            "Success": true
+          },
+          "go_race_compile": {
+            "Seconds": 67.577682583,
+            "UserSeconds": 141.249339,
+            "SystemSeconds": 16.031737,
+            "LoadBefore": [
+              "7.12",
+              "11.50",
+              "13.57"
+            ],
+            "LoadAfter": [
+              "6.29",
+              "10.39",
+              "13.05"
+            ],
+            "StartedAt": "2026-11-04T05:17:14.023374036Z",
+            "FinishedAt": "2026-11-04T05:18:21.601169276Z",
+            "Success": true
+          },
+          "web_modules": {
+            "Seconds": 10.2007017,
+            "UserSeconds": 19.164347,
+            "SystemSeconds": 4.397347,
+            "LoadBefore": [
+              "6.29",
+              "10.39",
+              "13.05"
+            ],
+            "LoadAfter": [
+              "6.42",
+              "10.28",
+              "12.98"
+            ],
+            "StartedAt": "2026-11-04T05:18:22.639538635Z",
+            "FinishedAt": "2026-11-04T05:18:32.840339199Z",
+            "Success": true
+          }
+        },
+        "HistoricalRootSeconds": 7520.229515599024
+      },
+      {
+        "Case": {
+          "PR": 212,
+          "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5"
+        },
+        "Pairs": [
+          {
+            "Full": {
+              "Seconds": 996.487117925,
+              "UserSeconds": 9029.723736,
+              "SystemSeconds": 498.212967,
+              "LoadBefore": [
+                "12.88",
+                "17.83",
+                "23.56"
+              ],
+              "LoadAfter": [
+                "15.10",
+                "23.25",
+                "24.38"
+              ],
+              "Stages": {
+                "api": 599.471410257,
+                "app": 877.765885141,
+                "e2e": 292.266662968,
+                "mainthread": 270.237416524,
+                "other": 872.189488621,
+                "quality": 64.674815487,
+                "web": 114.803611163
+              },
+              "StartedAt": "2026-11-04T06:55:14.290797381Z",
+              "FinishedAt": "2026-11-04T07:11:50.778025382Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+                "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 996.393714585,
+                "Stages": {
+                  "api": 599.471410257,
+                  "app": 877.765885141,
+                  "e2e": 292.266662968,
+                  "mainthread": 270.237416524,
+                  "other": 872.189488621,
+                  "quality": 64.674815487,
+                  "web": 114.803611163
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 948.584916577,
+              "UserSeconds": 8261.154117,
+              "SystemSeconds": 370.750627,
+              "LoadBefore": [
+                "15.10",
+                "23.25",
+                "24.38"
+              ],
+              "LoadAfter": [
+                "16.63",
+                "19.74",
+                "22.91"
+              ],
+              "Stages": {
+                "analysis": 4.701467442,
+                "api": 564.854035902,
+                "app": 840.238034206,
+                "e2e": 279.020438801,
+                "mainthread": 252.768569777,
+                "other": 819.520082019,
+                "quality": 15.5101696,
+                "web": 113.992596259
+              },
+              "StartedAt": "2026-11-04T07:11:50.780849483Z",
+              "FinishedAt": "2026-11-04T07:27:39.36586568Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+                "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 948.5453075639999,
+                "Stages": {
+                  "analysis": 4.701467442,
+                  "api": 564.854035902,
+                  "app": 840.238034206,
+                  "e2e": 279.020438801,
+                  "mainthread": 252.768569777,
+                  "other": 819.520082019,
+                  "quality": 15.5101696,
+                  "web": 113.992596259
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2323,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 1195.182215677,
+              "UserSeconds": 8592.14926,
+              "SystemSeconds": 392.058646,
+              "LoadBefore": [
+                "12.52",
+                "19.44",
+                "22.33"
+              ],
+              "LoadAfter": [
+                "35.05",
+                "57.27",
+                "54.33"
+              ],
+              "Stages": {
+                "api": 808.369818819,
+                "app": 1098.018657414,
+                "e2e": 525.118850225,
+                "mainthread": 312.303114297,
+                "other": 1069.033233416,
+                "quality": 19.92260469,
+                "web": 116.415569069
+              },
+              "StartedAt": "2026-11-04T07:43:04.57840931Z",
+              "FinishedAt": "2026-11-04T08:02:59.760771755Z",
+              "Success": false,
+              "Error": "mainthread: exit status 2\ne2e: exit status 2\nother: exit status 2",
+              "Execution": {
+                "Mode": "full",
+                "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+                "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 1195.144809255,
+                "Stages": {
+                  "api": 808.369818819,
+                  "app": 1098.018657414,
+                  "e2e": 525.118850225,
+                  "mainthread": 312.303114297,
+                  "other": 1069.033233416,
+                  "quality": 19.92260469,
+                  "web": 116.415569069
+                },
+                "FullVerified": false,
+                "SelectionDelegated": false,
+                "Error": "mainthread: exit status 2\ne2e: exit status 2\nother: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 925.206129432,
+              "UserSeconds": 8166.384803,
+              "SystemSeconds": 383.563511,
+              "LoadBefore": [
+                "16.63",
+                "19.74",
+                "22.91"
+              ],
+              "LoadAfter": [
+                "12.52",
+                "19.44",
+                "22.33"
+              ],
+              "Stages": {
+                "analysis": 4.901931625,
+                "api": 566.169519851,
+                "app": 834.108717456,
+                "e2e": 268.875786724,
+                "mainthread": 253.414203276,
+                "other": 784.640951848,
+                "quality": 15.029206866,
+                "web": 125.215363241
+              },
+              "StartedAt": "2026-11-04T07:27:39.369209003Z",
+              "FinishedAt": "2026-11-04T07:43:04.575464417Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+                "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 925.153133324,
+                "Stages": {
+                  "analysis": 4.901931625,
+                  "api": 566.169519851,
+                  "app": 834.108717456,
+                  "e2e": 268.875786724,
+                  "mainthread": 253.414203276,
+                  "other": 784.640951848,
+                  "quality": 15.029206866,
+                  "web": 125.215363241
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2323,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 1013.401190576,
+              "UserSeconds": 8513.207759,
+              "SystemSeconds": 427.026204,
+              "LoadBefore": [
+                "35.05",
+                "57.27",
+                "54.33"
+              ],
+              "LoadAfter": [
+                "17.25",
+                "31.43",
+                "44.06"
+              ],
+              "Stages": {
+                "api": 649.804673409,
+                "app": 911.62837921,
+                "e2e": 296.793071054,
+                "mainthread": 303.886872684,
+                "other": 862.04673337,
+                "quality": 16.353959265,
+                "web": 141.385513898
+              },
+              "StartedAt": "2026-11-04T08:02:59.764374823Z",
+              "FinishedAt": "2026-11-04T08:19:53.165652989Z",
+              "Success": false,
+              "Error": "mainthread: exit status 2\ne2e: exit status 2",
+              "Execution": {
+                "Mode": "full",
+                "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+                "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 1013.331586009,
+                "Stages": {
+                  "api": 649.804673409,
+                  "app": 911.62837921,
+                  "e2e": 296.793071054,
+                  "mainthread": 303.886872684,
+                  "other": 862.04673337,
+                  "quality": 16.353959265,
+                  "web": 141.385513898
+                },
+                "FullVerified": false,
+                "SelectionDelegated": false,
+                "Error": "mainthread: exit status 2\ne2e: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 910.383797439,
+              "UserSeconds": 8104.9697,
+              "SystemSeconds": 369.453671,
+              "LoadBefore": [
+                "17.25",
+                "31.43",
+                "44.06"
+              ],
+              "LoadAfter": [
+                "14.67",
+                "19.82",
+                "30.25"
+              ],
+              "Stages": {
+                "analysis": 4.743869817,
+                "api": 562.811151689,
+                "app": 811.350521974,
+                "e2e": 270.131914907,
+                "mainthread": 240.234150182,
+                "other": 776.116885729,
+                "quality": 16.00410618,
+                "web": 119.168999105
+              },
+              "StartedAt": "2026-11-04T08:19:53.168412875Z",
+              "FinishedAt": "2026-11-04T08:35:03.552327361Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+                "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 910.343168388,
+                "Stages": {
+                  "analysis": 4.743869817,
+                  "api": 562.811151689,
+                  "app": 811.350521974,
+                  "e2e": 270.131914907,
+                  "mainthread": 240.234150182,
+                  "other": 776.116885729,
+                  "quality": 16.00410618,
+                  "web": 119.168999105
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2323,
+            "FullFallback": true
+          }
+        ],
+        "Reasons": [
+          "Web filesystem or process boundary requires full source-dependent validation",
+          "foundation changed: cmd/tend-updater/main.go",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHistory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenancePreservesUnknownRunAndLinksTwoIndependentWindows",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceRejectsPreparationAndReceiptMismatch",
+          "new root: github.com/GhostFlying/tend/internal/app/TestManagerCloseIndexedCallbackIdentity",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryNativeFenceFollowsUnlinkedLeaf",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryPhysicalStopThenOwnerCancel",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopDoesNotSwallowExplicitControl",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopPreservesPhysicalFactsAndLateReceipts",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopRejectsIncompleteInventory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryWorkerBusinessResultAndExplicitCancelRemainAuthoritative",
+          "new root: github.com/GhostFlying/tend/internal/runner/TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop",
+          "new root: github.com/GhostFlying/tend/internal/runner/TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestCommittedMaintenanceProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestReceiptRecoveryStartupProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/store/TestCoordinationQueryIndexesUpgradeHistory",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockActualKernelOwner",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockBtrfsDeviceIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockRequiresExactDescriptorStat",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualCancelledUpdaterReceiptRecovery",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualFailedCandidateForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterBootstrap",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterInterruptedBeforeStart",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceCanDeployAgainAfterLinkedReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceContinuationRejectsLiveOriginal",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceDoesNotReauthorizeAmbiguousLaunch",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceHistoryRemainsBoundedAcrossTwentyWindows",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceNotDrainedCanCancelWithoutReplacingServer",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchContinuationKeepsCandidateAndRequest",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchPhaseClassification",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRechecksHostedDrainBeforeStop",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRetainsOpenRunsAndLinksIndependentReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxProcessCrashHelper",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxProcessCrashOnlyExactParentWithoutGracefulClose",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopExplicitCrashRetainsUnknownObservation",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopRechecksFactsBeforeCrash",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopRejectsIncompleteOrUnsafeFacts",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceActualProcessHealthAndLinkReplay",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceStartupVerifiesFailedParentHistory",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryStartupRequiresExactPersistedAuthority",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-server",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/api",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/app",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archive",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archiveseed",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/blobstore",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cfgfile",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cli",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/contextbuilder",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/dispatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/e2e",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/bridge",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/coordination",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/nativeusage",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/orca",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/remote",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/rollout",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/traex",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/mainthread",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging/telegram",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/netx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/procx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck/cmd",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/schemagen",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/release",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/reviewwatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentcontrol",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentexec",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentregistry",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/gitws",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/journal",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runnerapi",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/serverkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/store",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/check",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/racecheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/recoveryfixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/storefixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/tools",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/upgradectl",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/usagemaint",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/views",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webhookauth",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webui",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/agenthooks",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/appserver",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/tsnet"
+        ],
+        "Preparation": {
+          "dependencies": {
+            "Seconds": 1.125297068,
+            "UserSeconds": 1.270242,
+            "SystemSeconds": 0.217092,
+            "LoadBefore": [
+              "14.14",
+              "18.23",
+              "23.75"
+            ],
+            "LoadAfter": [
+              "14.14",
+              "18.23",
+              "23.75"
+            ],
+            "StartedAt": "2026-11-04T06:55:02.491836397Z",
+            "FinishedAt": "2026-11-04T06:55:03.617326225Z",
+            "Success": true
+          },
+          "go_compile": {
+            "Seconds": 61.994306395,
+            "UserSeconds": 233.374988,
+            "SystemSeconds": 25.633103,
+            "LoadBefore": [
+              "15.31",
+              "21.97",
+              "25.92"
+            ],
+            "LoadAfter": [
+              "14.56",
+              "20.39",
+              "25.10"
+            ],
+            "StartedAt": "2026-11-04T06:52:04.142875927Z",
+            "FinishedAt": "2026-11-04T06:53:06.137286302Z",
+            "Success": true
+          },
+          "go_race_compile": {
+            "Seconds": 116.354400541,
+            "UserSeconds": 316.265913,
+            "SystemSeconds": 30.034225,
+            "LoadBefore": [
+              "14.56",
+              "20.39",
+              "25.10"
+            ],
+            "LoadAfter": [
+              "14.14",
+              "18.23",
+              "23.75"
+            ],
+            "StartedAt": "2026-11-04T06:53:06.137306517Z",
+            "FinishedAt": "2026-11-04T06:55:02.491800321Z",
+            "Success": true
+          },
+          "web_modules": {
+            "Seconds": 10.673140737,
+            "UserSeconds": 19.920612,
+            "SystemSeconds": 4.743029,
+            "LoadBefore": [
+              "14.14",
+              "18.23",
+              "23.75"
+            ],
+            "LoadAfter": [
+              "12.88",
+              "17.83",
+              "23.56"
+            ],
+            "StartedAt": "2026-11-04T06:55:03.617355527Z",
+            "FinishedAt": "2026-11-04T06:55:14.290617625Z",
+            "Success": true
+          }
+        },
+        "HistoricalRootSeconds": 7520.229515599024
+      },
+      {
+        "Case": {
+          "PR": 213,
+          "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819"
+        },
+        "Pairs": [
+          {
+            "Full": {
+              "Seconds": 903.905878623,
+              "UserSeconds": 8162.827398,
+              "SystemSeconds": 378.585863,
+              "LoadBefore": [
+                "13.37",
+                "17.52",
+                "27.37"
+              ],
+              "LoadAfter": [
+                "7.32",
+                "13.11",
+                "19.80"
+              ],
+              "Stages": {
+                "api": 549.594941484,
+                "app": 820.61206627,
+                "e2e": 265.156463379,
+                "mainthread": 234.044171293,
+                "other": 774.687948703,
+                "quality": 69.660465175,
+                "web": 119.367008628
+              },
+              "StartedAt": "2026-11-04T08:38:23.257329281Z",
+              "FinishedAt": "2026-11-04T08:53:27.163328596Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+                "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 903.845533994,
+                "Stages": {
+                  "api": 549.594941484,
+                  "app": 820.61206627,
+                  "e2e": 265.156463379,
+                  "mainthread": 234.044171293,
+                  "other": 774.687948703,
+                  "quality": 69.660465175,
+                  "web": 119.367008628
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 927.065546813,
+              "UserSeconds": 8223.475626,
+              "SystemSeconds": 401.564098,
+              "LoadBefore": [
+                "7.32",
+                "13.11",
+                "19.80"
+              ],
+              "LoadAfter": [
+                "15.47",
+                "19.30",
+                "20.23"
+              ],
+              "Stages": {
+                "analysis": 4.419265079,
+                "api": 550.888483067,
+                "app": 858.62518258,
+                "e2e": 274.555001172,
+                "mainthread": 240.362619897,
+                "other": 801.684074772,
+                "quality": 16.507591155,
+                "web": 111.272044116
+              },
+              "StartedAt": "2026-11-04T08:53:27.167493843Z",
+              "FinishedAt": "2026-11-04T09:08:54.233143397Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+                "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 927.0230515259999,
+                "Stages": {
+                  "analysis": 4.419265079,
+                  "api": 550.888483067,
+                  "app": 858.62518258,
+                  "e2e": 274.555001172,
+                  "mainthread": 240.362619897,
+                  "other": 801.684074772,
+                  "quality": 16.507591155,
+                  "web": 111.272044116
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2337,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 944.988798989,
+              "UserSeconds": 8585.67169,
+              "SystemSeconds": 431.852696,
+              "LoadBefore": [
+                "11.72",
+                "18.59",
+                "21.31"
+              ],
+              "LoadAfter": [
+                "9.15",
+                "15.04",
+                "18.64"
+              ],
+              "Stages": {
+                "api": 586.571939298,
+                "app": 862.346941479,
+                "e2e": 295.560687317,
+                "mainthread": 245.115919622,
+                "other": 820.974405324,
+                "quality": 16.536065879,
+                "web": 113.95502238
+              },
+              "StartedAt": "2026-11-04T09:26:14.844075666Z",
+              "FinishedAt": "2026-11-04T09:41:59.833153484Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+                "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 944.942322897,
+                "Stages": {
+                  "api": 586.571939298,
+                  "app": 862.346941479,
+                  "e2e": 295.560687317,
+                  "mainthread": 245.115919622,
+                  "other": 820.974405324,
+                  "quality": 16.536065879,
+                  "web": 113.95502238
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 1040.601058046,
+              "UserSeconds": 9091.886144,
+              "SystemSeconds": 505.171523,
+              "LoadBefore": [
+                "15.47",
+                "19.30",
+                "20.23"
+              ],
+              "LoadAfter": [
+                "11.72",
+                "18.59",
+                "21.31"
+              ],
+              "Stages": {
+                "analysis": 4.988445544,
+                "api": 611.701391036,
+                "app": 937.64400363,
+                "e2e": 314.660882894,
+                "mainthread": 263.823972349,
+                "other": 893.102145719,
+                "quality": 18.017073472,
+                "web": 132.136478926
+              },
+              "StartedAt": "2026-11-04T09:08:54.237700353Z",
+              "FinishedAt": "2026-11-04T09:26:14.838937324Z",
+              "Success": false,
+              "Error": "e2e: exit status 2",
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+                "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 1040.540430926,
+                "Stages": {
+                  "analysis": 4.988445544,
+                  "api": 611.701391036,
+                  "app": 937.64400363,
+                  "e2e": 314.660882894,
+                  "mainthread": 263.823972349,
+                  "other": 893.102145719,
+                  "quality": 18.017073472,
+                  "web": 132.136478926
+                },
+                "FullVerified": false,
+                "SelectionDelegated": true,
+                "Error": "e2e: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2337,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 865.730797634,
+              "UserSeconds": 7816.940206,
+              "SystemSeconds": 343.765093,
+              "LoadBefore": [
+                "9.15",
+                "15.04",
+                "18.64"
+              ],
+              "LoadAfter": [
+                "7.13",
+                "11.55",
+                "15.44"
+              ],
+              "Stages": {
+                "api": 533.564080173,
+                "app": 789.02909044,
+                "e2e": 259.64936142,
+                "mainthread": 231.341498258,
+                "other": 740.524231865,
+                "quality": 16.818670392,
+                "web": 114.762850092
+              },
+              "StartedAt": "2026-11-04T09:41:59.839725348Z",
+              "FinishedAt": "2026-11-04T09:56:25.570597094Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+                "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 865.658788784,
+                "Stages": {
+                  "api": 533.564080173,
+                  "app": 789.02909044,
+                  "e2e": 259.64936142,
+                  "mainthread": 231.341498258,
+                  "other": 740.524231865,
+                  "quality": 16.818670392,
+                  "web": 114.762850092
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 892.172674951,
+              "UserSeconds": 7904.143752,
+              "SystemSeconds": 339.477793,
+              "LoadBefore": [
+                "7.13",
+                "11.55",
+                "15.44"
+              ],
+              "LoadAfter": [
+                "5.72",
+                "11.37",
+                "14.48"
+              ],
+              "Stages": {
+                "analysis": 4.476383424,
+                "api": 520.972677333,
+                "app": 801.50403132,
+                "e2e": 254.607523389,
+                "mainthread": 232.432873677,
+                "other": 771.100470927,
+                "quality": 14.291894712,
+                "web": 107.712632362
+              },
+              "StartedAt": "2026-11-04T09:56:25.574523607Z",
+              "FinishedAt": "2026-11-04T10:11:17.747306831Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+                "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 892.124471641,
+                "Stages": {
+                  "analysis": 4.476383424,
+                  "api": 520.972677333,
+                  "app": 801.50403132,
+                  "e2e": 254.607523389,
+                  "mainthread": 232.432873677,
+                  "other": 771.100470927,
+                  "quality": 14.291894712,
+                  "web": 107.712632362
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2337,
+            "FullFallback": true
+          }
+        ],
+        "Reasons": [
+          "Web filesystem or process boundary requires full source-dependent validation",
+          "foundation changed: cmd/tend-updater/main.go",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHistory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceOwnedLaunchExitPreservesRegisteredAndAbsentParent",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenancePreservesUnknownRunAndLinksTwoIndependentWindows",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceRejectsPreparationAndReceiptMismatch",
+          "new root: github.com/GhostFlying/tend/internal/app/TestManagerCloseIndexedCallbackIdentity",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryNativeFenceFollowsUnlinkedLeaf",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryPhysicalStopThenOwnerCancel",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopDoesNotSwallowExplicitControl",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopPreservesPhysicalFactsAndLateReceipts",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopRejectsIncompleteInventory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryWorkerBusinessResultAndExplicitCancelRemainAuthoritative",
+          "new root: github.com/GhostFlying/tend/internal/app/TestUsageOverlapIndexesPreserveHistoryAndCompleteViews",
+          "new root: github.com/GhostFlying/tend/internal/runner/TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop",
+          "new root: github.com/GhostFlying/tend/internal/runner/TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestCommittedMaintenanceProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestReceiptRecoveryStartupProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/store/TestCoordinationQueryIndexesUpgradeHistory",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockActualKernelOwner",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockBtrfsDeviceIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockRequiresExactDescriptorStat",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualCancelledUpdaterReceiptRecovery",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualEarlyExitForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualFailedCandidateForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterBootstrap",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterInterruptedBeforeStart",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceCanDeployAgainAfterLinkedReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceContinuationRejectsLiveOriginal",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceDoesNotReauthorizeAmbiguousLaunch",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceHistoryRemainsBoundedAcrossTwentyWindows",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceNotDrainedCanCancelWithoutReplacingServer",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchContinuationKeepsCandidateAndRequest",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchPhaseClassification",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRechecksHostedDrainBeforeStop",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRetainsOpenRunsAndLinksIndependentReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxMaintenanceEarlyExitCarriesOwnedWaitProof",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxProcessCrashHelper",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxProcessCrashOnlyExactParentWithoutGracefulClose",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryCapturesRejectChangedExecutionIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryCapturesUseStableExecutionIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryDrainedSummaryHistoryPreservesAuthorization",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryDrainedSummaryHistoryRejectsUnsafeFacts",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopExplicitCrashRetainsUnknownObservation",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopRechecksFactsBeforeCrash",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopRejectsIncompleteOrUnsafeFacts",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestUpdaterMaintenanceFastExitHelper",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceActualProcessHealthAndLinkReplay",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceStartupVerifiesFailedParentHistory",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryChangedObservationsActualSuccessorStartup",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryLaunchExitParentRequiresExactOwnedHistory",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryStartupAcceptsDistinctCompleteObservations",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryStartupRequiresExactPersistedAuthority",
+          "new root: github.com/GhostFlying/tend/internal/views/TestManagerControlIndexPreservesBlockersAndRequestHistory",
+          "new root: github.com/GhostFlying/tend/internal/views/TestManagerHandoffDeliveriesDeduplicateLogicalHistory",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-server",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/api",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/app",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archive",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archiveseed",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/blobstore",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cfgfile",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cli",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/contextbuilder",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/dispatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/e2e",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/bridge",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/coordination",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/nativeusage",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/orca",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/remote",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/rollout",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/traex",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/mainthread",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging/telegram",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/netx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/procx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck/cmd",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/schemagen",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/release",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/reviewwatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentcontrol",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentexec",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentregistry",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/gitws",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/journal",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runnerapi",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/serverkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/store",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/check",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/racecheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/recoveryfixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/storefixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/tools",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/upgradectl",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/usagemaint",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/views",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webhookauth",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webui",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/agenthooks",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/appserver",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/tsnet"
+        ],
+        "Preparation": {
+          "dependencies": {
+            "Seconds": 1.339759463,
+            "UserSeconds": 1.565232,
+            "SystemSeconds": 0.223604,
+            "LoadBefore": [
+              "14.26",
+              "17.90",
+              "27.65"
+            ],
+            "LoadAfter": [
+              "14.16",
+              "17.82",
+              "27.57"
+            ],
+            "StartedAt": "2026-11-04T08:38:09.931423429Z",
+            "FinishedAt": "2026-11-04T08:38:11.271325611Z",
+            "Success": true
+          },
+          "go_compile": {
+            "Seconds": 63.663033926,
+            "UserSeconds": 240.655269,
+            "SystemSeconds": 26.580743,
+            "LoadBefore": [
+              "14.54",
+              "19.70",
+              "30.16"
+            ],
+            "LoadAfter": [
+              "16.73",
+              "19.34",
+              "29.32"
+            ],
+            "StartedAt": "2026-11-04T08:35:08.727511306Z",
+            "FinishedAt": "2026-11-04T08:36:12.390646763Z",
+            "Success": true
+          },
+          "go_race_compile": {
+            "Seconds": 117.540571809,
+            "UserSeconds": 319.340262,
+            "SystemSeconds": 30.415517,
+            "LoadBefore": [
+              "16.73",
+              "19.34",
+              "29.32"
+            ],
+            "LoadAfter": [
+              "14.26",
+              "17.90",
+              "27.65"
+            ],
+            "StartedAt": "2026-11-04T08:36:12.390667343Z",
+            "FinishedAt": "2026-11-04T08:38:09.931366302Z",
+            "Success": true
+          },
+          "web_modules": {
+            "Seconds": 11.985759866,
+            "UserSeconds": 22.059766,
+            "SystemSeconds": 4.992862,
+            "LoadBefore": [
+              "14.16",
+              "17.82",
+              "27.57"
+            ],
+            "LoadAfter": [
+              "13.37",
+              "17.52",
+              "27.37"
+            ],
+            "StartedAt": "2026-11-04T08:38:11.271365828Z",
+            "FinishedAt": "2026-11-04T08:38:23.25720863Z",
+            "Success": true
+          }
+        },
+        "HistoricalRootSeconds": 7520.229515599024
+      },
+      {
+        "Case": {
+          "PR": 214,
+          "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4"
+        },
+        "Pairs": [
+          {
+            "Full": {
+              "Seconds": 979.763718488,
+              "UserSeconds": 8376.520476,
+              "SystemSeconds": 386.07917,
+              "LoadBefore": [
+                "8.77",
+                "10.51",
+                "13.67"
+              ],
+              "LoadAfter": [
+                "11.65",
+                "16.98",
+                "17.66"
+              ],
+              "Stages": {
+                "api": 558.134719809,
+                "app": 840.928491783,
+                "e2e": 268.425469352,
+                "mainthread": 241.076487204,
+                "other": 842.855394417,
+                "quality": 45.652728466,
+                "web": 122.772385932
+              },
+              "StartedAt": "2026-11-04T10:13:58.288172324Z",
+              "FinishedAt": "2026-11-04T10:30:18.052015415Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+                "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 979.702463412,
+                "Stages": {
+                  "api": 558.134719809,
+                  "app": 840.928491783,
+                  "e2e": 268.425469352,
+                  "mainthread": 241.076487204,
+                  "other": 842.855394417,
+                  "quality": 45.652728466,
+                  "web": 122.772385932
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 1031.895066496,
+              "UserSeconds": 8451.658745,
+              "SystemSeconds": 401.453367,
+              "LoadBefore": [
+                "11.65",
+                "16.98",
+                "17.66"
+              ],
+              "LoadAfter": [
+                "25.16",
+                "31.07",
+                "25.50"
+              ],
+              "Stages": {
+                "analysis": 4.912562174,
+                "api": 567.312218854,
+                "app": 874.34734502,
+                "e2e": 274.734816564,
+                "mainthread": 246.872329507,
+                "other": 899.220025246,
+                "quality": 18.128249628,
+                "web": 116.367228109
+              },
+              "StartedAt": "2026-11-04T10:30:18.057370519Z",
+              "FinishedAt": "2026-11-04T10:47:29.952542403Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+                "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 1031.846556552,
+                "Stages": {
+                  "analysis": 4.912562174,
+                  "api": 567.312218854,
+                  "app": 874.34734502,
+                  "e2e": 274.734816564,
+                  "mainthread": 246.872329507,
+                  "other": 899.220025246,
+                  "quality": 18.128249628,
+                  "web": 116.367228109
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2342,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 1009.909296529,
+              "UserSeconds": 8401.623654,
+              "SystemSeconds": 417.816549,
+              "LoadBefore": [
+                "8.09",
+                "17.29",
+                "25.27"
+              ],
+              "LoadAfter": [
+                "11.66",
+                "17.41",
+                "21.28"
+              ],
+              "Stages": {
+                "api": 549.681242778,
+                "app": 873.264038991,
+                "e2e": 278.280319211,
+                "mainthread": 226.29877316,
+                "other": 893.151948356,
+                "quality": 15.151451212,
+                "web": 107.198425464
+              },
+              "StartedAt": "2026-11-04T11:04:23.647576008Z",
+              "FinishedAt": "2026-11-04T11:21:13.557020369Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "full",
+                "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+                "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 1009.872247472,
+                "Stages": {
+                  "api": 549.681242778,
+                  "app": 873.264038991,
+                  "e2e": 278.280319211,
+                  "mainthread": 226.29877316,
+                  "other": 893.151948356,
+                  "quality": 15.151451212,
+                  "web": 107.198425464
+                },
+                "FullVerified": true,
+                "SelectionDelegated": false,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 1013.676884352,
+              "UserSeconds": 8220.215333,
+              "SystemSeconds": 362.147978,
+              "LoadBefore": [
+                "25.16",
+                "31.07",
+                "25.50"
+              ],
+              "LoadAfter": [
+                "8.09",
+                "17.29",
+                "25.27"
+              ],
+              "Stages": {
+                "analysis": 5.145467136,
+                "api": 590.132385365,
+                "app": 867.342657677,
+                "e2e": 260.698418412,
+                "mainthread": 284.839655197,
+                "other": 875.292393389,
+                "quality": 18.385439687,
+                "web": 123.601845221
+              },
+              "StartedAt": "2026-11-04T10:47:29.965250581Z",
+              "FinishedAt": "2026-11-04T11:04:23.642218864Z",
+              "Success": false,
+              "Error": "mainthread: exit status 2",
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+                "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 1013.620884891,
+                "Stages": {
+                  "analysis": 5.145467136,
+                  "api": 590.132385365,
+                  "app": 867.342657677,
+                  "e2e": 260.698418412,
+                  "mainthread": 284.839655197,
+                  "other": 875.292393389,
+                  "quality": 18.385439687,
+                  "web": 123.601845221
+                },
+                "FullVerified": false,
+                "SelectionDelegated": true,
+                "Error": "mainthread: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2342,
+            "FullFallback": true
+          },
+          {
+            "Full": {
+              "Seconds": 1033.529486325,
+              "UserSeconds": 8670.685146,
+              "SystemSeconds": 446.549591,
+              "LoadBefore": [
+                "11.66",
+                "17.41",
+                "21.28"
+              ],
+              "LoadAfter": [
+                "11.24",
+                "17.85",
+                "21.35"
+              ],
+              "Stages": {
+                "api": 601.572156892,
+                "app": 891.611723701,
+                "e2e": 298.391070461,
+                "mainthread": 258.123214037,
+                "other": 888.948643099,
+                "quality": 17.205749561,
+                "web": 134.298728719
+              },
+              "StartedAt": "2026-11-04T11:21:13.562243171Z",
+              "FinishedAt": "2026-11-04T11:38:27.091949162Z",
+              "Success": false,
+              "Error": "e2e: exit status 2",
+              "Execution": {
+                "Mode": "full",
+                "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+                "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+                "Valid": true,
+                "Passed": false,
+                "Seconds": 1033.481018936,
+                "Stages": {
+                  "api": 601.572156892,
+                  "app": 891.611723701,
+                  "e2e": 298.391070461,
+                  "mainthread": 258.123214037,
+                  "other": 888.948643099,
+                  "quality": 17.205749561,
+                  "web": 134.298728719
+                },
+                "FullVerified": false,
+                "SelectionDelegated": false,
+                "Error": "e2e: exit status 2",
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "Selected": {
+              "Seconds": 925.348709572,
+              "UserSeconds": 7867.692865,
+              "SystemSeconds": 328.821859,
+              "LoadBefore": [
+                "11.24",
+                "17.85",
+                "21.35"
+              ],
+              "LoadAfter": [
+                "7.53",
+                "13.98",
+                "18.41"
+              ],
+              "Stages": {
+                "analysis": 4.305768699,
+                "api": 518.952140663,
+                "app": 800.365688619,
+                "e2e": 257.285227872,
+                "mainthread": 223.280163922,
+                "other": 808.443278005,
+                "quality": 14.533509229,
+                "web": 104.026550382
+              },
+              "StartedAt": "2026-11-04T11:38:27.096810426Z",
+              "FinishedAt": "2026-11-04T11:53:52.445649477Z",
+              "Success": true,
+              "Execution": {
+                "Mode": "affected",
+                "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+                "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+                "Valid": true,
+                "Passed": true,
+                "Seconds": 925.29589403,
+                "Stages": {
+                  "analysis": 4.305768699,
+                  "api": 518.952140663,
+                  "app": 800.365688619,
+                  "e2e": 257.285227872,
+                  "mainthread": 223.280163922,
+                  "other": 808.443278005,
+                  "quality": 14.533509229,
+                  "web": 104.026550382
+                },
+                "FullVerified": true,
+                "SelectionDelegated": true,
+                "Profile": {
+                  "Go": "go1.27.1",
+                  "OS": "linux",
+                  "Arch": "amd64",
+                  "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                  "Race": true
+                }
+              }
+            },
+            "SelectedRoots": 2342,
+            "FullFallback": true
+          }
+        ],
+        "Reasons": [
+          "Web filesystem or process boundary requires full source-dependent validation",
+          "foundation changed: cmd/tend-updater/main.go",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHistory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceOwnedLaunchExitPreservesRegisteredAndAbsentParent",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenancePreservesUnknownRunAndLinksTwoIndependentWindows",
+          "new root: github.com/GhostFlying/tend/internal/app/TestCommittedMaintenanceRejectsPreparationAndReceiptMismatch",
+          "new root: github.com/GhostFlying/tend/internal/app/TestManagerCloseIndexedCallbackIdentity",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryNativeFenceFollowsUnlinkedLeaf",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryPhysicalStopThenOwnerCancel",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopDoesNotSwallowExplicitControl",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopPreservesPhysicalFactsAndLateReceipts",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryStopRejectsIncompleteInventory",
+          "new root: github.com/GhostFlying/tend/internal/app/TestReceiptRecoveryWorkerBusinessResultAndExplicitCancelRemainAuthoritative",
+          "new root: github.com/GhostFlying/tend/internal/app/TestUsageOverlapIndexesPreserveHistoryAndCompleteViews",
+          "new root: github.com/GhostFlying/tend/internal/runner/TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop",
+          "new root: github.com/GhostFlying/tend/internal/runner/TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestCommittedMaintenanceProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/serverkit/TestReceiptRecoveryStartupProductionAssembly",
+          "new root: github.com/GhostFlying/tend/internal/store/TestCoordinationQueryIndexesUpgradeHistory",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockActualKernelOwner",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockBtrfsDeviceIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedFlockRequiresExactDescriptorStat",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualCancelledUpdaterReceiptRecovery",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualEarlyExitForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualFailedCandidateForward",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterBootstrap",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedHandoffActualLinkedUpdaterInterruptedBeforeStart",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceCanDeployAgainAfterLinkedReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceContinuationRejectsLiveOriginal",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceDoesNotReauthorizeAmbiguousLaunch",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceHistoryRemainsBoundedAcrossTwentyWindows",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceNotDrainedCanCancelWithoutReplacingServer",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchContinuationKeepsCandidateAndRequest",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenancePrelaunchPhaseClassification",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRechecksHostedDrainBeforeStop",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceRetainsOpenRunsAndLinksIndependentReceipt",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxMaintenanceEarlyExitCarriesOwnedWaitProof",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxProcessCrashHelper",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestLinuxProcessCrashOnlyExactParentWithoutGracefulClose",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryCapturesRejectChangedExecutionIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryCapturesUseStableExecutionIdentity",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryDrainedSummaryHistoryPreservesAuthorization",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryDrainedSummaryHistoryRejectsUnsafeFacts",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopExplicitCrashRetainsUnknownObservation",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopRechecksFactsBeforeCrash",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestReceiptRecoveryStopRejectsIncompleteOrUnsafeFacts",
+          "new root: github.com/GhostFlying/tend/internal/updater/TestUpdaterMaintenanceFastExitHelper",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceActualProcessHealthAndLinkReplay",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestCommittedMaintenanceStartupVerifiesFailedParentHistory",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryChangedObservationsActualSuccessorStartup",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryLaunchExitParentRequiresExactOwnedHistory",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryStartupAcceptsDistinctCompleteObservations",
+          "new root: github.com/GhostFlying/tend/internal/upgradectl/TestReceiptRecoveryStartupRequiresExactPersistedAuthority",
+          "new root: github.com/GhostFlying/tend/internal/views/TestManagerControlIndexPreservesBlockersAndRequestHistory",
+          "new root: github.com/GhostFlying/tend/internal/views/TestManagerHandoffDeliveriesDeduplicateLogicalHistory",
+          "new root: github.com/GhostFlying/tend/internal/views/TestUsageResolverActorErrorDoesNotCacheFailure",
+          "new root: github.com/GhostFlying/tend/internal/views/TestUsageResolverActorsMatchOriginalSQL",
+          "new root: github.com/GhostFlying/tend/internal/views/TestUsageResolverBatchFailureUsesOriginalQueries",
+          "new root: github.com/GhostFlying/tend/internal/views/TestUsageResolverDoesNotCacheAcrossRequests",
+          "new root: github.com/GhostFlying/tend/internal/views/TestUsageResolverRunAmbiguityMatchesOriginalSQL",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-server",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/api",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/app",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archive",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archiveseed",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/blobstore",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cfgfile",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cli",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/contextbuilder",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/dispatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/e2e",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/bridge",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/coordination",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/nativeusage",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/orca",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/remote",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/rollout",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/traex",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/mainthread",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging/telegram",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/netx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/procx",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck/cmd",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/schemagen",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/release",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/reviewwatch",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentcontrol",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentexec",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentregistry",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/gitws",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/journal",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runnerapi",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/sandbox",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/serverkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/store",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/check",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/racecheck",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/recoveryfixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/storefixture",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/tools",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/updater",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/upgradectl",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/usagemaint",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/views",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webhookauth",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webui",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/agenthooks",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/appserver",
+          "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/tsnet"
+        ],
+        "Preparation": {
+          "dependencies": {
+            "Seconds": 1.535375358,
+            "UserSeconds": 1.60461,
+            "SystemSeconds": 0.273211,
+            "LoadBefore": [
+              "7.95",
+              "10.45",
+              "13.70"
+            ],
+            "LoadAfter": [
+              "7.95",
+              "10.45",
+              "13.70"
+            ],
+            "StartedAt": "2026-11-04T10:13:44.133549534Z",
+            "FinishedAt": "2026-11-04T10:13:45.669021889Z",
+            "Success": true
+          },
+          "go_compile": {
+            "Seconds": 49.15061573,
+            "UserSeconds": 172.189368,
+            "SystemSeconds": 18.581345,
+            "LoadBefore": [
+              "5.58",
+              "11.24",
+              "14.43"
+            ],
+            "LoadAfter": [
+              "7.37",
+              "10.95",
+              "14.18"
+            ],
+            "StartedAt": "2026-11-04T10:11:22.342311628Z",
+            "FinishedAt": "2026-11-04T10:12:11.493039543Z",
+            "Success": true
+          },
+          "go_race_compile": {
+            "Seconds": 92.640321713,
+            "UserSeconds": 237.197553,
+            "SystemSeconds": 22.621376,
+            "LoadBefore": [
+              "7.37",
+              "10.95",
+              "14.18"
+            ],
+            "LoadAfter": [
+              "7.95",
+              "10.45",
+              "13.70"
+            ],
+            "StartedAt": "2026-11-04T10:12:11.493052367Z",
+            "FinishedAt": "2026-11-04T10:13:44.13350356Z",
+            "Success": true
+          },
+          "web_modules": {
+            "Seconds": 12.618792717,
+            "UserSeconds": 22.938376,
+            "SystemSeconds": 5.336018,
+            "LoadBefore": [
+              "7.95",
+              "10.45",
+              "13.70"
+            ],
+            "LoadAfter": [
+              "8.77",
+              "10.51",
+              "13.67"
+            ],
+            "StartedAt": "2026-11-04T10:13:45.669044896Z",
+            "FinishedAt": "2026-11-04T10:13:58.288041697Z",
+            "Success": true
+          }
+        },
+        "HistoricalRootSeconds": 7520.229515599024
+      }
+    ],
+    "Web": {
+      "Case": {
+        "PR": 201,
+        "Commit": "90f873c1c3c357e7104d4ceb65f365969ec6f5ba",
+        "Base": "faa0888fce6975e19cba7fa853faec413de66181"
+      },
+      "Pairs": [
+        {
+          "Full": {
+            "Seconds": 897.59082403,
+            "UserSeconds": 7458.695587,
+            "SystemSeconds": 380.032139,
+            "LoadBefore": [
+              "11.85",
+              "24.40",
+              "31.39"
+            ],
+            "LoadAfter": [
+              "22.14",
+              "38.77",
+              "38.47"
+            ],
+            "Stages": {
+              "api": 607.76766976,
+              "app": 783.28779592,
+              "e2e": 284.9345395,
+              "mainthread": 277.736578188,
+              "other": 736.257327781,
+              "quality": 15.047062849,
+              "web": 152.718878892
+            },
+            "StartedAt": "2026-11-04T13:40:40.42595338Z",
+            "FinishedAt": "2026-11-04T13:55:38.016865063Z",
+            "Success": true,
+            "Execution": {
+              "Mode": "full",
+              "Commit": "90f873c1c3c357e7104d4ceb65f365969ec6f5ba",
+              "Fingerprint": "ab3d22d6c60ab6d78085a30d561ce77c15020901feeee72fcceb9cdeeb3f315b",
+              "Valid": true,
+              "Passed": true,
+              "Seconds": 897.52894892,
+              "Stages": {
+                "api": 607.76766976,
+                "app": 783.28779592,
+                "e2e": 284.9345395,
+                "mainthread": 277.736578188,
+                "other": 736.257327781,
+                "quality": 15.047062849,
+                "web": 152.718878892
+              },
+              "FullVerified": true,
+              "SelectionDelegated": false,
+              "Profile": {
+                "Go": "go1.27.1",
+                "OS": "linux",
+                "Arch": "amd64",
+                "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                "Race": true
+              }
+            }
+          },
+          "Selected": {
+            "Seconds": 1157.854433047,
+            "UserSeconds": 7566.29444,
+            "SystemSeconds": 450.017266,
+            "LoadBefore": [
+              "22.14",
+              "38.77",
+              "38.47"
+            ],
+            "LoadAfter": [
+              "29.27",
+              "34.92",
+              "34.33"
+            ],
+            "Stages": {
+              "analysis": 4.684700469,
+              "api": 599.848336442,
+              "app": 751.807467803,
+              "e2e": 305.868789083,
+              "mainthread": 250.920400495,
+              "other": 1017.170708804,
+              "quality": 37.016514197,
+              "web": 124.498428283
+            },
+            "StartedAt": "2026-11-04T13:55:38.025343468Z",
+            "FinishedAt": "2026-11-04T14:14:55.879953146Z",
+            "Success": false,
+            "Error": "selected checks failed: [e2e: exit status 1]",
+            "Execution": {
+              "Mode": "affected",
+              "Commit": "90f873c1c3c357e7104d4ceb65f365969ec6f5ba",
+              "Fingerprint": "ab3d22d6c60ab6d78085a30d561ce77c15020901feeee72fcceb9cdeeb3f315b",
+              "Valid": true,
+              "Passed": false,
+              "Seconds": 1150.589463708,
+              "Stages": {
+                "analysis": 4.684700469,
+                "api": 599.848336442,
+                "app": 751.807467803,
+                "e2e": 305.868789083,
+                "mainthread": 250.920400495,
+                "other": 1017.170708804,
+                "quality": 37.016514197,
+                "web": 124.498428283
+              },
+              "FullVerified": false,
+              "SelectionDelegated": false,
+              "Error": "selected checks failed: [e2e: exit status 1]",
+              "Web": {
+                "Files": [
+                  "scripts/genapi.test.ts",
+                  "scripts/layout-fixture.test.ts",
+                  "scripts/layout-groups.test.ts",
+                  "scripts/style-check.test.ts",
+                  "src/agents/data.test.ts",
+                  "src/agents/facts.test.ts",
+                  "src/api/client.test.ts",
+                  "src/api/deployment.test.ts",
+                  "src/api/ids.test.ts",
+                  "src/app/durableOp.test.ts",
+                  "src/app/ownerCommand.test.ts",
+                  "src/app/router.test.ts",
+                  "src/attention/actorLabel.test.ts",
+                  "src/attention/useInboxCount.test.ts",
+                  "src/conversation/Markdown.test.tsx",
+                  "src/conversation/background.test.ts",
+                  "src/conversation/draft.test.ts",
+                  "src/conversation/draftStore.test.ts",
+                  "src/conversation/handoff.test.ts",
+                  "src/conversation/images.test.ts",
+                  "src/conversation/interrupt.test.ts",
+                  "src/conversation/issueMetadata.test.ts",
+                  "src/conversation/model.test.ts",
+                  "src/conversation/queueView.test.ts",
+                  "src/conversation/scrollAnchor.test.ts",
+                  "src/conversation/settings.test.ts",
+                  "src/conversation/steer.test.ts",
+                  "src/conversation/toolLabels.test.ts",
+                  "src/conversation/transcriptBlocks.test.ts",
+                  "src/conversation/withdraw.test.ts",
+                  "src/decisions/DecisionContext.test.tsx",
+                  "src/decisions/answer.test.ts",
+                  "src/decisions/text.test.ts",
+                  "src/decisions/workerAnswer.test.ts",
+                  "src/hosts/status.test.ts",
+                  "src/i18n/copyRules.test.ts",
+                  "src/i18n/display.test.ts",
+                  "src/issues/actions.test.ts",
+                  "src/issues/activity.test.ts",
+                  "src/issues/boardData.test.ts",
+                  "src/issues/data.test.ts",
+                  "src/issues/followupTime.test.ts",
+                  "src/issues/ownerReads.test.ts",
+                  "src/issues/turn.test.ts",
+                  "src/live/data.test.ts",
+                  "src/live/eventStream.test.ts",
+                  "src/live/sse.test.ts",
+                  "src/messaging/Interaction.test.tsx",
+                  "src/messaging/feed.test.ts",
+                  "src/queue/sendQueue.test.ts",
+                  "src/repos/registry.test.ts",
+                  "src/rollout/model.test.ts",
+                  "src/shell/RoutePage.test.tsx",
+                  "src/shell/navigation.test.tsx",
+                  "src/sw/policy.test.ts",
+                  "src/tasks/execution.test.ts",
+                  "src/tasks/facts.test.ts",
+                  "src/tasks/files.test.ts",
+                  "src/tasks/lists.test.ts",
+                  "src/tasks/runLabel.test.ts",
+                  "src/ui/activityStatus.test.ts",
+                  "src/ui/ui.test.tsx",
+                  "src/upgrades/status.test.ts",
+                  "src/usage/Usage.test.tsx",
+                  "src/workitems/choice.test.ts",
+                  "src/workitems/live.test.ts",
+                  "src/workitems/model.test.ts"
+                ],
+                "ExecutedFiles": [
+                  "scripts/genapi.test.ts",
+                  "scripts/layout-fixture.test.ts",
+                  "scripts/layout-groups.test.ts",
+                  "scripts/style-check.test.ts",
+                  "src/agents/data.test.ts",
+                  "src/agents/facts.test.ts",
+                  "src/api/client.test.ts",
+                  "src/api/deployment.test.ts",
+                  "src/api/ids.test.ts",
+                  "src/app/durableOp.test.ts",
+                  "src/app/ownerCommand.test.ts",
+                  "src/app/router.test.ts",
+                  "src/attention/actorLabel.test.ts",
+                  "src/attention/useInboxCount.test.ts",
+                  "src/conversation/Markdown.test.tsx",
+                  "src/conversation/background.test.ts",
+                  "src/conversation/draft.test.ts",
+                  "src/conversation/draftStore.test.ts",
+                  "src/conversation/handoff.test.ts",
+                  "src/conversation/images.test.ts",
+                  "src/conversation/interrupt.test.ts",
+                  "src/conversation/issueMetadata.test.ts",
+                  "src/conversation/model.test.ts",
+                  "src/conversation/queueView.test.ts",
+                  "src/conversation/scrollAnchor.test.ts",
+                  "src/conversation/settings.test.ts",
+                  "src/conversation/steer.test.ts",
+                  "src/conversation/toolLabels.test.ts",
+                  "src/conversation/transcriptBlocks.test.ts",
+                  "src/conversation/withdraw.test.ts",
+                  "src/decisions/DecisionContext.test.tsx",
+                  "src/decisions/answer.test.ts",
+                  "src/decisions/text.test.ts",
+                  "src/decisions/workerAnswer.test.ts",
+                  "src/hosts/status.test.ts",
+                  "src/i18n/copyRules.test.ts",
+                  "src/i18n/display.test.ts",
+                  "src/issues/actions.test.ts",
+                  "src/issues/activity.test.ts",
+                  "src/issues/boardData.test.ts",
+                  "src/issues/data.test.ts",
+                  "src/issues/followupTime.test.ts",
+                  "src/issues/ownerReads.test.ts",
+                  "src/issues/turn.test.ts",
+                  "src/live/data.test.ts",
+                  "src/live/eventStream.test.ts",
+                  "src/live/sse.test.ts",
+                  "src/messaging/Interaction.test.tsx",
+                  "src/messaging/feed.test.ts",
+                  "src/queue/sendQueue.test.ts",
+                  "src/repos/registry.test.ts",
+                  "src/rollout/model.test.ts",
+                  "src/shell/RoutePage.test.tsx",
+                  "src/shell/navigation.test.tsx",
+                  "src/sw/policy.test.ts",
+                  "src/tasks/execution.test.ts",
+                  "src/tasks/facts.test.ts",
+                  "src/tasks/files.test.ts",
+                  "src/tasks/lists.test.ts",
+                  "src/tasks/runLabel.test.ts",
+                  "src/ui/activityStatus.test.ts",
+                  "src/ui/ui.test.tsx",
+                  "src/upgrades/status.test.ts",
+                  "src/usage/Usage.test.tsx",
+                  "src/workitems/choice.test.ts",
+                  "src/workitems/live.test.ts",
+                  "src/workitems/model.test.ts"
+                ],
+                "FailedFiles": [],
+                "Reason": "full Web inventory",
+                "Completed": true
+              },
+              "Profile": {
+                "Go": "go1.27.1",
+                "OS": "linux",
+                "Arch": "amd64",
+                "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+                "Race": true
+              }
+            }
+          },
+          "SelectedRoots": 2084,
+          "FullFallback": false
+        },
+        {
+          "Full": {
+            "Seconds": 0,
+            "UserSeconds": 0,
+            "SystemSeconds": 0,
+            "LoadBefore": null,
+            "LoadAfter": null,
+            "StartedAt": "",
+            "FinishedAt": "",
+            "Success": false
+          },
+          "Selected": {
+            "Seconds": 511.973826437,
+            "UserSeconds": 1497.485842,
+            "SystemSeconds": 137.732081,
+            "LoadBefore": [
+              "29.27",
+              "34.92",
+              "34.33"
+            ],
+            "LoadAfter": [
+              "52.02",
+              "56.90",
+              "44.20"
+            ],
+            "StartedAt": "2026-11-04T14:14:55.88875064Z",
+            "FinishedAt": "2026-11-04T14:23:27.862659955Z",
+            "Success": false,
+            "Error": "exit status 1"
+          },
+          "SelectedRoots": 2084,
+          "FullFallback": false
+        }
+      ],
+      "Reasons": [
+        "Web filesystem or process boundary requires full source-dependent validation",
+        "documentation only: docs/design.md",
+        "documentation only: docs/plans/issue-card-child-only-progress.md",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-runner",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-sandbox",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-server",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/cmd/tend-updater",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/api",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/app",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archive",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/archiveseed",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/blobstore",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cfgfile",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/cli",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/contextbuilder",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/dispatch",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/e2e",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/bridge",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/coordination",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/nativeusage",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/orca",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/remote",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/rollout",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/harness/traex",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/mainthread",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/messaging/telegram",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/netx",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/procx",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/compatcheck/cmd",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/protocol/schemagen",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/release",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/reviewwatch",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentcontrol",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentexec",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/agentregistry",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/gitws",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runner/journal",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/runnerapi",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/sandbox",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/serverkit",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/store",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/check",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/racecheck",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/testkit/storefixture",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/tools",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/updater",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/upgradectl",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/usagemaint",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/views",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webhookauth",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/internal/webui",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/agenthooks",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/appserver",
+        "unattributed process or resource inspection after source change: github.com/GhostFlying/tend/spikes/tsnet",
+        "web dependency changed: web/scripts/issue-surfaces-layout.ts",
+        "web dependency changed: web/src/issues/Board.module.css",
+        "web dependency changed: web/src/issues/Board.tsx",
+        "web dependency changed: web/src/issues/PlanRead.tsx"
+      ],
+      "Preparation": {
+        "dependencies": {
+          "Seconds": 1.27938995,
+          "UserSeconds": 1.455787,
+          "SystemSeconds": 0.21893,
+          "LoadBefore": [
+            "12.35",
+            "25.14",
+            "31.74"
+          ],
+          "LoadAfter": [
+            "12.35",
+            "25.14",
+            "31.74"
+          ],
+          "StartedAt": "2026-11-04T13:40:27.122026637Z",
+          "FinishedAt": "2026-11-04T13:40:28.401558961Z",
+          "Success": true
+        },
+        "go_compile": {
+          "Seconds": 27.505987973,
+          "UserSeconds": 78.812386,
+          "SystemSeconds": 14.984865,
+          "LoadBefore": [
+            "12.27",
+            "28.73",
+            "33.37"
+          ],
+          "LoadAfter": [
+            "14.37",
+            "27.64",
+            "32.85"
+          ],
+          "StartedAt": "2026-11-04T13:39:08.598621269Z",
+          "FinishedAt": "2026-11-04T13:39:36.104709882Z",
+          "Success": true
+        },
+        "go_race_compile": {
+          "Seconds": 51.017048435,
+          "UserSeconds": 87.962135,
+          "SystemSeconds": 14.251435,
+          "LoadBefore": [
+            "14.37",
+            "27.64",
+            "32.85"
+          ],
+          "LoadAfter": [
+            "12.35",
+            "25.14",
+            "31.74"
+          ],
+          "StartedAt": "2026-11-04T13:39:36.104725947Z",
+          "FinishedAt": "2026-11-04T13:40:27.121976243Z",
+          "Success": true
+        },
+        "web_modules": {
+          "Seconds": 12.024124483,
+          "UserSeconds": 21.580533,
+          "SystemSeconds": 4.901605,
+          "LoadBefore": [
+            "12.35",
+            "25.14",
+            "31.74"
+          ],
+          "LoadAfter": [
+            "11.85",
+            "24.40",
+            "31.39"
+          ],
+          "StartedAt": "2026-11-04T13:40:28.401582345Z",
+          "FinishedAt": "2026-11-04T13:40:40.425818273Z",
+          "Success": true
+        }
+      },
+      "HistoricalRootSeconds": 6845.531679276033
+    },
+    "WebBaseline": {
+      "Seconds": 1027.024921363,
+      "UserSeconds": 7829.977088,
+      "SystemSeconds": 416.531056,
+      "LoadBefore": [
+        "8.14",
+        "17.22",
+        "29.66"
+      ],
+      "LoadAfter": [
+        "11.85",
+        "28.93",
+        "33.46"
+      ],
+      "StartedAt": "2026-11-04T13:21:56.723535654Z",
+      "FinishedAt": "2026-11-04T13:39:03.748568388Z",
+      "Success": true
+    },
+    "BaselineFullSeconds": 993.842588653,
+    "BaselineCollectionSeconds": 85.658240124,
+    "RefreshFullSeconds": 989.992361101,
+    "RefreshCollectionSeconds": 89.878298969,
+    "FullCycleSeconds": 0,
+    "SelectedCycleSeconds": 0,
+    "NetSeconds": 0,
+    "BootstrapCycleSeconds": 0,
+    "BootstrapNetSeconds": 0,
+    "Completed": false,
+    "Validated": false,
+    "Failures": [
+      "PR 210 round 2 affected: other: exit status 2",
+      "PR 211 round 2 full: e2e: exit status 2\nother: exit status 2",
+      "PR 212 round 2 full: mainthread: exit status 2\ne2e: exit status 2\nother: exit status 2",
+      "PR 212 round 3 full: mainthread: exit status 2\ne2e: exit status 2",
+      "PR 213 round 2 affected: e2e: exit status 2",
+      "PR 214 round 2 affected: mainthread: exit status 2",
+      "PR 214 round 3 full: e2e: exit status 2",
+      "missing baseline: e2e: exit status 2\nother: exit status 2",
+      "native cache full: e2e: exit status 2\nother: exit status 2",
+      "native cache affected: other: exit status 2",
+      "PR 201 round 1 affected: selected checks failed: [e2e: exit status 1]"
+    ],
+    "Error": "context canceled",
+    "CPUs": 32,
+    "Profile": {
+      "Go": "go1.27.1",
+      "OS": "linux",
+      "Arch": "amd64",
+      "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+      "Race": true
+    },
+    "NativeCachePrime": {
+      "affected": {
+        "Seconds": 764.339090479,
+        "UserSeconds": 1768.956888,
+        "SystemSeconds": 67.234191,
+        "LoadBefore": [
+          "31.43",
+          "50.60",
+          "60.53"
+        ],
+        "LoadAfter": [
+          "46.43",
+          "35.18",
+          "40.99"
+        ],
+        "Stages": {
+          "analysis": 5.272268545,
+          "api": 8.156220595,
+          "app": 4.722970408,
+          "e2e": 216.759770548,
+          "mainthread": 4.237193709,
+          "other": 740.941519141,
+          "quality": 16.635449778,
+          "web": 99.682467641
+        },
+        "StartedAt": "2026-11-04T12:56:59.879871447Z",
+        "FinishedAt": "2026-11-04T13:09:44.219076143Z",
+        "Success": false,
+        "Error": "other: exit status 2",
+        "Execution": {
+          "Mode": "affected",
+          "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+          "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+          "Valid": true,
+          "Passed": false,
+          "Seconds": 764.29306076,
+          "Stages": {
+            "analysis": 5.272268545,
+            "api": 8.156220595,
+            "app": 4.722970408,
+            "e2e": 216.759770548,
+            "mainthread": 4.237193709,
+            "other": 740.941519141,
+            "quality": 16.635449778,
+            "web": 99.682467641
+          },
+          "FullVerified": false,
+          "SelectionDelegated": true,
+          "Error": "other: exit status 2",
+          "Profile": {
+            "Go": "go1.27.1",
+            "OS": "linux",
+            "Arch": "amd64",
+            "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+            "Race": true
+          }
+        }
+      },
+      "full": {
+        "Seconds": 1283.900241466,
+        "UserSeconds": 8934.422776,
+        "SystemSeconds": 421.313532,
+        "LoadBefore": [
+          "28.63",
+          "64.54",
+          "62.96"
+        ],
+        "LoadAfter": [
+          "31.43",
+          "50.60",
+          "60.53"
+        ],
+        "Stages": {
+          "api": 749.833181741,
+          "app": 1080.015797681,
+          "e2e": 394.350713559,
+          "mainthread": 355.668556881,
+          "other": 1038.959037855,
+          "quality": 24.143065893,
+          "web": 232.244508255
+        },
+        "StartedAt": "2026-11-04T12:35:35.971857548Z",
+        "FinishedAt": "2026-11-04T12:56:59.87225522Z",
+        "Success": false,
+        "Error": "e2e: exit status 2\nother: exit status 2",
+        "Execution": {
+          "Mode": "full",
+          "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+          "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+          "Valid": true,
+          "Passed": false,
+          "Seconds": 1283.855784923,
+          "Stages": {
+            "api": 749.833181741,
+            "app": 1080.015797681,
+            "e2e": 394.350713559,
+            "mainthread": 355.668556881,
+            "other": 1038.959037855,
+            "quality": 24.143065893,
+            "web": 232.244508255
+          },
+          "FullVerified": false,
+          "SelectionDelegated": false,
+          "Error": "e2e: exit status 2\nother: exit status 2",
+          "Profile": {
+            "Go": "go1.27.1",
+            "OS": "linux",
+            "Arch": "amd64",
+            "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+            "Race": true
+          }
+        }
+      }
+    },
+    "NativeCacheWarm": {
+      "affected": {
+        "Seconds": 107.031998362,
+        "UserSeconds": 220.795374,
+        "SystemSeconds": 28.91988,
+        "LoadBefore": [
+          "7.39",
+          "20.55",
+          "32.08"
+        ],
+        "LoadAfter": [
+          "8.14",
+          "17.22",
+          "29.66"
+        ],
+        "Stages": {
+          "analysis": 4.481081378,
+          "api": 7.907935449,
+          "app": 4.480891272,
+          "e2e": 7.684573383,
+          "mainthread": 4.135713057,
+          "other": 3.8908239140000003,
+          "quality": 14.108362361,
+          "web": 93.693169168
+        },
+        "StartedAt": "2026-11-04T13:20:09.530291528Z",
+        "FinishedAt": "2026-11-04T13:21:56.562459098Z",
+        "Success": true,
+        "Execution": {
+          "Mode": "affected",
+          "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+          "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+          "Valid": true,
+          "Passed": true,
+          "Seconds": 106.989593269,
+          "Stages": {
+            "analysis": 4.481081378,
+            "api": 7.907935449,
+            "app": 4.480891272,
+            "e2e": 7.684573383,
+            "mainthread": 4.135713057,
+            "other": 3.8908239140000003,
+            "quality": 14.108362361,
+            "web": 93.693169168
+          },
+          "FullVerified": true,
+          "SelectionDelegated": true,
+          "Profile": {
+            "Go": "go1.27.1",
+            "OS": "linux",
+            "Arch": "amd64",
+            "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+            "Race": true
+          }
+        }
+      },
+      "full": {
+        "Seconds": 625.296241465,
+        "UserSeconds": 1171.856343,
+        "SystemSeconds": 49.135531,
+        "LoadBefore": [
+          "46.43",
+          "35.18",
+          "40.99"
+        ],
+        "LoadAfter": [
+          "7.39",
+          "20.55",
+          "32.08"
+        ],
+        "Stages": {
+          "api": 7.851682185,
+          "app": 4.398332542,
+          "e2e": 8.52375873,
+          "mainthread": 4.212018997,
+          "other": 608.581114643,
+          "quality": 15.721412632,
+          "web": 99.750786788
+        },
+        "StartedAt": "2026-11-04T13:09:44.224868585Z",
+        "FinishedAt": "2026-11-04T13:20:09.521272435Z",
+        "Success": true,
+        "Execution": {
+          "Mode": "full",
+          "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+          "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+          "Valid": true,
+          "Passed": true,
+          "Seconds": 625.256446126,
+          "Stages": {
+            "api": 7.851682185,
+            "app": 4.398332542,
+            "e2e": 8.52375873,
+            "mainthread": 4.212018997,
+            "other": 608.581114643,
+            "quality": 15.721412632,
+            "web": 99.750786788
+          },
+          "FullVerified": true,
+          "SelectionDelegated": false,
+          "Profile": {
+            "Go": "go1.27.1",
+            "OS": "linux",
+            "Arch": "amd64",
+            "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+            "Race": true
+          }
+        }
+      }
+    },
+    "ToolFingerprint": "64592de0c90b24698faeb71ba9d22c3c1413fd40b92bbb020f4761236b8cab01",
+    "SetupSeconds": 21.915101501000002,
+    "CollectionJobs": 8,
+    "BudgetArgs": [
+      "-jobs",
+      "4"
+    ],
+    "ResourceReport": "resources.jsonl",
+    "ResourceError": "",
+    "BootstrapToolFingerprint": "a2f9862a13e0a1e8f280d43e74eefb412c5c968609fc3f8b8bc354a66bf50a7b",
+    "BootstrapIndexFingerprint": "0c248a7c71624d63d16931947abd915fa9135a6f6132a83378788be6bf8a17b1",
+    "CommonDependencySeconds": 0,
+    "MissingBaseline": {
+      "Seconds": 1400.586252967,
+      "UserSeconds": 9441.080363,
+      "SystemSeconds": 488.928521,
+      "LoadBefore": [
+        "17.90",
+        "37.66",
+        "29.40"
+      ],
+      "LoadAfter": [
+        "28.63",
+        "64.54",
+        "62.96"
+      ],
+      "Stages": {
+        "analysis": 4.636477651,
+        "api": 741.99021395,
+        "app": 1204.693982108,
+        "e2e": 463.419634448,
+        "mainthread": 299.061217808,
+        "other": 1237.710218737,
+        "quality": 15.897785156,
+        "web": 143.419963538
+      },
+      "StartedAt": "2026-11-04T12:12:15.379945591Z",
+      "FinishedAt": "2026-11-04T12:35:35.966310113Z",
+      "Success": false,
+      "Error": "e2e: exit status 2\nother: exit status 2",
+      "Execution": {
+        "Mode": "affected",
+        "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+        "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+        "Valid": true,
+        "Passed": false,
+        "Seconds": 1400.532472211,
+        "Stages": {
+          "analysis": 4.636477651,
+          "api": 741.99021395,
+          "app": 1204.693982108,
+          "e2e": 463.419634448,
+          "mainthread": 299.061217808,
+          "other": 1237.710218737,
+          "quality": 15.897785156,
+          "web": 143.419963538
+        },
+        "FullVerified": false,
+        "SelectionDelegated": true,
+        "Error": "e2e: exit status 2\nother: exit status 2",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        }
+      }
+    }
+  },
+  "RawReportSHA256": "3af6e728de3c321b7964f64a90e05c1ccaac07d69c97fc6916328424befd4b05",
+  "DescriptiveAccountingOnly": {
+    "IncludesFailures": true,
+    "FullMedianCycleSeconds": 4688.513191359,
+    "AffectedMedianCycleSeconds": 4576.515577108,
+    "RefreshSeconds": 1089.611880762,
+    "AffectedWithRefreshSeconds": 5666.1274578699995,
+    "RawExtraSeconds": 977.6142665109992,
+    "InitialBaselineSeconds": 1090.600638216,
+    "ToolSetupSeconds": 21.915101501000002,
+    "SharedBaselineNetworkDownloadSeconds": null,
+    "UseAsAcceptedPerformanceDifference": false
+  },
+  "BootstrapLegacyReceipt": {
+    "Initial": {
+      "Seconds": 1090.600638216,
+      "UserSeconds": 9019.22562,
+      "SystemSeconds": 445.576236,
+      "LoadBefore": [
+        "20.75",
+        "19.23",
+        "16.85"
+      ],
+      "LoadAfter": [
+        "9.11",
+        "18.53",
+        "21.63"
+      ],
+      "StartedAt": "2026-11-03T18:41:11.943489169Z",
+      "FinishedAt": "2026-11-03T18:59:22.544373313Z"
+    },
+    "InitialSuccessFieldPresent": false,
+    "BaselineVerified": true,
+    "BaselineFullSeconds": 993.842588653,
+    "BaselineCollectionSeconds": 85.658240124,
+    "BaselineCommit": "3f512173b4024a2dc0c99522752eddb483795447",
+    "ToolFingerprint": "a2f9862a13e0a1e8f280d43e74eefb412c5c968609fc3f8b8bc354a66bf50a7b",
+    "BaselineMarkers": [
+      "[impact] baseline 3f512173b4024a2dc0c99522752eddb483795447: 2282 roots, full 993.8s, collection 85.7s"
+    ],
+    "LaterRunError": "replay PR 210 full failed: exit status 1",
+    "ObservedSourceHEAD": "71c69235012dc98275896cbcd0e1faf4d81727c4"
+  },
+  "Resources": {
+    "Samples": 75815,
+    "CPUSecondsByClass": {
+      "go_driver": 2916.8500000001445,
+      "go_link": 4701.540000000109,
+      "other": 4007.4500000019393,
+      "go_compile": 1718.7099999999957,
+      "go_test": 297078.0899999983,
+      "web_install": 75.58000000000004,
+      "web_test": 908.7199999999983,
+      "web_typecheck": 1954.259999999992,
+      "web_lint": 2947.82,
+      "web_format": 1110.4900000000018,
+      "web_style": 36.73,
+      "web_build": 211.50999999999988
+    },
+    "Load1Minute": {
+      "Min": 5.58,
+      "Median": 20.81,
+      "Max": 143.42
+    }
+  },
+  "NativeFailureDetails": [
+    {
+      "PR": 210,
+      "Round": 2,
+      "Mode": "affected",
+      "Root": "github.com/GhostFlying/tend/internal/sandbox/TestSandboxRealOwnerAPIAndRunner",
+      "Code": "stale_revision",
+      "Message": "context changed during review",
+      "SelectionDelegated": true,
+      "SourceValid": true,
+      "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+      "CheckSeconds": 781.883388599,
+      "NativeTestSeconds": 248.06
+    },
+    {
+      "PR": 211,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestRunnerStopsCancelledRun",
+      "Code": "native_test_failure",
+      "Message": "cancellation stop scenario failed",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+      "CheckSeconds": 1119.8808694,
+      "NativeTestSeconds": 16.91
+    },
+    {
+      "PR": 211,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEnd_WebAnswersDecisions",
+      "Code": "missing_event",
+      "Message": "no event: the agent asks",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+      "CheckSeconds": 1119.8808694,
+      "NativeTestSeconds": 18.11
+    },
+    {
+      "PR": 211,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/sandbox/TestSandboxRealOwnerAPIAndRunner",
+      "Code": "context_deadline_exceeded",
+      "Message": "conversation request exceeded the test context deadline",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+      "CheckSeconds": 1119.8808694,
+      "NativeTestSeconds": 600.37
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedPlannerTransfersResponsibilityToActualOwner",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 12.64,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedManagerControlsOnlyPrimaryTask",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 12.55,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedPlannerRepairClassifiesCanonicalSource",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 12.36,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEnd_WebStopsBackgroundEventTurn",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 21.49,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestFault_RunnerManagerRateLimitContinuesWithoutRepeatingTools",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 103.23,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestRunnerStopsCancelledRun",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 17.67,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEndSingleSlotManagerDelegatesAcceptsAndCloses",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 100.32,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/sandbox/TestSandboxRealOwnerAPIAndRunner",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 601.92,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/serverkit/TestCommittedMaintenanceProductionAssembly",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 26.91,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 2,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/serverkit/TestReceiptRecoveryStartupProductionAssembly",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1195.182215677,
+      "NativeTestSeconds": 25.63,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedPlannerTransfersResponsibilityToActualOwner",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1013.401190576,
+      "NativeTestSeconds": 12.08,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedManagerControlsOnlyPrimaryTask",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1013.401190576,
+      "NativeTestSeconds": 12.67,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedPoolUnavailableModelsReleaseCapacityAndBackOff",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1013.401190576,
+      "NativeTestSeconds": 16.21,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedManagerReadsOwnBackgroundSources",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1013.401190576,
+      "NativeTestSeconds": 12.34,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEnd_WebAnswersDecisions",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1013.401190576,
+      "NativeTestSeconds": 20.31,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 212,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestLargeEventVolumesArrive",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+      "CheckSeconds": 1013.401190576,
+      "NativeTestSeconds": 18.95,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 213,
+      "Round": 2,
+      "Mode": "affected",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEnd_WebAnswersDecisions",
+      "SelectionDelegated": true,
+      "SourceValid": true,
+      "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+      "CheckSeconds": 1040.601058046,
+      "NativeTestSeconds": 16.3,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 214,
+      "Round": 2,
+      "Mode": "affected",
+      "Root": "github.com/GhostFlying/tend/internal/mainthread/TestNamedPlannerTransfersResponsibilityToActualOwner",
+      "SelectionDelegated": true,
+      "SourceValid": true,
+      "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+      "CheckSeconds": 1013.676884352,
+      "NativeTestSeconds": 11.77,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 214,
+      "Round": 3,
+      "Mode": "full",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEnd_WebAnswersDecisions",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+      "CheckSeconds": 1033.529486325,
+      "NativeTestSeconds": 16.59,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    },
+    {
+      "PR": 201,
+      "Round": 1,
+      "Mode": "affected",
+      "Root": "github.com/GhostFlying/tend/internal/e2e/TestEndToEnd_WebAnswersDecisions",
+      "SelectionDelegated": false,
+      "SourceValid": true,
+      "Fingerprint": "ab3d22d6c60ab6d78085a30d561ce77c15020901feeee72fcceb9cdeeb3f315b",
+      "CheckSeconds": 1157.854433047,
+      "NativeTestSeconds": 20.13,
+      "Code": "native_test_failure",
+      "Message": "native root assertion or wait failed; original output retained privately"
+    }
+  ],
+  "UnresolvedIssues": [
+    {
+      "Area": "shared dependency state",
+      "Status": "unresolved",
+      "Evidence": "Changing A to mutate runtime.GOMAXPROCS omitted TestB; full race failed TestB while the actual affected driver passed.",
+      "Gate": "shadow full gate retained"
+    },
+    {
+      "Area": "baseline event attribution",
+      "Status": "unresolved",
+      "Evidence": "Real repository full groups succeeded, but baseline publication rejected an intentionally failing nested example.test/fixture package; no index was published."
+    }
+  ],
+  "LastSuccessfulCI": {
+    "RunID": 41841319514,
+    "Head": "824bccf073ad320ff7b0b94cc9b09f80afa8d973",
+    "Conclusion": "success",
+    "WallSeconds": 631.0,
+    "ActiveAttemptWallSeconds": 631.0,
+    "RetryGapSeconds": 0,
+    "RunnerSeconds": 2893.0,
+    "LatestEffectiveRunnerSeconds": 2893.0,
+    "Jobs": {
+      "plan": 42.0,
+      "quality": 106.0,
+      "shadow": 45.0,
+      "race (e2e)": 276.0,
+      "race (other)": 571.0,
+      "race (mainthread)": 254.0,
+      "race (api)": 368.0,
+      "race (app)": 471.0,
+      "web": 56.0,
+      "cross": 78.0,
+      "layout (1)": 315.0,
+      "layout (2)": 305.0,
+      "check": 6.0
+    },
+    "Attempts": [
+      {
+        "Attempt": 1,
+        "Conclusion": "success",
+        "ExecutedJobs": [
+          {
+            "Name": "plan",
+            "JobID": 126613343957,
+            "Conclusion": "success",
+            "Seconds": 42.0,
+            "StartedAt": "2026-11-04T13:47:31Z",
+            "CompletedAt": "2026-11-04T13:48:13Z"
+          },
+          {
+            "Name": "quality",
+            "JobID": 126613742624,
+            "Conclusion": "success",
+            "Seconds": 106.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:50:02Z"
+          },
+          {
+            "Name": "shadow",
+            "JobID": 126613742635,
+            "Conclusion": "success",
+            "Seconds": 45.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:49:01Z"
+          },
+          {
+            "Name": "race (e2e)",
+            "JobID": 126613742723,
+            "Conclusion": "success",
+            "Seconds": 276.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:52:52Z"
+          },
+          {
+            "Name": "race (other)",
+            "JobID": 126613742805,
+            "Conclusion": "success",
+            "Seconds": 571.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:57:47Z"
+          },
+          {
+            "Name": "race (mainthread)",
+            "JobID": 126613742875,
+            "Conclusion": "success",
+            "Seconds": 254.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:52:30Z"
+          },
+          {
+            "Name": "race (api)",
+            "JobID": 126613742909,
+            "Conclusion": "success",
+            "Seconds": 368.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:54:24Z"
+          },
+          {
+            "Name": "race (app)",
+            "JobID": 126613743047,
+            "Conclusion": "success",
+            "Seconds": 471.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:56:07Z"
+          },
+          {
+            "Name": "web",
+            "JobID": 126613743315,
+            "Conclusion": "success",
+            "Seconds": 56.0,
+            "StartedAt": "2026-11-04T13:48:16Z",
+            "CompletedAt": "2026-11-04T13:49:12Z"
+          },
+          {
+            "Name": "cross",
+            "JobID": 126614278677,
+            "Conclusion": "success",
+            "Seconds": 78.0,
+            "StartedAt": "2026-11-04T13:49:15Z",
+            "CompletedAt": "2026-11-04T13:50:33Z"
+          },
+          {
+            "Name": "layout (1)",
+            "JobID": 126614278787,
+            "Conclusion": "success",
+            "Seconds": 315.0,
+            "StartedAt": "2026-11-04T13:49:15Z",
+            "CompletedAt": "2026-11-04T13:54:30Z"
+          },
+          {
+            "Name": "layout (2)",
+            "JobID": 126614279013,
+            "Conclusion": "success",
+            "Seconds": 305.0,
+            "StartedAt": "2026-11-04T13:49:16Z",
+            "CompletedAt": "2026-11-04T13:54:21Z"
+          },
+          {
+            "Name": "check",
+            "JobID": 126618835020,
+            "Conclusion": "success",
+            "Seconds": 6.0,
+            "StartedAt": "2026-11-04T13:57:50Z",
+            "CompletedAt": "2026-11-04T13:57:56Z"
+          }
+        ]
+      }
+    ],
+    "TimingMethod": "Completed workflow updated_at minus created_at; actual runner durations from job timestamps; skipped jobs excluded; no retry",
+    "EventCandidate": "a2074976f19b0e79d85f8ffb626c3ab43e24eba8",
+    "Fingerprint": "72b6d234bd8701cb6114883903db6a248271a0a23f3a09677599f9fc859970f8"
+  },
+  "LastSuccessfulCIValidation": {
+    "Format": 1,
+    "Commit": "a2074976f19b0e79d85f8ffb626c3ab43e24eba8",
+    "Fingerprint": "72b6d234bd8701cb6114883903db6a248271a0a23f3a09677599f9fc859970f8",
+    "Mode": "shadow",
+    "FullVerified": true,
+    "RunID": "41841319514",
+    "EventSHA": "a2074976f19b0e79d85f8ffb626c3ab43e24eba8",
+    "Jobs": {
+      "plan": {
+        "result": "success",
+        "outputs": {}
+      },
+      "quality": {
+        "result": "success",
+        "outputs": {}
+      },
+      "race": {
+        "result": "success",
+        "outputs": {}
+      },
+      "web": {
+        "result": "success",
+        "outputs": {}
+      },
+      "layout": {
+        "result": "success",
+        "outputs": {}
+      },
+      "cross": {
+        "result": "success",
+        "outputs": {}
+      },
+      "shadow": {
+        "result": "success",
+        "outputs": {}
+      }
+    }
+  },
+  "FinalCandidateCI": "not run; current branch conflicts with newer main and will not be merged",
+  "StoppedOwnReplay": {
+    "Graceful": true,
+    "RemainingVerifiedProcesses": 0,
+    "Exit": 1
+  },
+  "Review": {
+    "Commit": "43a7606b07aeca3d77916497a690b89de80274e7",
+    "Outcome": "changes requested",
+    "LogSHA256": "adf85f7514bcd22529411e059e70069a09b9dde5dc667a399b6e3ef9f07c257f"
+  },
+  "ScopeEquivalence": {
+    "MeasuredToolCommit": "bf20bc80585ad39e23873a296e87e1b72dc2534f",
+    "CorrectedToolCommit": "43a7606b07aeca3d77916497a690b89de80274e7",
+    "Cases": [
+      {
+        "PR": 210,
+        "Commit": "f198d0fb0cf8c8578f032ed0e5d581686c17ee0e",
+        "Full": true,
+        "GoRoots": 2304,
+        "Fingerprint": "f7ae73e5999b88af999ebf500379ef8ff29d7e738b826e921f5f011132c2e733",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "SelectedGoEqual": true,
+        "SourceAndConfigurationEqual": true
+      },
+      {
+        "PR": 211,
+        "Commit": "80c0b52dcf7fbf0e5b971ba56a21f2b2fd51c259",
+        "Full": true,
+        "GoRoots": 2307,
+        "Fingerprint": "d16aa800ccc445fc2f9484db0fe5072bf886c827e1dd74977a99bd7c5440d624",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "SelectedGoEqual": true,
+        "SourceAndConfigurationEqual": true
+      },
+      {
+        "PR": 212,
+        "Commit": "8d5db68c193dab7ac614b3212280f3bbddfd19e5",
+        "Full": true,
+        "GoRoots": 2323,
+        "Fingerprint": "8d8fef4c3eddabd353ca71f5a945e588248400c8200e9ef447f81a5a421acd47",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "SelectedGoEqual": true,
+        "SourceAndConfigurationEqual": true
+      },
+      {
+        "PR": 213,
+        "Commit": "d94bba21b3ba0813a2994fa009fd128236cad819",
+        "Full": true,
+        "GoRoots": 2337,
+        "Fingerprint": "6fa22bf92e65efcfe8faab9f2f5ffdd25819f80f0a45408ec0a5f942b194bbeb",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "SelectedGoEqual": true,
+        "SourceAndConfigurationEqual": true
+      },
+      {
+        "PR": 214,
+        "Commit": "71c69235012dc98275896cbcd0e1faf4d81727c4",
+        "Full": true,
+        "GoRoots": 2342,
+        "Fingerprint": "463a14a05cf7bfcfaac3f5fed502d7b4f56972a036379de59337c034e1ac1eb5",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "SelectedGoEqual": true,
+        "SourceAndConfigurationEqual": true
+      }
+    ],
+    "ExecutionPathsCompared": [
+      "Makefile",
+      "internal/testkit/check",
+      "internal/testkit/racecheck",
+      "internal/procx",
+      "internal/testkit/impact/run.go"
+    ],
+    "ExecutionFilesChanged": [
+      "internal/testkit/check/main.go",
+      "internal/testkit/impact/run.go"
+    ],
+    "LocalFullReuseBranchUsedInTheseCases": false,
+    "Interpretation": "Only full-fallback execution sets and default source/configuration identity are equivalent. Recorded analysis costs belong to the old measured version; precision selection and Web results are not current-version benefit acceptance."
+  }
+}

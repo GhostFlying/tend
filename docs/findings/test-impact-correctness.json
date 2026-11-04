@@ -3089,5 +3089,11 @@
       }
     ],
     "Interpretation": "The later change binds execute modes and forces full checks for mutable local modules. These fixed faults have no mutable local module, unchanged source/configuration and plans, and identical executors. Native fault evidence retains the original tool commit; it is not claimed as a rerun of the later source."
-  }
+  },
+  "OverallAccepted": false,
+  "ExperimentStopped": true,
+  "UnresolvedIssues": [
+    "dependency-owned runtime shared state can omit a failing root",
+    "repository baseline event attribution includes nested external fixtures"
+  ]
 }
