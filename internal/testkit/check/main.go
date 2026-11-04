@@ -296,7 +296,7 @@ func main() {
 		}
 		if err == nil && !*planOnly {
 			var full impact.Result
-			if *mode == "shadow" || plan.Full {
+			if *mode == "shadow" || plan.Full || plan.LocalFull {
 				full, err = complete(ctx, dir, b, *goTool, *pnpm, *count)
 				if full.Fingerprint != plan.Fingerprint {
 					full.Valid, full.Passed, full.FullVerified = false, false, false
@@ -306,7 +306,7 @@ func main() {
 				full.Mode = *mode
 				full.Stages["analysis"] = analysisSeconds
 				full.Seconds += analysisSeconds
-				full.SelectionDelegated = plan.Full
+				full.SelectionDelegated = plan.Full || plan.LocalFull
 				err = errors.Join(err, impact.WriteJSON(*report, full))
 			}
 			absolute, pathErr := filepath.Abs(planPath)
@@ -314,7 +314,7 @@ func main() {
 				// The full failure remains the gate and its result is retained.
 			} else if pathErr != nil {
 				err = pathErr
-			} else if !plan.Full {
+			} else if !plan.Full && !plan.LocalFull {
 				var result impact.Result
 				result, err = impact.Run(ctx, impact.RunOptions{Dir: dir, Go: *goTool, PNPM: *pnpm, PlanPath: absolute, RaceRunner: *raceRunner, Jobs: b.jobs, Procs: b.procs, Packages: b.packages, AppShards: b.shards, SuiteShards: b.suiteShards, Count: *count, IsolateE2E: b.exclusiveE2E, Log: os.Stdout}, plan)
 				result.Mode = *mode

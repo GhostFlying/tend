@@ -158,31 +158,37 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 	if err != nil {
 		return s, err
 	}
-	var overlay compilerOverlay
-	s.Profile, overlay, err = buildProfile(ctx, dir, goTool)
+	var inputs buildInputs
+	s.Profile, inputs, err = buildProfile(ctx, dir, goTool)
 	if err != nil {
 		return s, err
 	}
-	commit, err := output(ctx, dir, "git", "rev-parse", "HEAD")
+	overlay := inputs.overlay
+	module, err := output(ctx, dir, goTool, "list", "-m", "-json")
 	if err != nil {
 		return s, err
 	}
-	s.Commit = strings.TrimSpace(string(commit))
-	status, err := output(ctx, dir, "git", "status", "--porcelain", "--untracked-files=all")
-	if err != nil {
-		return s, err
+	modules := json.NewDecoder(bytes.NewReader(module))
+	for {
+		var m goModule
+		if err := modules.Decode(&m); err == io.EOF {
+			break
+		} else if err != nil {
+			return s, err
+		}
+		if m.Main && filepath.Clean(m.Dir) == dir {
+			s.Module = m.Path
+		}
 	}
-	s.Clean = len(status) == 0
-	module, err := output(ctx, dir, goTool, "list", "-m", "-f", "{{.Path}}")
-	if err != nil {
-		return s, err
+	if s.Module == "" {
+		return s, fmt.Errorf("repository directory must be an active Go module root")
 	}
-	s.Module = strings.TrimSpace(string(module))
 	listed, err := output(ctx, dir, goTool, "list", "-race", "-deps", "-json", "./...")
 	if err != nil {
 		return s, err
 	}
 	type goPackage struct {
+		Module                                           *goModule
 		ImportPath, Dir                                  string
 		Imports, TestImports, XTestImports               []string
 		TestGoFiles, XTestGoFiles                        []string
@@ -192,8 +198,20 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 		SwigFiles, SwigCXXFiles, SysoFiles               []string
 	}
 	var buildInputs []string
+	localInputs := localModuleInputs{}
 	productionProcess, testProcess := map[string]bool{}, map[string]bool{}
 	productionInspection, testInspection := map[string]bool{}, map[string]bool{}
+	captureLocal := func(p goPackage) error {
+		var files []string
+		for _, group := range [][]string{p.GoFiles, p.CgoFiles, p.EmbedFiles, p.CFiles, p.CXXFiles, p.MFiles, p.HFiles, p.FFiles, p.SFiles, p.SwigFiles, p.SwigCXXFiles, p.SysoFiles} {
+			files = append(files, group...)
+		}
+		mutable, err := localInputs.capture(p.Dir, files, p.Module, s.Module)
+		if mutable {
+			productionInspection[p.ImportPath] = true
+		}
+		return err
+	}
 	productionState, testState := map[string]bool{}, map[string]bool{}
 	productionImports := map[string][]string{}
 	dec := json.NewDecoder(bytes.NewReader(listed))
@@ -205,13 +223,16 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 			return s, err
 		}
 		productionImports[p.ImportPath] = p.Imports
+		if err := captureLocal(p); err != nil {
+			return s, err
+		}
 		if p.ImportPath == "os/exec" {
 			productionProcess[p.ImportPath] = true
 		}
 		if inspectionImport(p.ImportPath) {
 			productionInspection[p.ImportPath] = true
 		}
-		if p.ImportPath != s.Module && !strings.HasPrefix(p.ImportPath, s.Module+"/") {
+		if p.Module == nil || p.Module.Path != s.Module {
 			continue
 		}
 		rel, err := filepath.Rel(dir, p.Dir)
@@ -305,6 +326,9 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 				return s, err
 			}
 			productionImports[p.ImportPath] = p.Imports
+			if err := captureLocal(p); err != nil {
+				return s, err
+			}
 			if p.ImportPath == "os/exec" {
 				productionProcess[p.ImportPath] = true
 			}
@@ -362,6 +386,22 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 	var fingerprint bytes.Buffer
+	// Go may resolve and write sum files while discovering dependencies. Bind
+	// the effective configuration and cleanliness after that resolution.
+	s.Profile.ModuleConfig, err = moduleConfigIdentity(dir, inputs.flags, inputs.workspace)
+	if err != nil {
+		return s, err
+	}
+	s.Profile.LocalModules, err = localInputs.digest()
+	if err != nil {
+		return s, err
+	}
+	if s.Profile.ModuleConfig != "" {
+		fmt.Fprintln(&fingerprint, "module-configuration", s.Profile.ModuleConfig)
+	}
+	if s.Profile.LocalModules != "" {
+		fmt.Fprintln(&fingerprint, "local-modules", s.Profile.LocalModules)
+	}
 	if overlay.digest != "" {
 		fmt.Fprintln(&fingerprint, "compiler-overlay", overlay.digest)
 	}
@@ -426,6 +466,16 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 		s.Files[path] = f
 	}
 	s.Fingerprint = hash(fingerprint.Bytes())
+	commit, err := output(ctx, dir, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return s, err
+	}
+	s.Commit = strings.TrimSpace(string(commit))
+	status, err := output(ctx, dir, "git", "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return s, err
+	}
+	s.Clean = len(status) == 0
 	return s, nil
 }
 

@@ -53,8 +53,12 @@ func TestNestedOrchestratorCancellationCleansChildGroups(t *testing.T) {
 	var pid int
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(record); err == nil {
-			pid, _ = strconv.Atoi(string(b))
-			break
+			// WriteFile creates the marker before writing its PID. Observing
+			// that empty intermediate file is not a readiness notification.
+			if candidate, err := strconv.Atoi(string(b)); err == nil && candidate > 0 {
+				pid = candidate
+				break
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

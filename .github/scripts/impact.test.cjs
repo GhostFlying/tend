@@ -29,6 +29,8 @@ test("candidate plan must match source identity and contain valid nonempty selec
   const sha = "a".repeat(40);
   const plan = { Format: 1, Commit: sha, Fingerprint: "b".repeat(64), Full: false, Reasons: [], Go: { "m/p": ["TestOne"] }, Layout: [] };
   validatePlan(plan, sha);
+  validatePlan({ ...plan, LocalFull: true }, sha);
+  assert.throws(() => validatePlan({ ...plan, LocalFull: "true" }, sha));
   assert.throws(() => validatePlan(plan, "c".repeat(40)));
   assert.throws(() => validatePlan({ ...plan, Go: { "m/p": [] } }, sha));
   assert.throws(() => validatePlan({ ...plan, Go: { "m/p": ["TestOne", "TestOne"] } }, sha));

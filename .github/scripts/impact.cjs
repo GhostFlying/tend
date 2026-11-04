@@ -9,7 +9,8 @@ const shaPattern = /^[0-9a-f]{40}$/;
 
 function validatePlan(plan, commit) {
   if (plan.Format !== 1 || plan.Commit !== commit || !/^[0-9a-f]{64}$/.test(plan.Fingerprint) ||
-      !plan.Go || !Array.isArray(plan.Reasons) || typeof plan.Full !== "boolean" || !Array.isArray(plan.Layout)) {
+      !plan.Go || !Array.isArray(plan.Reasons) || typeof plan.Full !== "boolean" ||
+      (plan.LocalFull !== undefined && typeof plan.LocalFull !== "boolean") || !Array.isArray(plan.Layout)) {
     throw new Error("Invalid candidate impact plan");
   }
   for (const [pkg, roots] of Object.entries(plan.Go)) {

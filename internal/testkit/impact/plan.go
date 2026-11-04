@@ -93,6 +93,9 @@ func Select(current Snapshot, index *Index, invalid string) Plan {
 	if current.Profile.Overlay != "" {
 		full("compiler overlay requires complete validation")
 	}
+	if current.Profile.ModuleConfig != "" {
+		full("alternate module or workspace requires complete validation")
+	}
 	if index == nil {
 		full("baseline unavailable: " + invalid)
 	} else {
@@ -268,6 +271,17 @@ func Select(current Snapshot, index *Index, invalid string) Plan {
 	}
 	for pkg := range p.Go {
 		slices.Sort(p.Go[pkg])
+	}
+	if !p.Full && p.Web.Run && p.Web.Full {
+		complete := allGo(current)
+		equal := len(p.Go) == len(complete)
+		for pkg, roots := range complete {
+			equal = equal && slices.Equal(roots, p.Go[pkg])
+		}
+		if equal {
+			p.LocalFull = true
+			p.Reasons = append(p.Reasons, "complete local Go and Web workload; reuse full validation")
+		}
 	}
 	slices.Sort(p.Reasons)
 	p.Reasons = slices.Compact(p.Reasons)

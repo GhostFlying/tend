@@ -70,6 +70,9 @@ func run(ctx context.Context, args []string) error {
 	if before.Profile.Overlay != "" {
 		return fmt.Errorf("function coverage baselines do not support compiler overlays; use make check-full")
 	}
+	if before.Profile.ModuleConfig != "" {
+		return fmt.Errorf("function coverage baselines do not support alternate modules or workspaces; use make check-full")
+	}
 	start := time.Now()
 	recordsDir, err := os.MkdirTemp("", "tend-impact-full-events-")
 	if err != nil {

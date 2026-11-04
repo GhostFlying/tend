@@ -30,6 +30,8 @@ type Profile struct {
 	Go, OS, Arch, Flags string
 	Race                bool
 	Overlay             string `json:",omitempty"`
+	ModuleConfig        string `json:",omitempty"`
+	LocalModules        string `json:",omitempty"`
 }
 
 type Function struct {
@@ -91,6 +93,7 @@ type Plan struct {
 	Commit, Fingerprint   string
 	Baseline              string
 	Full                  bool
+	LocalFull             bool `json:",omitempty"`
 	Reasons               []string
 	Go                    map[string][]string
 	Web                   WebPlan
@@ -296,28 +299,35 @@ func BuildProfile(ctx context.Context, dir, goTool string) (Profile, error) {
 	return p, err
 }
 
-func buildProfile(ctx context.Context, dir, goTool string) (Profile, compilerOverlay, error) {
+func buildProfile(ctx context.Context, dir, goTool string) (Profile, buildInputs, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
-		return Profile{}, compilerOverlay{}, err
+		return Profile{}, buildInputs{}, err
 	}
-	b, err := output(ctx, dir, goTool, "env", "GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "CGO_ENABLED", "GOEXPERIMENT", "GOAMD64", "GOARM64", "CC", "CXX", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_LDFLAGS")
+	b, err := output(ctx, dir, goTool, "env", "GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "CGO_ENABLED", "GOEXPERIMENT", "GOAMD64", "GOARM64", "CC", "CXX", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_LDFLAGS", "GOWORK")
 	if err != nil {
-		return Profile{}, compilerOverlay{}, err
+		return Profile{}, buildInputs{}, err
 	}
 	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
-	if len(lines) != 14 {
-		return Profile{}, compilerOverlay{}, fmt.Errorf("incomplete Go build configuration")
+	if len(lines) != 15 {
+		return Profile{}, buildInputs{}, fmt.Errorf("incomplete Go build configuration")
 	}
+	inputs := buildInputs{flags: lines[3], workspace: lines[14]}
+	lines = lines[:14]
 	overlay, err := loadCompilerOverlay(dir, lines[3])
 	if err != nil {
-		return Profile{}, compilerOverlay{}, err
+		return Profile{}, buildInputs{}, err
+	}
+	inputs.overlay = overlay
+	config, err := moduleConfigIdentity(dir, inputs.flags, inputs.workspace)
+	if err != nil {
+		return Profile{}, buildInputs{}, err
 	}
 	lines[3] = semanticGoFlags(lines[3])
 	if overlay.digest != "" {
 		lines = append(lines, "compiler-overlay:"+overlay.digest)
 	}
-	return Profile{Go: lines[0], OS: lines[1], Arch: lines[2], Flags: hash([]byte(strings.Join(lines[3:], "\n"))), Race: true, Overlay: overlay.digest}, overlay, nil
+	return Profile{Go: lines[0], OS: lines[1], Arch: lines[2], Flags: hash([]byte(strings.Join(lines[3:], "\n"))), Race: true, Overlay: overlay.digest, ModuleConfig: config}, inputs, nil
 }
 
 func ResolvedGoFlags(ctx context.Context, dir, goTool string) (string, error) {

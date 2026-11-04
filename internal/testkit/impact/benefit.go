@@ -378,7 +378,7 @@ func Benefit(ctx context.Context, o BenefitOptions) (err error) {
 		for _, roots := range plan.Go {
 			count += len(roots)
 		}
-		return replayPairs(ctx, result, count, plan.Full, func(mode string, round int) (Measurement, error) {
+		return replayPairs(ctx, result, count, plan.Full || plan.LocalFull, func(mode string, round int) (Measurement, error) {
 			fmt.Fprintf(o.Log, "[impact] replay PR %d %s round %d %s\n", candidate.PR, candidate.Commit, round+1, mode)
 			m, err := measureCheck(plan, mode, fmt.Sprintf("pr-%d-%d-%s", candidate.PR, round, mode), 1)
 			if err == nil && !m.Success {

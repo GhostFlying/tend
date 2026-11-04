@@ -254,7 +254,7 @@ jobs:
           path: .local/impact
       - name: execute selected checks for comparison
         run: |
-          if [ "$CHECK_MODE" = shadow ] && [ "$(node -p 'require("./.local/impact/plan.json").Full')" = false ]; then
+          if [ "$CHECK_MODE" = shadow ] && [ "$(node -p '((p) => p.Full || !!p.LocalFull)(require("./.local/impact/plan.json"))')" = false ]; then
             make check CHECK_MODE=affected
           else
             echo 'The selected workload is covered by the required full CI jobs or the active mode.'
