@@ -151,17 +151,36 @@ func (t *runnerTransport) Acknowledge(ctx context.Context, e coordination.Event)
 	return t.acknowledge(ctx, e, flush)
 }
 
-func (t *runnerTransport) AcknowledgeReplyPrefix(ctx context.Context, e coordination.Event) error {
+func (t *runnerTransport) AcknowledgeReplyPrefix(ctx context.Context, e coordination.Event, consumed []int64) error {
 	if e.Native == nil || e.Native.Kind != harness.EventAgentMessageDelta {
 		return errors.New("reply prefix requires its original delta identity")
 	}
 	t.mu.Lock()
-	origin, ok := t.origins[e.Sequence]
-	t.mu.Unlock()
-	if !ok {
-		return errors.New("reply prefix has no original receipt identity")
+	origins := map[string][]int64{}
+	lastConsumed := false
+	for _, sequence := range consumed {
+		origin, ok := t.origins[sequence]
+		if !ok {
+			t.mu.Unlock()
+			return errors.New("reply prefix has no original receipt identity")
+		}
+		origins[origin.run] = append(origins[origin.run], origin.sequence)
+		lastConsumed = lastConsumed || sequence == e.Sequence
 	}
-	return t.app.AcknowledgeManagerReplyPrefix(ctx, origin.run, origin.sequence, e.ThreadID, e.Native.TurnID, e.Native.ItemID, e.Native.Text)
+	t.mu.Unlock()
+	if !lastConsumed {
+		return errors.New("reply prefix did not consume its last delta")
+	}
+	for run, sequences := range origins {
+		var last int64
+		for _, sequence := range sequences {
+			last = max(last, sequence)
+		}
+		if err := t.app.AcknowledgeManagerReplyPrefix(ctx, run, last, e.ThreadID, e.Native.TurnID, e.Native.ItemID, e.Native.Text, sequences); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *runnerTransport) acknowledge(ctx context.Context, e coordination.Event, flush bool) error {

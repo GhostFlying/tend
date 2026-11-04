@@ -3,6 +3,7 @@ package mainthread
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -13,13 +14,13 @@ import (
 
 type prefixThread struct {
 	harness.Thread
-	ack func(context.Context, harness.Event) error
+	ack func(context.Context, harness.Event, []int64) error
 }
 
 func TestNativeTerminalReplyFlushDoesNotRequirePrefixAcknowledgement(t *testing.T) {
 	e := newEnv(t, testkit.NewHarness())
 	e.stop()
-	thread := &prefixThread{ack: func(context.Context, harness.Event) error {
+	thread := &prefixThread{ack: func(context.Context, harness.Event, []int64) error {
 		t.Fatal("real native terminal handling was intercepted by the closing-prefix hook")
 		return nil
 	}}
@@ -52,7 +53,7 @@ func TestClosingReplyPrefixDoesNotPublishSuppressedRepairOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.m.active = &turn{requestID: repair, messageID: source}
-	thread := &prefixThread{ack: func(context.Context, harness.Event) error {
+	thread := &prefixThread{ack: func(context.Context, harness.Event, []int64) error {
 		t.Fatal("suppressed repair prose was treated as a visible durable reply")
 		return nil
 	}}
@@ -90,7 +91,7 @@ func (s boundaryPrefixSession) ResumeThread(ctx context.Context, id string, cfg 
 	return boundaryPrefixThread{thread.(*testkit.FakeThread)}, nil
 }
 
-func (boundaryPrefixThread) AcknowledgeReplyPrefix(context.Context, harness.Event) error {
+func (boundaryPrefixThread) AcknowledgeReplyPrefix(context.Context, harness.Event, []int64) error {
 	return errors.New("buffered output has no visible terminal message yet")
 }
 
@@ -132,8 +133,8 @@ func TestBackgroundNativeTerminalSettlesBeforeVisiblePrefixIsRequired(t *testing
 }
 
 func (*prefixThread) ID() string { return "native-original" }
-func (t *prefixThread) AcknowledgeReplyPrefix(ctx context.Context, event harness.Event) error {
-	return t.ack(ctx, event)
+func (t *prefixThread) AcknowledgeReplyPrefix(ctx context.Context, event harness.Event, consumed []int64) error {
+	return t.ack(ctx, event, consumed)
 }
 
 func TestFault_ManagerTerminalReplyAcknowledgesOnlyDurableDeltaPrefix(t *testing.T) {
@@ -149,13 +150,13 @@ func TestFault_ManagerTerminalReplyAcknowledgesOnlyDurableDeltaPrefix(t *testing
 			}
 			attempts := 0
 			ackFailure := errors.New("original prefix acknowledgement unavailable")
-			thread := &prefixThread{ack: func(_ context.Context, event harness.Event) error {
+			thread := &prefixThread{ack: func(_ context.Context, event harness.Event, consumed []int64) error {
 				attempts++
 				rows := assistantItems(t, e)
 				if len(rows) != 1 || rows[0].Body != "original尾部🙂" || rows[0].AssistantState != state {
 					t.Fatalf("ack preceded durable terminal text: %+v", rows)
 				}
-				if event.CoordinatorSequence != 19 || event.Kind != harness.EventAgentMessageDelta || event.TurnID != "original-turn" || event.ItemID != "original-item" {
+				if !slices.Equal(consumed, []int64{17, 18, 19}) || event.CoordinatorSequence != 19 || event.Kind != harness.EventAgentMessageDelta || event.TurnID != "original-turn" || event.ItemID != "original-item" {
 					t.Fatalf("prefix lost original last event identity: %+v", event)
 				}
 				if attempts == 1 {

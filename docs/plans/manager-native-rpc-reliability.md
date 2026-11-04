@@ -15,6 +15,7 @@
 1. 先添加故障回归：17、18、19 三段 delta 的真实累计文本和最后消费游标；streaming 定时保存不确认；terminal 保存失败不确认；确认失败可重试。
 2. reply draft 保留最后消费事件的原协调游标。只有 attachment shutdown 缺少原生终结事件时，在 interrupted/unknown 等 terminal 累计文本成功持久化后，调用显式的内部回复前缀确认接口，确认同一原 run/thread/turn/item 的已消费前缀。真实原生终结事件保留既有处理及确认通路，不插入可见消息检查阻断 repair 抑制或后台暂存输出的正常结算。app 在同一确认事务里验证真实原 delta 身份与可见终态正文完全相等，不能把旧终态不可覆写产生的成功 no-op 当作保存新文本。repair 抑制输出不伪造成可见消息。不能通过伪造 item completed 来复用通路。
 3. 保留现有 close 的全部 applied guard、最后游标、信封和请求身份。验证冻结旧 close 在三段 delta 未应用时仍返回 unknown，真正保存 terminal 回复并确认前缀后，同一原 close 信封才能成功；不得把原业务 receipt 变成成功。
+   draft 只在消费成功时记录协调游标；内部确认将精确集合映射回各原 Run。事务中要求同 item 的未应用前缀全部被消费，且集合内游标确实属于原前缀。事件处理失败缺少中间片段时，即使部分正文与可见终态相等，也必须保持 unknown，不能确认整个范围。
 4. 不改变 server/runner wire 或请求默认语义，不新增用户能力或 CLI 入口。内部可选接口只在协调 attachment 使用，普通本机 harness 维持现有行为。
 
 ## 验证和交付

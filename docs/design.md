@@ -916,6 +916,8 @@ manager 关闭时如果只剩回复 delta，没有原生 item/turn 终结事件�
 在真正保存 interrupted/unknown 累计回复后，显式确认该回复最后已消费的原 run/seq
 及同 thread/turn/item 的 delta 前缀。普通 streaming 保存不确认，保存失败不确认，
 确认事务还须匹配原 delta 身份与已保存终态正文，不能将旧终态的 no-op 视为新前缀已保存。
+draft 只记录成功消费的协调游标，确认时映射回各原 Run；前缀内任何未消费的原 delta
+仍保持未应用，不能因后续片段已保存而覆盖一次事件处理失败留下的缺口。
 确认失败仍可用原身份重试。此确认不是原生 turn 成功或业务回执对账，不删除未知效果；
 成功 close 的完整 applied 守卫和 runner 冻结的信封、请求 ID、末游标均不变。
 见[实施计划](plans/manager-native-rpc-reliability.md)。

@@ -10,8 +10,20 @@ import (
 )
 
 func TestFault_ManagerFrozenCloseWaitsForOriginalReplyPrefixes(t *testing.T) {
-	for _, otherItem := range []bool{false, true} {
-		t.Run(fmt.Sprintf("separate_item_%t", otherItem), func(t *testing.T) {
+	for _, scenario := range []struct {
+		name           string
+		otherItem, gap bool
+	}{{name: "same_item"}, {name: "separate_item", otherItem: true}, {name: "missing_middle_delta", gap: true}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			otherItem := scenario.otherItem
+			consumed := []int64{17, 18, 19}
+			if otherItem || scenario.gap {
+				consumed = []int64{17, 19}
+			}
+			originalBody := "original fragmentoriginal fragmentoriginal fragment"
+			if otherItem || scenario.gap {
+				originalBody = "original fragmentoriginal fragment"
+			}
 			h, _, _, as, source := reviewManagerAssignment(t)
 			selection, named, err := h.app.HostedRuntimeSelection(t.Context(), as.Manager.ConversationID)
 			if err != nil || !named {
@@ -69,43 +81,53 @@ func TestFault_ManagerFrozenCloseWaitsForOriginalReplyPrefixes(t *testing.T) {
 					t.Fatal(op)
 				}
 			}
-			record("original-item", "original cumulative body", protocol.AssistantStreaming)
-			if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", "original cumulative body"); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+			record("original-item", originalBody, protocol.AssistantStreaming)
+			if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", originalBody, consumed); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 				t.Fatal("ordinary streaming save acknowledged a replayable prefix", err)
 			}
-			record("original-item", "original cumulative body", protocol.AssistantInterrupted)
+			record("original-item", originalBody, protocol.AssistantInterrupted)
+			if scenario.gap {
+				if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", originalBody, consumed); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+					t.Fatal("missing middle delta was acknowledged by a matching incomplete terminal body", err)
+				}
+				if _, err := replay(); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+					t.Fatal("frozen close discarded a failed delta application", err)
+				}
+				return
+			}
+
 			for _, mismatch := range []struct {
 				run, thread, turn, item, body string
 				sequence                      int64
 			}{
-				{"another-run", "native", "original-turn", "original-item", "original cumulative body", 19},
-				{as.RunID, "another-thread", "original-turn", "original-item", "original cumulative body", 19},
-				{as.RunID, "native", "another-turn", "original-item", "original cumulative body", 19},
-				{as.RunID, "native", "original-turn", "another-item", "original cumulative body", 19},
+				{"another-run", "native", "original-turn", "original-item", originalBody, 19},
+				{as.RunID, "another-thread", "original-turn", "original-item", originalBody, 19},
+				{as.RunID, "native", "another-turn", "original-item", originalBody, 19},
+				{as.RunID, "native", "original-turn", "another-item", originalBody, 19},
 				{as.RunID, "native", "original-turn", "original-item", "different body", 19},
-				{as.RunID, "native", "original-turn", "original-item", "original cumulative body", 20},
+				{as.RunID, "native", "original-turn", "original-item", originalBody, 20},
 			} {
-				if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), mismatch.run, mismatch.sequence, mismatch.thread, mismatch.turn, mismatch.item, mismatch.body); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+				if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), mismatch.run, mismatch.sequence, mismatch.thread, mismatch.turn, mismatch.item, mismatch.body, consumed); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 					t.Fatal("mismatched prefix was acknowledged", mismatch, err)
 				}
 			}
 			// Recording against an existing terminal item can succeed without changing
 			// its body. That no-op cannot justify acknowledging different consumed text.
 			record("original-item", "different body", protocol.AssistantInterrupted)
-			if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", "different body"); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+			if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", "different body", consumed); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 				t.Fatal("terminal record no-op was mistaken for durable new text", err)
 			}
 			// A persisted terminal reply covers only the consumed prefix of its item.
 			// Another item's delta must continue blocking the identical close envelope.
-			if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", "original cumulative body"); err != nil {
+			if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", originalBody, consumed); err != nil {
 				t.Fatal(err)
 			}
 			if otherItem {
 				if _, err := replay(); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 					t.Fatalf("one reply prefix discarded another item's pending delta: %v", err)
 				}
-				record("another-item", "other cumulative body", protocol.AssistantUnknown)
-				if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 18, "native", "original-turn", "another-item", "other cumulative body"); err != nil {
+				record("another-item", "original fragment", protocol.AssistantUnknown)
+				if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 18, "native", "original-turn", "another-item", "original fragment", []int64{18}); err != nil {
 					t.Fatal(err)
 				}
 			}

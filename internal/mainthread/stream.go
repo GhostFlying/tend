@@ -23,6 +23,7 @@ type replyDraft struct {
 	persisted bool
 	replyTo   string
 	sources   []string
+	consumed  []int64
 }
 
 type replyKey struct{ turn, item string }
@@ -31,7 +32,7 @@ type replyDrafts map[replyKey]*replyDraft
 // replyPrefixAcknowledger confirms deltas only after their cumulative terminal
 // reply is durable. Streaming frames remain replayable until that boundary.
 type replyPrefixAcknowledger interface {
-	AcknowledgeReplyPrefix(context.Context, harness.Event) error
+	AcknowledgeReplyPrefix(context.Context, harness.Event, []int64) error
 }
 
 func (d replyDrafts) begin(ev harness.Event, m *Manager) {
@@ -55,6 +56,9 @@ func (d replyDrafts) consume(ev harness.Event) {
 	}
 	if ev.Kind == harness.EventAgentMessageDelta {
 		r.text.WriteString(ev.Text)
+		if ev.CoordinatorSequence != 0 {
+			r.consumed = append(r.consumed, ev.CoordinatorSequence)
+		}
 	} else {
 		r.text.Reset()
 		r.text.WriteString(ev.Text)
@@ -110,7 +114,7 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th harness.Thread, dr
 		if repair {
 			continue
 		}
-		if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event); err != nil {
+		if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event, r.consumed); err != nil {
 			return err
 		}
 	}
