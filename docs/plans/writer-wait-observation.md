@@ -106,3 +106,8 @@ followup。日志不可将这些值相加当成总耗时；pool wait 累计量�
 driver 的 context 或 timeout 行为。另覆盖自动 rollback 先完成而 Commit 返回
 `ErrTxDone`：只记录失败边界的 context 状态并保留取消摘要，不替换错误、不宣称
 取消是任意业务错误的原因；已成功 commit 后才取消仍是成功。
+
+构造函数保留原三参 `Open` 的精确函数类型，供既有注入 constructor 的调用方使用；
+诊断组装使用内部包的 `OpenWithOptions`。把 `Open` 直接改为 variadic 虽然兼容普通
+调用，却不兼容既有函数值，已由 E2E 编译入口暴露；修正保留真实调用方，不修改
+fixture 绕开该接口要求。验证包含现有 E2E 包的 compile-only 检查及诊断定向回归。
