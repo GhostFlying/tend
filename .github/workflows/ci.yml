@@ -1,161 +1,30 @@
-name: ci
+name: app-cost-pair
 
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  quality:
+  pair:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-go
-        id: go
         with:
-          role: quality
-      - name: static checks and capability coverage
-        run: make ci-check capability-check protocol-check fmt-check vet staticcheck
-      - name: publish main build snapshot
-        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ steps.go.outputs.build-path }}
-          key: ${{ steps.go.outputs.build-key }}
-
-  race:
-    name: race (${{ matrix.group }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [app, api, mainthread, e2e, other]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-go
-        id: go
-        with:
-          role: ${{ matrix.group }}
-      - name: race tests
-        env:
-          APP_TEST_SHARDS: 4
-          TEST_GROUP: ${{ matrix.group }}
-        run: make test
-      - name: publish main build snapshot
-        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ steps.go.outputs.build-path }}
-          key: ${{ steps.go.outputs.build-key }}
-
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v6
-        with:
-          package_json_file: web/package.json
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - name: web checks and build
-        run: make web-check
+          role: app
+      - name: compare immutable sources on one runner
+        run: |
+          cp .github/scripts/measure-app-pair.py "$RUNNER_TEMP/measure-app-pair.py"
+          python3 "$RUNNER_TEMP/measure-app-pair.py"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: web-app
-          path: internal/webui/dist/app
+          name: app-cost-pair
+          path: ${{ runner.temp }}/app-cost-pair
           if-no-files-found: error
-          retention-days: 1
-
-  layout:
-    name: layout (${{ matrix.group }})
-    needs: web
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v6
-        with:
-          package_json_file: web/package.json
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-app
-          path: ${{ runner.temp }}/web-app
-      - name: install browser dependencies
-        run: |
-          pnpm --dir web install --frozen-lockfile
-          pnpm --dir web exec playwright install --with-deps chromium
-      - name: browser regressions
-        env:
-          TEND_LAYOUT_BUILD_ROOT: ${{ runner.temp }}/web-app
-          TEND_LAYOUT_OUTPUT: ${{ runner.temp }}/layout
-          LAYOUT_GROUP: ${{ matrix.group }}
-        run: pnpm --dir web exec node scripts/layout-groups.ts "$LAYOUT_GROUP"
-
-  cross:
-    needs: web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-go
-        id: go
-        with:
-          role: cross
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-app
-          path: internal/webui/dist/app
-      - name: cross-compile with the actual web app
-        run: |
-          GOOS=windows GOARCH=amd64 go build ./...
-          GOOS=darwin GOARCH=arm64 go build ./...
-      - name: publish main build snapshot
-        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ steps.go.outputs.build-path }}
-          key: ${{ steps.go.outputs.build-key }}
-
-  # Keep the existing required check name while rejecting every incomplete job.
-  check:
-    if: ${{ always() }}
-    needs: [quality, race, web, layout, cross]
-    runs-on: ubuntu-latest
-    steps:
-      - name: require all checks
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
-
-  cache-maintenance:
-    needs: check
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/github-script@v8
-        with:
-          script: |
-            const { prune } = require('./.github/scripts/go-cache.cjs');
-            await prune({ github, context, core });
+          retention-days: 14
