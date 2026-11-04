@@ -14,7 +14,7 @@ import (
 
 // bufferBackgroundReply keeps ordinary output out of the transcript until the
 // background turn has made its final visible/silent choice.
-func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordAgentMessagePayload) (bool, Outcome, error) {
+func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordAgentMessagePayload, preservePrefix bool) (bool, Outcome, error) {
 	b, handled, err := backgroundOutputBatch(ctx, x, tx, p.ReplyTo, p.TurnID)
 	if err != nil || !handled {
 		return handled, Outcome{}, err
@@ -32,19 +32,20 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 		return true, Outcome{}, err
 	}
 	result := Outcome{Result: map[string]any{"background_batch_id": b.BatchID, "retained": true}}
-	if err == nil && (oldStatus != string(protocol.AssistantStreaming) || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old))) {
+	extend := preservePrefix && oldStatus == string(protocol.AssistantInterrupted) && status == protocol.AssistantInterrupted && strings.HasPrefix(p.Body, old)
+	if err == nil && (oldStatus != string(protocol.AssistantStreaming) && !extend || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old))) {
 		return true, result, nil
 	}
 	if p.Body == "" && errors.Is(err, sql.ErrNoRows) {
 		return true, Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, p.Body, string(status), x.Env.RequestID, x.Now.UnixMilli())
+	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, p.Body, string(status), x.Env.RequestID, x.Now.UnixMilli(), preservePrefix && status == protocol.AssistantInterrupted)
 	if err != nil {
 		return true, Outcome{}, err
 	}
 	// Late terminal output follows the already settled batch disposition.
 	if b.Status != "pending" && b.Status != "frozen" {
-		err = publishBackgroundReplies(ctx, x, tx, b, b.Status)
+		err = publishBackgroundReplies(ctx, x, tx, b, b.Status, agentMessageRecordPolicy{extendInterruptedPrefix: preservePrefix})
 	}
 	return true, result, err
 }
@@ -101,7 +102,7 @@ func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 	return true, out, err
 }
 
-func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b protocol.BackgroundBatch, status string) error {
+func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b protocol.BackgroundBatch, status string, policy ...agentMessageRecordPolicy) error {
 	rows, err := tx.Q().QueryContext(ctx, `SELECT thread_id,turn_id,item_id,body,status,request_id,kind,tool_json,created_at FROM background_replies WHERE batch_id=? AND published=0 ORDER BY seq`, b.BatchID)
 	if err != nil {
 		return err
@@ -154,7 +155,7 @@ func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b prot
 			}
 			env.Payload, err = json.Marshal(recordAgentMessagePayload{Body: r.body, ReplyTo: b.MessageID, TurnID: r.turn, ItemID: r.item, Status: state})
 			if err == nil {
-				out, err = recordVisibleAgentMessage(ctx, &copy, tx)
+				out, err = recordVisibleAgentMessage(ctx, &copy, tx, policy...)
 			}
 		}
 		if err != nil {

@@ -35,6 +35,9 @@ type replyPrefixAcknowledger interface {
 	AcknowledgeReplyPrefix(context.Context, harness.Event, []int64) error
 }
 
+// Reply persistence needs only its original identity, not a live native thread.
+type replyThread interface{ ID() string }
+
 func (d replyDrafts) begin(ev harness.Event, m *Manager) {
 	k := replyKey{ev.TurnID, ev.ItemID}
 	if d[k] != nil {
@@ -68,7 +71,7 @@ func (d replyDrafts) consume(ev harness.Event) {
 	r.event.Text, r.dirty = r.text.String(), true
 }
 
-func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts replyDrafts, turn string, state protocol.AssistantState) error {
+func (m *Manager) flushReplies(ctx context.Context, th replyThread, drafts replyDrafts, turn string, state protocol.AssistantState) error {
 	keys := make([]replyKey, 0, len(drafts))
 	for key := range drafts {
 		keys = append(keys, key)
@@ -95,7 +98,7 @@ func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts re
 
 // Real native terminal events retain their ordinary acknowledgement path. Only
 // attachment shutdown needs a separate boundary for otherwise unterminated text.
-func (m *Manager) flushClosingReplies(ctx context.Context, th harness.Thread, drafts replyDrafts, state protocol.AssistantState) error {
+func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, drafts replyDrafts, state protocol.AssistantState) error {
 	if err := m.flushReplies(ctx, th, drafts, "", state); err != nil {
 		return err
 	}
@@ -126,7 +129,7 @@ func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev ha
 	return m.recordReplySources(ctx, th, ev, state, replyTo, sources)
 }
 
-func (m *Manager) recordReplySources(ctx context.Context, th harness.Thread, ev harness.Event, state protocol.AssistantState, replyTo string, sources []string) error {
+func (m *Manager) recordReplySources(ctx context.Context, th replyThread, ev harness.Event, state protocol.AssistantState, replyTo string, sources []string) error {
 	repair, err := m.isRepairEvent(ctx, th, ev)
 	if err != nil {
 		return err
@@ -160,10 +163,11 @@ func (m *Manager) recordReplySources(ctx context.Context, th harness.Thread, ev 
 		payload["status"] = string(state)
 		native += fmt.Sprintf("/%s:%x", state, sha256.Sum256([]byte(ev.Text)))
 	}
-	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{})
+	_, replay := th.(*databaseReplyThread)
+	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{PreservePrefix: replay})
 }
 
-func (m *Manager) isRepairEvent(ctx context.Context, th harness.Thread, ev harness.Event) (bool, error) {
+func (m *Manager) isRepairEvent(ctx context.Context, th replyThread, ev harness.Event) (bool, error) {
 	// A delayed item can belong to the previous native turn while a repair
 	// is starting. Persisted native identity takes precedence over admission.
 	rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)

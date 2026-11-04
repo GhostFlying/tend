@@ -809,7 +809,7 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 
 // record executes a conversation write of the main agent under a request
 // ID derived from native.
-func (m *Manager) record(ctx context.Context, th harness.Thread, native, op string, payload any, cmd app.Command) error {
+func (m *Manager) record(ctx context.Context, th replyThread, native, op string, payload any, cmd app.Command) error {
 	requestID, err := m.app.NativeRequestID(ctx, "harness:"+m.bindingInstance(), native)
 	if err != nil {
 		return err

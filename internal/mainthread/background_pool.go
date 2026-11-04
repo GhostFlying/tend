@@ -11,13 +11,14 @@ import (
 
 // BackgroundPool bounds isolated harness processes; each logical session is serial.
 type BackgroundPool struct {
-	App    *app.App
-	Front  *Manager
-	Limit  int
-	New    func(string) (*Manager, error)
-	mu     sync.Mutex
-	active map[string]*Manager
-	remote map[string]bool
+	App      *app.App
+	Front    *Manager
+	Limit    int
+	New      func(string) (*Manager, error)
+	mu       sync.Mutex
+	active   map[string]*Manager
+	remote   map[string]bool
+	database map[string]bool
 }
 
 func (p *BackgroundPool) Run(ctx context.Context) {
@@ -28,6 +29,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 	p.mu.Lock()
 	p.active = map[string]*Manager{}
 	p.remote = map[string]bool{}
+	p.database = map[string]bool{}
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -45,6 +47,9 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 		ids, err := p.App.PendingAgentConversations(ctx)
 		if err == nil {
 			for _, id := range ids {
+				if handled, err := p.startDatabaseReplyReplay(ctx, id, &wg); err != nil || handled {
+					continue
+				}
 				claimed, err := p.App.AgentConversationClaimed(ctx, id)
 				if err != nil || !claimed {
 					continue
@@ -202,8 +207,9 @@ func (p *BackgroundPool) Deliver(ctx context.Context, d app.Delivery) app.Delive
 	}
 	p.mu.Lock()
 	m := p.active[conversation]
+	database := p.database[conversation]
 	p.mu.Unlock()
-	if m != nil {
+	if m != nil && !database {
 		return m.Control().Deliver(ctx, d)
 	}
 	return app.DeliveryResult{Outcome: app.Unknown, Reason: "background process is no longer attached; inspect persisted turn state"}
