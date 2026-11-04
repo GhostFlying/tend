@@ -1,6 +1,6 @@
 # Capability 基础设施实施计划
 
-状态：实施前计划；尚无产品代码。P2 真实入口证据接口存在技术阻塞，交原责任链答复后续本任务，不重建调查或基建责任。计划仅覆盖候选准备，不授权合入、安装或部署。
+状态：续跑实施计划，承接原计划提交 `6a8090ea` 和原三文件；尚无产品代码。按冻结合同纠正，缺少 runtime 接口仅限制真实确认与生图步骤，不阻塞其余产品编码。计划仅覆盖候选准备，不授权合入、安装或部署。
 
 ## 冻结输入与吸收
 
@@ -100,3 +100,14 @@
 完成后显式提交 commit/diff、计划、设计吸收、A01–A28 矩阵、命令日志及真实首例原件。列出未完成/未知及风险，不把候选/CI 当上线。
 
 原能力责任与 Agent、设计、board 责任独立关联；只有确需生图阶段依赖 image_gen。正式合入和受控升级留原 Issue 交付义务、精确版本化批准与独立 delivery_authorization 任务，在同一协调窗口执行。本任务无合入、安装、部署或其他任务窗口操作权限。
+
+## 本次续跑批次（编码前修订）
+
+1. 先交付定义 CAS/历史、私有声明及公共登记、完整具名查询/CLI/目录。声明采用独立可选扩展版本，不占用并行单入口配置格式；有声明时拒绝旧 peer 登记，不修改旧 snapshot/hash。
+2. 两 role required 放入现有 selection，深复制、集合比较与规范化贯通。纯 matcher 共用于 claim 和解释；当前 adapter 没有受信任证据时安全阻塞，不能把 Available 提升为 capability。
+3. 新增最小受信任 runtime 证据合同：adapter 结构化 tool inventory（来源/config/scope/TTL），runner 身份上报与追加历史；当前不支持枚举/prepare/adopt 的适配器明确 unsupported。session-only 证据不得授权新会话。实现 negative、TTL、错绑定及模拟反例；未来 profile 证据必须由明确支持的受信任 adapter 提供。
+4. 采用现有 2/1 feature 协商，新增 executor-capabilities-v1，不收紧旧有效输入；新字段只向已协商 peer 发送，旧 required 为空的任务默认及恢复不变。若实作无法保持则停止该协议路线并报告精确缺口，不静默改代际。
+5. 保守路径也要完成定义/声明/Task 输入、查询、调度与解释测试和必要 UI 投影；真实 image_gen 仍最多一次，当前不可观察费用且无精确入口证据时不调用。未完成的真实适配与独立验收如实列出。
+6. 不修改 AnswerDecision/resumeAnsweredQuestion 控制流；独立 review 由 Tend reviewer 承担。完成本批候选与检查后再按原责任链交付，不把本批进展称整体验收通过。
+
+本次恢复核对：工作树干净，HEAD 为原计划提交。三个输入再次正式下载、全文阅读并重新核验原尺寸/SHA；不重做调查。并行 Agent 候选只是接口参考，不吸收其实现、不等待其合入；能力仅绑定现有 worker 的单 RuntimeID，拒绝将 OwnerBinding 或其他 purpose 证据拼接进 worker 能力。
