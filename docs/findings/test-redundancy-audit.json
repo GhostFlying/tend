@@ -1,0 +1,123 @@
+{
+  "Format": 1,
+  "SourceCommit": "5c018f2d8ed79b15a39d34c9d75aac328f8cc48a",
+  "SourceGoFingerprint": "02374be4f62579de6faa9a356b9eed8fae4abf67659ad1d636e07dfe85538ce9",
+  "Scan": {
+    "NamedDeclarations": 2537,
+    "LiteralSubtests": 465,
+    "ExactBodyGroups": [],
+    "ExternalPackageScopesSeparate": true,
+    "Method": "go list active TestGoFiles/XTestGoFiles; go/parser and formatted function-body SHA256; candidates only, not native execution inventory",
+    "ScannerSHA256": "c6d1b984e92b79af2ab2a115c5b51dff9773a235d1335cf10cc6ce59a6b07566"
+  },
+  "Profiles": [
+    {
+      "Head": "5c018f2d8ed79b15a39d34c9d75aac328f8cc48a",
+      "GoSourceFingerprint": "02374be4f62579de6faa9a356b9eed8fae4abf67659ad1d636e07dfe85538ce9",
+      "SourceValid": true,
+      "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+      "Package": "./internal/api",
+      "GOMAXPROCS": 2,
+      "GoPackageParallel": 2,
+      "ExitCode": 0,
+      "Seconds": 281.46613216400146,
+      "ProfileSHA256": "6e820d4154fd794f28eab69b0449e4d361de944c940602a47013ab3d00204a91",
+      "NativeRootSeconds": 276.03,
+      "TotalSampleCPUSeconds": 287.6,
+      "Functions": [
+        {
+          "Function": "internal/api.(*env).task",
+          "CumulativeCPUSeconds": 180.82,
+          "CPUPercent": 62.87
+        },
+        {
+          "Function": "internal/api.(*Server).tasks",
+          "CumulativeCPUSeconds": 14.84,
+          "CPUPercent": 5.16
+        }
+      ],
+      "NativeLogSHA256": "497fbdf4038c36e3f8ecb410c0ff77cf192f7c9769e5a17c6ae469bce4ae4894",
+      "PprofSummarySHA256": "ff86b1dce4b66a5ded37667c435ca858b2e60cf20e9e303ac2bc87e0a22592cc"
+    },
+    {
+      "Head": "5c018f2d8ed79b15a39d34c9d75aac328f8cc48a",
+      "GoSourceFingerprint": "02374be4f62579de6faa9a356b9eed8fae4abf67659ad1d636e07dfe85538ce9",
+      "SourceValid": true,
+      "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+      "Package": "./internal/app",
+      "GOMAXPROCS": 2,
+      "GoPackageParallel": 2,
+      "ExitCode": 0,
+      "Seconds": 131.5641839504242,
+      "ProfileSHA256": "bcddc31516aa91f4cb14da2900ce8c63ccddc53d0478a6aed272e38de2a9779c",
+      "NativeRootSeconds": 128.5,
+      "TotalSampleCPUSeconds": 133.05,
+      "Functions": [
+        {
+          "Function": "internal/app.(*harness).createTask",
+          "CumulativeCPUSeconds": 83.79,
+          "CPUPercent": 62.98
+        },
+        {
+          "Function": "internal/views.TaskRelations",
+          "CumulativeCPUSeconds": 2.49,
+          "CPUPercent": 1.87
+        }
+      ],
+      "NativeLogSHA256": "421d4892f91a92cd7ac85f79cb0fff77d69206733f954558609cba5388ef9a30",
+      "PprofSummarySHA256": "5174aeca8f8bd0ce72fe1db28c945f9b793852be03246a1400f4996e6c24aabc"
+    }
+  ],
+  "Baseline": {
+    "Commit": "3f512173b4024a2dc0c99522752eddb483795447",
+    "Fingerprint": "5a27e13209b54e29704d295388525e650306ffae8ee2a75f5c8dd7b1ede654da",
+    "Roots": [
+      {
+        "Package": "github.com/GhostFlying/tend/internal/api",
+        "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+        "Mode": "static-process",
+        "Functions": null,
+        "Seconds": 595
+      },
+      {
+        "Package": "github.com/GhostFlying/tend/internal/app",
+        "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+        "Mode": "static-process",
+        "Functions": null,
+        "Seconds": 221.39
+      },
+      {
+        "Package": "github.com/GhostFlying/tend/internal/e2e",
+        "Root": "TestEndToEnd_NamedExecutionReloadRestartAndIndependentAcceptance",
+        "Mode": "static-process",
+        "Functions": null,
+        "Seconds": 31.67
+      },
+      {
+        "Package": "github.com/GhostFlying/tend/internal/e2e",
+        "Root": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles",
+        "Mode": "static-process",
+        "Functions": null,
+        "Seconds": 32.09
+      },
+      {
+        "Package": "github.com/GhostFlying/tend/internal/sandbox",
+        "Root": "TestSandboxRealOwnerAPIAndRunner",
+        "Mode": "static-process",
+        "Functions": null,
+        "Seconds": 471.74
+      },
+      {
+        "Package": "github.com/GhostFlying/tend/internal/store",
+        "Root": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase",
+        "Mode": "static-process",
+        "Functions": null,
+        "Seconds": 64.88
+      }
+    ]
+  },
+  "ConfirmedWholeTestDeletions": [],
+  "Candidates": "See the six individually scoped rows in the accompanying Markdown report",
+  "ImplementedSavingsSeconds": null,
+  "BusinessTestsDeleted": 0
+}
