@@ -6,6 +6,10 @@
 
 `tend issue` 默认显示未关闭 Issue 摘要；`issue show <id>` 先展示目标、当前评估、下一步与执行概况，`--json` 读取完整对象。创建、编辑、暂停、恢复、取消、关闭、重开、子项、依赖、负责人交接、任务合同、来源与完成核对继续使用现有命令。Issue 的选择与人类行动通过 `tend attention` 管理。
 
+`tend issue context <id> --after-source <sequence>`（托管工具 `issues_context_read`）读取本项已准入来源的更正义务、有效事实复核、本项原生执行的未决回执及冻结任务合同差异。`prepared` 如实表示历史 baseline 是否存在；canonical Issue 可以同时 `prepared=false`、`sync_status=synced`、`dispatch_ready=true`。`coordination_state` 按本项执行身份聚合，不能因全局处理回合同时接触其他 Issue 就将其消息分类或 recovering 状态归给本项。旧代次和 repair chain 的真实未决回执仍保留。
+
+`dispatch_ready` 与 `dispatch_blockers` 是上下文诊断，不是 `issues_create_task` / `tend issue create-task <id>` 的准入结果，也不证明 worker 已启动或资源可用。正式创建使用当前 Issue revision、assignment epoch、真实已准入 source 的 content revision 和完整任务合同，由服务器核对权限、责任与执行条件；不能只看这个投影就断言任务已被拒绝。不要为 canonical task 补造历史全局 baseline、结清其他 Issue 来源或重开已完成请求。原请求重试仍沿用同一 request ID、原版本与完全相同的输入；读取不消解任何账本义务。
+
 ```sh
 tend issue
 tend issue show "$ISSUE_ID" --json

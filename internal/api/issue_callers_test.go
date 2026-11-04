@@ -62,6 +62,9 @@ func TestCanonicalIssueCallerHTTPAndCLILifecycle(t *testing.T) {
 	if json.Unmarshal(run("context", issue.IssueID), &context) != nil || context.IssueID != issue.IssueID || context.Revision < 1 {
 		t.Fatal(context)
 	}
+	if context.Prepared || !context.DispatchReady || context.SyncStatus != "synced" || context.CoordinationState != "idle" || len(context.DispatchBlockers) != 0 {
+		t.Fatalf("CLI exposed legacy baseline as canonical admission: %+v", context)
+	}
 	at := e.clock.Now().Add(time.Hour).UnixMilli()
 	payload, _ := json.Marshal(map[string]any{"spec": protocol.FollowupSpec{Purpose: "Check current publication", Instruction: "Review existing delivery facts", Kind: "at", At: at, Timezone: "UTC"}})
 	var result protocol.APIResponse
