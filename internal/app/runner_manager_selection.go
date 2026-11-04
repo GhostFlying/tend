@@ -17,7 +17,8 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "manager task awaits a runner claim")
 	}
 	var run string
-	err := q.QueryRowContext(ctx, `SELECT r.run_id FROM runs r JOIN leases l USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND l.status='active' ORDER BY r.created_at DESC LIMIT 1`, m.TaskID).Scan(&run)
+	var strict bool
+	err := q.QueryRowContext(ctx, `SELECT r.run_id,COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'' FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND l.status='active' ORDER BY r.created_at DESC LIMIT 1`, m.TaskID).Scan(&run, &strict)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return hostedconfig.Selection{}, false, err
 	}
@@ -38,7 +39,7 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if owner {
 		policy = protocol.IssueOwnerPolicy
 	}
-	return hostedconfig.Selection{OwnershipPolicy: policy, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
+	return hostedconfig.Selection{OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
 }
 
 // AgentConversationClaimed prevents the hosted pool from starting an Issue
@@ -125,7 +126,8 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 	}
 	selected.RunnerRunID = run
 	var receipt struct {
-		ReceiptOnly bool `json:"receipt_only"`
+		ReceiptOnly     bool   `json:"receipt_only"`
+		ReaderRequestID string `json:"receipt_reader_request_id"`
 	}
 	if err = json.Unmarshal([]byte(trigger), &receipt); err != nil {
 		return err
@@ -139,5 +141,6 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 		return err
 	}
 	selected.ReceiptOnly = receipt.ReceiptOnly || closing || parked
+	selected.RequireReceiptReader = receipt.ReaderRequestID != ""
 	return nil
 }

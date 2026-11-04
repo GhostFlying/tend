@@ -6501,6 +6501,9 @@
         },
         "receipt_only": {
           "type": "boolean"
+        },
+        "require_receipt_reader": {
+          "type": "boolean"
         }
       },
       "required": [

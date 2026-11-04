@@ -111,8 +111,9 @@ func buildManagerAssignment(ctx context.Context, q store.Querier, r store.RunRow
 		return protocol.Assignment{}, err
 	}
 	var receipt struct {
-		ReceiptOnly bool `json:"receipt_only"`
+		ReceiptOnly     bool   `json:"receipt_only"`
+		ReaderRequestID string `json:"receipt_reader_request_id"`
 	}
 	_ = json.Unmarshal([]byte(a.TriggerJSON), &receipt)
-	return protocol.Assignment{Manager: &protocol.IssueManagerAssignment{ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}, nil
+	return protocol.Assignment{Manager: &protocol.IssueManagerAssignment{ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}, nil
 }

@@ -75,7 +75,7 @@ func (t *receiptNativeThread) FindTurn(_ context.Context, identity, turn string)
 
 func TestReceiptOnlyDriverPreservesAppliedConfigurationWithoutCatalog(t *testing.T) {
 	native := &receiptNativeSession{thread: &receiptNativeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
-	d := Driver{ReceiptOnly: true, Session: native, Profile: protocol.ExecutionProfile{Model: "original-catalog-alias", Effort: "low"}}
+	d := Driver{RequireReceiptReader: true, Session: native, Profile: protocol.ExecutionProfile{Model: "original-catalog-alias", Effort: "low"}}
 	defer d.Handle(t.Context(), "close", json.RawMessage(`{}`))
 	raw, _ := json.Marshal(Request{ThreadID: "original-thread", Config: harness.ThreadConfig{Model: "original-applied-model", Sandbox: "read-only", ApprovalPolicy: "never", Config: map[string]any{"model_provider": "original-provider", "model_reasoning_effort": "high"}}})
 	if _, err := d.Handle(t.Context(), "resume", raw); err != nil {
@@ -110,7 +110,7 @@ func TestReceiptOnlyDriverRejectsMissingOriginalResumeConfiguration(t *testing.T
 	for _, missing := range []string{"thread", "model"} {
 		t.Run(missing, func(t *testing.T) {
 			native := &receiptNativeSession{thread: &receiptNativeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
-			d := Driver{ReceiptOnly: true, Session: native}
+			d := Driver{RequireReceiptReader: true, Session: native}
 			defer d.Handle(t.Context(), "close", json.RawMessage(`{}`))
 			request := Request{ThreadID: "original-thread", Config: harness.ThreadConfig{Model: "original-model", Sandbox: "read-only", ApprovalPolicy: "never"}}
 			if missing == "thread" {
@@ -123,5 +123,15 @@ func TestReceiptOnlyDriverRejectsMissingOriginalResumeConfiguration(t *testing.T
 				t.Fatal("missing original configuration reached native lifecycle", err, native.models, native.resumes, native.starts)
 			}
 		})
+	}
+}
+
+func TestLegacyDriverStillReadsCurrentModelCatalog(t *testing.T) {
+	native := &receiptNativeSession{thread: &receiptNativeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
+	d := Driver{Session: native}
+	defer d.Handle(t.Context(), "close", json.RawMessage(`{}`))
+	_, err := d.Handle(t.Context(), "models", json.RawMessage(`{}`))
+	if native.models != 1 || err == nil || errors.Is(err, harness.ErrRejected) {
+		t.Fatal("legacy native method was rejected by the strict reader guard", native.models, err)
 	}
 }

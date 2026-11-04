@@ -19,7 +19,7 @@ import (
 
 func receiptOnlySelection() *hostedconfig.Selection {
 	return &hostedconfig.Selection{
-		RunnerManaged: true, RunnerRunID: "receipt-reader-run", ReceiptOnly: true,
+		RunnerManaged: true, RunnerRunID: "receipt-reader-run", ReceiptOnly: true, RequireReceiptReader: true,
 		Purpose:      agentconfig.IssueManager,
 		Definition:   agentconfig.AgentDefinition{Model: "original-catalog-model", Effort: "high"},
 		AppliedModel: "original-native-model", AppliedProvider: "original-provider", AppliedEffort: "high",
@@ -396,5 +396,74 @@ func TestReceiptOnlyReconcilesPersistedCompactCompletion(t *testing.T) {
 	}
 	if len(e.h.Starts()) != before {
 		t.Fatal("ledger reconciliation entered native execution")
+	}
+}
+
+func TestLegacyReceiptOnlyRetainsOriginalResumeAndFallback(t *testing.T) {
+	for _, rejected := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing_applied_model", true: "rejected_resume_falls_back"}[rejected], func(t *testing.T) {
+			e := newEnv(t, testkit.NewHarness())
+			e.stop()
+			e.m.named = receiptOnlySelection()
+			e.m.named.RequireReceiptReader = false
+			e.m.named.AppliedModel, e.m.named.AppliedProvider, e.m.named.AppliedEffort = "", "", ""
+			if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), "legacy-thread"); err != nil {
+				t.Fatal(err)
+			}
+			session := &receiptOnlySession{thread: &receiptThread{Thread: &historyReference{id: "legacy-thread"}}}
+			if rejected {
+				session.resumeErr = harness.ErrRejected
+			}
+			thread, err := e.m.openThread(t.Context(), session)
+			if !rejected && (err != nil || thread != session.thread) {
+				t.Fatal("legacy receipt-only resume acquired the new strict model requirement", thread, err)
+			}
+			wantStarts := 0
+			if rejected {
+				wantStarts = 1 // This session records and rejects the old fallback.
+			}
+			if session.resumes != 1 || session.starts != wantStarts {
+				t.Fatal("legacy receipt-only lifecycle changed", session.resumes, session.starts, err)
+			}
+		})
+	}
+}
+
+func TestReceiptOnlyBindingIgnoresStrictReaderFlag(t *testing.T) {
+	strict := *receiptOnlySelection()
+	legacy := strict
+	legacy.RequireReceiptReader = false
+	m := &Manager{cfg: Config{Instance: "original-manager"}, named: &strict}
+	binding := m.bindingInstance()
+	m.named = &legacy
+	if binding != m.bindingInstance() || !sameNamedBinding(strict, legacy) {
+		t.Fatal("strict reader flag replaced the original frozen named binding")
+	}
+}
+
+func TestLegacyReceiptOnlyDeliversPersistedCompact(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	e.m.named = receiptOnlySelection()
+	e.m.named.RequireReceiptReader = false
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,created_at,updated_at) VALUES('legacy-compact','main','legacy-thread','completed','manual',0,0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := e.m.Deliver(t.Context(), app.Delivery{Operation: "conversation.compact", Payload: json.RawMessage(`{"operation_id":"legacy-compact"}`)})
+	if result.Outcome != app.Delivered {
+		t.Fatal("legacy receipt-only delivery acquired strict native admission", result)
+	}
+}
+
+func TestLegacyReceiptOnlyRetainsHandoffReconciliation(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	e.m.named = receiptOnlySelection()
+	e.m.named.RequireReceiptReader = false
+	if result := e.m.Reconcile(t.Context(), app.Delivery{RequestID: "legacy-handoff", Operation: "conversation.handoff", Payload: json.RawMessage(`{}`)}); result.Outcome != app.Retry {
+		t.Fatal("legacy unstarted handoff no longer uses original ledger reconciliation", result)
 	}
 }

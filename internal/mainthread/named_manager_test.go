@@ -654,6 +654,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	case err := <-failed:
 		t.Fatal(err)
 	case <-time.After(10 * time.Second):
+		logNamedPoolFailure(t, e, pool, nil)
 		t.Fatal("actual pooled manager did not complete its scoped tool chain")
 	}
 	select {
