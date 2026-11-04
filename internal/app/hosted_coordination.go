@@ -69,6 +69,16 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			return protocol.Errorf(protocol.CodeForbidden, "cancelling responsibility permits settlement only")
 		}
 		switch c.Operation() {
+		case protocol.OpGrantArtifactShare, protocol.OpRevokeArtifactShare:
+			var handoff struct {
+				InternalHandoff bool `json:"internal_handoff"`
+			}
+			if err := json.Unmarshal(x.Env.Payload, &handoff); err != nil || !handoff.InternalHandoff {
+				return protocol.Errorf(protocol.CodeForbidden, "Issue agents may perform only an exact internal material handoff")
+			}
+			if x.Env.Target.Type != "issue" || x.Env.Target.ID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "internal material handoff targets only this responsibility")
+			}
 		case protocol.OpIssueRequestOwner:
 			child, err := store.GetCanonicalIssue(ctx, q, x.Env.Target.ID)
 			if err != nil {
@@ -249,6 +259,13 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 		}
 	}
 	if execution.Selection.Purpose == agentconfig.Main && (c.Operation() == protocol.OpReconcileManagerRun || c.Operation() == "decisions.grant_inputs" || c.Operation() == "decisions.revoke_inputs" || c.Operation() == protocol.OpGrantArtifactShare || c.Operation() == protocol.OpRevokeArtifactShare || c.Operation() == "issues.reuse" || c.Operation() == "issues.reopen" || c.Operation() == "issues.create" || c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner) {
+		var handoff struct {
+			InternalHandoff bool `json:"internal_handoff"`
+		}
+		_ = json.Unmarshal(x.Env.Payload, &handoff)
+		if (c.Operation() == protocol.OpGrantArtifactShare || c.Operation() == protocol.OpRevokeArtifactShare) && handoff.InternalHandoff {
+			delegationSources = nil // Apply verifies exact descendant material authority.
+		}
 		for _, source := range delegationSources {
 			admitted, err := mainExecutionSourceAdmitted(ctx, tx.Q(), execution.ID, source)
 			if err != nil {

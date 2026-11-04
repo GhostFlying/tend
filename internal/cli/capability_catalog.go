@@ -293,6 +293,15 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nIndependent acceptance: issue create accepts independent_acceptance: {required: true|false, reason: <text>}. A read-only investigation may use false and must still submit a legal durable report. Creator identity is server-frozen; omitted policy retains independent review.\n")
 		out.WriteString("tend issue set-acceptance-policy <issue_id> --revision <revision> --epoch <epoch> --data '{\"required\":false,\"reason\":\"A bounded investigation needs no separate review\"}'\nChanges affect future tasks only; current workers cannot self-exempt. Use --dry-run to save the original Envelope; unknown results require reconciliation and identical --request-id/payload/control values, never a new request. Read issue show/task show --json for creator and frozen task policy.\n")
 	}
+	if name == "issue" || name == "issue create" || name == "issue request-owner" || name == "issue assign" {
+		out.WriteString("\nAgent responsibility: owner: {agent_id: <environment/local_id>, reason: <text>} selects a concrete ordinary Agent; category_id is optional delegation-role metadata. A category alone discovers candidates. Categories are not permission gates; the server main identity stays reserved. Entry, CLI, model and effort never change with the role.\n")
+	}
+	if name == "issue share-artifact" || name == "issue revoke-artifact-share" {
+		out.WriteString("\nUse internal_handoff:true only for an exact descendant artifact handed to its ancestor Issue; supply artifact_id/ref_sha256 (or share_id/expected_share_revision for revoke), reason and the target epoch. No source_message_id is needed or permitted for an internal handoff. Other sharing still needs explicit owner authority. Unknown retries retain the original Envelope.\n")
+	}
+	if name == "attention escalate" {
+		out.WriteString("\nMain-to-human escalation requires human_requirement: fact|decision|action plus text identifying the actual missing human input. Internal platform/material work remains with main. Original question, responsibility revision, epoch and request identity are retained.\n")
+	}
 	return out.String()
 }
 

@@ -20,7 +20,7 @@ export function runtimeMethod(runtime: Runtime | undefined): string {
   return [cliLabel(runtime.cli), adapter].filter(Boolean).join(" · ");
 }
 
-/** An environment combines its execution adapter and declared CLI. */
+/** Entry method is adapter/CLI metadata; the environment is a separate object. */
 export function runtimeLabel(
   runtime: Pick<AgentInventoryRuntime, "kind" | "cli"> | undefined,
 ): string {

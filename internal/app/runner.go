@@ -193,6 +193,12 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		SpecVersion: action.TargetSpecVersion,
 		Spec:        workerInput, Workspace: ws,
 	}
+	if run.Protocol >= 3 {
+		as.AcceptancePolicy, err = store.TaskAcceptancePolicy(ctx, q, run.TaskID)
+		if err != nil {
+			return protocol.Assignment{}, err
+		}
+	}
 	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
 		return protocol.Assignment{}, err
 	}

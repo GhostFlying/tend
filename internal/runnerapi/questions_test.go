@@ -14,7 +14,7 @@ import (
 func httpQuestionRun(t *testing.T, capabilities ...string) (*env, *protocol.Assignment) {
 	t.Helper()
 	e := newEnv(t, 10*time.Millisecond)
-	rt := &protocol.RunnerRuntime{InstanceID: "questions", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: append([]string{protocol.CapabilityWorkerQuestions}, capabilities...)}
+	rt := &protocol.RunnerRuntime{InstanceID: "questions", Generation: 1, Sequence: 1, Protocol: protocol.PreviousRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.PreviousRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: append([]string{protocol.CapabilityWorkerQuestions}, capabilities...)}
 	e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "", protocol.HelloPayload{Runtime: rt, WorkspaceProtocol: 1}))
 	e.createTask()
 	as := e.claim(e.envelope(protocol.OpRunnerClaim, "", protocol.ClaimPayload{Runtime: rt, WorkspaceProtocol: 1}))

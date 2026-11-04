@@ -61,7 +61,7 @@ export function AgentDetails({
             ?.map((id) => categories.find((c) => c.category_id === id)?.title || id)
             .join("、")}
         </dd>
-        <dt>运行位置</dt>
+        <dt>执行环境</dt>
         <dd>{group.id}</dd>
         <dt>运行方式</dt>
         <dd>{runtimeMethod(runtime)}</dd>
@@ -131,17 +131,20 @@ export function AgentDetails({
               <dd>{entry.history.pin.snapshot_id}</dd>
             </>
           )}
-          <dt>执行环境</dt>
+          <dt>{agent.owner_runtime_binding_ref ? "原 primary 入口" : "唯一入口"}</dt>
           <dd>
             {runtimeMethod(runtime)} · {agent.runtime_binding_ref.runtime_id} · v
             {agent.runtime_binding_ref.revision}
           </dd>
-          <dt>协调环境</dt>
-          <dd>
-            {runtimeMethod(owner)} ·{" "}
-            {(agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).runtime_id} · v
-            {(agent.owner_runtime_binding_ref ?? agent.runtime_binding_ref).revision}
-          </dd>
+          {agent.owner_runtime_binding_ref && (
+            <>
+              <dt>历史协调入口</dt>
+              <dd>
+                {runtimeMethod(owner)} · {agent.owner_runtime_binding_ref.runtime_id} · v
+                {agent.owner_runtime_binding_ref.revision}（旧格式，待显式迁移）
+              </dd>
+            </>
+          )}
           <dt>CLI 声明</dt>
           <dd>{cliLabel(runtime?.cli) || "未声明"}</dd>
         </dl>

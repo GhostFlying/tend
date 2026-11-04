@@ -41,7 +41,7 @@ func HostContinuations(ctx context.Context, q store.Querier, host string, now in
 		}
 		for _, a := range inv.Projection.Agents {
 			binding := a.Binding
-			if e.Pin.Purpose == "issue_manager" && a.OwnerBinding != nil {
+			if e.Pin.Purpose == "issue_manager" && inv.Projection.FormatVersion == 2 && a.OwnerBinding != nil {
 				binding = *a.OwnerBinding
 			}
 			if a.Identity == e.Pin.Identity && a.Revision == e.Pin.AgentRevision && binding == e.Pin.Runtime && a.RequestedModel == e.Pin.Profile.Model && a.RequestedEffort == e.Pin.Profile.Effort {

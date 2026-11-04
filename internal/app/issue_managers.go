@@ -27,8 +27,8 @@ func (RequestIssueOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.CategoryID == "" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "select an active owner capability category with agent_categories_list")
+	if p.CategoryID == "" && p.AgentID == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "select a concrete agent_id or a delegation role category_id")
 	}
 	if _, err := store.GetCanonicalIssue(ctx, tx.Q(), x.Env.Target.ID); err != nil {
 		return Outcome{}, errNotFound(err, "Issue does not exist")
@@ -86,18 +86,24 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	if issue.State != protocol.IssueActive || issue.AssignmentState != "active" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "issue is not available for manager publication")
 	}
-	if p.CategoryID == "" {
+	if p.CategoryID == "" && p.AgentID == "" {
 		p.CategoryID = protocol.DefaultIssueManagerCategory
 	}
-	if !protocol.AgentInventoryID(p.CategoryID) || strings.TrimSpace(p.Reason) == "" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "category and reason are required")
+	if (p.CategoryID != "" && !protocol.AgentInventoryID(p.CategoryID)) || strings.TrimSpace(p.Reason) == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "valid delegation role and reason are required")
 	}
-	category, err := store.GetAgentCategory(ctx, tx.Q(), p.CategoryID)
-	if err != nil {
-		return Outcome{}, errNotFound(err, "Agent capability category does not exist; read agent_categories_list and configure an active category")
-	}
-	if category.State != "active" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager category is inactive")
+	// Categories discover candidates; a concrete identity does not need to
+	// belong to that role. This never grants execution or coordination authority.
+	if p.AgentID == "" {
+		category, err := store.GetAgentCategory(ctx, tx.Q(), p.CategoryID)
+		if err != nil {
+			return Outcome{}, errNotFound(err, "delegation role does not exist")
+		}
+		if category.State != "active" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delegation role is inactive")
+		}
+	} else if err := validateOrdinaryAgent(ctx, tx.Q(), x, p.AgentID); err != nil {
+		return Outcome{}, err
 	}
 	if x.Principal.Kind == protocol.PrincipalMainAgent {
 		if x.coordinationExecution == nil || p.SourceMessageID == "" {
@@ -142,7 +148,7 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
-	if issue.Assignee.Kind == protocol.IssueAssigneeAgent && !p.Replace {
+	if issue.Assignee.Kind == protocol.IssueAssigneeAgent && issue.Assignee.Ref != p.AgentID && !p.Replace {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace=true is required to fence the current manager")
 	}
 	if issue.Assignee.Kind == protocol.IssueAssigneeAgent && retiring == nil && !c.migration {
@@ -150,7 +156,7 @@ func (c RequestIssueManager) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE issue_id=? AND assignment_epoch=? AND host_id||'/'||json_extract(pin_json,'$.identity.local_id')=?)`, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref).Scan(&runnerOwned); err != nil {
 			return Outcome{}, err
 		}
-		if !runnerOwned {
+		if !runnerOwned && issue.Assignee.Ref != p.AgentID {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "existing hosted manager must use the backed-up manager migration operation")
 		}
 	}

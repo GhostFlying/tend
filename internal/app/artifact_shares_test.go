@@ -789,3 +789,87 @@ func TestArtifactSharePublishedSameIssueInputRetainsIndependentAuthority(t *test
 		t.Fatal("same-Issue file stopped being a legal input after publication", op)
 	}
 }
+
+func TestInternalArtifactHandoffUsesExactDescendantFilesWithoutHumanRelay(t *testing.T) {
+	h, runtime, target, manager, _ := reviewManagerAssignment(t)
+	created := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{ParentIssueID: target.IssueID, ExpectedParentRevision: rev(target.Revision), Plan: protocol.IssuePlan{Title: "Read-only child report", Project: target.Plan.Project, Intent: "Deliver immutable evidence to the parent"}}, nil), CanonicalOwnerIssueCommand{Action: "create"})
+	if created.Status != protocol.OpSucceeded {
+		t.Fatal(created)
+	}
+	var child protocol.Issue
+	if err := json.Unmarshal(created.Result, &child); err != nil {
+		t.Fatal(err)
+	}
+	task := createCanonicalTaskForTest(t, h, child)
+	producer, ok := h.claimWith("linux-1", h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil))
+	if !ok || producer.TaskID != task {
+		t.Fatal("descendant result not claimed", producer)
+	}
+	original := []byte("exact original descendant report")
+	file, _ := h.uploadResultFile(producer, "report.md", original)
+	unused, _ := h.uploadResultFile(producer, "unsubmitted.md", []byte("not part of the artifact"))
+	result := testArtifact(h.task(task).WorkspaceName)
+	result.Files = []protocol.ArtifactFile{file}
+	if op := h.runAs(producer, protocol.OpRunsSubmitArtifact, result, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	artifactID := h.task(task).CurrentArtifactID
+	var artifact store.ArtifactRow
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		artifact, err = store.GetArtifact(t.Context(), tx.Q(), artifactID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turn, _ := startHostedIssueReview(t, h, target)
+	principal := runPrincipal(manager.RunID, protocol.RoleIssueManager)
+	principal.Thread, principal.ConversationID = turn.ThreadID, manager.Manager.ConversationID
+	target = canonicalTaskIssue(t, h, target.IssueID)
+	payload := protocol.GrantArtifactSharePayload{InternalHandoff: true, IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Reason: "Consume the exact child evidence in its original parent"}, ArtifactID: artifactID, RefSHA256: store.ArtifactRefSHA256(artifact.RefJSON)}
+	env := h.env(protocol.OpGrantArtifactShare, protocol.Target{Type: "issue", ID: target.IssueID}, payload, rev(target.Revision))
+	command := HostedCoordinationCommand{Command: ArtifactShareCommand{}, ExecutionID: turn.RequestID, EffectSeq: 1}
+	op, err := h.app.Execute(t.Context(), principal, env, command)
+	if err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal("internal handoff required a human source", op, err)
+	}
+	var share protocol.ArtifactShare
+	if err := json.Unmarshal(op.Result, &share); err != nil || !share.InternalHandoff || len(share.Files) != 1 || share.Files[0] != file || share.SourceIssueID != child.IssueID || share.SourceMessageID != "" {
+		t.Fatal("handoff widened or relabeled immutable material", share, err)
+	}
+	meta, body, err := h.app.OpenRunFile(t.Context(), principal, file.FileID)
+	if err != nil {
+		t.Fatal("artifact is readable but its exact file is not downloadable", err)
+	}
+	raw, readErr := io.ReadAll(body)
+	body.Close()
+	if readErr != nil || !bytes.Equal(raw, original) || meta != file {
+		t.Fatal("download changed original identity or bytes", meta, readErr)
+	}
+	if _, body, err := h.app.OpenRunFile(t.Context(), principal, unused.FileID); err == nil {
+		body.Close()
+		t.Fatal("internal handoff granted every upload from the source run")
+	}
+	// The same material cannot be shared into an unrelated responsibility.
+	sibling := createCanonicalOwnerTestIssue(t, h)
+	wrong := payload
+	wrong.ExpectedAssignmentEpoch = sibling.AssignmentEpoch
+	bad, wrongErr := h.app.Execute(t.Context(), owner, h.env(protocol.OpGrantArtifactShare, protocol.Target{Type: "issue", ID: sibling.IssueID}, wrong, rev(sibling.Revision)), ArtifactShareCommand{})
+	if protocol.CodeOf(wrongErr) != protocol.CodeForbidden && (bad.Error == nil || bad.Error.Code != protocol.CodeForbidden) {
+		t.Fatal("internal handoff crossed the task tree", bad)
+	}
+	// Exact request recovery remains stable even after later revocation.
+	target = canonicalTaskIssue(t, h, target.IssueID)
+	revoke := protocol.RevokeArtifactSharePayload{InternalHandoff: true, IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Reason: "End new reads after parent consumption"}, ShareID: share.ShareID, ExpectedShareRevision: share.Revision}
+	closed := hostedEffect(t, h, principal, turn, 2, protocol.Target{Type: "issue", ID: target.IssueID}, rev(target.Revision), revoke, ArtifactShareCommand{Revoke: true})
+	if closed.Status != protocol.OpSucceeded {
+		t.Fatal(closed)
+	}
+	if replay, err := h.app.Execute(t.Context(), principal, env, command); err != nil || !bytes.Equal(replay.Result, op.Result) {
+		t.Fatal("internal handoff replay acquired new authority", replay, err)
+	}
+	if _, body, err := h.app.OpenRunFile(t.Context(), principal, file.FileID); err == nil {
+		body.Close()
+		t.Fatal("revoked handoff still grants new downloads")
+	}
+}

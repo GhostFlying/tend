@@ -746,9 +746,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "category_id"
-      ],
       "title": "AgentRequirement",
       "type": "object"
     },
@@ -1618,6 +1615,9 @@
             }
           ]
         },
+        "internal_handoff": {
+          "type": "boolean"
+        },
         "issue_id": {
           "type": "string"
         },
@@ -1790,6 +1790,12 @@
             }
           ]
         },
+        "human_evidence": {
+          "type": "string"
+        },
+        "human_requirement": {
+          "type": "string"
+        },
         "issue_id": {
           "type": "string"
         },
@@ -1933,6 +1939,12 @@
           "$ref": "#/definitions/DecisionView"
         },
         "decision_id": {
+          "type": "string"
+        },
+        "human_evidence": {
+          "type": "string"
+        },
+        "human_requirement": {
           "type": "string"
         },
         "issue_id": {
@@ -3337,6 +3349,12 @@
         "decision_id": {
           "type": "string"
         },
+        "human_evidence": {
+          "type": "string"
+        },
+        "human_requirement": {
+          "type": "string"
+        },
         "issue_id": {
           "type": "string"
         },
@@ -4307,6 +4325,9 @@
         "expected_source_revision": {
           "type": "integer"
         },
+        "internal_handoff": {
+          "type": "boolean"
+        },
         "reason": {
           "type": "string"
         },
@@ -4330,6 +4351,9 @@
       "properties": {
         "expected_assignment_epoch": {
           "type": "integer"
+        },
+        "human_requirement": {
+          "type": "string"
         },
         "option": {
           "type": "string"
@@ -6669,7 +6693,6 @@
         }
       },
       "required": [
-        "category_id",
         "reason"
       ],
       "title": "IssueOwnerRequest",
@@ -10098,6 +10121,9 @@
         },
         "expected_source_revision": {
           "type": "integer"
+        },
+        "internal_handoff": {
+          "type": "boolean"
         },
         "reason": {
           "type": "string"

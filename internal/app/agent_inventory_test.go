@@ -296,3 +296,61 @@ func TestAgentInventorySameLocalIdentityOnDifferentHosts(t *testing.T) {
 		t.Fatal("host-local identities collapsed")
 	}
 }
+
+func TestSingleEntryRegistrationVersionsRolesAndRejectsProtocolTwo(t *testing.T) {
+	h, runtime, p, _ := inventorySetup(t)
+	p.FormatVersion = 3
+	p.Runtimes[0].CLI = "codex"
+	_, hash, err := protocol.CanonicalAgentInventory(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := inventoryRequest(h, runtime, p, hash, 1, 0, "single-entry")
+	first := h.exec(runner("linux-1"), env, RegisterAgentInventory{})
+	if first.Status != protocol.OpSucceeded {
+		t.Fatal(first)
+	}
+	// Reordering a set does not change its canonical revision or hash.
+	p.Agents[0].Categories = []string{"reviewer", "implementer"}
+	_, reordered, err := protocol.CanonicalAgentInventory(p)
+	if err != nil || reordered != hash {
+		t.Fatal("multiple roles changed their canonical identity", err)
+	}
+	p.Agents[0].RequestedModel = "replacement"
+	_, changed, _ := protocol.CanonicalAgentInventory(p)
+	requireInventoryCode(t, h, runner("linux-1"), inventoryRequest(h, runtime, p, changed, 2, 1, "changed-without-revision"), protocol.CodeInvalidRequest)
+	p.Agents[0].Revision++
+	_, changed, _ = protocol.CanonicalAgentInventory(p)
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, runtime, p, changed, 2, 1, "new-revision"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if replay := h.exec(runner("linux-1"), env, RegisterAgentInventory{}); !bytes.Equal(first.Result, replay.Result) {
+		t.Fatal("new configuration rewrote an old registration receipt", replay)
+	}
+	old := *runtime
+	old.Protocol, old.ProtocolMin, old.ProtocolMax = 2, 2, 2
+	old.Sequence++
+	requireInventoryCode(t, h, runner("linux-1"), inventoryRequest(h, &old, p, changed, 3, 2, "wrong-wire"), protocol.CodeInvalidRequest)
+}
+
+func TestProtocolThreeRejectsFreshDualEntryButKeepsProtocolTwoAdapter(t *testing.T) {
+	h, runtime, p, _ := inventorySetup(t)
+	p.FormatVersion = 2
+	p.Runtimes[0].CLI = "codex"
+	binding := p.Agents[0].Binding
+	p.Agents[0].OwnerBinding = &binding
+	_, hash, err := protocol.CanonicalAgentInventory(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireInventoryCode(t, h, runner("linux-1"), inventoryRequest(h, runtime, p, hash, 1, 0, "new-dual-entry"), protocol.CodeInvalidRequest)
+	previous := *runtime
+	previous.Protocol, previous.ProtocolMin, previous.ProtocolMax = 2, 2, 2
+	previous.Sequence++
+	if op := h.versionedHello("linux-1", &previous); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, &previous, p, hash, 1, 0, "legacy-dual-entry"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal("protocol-2 adapter changed the old valid contract", op)
+	}
+}

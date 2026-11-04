@@ -72,6 +72,8 @@ type AgentInventoryRuntime struct {
 }
 
 type AgentInventoryDefinition struct {
+	// OwnerBinding is retained solely for format-2 history and communication.
+	// Format 3 rejects a second entry.
 	OwnerBinding    *AgentRuntimeReference     `json:"owner_runtime_binding_ref,omitempty"`
 	Identity        AgentIdentity              `json:"identity"`
 	Revision        uint64                     `json:"revision"`
@@ -127,7 +129,7 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 	bad := func() ([]byte, string, error) {
 		return nil, "", Errorf(CodeInvalidRequest, "invalid agent inventory projection")
 	}
-	if (p.FormatVersion != 1 && p.FormatVersion != 2) || !AgentInventoryID(p.ExecutionEnvironmentID) || (p.SourceKind != AgentSourceInline && p.SourceKind != AgentSourceLocalFile) {
+	if (p.FormatVersion != 1 && p.FormatVersion != 2 && p.FormatVersion != 3) || !AgentInventoryID(p.ExecutionEnvironmentID) || (p.SourceKind != AgentSourceInline && p.SourceKind != AgentSourceLocalFile) {
 		return bad()
 	}
 	p.Runtimes = append([]AgentInventoryRuntime{}, p.Runtimes...)
@@ -140,16 +142,19 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 		if _, found := runtimes[r.RuntimeID]; found {
 			return bad()
 		}
+		if p.FormatVersion >= 3 && r.CLI != "codex" && r.CLI != "traex" {
+			return bad()
+		}
 		if r.Kind != "appserver-worker" && r.Kind != "orca-worker" && r.Kind != "hosted-manager" && r.Kind != "central-traex-worker" {
 			return bad()
 		}
-		if r.Kind == "central-traex-worker" && (p.FormatVersion != 2 || r.CLI != "traex") {
+		if r.Kind == "central-traex-worker" && (p.FormatVersion < 2 || r.CLI != "traex") {
 			return bad()
 		}
-		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.Kind != "central-traex-worker" && r.CLI != "" && !(p.FormatVersion == 2 && (r.CLI == "codex" || r.CLI == "traex"))) {
+		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.Kind != "central-traex-worker" && r.CLI != "" && !(p.FormatVersion >= 2 && (r.CLI == "codex" || r.CLI == "traex"))) {
 			return bad()
 		}
-		if p.FormatVersion == 2 && r.Kind == "appserver-worker" && slices.Contains(r.DeclaredPurposes, "issue_manager") && r.CLI == "" {
+		if p.FormatVersion >= 2 && r.Kind == "appserver-worker" && slices.Contains(r.DeclaredPurposes, "issue_manager") && r.CLI == "" {
 			return nil, "", Errorf(CodeInvalidRequest, "manager runtime requires its CLI identity")
 		}
 		if !inventoryPurposes(r.DeclaredPurposes, r.Kind, p.FormatVersion) || r.Availability.Reason != inventoryUnavailable(r, true) {
@@ -235,7 +240,7 @@ func inventoryPurposes(values []string, kind string, format uint64) bool {
 			if v != "main" && v != "issue_manager" && v != "consultation" {
 				return false
 			}
-		} else if v != "worker_run" && !(format == 2 && kind == "appserver-worker" && v == "issue_manager") {
+		} else if v != "worker_run" && !((format >= 2 && kind == "appserver-worker" || format >= 3 && kind == "orca-worker") && v == "issue_manager") {
 			return false
 		}
 	}

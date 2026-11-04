@@ -162,6 +162,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if spec.DownloadFile != nil {
 		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
 	}
+	if spec.ReceiveMessages != nil && spec.AckMessage != nil {
+		cfg.Tools = append(cfg.Tools, harness.ReceiveMessagesToolSpec, harness.AckMessageToolSpec)
+	}
 	if spec.AskOwner != nil {
 		cfg.Tools = append(cfg.Tools, questionTool(spec))
 	}

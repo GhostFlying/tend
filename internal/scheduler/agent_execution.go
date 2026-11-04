@@ -65,7 +65,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 				original.SnapshotID, observed.SnapshotID = "", ""
 				original.InventoryRevision, observed.InventoryRevision = 0, 0
 				original.PublicSHA256, observed.PublicSHA256 = "", ""
-				if observed == original && slices.Contains(e.Categories, c.Manager.CategoryID) {
+				if observed == original {
 					pin := *c.ManagerPin
 					return &pin, ""
 				}
@@ -74,7 +74,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		}
 		var selected *protocol.RunExecutionPin
 		for _, e := range h.Executors {
-			if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || e.Pin.Purpose != "issue_manager" || !slices.Contains(e.Categories, c.Manager.CategoryID) || c.Manager.AgentID != "" && c.Manager.AgentID != e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID {
+			if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || e.Pin.Purpose != "issue_manager" || c.Manager.AgentID == "" && !slices.Contains(e.Categories, c.Manager.CategoryID) || c.Manager.AgentID != "" && c.Manager.AgentID != e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID {
 				continue
 			}
 			if selected == nil || e.Pin.Identity.LocalID < selected.Identity.LocalID {
@@ -117,7 +117,8 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		if accept && c.ReviewOwnerPin != nil && (e.Pin.Identity != c.ReviewOwnerPin.Identity || e.Pin.AgentRevision != c.ReviewOwnerPin.AgentRevision || e.Pin.Runtime != c.ReviewOwnerPin.Runtime || e.Pin.Profile != c.ReviewOwnerPin.Profile) {
 			return false
 		}
-		return e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
+		concrete := r.AgentID != "" || retained != nil && retained.Identity == e.Pin.Identity
+		return e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && (concrete || slices.Contains(e.Categories, r.CategoryID)) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
 	}
 	executors := append(slices.Clone(h.Executors), h.Continuations...)
 	slices.SortFunc(executors, func(a, b Executor) int {

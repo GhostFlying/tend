@@ -178,6 +178,9 @@ func (p *Prepared) ValidateUpdate(previous *Prepared) error {
 	if previous == nil || previous.configuration.EnvironmentID != p.configuration.EnvironmentID {
 		return nil
 	}
+	if err := agentconfig.ValidateUpdate(p.configuration.Definitions, previous.configuration.Definitions); err != nil {
+		return err
+	}
 	for _, next := range p.configuration.Definitions.Agents {
 		for _, old := range previous.configuration.Definitions.Agents {
 			if next.LocalID != old.LocalID {

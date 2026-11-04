@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -79,8 +80,8 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Projection.FormatVersion == 2 && (p.Runtime == nil || p.Runtime.Protocol < 2) {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "format-2 inventory requires runner protocol 2")
+	if p.Projection.FormatVersion >= 2 && (p.Runtime == nil || uint64(p.Runtime.Protocol) < p.Projection.FormatVersion) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "inventory requires its matching runner protocol generation")
 	}
 	if p.Projection.ExecutionEnvironmentID != x.Principal.Subject || p.LocalRevision < 1 || !protocol.AgentInventoryID(p.SnapshotID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid inventory identity or version")
@@ -109,6 +110,20 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{Result: current.Receipt}, nil
 		}
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "inventory local revision conflicts with accepted metadata")
+	}
+	if p.Runtime.Protocol >= 3 && p.Projection.FormatVersion < 3 {
+		for _, a := range p.Projection.Agents {
+			if a.OwnerBinding != nil {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new dual-entry registration requires an explicit single-primary migration; retained protocol-2 receipts and pins remain readable")
+			}
+		}
+	}
+	var normalized protocol.AgentInventoryProjection
+	if err := json.Unmarshal(canonical, &normalized); err != nil {
+		return Outcome{}, err
+	}
+	if err := protocol.ValidateAgentInventoryUpdate(normalized, current.Projection); err != nil {
+		return Outcome{}, err
 	}
 	categories := []protocol.AgentCategory{}
 	seen := map[string]bool{}

@@ -30,6 +30,19 @@ func Decode(data []byte) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, invalid("invalid_json", "$")
 	}
+	if cfg.FormatVersion >= 3 {
+		var fields struct {
+			Agents []map[string]json.RawMessage `json:"agents"`
+		}
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return Config{}, invalid("invalid_json", "$")
+		}
+		for i, a := range fields.Agents {
+			if _, exists := a["owner_runtime_id"]; exists {
+				return Config{}, invalid("retired_field", fmt.Sprintf("$.agents[%d].owner_runtime_id", i))
+			}
+		}
+	}
 	return cfg, nil
 }
 

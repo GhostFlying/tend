@@ -22,7 +22,7 @@ func TestNamedCoordinationSchemasDescribeWritableContracts(t *testing.T) {
 		if spec.Name == "issues_create" {
 			owner := planningSchemaAt(t, root, "payload", "owner")
 			ownerProps := owner["properties"].(map[string]any)
-			if !slices.Contains(owner["required"].([]any), any("category_id")) || ownerProps["expected_assignment_epoch"] != nil || ownerProps["source_message_id"] != nil {
+			if slices.Contains(owner["required"].([]any), any("category_id")) || ownerProps["expected_assignment_epoch"] != nil || ownerProps["source_message_id"] != nil {
 				t.Fatal("new Issue ownership asks the model to invent transaction metadata", owner)
 			}
 			if payload["properties"].(map[string]any)["manager"] != nil {

@@ -1077,3 +1077,17 @@ func TestPrivateNamedInstructionsStayInNativePromptNotLifecycleUpload(t *testing
 		})
 	}
 }
+
+func TestOrcaLaunchPromptUsesFrozenPolicyForEachCLI(t *testing.T) {
+	for _, cli := range []string{"codex", "traex"} {
+		for _, policy := range []*protocol.IssueAcceptancePolicy{nil, {Required: true}, {Required: false}} {
+			w := &worker{spec: harness.WorkerSpec{Role: protocol.RoleImplement, RunID: "original-run", AcceptancePolicy: policy, Spec: json.RawMessage(`{"deliverables":["report"]}`)}}
+			w.st.Marker = cli + "-original-launch"
+			prompt := w.prompt()
+			waived := policy != nil && !policy.Required
+			if strings.Contains(prompt, "An independent reviewer will check your work.") == waived || !strings.Contains(prompt, "launch "+w.st.Marker) {
+				t.Fatal("Orca actual launch prompt differs from frozen policy", cli, policy, prompt)
+			}
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -270,6 +271,11 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if !oneOf(p.Kind, "decision", "action", "information") || strings.TrimSpace(p.Title) == "" || p.Kind == "information" && p.BlocksClose {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "attention kind/title and nonblocking information are required")
 	}
+	if p.IssueID == "" && p.Kind != "information" && x.coordinationExecution != nil && x.coordinationExecution.Selection.Purpose == agentconfig.Main {
+		if !oneOf(p.HumanRequirement, "fact", "decision", "action") || strings.TrimSpace(p.HumanEvidence) == "" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "main retains internal problems; a human obligation requires human_requirement and specific human_evidence")
+		}
+	}
 	if p.IssueID != "" {
 		issue, e := store.GetCanonicalIssue(ctx, tx.Q(), p.IssueID)
 		if e != nil {
@@ -296,7 +302,7 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if p.DecisionID != "" && p.ChoiceID != "" || p.Kind != "decision" && (p.DecisionID != "" || p.ChoiceID != "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only a decision attention references one question")
 	}
-	a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.Principal, BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
+	a := protocol.Attention{HumanRequirement: p.HumanRequirement, HumanEvidence: p.HumanEvidence, AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.Principal, BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
 	if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
 		return Outcome{}, err
 	}

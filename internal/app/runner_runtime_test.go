@@ -126,3 +126,17 @@ func TestUnsupportedRuntimeRejectedBeforeAllocation(t *testing.T) {
 		t.Fatal("allocated unsupported run")
 	}
 }
+
+func TestRetiredProtocolOneCannotCreateNewRuntimeObservation(t *testing.T) {
+	h := newHarness(t)
+	r := testRuntime("retired-process")
+	r.Protocol, r.ProtocolMin, r.ProtocolMax = 1, 1, 1
+	before := h.count("events")
+	op, err := h.app.Execute(t.Context(), runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: r}, nil), Hello{})
+	if protocol.CodeOf(err) != protocol.CodeInvalidRequest && (op.Error == nil || op.Error.Code != protocol.CodeInvalidRequest) {
+		t.Fatal("retired protocol crossed the communication gate", op, err)
+	}
+	if h.count("events") != before {
+		t.Fatal("retired runner changed runtime facts")
+	}
+}

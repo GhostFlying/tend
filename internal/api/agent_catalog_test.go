@@ -32,7 +32,7 @@ func TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, hash, _ := definition.CanonicalPublic()
-	runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 1, Sequence: 1, Protocol: protocol.PreviousRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.PreviousRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
 	exec := func(operation string, revision *int64, payload any, command app.Command) {
 		t.Helper()
 		env := e.envelope(operation, protocol.Target{Type: "host", ID: "host-a"}, revision, payload)

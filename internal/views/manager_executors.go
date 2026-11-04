@@ -35,8 +35,13 @@ func HostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 			continue
 		}
 		for _, a := range inv.Projection.Agents {
+			if runtime.Runtime.Protocol >= 3 && p.Purpose == "issue_manager" && a.OwnerBinding != nil {
+				// Only HostContinuations may recover an old second-entry pin.
+				// Protocol 3 cannot create fresh owner work on that alternate entry.
+				continue
+			}
 			binding := a.Binding
-			if p.Purpose == "issue_manager" && a.OwnerBinding != nil {
+			if p.Purpose == "issue_manager" && inv.Projection.FormatVersion == 2 && a.OwnerBinding != nil {
 				binding = *a.OwnerBinding
 			}
 			if a.Identity != p.Identity || a.Revision != p.AgentRevision || binding != p.Runtime || !a.Enabled || a.RequestedModel != p.Profile.Model || a.RequestedEffort != p.Profile.Effort || ((p.Purpose == "issue_manager" && ((!slices.Contains(a.Purposes, "issue_manager") && !slices.Contains(a.Purposes, "worker_run")) || p.Worker != protocol.WorkerAppServer || p.BackendID != "")) || (p.Purpose != "issue_manager" && !slices.Contains(a.Purposes, "worker_run"))) {

@@ -252,7 +252,7 @@ func TestAgentContinuationReviewerSupportsRefreshedSpecAdmission(t *testing.T) {
 	}
 }
 
-func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.T) {
+func TestAgentContinuationReviewerCategoryRefreshKeepsFrozenIdentity(t *testing.T) {
 	for _, supported := range []bool{true, false} {
 		name := "legacy"
 		if supported {
@@ -282,11 +282,6 @@ func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.
 				t.Fatal(err)
 			}
 			inventoryCategory(t, h, "new-review", 0, "active")
-			for i := range inv.Projection.Agents {
-				if inv.Projection.Agents[i].Identity.LocalID == "beta" {
-					inv.Projection.Agents[i].Categories = append(inv.Projection.Agents[i].Categories, "new-review")
-				}
-			}
 			_, hash, err := protocol.CanonicalAgentInventory(inv.Projection)
 			if err != nil {
 				t.Fatal(err)
@@ -304,16 +299,6 @@ func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.
 			spec.AgentSelection.Acceptance.CategoryID = "new-review"
 			before := h.task(task.TaskID).ControlRevision
 			op := h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(before)), UpdateIntent{})
-			if supported {
-				if op.Status != protocol.OpFailed || op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
-					t.Fatal("incompatible category refresh was accepted", op)
-				}
-				if h.task(task.TaskID).ControlRevision != before || h.storedSpec(task.TaskID, 1).AgentSelection.Acceptance.CategoryID != "reviewer" {
-					t.Fatal("rejected refresh changed the contract")
-				}
-				spec.AgentSelection.Acceptance.CategoryID = "reviewer"
-				op = h.exec(owner, h.env("tasks.update_intent", taskTarget(task.TaskID), updateIntentPayload{Spec: &spec}, rev(before)), UpdateIntent{})
-			}
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal("compatible refresh was rejected", op)
 			}
@@ -357,6 +342,12 @@ func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.
 						if pin == nil {
 							t.Fatalf("successful refresh created an unschedulable contract: %s; reviewer=%+v fresh=%+v retained=%+v", reason, c.ReviewOwnerPin, fresh, retained)
 						}
+						reviewCandidate := c
+						reviewCandidate.Kind = protocol.ActionAccept
+						reviewPin, reviewReason := scheduler.SelectExecution(scheduler.Host{ID: "linux-1", IssueOwners: true, ContinuationsSupported: supported, Continuations: retained, Executors: fresh}, reviewCandidate)
+						if reviewPin == nil || reviewPin.Identity != accept.Execution.Identity || reviewPin.Runtime != accept.Execution.Runtime || reviewPin.Profile != accept.Execution.Profile {
+							t.Fatalf("category requalified or replaced the frozen reviewer: %s, %+v", reviewReason, reviewPin)
+						}
 					}
 				}
 				if !matched {
@@ -373,6 +364,12 @@ func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.
 
 func TestAgentContinuationDerivesCentralWorkerFromFrozenOwnerInventory(t *testing.T) {
 	h, r, _ := issueOwnerHarness(t)
+	// This fixture is a historical protocol-2 dual-entry owner contract.
+	r.Protocol, r.ProtocolMin, r.ProtocolMax = 2, 2, 2
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
 	var inventory store.AgentInventoryRow
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error

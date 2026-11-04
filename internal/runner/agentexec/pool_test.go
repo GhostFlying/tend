@@ -359,3 +359,35 @@ func TestRetainedNativeRefusalWithdrawsSelection(t *testing.T) {
 		t.Fatalf("native-rejected pin remains selectable for retained owner work: %+v", retained)
 	}
 }
+
+func TestSingleOrcaEntryReportsOwnerGapWithoutNativeFallback(t *testing.T) {
+	f := newSource(t)
+	f.config.FormatVersion = 3
+	f.config.Runtimes[0].Kind = agentconfig.OrcaWorker
+	f.config.Runtimes[0].CLI = "traex"
+	f.config.Agents[0].Categories = []string{"implementation", "investigation"}
+	f.config.Agents[0].Effort = "high"
+	f.reload(t)
+	var nativeProbes atomic.Int64
+	p, err := agentexec.New(agentexec.Options{Source: f.control, BackendID: "orca", Workspaces: gitws.New(gitws.Config{Home: t.TempDir()}), Probe: func(context.Context, agentexec.BuildInput) error { return nil }, ProbeOwner: func(context.Context, agentexec.BuildInput) error { nativeProbes.Add(1); return nil }, Build: func(agentexec.BuildInput) (harness.Workers, error) { return &testkit.Workers{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	observations, err := p.Observe(t.Context())
+	if err != nil || len(observations) != 2 {
+		t.Fatal(observations, err)
+	}
+	worker, manager := observations[0], observations[1]
+	if !worker.Available || manager.Available || manager.Reason != "coordination_entry_not_supported" || nativeProbes.Load() != 0 || worker.Pin.Runtime != manager.Pin.Runtime || worker.Pin.Profile != manager.Pin.Profile || worker.Pin.Identity != manager.Pin.Identity || manager.Pin.Worker != protocol.WorkerOrca {
+		t.Fatal("role changed primary entry or hid the actual coordination gap", observations)
+	}
+	if manager.Pin.Validate(manager.Pin.Identity.ExecutionEnvironmentID) != nil {
+		t.Fatal("honest unavailable observation cannot cross the wire", manager)
+	}
+	if _, err := p.ResolveManager(t.Context(), manager.Pin); err == nil || nativeProbes.Load() != 0 {
+		t.Fatal("unsupported Orca coordination fell back to native")
+	}
+}

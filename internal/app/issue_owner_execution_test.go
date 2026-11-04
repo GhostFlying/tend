@@ -160,8 +160,11 @@ func TestIssueOwnerExecutesWithSameIdentityAndReviewChild(t *testing.T) {
 func TestIssueOwnerCannotDispatchAnotherAgentWithoutChild(t *testing.T) {
 	h, _, issue := issueOwnerHarness(t)
 	beforeTasks, beforeIssues := h.count("tasks"), h.count("work_items")
-	op := createOwnerExecution(t, h, issue, "reviewer")
-	if op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeForbidden {
+	spec := testSpec
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{AgentID: "linux-1/beta", CategoryID: "reviewer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
+	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Cross-Agent execution", Spec: spec}
+	op, err := h.app.Execute(t.Context(), owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if protocol.CodeOf(err) != protocol.CodeForbidden && (op.Error == nil || op.Error.Code != protocol.CodeForbidden) {
 		t.Fatal("cross-Agent work bypassed child Issue", op)
 	}
 	if h.count("tasks") != beforeTasks || h.count("work_items") != beforeIssues {
@@ -570,5 +573,46 @@ func TestIssueOwnerBoundedReviewDoesNotCloseExpandedHumanScope(t *testing.T) {
 	}
 	if h.task(task.TaskID).Lifecycle != protocol.TaskCompleted || canonicalTaskIssue(t, h, review.IssueID).State != protocol.IssueActive {
 		t.Fatal("the bounded verdict silently completed the user's added responsibility")
+	}
+}
+
+func TestOrdinaryAgentOwnsAndReportsOutsideDeclaredCategory(t *testing.T) {
+	h, runtime, _ := issueOwnerHarness(t)
+	issue := policyIssue(t, h, false)
+	// No category is supplied; beta declares a different role, but its real
+	// primary entry, model and effort determine execution.
+	op := h.exec(owner, h.env(protocol.OpIssueRequestOwner, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{AgentID: "linux-1/beta", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Investigate using this exact ordinary Agent"}, rev(issue.Revision)), RequestIssueOwner{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var manager protocol.Assignment
+	for range 5 {
+		manager = ownerClaim(t, h, runtime)
+		if manager.Manager != nil && manager.Manager.IssueID == issue.IssueID {
+			break
+		}
+		stopOwnerClaim(t, h, manager)
+	}
+	if manager.Manager == nil || manager.Manager.IssueID != issue.IssueID || manager.Execution.Identity.LocalID != "beta" {
+		t.Fatal("concrete ordinary Agent required category membership", manager)
+	}
+	stopOwnerClaim(t, h, manager)
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	spec := testSpec
+	spec.Delivery = ""
+	spec.Deliverables = []string{"report"}
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "investigation"}}
+	before := h.count("work_items")
+	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Legal read-only investigation", Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if created.Status != protocol.OpSucceeded {
+		t.Fatal("investigation role forced a different Agent or code artifact", created)
+	}
+	worker := ownerWorkerClaim(t, h, runtime, protocol.RoleImplement)
+	if worker.Execution.Identity != manager.Execution.Identity || worker.Execution.Runtime != manager.Execution.Runtime || worker.Execution.Profile != manager.Execution.Profile || worker.AcceptancePolicy == nil || worker.AcceptancePolicy.Required {
+		t.Fatal("responsibility role changed primary identity or policy", manager, worker)
+	}
+	result := h.runAs(worker, protocol.OpRunsSubmitArtifact, protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Original findings with verifiable evidence"}}, SubmitArtifact{})
+	if result.Status != protocol.OpSucceeded || h.task(worker.TaskID).Lifecycle != protocol.TaskCompleted || h.count("acceptances") != 0 || h.count("work_items") != before {
+		t.Fatal("legal report manufactured code/review responsibility", result, h.task(worker.TaskID))
 	}
 }
