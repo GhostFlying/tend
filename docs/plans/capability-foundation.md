@@ -1,0 +1,102 @@
+# Capability 基础设施实施计划
+
+状态：实施前计划；尚无产品代码。P2 真实入口证据接口存在技术阻塞，交原责任链答复后续本任务，不重建调查或基建责任。计划仅覆盖候选准备，不授权合入、安装或部署。
+
+## 冻结输入与吸收
+
+三份原调查输入已通过任务正式下载工具取得，并全文阅读、重新计算字节数与 SHA-256。保留原件和调查作者的结论；本计划是实施吸收记录，不替换或重新署名原调查。
+
+| 原文件 | 字节数 | SHA-256 |
+|---|---:|---|
+| capability-investigation.md | 1888 | 385bebb9251b653210f9f1495cb056494d35e7421ef9586e1c77477b9b0d26e9 |
+| capability-end-to-end-design.md | 27859 | 7dd6b65c855743b570497100cbed7dd06fdcc1f33cdf06b44921db6110d392e8 |
+| capability-implementation-acceptance.md | 14881 | d244e9638b59aae6f90b6bb521ca1e3add32d604e9e3e3b59efe9a87a9d296ca |
+
+完整采用原方案的三类版本（定义、Agent 声明、executor 实证）、不可变历史、精确来源/config/session/TTL、两角色独立 required 集合、claim 原子固定及 launch 复核、unknown 原请求对账、共享 admission 和具名 CLI/API 合同。类别仅代表委托角色；模型或 CLI 名称不授予能力。声明、模拟、工具暴露、真实调用成功必须分别呈现。
+
+原 P0–P6、A01–A28 保留为实施和独立验收依据，不能把文档核验算作产品通过。原文建议的具体 TTL、超时和通知期限须形成可测试合同；初始采用工具证据最多五分钟、现有六十秒心跳围栏、单次无模型验证三十秒、十分钟一次持久阻塞通知，禁止自动验证循环。真实生图遵本任务最多一次最小图片调用的冻结上限；调用前必须核工具、可观察配额/费用及精确入口，不扩展预算。
+
+## 当前基线、差异与根因
+
+任务起点和当前 HEAD 为 `e8657a07a883bad758fbaff73f5e20ffbecd8c5b`；原调查基线为 `bc2be98a8e1e735f2d506195f0ecddf14ce91408`。初次及中断恢复后工作树均干净；没有产品改动或外部模型调用。
+
+两基线之间主要新增 manager 原收据读取及停止证明，未实现通用执行能力模型。`internal/agentconfig/config.go` 仍接受格式 1/2 并包含第二协调入口 `OwnerRuntimeID`；`internal/protocol/agent_inventory.go` 仍保留 `OwnerBinding`。`AgentRequirement` 没有 required capabilities，`RunExecutionPin` 是可比较值；`agentexec.Pool.Observe` 的 Available 只来自 adapter 初始化，`probe` 检查 executable/workspace 协议或 app-server 启停。`harness.Workers` 只有 Start，没有权威工具枚举或准备会话消费接口。现有 bridge 的 tools/list 只列 Tend 自身 worker 工具，无法代表原生会话全部工具。
+
+因此根因不是缺少 image_gen 布尔标记，而是缺少定义/声明、真实入口证据、冻结约束到调度/启动的事实链。直接把 Available、skills 名称或当前 worker schema 写为 profile confirmed 会跨会话扩大证据作用域，违反本任务的主要约束。
+
+只读核对得到并行单入口候选为 PR #236，head `0f838ec4533f84ea37c8adc29ed3cda45e0a89f3`，状态 open。其格式 3 拒绝第二入口，显式 CLI；允许指定 Agent 时省略 category；协议改为 3/2，保留 runner-v2、拒绝协议 1。其公开说明仍报告 Orca coordination 未实现，不能把 CI 成功当作该路径完成。PR #240 是另一项已合入的收据恢复修复，不是单入口候选，不能机械等它作为本任务前置。
+
+本计划没有检出、cherry-pick 或吸收该候选，也没有改其冻结合同。声明扩展应沿其最终单 RuntimeID 入口与不可变 public projection；能力绑定另表保存，保持原 pin 可比较及旧 JSON/hash。原责任链须确认采用的精确接口候选；这不要求先合入 PR，也不授权改造其他责任。
+
+## P0：冻结接口和证据边界
+
+1. 以当前起点及上述精确并行 head 核对 Config、projection、AgentRequirement、claim/恢复和 session 生命周期接口。恢复后重新读回候选，不能继承已漂移 head 的结论。
+2. 定义 `CapabilityReference`（ID、definition revision）及声明扩展位置，规定 canonical 排序、去重、克隆、Equal 和 nil/empty 历史行为；两角色分别冻结。
+3. `RunCapabilityBinding` 独立存 required digest、证据引用及同入口 session/reservation 安全引用，不改变原 RunExecutionPin 的可比较语义。
+4. 解决真实入口工具证据接口：要求受信任 adapter 返回完整性、tool/schema/source digest、来源版本、config/Agent/runtime revision、session/scope 及观察期限。仅 session scope 时必须准备并消费同一 session，使用原 admission，支持请求恢复与未知保留。
+5. 当前机器正式 Orca 命令 schema v1 共 320 命令，没有上述工具枚举或 prepare/adopt 命令；agent launch 的可见 flags 为 agent/worktree/prompt/model/effort/surface/focus/retry-launch。该结论限于正式可发现接口，不宣称外部实现绝无隐藏能力。当前 Tend 接口也不能填补该链路。不得猜隐藏协议、以 worker 自报 confirmed 或另起 Agent 绕过。
+6. 本会话暴露 image_gen schema，但未核实其工具来源版本、公开配置修订与可调度入口之间的权威关联，且没有发现相应配额/费用查询工具。当前状态只能是工具暴露已观察、实际执行未验证；调用次数零。交原责任链提供合法接口/精确绑定及可观察预算路径，或在原责任链安排对应 runtime 支持，保留本任务原合同。
+
+## P1：定义、声明与注册
+
+- 在 protocol 定义版本化能力、验证策略、引用、公开状态/原因，首例 image_gen。store 追加 migration 保存定义历史与 CAS 当前指针；写入走 app 的同事务请求去重、事件和 outbox。退休阻止新约束，不删除旧历史。
+- Agent 声明随本机配置修订、私有 snapshot 与公共 hash 登记；旧配置和原 hash 不重序列化、不补确认。声明缺失表示没有声明，不能解释为已完整观测缺能力。
+- 公共 `capability list/show/history/put` 与本机 validate/reload/register/registration/reconcile 同片提供完整输入、CAS、原请求 replay、帮助和实际入口用例；不引入远程私有配置写入口。
+
+## P2：executor 证据与本机恢复
+
+- 实证为追加事实，区分 tool_inventory、execution、simulation，保存精确绑定、source/schema digest、完整性、时间、request/sequence/incarnation 和安全产物引用。公共 DTO 不输出私有路径、配置正文或凭据。
+- `unverified/confirmed/unavailable` 和派生 expired/binding_changed/session_ended 共用匹配逻辑；旧 sequence/重启/迟到结果只留历史，heartbeat 不能续工具 TTL。
+- 受信任 adapter 经 runner 身份上报；普通 owner/worker 不能写确认字段。支持不了的路径明确 adapter_evidence_unsupported，工具未知不能写 tool_absent。
+- 私有具名 `agents local capabilities verify/status/reconcile` 绑定稳定 request_id/CAS 和 journal；一次验证、超时取消、重启恢复、同原请求对账。不得隐式付费调用或创建免费并发槽位。
+- 出口要求至少一条真实非模拟入口能提供合法完整证据。当前 P0 缺口未解时不把本阶段记完成，也不编造可成功匹配的实现。
+
+## P3：Task、调度、启动与解释
+
+- 将两角色 required 从 OwnerTaskSpec 显式映射到不可变 Spec、规范化/Equal/schema/hash/查询；显式 revision，拒绝未知/退休或冲突引用，非空集合要求 named selection。
+- 复用原纯调度和同事务 claim：先现有身份、角色、profile、host/backend、workspace、reviewer 与共享预算围栏，再检查唯一入口声明和有效证据全集。不得拼接不同入口。
+- 冻结证据、session reservation、run pin、spec、lease/request/event/outbox 同事务提交；事务失败不残留预约。launch 同入口复核，丢失则 capability_lost，不执行目标业务或暗换入口。
+- 原 continuation/handoff/reconnect 优先固定身份及历史 pin；恢复证据追加，unknown 不释放、不换请求重发。
+- explain 与 claim 共用纯 matcher，返回 eligible/pending/unavailable、missing、原因、checked/next/deadline 及恢复动作；只读查询不探测或创建 lease。等待超限一次持久通知，无无限静默重试。
+
+## P4：完整查询、工具与必要 UI
+
+- 定义列表/历史、Agent capabilities 列表/show/history/evidence、Task capability-explain 及 task show/list 完整 named CLI/API，按原建议逐叶提供 help、完整 JSON、输入校验、筛选/分页及固定水位游标；跨页换筛选报错。
+- 公共写提供 dry-run 原 Envelope、request show/replay，stale 不自动换 CAS。D142 路由/operation/本机入口目录与真实 CLI 入口测试同步，不用通用 RPC 壳代替。
+- 协调工具只读目录及本 Issue 合法 Task 解释，worker 只读本 run；不扩大原生执行权限或允许写 confirmed。
+- Agent 目录显示声明、当前实证、最近调用及未知/失效原因；Task 展示 required 和阻塞恢复。schema/TS 运行生成器。只做本能力必要投影，不实施 UI235、不影响非生图交互 sandbox。
+
+## 协议与历史兼容出口
+
+当前树为 2/1，strict 解码拒绝未知字段；并行候选已走 3/2。这是实际冲突，不能照搬调查的“基于 2/1 增量”作为既成结论。
+
+- 精确接口决定后评估所有 hello/heartbeat/claim/assignment/reconnect 发送点。优先只向协商 executor-capabilities-v1 的 peer 发送新字段；旧无 required 的请求、默认及恢复行为原样。
+- 非空 required 绝不给不能理解的 runner；公开定义/声明格式、任务/journal 可读范围与 release manifest 同步。旧 reader 不能丢约束执行。
+- 若实际收紧旧有效请求或改变恢复语义则递增协议并保留 N−1、删除 N−2 通信 adapter/marker/登记、增加拒绝测试；在并行 3/2 基础上重新判断，不机械再升级，也不退回 2/1。
+- 迁移只追加；副本验证旧 config/spec/pin/receipt/unknown 原字节/hash/语义和 nil/0 CAS。通信退役不删除历史读取。发布库存/排空只留后续 delivery 责任，本任务不操作。
+- 实施时在 docs/design.md 分配当时未占用的新决策编号，同提交更新；不抢占并行候选或当前树已经使用的 D173。
+
+## P5：首例、检查与候选
+
+真实 image_gen 首例必须来自最终精确入口和会话；先读取合法工具来源和预算，最多一次最小图片调用，记录 request、配置修订、时间/状态及原输出 SHA、大小/可解码；费用无法读取即 unknown。未知响应只查原请求/已有产物，不重试或换 provider。没有合法证据接口时交回精确技术问题，不能用 schema 或替身通过首例。
+
+按以下分组覆盖原 A01–A28；当前所有产品项均未执行，不能记通过：
+
+| 原验收项 | 实施及验证落点 |
+|---|---|
+| A01–A04 | 定义 CAS 竞态/去重、同四元组多身份、声明/注册响应丢失、原 bytes 与未知请求迁移 |
+| A05–A09 | 工具来源/完整性/模拟负例、跨绑定与会话反例、TTL/乱序/重启、prepare/adopt 和共享 reservation 恢复 |
+| A10–A16 | 两 role 冻结/非法输入、同事务选择、解释一致、有界通知、launch 丢失/原身份恢复、独立验收及共享预算 |
+| A17–A18 | 实际协商路径的新旧组合、strict decoder、旧请求恢复；实际 breaking 时 N/N−1 与退役拒绝 |
+| A19–A23 | 每叶 CLI 真入口/help、筛选分页游标、请求恢复、权限反例、当前/历史 UI 诚实呈现 |
+| A24–A25 | 一次真实生图、原图校验、费用/拒绝/未知证据，禁止未知重试 |
+| A26 | 最终 commit/tree/diff、完整 make check 退出状态、PR CI 真实读回；原责任链独立 formal-review |
+| A27–A28 | 超出本任务权限；后续独立 delivery_authorization 负责受控升级与真实上线读回 |
+
+定向回归先证明错选/丢字段/跨 session/错误恢复会被阻止，再运行完整 make check 并保留日志、最终 head/tree 和退出状态。PR 触发 CI 后真实读回；没有运行即未知。仓库独立 review 和 Tend 正式验收由原责任链的独立 reviewer 执行，本 worker 不启动原生 subagent 或外部 reviewer，不用实现者解释替代独立判断。
+
+## P6：交付边界
+
+完成后显式提交 commit/diff、计划、设计吸收、A01–A28 矩阵、命令日志及真实首例原件。列出未完成/未知及风险，不把候选/CI 当上线。
+
+原能力责任与 Agent、设计、board 责任独立关联；只有确需生图阶段依赖 image_gen。正式合入和受控升级留原 Issue 交付义务、精确版本化批准与独立 delivery_authorization 任务，在同一协调窗口执行。本任务无合入、安装、部署或其他任务窗口操作权限。
