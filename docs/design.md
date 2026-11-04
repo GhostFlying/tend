@@ -696,6 +696,12 @@ D155 锁观测补充：维护计划从精确 updater 的 fd/fdinfo 验证原 flo
 不同的情况，通过同 fd 的 mount ID 和 Btrfs mount device 精确核对；进程及 fd 前后
 身份不变且确有该 PID 的独占 flock 才通过，不以相同 inode 省略设备或所有者校验。
 
+D155 重启来源补充：同版本受监督重启保留历史 committed Binding，当前 Process
+随核实后的新 kernel 身份更新。普通维护分别匹配原 Binding 与当前持久 Process，
+不把历史提交 launch 当成当前 launch；实际 Inspect、唯一 Find 和 artifact 校验保留。
+failed-parent 前滚仍绑定其原 successor launch；新 successor 不得复用历史 Binding
+或当前 Process 的 launch。原 ledger、receipt 与请求不改写。见[实施计划](plans/restarted-maintenance-source.md)。
+
 
 ## D156：原收据未知时的显式崩溃恢复维护
 
