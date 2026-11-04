@@ -522,6 +522,8 @@ Owner 是具体 Agent 对具体 Issue 的责任，不是一种专用 Agent 类�
 
 当前 owner 可以通过冻结任务使用自己的执行适配器工作；实现身份、Agent/runtime revision、模型和 Issue assignment epoch 由服务端固定。跨 Agent 的工作委派必须先创建子 Issue，由接收 Agent 成为该子项 owner；子项 owner 可递归委派。省略子项 owner 时保留当前 Agent 身份，不默认选择另一 manager。父 owner 始终负责协调与结果整合。Task、Run、session 仅承载执行，不成为跨 Agent 派工旁路。
 
+D122/D128/D136 的 canonical 上下文查询按本项责任投影：来源更正保留已准入份额，事实保留 own/global/project 的有效复核，协调状态与 native pending 使用持久本项执行身份（含旧代次及 repair chain）；没有 hosted identity 的历史请求才按原请求的本项 conversation 归属。全局 logical 回合接触过某个上下文不构成本项执行身份，不将其他 Issue 的来源分类责任转移过来。`prepared` 继续如实显示历史 baseline，`dispatch_ready` 仅为上下文及既有冻结合同诊断，不代表 canonical 创建任务的实际准入结果；正式命令仍核对当前来源、Issue/assignment 版本及冻结合同。继承 EffectiveContext、TaskContextBlockers、真实 worker admission 与历史 baseline 调度路径不变，不因投影修正而结清 recovering/unknown 或扩大来源读取权限。见[实施计划](plans/scoped-canonical-context.md)。
+
 既有独立验收流程与材料隔离保留。新自身执行任务同事务建立有界验收子 Issue，并冻结其原始范围。验收领取将实际 reviewer 身份和配置与该子项绑定，运行关联可通过 owner 查询和 CLI 追踪。最终有效验收结论在通常收尾条件满足时可结清此有界责任；人工扩展的目标不能被原验收结论自动关闭。取消子项请求对应执行停止，实际执行及未知结果核清前不得确认取消。父 Issue 的完成仍走原证据与显式责任收尾路径。
 
 D123/D136 冻结产物验收：canonical task 的独立验收使用当前 artifact 及其不可变 spec，不因提交后 Issue 或祖先新增/修正的语义内容要求重跑实现。新的范围、来源复核与完成责任继续留在 Issue，验收不能替它们结清。实现领取仍检查当前继承语义和来源；验收仍检查负责人/reviewer、责任代次、Issue 生命周期与依赖、祖先结构、task 控制、当前 spec/action/artifact 及资源占用，不放行显式取消或已替换合同。无 API、迁移或 runner wire 变更。见[实施计划](plans/canonical-frozen-acceptance.md)。
