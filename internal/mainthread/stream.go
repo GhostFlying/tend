@@ -28,6 +28,12 @@ type replyDraft struct {
 type replyKey struct{ turn, item string }
 type replyDrafts map[replyKey]*replyDraft
 
+// replyPrefixAcknowledger confirms deltas only after their cumulative terminal
+// reply is durable. Streaming frames remain replayable until that boundary.
+type replyPrefixAcknowledger interface {
+	AcknowledgeReplyPrefix(context.Context, harness.Event) error
+}
+
 func (d replyDrafts) begin(ev harness.Event, m *Manager) {
 	k := replyKey{ev.TurnID, ev.ItemID}
 	if d[k] != nil {
@@ -54,6 +60,7 @@ func (d replyDrafts) consume(ev harness.Event) {
 		r.text.WriteString(ev.Text)
 		r.state = protocol.AssistantCompleted
 	}
+	r.event = ev
 	r.event.Text, r.dirty = r.text.String(), true
 }
 
@@ -76,6 +83,13 @@ func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts re
 		}
 		if err := m.recordReplySources(ctx, th, r.event, r.state, r.replyTo, r.sources); err != nil {
 			return err
+		}
+		if r.state != protocol.AssistantStreaming && r.event.Kind == harness.EventAgentMessageDelta {
+			if acknowledger, ok := th.(replyPrefixAcknowledger); ok {
+				if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event); err != nil {
+					return err
+				}
+			}
 		}
 		r.dirty, r.persisted = false, true
 	}

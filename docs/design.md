@@ -911,3 +911,11 @@ Task 的 waiting 责任，后续仍走正常 admission 以新 Run 承接。owner
 未对清业务回执时先保 unknown，原回执归账后仍以该请求续进。
 成功 close 后的新原生活动会使旧停止证明失效；确定未执行的拒绝和真只读不会伪造成继续执行。
 参见[计划](plans/retained-manager-reconciliation.md)与[操作合同](manager-reconciliation.md)。
+
+manager 关闭时如果只剩回复 delta，没有原生 item/turn 终结事件，协调 attachment
+在真正保存 interrupted/unknown 累计回复后，显式确认该回复最后已消费的原 run/seq
+及同 thread/turn/item 的 delta 前缀。普通 streaming 保存不确认，保存失败不确认，
+确认事务还须匹配原 delta 身份与已保存终态正文，不能将旧终态的 no-op 视为新前缀已保存。
+确认失败仍可用原身份重试。此确认不是原生 turn 成功或业务回执对账，不删除未知效果；
+成功 close 的完整 applied 守卫和 runner 冻结的信封、请求 ID、末游标均不变。
+见[实施计划](plans/manager-native-rpc-reliability.md)。

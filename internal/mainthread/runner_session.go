@@ -144,12 +144,30 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) ([]coordination.E
 }
 
 func (t *runnerTransport) Acknowledge(ctx context.Context, e coordination.Event) error {
-	turn, item := "", ""
 	flush := e.Disconnected
 	if e.Native != nil {
-		turn = e.Native.TurnID
-		item = e.Native.ItemID
 		flush = flush || e.Native.Kind == harness.EventCoordinatorHistoryEnd || (e.Native.Kind == harness.EventItemCompleted && e.Native.ItemType == harness.ItemAgentMessage) || e.Native.Kind == harness.EventTurnCompleted
+	}
+	return t.acknowledge(ctx, e, flush)
+}
+
+func (t *runnerTransport) AcknowledgeReplyPrefix(ctx context.Context, e coordination.Event) error {
+	if e.Native == nil || e.Native.Kind != harness.EventAgentMessageDelta {
+		return errors.New("reply prefix requires its original delta identity")
+	}
+	t.mu.Lock()
+	origin, ok := t.origins[e.Sequence]
+	t.mu.Unlock()
+	if !ok {
+		return errors.New("reply prefix has no original receipt identity")
+	}
+	return t.app.AcknowledgeManagerReplyPrefix(ctx, origin.run, origin.sequence, e.ThreadID, e.Native.TurnID, e.Native.ItemID, e.Native.Text)
+}
+
+func (t *runnerTransport) acknowledge(ctx context.Context, e coordination.Event, flush bool) error {
+	turn, item := "", ""
+	if e.Native != nil {
+		turn, item = e.Native.TurnID, e.Native.ItemID
 	}
 	t.mu.Lock()
 	origin, ok := t.origins[e.Sequence]
