@@ -72,3 +72,13 @@ head 并行；本阶段不运行新的完整本地检查，不进行生产读取
 parent/child、重新绑定后的 stopped 归属、旧 lastSeen、native/event 合并。大型
 诊断 sweep 留作调查原件；常规回归只保留小型确定性计数及这些状态等价断言。
 不增加迁移、索引、持久缓存或新观测框架。
+
+## 真实 heartbeat 推进场景
+
+候选运行后的第二批有界慢写摘要仍有5次 tick callback 2.651–5.056秒，archive 控制原回执重放主要等待 writer 连接约9.817秒。两窗负载不同，不能归因退化或承诺修复收益；稳定执行事实的首轮合成结果未覆盖 host heartbeat 持续推进。源码显示 sync 从 host.last_seen_at 取每个 run 的 liveness，任何前进都会使现有 no-op 条件失败并清空整个局部采样缓存。
+
+先以同一合法 active fixture 比较稳定轮与推进业务时钟和 host heartbeat 的轮次，记录 group sampling/UPDATE 数及局部 callback 耗时；秒级耗时仅作诊断，不作正确性门槛。保持有限历史条件一致，逐步与无缓存路径对照完整 group/execution 快照，覆盖 freshness 阈值与健康→unknown→健康中间重置。
+
+如 RED 证实只更新 lastSeen 造成重复采样，唯一候选范围是 execution sync 的事务内采样缓存：只有所有其他有效事实相同、且在本轮固定 now 下 liveness 健康分类不变时，更新并持久化 lastSeen 后保留已采样组。每个组每轮至少实际采样一次；真实 state、group、parent、source 或健康变化仍清空全部局部缓存并按原前后顺序采样，避免跨组 parent 叶关系与中间不健康状态丢失。缓存不跨事务或业务时间。
+
+仍保持原预算、unknown/pending、clock、writer、调度与事务语义；不新增 timer、timeout、持久状态或生产读取。先有限2CPU race RED/GREEN与等价回归，再冻结新产品版本并重新 review、CI、候选验证，不沿用旧候选版本的产品批准。
