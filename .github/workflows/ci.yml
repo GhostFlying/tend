@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -75,7 +75,7 @@ jobs:
 
   quality:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -96,7 +96,7 @@ jobs:
   race:
     needs: plan
     name: race (${{ matrix.group }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +133,7 @@ jobs:
 
   web:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -207,7 +207,7 @@ jobs:
 
   cross:
     needs: web
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -233,7 +233,7 @@ jobs:
 
   shadow:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -273,7 +273,7 @@ jobs:
   check:
     if: ${{ always() }}
     needs: [plan, quality, race, web, layout, cross, shadow]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: require all checks
         env:
@@ -309,7 +309,7 @@ jobs:
   cache-maintenance:
     needs: check
     if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: write
