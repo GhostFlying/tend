@@ -82,3 +82,5 @@ parent/child、重新绑定后的 stopped 归属、旧 lastSeen、native/event �
 如 RED 证实只更新 lastSeen 造成重复采样，唯一候选范围是 execution sync 的事务内采样缓存：只有所有其他有效事实相同、且在本轮固定 now 下 liveness 健康分类不变时，更新并持久化 lastSeen 后保留已采样组。每个组每轮至少实际采样一次；真实 state、group、parent、source 或健康变化仍清空全部局部缓存并按原前后顺序采样，避免跨组 parent 叶关系与中间不健康状态丢失。缓存不跨事务或业务时间。
 
 仍保持原预算、unknown/pending、clock、writer、调度与事务语义；不新增 timer、timeout、持久状态或生产读取。先有限2CPU race RED/GREEN与等价回归，再冻结新产品版本并重新 review、CI、候选验证，不沿用旧候选版本的产品批准。
+
+局部 RED 已确认：N=4、已合法完成历史任务2个，同 fixture 稳定轮 group UPDATE=1；时钟推进1秒并通过正式 RuntimeHeartbeat 后 group UPDATE=5，所有执行 liveness 已更新。修后 heartbeat group UPDATE=1，execution UPDATE 仍保留8次（4个 liveness 更新与原 sync 尾部4个重绑定更新），未靠丢写 lastSeen 达成计数。计时分别存在不同编译/共享负载背景，不据此承诺延迟提速。逐步无缓存对照包含 fresh、同为 stale、跨 freshness 阈值、unknown，以及既有跨组 parent、group rebind、健康中间重置和 native/event 合并。

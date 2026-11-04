@@ -527,14 +527,25 @@ func putConcurrencyExecutionSampled(ctx context.Context, tx *store.Tx, source pr
 	if state == "stopped" && lookup == nil {
 		effectiveGroup = previousGroup
 	}
-	if samples != nil && lookup == nil && previousRaw == string(raw) && previousState == state && previousSeen >= lastSeen && previousGroup == effectiveGroup && previousParent == source.ParentExecutionID {
+	sameFacts := lookup == nil && previousRaw == string(raw) && previousState == state && previousGroup == effectiveGroup && previousParent == source.ParentExecutionID
+	if samples != nil && sameFacts && previousSeen >= lastSeen {
 		return nil
+	}
+	// A heartbeat still persists its new liveness, but cannot change leaf load
+	// when every other fact and the health classification at this sync's now
+	// are unchanged. Crossing freshness must retain the original pre/post sample.
+	sameLoad := false
+	if samples != nil && sameFacts {
+		unhealthy := func(seen int64) bool {
+			return state == "unknown" || state == "running" && source.NativeSessionID == "" || now-seen > RunnerOfflineAfter.Milliseconds()
+		}
+		sameLoad = state == "stopped" || unhealthy(previousSeen) == unhealthy(max(previousSeen, lastSeen))
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO concurrency_executions(execution_id,environment_id,runtime_id,state,source_json,last_seen,group_id,parent_execution_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET state=excluded.state,source_json=excluded.source_json,last_seen=MAX(concurrency_executions.last_seen,excluded.last_seen),parent_execution_id=excluded.parent_execution_id,group_id=CASE WHEN excluded.state='stopped' THEN concurrency_executions.group_id ELSE excluded.group_id END`, source.ExecutionID, source.EnvironmentID, source.RuntimeID, state, string(raw), lastSeen, group, source.ParentExecutionID)
 	if err != nil {
 		return err
 	}
-	if samples != nil {
+	if samples != nil && !sameLoad {
 		clear(samples.seen)
 	}
 	return samples.sample(ctx, tx, groups, now)
