@@ -818,7 +818,10 @@ worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 t
 隐式 continuation、原 prompt 重放和 shutdown 注入。首批 app-server 不支持。
 附着不能恢复已取消的 turn，也不能将原生 unknown 判为成功或失败；同 session 的新
 业务继续需要独立持久化发送合同，不由此授权推断。实际恢复必须另核原业务推进，不能
-只以 lease active 或健康主机验收。见[计划](plans/retained-run-continuation.md)与
+只以 lease active 或健康主机验收。首次附着只接回 started journal；最终阶段仅恢复同一
+严格许可下已持久记录的真实 worker 结果，不能结算旧 give-up/release。严格附着的 setup、
+观察和本地事件保存失败保持 pending；最终请求只有业务成功回执才清理，accepted 或未知
+结果保留原请求身份。见[计划](plans/retained-run-continuation.md)与
 [操作合同](retained-run-continuation.md)。
 
 ## D160：Agent 运行关联与观测来源
