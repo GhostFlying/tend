@@ -70,3 +70,5 @@ Go 测试也可能将 Web 文件、文档或其他仓库资源当数据读取。
 已完成的真实故障注入、修复前资源漏选及修复后的双侧原生事件见[正确性报告](findings/test-impact-correctness.md)及[机器可读证据](findings/test-impact-correctness.json)。这些正确性结果不替代收益与完整门禁验收。
 
 收益不足时的测试集合审计见[重复与昂贵前置流程报告](findings/test-redundancy-audit.md)。其中包含具体合并候选和原始测试 CPU profile，尚未实施删减，不将候选成本当作已获得收益。
+
+文件系统边界在完整 Go 依赖图中传播，包含第三方依赖和仅测试导入的依赖。Go `-overlay` 会使用清单指定的替换内容进行构建（见 [Go 官方说明](https://go.dev/src/cmd/go/internal/work/build.go)）；清单、替换内容及原始磁盘输入共同进入身份。首版对 overlay 始终完整验证，并拒绝建立函数覆盖基线；启用后不能用函数映射缩小范围。

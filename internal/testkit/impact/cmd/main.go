@@ -67,6 +67,9 @@ func run(ctx context.Context, args []string) error {
 	if !before.Clean {
 		return fmt.Errorf("baseline requires a clean committed source tree")
 	}
+	if before.Profile.Overlay != "" {
+		return fmt.Errorf("function coverage baselines do not support compiler overlays; use make check-full")
+	}
 	start := time.Now()
 	recordsDir, err := os.MkdirTemp("", "tend-impact-full-events-")
 	if err != nil {

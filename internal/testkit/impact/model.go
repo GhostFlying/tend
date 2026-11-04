@@ -29,6 +29,7 @@ var ErrConfigurationChanged = errors.New("impact plan build configuration change
 type Profile struct {
 	Go, OS, Arch, Flags string
 	Race                bool
+	Overlay             string `json:",omitempty"`
 }
 
 type Function struct {
@@ -291,16 +292,32 @@ func command(ctx context.Context, dir string, writer io.Writer, env []string, so
 }
 
 func BuildProfile(ctx context.Context, dir, goTool string) (Profile, error) {
+	p, _, err := buildProfile(ctx, dir, goTool)
+	return p, err
+}
+
+func buildProfile(ctx context.Context, dir, goTool string) (Profile, compilerOverlay, error) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return Profile{}, compilerOverlay{}, err
+	}
 	b, err := output(ctx, dir, goTool, "env", "GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "CGO_ENABLED", "GOEXPERIMENT", "GOAMD64", "GOARM64", "CC", "CXX", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_LDFLAGS")
 	if err != nil {
-		return Profile{}, err
+		return Profile{}, compilerOverlay{}, err
 	}
 	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
 	if len(lines) != 14 {
-		return Profile{}, fmt.Errorf("incomplete Go build configuration")
+		return Profile{}, compilerOverlay{}, fmt.Errorf("incomplete Go build configuration")
+	}
+	overlay, err := loadCompilerOverlay(dir, lines[3])
+	if err != nil {
+		return Profile{}, compilerOverlay{}, err
 	}
 	lines[3] = semanticGoFlags(lines[3])
-	return Profile{Go: lines[0], OS: lines[1], Arch: lines[2], Flags: hash([]byte(strings.Join(lines[3:], "\n"))), Race: true}, nil
+	if overlay.digest != "" {
+		lines = append(lines, "compiler-overlay:"+overlay.digest)
+	}
+	return Profile{Go: lines[0], OS: lines[1], Arch: lines[2], Flags: hash([]byte(strings.Join(lines[3:], "\n"))), Race: true, Overlay: overlay.digest}, overlay, nil
 }
 
 func ResolvedGoFlags(ctx context.Context, dir, goTool string) (string, error) {

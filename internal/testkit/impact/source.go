@@ -38,6 +38,17 @@ func isRoot(name string) bool {
 	return false
 }
 
+func inspectionImport(name string) bool {
+	if strings.HasPrefix(name, "go/") || name == "golang.org/x/tools/go/packages" {
+		return true
+	}
+	switch name {
+	case "os", "io/fs", "io/ioutil", "path/filepath", "syscall", "golang.org/x/sys/unix", "C":
+		return true
+	}
+	return false
+}
+
 func parseFile(path, pkg string, data []byte) (File, error) {
 	f := File{Digest: hash(data), Package: pkg, Functions: map[string]Function{}}
 	if !strings.HasSuffix(path, ".go") {
@@ -62,8 +73,7 @@ func parseFile(path, pkg string, data []byte) (File, error) {
 		if err != nil {
 			return f, err
 		}
-		switch name {
-		case "os", "io/fs", "io/ioutil", "path/filepath", "syscall", "golang.org/x/sys/unix", "go/parser", "go/build", "C":
+		if inspectionImport(name) {
 			f.SourceInspection = true
 		}
 	}
@@ -144,7 +154,12 @@ func parseFile(path, pkg string, data []byte) (File, error) {
 func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 	s := Snapshot{Files: map[string]File{}, Packages: map[string]Package{}}
 	var err error
-	s.Profile, err = BuildProfile(ctx, dir, goTool)
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return s, err
+	}
+	var overlay compilerOverlay
+	s.Profile, overlay, err = buildProfile(ctx, dir, goTool)
 	if err != nil {
 		return s, err
 	}
@@ -193,7 +208,7 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 		if p.ImportPath == "os/exec" {
 			productionProcess[p.ImportPath] = true
 		}
-		if slices.Contains([]string{"go/parser", "go/ast", "go/types", "go/build", "golang.org/x/tools/go/packages"}, p.ImportPath) {
+		if inspectionImport(p.ImportPath) {
 			productionInspection[p.ImportPath] = true
 		}
 		if p.ImportPath != s.Module && !strings.HasPrefix(p.ImportPath, s.Module+"/") {
@@ -227,7 +242,7 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 			}
 		}
 		for _, file := range active {
-			b, err := os.ReadFile(filepath.Join(p.Dir, file))
+			b, err := overlay.readFile(dir, filepath.Join(p.Dir, file))
 			if err != nil {
 				return s, err
 			}
@@ -293,7 +308,7 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 			if p.ImportPath == "os/exec" {
 				productionProcess[p.ImportPath] = true
 			}
-			if slices.Contains([]string{"go/parser", "go/ast", "go/types", "go/build", "golang.org/x/tools/go/packages"}, p.ImportPath) {
+			if inspectionImport(p.ImportPath) {
 				productionInspection[p.ImportPath] = true
 			}
 		}
@@ -330,6 +345,9 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 		p.SourceInspection = productionInspection[id] || testInspection[id]
 		p.SharedState = productionState[id] || testState[id]
 		for _, dep := range p.TestImports {
+			if dep == "testing" {
+				continue
+			}
 			p.ProcessBoundary = p.ProcessBoundary || productionProcess[dep]
 			p.SourceInspection = p.SourceInspection || productionInspection[dep]
 			p.SharedState = p.SharedState || productionState[dep]
@@ -344,6 +362,9 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 	var fingerprint bytes.Buffer
+	if overlay.digest != "" {
+		fmt.Fprintln(&fingerprint, "compiler-overlay", overlay.digest)
+	}
 	for _, path := range paths {
 		if path == "" {
 			continue
@@ -351,13 +372,19 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 		info, err := os.Lstat(filepath.Join(dir, path))
 		if os.IsNotExist(err) {
 			fmt.Fprintln(&fingerprint, path, "deleted")
-			continue
-		}
-		if err != nil {
+			entry, exists := overlay.files[buildPath(dir, path)]
+			if !exists || entry.deleted {
+				continue
+			}
+		} else if err != nil {
 			return s, err
 		}
 		var b []byte
-		if info.Mode()&os.ModeSymlink != 0 {
+		var mode os.FileMode
+		if info == nil {
+			// The overlay introduces a virtual file. Its bytes are bound by the
+			// overlay digest, while the absent physical file remains explicit.
+		} else if info.Mode()&os.ModeSymlink != 0 {
 			link, err := os.Readlink(filepath.Join(dir, path))
 			if err != nil {
 				return s, err
@@ -371,6 +398,12 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 		} else {
 			return s, fmt.Errorf("unsupported source entry %s", path)
 		}
+		if info != nil {
+			mode = info.Mode() & 0o111
+			// Keep physical source identity even when the compiler overlays it:
+			// tests can still read the original bytes at runtime.
+			fmt.Fprintln(&fingerprint, path, mode, hash(b))
+		}
 		pkg := ""
 		for id, p := range s.Packages {
 			if p.Dir == filepath.ToSlash(filepath.Dir(path)) {
@@ -378,13 +411,19 @@ func Capture(ctx context.Context, dir, goTool string) (Snapshot, error) {
 				break
 			}
 		}
+		if entry, exists := overlay.files[buildPath(dir, path)]; exists {
+			if entry.deleted {
+				s.Files[path] = File{Digest: hash(b), Package: pkg, Executable: uint32(mode), Functions: map[string]Function{}}
+				continue
+			}
+			b = entry.data
+		}
 		f, err := parseFile(path, pkg, b)
 		if err != nil {
 			return s, err
 		}
-		f.Executable = uint32(info.Mode() & 0o111)
+		f.Executable = uint32(mode)
 		s.Files[path] = f
-		fmt.Fprintln(&fingerprint, path, info.Mode()&0o111, f.Digest)
 	}
 	s.Fingerprint = hash(fingerprint.Bytes())
 	return s, nil
