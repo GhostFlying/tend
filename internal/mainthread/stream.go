@@ -84,14 +84,35 @@ func (m *Manager) flushReplies(ctx context.Context, th harness.Thread, drafts re
 		if err := m.recordReplySources(ctx, th, r.event, r.state, r.replyTo, r.sources); err != nil {
 			return err
 		}
-		if r.state != protocol.AssistantStreaming && r.event.Kind == harness.EventAgentMessageDelta {
-			if acknowledger, ok := th.(replyPrefixAcknowledger); ok {
-				if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event); err != nil {
-					return err
-				}
-			}
-		}
 		r.dirty, r.persisted = false, true
+	}
+	return nil
+}
+
+// Real native terminal events retain their ordinary acknowledgement path. Only
+// attachment shutdown needs a separate boundary for otherwise unterminated text.
+func (m *Manager) flushClosingReplies(ctx context.Context, th harness.Thread, drafts replyDrafts, state protocol.AssistantState) error {
+	if err := m.flushReplies(ctx, th, drafts, "", state); err != nil {
+		return err
+	}
+	acknowledger, ok := th.(replyPrefixAcknowledger)
+	if !ok {
+		return nil
+	}
+	for _, r := range drafts {
+		if !r.persisted || r.state == protocol.AssistantStreaming || r.event.Kind != harness.EventAgentMessageDelta {
+			continue
+		}
+		repair, err := m.isRepairEvent(ctx, th, r.event)
+		if err != nil {
+			return err
+		}
+		if repair {
+			continue
+		}
+		if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event); err != nil {
+			return err
+		}
 	}
 	return nil
 }
