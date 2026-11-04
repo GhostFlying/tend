@@ -69,6 +69,9 @@ func (r *Runner) fenceRetainedJournal(ctx context.Context, id string) error {
 	if _, err := r.cfg.Journal.Run(ctx, id); err != nil {
 		return err
 	}
+	if err := r.cfg.Journal.ClearRetainedStop(ctx, id); err != nil {
+		return err
+	}
 	return r.cfg.Journal.SetFenced(ctx, id, true)
 }
 
@@ -90,11 +93,25 @@ func (r *Runner) lockSettlement(ctx context.Context, a *active) (func(), error) 
 // authorizeRetainedSettlement orders later Continue/Stop with retention and final
 // settlement. A cancelled executor must exit before any fresh attempt starts.
 func (r *Runner) authorizeRetainedSettlement(ctx context.Context, id string, clearFence bool) error {
+	if clearFence {
+		return r.authorizeRetainedControl(ctx, id, true, func() error {
+			return r.cfg.Journal.ClearRetainedStop(ctx, id)
+		})
+	}
+	return r.authorizeRetainedControl(ctx, id, clearFence, nil)
+}
+
+func (r *Runner) authorizeRetainedControl(ctx context.Context, id string, clearFence bool, record func() error) error {
 	for {
 		r.mu.Lock()
 		a := r.active[id]
 		r.mu.Unlock()
 		if a == nil {
+			if record != nil {
+				if err := record(); err != nil {
+					return err
+				}
+			}
 			if clearFence {
 				return r.cfg.Journal.SetFenced(ctx, id, false)
 			}
@@ -110,11 +127,19 @@ func (r *Runner) authorizeRetainedSettlement(ctx context.Context, id string, cle
 			unlock()
 			continue
 		}
-		if clearFence {
+		if record != nil {
+			err = record()
+		}
+		if err == nil && clearFence {
 			err = r.cfg.Journal.SetFenced(ctx, id, false)
 		}
 		if err == nil && a.retained {
 			a.retained = false
+			a.reconcileOnExit = true
+		}
+		if err == nil && record != nil && !clearFence {
+			// A Stop can reach an ordinary reporting executor just before it
+			// exits. Its successor must consume the newly durable receipt.
 			a.reconcileOnExit = true
 		}
 		r.mu.Unlock()

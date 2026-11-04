@@ -821,7 +821,10 @@ worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 t
 只以 lease active 或健康主机验收。首次附着只接回 started journal；最终阶段仅恢复同一
 严格许可下已持久记录的真实 worker 结果，不能结算旧 give-up/release。严格附着的 setup、
 观察和本地事件保存失败保持 pending；最终请求只有业务成功回执才清理，accepted 或未知
-结果保留原请求身份。见[计划](plans/retained-run-continuation.md)与
+结果保留原请求身份。另一个 authenticated Hello 的独立 Stop 可结束同一原 journal
+责任；它以原 Assignment/lease 摘要持久化，不清 strict 约束，不将 Forbidden 当业务成功。
+物理停止后，在 Done 同一事务保存原请求/事件历史再退出 pending；原 server 业务回执
+不改写，后续 Retain/Continue 或新附着使旧 Stop 许可失效。见[计划](plans/retained-run-continuation.md)与
 [操作合同](retained-run-continuation.md)。
 
 ## D160：Agent 运行关联与观测来源

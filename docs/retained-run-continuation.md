@@ -56,3 +56,11 @@ WorkerDoneAt 和 WorkerResult 的 worker_done/submitting/releasing journal，才
 才清理工作区和 journal；accepted/pending_reconciliation、失败或未知回执均保留原请求
 身份继续对账。附着 setup、原生观察或本地事件保存错误同样保持 pending，不作为普通
 worker 失败关闭原 terminal。明确 Stop、paused、held 仍遵循既有独立控制授权。
+
+独立 owner 取消或原业务提交已成功但回执丢失时，原 Run 凭据可能已撤销；Forbidden
+本身不证明业务成功。只有 authenticated host Hello 对同一原 journal 给出 Stop，才
+记录独立的本地结算许可，绑定原 Assignment/lease 摘要和 Hello request ID。该许可
+不清 strict 附着身份，仍须物理停止证明。无法再发送的原最终请求和事件在 Done 的
+同一事务保存为未确认历史，再移出 pending 队列；server 的原 Accepted/Succeeded
+回执保持原文。消息投递等专用回执仍按其独立的 post-stop 凭据先对账。重启保留
+Stop 许可；后续 Retain、Continue 或新的附着许可使旧 Stop 失效。

@@ -44,3 +44,13 @@ give-up/release 的 accepted/pending_reconciliation 不是成功业务终态，�
 事件或工作区所有权。strict 的 Start/setup、Wait 与本地事件保存错误均保持待对账，
 不能构造 worker_start_failed 后走普通 finalizing 关闭原 terminal；明确 Stop/paused/held
 仍遵循独立的既有控制授权。普通旧协议路径不因新增 strict 模式改变默认语义。
+
+独立 owner 取消之后，原 accepted 请求按既有合同仍不改写，不能要求它事后变为
+succeeded。runner 仅在 authenticated Hello 对原 journal 返回 Stop 时，另外持久记录
+原 Assignment/lease 与 Hello request 身份绑定的结算许可；不清 strict 附着约束，也不将
+单独 Forbidden 当作结算证据。物理停止仍是前置条件。原凭据撤销后无法发送的请求和
+事件在 Done 的同一事务转入保留 metadata 历史，再退出 pending 队列。重启保留该许可，
+后续 Retain、Continue 或新的 strict authority 使旧许可失效；缺失原 journal 或身份不符继续拒绝。
+
+strict 最终请求遇到非成功或凭据撤销会明确唤醒 Hello 对账；Stop 若到达仍在报告的 executor，
+其退出必须再次唤醒，避免新许可被一次仍在退出的执行器消耗后无人收尾。

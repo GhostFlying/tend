@@ -719,10 +719,26 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	if err != nil {
 		return &completionPending{err}
 	}
-	// Dedicated receipts are not in RequestForRun and must be drained before
-	// final reporting. Failure leaves both the receipt and final request intact.
+	// Dedicated receipts retain their separate post-stop credential. Drain
+	// these facts before ending local ownership, without repeating invocation.
 	if err := r.recoverRunMessages(ctx, as); err != nil {
 		return err
+	}
+	if strictResume != nil {
+		stop, err := r.cfg.Journal.RetainedStop(ctx, as.RunID)
+		if err != nil {
+			return &completionPending{err}
+		}
+		if stop != nil {
+			run, err := r.cfg.Journal.Run(ctx, as.RunID)
+			if err != nil || !run.StoppedConfirmed {
+				return &completionPending{errors.New("runner: authoritative Stop still awaits physical stop proof")}
+			}
+			// The host's Stop independently ends local responsibility. Run
+			// credentials may already be revoked; preserve outstanding facts
+			// as history instead of interpreting Forbidden as business success.
+			return r.cleanupReportedRun(ctx, as)
+		}
 	}
 	req, ok, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
 	if err != nil {
@@ -746,11 +762,13 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 		op, err := r.send(ctx, runCredential(as), &req.Envelope)
 		if strictResume != nil {
 			if err != nil {
+				r.requestReconcile()
 				return &completionPending{err}
 			}
 			if op.Status != protocol.OpSucceeded {
 				// Accepted acknowledges the original request identity, not
 				// business settlement. Keep its exact request and ownership.
+				r.requestReconcile()
 				return &completionPending{errors.New("runner: strict final report awaits business settlement")}
 			}
 		}
@@ -779,6 +797,10 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			}
 		}
 	}
+	return r.cleanupReportedRun(ctx, as)
+}
+
+func (r *Runner) cleanupReportedRun(ctx context.Context, as protocol.Assignment) error {
 	_, settleErr := r.settleRun(ctx, as.RunID, func() error {
 		execution, err := r.resolveExecution(ctx, as)
 		if err != nil {

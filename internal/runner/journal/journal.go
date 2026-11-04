@@ -386,6 +386,9 @@ func (j *Journal) Replace(ctx context.Context, runID, phase, oldRequestID string
 // Done marks a run done and forgets its request and events.
 func (j *Journal) Done(ctx context.Context, runID string) error {
 	return j.tx(ctx, func(tx *sql.Tx) error {
+		if err := archiveRetainedStop(ctx, tx, runID); err != nil {
+			return fmt.Errorf("journal: preserve stopped strict facts: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase = 'done', updated_at = ? WHERE run_id = ?`, j.now().UnixMilli(), runID); err != nil {
 			return fmt.Errorf("journal: finish run: %w", err)
 		}

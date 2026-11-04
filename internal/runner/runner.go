@@ -626,7 +626,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			}
 			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictStop:
-			if err := r.authorizeRetainedSettlement(ctx, v.RunID, false); err != nil {
+			if err := r.authorizeRetainedControl(ctx, v.RunID, false, func() error {
+				return r.cfg.Journal.AuthorizeRetainedStop(ctx, v.RunID, env.RequestID)
+			}); err != nil {
 				return err
 			}
 			if run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing {
