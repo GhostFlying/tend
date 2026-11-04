@@ -49,8 +49,8 @@ type RuntimeBinding struct {
 // human-readable label, not an identity key. Label changes still follow the
 // definition revision and explicit acceptance process.
 type AgentDefinition struct {
-	// OwnerRuntimeID optionally supplies coordination transport for this same
-	// identity, for example when its execution transport is an Orca terminal.
+	// OwnerRuntimeID is historical format-2 data only. Format 3 rejects it;
+	// new roles always use RuntimeID and the same CLI/model/effort.
 	OwnerRuntimeID string    `json:"owner_runtime_id,omitempty"`
 	Instructions   string    `json:"instructions,omitempty"`
 	LocalID        string    `json:"local_id"`
@@ -121,7 +121,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 	if source.Kind == LocalFile && strings.TrimSpace(source.Reference) == "" {
 		return nil, invalid("required", "$source.reference")
 	}
-	if cfg.FormatVersion != 1 && cfg.FormatVersion != 2 {
+	if cfg.FormatVersion != 1 && cfg.FormatVersion != 2 && cfg.FormatVersion != 3 {
 		return nil, invalid("unsupported_format", "$.format_version")
 	}
 	runtimes := make(map[string]RuntimeBinding, len(cfg.Runtimes))
@@ -139,9 +139,12 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 		if strings.TrimSpace(r.ExecutableRef) == "" {
 			return nil, invalid("required", path+".executable_ref")
 		}
+		if cfg.FormatVersion >= 3 && r.CLI != "codex" && r.CLI != "traex" {
+			return nil, invalid("required", path+".cli")
+		}
 		switch r.Kind {
 		case CentralWorker:
-			if cfg.FormatVersion != 2 || r.CLI != "traex" {
+			if cfg.FormatVersion < 2 || r.CLI != "traex" {
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		case OrcaWorker:
@@ -149,7 +152,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		case AppServerWorker, HostedManager:
-			if r.CLI != "" && !(cfg.FormatVersion == 2 && (r.CLI == "codex" || r.CLI == "traex")) {
+			if r.CLI != "" && !(cfg.FormatVersion >= 2 && (r.CLI == "codex" || r.CLI == "traex")) {
 				return nil, invalid("unsupported_cli", path+".cli")
 			}
 		default:
@@ -158,7 +161,7 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 		if err := validatePurposes(r.DeclaredPurposes, r.Kind, path+".declared_purposes", cfg.FormatVersion); err != nil {
 			return nil, err
 		}
-		if cfg.FormatVersion == 2 && r.Kind == AppServerWorker && slices.Contains(r.DeclaredPurposes, IssueManager) && r.CLI == "" {
+		if cfg.FormatVersion >= 2 && r.Kind == AppServerWorker && slices.Contains(r.DeclaredPurposes, IssueManager) && r.CLI == "" {
 			return nil, invalid("required", path+".cli")
 		}
 		runtimes[r.ID] = r
@@ -248,7 +251,7 @@ func validatePurposes(purposes []Purpose, kind RuntimeKind, path string, format 
 			if p != Main && p != IssueManager && p != Consultation {
 				return invalid("unsupported_purpose", field)
 			}
-		} else if p != WorkerRun && !(format == 2 && kind == AppServerWorker && p == IssueManager) {
+		} else if p != WorkerRun && !((format >= 2 && kind == AppServerWorker || format >= 3 && kind == OrcaWorker) && p == IssueManager) {
 			return invalid("unsupported_purpose", field)
 		}
 	}

@@ -118,3 +118,38 @@ func TestConcurrencySkipsBusyRuntimeWithoutReservingReviewerCapacity(t *testing.
 		t.Fatal("busy reviewer selected", p, reason)
 	}
 }
+
+func TestConcreteIdentityUsesRolesAsMetadataWithoutChangingExecution(t *testing.T) {
+	pin := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "env", LocalID: "ordinary"}, Runtime: protocol.AgentRuntimeReference{RuntimeID: "primary", Revision: 4}, AgentRevision: 3, Profile: protocol.ExecutionProfile{Model: "original", Effort: "high"}, Worker: protocol.WorkerOrca, BackendID: "orca"}
+	h := Host{ID: "env", Executors: []Executor{{Pin: pin, Categories: []string{"planning", "investigation"}}}, IssueOwners: true}
+	r := protocol.AgentRequirement{AgentID: "env/ordinary", CategoryID: "implementation", Model: "original", Effort: "high"}
+	c := Candidate{Kind: protocol.ActionImplement, AcceptanceWaived: true, AgentSelection: &protocol.TaskAgentSelection{Implementation: r}}
+	if err := c.AgentSelection.ValidateForAcceptance(false); err != nil {
+		t.Fatal(err)
+	}
+	if got, reason := SelectExecution(h, c); got == nil || *got != pin || reason != "" {
+		t.Fatal("category authorized a concrete identity or role changed its entry", got, reason)
+	}
+	c.AgentSelection.Implementation.CategoryID = ""
+	if err := c.AgentSelection.ValidateForAcceptance(false); err != nil {
+		t.Fatal("concrete Agent requires a category", err)
+	}
+	if got, reason := SelectExecution(h, c); got == nil || *got != pin || reason != "" {
+		t.Fatal(got, reason)
+	}
+	c.AgentSelection.Implementation.Model = "replacement"
+	if got, _ := SelectExecution(h, c); got != nil {
+		t.Fatal("role changed the frozen profile", got)
+	}
+	c.AgentSelection.Implementation = protocol.AgentRequirement{CategoryID: "implementation"}
+	if got, _ := SelectExecution(h, c); got != nil {
+		t.Fatal("automatic discovery ignored the requested role", got)
+	}
+	manager := pin
+	manager.Purpose, manager.BackendID = "issue_manager", ""
+	h.Executors = []Executor{{Pin: manager, Categories: []string{"planning"}}}
+	c.Manager = &protocol.IssueManagerSpec{OwnershipPolicy: protocol.IssueOwnerPolicy, AgentID: "env/ordinary", CategoryID: "investigation"}
+	if got, reason := SelectExecution(h, c); got == nil || *got != manager || reason != "" {
+		t.Fatal("owner role selected another entry or required category membership", got, reason)
+	}
+}

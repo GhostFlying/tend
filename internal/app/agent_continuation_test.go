@@ -373,6 +373,12 @@ func TestAgentContinuationReviewerCategoryRefreshUsesFrozenInventory(t *testing.
 
 func TestAgentContinuationDerivesCentralWorkerFromFrozenOwnerInventory(t *testing.T) {
 	h, r, _ := issueOwnerHarness(t)
+	// This fixture is a historical protocol-2 dual-entry owner contract.
+	r.Protocol, r.ProtocolMin, r.ProtocolMax = 2, 2, 2
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
 	var inventory store.AgentInventoryRow
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error

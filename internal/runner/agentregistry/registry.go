@@ -218,6 +218,15 @@ func (r *Registry) Commit(ctx context.Context, req CommitRequest) (Receipt, erro
 	if r.state.Revision == math.MaxUint64 {
 		return Receipt{}, fail("revision_exhausted")
 	}
+	if current, ok := entryFor(r.state, r.state.Current); ok {
+		previous, err := r.readSnapshot(current, r.state.Environment)
+		if err != nil {
+			return Receipt{}, err
+		}
+		if err := agentconfig.ValidateUpdate(c.payload.Config, previous.payload.Config); err != nil {
+			return Receipt{}, err
+		}
+	}
 	at := r.opts.Now()
 	if at.IsZero() {
 		return Receipt{}, fail("invalid_clock")

@@ -38,7 +38,7 @@ func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue 
 		if !a.Enabled || !slices.Contains(a.Purposes, "worker_run") {
 			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "this Agent has no execution adapter; delegate a child Issue to an execution-capable Agent")
 		}
-		if implementation.AgentID != "" && implementation.AgentID != issue.Assignee.Ref || !slices.Contains(a.Categories, implementation.CategoryID) || implementation.RuntimeID != "" && implementation.RuntimeID != a.Binding.RuntimeID || !implementation.MatchesProfile(protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}) || spec.Requirements.HostID != "" && spec.Requirements.HostID != parts[0] {
+		if implementation.AgentID != "" && implementation.AgentID != issue.Assignee.Ref || implementation.RuntimeID != "" && implementation.RuntimeID != a.Binding.RuntimeID || !implementation.MatchesProfile(protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}) || spec.Requirements.HostID != "" && spec.Requirements.HostID != parts[0] {
 			return nil, protocol.Errorf(protocol.CodeForbidden, "another Agent must own a child Issue before executing this work")
 		}
 		if x.coordinationExecution != nil && (x.coordinationExecution.Selection.Identity != a.Identity || x.coordinationExecution.Selection.Definition.Revision != a.Revision || x.coordinationExecution.Selection.Definition.Model != a.RequestedModel || x.coordinationExecution.Selection.Definition.Effort != a.RequestedEffort) {
@@ -71,7 +71,7 @@ func validateRetainedReviewer(ctx context.Context, q store.Querier, contract sto
 	requirement := next.AgentSelection.Acceptance
 	ref := pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID
 	compatible := (requirement.AgentID == "" || requirement.AgentID == ref) && (requirement.RuntimeID == "" || requirement.RuntimeID == pin.Runtime.RuntimeID) && requirement.MatchesProfile(pin.Profile) && (next.AcceptanceExecution == nil || *next.AcceptanceExecution == pin.Profile)
-	if compatible && requirement.CategoryID != previous.AgentSelection.Acceptance.CategoryID {
+	if compatible && requirement.AgentID == "" && requirement.CategoryID != previous.AgentSelection.Acceptance.CategoryID {
 		compatible = false
 		runtime, err := store.GetHostRuntime(ctx, q, pin.Identity.ExecutionEnvironmentID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {

@@ -96,17 +96,17 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	}
 	if x.coordinationExecution != nil && x.coordinationExecution.Selection.OwnershipPolicy == protocol.IssueOwnerPolicy && p.Owner == nil {
 		if p.Assignee != nil && p.Assignee.Kind == protocol.IssueAssigneeAgent {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "publish child ownership with owner.category_id and optional owner.agent_id")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "publish child ownership with owner.agent_id or a delegation role category_id")
 		}
 		if p.Manager != nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "use owner for new child responsibility; manager names the historical publication contract")
 		} else if p.Assignee == nil && x.coordinationExecution.IssueID != "" {
-			p.Owner = &protocol.IssueOwnerRequest{CategoryID: x.coordinationExecution.Selection.Definition.Categories[0], AgentID: hostedconfig.IdentityRef(x.coordinationExecution.Selection.Identity), Reason: "Retain child responsibility with the current Agent"}
+			p.Owner = &protocol.IssueOwnerRequest{AgentID: hostedconfig.IdentityRef(x.coordinationExecution.Selection.Identity), Reason: "Retain child responsibility with the current Agent"}
 		}
 	}
 	if p.Owner != nil {
-		if p.Manager != nil || p.Owner.CategoryID == "" {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner requires an explicit capability category and cannot be combined with manager")
+		if p.Manager != nil || p.Owner.CategoryID == "" && p.Owner.AgentID == "" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner requires agent_id or a delegation role and cannot be combined with manager")
 		}
 		p.Manager = &protocol.RequestIssueManagerPayload{CategoryID: p.Owner.CategoryID, AgentID: p.Owner.AgentID, Reason: p.Owner.Reason}
 	}

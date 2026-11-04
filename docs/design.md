@@ -169,6 +169,7 @@
 | D164 | 原不可变 artifact 可经 owner 或主 Agent relay 的精确授权共享给目标责任代次；artifact/file/hash 与原来源冻结，撤销阻止新读，不授予源任务控制或伪造新报告。追加迁移86并提供 CLI/工具全入口。 | 实施中 |
 | D167 | 创建者或显式用户决定后续 Task 是否强制独立验收；真实来源及政策冻结，免验仍需合法结果、责任核对和交付证明，不伪造通过记录，不追溯撤销在途验收。 | 实施中 |
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
+| D173 | format 3 Agent 保留原 primary 唯一入口与多值委托角色；显式身份不以 category 授权，冻结 Task policy 贯通实际启动提示，内部精确 artifact 交接不外推人工。协议 3/2，Orca 同入口协调如实保留缺口。 | 已实现，待独立验证 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -911,3 +912,19 @@ Task 的 waiting 责任，后续仍走正常 admission 以新 Run 承接。owner
 未对清业务回执时先保 unknown，原回执归账后仍以该请求续进。
 成功 close 后的新原生活动会使旧停止证明失效；确定未执行的拒绝和真只读不会伪造成继续执行。
 参见[计划](plans/retained-manager-reconciliation.md)与[操作合同](manager-reconciliation.md)。
+
+## D173：Agent 单入口、多角色与真实冻结提示
+
+本决策取代 D136 中按 owner/worker 职责选择第二 runtime 的活动模型。Agent 始终属于一个已有执行环境对象；env 不是主机、驱动或传输的别称。format 3 的每个定义只有一个 runtime 引用，该入口必须明确 CLI，model/effort 来自同一个定义；禁止 `owner_runtime_id` 和公共 `owner_runtime_binding_ref` 第二入口。不同 Agent 可共用相同执行四元组，identity、local_id、名称与修订仍各自保留。
+
+category 数组表达委托角色，可同时声明多个值。自动发现按角色筛选；具体 `agent_id` 指派不要求分类 membership，也不将分类变成授权。Issue owner 是动态责任；server main 身份在新模型保留为顶层协调身份，其他普通 Agent 可被指派。真实入口能力、原责任/epoch/CAS、独立 reviewer 隔离和并发预算继续约束执行。Orca 同入口协调尚未实现：format 3 明确报告 `coordination_entry_not_supported`，不启动第二入口，不以 status 广告替代 owner E2E。
+
+新配置经 validate/reload/reconcile/register 接受，新修订不得原地更改历史定义、入口或 profile。format 1/2 是保留的历史格式；format 3 不可降级。旧快照、pin、未知请求与在途责任按原字节与原入口续接。旧配置不能通过批量改写历史表迁移；显式新修订保留原 primary，再收口 provider/economy 分类变体。实际环境的迁移表属于私有操作材料，不提交公开仓库。
+
+通信代际为 3/2；1 已退役并测试拒绝。3 承载 format 3 与冻结 policy 的启动语义；2 保留原 format 1/2、历史双入口 pin 的通信兼容。server-first，旧通信适配在第 4 代删除，历史持久化读取不随通信退役删除。发布前必须核对所有主机、未结束运行和未知操作，不能借版本提升自动重启或重写在途任务。
+
+Assignment 携带 Task 创建时冻结的 acceptance policy，经 journal 原样传到 WorkerSpec/Brief。required=false 明确无需单独业务验收；true 与缺失的 legacy policy 保留独立验收要求。报告任务不再无条件要求代码修改；actual acceptance assignment 始终保留 reviewer 隔离。策略变化仅影响未来任务，不修改旧启动提示；仓库独立代码 review、完整检查和 CI 不受业务 waiver 影响。
+
+D164 内部交接补充：`internal_handoff=true` 仅将原后代 artifact 的精确 ref SHA 与文件 manifest 授给当前祖先责任 epoch。当前祖先 Agent 或 main 可完成该内部动作，无需将技术授权死路转交人工；不授兄弟、源 Task 控制或整消息材料权限。普通跨树共享保持原 owner 授权规则。撤销只挡未来读取，已经合法冻结的 inputs 不热改；原 request_id/CAS/unknown 语义保持。main 向人类升级 attention 必须记录缺少的 `fact|decision|action` 及具体证据；内部平台修复和材料交接仍由 Agent/main 承接。
+
+实施与验证见[计划](plans/agent-single-entry-roles.md)及[操作说明](agent-single-entry.md)。Capability 基建与详情 UI 专项独立处理，本决策不从 CLI 或模型名称推断能力。

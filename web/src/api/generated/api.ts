@@ -525,6 +525,8 @@ export interface AttentionView {
   created_at: number;
   decision?: DecisionView;
   decision_id?: string;
+  human_evidence?: string;
+  human_requirement?: string;
   issue_id?: string;
   issue_intent?: string;
   issue_title?: string;
@@ -655,6 +657,8 @@ export interface AttentionResponsibility {
   ancestry: AttentionResponsibilityAncestor[] | null;
   assignment_epoch: number;
   history: AttentionResponsibilityHop[] | null;
+  human_evidence?: string;
+  human_requirement?: string;
   issue_id?: string;
   origin_assignment_epoch: number;
   origin_issue_id: string;
@@ -1789,6 +1793,7 @@ export interface ArtifactShare {
   created_at: number;
   digest: string;
   files: ArtifactFile[] | null;
+  internal_handoff?: boolean;
   issue_id: string;
   reason: string;
   ref_sha256: string;
@@ -2186,6 +2191,8 @@ export interface CreateAttentionPayload {
   blocks_close?: boolean;
   choice_id?: string;
   decision_id?: string;
+  human_evidence?: string;
+  human_requirement?: string;
   issue_id?: string;
   kind: string;
   latest_action_at?: number;
@@ -2246,7 +2253,7 @@ export interface RequestIssueManagerPayload {
  */
 export interface IssueOwnerRequest {
   agent_id?: string;
-  category_id: string;
+  category_id?: string;
   reason: string;
 }
 /**
@@ -2316,7 +2323,7 @@ export interface TaskAgentSelection {
  */
 export interface AgentRequirement {
   agent_id?: string;
-  category_id: string;
+  category_id?: string;
   effort?: string;
   model?: string;
   runtime_id?: string;
@@ -2499,6 +2506,7 @@ export interface GrantArtifactSharePayload {
   artifact_id: string;
   expected_assignment_epoch: number;
   expected_source_revision?: number;
+  internal_handoff?: boolean;
   reason?: string;
   ref_sha256: string;
   source_message_id?: string;
@@ -2509,6 +2517,7 @@ export interface GrantArtifactSharePayload {
  */
 export interface HandleAttentionPayload {
   expected_assignment_epoch: number;
+  human_requirement?: string;
   option?: string;
   reason: string;
   text?: string;
@@ -3974,6 +3983,7 @@ export interface RevokeArtifactSharePayload {
   expected_assignment_epoch: number;
   expected_share_revision: number;
   expected_source_revision?: number;
+  internal_handoff?: boolean;
   reason?: string;
   share_id: string;
   source_message_id?: string;

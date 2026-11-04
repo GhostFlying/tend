@@ -379,7 +379,7 @@ func TestMessagingMainDecisionPublishesWithoutSelfWake(t *testing.T) {
 		return n
 	}
 	before := count()
-	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "attention"}, nil, protocol.CreateAttentionPayload{Kind: "decision", Title: "Choose the next step", Options: []string{"A", "B"}}, AttentionCommand{Action: "create"})
+	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "attention"}, nil, protocol.CreateAttentionPayload{Kind: "decision", Title: "Choose the next step", Options: []string{"A", "B"}, HumanRequirement: "decision", HumanEvidence: "Only the user can choose the intended next goal"}, AttentionCommand{Action: "create"})
 	if op.Error != nil {
 		t.Fatal(op)
 	}

@@ -1,3 +1,5 @@
+> 当前活动模型见 [D173 单入口与角色迁移](agent-single-entry.md)。format 3 禁止第二 owner 入口；本文中 format 1/2 的双入口内容仅用于历史读取与显式迁移，不能用于新定义。分类只表达多值委托角色，不能作具体 Agent 指派权限。
+
 # 编写 Agent 定义
 
 本指南说明当前 Agent 的命名约定（D123）。Agent 在 runner 本机定义，Category 是服务端的跨 runner 工作分类。配置中的 CLI、model、effort 和 runtime 单独表达执行方式。

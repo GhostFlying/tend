@@ -1,1 +1,1 @@
-{"current":2,"previous":1,"adapters":[{"id":"runner-v1","protocol":1,"remove_in":3,"file":"internal/protocol/runner_v1.go","test":"internal/protocol/runner_v1_test.go"}]}
+{"current":3,"previous":2,"adapters":[{"id":"runner-v2","protocol":2,"remove_in":4,"file":"internal/protocol/runner_v2.go","test":"internal/protocol/runner_v2_test.go"}]}

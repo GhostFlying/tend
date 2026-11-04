@@ -195,6 +195,7 @@ func TestAttentionActionTimeHostedPlannerAndOriginalDecisionAnswer(t *testing.T)
 	turn := startHostedReview(t, h, "main", delivery)
 	due := h.clock.Now().Add(30 * time.Hour).UnixMilli()
 	p := protocol.CreateAttentionPayload{Kind: "decision", Title: "Choose report scope", Options: []string{"summary", "full"}, LatestActionAt: &due}
+	p.HumanRequirement, p.HumanEvidence = "decision", "The user must select which goal to pursue before its deadline"
 	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "attention"}, nil, p, AttentionCommand{Action: "create"})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

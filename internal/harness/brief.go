@@ -243,12 +243,17 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		input = "Review the submitted work against this task.\n\n" + b.String()
 		return instructions, input
 	}
-	instructions = "You implement a task for tend. " + common +
-		"Change the files in the working trees so the goal is met and the acceptance checks pass; run them yourself. " +
+	review := "An independent reviewer will check your work. "
+	if spec.AcceptancePolicy != nil && !spec.AcceptancePolicy.Required {
+		review = "The frozen creator acceptance policy does not require separate business acceptance. Submit verifiable results to the responsible Issue; do not invent an acceptance verdict. "
+	}
+	instructions = "You execute a frozen task for tend. " + common +
+		"Fulfill the frozen goal and deliverables and run the acceptance checks yourself. " +
 		"Whether and how to commit is yours to decide, as the task and each repository's own rules ask; tend does not commit for you, " +
-		"and records each repository's HEAD and working tree as you leave them. " +
-		"An independent reviewer will check your work. For report or file delivery, call submit_result with the requested report and explicitly selected files before ending your turn. Report-only work does not require Git changes. State evidence and uncertainties honestly."
-	input = "Implement this task.\n\n" + b.String()
+		"and records each repository's HEAD and working tree as you leave them. " + review +
+		"Repository requirements for independent code review, complete checks and CI still apply to code changes. " +
+		"For report or file delivery, call submit_result with the requested report and explicitly selected files before ending your turn. Report-only work does not require Git changes. State evidence and uncertainties honestly."
+	input = "Execute this task.\n\n" + b.String()
 	if spec.Feedback != nil {
 		input += "\nThe last review asked for changes:\n" + string(spec.Feedback.Issues) + "\n"
 		if len(spec.Feedback.Evidence) > 0 {

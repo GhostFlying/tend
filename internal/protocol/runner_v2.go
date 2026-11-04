@@ -2,9 +2,9 @@ package protocol
 
 import "fmt"
 
-// tend:compat runner-v1 protocol=1 remove=3
-// Protocol 1 retains the original workspace execution wire contract.
-// It cannot carry manager assignments or format-2 inventory.
+// tend:compat runner-v2 protocol=2 remove=4
+// Protocol 2 retains the historical format-1/2 inventory and dual-entry pins.
+// New single-entry inventories require protocol 3; old pins are never rewritten.
 
 // RunnerProtocolSupported is deliberately a two-generation communication gate.
 func RunnerProtocolSupported(version int64) bool {

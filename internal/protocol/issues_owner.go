@@ -22,7 +22,7 @@ type CreateIssuePayload struct {
 // IssueOwnerRequest selects responsibility for a new Issue. Its source and
 // assignment epoch come from the enclosing transaction, never model guesses.
 type IssueOwnerRequest struct {
-	CategoryID string `json:"category_id"`
+	CategoryID string `json:"category_id,omitempty"`
 	AgentID    string `json:"agent_id,omitempty"`
 	Reason     string `json:"reason"`
 }

@@ -51,6 +51,7 @@ type Options struct {
 }
 
 type entry struct {
+	singleEntry  bool
 	input        BuildInput
 	ownerInput   *BuildInput
 	workers      harness.Workers
@@ -102,9 +103,9 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 	entries := map[string]*entry{}
 	for _, a := range cfg.Agents {
 		r := runtimes[a.RuntimeID]
-		e := &entry{input: BuildInput{Runtime: r, Agent: a, Installation: installation[r.ID]}}
+		e := &entry{singleEntry: cfg.FormatVersion >= 3, input: BuildInput{Runtime: r, Agent: a, Installation: installation[r.ID]}}
 		ownerRuntime := r
-		if a.OwnerRuntimeID != "" {
+		if cfg.FormatVersion == 2 && a.OwnerRuntimeID != "" {
 			ownerRuntime = runtimes[a.OwnerRuntimeID]
 		}
 		if ownerRuntime.Kind == agentconfig.AppServerWorker && (slices.Contains(a.Purposes, agentconfig.IssueManager) || ownerRuntime.CLI != "" && slices.Contains(a.Purposes, agentconfig.WorkerRun)) {
@@ -155,6 +156,13 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
 		if slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun) {
 			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.reason == "" && e.workers != nil, Reason: e.reason})
+		}
+		if e.singleEntry && e.input.Runtime.Kind == agentconfig.OrcaWorker {
+			// Report the actual gap on the primary entry. No native probe or
+			// alternate executable is allowed to manufacture owner readiness.
+			manager := pin
+			manager.Purpose, manager.BackendID = "issue_manager", ""
+			out = append(out, protocol.AgentExecutor{Pin: manager, Reason: "coordination_entry_not_supported"})
 		}
 		if managerPurpose(e) {
 			pin.Purpose = "issue_manager"

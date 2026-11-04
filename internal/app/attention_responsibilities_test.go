@@ -91,8 +91,15 @@ func TestResponsibilityEscalatesOneParentThenMainBeforeHuman(t *testing.T) {
 	assertHumanProblemCount(t, h, 0)
 	_, delivery := h.say("Inspect the problem already escalated to the top coordinator")
 	turn := startHostedReview(t, h, "main", delivery)
-	p := protocol.HandleAttentionPayload{ExpectedAssignmentEpoch: 0, Reason: "The top coordinator cannot resolve this without a user choice"}
-	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "attention", ID: a.AttentionID}, rev(a.Responsibility.Revision), p, HandleAttention{Escalate: true})
+	p := protocol.HandleAttentionPayload{ExpectedAssignmentEpoch: 0, Reason: "Internal evidence access needs repair"}
+	rejected := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "attention", ID: a.AttentionID}, rev(a.Responsibility.Revision), p, HandleAttention{Escalate: true})
+	if rejected.Status != protocol.OpFailed || rejected.Error.Code != protocol.CodeInvalidRequest {
+		t.Fatal("internal problem escaped to human without missing human input", rejected)
+	}
+	assertHumanProblemCount(t, h, 0)
+	p.HumanRequirement, p.Text = "decision", "The user must choose between the two mutually exclusive goals after technical options were exhausted"
+	p.Reason = "The top coordinator cannot resolve this without a user choice"
+	op := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "attention", ID: a.AttentionID}, rev(a.Responsibility.Revision), p, HandleAttention{Escalate: true})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -873,5 +880,26 @@ func TestResponsibilityIntermediateAgentHandoffInvalidatesOldEscalation(t *testi
 	}
 	if op := supervisorHandle(t, h, root, old, false, "continue"); op.Status == protocol.OpSucceeded {
 		t.Error("old escalated route can still resolve without new intermediate supervisor")
+	}
+}
+
+func TestMainCannotPublishInternalMaterialProblemAsUnscopedHumanTodo(t *testing.T) {
+	h := hostedManagerHarness(t)
+	_, delivery := h.say("Continue the internal evidence handoff")
+	turn := startHostedReview(t, h, "main", delivery)
+	payload := protocol.CreateAttentionPayload{Kind: "action", Title: "Repair access to the original report"}
+	before := h.count("attentions")
+	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "attention"}, nil, payload, AttentionCommand{Action: "create"})
+	if op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeInvalidRequest || h.count("attentions") != before {
+		t.Fatal("internal platform work became a human obligation", op)
+	}
+	payload.Title, payload.HumanRequirement, payload.HumanEvidence = "Choose the intended scope", "decision", "The two requested goals are mutually exclusive and the original user must choose one"
+	op = hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "attention"}, nil, payload, AttentionCommand{Action: "create"})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal("actual human decision was blocked", op)
+	}
+	var attention protocol.Attention
+	if err := json.Unmarshal(op.Result, &attention); err != nil || attention.HumanRequirement != "decision" || attention.HumanEvidence != payload.HumanEvidence {
+		t.Fatal("human decision provenance was lost", attention, err)
 	}
 }

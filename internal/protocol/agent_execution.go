@@ -10,7 +10,7 @@ const CapabilityAgentExecution = "runner-agent-execution-v1"
 type AgentRequirement struct {
 	// AgentID pins a concrete identity when execution is retained by its owner.
 	AgentID    string `json:"agent_id,omitempty"`
-	CategoryID string `json:"category_id"`
+	CategoryID string `json:"category_id,omitempty"`
 	RuntimeID  string `json:"runtime_id,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Effort     string `json:"effort,omitempty"`
@@ -44,7 +44,7 @@ func (s TaskAgentSelection) ValidateForAcceptance(required bool) error {
 		} else if !validExecutionEffort(r.Effort) {
 			return Errorf(CodeInvalidRequest, "unsupported agent reasoning effort constraint")
 		}
-		if !AgentInventoryID(r.CategoryID) || (r.RuntimeID != "" && !AgentInventoryID(r.RuntimeID)) {
+		if (r.AgentID == "" && !AgentInventoryID(r.CategoryID)) || (r.CategoryID != "" && !AgentInventoryID(r.CategoryID)) || (r.RuntimeID != "" && !AgentInventoryID(r.RuntimeID)) {
 			return Errorf(CodeInvalidRequest, "agent selection requires valid category/runtime identities")
 		}
 	}
@@ -66,10 +66,10 @@ type RunExecutionPin struct {
 }
 
 func (p RunExecutionPin) Validate(host string) error {
-	if p.Purpose != "" && p.Purpose != "issue_manager" || p.Purpose == "issue_manager" && (p.BackendID != "" || p.Worker != WorkerAppServer) {
+	if p.Purpose != "" && p.Purpose != "issue_manager" || p.Purpose == "issue_manager" && (p.BackendID != "" || (p.Worker != WorkerAppServer && p.Worker != WorkerOrca)) {
 		return Errorf(CodeInvalidRequest, "invalid execution purpose")
 	}
-	if p.Identity.ExecutionEnvironmentID != host || !AgentInventoryID(p.Identity.LocalID) || p.AgentRevision == 0 || !AgentInventoryID(p.Runtime.RuntimeID) || p.Runtime.Revision == 0 || p.InventoryRevision < 1 || !AgentInventoryID(p.SnapshotID) || !strings.HasPrefix(p.PublicSHA256, "sha256:") || !p.Worker.Valid() || (p.BackendID != "git" && p.BackendID != "orca" && !(p.Purpose == "issue_manager" && p.BackendID == "" && p.Worker == WorkerAppServer)) {
+	if p.Identity.ExecutionEnvironmentID != host || !AgentInventoryID(p.Identity.LocalID) || p.AgentRevision == 0 || !AgentInventoryID(p.Runtime.RuntimeID) || p.Runtime.Revision == 0 || p.InventoryRevision < 1 || !AgentInventoryID(p.SnapshotID) || !strings.HasPrefix(p.PublicSHA256, "sha256:") || !p.Worker.Valid() || (p.BackendID != "git" && p.BackendID != "orca" && !(p.Purpose == "issue_manager" && p.BackendID == "" && (p.Worker == WorkerAppServer || p.Worker == WorkerOrca))) {
 		return Errorf(CodeInvalidRequest, "invalid named execution pin")
 	}
 	return p.Profile.Validate()

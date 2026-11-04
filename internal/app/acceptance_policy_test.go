@@ -630,3 +630,58 @@ func TestCreatorPolicyWaiverDoesNotRestoreRevokedInputAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAssignmentCarriesTaskCreationPolicyAfterIssuePolicyChanges(t *testing.T) {
+	for _, required := range []bool{false, true} {
+		t.Run(map[bool]string{false: "waived", true: "required"}[required], func(t *testing.T) {
+			h := newDeliverableHarness(t)
+			issue := policyIssue(t, h, required)
+			task := policyReportTask(t, h, issue)
+			if op := policyChange(t, h, canonicalTaskIssue(t, h, issue.IssueID), !required); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			as, ok, _ := h.claimDeliverableRun()
+			if !ok || as.TaskID != task || as.AcceptancePolicy == nil || as.AcceptancePolicy.Required != required {
+				t.Fatal("assignment read current Issue policy instead of creation snapshot", as)
+			}
+			if as.AcceptancePolicy.Creator.Kind != "owner" || as.AcceptancePolicy.RequestID == "" {
+				t.Fatal("assignment lost policy provenance", as.AcceptancePolicy)
+			}
+		})
+	}
+}
+
+func TestLegacyAssignmentDoesNotInferWaiverOrRewriteStoredPolicy(t *testing.T) {
+	h := newDeliverableHarness(t)
+	issue := policyIssue(t, h, false)
+	task := policyReportTask(t, h, issue)
+	as, ok, _ := h.claimDeliverableRun()
+	if !ok || as.TaskID != task {
+		t.Fatal(as)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		run, err := store.GetRun(t.Context(), tx.Q(), as.RunID)
+		if err != nil {
+			return err
+		}
+		lease, err := store.GetLeaseByRun(t.Context(), tx.Q(), as.RunID)
+		if err != nil {
+			return err
+		}
+		run.Protocol = 2 // An original protocol-2 run keeps its legacy prompt contract.
+		legacy, err := buildAssignment(t.Context(), tx.Q(), run, lease, h.app.leaseTTL)
+		if err != nil {
+			return err
+		}
+		frozen, err := store.TaskAcceptancePolicy(t.Context(), tx.Q(), task)
+		if err != nil {
+			return err
+		}
+		if legacy.AcceptancePolicy != nil || frozen == nil || frozen.Required {
+			t.Fatal("legacy communication rewrote or invented the creator policy", legacy, frozen)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

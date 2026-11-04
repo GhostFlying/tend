@@ -59,7 +59,20 @@ func (c ArtifactShareCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err := validateCanonicalSourceReference(ctx, tx.Q(), canonicalOwnerIssueSource(control.IssueSourceReference)); err != nil {
 		return Outcome{}, err
 	}
-	if x.Principal.Kind != protocol.PrincipalOwner {
+	internal := grant.InternalHandoff || revoke.InternalHandoff
+	if internal {
+		// Material authority follows this exact task-tree responsibility, never
+		// a generic authorization message or a sibling Issue.
+		if control.SourceMessageID != "" || control.ExpectedSourceRevision != nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "internal handoff does not grant message material authority")
+		}
+		if x.Principal.Kind != protocol.PrincipalOwner {
+			e := x.coordinationExecution
+			if e == nil || (e.Selection.Purpose != agentconfig.Main && (e.Selection.Purpose != agentconfig.IssueManager || e.IssueID != issue.IssueID || e.AssignmentEpoch != issue.AssignmentEpoch)) {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "internal handoff requires the current target responsibility")
+			}
+		}
+	} else if x.Principal.Kind != protocol.PrincipalOwner {
 		if x.Principal.Kind != protocol.PrincipalMainAgent || x.coordinationExecution == nil || x.coordinationExecution.Selection.Purpose != agentconfig.Main || control.SourceMessageID == "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only an admitted main execution can relay explicit owner sharing")
 		}
@@ -73,6 +86,9 @@ func (c ArtifactShareCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		value, err = store.GetArtifactShare(ctx, tx.Q(), revoke.ShareID)
 		if err != nil {
 			return Outcome{}, errNotFound(err, "artifact share does not exist")
+		}
+		if internal && !value.InternalHandoff {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "an internal handoff cannot revoke owner material authority")
 		}
 		if value.IssueID != issue.IssueID {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "share belongs to another Issue")
@@ -105,6 +121,15 @@ func (c ArtifactShareCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, errNotFound(err, "artifact source Issue does not exist")
 		}
+		if internal {
+			ancestor, err := responsibilityAncestor(ctx, tx.Q(), source, issue.IssueID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if !ancestor || source == issue.IssueID {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "internal handoff requires a descendant result for its ancestor responsibility")
+			}
+		}
 		var payload struct {
 			Files []protocol.ArtifactFile `json:"files"`
 		}
@@ -131,7 +156,7 @@ func (c ArtifactShareCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if duplicate {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "an active exact artifact share already exists")
 		}
-		value = protocol.ArtifactShare{ShareID: x.IDs.New(protocol.PrefixArtifactShare), Revision: 1, IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, ArtifactID: artifact.ArtifactID, SourceTaskID: artifact.TaskID, SourceIssueID: source, Digest: artifact.Digest, RefSHA256: grant.RefSHA256, Files: files, Status: "active", Reason: control.Reason, SourceMessageID: control.SourceMessageID, SourceRevision: control.ExpectedSourceRevision, CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
+		value = protocol.ArtifactShare{InternalHandoff: internal, ShareID: x.IDs.New(protocol.PrefixArtifactShare), Revision: 1, IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, ArtifactID: artifact.ArtifactID, SourceTaskID: artifact.TaskID, SourceIssueID: source, Digest: artifact.Digest, RefSHA256: grant.RefSHA256, Files: files, Status: "active", Reason: control.Reason, SourceMessageID: control.SourceMessageID, SourceRevision: control.ExpectedSourceRevision, CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
 		ref = artifact.RefJSON
 	}
 	if err := tx.PutArtifactShare(ctx, value, ref, x.Env.RequestID); err != nil {

@@ -4,6 +4,8 @@ package protocol
 // Responsibility determines whether an Agent or a human must handle it.
 // Decision answers stay in their original decision/choice, not in this record.
 type Attention struct {
+	HumanRequirement       string                   `json:"human_requirement,omitempty"`
+	HumanEvidence          string                   `json:"human_evidence,omitempty"`
 	ResolutionActor        *Principal               `json:"resolution_actor,omitempty"`
 	Responsibility         *AttentionResponsibility `json:"responsibility,omitempty"`
 	LatestActionAt         *int64                   `json:"latest_action_at,omitempty"`
@@ -36,6 +38,8 @@ type Attention struct {
 // AttentionResponsibility identifies who must handle an original question.
 // It never changes the Issue assignee or grants general access to child tasks.
 type AttentionResponsibility struct {
+	HumanRequirement      string                            `json:"human_requirement,omitempty"`
+	HumanEvidence         string                            `json:"human_evidence,omitempty"`
 	Ancestry              []AttentionResponsibilityAncestor `json:"ancestry"`
 	OriginAssignmentEpoch int64                             `json:"origin_assignment_epoch"`
 	OriginIssueID         string                            `json:"origin_issue_id"`
@@ -65,6 +69,8 @@ type AttentionResponsibilityHop struct {
 // HandleAttentionPayload preserves the original question version and routes.
 // Resolution answers it; escalation only changes the responsible recipient.
 type HandleAttentionPayload struct {
+	// Required only when main escalates to the human: fact, decision, or action.
+	HumanRequirement        string `json:"human_requirement,omitempty"`
 	ExpectedAssignmentEpoch int64  `json:"expected_assignment_epoch"`
 	Version                 int64  `json:"version,omitempty"`
 	Option                  string `json:"option,omitempty"`
@@ -102,6 +108,9 @@ type AttentionPage struct {
 	Next  string          `json:"next,omitempty"`
 }
 type CreateAttentionPayload struct {
+	// Main must justify a human obligation without an Issue responsibility.
+	HumanRequirement string `json:"human_requirement,omitempty"`
+	HumanEvidence    string `json:"human_evidence,omitempty"`
 	// Omission leaves the action time unknown; zero also means unknown.
 	LatestActionAt        *int64   `json:"latest_action_at,omitempty"`
 	LatestActionTimezone  string   `json:"latest_action_timezone,omitempty"`

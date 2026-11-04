@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,5 +390,38 @@ func TestBothWorkerRolesExposeScopedObservation(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestNativeWorkerStartsWithFrozenPolicyAndNegotiatedMailbox(t *testing.T) {
+	for _, policy := range []*protocol.IssueAcceptancePolicy{nil, {Required: true}, {Required: false}} {
+		ws, servers := fakeWorkers(t)
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w, err := ws.Start(ctx, harness.WorkerSpec{Role: protocol.RoleImplement, Dir: "/w", AcceptancePolicy: policy, Spec: json.RawMessage(`{"deliverables":["report"]}`), ReceiveMessages: func(context.Context) (*protocol.RunMessage, error) { return nil, nil }, AckMessage: func(context.Context, string) error { return nil }})
+		if err != nil {
+			cancel(context.Canceled)
+			t.Fatal(err)
+		}
+		f := <-servers
+		var start ThreadStartParams
+		if err := json.Unmarshal(f.params(methodThreadStart), &start); err != nil {
+			t.Fatal(err)
+		}
+		raw := string(f.params(methodThreadStart))
+		waived := policy != nil && !policy.Required
+		if strings.Contains(raw, "An independent reviewer will check your work.") == waived {
+			t.Fatal("native thread instructions differ from frozen policy", raw)
+		}
+		for _, name := range []string{harness.ReceiveMessagesTool, harness.AckMessageTool} {
+			if !slices.ContainsFunc(start.DynamicTools, func(tool DynamicToolSpec) bool { return tool.Name == name }) {
+				t.Fatal("native primary lacks negotiated mailbox", name, start.DynamicTools)
+			}
+		}
+		cancel(context.Canceled)
+		for range w.Events() {
+		}
+		if _, err := w.Wait(); !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
 	}
 }

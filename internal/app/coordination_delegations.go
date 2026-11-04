@@ -114,7 +114,7 @@ func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation s
 			p.Manager = &protocol.RequestIssueManagerPayload{}
 		}
 		if p.Manager != nil {
-			if p.Manager.CategoryID == "" {
+			if p.Manager.CategoryID == "" && p.Manager.AgentID == "" {
 				p.Manager.CategoryID = protocol.DefaultIssueManagerCategory
 			}
 			if p.Manager.SourceMessageID == "" || p.Manager.SourceMessageID == p.SourceMessageID {
@@ -132,7 +132,7 @@ func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation s
 		if json.Unmarshal(raw, &p) != nil {
 			return fallback
 		}
-		if p.CategoryID == "" {
+		if p.CategoryID == "" && p.AgentID == "" {
 			p.CategoryID = protocol.DefaultIssueManagerCategory
 		}
 		p.SourceMessageID = ""

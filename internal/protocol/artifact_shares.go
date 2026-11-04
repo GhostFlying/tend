@@ -2,6 +2,7 @@ package protocol
 
 // ArtifactShare grants only one immutable result to one responsibility epoch.
 type ArtifactShare struct {
+	InternalHandoff bool           `json:"internal_handoff,omitempty"`
 	ShareID         string         `json:"share_id"`
 	Revision        int64          `json:"revision"`
 	IssueID         string         `json:"issue_id"`
@@ -22,12 +23,15 @@ type ArtifactShare struct {
 }
 
 type GrantArtifactSharePayload struct {
+	// InternalHandoff permits only descendant result to ancestor responsibility.
+	InternalHandoff bool `json:"internal_handoff,omitempty"`
 	IssueControlPayload
 	ArtifactID string `json:"artifact_id"`
 	RefSHA256  string `json:"ref_sha256"`
 }
 
 type RevokeArtifactSharePayload struct {
+	InternalHandoff bool `json:"internal_handoff,omitempty"`
 	IssueControlPayload
 	ShareID               string `json:"share_id"`
 	ExpectedShareRevision int64  `json:"expected_share_revision"`

@@ -189,6 +189,10 @@ func (c HandleAttention) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		}
 		r.History = append(r.History, responsibilityHop(r, p.Reason, x.Env.RequestID))
 		if r.RecipientKind == "main" {
+			if x.Principal.Kind != protocol.PrincipalOwner && (!oneOf(p.HumanRequirement, "fact", "decision", "action") || strings.TrimSpace(p.Text) == "") {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "internal work remains with main; human escalation requires human_requirement=fact|decision|action and text identifying the missing human input")
+			}
+			r.HumanRequirement, r.HumanEvidence = p.HumanRequirement, p.Text
 			r.RecipientKind = "owner"
 			r.RecipientRef = ""
 			r.IssueID = ""

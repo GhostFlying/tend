@@ -90,7 +90,10 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	ConcurrencyFeedback bool `json:"concurrency_feedback,omitempty"`
+	// AcceptancePolicy is the immutable task creation policy, never current Issue state.
+	// Absent on legacy assignments: independent acceptance remains required.
+	AcceptancePolicy    *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
+	ConcurrencyFeedback bool                   `json:"concurrency_feedback,omitempty"`
 	// PreparationDiagnostics permits the optional release diagnosis. Older
 	// servers omit it, so new runners retain the original release payload.
 	PreparationDiagnostics bool                     `json:"preparation_diagnostics,omitempty"`

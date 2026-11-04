@@ -7,9 +7,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/domain"
-	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -54,11 +52,6 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 		}
 		if strings.TrimSpace(p.Reason) == "" || current.PendingHandoffID != p.HandoffID || current.PendingAssignee == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "the current handoff and explicit reason are required")
-		}
-		if current.PendingAssignee.Kind == protocol.IssueAssigneeAgent {
-			if err := rejectMigratedHostedAssignment(ctx, tx.Q(), current.IssueID); err != nil {
-				return Outcome{}, err
-			}
 		}
 		blockers, err := hostedHandoffBlockers(ctx, tx.Q(), current.IssueID, current.AssignmentEpoch)
 		if err != nil {
@@ -113,11 +106,6 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	if strings.TrimSpace(p.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "assignment reason is required")
 	}
-	if p.Assignee.Kind == protocol.IssueAssigneeAgent {
-		if err := rejectMigratedHostedAssignment(ctx, tx.Q(), current.IssueID); err != nil {
-			return Outcome{}, err
-		}
-	}
 	if err := resolveHostedAssignee(ctx, tx.Q(), x, p.Assignee); err != nil {
 		return Outcome{}, err
 	}
@@ -154,16 +142,6 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	return saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, canonicalOwnerIssueSource{}, p, "issue.assignment_fenced")
 }
 
-func rejectMigratedHostedAssignment(ctx context.Context, q store.Querier, issue string) error {
-	var migrated bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE issue_id=?)`, issue).Scan(&migrated); err != nil {
-		return err
-	}
-	if migrated {
-		return protocol.Errorf(protocol.CodeInvalidTransition, "migrated manager responsibilities require a category handoff")
-	}
-	return nil
-}
 func resolveHostedAssignee(ctx context.Context, q store.Querier, x *Exec, target protocol.IssueAssignee) error {
 	if target.Kind == protocol.IssueAssigneeOwner {
 		owner := x.Principal.Subject
@@ -193,29 +171,19 @@ func resolveHostedAssignee(ctx context.Context, q store.Querier, x *Exec, target
 		}
 		return nil
 	}
-	var retired bool
-	if err := q.QueryRowContext(ctx, `SELECT finalized FROM manager_runner_cutover WHERE singleton=1`).Scan(&retired); err != nil {
-		return err
+	if target.Kind != protocol.IssueAssigneeAgent {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "unknown assignee kind")
 	}
-	if retired {
-		return protocol.Errorf(protocol.CodeInvalidTransition, "hosted manager assignment is retired; publish a category task")
+	if x.hostedConfiguration != nil && x.hostedConfiguration.Public().FormatVersion < 3 && strings.HasPrefix(target.Ref, x.hostedConfiguration.Public().ExecutionEnvironmentID+"/") {
+		var retired bool
+		if err := q.QueryRowContext(ctx, `SELECT finalized FROM manager_runner_cutover WHERE singleton=1`).Scan(&retired); err != nil {
+			return err
+		}
+		if retired {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "historical hosted manager assignment is retired; explicitly migrate the definition")
+		}
 	}
-	if target.Kind != protocol.IssueAssigneeAgent || x.hostedConfiguration == nil {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "agent assignment requires registered hosted definitions")
-	}
-	env := x.hostedConfiguration.Public().ExecutionEnvironmentID
-	prefix := env + "/"
-	if !strings.HasPrefix(target.Ref, prefix) {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "agent identity is not registered in this execution environment")
-	}
-	selected, err := x.hostedConfiguration.Select(strings.TrimPrefix(target.Ref, prefix), agentconfig.IssueManager)
-	if err != nil {
-		return err
-	}
-	if hostedconfig.IdentityRef(selected.Identity) != target.Ref {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "agent identity does not match the registered definition")
-	}
-	return nil
+	return validateOrdinaryAgent(ctx, q, x, target.Ref)
 }
 func hostedHandoffBlockers(ctx context.Context, q store.Querier, issue string, epoch int64) ([]protocol.IssueBlocker, error) {
 	return views.ManagerHandoffBlockers(ctx, q, issue, epoch)
