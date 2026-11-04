@@ -351,7 +351,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		if err := m.app.AwaitNativeReceipts(cleanup, th.ID()); err != nil {
 			m.cfg.Log.ErrorContext(cleanup, "could not fence native receipts", "err", err)
 		}
-		if err := m.flushReplies(cleanup, th, drafts, "", protocol.AssistantInterrupted); err != nil {
+		if err := m.flushClosingReplies(cleanup, th, drafts, protocol.AssistantInterrupted); err != nil {
 			m.cfg.Log.ErrorContext(cleanup, "could not preserve partial replies", "err", err)
 		}
 		m.detach(th)
