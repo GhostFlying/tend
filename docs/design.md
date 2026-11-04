@@ -942,6 +942,8 @@ harness Session，不查询模型，不 enqueue 原生 RPC，也不恢复 lease 
 
 ## D173：有停止证明的原业务回执读取
 
+manager transport 的 failed 不直接代表业务失败。会话清理前的结构化退出日志只冻结当场确定的 Issue/Run/epoch 和 conversation，并分开记录原 serve 返回错误、context cause、关闭触发分支和后续 cleanup error；pool 在 cancel 前记录退出阶段、原错误和直接处理的 delivery request。日志不缓存跨回合或重连的 thread/turn/request 身份，未知字段省略；显式关闭仅记录调用处已知的 initiating request。日志不包含正文、prompt、工具参数、环境或凭据，不新增业务效果，也不代替原生回执和物理停止证明。详见[观测计划](plans/manager-session-diagnostics.md)。
+
 原 manager 成功 close、原事件全部应用、独立 stopped 请求已成功且末游标相同，仍不代表原业务完成。若唯一剩余阻塞是原业务收据，`task reconcile-manager --mode read_receipts` 可在同一事务中校验 Task CAS、原 Run/lease/host、assignment epoch、冻结执行 pin、close 原结果和 stopped 原 payload 摘要，结束旧 transport 并创建唯一 receipt-only 后继。原业务请求、未知结果、native pending 与原始事件均保留；相同请求重试不增加代次。默认 settle 仍须业务收据全部对清。
 
 reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能绕维护、park 或其他执行占位。它只按原 binding resume 原 thread，沿冻结 AppliedModel/provider/effort；缺身份或配置继续阻塞，不以当前模型目录、业务 readiness probe、新 thread、摘要、迁移或业务工具替代读取。只有原身份的真实 native 终态与完整 consumed sources 能经既有对账事务结清原 pending；物理停止、内部 repair 审计或日志里的终态线索不能代替该回执。
