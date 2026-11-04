@@ -1029,3 +1029,8 @@ successor 动作保留身份，legacy 查询不物化 policy；新的独立 resu
 续接以及旧 yield 合同。N/N−1 逐项验证旧默认不变，新 typed wait 独立验证无后继。runner
 wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 版本，也无旧通信适配器
 需要登记退役；未来若要移除旧默认，必须独立实施版本化迁移。详见[兼容修正计划](plans/decision-continuation-compatibility.md)。
+
+
+## D175：TraeX 原 rollout 的终态补证
+
+独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证仅替代缺结束时间的弱观测，不覆盖冲突身份或已有确定原生结果，不创建会话或重发输入。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。
