@@ -344,3 +344,84 @@ func TestCapabilityRequiredInputFreezeFilteringAndPagination(t *testing.T) {
 		t.Fatal(page3, err)
 	}
 }
+
+func TestCapabilityRevalidationRetainsOriginalPinAndSelectionEvidence(t *testing.T) {
+	h, r, pin := capabilitySetup(t)
+	taskID := capabilityTask(t, h)
+	e := capabilityEvidence(h, r, pin, 1)
+	target := protocol.Target{Type: "host", ID: "linux-1"}
+	if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerCapabilityEvidence, target, protocol.ReportCapabilityEvidencePayload{Runtime: r, Evidence: e}, rev(1)), ReportCapabilityEvidence{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil), Claim{})
+	var claimed claimResult
+	if err := json.Unmarshal(op.Result, &claimed); err != nil || claimed.Assignment.CapabilityBinding == nil {
+		t.Fatal(op, err)
+	}
+	selected, _ := json.Marshal(claimed.Assignment.CapabilityBinding.Evidence)
+	var inv store.AgentInventoryRow
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		inv, err = store.GetAgentInventory(t.Context(), tx.Q(), "linux-1")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inv.Projection.Agents[1].Revision++
+	_, hash, err := protocol.CanonicalAgentInventory(inv.Projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, r, inv.Projection, hash, 2, 1, "new-unrelated-snapshot"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	for i := range r.AgentExecutors {
+		r.AgentExecutors[i].Pin.SnapshotID = "new-unrelated-snapshot"
+		r.AgentExecutors[i].Pin.PublicSHA256 = hash
+		r.AgentExecutors[i].Pin.InventoryRevision = 2
+		if i == 1 {
+			r.AgentExecutors[i].Pin.AgentRevision++
+		}
+	}
+	r.AgentContinuations = []protocol.AgentExecutor{{Pin: pin, Available: true}}
+	r.ContinuationBackend = "git"
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentContinuation)
+	h.clock.Advance(6 * time.Minute)
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	fresh := capabilityEvidence(h, r, pin, 2)
+	report := h.env(protocol.OpRunnerCapabilityEvidence, target, protocol.ReportCapabilityEvidencePayload{Runtime: r, Evidence: fresh}, rev(2))
+	if op := h.exec(runner("linux-1"), report, ReportCapabilityEvidence{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		original, err := store.GetRunCapabilityBinding(t.Context(), tx.Q(), claimed.Assignment.RunID)
+		if err != nil {
+			return err
+		}
+		body, _ := json.Marshal(original.Evidence)
+		if string(body) != string(selected) || original.Pin != pin {
+			t.Fatal("revalidation rewrote original selection")
+		}
+		run, err := store.GetRun(t.Context(), tx.Q(), claimed.Assignment.RunID)
+		if err != nil {
+			return err
+		}
+		lease, err := store.GetLeaseByRun(t.Context(), tx.Q(), claimed.Assignment.RunID)
+		if err != nil {
+			return err
+		}
+		as, err := buildAssignment(t.Context(), tx.Q(), run, lease, h.app.leaseTTL, h.clock.Now().UnixMilli())
+		if err != nil {
+			return err
+		}
+		if as.TaskID != taskID || as.Execution == nil || *as.Execution != pin || as.CapabilityBinding.Revalidation == nil || as.CapabilityBinding.Revalidation.RequestID != report.RequestID || as.CapabilityBinding.CurrentMatch.State != "eligible" {
+			t.Fatal("same-entry recovery missing", as.CapabilityBinding)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -958,12 +958,14 @@ Capability 与角色 category、runner feature 和 CLI 覆盖目录分别建模�
 
 Task 两 role 在既有 AgentRequirement 中分别冻结 `required_capabilities`。定义必须显式 revision；集合比较/克隆/规范化不丢字段。claim 在既有身份、owner、reviewer、host/backend、workspace、共享预算围栏之内使用统一纯 matcher；所有 required 必须来自同一 pin。证据与 required digest 独立写入不可变 RunCapabilityBinding，与 run/pin/lease/request/event 原子提交，保持 RunExecutionPin 的可比较性。assignment 只向协商 peer 发送新 binding；启动前检查原 TTL、incarnation 和来源，再调用 adapter 的原子启动入口，失败记录 capability_lost，不能换身份或 provider。
 
-本机 `agents local capabilities verify/status/reconcile` 使用新增 journal 16 追加表。先持久记录原请求，唯一插入者最多探测一次，timeout≤30s，无付费调用。未知/丢响应不重新探测；reconcile 只读同原 server 请求与 payload hash。新 incarnation 已围栏原进程且 server 原请求未记录时，才能明确结束旧未知状态并由管理员发起新动作。status 保留原输入、信封与 receipt；控制 API 不接收用户自填证据。
+本机 `agents local capabilities verify/status/reconcile` 使用新增 journal 16/17 追加表。先持久记录原请求，唯一插入者最多探测一次，timeout≤30s，无付费调用。未知/丢响应不重新探测；reconcile 只读同原 server 请求与 payload hash。新 incarnation 已围栏原进程且 server 原请求未记录时，才能明确结束旧未知状态并由管理员发起新动作。status 保留原输入、信封与 receipt；控制 API 不接收用户自填证据。
 
 公共定义、Agent 当前/历史证据及 Task explain 提供具名 CLI/API；协调工具只有读取目录和合法 Issue Task 的能力解释。worker 的原观察接口仅补本 run binding，role 指令携带本 role required。分页游标固定筛选、水位；可变目录/匹配事实发生变化时拒绝旧游标，不能悄然跳项。Task list 可按 capability 与 role 筛选，Task show/run 保留冻结 binding。必要 UI 在现有 Agent/Task 详情展示声明、工具实证、最近调用、失效及候选原因，不实施其他 UI 产品目标。
 
 已有维护 sweep 对等待十分钟仍不满足的 Task/spec/role 产生一次持久 Attention 和事件，不调用模型/验证、不循环派发 probe。Task 仍诚实等待，可修同入口配置、显式补证据或修订未来 spec；未知先对账。
 
-协议经逐发送点评估采用 2/1 上的显式 feature `executor-capabilities-v1`：新 runner 先声明 feature，server 仅对 journal≥16 的 peer 回 ack；登记扩展要求双方协商，旧 peer 的 status 不带扩展 projection，非空 required 不给不支持的新请求或重放。新字段不进入旧默认 assignment/spec，旧无要求任务保持原义，因此本变更不递增协议、不删 1 适配。server schema 追加 88，runner journal 追加 16；旧 reader 必须拒绝新存储，历史 snapshot/hash 不重写。实际部署前的协议库存/排空和 downgrade 验证属于独立交付合同。
+协议经逐发送点评估采用 2/1 上的显式 feature `executor-capabilities-v1`：新 runner 先声明 feature，server 仅对 journal≥16 的 peer 回 ack；登记扩展要求双方协商，旧 peer 的 status 不带扩展 projection，非空 required 不给不支持的新请求或重放。新字段不进入旧默认 assignment/spec，旧无要求任务保持原义，因此本变更不递增协议、不删 1 适配。server schema 追加 88，runner journal 追加 16/17；旧 reader 必须拒绝新存储，历史 snapshot/hash 不重写。实际部署前的协议库存/排空和 downgrade 验证属于独立交付合同。
 
 本候选的设计边界是保守可用的基础逻辑与 adapter 合同；真实入口工具枚举、受信任 profile/同 session 执行与一次有界 image_gen 验证仍须取得真实证据，不能把 unknown 当完成。Refs: D123、D128、D142。实施计划见 `docs/plans/capability-foundation.md`。
+
+D174 续接补充：显式验证同一已保留 snapshot 可以追加 run.capability_revalidated 事实和证据引用，不修改原 RunCapabilityBinding。assignment 的 current_match/revalidation 指明当前资格，runner 在 journal 17 追加原服务器 receipt 投影；原 assignment_json、选择 pin 和原证据字节不变。未验证、过期或失效仍阻止启动；复验不替代原租约、control 和 unknown 对账，也不自动恢复业务。

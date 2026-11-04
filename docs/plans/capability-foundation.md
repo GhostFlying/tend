@@ -114,6 +114,6 @@
 
 ## 已落地候选批次
 
-本次实现依据 D174。新增 server migration 88、runner journal 16，定义/声明/证据/两 role required、具名查询与本机验证恢复、claim 原子绑定/launch 围栏和必要详情投影。保守 adapter 边界已在本仓库设计实现，不再被当作全部编码的外部前置；当前生产 adapters 仍明确不支持 authoritative inventory/atomic launch，真实调用和完整生产闭环保持未验证。
+本次实现依据 D174。新增 server migration 88、runner journal 16/17，定义/声明/证据/两 role required、具名查询与本机验证恢复、claim 原子绑定/launch 围栏和必要详情投影。保守 adapter 边界已在本仓库设计实现，不再被当作全部编码的外部前置；当前生产 adapters 仍明确不支持 authoritative inventory/atomic launch，真实调用和完整生产闭环保持未验证。
 
 定义 read 的 CLI 修订参数采用 `--definition-revision`，避免与既有 CAS flag 重名；对应 HTTP 仍为 revision。session prepare/adopt 本批明确 unsupported，不以 profile 推断填补。原始设计/验收文件继续作为原作者冻结输入，不另建调查。详细验证、矩阵与未完成边界随候选报告交付；独立 review、CI、合入和部署不会由本实现者自报通过。

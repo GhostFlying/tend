@@ -25,7 +25,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 16
+const CurrentVersion int64 = 17
 
 // Run phases.
 const (
@@ -206,6 +206,7 @@ func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
 			r.Envelope.ExpectedControlRevision = &revision.Int64
 		}
 		r.RunID = runID.String
+
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -252,6 +253,9 @@ func (j *Journal) AcceptAssignmentFromWorker(ctx context.Context, as protocol.As
 			as.RunID, as.LeaseID, as.RunToken, string(body), j.now().UnixMilli(), worker); err != nil {
 			return fmt.Errorf("journal: put run: %w", err)
 		}
+		if err := recordCapabilityReceipt(ctx, tx, as); err != nil {
+			return err
+		}
 		if claimID != "" {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id = ?`, claimID); err != nil {
 				return fmt.Errorf("journal: forget claim: %w", err)
@@ -273,7 +277,7 @@ func (j *Journal) BindUnstartedWorkerOrigin(ctx context.Context, runID string, w
 
 // Runs returns the runs that are not done.
 func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held, COALESCE(worker_result_json,''), COALESCE(worker_done_at,0), stopped_confirmed, worker_kind FROM runs
+	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held, COALESCE(worker_result_json,''), COALESCE(worker_done_at,0), stopped_confirmed, worker_kind, COALESCE((SELECT binding_json FROM run_capability_receipts c WHERE c.run_id=runs.run_id ORDER BY c.sequence DESC LIMIT 1),'') FROM runs
 		WHERE phase <> 'done' ORDER BY run_id`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list runs: %w", err)
@@ -282,16 +286,24 @@ func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
 	var out []Run
 	for rows.Next() {
 		var (
-			r      Run
-			body   string
-			result string
+			r          Run
+			body       string
+			result     string
+			capability string
 		)
-		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held, &result, &r.WorkerDoneAtMillis, &r.StoppedConfirmed, &r.WorkerKind); err != nil {
+		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held, &result, &r.WorkerDoneAtMillis, &r.StoppedConfirmed, &r.WorkerKind, &capability); err != nil {
 			return nil, fmt.Errorf("journal: scan run: %w", err)
 		}
 		r.WorkerResult = json.RawMessage(result)
 		if err := json.Unmarshal([]byte(body), &r.Assignment); err != nil {
 			return nil, fmt.Errorf("journal: decode assignment: %w", err)
+		}
+		if capability != "" {
+			var binding protocol.RunCapabilityBinding
+			if err := json.Unmarshal([]byte(capability), &binding); err != nil {
+				return nil, err
+			}
+			r.Assignment.CapabilityBinding = &binding
 		}
 		out = append(out, r)
 	}
