@@ -27,7 +27,7 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 			ctx := t.Context()
 			clock := testkit.NewClock()
 			path := filepath.Join(t.TempDir(), "usage.db")
-			db, err := store.Open(ctx, path, clock.Now)
+			db, err := openAppFixture(ctx, path, clock.Now)
 			if err != nil {
 				t.Fatal(err)
 			}

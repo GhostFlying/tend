@@ -11,7 +11,7 @@ import (
 
 func TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents(t *testing.T) {
 	ctx := t.Context()
-	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), testkit.NewClock().Now)
+	s, err := viewFixture.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), testkit.NewClock().Now)
 	if err != nil {
 		t.Fatal(err)
 	}

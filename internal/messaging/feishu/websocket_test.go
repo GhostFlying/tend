@@ -19,15 +19,18 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/gorilla/websocket"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 )
+
+var feishuFixture storefixture.Template
 
 func websocketApp(t *testing.T) (*app.App, *store.Store, *testkit.Clock) {
 	t.Helper()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 81)
-	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	db, err := feishuFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
