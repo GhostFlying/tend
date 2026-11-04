@@ -81,7 +81,11 @@ func (inputs localModuleInputs) capture(dir string, files []string, module *goMo
 		if err != nil {
 			return true, fmt.Errorf("read mutable module build input: %w", err)
 		}
-		inputs[path] = hash(data)
+		info, err := os.Stat(path)
+		if err != nil {
+			return true, fmt.Errorf("stat mutable module build input: %w", err)
+		}
+		inputs[path] = hash(fmt.Appendf(nil, "%d:%s", info.Mode()&0o111, hash(data)))
 	}
 	if module.Replace != nil {
 		module = module.Replace

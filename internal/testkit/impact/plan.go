@@ -99,6 +99,9 @@ func Select(current Snapshot, index *Index, invalid string) Plan {
 	if current.Profile.ModuleConfig != "" {
 		full("alternate module or workspace requires complete validation")
 	}
+	if current.Profile.LocalModules != "" {
+		full("mutable local module requires complete validation")
+	}
 	if index == nil {
 		full("baseline unavailable: " + invalid)
 	} else {
