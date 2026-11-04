@@ -114,7 +114,17 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	run, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { defer close(done); _ = m.Run(run) }()
-	defer func() { cancel(); <-done }()
+	phase := "context_cancelled"
+	var poolErr error
+	var request string
+	var outcome any
+	defer func() {
+		m.cfg.Log.InfoContext(run, "manager pool attachment ending", "instance", m.cfg.Instance,
+			"conversation_id", id, "pool_exit_phase", phase, "pool_error", poolErr,
+			"delivery_request_id", request, "delivery_outcome", outcome, "context_cause", context.Cause(run))
+		cancel()
+		<-done
+	}()
 	// Startup settles abandoned turns before reconciliation can acknowledge
 	// their deliveries. Do not tear down an uninitialized recovery process.
 	waitCtx := run
@@ -125,6 +135,7 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	thread, err := m.waitStartup(waitCtx)
 	stopWait()
 	if err != nil {
+		phase, poolErr = "startup_failed", err
 		if !receiptRead && run.Err() == nil {
 			if deferErr := p.App.DeferAgentStartup(run, id); deferErr != nil {
 				m.cfg.Log.WarnContext(run, "could not defer failed background startup", "err", deferErr)
@@ -133,6 +144,7 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 		return
 	}
 	if thread == nil {
+		phase = "startup_paused"
 		// Preparation can commit after pool selection but before serve reads
 		// its admission gate. There is no native execution or retry to defer.
 		return
@@ -140,32 +152,41 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	dest := "background_thread:" + id
 	inflight, err := p.App.InFlightDeliveries(run)
 	if err != nil {
+		phase, poolErr = "inflight_read_failed", err
 		return
 	}
 	for _, d := range inflight {
 		if d.Destination == dest {
+			request, outcome = d.RequestID, nil
 			if err := p.App.FinishDelivery(run, d, m.Reconcile(run, d)); err != nil {
+				phase, poolErr = "inflight_settlement_failed", err
 				return
 			}
 		}
 	}
 	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+		phase = "receipt_only_finished"
 		// Reconcile original delivery receipts above, but never start fresh
 		// business input on the fenced executor.
 		return
 	}
 	for run.Err() == nil {
 		if paused, err := p.App.UpgradePausesMain(run); err != nil || paused {
+			phase, poolErr = "admission_paused", err
 			return
 		}
 		d, _, ok, err := p.App.NextDelivery(run, dest)
 		if err != nil || !ok {
+			phase, poolErr = "delivery_unavailable", err
 			return
 		}
+		request, outcome = d.RequestID, nil
 		result := m.Deliver(run, d)
+		outcome = result.Outcome
 		if d.Operation == app.OpRecoverAgent {
 			pending, err := p.App.NativeReceiptPending(run, d.RequestID)
 			if err != nil {
+				phase, poolErr = "recovery_receipt_read_failed", err
 				return
 			}
 			if pending {
@@ -175,6 +196,7 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 				_, err := m.waitThread(readCtx)
 				stopRead()
 				if err != nil {
+					phase, poolErr = "recovery_attachment_failed", err
 					return
 				}
 				result = m.Reconcile(run, d)
@@ -183,10 +205,13 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 		if result.Outcome == app.Retry {
 			result.RetryAfter = max(result.RetryAfter, time.Second*5)
 		}
+		outcome = result.Outcome
 		if err = p.App.FinishDelivery(run, d, result); err != nil {
+			phase, poolErr = "delivery_settlement_failed", err
 			return
 		}
 		if selected := m.namedSelection(); selected != nil && selected.RunnerRunID != "" {
+			phase = "runner_delivery_returned"
 			return
 		}
 	}

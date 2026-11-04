@@ -193,6 +193,8 @@ func (m *Manager) Run(ctx context.Context) error {
 // handles the thread's events until the session ends.
 func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	started := false
+	diagnostics := m.sessionDiagnostics(nil)
+	defer func() { diagnostics.exit(ctx, startupErr) }()
 	defer func() {
 		if !started && ctx.Err() == nil {
 			m.notifyStartupExit(startupErr)
@@ -227,6 +229,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.named = &copy
 	}
 	m.namedMu.Unlock()
+	if named {
+		diagnostics = m.sessionDiagnostics(&selected)
+	}
 	if named && selected.RequireReceiptReader {
 		receiptOnly = true
 		selected, err = m.restoreReceiptOnlyModel(ctx, selected)
@@ -258,7 +263,8 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.mu.Lock()
 		ownedPermits.closed = true
 		m.mu.Unlock()
-		closeErr := s.Close()
+		diagnostics.exit(ctx, startupErr)
+		closeErr := diagnostics.close(ctx, s, "serve_cleanup")
 		flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if closeErr == nil {
@@ -269,7 +275,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			}
 			m.mu.Unlock()
 			if err := m.app.StopAuxiliaryConcurrency(flush, ids); err != nil {
-				m.cfg.Log.ErrorContext(flush, "settle auxiliary concurrency", "err", err)
+				diagnostics.cleanup(flush, slog.LevelError, "settle_auxiliary_concurrency", err)
 			}
 		}
 		m.syncNativeUsageState(flush, true)
@@ -355,16 +361,17 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	defer func() {
+		diagnostics.exit(ctx, startupErr)
 		m.mu.Lock()
 		m.archiveTeardown = true
 		m.mu.Unlock()
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if err := m.app.AwaitNativeReceipts(cleanup, th.ID()); err != nil {
-			m.cfg.Log.ErrorContext(cleanup, "could not fence native receipts", "err", err)
+			diagnostics.cleanup(cleanup, slog.LevelError, "fence_native_receipts", err)
 		}
 		if err := m.flushClosingReplies(cleanup, th, drafts, protocol.AssistantInterrupted); err != nil {
-			m.cfg.Log.ErrorContext(cleanup, "could not preserve partial replies", "err", err)
+			diagnostics.cleanup(cleanup, slog.LevelError, "preserve_partial_replies", err)
 		}
 		m.detach(th)
 		m.mu.Lock()
@@ -377,7 +384,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			}
 		}
 		if err := m.app.SettleOpenTurns(cleanup, th.ID()); err != nil {
-			m.cfg.Log.ErrorContext(ctx, "could not settle interrupted turns", "err", err)
+			diagnostics.cleanup(cleanup, slog.LevelError, "settle_interrupted_turns", err)
 		}
 	}()
 	lastConcurrencyActivity := int64(0)
@@ -508,25 +515,27 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		// Keep applying final usage/output while the runner drains and closes
 		// its native process. Delivery cancellation must not cancel this pump.
 		defer func() {
+			diagnostics.exit(ctx, startupErr)
 			drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
 			closed := make(chan error, 1)
-			go func() { closed <- s.Close() }()
+			go func() { closed <- diagnostics.close(drain, s, "serve_final_drain") }()
 			for {
 				select {
 				case err := <-closed:
 					if err != nil {
-						m.cfg.Log.WarnContext(drain, "manager native close requires reconciliation", "err", err)
+						diagnostics.cleanup(drain, slog.LevelWarn, "native_close", err)
 					}
 					return
 				case <-drain.Done():
+					diagnostics.cleanup(drain, slog.LevelWarn, "final_drain", drain.Err())
 					return
 				case event, ok := <-th.Events():
 					if !ok {
 						return
 					}
 					if err := processEvent(drain, event); err != nil {
-						m.cfg.Log.WarnContext(drain, "manager final event requires reconciliation", "err", err)
+						diagnostics.cleanup(drain, slog.LevelWarn, "final_event", err)
 					}
 				}
 			}
@@ -1316,7 +1325,7 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		// overlap the next message's turn; the thread is resumed in a
 		// new session.
 		if s := m.detach(th); s != nil {
-			_ = s.Close()
+			_ = m.closeSession(ctx, s, d.RequestID, "turn_start_unconfirmed")
 		}
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "turn/start did not answer; the message may or may not be in the conversation"}
 	}

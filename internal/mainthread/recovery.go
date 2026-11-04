@@ -207,7 +207,7 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 			return app.DeliveryResult{Outcome: app.Retry, RetryAfter: 5 * time.Second}
 		}
 		if s := m.detach(th); s != nil {
-			_ = s.Close()
+			_ = m.closeSession(ctx, s, d.RequestID, "recovery_start_unconfirmed")
 		}
 		return m.blockRecovery(context.WithoutCancel(ctx), d, "Native continuation start did not answer; automatic resend is disabled.")
 	}
@@ -243,10 +243,10 @@ wait:
 	rec.Failure = a.failure
 	m.mu.Unlock()
 	if err := m.app.SettleMainSteers(context.WithoutCancel(ctx), th.ID(), id, rec.Status); err != nil {
-		return m.deferRecoveryReceipt(ctx, th, err)
+		return m.deferRecoveryReceipt(ctx, th, d.RequestID, err)
 	}
 	if err := m.app.PutMainTurn(context.WithoutCancel(ctx), rec); err != nil {
-		return m.deferRecoveryReceipt(ctx, th, err)
+		return m.deferRecoveryReceipt(ctx, th, d.RequestID, err)
 	}
 	return app.DeliveryResult{Outcome: app.Delivered}
 }
@@ -318,11 +318,11 @@ func (m *Manager) retainedRecoverySources(ctx context.Context, request, message 
 
 // A known native completion survives failed local settlement through the same
 // read-only reconciliation path as a disconnected execution.
-func (m *Manager) deferRecoveryReceipt(ctx context.Context, th harness.Thread, cause error) app.DeliveryResult {
+func (m *Manager) deferRecoveryReceipt(ctx context.Context, th harness.Thread, request string, cause error) app.DeliveryResult {
 	if err := m.app.AwaitNativeReceipts(context.WithoutCancel(ctx), th.ID()); err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not defer recovery receipt", "err", err)
 		if s := m.detach(th); s != nil {
-			_ = s.Close()
+			_ = m.closeSession(ctx, s, request, "recovery_receipt_persistence_failed")
 		}
 	}
 	return retry(cause)
