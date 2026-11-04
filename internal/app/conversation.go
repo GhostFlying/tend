@@ -323,7 +323,12 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 // RecordAgentMessage handles conversation.record_agent_message: the main
 // agent said something in a turn. Its request ID is derived from the
 // harness item, so recording the same item again has no effect.
-type RecordAgentMessage struct{ Reconciled bool }
+type RecordAgentMessage struct {
+	Reconciled bool
+	// PreservePrefix is an internal database-replay constraint. Native terminal
+	// events keep their normal ability to replace provisional streaming text.
+	PreservePrefix bool
+}
 
 type recordAgentMessagePayload struct {
 	Body         string                  `json:"body"`
@@ -351,21 +356,50 @@ func (c RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	if !utf8.ValidString(p.Body) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be UTF-8")
 	}
+	if c.PreservePrefix {
+		if err := preserveRecordedReplyPrefix(ctx, tx, x.Principal.Thread, p); err != nil {
+			return Outcome{}, err
+		}
+	}
 	switch p.Status {
 	case "", protocol.AssistantStreaming, protocol.AssistantCompleted, protocol.AssistantInterrupted, protocol.AssistantFailed, protocol.AssistantUnknown:
 	default:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown assistant status")
 	}
-	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p); handled {
+	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p, c.PreservePrefix); handled {
 		return out, err
 	}
-	return recordVisibleAgentMessage(ctx, x, tx, c.Reconciled)
-}
-func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, reconciled ...bool) (Outcome, error) {
-	return recordVisibleAgentMessageWithFiles(ctx, x, tx, nil, reconciled...)
+	return recordVisibleAgentMessage(ctx, x, tx, agentMessageRecordPolicy{reconciled: c.Reconciled, extendInterruptedPrefix: c.PreservePrefix})
 }
 
-func recordVisibleAgentMessageWithFiles(ctx context.Context, x *Exec, tx *store.Tx, files []string, reconciled ...bool) (Outcome, error) {
+func preserveRecordedReplyPrefix(ctx context.Context, tx *store.Tx, thread string, p recordAgentMessagePayload) error {
+	rows, err := tx.Q().QueryContext(ctx, `SELECT i.body FROM conversation_agent_messages a JOIN conversation_messages i ON i.message_id=a.message_id WHERE a.thread_id=? AND a.turn_id=? AND a.item_id=? UNION ALL SELECT body FROM background_replies WHERE thread_id=? AND turn_id=? AND item_id=?`, thread, p.TurnID, p.ItemID, thread, p.TurnID, p.ItemID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var original string
+		if err := rows.Scan(&original); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(p.Body, original) {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "database replay does not preserve the recorded reply prefix")
+		}
+	}
+	return rows.Err()
+}
+
+type agentMessageRecordPolicy struct {
+	reconciled              bool
+	extendInterruptedPrefix bool
+}
+
+func recordVisibleAgentMessage(ctx context.Context, x *Exec, tx *store.Tx, policy ...agentMessageRecordPolicy) (Outcome, error) {
+	return recordVisibleAgentMessageWithFiles(ctx, x, tx, nil, policy...)
+}
+
+func recordVisibleAgentMessageWithFiles(ctx context.Context, x *Exec, tx *store.Tx, files []string, policy ...agentMessageRecordPolicy) (Outcome, error) {
 	var p recordAgentMessagePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -402,7 +436,7 @@ func recordVisibleAgentMessageWithFiles(ctx context.Context, x *Exec, tx *store.
 			// Terminal text cannot be revived by a delayed delta. A streaming
 			// update is cumulative and must extend the committed prefix; the
 			// authoritative completed item may replace it with shorter text.
-			restore := len(reconciled) > 0 && reconciled[0] && (row.Status == string(protocol.AssistantInterrupted) || row.Status == string(protocol.AssistantUnknown))
+			restore := len(policy) > 0 && (policy[0].reconciled && (row.Status == string(protocol.AssistantInterrupted) || row.Status == string(protocol.AssistantUnknown)) || policy[0].extendInterruptedPrefix && row.Status == string(protocol.AssistantInterrupted) && status == protocol.AssistantInterrupted && strings.HasPrefix(p.Body, old.Body))
 			if (row.Status != string(protocol.AssistantStreaming) && !restore) || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old.Body)) || (old.Body == p.Body && row.Status == string(status)) {
 				return result, nil
 			}

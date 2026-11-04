@@ -921,3 +921,16 @@ draft 只记录成功消费的协调游标，确认时映射回各原 Run；前�
 确认失败仍可用原身份重试。此确认不是原生 turn 成功或业务回执对账，不删除未知效果；
 成功 close 的完整 applied 守卫和 runner 冻结的信封、请求 ID、末游标均不变。
 见[实施计划](plans/manager-native-rpc-reliability.md)。
+
+已 lapsed 的原 manager 若仍有 closing 与未决业务收据，普通 active-only admission
+不再承担其回复事件消费。BackgroundPool 在正常 claim 前可识别原 task/run/lease、
+冻结 pin/epoch、原 thread 和已确认 resume 全部匹配的数据库回放范围；它不创建
+harness Session，不查询模型，不 enqueue 原生 RPC，也不恢复 lease 或生成新 Run。
+同一读取快照固定原 item 的回复 delta，包括重建全文所需的已应用前缀；完整消费后
+复用上述持久化确认。回放的记录事务要求已存可见或后台正文仍是本次正文的前缀，
+不能用剩余 suffix 覆写旧输出。普通原生终结处理保留既有默认语义。错误身份、非回复
+事件或不兼容正文继续 unknown，晚到 close/stopped 仍由原凭据和信封正常归账；
+该本地读取边界不代表原生 turn 结束或业务结果已确定。
+见[实施计划](plans/retained-manager-db-replay.md)。
+
+数据库专用回放计入维护 drain，但不能作为 live interrupt 的执行证明；准入检查与 pool 注册共用 drain 锁。原 interrupted 正文可按同 item 的真实累计前缀延长，其他终态不因此可改写。未发布 background buffer 的精确终态正文也可证明持久化，确认 delta 不发布或结清其 batch。

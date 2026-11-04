@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -29,16 +30,8 @@ func (a *App) AcknowledgeManagerReplyPrefix(ctx context.Context, run string, seq
 		if !original {
 			return protocol.Errorf(protocol.CodeUnknownOutcome, "reply prefix has no matching original delta")
 		}
-		row, err := store.GetAgentMessage(ctx, tx.Q(), thread, turn, item)
-		if err != nil {
+		if err := durableManagerReplyPrefix(ctx, tx.Q(), thread, turn, item, body); err != nil {
 			return err
-		}
-		message, err := store.GetConversationItem(ctx, tx.Q(), row.MessageID)
-		if err != nil {
-			return err
-		}
-		if row.Status == string(protocol.AssistantStreaming) || row.Status == "" || message.Body != body {
-			return protocol.Errorf(protocol.CodeUnknownOutcome, "terminal reply prefix has not been persisted")
 		}
 		rows, err := tx.Q().QueryContext(ctx, `SELECT seq,applied FROM manager_native_events WHERE run_id=? AND seq<=? AND json_extract(body_json,'$.thread_id')=? AND json_extract(body_json,'$.native.Kind')='agent_message_delta' AND json_extract(body_json,'$.native.TurnID')=? AND json_extract(body_json,'$.native.ItemID')=?`, run, sequence, thread, turn, item)
 		if err != nil {
@@ -75,4 +68,30 @@ func (a *App) AcknowledgeManagerReplyPrefix(ctx context.Context, run string, seq
 		a.notifyChange()
 	}
 	return err
+}
+
+// A deferred background reply is durable without being published or settling
+// its batch. Its original turn/message binding must still match exactly.
+func durableManagerReplyPrefix(ctx context.Context, q store.Querier, thread, turn, item, body string) error {
+	row, err := store.GetAgentMessage(ctx, q, thread, turn, item)
+	if err == nil {
+		message, err := store.GetConversationItem(ctx, q, row.MessageID)
+		if err != nil {
+			return err
+		}
+		if row.Status != string(protocol.AssistantStreaming) && row.Status != "" && message.Body == body {
+			return nil
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	} else {
+		var durable bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM background_replies r JOIN background_batches b USING(batch_id) JOIN main_turns t ON t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id WHERE r.thread_id=? AND r.turn_id=? AND r.item_id=? AND r.kind='message' AND r.status IN ('interrupted','unknown','completed','failed') AND r.body=?)`, thread, turn, item, body).Scan(&durable); err != nil {
+			return err
+		}
+		if durable {
+			return nil
+		}
+	}
+	return protocol.Errorf(protocol.CodeUnknownOutcome, "terminal reply prefix has not been persisted")
 }
