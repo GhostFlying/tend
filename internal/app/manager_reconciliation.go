@@ -137,6 +137,13 @@ func managerRunReconciliation(ctx context.Context, q store.Querier, task, run st
 	if out.PendingBusinessReceipts {
 		out.Blockers = append(out.Blockers, "business_receipts_unreconciled")
 	}
+	stop, err := managerPhysicalStopProof(ctx, q, run, l.LeaseID)
+	if err != nil {
+		return out, err
+	}
+	if stop != nil {
+		out.StoppedRequestID, out.StoppedPayloadSHA256, out.StoppedLastSequence = stop.request, stop.hash, stop.sequence
+	}
 	out.CanSettleWaiting = len(out.Blockers) == 0
 	return out, nil
 }
@@ -156,6 +163,9 @@ func (ReconcileManagerRun) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	var p protocol.ReconcileManagerRunPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	if p.Mode != "" && p.Mode != "read_receipts" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager reconciliation mode")
 	}
 	if p.RunID == "" || p.LeaseID == "" || p.CloseRequestID == "" || len(p.CloseResultSHA256) != sha256.Size*2 || strings.TrimSpace(p.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "exact original run, lease, close receipt SHA256 and reason required")
@@ -188,6 +198,9 @@ func (ReconcileManagerRun) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	}
 	if s.Observed == protocol.RunFinished || s.Observed == protocol.RunFailed {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "original manager run already ended")
+	}
+	if p.Mode == "read_receipts" {
+		return admitManagerReceiptReader(ctx, x, tx, s, p, m)
 	}
 	if !s.CanSettleWaiting {
 		return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "original native and business receipts require reconciliation before settling this manager")

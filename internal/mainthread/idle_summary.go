@@ -97,6 +97,9 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	if !m.cfg.MaintenanceEnabled {
 		return nil
 	}
+	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+		return nil
+	}
 	if !m.workMu.TryLock() {
 		return nil
 	}

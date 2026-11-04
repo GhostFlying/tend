@@ -324,6 +324,10 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		managerCandidates = nil
 	}
 	candidates = append(candidates, managerCandidates...)
+	candidates, err = filterManagerReceiptReaders(ctx, q, candidates, p.Runtime)
+	if err != nil {
+		return Outcome{}, err
+	}
 	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err
 	}

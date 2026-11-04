@@ -169,6 +169,7 @@
 | D164 | 原不可变 artifact 可经 owner 或主 Agent relay 的精确授权共享给目标责任代次；artifact/file/hash 与原来源冻结，撤销阻止新读，不授予源任务控制或伪造新报告。追加迁移86并提供 CLI/工具全入口。 | 实施中 |
 | D167 | 创建者或显式用户决定后续 Task 是否强制独立验收；真实来源及政策冻结，免验仍需合法结果、责任核对和交付证明，不伪造通过记录，不追溯撤销在途验收。 | 实施中 |
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
+| D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -936,3 +937,11 @@ harness Session，不查询模型，不 enqueue 原生 RPC，也不恢复 lease 
 数据库专用回放计入维护 drain，但不能作为 live interrupt 的执行证明；准入检查与 pool 注册共用 drain 锁。原 interrupted 正文可按同 item 的真实累计前缀延长，其他终态不因此可改写。未发布 background buffer 的精确终态正文也可证明持久化，确认 delta 不发布或结清其 batch。
 
 原 execution 为 logical repair 时，内部回复 delta 不得发布成用户正文。数据库回放实际消费完整固定前缀后，在同一事务重核原 repair/pending/run/thread/turn/item 身份与原始 delta 内容，保存仅含来源、消费序列及累计摘要的内部审计，再更新 applied；原始事件保留。此确认不代表 native turn 终结或业务成功，也不清理业务收据；普通回复的终态正文持久化守卫不变。
+
+## D173：有停止证明的原业务回执读取
+
+原 manager 成功 close、原事件全部应用、独立 stopped 请求已成功且末游标相同，仍不代表原业务完成。若唯一剩余阻塞是原业务收据，`task reconcile-manager --mode read_receipts` 可在同一事务中校验 Task CAS、原 Run/lease/host、assignment epoch、冻结执行 pin、close 原结果和 stopped 原 payload 摘要，结束旧 transport 并创建唯一 receipt-only 后继。原业务请求、未知结果、native pending 与原始事件均保留；相同请求重试不增加代次。默认 settle 仍须业务收据全部对清。
+
+reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能绕维护、park 或其他执行占位。它只按原 binding resume 原 thread，沿冻结 AppliedModel/provider/effort；缺身份或配置继续阻塞，不以当前模型目录、业务 readiness probe、新 thread、摘要、迁移或业务工具替代读取。只有原身份的真实 native 终态与完整 consumed sources 能经既有对账事务结清原 pending；物理停止、内部 repair 审计或日志里的终态线索不能代替该回执。
+
+实现复用既有 Assignment 的 ReceiptOnly 字段及普通请求去重，不改变 server/runner wire 格式或协议代际。新模式仅对显式报告 `runner-manager-receipt-reader-v1` 的原 host 准入；该模式新动作的 claim 与重启恢复同样要求此能力，避免旧执行器在读取前做普通业务探活。历史 receipt-only 与普通业务协议不因此收紧。新 runner 的内部受限解析跳过业务探活，普通执行保持既有探活和模型选择。部署需同时更新实际 runner 才具备这条受限读取实现。见[实施计划](plans/proved-close-receipt-reader.md)。

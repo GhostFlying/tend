@@ -6,14 +6,15 @@ import "encoding/json"
 type TaskKind string
 
 const (
-	TaskKindExecution           TaskKind = "execution"
-	TaskKindIssueManager        TaskKind = "issue_manager"
-	DefaultIssueManagerCategory          = "issue-manager"
-	CapabilityIssueManager               = "runner-issue-manager-v1"
-	CapabilityIssueOwner                 = "runner-issue-owner-v1"
-	OpIssueRequestManager                = "issues.request_manager"
-	OpIssueRequestOwner                  = "issues.request_owner"
-	IssueOwnerPolicy                     = "issue-owner-v1"
+	TaskKindExecution              TaskKind = "execution"
+	TaskKindIssueManager           TaskKind = "issue_manager"
+	DefaultIssueManagerCategory             = "issue-manager"
+	CapabilityIssueManager                  = "runner-issue-manager-v1"
+	CapabilityIssueOwner                    = "runner-issue-owner-v1"
+	CapabilityManagerReceiptReader          = "runner-manager-receipt-reader-v1"
+	OpIssueRequestManager                   = "issues.request_manager"
+	OpIssueRequestOwner                     = "issues.request_owner"
+	IssueOwnerPolicy                        = "issue-owner-v1"
 )
 
 // RequestIssueManagerPayload selects a capability category and optional Agent

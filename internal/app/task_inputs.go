@@ -134,6 +134,9 @@ func runtimeSupportsObservation(runtime *protocol.RunnerRuntime) bool {
 // Recovery must retain the same capabilities as the original claim. Otherwise
 // restarting an older runner could bypass the scheduler through reassignment.
 func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
+	if err := checkManagerReceiptReaderRecovery(ctx, q, host, runtime); err != nil {
+		return err
+	}
 	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) && runtimeSupportsAcceptanceExecution(runtime) {
 		return nil
 	}

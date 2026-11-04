@@ -40,6 +40,30 @@ type ManagerExecutionResolver interface {
 	ResolveManager(context.Context, protocol.RunExecutionPin) (ManagerExecution, error)
 }
 
+// ManagerReceiptExecutionResolver retains original configuration without probing
+// readiness to start new business executions.
+type ManagerReceiptExecutionResolver interface {
+	ResolveManagerReceipt(context.Context, protocol.RunExecutionPin) (ManagerExecution, error)
+}
+
+func (r *Runner) resolveManagerExecution(ctx context.Context, as protocol.Assignment) (ManagerExecution, error) {
+	if as.Execution == nil || as.Manager == nil {
+		return ManagerExecution{}, errors.New("runner: manager executor is unavailable")
+	}
+	if as.Manager.ReceiptOnly {
+		resolver, ok := r.cfg.Executions.(ManagerReceiptExecutionResolver)
+		if !ok {
+			return ManagerExecution{}, errors.New("runner: original manager receipt resolver is unavailable")
+		}
+		return resolver.ResolveManagerReceipt(ctx, *as.Execution)
+	}
+	resolver, ok := r.cfg.Executions.(ManagerExecutionResolver)
+	if !ok {
+		return ManagerExecution{}, errors.New("runner: manager executor is unavailable")
+	}
+	return resolver.ResolveManager(ctx, *as.Execution)
+}
+
 func assignmentWorker(as protocol.Assignment, legacy protocol.WorkerKind) protocol.WorkerKind {
 	if as.Execution != nil {
 		return as.Execution.Worker

@@ -345,7 +345,8 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // Driver runs operations against the runner-local native process. The caller
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
-	OnSource func(context.Context, protocol.RolloutPreviewSource) error
+	ReceiptOnly bool
+	OnSource    func(context.Context, protocol.RolloutPreviewSource) error
 	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
 	LegacyRawUsage bool
 	OnUsageSource  func(context.Context, nativeusage.Source) error
@@ -365,6 +366,9 @@ type Driver struct {
 }
 
 func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage) (any, error) {
+	if d.ReceiptOnly && method != "resume" && method != "find" && method != "usage" && method != "close" {
+		return nil, fmt.Errorf("%w: receipt-only manager cannot execute native business operations", harness.ErrRejected)
+	}
 	var r Request
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return nil, err
@@ -380,6 +384,9 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" {
 			return nil, fmt.Errorf("%w: manager requires read-only/never", harness.ErrRejected)
 		}
+		if d.ReceiptOnly && (r.ThreadID == "" || cfg.Model == "" || cfg.Ephemeral) {
+			return nil, fmt.Errorf("%w: receipt-only resume requires the original thread and applied model", harness.ErrRejected)
+		}
 		if cfg.Config == nil {
 			cfg.Config = map[string]any{}
 		}
@@ -387,26 +394,28 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			cfg.Config[key] = value
 		}
 		cfg.Cwd = d.Directory
-		cfg.Model = d.Profile.Model
-		// Definitions can name a catalog ID while the CLI reports its native
-		// model name. Resolve that alias against this executor's own catalog.
-		if catalog, ok := d.Session.(harness.ModelCatalog); ok {
-			models, err := catalog.Models(ctx)
-			if err != nil {
-				return nil, err
-			}
-			for _, model := range models {
-				if model.ID == d.Profile.Model || model.Name == d.Profile.Model {
-					cfg.Model = model.Name
-					if model.Provider != "" {
-						cfg.Config["model_provider"] = model.Provider
+		if !d.ReceiptOnly {
+			cfg.Model = d.Profile.Model
+			// Definitions can name a catalog ID while the CLI reports its native
+			// model name. Resolve that alias against this executor's own catalog.
+			if catalog, ok := d.Session.(harness.ModelCatalog); ok {
+				models, err := catalog.Models(ctx)
+				if err != nil {
+					return nil, err
+				}
+				for _, model := range models {
+					if model.ID == d.Profile.Model || model.Name == d.Profile.Model {
+						cfg.Model = model.Name
+						if model.Provider != "" {
+							cfg.Config["model_provider"] = model.Provider
+						}
+						break
 					}
-					break
 				}
 			}
-		}
-		if d.Profile.Effort != "" {
-			cfg.Config["model_reasoning_effort"] = d.Profile.Effort
+			if d.Profile.Effort != "" {
+				cfg.Config["model_reasoning_effort"] = d.Profile.Effort
+			}
 		}
 		cfg.DeveloperInstructions += "\n" + d.Instructions
 		cfg.LegacyRawUsage = d.LegacyRawUsage
@@ -568,6 +577,9 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 	return nil, fmt.Errorf("%w: manager native operation is unsupported", harness.ErrRejected)
 }
 func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolResult {
+	if d.ReceiptOnly {
+		return harness.ToolResult{Text: "Receipt-only managers cannot execute native tool callbacks"}
+	}
 	key := call.ThreadID + "/" + call.TurnID + "/" + call.CallID
 	ch := make(chan harness.ToolResult, 1)
 	d.mu.Lock()
