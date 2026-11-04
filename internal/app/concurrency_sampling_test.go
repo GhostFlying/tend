@@ -21,7 +21,7 @@ func TestConcurrencySyncSamplingMatchesEachTransition(t *testing.T) {
 	native := func(id, env, parent string) protocol.ConcurrencySource {
 		return protocol.ConcurrencySource{ExecutionID: id, EnvironmentID: env, RuntimeID: "worker", AgentID: "agent", SessionID: id, NativeSessionID: "native-" + id, EventID: "event-" + id, ParentExecutionID: parent}
 	}
-	for _, scenario := range []string{"health_reset", "cross_group_parent", "rebound_stop"} {
+	for _, scenario := range []string{"health_reset", "cross_group_parent", "rebound_stop", "heartbeat_fresh", "heartbeat_expired", "heartbeat_freshness_boundary", "heartbeat_unknown"} {
 		t.Run(scenario, func(t *testing.T) {
 			var expected [][]string
 			for _, cached := range []bool{false, true} {
@@ -39,7 +39,7 @@ func TestConcurrencySyncSamplingMatchesEachTransition(t *testing.T) {
 					other := native("other", "env-a", "")
 					child := native("child", "env-b", "")
 					initialParent := "running"
-					if scenario == "cross_group_parent" {
+					if scenario == "cross_group_parent" || scenario == "heartbeat_unknown" {
 						initialParent = "unknown"
 					}
 					for _, step := range []concurrencySampleStep{{parent, initialParent, now}, {other, "running", now}, {child, "stopped", now}} {
@@ -62,6 +62,20 @@ func TestConcurrencySyncSamplingMatchesEachTransition(t *testing.T) {
 						return err
 					}
 					steps := []concurrencySampleStep{{parent, "running", now}, {parent, "running", now - 1000}, {parent, "unknown", now}, {parent, "running", now}}
+					switch scenario {
+					case "heartbeat_fresh":
+						now += time.Second.Milliseconds()
+						steps = []concurrencySampleStep{{parent, "running", now}, {other, "running", now}, {parent, "running", now - 500}}
+					case "heartbeat_expired":
+						now += RunnerOfflineAfter.Milliseconds() + 2
+						steps = []concurrencySampleStep{{parent, "running", now - RunnerOfflineAfter.Milliseconds() - 1}, {other, "running", now - RunnerOfflineAfter.Milliseconds() - 1}}
+					case "heartbeat_freshness_boundary":
+						now += RunnerOfflineAfter.Milliseconds() + 1
+						steps = []concurrencySampleStep{{parent, "running", now}, {other, "running", now}, {parent, "unknown", now}, {parent, "running", now}}
+					case "heartbeat_unknown":
+						now += time.Second.Milliseconds()
+						steps = []concurrencySampleStep{{parent, "unknown", now}, {other, "running", now}, {parent, "unknown", now - 500}}
+					}
 					if scenario == "cross_group_parent" {
 						child.ParentExecutionID = parent.ExecutionID
 						steps = []concurrencySampleStep{{other, "running", now}, {child, "running", now}, {other, "running", now}, {child, "stopped", now}, {other, "running", now}}

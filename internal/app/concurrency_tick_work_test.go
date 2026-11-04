@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func concurrencyTickWorkFixture(t *testing.T, active int) *harness {
+func concurrencyTickWorkFixture(t *testing.T, active, history int) *harness {
 	t.Helper()
 	h, runtime, projection, hash := inventorySetup(t)
 	config := testConfig()
@@ -31,6 +32,12 @@ func concurrencyTickWorkFixture(t *testing.T, active int) *harness {
 		concurrencyConfigure(t, h, "create", group, 0, protocol.ConfigureConcurrencyPayload{Name: group, Min: 1, Initial: 128, Max: 128})
 	}
 	concurrencyConfigure(t, h, "bind", "shared", 1, protocol.ConfigureConcurrencyPayload{EnvironmentID: "linux-1", RuntimeID: "worker"})
+	for range history {
+		_, acceptance := h.toAwaitingAcceptance()
+		if op := h.submitVerdict(acceptance, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
 	spec := testSpec
 	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
 	for i := 0; i < active; i++ {
@@ -60,7 +67,7 @@ func concurrencyTickWorkFixture(t *testing.T, active int) *harness {
 }
 
 func TestConcurrencySyncSettledWorkIsBounded(t *testing.T) {
-	h := concurrencyTickWorkFixture(t, 4)
+	h := concurrencyTickWorkFixture(t, 4, 0)
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE TEMP TABLE settled_group_writes(n INTEGER NOT NULL); INSERT INTO settled_group_writes VALUES(0);
 CREATE TEMP TRIGGER count_settled_group AFTER UPDATE ON concurrency_groups BEGIN UPDATE settled_group_writes SET n=n+1; END;`)
@@ -91,5 +98,54 @@ CREATE TEMP TRIGGER count_settled_group AFTER UPDATE ON concurrency_groups BEGIN
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConcurrencySyncHeartbeatWorkIsBounded(t *testing.T) {
+	h := concurrencyTickWorkFixture(t, 4, 2)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `CREATE TEMP TABLE heartbeat_sync_writes(kind TEXT PRIMARY KEY,n INTEGER NOT NULL);
+INSERT INTO heartbeat_sync_writes VALUES('group',0),('execution',0);
+CREATE TEMP TRIGGER count_heartbeat_group AFTER UPDATE ON concurrency_groups BEGIN UPDATE heartbeat_sync_writes SET n=n+1 WHERE kind='group'; END;
+CREATE TEMP TRIGGER count_heartbeat_execution AFTER UPDATE ON concurrency_executions BEGIN UPDATE heartbeat_sync_writes SET n=n+1 WHERE kind='execution'; END;`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, heartbeat := range []bool{false, true} {
+		if heartbeat {
+			h.clock.Advance(time.Second)
+			if _, err := h.heartbeat(t.Context(), runner("linux-1"), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE heartbeat_sync_writes SET n=0`); err != nil {
+				return err
+			}
+			started := time.Now()
+			if err := syncConcurrencyExecutions(t.Context(), tx, h.clock.Now().UnixMilli()); err != nil {
+				return err
+			}
+			elapsed := time.Since(started)
+			var groups, executions int
+			if err := tx.Q().QueryRowContext(t.Context(), `SELECT n FROM heartbeat_sync_writes WHERE kind='group'`).Scan(&groups); err != nil {
+				return err
+			}
+			if err := tx.Q().QueryRowContext(t.Context(), `SELECT n FROM heartbeat_sync_writes WHERE kind='execution'`).Scan(&executions); err != nil {
+				return err
+			}
+			var stale int
+			if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM concurrency_executions WHERE state='running' AND last_seen<?`, h.clock.Now().UnixMilli()).Scan(&stale); err != nil {
+				return err
+			}
+			t.Logf("active=4 history=2 heartbeat=%t sync=%s group_updates=%d execution_updates=%d", heartbeat, elapsed, groups, executions)
+			if groups != 1 || stale != 0 {
+				t.Errorf("heartbeat=%t resampled unchanged load: group_updates=%d want1 stale_liveness=%d want0", heartbeat, groups, stale)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
