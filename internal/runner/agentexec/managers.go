@@ -68,6 +68,16 @@ func (p *Pool) probeManager(ctx context.Context, e *entry) bool {
 }
 
 func (p *Pool) ResolveManager(ctx context.Context, pin protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	return p.resolveManager(ctx, pin, false)
+}
+
+// ResolveManagerReceipt restores the original accepted configuration without
+// requiring readiness to create a new native thread or business turn.
+func (p *Pool) ResolveManagerReceipt(ctx context.Context, pin protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	return p.resolveManager(ctx, pin, true)
+}
+
+func (p *Pool) resolveManager(ctx context.Context, pin protocol.RunExecutionPin, receiptOnly bool) (runner.ManagerExecution, error) {
 	if pin.Purpose != "issue_manager" || pin.BackendID != "" || pin.Validate(pin.Identity.ExecutionEnvironmentID) != nil {
 		return runner.ManagerExecution{}, errors.New("manager pin is invalid")
 	}
@@ -86,7 +96,7 @@ func (p *Pool) ResolveManager(ctx context.Context, pin protocol.RunExecutionPin)
 		return runner.ManagerExecution{}, err
 	}
 	e := entries[pin.Identity.LocalID]
-	if e == nil || !managerPurpose(e) || e.input.Agent.Revision != pin.AgentRevision || e.ownerInput.Runtime.ID != pin.Runtime.RuntimeID || e.ownerInput.Runtime.Revision != pin.Runtime.Revision || e.input.Agent.Model != pin.Profile.Model || e.input.Agent.Effort != pin.Profile.Effort || !p.probeManager(ctx, e) {
+	if e == nil || !managerPurpose(e) || e.input.Agent.Revision != pin.AgentRevision || e.ownerInput.Runtime.ID != pin.Runtime.RuntimeID || e.ownerInput.Runtime.Revision != pin.Runtime.Revision || e.input.Agent.Model != pin.Profile.Model || e.input.Agent.Effort != pin.Profile.Effort || (!receiptOnly && !p.probeManager(ctx, e)) {
 		return runner.ManagerExecution{}, errors.New("original manager executor is unavailable")
 	}
 	bin := e.ownerInput.Runtime.ExecutableRef

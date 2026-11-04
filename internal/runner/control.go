@@ -171,6 +171,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		if _, ok := r.cfg.Executions.(ManagerExecutionResolver); ok && r.runnerProtocol >= 2 {
 			capabilities = append(capabilities, protocol.CapabilityIssueManager)
 			capabilities = append(capabilities, protocol.CapabilityIssueOwner)
+			if _, ok := r.cfg.Executions.(ManagerReceiptExecutionResolver); ok {
+				capabilities = append(capabilities, protocol.CapabilityManagerReceiptReader)
+			}
 		}
 	}
 	if r.cfg.AgentInventory != nil {

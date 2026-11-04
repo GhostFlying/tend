@@ -226,6 +226,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.named = &selected
 	}
 	m.namedMu.Unlock()
+	if named && selected.ReceiptOnly {
+		receiptOnly = true
+		if selected.AppliedModel == "" {
+			return errors.New("original hosted execution model is unavailable for receipt-only attachment")
+		}
+	}
 	var s harness.Session
 	if named {
 		if m.cfg.OpenNamed == nil {
@@ -626,20 +632,25 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	if err != nil {
 		return nil, err
 	}
+	selected := m.namedSelection()
+	receiptRead := selected != nil && selected.ReceiptOnly
+	if receiptRead && selected.AppliedModel == "" {
+		return nil, errors.New("original hosted execution model is unavailable for receipt-only attachment")
+	}
 	parkRead := false
-	if selected := m.namedSelection(); selected != nil && selected.RunnerManaged {
+	if selected != nil && selected.RunnerManaged && !receiptRead {
 		parkRead, err = m.app.UpgradeParkReceiptRead(ctx, m.cfg.ConversationID, selected.RunnerRunID)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if p.Prepared || parkRead {
+	if p.Prepared || parkRead || receiptRead {
 		id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 		if err != nil {
 			return nil, err
 		}
 		if !exists {
-			return nil, errors.New("original native thread is unavailable for archive reconciliation")
+			return nil, errors.New("original native thread is unavailable for receipt reconciliation")
 		}
 		if err := m.app.SettleOpenTurns(ctx, id); err != nil {
 			return nil, err
@@ -835,6 +846,9 @@ func (m *Manager) record(ctx context.Context, th replyThread, native, op string,
 // delivery of that turn, so a replayed call keeps its original identity,
 // or else the delivery whose turn is starting.
 func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.ToolResult {
+	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+		return harness.ToolResult{Text: "Receipt-only attachments cannot execute native tool callbacks."}
+	}
 	m.mu.Lock()
 	blocked := m.maintenanceBlocked || (m.cfg.MaintenanceEnabled && (m.thread == nil || m.thread.ID() != c.ThreadID))
 	m.mu.Unlock()
@@ -974,6 +988,9 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // Deliver implements dispatch.Handler: it hands a message to the front
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+		return app.DeliveryResult{Outcome: app.Retry, Reason: "Receipt-only attachments cannot start native work."}
+	}
 	if d.Operation == app.OpRecoverAgent {
 		return m.deliverRecovery(ctx, d)
 	}
@@ -1282,6 +1299,9 @@ wait:
 // Reconcile implements dispatch.Handler for a delivery a previous process
 // left in the middle.
 func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly && (d.Operation == "conversation.compact" || d.Operation == "conversation.handoff") {
+		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Receipt-only attachments cannot resume native maintenance."}
+	}
 	if d.Operation == "conversation.compact" {
 		return m.reconcileCompact(ctx, d)
 	}

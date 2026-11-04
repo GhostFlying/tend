@@ -44,6 +44,9 @@ func CapabilityBindings() []CapabilityBinding {
 				args = append(args, "sample")
 			}
 		}
+		if cmd.Name == "task manager-reconciliation" {
+			args = append(args, "--run", "original")
+		}
 		capability := "GET " + strings.Split(cmd.Route, "?")[0]
 		if cmd.Post {
 			capability = "POST " + cmd.Route
@@ -51,7 +54,11 @@ func CapabilityBindings() []CapabilityBinding {
 		}
 		if cmd.Operation != "" {
 			capability = cmd.Operation
-			args = append(args, "--data", `{}`)
+			if cmd.Operation == protocol.OpReconcileManagerRun {
+				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
+			} else {
+				args = append(args, "--data", `{}`)
+			}
 			if cmd.RevisionRoute != "" {
 				args = append(args, "--revision", "2")
 			}

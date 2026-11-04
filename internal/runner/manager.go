@@ -136,11 +136,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
-	resolver, ok := r.cfg.Executions.(ManagerExecutionResolver)
-	if !ok || as.Execution == nil || as.Manager == nil {
-		return errors.New("runner: manager executor is unavailable")
-	}
-	resolved, err := resolver.ResolveManager(ctx, *as.Execution)
+	resolved, err := r.resolveManagerExecution(ctx, as)
 	if err != nil {
 		return err
 	}
@@ -163,7 +159,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	opened = true
 	nativeClosed := false
 	var emitMu sync.Mutex
-	driver := coordination.Driver{OnUsageStopped: func(stopCtx context.Context, thread string) error {
+	driver := coordination.Driver{ReceiptOnly: as.Manager.ReceiptOnly, OnUsageStopped: func(stopCtx context.Context, thread string) error {
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
 	}, LegacyRawUsage: !r.supportsNativeUsage(), OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 		return r.registerUsage(sourceCtx, as, source)

@@ -3396,6 +3396,9 @@ export interface ManagerRunReconciliation {
   observed: RunObserved;
   pending_business_receipts: boolean;
   run_id: string;
+  stopped_last_sequence: number;
+  stopped_payload_sha256?: string;
+  stopped_request_id?: string;
   task_id: string;
   task_revision: number;
   unapplied_events: number;
@@ -3848,9 +3851,12 @@ export interface ReconcileManagerRunPayload {
   expected_assignment_epoch: number;
   expected_source_revision?: number;
   lease_id: string;
+  mode?: string;
   reason: string;
   run_id: string;
   source_message_id?: string;
+  stopped_payload_sha256?: string;
+  stopped_request_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

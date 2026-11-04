@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +30,14 @@ func TestFault_LapsedManagerRepairReplayCommitsItsOriginalClose(t *testing.T) {
 	lapsedManagerReplayCommitsOriginalClose(t, true)
 }
 
-func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
+type databaseReplayFixture struct {
+	server             *server
+	assignment         *protocol.Assignment
+	runtime            *protocol.RunnerRuntime
+	business, instance string
+}
+
+func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained ...bool) databaseReplayFixture {
 	t.Helper()
 	s := newServer(t, time.Hour)
 	ctx := t.Context()
@@ -59,7 +67,7 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
 	execute(host, protocol.OpRunnerInventoryRegister, protocol.Target{Type: "host", ID: "linux-1"}, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: 1, SnapshotID: "frozen-manager", PublicSHA256: hash, Projection: projection}, &zero, app.RegisterAgentInventory{})
 	pin := protocol.RunExecutionPin{Purpose: "issue_manager", Identity: projection.Agents[0].Identity, AgentRevision: 1, Runtime: projection.Agents[0].Binding, InventoryRevision: 1, SnapshotID: "frozen-manager", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: "frozen-model"}, Worker: protocol.WorkerAppServer}
 	runtime.Sequence++
-	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager)
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager, protocol.CapabilityManagerReceiptReader)
 	runtime.AgentExecutors = []protocol.AgentExecutor{{Pin: pin, Available: true}}
 	execute(host, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil, app.Hello{})
 	created := execute(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Reconcile the original manager", Project: "default", Intent: "Keep the original receipts"}}, nil, app.CanonicalOwnerIssueCommand{Action: "create"})
@@ -79,6 +87,7 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
 	if err != nil || !named {
 		t.Fatal(selection, named, err)
 	}
+	selection.AppliedModel = "frozen-model"
 	business, source := s.ids.New(protocol.PrefixRequest), ""
 	var manager store.IssueManagerTask
 	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -108,7 +117,13 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
 		}
 		if repair {
 			logical := s.ids.New(protocol.PrefixRequest)
+			if err := tx.PutMainTurn(ctx, store.MainTurn{RequestID: logical, MessageID: source, ThreadID: "original-native", Status: store.TurnInterrupted}, s.now().UnixMilli()); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO logical_turns(logical_turn_id,message_id,status,repair_attempts,updated_at) VALUES(?,?,'pending_repair',1,?)`, logical, source, s.now().UnixMilli()); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_executions(request_id,logical_turn_id,repair) VALUES(?,?,0)`, logical, logical); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_executions(request_id,logical_turn_id,repair) VALUES(?,?,1)`, business, logical); err != nil {
@@ -152,6 +167,9 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
 		t.Fatal("original frozen close bypassed unapplied deltas", err)
 	}
 	if err := s.store.Write(ctx, func(tx *store.Tx) error {
+		if err := tx.UpdateRunObserved(ctx, as.RunID, protocol.RunUnknown, s.now().UnixMilli()); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `UPDATE leases SET status='lapsed' WHERE run_id=?`, as.RunID)
 		return err
 	}); err != nil {
@@ -206,7 +224,38 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
 	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, business) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != 19 {
 		t.Fatal("prefix replay fabricated business completion or changed raw native events")
 	}
+	if len(retained) > 0 && retained[0] {
+		cancel()
+		wg.Wait()
+		prepare, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest)}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var old store.RunRow
+		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			var err error
+			old, err = store.GetRun(ctx, tx.Q(), as.RunID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		plan := protocol.CommittedMaintenancePlan{MaintenanceID: "receipt-reader-fixture", RequestID: s.ids.New(protocol.PrefixRequest), LinkRequestID: s.ids.New(protocol.PrefixRequest), PreparationRevision: prepare.Revision, Previous: protocol.UpgradeBinding{InstanceID: "server", ProcessInstanceID: "previous", ArtifactSHA256: strings.Repeat("a", 64)}, Successor: protocol.UpgradeBinding{UpgradeID: "receipt-reader-fixture", InstanceID: "server", ProcessInstanceID: "successor", ArtifactSHA256: strings.Repeat("b", 64)}, ReceiptRecoveryStop: &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{{TaskID: as.TaskID, Run: protocol.RunView{RunID: as.RunID, Role: as.Role, Host: old.HostID, Generation: old.Generation, SpecVersion: 1, Observed: old.ObservedState}}}}}
+		process := protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: "successor", SHA256: plan.Successor.ArtifactSHA256}
+		if _, err := s.app.RegisterCommittedMaintenance(ctx, plan, process); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.app.LinkCommittedMaintenance(ctx, protocol.CommittedMaintenanceReceipt{MaintenanceID: plan.MaintenanceID, RequestID: plan.RequestID, Previous: plan.Previous, Successor: plan.Successor, Process: process, Generation: 9, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest), ExpectedControlRevision: prepare.Revision}, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if result, err := s.app.Execute(ctx, principal, frozenClose, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); err != nil || result.Status != protocol.OpSucceeded {
 		t.Fatal("same original close envelope could not commit after consumption", result, err)
 	}
+	if len(retained) > 0 && retained[0] {
+		native(protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original physical process exited", LastSequence: 19})
+	}
+	return databaseReplayFixture{server: s, assignment: as, runtime: runtime, business: business, instance: instance}
 }

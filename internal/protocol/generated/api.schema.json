@@ -7723,6 +7723,15 @@
         "run_id": {
           "type": "string"
         },
+        "stopped_last_sequence": {
+          "type": "integer"
+        },
+        "stopped_payload_sha256": {
+          "type": "string"
+        },
+        "stopped_request_id": {
+          "type": "string"
+        },
         "task_id": {
           "type": "string"
         },
@@ -7746,6 +7755,7 @@
         "assignment_epoch",
         "observed",
         "close_last_sequence",
+        "stopped_last_sequence",
         "event_last_sequence",
         "unapplied_events",
         "unresolved_native_requests",
@@ -9650,6 +9660,9 @@
         "lease_id": {
           "type": "string"
         },
+        "mode": {
+          "type": "string"
+        },
         "reason": {
           "type": "string"
         },
@@ -9657,6 +9670,12 @@
           "type": "string"
         },
         "source_message_id": {
+          "type": "string"
+        },
+        "stopped_payload_sha256": {
+          "type": "string"
+        },
+        "stopped_request_id": {
           "type": "string"
         }
       },

@@ -153,6 +153,9 @@ func findCapabilityCommand(args []string) (capabilityCommand, []string, bool) {
 }
 
 func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, args []string) error {
+	if cmd.Name == "task reconcile-manager" {
+		return runManagerReconciliation(ctx, e, args)
+	}
 	fs := newFlags(e, cmd.Name)
 	asJSON := fs.Bool("json", cmd.JSONDefault, "print the complete server response as JSON")
 	out := fs.String("out", "", "download destination (required for download)")
