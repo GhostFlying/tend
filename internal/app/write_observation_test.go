@@ -24,7 +24,7 @@ func TestExecuteWriteObservationPreservesReplay(t *testing.T) {
 	}
 	var tick int64
 	var observations []store.WriteObservation
-	s, err := store.Open(t.Context(), path, clock.Now, store.WithWriteObserver(func() time.Time {
+	s, err := store.OpenWithOptions(t.Context(), path, clock.Now, store.WithWriteObserver(func() time.Time {
 		tick++
 		return time.Unix(0, tick*int64(time.Millisecond))
 	}, time.Millisecond, func(o store.WriteObservation) { observations = append(observations, o) }))

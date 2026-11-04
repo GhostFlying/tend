@@ -45,7 +45,13 @@ type Store struct {
 
 // Open opens or creates the database at path and applies pending
 // migrations. now supplies the time recorded for applied migrations.
-func Open(ctx context.Context, dbPath string, now func() time.Time, opts ...OpenOption) (*Store, error) {
+func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, error) {
+	return OpenWithOptions(ctx, dbPath, now)
+}
+
+// OpenWithOptions adds internal diagnostic options while Open retains its
+// original function type for callers that inject the store constructor.
+func OpenWithOptions(ctx context.Context, dbPath string, now func() time.Time, opts ...OpenOption) (*Store, error) {
 	write, err := sql.Open("sqlite", dsn(dbPath, true))
 	if err != nil {
 		return nil, fmt.Errorf("store: open writer: %w", err)

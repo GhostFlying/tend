@@ -171,7 +171,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return err
 	}
 
-	s, err := store.Open(ctx, filepath.Join(dataDir, "tend.db"), now,
+	s, err := store.OpenWithOptions(ctx, filepath.Join(dataDir, "tend.db"), now,
 		store.WithWriteObserver(time.Now, time.Second, func(o store.WriteObservation) {
 			logWriteObservation(log, o)
 		}))
