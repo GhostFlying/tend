@@ -297,7 +297,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			if agent == nil || uint64(contract.AgentRevision) != agent.Revision || contract.RuntimeID != agent.Binding.RuntimeID || uint64(contract.RuntimeRevision) != agent.Binding.Revision || contract.Model != agent.RequestedModel || contract.Effort != agent.RequestedEffort {
 				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the owner execution configuration changed; create a new task contract and retain this task's historical pins")
 			}
-			if err := validateRetainedReviewer(ctx, tx.Q(), contract, current, *p.Spec); err != nil {
+			if err := validateRetainedReviewer(ctx, tx.Q(), contract, *p.Spec); err != nil {
 				return Outcome{}, err
 			}
 		} else if !errors.Is(err, store.ErrNotFound) {

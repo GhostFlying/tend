@@ -56,7 +56,7 @@ func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue 
 	return nil, protocol.Errorf(protocol.CodeNotFound, "Issue owner is absent from its registered inventory")
 }
 
-func validateRetainedReviewer(ctx context.Context, q store.Querier, contract store.TaskOwnerContract, previous, next domain.Spec) error {
+func validateRetainedReviewer(ctx context.Context, q store.Querier, contract store.TaskOwnerContract, next domain.Spec) error {
 	if contract.ReviewIssueID == "" {
 		return nil
 	}
@@ -71,25 +71,8 @@ func validateRetainedReviewer(ctx context.Context, q store.Querier, contract sto
 	requirement := next.AgentSelection.Acceptance
 	ref := pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID
 	compatible := (requirement.AgentID == "" || requirement.AgentID == ref) && (requirement.RuntimeID == "" || requirement.RuntimeID == pin.Runtime.RuntimeID) && requirement.MatchesProfile(pin.Profile) && (next.AcceptanceExecution == nil || *next.AcceptanceExecution == pin.Profile)
-	if compatible && requirement.AgentID == "" && requirement.CategoryID != previous.AgentSelection.Acceptance.CategoryID {
-		compatible = false
-		runtime, err := store.GetHostRuntime(ctx, q, pin.Identity.ExecutionEnvironmentID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-		var inventory store.AgentInventoryRow
-		if err == nil && runtimeSupportsAgentContinuation(&runtime.Runtime) {
-			inventory, err = store.GetAgentInventoryAt(ctx, q, *pin)
-		} else {
-			inventory, err = store.GetAgentInventory(ctx, q, pin.Identity.ExecutionEnvironmentID)
-		}
-		if err != nil {
-			return err
-		}
-		for _, a := range inventory.Projection.Agents {
-			compatible = compatible || a.Identity == pin.Identity && slices.Contains(a.Categories, requirement.CategoryID)
-		}
-	}
+	// The review child already owns this exact identity/profile. A role-label
+	// change is metadata and must not replace or requalify that responsibility.
 	if !compatible {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "a task refresh cannot replace its review child owner; explicitly reconcile or replace the responsibility contract")
 	}
