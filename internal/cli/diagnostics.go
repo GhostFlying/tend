@@ -256,7 +256,7 @@ func runLocalAgentCommand(ctx context.Context, e *Env, args []string) error {
 
 func runRequestReplay(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "request replay")
-	data := fs.String("data", "", "original Envelope")
+	data := fs.String("data", "", "original Envelope; inspect request show before replaying an unknown outcome")
 	file := fs.String("file", "", "original Envelope file; - reads stdin")
 	dry := fs.Bool("dry-run", false, "print original Envelope")
 	fs.Bool("json", true, "print complete receipt")

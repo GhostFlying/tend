@@ -160,11 +160,7 @@ func runConcurrency(ctx context.Context, e *Env, args []string) error {
 		return json.NewEncoder(e.Stdout).Encode(env)
 	}
 	fmt.Fprintf(e.Stderr, "Concurrency request %s; revision %d\n", *request, *revision)
-	var response protocol.APIResponse
-	err = c.do(ctx, "POST", "/api/v1/ops", env, &response)
-	if isTransport(err) {
-		err = c.do(ctx, "POST", "/api/v1/ops", env, &response)
-	}
+	response, err := (owner{e: e, c: c}).sendEnvelope(ctx, env)
 	if err != nil {
 		return err
 	}

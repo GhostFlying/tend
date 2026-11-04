@@ -4,7 +4,7 @@ Refs: D11、D142。
 
 ## 已证问题与范围
 
-`sendEnvelope` 对一般 transport error 自动再次 POST；这类错误也包括服务端已接受请求但回执断开，无法证明请求未送达。保留同一 request ID 不等于已经对账。现有 typed 写入、Issue replay 与 request replay 共用该入口。
+`sendEnvelope` 对一般 transport error 自动再次 POST；这类错误也包括服务端已接受请求但回执断开，无法证明请求未送达。保留同一 request ID 不等于已经对账。现有 typed 写入、Issue replay 与 request replay 共用该入口。注册仓库、分类写入与并发配置还复制了相同的自动重发块，一并直接复用该共享入口，不改变业务解析或结果展示。
 
 ## 实施步骤
 
