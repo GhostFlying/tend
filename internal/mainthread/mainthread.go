@@ -227,7 +227,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.named = &copy
 	}
 	m.namedMu.Unlock()
-	if named && selected.ReceiptOnly {
+	if named && selected.RequireReceiptReader {
 		receiptOnly = true
 		selected, err = m.restoreReceiptOnlyModel(ctx, selected)
 		if err != nil {
@@ -698,7 +698,7 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 		return nil, err
 	}
 	selected := m.namedSelection()
-	receiptRead := selected != nil && selected.ReceiptOnly
+	receiptRead := selected != nil && selected.RequireReceiptReader
 	if receiptRead && selected.AppliedModel == "" {
 		restored, err := m.restoreReceiptOnlyModel(ctx, *selected)
 		if err != nil {
@@ -918,7 +918,7 @@ func (m *Manager) record(ctx context.Context, th replyThread, native, op string,
 // delivery of that turn, so a replayed call keeps its original identity,
 // or else the delivery whose turn is starting.
 func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.ToolResult {
-	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+	if selected := m.namedSelection(); selected != nil && selected.RequireReceiptReader {
 		return harness.ToolResult{Text: "Receipt-only attachments cannot execute native tool callbacks."}
 	}
 	m.mu.Lock()
@@ -1060,7 +1060,7 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // Deliver implements dispatch.Handler: it hands a message to the front
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
-	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly {
+	if selected := m.namedSelection(); selected != nil && selected.RequireReceiptReader {
 		return app.DeliveryResult{Outcome: app.Retry, Reason: "Receipt-only attachments cannot start native work."}
 	}
 	if d.Operation == app.OpRecoverAgent {
@@ -1374,7 +1374,7 @@ func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryRes
 	if d.Operation == "conversation.compact" {
 		return m.reconcileCompact(ctx, d)
 	}
-	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly && d.Operation == "conversation.handoff" {
+	if selected := m.namedSelection(); selected != nil && selected.RequireReceiptReader && d.Operation == "conversation.handoff" {
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Receipt-only attachments cannot resume native maintenance."}
 	}
 	if d.Operation == "conversation.handoff" {

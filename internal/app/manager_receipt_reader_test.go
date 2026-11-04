@@ -100,8 +100,14 @@ func TestFault_ManagerReceiptReaderReleasesOnlyProvedClosedTransport(t *testing.
 		t.Fatal("old runner claimed the new strictly read-only responsibility", oldClaim)
 	}
 	reader := reviewClaimManager(t, h, &runtime)
-	if reader.RunID == as.RunID || reader.TaskID != as.TaskID || reader.Manager == nil || !reader.Manager.ReceiptOnly || !reflect.DeepEqual(reader.Execution, beforePin) {
+	if reader.RunID == as.RunID || reader.TaskID != as.TaskID || reader.Manager == nil || !reader.Manager.ReceiptOnly || !reader.Manager.RequireReceiptReader || !reflect.DeepEqual(reader.Execution, beforePin) {
 		t.Fatal("reader did not retain the original frozen responsibility", reader)
+	}
+	runtime.Sequence++
+	recovery := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: &runtime, WorkspaceProtocol: 1}, nil), Hello{})
+	var recovered protocol.HelloResult
+	if recovery.Status != protocol.OpSucceeded || json.Unmarshal(recovery.Result, &recovered) != nil || len(recovered.Reassigned) != 1 || !recovered.Reassigned[0].Manager.RequireReceiptReader || recovered.Reassigned[0].RunID != reader.RunID {
+		t.Fatal("Hello lost strict reader assignment", recovery, recovered)
 	}
 	if _, err := h.app.QueueManagerNative(t.Context(), reader.RunID, "turn", json.RawMessage(`{}`)); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("receipt reader could start new native business", err)
@@ -203,6 +209,13 @@ func TestFault_ManagerReceiptReaderKeepsNegotiationAcrossNonterminalReads(t *tes
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		reader := reviewClaimManager(t, h, &runtime)
+		if !reader.Manager.RequireReceiptReader {
+			t.Fatal("successor lost strict reader contract")
+		}
+		selection, named, err := h.app.HostedRuntimeSelection(t.Context(), reader.Manager.ConversationID)
+		if err != nil || !named || !selection.RequireReceiptReader {
+			t.Fatal("hosted receipt selection lost negotiated contract", selection, err)
+		}
 		close, err := h.app.QueueManagerNative(t.Context(), reader.RunID, "close", json.RawMessage(`{}`))
 		if err != nil {
 			t.Fatal(err)

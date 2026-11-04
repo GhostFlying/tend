@@ -44,11 +44,14 @@ type IssueManagerSpec struct {
 
 // IssueManagerAssignment binds a turn to a continuing responsibility.
 type IssueManagerAssignment struct {
-	ReceiptOnly     bool   `json:"receipt_only,omitempty"`
-	IssueID         string `json:"issue_id"`
-	ConversationID  string `json:"conversation_id"`
-	AssignmentEpoch int64  `json:"assignment_epoch"`
-	CategoryID      string `json:"category_id"`
+	// RequireReceiptReader selects the negotiated strict history reader.
+	// Its absence retains historical receipt-only behavior.
+	RequireReceiptReader bool   `json:"require_receipt_reader,omitempty"`
+	ReceiptOnly          bool   `json:"receipt_only,omitempty"`
+	IssueID              string `json:"issue_id"`
+	ConversationID       string `json:"conversation_id"`
+	AssignmentEpoch      int64  `json:"assignment_epoch"`
+	CategoryID           string `json:"category_id"`
 }
 
 // ExecutionResponsibility identifies the Issue whose owner is doing this run.

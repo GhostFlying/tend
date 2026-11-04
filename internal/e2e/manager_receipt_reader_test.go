@@ -96,7 +96,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 				t.Fatal(claimed, err)
 			}
 			reader := result.Assignment
-			if reader.TaskID != old.TaskID || reader.RunID == old.RunID || reader.Manager == nil || !reader.Manager.ReceiptOnly {
+			if reader.TaskID != old.TaskID || reader.RunID == old.RunID || reader.Manager == nil || !reader.Manager.ReceiptOnly || !reader.Manager.RequireReceiptReader {
 				t.Fatal("new transport is not the original responsibility's read-only reader", reader)
 			}
 			native := &receiptHistorySession{thread: &receiptHistoryThread{events: make(chan harness.Event), business: f.business, status: status}, done: make(chan struct{})}
@@ -119,7 +119,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 				}
 				return nil
 			}
-			driver := &coordination.Driver{Session: native, Profile: reader.Execution.Profile, ReceiptOnly: reader.Manager.ReceiptOnly, Emit: func(_ context.Context, e coordination.Event) error {
+			driver := &coordination.Driver{Session: native, Profile: reader.Execution.Profile, RequireReceiptReader: reader.Manager.RequireReceiptReader, Emit: func(_ context.Context, e coordination.Event) error {
 				raw, _ := json.Marshal(e)
 				return report(protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence.Add(1), Body: raw})
 			}}
@@ -174,7 +174,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 					return nil, errors.New("unrelated receipt reader")
 				}
 				return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, log), mainthread.Config{Instance: f.instance, ConversationID: id, Log: log, RestartDelay: time.Millisecond, OpenNamed: func(c context.Context, selection hostedconfig.Selection) (harness.Session, error) {
-					if !selection.ReceiptOnly || selection.RunnerRunID != reader.RunID {
+					if !selection.ReceiptOnly || !selection.RequireReceiptReader || selection.RunnerRunID != reader.RunID {
 						return nil, errors.New("wrong receipt-only transport")
 					}
 					return mainthread.RunnerSession(c, s.app, reader.RunID), nil

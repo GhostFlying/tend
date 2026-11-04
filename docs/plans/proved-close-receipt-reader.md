@@ -29,3 +29,11 @@
 先保留真实入口阻塞的 RED 与离线证据，再实现所需最小修改。覆盖错误原身份/证明、未确认停止、未知业务保留、禁止新业务、原 thread/pin、读取失败与真实终态对账。新增用户能力必须同步 typed CLI、帮助、能力目录、请求恢复与 schema；内部 wire 不发生变化时不凭空提升协议。
 
 稳定候选的定向回归、规定独立 Sol/xhigh review、CI 和唯一完整本地检查按资源允许并行。全部门通过后 fresh main / rebase 线性合入，交唯一 operator 按实际合入版本受控发布并验收原业务事实；没有真实终态或正式处置时不报告整体恢复。
+
+## 同代历史 receipt-only 兼容修正
+
+正式回归暴露历史 receipt-only assignment 被错误要求实现新 resolver。新增可选 `require_receipt_reader` 标志，默认 false 保留历史协议与 resolver/模型恢复行为；只有已协商新能力且携带 proof-bound reader 来源的 action 生成 true。Claim、重连与后继 reader 的标志从原持久 action 来源派生，不允许 caller 自行升级。真实严格 reader 仍拒绝普通 probe/current catalog，不提供业务 fallback。
+
+私有 hosted selection 携带同一标志，但 binding identity/hash 比较归一化删除该临时读取约束，冻结 pin、原 thread 与 epoch 不变。原 closing/park/archive 的已有规则保留，新增严格限制只施加于新模式。用原未知启动 E2E 的旧 resolver 保留兼容 RED，另覆盖严格 reader 缺新 resolver 拒绝、旧模式原生操作可用、严格模式标志跨 Claim/Hello/重连/后继保持。旧 full 在冻结树继续收集真实结果；本修正在独立树实现，最终完整检查必须绑定最终版本。
+
+失败诊断只在既有 named pool 用例失败时采集有界只读状态：原 conversation/request、逻辑回合状态与读取错误、pool active/remote/ready、原 outbox head 与 native pending 计数。不改变超时、重试、成功条件或生产行为。

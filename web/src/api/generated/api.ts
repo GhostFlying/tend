@@ -511,6 +511,7 @@ export interface IssueManagerAssignment {
   conversation_id: string;
   issue_id: string;
   receipt_only?: boolean;
+  require_receipt_reader?: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

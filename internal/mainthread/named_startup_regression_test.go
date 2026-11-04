@@ -174,6 +174,12 @@ func testNamedPoolStartup(t *testing.T, prepare bool) {
 	done := make(chan struct{})
 	go func() { defer close(done); pool.Run(ctx) }()
 	defer func() { cancel(); <-done }()
+	defer func() {
+		if t.Failed() {
+			t.Logf("healthy native inputs=%d", healthyInputs.Load())
+			logNamedPoolFailure(t, e, pool, requests)
+		}
+	}()
 	if prepare {
 		select {
 		case <-selected:

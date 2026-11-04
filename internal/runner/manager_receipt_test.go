@@ -105,7 +105,7 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 	}
 	defer j.Close()
 	pin := protocol.RunExecutionPin{Profile: protocol.ExecutionProfile{Model: "original-catalog-alias", Effort: "low"}}
-	as := protocol.Assignment{Protocol: 2, RunID: "receipt-reader", LeaseID: "reader-lease", Role: protocol.RoleIssueManager, Execution: &pin, Manager: &protocol.IssueManagerAssignment{ReceiptOnly: true, ConversationID: "original-conversation"}}
+	as := protocol.Assignment{Protocol: 2, RunID: "receipt-reader", LeaseID: "reader-lease", Role: protocol.RoleIssueManager, Execution: &pin, Manager: &protocol.IssueManagerAssignment{RequireReceiptReader: true, ReceiptOnly: true, ConversationID: "original-conversation"}}
 	if err := j.AcceptAssignment(ctx, as, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -173,11 +173,12 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 func TestManagerReceiptResolverNeverFallsBackToBusinessReadiness(t *testing.T) {
 	resolver := &closeRecoveryResolver{}
 	r := New(Config{Executions: resolver})
-	as := protocol.Assignment{Execution: &protocol.RunExecutionPin{}, Manager: &protocol.IssueManagerAssignment{ReceiptOnly: true}}
+	as := protocol.Assignment{Execution: &protocol.RunExecutionPin{}, Manager: &protocol.IssueManagerAssignment{RequireReceiptReader: true, ReceiptOnly: true}}
 	if _, err := r.resolveManagerExecution(t.Context(), as); err == nil {
 		t.Fatal("missing receipt resolver fell back to ordinary business resolution")
 	}
 	as.Manager.ReceiptOnly = false
+	as.Manager.RequireReceiptReader = false
 	if _, err := r.resolveManagerExecution(t.Context(), as); err != nil {
 		t.Fatal("ordinary manager resolver changed", err)
 	}
@@ -215,5 +216,20 @@ func TestManagerReceiptCapabilityRequiresBothResolversAndCurrentProtocol(t *test
 				t.Fatal("runtime advertised a receipt contract it cannot enforce", view.Capabilities)
 			}
 		})
+	}
+}
+
+// Historical receipt-only assignments predate strict reader negotiation.
+func TestLegacyReceiptOnlyUsesExistingManagerResolver(t *testing.T) {
+	r := New(Config{Executions: &closeRecoveryResolver{}})
+	var as protocol.Assignment
+	if err := json.Unmarshal([]byte(`{"execution":{},"manager":{"receipt_only":true,"issue_id":"issue","conversation_id":"conversation","assignment_epoch":1,"category_id":"manager"}}`), &as); err != nil {
+		t.Fatal(err)
+	}
+	if as.Manager.RequireReceiptReader {
+		t.Fatal("historical serialized assignment enabled strict reader")
+	}
+	if _, err := r.resolveManagerExecution(t.Context(), as); err != nil {
+		t.Fatal("legacy receipt-only assignment lost its existing resolver contract", err)
 	}
 }

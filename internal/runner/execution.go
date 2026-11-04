@@ -50,7 +50,7 @@ func (r *Runner) resolveManagerExecution(ctx context.Context, as protocol.Assign
 	if as.Execution == nil || as.Manager == nil {
 		return ManagerExecution{}, errors.New("runner: manager executor is unavailable")
 	}
-	if as.Manager.ReceiptOnly {
+	if as.Manager.RequireReceiptReader {
 		resolver, ok := r.cfg.Executions.(ManagerReceiptExecutionResolver)
 		if !ok {
 			return ManagerExecution{}, errors.New("runner: original manager receipt resolver is unavailable")
