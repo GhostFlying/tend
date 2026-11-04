@@ -20,6 +20,8 @@
 
 新模式显式协商 `runner-manager-receipt-reader-v1`：admission、该模式新 action 的 claim 与该 Run 的恢复均拒绝旧执行器。新增可选能力不改变历史 receipt-only 或普通业务请求，也不升级 wire 代际。
 
+独立 review 的两项修正：原 closing Run 的 metadata-only attachment 可以恢复该 Run 已确认的缓存启动元数据，缺原模型时不能提前切断其事件消费；这不是读取当前模型目录或打开 native。新模式的原业务 pending 尚未对清时，后续 receipt-only 代次继续携带原 reader 请求与原待对账身份，不能因一次读取失败或非终态而丢失能力要求；原 pending 全部对清后，新的无关责任不继承该限制。
+
 ## 回归与交付
 
 先保留真实入口阻塞的 RED 与离线证据，再实现所需最小修改。覆盖错误原身份/证明、未确认停止、未知业务保留、禁止新业务、原 thread/pin、读取失败与真实终态对账。新增用户能力必须同步 typed CLI、帮助、能力目录、请求恢复与 schema；内部 wire 不发生变化时不凭空提升协议。

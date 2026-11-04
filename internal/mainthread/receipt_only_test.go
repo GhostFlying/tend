@@ -2,6 +2,7 @@ package mainthread
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -171,5 +173,141 @@ func TestReceiptOnlyClearsPendingOnlyForOriginalTerminalHistory(t *testing.T) {
 				t.Fatal("receipt pending did not reflect exact terminal native history", pending, reader.known, err)
 			}
 		})
+	}
+}
+
+// These are persisted synthetic startup receipts, not provider terminal proof.
+func seedClosingReceiptMetadata(t *testing.T, e *env, modelsStatus string, closing bool) {
+	t.Helper()
+	ctx := t.Context()
+	err := e.store.Write(ctx, func(tx *store.Tx) error {
+		if err := tx.InsertTask(ctx, store.TaskRow{TaskID: "task_cached", Kind: protocol.TaskKindIssueManager, Title: "Cached attachment", Project: "default", Lifecycle: protocol.TaskRunning, ControlMode: protocol.ControlManaged, SpecVersion: 1}); err != nil {
+			return err
+		}
+		if err := tx.InsertAction(ctx, store.ActionRow{ActionID: "action_cached", TaskID: "task_cached", Kind: protocol.ActionImplement, EffectKey: "cached", TriggerJSON: `{}`, AuthorizationJSON: `{}`, TargetSpecVersion: 1, Generation: 1, Status: protocol.ActionDispatched, CreatedRequestID: "request_cached"}); err != nil {
+			return err
+		}
+		if err := tx.InsertRun(ctx, store.RunRow{RunID: "receipt-reader-run", TaskID: "task_cached", ActionID: "action_cached", Generation: 1, Role: protocol.RoleIssueManager, DesiredState: protocol.DesiredRun, ObservedState: protocol.RunUnknown}); err != nil {
+			return err
+		}
+		models, err := json.Marshal(map[string]any{"result": []harness.Model{{ID: "original-catalog-model", Name: "original-native-model", Provider: "original-provider", DefaultEffort: "high", SupportedEfforts: []string{"high"}}}})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,result_json,status,created_at) VALUES('models_cached','receipt-reader-run','models','{}',?,?,0)`, string(models), modelsStatus); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,result_json,status,created_at) VALUES('resume_cached','receipt-reader-run','resume','{}','{"result":{"ID":"original-thread","Permissions":{"Sandbox":"read-only","ApprovalPolicy":"never"}}}','completed',0)`); err != nil {
+			return err
+		}
+		if closing {
+			_, err := tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES('close_cached','receipt-reader-run','close','{}','pending',0)`)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReceiptOnlyClosingAttachmentRestoresConfirmedModel(t *testing.T) {
+	for _, test := range []struct {
+		name, status     string
+		closing, allowed bool
+	}{
+		{"confirmed_closing", "completed", true, true},
+		{"unconfirmed_model", "unknown", true, false},
+		{"ordinary_reader", "completed", false, false},
+		{"unconfirmed_resume", "completed", true, false},
+		{"wrong_original_thread", "completed", true, false},
+		{"unavailable_frozen_model", "completed", true, false},
+		{"non_runner_reader", "completed", true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			e := newEnv(t, testkit.NewHarness())
+			e.stop()
+			e.m.named = receiptOnlySelection()
+			e.m.named.AppliedModel, e.m.named.AppliedProvider, e.m.named.AppliedEffort = "", "", ""
+			seedClosingReceiptMetadata(t, e, test.status, test.closing)
+			if test.name == "unconfirmed_resume" {
+				if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE manager_native_requests SET status='unknown' WHERE request_id='resume_cached'`)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.name == "unavailable_frozen_model" {
+				e.m.named.Definition.Model = "unavailable-model"
+			}
+			if test.name == "non_runner_reader" {
+				e.m.named.RunnerManaged = false
+			}
+			originalID := "original-thread"
+			if test.name == "wrong_original_thread" {
+				originalID = "unrelated-thread"
+			}
+			if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), originalID); err != nil {
+				t.Fatal(err)
+			}
+			original := &receiptThread{Thread: &historyReference{id: "original-thread"}}
+			session := &receiptOnlySession{thread: original}
+			before := e.count(`SELECT COUNT(*) FROM manager_native_requests`)
+			thread, err := e.m.openThread(t.Context(), session)
+			if test.allowed {
+				if err != nil || thread != original || session.resumes != 1 {
+					t.Fatal("confirmed closing metadata could not restore its attachment", thread, err, session.resumes)
+				}
+				if session.config.Model != "original-native-model" || session.config.Config["model_provider"] != "original-provider" || session.config.Config["model_reasoning_effort"] != "high" {
+					t.Fatal("attachment did not preserve confirmed startup configuration", session.config)
+				}
+			} else if err == nil || session.resumes != 0 {
+				t.Fatal("reader lacking confirmed closing metadata reached native resume", err, session.resumes)
+			}
+			if session.starts != 0 || e.count(`SELECT COUNT(*) FROM manager_native_requests`) != before {
+				t.Fatal("metadata attachment created a fresh native request")
+			}
+		})
+	}
+}
+
+func TestReceiptOnlyClosingRunnerTransportDrainsWithoutNativeRequest(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	e.m.named = receiptOnlySelection()
+	e.m.named.AppliedModel, e.m.named.AppliedProvider, e.m.named.AppliedEffort = "", "", ""
+	seedClosingReceiptMetadata(t, e, "completed", true)
+	if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), "original-thread"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('receipt-reader-run',1,'{"thread_id":"original-thread","native":{"Kind":"request_usage"}}')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := e.count(`SELECT COUNT(*) FROM manager_native_requests`)
+	ctx, cancel := context.WithCancel(t.Context())
+	session := coordination.New(ctx, &runnerTransport{app: e.app, run: "receipt-reader-run", origins: map[int64]managerEventOrigin{}})
+	defer func() {
+		cancel()
+		<-session.Done()
+	}()
+	thread, err := e.m.openThread(ctx, session)
+	if err != nil || thread.ID() != "original-thread" {
+		t.Fatal("confirmed closing metadata did not attach the real runner transport", thread, err)
+	}
+	select {
+	case event := <-thread.Events():
+		if event.Kind != harness.EventRequestUsage {
+			t.Fatal("closing attachment lost its original uploaded event", event)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("closing attachment did not drain its original uploaded event")
+	}
+	selected := e.m.namedSelection()
+	if selected.AppliedModel != "original-native-model" || selected.AppliedProvider != "original-provider" || selected.AppliedEffort != "high" || e.count(`SELECT COUNT(*) FROM manager_native_requests`) != before {
+		t.Fatal("metadata attachment changed model or queued a native RPC", selected)
 	}
 }
