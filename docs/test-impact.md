@@ -66,3 +66,5 @@ release 从 main 手动触发 `ci`，选择 `mode=release`，`ref` 必须是完�
 原生缓存观测按 full、affected 的固定顺序执行，后者会共享前者已经填充的 Go 测试结果缓存；首轮及后续暖缓存均单列。这部分用于展示顺序运行的日常缓存表现，不能用其差值宣称两种策略的收益。收益对照只使用关闭结果缓存的交替配对。
 
 Go 测试也可能将 Web 文件、文档或其他仓库资源当数据读取。首版将 Go 的文件系统、原生系统调用和源码读取模块导入（包括 `os`、`io/fs`、`io/ioutil`、`path/filepath`、`syscall`、`golang.org/x/sys/unix`、`go/parser`、`go/build`、`C`）保守视作文件系统边界，并保留已有的 Go 源码字符串识别。资源读取与进程边界沿生产依赖传播，测试依赖只作为终端；任意源码或资源变化都运行这些测试包。该规则不能只限于 Go 文件变化，也不能假设 Web 文件只由 Web 测试读取。
+
+已完成的真实故障注入、修复前资源漏选及修复后的双侧原生事件见[正确性报告](findings/test-impact-correctness.md)及[机器可读证据](findings/test-impact-correctness.json)。这些正确性结果不替代收益与完整门禁验收。
