@@ -35,8 +35,10 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	lost := 2
+	lost := 1
 	var ids []string
+	var envelopes [][]byte
+	var hashes []string
 	reads := 0
 	httpClient := &http.Client{Transport: issueTransport(func(request *http.Request) (*http.Response, error) {
 		if request.Method == "GET" {
@@ -47,13 +49,22 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 			if err != nil {
 				return nil, err
 			}
-			var env protocol.Envelope
-			err = json.NewDecoder(original).Decode(&env)
+			raw, err := io.ReadAll(original)
 			original.Close()
 			if err != nil {
 				return nil, err
 			}
+			var env protocol.Envelope
+			if err := json.Unmarshal(raw, &env); err != nil {
+				return nil, err
+			}
+			hash, err := protocol.PayloadHash(&env)
+			if err != nil {
+				return nil, err
+			}
 			ids = append(ids, env.RequestID)
+			envelopes = append(envelopes, raw)
+			hashes = append(hashes, hash)
 			if !strings.Contains(stderr.String(), env.RequestID) {
 				t.Error("request identity was not visible before HTTP")
 			}
@@ -72,13 +83,26 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 	if code := cli.Main(t.Context(), env, []string{"issue", "create", "--data", payload}); code != 1 {
 		t.Fatalf("lost responses exit=%d out=%s err=%s", code, &stdout, &stderr)
 	}
-	if len(ids) != 2 || ids[0] != ids[1] || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
-		t.Fatalf("transport retry duplicated issue: ids=%v", ids)
+	if len(ids) != 1 || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
+		t.Fatalf("unknown submission was repeated or duplicated issue: ids=%v", ids)
 	}
 	originalID := ids[0]
+	if !strings.Contains(stderr.String(), "unknown_outcome") || !strings.Contains(stderr.String(), "request show "+originalID) {
+		t.Fatal("lost response omitted original-request recovery guidance", stderr.String())
+	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := cli.Main(t.Context(), env, []string{"issue", "create", "--request-id", originalID, "--data", payload}); code != 0 {
+	beforeReads := reads
+	if code := cli.Main(t.Context(), env, []string{"request", "show", originalID, "--json"}); code != 0 {
+		t.Fatalf("reconciliation exit=%d out=%s err=%s", code, &stdout, &stderr)
+	}
+	var recorded protocol.RequestView
+	if err := json.Unmarshal(stdout.Bytes(), &recorded); err != nil || recorded.RequestID != originalID || recorded.Status != protocol.OpSucceeded || reads != beforeReads+1 || len(ids) != 1 {
+		t.Fatalf("original committed request was not reconciled read-only: %+v err=%v reads=%d ids=%v", recorded, err, reads, ids)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli.Main(t.Context(), env, []string{"request", "replay", "--data", string(envelopes[0])}); code != 0 {
 		t.Fatalf("recovery exit=%d out=%s err=%s", code, &stdout, &stderr)
 	}
 	var response protocol.APIResponse
@@ -87,8 +111,15 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 	}
 	var issue protocol.Issue
 	_ = json.Unmarshal(response.Operation.Result, &issue)
-	if response.Operation.RequestID != originalID || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
-		t.Fatal("manual recovery created another issue")
+	var recordedResult, replayedResult bytes.Buffer
+	if err := json.Compact(&recordedResult, recorded.Result); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Compact(&replayedResult, response.Operation.Result); err != nil {
+		t.Fatal(err)
+	}
+	if response.Operation.RequestID != originalID || len(ids) != 2 || ids[1] != originalID || !bytes.Equal(envelopes[0], envelopes[1]) || hashes[0] != hashes[1] || !bytes.Equal(recordedResult.Bytes(), replayedResult.Bytes()) || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
+		t.Fatal("manual recovery changed the original Envelope, recorded result, or duplicated its issue")
 	}
 	stdout.Reset()
 	stderr.Reset()
@@ -100,7 +131,7 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	beforeReads := reads
+	beforeReads = reads
 	if code := cli.Main(t.Context(), env, []string{"issue", "pause", issue.IssueID}); code != 0 {
 		t.Fatalf("first pause exit=%d %s", code, &stderr)
 	}
