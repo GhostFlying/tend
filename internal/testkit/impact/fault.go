@@ -27,6 +27,16 @@ type FaultOptions struct {
 	Log                    io.Writer
 }
 
+func missingFailureRoots(plan Plan, full, selectedFailed, selectedRan []FailureRoot) []FailureRoot {
+	var missing []FailureRoot
+	for _, root := range full {
+		if !slices.Contains(plan.Go[root.Package], root.Root) || !slices.Contains(selectedRan, root) || !slices.Contains(selectedFailed, root) {
+			missing = append(missing, root)
+		}
+	}
+	return missing
+}
+
 // failureEvents consumes native Go JSON, preserving top-level attribution for
 // nested subtests. A package build failure alone is not a semantic mutant.
 func failureEvents(directory string) (failed, executed []FailureRoot, err error) {
@@ -173,16 +183,12 @@ func Faults(ctx context.Context, o FaultOptions) (err error) {
 		if err != nil {
 			return err
 		}
-		_, ran, err := failureEvents(selectedDir)
+		selectedFailed, ran, err := failureEvents(selectedDir)
 		if err != nil {
 			return err
 		}
 		e.Failures = failed
-		for _, root := range failed {
-			if !slices.Contains(plan.Go[root.Package], root.Root) || !slices.Contains(ran, root) {
-				e.Missing = append(e.Missing, root)
-			}
-		}
+		e.Missing = missingFailureRoots(plan, failed, selectedFailed, ran)
 		e.Passed = len(failed) > 0 && len(e.Missing) == 0
 		if err := WriteJSON(o.Report, report); err != nil {
 			return err

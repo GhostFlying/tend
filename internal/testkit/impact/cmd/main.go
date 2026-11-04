@@ -73,9 +73,6 @@ func run(ctx context.Context, args []string) error {
 	if before.Profile.ModuleConfig != "" {
 		return fmt.Errorf("function coverage baselines do not support alternate modules or workspaces; use make check-full")
 	}
-	if before.UnboundResources {
-		return fmt.Errorf("function coverage baselines require bound resource symlinks; use make check-full")
-	}
 	start := time.Now()
 	recordsDir, err := os.MkdirTemp("", "tend-impact-full-events-")
 	if err != nil {

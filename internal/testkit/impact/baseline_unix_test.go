@@ -67,3 +67,52 @@ func TestCompiledChecksPreserveMakefileControls(t *testing.T) {
 		t.Fatal("lost pnpm override")
 	}
 }
+
+func TestBaselineCLITracksUnboundCacheLinksWithoutFunctionAttribution(t *testing.T) {
+	dir := fixtureRepo(t)
+	cache := filepath.Join(dir, ".pnpm-store/v10/projects")
+	if err := os.MkdirAll(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{"directory": t.TempDir(), "dangling": filepath.Join(t.TempDir(), "absent")} {
+		if err := os.Symlink(target, filepath.Join(cache, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixtureCommit(t, dir)
+	runner := filepath.Join(t.TempDir(), "full")
+	if err := os.WriteFile(runner, []byte("#!/bin/sh\nset -eu\nmkdir -p \"$TEST_REPORT_DIR/race-all-1\"\ngo test -race -count=1 -json ./... > \"$TEST_REPORT_DIR/race-all-1/all.jsonl\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tools, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".local/index.json")
+	if _, err := output(t.Context(), tools, "go", "run", "./cmd", "baseline", "-dir", dir, "-index", path, "-check-runner", runner); err != nil {
+		t.Fatal(err)
+	}
+	index, err := ReadIndex(path)
+	if err != nil || !index.Source.UnboundResources {
+		t.Fatal(index, err)
+	}
+	for _, row := range index.Executions {
+		if row.Mode != "static-resource" || len(row.Functions) != 0 {
+			t.Fatal("unbound input claimed function coverage", row)
+		}
+	}
+	current := index.Source
+	for _, unbound := range []bool{true, false} {
+		current.UnboundResources = unbound
+		if !Select(current, index, "").Full {
+			t.Fatal("resource fallback baseline narrowed after link removal")
+		}
+	}
+	index.Executions[0].Mode = "coverage"
+	if err := WriteJSON(path, index); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadIndex(path); err == nil {
+		t.Fatal("resource fallback accepted function attribution")
+	}
+}

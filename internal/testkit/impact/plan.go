@@ -106,6 +106,9 @@ func Select(current Snapshot, index *Index, invalid string) Plan {
 		full("baseline unavailable: " + invalid)
 	} else {
 		p.Baseline = index.Source.Commit
+		if index.Source.UnboundResources {
+			full("baseline has unbound resource symlinks; complete validation required")
+		}
 		if index.Format != Format || !index.VerifiedFull || current.Profile != index.Source.Profile || current.Module != index.Source.Module {
 			full("baseline configuration or verification mismatch")
 		}

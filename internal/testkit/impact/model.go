@@ -171,8 +171,11 @@ func ReadIndex(path string) (*Index, error) {
 			return nil, fmt.Errorf("invalid execution inventory: %s", key)
 		}
 		seen[key] = true
-		if e.Mode != "coverage" && e.Mode != "static-skipped" && e.Mode != "static-process" {
+		if e.Mode != "coverage" && e.Mode != "static-skipped" && e.Mode != "static-process" && e.Mode != "static-resource" {
 			return nil, fmt.Errorf("unknown execution attribution: %s", key)
+		}
+		if (e.Mode == "static-resource") != x.Source.UnboundResources || (e.Mode == "static-resource" && len(e.Functions) != 0) {
+			return nil, fmt.Errorf("invalid resource fallback: %s", key)
 		}
 		if e.Mode == "static-process" && (!x.Source.Packages[e.Package].ProcessBoundary || len(e.Functions) != 0) {
 			return nil, fmt.Errorf("invalid process fallback: %s", key)

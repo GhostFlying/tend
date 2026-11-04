@@ -1,50 +1,50 @@
 {
   "Format": 1,
-  "ToolCommit": "bf20bc80585ad39e23873a296e87e1b72dc2534f",
-  "ToolTree": "185dbf224e1de90b90d2ff17aced42a5ba0eac26",
+  "ToolCommit": "ee9e084218f9cfd2a86333b0968c60df432e1c03",
+  "ToolTree": "c4e10d44f21689d566d95921343bb20f2ba990dd",
   "Baseline": "3f512173b4024a2dc0c99522752eddb483795447",
   "Go": "go1.27.1",
   "Platform": "linux/amd64",
-  "RawReportSHA256": "db23e672ac6e6be5a0e93f15af94d3bbe0bbb6b69d4a6e713091dc9ee8e036cb",
-  "RawLogSHA256": "c05246dfe64234922f979dffeddf17a017281bf7812bb115180ffb881057d01e",
+  "RawReportSHA256": "4911268374955e5c5f6a6284f13eccf03f9c66a4b01be35a1b3490e677a48cfb",
+  "RawLogSHA256": "df99f245e7a18be173909bbe06b7ad39cf68321de4ed090d676fd669a4a54132",
   "Cases": [
     {
       "Name": "state-rule",
       "Full": {
-        "Seconds": 374.650867872,
-        "UserSeconds": 4612.765749,
-        "SystemSeconds": 157.028346,
+        "Seconds": 395.877042335,
+        "UserSeconds": 4813.736742,
+        "SystemSeconds": 165.160642,
         "LoadBefore": [
-          "1.50",
-          "1.97",
-          "1.95"
+          "4.84",
+          "5.55",
+          "9.89"
         ],
         "LoadAfter": [
-          "4.31",
-          "8.80",
-          "5.85"
+          "5.11",
+          "11.24",
+          "12.01"
         ],
-        "StartedAt": "2026-11-04T03:52:36.500367785Z",
-        "FinishedAt": "2026-11-04T03:58:51.151325379Z",
+        "StartedAt": "2026-11-04T13:15:08.189504529Z",
+        "FinishedAt": "2026-11-04T13:21:44.066636135Z",
         "Success": false,
         "Error": "exit status 1"
       },
       "Selected": {
-        "Seconds": 509.443097353,
-        "UserSeconds": 4213.168841,
-        "SystemSeconds": 149.730314,
+        "Seconds": 372.107558981,
+        "UserSeconds": 4280.105499,
+        "SystemSeconds": 128.859203,
         "LoadBefore": [
-          "4.31",
-          "8.80",
-          "5.85"
+          "5.11",
+          "11.24",
+          "12.01"
         ],
         "LoadAfter": [
-          "3.08",
-          "7.68",
-          "7.42"
+          "8.11",
+          "12.12",
+          "12.73"
         ],
-        "StartedAt": "2026-11-04T03:58:51.151516171Z",
-        "FinishedAt": "2026-11-04T04:07:20.594702538Z",
+        "StartedAt": "2026-11-04T13:21:44.066854864Z",
+        "FinishedAt": "2026-11-04T13:27:56.174491472Z",
         "Success": false,
         "Error": "exit status 1"
       },
@@ -58,19 +58,19 @@
       "Passed": true,
       "WebFailures": null,
       "WebMissing": null,
-      "SelectedRoots": 2247,
+      "SelectedRoots": 2282,
       "PlanFingerprint": "8d61cddd993e94199829b804a5220fe5542af3855e6cffa2cb8a0eff760c8426",
-      "PlanFullFallback": false,
+      "PlanFullFallback": true,
       "NativeFailureRootEvents": {
         "full": [
           {
-            "Time": "2026-11-04T11:54:52.405817633+08:00",
+            "Time": "2026-11-04T21:17:32.559253941+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/domain",
             "Test": "TestRunTransitions"
           },
           {
-            "Time": "2026-11-04T11:54:52.405929663+08:00",
+            "Time": "2026-11-04T21:17:32.559371524+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/domain",
             "Test": "TestRunTransitions",
@@ -79,13 +79,13 @@
         ],
         "selected": [
           {
-            "Time": "2026-11-04T12:00:51.045432328+08:00",
+            "Time": "2026-11-04T21:23:40.816048445+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/domain",
             "Test": "TestRunTransitions"
           },
           {
-            "Time": "2026-11-04T12:00:51.045540856+08:00",
+            "Time": "2026-11-04T21:23:40.816195754+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/domain",
             "Test": "TestRunTransitions",
@@ -97,40 +97,40 @@
     {
       "Name": "transaction-rollback",
       "Full": {
-        "Seconds": 354.88804017,
-        "UserSeconds": 4406.618722,
-        "SystemSeconds": 139.579072,
+        "Seconds": 364.497632284,
+        "UserSeconds": 4438.995294,
+        "SystemSeconds": 142.549948,
         "LoadBefore": [
-          "3.00",
-          "7.58",
-          "7.39"
+          "8.11",
+          "12.12",
+          "12.73"
         ],
         "LoadAfter": [
-          "5.65",
-          "11.58",
-          "9.95"
+          "5.58",
+          "12.31",
+          "13.27"
         ],
-        "StartedAt": "2026-11-04T04:07:23.081543989Z",
-        "FinishedAt": "2026-11-04T04:13:17.969678159Z",
+        "StartedAt": "2026-11-04T13:27:58.924668671Z",
+        "FinishedAt": "2026-11-04T13:34:03.422373944Z",
         "Success": false,
         "Error": "exit status 1"
       },
       "Selected": {
-        "Seconds": 496.68344886,
-        "UserSeconds": 4206.064434,
-        "SystemSeconds": 149.226777,
+        "Seconds": 370.777220027,
+        "UserSeconds": 4279.547204,
+        "SystemSeconds": 129.107545,
         "LoadBefore": [
-          "5.65",
-          "11.58",
-          "9.95"
+          "5.58",
+          "12.31",
+          "13.27"
         ],
         "LoadAfter": [
-          "3.72",
-          "9.22",
-          "10.38"
+          "5.93",
+          "12.66",
+          "13.77"
         ],
-        "StartedAt": "2026-11-04T04:13:17.96981721Z",
-        "FinishedAt": "2026-11-04T04:21:34.653352641Z",
+        "StartedAt": "2026-11-04T13:34:03.422495891Z",
+        "FinishedAt": "2026-11-04T13:40:14.199790716Z",
         "Success": false,
         "Error": "exit status 1"
       },
@@ -244,688 +244,688 @@
       "Passed": true,
       "WebFailures": null,
       "WebMissing": null,
-      "SelectedRoots": 2175,
+      "SelectedRoots": 2282,
       "PlanFingerprint": "88c04fa0edee1d35a2e201e8d41d015ba5e5534cfcf2578de1dc674be38a78dd",
-      "PlanFullFallback": false,
+      "PlanFullFallback": true,
       "NativeFailureRootEvents": {
         "full": [
           {
-            "Time": "2026-11-04T12:08:04.494018403+08:00",
+            "Time": "2026-11-04T21:28:42.71572413+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestAgentInventoryTransactionRollsBackWithoutReceipt"
           },
           {
-            "Time": "2026-11-04T12:08:05.229314791+08:00",
+            "Time": "2026-11-04T21:28:43.560163879+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestAgentInventoryTransactionRollsBackWithoutReceipt",
-            "Elapsed": 0.74
+            "Elapsed": 0.84
           },
           {
-            "Time": "2026-11-04T12:08:11.303687396+08:00",
+            "Time": "2026-11-04T21:28:49.828809189+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestNoEffectIsNotRecorded"
           },
           {
-            "Time": "2026-11-04T12:08:11.681314493+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestNoEffectIsNotRecorded",
-            "Elapsed": 0.38
-          },
-          {
-            "Time": "2026-11-04T12:08:13.717071721+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_InternalErrorRetrySafe"
-          },
-          {
-            "Time": "2026-11-04T12:08:14.159592348+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_InternalErrorRetrySafe",
-            "Elapsed": 0.44
-          },
-          {
-            "Time": "2026-11-04T12:08:16.428067741+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestNoEffectWithEventsIsAnError"
-          },
-          {
-            "Time": "2026-11-04T12:08:16.85361089+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestNoEffectWithEventsIsAnError",
-            "Elapsed": 0.43
-          },
-          {
-            "Time": "2026-11-04T12:08:37.059885507+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/store",
-            "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase"
-          },
-          {
-            "Time": "2026-11-04T12:08:41.105324728+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_AttentionQuestionAndHistoryRollBackTogether"
-          },
-          {
-            "Time": "2026-11-04T12:08:41.656322603+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_AttentionQuestionAndHistoryRollBackTogether",
-            "Elapsed": 0.55
-          },
-          {
-            "Time": "2026-11-04T12:08:47.374372339+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestAttentionManagerRelayUsesActualLocalOwnerSource"
-          },
-          {
-            "Time": "2026-11-04T12:08:48.670950863+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestAttentionManagerRelayUsesActualLocalOwnerSource",
-            "Elapsed": 1.3
-          },
-          {
-            "Time": "2026-11-04T12:08:48.834787271+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots"
-          },
-          {
-            "Time": "2026-11-04T12:08:49.286196067+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots",
-            "Elapsed": 0.45
-          },
-          {
-            "Time": "2026-11-04T12:09:01.602114243+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_CompletionNoticeFailureRollsBackAcceptance"
-          },
-          {
-            "Time": "2026-11-04T12:09:02.769344983+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_CompletionNoticeFailureRollsBackAcceptance",
-            "Elapsed": 1.17
-          },
-          {
-            "Time": "2026-11-04T12:09:10.401919005+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFollowupAtomicFactRollbackAndReplacementInvalidation"
-          },
-          {
-            "Time": "2026-11-04T12:09:11.34190187+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/store",
-            "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase",
-            "Elapsed": 34.28
-          },
-          {
-            "Time": "2026-11-04T12:09:11.439574236+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFollowupAtomicFactRollbackAndReplacementInvalidation",
-            "Elapsed": 1.04
-          },
-          {
-            "Time": "2026-11-04T12:09:11.441886116+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal"
-          },
-          {
-            "Time": "2026-11-04T12:09:12.015588733+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal",
-            "Elapsed": 0.57
-          },
-          {
-            "Time": "2026-11-04T12:09:14.492552661+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedManagerWorkerAcceptanceCompletionClosureAndParentWake"
-          },
-          {
-            "Time": "2026-11-04T12:09:17.41040281+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedManagerWorkerAcceptanceCompletionClosureAndParentWake",
-            "Elapsed": 2.92
-          },
-          {
-            "Time": "2026-11-04T12:09:19.050575956+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource"
-          },
-          {
-            "Time": "2026-11-04T12:09:19.830676713+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource",
-            "Elapsed": 0.78
-          },
-          {
-            "Time": "2026-11-04T12:09:26.392489527+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_EventWakeQueueFailureRollsBackDecision"
-          },
-          {
-            "Time": "2026-11-04T12:09:27.059297022+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_EventWakeQueueFailureRollsBackDecision",
-            "Elapsed": 0.67
-          },
-          {
-            "Time": "2026-11-04T12:10:03.296410117+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedParentClosesWithVerifiedDescendantAcceptance"
-          },
-          {
-            "Time": "2026-11-04T12:10:06.070574543+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedParentClosesWithVerifiedDescendantAcceptance",
-            "Elapsed": 2.77
-          },
-          {
-            "Time": "2026-11-04T12:10:11.843198274+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedMainClassificationRequiresAdmittedTarget"
-          },
-          {
-            "Time": "2026-11-04T12:10:11.990617347+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption"
-          },
-          {
-            "Time": "2026-11-04T12:10:12.616408299+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope"
-          },
-          {
-            "Time": "2026-11-04T12:10:12.839682264+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedMainClassificationRequiresAdmittedTarget",
-            "Elapsed": 1
-          },
-          {
-            "Time": "2026-11-04T12:10:13.370175241+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption",
-            "Elapsed": 1.38
-          },
-          {
-            "Time": "2026-11-04T12:10:13.830718683+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope",
-            "Elapsed": 1.21
-          },
-          {
-            "Time": "2026-11-04T12:10:13.830823193+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_RunnerNestedManagerSourceMustStayInAdmittedScope"
-          },
-          {
-            "Time": "2026-11-04T12:10:15.348061469+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_RunnerNestedManagerSourceMustStayInAdmittedScope",
-            "Elapsed": 1.52
-          },
-          {
-            "Time": "2026-11-04T12:10:17.682757259+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/views",
-            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents"
-          },
-          {
-            "Time": "2026-11-04T12:10:17.871707332+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource"
-          },
-          {
-            "Time": "2026-11-04T12:10:20.925901866+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource",
-            "Elapsed": 3.05
-          },
-          {
-            "Time": "2026-11-04T12:10:23.660852799+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/views",
-            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents",
-            "Elapsed": 5.98
-          },
-          {
-            "Time": "2026-11-04T12:10:27.296330675+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestNativePreviewRollsBackAndIncludesReleasedEarlierPages"
-          },
-          {
-            "Time": "2026-11-04T12:10:27.976302592+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestNativePreviewRollsBackAndIncludesReleasedEarlierPages",
-            "Elapsed": 0.68
-          },
-          {
-            "Time": "2026-11-04T12:10:53.359368577+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/store",
-            "Test": "TestWriteRollsBackOnError"
-          },
-          {
-            "Time": "2026-11-04T12:10:59.371259861+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/store",
-            "Test": "TestWriteRollsBackOnError",
-            "Elapsed": 6.01
-          },
-          {
-            "Time": "2026-11-04T12:11:11.047585541+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_TaskRelationsFailureRollsBackCreationAndUpdate"
-          },
-          {
-            "Time": "2026-11-04T12:11:11.807956479+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_TaskRelationsFailureRollsBackCreationAndUpdate",
-            "Elapsed": 0.76
-          },
-          {
-            "Time": "2026-11-04T12:11:27.095991292+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_WorkerQuestionNoticeFailureRollsBackCreation"
-          },
-          {
-            "Time": "2026-11-04T12:11:28.079599535+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_WorkerQuestionNoticeFailureRollsBackCreation",
-            "Elapsed": 0.98
-          },
-          {
-            "Time": "2026-11-04T12:11:32.363245558+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestWorkspaceUnusedRebindRollsBackOnLateWriteFailure"
-          },
-          {
-            "Time": "2026-11-04T12:11:33.218321006+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestWorkspaceUnusedRebindRollsBackOnLateWriteFailure",
-            "Elapsed": 0.85
-          }
-        ],
-        "selected": [
-          {
-            "Time": "2026-11-04T12:13:39.94347118+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestAgentInventoryTransactionRollsBackWithoutReceipt"
-          },
-          {
-            "Time": "2026-11-04T12:13:40.553831797+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestAgentInventoryTransactionRollsBackWithoutReceipt",
-            "Elapsed": 0.61
-          },
-          {
-            "Time": "2026-11-04T12:13:46.999458824+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestNoEffectIsNotRecorded"
-          },
-          {
-            "Time": "2026-11-04T12:13:47.42243699+08:00",
+            "Time": "2026-11-04T21:28:50.246730059+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestNoEffectIsNotRecorded",
             "Elapsed": 0.42
           },
           {
-            "Time": "2026-11-04T12:13:48.968308755+08:00",
+            "Time": "2026-11-04T21:28:52.925181393+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_InternalErrorRetrySafe"
           },
           {
-            "Time": "2026-11-04T12:13:49.368252907+08:00",
+            "Time": "2026-11-04T21:28:53.350739673+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_InternalErrorRetrySafe",
-            "Elapsed": 0.4
+            "Elapsed": 0.43
           },
           {
-            "Time": "2026-11-04T12:13:50.963265077+08:00",
+            "Time": "2026-11-04T21:28:55.060743252+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestNoEffectWithEventsIsAnError"
           },
           {
-            "Time": "2026-11-04T12:13:51.334595419+08:00",
+            "Time": "2026-11-04T21:28:55.440030617+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestNoEffectWithEventsIsAnError",
-            "Elapsed": 0.37
+            "Elapsed": 0.38
           },
           {
-            "Time": "2026-11-04T12:14:15.001173654+08:00",
+            "Time": "2026-11-04T21:29:13.659734168+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/store",
+            "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase"
+          },
+          {
+            "Time": "2026-11-04T21:29:19.611115415+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_AttentionQuestionAndHistoryRollBackTogether"
           },
           {
-            "Time": "2026-11-04T12:14:15.547790738+08:00",
+            "Time": "2026-11-04T21:29:20.1782047+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_AttentionQuestionAndHistoryRollBackTogether",
-            "Elapsed": 0.55
+            "Elapsed": 0.57
           },
           {
-            "Time": "2026-11-04T12:14:19.714985832+08:00",
+            "Time": "2026-11-04T21:29:25.104844154+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestAttentionManagerRelayUsesActualLocalOwnerSource"
           },
           {
-            "Time": "2026-11-04T12:14:21.017499591+08:00",
+            "Time": "2026-11-04T21:29:26.445338949+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestAttentionManagerRelayUsesActualLocalOwnerSource",
-            "Elapsed": 1.3
+            "Elapsed": 1.34
           },
           {
-            "Time": "2026-11-04T12:14:23.024886992+08:00",
+            "Time": "2026-11-04T21:29:27.377911497+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots"
           },
           {
-            "Time": "2026-11-04T12:14:23.487390178+08:00",
+            "Time": "2026-11-04T21:29:27.819299211+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots",
-            "Elapsed": 0.46
+            "Elapsed": 0.44
           },
           {
-            "Time": "2026-11-04T12:14:33.649087447+08:00",
+            "Time": "2026-11-04T21:29:39.499484913+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_CompletionNoticeFailureRollsBackAcceptance"
           },
           {
-            "Time": "2026-11-04T12:14:34.613145728+08:00",
+            "Time": "2026-11-04T21:29:40.524903779+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_CompletionNoticeFailureRollsBackAcceptance",
-            "Elapsed": 0.96
+            "Elapsed": 1.03
           },
           {
-            "Time": "2026-11-04T12:14:43.695471783+08:00",
+            "Time": "2026-11-04T21:29:46.822974186+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/store",
+            "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase",
+            "Elapsed": 33.16
+          },
+          {
+            "Time": "2026-11-04T21:29:49.21583982+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFollowupAtomicFactRollbackAndReplacementInvalidation"
           },
           {
-            "Time": "2026-11-04T12:14:44.656427866+08:00",
+            "Time": "2026-11-04T21:29:50.154674977+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFollowupAtomicFactRollbackAndReplacementInvalidation",
-            "Elapsed": 0.96
+            "Elapsed": 0.94
           },
           {
-            "Time": "2026-11-04T12:14:44.657293571+08:00",
+            "Time": "2026-11-04T21:29:50.155247545+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal"
           },
           {
-            "Time": "2026-11-04T12:14:45.214399574+08:00",
+            "Time": "2026-11-04T21:29:50.758145986+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal",
-            "Elapsed": 0.56
+            "Elapsed": 0.6
           },
           {
-            "Time": "2026-11-04T12:14:47.6721026+08:00",
+            "Time": "2026-11-04T21:29:53.160439214+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestHostedManagerWorkerAcceptanceCompletionClosureAndParentWake"
           },
           {
-            "Time": "2026-11-04T12:14:50.563002024+08:00",
+            "Time": "2026-11-04T21:29:55.992261307+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestHostedManagerWorkerAcceptanceCompletionClosureAndParentWake",
-            "Elapsed": 2.89
+            "Elapsed": 2.83
           },
           {
-            "Time": "2026-11-04T12:14:51.63606893+08:00",
+            "Time": "2026-11-04T21:29:58.011796187+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource"
           },
           {
-            "Time": "2026-11-04T12:14:52.410298874+08:00",
+            "Time": "2026-11-04T21:29:58.73068021+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource",
-            "Elapsed": 0.77
+            "Elapsed": 0.72
           },
           {
-            "Time": "2026-11-04T12:14:59.792084371+08:00",
+            "Time": "2026-11-04T21:30:04.818626197+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_EventWakeQueueFailureRollsBackDecision"
           },
           {
-            "Time": "2026-11-04T12:15:00.462356786+08:00",
+            "Time": "2026-11-04T21:30:05.475712746+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_EventWakeQueueFailureRollsBackDecision",
-            "Elapsed": 0.67
+            "Elapsed": 0.66
           },
           {
-            "Time": "2026-11-04T12:15:35.288402722+08:00",
+            "Time": "2026-11-04T21:30:41.930043258+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestHostedParentClosesWithVerifiedDescendantAcceptance"
           },
           {
-            "Time": "2026-11-04T12:15:38.139190567+08:00",
+            "Time": "2026-11-04T21:30:44.865820534+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestHostedParentClosesWithVerifiedDescendantAcceptance",
-            "Elapsed": 2.85
+            "Elapsed": 2.94
           },
           {
-            "Time": "2026-11-04T12:15:43.109122268+08:00",
+            "Time": "2026-11-04T21:30:49.410095807+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption"
           },
           {
-            "Time": "2026-11-04T12:15:44.551055577+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption",
-            "Elapsed": 1.44
-          },
-          {
-            "Time": "2026-11-04T12:15:44.826075132+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope"
-          },
-          {
-            "Time": "2026-11-04T12:15:45.230084727+08:00",
+            "Time": "2026-11-04T21:30:50.13457306+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestHostedMainClassificationRequiresAdmittedTarget"
           },
           {
-            "Time": "2026-11-04T12:15:46.001537004+08:00",
+            "Time": "2026-11-04T21:30:50.826587508+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption",
+            "Elapsed": 1.42
+          },
+          {
+            "Time": "2026-11-04T21:30:50.949875098+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope"
+          },
+          {
+            "Time": "2026-11-04T21:30:51.115617048+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedMainClassificationRequiresAdmittedTarget",
+            "Elapsed": 0.98
+          },
+          {
+            "Time": "2026-11-04T21:30:52.071031454+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope",
-            "Elapsed": 1.18
+            "Elapsed": 1.12
           },
           {
-            "Time": "2026-11-04T12:15:46.002518566+08:00",
+            "Time": "2026-11-04T21:30:52.071058911+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_RunnerNestedManagerSourceMustStayInAdmittedScope"
           },
           {
-            "Time": "2026-11-04T12:15:46.237451902+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/app",
-            "Test": "TestHostedMainClassificationRequiresAdmittedTarget",
-            "Elapsed": 1.01
-          },
-          {
-            "Time": "2026-11-04T12:15:47.4185134+08:00",
+            "Time": "2026-11-04T21:30:53.490825333+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_RunnerNestedManagerSourceMustStayInAdmittedScope",
             "Elapsed": 1.42
           },
           {
-            "Time": "2026-11-04T12:15:51.674518662+08:00",
+            "Time": "2026-11-04T21:30:54.414058168+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/views",
+            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents"
+          },
+          {
+            "Time": "2026-11-04T21:30:57.271713802+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource"
           },
           {
-            "Time": "2026-11-04T12:15:54.677072301+08:00",
+            "Time": "2026-11-04T21:31:00.158893042+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource",
-            "Elapsed": 3
+            "Elapsed": 2.89
           },
           {
-            "Time": "2026-11-04T12:15:59.279249566+08:00",
+            "Time": "2026-11-04T21:31:00.536112929+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/views",
+            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents",
+            "Elapsed": 6.12
+          },
+          {
+            "Time": "2026-11-04T21:31:05.056442037+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestNativePreviewRollsBackAndIncludesReleasedEarlierPages"
           },
           {
-            "Time": "2026-11-04T12:15:59.954151949+08:00",
+            "Time": "2026-11-04T21:31:05.747758606+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestNativePreviewRollsBackAndIncludesReleasedEarlierPages",
-            "Elapsed": 0.67
+            "Elapsed": 0.69
           },
           {
-            "Time": "2026-11-04T12:16:44.912905265+08:00",
+            "Time": "2026-11-04T21:31:29.064035111+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/store",
+            "Test": "TestWriteRollsBackOnError"
+          },
+          {
+            "Time": "2026-11-04T21:31:35.3006717+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/store",
+            "Test": "TestWriteRollsBackOnError",
+            "Elapsed": 6.24
+          },
+          {
+            "Time": "2026-11-04T21:31:50.014910297+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_TaskRelationsFailureRollsBackCreationAndUpdate"
           },
           {
-            "Time": "2026-11-04T12:16:45.684962018+08:00",
+            "Time": "2026-11-04T21:31:50.785126464+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_TaskRelationsFailureRollsBackCreationAndUpdate",
             "Elapsed": 0.77
           },
           {
-            "Time": "2026-11-04T12:16:49.827494891+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/views",
-            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents"
-          },
-          {
-            "Time": "2026-11-04T12:16:56.09257068+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/views",
-            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents",
-            "Elapsed": 6.26
-          },
-          {
-            "Time": "2026-11-04T12:16:59.640634237+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/store",
-            "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase"
-          },
-          {
-            "Time": "2026-11-04T12:17:00.673434876+08:00",
+            "Time": "2026-11-04T21:32:06.032342389+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_WorkerQuestionNoticeFailureRollsBackCreation"
           },
           {
-            "Time": "2026-11-04T12:17:01.669243332+08:00",
+            "Time": "2026-11-04T21:32:07.055105052+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestFault_WorkerQuestionNoticeFailureRollsBackCreation",
-            "Elapsed": 1
+            "Elapsed": 1.02
           },
           {
-            "Time": "2026-11-04T12:17:07.470994803+08:00",
+            "Time": "2026-11-04T21:32:12.234277319+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestWorkspaceUnusedRebindRollsBackOnLateWriteFailure"
           },
           {
-            "Time": "2026-11-04T12:17:08.316143178+08:00",
+            "Time": "2026-11-04T21:32:13.067846383+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/app",
             "Test": "TestWorkspaceUnusedRebindRollsBackOnLateWriteFailure",
-            "Elapsed": 0.84
+            "Elapsed": 0.83
+          }
+        ],
+        "selected": [
+          {
+            "Time": "2026-11-04T21:34:23.699250027+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestAgentInventoryTransactionRollsBackWithoutReceipt"
           },
           {
-            "Time": "2026-11-04T12:17:30.70685531+08:00",
+            "Time": "2026-11-04T21:34:24.35016606+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestAgentInventoryTransactionRollsBackWithoutReceipt",
+            "Elapsed": 0.65
+          },
+          {
+            "Time": "2026-11-04T21:34:30.204763+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestNoEffectIsNotRecorded"
+          },
+          {
+            "Time": "2026-11-04T21:34:30.591232865+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestNoEffectIsNotRecorded",
+            "Elapsed": 0.39
+          },
+          {
+            "Time": "2026-11-04T21:34:33.552022803+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_InternalErrorRetrySafe"
+          },
+          {
+            "Time": "2026-11-04T21:34:33.971702913+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_InternalErrorRetrySafe",
+            "Elapsed": 0.42
+          },
+          {
+            "Time": "2026-11-04T21:34:35.011952407+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestNoEffectWithEventsIsAnError"
+          },
+          {
+            "Time": "2026-11-04T21:34:35.420391792+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestNoEffectWithEventsIsAnError",
+            "Elapsed": 0.41
+          },
+          {
+            "Time": "2026-11-04T21:35:01.05294334+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/store",
+            "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase"
+          },
+          {
+            "Time": "2026-11-04T21:35:01.39063673+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_AttentionQuestionAndHistoryRollBackTogether"
+          },
+          {
+            "Time": "2026-11-04T21:35:01.993643232+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_AttentionQuestionAndHistoryRollBackTogether",
+            "Elapsed": 0.6
+          },
+          {
+            "Time": "2026-11-04T21:35:08.812747709+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestAttentionManagerRelayUsesActualLocalOwnerSource"
+          },
+          {
+            "Time": "2026-11-04T21:35:09.80159743+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots"
+          },
+          {
+            "Time": "2026-11-04T21:35:10.168148636+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestAttentionManagerRelayUsesActualLocalOwnerSource",
+            "Elapsed": 1.36
+          },
+          {
+            "Time": "2026-11-04T21:35:10.322912569+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestCanonicalOwnerEventPersistenceFailureRollsBackBothSnapshots",
+            "Elapsed": 0.52
+          },
+          {
+            "Time": "2026-11-04T21:35:22.957039261+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_CompletionNoticeFailureRollsBackAcceptance"
+          },
+          {
+            "Time": "2026-11-04T21:35:24.050837523+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_CompletionNoticeFailureRollsBackAcceptance",
+            "Elapsed": 1.09
+          },
+          {
+            "Time": "2026-11-04T21:35:30.294441778+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFollowupAtomicFactRollbackAndReplacementInvalidation"
+          },
+          {
+            "Time": "2026-11-04T21:35:31.279530185+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFollowupAtomicFactRollbackAndReplacementInvalidation",
+            "Elapsed": 0.98
+          },
+          {
+            "Time": "2026-11-04T21:35:31.279820137+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal"
+          },
+          {
+            "Time": "2026-11-04T21:35:31.900885917+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal",
+            "Elapsed": 0.62
+          },
+          {
+            "Time": "2026-11-04T21:35:34.384230296+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedManagerWorkerAcceptanceCompletionClosureAndParentWake"
+          },
+          {
+            "Time": "2026-11-04T21:35:34.591666987+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/store",
             "Test": "TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase",
-            "Elapsed": 31.07
+            "Elapsed": 33.54
           },
           {
-            "Time": "2026-11-04T12:19:09.668419899+08:00",
+            "Time": "2026-11-04T21:35:37.319846715+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedManagerWorkerAcceptanceCompletionClosureAndParentWake",
+            "Elapsed": 2.94
+          },
+          {
+            "Time": "2026-11-04T21:35:39.809399751+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource"
+          },
+          {
+            "Time": "2026-11-04T21:35:40.582429163+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestConsultationPromotionRejectsExternalIntentAndCrossConversationSource",
+            "Elapsed": 0.77
+          },
+          {
+            "Time": "2026-11-04T21:35:47.082088088+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_EventWakeQueueFailureRollsBackDecision"
+          },
+          {
+            "Time": "2026-11-04T21:35:47.772631899+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_EventWakeQueueFailureRollsBackDecision",
+            "Elapsed": 0.69
+          },
+          {
+            "Time": "2026-11-04T21:36:24.032895252+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedParentClosesWithVerifiedDescendantAcceptance"
+          },
+          {
+            "Time": "2026-11-04T21:36:26.817868911+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedParentClosesWithVerifiedDescendantAcceptance",
+            "Elapsed": 2.78
+          },
+          {
+            "Time": "2026-11-04T21:36:32.502053449+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedMainClassificationRequiresAdmittedTarget"
+          },
+          {
+            "Time": "2026-11-04T21:36:32.897635024+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope"
+          },
+          {
+            "Time": "2026-11-04T21:36:33.557110491+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedMainClassificationRequiresAdmittedTarget",
+            "Elapsed": 1.05
+          },
+          {
+            "Time": "2026-11-04T21:36:34.15651769+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_NestedManagerSourceMustStayInAdmittedScope",
+            "Elapsed": 1.26
+          },
+          {
+            "Time": "2026-11-04T21:36:34.156555909+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_RunnerNestedManagerSourceMustStayInAdmittedScope"
+          },
+          {
+            "Time": "2026-11-04T21:36:35.291405969+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption"
+          },
+          {
+            "Time": "2026-11-04T21:36:35.634660595+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_RunnerNestedManagerSourceMustStayInAdmittedScope",
+            "Elapsed": 1.48
+          },
+          {
+            "Time": "2026-11-04T21:36:36.681703572+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestHostedUnknownOrdinaryStartIsNotSourceConsumption",
+            "Elapsed": 1.39
+          },
+          {
+            "Time": "2026-11-04T21:36:40.565361935+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource"
+          },
+          {
+            "Time": "2026-11-04T21:36:43.642538295+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource",
+            "Elapsed": 3.08
+          },
+          {
+            "Time": "2026-11-04T21:36:44.178278346+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/views",
+            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents"
+          },
+          {
+            "Time": "2026-11-04T21:36:47.324000825+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestNativePreviewRollsBackAndIncludesReleasedEarlierPages"
+          },
+          {
+            "Time": "2026-11-04T21:36:48.027046236+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestNativePreviewRollsBackAndIncludesReleasedEarlierPages",
+            "Elapsed": 0.7
+          },
+          {
+            "Time": "2026-11-04T21:36:50.464995643+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/views",
+            "Test": "TestNoticeMetadataIsAtomicAndProjectsIntoHistoryAndEvents",
+            "Elapsed": 6.29
+          },
+          {
+            "Time": "2026-11-04T21:37:17.962710548+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/store",
             "Test": "TestWriteRollsBackOnError"
           },
           {
-            "Time": "2026-11-04T12:19:15.796382845+08:00",
+            "Time": "2026-11-04T21:37:24.072756757+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/store",
             "Test": "TestWriteRollsBackOnError",
-            "Elapsed": 6.13
+            "Elapsed": 6.11
+          },
+          {
+            "Time": "2026-11-04T21:37:32.077240674+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_TaskRelationsFailureRollsBackCreationAndUpdate"
+          },
+          {
+            "Time": "2026-11-04T21:37:32.847693538+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_TaskRelationsFailureRollsBackCreationAndUpdate",
+            "Elapsed": 0.77
+          },
+          {
+            "Time": "2026-11-04T21:37:53.056682334+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_WorkerQuestionNoticeFailureRollsBackCreation"
+          },
+          {
+            "Time": "2026-11-04T21:37:53.994486605+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestFault_WorkerQuestionNoticeFailureRollsBackCreation",
+            "Elapsed": 0.94
+          },
+          {
+            "Time": "2026-11-04T21:37:56.403266026+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestWorkspaceUnusedRebindRollsBackOnLateWriteFailure"
+          },
+          {
+            "Time": "2026-11-04T21:37:57.243764824+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/app",
+            "Test": "TestWorkspaceUnusedRebindRollsBackOnLateWriteFailure",
+            "Elapsed": 0.84
           }
         ]
       }
@@ -933,40 +933,40 @@
     {
       "Name": "http-contract",
       "Full": {
-        "Seconds": 375.919000348,
-        "UserSeconds": 4413.329935,
-        "SystemSeconds": 136.19048,
+        "Seconds": 390.418462972,
+        "UserSeconds": 4488.416298,
+        "SystemSeconds": 139.095882,
         "LoadBefore": [
-          "3.72",
-          "9.22",
-          "10.38"
+          "5.86",
+          "12.53",
+          "13.72"
         ],
         "LoadAfter": [
-          "5.47",
-          "11.08",
-          "11.52"
+          "5.82",
+          "12.55",
+          "14.06"
         ],
-        "StartedAt": "2026-11-04T04:21:37.213690732Z",
-        "FinishedAt": "2026-11-04T04:27:53.132757966Z",
+        "StartedAt": "2026-11-04T13:40:17.034313957Z",
+        "FinishedAt": "2026-11-04T13:46:47.452860486Z",
         "Success": false,
         "Error": "exit status 1"
       },
       "Selected": {
-        "Seconds": 510.06828402,
-        "UserSeconds": 4196.549096,
-        "SystemSeconds": 147.443036,
+        "Seconds": 354.83938381,
+        "UserSeconds": 4303.911574,
+        "SystemSeconds": 132.885356,
         "LoadBefore": [
-          "5.47",
-          "11.08",
-          "11.52"
+          "5.82",
+          "12.55",
+          "14.06"
         ],
         "LoadAfter": [
-          "4.34",
-          "9.12",
-          "11.30"
+          "4.79",
+          "13.02",
+          "14.57"
         ],
-        "StartedAt": "2026-11-04T04:27:53.132918082Z",
-        "FinishedAt": "2026-11-04T04:36:23.20132266Z",
+        "StartedAt": "2026-11-04T13:46:47.452993339Z",
+        "FinishedAt": "2026-11-04T13:52:42.292466641Z",
         "Success": false,
         "Error": "exit status 1"
       },
@@ -1056,532 +1056,532 @@
       "Passed": true,
       "WebFailures": null,
       "WebMissing": null,
-      "SelectedRoots": 2175,
+      "SelectedRoots": 2282,
       "PlanFingerprint": "ce4106fdf29e3de832bc8a2ae0019293264e1a5d4d26e2708d79f70b6cf1d16b",
-      "PlanFullFallback": false,
+      "PlanFullFallback": true,
       "NativeFailureRootEvents": {
         "full": [
           {
-            "Time": "2026-11-04T12:21:58.594784406+08:00",
+            "Time": "2026-11-04T21:40:38.907393155+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts"
           },
           {
-            "Time": "2026-11-04T12:21:58.651659697+08:00",
+            "Time": "2026-11-04T21:40:38.968938411+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit"
           },
           {
-            "Time": "2026-11-04T12:22:05.084192116+08:00",
+            "Time": "2026-11-04T21:40:45.47120188+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts",
-            "Elapsed": 6.49
+            "Elapsed": 6.56
           },
           {
-            "Time": "2026-11-04T12:22:05.854460164+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestSessionLifecycle"
-          },
-          {
-            "Time": "2026-11-04T12:22:06.185269189+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestSessionLifecycle",
-            "Elapsed": 0.33
-          },
-          {
-            "Time": "2026-11-04T12:22:06.215841688+08:00",
+            "Time": "2026-11-04T21:40:46.132234445+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestArchiveOriginalAndResourceGrantsPreserveScopeAndPreviewPolicy"
           },
           {
-            "Time": "2026-11-04T12:22:08.161657493+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics"
-          },
-          {
-            "Time": "2026-11-04T12:22:08.488624157+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestArchiveOwnerBrowseUsesSharedReaderAndKeepsHistoricalBytes"
-          },
-          {
-            "Time": "2026-11-04T12:22:08.993344214+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics",
-            "Elapsed": 0.83
-          },
-          {
-            "Time": "2026-11-04T12:22:11.098484871+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestArchiveOriginalAndResourceGrantsPreserveScopeAndPreviewPolicy",
-            "Elapsed": 4.88
-          },
-          {
-            "Time": "2026-11-04T12:22:11.984991338+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestConversationPages"
-          },
-          {
-            "Time": "2026-11-04T12:22:12.702336311+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestConversationPages",
-            "Elapsed": 0.72
-          },
-          {
-            "Time": "2026-11-04T12:22:13.331716606+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestArchiveOwnerBrowseUsesSharedReaderAndKeepsHistoricalBytes",
-            "Elapsed": 4.84
-          },
-          {
-            "Time": "2026-11-04T12:22:21.883993688+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestConversationHandoffDisabledWithoutHostedMain"
-          },
-          {
-            "Time": "2026-11-04T12:22:22.327675814+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestConversationHandoffDisabledWithoutHostedMain",
-            "Elapsed": 0.44
-          },
-          {
-            "Time": "2026-11-04T12:22:24.690039817+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestNonUploadOperationsKeepSmallPayloadLimit"
-          },
-          {
-            "Time": "2026-11-04T12:22:25.162737426+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestNonUploadOperationsKeepSmallPayloadLimit",
-            "Elapsed": 0.47
-          },
-          {
-            "Time": "2026-11-04T12:22:25.242374+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestFinishedTaskPages"
-          },
-          {
-            "Time": "2026-11-04T12:22:26.818255586+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRetiredWorkItemOwnerRoutesCannotCreateOrMutateBusiness"
-          },
-          {
-            "Time": "2026-11-04T12:22:27.402730874+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRetiredWorkItemOwnerRoutesCannotCreateOrMutateBusiness",
-            "Elapsed": 0.58
-          },
-          {
-            "Time": "2026-11-04T12:22:32.351919434+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestEventStream"
-          },
-          {
-            "Time": "2026-11-04T12:22:32.933796667+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestEventStream",
-            "Elapsed": 0.58
-          },
-          {
-            "Time": "2026-11-04T12:22:33.717186534+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestExternalCoordinatorRetired"
-          },
-          {
-            "Time": "2026-11-04T12:22:34.045840308+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestExternalCoordinatorRetired",
-            "Elapsed": 0.33
-          },
-          {
-            "Time": "2026-11-04T12:22:35.59817278+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestOwnerOpsWhitelist"
-          },
-          {
-            "Time": "2026-11-04T12:22:35.957592445+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestOwnerOpsWhitelist",
-            "Elapsed": 0.36
-          },
-          {
-            "Time": "2026-11-04T12:22:36.455454981+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestFault_HostedMainThreadDisabled"
-          },
-          {
-            "Time": "2026-11-04T12:22:36.573012159+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestIssueProgressHTTPHistoryReplayAndActivity"
-          },
-          {
-            "Time": "2026-11-04T12:22:36.951052296+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestFault_HostedMainThreadDisabled",
-            "Elapsed": 0.5
-          },
-          {
-            "Time": "2026-11-04T12:22:41.621057848+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestIssueProgressHTTPHistoryReplayAndActivity",
-            "Elapsed": 5.05
-          },
-          {
-            "Time": "2026-11-04T12:22:46.258119813+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRunLogs"
-          },
-          {
-            "Time": "2026-11-04T12:22:47.495287404+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestFinishedTaskPages",
-            "Elapsed": 22.25
-          },
-          {
-            "Time": "2026-11-04T12:22:47.879380203+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRunLogs",
-            "Elapsed": 1.62
-          },
-          {
-            "Time": "2026-11-04T12:22:49.354936483+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows"
-          },
-          {
-            "Time": "2026-11-04T12:22:49.713915193+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows",
-            "Elapsed": 0.36
-          },
-          {
-            "Time": "2026-11-04T12:22:49.713979684+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRolloutPreviewRejectsPathsAndUnboundContentCursors"
-          },
-          {
-            "Time": "2026-11-04T12:22:50.05844636+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRolloutPreviewRejectsPathsAndUnboundContentCursors",
-            "Elapsed": 0.34
-          },
-          {
-            "Time": "2026-11-04T12:22:50.958710355+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem"
-          },
-          {
-            "Time": "2026-11-04T12:22:52.264722947+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem",
-            "Elapsed": 1.31
-          },
-          {
-            "Time": "2026-11-04T12:26:37.745997545+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
-            "Elapsed": 279.09
-          }
-        ],
-        "selected": [
-          {
-            "Time": "2026-11-04T12:28:07.179375432+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit"
-          },
-          {
-            "Time": "2026-11-04T12:28:07.354475619+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts"
-          },
-          {
-            "Time": "2026-11-04T12:28:13.831816084+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts",
-            "Elapsed": 6.48
-          },
-          {
-            "Time": "2026-11-04T12:28:14.227494893+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestArchiveOriginalAndResourceGrantsPreserveScopeAndPreviewPolicy"
-          },
-          {
-            "Time": "2026-11-04T12:28:14.624300058+08:00",
+            "Time": "2026-11-04T21:40:46.203799699+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestSessionLifecycle"
           },
           {
-            "Time": "2026-11-04T12:28:14.978924716+08:00",
+            "Time": "2026-11-04T21:40:46.56703069+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestSessionLifecycle",
-            "Elapsed": 0.35
+            "Elapsed": 0.36
           },
           {
-            "Time": "2026-11-04T12:28:16.291172215+08:00",
+            "Time": "2026-11-04T21:40:48.615566315+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics"
           },
           {
-            "Time": "2026-11-04T12:28:17.014706356+08:00",
-            "Action": "fail",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics",
-            "Elapsed": 0.72
-          },
-          {
-            "Time": "2026-11-04T12:28:17.202411041+08:00",
+            "Time": "2026-11-04T21:40:48.836811712+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestArchiveOwnerBrowseUsesSharedReaderAndKeepsHistoricalBytes"
           },
           {
-            "Time": "2026-11-04T12:28:18.642329879+08:00",
+            "Time": "2026-11-04T21:40:49.386989715+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics",
+            "Elapsed": 0.77
+          },
+          {
+            "Time": "2026-11-04T21:40:50.772989917+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestArchiveOriginalAndResourceGrantsPreserveScopeAndPreviewPolicy",
-            "Elapsed": 4.41
+            "Elapsed": 4.64
           },
           {
-            "Time": "2026-11-04T12:28:19.700338411+08:00",
+            "Time": "2026-11-04T21:40:52.31749761+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestConversationPages"
           },
           {
-            "Time": "2026-11-04T12:28:20.444384944+08:00",
+            "Time": "2026-11-04T21:40:53.089336741+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestConversationPages",
-            "Elapsed": 0.74
+            "Elapsed": 0.77
           },
           {
-            "Time": "2026-11-04T12:28:21.799263508+08:00",
+            "Time": "2026-11-04T21:40:53.618671842+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestArchiveOwnerBrowseUsesSharedReaderAndKeepsHistoricalBytes",
-            "Elapsed": 4.6
+            "Elapsed": 4.78
           },
           {
-            "Time": "2026-11-04T12:28:28.503880586+08:00",
+            "Time": "2026-11-04T21:41:02.348702923+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestConversationHandoffDisabledWithoutHostedMain"
           },
           {
-            "Time": "2026-11-04T12:28:28.818400926+08:00",
+            "Time": "2026-11-04T21:41:02.742792475+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestConversationHandoffDisabledWithoutHostedMain",
-            "Elapsed": 0.31
+            "Elapsed": 0.39
           },
           {
-            "Time": "2026-11-04T12:28:30.641544879+08:00",
-            "Action": "run",
-            "Package": "github.com/GhostFlying/tend/internal/api",
-            "Test": "TestFinishedTaskPages"
-          },
-          {
-            "Time": "2026-11-04T12:28:30.721732404+08:00",
+            "Time": "2026-11-04T21:41:04.791998411+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestNonUploadOperationsKeepSmallPayloadLimit"
           },
           {
-            "Time": "2026-11-04T12:28:31.23930468+08:00",
+            "Time": "2026-11-04T21:41:05.302552032+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestNonUploadOperationsKeepSmallPayloadLimit",
-            "Elapsed": 0.52
+            "Elapsed": 0.51
           },
           {
-            "Time": "2026-11-04T12:28:33.136368423+08:00",
+            "Time": "2026-11-04T21:41:06.034326387+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestFinishedTaskPages"
+          },
+          {
+            "Time": "2026-11-04T21:41:07.506346239+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRetiredWorkItemOwnerRoutesCannotCreateOrMutateBusiness"
           },
           {
-            "Time": "2026-11-04T12:28:33.631033198+08:00",
+            "Time": "2026-11-04T21:41:08.000726288+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRetiredWorkItemOwnerRoutesCannotCreateOrMutateBusiness",
             "Elapsed": 0.49
           },
           {
-            "Time": "2026-11-04T12:28:35.43957351+08:00",
+            "Time": "2026-11-04T21:41:10.918637376+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestEventStream"
           },
           {
-            "Time": "2026-11-04T12:28:35.966775145+08:00",
+            "Time": "2026-11-04T21:41:11.593221586+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestEventStream",
-            "Elapsed": 0.53
+            "Elapsed": 0.67
           },
           {
-            "Time": "2026-11-04T12:28:36.616393637+08:00",
+            "Time": "2026-11-04T21:41:12.338020917+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestExternalCoordinatorRetired"
           },
           {
-            "Time": "2026-11-04T12:28:37.275393254+08:00",
+            "Time": "2026-11-04T21:41:13.413939907+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestExternalCoordinatorRetired",
-            "Elapsed": 0.66
+            "Elapsed": 1.08
           },
           {
-            "Time": "2026-11-04T12:28:41.696539039+08:00",
+            "Time": "2026-11-04T21:41:15.346680111+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestOwnerOpsWhitelist"
           },
           {
-            "Time": "2026-11-04T12:28:41.711733895+08:00",
+            "Time": "2026-11-04T21:41:15.719857895+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestOwnerOpsWhitelist",
+            "Elapsed": 0.37
+          },
+          {
+            "Time": "2026-11-04T21:41:16.19001622+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestFault_HostedMainThreadDisabled"
+          },
+          {
+            "Time": "2026-11-04T21:41:16.488976966+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestIssueProgressHTTPHistoryReplayAndActivity"
           },
           {
-            "Time": "2026-11-04T12:28:42.097532054+08:00",
+            "Time": "2026-11-04T21:41:16.618586799+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestFault_HostedMainThreadDisabled",
+            "Elapsed": 0.43
+          },
+          {
+            "Time": "2026-11-04T21:41:21.666444309+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestIssueProgressHTTPHistoryReplayAndActivity",
+            "Elapsed": 5.18
+          },
+          {
+            "Time": "2026-11-04T21:41:26.122086273+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRunLogs"
+          },
+          {
+            "Time": "2026-11-04T21:41:27.774393147+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRunLogs",
+            "Elapsed": 1.65
+          },
+          {
+            "Time": "2026-11-04T21:41:28.836862508+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestFinishedTaskPages",
+            "Elapsed": 22.8
+          },
+          {
+            "Time": "2026-11-04T21:41:30.809885855+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem"
+          },
+          {
+            "Time": "2026-11-04T21:41:30.881311446+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows"
+          },
+          {
+            "Time": "2026-11-04T21:41:31.241321695+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows",
+            "Elapsed": 0.36
+          },
+          {
+            "Time": "2026-11-04T21:41:31.241366007+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRolloutPreviewRejectsPathsAndUnboundContentCursors"
+          },
+          {
+            "Time": "2026-11-04T21:41:31.655676496+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRolloutPreviewRejectsPathsAndUnboundContentCursors",
+            "Elapsed": 0.41
+          },
+          {
+            "Time": "2026-11-04T21:41:32.300829859+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem",
+            "Elapsed": 1.49
+          },
+          {
+            "Time": "2026-11-04T21:45:19.439736716+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+            "Elapsed": 280.47
+          }
+        ],
+        "selected": [
+          {
+            "Time": "2026-11-04T21:46:59.914017122+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts"
+          },
+          {
+            "Time": "2026-11-04T21:47:00.000413787+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit"
+          },
+          {
+            "Time": "2026-11-04T21:47:06.911130697+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts",
+            "Elapsed": 7
+          },
+          {
+            "Time": "2026-11-04T21:47:07.50489698+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestArchiveOriginalAndResourceGrantsPreserveScopeAndPreviewPolicy"
+          },
+          {
+            "Time": "2026-11-04T21:47:07.727496835+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestSessionLifecycle"
+          },
+          {
+            "Time": "2026-11-04T21:47:08.137117928+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestSessionLifecycle",
+            "Elapsed": 0.41
+          },
+          {
+            "Time": "2026-11-04T21:47:09.604388811+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics"
+          },
+          {
+            "Time": "2026-11-04T21:47:10.370567228+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestHistoricalBackgroundOwnerSourcesAndMetrics",
+            "Elapsed": 0.77
+          },
+          {
+            "Time": "2026-11-04T21:47:10.423606867+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestArchiveOwnerBrowseUsesSharedReaderAndKeepsHistoricalBytes"
+          },
+          {
+            "Time": "2026-11-04T21:47:12.333755224+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestArchiveOriginalAndResourceGrantsPreserveScopeAndPreviewPolicy",
+            "Elapsed": 4.83
+          },
+          {
+            "Time": "2026-11-04T21:47:13.31842709+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestConversationPages"
+          },
+          {
+            "Time": "2026-11-04T21:47:14.141157997+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestConversationPages",
+            "Elapsed": 0.82
+          },
+          {
+            "Time": "2026-11-04T21:47:14.903920891+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestArchiveOwnerBrowseUsesSharedReaderAndKeepsHistoricalBytes",
+            "Elapsed": 4.48
+          },
+          {
+            "Time": "2026-11-04T21:47:22.30703094+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestConversationHandoffDisabledWithoutHostedMain"
+          },
+          {
+            "Time": "2026-11-04T21:47:22.6350966+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestConversationHandoffDisabledWithoutHostedMain",
+            "Elapsed": 0.33
+          },
+          {
+            "Time": "2026-11-04T21:47:24.80006337+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestNonUploadOperationsKeepSmallPayloadLimit"
+          },
+          {
+            "Time": "2026-11-04T21:47:25.322997978+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestNonUploadOperationsKeepSmallPayloadLimit",
+            "Elapsed": 0.52
+          },
+          {
+            "Time": "2026-11-04T21:47:25.972999134+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestFinishedTaskPages"
+          },
+          {
+            "Time": "2026-11-04T21:47:27.250722627+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRetiredWorkItemOwnerRoutesCannotCreateOrMutateBusiness"
+          },
+          {
+            "Time": "2026-11-04T21:47:27.774817399+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestRetiredWorkItemOwnerRoutesCannotCreateOrMutateBusiness",
+            "Elapsed": 0.52
+          },
+          {
+            "Time": "2026-11-04T21:47:34.65816401+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestEventStream"
+          },
+          {
+            "Time": "2026-11-04T21:47:35.91039829+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestEventStream",
+            "Elapsed": 1.25
+          },
+          {
+            "Time": "2026-11-04T21:47:36.697957419+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestExternalCoordinatorRetired"
+          },
+          {
+            "Time": "2026-11-04T21:47:37.044347936+08:00",
+            "Action": "fail",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestExternalCoordinatorRetired",
+            "Elapsed": 0.35
+          },
+          {
+            "Time": "2026-11-04T21:47:37.719946091+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestOwnerOpsWhitelist"
+          },
+          {
+            "Time": "2026-11-04T21:47:38.119708463+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestOwnerOpsWhitelist",
             "Elapsed": 0.4
           },
           {
-            "Time": "2026-11-04T12:28:42.586419107+08:00",
+            "Time": "2026-11-04T21:47:38.610089042+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestFault_HostedMainThreadDisabled"
           },
           {
-            "Time": "2026-11-04T12:28:43.042143073+08:00",
+            "Time": "2026-11-04T21:47:39.074854754+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestFault_HostedMainThreadDisabled",
             "Elapsed": 0.46
           },
           {
-            "Time": "2026-11-04T12:28:46.217695857+08:00",
+            "Time": "2026-11-04T21:47:39.591491092+08:00",
+            "Action": "run",
+            "Package": "github.com/GhostFlying/tend/internal/api",
+            "Test": "TestIssueProgressHTTPHistoryReplayAndActivity"
+          },
+          {
+            "Time": "2026-11-04T21:47:44.262805631+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestIssueProgressHTTPHistoryReplayAndActivity",
-            "Elapsed": 4.51
+            "Elapsed": 4.67
           },
           {
-            "Time": "2026-11-04T12:28:50.750109812+08:00",
+            "Time": "2026-11-04T21:47:49.060591225+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRunLogs"
           },
           {
-            "Time": "2026-11-04T12:28:51.83535417+08:00",
+            "Time": "2026-11-04T21:47:50.243907736+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestFinishedTaskPages",
-            "Elapsed": 21.19
+            "Elapsed": 24.27
           },
           {
-            "Time": "2026-11-04T12:28:52.36790791+08:00",
+            "Time": "2026-11-04T21:47:50.754278793+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRunLogs",
-            "Elapsed": 1.62
+            "Elapsed": 1.69
           },
           {
-            "Time": "2026-11-04T12:28:53.658724261+08:00",
+            "Time": "2026-11-04T21:47:52.287716922+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows"
           },
           {
-            "Time": "2026-11-04T12:28:54.043402577+08:00",
+            "Time": "2026-11-04T21:47:52.674016831+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestTokenUsageAndRolloutReadsRequireOwnerAndValidateWindows",
-            "Elapsed": 0.38
+            "Elapsed": 0.39
           },
           {
-            "Time": "2026-11-04T12:28:54.04351296+08:00",
+            "Time": "2026-11-04T21:47:52.674096721+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRolloutPreviewRejectsPathsAndUnboundContentCursors"
           },
           {
-            "Time": "2026-11-04T12:28:54.360567247+08:00",
+            "Time": "2026-11-04T21:47:53.05619433+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRolloutPreviewRejectsPathsAndUnboundContentCursors",
-            "Elapsed": 0.32
+            "Elapsed": 0.38
           },
           {
-            "Time": "2026-11-04T12:28:55.265267818+08:00",
+            "Time": "2026-11-04T21:47:53.898994778+08:00",
             "Action": "run",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem"
           },
           {
-            "Time": "2026-11-04T12:28:56.469923775+08:00",
+            "Time": "2026-11-04T21:47:55.250563599+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestRecentTasksUseCompletionEvidenceAndPrimaryWorkItem",
-            "Elapsed": 1.21
+            "Elapsed": 1.35
           },
           {
-            "Time": "2026-11-04T12:32:40.830889903+08:00",
+            "Time": "2026-11-04T21:51:43.451105103+08:00",
             "Action": "fail",
             "Package": "github.com/GhostFlying/tend/internal/api",
             "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
-            "Elapsed": 273.65
+            "Elapsed": 283.45
           }
         ]
       }
@@ -1589,40 +1589,40 @@
     {
       "Name": "web-duration",
       "Full": {
-        "Seconds": 4.600419178,
-        "UserSeconds": 16.085786,
-        "SystemSeconds": 3.27353,
+        "Seconds": 4.657909712,
+        "UserSeconds": 16.140732,
+        "SystemSeconds": 3.403881,
         "LoadBefore": [
-          "4.34",
-          "9.12",
-          "11.30"
+          "5.13",
+          "12.95",
+          "14.54"
         ],
         "LoadAfter": [
-          "4.31",
-          "9.04",
-          "11.26"
+          "4.72",
+          "12.74",
+          "14.46"
         ],
-        "StartedAt": "2026-11-04T04:36:27.008624975Z",
-        "FinishedAt": "2026-11-04T04:36:31.609170054Z",
+        "StartedAt": "2026-11-04T13:52:46.570480173Z",
+        "FinishedAt": "2026-11-04T13:52:51.22847232Z",
         "Success": false,
         "Error": "exit status 1"
       },
       "Selected": {
-        "Seconds": 6.055998851,
-        "UserSeconds": 18.091352,
-        "SystemSeconds": 3.822644,
+        "Seconds": 6.049410122,
+        "UserSeconds": 18.084148,
+        "SystemSeconds": 3.701129,
         "LoadBefore": [
-          "4.31",
-          "9.04",
-          "11.26"
+          "4.72",
+          "12.74",
+          "14.46"
         ],
         "LoadAfter": [
-          "4.37",
-          "8.97",
-          "11.23"
+          "4.74",
+          "12.61",
+          "14.41"
         ],
-        "StartedAt": "2026-11-04T04:36:31.611075277Z",
-        "FinishedAt": "2026-11-04T04:36:37.667171501Z",
+        "StartedAt": "2026-11-04T13:52:51.229815087Z",
+        "FinishedAt": "2026-11-04T13:52:57.279322956Z",
         "Success": false,
         "Error": "exit status 1"
       },
@@ -1633,9 +1633,9 @@
         "src/conversation/model.test.ts"
       ],
       "WebMissing": null,
-      "SelectedRoots": 2175,
+      "SelectedRoots": 2282,
       "PlanFingerprint": "2c0ef3afcb08e2d819aab8f2fe16ccf5f8536b02e514b9ade1f3b039395d45e8",
-      "PlanFullFallback": false,
+      "PlanFullFallback": true,
       "NativeFailureRootEvents": {
         "full": [],
         "selected": []
@@ -1789,40 +1789,40 @@
     {
       "Name": "web-source-reader",
       "Full": {
-        "Seconds": 4.683308512,
-        "UserSeconds": 16.805796,
-        "SystemSeconds": 3.349966,
+        "Seconds": 4.746924205,
+        "UserSeconds": 16.586963,
+        "SystemSeconds": 3.472172,
         "LoadBefore": [
-          "4.98",
-          "9.02",
-          "11.23"
+          "4.52",
+          "12.43",
+          "14.34"
         ],
         "LoadAfter": [
-          "5.54",
-          "9.07",
-          "11.24"
+          "4.24",
+          "12.24",
+          "14.27"
         ],
-        "StartedAt": "2026-11-04T04:36:41.534868718Z",
-        "FinishedAt": "2026-11-04T04:36:46.218276183Z",
+        "StartedAt": "2026-11-04T13:53:01.359689088Z",
+        "FinishedAt": "2026-11-04T13:53:06.10668984Z",
         "Success": false,
         "Error": "exit status 1"
       },
       "Selected": {
-        "Seconds": 6.119384426,
-        "UserSeconds": 17.891227,
-        "SystemSeconds": 3.600247,
+        "Seconds": 6.247734759,
+        "UserSeconds": 18.821878,
+        "SystemSeconds": 3.900215,
         "LoadBefore": [
-          "5.54",
-          "9.07",
-          "11.24"
+          "4.24",
+          "12.24",
+          "14.27"
         ],
         "LoadAfter": [
-          "5.34",
-          "8.97",
-          "11.19"
+          "4.38",
+          "12.14",
+          "14.23"
         ],
-        "StartedAt": "2026-11-04T04:36:46.219535515Z",
-        "FinishedAt": "2026-11-04T04:36:52.339009013Z",
+        "StartedAt": "2026-11-04T13:53:06.107931433Z",
+        "FinishedAt": "2026-11-04T13:53:12.355730255Z",
         "Success": false,
         "Error": "exit status 1"
       },
@@ -1833,9 +1833,9 @@
         "src/i18n/copyRules.test.ts"
       ],
       "WebMissing": null,
-      "SelectedRoots": 2175,
+      "SelectedRoots": 2282,
       "PlanFingerprint": "79284c1af3ccc7df8f98ea5e5790f53d7a42b3e4e091d4c588df49598fa9973d",
-      "PlanFullFallback": false,
+      "PlanFullFallback": true,
       "NativeFailureRootEvents": {
         "full": [],
         "selected": []
@@ -1989,40 +1989,40 @@
     {
       "Name": "go-source-web-reader",
       "Full": {
-        "Seconds": 4.595970468,
-        "UserSeconds": 16.223081,
-        "SystemSeconds": 3.318929,
+        "Seconds": 4.717351744,
+        "UserSeconds": 16.560112,
+        "SystemSeconds": 3.482384,
         "LoadBefore": [
-          "5.07",
-          "8.85",
-          "11.14"
+          "4.19",
+          "11.97",
+          "14.16"
         ],
         "LoadAfter": [
-          "5.62",
-          "8.91",
-          "11.15"
+          "4.01",
+          "11.80",
+          "14.09"
         ],
-        "StartedAt": "2026-11-04T04:36:56.032538875Z",
-        "FinishedAt": "2026-11-04T04:37:00.628585668Z",
+        "StartedAt": "2026-11-04T13:53:16.445804923Z",
+        "FinishedAt": "2026-11-04T13:53:21.163272183Z",
         "Success": false,
         "Error": "exit status 1"
       },
       "Selected": {
-        "Seconds": 6.132638533,
-        "UserSeconds": 18.172046,
-        "SystemSeconds": 3.811116,
+        "Seconds": 6.145007086,
+        "UserSeconds": 17.791906,
+        "SystemSeconds": 3.820131,
         "LoadBefore": [
-          "5.62",
-          "8.91",
-          "11.15"
+          "4.01",
+          "11.80",
+          "14.09"
         ],
         "LoadAfter": [
-          "5.41",
-          "8.81",
-          "11.10"
+          "7.14",
+          "12.32",
+          "14.25"
         ],
-        "StartedAt": "2026-11-04T04:37:00.629770054Z",
-        "FinishedAt": "2026-11-04T04:37:06.762522671Z",
+        "StartedAt": "2026-11-04T13:53:21.164448579Z",
+        "FinishedAt": "2026-11-04T13:53:27.309584573Z",
         "Success": false,
         "Error": "exit status 1"
       },
@@ -2033,9 +2033,9 @@
         "src/decisions/text.test.ts"
       ],
       "WebMissing": null,
-      "SelectedRoots": 2247,
+      "SelectedRoots": 2282,
       "PlanFingerprint": "3d15e81a644caa6685aeb2c5622134e303a932f0ede79fc156beb51189743cb1",
-      "PlanFullFallback": false,
+      "PlanFullFallback": true,
       "NativeFailureRootEvents": {
         "full": [],
         "selected": []
@@ -2189,7 +2189,6 @@
   ],
   "ResourceCounterexample": {
     "Name": "go-reader-web-resource",
-    "ToolCommit": "bf20bc80585ad39e23873a296e87e1b72dc2534f",
     "Fixture": "example.test/fixture",
     "Resource": "web/src/value.ts",
     "Mutation": {
@@ -2200,16 +2199,18 @@
     "BeforeFixOmittedRoots": 1,
     "AfterFixMissingRoots": 0,
     "Passed": true,
+    "ToolCommit": "824bccf073ad320ff7b0b94cc9b09f80afa8d973",
+    "ToolTree": "f7bef6357502058fdb3e9005e96c8cf1d19997ee",
     "NativeEvents": {
       "Full": [
         {
-          "Time": "2026-11-04T11:53:52.469767209+08:00",
+          "Time": "2026-11-04T21:49:45.67574489+08:00",
           "Action": "run",
           "Package": "example.test/fixture",
           "Test": "TestWebResource"
         },
         {
-          "Time": "2026-11-04T11:53:52.469936089+08:00",
+          "Time": "2026-11-04T21:49:45.675950338+08:00",
           "Action": "fail",
           "Package": "example.test/fixture",
           "Test": "TestWebResource",
@@ -2218,13 +2219,13 @@
       ],
       "Selected": [
         {
-          "Time": "2026-11-04T11:53:53.076035984+08:00",
+          "Time": "2026-11-04T21:49:46.243045463+08:00",
           "Action": "run",
           "Package": "example.test/fixture",
           "Test": "TestWebResource"
         },
         {
-          "Time": "2026-11-04T11:53:53.076230463+08:00",
+          "Time": "2026-11-04T21:49:46.243345197+08:00",
           "Action": "fail",
           "Package": "example.test/fixture",
           "Test": "TestWebResource",
@@ -2248,7 +2249,845 @@
         "TestWebResource"
       ]
     },
-    "BeforeLogSHA256": "0a0d14f2f9e7db7f6bae2e35bffcc5c6cfb74530efaba42b69944387b5344053",
-    "AfterLogSHA256": "3572ff392a703c4c8ff920f6fc78ddbbd4d8f731495d73c5a7fd540646dd033d"
+    "NativeLogSHA256": "b03bda1b8b1ff651799f0b5abbd5278abfe436c61e88894a0a23404f40f9a5cb",
+    "HistoricalBeforeFixEvidence": {
+      "ToolCommit": "bf20bc80585ad39e23873a296e87e1b72dc2534f",
+      "BeforeLogSHA256": "0a0d14f2f9e7db7f6bae2e35bffcc5c6cfb74530efaba42b69944387b5344053",
+      "HistoricalAfterLogSHA256": "3572ff392a703c4c8ff920f6fc78ddbbd4d8f731495d73c5a7fd540646dd033d"
+    }
+  },
+  "CurrentImplementationCommit": "824bccf073ad320ff7b0b94cc9b09f80afa8d973",
+  "CurrentBoundaryEvidence": {
+    "ToolCommit": "824bccf073ad320ff7b0b94cc9b09f80afa8d973",
+    "ToolTree": "f7bef6357502058fdb3e9005e96c8cf1d19997ee",
+    "Go": "go1.27.1",
+    "Platform": "linux/amd64",
+    "NativeLogSHA256": "b03bda1b8b1ff651799f0b5abbd5278abfe436c61e88894a0a23404f40f9a5cb",
+    "Cases": [
+      {
+        "Case": "TestGoResourceReaderRetainsActualFailureAfterWebOnlyChange",
+        "FailedRoot": "TestWebResource",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:49:45.67574489+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestWebResource"
+            },
+            {
+              "Time": "2026-11-04T21:49:45.675950338+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestWebResource",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:49:46.243045463+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestWebResource"
+            },
+            {
+              "Time": "2026-11-04T21:49:46.243345197+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestWebResource",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestExternalFilesystemConsumerRetainsActualFailure/production",
+        "FailedRoot": "TestRead",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:17.268128026+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestRead"
+            },
+            {
+              "Time": "2026-11-04T21:50:17.268375112+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestRead",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:17.67256334+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestRead"
+            },
+            {
+              "Time": "2026-11-04T21:50:17.672767058+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestRead",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestExternalFilesystemConsumerRetainsActualFailure/test_only",
+        "FailedRoot": "TestRead",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:24.732429812+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestRead"
+            },
+            {
+              "Time": "2026-11-04T21:50:24.73267145+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestRead",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:25.128824531+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestRead"
+            },
+            {
+              "Time": "2026-11-04T21:50:25.129043591+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestRead",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestCompilerOverlayContentDriftRequiresCompleteValidation/ignored",
+        "FailedRoot": "TestA",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:27.321872131+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestA"
+            },
+            {
+              "Time": "2026-11-04T21:50:27.322076042+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestA",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:27.708358071+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestA"
+            },
+            {
+              "Time": "2026-11-04T21:50:27.708496768+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestA",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestCompilerOverlayContentDriftRequiresCompleteValidation/external",
+        "FailedRoot": "TestA",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:29.973401387+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestA"
+            },
+            {
+              "Time": "2026-11-04T21:50:29.973604458+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestA",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:30.422854299+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestA"
+            },
+            {
+              "Time": "2026-11-04T21:50:30.423027531+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestA",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestCompilerOverlayContentDriftRequiresCompleteValidation/quoted_relative",
+        "FailedRoot": "TestA",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:32.766904497+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestA"
+            },
+            {
+              "Time": "2026-11-04T21:50:32.767055955+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestA",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:33.174783913+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestA"
+            },
+            {
+              "Time": "2026-11-04T21:50:33.174954911+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestA",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestAlternateModuleContentDriftRequiresCompleteValidation/ignored",
+        "FailedRoot": "TestDependency",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:49:48.593151176+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:48.593346357+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:49:49.021050957+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:49.021275732+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestAlternateModuleContentDriftRequiresCompleteValidation/external",
+        "FailedRoot": "TestDependency",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:49:51.374410116+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:51.374575727+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:49:51.752881433+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:51.753047718+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestAlternateModuleContentDriftRequiresCompleteValidation/quoted_relative",
+        "FailedRoot": "TestDependency",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:49:54.135248295+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:54.135515912+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:49:54.548348245+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:54.548506051+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestLocalReplacementBuildInputsRemainBound",
+        "FailedRoot": "TestDependency",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:49:56.820595521+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:56.820808131+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:49:57.222673497+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:49:57.222825447+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestWorkspaceConfigurationAndMutableModulesRemainBound",
+        "FailedRoot": "TestDependency",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:05.492736778+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:50:05.492909469+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:06.728589356+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:50:06.72879485+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestSymlinkedResourceContentDriftRetainsActualFailure/ignored",
+        "FailedRoot": "TestLinkedResource",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:42.477284092+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource"
+            },
+            {
+              "Time": "2026-11-04T21:50:42.477535056+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:42.891566871+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource"
+            },
+            {
+              "Time": "2026-11-04T21:50:42.891784474+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestSymlinkedResourceContentDriftRetainsActualFailure/external",
+        "FailedRoot": "TestLinkedResource",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:45.213135578+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource"
+            },
+            {
+              "Time": "2026-11-04T21:50:45.213346606+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:45.60241675+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource"
+            },
+            {
+              "Time": "2026-11-04T21:50:45.602625105+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestSymlinkedResourceContentDriftRetainsActualFailure/tracked",
+        "FailedRoot": "TestLinkedResource",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:47.952152511+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource"
+            },
+            {
+              "Time": "2026-11-04T21:50:47.952394499+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:48.31182496+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource"
+            },
+            {
+              "Time": "2026-11-04T21:50:48.312005335+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestLinkedResource",
+              "Elapsed": 0
+            }
+          ]
+        }
+      },
+      {
+        "Case": "TestLocalModuleExecutableModeDriftRetainsActualFailure",
+        "FailedRoot": "TestDependency",
+        "Passed": true,
+        "MissingRoots": 0,
+        "NativeEvents": {
+          "Full": [
+            {
+              "Time": "2026-11-04T21:50:09.601155034+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:50:09.602196116+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ],
+          "Selected": [
+            {
+              "Time": "2026-11-04T21:50:10.085200662+08:00",
+              "Action": "run",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency"
+            },
+            {
+              "Time": "2026-11-04T21:50:10.086049572+08:00",
+              "Action": "fail",
+              "Package": "example.test/fixture",
+              "Test": "TestDependency",
+              "Elapsed": 0
+            }
+          ]
+        }
+      }
+    ],
+    "LocalWorkloadReuse": {
+      "Passed": true,
+      "SingleBrowserScriptPreserved": true,
+      "SelectedRunnerRefusedToStart": true,
+      "NativeEvents": {
+        "shadow": [
+          {
+            "Time": "2026-11-04T21:50:37.139336729+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "TestA"
+          },
+          {
+            "Time": "2026-11-04T21:50:37.139491111+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "TestA",
+            "Elapsed": 0
+          },
+          {
+            "Time": "2026-11-04T21:50:37.139498257+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "TestB"
+          },
+          {
+            "Time": "2026-11-04T21:50:37.139582692+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "TestB",
+            "Elapsed": 0
+          },
+          {
+            "Time": "2026-11-04T21:50:37.139613582+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "FuzzA"
+          },
+          {
+            "Time": "2026-11-04T21:50:37.139975186+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "FuzzA",
+            "Elapsed": 0
+          },
+          {
+            "Time": "2026-11-04T21:50:37.13999157+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "Example"
+          },
+          {
+            "Time": "2026-11-04T21:50:37.140168212+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "Example",
+            "Elapsed": 0
+          }
+        ],
+        "affected": [
+          {
+            "Time": "2026-11-04T21:50:38.962143963+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "TestA"
+          },
+          {
+            "Time": "2026-11-04T21:50:38.96231724+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "TestA",
+            "Elapsed": 0
+          },
+          {
+            "Time": "2026-11-04T21:50:38.962326292+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "TestB"
+          },
+          {
+            "Time": "2026-11-04T21:50:38.962400194+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "TestB",
+            "Elapsed": 0
+          },
+          {
+            "Time": "2026-11-04T21:50:38.962449465+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "FuzzA"
+          },
+          {
+            "Time": "2026-11-04T21:50:38.962866247+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "FuzzA",
+            "Elapsed": 0
+          },
+          {
+            "Time": "2026-11-04T21:50:38.96287334+08:00",
+            "Action": "run",
+            "Package": "example.test/fixture",
+            "Test": "Example"
+          },
+          {
+            "Time": "2026-11-04T21:50:38.963197954+08:00",
+            "Action": "pass",
+            "Package": "example.test/fixture",
+            "Test": "Example",
+            "Elapsed": 0
+          }
+        ]
+      }
+    },
+    "OtherPassedRegressions": [
+      "TestSelectedRunCancellationCleansRaceValidationChild",
+      "TestGoResourceReaderRetainsActualFailureAfterWebOnlyChange",
+      "TestAlternateModuleContentDriftRequiresCompleteValidation",
+      "TestLocalReplacementBuildInputsRemainBound",
+      "TestWorkspaceConfigurationAndMutableModulesRemainBound",
+      "TestLocalModuleExecutableModeDriftRetainsActualFailure",
+      "TestExternalFilesystemConsumerRetainsActualFailure",
+      "TestCompilerOverlayContentDriftRequiresCompleteValidation",
+      "TestCompilerOverlayVirtualFilesAndPhysicalInputsRemainBound",
+      "TestCompilerOverlayChangeDuringExecutionInvalidatesResult",
+      "TestShadowReusesEquivalentLocalWorkloadWithoutWideningBrowser",
+      "TestSymlinkedResourceContentDriftRetainsActualFailure",
+      "TestUnboundResourceLinksRequireCompleteValidation",
+      "TestLinkedWebInspectionModulesUseEffectiveSource",
+      "TestCompilerOverlayOnLinkedFileUsesEffectiveCode"
+    ],
+    "NestedRaceCancellation": {
+      "Passed": true,
+      "Regression": "TestSelectedRunCancellationCleansRaceValidationChild",
+      "ChildTerminationVerified": true,
+      "RepeatedRuns": 10,
+      "StressToolCommit": "ee9e084218f9cfd2a86333b0968c60df432e1c03",
+      "StressLogSHA256": "f93275d9da43a08f47489177e016b9629216b56a8ef05172f3288cdcba3c6364"
+    }
+  },
+  "CurrentFaultScopeEquivalence": {
+    "RepositoryFaultToolCommit": "ee9e084218f9cfd2a86333b0968c60df432e1c03",
+    "CurrentImplementationCommit": "824bccf073ad320ff7b0b94cc9b09f80afa8d973",
+    "Baseline": "3f512173b4024a2dc0c99522752eddb483795447",
+    "ExecutionPathsIdentical": [
+      "Makefile",
+      "internal/testkit/check",
+      "internal/testkit/impact/run.go",
+      "internal/testkit/racecheck",
+      "internal/procx",
+      "internal/testkit/impact/web.go",
+      "internal/testkit/impact/web.cjs",
+      "internal/testkit/impact/fault.go"
+    ],
+    "Cases": [
+      {
+        "Name": "state-rule",
+        "Fingerprint": "8d61cddd993e94199829b804a5220fe5542af3855e6cffa2cb8a0eff760c8426",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "PlanEqual": true,
+        "MutableLocalModules": false,
+        "Full": true,
+        "LocalFull": false,
+        "GoRoots": 2282
+      },
+      {
+        "Name": "transaction-rollback",
+        "Fingerprint": "88c04fa0edee1d35a2e201e8d41d015ba5e5534cfcf2578de1dc674be38a78dd",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "PlanEqual": true,
+        "MutableLocalModules": false,
+        "Full": true,
+        "LocalFull": false,
+        "GoRoots": 2282
+      },
+      {
+        "Name": "http-contract",
+        "Fingerprint": "ce4106fdf29e3de832bc8a2ae0019293264e1a5d4d26e2708d79f70b6cf1d16b",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "PlanEqual": true,
+        "MutableLocalModules": false,
+        "Full": true,
+        "LocalFull": false,
+        "GoRoots": 2282
+      },
+      {
+        "Name": "web-duration",
+        "Fingerprint": "2c0ef3afcb08e2d819aab8f2fe16ccf5f8536b02e514b9ade1f3b039395d45e8",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "PlanEqual": true,
+        "MutableLocalModules": false,
+        "Full": true,
+        "LocalFull": false,
+        "GoRoots": 2282
+      },
+      {
+        "Name": "web-source-reader",
+        "Fingerprint": "79284c1af3ccc7df8f98ea5e5790f53d7a42b3e4e091d4c588df49598fa9973d",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "PlanEqual": true,
+        "MutableLocalModules": false,
+        "Full": true,
+        "LocalFull": false,
+        "GoRoots": 2282
+      },
+      {
+        "Name": "go-source-web-reader",
+        "Fingerprint": "3d15e81a644caa6685aeb2c5622134e303a932f0ede79fc156beb51189743cb1",
+        "Profile": {
+          "Go": "go1.27.1",
+          "OS": "linux",
+          "Arch": "amd64",
+          "Flags": "29943dd1f180d8a6f675d0c07eb59a695d9280bc947f20c949b6af85b8049922",
+          "Race": true
+        },
+        "PlanEqual": true,
+        "MutableLocalModules": false,
+        "Full": true,
+        "LocalFull": false,
+        "GoRoots": 2282
+      }
+    ],
+    "Interpretation": "The later change binds execute modes and forces full checks for mutable local modules. These fixed faults have no mutable local module, unchanged source/configuration and plans, and identical executors. Native fault evidence retains the original tool commit; it is not claimed as a rerun of the later source."
   }
 }

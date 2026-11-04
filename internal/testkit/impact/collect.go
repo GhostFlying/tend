@@ -155,9 +155,6 @@ func Collect(ctx context.Context, o CollectOptions) (*Index, error) {
 	if s.Profile.ModuleConfig != "" {
 		return nil, fmt.Errorf("function coverage baselines do not support alternate modules or workspaces; use complete validation")
 	}
-	if s.UnboundResources {
-		return nil, fmt.Errorf("function coverage baselines require bound resource symlinks; use complete validation")
-	}
 	index := &Index{Format: Format, Source: s, AnalysisSeconds: duration(start)}
 	tmp, err := os.MkdirTemp("", "tend-impact-")
 	if err != nil {
@@ -173,7 +170,7 @@ func Collect(ctx context.Context, o CollectOptions) (*Index, error) {
 	slices.Sort(packages)
 	for n, id := range packages {
 		pkg := s.Packages[id]
-		if pkg.ProcessBoundary {
+		if pkg.ProcessBoundary || s.UnboundResources {
 			// These roots already executed in the ordinary full suite. Repeating
 			// unknown process trees under instrumentation cannot establish complete
 			// attribution, and could leave detached children on cancellation.
@@ -182,6 +179,9 @@ func Collect(ctx context.Context, o CollectOptions) (*Index, error) {
 				for _, record := range o.FullExecutions {
 					if record.Package == id && record.Root == root && (record.Mode == "full-pass" || record.Mode == "full-skip") {
 						record.Mode = "static-process"
+						if s.UnboundResources {
+							record.Mode = "static-resource"
+						}
 						record.Functions = nil
 						index.Executions = append(index.Executions, record)
 						found = true
@@ -189,10 +189,10 @@ func Collect(ctx context.Context, o CollectOptions) (*Index, error) {
 					}
 				}
 				if !found {
-					return nil, fmt.Errorf("process fallback requires complete ordinary-full evidence: %s/%s", id, root)
+					return nil, fmt.Errorf("static fallback requires complete ordinary-full evidence: %s/%s", id, root)
 				}
 			}
-			fmt.Fprintf(o.Log, "[impact] static process fallback %d/%d %s: %d verified full-suite roots\n", n+1, len(packages), id, len(pkg.Roots))
+			fmt.Fprintf(o.Log, "[impact] static fallback %d/%d %s: %d verified full-suite roots\n", n+1, len(packages), id, len(pkg.Roots))
 			continue
 		}
 		binary := filepath.Join(tmp, "package.test")
