@@ -80,7 +80,8 @@ jobs:
   layout:
     name: layout (${{ matrix.group }})
     needs: web
-    runs-on: ubuntu-latest
+    # Playwright 1.55.1 has browser builds for this image; latest may advance.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

@@ -27,3 +27,7 @@
 - false 策略报告只产生真实结果，不虚构 acceptance；true 与 legacy 保留独立验收要求；Issue 后改 policy 不影响任务冻结值。
 - 精确共享可通过标准读/下载路径消费；内部缺材料交由 Agent/main 处理，仅真实人类事实或决策进入人工。
 - 3/2 混跑、拒绝 1、重放原 payload、预算 active/unknown 与旧 pin 验证；不将调查证据包的离线校验算作产品测试。
+
+## P6 验证环境补充
+
+实际 CI 的 layout 在浏览器依赖安装阶段失败：仓库固定 Playwright 1.55.1 不支持自动漂移后的 Ubuntu 26.04 镜像，尚未运行页面断言。将 layout job 明确固定到该版本已支持的 Ubuntu 24.04；不更改依赖版本、断言、分组或 required check gate。保留失败 run，并以最终候选重跑完整 CI。其他 Go/Web/cross job 不改变环境。
