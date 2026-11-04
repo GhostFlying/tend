@@ -27,4 +27,4 @@ Refs: D151。承接[第一轮](test-setup-deduplication.md)，保留完整race�
 
 新增未checkpoint的WAL拒绝与模板临时目录清理验证，继续执行已有并发数据库隔离、文件隔离、既有文件保护、首次初始化失败保持及新鲜schema一致性验证。原有Store事务回滚各故障切点全部保留。
 
-最初受影响包验证中Telegram因替换建库调用后遗留未使用import而编译失败，随后移除该import；最终是否通过以PR的最终候选记录为准，不使用其余包通过掩盖此失败。完整对照、规定独立review及CI也以PR记录为准。
+最初受影响包验证中Telegram因替换建库调用后遗留未使用import而编译失败；随后CI在Feishu独立transport测试中发现同类遗留import，两处均移除。最终是否通过以PR的最终候选记录为准，不使用其余包通过掩盖这些失败。完整对照、规定独立review及CI也以PR记录为准。
