@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 // Capture only failed synthetic tests, without changing their deadline or result.
@@ -14,7 +15,10 @@ func logNamedPoolFailure(t *testing.T, e *env, pool *BackgroundPool, requests ma
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	pool.mu.Lock()
+	if !pool.mu.TryLock() {
+		t.Log("named pool snapshot unavailable: pool lock is busy")
+		return
+	}
 	active := make(map[string]*Manager, len(pool.active))
 	for id, m := range pool.active {
 		active[id] = m
@@ -22,7 +26,10 @@ func logNamedPoolFailure(t *testing.T, e *env, pool *BackgroundPool, requests ma
 	t.Logf("named pool active=%d remote=%d database=%d sessions=%d starts=%+v", len(pool.active), len(pool.remote), len(pool.database), e.h.Sessions(), e.h.Starts())
 	pool.mu.Unlock()
 	for id, m := range active {
-		m.mu.Lock()
+		if !m.mu.TryLock() {
+			t.Logf("named conversation=%s readiness unavailable: manager lock is busy", id)
+			continue
+		}
 		ready := m.thread != nil
 		m.mu.Unlock()
 		t.Logf("named conversation=%s ready=%t", id, ready)
@@ -44,5 +51,32 @@ func logNamedPoolFailure(t *testing.T, e *env, pool *BackgroundPool, requests ma
 		if err != nil {
 			t.Logf("named failure snapshot error=%v", err)
 		}
+	}
+}
+
+func TestNamedFailureDiagnosticDoesNotWaitForPoolOrManagerLocks(t *testing.T) {
+	for _, lock := range []string{"pool", "manager"} {
+		t.Run(lock, func(t *testing.T) {
+			m := &Manager{}
+			pool := &BackgroundPool{active: map[string]*Manager{"synthetic-conversation": m}}
+			var unlock func()
+			if lock == "pool" {
+				pool.mu.Lock()
+				unlock = pool.mu.Unlock
+			} else {
+				m.mu.Lock()
+				unlock = m.mu.Unlock
+			}
+			done := make(chan struct{})
+			go func() { defer close(done); logNamedPoolFailure(t, &env{h: testkit.NewHarness()}, pool, nil) }()
+			select {
+			case <-done:
+				unlock()
+			case <-time.After(time.Second):
+				unlock()
+				<-done
+				t.Fatal("failure diagnostic waited for a lock held by the failed execution")
+			}
+		})
 	}
 }
