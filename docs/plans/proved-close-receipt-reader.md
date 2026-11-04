@@ -22,6 +22,8 @@
 
 独立 review 的两项修正：原 closing Run 的 metadata-only attachment 可以恢复该 Run 已确认的缓存启动元数据，缺原模型时不能提前切断其事件消费；这不是读取当前模型目录或打开 native。新模式的原业务 pending 尚未对清时，后续 receipt-only 代次继续携带原 reader 请求与原待对账身份，不能因一次读取失败或非终态而丢失能力要求；原 pending 全部对清后，新的无关责任不继承该限制。
 
+对上述关闭窗口继续核验：新 reader 没有 models RPC，因此优先读取同一 Run、精确原 thread 的已确认 resume 内实际模型配置；只有历史 resume 没有该配置时，才使用该 Run 已有的缓存模型目录作兼容恢复。原 compaction 的 Reconcile 仅读账本既存完成证据，应继续允许；创建 compaction、handoff 或工具业务的禁令不变。候选修正先做必要定向和限定独立核查、受控二进制原故障验证；目标验证通过后再并行正式完整检查与 CI/review，避免对尚未实证的候选反复全量验证。
+
 ## 回归与交付
 
 先保留真实入口阻塞的 RED 与离线证据，再实现所需最小修改。覆盖错误原身份/证明、未确认停止、未知业务保留、禁止新业务、原 thread/pin、读取失败与真实终态对账。新增用户能力必须同步 typed CLI、帮助、能力目录、请求恢复与 schema；内部 wire 不发生变化时不凭空提升协议。

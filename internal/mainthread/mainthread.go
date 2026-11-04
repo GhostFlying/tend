@@ -641,13 +641,6 @@ func (m *Manager) restoreReceiptOnlyModel(ctx context.Context, selected hostedco
 	if !selected.RunnerManaged || selected.RunnerRunID == "" {
 		return selected, unavailable
 	}
-	modelsRaw, err := m.app.ManagerClosingAttachment(ctx, selected.RunnerRunID, "models", "")
-	if err != nil {
-		return selected, err
-	}
-	if len(modelsRaw) == 0 {
-		return selected, unavailable
-	}
 	id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 	if err != nil {
 		return selected, err
@@ -660,6 +653,25 @@ func (m *Manager) restoreReceiptOnlyModel(ctx context.Context, selected hostedco
 		return selected, err
 	}
 	if len(resumeRaw) == 0 {
+		return selected, unavailable
+	}
+	var resumed struct {
+		Model harness.ModelSelection
+	}
+	if err := json.Unmarshal(resumeRaw, &resumed); err != nil {
+		return selected, fmt.Errorf("read confirmed closing resume: %w", err)
+	}
+	if resumed.Model.Model != "" {
+		selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = resumed.Model.Model, resumed.Model.Provider, resumed.Model.Effort
+		return selected, nil
+	}
+	// Older startup replies did not carry the applied model. Only those
+	// attachments use their original confirmed catalog as a fallback.
+	modelsRaw, err := m.app.ManagerClosingAttachment(ctx, selected.RunnerRunID, "models", "")
+	if err != nil {
+		return selected, err
+	}
+	if len(modelsRaw) == 0 {
 		return selected, unavailable
 	}
 	var models []harness.Model
@@ -1359,11 +1371,11 @@ wait:
 // Reconcile implements dispatch.Handler for a delivery a previous process
 // left in the middle.
 func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
-	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly && (d.Operation == "conversation.compact" || d.Operation == "conversation.handoff") {
-		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Receipt-only attachments cannot resume native maintenance."}
-	}
 	if d.Operation == "conversation.compact" {
 		return m.reconcileCompact(ctx, d)
+	}
+	if selected := m.namedSelection(); selected != nil && selected.ReceiptOnly && d.Operation == "conversation.handoff" {
+		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Receipt-only attachments cannot resume native maintenance."}
 	}
 	if d.Operation == "conversation.handoff" {
 		return m.reconcileHandoff(ctx, d)

@@ -125,10 +125,8 @@ func TestReceiptOnlyRejectsFreshDeliveriesAndToolCalls(t *testing.T) {
 	if result := e.m.onToolCall(t.Context(), harness.ToolCall{Tool: "repos_list", Arguments: []byte(`{}`)}); result.Success {
 		t.Fatal("receipt reader executed a fresh native tool callback", result)
 	}
-	for _, op := range []string{"conversation.compact", "conversation.handoff"} {
-		if result := e.m.Reconcile(t.Context(), app.Delivery{Operation: op, Payload: []byte(`{}`)}); result.Outcome != app.Unknown {
-			t.Fatal("receipt reader resumed native maintenance", op, result)
-		}
+	if result := e.m.Reconcile(t.Context(), app.Delivery{Operation: "conversation.handoff", Payload: []byte(`{}`)}); result.Outcome != app.Unknown {
+		t.Fatal("receipt reader resumed native handoff", result)
 	}
 }
 
@@ -309,5 +307,94 @@ func TestReceiptOnlyClosingRunnerTransportDrainsWithoutNativeRequest(t *testing.
 	selected := e.m.namedSelection()
 	if selected.AppliedModel != "original-native-model" || selected.AppliedProvider != "original-provider" || selected.AppliedEffort != "high" || e.count(`SELECT COUNT(*) FROM manager_native_requests`) != before {
 		t.Fatal("metadata attachment changed model or queued a native RPC", selected)
+	}
+}
+
+func TestReceiptOnlyClosingReaderRestoresConfirmedResumeWithoutModels(t *testing.T) {
+	for _, catalog := range []string{"absent", "legacy_differs"} {
+		t.Run(catalog, func(t *testing.T) {
+			e := newEnv(t, testkit.NewHarness())
+			e.stop()
+			e.m.named = receiptOnlySelection()
+			e.m.named.AppliedModel, e.m.named.AppliedProvider, e.m.named.AppliedEffort = "", "", ""
+			seedClosingReceiptMetadata(t, e, "completed", true)
+			// The strict reader never issued Models. Its confirmed resume is the
+			// persisted source of the actual provider configuration after teardown.
+			if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+				if catalog == "absent" {
+					if _, err := tx.Exec(t.Context(), `DELETE FROM manager_native_requests WHERE request_id='models_cached'`); err != nil {
+						return err
+					}
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE manager_native_requests SET result_json='{"result":{"ID":"original-thread","Model":{"Model":"retained-native-model","Provider":"retained-provider","Effort":"medium"},"Permissions":{"Sandbox":"read-only","ApprovalPolicy":"never"}}}' WHERE request_id='resume_cached'`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), "original-thread"); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('receipt-reader-run',1,'{"thread_id":"original-thread","native":{"Kind":"request_usage"}}')`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := e.count(`SELECT COUNT(*) FROM manager_native_requests`)
+			ctx, cancel := context.WithCancel(t.Context())
+			session := coordination.New(ctx, &runnerTransport{app: e.app, run: "receipt-reader-run", origins: map[int64]managerEventOrigin{}})
+			defer func() { cancel(); <-session.Done() }()
+			thread, err := e.m.openThread(ctx, session)
+			if err != nil || thread.ID() != "original-thread" {
+				t.Fatal("strict closing reader could not restore its confirmed resume metadata", thread, err)
+			}
+			select {
+			case event := <-thread.Events():
+				if event.Kind != harness.EventRequestUsage {
+					t.Fatal("strict closing reader lost original uploaded event", event)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("strict closing reader did not drain original uploaded event")
+			}
+			selected := e.m.namedSelection()
+			if selected.AppliedModel != "retained-native-model" || selected.AppliedProvider != "retained-provider" || selected.AppliedEffort != "medium" || e.count(`SELECT COUNT(*) FROM manager_native_requests`) != before {
+				t.Fatal("strict closing reader did not retain actual confirmed resume configuration", selected)
+			}
+		})
+	}
+}
+
+func TestReceiptOnlyReconcilesPersistedCompactCompletion(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	e.m.named = receiptOnlySelection()
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,created_at,updated_at) VALUES('receipt-compact','main','original-thread','running','manual',0,0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delivery := app.Delivery{Operation: "conversation.compact", Payload: json.RawMessage(`{"operation_id":"receipt-compact"}`)}
+	before := len(e.h.Starts())
+	if result := e.m.Reconcile(t.Context(), delivery); result.Outcome != app.Unknown {
+		t.Fatal("unconfirmed compact was not retained as unknown", result)
+	}
+	if err := e.app.RecordRolloutEvent(t.Context(), "main", "original-thread", "original-compact-turn", "original-compact-item", string(harness.EventItemCompleted), json.RawMessage(`{"id":"original-compact-item","type":"contextCompaction"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if result := e.m.Deliver(t.Context(), delivery); result.Outcome != app.Retry {
+		t.Fatal("receipt-only attachment admitted fresh native compact", result)
+	}
+	if result := e.m.Reconcile(t.Context(), delivery); result.Outcome != app.Delivered {
+		t.Fatal("receipt-only attachment could not reconcile durable compact evidence", result)
+	}
+	if state, err := e.app.CompactState(t.Context(), "receipt-compact"); err != nil || state != "completed" {
+		t.Fatal("original compact was not reconciled from ledger evidence", state, err)
+	}
+	if result := e.m.Reconcile(t.Context(), delivery); result.Outcome != app.Delivered {
+		t.Fatal("completed compact reconciliation was not idempotent", result)
+	}
+	if len(e.h.Starts()) != before {
+		t.Fatal("ledger reconciliation entered native execution")
 	}
 }
