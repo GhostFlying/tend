@@ -55,7 +55,7 @@ func TestConversationHandoffLostAnswerKeepsRequestAndUnknownIsNotRepeated(t *tes
 		t.Fatalf("unknown handoff=%d %s", code, te.errOut)
 	}
 	sent := f.seen("POST /api/v1/ops")
-	if len(sent) != 2 || string(sent[0].body) != string(sent[1].body) || !strings.Contains(te.out.String(), "unknown") {
+	if len(sent) != 1 || !strings.Contains(te.errOut.String(), "unknown_outcome") {
 		t.Fatalf("lost answer replay: %+v %s", sent, te.out)
 	}
 }

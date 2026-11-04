@@ -23,8 +23,8 @@ type client struct {
 
 // transportError is a failure to get an answer from the server at all, or
 // an answer from something in front of it. The request may or may not
-// have reached tend, so it is safe to resend only under the same request
-// ID.
+// have reached tend. Reconcile the original request before deciding whether
+// to explicitly replay its unchanged Envelope and request ID.
 type transportError struct{ err error }
 
 func (t transportError) Error() string { return "tend is unreachable: " + t.err.Error() }

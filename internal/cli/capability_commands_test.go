@@ -321,7 +321,7 @@ func TestCapabilityWritesKeepOriginalIdentityAndUncertainty(t *testing.T) {
 	}
 }
 
-func TestCapabilityDryRunAndTransportRetryKeepExactEnvelope(t *testing.T) {
+func TestCapabilityDryRunAndTransportUnknownKeepExactEnvelope(t *testing.T) {
 	f := newFakeServer(t)
 	f.answer("GET /api/v1/issue-notification-settings", protocol.IssueNotificationSettings{Revision: 4, DelayMinutes: 2})
 	env := newTestEnv(t, f.srv.URL)
@@ -354,12 +354,12 @@ func TestCapabilityDryRunAndTransportRetryKeepExactEnvelope(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: envelope.RequestID, Status: protocol.OpSucceeded}})
 	})
-	if code := env.main("request", "replay", "--data", string(original)); code != 0 {
+	if code := env.main("request", "replay", "--data", string(original)); code != exitError {
 		t.Fatal(code, env.errOut)
 	}
 	calls := f.seen("POST /api/v1/ops")
-	if len(calls) != 2 || !bytes.Equal(calls[0].body, calls[1].body) {
-		t.Fatal("transport retry changed the request")
+	if len(calls) != 1 {
+		t.Fatal("unknown replay was automatically repeated")
 	}
 	if len(f.seen("GET /api/v1/issue-notification-settings")) != 1 {
 		t.Fatal("replay refreshed control state")
