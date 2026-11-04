@@ -36,3 +36,11 @@ CLI 覆盖 typed 参数、帮助、输出、保存原 envelope、单次 POST 与
 支持；严格路径仅用显式 Reattach 读取原 state、resource/backend/provider/mount 身份和
 已有目录，不运行 profile、Git/Orca 创建或 rename，不写状态。缺失或不一致保持 pending，
 不支持该路径的 workspace 实现同样拒绝；普通任务的 Prepare 语义保持不变。
+
+附着许可不等于旧业务结算许可。首次 strict verdict 仅能接回 started journal；已经进入
+worker_done/submitting/releasing 的 journal，只有此前已保存同一 strict request 且真实
+WorkerDoneAt/WorkerResult 均存在时，才能继续该 strict worker 自己的结果收尾。原始
+give-up/release 的 accepted/pending_reconciliation 不是成功业务终态，不得清除请求、
+事件或工作区所有权。strict 的 Start/setup、Wait 与本地事件保存错误均保持待对账，
+不能构造 worker_start_failed 后走普通 finalizing 关闭原 terminal；明确 Stop/paused/held
+仍遵循独立的既有控制授权。普通旧协议路径不因新增 strict 模式改变默认语义。

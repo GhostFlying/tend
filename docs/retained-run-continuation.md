@@ -49,3 +49,10 @@ tend request replay --file original-envelope.json --json
 新的同 session continuation，应先对账原 pending send 并另行使用有持久去重身份的明确
 业务合同。新模式不会隐式发送 continuation 或 shutdown interrupt。原生身份与结果仍须
 通过现场证据验收，不能将 lease active 当作原任务已经恢复。
+
+首次附着许可只接回 started journal。只有此前保存了同一附着请求、且已经记录真实
+WorkerDoneAt 和 WorkerResult 的 worker_done/submitting/releasing journal，才允许恢复
+原结果收尾；旧 give-up/release 不能借此解除结算保护。strict 最终请求只有业务成功回执
+才清理工作区和 journal；accepted/pending_reconciliation、失败或未知回执均保留原请求
+身份继续对账。附着 setup、原生观察或本地事件保存错误同样保持 pending，不作为普通
+worker 失败关闭原 terminal。明确 Stop、paused、held 仍遵循既有独立控制授权。

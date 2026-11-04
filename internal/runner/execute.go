@@ -203,7 +203,7 @@ func runTarget(as protocol.Assignment) protocol.Target {
 }
 
 // work runs the worker and journals the run's final report.
-func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *active) error {
+func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *active) (workErr error) {
 	if err := r.settleTakeover(runCtx, as, a); err != nil {
 		return err
 	}
@@ -254,6 +254,14 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return &completionPending{err}
 	}
+	defer func() {
+		// Setup, observation and local persistence failures do not prove the
+		// original worker stopped. Preserve it instead of fabricating a new
+		// business failure and entering the ordinary terminal finalizer.
+		if strictResume != nil && workErr != nil && context.Cause(runCtx) == nil && !isCompletionPending(workErr) && !isQuestionYield(workErr) && !errors.Is(workErr, errPaused) && !errors.Is(workErr, errHeld) {
+			workErr = &completionPending{workErr}
+		}
+	}()
 	var p Prepared
 	if strictResume != nil {
 		if run.Held || run.Thread == "" {
@@ -419,6 +427,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 				return stopped(errPaused)
 			}
 		}
+		if strictResume != nil && context.Cause(runCtx) == nil {
+			return &completionPending{err}
+		}
 		if native, ok := errors.AsType[*orca.Error](err); ok && as.Execution != nil && (native.Code == "invalid_argument" || native.Code == "capability_unsupported" || native.Code == "incompatible_runtime") {
 			if rejected, ok := r.cfg.Executions.(interface {
 				Reject(protocol.RunExecutionPin, string)
@@ -482,6 +493,14 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	<-uploaded
 	if errors.Is(werr, harness.ErrRetainedResumePending) {
 		return &completionPending{werr}
+	}
+	if strictResume != nil && context.Cause(runCtx) == nil {
+		if appendErr != nil {
+			return &completionPending{appendErr}
+		}
+		if werr != nil {
+			return &completionPending{werr}
+		}
 	}
 	if err := r.recordClosedSession(context.WithoutCancel(ctx), as); err != nil {
 		return &completionPending{err}
@@ -696,6 +715,10 @@ func outcome(env protocol.Envelope) []any {
 }
 
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
+	strictResume, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
+	if err != nil {
+		return &completionPending{err}
+	}
 	// Dedicated receipts are not in RequestForRun and must be drained before
 	// final reporting. Failure leaves both the receipt and final request intact.
 	if err := r.recoverRunMessages(ctx, as); err != nil {
@@ -705,16 +728,32 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	if err != nil {
 		return err
 	}
+	if strictResume != nil && !ok {
+		return &completionPending{errors.New("runner: strict final report is unavailable")}
+	}
 	// execute has confirmed the process stopped before entering reporting.
 	if ok {
 		// Facts go out before the result that ends the run's credential.
 		if err := r.retry(ctx, func() error { return r.flushEvents(ctx, as) }); err != nil {
+			if strictResume != nil {
+				return &completionPending{err}
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			r.cfg.Log.ErrorContext(ctx, "tend rejected run events", "run_id", as.RunID, "err", err)
 		}
-		_, err := r.send(ctx, runCredential(as), &req.Envelope)
+		op, err := r.send(ctx, runCredential(as), &req.Envelope)
+		if strictResume != nil {
+			if err != nil {
+				return &completionPending{err}
+			}
+			if op.Status != protocol.OpSucceeded {
+				// Accepted acknowledges the original request identity, not
+				// business settlement. Keep its exact request and ownership.
+				return &completionPending{errors.New("runner: strict final report awaits business settlement")}
+			}
+		}
 		if err == nil {
 			r.cfg.Log.InfoContext(ctx, "run reported", append([]any{"run_id", as.RunID, "operation", req.Envelope.Operation}, outcome(req.Envelope)...)...)
 		}

@@ -598,8 +598,20 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 				r.requestReconcile()
 			}
 		case v.Verdict == protocol.VerdictContinueRetained:
-			if v.RetainedResume == nil || v.RetainedResume.RequestID == "" || v.RetainedResume.Mode != "attach" || run.Held || (run.Phase != journal.PhaseStarted && run.Phase != journal.PhaseWorkerDone && run.Phase != journal.PhaseSubmitting && run.Phase != journal.PhaseReleasing) {
+			if v.RetainedResume == nil || v.RetainedResume.RequestID == "" || v.RetainedResume.Mode != "attach" || run.Held {
 				return errors.New("runner: strict retained continuation identity is unavailable")
+			}
+			if run.Phase != journal.PhaseStarted {
+				// An attachment permit cannot authorize settlement of an old
+				// give-up request. Only a result already produced under this
+				// same strict authority may resume its final reporting phases.
+				authority, err := r.cfg.Journal.RetainedResume(ctx, v.RunID)
+				if err != nil {
+					return err
+				}
+				if authority == nil || *authority != *v.RetainedResume || run.WorkerDoneAtMillis == 0 || len(run.WorkerResult) == 0 || (run.Phase != journal.PhaseWorkerDone && run.Phase != journal.PhaseSubmitting && run.Phase != journal.PhaseReleasing) {
+					return errors.New("runner: strict retained continuation has no validated result")
+				}
 			}
 			if err := r.cfg.Journal.SetRetainedResume(ctx, v.RunID, *v.RetainedResume); err != nil {
 				return err
