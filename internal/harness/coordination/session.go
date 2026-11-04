@@ -26,6 +26,10 @@ type EventAcknowledger interface {
 	Acknowledge(context.Context, Event) error
 }
 
+type ReplyPrefixAcknowledger interface {
+	AcknowledgeReplyPrefix(context.Context, Event) error
+}
+
 type Event struct {
 	Historical   bool              `json:"-"`
 	SourceRunID  string            `json:"-"`
@@ -289,6 +293,18 @@ func (t *thread) AcknowledgeEvent(ctx context.Context, event harness.Event) erro
 	}
 	if ack, ok := t.session.transport.(EventAcknowledger); ok {
 		return ack.Acknowledge(ctx, Event{Sequence: event.CoordinatorSequence, ThreadID: t.ID(), Native: &event, Disconnected: event.Kind == harness.EventCoordinatorDisconnected})
+	}
+	return nil
+}
+
+// AcknowledgeReplyPrefix is separate from event acknowledgement: a persisted
+// interrupted reply is not a native item-completed or turn-completed fact.
+func (t *thread) AcknowledgeReplyPrefix(ctx context.Context, event harness.Event) error {
+	if event.CoordinatorSequence == 0 || event.Kind != harness.EventAgentMessageDelta {
+		return nil
+	}
+	if ack, ok := t.session.transport.(ReplyPrefixAcknowledger); ok {
+		return ack.AcknowledgeReplyPrefix(ctx, Event{Sequence: event.CoordinatorSequence, ThreadID: t.ID(), Native: &event})
 	}
 	return nil
 }
