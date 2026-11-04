@@ -185,3 +185,55 @@ func TestManagerReceiptReaderRetainsAllFences(t *testing.T) {
 		})
 	}
 }
+
+func TestFault_ManagerReceiptReaderKeepsNegotiationAcrossNonterminalReads(t *testing.T) {
+	h, original, pending := stoppedRetainedManager(t)
+	payload := receiptReaderPayload(t, h, original)
+	env := h.env(protocol.OpReconcileManagerRun, taskTarget(original.TaskID), payload, rev(h.task(original.TaskID).ControlRevision))
+	if op := h.exec(owner, env, ReconcileManagerRun{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var runtime protocol.RunnerRuntime
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		r, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+		runtime = r.Runtime
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		reader := reviewClaimManager(t, h, &runtime)
+		close, err := h.app.QueueManagerNative(t.Context(), reader.RunID, "close", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.runAs(reader, protocol.OpManagerNativeClaim, map[string]any{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
+		if op := h.runAs(reader, protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: close}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 {
+			t.Fatal("closing a reader fabricated a native business terminal")
+		}
+		old := runtime
+		old.Capabilities = slices.DeleteFunc(slices.Clone(runtime.Capabilities), func(capability string) bool { return capability == protocol.CapabilityManagerReceiptReader })
+		claim := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: &old, WorkspaceProtocol: 1}, nil), Claim{})
+		if string(claim.Result) != `{"assignment":null}` {
+			t.Fatal("a subsequent unknown receipt generation lost its negotiated reader requirement", attempt, claim)
+		}
+		if h.countWhere(`SELECT COUNT(*) FROM plan_actions WHERE task_id=? AND status='pending' AND json_extract(trigger_json,'$.receipt_reader_request_id')=?`, original.TaskID, env.RequestID) != 1 {
+			t.Fatal("subsequent reader did not retain its original request identity")
+		}
+	}
+	// This unit fixture supplies the original terminal ledger fact only to check
+	// expiration of the negotiated scope; the reader command never clears it.
+	resolveRetainedBusinessReceipt(t, h, pending)
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		trigger, err := managerReceiptReaderTrigger(t.Context(), tx.Q(), original.TaskID)
+		if err == nil && trigger != `{"receipt_only":true}` {
+			t.Fatal("an unrelated future receipt inherited the completed reader requirement", trigger)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

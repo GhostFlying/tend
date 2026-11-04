@@ -223,14 +223,20 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	m.namedMu.Lock()
 	m.named = nil
 	if named {
-		m.named = &selected
+		copy := selected
+		m.named = &copy
 	}
 	m.namedMu.Unlock()
 	if named && selected.ReceiptOnly {
 		receiptOnly = true
-		if selected.AppliedModel == "" {
-			return errors.New("original hosted execution model is unavailable for receipt-only attachment")
+		selected, err = m.restoreReceiptOnlyModel(ctx, selected)
+		if err != nil {
+			return err
 		}
+		m.namedMu.Lock()
+		copy := selected
+		m.named = &copy
+		m.namedMu.Unlock()
 	}
 	var s harness.Session
 	if named {
@@ -624,6 +630,53 @@ func (m *Manager) threadConfig() harness.ThreadConfig {
 	return cfg
 }
 
+// restoreReceiptOnlyModel preserves the metadata-only attachment used to drain
+// an already closing runner. These are confirmed replies of the same run, never
+// a new model query or a native resume queued behind its close.
+func (m *Manager) restoreReceiptOnlyModel(ctx context.Context, selected hostedconfig.Selection) (hostedconfig.Selection, error) {
+	if selected.AppliedModel != "" {
+		return selected, nil
+	}
+	unavailable := errors.New("original hosted execution model is unavailable for receipt-only attachment")
+	if !selected.RunnerManaged || selected.RunnerRunID == "" {
+		return selected, unavailable
+	}
+	modelsRaw, err := m.app.ManagerClosingAttachment(ctx, selected.RunnerRunID, "models", "")
+	if err != nil {
+		return selected, err
+	}
+	if len(modelsRaw) == 0 {
+		return selected, unavailable
+	}
+	id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
+	if err != nil {
+		return selected, err
+	}
+	if !exists {
+		return selected, unavailable
+	}
+	resumeRaw, err := m.app.ManagerClosingAttachment(ctx, selected.RunnerRunID, "resume", id)
+	if err != nil {
+		return selected, err
+	}
+	if len(resumeRaw) == 0 {
+		return selected, unavailable
+	}
+	var models []harness.Model
+	if err := json.Unmarshal(modelsRaw, &models); err != nil {
+		return selected, fmt.Errorf("read confirmed closing models: %w", err)
+	}
+	actual, err := resolveNamedModel(models, selected)
+	if err != nil {
+		return selected, err
+	}
+	if actual.Model == "" {
+		return selected, unavailable
+	}
+	selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = actual.Model, actual.Provider, actual.Effort
+	return selected, nil
+}
+
 // openThread resumes the instance's front thread, or starts a new one
 // when there is none or it cannot be resumed. A new thread has no
 // baseline, so its first turn gets a full snapshot.
@@ -635,7 +688,14 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	selected := m.namedSelection()
 	receiptRead := selected != nil && selected.ReceiptOnly
 	if receiptRead && selected.AppliedModel == "" {
-		return nil, errors.New("original hosted execution model is unavailable for receipt-only attachment")
+		restored, err := m.restoreReceiptOnlyModel(ctx, *selected)
+		if err != nil {
+			return nil, err
+		}
+		selected = &restored
+		m.namedMu.Lock()
+		m.named = selected
+		m.namedMu.Unlock()
 	}
 	parkRead := false
 	if selected != nil && selected.RunnerManaged && !receiptRead {

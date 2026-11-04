@@ -178,7 +178,11 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 					if err = insertManagerAction(ctx, x, tx, id, generation); err != nil {
 						return err
 					}
-					if _, err = tx.Exec(ctx, `UPDATE plan_actions SET trigger_json='{"receipt_only":true}' WHERE task_id=? AND generation=? AND kind='coordinate'`, id, generation); err != nil {
+					trigger, err := managerReceiptReaderTrigger(ctx, tx.Q(), id)
+					if err != nil {
+						return err
+					}
+					if _, err = tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=? WHERE task_id=? AND generation=? AND kind='coordinate'`, trigger, id, generation); err != nil {
 						return err
 					}
 				}
