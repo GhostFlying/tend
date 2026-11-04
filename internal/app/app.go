@@ -192,6 +192,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
+	ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: x.TraceID})
 
 	var (
 		op      protocol.Operation
@@ -247,6 +248,8 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		// reviews that were exact before the write, independent of its actor or
 		// command alias; persistOutcome also requires valid reviewed sources.
 		x.reviewedContexts = map[string][]string{}
+		endReviewed := tx.ObservePhase(store.WriteReviewedContext)
+		defer endReviewed()
 		rows, err := tx.Q().QueryContext(ctx, `SELECT c.work_item_id,r.logical_turn_id FROM work_item_contexts c JOIN logical_turn_context_reviews r ON r.work_item_id=c.work_item_id AND r.revision=c.revision JOIN logical_turns l ON l.logical_turn_id=r.logical_turn_id WHERE l.status='processing'`)
 		if err != nil {
 			return err
@@ -261,11 +264,14 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		}
 		err = rows.Err()
 		rows.Close()
+		endReviewed()
 		if err != nil {
 			return err
 		}
 
+		endApply := tx.ObservePhase(store.WriteApply)
 		out, applyErr := cmd.Apply(ctx, x, tx)
+		endApply()
 		if applyErr == nil && out.NoEffect {
 			if len(out.Events) > 0 || len(out.Outbox) > 0 {
 				return fmt.Errorf("app: %s returned a no-effect outcome with events or outbox messages", env.Operation)
@@ -284,8 +290,11 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 					return err
 				}
 				rec.Status, rec.ResultJSON = protocol.OpSucceeded, string(result)
-				if err := tx.InsertRequest(ctx, rec); err != nil {
-					return err
+				endInsert := tx.ObservePhase(store.WriteRequestInsert)
+				insertErr := tx.InsertRequest(ctx, rec)
+				endInsert()
+				if insertErr != nil {
+					return insertErr
 				}
 				op = operationOf(rec)
 				return nil
@@ -300,10 +309,14 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		if applyErr == nil {
 			applyErr = a.persistOutcome(ctx, x, tx, out, &rec)
 			if applyErr == nil {
+				endRefresh := tx.ObservePhase(store.WriteManagerRefresh)
 				applyErr = refreshManagerTasks(ctx, x, tx)
+				endRefresh()
 			}
 			if applyErr == nil {
+				endMaintenance := tx.ObservePhase(store.WriteMaintenance)
 				applyErr = settleMaintenanceStopsOnOwnerControl(ctx, x, tx)
+				endMaintenance()
 			}
 		}
 		if applyErr != nil {
@@ -346,8 +359,11 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			}
 			applied = true
 		}
-		if err := tx.InsertRequest(ctx, rec); err != nil {
-			return err
+		endInsert := tx.ObservePhase(store.WriteRequestInsert)
+		insertErr := tx.InsertRequest(ctx, rec)
+		endInsert()
+		if insertErr != nil {
+			return insertErr
 		}
 		op = operationOf(rec)
 		return nil
@@ -367,6 +383,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 }
 
 func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Outcome, rec *store.RequestRecord) error {
+	defer tx.ObservePhase(store.WritePersistOutcome)()
 	if err := cancelObsoleteQuestions(ctx, x, tx, &out); err != nil {
 		return err
 	}
@@ -495,8 +512,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			}
 		}
 	}
-	if err := reconcileAttentionResponsibilities(ctx, x, tx); err != nil {
-		return err
+	endAttention := tx.ObservePhase(store.WriteAttention)
+	attentionErr := reconcileAttentionResponsibilities(ctx, x, tx)
+	endAttention()
+	if attentionErr != nil {
+		return attentionErr
 	}
 	if err := syncMessagingInteractions(ctx, x, tx, out.Events); err != nil {
 		return err
@@ -507,7 +527,9 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 	if err := webhookIssueEvents(ctx, x, tx, out.Events); err != nil {
 		return err
 	}
+	endFollowup := tx.ObservePhase(store.WriteFollowup)
 	matched, err := followupEvents(ctx, x, tx, out.Events)
+	endFollowup()
 	if err != nil {
 		return err
 	}

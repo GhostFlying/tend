@@ -1,6 +1,6 @@
 # 单写事务等待的最小定位计划
 
-状态：仅计划，未修改产品；诊断基线为 `558df9d6348d6c69d8d04d133e4324ea56c007d5`。
+状态：最小候选已实现，尚未完成完整发布门；诊断基线为 `558df9d6348d6c69d8d04d133e4324ea56c007d5`。
 
 ## 已有证据和边界
 
@@ -90,3 +90,19 @@ followups、manager refresh、maintenance settlement、request insert 等固定�
 并识别其写入来源，才算观测能力有效；不承诺此补丁本身恢复业务。拿到源码与
 复现支持的原因后回到路径 A，停止扩展观测范围。禁止增加并发 writer、盲增
 timeout、自动重放原请求、停止健康检查、重启服务或暴露公网 pprof。
+
+## 首版实现收口
+
+事务结束与连接释放后才调用 observer；observer 重入写入不占着原 writer。
+显式连接需要在 callback panic 时先 rollback 再关闭，否则 `Conn.Close` 可能等待
+未结束的事务；panic 继续传播，不转换为业务成功。原错误包装与 `errors.Is` 链保留。
+
+阶段为 inclusive，特别是 callback 包含 `persist_outcome`，后者包含 attention 和
+followup。日志不可将这些值相加当成总耗时；pool wait 累计量是整个连接池的计数，
+不是本请求独占的等待。缺少业务标签时只保留调用 PC，真正输出摘要才解析函数名。
+
+真实 SQLite 的 BEGIN 可能忽略刚发生的取消，随后在 statement/commit 观察到取消；
+因此分段正确性同时覆盖真实 SQLite 写锁竞争和最小可取消 driver，不修改生产
+driver 的 context 或 timeout 行为。另覆盖自动 rollback 先完成而 Commit 返回
+`ErrTxDone`：只记录失败边界的 context 状态并保留取消摘要，不替换错误、不宣称
+取消是任意业务错误的原因；已成功 commit 后才取消仍是成功。
