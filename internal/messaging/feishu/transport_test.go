@@ -20,7 +20,7 @@ import (
 func TestTransportSignedCallbackDurableMessageOutboxAndRevokedOwner(t *testing.T) {
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 81)
-	database, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	database, err := feishuFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

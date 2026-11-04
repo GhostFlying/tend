@@ -7,11 +7,14 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
+
+var viewFixture storefixture.Template
 
 func TestSystemTurnStatesProjectIntoConversationAndEvents(t *testing.T) {
 	ctx := t.Context()
-	s, err := store.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), testkit.NewClock().Now)
+	s, err := viewFixture.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), testkit.NewClock().Now)
 	if err != nil {
 		t.Fatal(err)
 	}

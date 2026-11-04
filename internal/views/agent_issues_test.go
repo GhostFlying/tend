@@ -14,7 +14,7 @@ import (
 func TestAgentIssuesFrozenIdentityAndPagination(t *testing.T) {
 	ctx := t.Context()
 	clock := testkit.NewClock()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	db, err := viewFixture.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

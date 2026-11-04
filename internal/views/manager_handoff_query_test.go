@@ -17,7 +17,7 @@ const priorManagerDeliveriesSQL = `SELECT DISTINCT o.request_id FROM outbox o JO
 func TestManagerHandoffDeliveriesDeduplicateLogicalHistory(t *testing.T) {
 	ctx := t.Context()
 	clock := testkit.NewClock()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	db, err := viewFixture.Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

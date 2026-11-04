@@ -48,7 +48,7 @@ func readCanonicalFixture(t *testing.T, s *Store, id string, revision int64) pro
 }
 
 func TestCanonicalIssueCurrentAndHistoryShareOneRevision(t *testing.T) {
-	s, path := openTest(t)
+	s, path := openFreshTest(t)
 	root := canonicalIssueFixture("wi_00000000000000000000000001")
 	saveCanonicalFixture(t, s, root, 0)
 	child := canonicalIssueFixture("wi_00000000000000000000000002")
