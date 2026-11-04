@@ -22,6 +22,15 @@ import (
 )
 
 func TestFault_LapsedManagerDatabaseReplayCommitsItsOriginalClose(t *testing.T) {
+	lapsedManagerReplayCommitsOriginalClose(t, false)
+}
+
+func TestFault_LapsedManagerRepairReplayCommitsItsOriginalClose(t *testing.T) {
+	lapsedManagerReplayCommitsOriginalClose(t, true)
+}
+
+func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool) {
+	t.Helper()
 	s := newServer(t, time.Hour)
 	ctx := t.Context()
 	execute := func(principal protocol.Principal, op string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
@@ -97,6 +106,15 @@ func TestFault_LapsedManagerDatabaseReplayCommitsItsOriginalClose(t *testing.T) 
 		if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: business, ConversationID: as.Manager.ConversationID, IssueID: selection.IssueID, AssignmentEpoch: selection.AssignmentEpoch, Selection: selection, CreatedAt: s.now().UnixMilli()}); err != nil {
 			return err
 		}
+		if repair {
+			logical := s.ids.New(protocol.PrefixRequest)
+			if _, err := tx.Exec(ctx, `INSERT INTO logical_turns(logical_turn_id,message_id,status,repair_attempts,updated_at) VALUES(?,?,'pending_repair',1,?)`, logical, source, s.now().UnixMilli()); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_executions(request_id,logical_turn_id,repair) VALUES(?,?,1)`, business, logical); err != nil {
+				return err
+			}
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, business)
 		return err
 	}); err != nil {
@@ -128,6 +146,11 @@ func TestFault_LapsedManagerDatabaseReplayCommitsItsOriginalClose(t *testing.T) 
 		t.Fatal(err)
 	}
 	native(protocol.OpManagerNativeClaim, map[string]any{})
+	closeBody, _ := json.Marshal(protocol.ManagerNativeReply{ID: close, Result: json.RawMessage(`null`), LastSequence: 19})
+	frozenClose := &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeReply, Target: protocol.Target{Type: "run", ID: as.RunID}, Payload: closeBody}
+	if _, err := s.app.Execute(ctx, principal, frozenClose, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		t.Fatal("original frozen close bypassed unapplied deltas", err)
+	}
 	if err := s.store.Write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE leases SET status='lapsed' WHERE run_id=?`, as.RunID)
 		return err
@@ -170,8 +193,20 @@ func TestFault_LapsedManagerDatabaseReplayCommitsItsOriginalClose(t *testing.T) 
 	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=?`, as.RunID) != 2 || s.count(`SELECT COUNT(*) FROM runs`) != 1 || s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='lapsed'`, as.RunID) != 1 {
 		t.Fatal("database replay queued native work, created a run or renewed the lease")
 	}
-	if s.count(`SELECT COUNT(*) FROM conversation_agent_messages a JOIN conversation_messages m USING(message_id) WHERE a.thread_id='original-native' AND a.turn_id='original-turn' AND a.item_id='original-item' AND a.status='interrupted' AND m.body='part17part18part19'`) != 1 || s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 {
-		t.Fatal("database replay lost original text or fabricated business completion")
+	if repair {
+		if s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 || s.count(`SELECT COUNT(*) FROM background_replies WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 {
+			t.Fatal("internal repair text was published as a user reply")
+		}
+		if s.count(`SELECT COUNT(*) FROM events WHERE object_id=? AND kind='run.manager_repair_prefix_consumed'`, as.RunID) != 1 {
+			t.Fatal("repair prefix has no durable internal consumption evidence")
+		}
+	} else if s.count(`SELECT COUNT(*) FROM conversation_agent_messages a JOIN conversation_messages m USING(message_id) WHERE a.thread_id='original-native' AND a.turn_id='original-turn' AND a.item_id='original-item' AND a.status='interrupted' AND m.body='part17part18part19'`) != 1 {
+		t.Fatal("ordinary database replay lost original text")
 	}
-	native(protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: close, Result: json.RawMessage(`null`), LastSequence: 19})
+	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, business) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != 19 {
+		t.Fatal("prefix replay fabricated business completion or changed raw native events")
+	}
+	if result, err := s.app.Execute(ctx, principal, frozenClose, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); err != nil || result.Status != protocol.OpSucceeded {
+		t.Fatal("same original close envelope could not commit after consumption", result, err)
+	}
 }
