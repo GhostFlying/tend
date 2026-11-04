@@ -47,6 +47,8 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "repo list", Route: "/api/v1/repos"},
 	{Name: "task list", Route: "/api/v1/tasks", Queries: "all finished project lifecycle sort before limit"},
 	{Name: "task show", Route: "/api/v1/tasks/{id}"},
+	{Name: "run maintenance-reconciliation", Route: "/api/v1/runs/{id}/maintenance-reconciliation", JSONDefault: true},
+	{Name: "run continue-retained", Operation: protocol.OpContinueRetainedRun, Target: "run", RevisionRoute: "-", JSONDefault: true},
 	{Name: "run logs", Route: "/api/v1/runs/{id}/logs", Queries: "after wait"},
 	{Name: "run preview", Route: "/api/v1/runs/{id}/preview", Queries: "before after generation record field reference offset", JSONDefault: true},
 	{Name: "run rollout", Route: "/api/v1/runs/{id}/rollout", Queries: "after before"},
@@ -157,6 +159,12 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		return runManagerReconciliation(ctx, e, args)
 	}
 	fs := newFlags(e, cmd.Name)
+	if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" {
+		fs.Usage = func() {
+			fmt.Fprint(e.Stderr, commandUsage(strings.Fields(cmd.Name)))
+			fs.PrintDefaults()
+		}
+	}
 	asJSON := fs.Bool("json", cmd.JSONDefault, "print the complete server response as JSON")
 	out := fs.String("out", "", "download destination (required for download)")
 	qstrings := map[string]*string{}

@@ -71,6 +71,7 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"runs_continue_retained", "Independently authorize only the original ordinary Orca Run after exact identity, protection-set and settled business receipt checks. Requires current Task revision and full immutable pin. Old runners remain retained; missing native identity cannot launch a replacement. Never use for managers or invent an owner decision.", "run", protocol.ContinueRetainedRunPayload{}, app.ContinueRetainedRun{}, true},
 	{"artifact_shares_grant", "Share one immutable artifact and its exact files with a target Issue from an admitted owner authorization. No source task control or delegation of further sharing.", "issue", protocol.GrantArtifactSharePayload{}, app.ArtifactShareCommand{}, true},
 	{"artifact_shares_revoke", "Revoke future reads of an exact artifact share using target Issue and share revisions. Previously frozen task inputs remain historical facts.", "issue", protocol.RevokeArtifactSharePayload{}, app.ArtifactShareCommand{Revoke: true}, true},
 	{"question_inputs_grant", "Grant only selected file_ids from the actual owner answer or ReplyTo supplement to an exact worker question/run/lease. Use the input revision CAS, real source content revision and original request identity. Does not rewrite the answer, authorize other attachments, or inherit into a continuation. Return metadata then relay it to the original executor without restarting it.", "decision", protocol.QuestionInputPayload{}, app.QuestionInputCommand{}, true},
@@ -160,6 +161,9 @@ func hostedMutationSchema(payload any) json.RawMessage {
 func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
 	out = append(out, harness.ToolSpec{Name: "conversation_input_read", Description: "Read one exact admitted communication input and immediately record witnessed consumption. No address or channel selection.", InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string"}},"required":["message_id"],"additionalProperties":false}`)})
+	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
+		out = append(out, harness.ToolSpec{Name: "runs_maintenance_reconciliation", Description: "Read the original ordinary Run identity, maintenance protection set and unresolved receipt blockers without probing or controlling its provider.", InputSchema: exportSchema(json.RawMessage(argumentSchema(retainedRunReadArgs{})))})
+	}
 	if purpose == agentconfig.Main {
 		out = append(out, harness.ToolSpec{Name: "tasks_manager_reconciliation", Description: "Read exact ledger-only original manager close, event and business receipt evidence. Missing sessions remain unknown; this read never authorizes native replay.", InputSchema: exportSchema(json.RawMessage(argumentSchema(managerReconciliationReadArgs{})))})
 	}
@@ -169,7 +173,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 			// command. New named turns publish ordinary Agent ownership.
 			continue
 		}
-		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && m.name != "issues_request_owner" && m.name != "issues_set_acceptance_policy" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
+		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && m.name != "issues_request_owner" && m.name != "issues_set_acceptance_policy" && !strings.HasPrefix(m.name, "attentions_") && m.name != "runs_continue_retained" && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
 			continue
 		}
 		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)}
@@ -193,6 +197,16 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 				body["required"] = append(body["required"].([]any), "expected_source_revision")
 				props["expected_source_revision"] = map[string]any{"type": "integer", "minimum": 1, "description": "Exact content_revision of source_message_id from conversation_turn_read; required with the source message ID."}
 			}
+			spec.InputSchema, _ = json.Marshal(root)
+		}
+		if m.name == "runs_continue_retained" && purpose == agentconfig.Main {
+			var root map[string]any
+			_ = json.Unmarshal(spec.InputSchema, &root)
+			body := root["properties"].(map[string]any)["payload"].(map[string]any)
+			body["required"] = append(body["required"].([]any), "source_message_id", "expected_source_revision")
+			props := body["properties"].(map[string]any)
+			props["source_message_id"] = map[string]any{"type": "string", "minLength": 1, "description": "Exact owner source admitted to this planner execution. Queued, withdrawn or merely visible material cannot authorize continuation."}
+			props["expected_source_revision"] = map[string]any{"type": "integer", "minimum": 1, "description": "Exact content_revision of the admitted original owner source."}
 			spec.InputSchema, _ = json.Marshal(root)
 		}
 		out = append(out, spec)
@@ -313,6 +327,39 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		c.ExecutionRequestID = execution.ID
 		value, err := s.startHostedUpgrade(ctx, c, native.Status == store.TurnStarting || native.Status == store.TurnStarted)
 		return hostedAnswer(value, err), true
+	}
+	if c.Tool == "runs_maintenance_reconciliation" {
+		if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "only an admitted coordinator can inspect retained Run reconciliation"))
+		}
+		var args retainedRunReadArgs
+		if err := decode(c.Arguments, &args); err != nil {
+			return fail(err)
+		}
+		value, err := s.app.RetainedRunReconciliation(ctx, args.RunID)
+		if err == nil && execution.Selection.Purpose == agentconfig.IssueManager {
+			err = s.store.Read(ctx, func(tx *store.ReadTx) error {
+				primary, e := store.GetTaskIssueOwner(ctx, tx.Q(), value.Identity.TaskID)
+				if e != nil {
+					return e
+				}
+				if primary != execution.IssueID {
+					return protocol.Errorf(protocol.CodeForbidden, "retained Run is outside this Issue")
+				}
+				current, e := store.GetCanonicalIssue(ctx, tx.Q(), primary)
+				if e != nil {
+					return e
+				}
+				if current.AssignmentEpoch != execution.AssignmentEpoch || current.AssignmentState != "active" {
+					return protocol.Errorf(protocol.CodeForbidden, "Issue responsibility changed")
+				}
+				return nil
+			})
+		}
+		if err != nil {
+			return fail(err)
+		}
+		return hostedAnswer(value, nil), true
 	}
 	if c.Tool == "tasks_manager_reconciliation" {
 		if execution.Selection.Purpose != agentconfig.Main {

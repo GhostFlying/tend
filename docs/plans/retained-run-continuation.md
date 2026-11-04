@@ -30,3 +30,9 @@ CLI 覆盖 typed 参数、帮助、输出、保存原 envelope、单次 POST 与
 旧 `RootObservationRequired` 不禁止 terminal 缺失时的 reset/launch；直接 server 解保护不满足本需求。严格模式必须验证原保存 Thread 能解码、原 worktree/terminal/pane/session/runtime/root launch/turn 一致；坏/空 Thread、terminal 缺失、身份改变和 resume 拒绝均保持待对账，零 launch、零 send，不能报业务失败清理原运行。缺 journal、held journal、旧 runner、不同 pin 同样保持留存。严格选择写入 journal 且重启保留，不能在下一次普通 Hello 退回 fallback。
 
 严格 reattach 仅观察原 turn；没有明确独立继续许可时禁止任何隐式 Continuation、startup/recovery retry、原 prompt 重放或新 session。若实际原 turn 已取消，需要另一个明确授权的一次同 session continuation，使用新的去重 send ID、先对账已有 pending send，保同 Run/lease/pin；不能声称仅观察就恢复了执行。本轮在有界元数据确认前不同时扩两种模式，不把未知原生状态臆断成 cancelled/running。协议评估按 capability opt-in 扩展，N/N−1 旧请求默认语义与旧响应均不变；只对显式支持的 peer 返回新 verdict。
+
+工作区同样采用严格附着：普通 Prepare 会重跑 profile，缺 state 时可重建 clone/worktree，
+不能先调用它再核 Thread。runner 在任何 Prepare 前核本地严格权限与 held/thread/worker
+支持；严格路径仅用显式 Reattach 读取原 state、resource/backend/provider/mount 身份和
+已有目录，不运行 profile、Git/Orca 创建或 rename，不写状态。缺失或不一致保持 pending，
+不支持该路径的 workspace 实现同样拒绝；普通任务的 Prepare 语义保持不变。

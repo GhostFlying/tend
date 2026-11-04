@@ -802,6 +802,25 @@ runner 才接收逐运行 retain。无该能力或不受支持的代际不得收
 原运行的独立业务对账/退役入口另批实现，并须同步 CLI/主工具面；主机成功登记不证明
 原运行恢复，也不证明升级排空或未知外部结果已确定。见[实施计划](plans/retained-run-reconciliation.md)。
 
+D159 普通 Run 继续补充：独立 typed `runs.continue_retained` 只授权命名普通 Orca
+执行的原 journal 严格附着，不删除原维护保护、物理停止或未知业务请求。动作核验
+Task CAS、Run/task/action/generation/spec/host/同一未 released lease、完整执行 pin、
+全部保护身份与原文摘要及真实已结算业务；新 capture、控制变化或新 pending 使原决议失效。
+owner、准入主会话来源和当前负责该 Task 的 Issue owner 共享同一 app 校验；CLI 提供
+只读对账、完整冻结输入、原请求查询与精确 replay。决议本身不续租，只有携带原 journal
+的合法 Hello 可恢复原 lapsed lease；缺 journal 不分配新运行，heartbeat 不能先行消费授权。
+
+专用 continue_retained verdict 仅返回给显式协商 strict-retained-resume 的 runner；
+N/N−1 旧 peer 仍 retain，旧请求默认语义不变。新 runner 将严格模式独立写入 journal，
+保存原 Assignment/Thread，重启和后续普通 Continue 不丢失约束。Orca 要求原
+worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 turn 可观察；
+坏 Thread、失踪 terminal、unknown/pending 或身份变化均保留待对账，禁止新 launch、
+隐式 continuation、原 prompt 重放和 shutdown 注入。首批 app-server 不支持。
+附着不能恢复已取消的 turn，也不能将原生 unknown 判为成功或失败；同 session 的新
+业务继续需要独立持久化发送合同，不由此授权推断。实际恢复必须另核原业务推进，不能
+只以 lease active 或健康主机验收。见[计划](plans/retained-run-continuation.md)与
+[操作合同](retained-run-continuation.md)。
+
 ## D160：Agent 运行关联与观测来源
 
 Agent 详情的 Issue 关联只读冻结的 run_agent_executions 身份与历史 pin，关联依次采用

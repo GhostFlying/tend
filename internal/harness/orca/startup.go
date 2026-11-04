@@ -42,6 +42,9 @@ func (w *worker) startupEvent(ctx context.Context, phase string) error {
 }
 
 func (w *worker) beginStartup(ctx context.Context, agent string) error {
+	if w.spec.RetainedResume != nil {
+		return w.beginRetained(ctx)
+	}
 	for {
 		if s := w.st.Startup; s != nil && s.Phase == "closing" {
 			if err := w.startupEvent(ctx, "retry_pending"); err != nil {
