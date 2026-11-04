@@ -1,11 +1,13 @@
 package journal
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 func TestRolloutLocatorSurvivesEventCleanupReopenAndRunCompletion(t *testing.T) {
@@ -68,13 +70,30 @@ func TestCleanupPreservesRegisteredOriginalAndArtifacts(t *testing.T) {
 
 func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
-	j := open(t, path)
-	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
-	if err := j.RegisterUsageSource(t.Context(), source); err != nil {
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Recreate the committed v14 schema before the rollout locator table existed.
-	if _, err := j.db.ExecContext(t.Context(), "DROP TABLE rollout_sources; PRAGMA user_version=14"); err != nil {
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries[:14] {
+		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(t.Context(), string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(t.Context(), "PRAGMA user_version=14"); err != nil {
+		t.Fatal(err)
+	}
+	j := &Journal{db: db, now: testkit.NewClock().Now, path: path}
+	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
+	if err := j.RegisterUsageSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	if err := j.Close(); err != nil {

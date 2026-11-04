@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
@@ -48,23 +47,13 @@ func SummariesWithExecution(ctx context.Context, q store.Querier, rows []store.T
 
 func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows []store.TaskRow) ([]protocol.TaskSummary, error) {
 	out := make([]protocol.TaskSummary, 0, len(rows))
-	var err error
+	capabilities, err := facts.capabilitySelections(ctx, q, rows)
+	if err != nil {
+		return nil, err
+	}
 	for _, row := range rows {
 		summary := Summary(row)
-		if row.Kind != protocol.TaskKindIssueManager {
-			body, err := store.GetSpec(ctx, q, row.TaskID, row.SpecVersion)
-			if err != nil {
-				return nil, err
-			}
-			var spec domain.Spec
-			if err := json.Unmarshal([]byte(body), &spec); err != nil {
-				return nil, err
-			}
-			if s := spec.AgentSelection; s != nil && (len(s.Implementation.RequiredCapabilities) > 0 || len(s.Acceptance.RequiredCapabilities) > 0) {
-				selection := s.Clone()
-				summary.RequiredCapabilities = &selection
-			}
-		}
+		summary.RequiredCapabilities = capabilities[row.TaskID]
 		if row.Kind == protocol.TaskKindIssueManager {
 			m, e := store.GetIssueManagerTask(ctx, q, row.TaskID)
 			if e != nil {
