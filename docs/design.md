@@ -1006,6 +1006,8 @@ resume；`dependency` 保存另一个普通 execution Task 的精确 spec 版本
 answered 与 stopped 齐备后的续接默认；没有 policy row 的历史 handoff 仍沿原合同，不伪造
 一个旧 wait 决定。新入口缺 policy 拒绝，只有显式 typed wait 才等待；不从自由文本推断
 typed 条件。既有 Attention 通过非空 typed 字段显式 opt-in，省略时保持旧行为。
+新 typed IssueManager 答案必须引用当前 Issue 已准入且未撤回的原 owner 消息；
+复用既有 owner relay 校验，不将 cancelled outbox 当成仍然有效的 owner 授权。
 
 答案及其原 request_id 保持不可变。独立 continuation 记录保存自己的 revision、等待原因、冻结
 依赖和 resume 请求；`decisions.continuation.resume` / `reconcile` 同时校验 continuation revision
