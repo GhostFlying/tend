@@ -440,10 +440,11 @@ func (w *worker) awaitRecoveryReconciliation(ctx context.Context) bool {
 		"turn_at": w.st.Turn, "managed_turn_at": w.st.Turn, "code": code, "background_pending": true, "root_state": "unknown",
 	})
 	for ctx.Err() == nil {
-		// A saved receipt is queried under its original identity. Without one,
-		// continueFailedSession only accepts an observed matching prompt after issue.
+		// Keep the durable recovery strategy while observation is unavailable.
+		// A closing recovery must finish its original close and fresh launch,
+		// rather than submit a continuation into the failed session.
 		var err error
-		if w.spec.HandBack {
+		if w.spec.HandBack || w.st.Recovery.Phase == recoveryClosing || w.st.Recovery.Phase == recoveryLaunching {
 			err = w.begin(ctx, orcaAgents[w.ws.opts.Agent])
 		} else {
 			err = w.continueFailedSession(ctx)
