@@ -150,7 +150,11 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 		sort.Strings(ids)
 		var runnable []string
 		for _, id := range ids {
-			allowed, err := agentStartupAllowed(ctx, tx.Q(), id, a.now().UnixMilli())
+			if dueReceipts[id] {
+				runnable = append(runnable, id)
+				continue
+			}
+			allowed, err := a.agentStartupAllowed(ctx, tx.Q(), id, a.now().UnixMilli())
 			if err != nil {
 				return err
 			}

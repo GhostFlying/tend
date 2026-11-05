@@ -595,7 +595,7 @@ D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适�
 
 内部待处理问题通过现有持久 background source 唤醒责任 Agent，不形成用户 Inbox、徽标、渠道交互或个人待办。解决后回到来源 Issue；旧问题在升级时保留原文、ID、历史及回答通道并接续责任。用户仍可直接控制。CLI `attention list --recipient agent|main|owner|all --responsible-issue <id>` 支持责任筛选及分页；`attention resolve|escalate` 使用责任版本、epoch、原问题版本和理由，支持完整 Envelope 的 dry-run/replay。
 
-负责人会话在接收原输入前持续启动失败时，独立技术事件按原输入身份保留启动失败窗口，复用 Agent 恢复政策的次数及总时长预算，暂态仍按原30秒退避，不伪造 outbox 投递次数或 native turn。耗尽后建立唯一 action Attention 并交父 Issue，根交主协调；主协调自身启动失败直接持久通知 owner，不再依赖同一不可用运行时处理自己的故障。原输入仍 pending，问题结清前暂停其自动启动；明确结清或实际成功后以原输入身份继续，未知 native 回执仍走原对账。见[实施计划](plans/bounded-agent-startup-escalation.md)。
+负责人会话持续启动失败时，在同一读取快照中冻结实际 runtime selection 及其原输入或对账 attachment 身份，独立技术事件仅结算该身份的启动失败窗口，复用 Agent 恢复政策的次数及总时长预算，暂态仍按原30秒退避。尚无 native intent 的 pending 或已由 dispatcher claim 的 sending 均可计本地启动失败，不伪造 outbox 投递次数或 native turn，也不重派或释放原 sending。耗尽后建立唯一 action Attention 并交父 Issue，根交主协调；主协调自身启动失败直接持久通知 owner，不再依赖同一不可用运行时处理自己的故障。原输入及实际 dispatch 状态保留，问题结清前暂停该未准入输入的自动启动；明确结清或实际成功后以原输入身份继续。已有 native intent 或未知回执的只读 attachment 独立发现，不受较新输入的启动预算阻断，原未知事实仍走原对账。见[实施计划](plans/bounded-agent-startup-escalation.md)。
 
 新 runner 以可选能力 `supervisor-questions-v1` 协商，并在创建 run 时冻结答复合同；新运行的 `ask_owner` 表示提交给 Issue owner，其答复不能扩大原授权。旧运行仍保留真实用户答复语义，但问题先按责任链上报。字段可选，默认关闭；runner wire 继续为 2/1，不改变旧请求的有效性。实施计划见 docs/plans/issue-responsibility-routing.md。
 

@@ -174,12 +174,7 @@ func (m *Manager) Run(ctx context.Context) error {
 				return err
 			}
 		}
-		allowed, err := m.app.AgentStartupAllowed(ctx, m.cfg.ConversationID)
-		if err != nil {
-			m.notifyStartupExit(err)
-			return err
-		}
-		if needsRead && allowed {
+		if needsRead {
 			if err := m.serve(ctx); err != nil && ctx.Err() == nil {
 				m.cfg.Log.ErrorContext(ctx, "main thread session ended", "err", err)
 			}
@@ -198,12 +193,13 @@ func (m *Manager) Run(ctx context.Context) error {
 // handles the thread's events until the session ends.
 func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	started := false
+	var startupAttachment app.AgentStartupAttachment
 	diagnostics := m.sessionDiagnostics(nil)
 	defer func() { diagnostics.exit(ctx, startupErr) }()
 	defer func() {
 		if !started && ctx.Err() == nil {
 			if startupErr != nil {
-				if err := m.app.DeferAgentStartup(ctx, m.cfg.ConversationID); err != nil {
+				if err := m.app.DeferAgentStartupAttachment(ctx, m.cfg.ConversationID, startupAttachment); err != nil {
 					m.cfg.Log.WarnContext(ctx, "could not record failed agent startup", "err", err)
 				}
 			}
@@ -228,8 +224,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			return nil
 		}
 	}
-	selected, named, err := m.app.HostedRuntimeSelection(ctx, m.cfg.ConversationID)
+	selected, named, startupAttachment, err := m.app.HostedRuntimeStartupSelection(ctx, m.cfg.ConversationID)
 	if err != nil {
+		return err
+	}
+	allowed, err := m.app.AgentStartupAttachmentAllowed(ctx, startupAttachment)
+	if err != nil || !allowed {
 		return err
 	}
 	m.namedMu.Lock()
@@ -354,7 +354,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		return err
 	}
 	if !remote {
-		if err := m.app.AgentStartupSucceeded(ctx, m.cfg.ConversationID); err != nil {
+		if err := m.app.AgentStartupAttachmentSucceeded(ctx, startupAttachment); err != nil {
 			return err
 		}
 	}
@@ -567,7 +567,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		if err != nil {
 			return err
 		}
-		if err := m.app.AgentStartupSucceeded(ctx, m.cfg.ConversationID); err != nil {
+		if err := m.app.AgentStartupAttachmentSucceeded(ctx, startupAttachment); err != nil {
 			return err
 		}
 		m.mu.Lock()

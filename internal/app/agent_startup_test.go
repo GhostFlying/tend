@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -10,6 +11,10 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func agentStartupHead(ctx context.Context, q store.Querier, conversation string) (store.OutboxMessage, error) {
+	return store.HeadOutboxPrioritized(ctx, q, store.ConversationDestination(store.ConversationID(conversation)), OpHandleEvent)
+}
 
 func startupInput(t *testing.T, h *harness, conversation string) store.OutboxMessage {
 	t.Helper()
