@@ -772,17 +772,17 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThre
 		}
 	}
 	if compactPending {
+		// Adapters may dispatch buffered callbacks inside ResumeThread. Quarantine
+		// this attachment before exposing any handler, including a rejected resume.
+		m.mu.Lock()
+		m.compactRecovery = true
+		m.mu.Unlock()
 		if err := m.app.SettleOpenTurns(ctx, compactID); err != nil {
 			return nil, err
 		}
 		th, err := s.ResumeThread(ctx, compactID, m.threadConfig())
 		if errors.Is(err, harness.ErrRejected) {
 			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "original compact thread cannot be resumed; reconcile before replacing it")
-		}
-		if err == nil {
-			m.mu.Lock()
-			m.compactRecovery = true
-			m.mu.Unlock()
 		}
 		return th, err
 	}

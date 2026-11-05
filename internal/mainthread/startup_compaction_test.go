@@ -249,3 +249,87 @@ func (t *acknowledgedCompactThread) AcknowledgeEvent(_ context.Context, event ha
 	}
 	return nil
 }
+
+func TestCompactRecoveryBlocksIdleNativeSummary(t *testing.T) {
+	for _, state := range []string{"pending_recovery", "settled_recovery", "live_unknown"} {
+		t.Run(state, func(t *testing.T) {
+			f := newHandoffFixture(t)
+			seedIdleConversation(t, f)
+			seedUnknownCompact(t, f)
+			if state != "live_unknown" {
+				if _, err := f.e.m.openThread(t.Context(), f.session); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state == "settled_recovery" {
+				if err := f.e.app.CompleteNativeCompact(t.Context(), "main", f.source.ID(), "original-completion"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.clock.Advance(time.Hour)
+			if err := f.e.m.idleSummary(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			_, forks, _ := f.session.counts()
+			if forks != 0 || f.e.count(`SELECT COUNT(*) FROM conversation_summary_attempts`) != 0 {
+				t.Fatal("compact isolation admitted a fresh native summary", forks)
+			}
+		})
+	}
+}
+
+func TestCompactResumeQuarantinesSynchronousToolCallback(t *testing.T) {
+	f := newHandoffFixture(t)
+	f.e.m.cfg.MaintenanceEnabled = false
+	message := f.e.say("Retain the original callback identity")
+	delivery, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatal(delivery, ok, err)
+	}
+	rec := store.MainTurn{RequestID: delivery.RequestID, MessageID: message, ThreadID: f.source.ID(), TurnID: "retained-turn"}
+	for _, state := range []string{store.TurnStarting, store.TurnStarted, store.TurnCompleted} {
+		rec.Status = state
+		if err := f.e.app.PutMainTurn(t.Context(), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.e.app.FinishDelivery(t.Context(), delivery, app.DeliveryResult{Outcome: app.Delivered}); err != nil {
+		t.Fatal(err)
+	}
+	call := harness.ToolCall{ThreadID: f.source.ID(), TurnID: rec.TurnID, CallID: "buffered-call", Tool: "agent_conversations_list", Arguments: json.RawMessage(`{}`)}
+	if result := f.e.m.onToolCall(t.Context(), call); !result.Success {
+		t.Fatal("fixture did not reach the ordinary tool service", result)
+	}
+
+	seedUnknownCompact(t, f)
+	called := false
+	var result harness.ToolResult
+	f.session.resumeHook = func(ctx context.Context, id string, cfg harness.ThreadConfig) {
+		called = true
+		call.ThreadID = id
+		result = cfg.OnToolCall(ctx, call)
+	}
+	if _, err := f.e.m.openThread(t.Context(), f.session); err != nil {
+		t.Fatal(err)
+	}
+	if !called || result.Success {
+		t.Fatal("buffered resume callback reached the tool service before quarantine", called, result)
+	}
+}
+
+func TestIdleSummaryResumesAfterLiveCompactCompletes(t *testing.T) {
+	f := newHandoffFixture(t)
+	seedIdleConversation(t, f)
+	seedUnknownCompact(t, f)
+	if err := f.e.app.CompleteNativeCompact(t.Context(), "main", f.source.ID(), "original-completion"); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(time.Hour)
+	if err := f.e.m.idleSummary(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, forks, _ := f.session.counts()
+	if forks != 1 {
+		t.Fatal("settled live compact incorrectly disabled normal idle summary", forks)
+	}
+}
