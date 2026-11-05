@@ -820,7 +820,11 @@ worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 t
 附着不能恢复已取消的 turn，也不能将原生 unknown 判为成功或失败；同 session 的新
 业务继续需要独立持久化发送合同，不由此授权推断。实际恢复必须另核原业务推进，不能
 只以 lease active 或健康主机验收。首次附着只接回 started journal；最终阶段仅恢复同一
-严格许可下已持久记录的真实 worker 结果，不能结算旧 give-up/release。严格附着的 setup、
+严格许可下已持久记录的真实 worker 结果，或原问答 handoff 已确认物理停止后的
+`runs.yield_question` 回执。后者须为已协商问答交接的普通 Run、releasing 阶段，保留原
+request ID、Run/target、decision 和原 thread payload；仍由服务端核验原 handoff，
+不产生 WorkerDone、新问题或新 native 执行，不能结算旧 give-up/release。见
+[回执恢复计划](plans/strict-question-yield-reconciliation.md)。严格附着的 setup、
 观察和本地事件保存失败保持 pending；最终请求只有业务成功回执才清理，accepted 或未知
 结果保留原请求身份。strict 最终请求和前置事件仅作一次现有请求超时内的上传尝试；
 未知结果保留原请求/事件，显式唤醒 Hello 对账以观察后续 Stop；strict pending 报告在

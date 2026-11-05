@@ -2,11 +2,39 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
+
+// retainedQuestionYieldReady resumes only a physically stopped original
+// handoff receipt. It is neither a worker result nor a general release permit.
+func (r *Runner) retainedQuestionYieldReady(ctx context.Context, run journal.Run) (bool, error) {
+	if run.Phase != journal.PhaseReleasing || !run.StoppedConfirmed || run.Held ||
+		!run.Assignment.QuestionHandoffs || run.Assignment.Manager != nil ||
+		run.Assignment.LeaseID == "" || run.Thread == "" {
+		return false, nil
+	}
+	req, ok, err := r.cfg.Journal.RequestForRun(ctx, run.Assignment.RunID)
+	if err != nil || !ok {
+		return false, err
+	}
+	if req.RunID != run.Assignment.RunID || req.Envelope.RequestID == "" ||
+		req.Envelope.Operation != protocol.OpRunsYieldQuestion ||
+		req.Envelope.Target.Type != "run" || req.Envelope.Target.ID != run.Assignment.RunID {
+		return false, nil
+	}
+	var fields map[string]json.RawMessage
+	var payload protocol.YieldQuestionPayload
+	if json.Unmarshal(req.Envelope.Payload, &fields) != nil || len(fields) != 2 ||
+		json.Unmarshal(req.Envelope.Payload, &payload) != nil {
+		return false, nil
+	}
+	return payload.DecisionID != "" && payload.ThreadID != "" && payload.ThreadID == run.Thread, nil
+}
 
 // retainRun serializes retention with irreversible local settlement without
 // holding the host-wide mutex across workspace cleanup. A settlement already

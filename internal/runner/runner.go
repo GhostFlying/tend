@@ -618,13 +618,22 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			}
 			if run.Phase != journal.PhaseStarted {
 				// An attachment permit cannot authorize settlement of an old
-				// give-up request. Only a result already produced under this
-				// same strict authority may resume its final reporting phases.
+				// give-up request. A result or stopped question-yield receipt
+				// must belong to this same already-recorded strict authority.
 				authority, err := r.cfg.Journal.RetainedResume(ctx, v.RunID)
 				if err != nil {
 					return err
 				}
-				if authority == nil || *authority != *v.RetainedResume || run.WorkerDoneAtMillis == 0 || len(run.WorkerResult) == 0 || (run.Phase != journal.PhaseWorkerDone && run.Phase != journal.PhaseSubmitting && run.Phase != journal.PhaseReleasing) {
+				sameAuthority := authority != nil && *authority == *v.RetainedResume
+				resultReady := run.WorkerDoneAtMillis > 0 && len(run.WorkerResult) > 0 && (run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing)
+				yieldReady := false
+				if sameAuthority && !resultReady {
+					yieldReady, err = r.retainedQuestionYieldReady(ctx, run)
+					if err != nil {
+						return err
+					}
+				}
+				if !sameAuthority || !resultReady && !yieldReady {
 					if err := r.rejectRetainedContinuation(ctx, run, v.RunID, "no validated result"); err != nil {
 						return err
 					}
