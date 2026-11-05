@@ -23,3 +23,7 @@
 原候选的真实格式验证失败：TraeX 0.213.1 把 managed input 和外层工具调用保存在 history_mutation append/items；只读 response_item 无法绑定原输入，也会漏掉未结外层操作。补齐 append 中已有 message/function/custom-tool 语义，不把 snapshot/rewrite 或未来格式当空操作库存。未知工具名称即使有 output 也保留 unknown，不用 opaque code-mode 返回值证明全部效果已结。
 
 独立审查同时指出真实 Workers.Start/begin 与 acceptance 缺 verdict 路径仍可发送 continuation/reminder，以及补证 failed/settled 无轮询延时。回归须走真实 Start、begin 和 run，跨 serialized Thread 重启后仍无隐式 Send/Launch/Close；补证保持有界可取消的 Poll，真实原生和 Codex 旧路径不变。原候选失败与 review finding 保留，修后一批完整目标回归和同一冻结原件离线验证再更新候选。
+
+## 恢复阶段的最后分流校验
+
+补证阻止已持久化 closing 恢复时会进入既有 unknown 对账循环。该循环此前只处理 continuing；不能因观测从补证转为强原生事实而丢失原 closing 策略。最小修复按已有 durable Recovery.Phase 重入原 begin/close/launch 路径，不增加恢复授权、不修改错误重试或关闭身份。回归通过真实 Workers.Start 从弱观测转强观测，分别验证 closing 只关闭原 terminal 后重建、关闭成功但回执丢失后先读取原 terminal 消失事实、continuing 仍只续原 session，三者不得互串。原 close CLI 没有独立 request ID，验证它已有 terminal/session/launch 身份，不虚构新的去重能力。

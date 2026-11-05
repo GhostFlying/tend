@@ -437,3 +437,93 @@ func TestTraexRootSupplementDoesNotAuthorizeRecoveryEntrypoints(t *testing.T) {
 		})
 	}
 }
+
+func TestTraexRootSupplementRecoveryPhaseSurvivesWeakToStrongStartup(t *testing.T) {
+	for _, phase := range []string{recoveryClosing, recoveryContinuing} {
+		for _, lostClose := range []bool{false, true} {
+			if phase == recoveryContinuing && lostClose {
+				continue
+			}
+			name := phase
+			if lostClose {
+				name += "_lost_close_reply"
+			}
+			t.Run(name, func(t *testing.T) {
+				f, saved, a, body := traexEndingFixture(t)
+				a.Prompt = saved.st.Said
+				a.MainAgent = &MainAgent{State: stateDone, Outcome: "failure", StateStartedAt: 5000}
+				a.StateStartedAt = 5000
+				body += rootRecord(5000, "event_msg", map[string]any{"type": "task_complete", "turn_id": "turn-original", "error": map[string]any{"codex_error_info": "response_stream_disconnected"}})
+				if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+				code := "response_stream_disconnected"
+				if phase == recoveryClosing {
+					code = "invalid_encrypted_content"
+				}
+				saved.st.Recovery = &recoveryState{Attempts: 1, Phase: phase, Code: code, SessionID: saved.st.SessionID, TranscriptPath: a.ProviderSession.TranscriptPath, TurnID: "turn-original", Terminal: saved.st.Terminal, Pane: saved.st.Pane, TurnAt: 5000, OriginalPrompt: saved.st.Said, LaunchID: saved.st.RootLaunchID, RuntimeID: saved.st.RootRuntimeID}
+				spec := saved.spec
+				spec.Thread = mustState(saved.st)
+				ctx, cancel := context.WithCancelCause(t.Context())
+				defer cancel(harness.ErrHeld)
+				previous := f.ws.opts.Client.Exec
+				reads, closes := 0, 0
+				effect := make(chan struct{}, 1)
+				f.ws.opts.Client.Exec = func(ctx context.Context, dir string, args []string) ([]byte, error) {
+					if len(args) > 1 && args[0] == "worktree" && args[1] == "ps" {
+						reads++
+						if reads == 2 {
+							f.orca.mu.Lock()
+							a.RootTurn.State, a.RootTurn.Operations, a.RootTurn.ErrorCode = "failed", "settled", code
+							a.RootTurn.CompletedAt = 5000
+							f.orca.mu.Unlock()
+						}
+					}
+					raw, err := previous(ctx, dir, args)
+					if len(args) > 1 && args[0] == "terminal" && args[1] == "close" {
+						closes++
+						if lostClose && closes == 1 && err == nil {
+							return nil, errors.New("original close reply lost after completion")
+						}
+					}
+					if len(args) > 1 && (args[0] == "agent" && args[1] == "launch" || args[0] == "terminal" && args[1] == "send") {
+						select {
+						case effect <- struct{}{}:
+						default:
+						}
+					}
+					return raw, err
+				}
+				started, err := f.ws.Start(ctx, spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				drained := make(chan struct{})
+				go func() {
+					defer close(drained)
+					for range started.Events() {
+					}
+				}()
+				select {
+				case <-effect:
+				case <-time.After(time.Second):
+					t.Error("original recovery phase never resumed")
+				}
+				cancel(harness.ErrHeld)
+				_, _ = started.Wait()
+				<-drained
+				sends, launches := f.orca.count("terminal send", nil), f.orca.count("agent launch", nil)
+				if phase == recoveryClosing {
+					if closes != 1 || sends != 0 || launches != 1 {
+						t.Fatalf("closing changed strategy: closes=%d sends=%d launches=%d", closes, sends, launches)
+					}
+					if f.orca.count("terminal close", func(c []string) bool { return flag(c, "--terminal") == saved.st.Terminal }) != 1 {
+						t.Fatal("close lost original terminal identity")
+					}
+				} else if closes != 0 || sends != 1 || launches != 0 {
+					t.Fatalf("continuing changed strategy: closes=%d sends=%d launches=%d", closes, sends, launches)
+				}
+			})
+		}
+	}
+}
