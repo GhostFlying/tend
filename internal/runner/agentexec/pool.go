@@ -57,6 +57,20 @@ type entry struct {
 	reason       string
 	managerReady bool
 }
+
+// entryObservation contains only immutable values, never a mutable adapter or
+// configuration slice. Native IO remains serialized by mu, independently of
+// heartbeat reads of the last published state for an exact accepted snapshot.
+type entryObservation struct {
+	worker         protocol.WorkerKind
+	workerPurpose  bool
+	workerReady    bool
+	reason         string
+	managerPurpose bool
+	managerReady   bool
+	managerRuntime protocol.AgentRuntimeReference
+}
+
 type Pool struct {
 	retainedMu       sync.Mutex
 	retained         []protocol.RunExecutionPin
@@ -64,6 +78,8 @@ type Pool struct {
 	options          Options
 	mu               sync.Mutex
 	snapshots        map[string]map[string]*entry
+	observationMu    sync.RWMutex
+	observations     map[string]map[string]entryObservation
 }
 
 func New(options Options) (*Pool, error) {
@@ -83,6 +99,18 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 	if saved := p.snapshots[id]; saved != nil {
 		return saved, nil
 	}
+	entries, err := p.readSnapshot(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	p.snapshots[id] = entries
+	p.publishSnapshot(id, entries)
+	return entries, nil
+}
+
+// readSnapshot restores definitions only. It never initializes adapters or
+// probes native readiness, including when called from a heartbeat.
+func (p *Pool) readSnapshot(ctx context.Context, id string) (map[string]*entry, error) {
 	snapshot, err := p.options.Source.ResolveAccepted(ctx, id)
 	if err != nil {
 		return nil, err
@@ -123,9 +151,53 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 		}
 		entries[a.LocalID] = e
 	}
-	p.snapshots[id] = entries
 	return entries, nil
 }
+
+func snapshotObservations(entries map[string]*entry) map[string]entryObservation {
+	out := make(map[string]entryObservation, len(entries))
+	for id, e := range entries {
+		worker := protocol.WorkerAppServer
+		if e.input.Runtime.Kind == agentconfig.OrcaWorker || e.input.Runtime.Kind == agentconfig.CentralWorker {
+			worker = protocol.WorkerOrca
+		}
+		o := entryObservation{worker: worker, workerPurpose: slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun), workerReady: e.reason == "" && e.workers != nil, reason: e.reason, managerPurpose: managerPurpose(e), managerReady: e.managerReady}
+		if o.managerPurpose {
+			o.managerRuntime = protocol.AgentRuntimeReference{RuntimeID: e.ownerInput.Runtime.ID, Revision: e.ownerInput.Runtime.Revision}
+		}
+		out[id] = o
+	}
+	return out
+}
+
+// publishSnapshot is called with mu held after each adapter state change.
+// Published maps and their value-only observations are never mutated.
+func (p *Pool) publishSnapshot(id string, entries map[string]*entry) {
+	observations := snapshotObservations(entries)
+	p.observationMu.Lock()
+	defer p.observationMu.Unlock()
+	if p.observations == nil {
+		p.observations = make(map[string]map[string]entryObservation)
+	}
+	p.observations[id] = observations
+}
+
+func (p *Pool) observeSnapshot(ctx context.Context, id string) (map[string]entryObservation, error) {
+	p.observationMu.RLock()
+	entries := p.observations[id]
+	p.observationMu.RUnlock()
+	if entries != nil {
+		return entries, nil
+	}
+	// A newly accepted snapshot has no readiness from an older configuration,
+	// even when a probe for that older snapshot currently owns the adapter lock.
+	definitions, err := p.readSnapshot(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return snapshotObservations(definitions), nil
+}
+
 func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 	status, err := p.options.Source.Status(ctx)
 	if err != nil {
@@ -134,32 +206,24 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 	if status.Revision == 0 {
 		return nil, nil
 	}
-	if !p.mu.TryLock() {
-		return nil, nil
-	}
-	defer p.mu.Unlock()
-	entries, err := p.load(ctx, status.SnapshotID)
+	entries, err := p.observeSnapshot(ctx, status.SnapshotID)
 	if err != nil {
 		return nil, err
 	}
 	out := []protocol.AgentExecutor{}
 	for _, a := range status.Projection.Agents {
-		e := entries[a.Identity.LocalID]
-		if e == nil {
+		e, ok := entries[a.Identity.LocalID]
+		if !ok {
 			continue
 		}
-		worker := protocol.WorkerAppServer
-		if e.input.Runtime.Kind == agentconfig.OrcaWorker || e.input.Runtime.Kind == agentconfig.CentralWorker {
-			worker = protocol.WorkerOrca
+		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: e.worker, BackendID: p.options.BackendID}
+		if e.workerPurpose {
+			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.workerReady, Reason: e.reason})
 		}
-		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
-		if slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun) {
-			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.reason == "" && e.workers != nil, Reason: e.reason})
-		}
-		if managerPurpose(e) {
+		if e.managerPurpose {
 			pin.Purpose = "issue_manager"
 			pin.Worker = protocol.WorkerAppServer
-			pin.Runtime = protocol.AgentRuntimeReference{RuntimeID: e.ownerInput.Runtime.ID, Revision: e.ownerInput.Runtime.Revision}
+			pin.Runtime = e.managerRuntime
 			pin.BackendID = ""
 			reason := ""
 			if !e.managerReady {
@@ -196,6 +260,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 	if err != nil {
 		return runner.ResolvedExecution{}, err
 	}
+	defer p.publishSnapshot(pin.SnapshotID, entries)
 	e := entries[pin.Identity.LocalID]
 	if e != nil && (canProbe(e.reason)) {
 		p.initialize(ctx, e)
@@ -224,6 +289,7 @@ func (p *Pool) Reject(pin protocol.RunExecutionPin, reason string) {
 	if entries := p.snapshots[pin.SnapshotID]; entries != nil {
 		if e := entries[pin.Identity.LocalID]; e != nil {
 			e.reason = reason
+			p.publishSnapshot(pin.SnapshotID, entries)
 		}
 	}
 }
@@ -315,12 +381,14 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	for _, e := range entries {
 		if managerPurpose(e) && !e.managerReady {
 			e.managerReady = p.probeManager(ctx, e)
+			p.publishSnapshot(status.SnapshotID, entries)
 			if !e.managerReady {
 				retry = errors.Join(retry, errors.New("owner native isolation is not verified"))
 			}
 		}
 		if canProbe(e.reason) {
 			retry = errors.Join(retry, p.initialize(ctx, e))
+			p.publishSnapshot(status.SnapshotID, entries)
 		}
 	}
 	return errors.Join(retainedErr, retry)

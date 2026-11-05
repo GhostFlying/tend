@@ -587,6 +587,13 @@ Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑�
 
 D143 排版与元数据修正：format 2 的 hosted runtime 可显式声明 codex/traex，旧配置省略字段仍有效；缺声明只显示已知适配器，缺运行观测显示“未上报”。既有 `tend agents hosted/show --json` 同步输出原安全投影，无新增 API 或 runner wire 变更。见[实施计划](plans/agent-directory-presentation.md)。
 
+D143 观测隔离补充：runner 的原生探活与适配器初始化继续串行执行，但心跳读取独立
+短锁发布的逐 snapshot 不可变状态，锁繁忙不再等同于真实空库存。当前观测只使用
+本进程、当前已接受 snapshot 的状态；新 snapshot 尚未初始化时只报告其自身的未就绪
+定义，不继承旧配置的阳性。原 retained 观测保持完整冻结 pin、引用集合撤销和晚到
+刷新校验；拒绝及探活完成后发布新状态。控制模式仍逐次计算，维护准入和 wire 2/1
+不变，不新增 freshness 或业务授权语义。见[实施计划](plans/executor-inventory-observation.md)。
+
 ## D150：问题沿 Issue 责任链处理
 
 D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适配器，不另设管理层。另一 Agent 承担独立工作必须拥有子 Issue，包括调查与正式复核。执行中产生的问题归属于实际执行的 Issue（验收为复核子 Issue），负责 Agent 自己提出的问题则提交上级。
@@ -1050,3 +1057,9 @@ wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 
 ## D175：TraeX 原 rollout 的终态补证
 
 独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证只在原 observation record 位置的局部副本上发布真实事实，不覆盖冲突身份或已有确定原生结果；生命周期 Agent 始终沿用原 native-api 观测，补证不参与完成、恢复、控制或历史清理。每轮只发布一次 projection，不反复切换原弱观测与补证 revision，不创建会话或重发输入。TraeX 观测以持久语义指纹区分相同原生身份的 running 与后续终态/结束时钟/operations；排除采样时间，真实变化只推进一次 revision，相同事实及重启重放沿用原事件身份。指纹仅用于观测去重，不改变原生绑定或生命周期权限；旧 thread JSON 缺失字段仍可读取，首次补齐语义元数据可追加一次事实。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。
+
+### D84 / D159 补充：维护关闭后台 readiness probe 准入
+
+后台 execution readiness refresh 的准入与控制变更共用 control 锁：维护模式及 bootstrap maintenance 不再启动新的 refresh。已准入 refresh 不被假装结束，直到完整调用返回（包括短暂 native probe 的 Close/等待）才释放计数；同锁生成的当前 control revision 运行观测在此期间保留 `readiness_refresh_active` blocker，因此不能报告 ready。恢复 normal 后只唤醒既有 reconciler，不新增 timer。历史 Run、pin、lease、assignment、pending 与 unknown 保持原约束。
+
+这是后台 readiness 路径的维护修复，不是进程级 fork fence；正常业务恢复与 retained/native 对账仍由各自 journal/resource blocker 覆盖，物理替换时仍须独立证明全线程冻结与严格无 child。没有新 wire 字段、默认协议变化或迁移，也不追溯升级正在运行的旧二进制。见[实施计划](plans/runner-probe-maintenance-quiescence.md)。

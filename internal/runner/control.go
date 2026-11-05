@@ -99,6 +99,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		return nil, err
 	}
 	blockers := []string{}
+	if r.readinessRefreshes > 0 {
+		blockers = append(blockers, "readiness_refresh_active")
+	}
 	claims := int64(0)
 	for _, p := range requests {
 		if p.Envelope.Operation == protocol.OpRunnerClaim {
@@ -272,12 +275,16 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	if err := r.cfg.Journal.SaveControl(ctx, stored); err != nil {
 		return fmt.Errorf("persist runner control: %w", err)
 	}
+	wasMaintenance := r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance
 	modeChanged := r.control.Mode != stored.Mode || r.control.UpgradeID != stored.UpgradeID
 	attemptChanged := modeChanged || next.Mode == protocol.RunnerMaintenance && next.Revision > r.control.Revision && next.Upgrade == nil
 	cancelledBootstrap := next.Mode == protocol.RunnerNormal && next.UpgradeID == "" && r.control.UpgradeID == r.cfg.UpgradeID && r.cfg.UpgradeID != "" && next.Revision > r.control.Revision
 	r.control = stored
 	if (next.UpgradeID == r.cfg.UpgradeID && next.Revision > 0 || cancelledBootstrap) && (hello || r.helloConfirmed) {
 		r.bootstrapMaintenance = false
+	}
+	if wasMaintenance && stored.Mode == protocol.RunnerNormal && !r.bootstrapMaintenance {
+		r.requestReconcile()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

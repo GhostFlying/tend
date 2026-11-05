@@ -63,7 +63,7 @@ func (c *webClient) call(method, path string, body, out any) {
 		}
 	}
 }
-func (c *webClient) operation(id, name string, target protocol.Target, revision *int64, payload any) {
+func (c *webClient) operation(id, name string, target protocol.Target, revision *int64, payload any) protocol.APIResponse {
 	c.t.Helper()
 	raw, _ := json.Marshal(payload)
 	var result protocol.APIResponse
@@ -71,6 +71,20 @@ func (c *webClient) operation(id, name string, target protocol.Target, revision 
 	if result.Operation == nil || result.Operation.Status == protocol.OpFailed {
 		c.t.Fatalf("%s: %+v", name, result.Operation)
 	}
+	return result
+}
+
+func (c *webClient) conversationWindow(after int64) protocol.ConversationPage {
+	c.t.Helper()
+	page, err := readConversationWindow(after, func(cursor int64) (protocol.ConversationPage, error) {
+		var page protocol.ConversationPage
+		c.call(http.MethodGet, fmt.Sprintf("/api/v1/conversation?after=%d&limit=200", cursor), nil, &page)
+		return page, nil
+	})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return page
 }
 func waitFor(t *testing.T, ctx context.Context, label string, check func() bool) {
 	t.Helper()
@@ -94,13 +108,9 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	ready := make(chan Demo, 1)
 	runtime := make(chan *serverkit.Runtime, 1)
 	done := make(chan error, 1)
-	var interrupting atomic.Bool
+	gate := newInterruptionGate()
 	go func() {
-		done <- Run(ctx, Options{FastPacing: true, skipStory: true, Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
-			if interrupting.Load() {
-				<-ctx.Done()
-			}
-		}, Ready: func(r *serverkit.Runtime, demo Demo) { runtime <- r; ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+		done <- Run(ctx, Options{FastPacing: true, skipStory: true, Data: root, Listener: listener, replyDelta: gate.onDelta, Ready: func(r *serverkit.Runtime, demo Demo) { runtime <- r; ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 	}()
 	defer func() {
 		cancel()
@@ -363,18 +373,21 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	interruptPath := fmt.Sprintf("/api/v1/conversation?after=%d&limit=200", interruptAfter)
 	// Interrupt through the real owner API while the sandbox script is streaming.
-	interrupting.Store(true)
-	c.operation("test-interrupt-send", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "请介绍沙盒的交互能力"})
-	var interruptedSource, interruptedReply string
+	gate.armed.Store(true)
+	sent := c.operation("test-interrupt-send", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "请介绍沙盒的交互能力"})
+	var source struct {
+		MessageID string `json:"message_id"`
+		Seq       int64  `json:"seq"`
+	}
+	if err := json.Unmarshal(sent.Operation.Result, &source); err != nil || source.MessageID == "" || source.Seq <= interruptAfter {
+		t.Fatalf("invalid interruption source: %+v, %v", source, err)
+	}
+	gate.bind(source.MessageID)
+	interruptedSource, interruptedReply := source.MessageID, ""
 	for interruptedReply == "" {
-		var page protocol.ConversationPage
-		c.call(http.MethodGet, interruptPath, nil, &page)
+		page := c.conversationWindow(interruptAfter)
 		for _, item := range page.Items {
-			if item.Author == "owner" && item.Body == "请介绍沙盒的交互能力" {
-				interruptedSource = item.MessageID
-			}
 			if interruptedSource != "" && item.ReplyTo == interruptedSource && item.AssistantState == protocol.AssistantStreaming {
 				interruptedReply = item.MessageID
 			}
@@ -383,10 +396,22 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 			t.Fatal("did not observe streaming before interruption")
 		}
 	}
+	var held replyDeltaIdentity
+	select {
+	case held = <-gate.held:
+	case <-ctx.Done():
+		t.Fatal("target native turn did not enter interruption gate")
+	}
+	var thread, turn string
+	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(ctx, `SELECT thread_id,turn_id FROM conversation_agent_messages WHERE message_id=?`, interruptedReply).Scan(&thread, &turn)
+	}); err != nil || held != (replyDeltaIdentity{ThreadID: thread, TurnID: turn, SourceID: interruptedSource}) {
+		t.Fatalf("interruption gate does not match persisted reply: held=%+v thread=%s turn=%s err=%v", held, thread, turn, err)
+	}
 	c.operation("test-interrupt", "conversation.interrupt_reply", protocol.Target{Type: "message", ID: interruptedSource}, nil, protocol.InterruptReplyPayload{MessageID: interruptedSource})
 	var stopped protocol.ConversationPage
 	waitFor(t, ctx, "owner and assistant interruption are persisted", func() bool {
-		c.call(http.MethodGet, interruptPath, nil, &stopped)
+		stopped = c.conversationWindow(interruptAfter)
 		ownerStopped, replyStopped := false, false
 		for _, item := range stopped.Items {
 			ownerStopped = ownerStopped || item.MessageID == interruptedSource && item.State == protocol.MessageInterrupted
@@ -415,14 +440,14 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	var later protocol.ConversationPage
-	c.call(http.MethodGet, interruptPath, nil, &later)
+	later = c.conversationWindow(interruptAfter)
 	if turnItems(later) != beforeStop {
 		t.Fatal("script emitted text or tool callbacks after interrupted completion")
 	}
-	interrupting.Store(false)
+	gate.armed.Store(false)
 	c.operation("test-after-interrupt", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{Body: "中断后继续对话"})
 	waitFor(t, ctx, "conversation continues after interruption", func() bool {
-		c.call(http.MethodGet, interruptPath, nil, &later)
+		later = c.conversationWindow(interruptAfter)
 		for _, item := range later.Items {
 			if item.Author == "owner" && item.Body == "中断后继续对话" && item.State == protocol.MessageReplied {
 				return true
@@ -430,6 +455,9 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		}
 		return false
 	})
+	if duplicates := gate.duplicates(); len(duplicates) != 0 {
+		t.Fatalf("source entered another native turn during interruption: %+v", duplicates)
+	}
 }
 
 type testLog struct{ t *testing.T }

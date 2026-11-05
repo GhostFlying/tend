@@ -203,7 +203,7 @@ func TestReadinessProbeDoesNotBlockHeartbeatAndFailuresDoNotDefault(t *testing.T
 	// This call executes while native setup is deliberately held, with no wall sleep.
 	observations, err := p.Observe(t.Context())
 	close(release)
-	if err != nil || len(observations) != 0 {
+	if err != nil || len(observations) != 1 || observations[0].Available || observations[0].Reason != "adapter_not_loaded" {
 		t.Fatal(observations, err)
 	}
 	if err := <-done; err == nil {

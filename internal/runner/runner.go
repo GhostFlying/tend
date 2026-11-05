@@ -195,6 +195,7 @@ type Runner struct {
 	controlMu                   sync.Mutex
 	control                     protocol.RunnerControl
 	controlLoaded               bool
+	readinessRefreshes          int // guarded by controlMu; includes probe cleanup
 	repositoryBindingsSupported bool
 	bootstrapMaintenance        bool
 	updaterMu                   sync.Mutex
@@ -1018,7 +1019,7 @@ func (r *Runner) reconciler(ctx context.Context) {
 			}
 		}
 		if r.cfg.Executions != nil {
-			if err := r.cfg.Executions.Refresh(ctx); err != nil && ctx.Err() == nil {
+			if err := r.refreshExecutionReadiness(ctx); err != nil && ctx.Err() == nil {
 				r.cfg.Log.WarnContext(ctx, "named execution readiness unavailable", "err", err)
 				scheduleRetry()
 			}
