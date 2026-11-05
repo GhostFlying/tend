@@ -597,6 +597,8 @@ D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适�
 
 负责人会话持续启动失败时，在同一读取快照中冻结实际 runtime selection 及其原输入或对账 attachment 身份，独立技术事件仅结算该身份的启动失败窗口，复用 Agent 恢复政策的次数及总时长预算，暂态仍按原30秒退避。尚无 native intent 的 pending 或已由 dispatcher claim 的 sending 均可计本地启动失败，不伪造 outbox 投递次数或 native turn，也不重派或释放原 sending。耗尽后建立唯一 action Attention 并交父 Issue，根交主协调；主协调自身启动失败直接持久通知 owner，不再依赖同一不可用运行时处理自己的故障。原输入及实际 dispatch 状态保留，问题结清前暂停该未准入输入的自动启动；明确结清或实际成功后以原输入身份继续。已有 native intent 或未知回执的只读 attachment 独立发现，不受较新输入的启动预算阻断，原未知事实仍走原对账。见[实施计划](plans/bounded-agent-startup-escalation.md)。
 
+明确未发送的普通 `rejected` 输入在没有 pending native receipt 时仍受原启动预算约束；具名 sending/rejected 的冻结恢复合同及显式 pending receipt 的只读发现保持有效。原输入的 hold 同时约束 outbox 领取和首次 native starting 的事务准入，防止较新输入打开会话后绕过旧输入的技术待办；已有 native 执行事实的读取和结算继续保留。见[审查修正计划](plans/startup-hold-admission-review.md)。
+
 新 runner 以可选能力 `supervisor-questions-v1` 协商，并在创建 run 时冻结答复合同；新运行的 `ask_owner` 表示提交给 Issue owner，其答复不能扩大原授权。旧运行仍保留真实用户答复语义，但问题先按责任链上报。字段可选，默认关闭；runner wire 继续为 2/1，不改变旧请求的有效性。实施计划见 docs/plans/issue-responsibility-routing.md。
 
 

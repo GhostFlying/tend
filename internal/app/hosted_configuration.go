@@ -423,7 +423,8 @@ func (a *App) hostedRuntimeStartupSelection(ctx context.Context, q store.Querier
 	head, err := a.hostedServiceableHead(ctx, q, store.ConversationDestination(store.ConversationID(conversation)))
 	if err == nil {
 		attachment.RequestID = head.RequestID
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns WHERE request_id=?) OR EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, head.RequestID, head.RequestID).Scan(&attachment.Reconciliation); err != nil {
+		attachment.Reconciliation, err = agentStartupNativeWork(ctx, q, head.RequestID)
+		if err != nil {
 			return hostedconfig.Selection{}, false, attachment, err
 		}
 		selected, named, err := a.hostedSelectionForAdmission(ctx, q, head.RequestID, conversation)

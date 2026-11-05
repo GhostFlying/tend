@@ -46,15 +46,26 @@ func agentStartupAttachmentAllowed(ctx context.Context, q store.Querier, attachm
 	if attachment.Reconciliation || attachment.RequestID == "" {
 		return true, nil
 	}
-	state, err := readAgentStartupState(ctx, q, attachment.RequestID)
+	allowed, _, err := agentStartupInputAllowed(ctx, q, attachment.RequestID, now)
+	return allowed, err
+}
+
+func agentStartupInputAllowed(ctx context.Context, q store.Querier, request string, now int64) (bool, int64, error) {
+	state, err := readAgentStartupState(ctx, q, request)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 	if state.AttentionID != "" {
 		attention, err := store.GetAttention(ctx, q, state.AttentionID)
-		return err == nil && attention.Status != "open", err
+		return err == nil && attention.Status != "open", 0, err
 	}
-	return state.NextAttemptAt <= now, nil
+	return state.NextAttemptAt <= now, state.NextAttemptAt, nil
+}
+
+func agentStartupNativeWork(ctx context.Context, q store.Querier, request string) (bool, error) {
+	var native bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns WHERE request_id=? AND status<>'rejected') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, request, request).Scan(&native)
+	return native, err
 }
 
 func (a *App) agentStartupAllowed(ctx context.Context, q store.Querier, conversation string, now int64) (bool, error) {

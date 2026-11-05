@@ -660,6 +660,13 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			if paused {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "main thread is draining for server upgrade")
 			}
+			allowed, err := agentStartupAttachmentAllowed(ctx, tx.Q(), AgentStartupAttachment{RequestID: m.RequestID}, now)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "original input is awaiting startup recovery")
+			}
 		}
 		if m.Status == store.TurnStarting {
 			var isRecovery bool
