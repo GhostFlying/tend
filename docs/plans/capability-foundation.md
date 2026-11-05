@@ -193,6 +193,17 @@
 
 健康 reviewer 反例同时暴露现有 acceptance 查询在首次实现前错误套用“已有待验收产物”的 action 门。该投影与本次通知共用，必须同步修复：保留实际 pending implementation action，经 scheduler 检查其同 backend 的 reviewer 前置；只读候选筛选使用独立 reviewer filter，不覆盖冻结 AgentID/runtime/backend，不创建虚假 artifact 或验收 action。回归覆盖健康 reviewer 不通知、角色标签不继承、waived 可领取和原身份/backend 拒绝。
 
+## Agent 声明 revision 围栏修复计划（编码前）
+
+本轮接续独立验收对 `1d9e4c55` 的声明复用 finding；owner v1 继续优先于 spec2/旧矩阵，旧 verdict、Run、请求及 PR244 提交不改写。fresh 核对原分支干净且与远端一致，PR base/main 已整合，无新增冲突。旧 CI 通过仅属于旧对象。
+
+1. 本机 registry.Commit 在原请求 replay、unknown 和 CAS 判定之后、任何写入之前，检查所有已接受快照中的 environment/Agent/revision 声明。服务端 RegisterAgentInventory 在原请求去重/CAS 事务内同样校验全部登记历史，不能仅比较当前库存而漏过删除后重加或历史 revision。
+2. 同一 environment/Agent/revision 的 capability 引用集合不可改变；添加、移除、替换定义 revision 都须新 Agent revision。集合次序和 nil/empty 不构成语义变化；另一 Agent/环境独立。允许原历史 revision 的相同声明重新选用，不改旧快照/hash/pin；原请求仍返回原回执。旧坏历史只读保留，不自动迁移或伪造唯一声明，新请求不得继续制造冲突。
+3. 复用 protocol 的集合比较，统一本机 reload 与服务端 register 错误语义；不改普通 executor/身份/预算、Task required 或调度，不恢复 native 门，不扩展控制权限。
+4. 在修复前保存反例失败，修复后覆盖添加/移除/定义 revision 替换、删除后重加、历史 revision 重用、正常版本提升、顺序/nil 等价、请求 replay/conflict、CAS/并发及 restart/unknown。确认拒绝无 snapshot/event/outbox 或当前指针副作用，原历史仍可读。
+5. 兼容性：这是执行既有声明 revision 不变量的缺陷修复，拒绝的输入原本违反已文档化身份合同；不增加 wire 必填、改变合法旧请求默认或历史恢复。现有 2/1 与声明 feature 协商不变，无 schema/迁移变更；不修改已提交 SQL、DB/config/journal。若验证发现额外 breaking 行为，单独报告。
+6. 只执行 nice19、低并发、串行 targeted/vet/diff；临时缓存/测试输出全部在原 scratch。heavy/full/race 继续 HOLD，不启动 reviewer 或测试环境。提交并快进推送原 PR244，新 head CI 实际读回；完整检查、独立 formal-review 和正式交付门保留，不 merge/deploy。
+
 ## 当前与保留 pin 分页修复计划（编码前）
 
 本轮接续对 `1da93356` 的独立验收 finding；owner v1 和原 PR244/分支/全部历史不变。

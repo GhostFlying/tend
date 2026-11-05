@@ -125,6 +125,13 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "inventory local revision conflicts with accepted metadata")
 	}
+	history, err := store.ListAgentCapabilityDeclarations(ctx, tx.Q(), x.Principal.Subject)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if err := protocol.ValidateAgentCapabilityRevisions(history, p.Projection.Agents); err != nil {
+		return Outcome{}, err
+	}
 	categories := []protocol.AgentCategory{}
 	seen := map[string]bool{}
 	for _, a := range p.Projection.Agents {

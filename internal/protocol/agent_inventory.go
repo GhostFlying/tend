@@ -88,6 +88,26 @@ type AgentInventoryDefinition struct {
 	Availability    AgentInventoryAvailability `json:"availability"`
 }
 
+// ValidateAgentCapabilityRevisions reserves each accepted identity/revision for
+// its immutable declaration set. Callers supply accepted history, not just the
+// current inventory: removing an Agent must not release its old revisions.
+func ValidateAgentCapabilityRevisions(previous, next []AgentInventoryDefinition) error {
+	type key struct {
+		identity AgentIdentity
+		revision uint64
+	}
+	declarations := make(map[key][]CapabilityReference, len(next))
+	for _, a := range next {
+		declarations[key{a.Identity, a.Revision}] = a.Capabilities
+	}
+	for _, a := range previous {
+		if refs, ok := declarations[key{a.Identity, a.Revision}]; ok && !CapabilityReferencesEqual(a.Capabilities, refs) {
+			return Errorf(CodeConflictPayload, "agent capability declaration changed without a new agent revision")
+		}
+	}
+	return nil
+}
+
 type RegisterAgentInventoryPayload struct {
 	Runtime       *RunnerRuntime           `json:"runtime"`
 	LocalRevision int64                    `json:"local_revision"`

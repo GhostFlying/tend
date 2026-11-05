@@ -132,6 +132,10 @@ Agent 上加入 `"capabilities": [{"capability_id":"image_gen","definition_revis
 都先写入 runner bootstrap 中 `agents.source_file` 指向的完整配置文件，再走同一
 validate → reload → register 路径；命令不接收任意文件路径。修改每个 Agent 的声明须递增它的
 revision，保留其 env/local_id、唯一 runtime、CLI/model/effort 与其他 Agent。
+本机 reload 与服务端 register 会拒绝复用同一 Agent revision 的不同声明，
+包括删除后重加 Agent；此时须提高 Agent revision，再用新的业务 request_id 提交。
+本机错误码为 `capability_revision_conflict`，服务端为 `conflict_payload`。
+原已接受请求的 replay、历史快照和相同旧声明的恢复不变。
 
 ```sh
 tend agents local validate --socket "$TEND_RUNNER_SOCKET"

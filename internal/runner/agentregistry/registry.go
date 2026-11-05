@@ -3,6 +3,7 @@ package agentregistry
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -218,6 +219,9 @@ func (r *Registry) Commit(ctx context.Context, req CommitRequest) (Receipt, erro
 	if r.state.Revision == math.MaxUint64 {
 		return Receipt{}, fail("revision_exhausted")
 	}
+	if err := r.checkCapabilityRevisions(ctx, c); err != nil {
+		return Receipt{}, err
+	}
 	at := r.opts.Now()
 	if at.IsZero() {
 		return Receipt{}, fail("invalid_clock")
@@ -280,6 +284,40 @@ func (r *Registry) Commit(ctx context.Context, req CommitRequest) (Receipt, erro
 	}
 	r.state = next
 	return receipt, nil
+}
+
+// Run under the registry writer gate, after replay/unknown/CAS and before any
+// persistence. Accepted history is never rewritten to repair conflicting data.
+func (r *Registry) checkCapabilityRevisions(ctx context.Context, next *Candidate) error {
+	var projection protocol.AgentInventoryProjection
+	if err := json.Unmarshal(next.public, &projection); err != nil {
+		return storage(err)
+	}
+	if len(projection.Agents) == 0 {
+		return nil
+	}
+	for _, entry := range r.state.Snapshots {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// An identical canonical public hash already proves identical declarations.
+		// Private-only changes need not open unrelated historical payloads.
+		if entry.PublicHash == next.publicHash {
+			continue
+		}
+		previous, err := r.readSnapshot(entry, r.state.Environment)
+		if err != nil {
+			return err
+		}
+		var history protocol.AgentInventoryProjection
+		if err := json.Unmarshal(previous.public, &history); err != nil {
+			return storage(err)
+		}
+		if err := protocol.ValidateAgentCapabilityRevisions(history.Agents, projection.Agents); err != nil {
+			return fail("capability_revision_conflict")
+		}
+	}
+	return nil
 }
 func (r *Registry) Current(ctx context.Context) (Observation, error) {
 	if err := r.lock(ctx); err != nil {

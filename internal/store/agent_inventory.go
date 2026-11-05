@@ -41,6 +41,29 @@ func GetAgentInventory(ctx context.Context, q Querier, host string) (AgentInvent
 	return r, err
 }
 
+// ListAgentCapabilityDeclarations reads the immutable declaration identities of
+// a host, including Agents no longer present in its current inventory.
+func ListAgentCapabilityDeclarations(ctx context.Context, q Querier, host string) ([]protocol.AgentInventoryDefinition, error) {
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT a.value FROM agent_inventory_versions v, json_each(v.projection_json, '$.agents') a WHERE v.host_id=?`, host)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var declarations []protocol.AgentInventoryDefinition
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var a protocol.AgentInventoryDefinition
+		if err := json.Unmarshal([]byte(raw), &a); err != nil {
+			return nil, err
+		}
+		declarations = append(declarations, a)
+	}
+	return declarations, rows.Err()
+}
+
 func (t *Tx) InsertAgentInventory(ctx context.Context, r AgentInventoryRow, runtime protocol.RunnerRuntime) error {
 	body, err := json.Marshal(r.Receipt)
 	if err != nil {

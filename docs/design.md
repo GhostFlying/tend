@@ -1099,3 +1099,5 @@ D176 候选分页补充：Task 能力解释可同时投影同入口的当前 Age
 D176 候选渲染补充：Task 能力列表的 React 身份同样绑定完整冻结 pin，保证同入口当前与保留 revision 能独立更新、移除和重排。仅在 pin 缺省时按投影的 identity、Agent revision 与 runtime reference 使用独立 fallback；匹配状态不是渲染身份。不改变 API、协议、迁移或调度合同。
 
 D176 main 整合补充：main 的 D174/D175 与原迁移历史保持不变，Capability 原候选的 D174 在本整合候选改用 D176；原提交仍是旧编号的审计来源。未部署候选迁移原 SQL 顺延到 server 91、journal 17/18，保留 main 的 server 88–90、journal 16 原字节；journal 当前版本为 18。相同编号的旧候选数据库不能冒充 main schema，打开时明确拒绝冲突并保留原文件，不自动删表/重放/转换。正式安装库存、升级副本及回滚窗口审计由父交付合同执行，本轮无生产事实断言。协议仍是 feature 协商的 2/1；保留 main 的严格原生重连，声明 precheck 在 NextAttempt 前，普通 Start 接收原 retained-resume 权限。重连、配置标签与原停止证明各自保持原围栏。
+
+D176 声明修订围栏补充：已接受的 `(environment, Agent local_id, Agent revision)` 唯一确定 capability 引用集合。registry.Commit（含本机 reload）和服务端库存登记均在原请求 replay/unknown/CAS 之后、写入之前检查全部接受历史；添加、移除或变更 definition revision 不能复用同一 Agent revision。集合次序及 nil/empty 等价，另一身份独立；选用旧 revision 的原声明合法，但删除后重加或从新 revision 退回也不能改写旧声明。旧快照/hash/pin 和坏历史只读保留，原请求回放返回原回执。此项落实既有修订合同，无新 wire/schema/迁移或合法旧默认变化，现有 2/1 及声明 feature 协商保持。
