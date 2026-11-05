@@ -81,9 +81,9 @@ export function IssueBoard({
   const [filterOpen, setFilterOpen] = useState(false);
   const [cancelledExpanded, setCancelledExpanded] = useState(() => {
     try {
-      return localStorage.getItem("tend.board.cancelled-expanded") === "true";
+      return localStorage.getItem("tend.board.cancelled-expanded") !== "false";
     } catch {
-      return false;
+      return true;
     }
   });
   const mobileTabs = useRef<HTMLDivElement>(null);
