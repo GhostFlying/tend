@@ -155,12 +155,18 @@ func refreshTaskWorkContext(ctx context.Context, q store.Querier, taskID string,
 // shared-task links in the same write transaction. Legacy task dependencies
 // participate because the scheduler enforces both kinds of prerequisites.
 func validateIssueTaskDependencies(ctx context.Context, q store.Querier, candidate protocol.WorkItem) error {
+	return validateTaskWaitDependencies(ctx, q, &candidate)
+}
+
+func taskWaitPlans(ctx context.Context, q store.Querier, candidate *protocol.WorkItem) ([]protocol.WorkItem, error) {
 	items, err := store.ListIssues(ctx, q, "", "")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	items = slices.DeleteFunc(items, func(item protocol.WorkItem) bool { return item.WorkItemID == candidate.WorkItemID })
-	items = append(items, candidate)
+	if candidate != nil {
+		items = slices.DeleteFunc(items, func(item protocol.WorkItem) bool { return item.WorkItemID == candidate.WorkItemID })
+		items = append(items, *candidate)
+	}
 	// Project only dispatch responsibility into stage waits. A candidate's new
 	// legacy links are not persisted yet, so retain noncanonical shared tasks;
 	// only canonical tasks have one immutable primary and evidence-only refs.
@@ -175,7 +181,7 @@ func validateIssueTaskDependencies(ctx context.Context, q store.Querier, candida
 				if !found {
 					scope, err = store.ResolveTaskIssueScope(ctx, q, id)
 					if err != nil {
-						return err
+						return nil, err
 					}
 					scopes[id] = scope
 				}
@@ -186,39 +192,5 @@ func validateIssueTaskDependencies(ctx context.Context, q store.Querier, candida
 			stage.TaskIDs = members
 		}
 	}
-	lifecycles := map[string]protocol.TaskLifecycle{}
-	for _, item := range items {
-		for _, stage := range item.Stages {
-			for _, taskID := range stage.TaskIDs {
-				lifecycles[taskID] = ""
-			}
-		}
-	}
-	taskDependencies := map[string][]string{}
-	rows, err := q.QueryContext(ctx, `SELECT task_id,depends_on FROM task_dependencies`)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var taskID, dependency string
-		if err := rows.Scan(&taskID, &dependency); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		taskDependencies[taskID] = append(taskDependencies[taskID], dependency)
-		lifecycles[taskID], lifecycles[dependency] = "", ""
-	}
-	err = rows.Err()
-	_ = rows.Close()
-	if err != nil {
-		return err
-	}
-	for taskID := range lifecycles {
-		task, err := store.GetTask(ctx, q, taskID)
-		if err != nil {
-			return err
-		}
-		lifecycles[taskID] = task.Lifecycle
-	}
-	return domain.ValidateIssueTaskDependencies(items, lifecycles, taskDependencies)
+	return items, nil
 }

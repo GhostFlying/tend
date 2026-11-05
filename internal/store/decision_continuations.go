@@ -162,3 +162,45 @@ func ReadDecisionContinuation(ctx context.Context, q Querier, id string) (protoc
 	}
 	return v, nil
 }
+
+// TaskWaitDependencies includes unresolved typed handoffs in the existing wait
+// graph. Pausing or waiting for physical exit does not discard scheduling intent.
+// A queued continuation uses its new action; the predecessor action is then done.
+func TaskWaitDependencies(ctx context.Context, q Querier) (map[string][]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT task_id,depends_on FROM task_dependencies
+ UNION
+ SELECT r.task_id,c.dependency_task_id FROM decision_continuations c
+ JOIN run_question_handoffs h ON h.decision_id=c.decision_id
+ JOIN decisions d ON d.decision_id=c.decision_id
+ JOIN runs r ON r.run_id=h.run_id
+ JOIN tasks t ON t.task_id=r.task_id
+ JOIN tasks dep ON dep.task_id=c.dependency_task_id
+ JOIN plan_actions a ON a.action_id=COALESCE(h.continuation_action_id,r.action_id)
+ WHERE c.mode='dependency' AND c.state IN ('waiting','ready','continued')
+ AND d.status='answered' AND h.successor_run_id IS NULL
+ AND t.lifecycle NOT IN ('completed','cancelled') AND a.status IN ('pending','dispatched')
+ AND a.target_spec_version=t.spec_version
+ AND (a.kind<>'implement' OR a.generation=t.implement_generation)
+ AND (a.kind<>'accept' OR a.target_artifact_id=t.current_artifact_id)
+ AND NOT COALESCE(dep.lifecycle='completed' AND dep.spec_version=c.dependency_spec_version,0)
+ AND NOT EXISTS(SELECT 1 FROM task_execution_contracts ec JOIN issue_controls i ON i.issue_id=ec.issue_id
+  WHERE ec.task_id=t.task_id AND (i.assignment_epoch<>ec.assignment_epoch OR i.assignee_ref<>ec.agent_ref OR i.assignment_state<>'active'))
+ AND NOT EXISTS(SELECT 1 FROM run_issue_responsibilities rr JOIN issue_controls i ON i.issue_id=rr.issue_id
+  WHERE rr.run_id=r.run_id AND (i.assignment_epoch<>rr.assignment_epoch OR i.assignee_ref<>rr.agent_ref OR i.assignment_state<>'active' OR i.state NOT IN ('active','paused')))`)
+	if err != nil {
+		return nil, fmt.Errorf("store: read task wait dependencies: %w", err)
+	}
+	defer rows.Close()
+	deps := map[string][]string{}
+	for rows.Next() {
+		var task, dep string
+		if err := rows.Scan(&task, &dep); err != nil {
+			return nil, fmt.Errorf("store: scan task wait dependency: %w", err)
+		}
+		deps[task] = append(deps[task], dep)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list task wait dependencies: %w", err)
+	}
+	return deps, nil
+}

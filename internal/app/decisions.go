@@ -275,6 +275,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err := tx.AnswerDecision(ctx, d.DecisionID, d.Version, string(answer), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
+	if p.Continuation != nil && p.Continuation.Mode == protocol.DecisionDependency {
+		if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := resumeAnsweredQuestion(ctx, x, tx, d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
