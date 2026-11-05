@@ -36,7 +36,7 @@ var ownerCommands = commandMap(
 	app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
-	app.AnswerDecision{}, app.QuestionInputCommand{}, app.QuestionInputCommand{Revoke: true},
+	app.AnswerDecision{}, app.AnswerDecision{TypedContinuation: true}, app.QuestionInputCommand{}, app.QuestionInputCommand{Revoke: true},
 	app.ResumeDecisionContinuation{}, app.ResumeDecisionContinuation{Reconcile: true},
 	app.CreateAction{},
 	app.SetControlMode{},

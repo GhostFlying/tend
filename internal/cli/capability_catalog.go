@@ -57,6 +57,8 @@ func CapabilityBindings() []CapabilityBinding {
 			capability = cmd.Operation
 			if cmd.Operation == protocol.OpContinueRetainedRun {
 				args = append(args, "--data", retainedRunProofExample())
+			} else if cmd.Operation == protocol.OpAnswerDecisionContinuation {
+				args = append(args, "--data", `{"version":1,"text":"Wait for independent resume","continuation":{"mode":"wait","reason":"Await explicit continuation"}}`)
 			} else if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
 				args = append(args, "--data", `{"expected_revision":0}`)
 			} else if cmd.Operation == protocol.OpReconcileManagerRun {
@@ -314,10 +316,10 @@ func commandUsage(prefix []string) string {
 		out.WriteString("If the result is unknown, retain the original ID, input, revision and Envelope. Run tend request show <original-id> before tend request replay --file <original-envelope.json>; replay exact bytes only, never replace the ID or refresh the proof to retry an unknown request.\n")
 	}
 	if name == "decide" || name == "decision-continuation" || strings.HasPrefix(name, "decision-continuation ") {
-		out.WriteString("\nWorker handoff answers without a typed continuation record the answer only; they do not automatically resume a stopped worker. Free text never proves readiness. Supply the complete answer with decide --data or --file, including version and option/text.\n")
-		out.WriteString("tend decide <decision_id> --data '{\"version\":1,\"text\":\"Proceed\",\"continuation\":{\"mode\":\"continue_now\"}}'\n")
-		out.WriteString("tend decide <decision_id> --data '{\"version\":1,\"text\":\"Wait\",\"continuation\":{\"mode\":\"wait\",\"reason\":\"Await an independent resume decision\"}}'\n")
-		out.WriteString("tend decide <decision_id> --data '{\"version\":1,\"text\":\"After the dependency\",\"continuation\":{\"mode\":\"dependency\",\"reason\":\"Await exact dependency completion\",\"dependency\":{\"task_id\":\"<dependency_task>\",\"spec_version\":1}}}'\n")
+		out.WriteString("\nLegacy decide preserves automatic handoff after answer and stopped receipts. Use decision-continuation answer for conditional scheduling; it requires the parent Task --revision plus complete version, option/text and explicit continuation. Free text never proves a typed dependency.\n")
+		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"Proceed\",\"continuation\":{\"mode\":\"continue_now\"}}'\n")
+		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"Wait\",\"continuation\":{\"mode\":\"wait\",\"reason\":\"Await an independent resume decision\"}}'\n")
+		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"After the dependency\",\"continuation\":{\"mode\":\"dependency\",\"reason\":\"Await exact dependency completion\",\"dependency\":{\"task_id\":\"<dependency_task>\",\"spec_version\":1}}}'\n")
 		out.WriteString("Read decision-continuation show <decision_id> --json for policy, state, blocked_reason, continuation revision and parent task_control_revision. resume explicitly releases a wait; reconcile checks exact ordinary execution Task/spec completion without accepting a caller readiness claim. Manager Task dependencies are rejected; historical unsupported dependencies stay blocked. Both preserve physical-stop and current-contract guards.\n")
 		out.WriteString("tend decision-continuation resume <decision_id> --revision <task_control_revision> --request-id <new-request-id> --data '{\"expected_revision\":1}' --dry-run\nUse reconcile with the same input shape for dependency reconciliation. On unknown outcome keep the original request ID, payload, both revisions and saved Envelope; run tend request show <original-id>, then request replay --file <original-envelope.json> for an identical retry.\n")
 	}

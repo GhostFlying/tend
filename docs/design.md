@@ -170,7 +170,7 @@
 | D167 | 创建者或显式用户决定后续 Task 是否强制独立验收；真实来源及政策冻结，免验仍需合法结果、责任核对和交付证明，不伪造通过记录，不追溯撤销在途验收。 | 实施中 |
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
-| D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；历史及未声明意图保守等待，双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
+| D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -995,11 +995,15 @@ reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能�
 
 ## D174：回答事实与执行续接权限分离
 
-`AnswerDecision` 记录答案时，worker handoff 必须把机器续接意图与自由文本分开：
+新增 `decisions.respond_continuation` / `decisions.resolve_continuation_from_message`，
+要求显式完整 typed policy、原 decision version 及父 Task control revision；worker handoff
+的条件答复通过新入口把机器续接意图与自由文本分开：
 `continue_now` 在原执行确已停止且原合同仍有效后续接；`wait` 保存非空原因并等待独立的显式
 resume；`dependency` 保存另一个普通 execution Task 的精确 spec 版本，仅该版本的真实 completed 账本事实
-满足条件。未声明策略及升级前已回答但未续接的历史记录默认等待，不从文字、answered 或 stopped
-推导调度许可。普通非 handoff 问题保留原有回答语义。
+满足条件。旧 `decisions.respond` / `resolve_from_message` 的有效无策略输入保留原有
+answered 与 stopped 齐备后的续接默认；没有 policy row 的历史 handoff 仍沿原合同，不伪造
+一个旧 wait 决定。新入口缺 policy 拒绝，只有显式 typed wait 才等待；不从自由文本推断
+typed 条件。既有 Attention 通过非空 typed 字段显式 opt-in，省略时保持旧行为。
 
 答案及其原 request_id 保持不可变。独立 continuation 记录保存自己的 revision、等待原因、冻结
 依赖和 resume 请求；`decisions.continuation.resume` / `reconcile` 同时校验 continuation revision
@@ -1014,6 +1018,12 @@ resume；`dependency` 保存另一个普通 execution Task 的精确 spec 版本
 新的业务责任、不占用等待中的 worker 槽位、不重放旧业务请求。CLI、owner API 与托管工具
 提供一致的 typed 输入、只读阻塞事实及双 CAS 控制；输出明确区分 waiting / ready / continued。
 
-迁移 89 只追加独立 continuation 账本，不改写历史答案或伪造旧请求的策略。已有已提交 successor
-动作保留其历史身份；新增策略只约束本次新准入与依赖。协议 N/N−1 均保留原 handoff wire 字段，
-该 owner 策略为保守新增能力，不以 runner 协议升级代替答案与调度的区分。
+迁移 89 只追加独立 continuation 账本，不改写历史答案或伪造旧请求的策略。已有已提交
+successor 动作保留身份，legacy 查询不物化 policy；新的独立 resume 仅记录本次权限，
+不补造旧 answer request。
+
+兼容评估：初版把旧无策略默认改成 wait，确实改变旧有效请求，不能仅以字段可选或测试绿
+视为兼容。现通过独立新 operation 与显式 opt-in 保持旧输入、旧请求回执、无 policy row 的
+续接以及旧 yield 合同。N/N−1 逐项验证旧默认不变，新 typed wait 独立验证无后继。runner
+wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 版本，也无旧通信适配器
+需要登记退役；未来若要移除旧默认，必须独立实施版本化迁移。详见[兼容修正计划](plans/decision-continuation-compatibility.md)。

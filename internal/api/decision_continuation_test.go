@@ -83,7 +83,7 @@ func TestDecisionContinuationOwnerReadAndTwoRevisionCAS(t *testing.T) {
 	}
 	before := e.count(`SELECT COUNT(*) FROM request_records`)
 	var view protocol.DecisionContinuationView
-	if status := e.do(http.MethodGet, "/api/v1/decisions/"+decision+"/continuation", token, nil, &view); status != http.StatusOK || view.DecisionID != decision || view.RunID != run || view.TaskID != task.TaskID || view.Revision != 3 || view.State != "waiting" || view.BlockedReason != "explicit_resume_required" || view.ResumeCondition != "explicit_resume" || !reflect.DeepEqual(view.Policy, policy) || view.AnswerRequestID != "original-answer" {
+	if status := e.do(http.MethodGet, "/api/v1/decisions/"+decision+"/continuation", token, nil, &view); status != http.StatusOK || view.DecisionID != decision || view.RunID != run || view.TaskID != task.TaskID || view.Revision != 3 || view.State != "waiting" || view.BlockedReason != "explicit_resume_required" || view.ResumeCondition != "explicit_resume" || !reflect.DeepEqual(view.Policy, &policy) || view.AnswerRequestID != "original-answer" {
 		t.Fatal(status, view)
 	}
 	if got := e.count(`SELECT COUNT(*) FROM request_records`); got != before {
@@ -137,5 +137,29 @@ func TestDecisionContinuationOwnerReadAndTwoRevisionCAS(t *testing.T) {
 	}
 	if e.count(`SELECT COUNT(*) FROM run_question_handoffs WHERE continuation_action_id IS NOT NULL`) != 1 {
 		t.Fatal("resume failed to commit exactly one successor")
+	}
+}
+
+func TestDecisionContinuationTypedAnswerRouteRequiresCompletePolicy(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	revision := int64(0)
+	for _, typed := range []bool{false, true} {
+		payload := protocol.AnswerDecisionPayload{Version: 1, Text: "Wait"}
+		want := protocol.CodeInvalidRequest
+		if typed {
+			payload.Continuation = &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await original dependency"}
+			want = protocol.CodeNotFound
+		}
+		env := e.envelope(protocol.OpAnswerDecisionContinuation, protocol.Target{Type: "decision", ID: "missing"}, &revision, payload)
+		status, first := e.op(token, env)
+		if status != http.StatusOK || first.Operation == nil || first.Operation.Error == nil || first.Operation.Error.Code != want {
+			t.Fatalf("typed=%v HTTP%d %+v", typed, status, first.Operation)
+		}
+		status, replay := e.op(token, env)
+		if status != http.StatusOK || !reflect.DeepEqual(first.Operation, replay.Operation) {
+			t.Fatal("typed answer lost original receipt", first, replay)
+		}
 	}
 }

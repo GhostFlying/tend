@@ -77,11 +77,10 @@ func DecisionDependencyReady(ctx context.Context, q Querier, dependency *protoco
 	return true, "", nil
 }
 
-// ReadDecisionContinuation preserves legacy answered history as waiting intent;
+// ReadDecisionContinuation preserves the original legacy contract without inventing a policy;
 // it does not materialize a policy or replay an old business request.
 func ReadDecisionContinuation(ctx context.Context, q Querier, id string) (protocol.DecisionContinuationView, error) {
-	v := protocol.DecisionContinuationView{DecisionID: id, State: "waiting", ResumeCondition: "explicit_resume",
-		Policy: protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "explicit continuation admission required"}}
+	v := protocol.DecisionContinuationView{DecisionID: id, State: "legacy", ResumeCondition: "legacy_answer_and_stopped"}
 	var stopped bool
 	err := q.QueryRowContext(ctx, `SELECT h.run_id,r.task_id,h.stopped,COALESCE(h.continuation_action_id,''),COALESCE(h.successor_run_id,'') FROM run_question_handoffs h JOIN runs r USING(run_id) WHERE h.decision_id=?`, id).
 		Scan(&v.RunID, &v.TaskID, &stopped, &v.ContinuationActionID, &v.SuccessorRunID)
@@ -103,17 +102,20 @@ func ReadDecisionContinuation(ctx context.Context, q Querier, id string) (protoc
 		return v, err
 	}
 	if row != nil {
-		v.Revision, v.Policy, v.State = row.Revision, row.Policy, row.State
+		v.Revision, v.State = row.Revision, row.State
+		policy := row.Policy
+		v.Policy = &policy
+		v.ResumeCondition = "explicit_resume"
 		v.AnswerRequestID, v.ResumeRequestID = row.AnswerRequestID, row.ResumeRequestID
 	}
-	if v.Policy.Mode == protocol.DecisionDependency {
+	if v.Policy != nil && v.Policy.Mode == protocol.DecisionDependency {
 		v.ResumeCondition = "task_completed_at_spec"
-	} else if v.Policy.Mode == protocol.DecisionContinueNow {
+	} else if v.Policy != nil && v.Policy.Mode == protocol.DecisionContinueNow {
 		v.ResumeCondition = "original_handoff_stopped_and_current"
 	}
 	if v.ContinuationActionID != "" || v.SuccessorRunID != "" {
 		v.State = "continued"
-		if v.SuccessorRunID == "" && v.Policy.Mode == protocol.DecisionDependency {
+		if v.SuccessorRunID == "" && v.Policy != nil && v.Policy.Mode == protocol.DecisionDependency {
 			_, v.BlockedReason, err = DecisionDependencyReady(ctx, q, v.Policy.Dependency)
 		}
 		return v, err
@@ -123,10 +125,14 @@ func ReadDecisionContinuation(ctx context.Context, q Querier, id string) (protoc
 		return v, nil
 	}
 	if row == nil {
-		v.BlockedReason = "legacy_answer_requires_explicit_resume"
+		if !stopped {
+			v.BlockedReason = "original_process_not_stopped"
+		} else {
+			v.BlockedReason = "legacy_contract_without_successor"
+		}
 		return v, nil
 	}
-	if v.Policy.Mode == protocol.DecisionDependency {
+	if v.Policy != nil && v.Policy.Mode == protocol.DecisionDependency {
 		ready, reason, err := DecisionDependencyReady(ctx, q, v.Policy.Dependency)
 		if err != nil {
 			return v, err
@@ -138,7 +144,7 @@ func ReadDecisionContinuation(ctx context.Context, q Querier, id string) (protoc
 	}
 	if v.State == "waiting" {
 		v.BlockedReason = "explicit_resume_required"
-		if v.Policy.Mode == protocol.DecisionDependency {
+		if v.Policy != nil && v.Policy.Mode == protocol.DecisionDependency {
 			v.BlockedReason = "dependency_ready_reconcile_required"
 		}
 		return v, nil

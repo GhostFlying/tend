@@ -14,7 +14,7 @@ type decisionContinuationReadArgs struct {
 }
 
 func decisionContinuationMutation(name string) bool {
-	return name == "decision_continuation_resume" || name == "decision_continuation_reconcile"
+	return name == "decision_continuation_answer" || name == "decision_continuation_resume" || name == "decision_continuation_reconcile"
 }
 
 func decisionResolveSchema() string {
@@ -22,15 +22,11 @@ func decisionResolveSchema() string {
 	if err := json.Unmarshal([]byte(argumentSchema(resolveArgs{})), &root); err != nil {
 		panic(err)
 	}
-	root["description"] = "Record the owner's actual answer and its explicit worker-handoff continuation, without inferring readiness from text."
+	root["description"] = "Legacy answer operation. Conditional worker scheduling must use decision_continuation_answer with an explicit policy."
 	props := root["properties"].(map[string]any)
 	props["version"].(map[string]any)["description"] = "The original decision version you last read."
 	props["reason"].(map[string]any)["maxLength"] = 500
 	props["reason"].(map[string]any)["description"] = "One sentence on why, kept with the change."
-	policy := root["definitions"].(map[string]any)["DecisionContinuationPolicy"].(map[string]any)
-	policyProps := policy["properties"].(map[string]any)
-	policyProps["reason"].(map[string]any)["description"] = "Required nonempty for wait and dependency. Wait requires independent resume; dependency requires exact task/spec completion."
-	policyProps["dependency"].(map[string]any)["description"] = "Required only for dependency: one other ordinary execution Task's frozen spec version (manager tasks are rejected), checked against real completed facts."
 	out, err := json.Marshal(root)
 	if err != nil {
 		panic(err)
@@ -38,7 +34,7 @@ func decisionResolveSchema() string {
 	return string(out)
 }
 
-func decisionContinuationMutationSchema(raw json.RawMessage, resume bool) json.RawMessage {
+func decisionContinuationMutationSchema(raw json.RawMessage, name string) json.RawMessage {
 	var root map[string]any
 	if err := json.Unmarshal(raw, &root); err != nil {
 		panic(err)
@@ -48,11 +44,18 @@ func decisionContinuationMutationSchema(raw json.RawMessage, resume bool) json.R
 	props["target_id"] = map[string]any{"type": "string", "minLength": 1, "description": "Exact original decision_id; never a replacement question or successor Run."}
 	props["expected_control_revision"] = map[string]any{"type": "integer", "minimum": 0, "description": "Original parent Task control revision from decision_continuation_read, independent of continuation expected_revision."}
 	body := props["payload"].(map[string]any)
-	if resume {
+	if name == "decision_continuation_resume" || name == "decision_continuation_answer" {
 		body["required"] = append(body["required"].([]any), "source_message_id")
 	}
+	if name == "decision_continuation_answer" {
+		body["required"] = append(body["required"].([]any), "continuation")
+	}
 	bodyProps := body["properties"].(map[string]any)
-	bodyProps["expected_revision"].(map[string]any)["minimum"] = 0
+	if name == "decision_continuation_answer" {
+		bodyProps["version"].(map[string]any)["minimum"] = 1
+	} else {
+		bodyProps["expected_revision"].(map[string]any)["minimum"] = 0
+	}
 	bodyProps["source_message_id"] = map[string]any{"type": "string", "minLength": 1, "description": "Exact actual owner source admitted to this execution. A queued, withdrawn or merely visible message cannot authorize continuation."}
 	out, err := json.Marshal(root)
 	if err != nil {

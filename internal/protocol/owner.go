@@ -88,7 +88,8 @@ type InterruptReplyPayload struct {
 // decisions.resolve_from_message.
 type AnswerDecisionPayload struct {
 	// Continuation is explicit scheduling intent for a worker question handoff.
-	// Its absence records an answer without granting continuation authority.
+	// The explicit typed operation requires it; legacy operations omit it and
+	// preserve their original automatic handoff contract.
 	Continuation *DecisionContinuationPolicy `json:"continuation,omitempty"`
 	// Version is the decision version the answerer saw.
 	Version int64 `json:"version"`

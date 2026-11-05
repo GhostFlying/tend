@@ -28,7 +28,7 @@ func TestQuestionHandoffHumanOwnerResumes(t *testing.T) {
 	if op := h.runAs(as, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: q.DecisionID}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := answerHandoffOwnerNow(t, h, q); op.Status != protocol.OpSucceeded {
+	if op := answerQuestion(t, h, q, scopeQuestion.Options[0], ""); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	next, ok := h.claimInputRun(runtime)
@@ -255,17 +255,7 @@ func answerHandoff(t *testing.T, h *harness, issue protocol.Issue, q protocol.Wo
 	}); err != nil {
 		t.Fatal(err)
 	}
-	a := readAttentionForTest(t, h, id)
-	turn, principal := startHostedIssueReview(t, h, issue)
-	defer finishHostedReview(t, h, turn)
-	r := a.Responsibility
-	p := protocol.HandleAttentionPayload{ExpectedAssignmentEpoch: r.AssignmentEpoch, Version: a.QuestionVersion, Option: scopeQuestion.Options[0], Reason: "Continue the frozen agreement", Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionContinueNow}}
-	cmd := HandleAttention{}
-	op, err := h.app.Execute(t.Context(), principal, h.env(cmd.Operation(), protocol.Target{Type: "attention", ID: a.AttentionID}, p, rev(r.Revision)), HostedCoordinationCommand{Command: cmd, ExecutionID: turn.RequestID, EffectSeq: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return op
+	return supervisorHandle(t, h, issue, readAttentionForTest(t, h, id), false, scopeQuestion.Options[0])
 }
 
 func TestQuestionHandoffRetainsNamedExecutor(t *testing.T) {
@@ -332,7 +322,7 @@ func TestQuestionHandoffRetainsNamedExecutor(t *testing.T) {
 	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := h.exec(owner, h.env("decisions.respond", protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.AnswerDecisionPayload{Version: q.Version, Option: scopeQuestion.Options[0], Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionContinueNow}}, nil), AnswerDecision{}); op.Status != protocol.OpSucceeded {
+	if op := h.exec(owner, h.env("decisions.respond", protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.AnswerDecisionPayload{Version: q.Version, Option: scopeQuestion.Options[0]}, nil), AnswerDecision{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil), Claim{})
@@ -403,7 +393,7 @@ func TestFault_QuestionContinuationRejectsReassignedReviewEpoch(t *testing.T) {
 	if op := h.runAs(as, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: question.DecisionID}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := answerHandoffOwnerNow(t, h, question); op.Status != protocol.OpSucceeded {
+	if op := answerQuestion(t, h, question, scopeQuestion.Options[0], ""); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	review := canonicalTaskIssue(t, h, ownerContract(t, h, task.TaskID).ReviewIssueID)
@@ -430,10 +420,4 @@ func TestFault_QuestionContinuationRejectsReassignedReviewEpoch(t *testing.T) {
 	if count := h.count("run_question_handoffs WHERE successor_run_id IS NOT NULL"); count != 0 {
 		t.Fatal("stale answer created a successor", count)
 	}
-}
-
-// Positive handoff fixtures explicitly admit scheduling; answer text alone does not.
-func answerHandoffOwnerNow(t *testing.T, h *harness, q protocol.WorkerQuestion) protocol.Operation {
-	t.Helper()
-	return h.exec(owner, h.env("decisions.respond", protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.AnswerDecisionPayload{Version: q.Version, Option: scopeQuestion.Options[0], Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionContinueNow}}, nil), AnswerDecision{})
 }

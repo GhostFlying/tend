@@ -71,6 +71,7 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"decision_continuation_answer", "Record an actual owner answer with an explicit complete scheduling policy. Always use this typed operation for conditional worker handoffs; preserve source, parent Task revision and decision version. Omission never silently changes legacy answer semantics.", "decision", protocol.AnswerDecisionPayload{}, app.AnswerDecision{FromMessage: true, TypedContinuation: true}, true},
 	{"decision_continuation_resume", "Independently resume the original answered worker question after an explicit wait. Read decision_continuation_read first; supply both original continuation and parent Task revisions and the actual admitted owner source. Never replace the answer, retry an unknown request under a new identity, or bypass stopped/current-contract guards.", "decision", protocol.ResumeDecisionContinuationPayload{}, app.ResumeDecisionContinuation{FromMessage: true}, true},
 	{"decision_continuation_reconcile", "Reconcile readiness of the original answered worker question against exact dependency task/spec completion facts. Supply both original revisions. Caller readiness assertions, prose and elapsed time cannot satisfy the dependency; unknown remains unresolved. Reconciliation does not invent a new owner resume authorization.", "decision", protocol.ResumeDecisionContinuationPayload{}, app.ResumeDecisionContinuation{Reconcile: true, FromMessage: true}, true},
 	{"runs_continue_retained", "Independently authorize only the original ordinary Orca Run after exact identity, protection-set and settled business receipt checks. Requires current Task revision and full immutable pin. Old runners remain retained; missing native identity cannot launch a replacement. Never use for managers or invent an owner decision.", "run", protocol.ContinueRetainedRunPayload{}, app.ContinueRetainedRun{}, true},
@@ -181,7 +182,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		}
 		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)}
 		if decisionContinuationMutation(m.name) {
-			spec.InputSchema = decisionContinuationMutationSchema(spec.InputSchema, m.name == "decision_continuation_resume")
+			spec.InputSchema = decisionContinuationMutationSchema(spec.InputSchema, m.name)
 		}
 		if m.name == "issues_reuse" || m.name == "issues_reopen" || m.name == "issues_create" || m.name == "issues_request_manager" || m.name == "issues_request_owner" {
 			var root map[string]any

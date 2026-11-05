@@ -3762,7 +3762,6 @@
         "revision",
         "decision_version",
         "task_control_revision",
-        "policy",
         "state",
         "resume_condition"
       ],

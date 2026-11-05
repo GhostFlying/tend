@@ -37,6 +37,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "artifact-share list", Route: "/api/v1/issues/{id}/artifact-shares", Queries: "status after limit", JSONDefault: true},
 	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
 	{Name: "question-inputs show", Route: "/api/v1/decisions/{id}/inputs", JSONDefault: true},
+	{Name: "decision-continuation answer", Operation: protocol.OpAnswerDecisionContinuation, Target: "decision", RevisionRoute: "-", JSONDefault: true},
 	{Name: "decision-continuation show", Route: "/api/v1/decisions/{id}/continuation", JSONDefault: true},
 	{Name: "decision-continuation resume", Operation: protocol.OpResumeDecisionContinuation, Target: "decision", RevisionRoute: "-", JSONDefault: true},
 	{Name: "decision-continuation reconcile", Operation: protocol.OpReconcileDecisionContinuation, Target: "decision", RevisionRoute: "-", JSONDefault: true},
@@ -320,6 +321,14 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return usagef("payload must be a JSON object")
+	}
+	if cmd.Operation == protocol.OpAnswerDecisionContinuation {
+		var payload protocol.AnswerDecisionPayload
+		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil || payload.Continuation == nil || payload.Version < 1 || payload.Option == "" && payload.Text == "" {
+			return usagef("typed answer requires version, option/text and explicit continuation")
+		}
 	}
 	if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
 		var payload protocol.ResumeDecisionContinuationPayload
