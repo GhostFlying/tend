@@ -27,6 +27,8 @@ type agentStartupState struct {
 type AgentStartupAttachment struct {
 	RequestID      string
 	Reconciliation bool
+	// compactThread is populated only when this snapshot selected a compact.
+	compactThread string
 }
 
 func readAgentStartupState(ctx context.Context, q store.Querier, request string) (agentStartupState, error) {

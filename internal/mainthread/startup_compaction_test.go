@@ -96,3 +96,45 @@ func TestStartupHoldPreservesOriginalNativeCompactCompletion(t *testing.T) {
 		t.Fatal("native compact settlement changed the newer startup action or native intent")
 	}
 }
+
+func TestUncertainCompactResumeRejectionCannotReplaceThread(t *testing.T) {
+	f := newHandoffFixture(t)
+	f.e.m.cfg.MaintenanceEnabled = false
+	if err := f.e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,before_json,created_at,updated_at) VALUES('original-compact','main',?,'unknown','manual','{}',0,0)`, f.source.ID())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.session.resumeErr = map[string]error{f.source.ID(): harness.ErrRejected}
+	_, err := f.e.m.openThread(t.Context(), f.session)
+	if protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		t.Fatal("uncertain compact allowed a replacement thread", err)
+	}
+	if state, err := f.e.app.CompactState(t.Context(), "original-compact"); err != nil || state != "unknown" {
+		t.Fatal(state, err)
+	}
+}
+
+func TestUncertainCompactResumesOriginalThreadInsteadOfCurrentBinding(t *testing.T) {
+	f := newHandoffFixture(t)
+	f.e.m.cfg.MaintenanceEnabled = false
+	original := f.source.ID()
+	replacement, err := f.session.StartThread(t.Context(), f.e.m.threadConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.app.SetMainThread(t.Context(), "main", replacement.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,before_json,created_at,updated_at) VALUES('original-compact','main',?,'unknown','manual','{}',0,0)`, original)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := f.e.m.openThread(t.Context(), f.session)
+	if err != nil || restored.ID() != original {
+		t.Fatal("compact read a newer binding instead of its original native thread", restored, err)
+	}
+}

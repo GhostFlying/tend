@@ -3,7 +3,6 @@ package mainthread
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -28,11 +27,7 @@ func (m *Manager) bindingInstance() string {
 	if selected == nil {
 		return m.cfg.Instance
 	}
-	selected.RunnerRunID = ""
-	selected.ReceiptOnly, selected.RequireReceiptReader = false, false
-	selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = "", "", ""
-	raw, _ := json.Marshal(selected)
-	digest := sha256.Sum256(raw)
+	digest := sha256.Sum256([]byte(selected.BindingIdentity()))
 	return m.cfg.Instance + "/named/" + hex.EncodeToString(digest[:])
 }
 
@@ -60,12 +55,5 @@ func resolveNamedModel(models []harness.Model, selected hostedconfig.Selection) 
 }
 
 func sameNamedBinding(a, b hostedconfig.Selection) bool {
-	a.RunnerRunID, b.RunnerRunID = "", ""
-	a.ReceiptOnly, b.ReceiptOnly = false, false
-	a.RequireReceiptReader, b.RequireReceiptReader = false, false
-	a.AppliedModel, a.AppliedProvider, a.AppliedEffort = "", "", ""
-	b.AppliedModel, b.AppliedProvider, b.AppliedEffort = "", "", ""
-	left, _ := json.Marshal(a)
-	right, _ := json.Marshal(b)
-	return string(left) == string(right)
+	return a.BindingIdentity() == b.BindingIdentity()
 }

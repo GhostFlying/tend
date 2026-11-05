@@ -743,6 +743,20 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 			return nil, err
 		}
 	}
+	// A compact has no main turn. Resume its original native thread directly,
+	// before toolset handoff or any fallback to another binding or new thread.
+	if id, pending, err := m.app.UncertainCompactThread(ctx, m.cfg.ConversationID); err != nil {
+		return nil, err
+	} else if pending {
+		if err := m.app.SettleOpenTurns(ctx, id); err != nil {
+			return nil, err
+		}
+		th, err := s.ResumeThread(ctx, id, m.threadConfig())
+		if errors.Is(err, harness.ErrRejected) {
+			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "original compact thread cannot be resumed; reconcile before replacing it")
+		}
+		return th, err
+	}
 	if p.Prepared || parkRead || receiptRead {
 		id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 		if err != nil {

@@ -114,6 +114,16 @@ type Selection struct {
 	Purpose               agentconfig.Purpose         `json:"purpose"`
 }
 
+// BindingIdentity excludes transient receipt and resolved-model state, matching
+// the native thread binding across reconnects and historical execution facts.
+func (s Selection) BindingIdentity() string {
+	s.RunnerRunID = ""
+	s.ReceiptOnly, s.RequireReceiptReader = false, false
+	s.AppliedModel, s.AppliedProvider, s.AppliedEffort = "", "", ""
+	raw, _ := json.Marshal(s)
+	return string(raw)
+}
+
 func (p *Prepared) Select(localID string, purpose agentconfig.Purpose) (Selection, error) {
 	for _, a := range p.configuration.Definitions.Agents {
 		if a.LocalID != localID {
