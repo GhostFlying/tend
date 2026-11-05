@@ -2,6 +2,7 @@ package orca
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -174,6 +175,8 @@ type workerState struct {
 	// Marker is in the brief of the agent's launch; it finds the agent
 	// when the runner stopped before the launch was answered.
 	Marker string `json:"marker,omitempty"`
+	// VerdictTurn identifies a journaled logical turn independently of wall time.
+	VerdictTurn string `json:"verdict_turn,omitempty"`
 	// Asked is when that launch was asked for, in Unix milliseconds.
 	Asked int64 `json:"asked,omitempty"`
 	// Launch is orca's operation for a launch whose answer was lost.
@@ -346,6 +349,21 @@ func (w *worker) openBridge(ctx context.Context) error {
 	tools := []harness.ToolSpec{harness.ResultToolSpec}
 	handle := w.results.Handle
 	if w.spec.Role == protocol.RoleAccept {
+		verdictDir := w.spec.StateDir
+		if verdictDir == "" {
+			state, err := bridge.StatePath(ctx, w.spec.Dir)
+			if err != nil {
+				return err
+			}
+			run := sha256.Sum256([]byte(w.spec.RunID))
+			verdictDir = filepath.Join(filepath.Dir(state), "tend-verdicts", fmt.Sprintf("%x", run))
+		}
+		w.verdicts.StateDir = verdictDir
+		w.verdicts.RequireBinding = true
+		w.bindVerdict()
+		if err := w.verdicts.Restore(); err != nil {
+			return err
+		}
 		tools = []harness.ToolSpec{harness.VerdictToolSpec}
 		handle = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
@@ -388,16 +406,41 @@ func (w *worker) closeBridge(ctx context.Context) {
 	}
 }
 
+// bindVerdict publishes only journaled send identity to the concurrent bridge.
+// Native session/root identity is checked separately by strict attachment.
+func (w *worker) bindVerdict() {
+	if w.spec.Role != protocol.RoleAccept {
+		return
+	}
+	binding := ""
+	if w.st.Turn != 0 {
+		b, _ := json.Marshal(struct {
+			Run      string
+			Worktree string
+			Launch   string
+			Turn     int64
+			TurnID   string
+		}{w.spec.RunID, w.st.Worktree, w.st.Marker, w.st.Turn, w.st.VerdictTurn})
+		binding = string(b)
+	}
+	w.verdicts.Bind(binding)
+}
+
 // save journals the worker's state before anything it describes happens.
 func (w *worker) save() error {
 	if w.spec.OnThread == nil {
+		w.bindVerdict()
 		return nil
 	}
 	b, err := json.Marshal(w.st)
 	if err != nil {
 		return err
 	}
-	return w.spec.OnThread(string(b))
+	if err := w.spec.OnThread(string(b)); err != nil {
+		return err
+	}
+	w.bindVerdict()
+	return nil
 }
 
 // begin leaves the agent with a turn of tend's under way: the one an
@@ -533,6 +576,9 @@ func (w *worker) launch(ctx context.Context, agent string) error {
 	if w.st.Marker == "" {
 		w.st.Worktree = w.wt
 		w.st.Marker = w.ws.opts.IDs.New(protocol.PrefixLaunch)
+		if w.spec.Role == protocol.RoleAccept {
+			w.st.VerdictTurn = w.ws.opts.IDs.New(protocol.PrefixRequest)
+		}
 		w.st.Asked = w.ws.opts.Now().UnixMilli()
 		w.st.Turn = w.st.Asked
 		if err := w.save(); err != nil {
@@ -722,6 +768,9 @@ func (w *worker) send(ctx context.Context, text string) error {
 		text = w.st.SendText
 	} else {
 		w.st.Turn = w.ws.opts.Now().UnixMilli()
+		if w.spec.Role == protocol.RoleAccept {
+			w.st.VerdictTurn = w.ws.opts.IDs.New(protocol.PrefixRequest)
+		}
 		w.st.Interrupted, w.st.Said = false, said(text)
 		if err := w.save(); err != nil {
 			return err

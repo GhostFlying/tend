@@ -843,6 +843,8 @@ request ID、Run/target、decision 和原 thread payload；仍由服务端核验
 未知或未附着不获得输入权限。原 pin 可由已协商能力/原 backend 下的 AgentContinuations
 证明继续可用，不要求它仍是当前新任务库存，也不替换其任何冻结字段。
 
+D159 验收回执恢复补充：Orca bridge 将原 verdict 原子保存到 Run 私有状态，保存成功后才确认。回执绑定原 Run、worktree、native launch marker 和已持久的逻辑 turn（新发送另存唯一 turn ID，避免同一毫秒混用）；worker attempt 与本次附着授权 ID 不改变原执行身份。新 launch 或发送新 turn 时切换绑定并清除内存 verdict，旧回执不能成为新 turn 的结果。重建先恢复同一绑定的 verdict，再由严格附着核验保存的 terminal/pane/session/runtime/native launch/root turn。绑定未匹配或没有原回执时保持 pending，不发送提醒；破损或保存失败同样不生成业务完成。既有无绑定的其它 harness 回执格式保留，未修改 runner wire N/N−1。见[实施计划](plans/retained-acceptance-verdict.md)。
+
 ## D160：Agent 运行关联与观测来源
 
 Agent 详情的 Issue 关联只读冻结的 run_agent_executions 身份与历史 pin，关联依次采用
