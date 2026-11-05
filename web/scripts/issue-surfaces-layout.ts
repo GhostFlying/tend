@@ -1639,8 +1639,7 @@ async function captureS4() {
               "last board column is fully visible",
             );
             const toggle = page.getByRole("button", { name: /已取消/ }).filter({ visible: true });
-            assert.equal(await toggle.getAttribute("aria-expanded"), "false");
-            await toggle.click();
+            assert.equal(await toggle.getAttribute("aria-expanded"), "true");
             const expanded = await page
               .getByRole("region", { name: "已取消列", exact: true })
               .boundingBox();
@@ -1651,6 +1650,11 @@ async function captureS4() {
             await page.screenshot({
               path: join(output, `board-expanded-${viewport.width}-${colorScheme}.png`),
             });
+            await toggle.click();
+            assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+            await page.reload();
+            await page.getByRole("button", { name: "发布流程整理", exact: true }).waitFor();
+            assert.equal(await toggle.getAttribute("aria-expanded"), "false");
             await toggle.click();
           } else {
             const selectedTab = page.getByRole("tab", { selected: true });
