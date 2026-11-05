@@ -174,7 +174,12 @@ func (m *Manager) Run(ctx context.Context) error {
 				return err
 			}
 		}
-		if needsRead {
+		allowed, err := m.app.AgentStartupAllowed(ctx, m.cfg.ConversationID)
+		if err != nil {
+			m.notifyStartupExit(err)
+			return err
+		}
+		if needsRead && allowed {
 			if err := m.serve(ctx); err != nil && ctx.Err() == nil {
 				m.cfg.Log.ErrorContext(ctx, "main thread session ended", "err", err)
 			}
@@ -197,6 +202,11 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	defer func() { diagnostics.exit(ctx, startupErr) }()
 	defer func() {
 		if !started && ctx.Err() == nil {
+			if startupErr != nil {
+				if err := m.app.DeferAgentStartup(ctx, m.cfg.ConversationID); err != nil {
+					m.cfg.Log.WarnContext(ctx, "could not record failed agent startup", "err", err)
+				}
+			}
 			m.notifyStartupExit(startupErr)
 		}
 	}()
@@ -342,6 +352,11 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	installed, err := m.app.MainThreadToolset(ctx, m.bindingInstance(), th.ID())
 	if err != nil {
 		return err
+	}
+	if !remote {
+		if err := m.app.AgentStartupSucceeded(ctx, m.cfg.ConversationID); err != nil {
+			return err
+		}
 	}
 	m.mu.Lock()
 	m.session, m.thread = s, th
@@ -550,6 +565,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			return nil
 		})
 		if err != nil {
+			return err
+		}
+		if err := m.app.AgentStartupSucceeded(ctx, m.cfg.ConversationID); err != nil {
 			return err
 		}
 		m.mu.Lock()
