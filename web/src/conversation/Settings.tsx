@@ -1,7 +1,15 @@
 import { Button } from "../ui/Button.tsx";
-import { useOverlayState } from "../ui/focus.ts";
+import { OverlayVisibility, useOverlayState } from "../ui/focus.ts";
 // The composer's compact model seat: a two-level menu shared across devices.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
@@ -15,6 +23,7 @@ const effortLabel = (effort: string) => effort || "默认";
 
 export function Settings({ connection }: { connection: Connection }) {
   const { client, live } = useServices();
+  const visible = useContext(OverlayVisibility);
   const settings = live.settings;
   const state = useStore(settings.state);
   const [open, setOpen] = useOverlayState(false);
@@ -27,11 +36,12 @@ export function Settings({ connection }: { connection: Connection }) {
   const position = useAnchoredPanel(open, trigger, 240);
 
   useEffect(() => {
+    if (!visible || connection.status !== "online") return;
     settings.start();
-  }, [settings]);
+    return () => void settings.stop();
+  }, [settings, visible, connection.status]);
   useEffect(() => {
     if (connection.status === "online") {
-      void settings.refresh();
       void settings.reconcile(client);
     }
   }, [settings, client, connection.status]);

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { OverlayVisibility } from "../ui/focus.ts";
 import type { Connection } from "../api/client.ts";
 import type { IssueConversationQueueEntry as ConversationQueueEntry } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -21,6 +22,7 @@ export function PendingQueue({
   awaitingAgent?: boolean;
 }) {
   const { live, client, queue, draft, conversation } = useServices();
+  const visible = useContext(OverlayVisibility);
   const state = useStore(live.queueView.state);
   const settings = useStore(live.settings.state).view;
   const handoff = useStore(live.handoff.state).view;
@@ -42,9 +44,13 @@ export function PendingQueue({
   const [expanded, setExpanded] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   useEffect(() => {
-    live.queueView.start();
     void draft.open();
-  }, [live, draft]);
+  }, [draft]);
+  useEffect(() => {
+    if (!visible) return;
+    live.queueView.start();
+    return () => live.queueView.stop();
+  }, [live, visible]);
   useEffect(() => {
     if (connection.status !== "online" || !draftState.loaded) return;
     void withdrawals.resume();
