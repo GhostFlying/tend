@@ -56,6 +56,9 @@ func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 		}
 	}
 	packages := max(1, min(6, cpus/10))
+	if jobs > 1 {
+		packages = max(packages, min(2, cpus/(2*jobs)))
+	}
 	// Budget the largest simultaneously active test-process sets, rather than
 	// treating a four-shard group as one Go process. Static checks and Web each
 	// reserve one slot; their own build/worker parallelism remains bounded.
