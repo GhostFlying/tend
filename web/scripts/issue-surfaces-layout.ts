@@ -1591,6 +1591,7 @@ async function captureS4() {
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
+    await page.evaluate(() => localStorage.setItem("tend.board.cancelled-expanded", "false"));
     for (const colorScheme of viewport.width === 1440
       ? (["light", "dark"] as const)
       : (["light"] as const)) {
@@ -1686,8 +1687,12 @@ async function captureS4() {
               "last board column is fully visible",
             );
             const toggle = page.getByRole("button", { name: /已取消/ }).filter({ visible: true });
-            assert.equal(await toggle.getAttribute("aria-expanded"), "false");
-            await toggle.click();
+            assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+            assert.equal(
+              await page.evaluate(() => localStorage.getItem("tend.board.cancelled-expanded")),
+              "false",
+              "ambiguous legacy preference remains unchanged",
+            );
             const expanded = await page
               .getByRole("region", { name: "已取消列", exact: true })
               .boundingBox();
@@ -1698,6 +1703,11 @@ async function captureS4() {
             await page.screenshot({
               path: join(output, `board-expanded-${viewport.width}-${colorScheme}.png`),
             });
+            await toggle.click();
+            assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+            await page.reload();
+            await page.getByRole("button", { name: "发布流程整理", exact: true }).waitFor();
+            assert.equal(await toggle.getAttribute("aria-expanded"), "false");
             await toggle.click();
           } else {
             const selectedTab = page.getByRole("tab", { selected: true });
