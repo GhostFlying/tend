@@ -137,9 +137,12 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		if c.ExecutionFilter != nil && *c.ExecutionFilter != e.Pin || h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || !matches(e, role, c.Kind == protocol.ActionAccept) {
 			continue
 		}
-		if c.Kind == protocol.ActionImplement && !c.AcceptanceWaived && (c.WorkspaceHost == "" || !c.NamedExecutionAssigned) {
+		if RequiresAcceptancePrerequisite(c) {
 			found := false
 			for _, review := range executors {
+				if c.ReviewExecutionFilter != nil && review.Pin != *c.ReviewExecutionFilter {
+					continue
+				}
 				if review.Pin.BackendID == e.Pin.BackendID && matches(review, c.AgentSelection.Acceptance, true) {
 					found = true
 					break
@@ -156,6 +159,13 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		return nil, "capability_unavailable: no executor satisfies the frozen required capabilities and execution constraints"
 	}
 	return nil, "no available category/runtime/model/effort candidates satisfy this host and workspace backend"
+}
+
+// RequiresAcceptancePrerequisite reports whether allocation must find a
+// compatible reviewer before starting implementation. Wait notices use the
+// same boundary without adding acceptance capabilities to the implementer.
+func RequiresAcceptancePrerequisite(c Candidate) bool {
+	return c.AgentSelection != nil && c.Kind == protocol.ActionImplement && !c.AcceptanceWaived && (c.WorkspaceHost == "" || !c.NamedExecutionAssigned)
 }
 
 // RequiredCapabilities returns only the current role's frozen requirements.

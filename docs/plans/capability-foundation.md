@@ -155,3 +155,15 @@
 2. 在 App 真实查询与 Claim 路径加入无关未连接主机的反例，证明健康声明候选仍 eligible 且可领取；单独覆盖未观测主机原因，不将缺失事实当作在线。
 3. 在超过十分钟的等待任务上验证同一未连接主机不阻断 SweepCapabilityWaits：一次持久通知和事件、重复 sweep 无重复通知，不探测工具或产生验证证据。
 4. 先记录旧对象的回归失败，再做最小修复及有界 targeted/vet/static 检查，交付新 commit、diff、报告和 manifest。heavy/full、仓库独立 review、目标集成与 required CI 未完成仍分别列明，不启动其他 Agent、环境或部署。
+
+## 验收角色前置等待修复计划（编码前）
+
+本轮接续对 `747c24b7` 的独立验收 finding，owner v1 声明语义及全部历史保持。
+
+1. 复现 implementation required 为空、acceptance required 为 image_gen@1 且 reviewer 无声明时，健康 executor 不领取首次实现任务、十一分钟后仍无通知的缺口。
+2. 让等待检测包含首次 named 分配实际检查的 acceptance 前置，复用 scheduler 的前置判定。通知保存阻塞角色自身的 required 和解释，以 task/spec/role 去重；不向 implementation 添加标签，不提前创建验收执行。
+3. 对齐只读 due 预筛选和事务内 sweep 的角色范围；保留 waived、已分配同 spec 与 workspace、当前验收 action 的角色隔离。超过十分钟仅针对非 eligible 且非空 required 的相关角色发出一次持久 Attention 和事件，不 probe。
+4. 验证 acceptance-only、双角色、waived、已分配、健康 reviewer 和重复/并发 sweep 的正反例，先保存旧代码失败，再执行低负载 targeted/vet；协议、迁移、request/CAS、unknown 和共享预算不变。
+5. 提交原 PR244 新候选及 exact head/base/diff、日志和 manifest；heavy/full 继续 HOLD，独立 review、required CI 与目标集成分别报告未完成，不启动其他 Agent 或测试环境，不 merge/deploy。
+
+健康 reviewer 反例同时暴露现有 acceptance 查询在首次实现前错误套用“已有待验收产物”的 action 门。该投影与本次通知共用，必须同步修复：保留实际 pending implementation action，经 scheduler 检查其同 backend 的 reviewer 前置；只读候选筛选使用独立 reviewer filter，不覆盖冻结 AgentID/runtime/backend，不创建虚假 artifact 或验收 action。回归覆盖健康 reviewer 不通知、角色标签不继承、waived 可领取和原身份/backend 拒绝。

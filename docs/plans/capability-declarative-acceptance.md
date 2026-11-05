@@ -53,3 +53,4 @@
 | R2 / A12、A20 | 声明满足时，host capacity/runtime capacity/普通 adapter 不可用为 pending，候选身份和原因可读；Claim 不领取，恢复可用后可领取。错误冻结 Agent/runtime/backend 不能因可恢复等待被放宽。 |
 | R3 / A13、A19 | 当前指南和持久 Attention 只要求声明配置和普通 executor 可用性；旧 verify/StartWithCapabilities/source/session 材料仅标历史，不作当前资格要求。 |
 | R4 / A12、A13、A20 | 配置存在而从未 Hello 的主机是未观测事实，不能中断全任务解释或等待通知。健康声明 executor 的 explanation/claim 保持一致；未观测主机有明确原因，不能获得执行资格；超过十分钟的等待仍只持久通知一次且不 probe。其他存储错误仍返回。 |
+| R5 / A10、A12、A13、A15 | implementation required 为空时，首次分配受 acceptance required 阻塞也必须十分钟后产生一次 acceptance 通知，解释保留 acceptance required，implementation 不继承标签。双角色按各自 role 去重；waived、已分配而不再检查前置、健康 reviewer 不产生多余验收通知；重复及并发 sweep 不重复 Attention/事件，不创建工具证据或执行。 |

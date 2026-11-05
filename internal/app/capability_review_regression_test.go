@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -108,6 +109,142 @@ func TestCapabilityWaitNoticeSurvivesUnobservedHost(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCapabilityAcceptancePrerequisiteWaitNotice(t *testing.T) {
+	for _, scenario := range []string{"acceptance_only", "both_roles", "implementation_notified", "acceptance_available", "waived"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, r, _ := capabilitySetup(t)
+			ref := protocol.CapabilityReference{CapabilityID: "image_gen", DefinitionRevision: 1}
+			spec := testSpec
+			spec.AgentSelection = &protocol.TaskAgentSelection{
+				Implementation: protocol.AgentRequirement{CategoryID: "implementer"},
+				Acceptance:     protocol.AgentRequirement{CategoryID: "reviewer", RequiredCapabilities: []protocol.CapabilityReference{ref}},
+			}
+			want := 1
+			if scenario == "both_roles" || scenario == "implementation_notified" {
+				spec.AgentSelection.Implementation.RequiredCapabilities = []protocol.CapabilityReference{ref}
+				want = 2
+			}
+			if scenario == "acceptance_available" {
+				// This category has an explicit declaration; no evidence is added.
+				spec.AgentSelection.Acceptance.CategoryID = "implementer"
+				want = 0
+			}
+			var op protocol.Operation
+			var task taskResult
+			if scenario == "waived" {
+				issue := policyIssue(t, h, false)
+				spec.Delivery = ""
+				spec.Deliverables = []string{domain.DeliveryReport}
+				op = h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "waived acceptance prerequisite", Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+				if err := json.Unmarshal(op.Result, &task); err != nil {
+					t.Fatal(op, err)
+				}
+				want = 0
+			} else {
+				op, task = h.createTask(owner, createTaskPayload{Title: "acceptance prerequisite", Spec: spec})
+			}
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if err := h.app.SweepCapabilityWaits(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if n := h.count("capability_wait_notices"); n != 0 {
+				t.Fatal("notified before deadline", n)
+			}
+			wantNew := want
+			if scenario == "implementation_notified" {
+				// A durable notice from the old sweep must not suppress the
+				// missing acceptance notice on the next maintenance pass.
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO capability_wait_notices(task_id,spec_version,role,request_id,created_at) VALUES(?,1,'implement','historical-notice',?)`, task.TaskID, h.clock.Now().UnixMilli())
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				wantNew--
+			}
+			h.clock.Advance(11 * time.Minute)
+			r.Sequence++
+			if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			explanation, err := h.app.TaskCapabilityExplanation(t.Context(), task.TaskID, 0, protocol.RoleAccept)
+			if err != nil || !slices.Equal(explanation.Required, []protocol.CapabilityReference{ref}) || scenario != "waived" && (explanation.State == "eligible") != (want == 0) {
+				t.Fatal("acceptance prerequisite explanation", explanation, err)
+			}
+			if want != 0 {
+				op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil), Claim{})
+				var result claimResult
+				if err := json.Unmarshal(op.Result, &result); err != nil || op.Status != protocol.OpSucceeded || result.Assignment.RunID != "" {
+					t.Fatal("undeclared reviewer allowed first allocation", op, err)
+				}
+			}
+			// Concurrent maintenance and repeated sweeps must persist only one
+			// notice per blocking role, without allocating another run or probe.
+			results := make(chan error, 2)
+			for range 2 {
+				go func() { results <- h.app.SweepCapabilityWaits(t.Context()) }()
+			}
+			for range 2 {
+				if err := <-results; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := h.app.SweepCapabilityWaits(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if n := h.count("capability_wait_notices"); n != want {
+				t.Fatalf("got %d durable notices, want %d", n, want)
+			}
+			if n := h.count("attentions"); n != wantNew {
+				t.Fatalf("got %d attentions, want %d", n, wantNew)
+			}
+			if h.count("runs") != 0 || h.count("executor_capability_evidence") != 0 {
+				t.Fatal("sweep created execution or native evidence")
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var n int
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capability_wait_notices WHERE task_id=? AND role='accept'`, task.TaskID).Scan(&n); err != nil {
+					return err
+				}
+				if (n == 1) != (want != 0) {
+					t.Fatal("notice recorded against the wrong role", n)
+				}
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM events WHERE object_id=? AND kind='task.capability_wait_notified' AND json_extract(body_json,'$.explanation.role')='accept' AND json_extract(body_json,'$.explanation.required[0].capability_id')='image_gen'`, task.TaskID).Scan(&n); err != nil {
+					return err
+				}
+				if (n == 1) != (want != 0) {
+					t.Fatal("event lost acceptance requirements", n)
+				}
+				body, err := store.GetSpec(t.Context(), tx.Q(), task.TaskID, 1)
+				if err != nil {
+					return err
+				}
+				var frozen struct {
+					AgentSelection *protocol.TaskAgentSelection `json:"agent_selection"`
+				}
+				if err := json.Unmarshal([]byte(body), &frozen); err != nil {
+					return err
+				}
+				if !frozen.AgentSelection.Equal(*spec.AgentSelection) {
+					t.Fatal("sweep rewrote role requirements", frozen.AgentSelection)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if want == 0 {
+				op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil), Claim{})
+				var result claimResult
+				if err := json.Unmarshal(op.Result, &result); err != nil || op.Status != protocol.OpSucceeded || result.Assignment.TaskID != task.TaskID || result.Assignment.Role != protocol.RoleImplement || result.Assignment.CapabilityBinding != nil {
+					t.Fatal("acceptance label leaked into implementation", op, err)
+				}
+			}
+		})
 	}
 }
 

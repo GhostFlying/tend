@@ -984,3 +984,7 @@ D174 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明
 D174 旧运行恢复及等待投影补充：缺省 match_policy 的历史 evidence-only binding 保留专用历史恢复适配；原请求上报可同事务追加同 pin 的新鲜 revalidation，并向旧协商 peer 返回原有格式。该适配不参与 declaration_v1 的新匹配或启动，不能把旧工具实证门加回声明式运行。只读解释保留不可用 executor 的身份与声明事实，普通容量/adapter 等待按完整冻结约束判为 pending；claim 始终只使用普通可用 executor。当前恢复指导为显式登记声明、恢复同入口可用性及 unknown 原请求对账。
 
 D174 未观测主机补充：已配置主机尚未发送 Hello 时，缺失 host_runtime 是该主机未观测的普通可用性事实，不能使其他主机的 Task 能力解释或十分钟持久等待通知整体失败。查询保留健康候选并明确该主机原因，不推断其在线、声明或 executor；非缺失类存储错误仍返回。冻结身份、声明修订、原入口及共享预算围栏保持不变。
+
+D174 验收前置等待补充：首次 named 实现分配需要同 host/backend 的验收候选时，十分钟等待检测同时检查 acceptance 自身的非空 required，即使 implementation required 为空。通知以实际阻塞的 task/spec/role 持久去重并携带该角色解释，不复制标签到实现角色。waived 或不再检查该前置的已分配任务不新增 acceptance 通知；验收 action 仍仅检查验收角色。该修复仅调整维护通知，无 wire、迁移或旧运行冻结语义变更。
+
+首次分配前的 acceptance 查询解释实际 implementation action 的 reviewer 前置，不套用尚不存在的验收 artifact 生命周期。只读 reviewer filter 限定配对候选而不改写原验收身份、profile、runtime 或 backend；全局 eligibility 与 Claim 的首次配对检查一致。通知的角色与 `task capability-explain --role` 恢复入口明确对应。

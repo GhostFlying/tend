@@ -50,6 +50,54 @@ func TestNamedSelectionRequiresCommonBackendAndKeepsHostCapacity(t *testing.T) {
 	}
 }
 
+func TestCapabilityAcceptancePrerequisiteBoundaryAndFilter(t *testing.T) {
+	implementer := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "implement"}, BackendID: "git"}
+	reviewer := implementer
+	reviewer.Identity.LocalID = "review"
+	ref := protocol.CapabilityReference{CapabilityID: "image_gen", DefinitionRevision: 1}
+	host := Host{ID: "host", Executors: []Executor{{Pin: implementer, Categories: []string{"implementer"}}}}
+	c := Candidate{Kind: protocol.ActionImplement, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer", AgentID: "host/review", RequiredCapabilities: []protocol.CapabilityReference{ref}}}}
+	for _, scenario := range []string{"first", "waived", "assigned", "workspace_only", "no_workspace", "acceptance_action"} {
+		t.Run(scenario, func(t *testing.T) {
+			trial := c
+			want := true
+			switch scenario {
+			case "waived":
+				trial.AcceptanceWaived, want = true, false
+			case "assigned":
+				trial.NamedExecutionAssigned, trial.WorkspaceHost, want = true, "host", false
+			case "workspace_only":
+				trial.WorkspaceHost = "host"
+			case "no_workspace":
+				trial.NamedExecutionAssigned = true
+			case "acceptance_action":
+				trial.Kind, want = protocol.ActionAccept, false
+			}
+			if RequiresAcceptancePrerequisite(trial) != want {
+				t.Fatal("prerequisite boundary differs", trial)
+			}
+			pin, _ := SelectExecution(host, trial)
+			if (pin == nil) != (want || trial.Kind == protocol.ActionAccept) {
+				t.Fatal("selection ignored prerequisite boundary", pin)
+			}
+		})
+	}
+	host.Executors = append(host.Executors, Executor{Pin: reviewer, Categories: []string{"reviewer"}, CapabilitySupport: true, DeclaredCapabilities: []protocol.CapabilityReference{ref}})
+	c.ReviewExecutionFilter = &reviewer
+	if pin, reason := SelectExecution(host, c); pin == nil || *pin != implementer || reason != "" {
+		t.Fatal("review prerequisite filter prevented valid pair", pin, reason)
+	}
+	c.ReviewExecutionFilter = &implementer
+	if pin, _ := SelectExecution(host, c); pin != nil {
+		t.Fatal("review filter overwrote acceptance identity/category", pin)
+	}
+	c.ReviewExecutionFilter = &reviewer
+	host.Executors[1].Pin.BackendID = "orca"
+	if pin, _ := SelectExecution(host, c); pin != nil {
+		t.Fatal("review filter bypassed common backend", pin)
+	}
+}
+
 func TestNamedModelEffortRequirementsFilterBothRoles(t *testing.T) {
 	implementation := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "implement"}, BackendID: "git", Profile: protocol.ExecutionProfile{Model: "implement-model", Effort: "high"}}
 	review := implementation
