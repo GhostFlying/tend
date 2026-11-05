@@ -148,6 +148,9 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if err := checkRepos(ctx, tx.Q(), p.Spec.Workspace.Repos()); err != nil {
 		return Outcome{}, err
 	}
+	if err := checkSpecCapabilities(ctx, tx.Q(), p.Spec); err != nil {
+		return Outcome{}, err
+	}
 	if err := checkSpecMounts(ctx, tx.Q(), p.Spec); err != nil {
 		return Outcome{}, err
 	}
@@ -356,6 +359,9 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 		if err := checkRepos(ctx, tx.Q(), addedRepos(current.Workspace, p.Spec.Workspace)); err != nil {
+			return Outcome{}, err
+		}
+		if err := checkSpecCapabilityUpdates(ctx, tx.Q(), current, *p.Spec); err != nil {
 			return Outcome{}, err
 		}
 		// A task that already has several mounts keeps them and waits for

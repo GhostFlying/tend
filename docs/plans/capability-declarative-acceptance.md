@@ -67,3 +67,11 @@
 | A17/A18 | main 新入口/schema roots 和旧声明 feature 协商并存；N/N−1 默认不变，不借整合改协议代际。 |
 | A19/A23 | 两侧 API/CLI 目录与生成类型完整、两侧 Web 回归入口保留；Capability 决策编号改 D176，main D174/D175 保留。 |
 | A26 | 最终 exact integration head/tree/main/base、targeted 初始失败/修正/终态、CI 真实状态分开记录；full HOLD/NOT_RUN，新的独立 review/验收未执行，不引用旧通过。 |
+
+Task required 更新 P2 有界补充（编码前；不替代原历史）：
+
+| 范围 | 必须观察 |
+|---|---|
+| R9 / A10、A21 | 无新增 mount 时，implementation/acceptance 分别新增和替换为未知 definition、未知 revision、退休 definition 均拒绝；合法新增/替换成功。保存真实 RED/GREEN，拒绝无 task/spec/event/outbox 副作用，原请求 replay、payload conflict、stale CAS 保持。 |
+| R9 / A04、A10、A15 | 同 role 未变历史引用在退休后允许合法其他更新（包括新增 mount），排序等价、删除可行；跨 role 新增与 revision 替换重新校验，不能从另一 role 借冻结豁免。原 spec/pin/binding 读回不变。 |
+| A26 当前门状态 | full 资源已经 release；implement 仅低负载 targeted。新对象需独立增量 review、once 机械绑定和独立核验后由验收 Run claim 一次，旧 review/full/CI 仅作历史。未执行不报 PASS；本轮不 merge/deploy。 |

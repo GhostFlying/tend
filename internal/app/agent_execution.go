@@ -20,7 +20,7 @@ func hostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 // legacy host worker remains authoritative for tasks without explicit selection.
 func checkSpecMounts(ctx context.Context, q store.Querier, spec domain.Spec) error {
 	if spec.AgentSelection != nil {
-		return checkSpecCapabilities(ctx, q, spec)
+		return nil
 	}
 	return checkMounts(ctx, q, spec.Workspace)
 }

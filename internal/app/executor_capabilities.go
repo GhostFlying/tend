@@ -64,13 +64,37 @@ func checkCapabilityReferences(ctx context.Context, q store.Querier, refs []prot
 }
 
 func checkSpecCapabilities(ctx context.Context, q store.Querier, s domain.Spec) error {
-	if s.AgentSelection == nil {
+	return checkSpecCapabilityUpdates(ctx, q, domain.Spec{}, s)
+}
+
+// References retained by the same role keep their frozen historical meaning.
+// Only a new exact reference needs an active definition, regardless of mounts.
+func checkSpecCapabilityUpdates(ctx context.Context, q store.Querier, current, next domain.Spec) error {
+	if next.AgentSelection == nil {
 		return nil
 	}
-	if err := checkCapabilityReferences(ctx, q, s.AgentSelection.Implementation.RequiredCapabilities); err != nil {
+	var previous protocol.TaskAgentSelection
+	if current.AgentSelection != nil {
+		previous = *current.AgentSelection
+	}
+	if err := checkAddedCapabilityReferences(ctx, q, previous.Implementation.RequiredCapabilities, next.AgentSelection.Implementation.RequiredCapabilities); err != nil {
 		return err
 	}
-	return checkCapabilityReferences(ctx, q, s.AgentSelection.Acceptance.RequiredCapabilities)
+	return checkAddedCapabilityReferences(ctx, q, previous.Acceptance.RequiredCapabilities, next.AgentSelection.Acceptance.RequiredCapabilities)
+}
+
+func checkAddedCapabilityReferences(ctx context.Context, q store.Querier, before, after []protocol.CapabilityReference) error {
+	refs, err := protocol.CanonicalCapabilityReferences(after)
+	if err != nil {
+		return err
+	}
+	var added []protocol.CapabilityReference
+	for _, ref := range refs {
+		if !slices.Contains(before, ref) {
+			added = append(added, ref)
+		}
+	}
+	return checkCapabilityReferences(ctx, q, added)
 }
 
 // ReportCapabilityEvidence accepts facts only from the authenticated, current

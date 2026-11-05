@@ -2,7 +2,18 @@
 
 本节先于新代码写入。owner source `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` content revision 1 优先于旧 spec2、下方历史计划和原调查 A01–A28。原计划提交 `6a8090ea`、旧候选 `7c7696fb`、原三输入及全部失败/Run/decision/request/unknown 历史保留；下文旧 native 建议不再是当前门禁。
 
-当前候选从 `7c7696fb` 续接，工作树核验干净，原 PR244 OPEN 且存在冲突；不另建 Task/Issue/环境，不改其他责任。完整 heavy 检查仍 HOLD，本轮仅源代码修订、必要低负载 targeted 和候选准备。独立 formal review 由 Tend 原责任链安排，不在本 worker 内启动其他 Agent。合入、安装与部署不在本轮授权。
+首次范围纠正时的历史状态：候选从 `7c7696fb` 续接，工作树核验干净，原 PR244 OPEN 且存在冲突；不另建 Task/Issue/环境，不改其他责任。当时完整 heavy 检查仍 HOLD，该批仅源代码修订、必要低负载 targeted 和候选准备。当前资源及执行角色约束见下方最新 P2 计划。独立 formal review 由 Tend 原责任链安排，不在本 worker 内启动其他 Agent。合入、安装与部署不在本轮授权。
+
+## Task required 更新 P2 修复计划（R9，编码前）
+
+本轮只承接 owner 转交的 `c9961cfd` source review P2：`UpdateIntent.Apply` 仅在新增 mount 时经 `checkSpecMounts` 校验 Capability，导致无新增 mount 的 required 更新可写入未知或退休引用。起始工作树干净，PR244 head 为 `c9961cfd`、base/main 为 `e07b8098`。本节及 D176/矩阵补充先于测试与产品代码；owner source v1 继续优先于旧 spec2/A01–A28，原 P2 工具实证、P5 真实调用费用门仍撤销。本轮 P2 是代码 review 严重度，与旧阶段 P2 无关。
+
+1. 用真实 App UpdateIntent、相同 workspace/mount，分别覆盖 implementation/acceptance 的新增及替换 required：未知 definition、未知 revision、退休 definition 拒绝，合法引用成功。先保存修复前 RED；拒绝不得推进 task/spec/event/outbox，原请求 replay/CAS 保持。
+2. 将 Capability 校验与 mount 校验解耦。创建仍校验全部引用；更新只按同 role 的当前冻结集合校验新增精确 `(capability_id, definition_revision)`，换 role 也算新增。删除不要求定义仍 active，未变引用继续历史冻结；新增 mount 也不能强制重验未变历史引用。
+3. 定向覆盖定义退休后既有 required 的合法更新、排序、删除、跨 role 及 revision 替换，读回原 spec/pin/binding 字节；既有普通身份、共享预算、unknown 原请求及请求事务不变。
+4. 兼容判断：落实已文档化的新引用必须存在且 active 的合同，修正漏校验路径；不改变 wire/default/runner 通信与合法历史引用，保持 2/1 feature 协商，无 schema/迁移/CLI 输入变化。最终增量 review 独立执行，旧 c996 review 不重跑或充当新候选通过。
+5. 本 implement Run 仅 nice19/GOMAXPROCS2/package1/testparallel1 串行 targeted/必要 vet/diff；full 资源现已 release，但仅独立验收可在新对象门通过、once 机械绑定并独立核验后 claim，本 Run 不启动 full/验证 clone/环境/Agent。交真实新 commit、原 PR244 快进候选、RED/GREEN/report/files/manifest；不 merge/deploy/install。
+6. 冻结的 PB7 owner answer v2 与 acc PFF9 blocked/旧 HOLD、supplemental messages[] 的上下文差异只作机制总账证据，不修改 AnswerDecision/handoff 或 once 脚本。旧 Run settled 事实按冻结输入保留；本机进程检查未见遗留检查，worker 工具无 live Run 账本查询，不能额外声称全局 settled。
 
 ## 当前 main 整合批次（编码前）
 
