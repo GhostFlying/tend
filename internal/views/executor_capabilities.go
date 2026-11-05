@@ -156,7 +156,8 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 		// Admission conditions not related to capabilities are shared too.
 		host.ConcurrencyBlocked = map[string]bool{}
 		runtime, err := store.GetHostRuntime(ctx, q, host.ID)
-		if err != nil {
+		runtimeUnobserved := errors.Is(err, store.ErrNotFound)
+		if err != nil && !runtimeUnobserved {
 			return v, err
 		}
 		for _, e := range append(slices.Clone(host.Executors), host.Continuations...) {
@@ -181,7 +182,11 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 		restored.Busy, restored.Slots = 0, 1
 		restored.ConcurrencyBlocked = nil
 		var hostReason *protocol.QueueWaitReason
-		if !host.available {
+		if runtimeUnobserved {
+			// A configured runner need not have sent Hello yet. Keep this
+			// missing observation local to the host, not a whole-query failure.
+			hostReason = &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "runner runtime has not been observed for host " + host.ID, HostID: host.ID}
+		} else if !host.available {
 			hostReason = &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "runner is offline or in maintenance", HostID: host.ID}
 		} else if !runtime.Online || now-runtime.LastHeartbeatAt >= 60000 {
 			hostReason = &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "runner is offline or its heartbeat expired", HostID: host.ID}

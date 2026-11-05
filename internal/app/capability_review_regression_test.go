@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,105 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func addUnobservedCapabilityHost(t *testing.T, h *harness) {
+	t.Helper()
+	config := testConfig()
+	host := config.Hosts[0]
+	host.HostID = "never-connected"
+	config.Hosts = append(config.Hosts, host)
+	if op := h.syncConfig(config); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		_, err := store.GetHostRuntime(t.Context(), tx.Q(), host.HostID)
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("expected an unobserved host, got %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilityExplanationPreservesHealthyClaimWithUnobservedHost(t *testing.T) {
+	h, r, pin := capabilitySetup(t)
+	task := capabilityTask(t, h)
+	addUnobservedCapabilityHost(t, h)
+	explanation, err := h.app.TaskCapabilityExplanation(t.Context(), task, 0, protocol.RoleImplement)
+	if err != nil || explanation.State != "eligible" {
+		t.Fatal("unobserved host hid healthy candidate", explanation, err)
+	}
+	if !strings.Contains(strings.Join(explanation.Reasons, " "), "runner runtime has not been observed for host never-connected") {
+		t.Fatal("unobserved host reason missing", explanation.Reasons)
+	}
+	found := false
+	for _, c := range explanation.Candidates {
+		if c.Identity.ExecutionEnvironmentID == "never-connected" {
+			t.Fatal("invented executor for unobserved host", c)
+		}
+		if c.Identity == pin.Identity && c.Current.State == "eligible" && c.SchedulingReason == nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("healthy frozen executor missing", explanation)
+	}
+	op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil), Claim{})
+	var result claimResult
+	if err := json.Unmarshal(op.Result, &result); err != nil || op.Status != protocol.OpSucceeded || result.Assignment.TaskID != task || result.Assignment.Execution == nil || *result.Assignment.Execution != pin {
+		t.Fatal("explanation and claim disagree", op, err)
+	}
+}
+
+func TestCapabilityWaitNoticeSurvivesUnobservedHost(t *testing.T) {
+	h, _, _ := capabilitySetup(t)
+	task := capabilityTask(t, h)
+	addUnobservedCapabilityHost(t, h)
+	h.clock.Advance(11 * time.Minute)
+	for range 2 {
+		if err := h.app.SweepCapabilityWaits(t.Context()); err != nil {
+			t.Fatal("unobserved host blocked notification", err)
+		}
+	}
+	explanation, err := h.app.TaskCapabilityExplanation(t.Context(), task, 0, protocol.RoleImplement)
+	if err != nil || explanation.State != "pending" {
+		t.Fatal("expired healthy host must still wait", explanation, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		for _, check := range []struct {
+			query string
+			want  int
+		}{
+			{`SELECT COUNT(*) FROM capability_wait_notices WHERE task_id=?`, 1},
+			{`SELECT COUNT(*) FROM events WHERE object_id=? AND kind='task.capability_wait_notified'`, 1},
+		} {
+			var n int
+			if err := tx.Q().QueryRowContext(t.Context(), check.query, task).Scan(&n); err != nil {
+				return err
+			}
+			if n != check.want {
+				t.Fatalf("%s: got %d, want %d", check.query, n, check.want)
+			}
+		}
+		var n int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM attentions WHERE json_extract(body_json,'$.title') LIKE 'Required capability%'`).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Fatal("attention missing or duplicated", n)
+		}
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM executor_capability_evidence`).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			t.Fatal("notification created native evidence", n)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Exercise the authenticated report and reconnect paths with a historical
 // binding, rather than testing a declaration matcher against fabricated IDs.

@@ -146,3 +146,12 @@
 2. R2：保留普通 adapter 不可用的候选事实供只读解释，claim 仍只使用可用 executor。按完整冻结身份/role/backend 约束核验可恢复性后，将容量、runtime admission、离线/adapter 等待投影为 pending；无声明/修订/不兼容仍 unavailable。通过 App 查询与 Claim 真实路径验证拒领和恢复后可领。
 3. R3：更新当前使用指南与一次持久等待通知，恢复建议为显式配置声明及恢复同 executor 普通可用性；旧 verify/source/session 材料明确为历史诊断，不作为新匹配前置。
 4. 运行有界 targeted 回归，记录 exact head/tree、task base、PR head/base/main、diff 与结果。heavy full 继续 HOLD；独立 review、最终 full/required CI、目标集成仍须原责任链安排，本轮不 merge/deploy。
+
+## 缺失主机运行事实修复计划（编码前）
+
+本轮接续对 `e9473586` 的独立验收 finding，仍以 owner v1 为准，不重做调查或恢复旧 native 门。
+
+1. TaskCapabilities 将 `GetHostRuntime` 的 `store.ErrNotFound` 作为该主机尚无运行观测处理，提供包含主机身份的不可用原因；其他存储错误继续返回。没有 Hello 不得构造 executor 或声明、放宽冻结身份及共享预算，也不得中断健康主机的候选查询。
+2. 在 App 真实查询与 Claim 路径加入无关未连接主机的反例，证明健康声明候选仍 eligible 且可领取；单独覆盖未观测主机原因，不将缺失事实当作在线。
+3. 在超过十分钟的等待任务上验证同一未连接主机不阻断 SweepCapabilityWaits：一次持久通知和事件、重复 sweep 无重复通知，不探测工具或产生验证证据。
+4. 先记录旧对象的回归失败，再做最小修复及有界 targeted/vet/static 检查，交付新 commit、diff、报告和 manifest。heavy/full、仓库独立 review、目标集成与 required CI 未完成仍分别列明，不启动其他 Agent、环境或部署。

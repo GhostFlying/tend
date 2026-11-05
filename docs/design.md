@@ -982,3 +982,5 @@ D174 范围修订（优先于以上 native-gate 历史文字）：依据 owner s
 D174 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明 feature peer 可接收。旧 binding 字段缺省仍保持原字节，原 evidence-only peer 的已分配运行可继续读取/恢复，不向它添加声明 current_match；新 runner 使用原冻结配置声明和普通 resolver。旧验证请求和 evidence 只作为可选诊断与原请求对账，不能生成新 Run 的资格或重写历史绑定。配置严格解码增加 int64 definition revision 的合法整数读取，仍拒绝分数、字符串、溢出及非正 revision；这是修复声明文件路径，不改变旧有效配置的默认值。
 
 D174 旧运行恢复及等待投影补充：缺省 match_policy 的历史 evidence-only binding 保留专用历史恢复适配；原请求上报可同事务追加同 pin 的新鲜 revalidation，并向旧协商 peer 返回原有格式。该适配不参与 declaration_v1 的新匹配或启动，不能把旧工具实证门加回声明式运行。只读解释保留不可用 executor 的身份与声明事实，普通容量/adapter 等待按完整冻结约束判为 pending；claim 始终只使用普通可用 executor。当前恢复指导为显式登记声明、恢复同入口可用性及 unknown 原请求对账。
+
+D174 未观测主机补充：已配置主机尚未发送 Hello 时，缺失 host_runtime 是该主机未观测的普通可用性事实，不能使其他主机的 Task 能力解释或十分钟持久等待通知整体失败。查询保留健康候选并明确该主机原因，不推断其在线、声明或 executor；非缺失类存储错误仍返回。冻结身份、声明修订、原入口及共享预算围栏保持不变。
