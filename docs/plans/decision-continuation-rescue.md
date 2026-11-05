@@ -64,3 +64,9 @@ retained-run 恢复、CLI transport、用量观测、Capability 或 UI 工作，
    独立规定 review 与 required CI；可并行提交/PR CI，但合入前门必须覆盖最终候选。
 
 本分支仅交付代码和可审查证据；原未知执行、follow-up Task、其工作区和线上控制均不动。
+
+## 兼容结论修正
+
+初版对未声明策略的旧有效请求默认等待，已确认改变原 handoff 合同，不能以字段可选或
+N/N−1 测试通过称为兼容。后续实施以[兼容修正计划](decision-continuation-compatibility.md)
+为准：旧默认保持，显式新 typed 入口才声明新等待合同。原计划和初版 Git 对象保留作历史。
