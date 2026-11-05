@@ -58,3 +58,19 @@ text-only 和显式/native request identity；两个 stopped handoff 的 A→B/B
 前提与 continuation 混合环；后续 canonical/legacy plan 加边关闭环。GREEN 同时验证合法
 无环链、原回答/策略/版本/失败回执原子性与原有兼容矩阵。只执行工具包全量和相关图/问答
 边界，不重复完整检查。最终实质 delta 交独立 reviewer 评估复审范围，不沿用旧结论。
+
+
+## 最后评审的 owner 来源撤回修正
+
+最终评审证实新 typed IssueManager 回答入口只检查消息已入站和 Issue 范围；
+撤回后 cancelled outbox 仍可被视为已准入，原 owner author 检查不足以证明当前授权。
+仅对新 typed IssueManager 来源复用现有 `validateAttentionOwnerRelay`，在回答、policy
+和后继 action 写入前拒绝已撤回 owner 消息。不扩大 legacy answer 或 ResponsibleAgent
+自产答复合同，不修改 outbox 历史，也不替换原 source、request identity 或 CAS。
+
+先用真实 manager named-tool callback 建立撤回来源仍能 continue_now 的 RED，验证拒绝后
+原 decision/policy/action 与协调 effect 保留原状，同一原 callback 保持一致拒绝；保留既有
+授权拒绝不记录业务失败 request receipt 的语义，不伪造成功或 unknown。同时保留未撤回
+同源 callback 成功正例。只执行相关低优先级 race 目标，不开启完整检查或新模型评审。
+修复提交交独立 reviewer 核最小 delta，再由集成 writer 纳入最终候选；旧 REQUEST_CHANGES
+和 RED 历史不改写。

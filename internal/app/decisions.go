@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -167,6 +168,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		if expected != task.ControlRevision {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "parent task control revision changed")
+		}
+		if c.FromMessage && !c.Responsible && x.coordinationExecution != nil && x.coordinationExecution.Selection.Purpose == agentconfig.IssueManager {
+			if err := validateAttentionOwnerRelay(ctx, tx.Q(), x, x.coordinationExecution.IssueID, p.SourceMessageID); err != nil {
+				return Outcome{}, err
+			}
 		}
 	}
 	if c.Responsible {
