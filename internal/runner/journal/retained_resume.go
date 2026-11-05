@@ -93,7 +93,19 @@ func (j *Journal) SetRetainedResume(ctx context.Context, id string, p protocol.R
 	if err != nil {
 		return err
 	}
-	return j.exec(ctx, `INSERT INTO retained_run_resumes(run_id,authority_json) VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET authority_json=excluded.authority_json`, id, string(b))
+	return j.tx(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `INSERT INTO retained_run_resumes(run_id,authority_json)
+		 SELECT run_id,? FROM runs WHERE run_id=? AND phase<>'done'
+		 ON CONFLICT(run_id) DO UPDATE SET authority_json=excluded.authority_json`, string(b), id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err == nil && n == 0 {
+			return ErrNotFound
+		}
+		return err
+	})
 }
 func (j *Journal) RetainedResume(ctx context.Context, id string) (*protocol.RetainedRunResume, error) {
 	var raw string

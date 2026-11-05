@@ -385,7 +385,31 @@ func (j *Journal) Replace(ctx context.Context, runID, phase, oldRequestID string
 
 // Done marks a run done and forgets its request and events.
 func (j *Journal) Done(ctx context.Context, runID string) error {
+	return j.done(ctx, runID, nil)
+}
+
+// DoneRetainedStop validates the independent Stop and preserves its outstanding
+// facts in the same transaction that ends local responsibility.
+func (j *Journal) DoneRetainedStop(ctx context.Context, runID string, stop RetainedStop) error {
+	return j.done(ctx, runID, &stop)
+}
+
+func (j *Journal) done(ctx context.Context, runID string, stop *RetainedStop) error {
 	return j.tx(ctx, func(tx *sql.Tx) error {
+		if stop != nil {
+			var raw, assignment string
+			var stopped bool
+			if err := tx.QueryRowContext(ctx, `SELECT a.authority_json,r.assignment_json,r.stopped_confirmed FROM retained_run_resumes a JOIN runs r USING(run_id) WHERE run_id=? AND r.phase<>'done'`, runID).Scan(&raw, &assignment, &stopped); err != nil {
+				return err
+			}
+			var current retainedResumeRecord
+			if err := json.Unmarshal([]byte(raw), &current); err != nil {
+				return err
+			}
+			if !stopped || current.Stop == nil || *current.Stop != *stop || stop.HelloRequestID == "" || stop.AssignmentSHA256 != assignmentDigest(assignment) {
+				return errors.New("journal: original Stop no longer authorizes completion")
+			}
+		}
 		if err := archiveRetainedStop(ctx, tx, runID); err != nil {
 			return fmt.Errorf("journal: preserve stopped strict facts: %w", err)
 		}
