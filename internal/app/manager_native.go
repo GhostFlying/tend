@@ -161,7 +161,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if method == "close" && p.Error == "" {
+		if method == "close" && p.Error == "" && !p.Rejected {
 			var last, pending int64
 			if err = tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0),COALESCE(SUM(CASE WHEN applied=0 THEN 1 ELSE 0 END),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&last, &pending); err != nil {
 				return Outcome{}, err
@@ -183,9 +183,19 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if method == "close" && p.Error == "" {
+		if method == "close" && p.Error == "" && !p.Rejected {
 			if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {
 				return Outcome{}, err
+			}
+			r, err := store.GetRun(ctx, tx.Q(), run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
+				// A prior independent stop can end the transport before this
+				// original close reply arrives. Retain its result without ending
+				// the Run again or rewriting its original failure/lease facts.
+				return Outcome{Result: p}, nil
 			}
 			preserved, err := preserveMaintenancePhysicalStop(ctx, x, tx, run, p.LastSequence)
 			if err != nil {

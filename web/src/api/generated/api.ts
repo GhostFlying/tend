@@ -219,6 +219,11 @@ export type MessageState =
 export type ToolStatus = "running" | "completed" | "failed" | "interrupted";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunDesired".
+ */
+export type RunDesired = "run" | "paused" | "stopped" | "held";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TokenScope".
  */
 export type TokenScope = "owner";
@@ -337,6 +342,7 @@ export interface TendAPI {
   LocalRepositoryBinding?: LocalRepositoryBinding;
   LocalRepositoryStatus?: LocalRepositoryStatus;
   ManagerMigrationPayload?: ManagerMigrationPayload;
+  ManagerRetirementStatus?: ManagerRetirementStatus;
   ManagerRunReconciliation?: ManagerRunReconciliation;
   ManualSource?: ManualSource;
   MessagingChannel?: MessagingChannel;
@@ -374,6 +380,7 @@ export interface TendAPI {
   RespondInteraction?: RespondInteraction;
   ResumeDecisionContinuationPayload?: ResumeDecisionContinuationPayload;
   RetainedRunReconciliation?: RetainedRunReconciliation;
+  RetireManagerRunPayload?: RetireManagerRunPayload;
   ReuseIssuePayload?: ReuseIssuePayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
   ReviewIssueSourcesPayload?: ReviewIssueSourcesPayload;
@@ -3461,6 +3468,50 @@ export interface ManagerMigrationPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManagerRetirementStatus".
+ */
+export interface ManagerRetirementStatus {
+  action_id: string;
+  assignment_epoch: number;
+  blockers: string[] | null;
+  can_retire: boolean;
+  desired: RunDesired;
+  event_last_sequence: number;
+  execution?: RunExecutionPin;
+  execution_sha256?: string;
+  host_id: string;
+  issue_id: string;
+  issue_revision: number;
+  lease_id: string;
+  lease_status: string;
+  more: boolean;
+  native_requests: ManagerNativeRequestStatus[] | null;
+  next_after?: string;
+  observed: RunObserved;
+  pending_business_receipts: boolean;
+  retirement_request_id?: string;
+  run_id: string;
+  task_id: string;
+  task_revision: number;
+  unapplied_events: number;
+  unresolved_native_requests: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManagerNativeRequestStatus".
+ */
+export interface ManagerNativeRequestStatus {
+  error: boolean;
+  method: string;
+  rejected: boolean;
+  request_id: string;
+  result_hash_omitted?: boolean;
+  result_present: boolean;
+  result_sha256?: string;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ManagerRunReconciliation".
  */
 export interface ManagerRunReconciliation {
@@ -4062,6 +4113,22 @@ export interface RetainedRunIdentity {
   lease_id: string;
   spec_version: number;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RetireManagerRunPayload".
+ */
+export interface RetireManagerRunPayload {
+  execution_sha256: string;
+  expected_assignment_epoch: number;
+  expected_issue_revision: number;
+  expected_source_revision?: number;
+  host_id: string;
+  issue_id: string;
+  lease_id: string;
+  reason: string;
+  run_id: string;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -69,6 +69,9 @@ func appendCanonicalTaskFacts(ctx context.Context, q store.Querier, root string,
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	if err := appendRetiringManagerFacts(ctx, q, root, f); err != nil {
+		return err
+	}
 	reviews, err := store.ListPendingCompletionReviews(ctx, q, root)
 	if err != nil {
 		return err

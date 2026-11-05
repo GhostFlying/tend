@@ -171,6 +171,7 @@
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
 | D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
+| D177 | owner 可在 cancelling 责任中按原 Task/Issue CAS、epoch、Run/host/lease/pin 显式退休 manager；只请求原生停止并冻结协调，真实回执、未应用事件和未知业务仍独立挡取消终态。 | 已实现，待验证 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -1050,3 +1051,14 @@ wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 
 ## D175：TraeX 原 rollout 的终态补证
 
 独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证只在原 observation record 位置的局部副本上发布真实事实，不覆盖冲突身份或已有确定原生结果；生命周期 Agent 始终沿用原 native-api 观测，补证不参与完成、恢复、控制或历史清理。每轮只发布一次 projection，不反复切换原弱观测与补证 revision，不创建会话或重发输入。TraeX 观测以持久语义指纹区分相同原生身份的 running 与后续终态/结束时钟/operations；排除采样时间，真实变化只推进一次 revision，相同事实及重启重放沿用原事件身份。指纹仅用于观测去重，不改变原生绑定或生命周期权限；旧 thread JSON 缺失字段仍可读取，首次补齐语义元数据可追加一次事实。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。
+
+
+## D177：取消中的原 manager 退休
+
+Issue 的 cancelling 仍保留已 assigned manager 的受限协调，支持其正常处理剩余责任。owner 明确接管外部取消收尾时，可用 `task retire-manager` 指定原 Task revision、Issue revision/assignment epoch、Run/host/lease 和 execution pin 的规范 JSON SHA256。只接受当前 cancelling 责任的同一冻结执行；不从当前 catalog 重新选择 Agent，不续 lease，不创建后继业务 Run。
+
+同一 app 事务记录原退休 request、冻结普通协调准入、取消该 manager 待调度及已分配的协调动作，并将原 Run desired 设为 stopped。显式 stop 优先于 receipt-only 调度例外。退休标记阻止后台刷新创建普通或自动 receipt-only 后继，未知业务仍留待独立、明确授权的原身份对账；此控制不触发模型或直接 native 调用。`task manager-retirement` 只读取服务端原账本和按原 request ID 分页的 native method/status/结果摘要，不读取进程、不返回 payload、prompt 或凭据；结果摘要只对不超过 64KiB UTF-8 字节的原 JSON 计算，较大结果明确省略。
+
+Task cancelled、退休请求成功和 desired stopped 均不代表原生停止。原 runner/harness 继续负责真实 close 与停止核验，只有原 credential/Run/request/cursor 的回执可结束物理执行及释放 lease。独立 stopped 之后迟到的原成功 close 只补存原回执，不重做 endRun 或覆盖原 failed/lease 事实；明确 rejected 的 close 不是物理停止证明。原 started 请求的 unknown、未应用 native event 和未决业务收据均独立阻止退休责任的 `finish_cancel`，未 claim 请求可由真实停止路径明确拒绝。原 manager 自行完成正常取消的既有路径保留；新增检查只覆盖 owner 显式退休的责任。
+
+CLI 提供完整具名查询、显式输入和原信封导出；响应未知时先查原 request，重放必须保原 request_id、完整 payload 和两种 CAS，不能自动刷新或换 ID。新增 owner operation 与查询，不改变 server/runner wire 字段或旧默认协调行为，不增加迁移或协议版本。见[实施计划](plans/manager-cancellation-retirement.md)及[操作合同](manager-reconciliation.md)。

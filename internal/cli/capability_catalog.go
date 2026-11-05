@@ -45,7 +45,7 @@ func CapabilityBindings() []CapabilityBinding {
 				args = append(args, "sample")
 			}
 		}
-		if cmd.Name == "task manager-reconciliation" {
+		if cmd.Name == "task manager-reconciliation" || cmd.Name == "task manager-retirement" {
 			args = append(args, "--run", "original")
 		}
 		capability := "GET " + strings.Split(cmd.Route, "?")[0]
@@ -63,6 +63,8 @@ func CapabilityBindings() []CapabilityBinding {
 				args = append(args, "--data", `{"expected_revision":0}`)
 			} else if cmd.Operation == protocol.OpReconcileManagerRun {
 				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
+			} else if cmd.Operation == protocol.OpRetireManagerRun {
+				args = append(args, "--issue", "sample", "--issue-revision", "4", "--assignment-epoch", "3", "--run", "original", "--host", "original-host", "--lease", "original-lease", "--pin-sha256", strings.Repeat("a", 64), "--reason", "Retire the original cancelling manager")
 			} else {
 				args = append(args, "--data", `{}`)
 			}
@@ -314,6 +316,10 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nRetained ordinary Orca Run recovery: maintenance-reconciliation is ledger-only; can_continue does not prove a live native turn or restored execution. Copy identity, every protection entry (including original_requests_json), protection_set_sha256 and task_revision from the exact original Run. continue-retained accepts the identity fields at the payload top level, the complete protections array, its hash and an independent reason; a cited source_message_id also requires expected_source_revision.\n")
 		out.WriteString("Use --revision with that original Task control revision, an explicit --request-id and --file <proof.json> (or --data <json>). Save --dry-run output as the original Envelope before submitting. The command authorizes strict attachment through the original journal and same lease only; it does not send a continuation, create a session or clear historical protection/unknown facts. Missing native evidence, old runners, pending business or a new maintenance capture keep recovery blocked.\n")
 		out.WriteString("If the result is unknown, retain the original ID, input, revision and Envelope. Run tend request show <original-id> before tend request replay --file <original-envelope.json>; replay exact bytes only, never replace the ID or refresh the proof to retry an unknown request.\n")
+	}
+	if name == "task manager-retirement" || name == "task retire-manager" {
+		out.WriteString("\nCancellation-only manager retirement: query the exact original Task/Run and retain its Task revision, Issue revision, assignment epoch, host, lease and execution pin SHA256. retire-manager requests that original manager stop without creating a replacement Run or authorizing ordinary coordination. A successful admission does not prove physical stop or finish Issue cancellation; inspect manager-retirement and original native receipts.\n")
+		out.WriteString("Use the complete proof flags or --data/--file, --revision and a stable --request-id. --dry-run exports the original Envelope. On an unknown result, keep the original input, control values and request ID, run tend request show <original-id>, then tend request replay --file <original-envelope.json> for an identical retry. Never refresh proof or replace the request ID to retry an unknown action.\n")
 	}
 	if name == "decide" || name == "decision-continuation" || strings.HasPrefix(name, "decision-continuation ") {
 		out.WriteString("\nLegacy decide preserves automatic handoff after answer and stopped receipts. Use decision-continuation answer for conditional scheduling; it requires the parent Task --revision plus complete version, option/text and explicit continuation. Free text never proves a typed dependency.\n")

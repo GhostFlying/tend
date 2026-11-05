@@ -7849,6 +7849,166 @@
       "title": "ManagerMigrationPayload",
       "type": "object"
     },
+    "ManagerNativeRequestStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "boolean"
+        },
+        "method": {
+          "type": "string"
+        },
+        "rejected": {
+          "type": "boolean"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result_hash_omitted": {
+          "type": "boolean"
+        },
+        "result_present": {
+          "type": "boolean"
+        },
+        "result_sha256": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "method",
+        "status",
+        "result_present",
+        "error",
+        "rejected"
+      ],
+      "title": "ManagerNativeRequestStatus",
+      "type": "object"
+    },
+    "ManagerRetirementStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_retire": {
+          "type": "boolean"
+        },
+        "desired": {
+          "$ref": "#/definitions/RunDesired"
+        },
+        "event_last_sequence": {
+          "type": "integer"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "execution_sha256": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_revision": {
+          "type": "integer"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "lease_status": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "native_requests": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ManagerNativeRequestStatus"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "pending_business_receipts": {
+          "type": "boolean"
+        },
+        "retirement_request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "task_revision": {
+          "type": "integer"
+        },
+        "unapplied_events": {
+          "type": "integer"
+        },
+        "unresolved_native_requests": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "issue_id",
+        "issue_revision",
+        "assignment_epoch",
+        "task_id",
+        "task_revision",
+        "run_id",
+        "action_id",
+        "host_id",
+        "lease_id",
+        "lease_status",
+        "observed",
+        "desired",
+        "can_retire",
+        "blockers",
+        "event_last_sequence",
+        "unapplied_events",
+        "unresolved_native_requests",
+        "pending_business_receipts",
+        "native_requests",
+        "more"
+      ],
+      "title": "ManagerRetirementStatus",
+      "type": "object"
+    },
     "ManagerRunReconciliation": {
       "additionalProperties": false,
       "properties": {
@@ -10365,6 +10525,53 @@
       "title": "RetainedRunReconciliation",
       "type": "object"
     },
+    "RetireManagerRunPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_sha256": {
+          "type": "string"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_issue_revision": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "expected_issue_revision",
+        "expected_assignment_epoch",
+        "run_id",
+        "host_id",
+        "lease_id",
+        "execution_sha256",
+        "reason"
+      ],
+      "title": "RetireManagerRunPayload",
+      "type": "object"
+    },
     "ReuseIssuePayload": {
       "additionalProperties": false,
       "properties": {
@@ -10609,6 +10816,16 @@
       ],
       "title": "RolloutPreviewReference",
       "type": "object"
+    },
+    "RunDesired": {
+      "enum": [
+        "run",
+        "paused",
+        "stopped",
+        "held"
+      ],
+      "title": "RunDesired",
+      "type": "string"
     },
     "RunExecutionPin": {
       "additionalProperties": false,
@@ -14874,6 +15091,9 @@
     "ManagerMigrationPayload": {
       "$ref": "#/definitions/ManagerMigrationPayload"
     },
+    "ManagerRetirementStatus": {
+      "$ref": "#/definitions/ManagerRetirementStatus"
+    },
     "ManagerRunReconciliation": {
       "$ref": "#/definitions/ManagerRunReconciliation"
     },
@@ -14984,6 +15204,9 @@
     },
     "RetainedRunReconciliation": {
       "$ref": "#/definitions/RetainedRunReconciliation"
+    },
+    "RetireManagerRunPayload": {
+      "$ref": "#/definitions/RetireManagerRunPayload"
     },
     "ReuseIssuePayload": {
       "$ref": "#/definitions/ReuseIssuePayload"

@@ -45,6 +45,8 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "question-inputs revoke", Operation: "decisions.revoke_inputs", Target: "decision", RevisionRoute: "/api/v1/decisions/{id}/inputs", RevisionField: "revision", JSONDefault: true},
 	{Name: "task manager-reconciliation", Route: "/api/v1/tasks/{id}/manager-reconciliation", Queries: "run=run_id", JSONDefault: true},
 	{Name: "task reconcile-manager", Operation: protocol.OpReconcileManagerRun, Target: "task", RevisionRoute: "-"},
+	{Name: "task manager-retirement", Route: "/api/v1/tasks/{id}/manager-retirement", Queries: "run=run_id after limit", JSONDefault: true},
+	{Name: "task retire-manager", Operation: protocol.OpRetireManagerRun, Target: "task", RevisionRoute: "-", JSONDefault: true},
 	{Name: "inbox list", Route: "/api/v1/inbox", Queries: "issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit"},
 	{Name: "session show", Route: "/api/v1/session"},
 	{Name: "deployment show", Route: "/api/v1/deployment"},
@@ -161,6 +163,12 @@ func findCapabilityCommand(args []string) (capabilityCommand, []string, bool) {
 func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, args []string) error {
 	if cmd.Name == "task reconcile-manager" {
 		return runManagerReconciliation(ctx, e, args)
+	}
+	if cmd.Name == "task retire-manager" {
+		return runManagerRetirement(ctx, e, args)
+	}
+	if cmd.Name == "task manager-retirement" {
+		return runManagerRetirementStatus(ctx, e, args)
 	}
 	fs := newFlags(e, cmd.Name)
 	if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" || strings.HasPrefix(cmd.Name, "decision-continuation ") {

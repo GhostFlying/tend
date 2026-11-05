@@ -95,6 +95,9 @@ func checkWorker(ctx context.Context, x *Exec, q store.Querier) error {
 // work that no longer matches the task stops, a task under human control
 // holds its runs, and a paused task pauses them.
 func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) protocol.RunDesired {
+	if run.DesiredState == protocol.DesiredStopped {
+		return protocol.DesiredStopped
+	}
 	var receipt struct {
 		ReceiptOnly bool `json:"receipt_only"`
 	}
@@ -103,8 +106,7 @@ func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) pr
 		return protocol.DesiredRun
 	}
 	switch {
-	case run.DesiredState == protocol.DesiredStopped,
-		run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed,
+	case run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed,
 		task.Lifecycle.Terminal(),
 		action.Status == protocol.ActionCancelled || action.Status == protocol.ActionSuperseded,
 		action.TargetSpecVersion != task.SpecVersion:
