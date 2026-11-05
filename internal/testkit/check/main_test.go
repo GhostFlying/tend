@@ -18,8 +18,8 @@ func TestCapacityAdaptsToEffectiveCPUsAndSupportsSequentialRecovery(t *testing.T
 	}{
 		{64, budget{7, 8, 4, 6, 2, false}},
 		{32, budget{7, 4, 2, 3, 2, false}},
-		{16, budget{4, 2, 2, 1, 2, true}},
-		{8, budget{2, 2, 2, 1, 2, true}},
+		{16, budget{4, 2, 2, 2, 2, true}},
+		{8, budget{2, 2, 2, 2, 2, true}},
 		{2, budget{1, 1, 1, 1, 2, true}},
 	} {
 		got, err := capacity(tc.cpus, 0, 0, 0)
@@ -30,6 +30,10 @@ func TestCapacityAdaptsToEffectiveCPUsAndSupportsSequentialRecovery(t *testing.T
 	b, err := capacity(64, 1, 0, 0)
 	if err != nil || b.jobs != 1 || b.shards != 1 || !b.exclusiveE2E {
 		t.Fatal(b, err)
+	}
+	b, err = capacity(8, 1, 0, 0)
+	if err != nil || b != (budget{1, 1, 1, 1, 4, true}) {
+		t.Fatal("explicit serial profile changed", b, err)
 	}
 	if _, err := capacity(64, 8, 0, 0); err == nil {
 		t.Fatal("unbounded group count accepted")
@@ -65,7 +69,7 @@ func TestAutomaticBudgetBoundsAllConcurrentTestProcesses(t *testing.T) {
 }
 
 func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
-	for _, cpus := range []int{2, 16, 64} {
+	for _, cpus := range []int{2, 8, 16, 64} {
 		b, _ := capacity(cpus, 0, 0, 0)
 		directory := t.TempDir()
 		parallel, isolated := tasks(b, directory, "selected-go", "selected-pnpm", 1)
@@ -76,6 +80,11 @@ func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
 			if !slices.Contains(task.env, "GO=selected-go") || !slices.Contains(task.env, "TEST_COUNT=1") ||
 				!slices.Contains(task.env, "TEST_SHARDS="+strconv.Itoa(b.suiteShards)) {
 				t.Fatalf("toolchain or uncached verification lost for %s", task.name)
+			}
+			if !slices.ContainsFunc(task.env, func(value string) bool {
+				return strings.HasPrefix(value, "GOFLAGS=") && strings.HasSuffix(value, " -p="+strconv.Itoa(b.packages))
+			}) {
+				t.Fatalf("package process budget lost for %s on %d CPUs", task.name, cpus)
 			}
 			if task.name == "web" {
 				want := "TEND_WEB_BUILD_OUT_DIR=" + filepath.Join(directory, "web-app")
