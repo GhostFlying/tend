@@ -827,6 +827,10 @@ worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 t
 不改写，后续 Retain/Continue 或新附着使旧 Stop 许可失效。见[计划](plans/retained-run-continuation.md)与
 [操作合同](retained-run-continuation.md)。
 
+严格附着的显式 Pause 仍中断已经验证的原 terminal，区别于 fence/shutdown 的零自动输入；
+未知或未附着不获得输入权限。原 pin 可由已协商能力/原 backend 下的 AgentContinuations
+证明继续可用，不要求它仍是当前新任务库存，也不替换其任何冻结字段。
+
 ## D160：Agent 运行关联与观测来源
 
 Agent 详情的 Issue 关联只读冻结的 run_agent_executions 身份与历史 pin，关联依次采用

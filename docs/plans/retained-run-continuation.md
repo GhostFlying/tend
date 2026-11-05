@@ -54,3 +54,10 @@ succeeded。runner 仅在 authenticated Hello 对原 journal 返回 Stop 时，�
 
 strict 最终请求遇到非成功或凭据撤销会明确唤醒 Hello 对账；Stop 若到达仍在报告的 executor，
 其退出必须再次唤醒，避免新许可被一次仍在退出的执行器消耗后无人收尾。
+
+独立复审控制补正：严格附着成功后，显式 Pause 仍须中断已经验证归属的原 terminal；
+不能与 fence/shutdown 的零自动输入混为一谈。仅在本次 beginRetained 成功后允许该
+Pause 中断，未知/未附着仍不发送输入，Hold 与显式 Stop 保留既有控制语义。
+原 pin 可用性同时接受已协商 continuation 能力与原 backend 下的 AgentContinuations
+完整精确 pin；不要求它仍是新任务库存，不借此扩大任何新任务选择范围。真实
+Hello/heartbeat 与 request/CAS/原pin保留回归覆盖库存变化后的继续和续租。

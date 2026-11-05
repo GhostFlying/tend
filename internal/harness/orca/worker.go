@@ -239,6 +239,9 @@ type worker struct {
 	// noticed a takeover.
 	holding         string
 	holdingEvidence map[string]any
+	// Only a successful native identity check admits an explicit pause of a
+	// strict attachment. This is not permission to send another prompt.
+	retainedAttached bool
 	// askedVerdict is set once an acceptance agent that finished without
 	// a verdict this worker received was asked for it again.
 	askedVerdict      bool
@@ -1190,9 +1193,10 @@ func (w *worker) stop(ctx context.Context, cause error) {
 	case errors.Is(cause, harness.ErrHeld), w.holding != "":
 		// The owner works in the agent: leave it alone.
 	default:
-		if w.spec.RetainedResume != nil {
+		if w.spec.RetainedResume != nil && (!errors.Is(cause, harness.ErrPaused) || !w.retainedAttached) {
 			// Observation-only attachment grants no implicit terminal input,
 			// including another interrupt during a fence or runner shutdown.
+			// Explicit pause still interrupts an already verified attachment.
 			return
 		}
 		w.st.Interrupted = true
