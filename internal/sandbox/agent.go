@@ -84,7 +84,7 @@ func (c *toolCaller) mutate(name, target string, revision *int64, payload, out a
 	return out == nil || json.Unmarshal(result.Outcome, out) == nil
 }
 
-func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.FakeThread, turn string, input harness.TurnInput, log *slog.Logger, onReplyDelta func(context.Context, harness.TurnInput), coordination chan struct{}, pace scriptPacing) string {
+func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.FakeThread, turn string, input harness.TurnInput, log *slog.Logger, onReplyDelta func(context.Context, string, string, harness.TurnInput), coordination chan struct{}, pace scriptPacing) string {
 	c := toolCaller{ctx: ctx, thread: th, turn: turn, log: log, coordination: coordination, pacing: pace}
 	if !delay(ctx, pace.thinking) {
 		return "interrupted"
@@ -273,7 +273,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 	if respond && !input.Repair && !formalReply {
 		if !streamReply(ctx, th, turn, response, pace.reply, func() {
 			if onReplyDelta != nil {
-				onReplyDelta(ctx, input)
+				onReplyDelta(ctx, th.ID(), turn, input)
 			}
 		}) {
 			return "interrupted"

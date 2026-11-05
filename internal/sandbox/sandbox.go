@@ -48,7 +48,7 @@ type Options struct {
 	// Ready runs after seeding, before serving, for test synchronization.
 	Ready func(*serverkit.Runtime, Demo)
 	// replyDelta is a sandbox-test synchronization point after the first delta.
-	replyDelta func(context.Context, harness.TurnInput)
+	replyDelta func(context.Context, string, string, harness.TurnInput)
 	// runnerTransport observes real loopback requests in lifecycle tests.
 	runnerTransport http.RoundTripper
 	// Test-only seed boundaries keep broad lifecycle tests lightweight.
