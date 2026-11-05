@@ -38,7 +38,7 @@ Refs: D151，延续 D149。
 - `make check`：完整自动预算，保留原生缓存。
 - `TEST_COUNT=1 TEST_REPORT_DIR=.local/test-reports make check`：完整强制重跑并输出原生 JSON；每组创建独立目录，每个分片保留独立文件，重复调用不覆盖已有报告。
 - `APP_TEST_SHARDS=4 TEST_SHARDS=2 make check`：显式调整 App 与其他长包的分片上限，仍统一计算进程预算。
-- `CHECK_JOBS=1 make check`：自动 App 与其他长包分片均回退为一，各组依次运行。
+- `CHECK_JOBS=1 CHECK_SERIAL_REASON="shared resource budget" make check`：自动 App 与其他长包分片均回退为一，各组依次运行。
 - `TEST_SHARDS=1 make test TEST_GROUP=e2e`：单进程运行完整 E2E，便于排查分片相关行为。
 
 迁移、已有路径重开、恢复相关入口仍直接使用 store.Open；模板只用于新建空库，绝不覆盖已有文件。sandbox 测试通过真实启动入口覆盖服务组装与迁移，本轮不为它增加绕过启动路径的注入。
