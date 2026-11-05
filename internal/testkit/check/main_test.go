@@ -69,6 +69,16 @@ func TestAutomaticBudgetBoundsAllConcurrentTestProcesses(t *testing.T) {
 }
 
 func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
+	for _, tc := range []struct{ name, flags string }{{"standalone", ""}, {"inherited", "-trimpath"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GOFLAGS", tc.flags)
+			checkTaskBudgetsAndIsolation(t)
+		})
+	}
+}
+
+func checkTaskBudgetsAndIsolation(t *testing.T) {
+	t.Helper()
 	for _, cpus := range []int{2, 8, 16, 64} {
 		b, _ := capacity(cpus, 0, 0, 0)
 		directory := t.TempDir()
@@ -82,7 +92,9 @@ func TestTasksCoverAllChecksWithPrivateWebAssets(t *testing.T) {
 				t.Fatalf("toolchain or uncached verification lost for %s", task.name)
 			}
 			if !slices.ContainsFunc(task.env, func(value string) bool {
-				return strings.HasPrefix(value, "GOFLAGS=") && strings.HasSuffix(value, " -p="+strconv.Itoa(b.packages))
+				key, flags, ok := strings.Cut(value, "=")
+				fields := strings.Fields(flags)
+				return ok && key == "GOFLAGS" && len(fields) > 0 && fields[len(fields)-1] == "-p="+strconv.Itoa(b.packages)
 			}) {
 				t.Fatalf("package process budget lost for %s on %d CPUs", task.name, cpus)
 			}
