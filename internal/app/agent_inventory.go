@@ -80,7 +80,7 @@ func (RegisterAgentInventory) Authorize(ctx context.Context, x *Exec, q store.Qu
 		if err != nil {
 			return err
 		}
-		if !runtimeSupportsExecutorCapabilities(p.Runtime) || !runtimeSupportsExecutorCapabilities(&current.Runtime) {
+		if !runtimeSupportsCapabilityInventory(p.Runtime) || !runtimeSupportsCapabilityInventory(&current.Runtime) {
 			return protocol.Errorf(protocol.CodeForbidden, "capability declaration extension was not negotiated")
 		}
 	}
@@ -91,8 +91,8 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Projection.CapabilityVersion != 0 && (p.Runtime == nil || !slices.Contains(p.Runtime.Capabilities, protocol.CapabilityExecutorEvidence)) {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "capability declarations require negotiated executor evidence support")
+	if p.Projection.CapabilityVersion != 0 && (p.Runtime == nil || !runtimeSupportsCapabilityInventory(p.Runtime)) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "capability declarations require negotiated capability declaration support")
 	}
 	if p.Projection.FormatVersion == 2 && (p.Runtime == nil || p.Runtime.Protocol < 2) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "format-2 inventory requires runner protocol 2")
@@ -169,7 +169,7 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 		}
 		result.Online, result.LastHeartbeatAtMillis = catalog.Online, catalog.LastHeartbeatAtMillis
 		result.Current, result.Projection = catalog.Current, catalog.Projection
-		if result.Projection != nil && result.Projection.CapabilityVersion != 0 && !runtimeSupportsExecutorCapabilities(input.Runtime) {
+		if result.Projection != nil && result.Projection.CapabilityVersion != 0 && !runtimeSupportsCapabilityInventory(input.Runtime) {
 			result.Projection = nil
 		}
 		if input.RequestID != "" {

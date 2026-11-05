@@ -1,6 +1,26 @@
+# 当前范围纠正与实施顺序
+
+本节先于新代码写入。owner source `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` content revision 1 优先于旧 spec2、下方历史计划和原调查 A01–A28。原计划提交 `6a8090ea`、旧候选 `7c7696fb`、原三输入及全部失败/Run/decision/request/unknown 历史保留；下文旧 native 建议不再是当前门禁。
+
+当前候选从 `7c7696fb` 续接，工作树核验干净，原 PR244 OPEN 且存在冲突；不另建 Task/Issue/环境，不改其他责任。完整 heavy 检查仍 HOLD，本轮仅源代码修订、必要低负载 targeted 和候选准备。独立 formal review 由 Tend 原责任链安排，不在本 worker 内启动其他 Agent。合入、安装与部署不在本轮授权。
+
+## 修订后的实施批次
+
+1. 更新 D174 和[替代验收矩阵](capability-declarative-acceptance.md)，逐条标注原 P0–P6、A01–A28 的适用、撤销或替代。
+2. 定义/修订维持 CAS、请求去重和追加历史；新定义支持 declaration_v1，历史 tool_inventory_v1 元数据继续可读但不控制匹配。配置 `capability_version=1` 的 Agent capabilities 是显式用户声明，支持在一个 reload/register 中逐项或批量配置。无声明不会按 CLI/品牌/模型推断。
+3. protocol matcher 只检查声明覆盖 required（包含 definition revision）；scheduler 另外保普通 executor 可用性、协商、身份/profile/backend、双 role 与共享预算。撤销 inventory/source/TTL/profile/session、prepare/adopt/consume/nativeguard/StartWithCapabilities 资格门。
+4. run binding 固定 required/digest、原 pin 以及该 pin 的 Agent revision（声明随历史 inventory 冻结）；claim/reconnect/launch 不探测工具，不启动额外会话，普通 Start 仍通过原 resolver 的精确身份。保留旧 binding/evidence/revalidation 的读取，不重写历史选择。用独立声明 feature 区分旧 native-gated peer，避免旧 runner 接到新语义而拒绝启动。
+5. 修正旧 review 三项：所有 capability precheck 在 NextAttempt 清 stop proof 之前；投影使用注入时钟且不再把 now=0 当 native 资格；解释候选不得覆盖原 required AgentID/RuntimeID/backend 来伪造匹配。新增反例回归。
+6. 更新 CLI/API 帮助、必要目录/UI 的声明/可用性投影与配置示例；双 role required、过滤/分页与旧修订查询仍保留。真实生图调用为零；不声称任何生产 Agent 已配置或部署。
+7. 必要 targeted 在现有工作树低负载运行，保原 CI journal-v14 fixture 失败与 P0 partial 事实。提交并更新原 PR 候选，记录 exact task base/head/tree 与 fresh PR base/target。最终 full/required CI/新独立 review 必须绑定最终候选；资源门未释放则明确 NOT_RUN/HOLD，不沿用旧通过。
+
+兼容评估：旧 required 为空和旧 feature 的默认/持久化字节不变；新声明语义使用另一个协商 feature，只给理解该语义的 runner 新 assignment。旧 v1 native binding 作为历史读取，未结束 run 沿冻结 pin 与声明，不改原 request/unknown。新 binding 显式 match_policy=declaration_v1；无该字段的旧 binding 继续允许原 evidence-only peer 原样恢复，不向其发送新 match_policy/声明 current_match。没有删除字段或收紧旧有效输入，不改变 runner 2/1 代际；旧 runner 不获声明模式任务。迁移仅追加，旧 reader 拒绝新 journal；生产升级/回滚库存审计仍由独立交付窗口承担。
+
+---
+
 # Capability 基础设施实施计划
 
-状态：续跑实施计划，承接原计划提交 `6a8090ea` 和原三文件；尚无产品代码。按冻结合同纠正，缺少 runtime 接口仅限制真实确认与生图步骤，不阻塞其余产品编码。计划仅覆盖候选准备，不授权合入、安装或部署。
+历史状态（已由下述范围纠正替代）：续跑实施计划，承接原计划提交 `6a8090ea` 和原三文件；尚无产品代码。按冻结合同纠正，缺少 runtime 接口仅限制真实确认与生图步骤，不阻塞其余产品编码。计划仅覆盖候选准备，不授权合入、安装或部署。
 
 ## 冻结输入与吸收
 

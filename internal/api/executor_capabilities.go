@@ -177,3 +177,33 @@ func (s *Server) taskCapabilityMatch(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, p)
 }
+
+func (s *Server) capabilityAgentRevisions(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.owner(r); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if err := rejectCapabilityQuery(r, "agent_revision", "after", "limit"); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	limit, err := capabilityLimit(r)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	var revision int64
+	if r.URL.Query().Has("agent_revision") {
+		revision, err = strconv.ParseInt(r.URL.Query().Get("agent_revision"), 10, 64)
+		if err != nil || revision < 1 {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "agent_revision must be positive"))
+			return
+		}
+	}
+	page, err := s.app.CapabilityAgentRevisions(r.Context(), r.PathValue("environment"), r.PathValue("agent"), revision, r.URL.Query().Get("after"), limit)
+	if err != nil {
+		s.writeError(w, r, notFound(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}

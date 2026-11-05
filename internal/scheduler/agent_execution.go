@@ -32,7 +32,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 			original.SnapshotID, observed.SnapshotID = "", ""
 			original.InventoryRevision, observed.InventoryRevision = 0, 0
 			original.PublicSHA256, observed.PublicSHA256 = "", ""
-			if observed == original && ExecutorCapabilityMatch(e, RequiredCapabilities(c)).State == "eligible" {
+			if observed == original && (c.ExecutionFilter == nil || e.Pin == *c.ExecutionFilter) && ExecutorCapabilityMatch(e, RequiredCapabilities(c)).State == "eligible" {
 				pin := *c.HandoffPin
 				return &pin, ""
 			}
@@ -134,7 +134,7 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		return cmp.Compare(a.Pin.BackendID, b.Pin.BackendID)
 	})
 	for _, e := range executors {
-		if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || !matches(e, role, c.Kind == protocol.ActionAccept) {
+		if c.ExecutionFilter != nil && *c.ExecutionFilter != e.Pin || h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || !matches(e, role, c.Kind == protocol.ActionAccept) {
 			continue
 		}
 		if c.Kind == protocol.ActionImplement && !c.AcceptanceWaived && (c.WorkspaceHost == "" || !c.NamedExecutionAssigned) {
@@ -174,8 +174,8 @@ func ExecutorCapabilityMatch(e Executor, required []protocol.CapabilityReference
 		m.State = "unavailable"
 		for i := range m.Reasons {
 			m.Reasons[i].State = "unavailable"
-			m.Reasons[i].Reason = "adapter_evidence_unsupported"
-			m.Reasons[i].Recovery = "use an explicitly supported evidence adapter at this exact entry; do not change provider implicitly"
+			m.Reasons[i].Reason = "declaration_protocol_unsupported"
+			m.Reasons[i].Recovery = "upgrade the same executor to the declaration scheduling contract; do not change provider implicitly"
 		}
 	}
 	return m

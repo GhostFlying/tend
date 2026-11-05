@@ -175,3 +175,20 @@ func capabilityCandidateKey(v protocol.AgentCapabilityView) string {
 	}
 	return key
 }
+
+func (a *App) CapabilityAgentRevisions(ctx context.Context, environment, agent string, revision int64, after string, limit int) (protocol.AgentCapabilityRevisionPage, error) {
+	var page protocol.AgentCapabilityRevisionPage
+	if !protocol.AgentInventoryID(environment) || !protocol.AgentInventoryID(agent) || revision < 0 {
+		return page, protocol.Errorf(protocol.CodeInvalidRequest, "valid environment, Agent and nonnegative revision are required")
+	}
+	limit, err := capabilityPageLimit(limit)
+	if err != nil {
+		return page, err
+	}
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		page, err = store.ListAgentCapabilityRevisions(ctx, tx.Q(), environment, agent, revision, after, limit)
+		return err
+	})
+	return page, err
+}

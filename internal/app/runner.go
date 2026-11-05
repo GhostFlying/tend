@@ -237,14 +237,16 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		as.ConcurrencyFeedback = slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAdaptiveConcurrency)
 		as.Execution = pin
 		if binding, err := store.GetRunCapabilityBinding(ctx, q, run.RunID); err == nil {
-			if !runtimeSupportsExecutorCapabilities(&runtime.Runtime) {
+			if !runtimeSupportsCapabilityDeclarations(&runtime.Runtime) && (binding.MatchPolicy != "" || !runtimeSupportsExecutorCapabilities(&runtime.Runtime)) {
 				return as, protocol.Errorf(protocol.CodeInvalidTransition, "runner cannot recover capability-constrained execution")
 			}
 			match, err := currentRunCapabilityMatch(ctx, q, binding, runtime.Runtime, now)
 			if err != nil {
 				return as, err
 			}
-			binding.CurrentMatch = &match
+			if runtimeSupportsCapabilityDeclarations(&runtime.Runtime) {
+				binding.CurrentMatch = &match
+			}
 			if recovery, err := store.GetRunCapabilityRevalidation(ctx, q, run.RunID); err == nil {
 				if match.State == "eligible" && slices.Equal(recovery.EvidenceIDs, match.EvidenceIDs) {
 					binding.Revalidation = &recovery
@@ -364,7 +366,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 
-	if !runtimeSupportsExecutorCapabilities(p.Runtime) {
+	if !runtimeSupportsCapabilityDeclarations(p.Runtime) {
 		for i := range executors {
 			executors[i].CapabilitySupport = false
 		}
@@ -422,25 +424,22 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 		if refs := scheduler.RequiredCapabilities(pick); len(refs) > 0 {
-			var match protocol.CapabilityMatch
-			for _, e := range append(slices.Clone(schedulingHost.Executors), schedulingHost.Continuations...) {
-				if e.Pin == *execution {
-					match = scheduler.ExecutorCapabilityMatch(e, refs)
-					break
-				}
+			binding := protocol.RunCapabilityBinding{MatchPolicy: "declaration_v1", Evidence: []protocol.ExecutorCapabilityEvidence{}, Required: slices.Clone(refs), RequiredSHA256: protocol.CapabilityRequiredDigest(refs), EvidenceIDs: []string{}, Pin: *execution, BoundAtMillis: now}
+			// A handoff can retain the original inventory receipt while an unrelated
+			// edit changes the current enclosing snapshot. Validate declarations at the
+			// selected original pin, just as reconnect does; never substitute a new pin.
+			runtime, err := store.GetHostRuntime(ctx, q, host.HostID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			match, err := currentRunCapabilityMatch(ctx, q, binding, runtime.Runtime, now)
+			if err != nil {
+				return Outcome{}, err
 			}
 			if match.State != "eligible" {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "capability evidence became ineligible")
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "capability declaration became ineligible")
 			}
-			boundEvidence := []protocol.ExecutorCapabilityEvidence{}
-			for _, id := range match.EvidenceIDs {
-				e, err := store.GetCapabilityEvidence(ctx, q, id)
-				if err != nil {
-					return Outcome{}, err
-				}
-				boundEvidence = append(boundEvidence, e)
-			}
-			binding := protocol.RunCapabilityBinding{Evidence: boundEvidence, Required: slices.Clone(refs), RequiredSHA256: protocol.CapabilityRequiredDigest(refs), EvidenceIDs: slices.Clone(match.EvidenceIDs), Pin: *execution, BoundAtMillis: now}
+
 			if err := tx.InsertRunCapabilityBinding(ctx, run.RunID, binding); err != nil {
 				return Outcome{}, err
 			}
@@ -596,6 +595,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			}
 		}
 		res.ExecutorCapabilities = runtimeSupportsExecutorCapabilities(p.Runtime)
+		res.CapabilityDeclarations = runtimeSupportsCapabilityDeclarations(p.Runtime)
 		res.AgentExecution = runtimeSupportsAgentExecution(p.Runtime)
 		res.AgentInventory = protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
 	}

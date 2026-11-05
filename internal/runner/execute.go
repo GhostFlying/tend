@@ -325,6 +325,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		_ = r.flushEvents(flushCtx, as)
 		return nil
 	}
+	startWorker, err := r.capabilityWorkerStart(runCtx, as, execution)
+	if err != nil {
+		return err
+	}
 	// Reset stop proof only when another native attempt is actually about to
 	// start. Recovering a durable question must preserve the predecessor exit.
 	attempt, err := r.cfg.Journal.NextAttempt(ctx, as.RunID)
@@ -346,10 +350,6 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		if err := r.cfg.Journal.SetThread(ctx, as.RunID, run.Thread); err != nil {
 			return err
 		}
-	}
-	startWorker, err := r.capabilityWorkerStart(runCtx, as, execution)
-	if err != nil {
-		return err
 	}
 	w, err := startWorker(runCtx, harness.WorkerSpec{ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {

@@ -88,6 +88,11 @@ func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The version-14 fixture must not pre-create tables from later migrations.
+	var futureTables int
+	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('capability_verifications','run_capability_receipts')`).Scan(&futureTables); err != nil || futureTables != 0 {
+		t.Fatal("version-14 fixture contains future capability tables", futureTables, err)
+	}
 	if _, err := db.ExecContext(t.Context(), "PRAGMA user_version=14"); err != nil {
 		t.Fatal(err)
 	}

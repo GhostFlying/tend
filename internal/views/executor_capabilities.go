@@ -13,20 +13,6 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func currentCapabilityEvidence(ctx context.Context, q store.Querier, pin protocol.RunExecutionPin, r protocol.RunnerRuntime) ([]protocol.ExecutorCapabilityEvidence, error) {
-	all, err := store.AgentCapabilityEvidence(ctx, q, pin.Identity.ExecutionEnvironmentID, pin.Identity.LocalID)
-	if err != nil {
-		return nil, err
-	}
-	out := []protocol.ExecutorCapabilityEvidence{}
-	for _, e := range all {
-		if e.Pin == pin && e.InstanceID == r.InstanceID && e.Generation == r.Generation {
-			out = append(out, e)
-		}
-	}
-	return out, nil
-}
-
 // CapabilityAgents retains declarations and historical evidence even when the
 // corresponding adapter is offline. It never probes or creates reservations.
 func CapabilityAgents(ctx context.Context, q store.Querier, now int64) ([]protocol.AgentCapabilityView, string, error) {
@@ -94,7 +80,7 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 			} else if !found {
 				v.Current.State = "pending"
 				for _, ref := range agent.Capabilities {
-					v.Current.Reasons = append(v.Current.Reasons, protocol.CapabilityReason{Capability: ref, State: "pending", Reason: "runner_or_adapter_unavailable", Recovery: "restore the same registered executor and obtain fresh evidence"})
+					v.Current.Reasons = append(v.Current.Reasons, protocol.CapabilityReason{Capability: ref, State: "pending", Reason: "runner_or_adapter_unavailable", Recovery: "restore the same explicitly configured executor"})
 				}
 			}
 			out = append(out, v)
@@ -130,7 +116,7 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 			refs = spec.AgentSelection.Acceptance.RequiredCapabilities
 		}
 	}
-	v := protocol.TaskCapabilityExplanation{TaskID: taskID, SpecVersion: version, Role: role, Required: slices.Clone(refs), State: "unavailable", Candidates: []protocol.AgentCapabilityView{}, Reasons: []string{}, CheckedAtMillis: now, DeadlineMillis: task.CreatedAt + 600000, Recovery: "read exact candidate reasons; verify the same entry once or explicitly revise a future Task spec; reconcile unknown original requests"}
+	v := protocol.TaskCapabilityExplanation{TaskID: taskID, SpecVersion: version, Role: role, Required: slices.Clone(refs), State: "unavailable", Candidates: []protocol.AgentCapabilityView{}, Reasons: []string{}, CheckedAtMillis: now, DeadlineMillis: task.CreatedAt + 600000, Recovery: "read candidate reasons; explicitly register declarations or revise a future Task spec; reconcile unknown original requests"}
 	facts, err := readExecutionFacts(ctx, q)
 	if err != nil {
 		return v, err
@@ -197,18 +183,7 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 			}
 			m := scheduler.ExecutorCapabilityMatch(executor, refs)
 			trial := c
-			if c.AgentSelection != nil {
-				selection := c.AgentSelection.Clone()
-				if role == protocol.RoleAccept {
-					selection.Acceptance.AgentID = p.Identity.ExecutionEnvironmentID + "/" + p.Identity.LocalID
-					selection.Acceptance.RuntimeID = p.Runtime.RuntimeID
-				} else {
-					selection.Implementation.AgentID = p.Identity.ExecutionEnvironmentID + "/" + p.Identity.LocalID
-					selection.Implementation.RuntimeID = p.Runtime.RuntimeID
-				}
-				trial.AgentSelection = &selection
-				trial.WorkspaceBackendID = p.BackendID
-			}
+			trial.ExecutionFilter = &p
 			schedulingReason := scheduler.SkipReason(host.Host, trial)
 			candidate := protocol.AgentCapabilityView{SchedulingReason: schedulingReason, Binding: p.Runtime, Categories: slices.Clone(executor.Categories), Purposes: []string{"worker_run"}, Identity: p.Identity, AgentRevision: p.AgentRevision, Declared: slices.Clone(executor.DeclaredCapabilities), Pin: &p, Current: m, Evidence: executor.CapabilityEvidence}
 			v.Candidates = append(v.Candidates, candidate)

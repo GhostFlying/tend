@@ -177,11 +177,7 @@ func (ReportCapabilityEvidence) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err := tx.InsertCapabilityEvidence(ctx, e); err != nil {
 		return Outcome{}, err
 	}
-	events, err := recordCapabilityRevalidations(ctx, x, tx, e, current.Runtime)
-	if err != nil {
-		return Outcome{}, err
-	}
-	events = append(events, Event{ObjectType: "host", ObjectID: x.Principal.Subject, Kind: "host.capability_evidence_recorded", Body: map[string]any{"evidence_id": e.EvidenceID, "state": e.State, "capability_id": e.Capability.CapabilityID}})
+	events := []Event{{ObjectType: "host", ObjectID: x.Principal.Subject, Kind: "host.capability_evidence_recorded", Body: map[string]any{"evidence_id": e.EvidenceID, "state": e.State, "capability_id": e.Capability.CapabilityID}}}
 	return Outcome{Result: e, Events: events}, nil
 }
 
@@ -211,57 +207,41 @@ func (a *App) CapabilityEvidenceRequest(ctx context.Context, p protocol.Principa
 }
 
 func currentRunCapabilityMatch(ctx context.Context, q store.Querier, b protocol.RunCapabilityBinding, r protocol.RunnerRuntime, now int64) (protocol.CapabilityMatch, error) {
-	all, err := store.AgentCapabilityEvidence(ctx, q, b.Pin.Identity.ExecutionEnvironmentID, b.Pin.Identity.LocalID)
+	// Read declarations from the frozen inventory, never the latest Agent.
+	inv, err := store.GetAgentInventoryAt(ctx, q, b.Pin)
 	if err != nil {
 		return protocol.CapabilityMatch{}, err
 	}
-	current := []protocol.ExecutorCapabilityEvidence{}
-	for _, e := range all {
-		if e.Pin == b.Pin && e.InstanceID == r.InstanceID && e.Generation == r.Generation {
-			current = append(current, e)
+	var declared []protocol.CapabilityReference
+	for _, agent := range inv.Projection.Agents {
+		if agent.Identity == b.Pin.Identity && agent.Revision == b.Pin.AgentRevision && agent.Binding == b.Pin.Runtime && agent.RequestedModel == b.Pin.Profile.Model && agent.RequestedEffort == b.Pin.Profile.Effort {
+			declared = agent.Capabilities
 		}
 	}
-	return protocol.MatchExecutorCapabilities(b.Pin, b.Required, b.Required, current, now), nil
-}
-func recordCapabilityRevalidations(ctx context.Context, x *Exec, tx *store.Tx, e protocol.ExecutorCapabilityEvidence, r protocol.RunnerRuntime) ([]Event, error) {
-	events := []Event{}
-	if e.Kind != "tool_inventory" {
-		return events, nil
-	}
-	runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), x.Principal.Subject)
+	m := protocol.MatchExecutorCapabilities(b.Pin, b.Required, declared, nil, now)
+	host, err := store.GetHostRuntime(ctx, q, b.Pin.Identity.ExecutionEnvironmentID)
 	if err != nil {
-		return nil, err
+		return m, err
 	}
-	for _, run := range runs {
-		b, err := store.GetRunCapabilityBinding(ctx, tx.Q(), run.RunID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
+	available := false
+	for _, e := range append(slices.Clone(r.AgentExecutors), r.AgentContinuations...) {
+		observed, original := e.Pin, b.Pin
+		observed.SnapshotID, original.SnapshotID = "", ""
+		observed.InventoryRevision, original.InventoryRevision = 0, 0
+		observed.PublicSHA256, original.PublicSHA256 = "", ""
+		if e.Available && observed == original {
+			available = true
 		}
-		if err != nil {
-			return nil, err
+	}
+	if !host.Online || now-host.LastHeartbeatAt >= 60000 || !available {
+		if m.State == "eligible" {
+			m.State = "pending"
 		}
-		if b.Pin != e.Pin {
-			continue
-		}
-		match, err := currentRunCapabilityMatch(ctx, tx.Q(), b, r, x.Now.UnixMilli())
-		if err != nil {
-			return nil, err
-		}
-		if match.State != "eligible" || !slices.Contains(match.EvidenceIDs, e.EvidenceID) {
-			continue
-		}
-		recovery := protocol.RunCapabilityRevalidation{RequestID: x.Env.RequestID, Pin: b.Pin, RequiredSHA256: b.RequiredSHA256, EvidenceIDs: match.EvidenceIDs, ObservedAtMillis: x.Now.UnixMilli()}
-		for _, id := range match.EvidenceIDs {
-			fact, err := store.GetCapabilityEvidence(ctx, tx.Q(), id)
-			if err != nil {
-				return nil, err
+		for i := range m.Reasons {
+			if m.Reasons[i].State == "eligible" {
+				m.Reasons[i].State, m.Reasons[i].Reason, m.Reasons[i].Recovery = "pending", "original_executor_unavailable", "restore the same frozen executor; do not switch identity or provider"
 			}
-			recovery.Evidence = append(recovery.Evidence, fact)
 		}
-		if err := tx.InsertRunCapabilityRevalidation(ctx, run.RunID, recovery); err != nil {
-			return nil, err
-		}
-		events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.capability_revalidated", Body: map[string]any{"request_id": recovery.RequestID, "evidence_ids": recovery.EvidenceIDs}})
 	}
-	return events, nil
+	return m, nil
 }

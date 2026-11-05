@@ -11,6 +11,10 @@ import (
 
 // CapabilityExecutorEvidence is a wire feature, not an execution capability.
 const CapabilityExecutorEvidence = "executor-capabilities-v1"
+
+// CapabilityExecutorDeclarations negotiates declaration-based scheduling. Older
+// evidence-gated runners must never receive assignments under this contract.
+const CapabilityExecutorDeclarations = "executor-capability-declarations-v1"
 const OpRunnerCapabilityEvidence = "runner.capability_evidence"
 const CapabilityEvidenceTTLMillis int64 = 300000
 
@@ -62,7 +66,7 @@ type CapabilityDefinition struct {
 	State              string `json:"state"`
 	ContractVersion    int64  `json:"contract_version"`
 	VerificationPolicy string `json:"verification_policy"`
-	ToolName           string `json:"tool_name"`
+	ToolName           string `json:"tool_name,omitempty"`
 }
 
 type PutCapabilityPayload struct {
@@ -71,12 +75,26 @@ type PutCapabilityPayload struct {
 	State              string `json:"state"`
 	ContractVersion    int64  `json:"contract_version"`
 	VerificationPolicy string `json:"verification_policy"`
-	ToolName           string `json:"tool_name"`
+	ToolName           string `json:"tool_name,omitempty"`
 }
 
 func (p PutCapabilityPayload) Validate() error {
-	if strings.TrimSpace(p.Title) == "" || len(p.Title) > 200 || len(p.Description) > 16000 || !slices.Contains([]string{"active", "retired"}, p.State) || p.ContractVersion != 1 || p.VerificationPolicy != "tool_inventory_v1" || !AgentInventoryID(p.ToolName) {
-		return Errorf(CodeInvalidRequest, "invalid capability definition or unsupported verification contract")
+	if strings.TrimSpace(p.Title) == "" || len(p.Title) > 200 || len(p.Description) > 16000 || !slices.Contains([]string{"active", "retired"}, p.State) || p.ContractVersion != 1 {
+		return Errorf(CodeInvalidRequest, "invalid capability definition")
+	}
+	switch p.VerificationPolicy {
+	case "declaration_v1":
+		if p.ToolName == "" {
+			return nil
+		}
+	case "tool_inventory_v1":
+		// Historical definition metadata remains accepted. Neither policy makes
+		// native inventory or actual execution a declaration scheduling gate.
+	default:
+		return Errorf(CodeInvalidRequest, "unsupported capability definition policy")
+	}
+	if !AgentInventoryID(p.ToolName) {
+		return Errorf(CodeInvalidRequest, "invalid capability tool metadata")
 	}
 	return nil
 }
@@ -174,51 +192,22 @@ type CapabilityMatch struct {
 	CheckedAtMillis int64                 `json:"checked_at_ms"`
 }
 
-// MatchExecutorCapabilities is shared by scheduling and read-only explanations.
-// No inference from a CLI/model/category, heartbeat, or execution success is made.
-func MatchExecutorCapabilities(pin RunExecutionPin, required, declared []CapabilityReference, evidence []ExecutorCapabilityEvidence, now int64) CapabilityMatch {
+// MatchExecutorCapabilities checks explicit declarations, including their exact
+// definition revisions. Historical tool evidence is accepted for API stability
+// but never grants or revokes a configuration label. The caller binds declared
+// to the immutable Agent revision of pin and checks ordinary executor readiness.
+func MatchExecutorCapabilities(_ RunExecutionPin, required, declared []CapabilityReference, _ []ExecutorCapabilityEvidence, now int64) CapabilityMatch {
 	m := CapabilityMatch{State: "eligible", Required: slices.Clone(required), Reasons: []CapabilityReason{}, EvidenceIDs: []string{}, CheckedAtMillis: now}
 	for _, ref := range required {
-		r := CapabilityReason{Capability: ref, State: "pending", Reason: "evidence_unverified", Recovery: "verify the exact configured executor once; reconcile any unknown original request"}
-		var latest *ExecutorCapabilityEvidence
-		for i := range evidence {
-			e := &evidence[i]
-			if e.Capability == ref && e.Pin == pin && e.Kind != "execution" && (latest == nil || e.Generation > latest.Generation || e.Generation == latest.Generation && e.Sequence > latest.Sequence) {
-				latest = e
-			}
-		}
+		reason := CapabilityReason{Capability: ref, State: "eligible", Reason: "capability_declared", Recovery: "configuration declaration only; actual tool execution is not verified"}
 		if !slices.Contains(declared, ref) {
-			r.State, r.Reason, r.Recovery = "unavailable", "capability_undeclared", "revise and register this Agent declaration explicitly"
-		} else if latest != nil {
-			e := *latest
-			r.EvidenceID, r.ExpiresAtMillis = e.EvidenceID, e.ExpiresAtMillis
-			switch {
-			case e.Validate(now) != nil:
-				r.Reason = "evidence_invalid"
-			case e.ExpiresAtMillis <= now:
-				r.Reason = "evidence_expired"
-			case e.Kind == "simulation":
-				r.Reason = "simulation_only"
-			case e.Scope != "profile":
-				r.State, r.Reason = "unavailable", "session_adoption_unsupported"
-			case e.State == "unavailable":
-				r.State, r.Reason = "unavailable", e.Reason
-			case e.State == "unverified":
-				r.Reason = e.Reason
-				if e.Reason == "adapter_evidence_unsupported" {
-					r.State = "unavailable"
-				}
-			case e.State == "confirmed" && e.Kind == "tool_inventory" && e.Reason == "tool_exposed":
-				r.State, r.Reason, r.Recovery = "eligible", "tool_exposed", "recheck the same binding before launch"
-				m.EvidenceIDs = append(m.EvidenceIDs, e.EvidenceID)
+			reason.State, reason.Reason, reason.Recovery = "unavailable", "capability_undeclared", "explicitly declare this definition revision and register the Agent configuration"
+			if slices.ContainsFunc(declared, func(d CapabilityReference) bool { return d.CapabilityID == ref.CapabilityID }) {
+				reason.Reason = "capability_revision_mismatch"
 			}
-		}
-		m.Reasons = append(m.Reasons, r)
-		if r.State == "unavailable" {
 			m.State = "unavailable"
-		} else if r.State == "pending" && m.State == "eligible" {
-			m.State = "pending"
 		}
+		m.Reasons = append(m.Reasons, reason)
 	}
 	return m
 }
@@ -233,6 +222,7 @@ type RunCapabilityRevalidation struct {
 }
 
 type RunCapabilityBinding struct {
+	MatchPolicy    string                       `json:"match_policy,omitempty"`
 	CurrentMatch   *CapabilityMatch             `json:"current_match,omitempty"`
 	Revalidation   *RunCapabilityRevalidation   `json:"revalidation,omitempty"`
 	Evidence       []ExecutorCapabilityEvidence `json:"evidence"`
@@ -331,3 +321,18 @@ type CapabilityEvidenceRequestStatus struct {
 }
 
 const OpRunnerCapabilityEvidenceStatus = "runner.capability_evidence_status"
+
+// AgentCapabilityRevision is a historical configuration declaration, without
+// any claim about the availability of its executor or native tools.
+type AgentCapabilityRevision struct {
+	Definition        AgentInventoryDefinition `json:"definition"`
+	InventoryRevision int64                    `json:"inventory_revision"`
+	ServerRevision    int64                    `json:"server_revision"`
+	SnapshotID        string                   `json:"snapshot_id"`
+	PublicSHA256      string                   `json:"public_sha256"`
+}
+type AgentCapabilityRevisionPage struct {
+	Items []AgentCapabilityRevision `json:"items"`
+	Next  string                    `json:"next_after,omitempty"`
+	AsOf  int64                     `json:"as_of"`
+}

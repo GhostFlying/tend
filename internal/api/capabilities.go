@@ -21,6 +21,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/capabilities/{id}", s.executionCapability},
 		{"GET /api/v1/capabilities/{id}/revisions", s.executionCapabilities},
 		{"GET /api/v1/agent-capabilities", s.agentCapabilities},
+		{"GET /api/v1/agent-capabilities/{environment}/{agent}/revisions", s.capabilityAgentRevisions},
 		{"GET /api/v1/agent-capabilities/{environment}/{agent}", s.agentCapabilities},
 		{"GET /api/v1/agent-capabilities/{environment}/{agent}/evidence", s.capabilityEvidenceHistory},
 		{"GET /api/v1/capability-evidence/{id}", s.capabilityEvidence},

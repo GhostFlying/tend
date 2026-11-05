@@ -7,54 +7,90 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
-type capabilityWorkersFixture struct {
-	evidence protocol.ExecutorCapabilityEvidence
-	starts   int
-}
+// This adapter deliberately implements only the ordinary execution interface.
+type declarationWorkersFixture struct{ starts int }
 
-func (w *capabilityWorkersFixture) Start(context.Context, harness.WorkerSpec) (harness.Worker, error) {
-	panic("capability launch used ordinary start")
-}
-func (w *capabilityWorkersFixture) CapabilityInventory(context.Context, protocol.RunExecutionPin, protocol.CapabilityReference) (protocol.ExecutorCapabilityEvidence, error) {
-	return w.evidence, nil
-}
-func (w *capabilityWorkersFixture) StartWithCapabilities(context.Context, harness.WorkerSpec, protocol.RunCapabilityBinding) (harness.Worker, error) {
+func (w *declarationWorkersFixture) Start(context.Context, harness.WorkerSpec) (harness.Worker, error) {
 	w.starts++
 	return nil, nil
 }
-
-func TestCapabilityLaunchRechecksSourceAndIncarnationBeforeBusiness(t *testing.T) {
+func declarationAssignment() protocol.Assignment {
+	pin := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "agent"}, AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "runtime", Revision: 1}, InventoryRevision: 1, SnapshotID: "snapshot", PublicSHA256: "sha256:" + strings.Repeat("a", 64), Profile: protocol.ExecutionProfile{Model: "model"}, Worker: protocol.WorkerAppServer, BackendID: "git"}
+	refs := []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}
+	binding := protocol.RunCapabilityBinding{Pin: pin, Required: refs, RequiredSHA256: protocol.CapabilityRequiredDigest(refs)}
+	return protocol.Assignment{Execution: &pin, CapabilityBinding: &binding}
+}
+func TestCapabilityLaunchUsesFrozenDeclarationAndOrdinaryStart(t *testing.T) {
 	r := controlRunner(t)
-	now := r.cfg.Now().UnixMilli()
-	digest := "sha256:" + strings.Repeat("a", 64)
-	pin := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "agent"}, AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "runtime", Revision: 1}, InventoryRevision: 1, SnapshotID: "snapshot", PublicSHA256: digest, Profile: protocol.ExecutionProfile{Model: "model"}, Worker: protocol.WorkerAppServer, BackendID: "git"}
-	ref := protocol.CapabilityReference{CapabilityID: "image_gen", DefinitionRevision: 1}
-	e := protocol.ExecutorCapabilityEvidence{EvidenceID: "evidence", Pin: pin, Capability: ref, InstanceID: "instance", Generation: 1, Sequence: 1, Kind: "tool_inventory", Scope: "profile", Complete: true, State: "confirmed", Reason: "tool_exposed", ObservedAtMillis: now - 1, ExpiresAtMillis: now + 1000, Source: &protocol.CapabilityToolSource{Kind: "native", ID: "fixture", Version: "v1", ToolName: "image_gen__imagegen", SchemaSHA256: digest, ExecutableSHA256: digest, ConfigurationSHA256: digest}}
-	binding := protocol.RunCapabilityBinding{Pin: pin, Required: []protocol.CapabilityReference{ref}, RequiredSHA256: protocol.CapabilityRequiredDigest([]protocol.CapabilityReference{ref}), EvidenceIDs: []string{e.EvidenceID}, Evidence: []protocol.ExecutorCapabilityEvidence{e}}
-	as := protocol.Assignment{Execution: &pin, CapabilityBinding: &binding}
-	r.confirmedRuntime = protocol.RunnerRuntime{InstanceID: "instance", Generation: 1}
-	w := &capabilityWorkersFixture{evidence: e}
-	start, err := r.capabilityWorkerStart(t.Context(), as, ResolvedExecution{Workers: w})
+	as := declarationAssignment()
+	w := &declarationWorkersFixture{}
+	resolved := ResolvedExecution{Workers: w, DeclaredCapabilities: as.CapabilityBinding.Required}
+	start, err := r.capabilityWorkerStart(t.Context(), as, resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := start(t.Context(), harness.WorkerSpec{}); err != nil || w.starts != 1 {
 		t.Fatal(err, w.starts)
 	}
-	s := *e.Source
-	s.Version = "v2"
-	w.evidence.Source = &s
-	if _, err := r.capabilityWorkerStart(t.Context(), as, ResolvedExecution{Workers: w}); err == nil {
-		t.Fatal("changed tool version launched")
+	// Native evidence and its lifetime never become launch requirements.
+	as.CapabilityBinding.Evidence = []protocol.ExecutorCapabilityEvidence{{Reason: "tool_absent", ExpiresAtMillis: 1}}
+	if _, err := r.capabilityWorkerStart(t.Context(), as, resolved); err != nil {
+		t.Fatal(err)
 	}
-	w.evidence = e
-	r.confirmedRuntime.Generation++
-	if _, err := r.capabilityWorkerStart(t.Context(), as, ResolvedExecution{Workers: w}); err == nil {
-		t.Fatal("old incarnation launched")
+	for _, mutate := range []func(*protocol.Assignment, *ResolvedExecution){
+		func(_ *protocol.Assignment, r *ResolvedExecution) { r.DeclaredCapabilities = nil },
+		func(a *protocol.Assignment, _ *ResolvedExecution) { a.CapabilityBinding.Pin.AgentRevision++ },
+		func(a *protocol.Assignment, _ *ResolvedExecution) { a.CapabilityBinding.RequiredSHA256 = "wrong" },
+	} {
+		original := declarationAssignment()
+		resolution := resolved
+		mutate(&original, &resolution)
+		if _, err := r.capabilityWorkerStart(t.Context(), original, resolution); err == nil {
+			t.Fatal("invalid declaration binding launched")
+		}
 	}
 	if w.starts != 1 {
-		t.Fatal("business started after failed preflight", w.starts)
+		t.Fatal("precheck started business", w.starts)
+	}
+}
+
+type declarationExecutionResolver struct {
+	ExecutionResolver
+	resolved ResolvedExecution
+}
+
+func (r declarationExecutionResolver) Resolve(context.Context, protocol.RunExecutionPin) (ResolvedExecution, error) {
+	return r.resolved, nil
+}
+
+func TestCapabilityPrecheckPreservesPriorStopProofBeforeAnyStart(t *testing.T) {
+	r := controlRunner(t)
+	as := declarationAssignment()
+	as.RunID, as.TaskID, as.Role, as.Desired = "run_precheck", "task", protocol.RoleImplement, protocol.DesiredRun
+	as.Workspace.BackendID = as.Execution.BackendID
+	w := &declarationWorkersFixture{}
+	r.cfg.Executions = declarationExecutionResolver{resolved: ResolvedExecution{Workers: w, Workspaces: completionWorkspaces{}}}
+	ctx := t.Context()
+	if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.cfg.Journal.NextAttempt(ctx, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.work(ctx, ctx, as, &active{as: as, desired: protocol.DesiredRun}); err == nil {
+		t.Fatal("undeclared frozen configuration started")
+	}
+	run, err := r.cfg.Journal.Run(ctx, as.RunID)
+	if err != nil || run.Attempts != 1 || !run.StoppedConfirmed || w.starts != 0 {
+		t.Fatalf("precheck cleared prior stop proof: %+v starts=%d err=%v", run, w.starts, err)
 	}
 }

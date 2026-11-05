@@ -40,6 +40,9 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
+	// ExecutionFilter restricts a read-only explanation to one exact candidate.
+	// It never replaces the task requirements or its frozen owner pins.
+	ExecutionFilter *protocol.RunExecutionPin
 	// AcceptanceWaived comes only from the server-frozen task policy.
 	AcceptanceWaived            bool
 	QuestionHandoff             bool

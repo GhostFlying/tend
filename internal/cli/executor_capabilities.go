@@ -15,7 +15,7 @@ import (
 
 func runLocalCapabilityCommand(ctx context.Context, e *Env, args []string) error {
 	if len(args) == 0 {
-		return usagef("agents local capabilities verify|status|reconcile --socket <path>; verify never calls a model; reconcile reads the original request")
+		return usagef("agents local capabilities verify|status|reconcile --socket <path>; verify is optional legacy diagnostics, never a declaration gate; reconcile reads the original request")
 	}
 	action := args[0]
 	fs := newFlags(e, "agents local capabilities "+action)

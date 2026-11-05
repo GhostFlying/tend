@@ -214,6 +214,8 @@ type Runner struct {
 	upgradeError                  string
 	downloadedBytes               int64
 	confirmedRuntime              protocol.RunnerRuntime
+
+	capabilityDeclarationsSupported bool
 }
 
 // New returns a Runner.
@@ -570,6 +572,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.executorCapabilitiesSupported = res.ExecutorCapabilities
+	r.capabilityDeclarationsSupported = res.CapabilityDeclarations
 	r.agentExecutionSupported = res.AgentExecution && r.cfg.Executions != nil
 	r.agentContinuationSupported = res.AgentContinuation && r.agentExecutionSupported
 	r.controlMu.Unlock()

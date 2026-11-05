@@ -14,64 +14,31 @@ func capabilityFixture() (RunExecutionPin, CapabilityReference, ExecutorCapabili
 	return p, r, e
 }
 
-func TestCapabilityMatcherRequiresExactCurrentEvidence(t *testing.T) {
-	p, r, e := capabilityFixture()
-	if m := MatchExecutorCapabilities(p, []CapabilityReference{r}, []CapabilityReference{r}, []ExecutorCapabilityEvidence{e}, 1500); m.State != "eligible" || len(m.EvidenceIDs) != 1 {
-		t.Fatal(m)
-	}
-	for _, test := range []struct {
-		name, reason string
-		change       func(*RunExecutionPin, *ExecutorCapabilityEvidence)
-		now          int64
-	}{
-		{"config", "evidence_unverified", func(p *RunExecutionPin, _ *ExecutorCapabilityEvidence) {
-			p.PublicSHA256 = "sha256:" + strings.Repeat("c", 64)
-		}, 1500},
-		{"agent", "evidence_unverified", func(p *RunExecutionPin, _ *ExecutorCapabilityEvidence) { p.AgentRevision++ }, 1500},
-		{"runtime", "evidence_unverified", func(p *RunExecutionPin, _ *ExecutorCapabilityEvidence) { p.Runtime.Revision++ }, 1500},
-		{"model", "evidence_unverified", func(p *RunExecutionPin, _ *ExecutorCapabilityEvidence) { p.Profile.Model = "other" }, 1500},
-		{"backend", "evidence_unverified", func(p *RunExecutionPin, _ *ExecutorCapabilityEvidence) { p.BackendID = "git" }, 1500},
-		{"session", "session_adoption_unsupported", func(_ *RunExecutionPin, e *ExecutorCapabilityEvidence) {
-			e.Scope = "session"
-			e.SessionID = "native-session"
-		}, 1500},
-		{"expired", "evidence_expired", func(*RunExecutionPin, *ExecutorCapabilityEvidence) {}, 2000},
-		{"simulation", "simulation_only", func(_ *RunExecutionPin, e *ExecutorCapabilityEvidence) {
-			e.Kind = "simulation"
-			e.State = "unverified"
-			e.Reason = "enumeration_incomplete"
-		}, 1500},
-		{"unsupported", "adapter_evidence_unsupported", func(_ *RunExecutionPin, e *ExecutorCapabilityEvidence) {
-			e.State = "unverified"
-			e.Reason = "adapter_evidence_unsupported"
-		}, 1500},
-		{"execution", "evidence_unverified", func(_ *RunExecutionPin, e *ExecutorCapabilityEvidence) {
-			e.Kind = "execution"
-			e.Reason = "execution_succeeded"
-			e.OutputSHA256 = e.Source.SchemaSHA256
-			e.CostState = "unknown"
-		}, 1500},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			pin, evidence := p, e
-			test.change(&pin, &evidence)
-			m := MatchExecutorCapabilities(pin, []CapabilityReference{r}, []CapabilityReference{r}, []ExecutorCapabilityEvidence{evidence}, test.now)
-			if m.State == "eligible" || m.Reasons[0].Reason != test.reason {
+func TestCapabilityMatcherUsesOnlyExplicitRevisionDeclarations(t *testing.T) {
+	p, ref, e := capabilityFixture()
+	for _, evidence := range [][]ExecutorCapabilityEvidence{nil, {e}, {{Kind: "simulation"}}, {{State: "unavailable", Reason: "tool_absent"}}} {
+		for _, now := range []int64{0, 1500, 3000000} {
+			m := MatchExecutorCapabilities(p, []CapabilityReference{ref}, []CapabilityReference{ref}, evidence, now)
+			if m.State != "eligible" || len(m.EvidenceIDs) != 0 || m.Reasons[0].Reason != "capability_declared" {
 				t.Fatal(m)
 			}
-		})
+		}
 	}
-	if m := MatchExecutorCapabilities(p, []CapabilityReference{r}, nil, []ExecutorCapabilityEvidence{e}, 1500); m.State != "unavailable" || m.Reasons[0].Reason != "capability_undeclared" {
+	for _, tc := range []struct {
+		declared []CapabilityReference
+		reason   string
+	}{
+		{nil, "capability_undeclared"},
+		{[]CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 2}}, "capability_revision_mismatch"},
+		{[]CapabilityReference{{CapabilityID: "codex", DefinitionRevision: 1}}, "capability_undeclared"},
+	} {
+		m := MatchExecutorCapabilities(p, []CapabilityReference{ref}, tc.declared, []ExecutorCapabilityEvidence{e}, 1500)
+		if m.State != "unavailable" || m.Reasons[0].Reason != tc.reason {
+			t.Fatal(m)
+		}
+	}
+	if m := MatchExecutorCapabilities(p, nil, nil, nil, 0); m.State != "eligible" {
 		t.Fatal(m)
-	}
-	missing := e
-	missing.Sequence++
-	missing.State = "unavailable"
-	missing.Reason = "tool_absent"
-	old := e
-	old.Sequence--
-	if m := MatchExecutorCapabilities(p, []CapabilityReference{r}, []CapabilityReference{r}, []ExecutorCapabilityEvidence{e, missing, old}, 1500); m.State != "unavailable" || m.Reasons[0].Reason != "tool_absent" {
-		t.Fatal("late evidence overrode revocation", m)
 	}
 }
 

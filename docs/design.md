@@ -946,7 +946,7 @@ reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能�
 
 实现复用既有 receipt-only 动作与普通请求去重，并新增可选 Assignment `require_receipt_reader` 标志。默认 false 保留历史 receipt-only 的 resolver、模型恢复与 native 操作规则；仅新 proof-bound 来源且已协商能力的 reader 为 true，启用冻结配置/noModels/严格 resolver。该临时约束不进入原 thread 的 binding identity，重连与后继代次从原 action 来源重建。字段可选且默认语义不变，不升级协议代际。新模式仅对显式报告 `runner-manager-receipt-reader-v1` 的原 host 准入；该模式新动作的 claim 与重启恢复同样要求此能力，避免旧执行器在读取前做普通业务探活。原待对账请求集合尚未清空时，非终态或失败读取后的后继代次继续携带原请求来源与能力要求；该原集合全部对清后，不把限制传播到无关责任。原 closing Run 的事件消费优先恢复同一 Run、精确 thread 的已确认 resume 内实际模型配置；仅历史 resume 缺该配置时再读该 Run 已有缓存模型目录。不能为了缺少当前 hosted turn 快照而切断原事件泵，也不因此访问当前模型目录或创建 native 会话。已持久化 compaction 的账本对账仍可完成，创建 compaction 与其他 native 维护继续禁止。历史 receipt-only 与普通业务协议不因此收紧。新 runner 的内部受限解析跳过业务探活，普通执行保持既有探活和模型选择。部署需同时更新实际 runner 才具备这条受限读取实现。见[实施计划](plans/proved-close-receipt-reader.md)。
 
-## D174：执行 Capability 的版本、证据与冻结约束
+## D174：执行 Capability 的声明、版本与冻结约束
 
 Capability 与角色 category、runner feature 和 CLI 覆盖目录分别建模。能力定义追加 revision，`capabilities.put` 通过 owner request_id/CAS 与事件同事务提交；`image_gen@1` 是初始定义，其工具名为 `image_gen__imagegen`。定义退休拒绝新声明和新 Task，不改写历史 spec、pin 或证据。
 
@@ -969,3 +969,12 @@ Task 两 role 在既有 AgentRequirement 中分别冻结 `required_capabilities`
 本候选的设计边界是保守可用的基础逻辑与 adapter 合同；真实入口工具枚举、受信任 profile/同 session 执行与一次有界 image_gen 验证仍须取得真实证据，不能把 unknown 当完成。Refs: D123、D128、D142。实施计划见 `docs/plans/capability-foundation.md`。
 
 D174 续接补充：显式验证同一已保留 snapshot 可以追加 run.capability_revalidated 事实和证据引用，不修改原 RunCapabilityBinding。assignment 的 current_match/revalidation 指明当前资格，runner 在 journal 17 追加原服务器 receipt 投影；原 assignment_json、选择 pin 和原证据字节不变。未验证、过期或失效仍阻止启动；复验不替代原租约、control 和 unknown 对账，也不自动恢复业务。
+
+
+D174 范围修订（优先于以上 native-gate 历史文字）：依据 owner source `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` v1，Capability 是配置标签。匹配只要求同一 Agent 的显式声明覆盖 Task 本 role required 的精确 definition revision，另保普通 executor 在线/可用性、单 RuntimeID、身份/profile/backend、共享预算和原冻结 pin。声明是用户意图，既非真实工具实证，也不表示调用必成功。image_gen 可以逐项或批量明确配置给官方登录的 Codex Agent；不得按品牌自动补值或声称实际已部署。
+
+工具 inventory/source/schema/TTL/profile/session、prepare/adopt/consume/nativeguard、StartWithCapabilities、真实调用及费用观测全部撤销为匹配、启动和验收门禁。旧 evidence/verification/revalidation 数据与原请求对账接口仅为历史/可选诊断，不参与声明资格。新 claim 的 RunCapabilityBinding 保存 required/digest 和原 pin，Agent revision 通过原 immutable inventory 精确恢复声明。launch 使用普通 Start；precheck 在 NextAttempt 之前，失败不清旧停止证明。解释使用注入时钟，不能覆盖用户冻结的 AgentID/RuntimeID/backend。
+
+声明调度使用独立协商 feature `executor-capability-declarations-v1`，旧 `executor-capabilities-v1` 保留历史证据接口；旧 native-gated runner 不接收新声明任务。无 required 的旧任务和 2/1 默认 wire 不变，兼容依据是双方协商及发送点验证，并非“新增字段自然兼容”。历史配置/hash/spec/pin/unknown 和迁移均不重写。原 P2/P5 的 native 依赖已撤销；新矩阵见 `plans/capability-declarative-acceptance.md`。完整检查资源 HOLD、独立 review/CI 和正式交付分别留证，不能拿旧候选通过代替新对象。
+
+D174 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明 feature peer 可接收。旧 binding 字段缺省仍保持原字节，原 evidence-only peer 的已分配运行可继续读取/恢复，不向它添加声明 current_match；新 runner 使用原冻结配置声明和普通 resolver。旧验证请求和 evidence 只作为可选诊断与原请求对账，不能生成新 Run 的资格或重写历史绑定。配置严格解码增加 int64 definition revision 的合法整数读取，仍拒绝分数、字符串、溢出及非正 revision；这是修复声明文件路径，不改变旧有效配置的默认值。

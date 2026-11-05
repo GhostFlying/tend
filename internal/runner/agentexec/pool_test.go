@@ -376,3 +376,39 @@ func TestCapabilityObservationDoesNotInferToolsFromHealthyAdapter(t *testing.T) 
 		t.Fatal(e, err)
 	}
 }
+
+func TestCapabilityDeclarationsResolveFromOriginalAcceptedSnapshot(t *testing.T) {
+	f := newSource(t)
+	f.config.CapabilityVersion = 1
+	f.config.Agents[0].Capabilities = []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}
+	f.reload(t)
+	p := newPool(t, f, func(context.Context, agentexec.BuildInput) error { return nil })
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first := observed(t, p)
+	f.config.Agents[0].Revision++
+	f.config.Agents[0].Capabilities = nil
+	f.reload(t)
+	if err := p.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	next := observed(t, p)
+	cold := newPool(t, f, func(context.Context, agentexec.BuildInput) error { return nil })
+	original, err := cold.Resolve(t.Context(), first.Pin)
+	if err != nil || len(original.DeclaredCapabilities) != 1 || original.DeclaredCapabilities[0].CapabilityID != "image_gen" {
+		t.Fatal(original, err)
+	}
+	current, err := cold.Resolve(t.Context(), next.Pin)
+	if err != nil || len(current.DeclaredCapabilities) != 0 {
+		t.Fatal(current, err)
+	}
+	if _, ok := original.Workers.(harness.CapabilityWorkers); ok {
+		t.Fatal("fixture unexpectedly supplies native capability hooks")
+	}
+	original.DeclaredCapabilities[0].DefinitionRevision = 99
+	restored, err := cold.Resolve(t.Context(), first.Pin)
+	if err != nil || restored.DeclaredCapabilities[0].DefinitionRevision != 1 {
+		t.Fatal("resolved declarations alias immutable snapshot", restored, err)
+	}
+}

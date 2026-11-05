@@ -136,7 +136,7 @@ func checkClaimRuntime(ctx context.Context, x *Exec, q store.Querier) error {
 	rec, err := store.GetRequest(ctx, q, x.Principal.DedupDomain(), x.Env.RequestID)
 	if err == nil {
 		var result claimResult
-		if json.Unmarshal([]byte(rec.ResultJSON), &result) == nil && result.Assignment.CapabilityBinding != nil && !runtimeSupportsExecutorCapabilities(p.Runtime) {
+		if json.Unmarshal([]byte(rec.ResultJSON), &result) == nil && result.Assignment.CapabilityBinding != nil && !runtimeSupportsCapabilityDeclarations(p.Runtime) && (result.Assignment.CapabilityBinding.MatchPolicy != "" || !runtimeSupportsExecutorCapabilities(p.Runtime)) {
 			return protocol.Errorf(protocol.CodeInvalidTransition, "recorded assignment requires executor capability negotiation")
 		}
 		if json.Unmarshal([]byte(rec.ResultJSON), &result) == nil && result.Assignment.Execution != nil && !runtimeSupportsAgentExecution(p.Runtime) {

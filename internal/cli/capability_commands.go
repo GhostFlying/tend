@@ -37,6 +37,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "capability show", Route: "/api/v1/capabilities/{id}", Queries: "definition-revision=revision", JSONDefault: true},
 	{Name: "capability history", Route: "/api/v1/capabilities/{id}/revisions", Queries: "state search after limit", JSONDefault: true},
 	{Name: "capability put", Operation: "capabilities.put", Target: "capability", RevisionRoute: "/api/v1/capabilities/{id}", RevisionField: "revision", JSONDefault: true},
+	{Name: "agents capabilities revisions", Route: "/api/v1/agent-capabilities/{environment}/{agent}/revisions", Queries: "agent-revision=agent_revision after limit", JSONDefault: true},
 	{Name: "agents capabilities list", Route: "/api/v1/agent-capabilities", Queries: "environment agent runtime capability state category purpose after limit", JSONDefault: true},
 	{Name: "agents capabilities show", Route: "/api/v1/agent-capabilities/{environment}/{agent}", Queries: "runtime capability state category purpose", JSONDefault: true},
 	{Name: "agents capabilities history", Route: "/api/v1/agent-capabilities/{environment}/{agent}/evidence", Queries: "capability kind state after limit", JSONDefault: true},
@@ -181,7 +182,11 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 			qstrings[param] = fs.String(flag, "", "server query parameter "+param)
 		}
 	}
-	data := fs.String("data", "", "complete JSON payload")
+	payloadHelp := "complete JSON payload"
+	if cmd.Name == "capability put" {
+		payloadHelp = "definition JSON: title, description, state, contract_version=1, verification_policy=declaration_v1; tool_name is optional metadata"
+	}
+	data := fs.String("data", "", payloadHelp)
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "original request identity for an identical retry")
 	revision := fs.Int64("revision", -1, "original expected control revision; first requests may read it")

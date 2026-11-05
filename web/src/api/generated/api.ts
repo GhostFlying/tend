@@ -237,6 +237,7 @@ export interface TendAPI {
   APIResponse?: APIResponse;
   AgentCapabilityPage?: AgentCapabilityPage;
   AgentCapabilityQuery?: AgentCapabilityQuery;
+  AgentCapabilityRevisionPage?: AgentCapabilityRevisionPage;
   AgentCategory?: AgentCategory;
   AgentCategoryPage?: AgentCategoryPage;
   AgentCompactionPage?: AgentCompactionPage;
@@ -1376,6 +1377,53 @@ export interface AgentCapabilityQuery {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCapabilityRevisionPage".
+ */
+export interface AgentCapabilityRevisionPage {
+  as_of: number;
+  items: AgentCapabilityRevision[] | null;
+  next_after?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentCapabilityRevision".
+ */
+export interface AgentCapabilityRevision {
+  definition: AgentInventoryDefinition;
+  inventory_revision: number;
+  public_sha256: string;
+  server_revision: number;
+  snapshot_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryDefinition".
+ */
+export interface AgentInventoryDefinition {
+  availability: AgentInventoryAvailability;
+  capabilities?: CapabilityReference[];
+  categories: string[] | null;
+  display_name: string;
+  enabled: boolean;
+  identity: AgentIdentity;
+  owner_runtime_binding_ref?: AgentRuntimeReference;
+  purposes: string[] | null;
+  registration: string;
+  requested_effort: string;
+  requested_model: string;
+  revision: number;
+  runtime_binding_ref: AgentRuntimeReference;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentInventoryAvailability".
+ */
+export interface AgentInventoryAvailability {
+  available: boolean;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "AgentCategory".
  */
 export interface AgentCategory {
@@ -1499,6 +1547,7 @@ export interface RunCapabilityBinding {
   current_match?: CapabilityMatch;
   evidence: ExecutorCapabilityEvidence[] | null;
   evidence_ids: string[] | null;
+  match_policy?: string;
   pin: RunExecutionPin;
   required: CapabilityReference[] | null;
   required_sha256: string;
@@ -2082,7 +2131,7 @@ export interface CapabilityDefinition {
   revision: number;
   state: string;
   title: string;
-  tool_name: string;
+  tool_name?: string;
   verification_policy: string;
 }
 /**
@@ -2764,33 +2813,6 @@ export interface AgentInventoryProjection {
   format_version: number;
   runtimes: AgentInventoryRuntime[] | null;
   source_kind: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentInventoryDefinition".
- */
-export interface AgentInventoryDefinition {
-  availability: AgentInventoryAvailability;
-  capabilities?: CapabilityReference[];
-  categories: string[] | null;
-  display_name: string;
-  enabled: boolean;
-  identity: AgentIdentity;
-  owner_runtime_binding_ref?: AgentRuntimeReference;
-  purposes: string[] | null;
-  registration: string;
-  requested_effort: string;
-  requested_model: string;
-  revision: number;
-  runtime_binding_ref: AgentRuntimeReference;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "AgentInventoryAvailability".
- */
-export interface AgentInventoryAvailability {
-  available: boolean;
-  reason: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3955,7 +3977,7 @@ export interface PutCapabilityPayload {
   description: string;
   state: string;
   title: string;
-  tool_name: string;
+  tool_name?: string;
   verification_policy: string;
 }
 /**

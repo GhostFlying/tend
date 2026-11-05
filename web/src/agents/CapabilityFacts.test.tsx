@@ -47,12 +47,11 @@ const view: AgentCapabilityView = {
       {
         capability: agent.capabilities![0]!,
         state: "eligible",
-        reason: "tool_exposed",
-        expires_at_ms: 2000,
+        reason: "capability_declared",
         recovery: "recheck",
       },
     ],
-    evidence_ids: ["evidence"],
+    evidence_ids: [],
     checked_at_ms: 1000,
   },
 };
@@ -74,22 +73,19 @@ const catalog: RunnerAgentCatalog = {
 };
 
 test("capability display never transfers an old configuration, offline or historical confirmation", () => {
-  expect(capabilityFacts(catalog, agent, false, 1500)).toBe(view);
-  expect(capabilityFacts(catalog, agent, true, 1500)).toBeUndefined();
-  expect(capabilityFacts({ ...catalog, online: false }, agent, false, 1500)).toBeUndefined();
-  expect(capabilityFacts(catalog, { ...agent, revision: 3 }, false, 1500)).toBeUndefined();
-  expect(
-    capabilityFacts(catalog, { ...agent, requested_model: "other" }, false, 1500),
-  ).toBeUndefined();
+  expect(capabilityFacts(catalog, agent, false)).toBe(view);
+  expect(capabilityFacts(catalog, agent, true)).toBeUndefined();
+  expect(capabilityFacts({ ...catalog, online: false }, agent, false)).toBeUndefined();
+  expect(capabilityFacts(catalog, { ...agent, revision: 3 }, false)).toBeUndefined();
+  expect(capabilityFacts(catalog, { ...agent, requested_model: "other" }, false)).toBeUndefined();
   expect(
     capabilityFacts(
       { ...catalog, current: { ...catalog.current!, snapshot_id: "other" } },
       agent,
       false,
-      1500,
     ),
   ).toBeUndefined();
-  expect(capabilityFacts(catalog, agent, false, 2000)?.current.state).toBe("pending");
+  expect(capabilityFacts(catalog, agent, false)?.current.state).toBe("eligible");
   expect(view.current.state).toBe("eligible");
 });
 
@@ -101,5 +97,5 @@ test("rendered declaration and tool facts do not claim a successful real generat
   );
   expect(html).toContain("image_gen@1");
   expect(html).toContain("尚无真实调用证据");
-  expect(html).toContain("evidence_expired");
+  expect(html).toContain("配置声明满足要求；实际执行未验证");
 });

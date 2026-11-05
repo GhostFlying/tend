@@ -30,6 +30,9 @@ type ContinuationResolver interface {
 }
 
 type ResolvedExecution struct {
+	// DeclaredCapabilities comes from the accepted snapshot resolved for this pin.
+	DeclaredCapabilities []protocol.CapabilityReference
+
 	Workers      harness.Workers
 	Workspaces   Workspaces
 	Instructions string

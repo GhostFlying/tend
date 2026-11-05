@@ -192,6 +192,65 @@
       "title": "AgentCapabilityQuery",
       "type": "object"
     },
+    "AgentCapabilityRevision": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "#/definitions/AgentInventoryDefinition"
+        },
+        "inventory_revision": {
+          "type": "integer"
+        },
+        "public_sha256": {
+          "type": "string"
+        },
+        "server_revision": {
+          "type": "integer"
+        },
+        "snapshot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "definition",
+        "inventory_revision",
+        "server_revision",
+        "snapshot_id",
+        "public_sha256"
+      ],
+      "title": "AgentCapabilityRevision",
+      "type": "object"
+    },
+    "AgentCapabilityRevisionPage": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentCapabilityRevision"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_after": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "as_of"
+      ],
+      "title": "AgentCapabilityRevisionPage",
+      "type": "object"
+    },
     "AgentCapabilityView": {
       "additionalProperties": false,
       "properties": {
@@ -2458,8 +2517,7 @@
         "description",
         "state",
         "contract_version",
-        "verification_policy",
-        "tool_name"
+        "verification_policy"
       ],
       "title": "CapabilityDefinition",
       "type": "object"
@@ -9831,8 +9889,7 @@
         "description",
         "state",
         "contract_version",
-        "verification_policy",
-        "tool_name"
+        "verification_policy"
       ],
       "title": "PutCapabilityPayload",
       "type": "object"
@@ -10833,6 +10890,9 @@
               "type": "null"
             }
           ]
+        },
+        "match_policy": {
+          "type": "string"
         },
         "pin": {
           "$ref": "#/definitions/RunExecutionPin"
@@ -15037,6 +15097,9 @@
     },
     "AgentCapabilityQuery": {
       "$ref": "#/definitions/AgentCapabilityQuery"
+    },
+    "AgentCapabilityRevisionPage": {
+      "$ref": "#/definitions/AgentCapabilityRevisionPage"
     },
     "AgentCategory": {
       "$ref": "#/definitions/AgentCategory"

@@ -244,3 +244,47 @@ func GetRunCapabilityRevalidation(ctx context.Context, q Querier, run string) (p
 	err = json.Unmarshal([]byte(body), &r)
 	return r, err
 }
+
+// ListAgentCapabilityRevisions uses registration history, not evidence history.
+// Watermarks are per environment; repeated registration of an unchanged Agent
+// remains visible with its original snapshot and registration revisions.
+func ListAgentCapabilityRevisions(ctx context.Context, q Querier, host, agent string, revision int64, after string, limit int) (protocol.AgentCapabilityRevisionPage, error) {
+	page := protocol.AgentCapabilityRevisionPage{Items: []protocol.AgentCapabilityRevision{}}
+	var maxRevision int64
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(server_revision),0) FROM agent_inventory_versions WHERE host_id=?`, host).Scan(&maxRevision); err != nil {
+		return page, err
+	}
+	cursor, err := CapabilityCursor([]any{"declaration_revisions", host, agent, revision}, after, maxRevision)
+	if err != nil {
+		return page, err
+	}
+	page.AsOf = cursor.AsOf
+	last := int64(0)
+	if cursor.After != "" {
+		last, err = strconv.ParseInt(cursor.After, 10, 64)
+		if err != nil || last < 1 {
+			return page, protocol.Errorf(protocol.CodeInvalidRequest, "invalid Agent revision cursor")
+		}
+	}
+	rows, err := q.QueryContext(ctx, `SELECT a.value,v.local_revision,v.server_revision,v.snapshot_id,v.public_sha256 FROM agent_inventory_versions v,json_each(v.projection_json,'$.agents') a WHERE v.host_id=? AND v.server_revision>? AND v.server_revision<=? AND json_extract(a.value,'$.identity.local_id')=? AND (?=0 OR json_extract(a.value,'$.revision')=?) ORDER BY v.server_revision LIMIT ?`, host, last, cursor.AsOf, agent, revision, revision, limit+1)
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if len(page.Items) == limit {
+			page.Next = cursor.Encode(strconv.FormatInt(page.Items[len(page.Items)-1].ServerRevision, 10))
+			break
+		}
+		var item protocol.AgentCapabilityRevision
+		var body string
+		if err := rows.Scan(&body, &item.InventoryRevision, &item.ServerRevision, &item.SnapshotID, &item.PublicSHA256); err != nil {
+			return page, err
+		}
+		if err := json.Unmarshal([]byte(body), &item.Definition); err != nil {
+			return page, err
+		}
+		page.Items = append(page.Items, item)
+	}
+	return page, rows.Err()
+}

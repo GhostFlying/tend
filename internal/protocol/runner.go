@@ -87,6 +87,8 @@ type HelloResult struct {
 	LeaseTTLMillis int64        `json:"lease_ttl_ms"`
 	Runs           []RunVerdict `json:"runs"`
 	Reassigned     []Assignment `json:"reassigned"`
+
+	CapabilityDeclarations bool `json:"capability_declarations,omitempty"`
 }
 
 // Assignment hands a run to a runner.

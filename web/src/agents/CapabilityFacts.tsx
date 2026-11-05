@@ -8,7 +8,6 @@ export function capabilityFacts(
   catalog: RunnerAgentCatalog | undefined,
   agent: AgentInventoryDefinition,
   historical = false,
-  now = Date.now(),
 ): AgentCapabilityView | undefined {
   if (historical || !catalog?.online) return undefined;
   const facts = catalog.capabilities?.find(
@@ -23,25 +22,7 @@ export function capabilityFacts(
       v.pin?.profile.model === agent.requested_model &&
       (v.pin?.profile.effort ?? "") === (agent.requested_effort ?? ""),
   );
-  if (!facts || facts.current.state !== "eligible") return facts;
-  const expired = facts.current.reasons?.some(
-    (reason) => !reason.expires_at_ms || reason.expires_at_ms <= now,
-  );
-  if (!expired) return facts;
-  return {
-    ...facts,
-    current: {
-      ...facts.current,
-      state: "pending",
-      reasons:
-        facts.current.reasons?.map((reason) => ({
-          ...reason,
-          state: "pending",
-          reason: "evidence_expired",
-          recovery: "重新读取并验证同一入口；先对账原未知请求",
-        })) ?? [],
-    },
-  };
+  return facts;
 }
 
 export function CapabilityFacts({
@@ -62,15 +43,15 @@ export function CapabilityFacts({
         {agent.capabilities?.map((r) => `${r.capability_id}@${r.definition_revision}`).join("、") ||
           "尚无声明"}
       </dd>
-      <dt>工具实证</dt>
+      <dt>声明匹配</dt>
       <dd>
         {facts ? (
           <>
             {facts.current.state === "eligible"
-              ? "工具已确认；调用结果另行记录"
+              ? "配置声明满足要求；实际执行未验证"
               : facts.current.state === "unavailable"
                 ? "当前不满足能力要求"
-                : "尚未验证或证据已失效"}
+                : "等待原执行入口可用"}
             <ul>
               {facts.current.reasons?.map((r) => (
                 <li key={`${r.capability.capability_id}:${r.reason}`}>
@@ -87,14 +68,14 @@ export function CapabilityFacts({
         ) : historical ? (
           "历史声明，不代表当前入口可用"
         ) : (
-          "未验证；离线或缺少当前入口证据"
+          "离线或缺少当前执行入口观测"
         )}
       </dd>
       <dt>最近真实调用</dt>
       <dd>
         {execution
           ? `${execution.capability.capability_id} · ${execution.reason} · ${new Date(execution.observed_at_ms).toLocaleString()} · 费用${execution.cost_state === "observed" ? "已观测" : "未知"}`
-          : "尚无真实调用证据；工具暴露不等于调用成功"}
+          : "尚无真实调用证据；配置声明不等于调用成功"}
       </dd>
     </>
   );
