@@ -156,6 +156,15 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 			return err
 		}
 		if receipt {
+			retired, err := managerCancellationRetired(ctx, tx.Q(), id)
+			if err != nil {
+				return err
+			}
+			if retired {
+				// The owner withdrew this coordinator, including automatic native
+				// attachments. Original receipts remain pending for explicit recovery.
+				continue
+			}
 			if retiring && m.State != "retiring" {
 				if _, err = tx.Exec(ctx, `UPDATE issue_manager_tasks SET state='retiring' WHERE task_id=?`, id); err != nil {
 					return err

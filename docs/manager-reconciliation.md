@@ -80,3 +80,59 @@ CLI 保留 JSON 原字段，不替换原证明或自动刷新 revision。可选�
 不对外部副作用的未知结果伪造成功，也不取消现有任务以掩盖对账缺口。
 
 新 `read_receipts` 模式要求原 host 已报告 `runner-manager-receipt-reader-v1`。其新 action 的领取及新 Run 的恢复也要求相同能力；先升级真实 runner，再读回诊断并提交原证明。旧 runner 仍可执行原有普通模式，不能被新模式用于探活或创建临时 thread。
+
+## 取消中的原 manager 退休
+
+已 assigned 的 manager 在 Issue 进入 `cancelling` 后仍可能承担取消协调，不能仅凭
+Issue 状态认定原 manager 已收到 Stop。owner 可明确退休这一原责任，由原 runner
+停止其执行；退休不会创建替代 Run、lease 或普通协调回合。此入口仅使用 owner
+凭据，不授予 manager 或主 Agent 额外控制权限。
+
+先读取精确原 Task/Run 的当前身份和未决 native 请求页：
+
+```sh
+tend task manager-retirement TASK --run RUN --limit 50 --json
+tend task manager-retirement TASK --run RUN --after REQUEST_CURSOR --limit 50 --json
+```
+
+`--run` 必填。`--limit` 默认 50，范围 1–100。`after` 是原 native request ID 的字符串
+游标；仅在 `more=true` 时将返回的 `next_after` 原样用于下一页。输出保留当前
+`task_revision`、`issue_revision`、`assignment_epoch`、原 Run/host/lease、冻结执行 pin
+及 `execution_sha256`，并分别显示退休请求 ID、`observed`、`desired`、`can_retire` 和
+`blockers`。native 请求仅返回原 ID、method、status、结果存在性/hash 和
+error/rejected；较大结果可能标记 `result_hash_omitted`。不返回 native payload、
+prompt、凭据或结果正文。查询只是账本事实，不进行 native 探活。
+
+使用查询的原控制值和证明字段导出待提交信封：
+
+```sh
+tend task retire-manager TASK --revision TASK_REVISION --request-id REQUEST \
+  --issue ISSUE --issue-revision ISSUE_REVISION --assignment-epoch EPOCH \
+  --run RUN --host HOST --lease LEASE --pin-sha256 EXECUTION_SHA256 \
+  --reason 'Retire the original cancelling manager' --dry-run
+```
+
+`--revision` 必须显式提供，CLI 不自动读取或刷新 Task/Issue revision、epoch、lease
+或 pin。`--pin-sha256` 对应 payload 的 `execution_sha256`。省略 `--dry-run` 提交同一
+具名动作；成功接纳只表示原 manager 已被请求停止，不证明物理退出或完成 Issue
+取消。读回 `manager-retirement`，依据原 runner 的真实 close/stopped 回执核对停止，
+未决原业务结果仍保留 unknown，最终取消仍须正式 `finish_cancel`。
+
+也可以使用完整 `--data JSON`、`--file PAYLOAD_FILE` 或 `--file -`。JSON 必须包含
+`issue_id`、`expected_issue_revision`、`expected_assignment_epoch`、`run_id`、`host_id`、
+`lease_id`、`execution_sha256` 和 `reason`，不能与上述 proof flags 混用。可选来源
+引用 `source_message_id` 与 `expected_source_revision` 必须同时提供；flags 形式为
+`--source-message MESSAGE --source-revision SOURCE_REVISION`。flags 的 `--reason`
+同时写入 payload 与 Envelope；完整 JSON 输入下，`--reason` 仅设置 Envelope reason，
+JSON 内的 reason 与原字段保持不变。
+
+网络失败或结果未知时保留原 request ID、完整输入、双方 revision、epoch 和导出的
+Envelope，先查询再恢复：
+
+```sh
+tend request show REQUEST --json
+tend request replay --file ORIGINAL_ENVELOPE
+```
+
+只允许相同原请求的完整重试；不能换 request ID、刷新证明或修改 payload 来重试未知
+动作。退休控制与物理停止、原 native 业务结果和最终 Issue 取消分别核验。
