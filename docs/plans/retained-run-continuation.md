@@ -61,3 +61,11 @@ Pause 中断，未知/未附着仍不发送输入，Hold 与显式 Stop 保留�
 原 pin 可用性同时接受已协商 continuation 能力与原 backend 下的 AgentContinuations
 完整精确 pin；不要求它仍是新任务库存，不借此扩大任何新任务选择范围。真实
 Hello/heartbeat 与 request/CAS/原pin保留回归覆盖库存变化后的继续和续租。
+
+最终复审事件分支补正：strict 报告先上传事件，凭据撤销可能在该分支返回 Forbidden，
+在尚未发送最终请求前就退出。因此该分支同样须明确唤醒 authenticated Hello 对账；
+不把 Forbidden 本身当作终态、不丢弃事件或更改原请求。回归使用真实 App/RPC 的
+成功回执丢失场景，先消费已有报告唤醒，再独立制造事件 Forbidden，要求仅凭此
+新唤醒自动收到原身份 Stop 并保留原事件/请求历史后收尾。另以真实取消上下文
+验证 strict Reattach 期间 Stop 仍通过下一轮持久请求读取识别取消并进入既有停止流程，
+不依据单次 completionPending 臆断无限重试，不扩展状态机。

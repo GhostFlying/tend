@@ -288,6 +288,15 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 }
 
 func TestRetainedStrictStopWireLostArtifactReceipt(t *testing.T) {
+	testRetainedStrictStopWireLostArtifactReceipt(t, false)
+}
+
+func TestRetainedStrictStopWireForbiddenEventSchedulesReconciliation(t *testing.T) {
+	testRetainedStrictStopWireLostArtifactReceipt(t, true)
+}
+
+func testRetainedStrictStopWireLostArtifactReceipt(t *testing.T, forbidPendingEvent bool) {
+	t.Helper()
 	ctx := t.Context()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 19)
@@ -401,6 +410,28 @@ func TestRetainedStrictStopWireLostArtifactReceipt(t *testing.T) {
 	}
 	if err = j.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: "original-root", Kind: "turn.observed", Body: json.RawMessage(`{"state":"unknown"}`)}); err != nil {
 		t.Fatal(err)
+	}
+	if forbidPendingEvent {
+		// Consume the earlier final-request wakeup. Only the event failure
+		// below may initiate the autonomous terminal reconciliation.
+		select {
+		case <-r.reconcile:
+		default:
+			t.Fatal("final request did not schedule its original reconciliation")
+		}
+		before, requests := retainedStrictSnapshot(t, j, as.RunID)
+		events, e := j.PendingEvents(ctx, as.RunID, 100)
+		if e != nil || len(events) != 1 {
+			t.Fatal("missing original event", events, e)
+		}
+		if e := r.report(ctx, as); !isCompletionPending(e) || protocol.CodeOf(e) != protocol.CodeForbidden {
+			t.Fatal("revoked event credential did not remain pending", e)
+		}
+		after, pending := retainedStrictSnapshot(t, j, as.RunID)
+		remaining, e := j.PendingEvents(ctx, as.RunID, 100)
+		if e != nil || !reflect.DeepEqual(events, remaining) || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(requests, pending) || ws.finishes.Load() != 0 {
+			t.Fatal("event rejection changed original facts or finalized responsibility", e)
+		}
 	}
 	r.controlLoaded = true
 	r.instanceID = runtime.InstanceID
@@ -559,5 +590,75 @@ func TestRetainedStrictStopDuringReportingReconcilesAfterExecutorExit(t *testing
 	}
 	if r.cfg.Workspaces.(*retainedStrictWorkspaceProbe).finishes.Load() != 1 {
 		t.Fatal("original responsibility not cleaned once")
+	}
+}
+
+// Cancellation during the strict workspace observation is completionPending on
+// its first return. The next iteration must still read the canceled context
+// through the real journal and reach the independently requested stop.
+type retainedStrictStopWorkspace struct {
+	*retainedStrictWorkspaceProbe
+	entered chan struct{}
+}
+
+func (w retainedStrictStopWorkspace) Reattach(ctx context.Context, _ protocol.Assignment) (Prepared, error) {
+	w.reattaches.Add(1)
+	close(w.entered)
+	<-ctx.Done()
+	return Prepared{}, ctx.Err()
+}
+
+func TestRetainedStrictStopDuringWorkspaceReattachDoesNotRetryForever(t *testing.T) {
+	r, as, _ := retainedStrictFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if err := r.cfg.Journal.SetFenced(ctx, as.RunID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.DeleteRequest(ctx, "original-business-request"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.SetRetainedResume(ctx, as.RunID, protocol.RetainedRunResume{RequestID: "original-attach", Mode: "attach"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := r.cfg.Journal.Run(ctx, as.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spaces := retainedStrictStopWorkspace{retainedStrictWorkspaceProbe: &retainedStrictWorkspaceProbe{}, entered: make(chan struct{})}
+	workers := &retainedStrictFinalizationProbe{retainedStrictWorkerProbe: &retainedStrictWorkerProbe{}}
+	r.cfg.Workspaces, r.cfg.Workers = spaces, workers
+	r.cfg.RetryDelay = time.Millisecond
+	rpc := retainedStrictRegressionServer(t, r, nil, protocol.OpSucceeded)
+	runCtx, stopRun := context.WithCancelCause(ctx)
+	defer stopRun(nil)
+	a := &active{as: as, ctx: runCtx, cancel: stopRun, desired: protocol.DesiredRun, resume: make(chan struct{}, 1)}
+	done := make(chan error, 1)
+	go func() { done <- r.execute(ctx, runCtx, as.RunID, a) }()
+	select {
+	case <-spaces.entered:
+	case <-ctx.Done():
+		t.Fatal("strict Reattach did not start")
+	}
+	r.applyDesired(ctx, a, protocol.DesiredStopped, r.cfg.Now())
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal("explicit stop did not settle after canceled Reattach", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("canceled Reattach retried until runner lifetime ended")
+	}
+	saved, err := r.cfg.Journal.HistoricalRun(t.Context(), as.RunID)
+	requests := rpc.snapshot()
+	if err != nil || saved.Phase != journal.PhaseDone || saved.Thread != "original-thread" || !reflect.DeepEqual(saved.Assignment, before.Assignment) ||
+		spaces.reattaches.Load() != 1 || spaces.prepares.Load() != 0 || spaces.collections.Load() != 0 || spaces.finishes.Load() != 1 ||
+		workers.starts.Load() != 0 || workers.finalizing.Load() != 1 || len(requests) != 1 || requests[0].Operation != protocol.OpRunsRelease {
+		t.Fatalf("explicit stop did not preserve identity or terminate: phase=%s reattach=%d prepare=%d collect=%d finish=%d starts=%d finalizing=%d requests=%v err=%v",
+			saved.Phase, spaces.reattaches.Load(), spaces.prepares.Load(), spaces.collections.Load(), spaces.finishes.Load(), workers.starts.Load(), workers.finalizing.Load(), requests, err)
+	}
+	var release protocol.ReleasePayload
+	if err := json.Unmarshal(requests[0].Payload, &release); err != nil || release.Reason != "stopped by tend" {
+		t.Fatal("stop became a workspace or worker failure", release, err)
 	}
 }

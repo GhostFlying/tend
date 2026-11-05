@@ -752,6 +752,7 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 		// Facts go out before the result that ends the run's credential.
 		if err := r.retry(ctx, func() error { return r.flushEvents(ctx, as) }); err != nil {
 			if strictResume != nil {
+				r.requestReconcile()
 				return &completionPending{err}
 			}
 			if ctx.Err() != nil {
