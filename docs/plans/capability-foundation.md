@@ -167,3 +167,12 @@
 5. 提交原 PR244 新候选及 exact head/base/diff、日志和 manifest；heavy/full 继续 HOLD，独立 review、required CI 与目标集成分别报告未完成，不启动其他 Agent 或测试环境，不 merge/deploy。
 
 健康 reviewer 反例同时暴露现有 acceptance 查询在首次实现前错误套用“已有待验收产物”的 action 门。该投影与本次通知共用，必须同步修复：保留实际 pending implementation action，经 scheduler 检查其同 backend 的 reviewer 前置；只读候选筛选使用独立 reviewer filter，不覆盖冻结 AgentID/runtime/backend，不创建虚假 artifact 或验收 action。回归覆盖健康 reviewer 不通知、角色标签不继承、waived 可领取和原身份/backend 拒绝。
+
+## 当前与保留 pin 分页修复计划（编码前）
+
+本轮接续对 `1da93356` 的独立验收 finding；owner v1 和原 PR244/分支/全部历史不变。
+
+1. 在真实 App 路径领取显式声明的 Agent、保留在途 pin，再登记同 Agent 无声明的新 revision，并同时上报当前与原 continuation。对另一个 pending Task 比较不分页与 limit=1/2 分页结果，复现旧键遗漏保留 pin。
+2. 候选排序与游标使用包含完整 RunExecutionPin 的稳定身份，区分 Agent/runtime/inventory revision、snapshot/hash、profile、worker/backend/purpose；不以当前 Agent 名称或可变匹配状态合并不同 pin。保持筛选、水位及事实签名绑定，旧键格式游标明确要求重新分页。
+3. 更新 D174 与 A20/R6；覆盖同入口 current/retained 声明差异、多种页长、筛选及跨页事实变化拒绝。不修改调度、claim、冻结 pin、声明或 wire/迁移。
+4. 仅运行低负载定向回归与必要 vet，提交原候选并交付 exact commit/diff、日志、manifest。heavy full 仍 HOLD；新独立 review、仓库 review、required CI 和目标冲突集成分别如实报告，不 merge/deploy 或另建环境。

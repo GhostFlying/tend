@@ -143,7 +143,7 @@ func (a *App) TaskCapabilityExplanationPage(ctx context.Context, task string, ve
 		if err != nil {
 			return err
 		}
-		keyCursor, err := store.CapabilityCursor(string(signature), clockCursor.After, now)
+		keyCursor, err := store.CapabilityCursor([]any{"task-candidate-pins-v2", string(signature)}, clockCursor.After, now)
 		if err != nil {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "capability match facts changed; start a fresh page")
 		}
@@ -169,11 +169,12 @@ func (a *App) TaskCapabilityExplanationPage(ctx context.Context, task string, ve
 	return p, err
 }
 func capabilityCandidateKey(v protocol.AgentCapabilityView) string {
-	key := views.CapabilityAgentKey(v)
-	if v.Pin != nil {
-		key += "/" + v.Pin.Runtime.RuntimeID + "/" + v.Pin.BackendID
-	}
-	return key
+	// Current and retained executions may share Agent/runtime/backend while
+	// differing in revision, snapshot or profile. Seal the entire frozen pin
+	// into the ordering key so an after boundary cannot skip a distinct pin.
+	// RunExecutionPin contains only scalar fields, so marshaling cannot fail.
+	pin, _ := json.Marshal(v.Pin)
+	return views.CapabilityAgentKey(v) + "/" + string(pin)
 }
 
 func (a *App) CapabilityAgentRevisions(ctx context.Context, environment, agent string, revision int64, after string, limit int) (protocol.AgentCapabilityRevisionPage, error) {

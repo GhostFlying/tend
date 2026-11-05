@@ -988,3 +988,5 @@ D174 未观测主机补充：已配置主机尚未发送 Hello 时，缺失 host
 D174 验收前置等待补充：首次 named 实现分配需要同 host/backend 的验收候选时，十分钟等待检测同时检查 acceptance 自身的非空 required，即使 implementation required 为空。通知以实际阻塞的 task/spec/role 持久去重并携带该角色解释，不复制标签到实现角色。waived 或不再检查该前置的已分配任务不新增 acceptance 通知；验收 action 仍仅检查验收角色。该修复仅调整维护通知，无 wire、迁移或旧运行冻结语义变更。
 
 首次分配前的 acceptance 查询解释实际 implementation action 的 reviewer 前置，不套用尚不存在的验收 artifact 生命周期。只读 reviewer filter 限定配对候选而不改写原验收身份、profile、runtime 或 backend；全局 eligibility 与 Claim 的首次配对检查一致。通知的角色与 `task capability-explain --role` 恢复入口明确对应。
+
+D174 候选分页补充：Task 能力解释可同时投影同入口的当前 Agent revision 与在途保留 revision，分页身份使用完整冻结 RunExecutionPin，不能仅用 environment/Agent/runtime/backend 合并。排序键和 after 边界保持同一全序，当前无声明与原保留声明独立返回。游标仍绑定筛选、水位及事实签名；排序格式变化拒绝旧游标并要求重新分页，不改变 server/runner wire、迁移、claim 或历史 pin。
