@@ -19,7 +19,9 @@ lease、不改变原 pin、native RPC、pending 输入、owner pause 或合法�
    源事实绑定原 run、lease、task；系统是发现者，不冒充 manager 业务调用。
 2. 问题来源为该 manager 的 Issue，接收者为实际父 Issue 负责人；根 Issue
    到 main。沿 D150 的既有责任记录与 background source 通知，不交回失租的
-   manager。main 不能解决时可沿原 Attention 升 owner。
+   manager。责任已经交接则先交当前 owner；main 不能解决时可沿原 Attention
+   升 owner。本触发不回填历史已 unknown/lapsed 的运行，历史责任另按原身份
+   做技术补齐，不宣称部署即恢复。
 3. 重复 expiry、App 重建不重复建问题或唤醒。只有真实失租触发，单纯 pause、
    waiting 与没有过期 lease 的 manager 不产生故障。
 4. 使用可控时钟覆盖 ordinary manager 与 receipt-only reader、自身 unknown
