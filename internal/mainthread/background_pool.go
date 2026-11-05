@@ -136,11 +136,6 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	stopWait()
 	if err != nil {
 		phase, poolErr = "startup_failed", err
-		if !receiptRead && run.Err() == nil {
-			if deferErr := p.App.DeferAgentStartup(run, id); deferErr != nil {
-				m.cfg.Log.WarnContext(run, "could not defer failed background startup", "err", deferErr)
-			}
-		}
 		return
 	}
 	if thread == nil {

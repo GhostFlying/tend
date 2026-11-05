@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -151,6 +150,13 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 		sort.Strings(ids)
 		var runnable []string
 		for _, id := range ids {
+			allowed, err := agentStartupAllowed(ctx, tx.Q(), id, a.now().UnixMilli())
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				continue
+			}
 			c, err := store.AgentConversation(ctx, tx.Q(), id)
 			if err != nil {
 				return err
@@ -206,18 +212,5 @@ func (a *App) MessageConversation(ctx context.Context, id string) (string, error
 // DeferAgentStartup leaves known-unsent input queued after a failed local
 // startup. Reuse its ordinary outbox deadline without claiming a native turn.
 func (a *App) DeferAgentStartup(ctx context.Context, conversation string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
-		head, err := a.hostedServiceableHead(ctx, tx.Q(), "background_thread:"+conversation)
-		if err == store.ErrNotFound {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if head.Status != store.OutboxPending {
-			return nil
-		}
-		now := a.now()
-		return tx.TransitionOutbox(ctx, store.OutboxTransition{OutboxID: head.OutboxID, From: head.Status, FromAttempts: head.Attempts, To: head.Status, Attempts: head.Attempts, NextAttemptAt: max(head.NextAttemptAt, now.Add(30*time.Second).UnixMilli()), Now: now.UnixMilli()})
-	})
+	return a.deferAgentStartup(ctx, conversation)
 }
