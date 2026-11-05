@@ -449,16 +449,15 @@ type ChildWork struct {
 
 // Agent is an agent orca tracks in a worktree.
 type Agent struct {
-	transcriptSupplement bool
-	rootProvisional      bool
-	legacyRootSupport    bool
-	RootTurn             *RootTurn        `json:"rootTurn,omitempty"`
-	RuntimeID            string           `json:"-"`
-	PaneKey              string           `json:"paneKey"`
-	MainAgent            *MainAgent       `json:"mainAgent,omitempty"`
-	ProviderSession      *ProviderSession `json:"providerSession,omitempty"`
-	Children             []ChildWork      `json:"children,omitempty"`
-	SubagentObservation  string           `json:"subagentObservation,omitempty"`
+	rootProvisional     bool
+	legacyRootSupport   bool
+	RootTurn            *RootTurn        `json:"rootTurn,omitempty"`
+	RuntimeID           string           `json:"-"`
+	PaneKey             string           `json:"paneKey"`
+	MainAgent           *MainAgent       `json:"mainAgent,omitempty"`
+	ProviderSession     *ProviderSession `json:"providerSession,omitempty"`
+	Children            []ChildWork      `json:"children,omitempty"`
+	SubagentObservation string           `json:"subagentObservation,omitempty"`
 	// State is working, done and so on, as orca reports it.
 	State     string `json:"state"`
 	AgentType string `json:"agentType"`
