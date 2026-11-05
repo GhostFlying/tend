@@ -41,10 +41,21 @@ func rootTranscript(ctx context.Context, session ProviderSession, st workerState
 	pending := map[string]bool{}
 	operations := newCodexOperations()
 	owned := launch
+	var expanded []json.RawMessage
 	marker := "[tend run " + runID + ", launch " + st.Marker + "]"
 	for {
 		if err := ctx.Err(); err != nil {
 			return Agent{}, err
+		}
+		var raw json.RawMessage
+		if len(expanded) > 0 {
+			raw, expanded = expanded[0], expanded[1:]
+		} else {
+			if err := decoder.Decode(&raw); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				return Agent{}, errors.New("orca: root transcript has an incomplete record")
+			}
 		}
 		var row struct {
 			Type      string    `json:"type"`
@@ -52,6 +63,8 @@ func rootTranscript(ctx context.Context, session ProviderSession, st workerState
 			Payload   struct {
 				Type             string             `json:"type"`
 				Originator       string             `json:"originator"`
+				Operation        string             `json:"operation"`
+				Items            []json.RawMessage  `json:"items"`
 				Cwd              string             `json:"cwd"`
 				ID               string             `json:"id"`
 				TurnID           string             `json:"turn_id"`
@@ -76,12 +89,36 @@ func rootTranscript(ctx context.Context, session ProviderSession, st workerState
 				} `json:"error"`
 			} `json:"payload"`
 		}
-		if err := decoder.Decode(&row); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
+		if err := json.Unmarshal(raw, &row); err != nil {
 			return Agent{}, errors.New("orca: root transcript has an incomplete record")
 		}
 		p := row.Payload
+		if expectedDir != "" && row.Type == "history_mutation" {
+			// TraeX stores both managed input and outer code-mode calls here. Keep
+			// append order; snapshots/rewrites cannot certify original effects.
+			if p.Operation != "append" || p.Items == nil || p.TurnID != "" && p.TurnID != turn {
+				if owned {
+					operations.unknown["history_mutation"] = true
+				}
+				continue
+			}
+			for _, item := range p.Items {
+				next, _ := json.Marshal(struct {
+					Type      string          `json:"type"`
+					Timestamp time.Time       `json:"timestamp"`
+					Payload   json.RawMessage `json:"payload"`
+				}{"response_item", row.Timestamp, item})
+				expanded = append(expanded, next)
+			}
+			continue
+		}
+		if expectedDir != "" && owned {
+			switch row.Type {
+			case "session_meta", "event_msg", "response_item", "turn_context", "world_state", "token_usage_record":
+			default:
+				operations.unknown["record/"+row.Type] = true
+			}
+		}
 		if row.Type == "session_meta" {
 			identity = p.ID
 			traexIdentity = p.Originator == "traex-tui" && filepath.Clean(p.Cwd) == filepath.Clean(expectedDir)
@@ -133,6 +170,13 @@ func rootTranscript(ctx context.Context, session ProviderSession, st workerState
 				if owned && p.CallID != "" {
 					pending[p.CallID] = true
 					operations.call(p.CallID, p.Name, p.Arguments)
+					if expectedDir != "" {
+						switch strings.TrimPrefix(p.Name, "functions.") {
+						case "spawn_agent", "exec_command", "write_stdin":
+						default:
+							operations.unknown["unsupported_tool/"+p.CallID] = true
+						}
+					}
 				}
 			case "function_call_output", "custom_tool_call_output":
 				if owned {
@@ -176,7 +220,7 @@ func rootTranscript(ctx context.Context, session ProviderSession, st workerState
 					}
 				}
 			default:
-				if expectedDir != "" && owned && p.Type != "reasoning" {
+				if expectedDir != "" && owned && p.Type != "reasoning" && p.Type != "trae_extra_info" {
 					operations.unknown["response/"+p.Type] = true
 				}
 			}
