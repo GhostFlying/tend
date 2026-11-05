@@ -473,6 +473,9 @@ func (w *worker) begin(ctx context.Context, agent string) error {
 			if w.st.Send != "" {
 				return w.send(ctx, "")
 			}
+			if a.transcriptSupplement {
+				return nil
+			}
 			if a.RootTurn != nil && (!validRootTurn(a, w.st.Turn) || a.RootTurn.State != "completed" || a.RootTurn.Operations != "settled") {
 				return nil
 			}
@@ -888,7 +891,7 @@ func (w *worker) run(ctx context.Context) {
 				w.emitID(ctx, "concurrency/"+a.ProviderSession.ID+"/"+a.RootTurn.TurnID+"/success", "worker.concurrency", protocol.ConcurrencyFeedback{Kind: "success", SessionID: a.ProviderSession.ID, TurnID: a.RootTurn.TurnID})
 			}
 			w.emit(ctx, "turn.completed", map[string]string{"reply": a.LastAssistantMessage})
-			if w.spec.Role == protocol.RoleAccept && w.verdicts.Verdict() == nil && !w.askedVerdict {
+			if w.spec.Role == protocol.RoleAccept && w.verdicts.Verdict() == nil && !w.askedVerdict && !a.transcriptSupplement {
 				// The verdict may have gone to an earlier worker, or never
 				// been given: ask once more before calling it inconclusive.
 				w.askedVerdict = true
@@ -1036,6 +1039,9 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 					return a, false, errors.New("orca: root turn ended without confirmed completion; reconciliation is required")
 				}
 				if a.transcriptSupplement {
+					if err := sleep(ctx, w.ws.opts.Poll); err != nil {
+						return Agent{}, false, nil
+					}
 					return a, false, nil
 				}
 				return a, false, w.recoverFailure(ctx, a)
