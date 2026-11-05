@@ -825,7 +825,10 @@ worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 t
 另一个 authenticated Hello 的独立 Stop 可结束同一原 journal
 责任；它以原 Assignment/lease 摘要持久化，不清 strict 约束，不将 Forbidden 当业务成功。
 物理停止后，在 Done 同一事务保存原请求/事件历史再退出 pending；原 server 业务回执
-不改写，后续 Retain/Continue 或新附着使旧 Stop 许可失效。见[计划](plans/retained-run-continuation.md)与
+不改写，后续 Retain/Continue 或新附着使旧 Stop 许可失效。Stop 复核、清理和新许可撤销
+按同一 Run settlement gate 排序，最终 journal 事务再次核对 Stop 并归档；Done 后不接受
+新的附着覆盖历史。单个 strict journal 不准入只保留该 Run 的 fence 与诊断，不阻止同 host
+应用其他 Run verdict 或完成启动。见[计划](plans/retained-run-continuation.md)与
 [操作合同](retained-run-continuation.md)。
 
 严格附着的显式 Pause 仍中断已经验证的原 terminal，区别于 fence/shutdown 的零自动输入；

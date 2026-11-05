@@ -737,7 +737,7 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			// The host's Stop independently ends local responsibility. Run
 			// credentials may already be revoked; preserve outstanding facts
 			// as history instead of interpreting Forbidden as business success.
-			return r.cleanupReportedRun(ctx, as)
+			return r.cleanupReportedRunWithStop(ctx, as, stop)
 		}
 	}
 	req, ok, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
@@ -802,7 +802,21 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 }
 
 func (r *Runner) cleanupReportedRun(ctx context.Context, as protocol.Assignment) error {
+	return r.cleanupReportedRunWithStop(ctx, as, nil)
+}
+
+func (r *Runner) cleanupReportedRunWithStop(ctx context.Context, as protocol.Assignment, stop *journal.RetainedStop) error {
 	_, settleErr := r.settleRun(ctx, as.RunID, func() error {
+		if stop != nil {
+			// Continue or a new attachment can revoke a previously read Stop.
+			// Recheck only after acquiring the same settlement gate they use,
+			// before performing any workspace cleanup.
+			current, err := r.cfg.Journal.RetainedStop(ctx, as.RunID)
+			run, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+			if err != nil || readErr != nil || current == nil || *current != *stop || !run.StoppedConfirmed {
+				return &completionPending{errors.New("runner: original Stop no longer authorizes cleanup")}
+			}
+		}
 		execution, err := r.resolveExecution(ctx, as)
 		if err != nil {
 			return &completionPending{err}
@@ -814,6 +828,12 @@ func (r *Runner) cleanupReportedRun(ctx context.Context, as protocol.Assignment)
 			if err := r.cfg.Journal.QueueWorkspaceRelease(ctx, protocol.WorkspaceRelease{WorkspaceID: as.Workspace.ID, TaskID: as.TaskID}); err != nil {
 				return err
 			}
+		}
+		if stop != nil {
+			if err := r.cfg.Journal.DoneRetainedStop(ctx, as.RunID, *stop); err != nil {
+				return &completionPending{err}
+			}
+			return nil
 		}
 		return r.cfg.Journal.Done(ctx, as.RunID)
 	})

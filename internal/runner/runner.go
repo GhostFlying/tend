@@ -287,7 +287,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.resendClaims(ctx); err != nil {
 		return err
 	}
-	if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
+	if err := r.retry(ctx, func() error { return r.reconcileHello(ctx) }); err != nil {
 		return err
 	}
 	if len(r.cfg.RolloutRoots) > 0 {
@@ -579,6 +579,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	r.mu.Lock()
 	r.confirmedRuntime = *runtime
 	r.mu.Unlock()
+	var rejected []string
 	for _, v := range res.Runs {
 		run := byID[v.RunID]
 		// What tend wants now, not what it wanted when it assigned the run.
@@ -599,7 +600,11 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			}
 		case v.Verdict == protocol.VerdictContinueRetained:
 			if v.RetainedResume == nil || v.RetainedResume.RequestID == "" || v.RetainedResume.Mode != "attach" || run.Held {
-				return errors.New("runner: strict retained continuation identity is unavailable")
+				if err := r.rejectRetainedContinuation(ctx, run, v.RunID, "identity unavailable"); err != nil {
+					return err
+				}
+				rejected = append(rejected, v.RunID)
+				continue
 			}
 			if run.Phase != journal.PhaseStarted {
 				// An attachment permit cannot authorize settlement of an old
@@ -610,13 +615,20 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 					return err
 				}
 				if authority == nil || *authority != *v.RetainedResume || run.WorkerDoneAtMillis == 0 || len(run.WorkerResult) == 0 || (run.Phase != journal.PhaseWorkerDone && run.Phase != journal.PhaseSubmitting && run.Phase != journal.PhaseReleasing) {
-					return errors.New("runner: strict retained continuation has no validated result")
+					if err := r.rejectRetainedContinuation(ctx, run, v.RunID, "no validated result"); err != nil {
+						return err
+					}
+					rejected = append(rejected, v.RunID)
+					continue
 				}
 			}
-			if err := r.cfg.Journal.SetRetainedResume(ctx, v.RunID, *v.RetainedResume); err != nil {
-				return err
-			}
-			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
+			if err := r.authorizeRetainedControl(ctx, v.RunID, true, func() error {
+				return r.cfg.Journal.SetRetainedResume(ctx, v.RunID, *v.RetainedResume)
+			}); err != nil {
+				if errors.Is(err, journal.ErrNotFound) && r.settledHeldRun(ctx, run) {
+					r.requestReconcile()
+					continue
+				}
 				return err
 			}
 			r.start(ctx, as, sent)
@@ -657,6 +669,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			return err
 		}
 		r.start(ctx, as, sent)
+	}
+	if len(rejected) > 0 {
+		return &retainedContinuationsRejected{runs: rejected}
 	}
 	return nil
 }
@@ -971,7 +986,7 @@ func (r *Runner) reconciler(ctx context.Context) {
 		}
 		retry = nil
 		r.waitIdleFenced(ctx)
-		if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
+		if err := r.retry(ctx, func() error { return r.reconcileHello(ctx) }); err != nil {
 			if ctx.Err() == nil {
 				r.cfg.Log.ErrorContext(ctx, "reconciliation failed", "err", err)
 			}

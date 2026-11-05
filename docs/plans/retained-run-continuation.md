@@ -69,3 +69,14 @@ Hello/heartbeat 与 request/CAS/原pin保留回归覆盖库存变化后的继续
 新唤醒自动收到原身份 Stop 并保留原事件/请求历史后收尾。另以真实取消上下文
 验证 strict Reattach 期间 Stop 仍通过下一轮持久请求读取识别取消并进入既有停止流程，
 不依据单次 completionPending 臆断无限重试，不扩展状态机。
+
+后继完整 stack 复审核实两处控制次序缺陷，本批仅修这些路径：
+
+- strict continuation 对单个 journal 不准入时，将该原 Run 保持 fenced/retained，继续应用同次 Hello 的其他 Run verdict，并允许 host 完成启动；不伪造成功、不分配新 Run。真实 Runner.Run 多 Run 回归验证旧 releasing/give-up 无合法结果时不会退出整个 host。
+- 独立 Stop 快照不能跨 settlement gate 授权 cleanup。Stop 的原身份、物理停止证明及当前许可须在该 Run 的同一 gate 内重新核验，再清理并在 journal 单事务中校验原 Stop、归档请求/事件和 Done。Continue/ClearStop 与新的 strict authority 写入使用同一既有 gate；已 Done 的 journal 不接受新 authority 覆盖历史。活动 executor 之外没有在运行的 cleanup；原 journal 事务的 Stop 条件仍独立保护最后落盘。
+
+先用真实并发 barrier 复现 revocation 先完成后旧 cleanup 不得结算，以及 cleanup 已持 gate 时新 authority 不能抢先清 Stop/覆盖归档；保留原请求、事件、assignment/thread 与 Stop 历史。目标验证使用获准空闲 2 CPU/p1/race，不启动 full、模型或生产操作。修改规模与 review 范围按最终实际差异评估。
+
+同一并发链中，Continue 在 reporting executor 尚未退出时撤销旧 Stop，不能只更新
+当前 active 条目后丢失后继启动；该控制同样设置既有 reconcileOnExit，复用退出唤醒，
+限定 reporting 场景，不扩展普通工作中的调度或控制状态机。
