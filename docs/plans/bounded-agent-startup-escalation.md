@@ -25,3 +25,5 @@
 ## 独立审查后的输入身份修正
 
 先保留并复现当前输入错归因、原未知回执被新输入预算挡住，以及 dispatcher 先 claim 为 sending 的真实主入口。启动时必须在同一读取快照中获得实际 runtime selection 与其原 request/message 身份；失败与成功只结算该 attachment，不能重新读取 raw 队头。未知 native intent/receipt 的只读 attachment 独立发现，不能由另一 pending 输入的预算阻断。sending 仅在尚无 native intent/receipt 的 pre-ready 情形计本地启动预算，保持 sending、原 ID 和未发生 native turn 的事实，不做普遍重派或释放。补实际 RED/GREEN 后以独立原子修复交接。
+
+组合复核进一步限定 legacy 回执的归属查询：已有 hosted execution 必须沿其冻结的实际 conversation 读取，不能因共享 source 在 main 而落回 legacy 分支；真正旧格式执行优先使用 agent_turn_contexts 的实际 conversation，只有缺少执行上下文才读取原消息会话。先复现具名 manager 共享 main source 的误归因，再以冻结 F2 的既有失租 fixture 验证原3项及完整 owner fallback 组合；不修改 F2、原回执或实际业务状态。

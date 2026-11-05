@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -88,6 +89,59 @@ func TestAgentStartupLegacyReceiptAttachmentIgnoresNewInputBudget(t *testing.T) 
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, turn.RequestID) != 1 || h.countWhere(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status=?`, turn.RequestID, store.TurnInterrupted) != 1 {
 		t.Fatal("startup discovery changed the original unknown native receipt")
+	}
+}
+
+func TestAgentStartupNamedSharedSourceReceiptKeepsExecutionConversation(t *testing.T) {
+	h, manager, _, _, receipt := receiptRecoveryFixture(t)
+	var mainInput store.OutboxMessage
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		mainInput, err = agentStartupHead(t.Context(), tx.Q(), "main")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, mainAttachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), "main")
+	if err != nil || mainAttachment.RequestID != mainInput.RequestID || mainAttachment.Reconciliation {
+		t.Fatal("shared main source reassigned a named manager receipt to main", mainInput.RequestID, mainAttachment, err)
+	}
+	_, named, managerAttachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), manager.Manager.ConversationID)
+	if err != nil || !named || managerAttachment.RequestID != receipt || !managerAttachment.Reconciliation {
+		t.Fatal("named receipt lost its actual execution conversation", managerAttachment, named, err)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, receipt) != 1 {
+		t.Fatal("conversation selection changed the original native receipt")
+	}
+}
+
+func TestAgentStartupLegacySharedSourceUsesAdmittedConversation(t *testing.T) {
+	h := newHarness(t)
+	work := h.createWork(workPlan())
+	h.prepareAgent(work.WorkItemID)
+	h.exec(owner, h.env("conversation.open_background", workTarget(work.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
+	conversation := "work-item:" + work.WorkItemID
+	message, mainDelivery := h.say("Shared original owner source")
+	request := h.ids.New(protocol.PrefixRequest)
+	if _, err := h.app.AgentContext(t.Context(), conversation, request); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if err := tx.PutMainTurn(t.Context(), store.MainTurn{RequestID: request, MessageID: message, ThreadID: "legacy-background-native", TurnID: "original-turn", Status: store.TurnInterrupted}, h.clock.Now().UnixMilli()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, mainAttachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), "main")
+	if err != nil || mainAttachment.RequestID != mainDelivery.RequestID || mainAttachment.Reconciliation {
+		t.Fatal("legacy source message overrode its admitted execution conversation", mainAttachment, err)
+	}
+	_, named, backgroundAttachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), conversation)
+	if err != nil || named || backgroundAttachment.RequestID != request || !backgroundAttachment.Reconciliation {
+		t.Fatal("legacy receipt was not discovered in its admitted conversation", backgroundAttachment, named, err)
 	}
 }
 

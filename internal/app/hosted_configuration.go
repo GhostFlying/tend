@@ -407,10 +407,11 @@ func (a *App) hostedRuntimeStartupSelection(ctx context.Context, q store.Querier
 		}
 		return selected, true, attachment, err
 	}
-	// Legacy native executions have no named snapshot, but their original
-	// receipts still own the attachment ahead of any newer input's budget.
+	// Named executions retain their frozen conversation even when their source
+	// message is shared. Only legacy receipts use admitted agent context first,
+	// falling back to the message conversation when no such context exists.
 	var receiptRequest string
-	err = q.QueryRowContext(ctx, `SELECT t.request_id FROM main_turns t JOIN native_turn_receipts_pending p USING(request_id) JOIN conversation_messages m ON m.message_id=t.message_id WHERE m.conversation_id=? ORDER BY t.created_at,t.request_id LIMIT 1`, store.ConversationID(conversation)).Scan(&receiptRequest)
+	err = q.QueryRowContext(ctx, `SELECT t.request_id FROM main_turns t JOIN native_turn_receipts_pending p USING(request_id) JOIN conversation_messages m ON m.message_id=t.message_id LEFT JOIN agent_turn_contexts c ON c.request_id=t.request_id WHERE COALESCE(c.conversation_id,m.conversation_id)=? AND NOT EXISTS(SELECT 1 FROM hosted_executions h WHERE h.execution_id=t.request_id) ORDER BY t.created_at,t.request_id LIMIT 1`, store.ConversationID(conversation)).Scan(&receiptRequest)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return hostedconfig.Selection{}, false, attachment, err
 	}
