@@ -138,3 +138,114 @@ func TestUncertainCompactResumesOriginalThreadInsteadOfCurrentBinding(t *testing
 		t.Fatal("compact read a newer binding instead of its original native thread", restored, err)
 	}
 }
+
+func seedUnknownCompact(t *testing.T, f *handoffFixture) {
+	t.Helper()
+	if err := f.e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,before_json,created_at,updated_at) VALUES('original-compact','main',?,'unknown','manual','{}',0,0)`, f.source.ID())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompactRecoverySessionEndsAfterOriginalCompletion(t *testing.T) {
+	for _, event := range []bool{true, false} {
+		t.Run(map[bool]string{true: "native_event", false: "already_durable"}[event], func(t *testing.T) {
+			f := newHandoffFixture(t)
+			seedUnknownCompact(t, f)
+			var compactAck atomic.Bool
+			f.session.mu.Lock()
+			f.session.threads[f.source.ID()] = &acknowledgedCompactThread{handoffTestThread: f.source.(*handoffTestThread), acked: &compactAck}
+			f.session.mu.Unlock()
+			retained := &retainedCompactSession{f.session}
+			f.e.m.cfg.Open = func(context.Context) (harness.Session, error) { return retained, nil }
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- f.e.m.serve(ctx) }()
+			eventually(t, "original compact recovery session attaches", func() bool { f.e.m.mu.Lock(); defer f.e.m.mu.Unlock(); return f.e.m.thread != nil })
+			if event {
+				f.source.(*handoffTestThread).Thread.(*testkit.FakeThread).Compact("original-completion")
+			} else if err := f.e.app.CompleteNativeCompact(t.Context(), "main", f.source.ID(), "original-completion"); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(10 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("settled compact session remained ready with its old toolset")
+			}
+			if event && !compactAck.Load() {
+				t.Fatal("compact attachment exited before acknowledging its durable completion")
+			}
+			if state, err := f.e.app.CompactState(t.Context(), "original-compact"); err != nil || state != "completed" {
+				t.Fatal(state, err)
+			}
+			if len(f.e.h.Starts()) != 0 {
+				t.Fatal("recovery attachment started business work", f.e.h.Starts())
+			}
+			f.saveSummary(t)
+			next, err := f.e.m.openThread(t.Context(), retained)
+			if err != nil {
+				t.Fatal("settled compact did not re-enter normal toolset startup", err)
+			}
+			if next.ID() == f.source.ID() {
+				t.Fatal("normal startup retained the old toolset thread after compact settlement")
+			}
+			binding, known, err := f.e.app.MainThreadBinding(t.Context(), "main")
+			hash, hashErr := f.e.m.currentToolsetHash()
+			if err != nil || hashErr != nil || !known || binding.ThreadID != next.ID() || binding.ToolsetHash != hash {
+				t.Fatal("toolset handoff did not commit the new binding", binding, err, hashErr)
+			}
+
+		})
+	}
+}
+
+func TestSettledCompactAttachmentStillRejectsFreshBusiness(t *testing.T) {
+	f := newHandoffFixture(t)
+	seedUnknownCompact(t, f)
+	f.e.say("Do not start this input on the old recovery toolset")
+	delivery, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatal(delivery, ok, err)
+	}
+	th, err := f.e.m.openThread(t.Context(), f.session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.e.m.mu.Lock()
+	f.e.m.session, f.e.m.thread = f.session, th
+	close(f.e.m.ready)
+	f.e.m.mu.Unlock()
+	if err := f.e.app.CompleteNativeCompact(t.Context(), "main", f.source.ID(), "durable-completion"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result := f.e.m.Deliver(ctx, delivery)
+	if result.Outcome != app.Retry || len(f.e.h.Starts()) != 0 {
+		t.Fatal("fresh business escaped a compact recovery attachment before normal startup", result, f.e.h.Starts())
+	}
+}
+
+type retainedCompactSession struct{ *handoffTestSession }
+
+func (s *retainedCompactSession) Close() error { return nil }
+
+type acknowledgedCompactThread struct {
+	*handoffTestThread
+	acked *atomic.Bool
+}
+
+func (t *acknowledgedCompactThread) AcknowledgeEvent(_ context.Context, event harness.Event) error {
+	if event.Kind == harness.EventItemCompleted && event.ItemType == harness.ItemContextCompaction {
+		t.acked.Store(true)
+	}
+	return nil
+}
