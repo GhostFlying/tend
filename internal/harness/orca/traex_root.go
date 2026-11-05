@@ -5,10 +5,30 @@ import (
 	"errors"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
+// recordObservedRoot projects a fact on a local copy. The lifecycle keeps the
+// original native API observation, including its uncertainty and authority.
+func (w *worker) recordObservedRoot(ctx context.Context, a Agent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if w.ws.opts.Agent == protocol.AgentTraex {
+		native := a
+		if err := w.observeTraexRoot(ctx, &a); err != nil {
+			// Transcript conflicts cannot become takeover or recovery authority.
+			a = native
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return w.recordRootObservation(ctx, a)
+}
+
 // observeTraexRoot supplements only an otherwise bound native history snapshot
-// whose ending clock is missing. It never supplies continuation authority.
+// whose ending clock is missing. Its result is for observation reporting only.
 func (w *worker) observeTraexRoot(ctx context.Context, a *Agent) error {
 	r := a.RootTurn
 	if a.AgentType != "traex" || r == nil || r.Source != "native-api" || r.State != "unknown" || r.ErrorCode != "ending_unconfirmed" || !validRootTurn(*a, w.st.Turn) || w.spec.HandBack || w.st.RootRebindPending || w.spec.Dir == "" {
@@ -36,7 +56,6 @@ func (w *worker) observeTraexRoot(ctx context.Context, a *Agent) error {
 			}
 		}
 	}
-	native.transcriptSupplement = true
 	*a = native
 	return nil
 }
