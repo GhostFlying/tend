@@ -44,3 +44,11 @@
 | A28 | 本轮不执行 | 不声称生产声明配置或部署已完成 |
 
 旧 source review 的三个 finding 都要有回归证据：precheck 失败不得在未 Start 时清 stop proof；注入 now 的目录/claim 不再因工具时效分歧；解释不能覆盖原 AgentID/RuntimeID/backend 来制造候选资格。旧 review/full/CI 只覆盖旧对象。原 CI journal-v14 fixture 错建后续表须纠正 fixture，不改已提交迁移。P0 external cancellation/partial 与未知 OS exit 保持原事实，不推断争用根因。
+
+本轮新增回归出口（上轮独立验收 changes_required 后，编码前记录）：
+
+| Finding | 当前验收补充 |
+|---|---|
+| R1 / A04、A14、A17、A21 | 缺省 MatchPolicy 的旧运行可接收同原 pin 的有效新复验收据；过期/错 pin/旧 incarnation 不授权恢复；原 binding 不变。declaration_v1 不读该适配、不产生 native 门。 |
+| R2 / A12、A20 | 声明满足时，host capacity/runtime capacity/普通 adapter 不可用为 pending，候选身份和原因可读；Claim 不领取，恢复可用后可领取。错误冻结 Agent/runtime/backend 不能因可恢复等待被放宽。 |
+| R3 / A13、A19 | 当前指南和持久 Attention 只要求声明配置和普通 executor 可用性；旧 verify/StartWithCapabilities/source/session 材料仅标历史，不作当前资格要求。 |

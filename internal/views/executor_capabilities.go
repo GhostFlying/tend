@@ -52,7 +52,7 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 			return nil, "", err
 		}
 		signature = append(signature, inv, runtime)
-		executors, err := HostExecutors(ctx, q, inv.ExecutionEnvironmentID, now)
+		executors, err := hostExecutors(ctx, q, inv.ExecutionEnvironmentID, now, true)
 		if err != nil {
 			return nil, "", err
 		}
@@ -71,6 +71,15 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 				p := executor.Pin
 				v.Pin = &p
 				v.Current = scheduler.ExecutorCapabilityMatch(executor, agent.Capabilities)
+				if reason := executorAvailabilityReason(runtime, p, now); reason != nil && v.Current.State == "eligible" {
+					v.SchedulingReason = reason
+					v.Current.State = "pending"
+					for i := range v.Current.Reasons {
+						v.Current.Reasons[i].State = "pending"
+						v.Current.Reasons[i].Reason = string(reason.Code)
+						v.Current.Reasons[i].Recovery = "restore ordinary availability of this same configured executor"
+					}
+				}
 				found = true
 				break
 			}
@@ -144,13 +153,6 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 		if err != nil {
 			return v, err
 		}
-		if !host.available {
-			v.Reasons = append(v.Reasons, "runner_unavailable:"+host.ID)
-			if v.State != "eligible" {
-				v.State = "pending"
-			}
-			continue
-		}
 		// Admission conditions not related to capabilities are shared too.
 		host.ConcurrencyBlocked = map[string]bool{}
 		runtime, err := store.GetHostRuntime(ctx, q, host.ID)
@@ -164,19 +166,33 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 			}
 			host.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] = !available
 		}
-		if !runtime.Online || now-runtime.LastHeartbeatAt >= 60000 {
-			v.Reasons = append(v.Reasons, "runner_offline:"+host.ID)
-			if v.State != "eligible" {
-				v.State = "pending"
-			}
-			continue
+		// Keep unavailable observations separate from the actual scheduling pool.
+		// Relax only transient readiness for the pending classification; frozen
+		// identity, profile, backend and both-role constraints remain unchanged.
+		restored := host.Host
+		restored.Executors, err = hostExecutors(ctx, q, host.ID, now, true)
+		if err != nil {
+			return v, err
+		}
+		restored.Continuations, err = hostContinuations(ctx, q, host.ID, now, true)
+		if err != nil {
+			return v, err
+		}
+		restored.Busy, restored.Slots = 0, 1
+		restored.ConcurrencyBlocked = nil
+		var hostReason *protocol.QueueWaitReason
+		if !host.available {
+			hostReason = &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "runner is offline or in maintenance", HostID: host.ID}
+		} else if !runtime.Online || now-runtime.LastHeartbeatAt >= 60000 {
+			hostReason = &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "runner is offline or its heartbeat expired", HostID: host.ID}
 		}
 		reason := scheduler.Skip(host.Host, c)
-		eligible := reason == ""
-		if !eligible {
-			v.Reasons = append(v.Reasons, reason)
+		eligible := reason == "" && hostReason == nil
+		if hostReason != nil {
+			v.Reasons = append(v.Reasons, hostReason.Message)
 		}
-		for _, executor := range append(slices.Clone(host.Executors), host.Continuations...) {
+		recoverable := false
+		for _, executor := range append(slices.Clone(restored.Executors), restored.Continuations...) {
 			p := executor.Pin
 			if p.Purpose != "" {
 				continue
@@ -185,11 +201,30 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 			trial := c
 			trial.ExecutionFilter = &p
 			schedulingReason := scheduler.SkipReason(host.Host, trial)
+			if host.ConcurrencyBlocked[p.Runtime.RuntimeID] {
+				schedulingReason = &protocol.QueueWaitReason{Code: protocol.QueueHostCapacity, Message: "runtime concurrency capacity unavailable", HostID: host.ID}
+			}
+			if unavailable := executorAvailabilityReason(runtime, p, now); unavailable != nil {
+				schedulingReason = unavailable
+			}
+			if hostReason != nil {
+				schedulingReason = hostReason
+			}
+			if m.State == "eligible" && schedulingReason != nil && scheduler.SkipReason(restored, trial) == nil {
+				recoverable = true
+				v.Reasons = append(v.Reasons, schedulingReason.Message)
+				if v.State != "eligible" {
+					v.State = "pending"
+				}
+			}
 			candidate := protocol.AgentCapabilityView{SchedulingReason: schedulingReason, Binding: p.Runtime, Categories: slices.Clone(executor.Categories), Purposes: []string{"worker_run"}, Identity: p.Identity, AgentRevision: p.AgentRevision, Declared: slices.Clone(executor.DeclaredCapabilities), Pin: &p, Current: m, Evidence: executor.CapabilityEvidence}
 			v.Candidates = append(v.Candidates, candidate)
 			if m.State == "pending" && v.State != "eligible" {
 				v.State = "pending"
 			}
+		}
+		if !eligible && !recoverable && reason != "" {
+			v.Reasons = append(v.Reasons, reason)
 		}
 		if eligible {
 			v.State = "eligible"
@@ -225,4 +260,22 @@ func FilterCapabilityAgents(items []protocol.AgentCapabilityView, f protocol.Age
 
 func ValidateCapabilityState(state string) bool {
 	return state == "" || slices.Contains(strings.Fields("eligible pending unavailable"), state)
+}
+
+// executorAvailabilityReason describes ordinary readiness without discarding
+// the configured declaration or pretending an unavailable adapter can be claimed.
+func executorAvailabilityReason(runtime store.HostRuntimeRow, pin protocol.RunExecutionPin, now int64) *protocol.QueueWaitReason {
+	if !runtime.Online || now > 0 && now-runtime.LastHeartbeatAt >= 60000 {
+		return &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "runner is offline or its heartbeat expired", HostID: pin.Identity.ExecutionEnvironmentID}
+	}
+	for _, e := range append(slices.Clone(runtime.Runtime.AgentExecutors), runtime.Runtime.AgentContinuations...) {
+		if e.Pin == pin && !e.Available {
+			message := "executor adapter is unavailable"
+			if e.Reason != "" {
+				message += ": " + e.Reason
+			}
+			return &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: message, HostID: pin.Identity.ExecutionEnvironmentID}
+		}
+	}
+	return nil
 }

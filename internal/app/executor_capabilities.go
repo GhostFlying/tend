@@ -177,7 +177,11 @@ func (ReportCapabilityEvidence) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err := tx.InsertCapabilityEvidence(ctx, e); err != nil {
 		return Outcome{}, err
 	}
-	events := []Event{{ObjectType: "host", ObjectID: x.Principal.Subject, Kind: "host.capability_evidence_recorded", Body: map[string]any{"evidence_id": e.EvidenceID, "state": e.State, "capability_id": e.Capability.CapabilityID}}}
+	events, err := recordLegacyCapabilityRevalidations(ctx, x, tx, e, current.Runtime)
+	if err != nil {
+		return Outcome{}, err
+	}
+	events = append(events, Event{ObjectType: "host", ObjectID: x.Principal.Subject, Kind: "host.capability_evidence_recorded", Body: map[string]any{"evidence_id": e.EvidenceID, "state": e.State, "capability_id": e.Capability.CapabilityID}})
 	return Outcome{Result: e, Events: events}, nil
 }
 
@@ -207,6 +211,9 @@ func (a *App) CapabilityEvidenceRequest(ctx context.Context, p protocol.Principa
 }
 
 func currentRunCapabilityMatch(ctx context.Context, q store.Querier, b protocol.RunCapabilityBinding, r protocol.RunnerRuntime, now int64) (protocol.CapabilityMatch, error) {
+	if b.MatchPolicy == "" {
+		return legacyRunCapabilityMatch(ctx, q, b, r, now)
+	}
 	// Read declarations from the frozen inventory, never the latest Agent.
 	inv, err := store.GetAgentInventoryAt(ctx, q, b.Pin)
 	if err != nil {

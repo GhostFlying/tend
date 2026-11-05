@@ -948,6 +948,8 @@ reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能�
 
 ## D174：执行 Capability 的声明、版本与冻结约束
 
+以下至“D174 范围修订”之前是旧候选的历史实现记录；native 资格门已撤销。当前合同以该范围修订及后续兼容补充为准，旧记录仅用于审计和历史 evidence-only 运行恢复。
+
 Capability 与角色 category、runner feature 和 CLI 覆盖目录分别建模。能力定义追加 revision，`capabilities.put` 通过 owner request_id/CAS 与事件同事务提交；`image_gen@1` 是初始定义，其工具名为 `image_gen__imagegen`。定义退休拒绝新声明和新 Task，不改写历史 spec、pin 或证据。
 
 私有配置和公共登记采用可选 `capability_version=1` 扩展，Agent 的 `capabilities` 是显式 definition revision 集合。省略扩展和声明时不改变旧序列化与 hash。集合排序、去重校验和深复制覆盖公私投影与两 role required。声明不产生可用性，不给任意 CLI、模型、hosted 或第二用途入口补能力；同执行四元组仍允许多个稳定身份。仅消费 worker 的原 RuntimeID，不改既有单入口责任的接口或历史。
@@ -978,3 +980,5 @@ D174 范围修订（优先于以上 native-gate 历史文字）：依据 owner s
 声明调度使用独立协商 feature `executor-capability-declarations-v1`，旧 `executor-capabilities-v1` 保留历史证据接口；旧 native-gated runner 不接收新声明任务。无 required 的旧任务和 2/1 默认 wire 不变，兼容依据是双方协商及发送点验证，并非“新增字段自然兼容”。历史配置/hash/spec/pin/unknown 和迁移均不重写。原 P2/P5 的 native 依赖已撤销；新矩阵见 `plans/capability-declarative-acceptance.md`。完整检查资源 HOLD、独立 review/CI 和正式交付分别留证，不能拿旧候选通过代替新对象。
 
 D174 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明 feature peer 可接收。旧 binding 字段缺省仍保持原字节，原 evidence-only peer 的已分配运行可继续读取/恢复，不向它添加声明 current_match；新 runner 使用原冻结配置声明和普通 resolver。旧验证请求和 evidence 只作为可选诊断与原请求对账，不能生成新 Run 的资格或重写历史绑定。配置严格解码增加 int64 definition revision 的合法整数读取，仍拒绝分数、字符串、溢出及非正 revision；这是修复声明文件路径，不改变旧有效配置的默认值。
+
+D174 旧运行恢复及等待投影补充：缺省 match_policy 的历史 evidence-only binding 保留专用历史恢复适配；原请求上报可同事务追加同 pin 的新鲜 revalidation，并向旧协商 peer 返回原有格式。该适配不参与 declaration_v1 的新匹配或启动，不能把旧工具实证门加回声明式运行。只读解释保留不可用 executor 的身份与声明事实，普通容量/adapter 等待按完整冻结约束判为 pending；claim 始终只使用普通可用 executor。当前恢复指导为显式登记声明、恢复同入口可用性及 unknown 原请求对账。

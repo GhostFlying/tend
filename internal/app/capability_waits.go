@@ -63,7 +63,7 @@ func (sweepCapabilityWaits) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 				continue
 			}
 		}
-		p := protocol.CreateAttentionPayload{Kind: "action", Title: "Required capability remains unavailable. Read task capability-explain; verify the same executor once or explicitly revise a future task. Reconcile unknown original requests first.", IssueID: issue}
+		p := protocol.CreateAttentionPayload{Kind: "action", Title: "Required capability is still waiting. Read task capability-explain; explicitly register the required declarations and restore ordinary availability of the same configured executor, or explicitly revise a future task. Reconcile unknown original requests first.", IssueID: issue}
 		if issue != "" {
 			p.TaskID = c.TaskID
 		}

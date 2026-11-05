@@ -264,6 +264,13 @@ func TestCapabilityWaitNoticeIsBoundedAndDoesNotProbe(t *testing.T) {
 		if n != 0 {
 			t.Fatal("wait triggered a probe", n)
 		}
+		var notice string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT body_json FROM attentions WHERE json_extract(body_json,'$.title') LIKE 'Required capability%'`).Scan(&notice); err != nil {
+			return err
+		}
+		if strings.Contains(notice, "verify the same executor") || !strings.Contains(notice, "explicitly register the required declarations") || !strings.Contains(notice, "ordinary availability") {
+			t.Fatal("notice restored native prerequisite", notice)
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

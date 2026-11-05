@@ -14,7 +14,7 @@
 6. 更新 CLI/API 帮助、必要目录/UI 的声明/可用性投影与配置示例；双 role required、过滤/分页与旧修订查询仍保留。真实生图调用为零；不声称任何生产 Agent 已配置或部署。
 7. 必要 targeted 在现有工作树低负载运行，保原 CI journal-v14 fixture 失败与 P0 partial 事实。提交并更新原 PR 候选，记录 exact task base/head/tree 与 fresh PR base/target。最终 full/required CI/新独立 review 必须绑定最终候选；资源门未释放则明确 NOT_RUN/HOLD，不沿用旧通过。
 
-兼容评估：旧 required 为空和旧 feature 的默认/持久化字节不变；新声明语义使用另一个协商 feature，只给理解该语义的 runner 新 assignment。旧 v1 native binding 作为历史读取，未结束 run 沿冻结 pin 与声明，不改原 request/unknown。新 binding 显式 match_policy=declaration_v1；无该字段的旧 binding 继续允许原 evidence-only peer 原样恢复，不向其发送新 match_policy/声明 current_match。没有删除字段或收紧旧有效输入，不改变 runner 2/1 代际；旧 runner 不获声明模式任务。迁移仅追加，旧 reader 拒绝新 journal；生产升级/回滚库存审计仍由独立交付窗口承担。
+兼容评估：旧 required 为空和旧 feature 的默认/持久化字节不变；新声明语义使用另一个协商 feature，只给理解该语义的 runner 新 assignment。旧 v1 native binding 作为历史读取，未结束 run 沿冻结 pin 与原恢复合同，不改原 request/unknown。新 binding 显式 match_policy=declaration_v1；无该字段的旧 binding 继续允许原 evidence-only peer 原样恢复，不向其发送新 match_policy/声明 current_match。没有删除字段或收紧旧有效输入，不改变 runner 2/1 代际；旧 runner 不获声明模式任务。迁移仅追加，旧 reader 拒绝新 journal；生产升级/回滚库存审计仍由独立交付窗口承担。
 
 ---
 
@@ -137,3 +137,12 @@
 本次实现依据 D174。新增 server migration 88、runner journal 16/17，定义/声明/证据/两 role required、具名查询与本机验证恢复、claim 原子绑定/launch 围栏和必要详情投影。保守 adapter 边界已在本仓库设计实现，不再被当作全部编码的外部前置；当前生产 adapters 仍明确不支持 authoritative inventory/atomic launch，真实调用和完整生产闭环保持未验证。
 
 定义 read 的 CLI 修订参数采用 `--definition-revision`，避免与既有 CAS flag 重名；对应 HTTP 仍为 revision。session prepare/adopt 本批明确 unsupported，不以 profile 推断填补。原始设计/验收文件继续作为原作者冻结输入，不另建调查。详细验证、矩阵与未完成边界随候选报告交付；独立 review、CI、合入和部署不会由本实现者自报通过。
+
+## 本轮 review 修复计划（编码前）
+
+本轮沿原分支与 PR244 修正上轮独立验收的三项 finding，owner v1 声明语义保持最高优先级。原候选及失败事实不覆盖，不新增环境或 Agent。
+
+1. R1：缺省 MatchPolicy 的旧 evidence-only binding 使用独立历史恢复适配，按原 pin、incarnation、sequence、有效期判定新鲜 revalidation，恢复 ReportCapabilityEvidence 的同事务追加和 assignment 投影。仅旧绑定进入此分支；declaration_v1 的新运行继续普通声明匹配/Start，不加 native 门。回归覆盖原收据返回、原绑定不变、过期/错绑定拒绝及新声明不生成复验。
+2. R2：保留普通 adapter 不可用的候选事实供只读解释，claim 仍只使用可用 executor。按完整冻结身份/role/backend 约束核验可恢复性后，将容量、runtime admission、离线/adapter 等待投影为 pending；无声明/修订/不兼容仍 unavailable。通过 App 查询与 Claim 真实路径验证拒领和恢复后可领。
+3. R3：更新当前使用指南与一次持久等待通知，恢复建议为显式配置声明及恢复同 executor 普通可用性；旧 verify/source/session 材料明确为历史诊断，不作为新匹配前置。
+4. 运行有界 targeted 回归，记录 exact head/tree、task base、PR head/base/main、diff 与结果。heavy full 继续 HOLD；独立 review、最终 full/required CI、目标集成仍须原责任链安排，本轮不 merge/deploy。
