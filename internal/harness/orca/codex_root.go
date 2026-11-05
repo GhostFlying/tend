@@ -254,9 +254,6 @@ func rootTranscript(ctx context.Context, session ProviderSession, st workerState
 }
 
 func (w *worker) observeCodexRoot(ctx context.Context, a *Agent) error {
-	if w.ws.opts.Agent == protocol.AgentTraex {
-		return w.observeTraexRoot(ctx, a)
-	}
 	if w.ws.opts.Agent != protocol.AgentCodex || a.RootTurn != nil {
 		return nil
 	}

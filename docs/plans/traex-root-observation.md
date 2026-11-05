@@ -27,3 +27,9 @@
 ## 恢复阶段的最后分流校验
 
 补证阻止已持久化 closing 恢复时会进入既有 unknown 对账循环。该循环此前只处理 continuing；不能因观测从补证转为强原生事实而丢失原 closing 策略。最小修复按已有 durable Recovery.Phase 重入原 begin/close/launch 路径，不增加恢复授权、不修改错误重试或关闭身份。回归通过真实 Workers.Start 从弱观测转强观测，分别验证 closing 只关闭原 terminal 后重建、关闭成功但回执丢失后先读取原 terminal 消失事实、continuing 仍只续原 session，三者不得互串。原 close CLI 没有独立 request ID，验证它已有 terminal/session/launch 身份，不虚构新的去重能力。
+
+## 收窄为只发布补证事实
+
+前几轮把补证 Agent 回流生命周期，随后增加的 guard 与恢复循环产生新的阶段分流和未知 Close 重发风险；这些候选和失败审查全部保留，不作为可部署源。本轮撤回这一授权耦合：原 daemon/native-api Agent 始终驱动 begin、run、answered、恢复、控制与历史清理；只在原单次 observation record 位置，对局部副本做 exact rollout 补证并发布一次真实事实。不是先发布 native unknown 再发布补证，避免 phase/revision 来回振荡。
+
+补证不再授权 WorkerDone，即使 rollout completed/settled 也不能生成 continuation、reminder、recovery、Close 或结果提交。原 native-api 强证据和明确用户控制沿用基线行为。去掉本批 private marker、所有生命周期 guard 及未知关闭循环重入；与基线逐字比较 client、recovery，worker 仅保留 observation 调用差异。测试覆盖补证事件的真实状态/原生时间/工具未知性，以及生命周期返回 Agent 仍是原 API unknown；同一已持久 phase/revision 经真实 Start、重启、恢复读取不会变成输入或关闭授权。
