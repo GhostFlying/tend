@@ -2,7 +2,11 @@ package orca
 
 import (
 	"context"
+	"errors"
+	"time"
+
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/harness"
 	"os"
 	"strings"
 	"testing"
@@ -192,6 +196,243 @@ func TestTraexRootSupplementCompletedAndFailedRequireRealTerminal(t *testing.T) 
 			}
 			if f.orca.count("terminal send", nil) != 0 || f.orca.count("agent launch", nil) != 0 || f.orca.count("terminal close", nil) != 0 {
 				t.Fatal("supplement replayed native work")
+			}
+		})
+	}
+}
+
+func rootAppend(at int64, items ...any) string {
+	return rootRecord(at, "history_mutation", map[string]any{"version": 1, "turn_id": "turn-original", "operation": "append", "items": items})
+}
+func TestTraexRootSupplementReadsHistoryMutationInputAndOperations(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(map[bool]string{false: "input", true: "pending tool"}[pending], func(t *testing.T) {
+			_, w, a, body := traexEndingFixture(t)
+			if !pending {
+				body = strings.SplitAfterN(body, "\n", 2)[0] + rootRecord(2000, "event_msg", map[string]any{"type": "task_started", "turn_id": "turn-original"}) + rootAppend(2001, map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": w.st.Said}}, "internal_chat_message_metadata_passthrough": map[string]any{"content_item_kinds": []string{"user.text"}}})
+			} else {
+				body += rootAppend(3000, map[string]any{"type": "custom_tool_call", "name": "exec", "call_id": "outer", "input": "command()"})
+			}
+			body += rootRecord(5000, "event_msg", map[string]any{"type": "turn_aborted", "turn_id": "turn-original"})
+			if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.observeCodexRoot(t.Context(), a); err != nil {
+				t.Fatal(err)
+			}
+			want := "settled"
+			if pending {
+				want = "pending"
+			}
+			if !a.transcriptSupplement || a.RootTurn.State != "cancelled" || a.RootTurn.Operations != want {
+				t.Fatalf("root=%+v supplemented=%v", a.RootTurn, a.transcriptSupplement)
+			}
+		})
+	}
+}
+func TestTraexRootSupplementUnknownToolOutputIsNotSettlement(t *testing.T) {
+	for _, kind := range []string{"function_call", "custom_tool_call"} {
+		t.Run(kind, func(t *testing.T) {
+			_, w, a, body := traexEndingFixture(t)
+			body += rootRecord(3000, "response_item", map[string]any{"type": kind, "name": "exec", "call_id": "opaque"}) + rootRecord(3100, "response_item", map[string]any{"type": kind + "_output", "call_id": "opaque", "output": "opaque receipt"}) + rootRecord(5000, "event_msg", map[string]any{"type": "turn_aborted", "turn_id": "turn-original"})
+			if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.observeCodexRoot(t.Context(), a); err != nil {
+				t.Fatal(err)
+			}
+			if a.RootTurn.Operations != "unknown" {
+				t.Fatalf("opaque output settled operations: %+v", a.RootTurn)
+			}
+		})
+	}
+}
+func waitTraexWorker(t *testing.T, w harness.Worker, cancel context.CancelCauseFunc) {
+	t.Helper()
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range w.Events() {
+		}
+	}()
+	finished := make(chan error, 1)
+	go func() { _, err := w.Wait(); finished <- err }()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Errorf("worker: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Error("supplemented completed worker did not finish without a new prompt")
+		cancel(harness.ErrHeld)
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Error("worker failed to stop")
+		}
+	}
+	<-drained
+}
+func TestTraexRootSupplementRealStartAcceptNeverSends(t *testing.T) {
+	f, w, a, body := traexEndingFixture(t)
+	body += rootEnd(5000, "turn-original")
+	if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	original := mustState(w.st)
+	for range 2 {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		spec := w.spec
+		spec.Role = protocol.RoleAccept
+		spec.Thread = original
+		started, err := f.ws.Start(ctx, spec)
+		if err != nil {
+			cancel(harness.ErrHeld)
+			t.Fatal(err)
+		}
+		waitTraexWorker(t, started, cancel)
+		cancel(harness.ErrHeld)
+		if f.orca.count("terminal send", nil) != 0 || f.orca.count("agent launch", nil) != 0 || f.orca.count("terminal close", nil) != 0 {
+			t.Fatal("Start/begin or missing-verdict path sent native input")
+		}
+	}
+}
+func TestTraexRootSupplementRunMissingVerdictNeverSends(t *testing.T) {
+	f, w, a, body := traexEndingFixture(t)
+	body += rootEnd(5000, "turn-original")
+	if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w.spec.Role = protocol.RoleAccept
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(harness.ErrHeld)
+	if err := w.openBridge(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w.events = make(chan harness.WorkerEvent)
+	w.done = make(chan struct{})
+	go w.run(ctx)
+	waitTraexWorker(t, w, cancel)
+	if f.orca.count("terminal send", nil) != 0 {
+		t.Fatal("missing verdict sent a reminder from transcript evidence")
+	}
+}
+func TestTraexRootSupplementFailedPollWaitsForCancellation(t *testing.T) {
+	f, w, a, body := traexEndingFixture(t)
+	body += rootRecord(5000, "event_msg", map[string]any{"type": "task_complete", "turn_id": "turn-original", "error": map[string]any{"codex_error_info": "other"}})
+	if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.ws.opts.Poll = time.Hour
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	entered := make(chan struct{}, 1)
+	prev := f.ws.opts.Client.Exec
+	f.ws.opts.Client.Exec = func(ctx context.Context, dir string, args []string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "terminal" && args[1] == "wait" {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+		}
+		return prev(ctx, dir, args)
+	}
+	result := make(chan error, 1)
+	go func() { _, _, err := w.step(ctx); result <- err }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("no native wait observed")
+	}
+	select {
+	case <-result:
+		t.Fatal("failed supplement returned immediately instead of respecting Poll")
+	case <-time.After(25 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Poll did not cancel")
+	}
+}
+
+func TestTraexRootSupplementRejectsRewritesAndAppendedOwnerInput(t *testing.T) {
+	for _, kind := range []string{"rewrite", "unknown mutation", "new user", "bookkeeping"} {
+		t.Run(kind, func(t *testing.T) {
+			_, w, a, body := traexEndingFixture(t)
+			switch kind {
+			case "rewrite":
+				body += rootRecord(3000, "history_mutation", map[string]any{"operation": "replace", "items": []any{}})
+			case "unknown mutation":
+				body += rootRecord(3000, "history_mutation", map[string]any{"operation": "future", "items": []any{}})
+			case "new user":
+				body += rootAppend(3000, map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "new owner input"}}})
+			case "bookkeeping":
+				body += rootAppend(3000, map[string]any{"type": "trae_extra_info"})
+			}
+			body += rootRecord(5000, "event_msg", map[string]any{"type": "turn_aborted", "turn_id": "turn-original"})
+			if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := w.observeCodexRoot(t.Context(), a)
+			if kind == "new user" {
+				if !errors.Is(err, harness.ErrHeld) {
+					t.Fatal("new input not rejected", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "unknown"
+			if kind == "bookkeeping" {
+				want = "settled"
+			}
+			if a.RootTurn.Operations != want {
+				t.Fatalf("root=%+v", a.RootTurn)
+			}
+		})
+	}
+}
+func TestTraexRootSupplementDoesNotAuthorizeRecoveryEntrypoints(t *testing.T) {
+	for _, kind := range []string{"recover", "continue", "close", "recheck"} {
+		t.Run(kind, func(t *testing.T) {
+			f, w, a, body := traexEndingFixture(t)
+			// Keep the daemon fixture's weak API row unchanged; supplementation is
+			// local to the decoded observation, never written back to Orca.
+			observed := *a
+			root := *a.RootTurn
+			observed.RootTurn = &root
+			a = &observed
+			body += rootRecord(5000, "event_msg", map[string]any{"type": "task_complete", "turn_id": "turn-original", "error": map[string]any{"codex_error_info": "response_stream_disconnected"}})
+			if err := os.WriteFile(a.ProviderSession.TranscriptPath, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.observeCodexRoot(t.Context(), a); err != nil {
+				t.Fatal(err)
+			}
+			w.st.Recovery = &recoveryState{Phase: recoveryContinuing, SessionID: w.st.SessionID, TurnID: w.st.RootObservedTurnID, TurnAt: 5000, OriginalPrompt: w.st.Said, Terminal: w.st.Terminal, Pane: w.st.Pane}
+			var err error
+			switch kind {
+			case "recover":
+				err = w.recoverFailure(t.Context(), *a)
+			case "continue":
+				err = w.continueObservedSession(t.Context(), *a, true)
+			case "close":
+				w.st.Recovery.Phase = recoveryClosing
+				err = w.closeFailedSession(t.Context())
+			case "recheck":
+				err = w.recheckFailedTurn(t.Context(), Wait{Satisfied: true})
+			}
+			if !errors.Is(err, errRecoveryUncertain) {
+				t.Fatal("recovery did not retain uncertainty", err)
+			}
+			if f.orca.count("terminal send", nil) != 0 || f.orca.count("agent launch", nil) != 0 || f.orca.count("terminal close", nil) != 0 {
+				t.Fatal("transcript evidence authorized recovery effects")
 			}
 		})
 	}

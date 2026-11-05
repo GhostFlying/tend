@@ -16,3 +16,10 @@
 ## 验证与交付
 
 必要故障回归先 RED 后 GREEN，有限并发 race 覆盖 TraeX 补证与既有 Codex/恢复路径。真实 rollout 的工具操作收敛不足时，给出 pending/unknown，不能仅凭 abort 清除 pending 或重发原输入。目标验证后冻结源，由既有唯一 operator 协调 runner 安全更新；完整本地检查、规定独立 review、required CI 按仓库门槛完成后方可合入。
+
+
+## 独立审查与原件验证后的收敛
+
+原候选的真实格式验证失败：TraeX 0.213.1 把 managed input 和外层工具调用保存在 history_mutation append/items；只读 response_item 无法绑定原输入，也会漏掉未结外层操作。补齐 append 中已有 message/function/custom-tool 语义，不把 snapshot/rewrite 或未来格式当空操作库存。未知工具名称即使有 output 也保留 unknown，不用 opaque code-mode 返回值证明全部效果已结。
+
+独立审查同时指出真实 Workers.Start/begin 与 acceptance 缺 verdict 路径仍可发送 continuation/reminder，以及补证 failed/settled 无轮询延时。回归须走真实 Start、begin 和 run，跨 serialized Thread 重启后仍无隐式 Send/Launch/Close；补证保持有界可取消的 Poll，真实原生和 Codex 旧路径不变。原候选失败与 review finding 保留，修后一批完整目标回归和同一冻结原件离线验证再更新候选。

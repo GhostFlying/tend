@@ -58,6 +58,9 @@ func (w *worker) recoveryBrief() string {
 }
 
 func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
+	if a.transcriptSupplement {
+		return errRecoveryUncertain
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -166,6 +169,9 @@ func (w *worker) closeFailedSession(ctx context.Context) error {
 		return err
 	}
 	if alive {
+		if a.transcriptSupplement {
+			return errRecoveryUncertain
+		}
 		if w.spec.HandBack || a.Prompt == "" || w.st.Said == "" || w.takenOver(a) != "" || a.ProviderSession == nil || a.ProviderSession.ID != r.SessionID ||
 			!rootFailed(a, w.st.Turn) || a.MainAgent.StateStartedAt != r.TurnAt {
 			return fmt.Errorf("%w: failed turn ownership or background completion changed before recovery", harness.ErrHeld)
@@ -209,6 +215,9 @@ func (w *worker) continueFailedSession(ctx context.Context) error {
 // The polling loop supplies its observation after applying the ordinary bounded
 // read retries. Startup uses continueFailedSession to obtain its own observation.
 func (w *worker) continueObservedSession(ctx context.Context, a Agent, alive bool) error {
+	if a.transcriptSupplement {
+		return errRecoveryUncertain
+	}
 	r := w.st.Recovery
 	if !alive || a.ProviderSession == nil || a.ProviderSession.ID != r.SessionID || w.spec.HandBack {
 		return errors.New("orca: original failed session is unavailable for continuation")
@@ -329,6 +338,9 @@ func (w *worker) recheckFailedTurn(ctx context.Context, wait Wait) error {
 	a, alive, err := w.agent(ctx)
 	if err != nil {
 		return err
+	}
+	if a.transcriptSupplement {
+		return errRecoveryUncertain
 	}
 	r := w.st.Recovery
 	expected := r.OriginalPrompt
