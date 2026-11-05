@@ -8,7 +8,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestRepositoryRegistrationUsesCurrentRevisionAndStableRetry(t *testing.T) {
+func TestRepositoryRegistrationLostAnswerKeepsOriginalRequest(t *testing.T) {
 	f := newFakeServer(t)
 	f.answer("GET /api/v1/repos/new", protocol.RepositoryRegistration{Repo: "new", RemoteURL: "https://example.com/new.git", ControlRevision: 4})
 	count := 0
@@ -32,12 +32,12 @@ func TestRepositoryRegistrationUsesCurrentRevisionAndStableRetry(t *testing.T) {
 		_ = json.NewEncoder(out).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
 	})
 	te := newTestEnv(t, f.srv.URL)
-	if code := te.main("repo", "register", "new", "--base", "main,release", "--json"); code != exitOK {
+	if code := te.main("repo", "register", "new", "--base", "main,release", "--json"); code != exitError {
 		t.Fatal(code, te.errOut.String())
 	}
 	seen := f.seen("POST /api/v1/ops")
-	if len(seen) != 2 || string(seen[0].body) != string(seen[1].body) {
-		t.Fatal("transport retry changed identity")
+	if len(seen) != 1 {
+		t.Fatal("unknown repository registration was automatically repeated")
 	}
 }
 

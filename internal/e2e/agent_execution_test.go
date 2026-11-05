@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -132,7 +133,12 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 		status, err := f.runner.AgentRegistrationStatus(t.Context())
 		return err == nil && status.Server != nil && len(status.Server.Executors) == 2 && status.Server.Executors[0].Available && status.Server.Executors[1].Available
 	})
-	f.stop()
+	if reuseMode == "" {
+		f.stop()
+	} else {
+		// Reuse needs a real completed source, not another reload/restart audit.
+		close(gate)
+	}
 	claimQueued := func() *protocol.Assignment {
 		t.Helper()
 		var runtime store.HostRuntimeRow
@@ -162,6 +168,9 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 		t.Fatal(err)
 	}
 	spec := protocol.OwnerTaskSpec{Goal: "named work", Acceptance: []string{"independent check"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, ImplementationContext: "AUTHOR_RATIONALE_PRIVATE", AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", RuntimeID: "worker", Model: "not-selected-model", Effort: "high"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer", RuntimeID: "review-runtime", Effort: "xhigh"}}}
+	if reuseMode != "" {
+		spec.AgentSelection.Implementation.Model = "implement-old"
+	}
 	payload, err := json.Marshal(protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "named work", Spec: spec})
 	if err != nil {
 		t.Fatal(err)
@@ -177,92 +186,128 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	if err := json.Unmarshal(taskResponse.Operation.Result, &created); err != nil {
 		t.Fatal(err)
 	}
-	if assignment := claimQueued(); assignment != nil {
-		t.Fatal("owner implementation model constraint was ignored", assignment.Execution)
+	if reuseMode == "" {
+		if assignment := claimQueued(); assignment != nil {
+			t.Fatal("owner implementation model constraint was ignored", assignment.Execution)
+		}
+		spec.AgentSelection.Implementation.Model = "implement-old"
+		spec.AgentSelection.Implementation.Effort = "low"
+		update, err := json.Marshal(protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reviewOwner.run("", "issue", "update-task", created.TaskID, "--data", string(update))
+		if assignment := claimQueued(); assignment != nil {
+			t.Fatal("owner implementation effort constraint was ignored", assignment.Execution)
+		}
+		spec.AgentSelection.Implementation.Effort = "high"
+		update, err = json.Marshal(protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reviewOwner.run("", "issue", "update-task", created.TaskID, "--data", string(update))
+		start(false)
 	}
-	spec.AgentSelection.Implementation.Model = "implement-old"
-	spec.AgentSelection.Implementation.Effort = "low"
-	update, err := json.Marshal(protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewOwner.run("", "issue", "update-task", created.TaskID, "--data", string(update))
-	if assignment := claimQueued(); assignment != nil {
-		t.Fatal("owner implementation effort constraint was ignored", assignment.Execution)
-	}
-	spec.AgentSelection.Implementation.Effort = "high"
-	update, err = json.Marshal(protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewOwner.run("", "issue", "update-task", created.TaskID, "--data", string(update))
-	start(false)
 
-	eventually(t, "implementation started", func() bool { mu.Lock(); defer mu.Unlock(); return len(starts) == 1 })
-	mu.Lock()
-	first := starts[0]
-	mu.Unlock()
-	if first.FrozenExecution == nil || first.FrozenExecution.Model != "implement-old" || first.FrozenExecution.Effort != "high" || first.RoleInstructions != "IMPLEMENT_PRIVATE_ROLE" {
-		t.Fatal("implementation ignored named definition", first)
-	}
-	withoutSelection := spec
-	withoutSelection.AgentSelection = nil
-	rejected, err := json.Marshal(protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &withoutSelection})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewOwner.out.Reset()
-	code := cli.Main(t.Context(), reviewOwner.env, []string{"issue", "update-task", created.TaskID, "--data", string(rejected)})
-	var rejection protocol.APIResponse
-	err = json.Unmarshal(reviewOwner.out.Bytes(), &rejection)
-	if code != 1 || err != nil || rejection.Operation == nil || rejection.Operation.Error == nil || rejection.Operation.Error.Code != protocol.CodeInvalidRequest || s.task(created.TaskID).SpecVersion != 3 {
-		t.Fatal("owner removal of selection changed a named workspace", code, rejection, err)
-	}
-	f.config.Agents[0].Revision++
-	f.config.Agents[0].Model = "implement-new"
-	f.config.Agents[0].Instructions = "IMPLEMENT_CHANGED_ROLE"
-	f.config.Agents[1].Revision++
-	f.config.Agents[1].Model = "review-new"
-	f.config.Agents[1].Instructions = "REVIEW_CHANGED_ROLE"
-	f.write()
-	if _, err := f.control.Reload(t.Context(), protocol.ReloadLocalAgentsRequest{RequestID: s.ids.New(protocol.PrefixRequest), ExpectedRevision: 1}); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "new inventory registered", func() bool { return f.current() != nil && f.current().LocalRevision == 2 })
-	f.stop()
-	start(false)
-	eventually(t, "same run resumed through old snapshot", func() bool { mu.Lock(); defer mu.Unlock(); return len(starts) >= 2 })
-	mu.Lock()
-	resumed := starts[1]
-	mu.Unlock()
-	if resumed.RunID != first.RunID || resumed.Attempt != 2 || resumed.FrozenExecution.Model != "implement-old" || resumed.RoleInstructions != "IMPLEMENT_PRIVATE_ROLE" || resumed.Thread == "" {
-		t.Fatalf("restart changed original run configuration: first=%+v resumed=%+v", first, resumed)
-	}
-	close(gate)
-	eventually(t, "independent acceptance completed", func() bool { return s.task(created.TaskID).Lifecycle == protocol.TaskCompleted })
-	mu.Lock()
-	observedStarts := append([]harness.WorkerSpec(nil), starts...)
-	observedFactories := append([]*testkit.Workers(nil), reviewFactories...)
-	mu.Unlock()
-	if len(observedStarts) != 3 {
-		t.Fatalf("starts=%d", len(observedStarts))
-	}
-	review := observedStarts[2]
-	if review.Role != protocol.RoleAccept || review.RunID == first.RunID || review.Thread != "" || review.FrozenExecution.Model != "review-new" || review.RoleInstructions != "REVIEW_CHANGED_ROLE" || strings.Contains(string(review.Spec), "AUTHOR_RATIONALE_PRIVATE") {
-		t.Fatalf("acceptance inherited implementation or missed its new run selection: %+v", review)
-	}
-	if reviewKind == agentconfig.OrcaWorker {
-		releases := 0
-		for _, factory := range observedFactories {
-			releases += len(factory.Released())
+	reloadDefinitions := func() {
+		t.Helper()
+		f.config.Agents[0].Revision++
+		f.config.Agents[0].Model = "implement-new"
+		f.config.Agents[0].Instructions = "IMPLEMENT_CHANGED_ROLE"
+		f.config.Agents[1].Revision++
+		f.config.Agents[1].Model = "review-new"
+		f.config.Agents[1].Instructions = "REVIEW_CHANGED_ROLE"
+		f.write()
+		if _, err := f.control.Reload(t.Context(), protocol.ReloadLocalAgentsRequest{RequestID: s.ids.New(protocol.PrefixRequest), ExpectedRevision: 1}); err != nil {
+			t.Fatal(err)
 		}
-		if releases == 0 {
-			t.Fatal("mixed runtime acceptance did not stop through its original Orca factory")
+		eventually(t, "new inventory registered", func() bool { return f.current() != nil && f.current().LocalRevision == 2 })
+	}
+	if reuseMode == "" {
+		eventually(t, "implementation started", func() bool { mu.Lock(); defer mu.Unlock(); return len(starts) == 1 })
+		mu.Lock()
+		first := starts[0]
+		mu.Unlock()
+		if first.FrozenExecution == nil || first.FrozenExecution.Model != "implement-old" || first.FrozenExecution.Effort != "high" || first.RoleInstructions != "IMPLEMENT_PRIVATE_ROLE" {
+			t.Fatal("implementation ignored named definition", first)
 		}
+		withoutSelection := spec
+		withoutSelection.AgentSelection = nil
+		rejected, err := json.Marshal(protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &withoutSelection})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reviewOwner.out.Reset()
+		code := cli.Main(t.Context(), reviewOwner.env, []string{"issue", "update-task", created.TaskID, "--data", string(rejected)})
+		var rejection protocol.APIResponse
+		err = json.Unmarshal(reviewOwner.out.Bytes(), &rejection)
+		if code != 1 || err != nil || rejection.Operation == nil || rejection.Operation.Error == nil || rejection.Operation.Error.Code != protocol.CodeInvalidRequest || s.task(created.TaskID).SpecVersion != 3 {
+			t.Fatal("owner removal of selection changed a named workspace", code, rejection, err)
+		}
+		reloadDefinitions()
+		f.stop()
+		start(false)
+		eventually(t, "same run resumed through old snapshot", func() bool { mu.Lock(); defer mu.Unlock(); return len(starts) >= 2 })
+		mu.Lock()
+		resumed := starts[1]
+		mu.Unlock()
+		if resumed.RunID != first.RunID || resumed.Attempt != 2 || resumed.FrozenExecution.Model != "implement-old" || resumed.RoleInstructions != "IMPLEMENT_PRIVATE_ROLE" || resumed.Thread == "" {
+			t.Fatalf("restart changed original run configuration: first=%+v resumed=%+v", first, resumed)
+		}
+		close(gate)
+		eventually(t, "independent acceptance completed", func() bool { return s.task(created.TaskID).Lifecycle == protocol.TaskCompleted })
+		mu.Lock()
+		observedStarts := append([]harness.WorkerSpec(nil), starts...)
+		observedFactories := append([]*testkit.Workers(nil), reviewFactories...)
+		mu.Unlock()
+		if len(observedStarts) != 3 {
+			t.Fatalf("starts=%d", len(observedStarts))
+		}
+		review := observedStarts[2]
+		if review.Role != protocol.RoleAccept || review.RunID == first.RunID || review.Thread != "" || review.FrozenExecution.Model != "review-new" || review.RoleInstructions != "REVIEW_CHANGED_ROLE" || strings.Contains(string(review.Spec), "AUTHOR_RATIONALE_PRIVATE") {
+			t.Fatalf("acceptance inherited implementation or missed its new run selection: %+v", review)
+		}
+		if reviewKind == agentconfig.OrcaWorker {
+			releases := 0
+			for _, factory := range observedFactories {
+				releases += len(factory.Released())
+			}
+			if releases == 0 {
+				t.Fatal("mixed runtime acceptance did not stop through its original Orca factory")
+			}
+		}
+	} else {
+		eventually(t, "source workspace completed", func() bool { return s.task(created.TaskID).Lifecycle == protocol.TaskCompleted })
+		reloadDefinitions()
 	}
 
 	if reuseMode == "" {
 		return
+	}
+	readSourcePins := func() []*protocol.RunExecutionPin {
+		t.Helper()
+		var pins []*protocol.RunExecutionPin
+		if err := s.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			runs, err := store.ListRunsByTask(t.Context(), tx.Q(), created.TaskID)
+			if err != nil {
+				return err
+			}
+			for _, run := range runs {
+				pin, err := store.GetRunExecution(t.Context(), tx.Q(), run.RunID)
+				if err != nil {
+					return err
+				}
+				pins = append(pins, pin)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return pins
+	}
+	sourcePins := readSourcePins()
+	if len(sourcePins) != 2 || sourcePins[0] == nil || sourcePins[1] == nil {
+		t.Fatal("completed source is missing its independent execution pins", sourcePins)
 	}
 	// The fake native sessions have finished. Report that stopped resource fact
 	// through the actual runner endpoint before asking for a new task to reuse it.
@@ -354,7 +399,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 		if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM runs WHERE task_id=?`, follow.TaskID).Scan(&runs); err != nil {
 			return err
 		}
-		if w.HostID != "linux-1" || runs != 0 {
+		if w.WorkspaceID != sourceWorkspace || w.HostID != "linux-1" || runs != 0 {
 			t.Fatal("fixture is not a new task on a retained workspace", w, runs)
 		}
 		return nil
@@ -372,5 +417,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	// adapters. The new task may now allocate, without changing the source task's pin.
 	start(false)
 	eventually(t, "reused task executes after both roles are available", func() bool { return s.task(follow.TaskID).Lifecycle == protocol.TaskCompleted })
-
+	if got := readSourcePins(); !reflect.DeepEqual(got, sourcePins) {
+		t.Fatalf("workspace reuse changed the completed source's run pins: before=%+v after=%+v", sourcePins, got)
+	}
 }

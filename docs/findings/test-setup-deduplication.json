@@ -1,0 +1,374 @@
+{
+  "Format": 1,
+  "Scope": "target root performance and fault detection; final full-check and CI results are maintained in the PR validation record",
+  "BaselineCommit": "bc2be98a8e1e735f2d506195f0ecddf14ce91408",
+  "ImplementationCommit": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+  "Environment": {
+    "LogicalCPUs": 64,
+    "CPUModel": "Intel(R) Xeon(R) Platinum 8336C CPU @ 2.30GHz",
+    "EffectiveGoBudget": 32,
+    "CheckJobs": 4,
+    "AppShards": 4,
+    "SuiteShards": 2,
+    "RootGOMAXPROCS": 2,
+    "RootPackageParallel": 2,
+    "Go": "go version go1.27.1 linux/amd64",
+    "Node": "v24.19.0",
+    "ExclusiveHost": false,
+    "PNPMLauncher": "11.21.0",
+    "PNPMPackageManager": "pnpm@10.34.7"
+  },
+  "Measurements": [
+    {
+      "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+      "Package": "api",
+      "Before": {
+        "Package": "api",
+        "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+        "Seconds": 271.3267013113946,
+        "CompileSeconds": 19.183493145741522,
+        "UserSeconds": 275.26783400000005,
+        "SystemSeconds": 6.3484,
+        "LoadBefore": [
+          3.177734375,
+          3.3466796875,
+          5.79150390625
+        ],
+        "LoadAfter": [
+          4.39404296875,
+          3.79345703125,
+          5.3359375
+        ],
+        "ExitCode": 0
+      },
+      "After": {
+        "Package": "api",
+        "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+        "Seconds": 25.449828481301665,
+        "CompileSeconds": 20.6149524692446,
+        "UserSeconds": 24.723862000000004,
+        "SystemSeconds": 0.7501220000000002,
+        "LoadBefore": [
+          9.94384765625,
+          5.4423828125,
+          5.3828125
+        ],
+        "LoadAfter": [
+          11.51806640625,
+          6.1650390625,
+          5.62353515625
+        ],
+        "ExitCode": 0
+      },
+      "WallReductionFraction": 0.9062022707006135
+    },
+    {
+      "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+      "Package": "app",
+      "Before": {
+        "Package": "app",
+        "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+        "Seconds": 126.4964863602072,
+        "CompileSeconds": 24.768779397010803,
+        "UserSeconds": 127.092173,
+        "SystemSeconds": 2.6737970000000004,
+        "LoadBefore": [
+          4.0029296875,
+          3.74658203125,
+          5.27783203125
+        ],
+        "LoadAfter": [
+          3.8486328125,
+          3.69140625,
+          5.05517578125
+        ],
+        "ExitCode": 0
+      },
+      "After": {
+        "Package": "app",
+        "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+        "Seconds": 14.119704084470868,
+        "CompileSeconds": 25.706217856146395,
+        "UserSeconds": 12.994437000000005,
+        "SystemSeconds": 0.32566499999999987,
+        "LoadBefore": [
+          14.294921875,
+          7.33349609375,
+          6.02978515625
+        ],
+        "LoadAfter": [
+          14.77197265625,
+          7.66796875,
+          6.15283203125
+        ],
+        "ExitCode": 0
+      },
+      "WallReductionFraction": 0.88837868552124
+    },
+    {
+      "Root": "TestEndToEnd_NamedExecutionReloadRestartAndIndependentAcceptance",
+      "Package": "e2e",
+      "Before": {
+        "Package": "e2e",
+        "Root": "TestEndToEnd_NamedExecutionReloadRestartAndIndependentAcceptance",
+        "Seconds": 18.260073710232973,
+        "CompileSeconds": 10.45608340576291,
+        "UserSeconds": 20.813652999999988,
+        "SystemSeconds": 0.4737870000000015,
+        "LoadBefore": [
+          3.9326171875,
+          3.71728515625,
+          5.04931640625
+        ],
+        "LoadAfter": [
+          3.537109375,
+          3.6376953125,
+          4.99365234375
+        ],
+        "ExitCode": 0
+      },
+      "After": {
+        "Package": "e2e",
+        "Root": "TestEndToEnd_NamedExecutionReloadRestartAndIndependentAcceptance",
+        "Seconds": 18.8986473409459,
+        "CompileSeconds": 11.26026728656143,
+        "UserSeconds": 20.92720299999999,
+        "SystemSeconds": 0.48474299999999904,
+        "LoadBefore": [
+          15.86328125,
+          8.2568359375,
+          6.3701171875
+        ],
+        "LoadAfter": [
+          16.17724609375,
+          8.70166015625,
+          6.54638671875
+        ],
+        "ExitCode": 0
+      },
+      "WallReductionFraction": -0.03497103247480693
+    },
+    {
+      "Root": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles",
+      "Package": "e2e",
+      "Before": {
+        "Package": "e2e",
+        "Root": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles",
+        "Seconds": 22.872562582604587,
+        "CompileSeconds": 10.45608340576291,
+        "UserSeconds": 27.695007000000032,
+        "SystemSeconds": 0.545541,
+        "LoadBefore": [
+          3.537109375,
+          3.6376953125,
+          4.99365234375
+        ],
+        "LoadAfter": [
+          3.3037109375,
+          3.5791015625,
+          4.9453125
+        ],
+        "ExitCode": 0
+      },
+      "After": {
+        "Package": "e2e",
+        "Root": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles",
+        "Seconds": 20.362569228745997,
+        "CompileSeconds": 11.26026728656143,
+        "UserSeconds": 24.770892000000003,
+        "SystemSeconds": 0.464931,
+        "LoadBefore": [
+          16.17724609375,
+          8.70166015625,
+          6.54638671875
+        ],
+        "LoadAfter": [
+          16.423828125,
+          9.35498046875,
+          6.81982421875
+        ],
+        "ExitCode": 0
+      },
+      "WallReductionFraction": 0.10973817843076017
+    }
+  ],
+  "BeforeFull": {
+    "Seconds": 615.1021371865645,
+    "ExitCode": 0,
+    "UserSeconds": 5014.180378999999,
+    "SystemSeconds": 140.589695
+  },
+  "FullValidationURL": "https://github.com/GhostFlying/tend/pull/241",
+  "TargetBeforeSeconds": 438.95582396443933,
+  "TargetAfterSeconds": 78.83074913546443,
+  "Faults": [
+    {
+      "Name": "page-200-truncation",
+      "Source": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+      "File": "internal/store/task_pages.go",
+      "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+      "ExitCode": 1,
+      "Seconds": 41.68535406887531,
+      "ExpectedDiagnostic": "listed 200 tasks, want 231",
+      "Detected": true,
+      "NativeEvents": [
+        {
+          "Time": "2026-11-04T22:45:22.835376531+08:00",
+          "Action": "run",
+          "Package": "github.com/GhostFlying/tend/internal/api",
+          "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit"
+        },
+        {
+          "Time": "2026-11-04T22:45:44.800354351+08:00",
+          "Action": "fail",
+          "Package": "github.com/GhostFlying/tend/internal/api",
+          "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+          "Elapsed": 21.96
+        }
+      ],
+      "LogSHA256": "3ffec315756e4514e1eec9c52fcbe310d5387fe98f48a0ce4053c03fe31ef5e7"
+    },
+    {
+      "Name": "lifecycle-filter",
+      "Source": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+      "File": "internal/store/task_pages.go",
+      "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+      "ExitCode": 1,
+      "Seconds": 41.02740610297769,
+      "ExpectedDiagnostic": "unexpected or duplicate task",
+      "Detected": true,
+      "NativeEvents": [
+        {
+          "Time": "2026-11-04T22:46:02.498575684+08:00",
+          "Action": "run",
+          "Package": "github.com/GhostFlying/tend/internal/api",
+          "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit"
+        },
+        {
+          "Time": "2026-11-04T22:46:25.862305142+08:00",
+          "Action": "fail",
+          "Package": "github.com/GhostFlying/tend/internal/api",
+          "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+          "Elapsed": 23.36
+        }
+      ],
+      "LogSHA256": "a4c2e1e5617a45e99af3011439aecf1394e908e5949bce37572e2eb255b4b798"
+    },
+    {
+      "Name": "cursor-ties",
+      "Source": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+      "File": "internal/store/task_pages.go",
+      "Root": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+      "ExitCode": 1,
+      "Seconds": 36.679279666393995,
+      "ExpectedDiagnostic": "unexpected or duplicate task",
+      "Detected": true,
+      "NativeEvents": [
+        {
+          "Time": "2026-11-04T22:46:43.703662269+08:00",
+          "Action": "run",
+          "Package": "github.com/GhostFlying/tend/internal/api",
+          "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit"
+        },
+        {
+          "Time": "2026-11-04T22:47:02.59303686+08:00",
+          "Action": "fail",
+          "Package": "github.com/GhostFlying/tend/internal/api",
+          "Test": "TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit",
+          "Elapsed": 18.89
+        }
+      ],
+      "LogSHA256": "2fe5c6ccee8da920a502c3ca60dd0373b9386c951f34239dca3830dca3af94ff"
+    },
+    {
+      "Name": "relation-queue-n-plus-one",
+      "Source": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+      "File": "internal/views/views.go",
+      "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+      "ExitCode": 1,
+      "Seconds": 130.7727113775909,
+      "ExpectedDiagnostic": "whole-queue scans, want one",
+      "Detected": true,
+      "NativeEvents": [
+        {
+          "Time": "2026-11-04T22:47:29.105113656+08:00",
+          "Action": "run",
+          "Package": "github.com/GhostFlying/tend/internal/app",
+          "Test": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction"
+        },
+        {
+          "Time": "2026-11-04T22:49:13.42053238+08:00",
+          "Action": "fail",
+          "Package": "github.com/GhostFlying/tend/internal/app",
+          "Test": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+          "Elapsed": 104.32
+        }
+      ],
+      "LogSHA256": "a40f7ca47b4876883e00a4c634334b33c9b9c86d8c5b0d2d70386bb16824c53e"
+    },
+    {
+      "Name": "relation-truncation",
+      "Source": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+      "File": "internal/store/task_relations.go",
+      "Root": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+      "ExitCode": 1,
+      "Seconds": 38.44103814754635,
+      "ExpectedDiagnostic": "relations 100, want 150",
+      "Detected": true,
+      "NativeEvents": [
+        {
+          "Time": "2026-11-04T22:49:41.591975846+08:00",
+          "Action": "run",
+          "Package": "github.com/GhostFlying/tend/internal/app",
+          "Test": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction"
+        },
+        {
+          "Time": "2026-11-04T22:49:51.919290147+08:00",
+          "Action": "fail",
+          "Package": "github.com/GhostFlying/tend/internal/app",
+          "Test": "TestTaskRelationsBatchExecutionFactsInsideClaimTransaction",
+          "Elapsed": 10.33
+        }
+      ],
+      "LogSHA256": "1ea6afe92ad650a138356bd20a677be7a1dabb1c08918cc707bb34036f29e9ef"
+    },
+    {
+      "Name": "reused-first-reviewer",
+      "Source": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+      "File": "internal/scheduler/agent_execution.go",
+      "Root": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles",
+      "ExitCode": 1,
+      "Seconds": 31.96483924612403,
+      "ExpectedDiagnostic": "new reused task claimed without an eligible reviewer",
+      "Detected": true,
+      "NativeEvents": [
+        {
+          "Time": "2026-11-04T22:50:08.283249476+08:00",
+          "Action": "run",
+          "Package": "github.com/GhostFlying/tend/internal/e2e",
+          "Test": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles"
+        },
+        {
+          "Time": "2026-11-04T22:50:23.916889794+08:00",
+          "Action": "fail",
+          "Package": "github.com/GhostFlying/tend/internal/e2e",
+          "Test": "TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles",
+          "Elapsed": 15.63
+        }
+      ],
+      "LogSHA256": "c4bd2a6d70bc8450cf650014dd7bba593875d12701bc4c437980795aef060b4c"
+    }
+  ],
+  "Review": {
+    "Commit": "9b34d09a11d0c3f07151b9766dd1196950b2e76e",
+    "ExitCode": 0,
+    "Seconds": 131.87385030277073,
+    "Outcome": "no actionable findings",
+    "LogSHA256": "0bc56a8ce4c9bcd7eedea016eba6558507b48086570c393c34635581927a1d61"
+  },
+  "BusinessTestsDeleted": 0,
+  "PreservedTaskCount": 231,
+  "PreservedRelationCount": 150,
+  "CollectionMethod": "race test binaries compiled per package with -p=2; independent root processes with -test.count=1 and GOMAXPROCS=2; compilation reported separately; full checks use GOMAXPROCS=32/CHECK_JOBS=4/APP_TEST_SHARDS=4/TEST_SHARDS=2/TEST_COUNT=1",
+  "Interpretation": "One paired sample per root, nonexclusive host; target reductions do not predict full-suite wall time or CI benefit."
+}

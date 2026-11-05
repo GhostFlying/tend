@@ -132,11 +132,7 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 		return (owner{e: e, json: true}).printJSON(env)
 	}
 	fmt.Fprintf(e.Stderr, "Repository request %s; revision %d\n", *requestID, *revision)
-	var response protocol.APIResponse
-	err = c.do(ctx, "POST", "/api/v1/ops", env, &response)
-	if isTransport(err) {
-		err = c.do(ctx, "POST", "/api/v1/ops", env, &response)
-	}
+	response, err := (owner{e: e, c: c}).sendEnvelope(ctx, env)
 	if err != nil {
 		return err
 	}

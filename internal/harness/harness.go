@@ -22,6 +22,8 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	// RetainedResume forbids fallback launch or implicit provider input.
+	RetainedResume      *protocol.RetainedRunResume
 	ConcurrencyFeedback bool
 	// OnNativeSource records a local locator without publishing native content.
 	OnNativeSource func(context.Context, protocol.RolloutPreviewSource) error
@@ -177,3 +179,7 @@ type CompletedReleaser interface {
 type Workers interface {
 	Start(ctx context.Context, spec WorkerSpec) (Worker, error)
 }
+
+// ErrRetainedResumePending leaves the original execution unresolved and intact.
+// Missing identity is not a business failure or permission to launch again.
+var ErrRetainedResumePending = errors.New("original retained native execution requires reconciliation")

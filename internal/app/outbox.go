@@ -161,6 +161,24 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 			wake = due
 			return nil
 		}
+		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
+			allowed, nextAttemptAt, err := agentStartupInputAllowed(ctx, tx.Q(), m.RequestID, now.UnixMilli())
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				native, err := agentStartupNativeWork(ctx, tx.Q(), m.RequestID)
+				if err != nil {
+					return err
+				}
+				if !native {
+					if nextAttemptAt > now.UnixMilli() {
+						wake = time.UnixMilli(nextAttemptAt)
+					}
+					return nil
+				}
+			}
+		}
 		if err := tx.TransitionOutbox(ctx, store.OutboxTransition{
 			OutboxID: m.OutboxID, From: store.OutboxPending, FromAttempts: m.Attempts,
 			To: store.OutboxSending, Attempts: m.Attempts + 1, NextAttemptAt: m.NextAttemptAt, Now: now.UnixMilli(),

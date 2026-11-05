@@ -23,6 +23,7 @@ export const layoutGroups: Record<string, string[]> = {
     "test:agents",
     "test:followups",
     "test:inbox-badge",
+    "test:conversation-reads",
   ],
 };
 

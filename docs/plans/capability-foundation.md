@@ -4,6 +4,16 @@
 
 当前候选从 `7c7696fb` 续接，工作树核验干净，原 PR244 OPEN 且存在冲突；不另建 Task/Issue/环境，不改其他责任。完整 heavy 检查仍 HOLD，本轮仅源代码修订、必要低负载 targeted 和候选准备。独立 formal review 由 Tend 原责任链安排，不在本 worker 内启动其他 Agent。合入、安装与部署不在本轮授权。
 
+## 当前 main 整合批次（编码前）
+
+本轮 owner 续接只授权低负载候选整合。Capability 当前设计编号为 D176（旧候选 D174 的历史引用保留，下文旧阶段编号按此映射）；main D174/D175 保持不变。起始候选 `1b6b3a0d` 工作树干净、远端同 head，原 12 个提交保留；fresh fetch main 为 `e07b8098`，PR244 仍为 draft/open、冲突，API 返回的 PR base `2c243433` 仅作观察，不替代已 fetch 的目标。原任务 base `e8657a07` 不变。没有发现本工作区遗留检查进程；原 settled Run/验收历史按本次冻结输入保留，不修改账本。
+
+1. 在同一候选分支创建 main integration commit，保留原提交身份，不 rebase、force push 或改 main。精确冲突为 design、protocol schema roots、runner execute、journal version、v14 migration fixture、Web scripts；逐项合并两侧行为，不重做或扩展其他责任。
+2. main 已占用 server migration 88–90、journal 16。保留这些文件原字节，将尚未部署候选的 capability SQL 原字节顺延为 server 91、journal 17/18，journal CurrentVersion 更新为 18。旧候选提交内的原编号/SQL 继续保留于 Git 历史。新增升级回归证明 main 的已有表/原请求及冻结 assignment 保持，capability 表追加；旧候选 DB 不得因相同编号误认成 main 历史，必要时明确拒绝，不能猜测生产状态或操作安装数据。
+3. 合并 runner retained-resume 行为与 capability precheck：保留普通 resolver/原身份、precheck 在 NextAttempt 清停止证明之前；声明模式仍普通 Start，旧 evidence-only 恢复与原 pin/unknown 对账不变。API/schema roots 和生成器须覆盖两侧入口，Web 浏览器组保留两侧回归。
+4. 保留 main 的 D174/D175，将 Capability 当前设计引用改为 D176；旧提交内 D174 继续可追溯。更新验收矩阵的整合/迁移补充。仅串行 nice19 的必要定向 Go/协议/类型/格式验证，所有临时输出在当前 run scratch。不得运行 full/race 全套或创建完整 clone/测试环境；heavy HOLD 未释放。独立 review 不从本 worker 启动，原链另行针对新 head 执行。
+5. 普通 push 原 PR 分支，记录 fresh main/PR head/base、tree、任务及整合前后 diff、迁移兼容与初始失败/结果。查询实际 CI workflow/check/ruleset；queued/running 不作 passed。required CI、完整本地检查、新独立验收和父版本化交付门全部保留，无 merge/deploy/install 权限。
+
 ## 当前与保留 pin 渲染修复计划（编码前）
 
 本轮接续对 `aa01c7fe` 的独立验收 finding。后端 R6 分页修复保留；owner v1、原分支/PR244 及全部历史不变。

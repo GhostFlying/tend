@@ -2,8 +2,39 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
+
+// retainedQuestionYieldReady resumes only a physically stopped original
+// handoff receipt. It is neither a worker result nor a general release permit.
+func (r *Runner) retainedQuestionYieldReady(ctx context.Context, run journal.Run) (bool, error) {
+	if run.Phase != journal.PhaseReleasing || !run.StoppedConfirmed || run.Held ||
+		!run.Assignment.QuestionHandoffs || run.Assignment.Manager != nil ||
+		run.Assignment.LeaseID == "" || run.Thread == "" {
+		return false, nil
+	}
+	req, ok, err := r.cfg.Journal.RequestForRun(ctx, run.Assignment.RunID)
+	if err != nil || !ok {
+		return false, err
+	}
+	if req.RunID != run.Assignment.RunID || req.Envelope.RequestID == "" ||
+		req.Envelope.Operation != protocol.OpRunsYieldQuestion ||
+		req.Envelope.Target.Type != "run" || req.Envelope.Target.ID != run.Assignment.RunID {
+		return false, nil
+	}
+	var fields map[string]json.RawMessage
+	var payload protocol.YieldQuestionPayload
+	if json.Unmarshal(req.Envelope.Payload, &fields) != nil || len(fields) != 2 ||
+		json.Unmarshal(req.Envelope.Payload, &payload) != nil {
+		return false, nil
+	}
+	return payload.DecisionID != "" && payload.ThreadID != "" && payload.ThreadID == run.Thread, nil
+}
 
 // retainRun serializes retention with irreversible local settlement without
 // holding the host-wide mutex across workspace cleanup. A settlement already
@@ -69,6 +100,9 @@ func (r *Runner) fenceRetainedJournal(ctx context.Context, id string) error {
 	if _, err := r.cfg.Journal.Run(ctx, id); err != nil {
 		return err
 	}
+	if err := r.cfg.Journal.ClearRetainedStop(ctx, id); err != nil {
+		return err
+	}
 	return r.cfg.Journal.SetFenced(ctx, id, true)
 }
 
@@ -90,11 +124,25 @@ func (r *Runner) lockSettlement(ctx context.Context, a *active) (func(), error) 
 // authorizeRetainedSettlement orders later Continue/Stop with retention and final
 // settlement. A cancelled executor must exit before any fresh attempt starts.
 func (r *Runner) authorizeRetainedSettlement(ctx context.Context, id string, clearFence bool) error {
+	if clearFence {
+		return r.authorizeRetainedControl(ctx, id, true, func() error {
+			return r.cfg.Journal.ClearRetainedStop(ctx, id)
+		})
+	}
+	return r.authorizeRetainedControl(ctx, id, clearFence, nil)
+}
+
+func (r *Runner) authorizeRetainedControl(ctx context.Context, id string, clearFence bool, record func() error) error {
 	for {
 		r.mu.Lock()
 		a := r.active[id]
 		r.mu.Unlock()
 		if a == nil {
+			if record != nil {
+				if err := record(); err != nil {
+					return err
+				}
+			}
 			if clearFence {
 				return r.cfg.Journal.SetFenced(ctx, id, false)
 			}
@@ -110,11 +158,20 @@ func (r *Runner) authorizeRetainedSettlement(ctx context.Context, id string, cle
 			unlock()
 			continue
 		}
-		if clearFence {
+		if record != nil {
+			err = record()
+		}
+		if err == nil && clearFence {
 			err = r.cfg.Journal.SetFenced(ctx, id, false)
 		}
 		if err == nil && a.retained {
 			a.retained = false
+			a.reconcileOnExit = true
+		}
+		if err == nil && record != nil && (!clearFence || a.reporting) {
+			// A control can reach a reporting executor just before it exits.
+			// Stop's receipt or a Continue revoking that receipt must not lose
+			// its successor when start still sees the old reporting executor.
 			a.reconcileOnExit = true
 		}
 		r.mu.Unlock()
@@ -146,4 +203,33 @@ func (r *Runner) markExecutorFenced(ctx context.Context, a *active) error {
 		return nil
 	}
 	return r.cfg.Journal.SetFenced(ctx, a.as.RunID, true)
+}
+
+// A rejected attachment is a local Run outcome, not failure of host recovery.
+// Direct Hello callers can inspect it; the host startup and reconciliation loops
+// keep the rejected journals fenced while continuing other work.
+type retainedContinuationsRejected struct{ runs []string }
+
+func (e *retainedContinuationsRejected) Error() string {
+	return fmt.Sprintf("runner: strict retained continuations remain fenced: %v", e.runs)
+}
+
+func (r *Runner) reconcileHello(ctx context.Context) error {
+	err := r.freshHello(ctx)
+	if _, rejected := errors.AsType[*retainedContinuationsRejected](err); rejected {
+		return nil
+	}
+	return err
+}
+
+func (r *Runner) rejectRetainedContinuation(ctx context.Context, held journal.Run, id, reason string) error {
+	if held.Assignment.RunID != "" {
+		if err := r.retainRun(ctx, id); err != nil {
+			if !errors.Is(err, journal.ErrNotFound) || !r.settledHeldRun(ctx, held) {
+				return err
+			}
+		}
+	}
+	r.cfg.Log.WarnContext(ctx, "strict continuation rejected; preserving original run", "run_id", id, "reason", reason)
+	return nil
 }

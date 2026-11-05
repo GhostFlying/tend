@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"slices"
 	"strings"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // CapabilityBinding is an executable CLI entry for a public interface.
@@ -54,7 +55,13 @@ func CapabilityBindings() []CapabilityBinding {
 		}
 		if cmd.Operation != "" {
 			capability = cmd.Operation
-			if cmd.Operation == protocol.OpReconcileManagerRun {
+			if cmd.Operation == protocol.OpContinueRetainedRun {
+				args = append(args, "--data", retainedRunProofExample())
+			} else if cmd.Operation == protocol.OpAnswerDecisionContinuation {
+				args = append(args, "--data", `{"version":1,"text":"Wait for independent resume","continuation":{"mode":"wait","reason":"Await explicit continuation"}}`)
+			} else if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
+				args = append(args, "--data", `{"expected_revision":0}`)
+			} else if cmd.Operation == protocol.OpReconcileManagerRun {
 				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
 			} else {
 				args = append(args, "--data", `{}`)
@@ -263,6 +270,9 @@ func commandUsage(prefix []string) string {
 		fmt.Fprintf(&out, "  %s\n", command)
 	}
 	if name != "" {
+		if name == "issue context" {
+			out.WriteString("\nRead canonical Issue context diagnostics with --after-source <sequence>.\nprepared reports the historical baseline; dispatch_ready describes context review, owned receipts and frozen task agreements.\nThese fields are not the admission result of issue create-task. Submit the formal task command with current Issue/source/assignment versions for that decision; do not prepare a legacy global baseline.\n")
+		}
 		for _, entry := range legacyBindings() {
 			if entry.Command == name {
 				fmt.Fprintf(&out, "\nExample: tend %s\n", strings.Join(entry.Example, " "))
@@ -302,6 +312,19 @@ func commandUsage(prefix []string) string {
 	if name == "issue" || name == "issue create" || name == "issue set-acceptance-policy" {
 		out.WriteString("\nIndependent acceptance: issue create accepts independent_acceptance: {required: true|false, reason: <text>}. A read-only investigation may use false and must still submit a legal durable report. Creator identity is server-frozen; omitted policy retains independent review.\n")
 		out.WriteString("tend issue set-acceptance-policy <issue_id> --revision <revision> --epoch <epoch> --data '{\"required\":false,\"reason\":\"A bounded investigation needs no separate review\"}'\nChanges affect future tasks only; current workers cannot self-exempt. Use --dry-run to save the original Envelope; unknown results require reconciliation and identical --request-id/payload/control values, never a new request. Read issue show/task show --json for creator and frozen task policy.\n")
+	}
+	if name == "run maintenance-reconciliation" || name == "run continue-retained" {
+		out.WriteString("\nRetained ordinary Orca Run recovery: maintenance-reconciliation is ledger-only; can_continue does not prove a live native turn or restored execution. Copy identity, every protection entry (including original_requests_json), protection_set_sha256 and task_revision from the exact original Run. continue-retained accepts the identity fields at the payload top level, the complete protections array, its hash and an independent reason; a cited source_message_id also requires expected_source_revision.\n")
+		out.WriteString("Use --revision with that original Task control revision, an explicit --request-id and --file <proof.json> (or --data <json>). Save --dry-run output as the original Envelope before submitting. The command authorizes strict attachment through the original journal and same lease only; it does not send a continuation, create a session or clear historical protection/unknown facts. Missing native evidence, old runners, pending business or a new maintenance capture keep recovery blocked.\n")
+		out.WriteString("If the result is unknown, retain the original ID, input, revision and Envelope. Run tend request show <original-id> before tend request replay --file <original-envelope.json>; replay exact bytes only, never replace the ID or refresh the proof to retry an unknown request.\n")
+	}
+	if name == "decide" || name == "decision-continuation" || strings.HasPrefix(name, "decision-continuation ") {
+		out.WriteString("\nLegacy decide preserves automatic handoff after answer and stopped receipts. Use decision-continuation answer for conditional scheduling; it requires the parent Task --revision plus complete version, option/text and explicit continuation. Free text never proves a typed dependency.\n")
+		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"Proceed\",\"continuation\":{\"mode\":\"continue_now\"}}'\n")
+		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"Wait\",\"continuation\":{\"mode\":\"wait\",\"reason\":\"Await an independent resume decision\"}}'\n")
+		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"After the dependency\",\"continuation\":{\"mode\":\"dependency\",\"reason\":\"Await exact dependency completion\",\"dependency\":{\"task_id\":\"<dependency_task>\",\"spec_version\":1}}}'\n")
+		out.WriteString("Read decision-continuation show <decision_id> --json for policy, state, blocked_reason, continuation revision and parent task_control_revision. resume explicitly releases a wait; reconcile checks exact ordinary execution Task/spec completion without accepting a caller readiness claim. Manager Task dependencies are rejected; historical unsupported dependencies stay blocked. Both preserve physical-stop and current-contract guards.\n")
+		out.WriteString("tend decision-continuation resume <decision_id> --revision <task_control_revision> --request-id <new-request-id> --data '{\"expected_revision\":1}' --dry-run\nUse reconcile with the same input shape for dependency reconciliation. On unknown outcome keep the original request ID, payload, both revisions and saved Envelope; run tend request show <original-id>, then request replay --file <original-envelope.json> for an identical retry.\n")
 	}
 	return out.String()
 }

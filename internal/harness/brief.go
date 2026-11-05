@@ -36,8 +36,26 @@ var VerdictToolSpec = ToolSpec{
 // VerdictTool; the last valid call counts.
 type Verdicts struct {
 	StateDir string
-	mu       sync.Mutex
-	verdict  *protocol.VerdictPayload
+	// RequireBinding prevents acknowledgments before a native send is journaled.
+	RequireBinding bool
+	binding        string
+	mu             sync.Mutex
+	verdict        *protocol.VerdictPayload
+}
+
+// Bind selects the original execution scope. A new native turn cannot inherit
+// the preceding turn's verdict. It is independent of worker attempt/authority.
+func (v *Verdicts) Bind(binding string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.binding != binding {
+		v.binding, v.verdict = binding, nil
+	}
+}
+
+type boundVerdict struct {
+	Binding string                  `json:"binding"`
+	Payload protocol.VerdictPayload `json:"payload"`
 }
 
 // Handle answers a call of VerdictTool.
@@ -51,11 +69,18 @@ func (v *Verdicts) Handle(_ context.Context, c ToolCall) ToolResult {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.RequireBinding && v.binding == "" {
+		return ToolResult{Text: "original verdict execution is not journaled"}
+	}
 	if v.StateDir != "" {
 		if err := os.MkdirAll(v.StateDir, 0o700); err != nil {
 			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
 		}
-		body, _ := json.Marshal(p)
+		var record any = p
+		if v.binding != "" {
+			record = boundVerdict{Binding: v.binding, Payload: p}
+		}
+		body, _ := json.Marshal(record)
 		path := filepath.Join(v.StateDir, "verdict.json")
 		if err := os.WriteFile(path+".tmp", body, 0o600); err != nil {
 			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
@@ -70,6 +95,9 @@ func (v *Verdicts) Handle(_ context.Context, c ToolCall) ToolResult {
 
 // Restore retains an acknowledged verdict across attempts of the same run.
 func (v *Verdicts) Restore() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.verdict = nil
 	if v.StateDir == "" {
 		return nil
 	}
@@ -81,15 +109,22 @@ func (v *Verdicts) Restore() error {
 		return fmt.Errorf("read original verdict: %w", err)
 	}
 	var p protocol.VerdictPayload
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if v.binding != "" {
+		var record boundVerdict
+		if err := json.Unmarshal(raw, &record); err != nil {
+			return fmt.Errorf("decode original verdict: %w", err)
+		}
+		if record.Binding != v.binding {
+			return nil
+		}
+		p = record.Payload
+	} else if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("decode original verdict: %w", err)
 	}
 	if !p.Verdict.Valid() {
 		return fmt.Errorf("original verdict is invalid")
 	}
-	v.mu.Lock()
 	v.verdict = &p
-	v.mu.Unlock()
 	return nil
 }
 

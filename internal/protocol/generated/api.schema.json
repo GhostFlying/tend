@@ -1116,6 +1116,9 @@
     "AnswerDecisionPayload": {
       "additionalProperties": false,
       "properties": {
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
         "option": {
           "type": "string"
         },
@@ -3251,6 +3254,71 @@
       "title": "ContextBlocker",
       "type": "object"
     },
+    "ContinueRetainedRunPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "protection_set_sha256": {
+          "type": "string"
+        },
+        "protections": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RetainedRunProtection"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "action_id",
+        "generation",
+        "spec_version",
+        "host_id",
+        "lease_id",
+        "execution",
+        "protections",
+        "protection_set_sha256",
+        "reason"
+      ],
+      "title": "ContinueRetainedRunPayload",
+      "type": "object"
+    },
     "ControlMode": {
       "enum": [
         "managed",
@@ -4065,6 +4133,110 @@
       "title": "DecisionChoice",
       "type": "object"
     },
+    "DecisionContinuationDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "spec_version"
+      ],
+      "title": "DecisionContinuationDependency",
+      "type": "object"
+    },
+    "DecisionContinuationMode": {
+      "enum": [
+        "continue_now",
+        "wait",
+        "dependency"
+      ],
+      "title": "DecisionContinuationMode",
+      "type": "string"
+    },
+    "DecisionContinuationPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency": {
+          "$ref": "#/definitions/DecisionContinuationDependency"
+        },
+        "mode": {
+          "$ref": "#/definitions/DecisionContinuationMode"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "DecisionContinuationPolicy",
+      "type": "object"
+    },
+    "DecisionContinuationView": {
+      "additionalProperties": false,
+      "properties": {
+        "answer_request_id": {
+          "type": "string"
+        },
+        "blocked_reason": {
+          "type": "string"
+        },
+        "continuation_action_id": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "decision_version": {
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
+        "resume_condition": {
+          "type": "string"
+        },
+        "resume_request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "successor_run_id": {
+          "type": "string"
+        },
+        "task_control_revision": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "run_id",
+        "task_id",
+        "revision",
+        "decision_version",
+        "task_control_revision",
+        "state",
+        "resume_condition"
+      ],
+      "title": "DecisionContinuationView",
+      "type": "object"
+    },
     "DecisionEffect": {
       "enum": [
         "implement",
@@ -4122,6 +4294,9 @@
         "answer": {},
         "briefing": {
           "$ref": "#/definitions/DecisionBriefing"
+        },
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationView"
         },
         "decision_id": {
           "type": "string"
@@ -4878,6 +5053,9 @@
     "HandleAttentionPayload": {
       "additionalProperties": false,
       "properties": {
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
         "expected_assignment_epoch": {
           "type": "integer"
         },
@@ -10514,6 +10692,9 @@
     "RespondAttentionPayload": {
       "additionalProperties": false,
       "properties": {
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
         "option": {
           "type": "string"
         },
@@ -10580,6 +10761,22 @@
       "title": "ResultReport",
       "type": "object"
     },
+    "ResumeDecisionContinuationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision"
+      ],
+      "title": "ResumeDecisionContinuationPayload",
+      "type": "object"
+    },
     "RetainedAgentDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -10609,6 +10806,185 @@
         "runtimes"
       ],
       "title": "RetainedAgentDefinition",
+      "type": "object"
+    },
+    "RetainedRunIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/RunExecutionPin"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "action_id",
+        "generation",
+        "spec_version",
+        "host_id",
+        "lease_id",
+        "execution"
+      ],
+      "title": "RetainedRunIdentity",
+      "type": "object"
+    },
+    "RetainedRunProtection": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "linked": {
+          "type": "boolean"
+        },
+        "maintenance_id": {
+          "type": "string"
+        },
+        "original_requests_json": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "maintenance_id",
+        "run_id",
+        "task_id",
+        "action_id",
+        "host_id",
+        "lease_id",
+        "original_requests_json",
+        "linked"
+      ],
+      "title": "RetainedRunProtection",
+      "type": "object"
+    },
+    "RetainedRunReconciliation": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_continue": {
+          "type": "boolean"
+        },
+        "continuation_request_id": {
+          "type": "string"
+        },
+        "continuation_task_revision": {
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/definitions/RetainedRunIdentity"
+        },
+        "lease_status": {
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "original_request_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_business_receipts": {
+          "type": "boolean"
+        },
+        "protection_set_sha256": {
+          "type": "string"
+        },
+        "protections": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RetainedRunProtection"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_revision": {
+          "type": "integer"
+        },
+        "unapplied_events": {
+          "type": "integer"
+        },
+        "unresolved_native_requests": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "identity",
+        "task_revision",
+        "role",
+        "observed",
+        "lease_status",
+        "protections",
+        "protection_set_sha256",
+        "original_request_ids",
+        "unresolved_native_requests",
+        "unapplied_events",
+        "pending_business_receipts",
+        "blockers",
+        "can_continue"
+      ],
+      "title": "RetainedRunReconciliation",
       "type": "object"
     },
     "ReuseIssuePayload": {
@@ -15221,6 +15597,9 @@
     "ConfirmAttentionPayload": {
       "$ref": "#/definitions/ConfirmAttentionPayload"
     },
+    "ContinueRetainedRunPayload": {
+      "$ref": "#/definitions/ContinueRetainedRunPayload"
+    },
     "ConversationAttachment": {
       "$ref": "#/definitions/ConversationAttachment"
     },
@@ -15253,6 +15632,9 @@
     },
     "CreateIssueTaskPayload": {
       "$ref": "#/definitions/CreateIssueTaskPayload"
+    },
+    "DecisionContinuationView": {
+      "$ref": "#/definitions/DecisionContinuationView"
     },
     "DownloadURLResponse": {
       "$ref": "#/definitions/DownloadURLResponse"
@@ -15505,6 +15887,12 @@
     },
     "RespondInteraction": {
       "$ref": "#/definitions/RespondInteraction"
+    },
+    "ResumeDecisionContinuationPayload": {
+      "$ref": "#/definitions/ResumeDecisionContinuationPayload"
+    },
+    "RetainedRunReconciliation": {
+      "$ref": "#/definitions/RetainedRunReconciliation"
     },
     "ReuseIssuePayload": {
       "$ref": "#/definitions/ReuseIssuePayload"

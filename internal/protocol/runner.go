@@ -53,6 +53,8 @@ type ClaimPayload struct {
 const (
 	// VerdictContinue means the run is current and its lease is active.
 	VerdictContinue = "continue"
+	// VerdictContinueRetained requires strict native reattachment support.
+	VerdictContinueRetained = "continue_retained"
 	// VerdictStop means the runner must stop the run and drop it.
 	VerdictStop = "stop"
 	// VerdictRetain keeps an unresolved original run fenced without releasing
@@ -62,10 +64,11 @@ const (
 
 // RunVerdict tells the runner what to do with a run it reported.
 type RunVerdict struct {
-	RunID   string     `json:"run_id"`
-	Verdict string     `json:"verdict"`
-	Desired RunDesired `json:"desired"`
-	Reason  string     `json:"reason,omitempty"`
+	RetainedResume *RetainedRunResume `json:"retained_resume,omitempty"`
+	RunID          string             `json:"run_id"`
+	Verdict        string             `json:"verdict"`
+	Desired        RunDesired         `json:"desired"`
+	Reason         string             `json:"reason,omitempty"`
 }
 
 // HelloResult answers a hello. Reassigned lists runs allocated to the host

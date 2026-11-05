@@ -710,7 +710,7 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 	// serve owns a fixed event stream. Reopen the session against the newly
 	// committed mapping before it accepts another user delivery.
 	if current := m.detach(th); current != nil {
-		_ = current.Close()
+		_ = m.closeSession(ctx, current, d.RequestID, "handoff_completed")
 	}
 	return app.DeliveryResult{Outcome: app.Delivered}
 }

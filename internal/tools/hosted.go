@@ -71,12 +71,16 @@ type hostedMutation struct {
 }
 
 var hostedMutations = []hostedMutation{
+	{"decision_continuation_answer", "Record an actual owner answer with an explicit complete scheduling policy. Always use this typed operation for conditional worker handoffs; preserve source, parent Task revision and decision version. Omission never silently changes legacy answer semantics.", "decision", protocol.AnswerDecisionPayload{}, app.AnswerDecision{FromMessage: true, TypedContinuation: true}, true},
+	{"decision_continuation_resume", "Independently resume the original answered worker question after an explicit wait. Read decision_continuation_read first; supply both original continuation and parent Task revisions and the actual admitted owner source. Never replace the answer, retry an unknown request under a new identity, or bypass stopped/current-contract guards.", "decision", protocol.ResumeDecisionContinuationPayload{}, app.ResumeDecisionContinuation{FromMessage: true}, true},
+	{"decision_continuation_reconcile", "Reconcile readiness of the original answered worker question against exact dependency task/spec completion facts. Supply both original revisions. Caller readiness assertions, prose and elapsed time cannot satisfy the dependency; unknown remains unresolved. Reconciliation does not invent a new owner resume authorization.", "decision", protocol.ResumeDecisionContinuationPayload{}, app.ResumeDecisionContinuation{Reconcile: true, FromMessage: true}, true},
+	{"runs_continue_retained", "Independently authorize only the original ordinary Orca Run after exact identity, protection-set and settled business receipt checks. Requires current Task revision and full immutable pin. Old runners remain retained; missing native identity cannot launch a replacement. Never use for managers or invent an owner decision.", "run", protocol.ContinueRetainedRunPayload{}, app.ContinueRetainedRun{}, true},
 	{"artifact_shares_grant", "Share one immutable artifact and its exact files with a target Issue from an admitted owner authorization. No source task control or delegation of further sharing.", "issue", protocol.GrantArtifactSharePayload{}, app.ArtifactShareCommand{}, true},
 	{"artifact_shares_revoke", "Revoke future reads of an exact artifact share using target Issue and share revisions. Previously frozen task inputs remain historical facts.", "issue", protocol.RevokeArtifactSharePayload{}, app.ArtifactShareCommand{Revoke: true}, true},
 	{"question_inputs_grant", "Grant only selected file_ids from the actual owner answer or ReplyTo supplement to an exact worker question/run/lease. Use the input revision CAS, real source content revision and original request identity. Does not rewrite the answer, authorize other attachments, or inherit into a continuation. Return metadata then relay it to the original executor without restarting it.", "decision", protocol.QuestionInputPayload{}, app.QuestionInputCommand{}, true},
 	{"question_inputs_revoke", "Revoke one exact question input grant_revision with the question input revision CAS. Stops future fetches; downloaded bytes, old answer receipts and independent spec inputs remain facts.", "decision", protocol.RevokeQuestionInputsPayload{}, app.QuestionInputCommand{Revoke: true}, true},
 	{"tasks_reconcile_manager", "Reconcile only a proved-closed original manager after all native and business receipts are settled. Requires exact task revision, lease, close receipt SHA and current admitted owner source. Preserves waiting responsibility; never replay a missing session or declare its Issue complete.", "task", protocol.ReconcileManagerRunPayload{}, app.ReconcileManagerRun{}, true},
-	{"attentions_resolve", "Handle an original problem assigned to this responsibility, preserving its exact question version. Use responsibility.revision as expected_control_revision and its assignment_epoch. Explain evidence/reason; this is an Agent answer, never user authorization. Keep task effects and independent acceptance intact.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{}, true},
+	{"attentions_resolve", "Handle an original problem assigned to this responsibility, preserving its exact question version. Use responsibility.revision as expected_control_revision and its assignment_epoch. For a worker handoff question include typed continuation continue_now, wait with reason, or dependency with reason and exact task/spec; omission preserves the legacy automatic handoff once answered and physically stopped under the current contract; use explicit continuation.mode=wait with a reason to hold continuation. Explain evidence/reason; this is an Agent answer within existing responsibility, never user authorization. Keep task effects and independent acceptance intact.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{}, true},
 	{"attentions_escalate", "Escalate an unresolved problem exactly one supervisor step: parent Issue, then main coordinator, then human. Use responsibility.revision and assignment_epoch. State attempted remedies and why they cannot work. Never notify the user directly for an internal problem, create duplicate problems, or reset task budgets.", "attention", protocol.HandleAttentionPayload{}, app.HandleAttention{Escalate: true}, true},
 	{"conversation_reply", "Reply to one admitted input. Tend selects its source endpoint; never repeat the body as native text.", "logical_turn", protocol.CoordinationReply{}, app.CoordinationReply{}, true},
 	{"conversation_notify", "Publish a sourced proactive notification. Tend selects Web and Telegram; no recipient addresses are accepted.", "logical_turn", protocol.MessagingPublication{}, app.PublishCommunication{Notify: true}, true},
@@ -96,7 +100,7 @@ var hostedMutations = []hostedMutation{
 	{"planner_entry_put", "Record a user_action or issue_priority. Omit target_id when creating; on update provide target_id and expected_control_revision. The server assigns identity, revision and timestamps. This does not schedule an agent retry; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryInput{}, app.PutPlannerEntry{}, true},
 	{"attentions_create", "Submit a distinct question/action to your supervisor, or record nonblocking information. Agent-owned Issue questions follow the responsibility chain; only human-targeted problems enter user Inbox. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
 	{"attentions_update", "Revise this stable attention without replacing or answering its original decision. Omit latest_action_at to retain it, set 0 to clear; timezone only changes display.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
-	{"attentions_respond", "Relay the owner's actual message to the original decision/version. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
+	{"attentions_respond", "Relay the owner's actual message to the original decision/version, including its typed worker-handoff continuation when supplied. Omission preserves the legacy automatic handoff once answered and physically stopped under the current contract; use explicit continuation.mode=wait with a reason to hold continuation. Free text never supplies typed continuation readiness. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
 	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
 	{"attentions_withdraw", "Withdraw an ordinary open action/information with a reason; decisions retain their original business path.", "attention", hostedEmptyPayload{}, app.AttentionCommand{Action: "withdraw"}, true},
 	{"conversation_associate_issues", "Classify this exact message into canonical Issues or explicitly leave it unassigned. Preserve owner corrections; this acknowledges routing only and never clears Issue source-review duties or authorizes execution.", "message", protocol.SetIssueMessageAssociationsPayload{}, app.SetIssueMessageAssociations{}, true},
@@ -160,6 +164,10 @@ func hostedMutationSchema(payload any) json.RawMessage {
 func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 	var out []harness.ToolSpec
 	out = append(out, harness.ToolSpec{Name: "conversation_input_read", Description: "Read one exact admitted communication input and immediately record witnessed consumption. No address or channel selection.", InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string"}},"required":["message_id"],"additionalProperties":false}`)})
+	if purpose == agentconfig.Main || purpose == agentconfig.IssueManager {
+		out = append(out, harness.ToolSpec{Name: "decision_continuation_read", Description: "Read the original question's typed continuation policy, resume condition, blocked reason, both current revisions and any committed action/successor. Read-only ledger evidence; readiness does not prove worker startup.", InputSchema: exportSchema(json.RawMessage(argumentSchema(decisionContinuationReadArgs{})))})
+		out = append(out, harness.ToolSpec{Name: "runs_maintenance_reconciliation", Description: "Read the original ordinary Run identity, maintenance protection set and unresolved receipt blockers without probing or controlling its provider.", InputSchema: exportSchema(json.RawMessage(argumentSchema(retainedRunReadArgs{})))})
+	}
 	if purpose == agentconfig.Main {
 		out = append(out, harness.ToolSpec{Name: "tasks_manager_reconciliation", Description: "Read exact ledger-only original manager close, event and business receipt evidence. Missing sessions remain unknown; this read never authorizes native replay.", InputSchema: exportSchema(json.RawMessage(argumentSchema(managerReconciliationReadArgs{})))})
 	}
@@ -169,10 +177,13 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 			// command. New named turns publish ordinary Agent ownership.
 			continue
 		}
-		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && m.name != "issues_request_owner" && m.name != "issues_set_acceptance_policy" && !strings.HasPrefix(m.name, "attentions_") && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" {
+		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_create" && m.name != "issues_request_owner" && m.name != "issues_set_acceptance_policy" && !strings.HasPrefix(m.name, "attentions_") && m.name != "runs_continue_retained" && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" && !decisionContinuationMutation(m.name) {
 			continue
 		}
 		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)}
+		if decisionContinuationMutation(m.name) {
+			spec.InputSchema = decisionContinuationMutationSchema(spec.InputSchema, m.name)
+		}
 		if m.name == "issues_reuse" || m.name == "issues_reopen" || m.name == "issues_create" || m.name == "issues_request_manager" || m.name == "issues_request_owner" {
 			var root map[string]any
 			_ = json.Unmarshal(spec.InputSchema, &root)
@@ -195,6 +206,16 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 			}
 			spec.InputSchema, _ = json.Marshal(root)
 		}
+		if m.name == "runs_continue_retained" && purpose == agentconfig.Main {
+			var root map[string]any
+			_ = json.Unmarshal(spec.InputSchema, &root)
+			body := root["properties"].(map[string]any)["payload"].(map[string]any)
+			body["required"] = append(body["required"].([]any), "source_message_id", "expected_source_revision")
+			props := body["properties"].(map[string]any)
+			props["source_message_id"] = map[string]any{"type": "string", "minLength": 1, "description": "Exact owner source admitted to this planner execution. Queued, withdrawn or merely visible material cannot authorize continuation."}
+			props["expected_source_revision"] = map[string]any{"type": "integer", "minimum": 1, "description": "Exact content_revision of the admitted original owner source."}
+			spec.InputSchema, _ = json.Marshal(root)
+		}
 		out = append(out, spec)
 	}
 	if purpose == agentconfig.Main {
@@ -205,7 +226,11 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		out = append(out, harness.ToolSpec{Name: "artifact_shares_list", Description: "Read explicit artifact/file grants for the current Issue responsibility. Applicability is distinct from historical grants; reading grants no source Task access.", InputSchema: exportSchema(json.RawMessage(argumentSchema(artifactShareListArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "issues_list", Description: "Discover canonical Issues and responsibility hierarchy. Managers see only their Issue and descendants; listing grants no write permission.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueListArgs{})))})
 		for _, name := range []string{"issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read"} {
-			out = append(out, harness.ToolSpec{Name: name, Description: "Read this canonical Issue's recorded context, followup history or delivery observations. Reading resolves nothing and never probes a provider.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
+			description := "Read this canonical Issue's recorded context, followup history or delivery observations. Reading resolves nothing and never probes a provider."
+			if name == "issues_context_read" {
+				description = "Read this Issue's admitted source-review duties, owned coordination receipts and frozen task agreements. prepared reports the historical baseline; dispatch_ready is context diagnostics, not the admission result of issues_create_task. A missing legacy baseline never requires preparing global context for a canonical task. Use the formal task command with current Issue/source/assignment versions for the actual admission decision. Reading settles nothing."
+			}
+			out = append(out, harness.ToolSpec{Name: name, Description: description, InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
 		}
 		out = append(out, harness.ToolSpec{Name: "capabilities_list", Description: "Read versioned capability definitions; declarations and tool exposure do not prove execution success. No probing or writes.", InputSchema: exportSchema(json.RawMessage(argumentSchema(capabilityListArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "capabilities_read", Description: "Read one exact capability definition revision, or current when revision is omitted.", InputSchema: exportSchema(json.RawMessage(argumentSchema(capabilityReadArgs{})))})
@@ -315,6 +340,47 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		c.ExecutionRequestID = execution.ID
 		value, err := s.startHostedUpgrade(ctx, c, native.Status == store.TurnStarting || native.Status == store.TurnStarted)
 		return hostedAnswer(value, err), true
+	}
+	if c.Tool == "decision_continuation_read" {
+		var args decisionContinuationReadArgs
+		if err := decode(c.Arguments, &args); err != nil {
+			return fail(err)
+		}
+		value, err := s.readDecisionContinuation(ctx, execution, args.DecisionID)
+		return hostedAnswer(value, err), true
+	}
+	if c.Tool == "runs_maintenance_reconciliation" {
+		if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "only an admitted coordinator can inspect retained Run reconciliation"))
+		}
+		var args retainedRunReadArgs
+		if err := decode(c.Arguments, &args); err != nil {
+			return fail(err)
+		}
+		value, err := s.app.RetainedRunReconciliation(ctx, args.RunID)
+		if err == nil && execution.Selection.Purpose == agentconfig.IssueManager {
+			err = s.store.Read(ctx, func(tx *store.ReadTx) error {
+				primary, e := store.GetTaskIssueOwner(ctx, tx.Q(), value.Identity.TaskID)
+				if e != nil {
+					return e
+				}
+				if primary != execution.IssueID {
+					return protocol.Errorf(protocol.CodeForbidden, "retained Run is outside this Issue")
+				}
+				current, e := store.GetCanonicalIssue(ctx, tx.Q(), primary)
+				if e != nil {
+					return e
+				}
+				if current.AssignmentEpoch != execution.AssignmentEpoch || current.AssignmentState != "active" {
+					return protocol.Errorf(protocol.CodeForbidden, "Issue responsibility changed")
+				}
+				return nil
+			})
+		}
+		if err != nil {
+			return fail(err)
+		}
+		return hostedAnswer(value, nil), true
 	}
 	if c.Tool == "tasks_manager_reconciliation" {
 		if execution.Selection.Purpose != agentconfig.Main {

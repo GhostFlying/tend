@@ -2,6 +2,7 @@ package orca
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -167,12 +168,15 @@ type workerState struct {
 	RootRebindSessionID       string `json:"root_rebind_session_id,omitempty"`
 	RootObservationPhase      string `json:"root_observation_phase,omitempty"`
 	RootObservationIdentity   string `json:"root_observation_identity,omitempty"`
+	RootObservationFactHash   string `json:"root_observation_fact_hash,omitempty"`
 	RootObservationRevision   int    `json:"root_observation_revision,omitempty"`
 	RootRuntimeID             string `json:"root_runtime_id,omitempty"`
 	RootLaunchID              string `json:"root_launch_id,omitempty"`
 	// Marker is in the brief of the agent's launch; it finds the agent
 	// when the runner stopped before the launch was answered.
 	Marker string `json:"marker,omitempty"`
+	// VerdictTurn identifies a journaled logical turn independently of wall time.
+	VerdictTurn string `json:"verdict_turn,omitempty"`
 	// Asked is when that launch was asked for, in Unix milliseconds.
 	Asked int64 `json:"asked,omitempty"`
 	// Launch is orca's operation for a launch whose answer was lost.
@@ -239,6 +243,9 @@ type worker struct {
 	// noticed a takeover.
 	holding         string
 	holdingEvidence map[string]any
+	// Only a successful native identity check admits an explicit pause of a
+	// strict attachment. This is not permission to send another prompt.
+	retainedAttached bool
 	// askedVerdict is set once an acceptance agent that finished without
 	// a verdict this worker received was asked for it again.
 	askedVerdict      bool
@@ -286,7 +293,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	w := &worker{ws: ws, spec: spec, wt: wt.ID, events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	// A thread from another harness, such as a traex thread ID from
 	// before the host moved to orca, does not decode and starts over.
-	_ = json.Unmarshal([]byte(spec.Thread), &w.st)
+	if err := json.Unmarshal([]byte(spec.Thread), &w.st); err != nil && spec.RetainedResume != nil {
+		return nil, fmt.Errorf("%w: saved native state is invalid", harness.ErrRetainedResumePending)
+	}
 	if err := w.openBridge(ctx); err != nil {
 		return prelaunchFailure(err)
 	}
@@ -340,6 +349,21 @@ func (w *worker) openBridge(ctx context.Context) error {
 	tools := []harness.ToolSpec{harness.ResultToolSpec}
 	handle := w.results.Handle
 	if w.spec.Role == protocol.RoleAccept {
+		verdictDir := w.spec.StateDir
+		if verdictDir == "" {
+			state, err := bridge.StatePath(ctx, w.spec.Dir)
+			if err != nil {
+				return err
+			}
+			run := sha256.Sum256([]byte(w.spec.RunID))
+			verdictDir = filepath.Join(filepath.Dir(state), "tend-verdicts", fmt.Sprintf("%x", run))
+		}
+		w.verdicts.StateDir = verdictDir
+		w.verdicts.RequireBinding = true
+		w.bindVerdict()
+		if err := w.verdicts.Restore(); err != nil {
+			return err
+		}
 		tools = []harness.ToolSpec{harness.VerdictToolSpec}
 		handle = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
@@ -382,16 +406,41 @@ func (w *worker) closeBridge(ctx context.Context) {
 	}
 }
 
+// bindVerdict publishes only journaled send identity to the concurrent bridge.
+// Native session/root identity is checked separately by strict attachment.
+func (w *worker) bindVerdict() {
+	if w.spec.Role != protocol.RoleAccept {
+		return
+	}
+	binding := ""
+	if w.st.Turn != 0 {
+		b, _ := json.Marshal(struct {
+			Run      string
+			Worktree string
+			Launch   string
+			Turn     int64
+			TurnID   string
+		}{w.spec.RunID, w.st.Worktree, w.st.Marker, w.st.Turn, w.st.VerdictTurn})
+		binding = string(b)
+	}
+	w.verdicts.Bind(binding)
+}
+
 // save journals the worker's state before anything it describes happens.
 func (w *worker) save() error {
 	if w.spec.OnThread == nil {
+		w.bindVerdict()
 		return nil
 	}
 	b, err := json.Marshal(w.st)
 	if err != nil {
 		return err
 	}
-	return w.spec.OnThread(string(b))
+	if err := w.spec.OnThread(string(b)); err != nil {
+		return err
+	}
+	w.bindVerdict()
+	return nil
 }
 
 // begin leaves the agent with a turn of tend's under way: the one an
@@ -521,9 +570,15 @@ func (w *worker) promptFor(spec harness.WorkerSpec) string {
 const launchAttempts = 5
 
 func (w *worker) launch(ctx context.Context, agent string) error {
+	if w.spec.RetainedResume != nil {
+		return harness.ErrRetainedResumePending
+	}
 	if w.st.Marker == "" {
 		w.st.Worktree = w.wt
 		w.st.Marker = w.ws.opts.IDs.New(protocol.PrefixLaunch)
+		if w.spec.Role == protocol.RoleAccept {
+			w.st.VerdictTurn = w.ws.opts.IDs.New(protocol.PrefixRequest)
+		}
 		w.st.Asked = w.ws.opts.Now().UnixMilli()
 		w.st.Turn = w.st.Asked
 		if err := w.save(); err != nil {
@@ -706,10 +761,16 @@ const sendAttempts = 3
 // it had: orca binds the request to its text, and may have run it
 // already.
 func (w *worker) send(ctx context.Context, text string) error {
+	if w.spec.RetainedResume != nil {
+		return harness.ErrRetainedResumePending
+	}
 	if w.st.Send != "" {
 		text = w.st.SendText
 	} else {
 		w.st.Turn = w.ws.opts.Now().UnixMilli()
+		if w.spec.Role == protocol.RoleAccept {
+			w.st.VerdictTurn = w.ws.opts.IDs.New(protocol.PrefixRequest)
+		}
 		w.st.Interrupted, w.st.Said = false, said(text)
 		if err := w.save(); err != nil {
 			return err
@@ -854,6 +915,10 @@ func (w *worker) run(ctx context.Context) {
 			return
 		}
 		if err != nil {
+			if w.spec.RetainedResume != nil {
+				w.err = fmt.Errorf("%w: retained native observation failed: %v", harness.ErrRetainedResumePending, err)
+				return
+			}
 			if w.st.Recovery != nil {
 				w.emit(ctx, "worker.recovery_failed", map[string]any{"attempts": w.st.Recovery.Attempts, "code": w.st.Recovery.Code})
 			}
@@ -963,7 +1028,7 @@ func (w *worker) step(ctx context.Context) (Agent, bool, error) {
 			}
 			w.emitRecoveryPhase(ctx)
 		}
-		if err := w.recordRootObservation(ctx, a); err != nil {
+		if err := w.recordObservedRoot(ctx, a); err != nil {
 			return a, false, err
 		}
 		if r := w.st.Recovery; r != nil && r.Phase == recoveryContinuing {
@@ -1178,6 +1243,12 @@ func (w *worker) stop(ctx context.Context, cause error) {
 	case errors.Is(cause, harness.ErrHeld), w.holding != "":
 		// The owner works in the agent: leave it alone.
 	default:
+		if w.spec.RetainedResume != nil && (!errors.Is(cause, harness.ErrPaused) || !w.retainedAttached) {
+			// Observation-only attachment grants no implicit terminal input,
+			// including another interrupt during a fence or runner shutdown.
+			// Explicit pause still interrupts an already verified attachment.
+			return
+		}
 		w.st.Interrupted = true
 		if err = w.save(); err == nil {
 			_, err = w.ws.opts.Client.SendInput(stopCtx, SendOptions{Terminal: w.st.Terminal, Text: esc})

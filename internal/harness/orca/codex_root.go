@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +20,11 @@ const transcriptRootSource = "native-transcript"
 // can belong to an ephemeral thread; only this session's recorded managed input
 // establishes the launch and current turn. No provider action is performed.
 func codexRoot(ctx context.Context, session ProviderSession, st workerState, runID string) (Agent, error) {
+	return rootTranscript(ctx, session, st, runID, "")
+}
+
+// expectedDir enables the verified TraeX format and exact workspace checks.
+func rootTranscript(ctx context.Context, session ProviderSession, st workerState, runID, expectedDir string) (Agent, error) {
 	f, err := os.Open(session.TranscriptPath)
 	if err != nil {
 		return Agent{}, errors.New("orca: root transcript is unavailable")
@@ -26,6 +32,7 @@ func codexRoot(ctx context.Context, session ProviderSession, st workerState, run
 	defer f.Close()
 	decoder := json.NewDecoder(f)
 	identity, prompt, turn, managedTurn, answer := "", "", "", "", ""
+	traexIdentity := false
 	// Explicit handback may adopt a replacement session. The saved rebind
 	// receipt names that session; the new managed send still needs native proof.
 	launch := st.RootRebindSessionID == session.ID && st.SessionID == session.ID && session.ID != ""
@@ -34,16 +41,31 @@ func codexRoot(ctx context.Context, session ProviderSession, st workerState, run
 	pending := map[string]bool{}
 	operations := newCodexOperations()
 	owned := launch
+	var expanded []json.RawMessage
 	marker := "[tend run " + runID + ", launch " + st.Marker + "]"
 	for {
 		if err := ctx.Err(); err != nil {
 			return Agent{}, err
+		}
+		var raw json.RawMessage
+		if len(expanded) > 0 {
+			raw, expanded = expanded[0], expanded[1:]
+		} else {
+			if err := decoder.Decode(&raw); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				return Agent{}, errors.New("orca: root transcript has an incomplete record")
+			}
 		}
 		var row struct {
 			Type      string    `json:"type"`
 			Timestamp time.Time `json:"timestamp"`
 			Payload   struct {
 				Type             string             `json:"type"`
+				Originator       string             `json:"originator"`
+				Operation        string             `json:"operation"`
+				Items            []json.RawMessage  `json:"items"`
+				Cwd              string             `json:"cwd"`
 				ID               string             `json:"id"`
 				TurnID           string             `json:"turn_id"`
 				Role             string             `json:"role"`
@@ -67,24 +89,57 @@ func codexRoot(ctx context.Context, session ProviderSession, st workerState, run
 				} `json:"error"`
 			} `json:"payload"`
 		}
-		if err := decoder.Decode(&row); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
+		if err := json.Unmarshal(raw, &row); err != nil {
 			return Agent{}, errors.New("orca: root transcript has an incomplete record")
 		}
 		p := row.Payload
+		if expectedDir != "" && row.Type == "history_mutation" {
+			// TraeX stores both managed input and outer code-mode calls here. Keep
+			// append order; snapshots/rewrites cannot certify original effects.
+			if p.Operation != "append" || p.Items == nil || p.TurnID != "" && p.TurnID != turn {
+				if owned {
+					operations.unknown["history_mutation"] = true
+				}
+				continue
+			}
+			for _, item := range p.Items {
+				next, _ := json.Marshal(struct {
+					Type      string          `json:"type"`
+					Timestamp time.Time       `json:"timestamp"`
+					Payload   json.RawMessage `json:"payload"`
+				}{"response_item", row.Timestamp, item})
+				expanded = append(expanded, next)
+			}
+			continue
+		}
+		if expectedDir != "" && owned {
+			switch row.Type {
+			case "session_meta", "event_msg", "response_item", "turn_context", "world_state", "token_usage_record":
+			default:
+				operations.unknown["record/"+row.Type] = true
+			}
+		}
 		if row.Type == "session_meta" {
 			identity = p.ID
+			traexIdentity = p.Originator == "traex-tui" && filepath.Clean(p.Cwd) == filepath.Clean(expectedDir)
 			continue
 		}
 		stamp := row.Timestamp.UnixMilli()
+		if expectedDir != "" && row.Type == "event_msg" {
+			switch p.Type {
+			case "task_started", "turn_started", "task_complete", "turn_complete", "turn_aborted":
+				if row.Timestamp.IsZero() || stamp <= 0 {
+					return Agent{}, errors.New("orca: native lifecycle clock is unavailable")
+				}
+			}
+		}
 		if row.Type == "event_msg" {
 			switch p.Type {
 			case "task_started", "turn_started":
 				turn, started, ended, prompt, answer = p.TurnID, stamp, 0, "", ""
 				state, outcome, code = "running", "", ""
 			case "task_complete", "turn_complete":
-				if p.TurnID == "" || p.TurnID != turn {
+				if p.TurnID == "" || p.TurnID != turn || expectedDir != "" && stamp < started {
 					continue
 				}
 				state, outcome, ended = "completed", "success", stamp
@@ -98,9 +153,12 @@ func codexRoot(ctx context.Context, session ProviderSession, st workerState, run
 			case "item_completed":
 				if owned {
 					operations.completed(p.Item, session.ID)
+					if expectedDir != "" && p.Item.Type != "CollabAgentToolCall" && p.Item.Type != "CommandExecution" {
+						operations.unknown["item/"+p.Item.Type] = true
+					}
 				}
 			case "turn_aborted":
-				if p.TurnID != "" && p.TurnID != turn {
+				if p.TurnID != "" && p.TurnID != turn || expectedDir != "" && (p.TurnID == "" || stamp < started) {
 					continue
 				}
 				state, outcome, ended = "cancelled", "cancellation", stamp
@@ -112,6 +170,13 @@ func codexRoot(ctx context.Context, session ProviderSession, st workerState, run
 				if owned && p.CallID != "" {
 					pending[p.CallID] = true
 					operations.call(p.CallID, p.Name, p.Arguments)
+					if expectedDir != "" {
+						switch strings.TrimPrefix(p.Name, "functions.") {
+						case "spawn_agent", "exec_command", "write_stdin":
+						default:
+							operations.unknown["unsupported_tool/"+p.CallID] = true
+						}
+					}
 				}
 			case "function_call_output", "custom_tool_call_output":
 				if owned {
@@ -154,11 +219,15 @@ func codexRoot(ctx context.Context, session ProviderSession, st workerState, run
 						}
 					}
 				}
+			default:
+				if expectedDir != "" && owned && p.Type != "reasoning" && p.Type != "trae_extra_info" {
+					operations.unknown["response/"+p.Type] = true
+				}
 			}
 		}
 		updated = max(updated, stamp)
 	}
-	if identity == "" || identity != session.ID || !launch || turn == "" || prompt == "" {
+	if identity == "" || identity != session.ID || !launch || turn == "" || prompt == "" || expectedDir != "" && !traexIdentity {
 		return Agent{}, errors.New("orca: root transcript does not confirm the managed launch and current turn")
 	}
 	// A saved send can precede its native turn. Preserve the proven original

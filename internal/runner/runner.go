@@ -290,7 +290,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.resendClaims(ctx); err != nil {
 		return err
 	}
-	if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
+	if err := r.retry(ctx, func() error { return r.reconcileHello(ctx) }); err != nil {
 		return err
 	}
 	if len(r.cfg.RolloutRoots) > 0 {
@@ -344,6 +344,16 @@ func (r *Runner) retry(ctx context.Context, fn func() error) error {
 		case <-time.After(r.cfg.RetryDelay):
 		}
 	}
+}
+
+// sendOnce leaves an uncertain original request for its caller to reconcile.
+// The existing client request timeout still bounds this single wire attempt.
+func (r *Runner) sendOnce(ctx context.Context, cred credential, env *protocol.Envelope) (protocol.Operation, error) {
+	op, err := r.c.do(ctx, cred, env)
+	if err == nil && op.Status == protocol.OpFailed && op.Error != nil {
+		return op, op.Error
+	}
+	return op, err
 }
 
 // send delivers env, resending it unchanged on transport failures.
@@ -584,6 +594,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	r.mu.Lock()
 	r.confirmedRuntime = *runtime
 	r.mu.Unlock()
+	var rejected []string
 	for _, v := range res.Runs {
 		run := byID[v.RunID]
 		// What tend wants now, not what it wanted when it assigned the run.
@@ -602,13 +613,58 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 				}
 				r.requestReconcile()
 			}
+		case v.Verdict == protocol.VerdictContinueRetained:
+			if v.RetainedResume == nil || v.RetainedResume.RequestID == "" || v.RetainedResume.Mode != "attach" || run.Held {
+				if err := r.rejectRetainedContinuation(ctx, run, v.RunID, "identity unavailable"); err != nil {
+					return err
+				}
+				rejected = append(rejected, v.RunID)
+				continue
+			}
+			if run.Phase != journal.PhaseStarted {
+				// An attachment permit cannot authorize settlement of an old
+				// give-up request. A result or stopped question-yield receipt
+				// must belong to this same already-recorded strict authority.
+				authority, err := r.cfg.Journal.RetainedResume(ctx, v.RunID)
+				if err != nil {
+					return err
+				}
+				sameAuthority := authority != nil && *authority == *v.RetainedResume
+				resultReady := run.WorkerDoneAtMillis > 0 && len(run.WorkerResult) > 0 && (run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing)
+				yieldReady := false
+				if sameAuthority && !resultReady {
+					yieldReady, err = r.retainedQuestionYieldReady(ctx, run)
+					if err != nil {
+						return err
+					}
+				}
+				if !sameAuthority || !resultReady && !yieldReady {
+					if err := r.rejectRetainedContinuation(ctx, run, v.RunID, "no validated result"); err != nil {
+						return err
+					}
+					rejected = append(rejected, v.RunID)
+					continue
+				}
+			}
+			if err := r.authorizeRetainedControl(ctx, v.RunID, true, func() error {
+				return r.cfg.Journal.SetRetainedResume(ctx, v.RunID, *v.RetainedResume)
+			}); err != nil {
+				if errors.Is(err, journal.ErrNotFound) && r.settledHeldRun(ctx, run) {
+					r.requestReconcile()
+					continue
+				}
+				return err
+			}
+			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictContinue:
 			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
 				return err
 			}
 			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictStop:
-			if err := r.authorizeRetainedSettlement(ctx, v.RunID, false); err != nil {
+			if err := r.authorizeRetainedControl(ctx, v.RunID, false, func() error {
+				return r.cfg.Journal.AuthorizeRetainedStop(ctx, v.RunID, env.RequestID)
+			}); err != nil {
 				return err
 			}
 			if run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing {
@@ -637,6 +693,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			return err
 		}
 		r.start(ctx, as, sent)
+	}
+	if len(rejected) > 0 {
+		return &retainedContinuationsRejected{runs: rejected}
 	}
 	return nil
 }
@@ -951,7 +1010,7 @@ func (r *Runner) reconciler(ctx context.Context) {
 		}
 		retry = nil
 		r.waitIdleFenced(ctx)
-		if err := r.retry(ctx, func() error { return r.freshHello(ctx) }); err != nil {
+		if err := r.retry(ctx, func() error { return r.reconcileHello(ctx) }); err != nil {
 			if ctx.Err() == nil {
 				r.cfg.Log.ErrorContext(ctx, "reconciliation failed", "err", err)
 			}

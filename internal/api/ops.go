@@ -16,7 +16,7 @@ import (
 var ownerCommands = commandMap(
 	app.ArtifactShareCommand{}, app.ArtifactShareCommand{Revoke: true},
 	app.FeishuCommand{}, app.FeishuCommand{Unbind: true},
-	app.ReconcileManagerRun{},
+	app.ReconcileManagerRun{}, app.ContinueRetainedRun{},
 	app.ConfigureConcurrency{Action: "create"}, app.ConfigureConcurrency{Action: "update"}, app.ConfigureConcurrency{Action: "bind"}, app.ConfigureConcurrency{Action: "unbind"}, app.ConfigureConcurrency{Action: "delete"}, app.HandleAttention{}, app.HandleAttention{Escalate: true}, app.ReconcileConversationUsage{}, app.WebhookCommand{Action: "create"}, app.WebhookCommand{Action: "update"}, app.WebhookCommand{Action: "pause"}, app.WebhookCommand{Action: "resume"}, app.WebhookCommand{Action: "cancel"}, app.WebhookCommand{Action: "rotate"},
 	app.RespondMessagingInteraction{},
 	app.MessagingCommand{Action: "send"}, app.MessagingCommand{Action: "reply"}, app.MessagingCommand{Action: "notify"}, app.MessagingCommand{Action: "read"}, app.MessagingCommand{Action: "bind"}, app.MessagingCommand{Action: "unbind"},
@@ -36,7 +36,8 @@ var ownerCommands = commandMap(
 	app.UpdateWorkItemChoice{Action: "respond"},
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
-	app.AnswerDecision{}, app.QuestionInputCommand{}, app.QuestionInputCommand{Revoke: true},
+	app.AnswerDecision{}, app.AnswerDecision{TypedContinuation: true}, app.QuestionInputCommand{}, app.QuestionInputCommand{Revoke: true},
+	app.ResumeDecisionContinuation{}, app.ResumeDecisionContinuation{Reconcile: true},
 	app.CreateAction{},
 	app.SetControlMode{},
 	app.RateTask{},

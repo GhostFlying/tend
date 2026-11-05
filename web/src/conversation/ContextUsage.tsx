@@ -1,5 +1,13 @@
-import { useOverlayState } from "../ui/focus.ts";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { OverlayVisibility, useOverlayState } from "../ui/focus.ts";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
 import type {
@@ -14,6 +22,7 @@ import { useAnchoredPanel } from "./useAnchoredPanel.ts";
 
 export function ContextUsage({ connection }: { connection: Connection }) {
   const { client, conversation } = useServices();
+  const visible = useContext(OverlayVisibility);
   const id = conversation?.id ?? "main";
   const [usage, setUsage] = useState<AgentContextUsage | null>(null);
   const [history, setHistory] = useState<AgentCompactionPage | null>(null);
@@ -101,7 +110,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   const operation = useDurableOp(client, `compact:${id}`);
   const base = `/api/v1/agent-conversations/${encodeURIComponent(id)}`;
   useEffect(() => {
-    if (connection.status !== "online") return;
+    if (!visible || connection.status !== "online") return;
     const abort = new AbortController();
     const read = () => {
       void Promise.all([
@@ -120,7 +129,7 @@ export function ContextUsage({ connection }: { connection: Connection }) {
       abort.abort();
       clearInterval(timer);
     };
-  }, [client, base, connection.status]);
+  }, [client, base, connection.status, visible]);
   const compact = async (reconcile = false) => {
     try {
       const c = await client.get<AgentConversation>(`${base}?projection=issues`);

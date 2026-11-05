@@ -152,9 +152,9 @@
 | D146 | Issue 工作状态与执行会话分离：实际执行领取、负责人派发子责任时，在原事务内将 active/有效责任下的 todo 及符合条件的父链提升为进行中，普通会话领取不触发，backlog/待检查/人工暂停/交接/终态形成边界。看板与详情追加可选的直接子 Issue 摘要、实际执行数与最多两项预览，完整列表沿既有父筛选分页；无子项不显示空区块，负责人运行事实归入属性。CLI 同步完整读取，runner wire 保持 2/1。见 docs/plans/issue-progress-visibility.md。 | 已实现，未发布 |
 | D147 | SQLite 读池保留最多 8 个空闲连接，复用初始化后的连接；最大读并发、写池单连接、query_only、事务快照及关闭释放保持原合同。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
 | D148 | CI 分离共享 Go 模块缓存与按职责、工具链和依赖分区的滚动构建缓存，PR 只恢复 main 构建快照，main 成功后发布候选快照并有界保留。Web 构建经本轮 artifact 供两组互斥且完整的浏览器回归与真实产物交叉编译使用，各 fixture 保留独立资产副本和缓存。最终 check 拒绝任一失败、跳过或取消。见 docs/plans/ci-cache-read-pool.md。 | 已实现 |
-| D149 | 本地 make check 按有效 CPU 选择有界组并发、Go 包并行与 App 分片，复用质量、五个完整 race 分组和 Web 检查；低容量机器保持 E2E 独立阶段，显式顺序模式可回退。Web 在每次检查私有临时目录构建，Go embed 目录在整个检查期间保持稳定；失败汇总保留全部检查，取消清理本次拥有的进程组。CI 原有分组与门禁保持。见 docs/plans/local-check-scheduler.md。 | 已实现 |
+| D149 | 本地 make check 按有效 CPU 选择有界组并发、Go 包并行与 App 分片，复用质量、五个完整 race 分组和 Web 检查；低容量机器保持 E2E 独立阶段，显式顺序模式可回退，多 CPU 下需记录串行原因；八 CPU 自动选择两组并行、App/suite 各两片，阶段日志记录起止与实际预算。见 docs/plans/check-budget-parallel.md。Web 在每次检查私有临时目录构建，Go embed 目录在整个检查期间保持稳定；失败汇总保留全部检查，取消清理本次拥有的进程组。CI 原有分组与门禁保持。见 docs/plans/local-check-scheduler.md。 | 已实现 |
 | D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
-| D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools 的普通空库 fixture 复用不可变模板，显式路径重开及迁移测试保留真实 Open。见 docs/plans/race-tail-latency.md。 | 已实现 |
+| D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools、dispatch、views及消息通道的普通空库fixture复用不可变模板；模板字节复制机制不依赖store，供Store包内普通事务/投影测试共用。迁移及历史升级测试保留真实建库，显式路径重开继续通过真实Open；App索引重建对照仅复用初始当前schema空库。批量读取规模测试从一次真实创建的合法投影在独立事务内准备数据，创建/Issue流程仍由专门业务测试覆盖；复用变体不重复完整reload/restart合同。见 docs/plans/race-tail-latency.md 与 docs/plans/test-setup-deduplication.md。 | 已实现 |
 | D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
 | D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，30 分钟稳定且累计满载 15 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
 | D155 | 已提交 server 通过独立本机窗口引导 updater，再以实际归档/host 维护确认前滚；保留 unknown run、旧收据及父失败，限定失败候选可独立后继，CLI 提供完整引导、取消、对账及释放。 | 已实现，待验收 |
@@ -170,6 +170,7 @@
 | D167 | 创建者或显式用户决定后续 Task 是否强制独立验收；真实来源及政策冻结，免验仍需合法结果、责任核对和交付证明，不伪造通过记录，不追溯撤销在途验收。 | 实施中 |
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
+| D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -522,6 +523,8 @@ Owner 是具体 Agent 对具体 Issue 的责任，不是一种专用 Agent 类�
 
 当前 owner 可以通过冻结任务使用自己的执行适配器工作；实现身份、Agent/runtime revision、模型和 Issue assignment epoch 由服务端固定。跨 Agent 的工作委派必须先创建子 Issue，由接收 Agent 成为该子项 owner；子项 owner 可递归委派。省略子项 owner 时保留当前 Agent 身份，不默认选择另一 manager。父 owner 始终负责协调与结果整合。Task、Run、session 仅承载执行，不成为跨 Agent 派工旁路。
 
+D122/D128/D136 的 canonical 上下文查询按本项责任投影：来源更正保留已准入份额，事实保留 own/global/project 的有效复核，协调状态与 native pending 使用持久本项执行身份（含旧代次及 repair chain）；没有 hosted identity 的历史请求才按原请求的本项 conversation 归属。全局 logical 回合接触过某个上下文不构成本项执行身份，不将其他 Issue 的来源分类责任转移过来。`prepared` 继续如实显示历史 baseline，`dispatch_ready` 仅为上下文及既有冻结合同诊断，不代表 canonical 创建任务的实际准入结果；正式命令仍核对当前来源、Issue/assignment 版本及冻结合同。继承 EffectiveContext、TaskContextBlockers、真实 worker admission 与历史 baseline 调度路径不变，不因投影修正而结清 recovering/unknown 或扩大来源读取权限。见[实施计划](plans/scoped-canonical-context.md)。
+
 既有独立验收流程与材料隔离保留。新自身执行任务同事务建立有界验收子 Issue，并冻结其原始范围。验收领取将实际 reviewer 身份和配置与该子项绑定，运行关联可通过 owner 查询和 CLI 追踪。最终有效验收结论在通常收尾条件满足时可结清此有界责任；人工扩展的目标不能被原验收结论自动关闭。取消子项请求对应执行停止，实际执行及未知结果核清前不得确认取消。父 Issue 的完成仍走原证据与显式责任收尾路径。
 
 D123/D136 冻结产物验收：canonical task 的独立验收使用当前 artifact 及其不可变 spec，不因提交后 Issue 或祖先新增/修正的语义内容要求重跑实现。新的范围、来源复核与完成责任继续留在 Issue，验收不能替它们结清。实现领取仍检查当前继承语义和来源；验收仍检查负责人/reviewer、责任代次、Issue 生命周期与依赖、祖先结构、task 控制、当前 spec/action/artifact 及资源占用，不放行显式取消或已替换合同。无 API、迁移或 runner wire 变更。见[实施计划](plans/canonical-frozen-acceptance.md)。
@@ -592,10 +595,18 @@ D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适�
 
 内部待处理问题通过现有持久 background source 唤醒责任 Agent，不形成用户 Inbox、徽标、渠道交互或个人待办。解决后回到来源 Issue；旧问题在升级时保留原文、ID、历史及回答通道并接续责任。用户仍可直接控制。CLI `attention list --recipient agent|main|owner|all --responsible-issue <id>` 支持责任筛选及分页；`attention resolve|escalate` 使用责任版本、epoch、原问题版本和理由，支持完整 Envelope 的 dry-run/replay。
 
+负责人会话持续启动失败时，在同一读取快照中冻结实际 runtime selection 及其原输入或对账 attachment 身份，独立技术事件仅结算该身份的启动失败窗口，复用 Agent 恢复政策的次数及总时长预算，暂态仍按原30秒退避。尚无 native intent 的 pending 或已由 dispatcher claim 的 sending 均可计本地启动失败，不伪造 outbox 投递次数或 native turn，也不重派或释放原 sending。耗尽后建立唯一 action Attention 并交父 Issue，根交主协调；主协调自身启动失败直接持久通知 owner，不再依赖同一不可用运行时处理自己的故障。原输入及实际 dispatch 状态保留，问题结清前暂停该未准入输入的自动启动；明确结清或实际成功后以原输入身份继续。已有 native intent 或未知回执的只读 attachment 独立发现，不受较新输入的启动预算阻断，原未知事实仍走原对账。见[实施计划](plans/bounded-agent-startup-escalation.md)。
+
+明确未发送的普通 `rejected` 输入在没有 pending native receipt 时仍受原启动预算约束；具名 sending/rejected 的冻结恢复合同及显式 pending receipt 的只读发现保持有效。原输入的 hold 同时约束 outbox 领取和首次 native starting 的事务准入，防止较新输入打开会话后绕过旧输入的技术待办；已有 native 执行事实的读取和结算继续保留。见[审查修正计划](plans/startup-hold-admission-review.md)。
+
+原生 compact 的 starting/running/unknown 也独立恢复其原会话完成流，以原 compact outbox request 对账，不借用较新输入的身份或清除其 hold；缺原 outbox 的旧事实仅保留只读发现，不捏造请求。实际 starting 在同一事务用私有 snapshot 冻结原 runtime 与 thread（含显式 legacy）；历史无 pin 时只凭同 conversation、同原 thread 的执行事实恢复，缺证或歧义保持 unknown，不能改用当前定义。恢复直接 resume 原 thread，拒绝恢复不能创建替代。见[原身份修正计划](plans/compact-runtime-identity-review.md)。缺证 compact 仅隔离其 conversation，不中止后台 pool 的其它扫描。原 compact attachment 在 ResumeThread 暴露回调前即进入隔离，禁止新 native 工作与工具回调；idle summary 同时受该隔离与未确认 compact 的账本门约束；完成事实持久化并 ack 后退出恢复 session，重新执行正常 binding/toolset 核验及必要 handoff。见[pool 与工具集修正计划](plans/compact-recovery-pool-and-toolset-review.md)。queued 或已结束的 compact 不授予未知原生操作豁免，完成事件只结算原 operation/thread，不重发 compact。见[补充审查计划](plans/startup-native-compaction-review.md)。
+
 新 runner 以可选能力 `supervisor-questions-v1` 协商，并在创建 run 时冻结答复合同；新运行的 `ask_owner` 表示提交给 Issue owner，其答复不能扩大原授权。旧运行仍保留真实用户答复语义，但问题先按责任链上报。字段可选，默认关闭；runner wire 继续为 2/1，不改变旧请求的有效性。实施计划见 docs/plans/issue-responsibility-routing.md。
 
 
 交接与容量合同：新执行按 `issue-question-handoffs-v1` 冻结分轮交接能力。提问持久保存原问题并由 runner 确认真正停止后结束本轮、释放 slot；代表 Issue owner 的执行自动提交父 Issue owner，根 Issue 提交唯一主协调 Agent。答复与退出确认均持久后才创建接续 Action/Run，沿用原 spec、artifact 和 generation，不消耗实现尝试额度，不复活旧 Run。固定原主机、执行配置和 workspace 互斥；可恢复的实现会话保留原生 thread，验收与不支持原生接续的适配器通过原问题及完整合同重建上下文。协调与执行均严格使用配置容量，不提供额外名额。新合同仅向明确协商的执行启用，历史 Run 保留原等待合同并受控排空；wire 仍为 2/1。详见 docs/plans/issue-run-handoffs.md。Agent 决策和行动完成不能用作真实人工授权证据。
+
+manager（含 receipt-only 对账运行）真实失租转为 unknown 时，同事务按原 run/lease 建立唯一技术 action Attention，绑定原执行事实并交实际父 Issue 负责人，根到 main，复用上述责任通知与逐级升级；责任已交接时先由当前 owner 承接。发现者记录为 system，不冒充 manager 业务请求。原 unknown、lease、冻结 pin、native pending 与输入保持不变，不自动重派或认定业务失败；没有真实失租的 pause 或条件等待不产生故障。此触发不回填历史已失租运行；历史技术责任须按原身份单独补齐，不以部署替代恢复。无需迁移、API/CLI 或 runner wire 变更。见 [实施计划](plans/manager-lease-reconciliation-attention.md)。
 
 ## D152：验收后交付责任与 owner 重开恢复
 
@@ -693,6 +704,12 @@ D155 锁观测补充：维护计划从精确 updater 的 fd/fdinfo 验证原 flo
 完整 stat device/inode 必须匹配计划。Btrfs 子卷 stat device 与 flock superblock device
 不同的情况，通过同 fd 的 mount ID 和 Btrfs mount device 精确核对；进程及 fd 前后
 身份不变且确有该 PID 的独占 flock 才通过，不以相同 inode 省略设备或所有者校验。
+
+D155 重启来源补充：同版本受监督重启保留历史 committed Binding，当前 Process
+随核实后的新 kernel 身份更新。普通维护分别匹配原 Binding 与当前持久 Process，
+不把历史提交 launch 当成当前 launch；实际 Inspect、唯一 Find 和 artifact 校验保留。
+failed-parent 前滚仍绑定其原 successor launch；新 successor 不得复用历史 Binding
+或当前 Process 的 launch。原 ledger、receipt 与请求不改写。见[实施计划](plans/restarted-maintenance-source.md)。
 
 
 ## D156：原收据未知时的显式崩溃恢复维护
@@ -793,6 +810,48 @@ runner 才接收逐运行 retain。无该能力或不受支持的代际不得收
 这一批只扩展执行器内部协议，不新增用户控制能力，CLI 已有 runtime 读取可见该能力。
 原运行的独立业务对账/退役入口另批实现，并须同步 CLI/主工具面；主机成功登记不证明
 原运行恢复，也不证明升级排空或未知外部结果已确定。见[实施计划](plans/retained-run-reconciliation.md)。
+
+D159 普通 Run 继续补充：独立 typed `runs.continue_retained` 只授权命名普通 Orca
+执行的原 journal 严格附着，不删除原维护保护、物理停止或未知业务请求。动作核验
+Task CAS、Run/task/action/generation/spec/host/同一未 released lease、完整执行 pin、
+全部保护身份与原文摘要及真实已结算业务；新 capture、控制变化或新 pending 使原决议失效。
+owner、准入主会话来源和当前负责该 Task 的 Issue owner 共享同一 app 校验；CLI 提供
+只读对账、完整冻结输入、原请求查询与精确 replay。决议本身不续租，只有携带原 journal
+的合法 Hello 可恢复原 lapsed lease；缺 journal 不分配新运行，heartbeat 不能先行消费授权。
+
+专用 continue_retained verdict 仅返回给显式协商 strict-retained-resume 的 runner；
+N/N−1 旧 peer 仍 retain，旧请求默认语义不变。新 runner 将严格模式独立写入 journal，
+保存原 Assignment/Thread，重启和后续普通 Continue 不丢失约束。Orca 要求原
+worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 turn 可观察；
+坏 Thread、失踪 terminal、unknown/pending 或身份变化均保留待对账，禁止新 launch、
+隐式 continuation、原 prompt 重放和 shutdown 注入。首批 app-server 不支持。
+附着不能恢复已取消的 turn，也不能将原生 unknown 判为成功或失败；同 session 的新
+业务继续需要独立持久化发送合同，不由此授权推断。实际恢复必须另核原业务推进，不能
+只以 lease active 或健康主机验收。首次附着只接回 started journal；最终阶段仅恢复同一
+严格许可下已持久记录的真实 worker 结果，或原问答 handoff 已确认物理停止后的
+`runs.yield_question` 回执。后者须为已协商问答交接的普通 Run、releasing 阶段，保留原
+request ID、Run/target、decision 和原 thread payload；仍由服务端核验原 handoff，
+不产生 WorkerDone、新问题或新 native 执行，不能结算旧 give-up/release。见
+[回执恢复计划](plans/strict-question-yield-reconciliation.md)。严格附着的 setup、
+观察和本地事件保存失败保持 pending；最终请求只有业务成功回执才清理，accepted 或未知
+结果保留原请求身份。strict 最终请求和前置事件仅作一次现有请求超时内的上传尝试；
+未知结果保留原请求/事件，显式唤醒 Hello 对账以观察后续 Stop；strict pending 报告在
+退出前沿既有 RetryDelay 等待，Stop/runner 取消可提前打断，避免成功 Hello 绕过退避。
+不依赖凭据撤销、进程重启或其他库存变化。普通 legacy 的 transport retry 语义保持不变。
+另一个 authenticated Hello 的独立 Stop 可结束同一原 journal
+责任；它以原 Assignment/lease 摘要持久化，不清 strict 约束，不将 Forbidden 当业务成功。
+物理停止后，在 Done 同一事务保存原请求/事件历史再退出 pending；原 server 业务回执
+不改写，后续 Retain/Continue 或新附着使旧 Stop 许可失效。Stop 复核、清理和新许可撤销
+按同一 Run settlement gate 排序，最终 journal 事务再次核对 Stop 并归档；Done 后不接受
+新的附着覆盖历史。单个 strict journal 不准入只保留该 Run 的 fence 与诊断，不阻止同 host
+应用其他 Run verdict 或完成启动。见[计划](plans/retained-run-continuation.md)与
+[操作合同](retained-run-continuation.md)。
+
+严格附着的显式 Pause 仍中断已经验证的原 terminal，区别于 fence/shutdown 的零自动输入；
+未知或未附着不获得输入权限。原 pin 可由已协商能力/原 backend 下的 AgentContinuations
+证明继续可用，不要求它仍是当前新任务库存，也不替换其任何冻结字段。
+
+D159 验收回执恢复补充：Orca bridge 将原 verdict 原子保存到 Run 私有状态，保存成功后才确认。回执绑定原 Run、worktree、native launch marker 和已持久的逻辑 turn（新发送另存唯一 turn ID，避免同一毫秒混用）；worker attempt 与本次附着授权 ID 不改变原执行身份。新 launch 或发送新 turn 时切换绑定并清除内存 verdict，旧回执不能成为新 turn 的结果。重建先恢复同一绑定的 verdict，再由严格附着核验保存的 terminal/pane/session/runtime/native launch/root turn。绑定未匹配或没有原回执时保持 pending，不发送提醒；破损或保存失败同样不生成业务完成。既有无绑定的其它 harness 回执格式保留，未修改 runner wire N/N−1。见[实施计划](plans/retained-acceptance-verdict.md)。
 
 ## D160：Agent 运行关联与观测来源
 
@@ -940,15 +999,61 @@ harness Session，不查询模型，不 enqueue 原生 RPC，也不恢复 lease 
 
 ## D173：有停止证明的原业务回执读取
 
+manager transport 的 failed 不直接代表业务失败。会话清理前的结构化退出日志只冻结当场确定的 Issue/Run/epoch 和 conversation，并分开记录原 serve 返回错误、context cause、关闭触发分支和后续 cleanup error；pool 在 cancel 前记录退出阶段、原错误和直接处理的 delivery request。日志不缓存跨回合或重连的 thread/turn/request 身份，未知字段省略；显式关闭仅记录调用处已知的 initiating request。日志不包含正文、prompt、工具参数、环境或凭据，不新增业务效果，也不代替原生回执和物理停止证明。详见[观测计划](plans/manager-session-diagnostics.md)。
+
 原 manager 成功 close、原事件全部应用、独立 stopped 请求已成功且末游标相同，仍不代表原业务完成。若唯一剩余阻塞是原业务收据，`task reconcile-manager --mode read_receipts` 可在同一事务中校验 Task CAS、原 Run/lease/host、assignment epoch、冻结执行 pin、close 原结果和 stopped 原 payload 摘要，结束旧 transport 并创建唯一 receipt-only 后继。原业务请求、未知结果、native pending 与原始事件均保留；相同请求重试不增加代次。默认 settle 仍须业务收据全部对清。
 
 reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能绕维护、park 或其他执行占位。它只按原 binding resume 原 thread，沿冻结 AppliedModel/provider/effort；缺身份或配置继续阻塞，不以当前模型目录、业务 readiness probe、新 thread、摘要、迁移或业务工具替代读取。只有原身份的真实 native 终态与完整 consumed sources 能经既有对账事务结清原 pending；物理停止、内部 repair 审计或日志里的终态线索不能代替该回执。
 
 实现复用既有 receipt-only 动作与普通请求去重，并新增可选 Assignment `require_receipt_reader` 标志。默认 false 保留历史 receipt-only 的 resolver、模型恢复与 native 操作规则；仅新 proof-bound 来源且已协商能力的 reader 为 true，启用冻结配置/noModels/严格 resolver。该临时约束不进入原 thread 的 binding identity，重连与后继代次从原 action 来源重建。字段可选且默认语义不变，不升级协议代际。新模式仅对显式报告 `runner-manager-receipt-reader-v1` 的原 host 准入；该模式新动作的 claim 与重启恢复同样要求此能力，避免旧执行器在读取前做普通业务探活。原待对账请求集合尚未清空时，非终态或失败读取后的后继代次继续携带原请求来源与能力要求；该原集合全部对清后，不把限制传播到无关责任。原 closing Run 的事件消费优先恢复同一 Run、精确 thread 的已确认 resume 内实际模型配置；仅历史 resume 缺该配置时再读该 Run 已有缓存模型目录。不能为了缺少当前 hosted turn 快照而切断原事件泵，也不因此访问当前模型目录或创建 native 会话。已持久化 compaction 的账本对账仍可完成，创建 compaction 与其他 native 维护继续禁止。历史 receipt-only 与普通业务协议不因此收紧。新 runner 的内部受限解析跳过业务探活，普通执行保持既有探活和模型选择。部署需同时更新实际 runner 才具备这条受限读取实现。见[实施计划](plans/proved-close-receipt-reader.md)。
 
-## D174：执行 Capability 的声明、版本与冻结约束
+## D174：回答事实与执行续接权限分离
 
-以下至“D174 范围修订”之前是旧候选的历史实现记录；native 资格门已撤销。当前合同以该范围修订及后续兼容补充为准，旧记录仅用于审计和历史 evidence-only 运行恢复。
+新增 `decisions.respond_continuation` / `decisions.resolve_continuation_from_message`，
+要求显式完整 typed policy、原 decision version 及父 Task control revision；worker handoff
+的条件答复通过新入口把机器续接意图与自由文本分开：
+`continue_now` 在原执行确已停止且原合同仍有效后续接；`wait` 保存非空原因并等待独立的显式
+resume；`dependency` 保存另一个普通 execution Task 的精确 spec 版本，仅该版本的真实 completed 账本事实
+满足条件。Task 前提、canonical Issue 与 legacy stage 的等待边在同一纯图中检查；
+新增 dependency 答案及后续图修改均在原事务中拒绝环，不能由另一条入口绕过。
+旧 `decisions.respond` / `resolve_from_message` 的有效无策略输入保留原有
+answered 与 stopped 齐备后的续接默认；没有 policy row 的历史 handoff 仍沿原合同，不伪造
+一个旧 wait 决定。新入口缺 policy 拒绝，只有显式 typed wait 才等待；不从自由文本推断
+typed 条件。既有 Attention 通过非空 typed 字段显式 opt-in，省略时保持旧行为。
+新 typed IssueManager 答案必须引用当前 Issue 已准入且未撤回的原 owner 消息；
+复用既有 owner relay 校验，不将 cancelled outbox 当成仍然有效的 owner 授权。
+
+答案及其原 request_id 保持不可变。独立 continuation 记录保存自己的 revision、等待原因、冻结
+依赖和 resume 请求；`decisions.continuation.resume` / `reconcile` 同时校验 continuation revision
+与父 Task control_revision，并继续校验原 spec / action generation / artifact / Issue assignment
+及执行 pin。reconcile 只能读取已冻结依赖的真实就绪事实，不能用客户端布尔值解除等待；wait
+只能由独立 resume 解除。托管主会话及当前 Issue owner 通过已有 execution/effect_seq 和 source
+准入执行这些动作；显式 resume 绑定实际 owner source，技术依赖对账不要求新的人工答复。
+
+真实 Task 完成事件通过 dependency 索引定点唤醒相关等待项；创建后尚未领取的 continuation
+仍在 scheduler 事实收集时重查冻结依赖，依赖改版或未完成不能因旧 ready 投影被领取。全过程
+仍保留原 handoff 的进程停止证明、原协议与执行器 pin、原 generation 和工作区合同，不创建
+新的业务责任、不占用等待中的 worker 槽位、不重放旧业务请求。CLI、owner API 与托管工具
+提供一致的 typed 输入、只读阻塞事实及双 CAS 控制；输出明确区分 waiting / ready / continued。
+
+迁移 89 只追加独立 continuation 账本，不改写历史答案或伪造旧请求的策略。已有已提交
+successor 动作保留身份，legacy 查询不物化 policy；新的独立 resume 仅记录本次权限，
+不补造旧 answer request。
+
+兼容评估：初版把旧无策略默认改成 wait，确实改变旧有效请求，不能仅以字段可选或测试绿
+视为兼容。现通过独立新 operation 与显式 opt-in 保持旧输入、旧请求回执、无 policy row 的
+续接以及旧 yield 合同。N/N−1 逐项验证旧默认不变，新 typed wait 独立验证无后继。runner
+wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 版本，也无旧通信适配器
+需要登记退役；未来若要移除旧默认，必须独立实施版本化迁移。详见[兼容修正计划](plans/decision-continuation-compatibility.md)。
+
+
+## D175：TraeX 原 rollout 的终态补证
+
+独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证只在原 observation record 位置的局部副本上发布真实事实，不覆盖冲突身份或已有确定原生结果；生命周期 Agent 始终沿用原 native-api 观测，补证不参与完成、恢复、控制或历史清理。每轮只发布一次 projection，不反复切换原弱观测与补证 revision，不创建会话或重发输入。TraeX 观测以持久语义指纹区分相同原生身份的 running 与后续终态/结束时钟/operations；排除采样时间，真实变化只推进一次 revision，相同事实及重启重放沿用原事件身份。指纹仅用于观测去重，不改变原生绑定或生命周期权限；旧 thread JSON 缺失字段仍可读取，首次补齐语义元数据可追加一次事实。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。
+
+## D176：执行 Capability 的声明、版本与冻结约束
+
+以下至“D176 范围修订”之前是旧候选的历史实现记录；native 资格门已撤销。当前合同以该范围修订及后续兼容补充为准，旧记录仅用于审计和历史 evidence-only 运行恢复。
 
 Capability 与角色 category、runner feature 和 CLI 覆盖目录分别建模。能力定义追加 revision，`capabilities.put` 通过 owner request_id/CAS 与事件同事务提交；`image_gen@1` 是初始定义，其工具名为 `image_gen__imagegen`。定义退休拒绝新声明和新 Task，不改写历史 spec、pin 或证据。
 
@@ -970,25 +1075,27 @@ Task 两 role 在既有 AgentRequirement 中分别冻结 `required_capabilities`
 
 本候选的设计边界是保守可用的基础逻辑与 adapter 合同；真实入口工具枚举、受信任 profile/同 session 执行与一次有界 image_gen 验证仍须取得真实证据，不能把 unknown 当完成。Refs: D123、D128、D142。实施计划见 `docs/plans/capability-foundation.md`。
 
-D174 续接补充：显式验证同一已保留 snapshot 可以追加 run.capability_revalidated 事实和证据引用，不修改原 RunCapabilityBinding。assignment 的 current_match/revalidation 指明当前资格，runner 在 journal 17 追加原服务器 receipt 投影；原 assignment_json、选择 pin 和原证据字节不变。未验证、过期或失效仍阻止启动；复验不替代原租约、control 和 unknown 对账，也不自动恢复业务。
+D176 续接补充：显式验证同一已保留 snapshot 可以追加 run.capability_revalidated 事实和证据引用，不修改原 RunCapabilityBinding。assignment 的 current_match/revalidation 指明当前资格，runner 在 journal 17 追加原服务器 receipt 投影；原 assignment_json、选择 pin 和原证据字节不变。未验证、过期或失效仍阻止启动；复验不替代原租约、control 和 unknown 对账，也不自动恢复业务。
 
 
-D174 范围修订（优先于以上 native-gate 历史文字）：依据 owner source `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` v1，Capability 是配置标签。匹配只要求同一 Agent 的显式声明覆盖 Task 本 role required 的精确 definition revision，另保普通 executor 在线/可用性、单 RuntimeID、身份/profile/backend、共享预算和原冻结 pin。声明是用户意图，既非真实工具实证，也不表示调用必成功。image_gen 可以逐项或批量明确配置给官方登录的 Codex Agent；不得按品牌自动补值或声称实际已部署。
+D176 范围修订（优先于以上 native-gate 历史文字）：依据 owner source `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` v1，Capability 是配置标签。匹配只要求同一 Agent 的显式声明覆盖 Task 本 role required 的精确 definition revision，另保普通 executor 在线/可用性、单 RuntimeID、身份/profile/backend、共享预算和原冻结 pin。声明是用户意图，既非真实工具实证，也不表示调用必成功。image_gen 可以逐项或批量明确配置给官方登录的 Codex Agent；不得按品牌自动补值或声称实际已部署。
 
 工具 inventory/source/schema/TTL/profile/session、prepare/adopt/consume/nativeguard、StartWithCapabilities、真实调用及费用观测全部撤销为匹配、启动和验收门禁。旧 evidence/verification/revalidation 数据与原请求对账接口仅为历史/可选诊断，不参与声明资格。新 claim 的 RunCapabilityBinding 保存 required/digest 和原 pin，Agent revision 通过原 immutable inventory 精确恢复声明。launch 使用普通 Start；precheck 在 NextAttempt 之前，失败不清旧停止证明。解释使用注入时钟，不能覆盖用户冻结的 AgentID/RuntimeID/backend。
 
 声明调度使用独立协商 feature `executor-capability-declarations-v1`，旧 `executor-capabilities-v1` 保留历史证据接口；旧 native-gated runner 不接收新声明任务。无 required 的旧任务和 2/1 默认 wire 不变，兼容依据是双方协商及发送点验证，并非“新增字段自然兼容”。历史配置/hash/spec/pin/unknown 和迁移均不重写。原 P2/P5 的 native 依赖已撤销；新矩阵见 `plans/capability-declarative-acceptance.md`。完整检查资源 HOLD、独立 review/CI 和正式交付分别留证，不能拿旧候选通过代替新对象。
 
-D174 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明 feature peer 可接收。旧 binding 字段缺省仍保持原字节，原 evidence-only peer 的已分配运行可继续读取/恢复，不向它添加声明 current_match；新 runner 使用原冻结配置声明和普通 resolver。旧验证请求和 evidence 只作为可选诊断与原请求对账，不能生成新 Run 的资格或重写历史绑定。配置严格解码增加 int64 definition revision 的合法整数读取，仍拒绝分数、字符串、溢出及非正 revision；这是修复声明文件路径，不改变旧有效配置的默认值。
+D176 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明 feature peer 可接收。旧 binding 字段缺省仍保持原字节，原 evidence-only peer 的已分配运行可继续读取/恢复，不向它添加声明 current_match；新 runner 使用原冻结配置声明和普通 resolver。旧验证请求和 evidence 只作为可选诊断与原请求对账，不能生成新 Run 的资格或重写历史绑定。配置严格解码增加 int64 definition revision 的合法整数读取，仍拒绝分数、字符串、溢出及非正 revision；这是修复声明文件路径，不改变旧有效配置的默认值。
 
-D174 旧运行恢复及等待投影补充：缺省 match_policy 的历史 evidence-only binding 保留专用历史恢复适配；原请求上报可同事务追加同 pin 的新鲜 revalidation，并向旧协商 peer 返回原有格式。该适配不参与 declaration_v1 的新匹配或启动，不能把旧工具实证门加回声明式运行。只读解释保留不可用 executor 的身份与声明事实，普通容量/adapter 等待按完整冻结约束判为 pending；claim 始终只使用普通可用 executor。当前恢复指导为显式登记声明、恢复同入口可用性及 unknown 原请求对账。
+D176 旧运行恢复及等待投影补充：缺省 match_policy 的历史 evidence-only binding 保留专用历史恢复适配；原请求上报可同事务追加同 pin 的新鲜 revalidation，并向旧协商 peer 返回原有格式。该适配不参与 declaration_v1 的新匹配或启动，不能把旧工具实证门加回声明式运行。只读解释保留不可用 executor 的身份与声明事实，普通容量/adapter 等待按完整冻结约束判为 pending；claim 始终只使用普通可用 executor。当前恢复指导为显式登记声明、恢复同入口可用性及 unknown 原请求对账。
 
-D174 未观测主机补充：已配置主机尚未发送 Hello 时，缺失 host_runtime 是该主机未观测的普通可用性事实，不能使其他主机的 Task 能力解释或十分钟持久等待通知整体失败。查询保留健康候选并明确该主机原因，不推断其在线、声明或 executor；非缺失类存储错误仍返回。冻结身份、声明修订、原入口及共享预算围栏保持不变。
+D176 未观测主机补充：已配置主机尚未发送 Hello 时，缺失 host_runtime 是该主机未观测的普通可用性事实，不能使其他主机的 Task 能力解释或十分钟持久等待通知整体失败。查询保留健康候选并明确该主机原因，不推断其在线、声明或 executor；非缺失类存储错误仍返回。冻结身份、声明修订、原入口及共享预算围栏保持不变。
 
-D174 验收前置等待补充：首次 named 实现分配需要同 host/backend 的验收候选时，十分钟等待检测同时检查 acceptance 自身的非空 required，即使 implementation required 为空。通知以实际阻塞的 task/spec/role 持久去重并携带该角色解释，不复制标签到实现角色。waived 或不再检查该前置的已分配任务不新增 acceptance 通知；验收 action 仍仅检查验收角色。该修复仅调整维护通知，无 wire、迁移或旧运行冻结语义变更。
+D176 验收前置等待补充：首次 named 实现分配需要同 host/backend 的验收候选时，十分钟等待检测同时检查 acceptance 自身的非空 required，即使 implementation required 为空。通知以实际阻塞的 task/spec/role 持久去重并携带该角色解释，不复制标签到实现角色。waived 或不再检查该前置的已分配任务不新增 acceptance 通知；验收 action 仍仅检查验收角色。该修复仅调整维护通知，无 wire、迁移或旧运行冻结语义变更。
 
 首次分配前的 acceptance 查询解释实际 implementation action 的 reviewer 前置，不套用尚不存在的验收 artifact 生命周期。只读 reviewer filter 限定配对候选而不改写原验收身份、profile、runtime 或 backend；全局 eligibility 与 Claim 的首次配对检查一致。通知的角色与 `task capability-explain --role` 恢复入口明确对应。
 
-D174 候选分页补充：Task 能力解释可同时投影同入口的当前 Agent revision 与在途保留 revision，分页身份使用完整冻结 RunExecutionPin，不能仅用 environment/Agent/runtime/backend 合并。排序键和 after 边界保持同一全序，当前无声明与原保留声明独立返回。游标仍绑定筛选、水位及事实签名；排序格式变化拒绝旧游标并要求重新分页，不改变 server/runner wire、迁移、claim 或历史 pin。
+D176 候选分页补充：Task 能力解释可同时投影同入口的当前 Agent revision 与在途保留 revision，分页身份使用完整冻结 RunExecutionPin，不能仅用 environment/Agent/runtime/backend 合并。排序键和 after 边界保持同一全序，当前无声明与原保留声明独立返回。游标仍绑定筛选、水位及事实签名；排序格式变化拒绝旧游标并要求重新分页，不改变 server/runner wire、迁移、claim 或历史 pin。
 
-D174 候选渲染补充：Task 能力列表的 React 身份同样绑定完整冻结 pin，保证同入口当前与保留 revision 能独立更新、移除和重排。仅在 pin 缺省时按投影的 identity、Agent revision 与 runtime reference 使用独立 fallback；匹配状态不是渲染身份。不改变 API、协议、迁移或调度合同。
+D176 候选渲染补充：Task 能力列表的 React 身份同样绑定完整冻结 pin，保证同入口当前与保留 revision 能独立更新、移除和重排。仅在 pin 缺省时按投影的 identity、Agent revision 与 runtime reference 使用独立 fallback；匹配状态不是渲染身份。不改变 API、协议、迁移或调度合同。
+
+D176 main 整合补充：main 的 D174/D175 与原迁移历史保持不变，Capability 原候选的 D174 在本整合候选改用 D176；原提交仍是旧编号的审计来源。未部署候选迁移原 SQL 顺延到 server 91、journal 17/18，保留 main 的 server 88–90、journal 16 原字节；journal 当前版本为 18。相同编号的旧候选数据库不能冒充 main schema，打开时明确拒绝冲突并保留原文件，不自动删表/重放/转换。正式安装库存、升级副本及回滚窗口审计由父交付合同执行，本轮无生产事实断言。协议仍是 feature 协商的 2/1；保留 main 的严格原生重连，声明 precheck 在 NextAttempt 前，普通 Start 接收原 retained-resume 权限。重连、配置标签与原停止证明各自保持原围栏。

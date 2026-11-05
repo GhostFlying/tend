@@ -8,6 +8,9 @@ TEST_TIMEOUT ?= 60m
 APP_TEST_SHARDS ?= 0
 TEST_SHARDS ?= 0
 CHECK_JOBS ?= 0
+# Explicit multicore serial checks require a recorded operational reason.
+CHECK_SERIAL_REASON ?=
+export CHECK_SERIAL_REASON
 TEST_COUNT ?= 0
 TEST_GROUP ?= all
 TEST_REPORT_DIR ?=

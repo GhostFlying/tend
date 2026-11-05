@@ -13,6 +13,7 @@ const (
 	CapabilityProtocolNegotiation    = "runner-protocol-negotiation-v1"
 	CapabilityRunnerHeartbeat        = "runner-heartbeat-v1"
 	CapabilityRunnerMaintenance      = "runner-maintenance-v1"
+	CapabilityStrictRetainedResume   = "runner-strict-retained-resume-v1"
 	CapabilityRetainedReconciliation = "runner-retained-reconciliation-v1"
 )
 

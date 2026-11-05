@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -90,6 +92,8 @@ func dedupe(s []string) []string {
 // answered decision again with the same answer returns the recorded result;
 // a different answer gets stale_revision and the current state.
 type AnswerDecision struct {
+	// TypedContinuation selects explicit scheduling policy instead of the legacy answer contract.
+	TypedContinuation bool
 	// FromMessage selects decisions.resolve_from_message.
 	FromMessage bool
 	// Responsible is an internal path after the current supervisor was verified.
@@ -97,14 +101,21 @@ type AnswerDecision struct {
 }
 
 type decisionAnswer struct {
-	Option string                 `json:"option,omitempty"`
-	Text   string                 `json:"text,omitempty"`
-	Effect *protocol.EffectResult `json:"effect,omitempty"`
-	Actor  *protocol.Principal    `json:"actor,omitempty"`
+	Continuation *protocol.DecisionContinuationPolicy `json:"continuation,omitempty"`
+	Option       string                               `json:"option,omitempty"`
+	Text         string                               `json:"text,omitempty"`
+	Effect       *protocol.EffectResult               `json:"effect,omitempty"`
+	Actor        *protocol.Principal                  `json:"actor,omitempty"`
 }
 
 // Operation implements Command.
 func (c AnswerDecision) Operation() string {
+	if c.TypedContinuation {
+		if c.FromMessage {
+			return protocol.OpResolveDecisionContinuation
+		}
+		return protocol.OpAnswerDecisionContinuation
+	}
 	if c.FromMessage {
 		return "decisions.resolve_from_message"
 	}
@@ -125,6 +136,12 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if c.TypedContinuation && (p.Continuation == nil || p.Version < 1 || x.Env.Target.Type != "decision") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "typed continuation requires a decision target, original version and explicit policy")
+	}
+	if !c.TypedContinuation && p.Continuation != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "use the explicit typed continuation operation")
+	}
 	if p.Option == "" && p.Text == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "option or text is required")
 	}
@@ -136,6 +153,27 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	d, err := store.GetDecision(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, errNotFound(err, "decision %s does not exist", x.Env.Target.ID)
+	}
+	if c.TypedContinuation && x.Env.Operation == c.Operation() {
+		if d.Worker == nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "typed continuation requires a worker handoff question")
+		}
+		expected, err := requireRevision(x.Env)
+		if err != nil {
+			return Outcome{}, err
+		}
+		task, err := store.GetTask(ctx, tx.Q(), d.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if expected != task.ControlRevision {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "parent task control revision changed")
+		}
+		if c.FromMessage && !c.Responsible && x.coordinationExecution != nil && x.coordinationExecution.Selection.Purpose == agentconfig.IssueManager {
+			if err := validateAttentionOwnerRelay(ctx, tx.Q(), x, x.coordinationExecution.IssueID, p.SourceMessageID); err != nil {
+				return Outcome{}, err
+			}
+		}
 	}
 	if c.Responsible {
 		var delivery bool
@@ -156,6 +194,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if d.Status == store.DecisionAnswered {
 		var prev decisionAnswer
 		if err := json.Unmarshal([]byte(d.AnswerJSON), &prev); err == nil && prev.Option == p.Option && prev.Text == p.Text {
+			if p.Continuation != nil && (prev.Continuation == nil || !reflect.DeepEqual(decisionContinuationPolicy(p.Continuation), *prev.Continuation)) {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "recorded continuation policy is immutable; use its independent resume operation")
+			}
 			return Outcome{Result: answerResult(d, d.Version, []byte(d.AnswerJSON), prev.Effect)}, nil
 		}
 	}
@@ -211,6 +252,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			}
 		}
 	}
+	if err := recordDecisionContinuation(ctx, x, tx, d, p.Continuation); err != nil {
+		return Outcome{}, err
+	}
 	effect, effectEvents, err := answerEffect(ctx, x, tx, d, p.Option)
 	if err != nil {
 		return Outcome{}, err
@@ -221,7 +265,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		sourceEvents = append(sourceEvents, Event{ObjectType: "message", ObjectID: p.SourceMessageID, Kind: "conversation.turn_reviewed"})
 	}
-	value := decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect}
+	value := decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect, Continuation: p.Continuation}
+	if value.Continuation != nil {
+		policy := decisionContinuationPolicy(value.Continuation)
+		value.Continuation = &policy
+	}
 	if c.Responsible {
 		actor := x.Principal
 		value.Actor = &actor
@@ -232,6 +280,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	}
 	if err := tx.AnswerDecision(ctx, d.DecisionID, d.Version, string(answer), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
+	}
+	if p.Continuation != nil && p.Continuation.Mode == protocol.DecisionDependency {
+		if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if err := resumeAnsweredQuestion(ctx, x, tx, d.DecisionID); err != nil {
 		return Outcome{}, err

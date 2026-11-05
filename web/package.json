@@ -34,7 +34,8 @@
     "test:ui-tour": "node scripts/layout-fixture.ts scripts/ui-tour.ts",
     "test:inbox-badge": "node scripts/layout-fixture.ts scripts/inbox-badge-layout.ts",
     "test:agent-directory": "node scripts/layout-fixture.ts scripts/agent-directory-layout.ts",
-    "test:task-capabilities": "node scripts/task-capability-render.ts"
+    "test:task-capabilities": "node scripts/task-capability-render.ts",
+    "test:conversation-reads": "node scripts/layout-fixture.ts scripts/hidden-conversation-reads.ts"
   },
   "dependencies": {
     "markdown-it": "^15.0.3",

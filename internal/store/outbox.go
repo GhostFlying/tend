@@ -37,6 +37,15 @@ func scanOutbox(row interface{ Scan(...any) error }) (OutboxMessage, error) {
 	return m, err
 }
 
+// GetOutboxByRequest reads one original delivery independently of queue priority.
+func GetOutboxByRequest(ctx context.Context, q Querier, request string) (OutboxMessage, error) {
+	m, err := scanOutbox(q.QueryRowContext(ctx, `SELECT `+outboxColumns+` FROM outbox WHERE request_id=?`, request))
+	if err != nil {
+		return OutboxMessage{}, notFound(err, "outbox request")
+	}
+	return m, nil
+}
+
 // HeadOutbox returns the first message, in commit order, of a destination
 // that still awaits delivery, whether or not it is due. Failed and unknown messages do not
 // hold back the ones behind them.

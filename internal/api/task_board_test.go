@@ -13,6 +13,7 @@ import (
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
 
 func TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit(t *testing.T) {
@@ -23,22 +24,40 @@ func TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit(t *testing.T) {
 		protocol.TaskAwaitingAcceptance, protocol.TaskChangesRequired, protocol.TaskCompleted, protocol.TaskCancelled}
 	all := map[string]protocol.TaskLifecycle{}
 	projects := map[string]string{}
-	for i := range 231 {
-		id := e.task(fmt.Sprintf("board task %d", i))
-		state, project := states[i%len(states)], "alpha"
-		if i%3 == 0 {
-			project = "beta"
-		}
-		if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
-			_, err := tx.Exec(t.Context(), "UPDATE tasks SET lifecycle = ?, project = ? WHERE task_id = ?", state, project, id)
+	// One real creation establishes the current task/spec/action shape. The
+	// large fixture exercises reads, not 231 copies of creation side effects.
+	first := e.task("board task 0")
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		seed, err := storefixture.ReadTaskSeed(t.Context(), tx.Q(), first)
+		if err != nil {
 			return err
-		}); err != nil {
-			t.Fatal(err)
 		}
-		all[id], projects[id] = state, project
-		if i%5 == 0 {
-			e.clock.Advance(time.Millisecond)
+		for i := range 231 {
+			row := seed.Row
+			row.Title = fmt.Sprintf("board task %d", i)
+			row.Lifecycle, row.Project = states[i%len(states)], "alpha"
+			if i%3 == 0 {
+				row.Project = "beta"
+			}
+			row.CreatedAt, row.UpdatedAt = e.clock.Now().UnixMilli(), e.clock.Now().UnixMilli()
+			if i == 0 {
+				err = tx.UpdateTask(t.Context(), row)
+			} else {
+				row.TaskID = e.ids.New(protocol.PrefixTask)
+				row.WorkspaceName = row.TaskID
+				err = seed.Insert(t.Context(), tx, e.ids, row)
+			}
+			if err != nil {
+				return err
+			}
+			all[row.TaskID], projects[row.TaskID] = row.Lifecycle, row.Project
+			if i%5 == 0 {
+				e.clock.Advance(time.Millisecond)
+			}
 		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		name, project, lifecycle string
@@ -75,7 +94,7 @@ func TestTaskBoardPagesEveryLifecycleBeyondSnapshotLimit(t *testing.T) {
 					t.Fatalf("page contains %d tasks", len(page.Tasks))
 				}
 				for _, task := range page.Tasks {
-					if !want[task.TaskID] || seen[task.TaskID] {
+					if !want[task.TaskID] || seen[task.TaskID] || task.Lifecycle != all[task.TaskID] || task.Project != projects[task.TaskID] {
 						t.Fatalf("unexpected or duplicate task %s", task.TaskID)
 					}
 					seen[task.TaskID] = true

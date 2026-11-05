@@ -86,7 +86,23 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 				r.mu.Lock()
 				a.reporting = true
 				r.mu.Unlock()
-				return r.report(ctx, as)
+				reportErr := r.report(ctx, as)
+				if isCompletionPending(reportErr) {
+					strict, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
+					if err != nil {
+						return &completionPending{errors.Join(reportErr, err)}
+					}
+					if strict != nil {
+						// Hello can record Stop while this executor is present.
+						// Preserve retry spacing without blocking that control.
+						select {
+						case <-ctx.Done():
+						case <-runCtx.Done():
+						case <-time.After(r.cfg.RetryDelay):
+						}
+					}
+				}
+				return reportErr
 			}
 		default:
 			return fmt.Errorf("runner: run %s has unknown phase %q", runID, run.Phase)
@@ -203,7 +219,7 @@ func runTarget(as protocol.Assignment) protocol.Target {
 }
 
 // work runs the worker and journals the run's final report.
-func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *active) error {
+func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *active) (workErr error) {
 	if err := r.settleTakeover(runCtx, as, a); err != nil {
 		return err
 	}
@@ -246,13 +262,45 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return &completionPending{err}
 	}
-	p, err := execution.Workspaces.Prepare(runCtx, as)
-	if err != nil {
-		return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
-	}
 	run, err := r.cfg.Journal.Run(ctx, as.RunID)
 	if err != nil {
 		return err
+	}
+	strictResume, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
+	if err != nil {
+		return &completionPending{err}
+	}
+	defer func() {
+		// Setup, observation and local persistence failures do not prove the
+		// original worker stopped. Preserve it instead of fabricating a new
+		// business failure and entering the ordinary terminal finalizer.
+		if strictResume != nil && workErr != nil && context.Cause(runCtx) == nil && !isCompletionPending(workErr) && !isQuestionYield(workErr) && !errors.Is(workErr, errPaused) && !errors.Is(workErr, errHeld) {
+			workErr = &completionPending{workErr}
+		}
+	}()
+	var p Prepared
+	if strictResume != nil {
+		if run.Held || run.Thread == "" {
+			return &completionPending{harness.ErrRetainedResumePending}
+		}
+		if _, supported := execution.Workers.(interface{ StrictRetainedResume() }); !supported {
+			return &completionPending{harness.ErrRetainedResumePending}
+		}
+		workspace, supported := execution.Workspaces.(interface {
+			Reattach(context.Context, protocol.Assignment) (Prepared, error)
+		})
+		if !supported {
+			return &completionPending{harness.ErrRetainedResumePending}
+		}
+		p, err = workspace.Reattach(runCtx, as)
+		if err != nil {
+			return &completionPending{fmt.Errorf("%w: %v", harness.ErrRetainedResumePending, err)}
+		}
+	} else {
+		p, err = execution.Workspaces.Prepare(runCtx, as)
+		if err != nil {
+			return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
+		}
 	}
 	var askOwner func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
 	var questions []protocol.WorkerQuestion
@@ -351,7 +399,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 	}
-	w, err := startWorker(runCtx, harness.WorkerSpec{ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := startWorker(runCtx, harness.WorkerSpec{RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
@@ -386,6 +434,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		HandBack:   run.Held,
 	})
 	if err != nil {
+		if errors.Is(err, harness.ErrRetainedResumePending) {
+			return &completionPending{err}
+		}
 		if nativeMessages {
 			switch {
 			case errors.Is(err, harness.ErrHeld):
@@ -395,6 +446,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 				r.applyDesired(ctx, a, protocol.DesiredPaused, startupObserved)
 				return stopped(errPaused)
 			}
+		}
+		if strictResume != nil && context.Cause(runCtx) == nil {
+			return &completionPending{err}
 		}
 		if native, ok := errors.AsType[*orca.Error](err); ok && as.Execution != nil && (native.Code == "invalid_argument" || native.Code == "capability_unsupported" || native.Code == "incompatible_runtime") {
 			if rejected, ok := r.cfg.Executions.(interface {
@@ -457,6 +511,17 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	<-messagesDone
 	stopUploader()
 	<-uploaded
+	if errors.Is(werr, harness.ErrRetainedResumePending) {
+		return &completionPending{werr}
+	}
+	if strictResume != nil && context.Cause(runCtx) == nil {
+		if appendErr != nil {
+			return &completionPending{appendErr}
+		}
+		if werr != nil {
+			return &completionPending{werr}
+		}
+	}
 	if err := r.recordClosedSession(context.WithoutCancel(ctx), as); err != nil {
 		return &completionPending{err}
 	}
@@ -670,25 +735,78 @@ func outcome(env protocol.Envelope) []any {
 }
 
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
-	// Dedicated receipts are not in RequestForRun and must be drained before
-	// final reporting. Failure leaves both the receipt and final request intact.
+	strictResume, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
+	if err != nil {
+		return &completionPending{err}
+	}
+	// Dedicated receipts retain their separate post-stop credential. Drain
+	// these facts before ending local ownership, without repeating invocation.
 	if err := r.recoverRunMessages(ctx, as); err != nil {
 		return err
+	}
+	if strictResume != nil {
+		stop, err := r.cfg.Journal.RetainedStop(ctx, as.RunID)
+		if err != nil {
+			return &completionPending{err}
+		}
+		if stop != nil {
+			run, err := r.cfg.Journal.Run(ctx, as.RunID)
+			if err != nil || !run.StoppedConfirmed {
+				return &completionPending{errors.New("runner: authoritative Stop still awaits physical stop proof")}
+			}
+			// The host's Stop independently ends local responsibility. Run
+			// credentials may already be revoked; preserve outstanding facts
+			// as history instead of interpreting Forbidden as business success.
+			return r.cleanupReportedRunWithStop(ctx, as, stop)
+		}
 	}
 	req, ok, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
 	if err != nil {
 		return err
 	}
+	if strictResume != nil && !ok {
+		return &completionPending{errors.New("runner: strict final report is unavailable")}
+	}
 	// execute has confirmed the process stopped before entering reporting.
 	if ok {
 		// Facts go out before the result that ends the run's credential.
-		if err := r.retry(ctx, func() error { return r.flushEvents(ctx, as) }); err != nil {
+		flush := func() error { return r.flushEvents(ctx, as) }
+		var eventErr error
+		if strictResume != nil {
+			// A durable Stop may arrive while the credential still works.
+			// Yield uncertain uploads to Hello instead of retrying forever
+			// inside a report that cannot reread that independent control.
+			eventErr = flush()
+		} else {
+			eventErr = r.retry(ctx, flush)
+		}
+		if err := eventErr; err != nil {
+			if strictResume != nil {
+				r.requestReconcile()
+				return &completionPending{err}
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			r.cfg.Log.ErrorContext(ctx, "tend rejected run events", "run_id", as.RunID, "err", err)
 		}
-		_, err := r.send(ctx, runCredential(as), &req.Envelope)
+		send := r.send
+		if strictResume != nil {
+			send = r.sendOnce
+		}
+		op, err := send(ctx, runCredential(as), &req.Envelope)
+		if strictResume != nil {
+			if err != nil {
+				r.requestReconcile()
+				return &completionPending{err}
+			}
+			if op.Status != protocol.OpSucceeded {
+				// Accepted acknowledges the original request identity, not
+				// business settlement. Keep its exact request and ownership.
+				r.requestReconcile()
+				return &completionPending{errors.New("runner: strict final report awaits business settlement")}
+			}
+		}
 		if err == nil {
 			r.cfg.Log.InfoContext(ctx, "run reported", append([]any{"run_id", as.RunID, "operation", req.Envelope.Operation}, outcome(req.Envelope)...)...)
 		}
@@ -714,7 +832,25 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			}
 		}
 	}
+	return r.cleanupReportedRun(ctx, as)
+}
+
+func (r *Runner) cleanupReportedRun(ctx context.Context, as protocol.Assignment) error {
+	return r.cleanupReportedRunWithStop(ctx, as, nil)
+}
+
+func (r *Runner) cleanupReportedRunWithStop(ctx context.Context, as protocol.Assignment, stop *journal.RetainedStop) error {
 	_, settleErr := r.settleRun(ctx, as.RunID, func() error {
+		if stop != nil {
+			// Continue or a new attachment can revoke a previously read Stop.
+			// Recheck only after acquiring the same settlement gate they use,
+			// before performing any workspace cleanup.
+			current, err := r.cfg.Journal.RetainedStop(ctx, as.RunID)
+			run, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+			if err != nil || readErr != nil || current == nil || *current != *stop || !run.StoppedConfirmed {
+				return &completionPending{errors.New("runner: original Stop no longer authorizes cleanup")}
+			}
+		}
 		execution, err := r.resolveExecution(ctx, as)
 		if err != nil {
 			return &completionPending{err}
@@ -726,6 +862,12 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			if err := r.cfg.Journal.QueueWorkspaceRelease(ctx, protocol.WorkspaceRelease{WorkspaceID: as.Workspace.ID, TaskID: as.TaskID}); err != nil {
 				return err
 			}
+		}
+		if stop != nil {
+			if err := r.cfg.Journal.DoneRetainedStop(ctx, as.RunID, *stop); err != nil {
+				return &completionPending{err}
+			}
+			return nil
 		}
 		return r.cfg.Journal.Done(ctx, as.RunID)
 	})

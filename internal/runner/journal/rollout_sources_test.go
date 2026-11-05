@@ -2,12 +2,12 @@ package journal
 
 import (
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 func TestRolloutLocatorSurvivesEventCleanupReopenAndRunCompletion(t *testing.T) {
@@ -70,11 +70,13 @@ func TestCleanupPreservesRegisteredOriginalAndArtifacts(t *testing.T) {
 
 func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
-
+	// Build the committed historical schema directly. Downgrading a current
+	// database version would leave tables introduced after version 14.
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db.Close()
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
 		t.Fatal(err)
@@ -88,24 +90,31 @@ func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The version-14 fixture must not pre-create tables from later migrations.
+	// A historical fixture must not pre-create capability or retained tables.
 	var futureTables int
-	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('capability_verifications','run_capability_receipts')`).Scan(&futureTables); err != nil || futureTables != 0 {
-		t.Fatal("version-14 fixture contains future capability tables", futureTables, err)
+	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('capability_verifications','run_capability_receipts','retained_run_resumes')`).Scan(&futureTables); err != nil || futureTables != 0 {
+		t.Fatal("version-14 fixture contains future tables", futureTables, err)
+	}
+	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
+	state, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO native_usage_sources(source_id,run_id,state_json) VALUES(?,?,?)`, source.ID, source.RunID, string(state)); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(t.Context(), "PRAGMA user_version=14"); err != nil {
 		t.Fatal(err)
 	}
-	j := &Journal{db: db, now: testkit.NewClock().Now, path: path}
-	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
-	if err := j.RegisterUsageSource(t.Context(), source); err != nil {
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Close(); err != nil {
-		t.Fatal(err)
-	}
-	j = open(t, path)
+	j := open(t, path)
 	defer j.Close()
+	var version int64
+	if err := j.db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != CurrentVersion {
+		t.Fatal("historical journal did not migrate to the current version", version, err)
+	}
 	sources, err := j.UsageSources(t.Context())
 	if err != nil || len(sources) != 1 || sources[0].Cursors["original"].Offset != 42 {
 		t.Fatal(sources, err)

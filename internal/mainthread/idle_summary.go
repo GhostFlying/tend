@@ -114,6 +114,11 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	} else if paused {
 		return nil
 	}
+	if pending, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {
+		return err
+	} else if pending {
+		return nil
+	}
 	settings, err := m.app.HandoffSettings(ctx)
 	if err != nil {
 		return err
@@ -126,9 +131,9 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 		return nil
 	}
 	m.mu.Lock()
-	s, th, active, last, summaryActive := m.session, m.thread, m.active, m.lastActivity, m.summaryActive
+	s, th, active, last, summaryActive, compactRecovery := m.session, m.thread, m.active, m.lastActivity, m.summaryActive, m.compactRecovery
 	m.mu.Unlock()
-	if s == nil || th == nil || active != nil || summaryActive {
+	if s == nil || th == nil || active != nil || summaryActive || compactRecovery {
 		return nil
 	}
 	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())

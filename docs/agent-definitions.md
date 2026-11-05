@@ -111,7 +111,7 @@ tend agents concurrency history --issue issue-example --session native-session-e
 或 --file，或完整的 name/min/initial/max 标志，不能重读新默认值。
 也可将 dry-run 原信封交给 `tend request replay`，以原 request_id 和版本恢复。
 
-## 显式 Capability 声明（D174）
+## 显式 Capability 声明（D176）
 
 Capability 是用户配置标签，与 categories、CLI/model、工具实际可用性分别表达。
 `image_gen@1` 已有定义可用作标签；旧定义中的工具策略元数据保留历史，不是调度门。

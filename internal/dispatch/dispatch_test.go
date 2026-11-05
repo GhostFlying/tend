@@ -16,6 +16,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
 
 const dest = "test_dest"
@@ -94,10 +95,12 @@ type env struct {
 	signal *Signal
 }
 
+var dispatchFixture storefixture.Template
+
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	clock := testkit.NewClock()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	s, err := dispatchFixture.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

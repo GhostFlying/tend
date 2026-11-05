@@ -1,6 +1,6 @@
 # 声明式 Capability 当前验收矩阵
 
-当前规范是 owner `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` content revision 1；优先于旧 spec2、原三输入与旧 D174 native 描述。此文件在新代码之前写入，断言是待验证要求，不能当作已通过报告。原三输入保持原 file ID/size/SHA，原计划和失败历史继续可追溯。
+当前规范是 owner `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` content revision 1；优先于旧 spec2、原三输入与旧 D176 native 描述。此文件在新代码之前写入，断言是待验证要求，不能当作已通过报告。原三输入保持原 file ID/size/SHA，原计划和失败历史继续可追溯。
 
 | 原阶段 | 处置 | 当前出口 |
 |---|---|---|
@@ -56,3 +56,13 @@
 | R5 / A10、A12、A13、A15 | implementation required 为空时，首次分配受 acceptance required 阻塞也必须十分钟后产生一次 acceptance 通知，解释保留 acceptance required，implementation 不继承标签。双角色按各自 role 去重；waived、已分配而不再检查前置、健康 reviewer 不产生多余验收通知；重复及并发 sweep 不重复 Attention/事件，不创建工具证据或执行。 |
 | R6 / A20 | 同 Agent/runtime/backend 的当前与在途保留 pin 均须跨页完整返回，游标以完整冻结 pin 区分 Agent/runtime/inventory revision、snapshot/hash、profile、worker/backend/purpose。limit=1/2 与不分页集合一致、无重复；当前无声明与原保留声明独立呈现。游标继续绑定筛选/事实水位，旧键格式或事实变动明确拒绝并要求重新分页。 |
 | R7 / A20、A23 | Task 候选 React key 使用完整冻结 pin，仅无 pin 时使用独立 fallback；同入口当前 alpha@2 与保留 alpha@1 同时显示后，重新读取返回仅 beta 时不得遗留 alpha 的声明/资格行。真实 React DOM 覆盖移除、重排与重新加入，查询不变更 Task 身份且无重复 key 警告。 |
+
+本轮 main 整合补充出口（不替代既有 A01–A28/R1–R7）：
+
+| 范围 | 必须观察 |
+|---|---|
+| A04 迁移 | main server 90/journal 16 正向升级后原 request、assignment、停止证明、retained authority 字节不变；capability 表追加可读；旧候选 88/16–17 冲突明确拒绝，拒绝不改原版本或数据。已部署 main SQL 字节保持。 |
+| A14 整合 | retained-resume 仍传入普通 Start，capability precheck 失败不清 stop proof、不启动；标签不探测 native 工具。 |
+| A17/A18 | main 新入口/schema roots 和旧声明 feature 协商并存；N/N−1 默认不变，不借整合改协议代际。 |
+| A19/A23 | 两侧 API/CLI 目录与生成类型完整、两侧 Web 回归入口保留；Capability 决策编号改 D176，main D174/D175 保留。 |
+| A26 | 最终 exact integration head/tree/main/base、targeted 初始失败/修正/终态、CI 真实状态分开记录；full HOLD/NOT_RUN，新的独立 review/验收未执行，不引用旧通过。 |

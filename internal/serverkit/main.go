@@ -171,7 +171,10 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return err
 	}
 
-	s, err := store.Open(ctx, filepath.Join(dataDir, "tend.db"), now)
+	s, err := store.OpenWithOptions(ctx, filepath.Join(dataDir, "tend.db"), now,
+		store.WithWriteObserver(time.Now, time.Second, func(o store.WriteObservation) {
+			logWriteObservation(log, o)
+		}))
 	if err != nil {
 		return err
 	}
@@ -727,4 +730,14 @@ func syncConfig(ctx context.Context, a *app.App, ids protocol.IDGen, cfg Config)
 		return fmt.Errorf("config sync: %s", op.Error.Message)
 	}
 	return nil
+}
+
+func logWriteObservation(log *slog.Logger, o store.WriteObservation) {
+	log.Warn("slow or cancelled store write",
+		"operation", o.Source.Operation, "request_id", o.Source.RequestID, "trace_id", o.Source.TraceID,
+		"caller", o.Caller, "stage", o.Stage, "outcome", o.Outcome, "context_state_at_failure", o.ContextState,
+		"total", o.Total, "connection_wait", o.ConnectionWait, "begin_immediate", o.Begin,
+		"callback_inclusive", o.Callback, "commit", o.Commit, "rollback", o.Rollback,
+		"phases_inclusive", o.Phases,
+		"pool_wait_count_total", o.PoolWaitCountTotal, "pool_wait_duration_total", o.PoolWaitDurationTotal)
 }

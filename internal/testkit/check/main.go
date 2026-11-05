@@ -44,18 +44,21 @@ func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 		}
 	}
 	if shards == 0 {
-		shards = max(1, min(8, cpus/8, 2*jobs))
+		shards = max(1, min(8, cpus/8, 2*jobs), min(2, cpus/(2*jobs)))
 		if jobs == 1 {
 			shards = 1
 		}
 	}
 	if suiteShards == 0 {
-		suiteShards = max(1, min(4, cpus/16, jobs))
+		suiteShards = max(1, min(4, cpus/16, jobs), min(2, cpus/(2*jobs)))
 		if jobs == 1 {
 			suiteShards = 1
 		}
 	}
 	packages := max(1, min(6, cpus/10))
+	if jobs > 1 {
+		packages = max(packages, min(2, cpus/(2*jobs)))
+	}
 	// Budget the largest simultaneously active test-process sets, rather than
 	// treating a four-shard group as one Go process. Static checks and Web each
 	// reserve one slot; their own build/worker parallelism remains bounded.
@@ -71,6 +74,24 @@ func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 		procs:        max(1, min(4, cpus/processes)),
 		exclusiveE2E: cpus < 32 || jobs == 1,
 	}, nil
+}
+
+// serialReason makes an intentional multicore serial override reviewable.
+func serialReason(cpus, requestedJobs int, b budget, reason string) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if b.jobs != 1 {
+		return "", nil
+	}
+	if reason != "" {
+		return reason, nil
+	}
+	if cpus <= 1 {
+		return "single effective CPU", nil
+	}
+	if requestedJobs == 0 {
+		return "automatic low CPU budget", nil
+	}
+	return "", fmt.Errorf("explicit jobs=1 on %d effective CPUs requires CHECK_SERIAL_REASON or -serial-reason; omit CHECK_JOBS to select a bounded parallel budget", cpus)
 }
 
 type task struct {
@@ -126,13 +147,15 @@ func runTask(ctx context.Context, t task) error {
 		return err
 	}
 	start := time.Now()
-	fmt.Printf("[check] %s started\n", t.name)
+	fmt.Printf("[check] %s started at=%s\n", t.name, start.UTC().Format(time.RFC3339Nano))
 	cmd := exec.CommandContext(ctx, "make", t.args...)
 	cmd.Env, cmd.Stdout, cmd.Stderr = t.env, os.Stdout, os.Stderr
 	procx.Contain(cmd)
 	err := cmd.Run()
 	procx.KillGroup(cmd)
-	fmt.Printf("[check] %s finished in %s: %v\n", t.name, time.Since(start).Round(time.Second), err)
+	finished := time.Now()
+	elapsed := finished.Sub(start)
+	fmt.Printf("[check] %s finished in %s: %v at=%s elapsed=%s\n", t.name, elapsed.Round(time.Second), err, finished.UTC().Format(time.RFC3339Nano), elapsed)
 	return err
 }
 
@@ -167,27 +190,32 @@ func schedule(ctx context.Context, jobs int, parallel, isolated []task, run func
 	return errors.Join(failures...)
 }
 
-func check(ctx context.Context, b budget, goTool, pnpm string, count int) error {
+func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string, count int) error {
 	directory, err := os.MkdirTemp("", "tend-check-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(directory)
 	parallel, isolated := tasks(b, directory, goTool, pnpm, count)
-	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t\n",
-		b.jobs, b.shards, b.suiteShards, b.packages, b.procs, b.exclusiveE2E)
+	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t effective-cpus=%d serial-reason=%q\n",
+		b.jobs, b.shards, b.suiteShards, b.packages, b.procs, b.exclusiveE2E, cpus, reason)
 	return schedule(ctx, b.jobs, parallel, isolated, runTask)
 }
 
 func main() {
-	jobs := flag.Int("jobs", 0, "concurrent check groups (0 selects by CPU, 1 selects sequential checks)")
+	jobs := flag.Int("jobs", 0, "concurrent check groups (0 selects by CPU; multicore 1 requires -serial-reason or CHECK_SERIAL_REASON)")
+	reason := flag.String("serial-reason", os.Getenv("CHECK_SERIAL_REASON"), "reason for an explicit multicore serial budget")
 	shards := flag.Int("shards", 0, "App test shards (0 selects by CPU)")
 	suiteShards := flag.Int("suite-shards", 0, "API, mainthread and E2E shards (0 selects by CPU)")
 	goTool := flag.String("go", "go", "Go executable")
 	pnpm := flag.String("pnpm", "pnpm", "pnpm executable")
 	count := flag.Int("count", 0, "repeat race tests explicitly; 0 keeps Go native caching")
 	flag.Parse()
-	b, err := capacity(runtime.GOMAXPROCS(0), *jobs, *shards, *suiteShards)
+	cpus := runtime.GOMAXPROCS(0)
+	b, err := capacity(cpus, *jobs, *shards, *suiteShards)
+	if err == nil {
+		*reason, err = serialReason(cpus, *jobs, b, *reason)
+	}
 	if err == nil && *count < 0 {
 		err = fmt.Errorf("count must be nonnegative")
 	}
@@ -197,7 +225,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := check(ctx, b, *goTool, *pnpm, *count); err != nil {
+	if err := check(ctx, b, cpus, *reason, *goTool, *pnpm, *count); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

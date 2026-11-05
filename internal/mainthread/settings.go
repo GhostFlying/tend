@@ -109,7 +109,7 @@ func (m *Manager) turnModel(ctx context.Context, th harness.Thread, request stri
 			session, active := m.session, m.active
 			m.mu.Unlock()
 			if active == nil && session != nil {
-				_ = session.Close()
+				_ = m.closeSession(ctx, session, request, "named_binding_changed")
 			}
 			return harness.ModelSelection{}, 0, protocol.Errorf(protocol.CodeInvalidTransition, "named definition changed; resume its frozen generation before starting this execution")
 		}

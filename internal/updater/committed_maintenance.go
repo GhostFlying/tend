@@ -107,13 +107,17 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 		}
 	}
 	exitedLaunch := p.ParentMaintenanceID != "" && p.PreviousProcess == (Identity{})
-	if !exitedLaunch && (!validIdentity(p.PreviousProcess) || p.Previous.ArtifactSHA256 != p.PreviousProcess.SHA256 || p.Previous.ProcessInstanceID != p.PreviousProcess.LaunchID) {
+	// Ordinary maintenance already matches the historical committed binding and
+	// the current verified process separately. A same-version restart preserves
+	// that binding; failed-parent recovery must retain its original launch.
+	parentLaunchChanged := p.ParentMaintenanceID != "" && p.Previous.ProcessInstanceID != p.PreviousProcess.LaunchID
+	if !exitedLaunch && (!validIdentity(p.PreviousProcess) || p.Previous.ArtifactSHA256 != p.PreviousProcess.SHA256 || parentLaunchChanged) {
 		return errors.New("updater: exact maintenance process binding required")
 	}
 	if generation && (p.ExpectedGeneration != s.state.Generation || p.StateSHA256 != digest(s.state)) {
 		return errors.New("updater: committed state generation changed")
 	}
-	if p.Successor.UpgradeID != p.MaintenanceID || !validRollbackBinding(p.Successor, s.cfg.InstanceID) || p.Successor.ProcessInstanceID == p.Previous.ProcessInstanceID || p.Successor.ArtifactSHA256 == p.Previous.ArtifactSHA256 {
+	if p.Successor.UpgradeID != p.MaintenanceID || !validRollbackBinding(p.Successor, s.cfg.InstanceID) || p.Successor.ProcessInstanceID == p.Previous.ProcessInstanceID || p.Successor.ProcessInstanceID == p.PreviousProcess.LaunchID || p.Successor.ArtifactSHA256 == p.Previous.ArtifactSHA256 {
 		return errors.New("updater: independent maintenance successor required")
 	}
 	if err := verifyResourceEvidence(maintenanceResources(p), s.opts.Now()); err != nil {

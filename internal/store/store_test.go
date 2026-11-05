@@ -10,9 +10,34 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/dbfixture"
 )
 
+var storeTemplate dbfixture.Template
+
 func openTest(t *testing.T) (*Store, string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "tend.db")
+	now := testkit.NewClock().Now
+	if err := storeTemplate.Copy(t.Context(), p, func(ctx context.Context, path string) error {
+		db, err := Open(ctx, path, now)
+		if err != nil {
+			return err
+		}
+		return db.Close()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(t.Context(), p, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s, p
+}
+
+// Migration and explicit reopen tests retain a database built from scratch.
+func openFreshTest(t *testing.T) (*Store, string) {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "tend.db")
 	s, err := Open(context.Background(), p, testkit.NewClock().Now)
@@ -81,7 +106,7 @@ func insertAction(t *testing.T, s *Store, id, task, effectKey string) error {
 }
 
 func TestOpenAppliesMigrationsOnce(t *testing.T) {
-	s, p := openTest(t)
+	s, p := openFreshTest(t)
 	var version int
 	if err := s.Read(context.Background(), func(tx *ReadTx) error {
 		return tx.Q().QueryRowContext(context.Background(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version)

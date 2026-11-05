@@ -35,7 +35,7 @@ func (q *usageResolverQueries) QueryRowContext(ctx context.Context, query string
 
 func newUsageResolverStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "ledger.db"), testkit.NewClock().Now)
+	s, err := viewFixture.Open(context.Background(), filepath.Join(t.TempDir(), "ledger.db"), testkit.NewClock().Now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,7 +19,7 @@ func TestManagerControlIndexPreservesBlockersAndRequestHistory(t *testing.T) {
 	ctx := t.Context()
 	clock := testkit.NewClock()
 	path := filepath.Join(t.TempDir(), "ledger.db")
-	db, err := store.Open(ctx, path, clock.Now)
+	db, err := viewFixture.Open(ctx, path, clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,16 +35,23 @@ const readIdleConnections = 8
 // connection with BEGIN IMMEDIATE avoids lock upgrade deadlocks and makes
 // concurrent writers queue in order.
 type Store struct {
-	path  string
-	files *blobstore.Store
-	write *sql.DB
-	read  *sql.DB
-	now   func() time.Time
+	path     string
+	files    *blobstore.Store
+	write    *sql.DB
+	read     *sql.DB
+	now      func() time.Time
+	observer *writeObserver
 }
 
 // Open opens or creates the database at path and applies pending
 // migrations. now supplies the time recorded for applied migrations.
 func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, error) {
+	return OpenWithOptions(ctx, dbPath, now)
+}
+
+// OpenWithOptions adds internal diagnostic options while Open retains its
+// original function type for callers that inject the store constructor.
+func OpenWithOptions(ctx context.Context, dbPath string, now func() time.Time, opts ...OpenOption) (*Store, error) {
 	write, err := sql.Open("sqlite", dsn(dbPath, true))
 	if err != nil {
 		return nil, fmt.Errorf("store: open writer: %w", err)
@@ -63,6 +70,9 @@ func Open(ctx context.Context, dbPath string, now func() time.Time) (*Store, err
 		return nil, err
 	}
 	s := &Store{path: dbPath, write: write, read: read, now: now, files: files}
+	for _, opt := range opts {
+		opt(s)
+	}
 	if err := s.migrate(ctx, 0); err != nil {
 		s.Close()
 		return nil, err
@@ -98,8 +108,9 @@ func (s *Store) Close() error {
 
 // Tx is a write transaction.
 type Tx struct {
-	files *blobstore.Store
-	tx    *sql.Tx
+	files       *blobstore.Store
+	tx          *sql.Tx
+	observation *writeCall
 }
 
 // ReadTx is a read-only transaction.
@@ -127,23 +138,50 @@ func (t *ReadTx) Q() Querier { return t.tx }
 // Write runs fn in a write transaction that begins immediately. The
 // transaction commits when fn returns nil and rolls back otherwise.
 func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
-	tx, err := s.write.BeginTx(ctx, nil)
+	observation := s.startWriteObservation(ctx)
+	defer func() { s.finishWriteObservation(observation, err) }()
+	conn, err := s.write.Conn(ctx)
 	if err != nil {
+		observation.endStage("")
 		return fmt.Errorf("store: begin write: %w", err)
 	}
+	defer conn.Close()
+	observation.endStage("begin_immediate")
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		observation.endStage("")
+		return fmt.Errorf("store: begin write: %w", err)
+	}
+	// Always finish the transaction before closing the explicit connection,
+	// including when the callback panics. After commit Rollback is a no-op.
 	defer func() {
+		var started time.Time
+		if observation != nil && err != nil {
+			started = observation.observer.now()
+		}
+		rbErr := tx.Rollback()
 		if err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			if observation != nil {
+				observation.observation.Rollback = observation.observer.now().Sub(started)
+			}
+			if rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 				err = errors.Join(err, fmt.Errorf("store: rollback: %w", rbErr))
 			}
 		}
 	}()
-	if err := fn(&Tx{tx: tx, files: s.files}); err != nil {
+	observation.endStage("callback")
+	if err := fn(&Tx{tx: tx, files: s.files, observation: observation}); err != nil {
+		observation.failedContext(ctx, err)
+		observation.endStage("")
 		return err
 	}
+	observation.endStage("commit")
 	if err := tx.Commit(); err != nil {
+		observation.failedContext(ctx, err)
+		observation.endStage("")
 		return fmt.Errorf("store: commit: %w", err)
 	}
+	observation.endStage("")
 	return nil
 }
 
@@ -217,6 +255,18 @@ func (s *Store) migrate(ctx context.Context, upTo int) error {
 		}
 		if current > len(migrations) {
 			return fmt.Errorf("store: database schema version %d is newer than this binary (%d)", current, len(migrations))
+		}
+		// An unreleased capability candidate used 88 before main allocated it.
+		// Do not interpret that database as the committed main history or try
+		// to repair it by replaying unrelated migrations over its original data.
+		if current >= 88 {
+			var name string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT name FROM schema_migrations WHERE version=88`).Scan(&name); err != nil {
+				return fmt.Errorf("store: read migration 88 identity: %w", err)
+			}
+			if name != migrations[87].name {
+				return fmt.Errorf("store: migration history conflict at version 88: recorded %q, expected %q", name, migrations[87].name)
+			}
 		}
 		for _, m := range migrations[current:] {
 			if _, err := tx.Exec(ctx, m.sql); err != nil {

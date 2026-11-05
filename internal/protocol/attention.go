@@ -65,11 +65,12 @@ type AttentionResponsibilityHop struct {
 // HandleAttentionPayload preserves the original question version and routes.
 // Resolution answers it; escalation only changes the responsible recipient.
 type HandleAttentionPayload struct {
-	ExpectedAssignmentEpoch int64  `json:"expected_assignment_epoch"`
-	Version                 int64  `json:"version,omitempty"`
-	Option                  string `json:"option,omitempty"`
-	Text                    string `json:"text,omitempty"`
-	Reason                  string `json:"reason"`
+	Continuation            *DecisionContinuationPolicy `json:"continuation,omitempty"`
+	ExpectedAssignmentEpoch int64                       `json:"expected_assignment_epoch"`
+	Version                 int64                       `json:"version,omitempty"`
+	Option                  string                      `json:"option,omitempty"`
+	Text                    string                      `json:"text,omitempty"`
+	Reason                  string                      `json:"reason"`
 }
 type AttentionView struct {
 	Attention
@@ -127,10 +128,11 @@ type UpdateAttentionPayload struct {
 	BlocksClose           bool     `json:"blocks_close,omitempty"`
 }
 type RespondAttentionPayload struct {
-	Version         int64  `json:"version"`
-	Option          string `json:"option,omitempty"`
-	Text            string `json:"text,omitempty"`
-	SourceMessageID string `json:"source_message_id,omitempty"`
+	Continuation    *DecisionContinuationPolicy `json:"continuation,omitempty"`
+	Version         int64                       `json:"version"`
+	Option          string                      `json:"option,omitempty"`
+	Text            string                      `json:"text,omitempty"`
+	SourceMessageID string                      `json:"source_message_id,omitempty"`
 }
 type ConfirmAttentionPayload struct {
 	Summary         string `json:"summary"`

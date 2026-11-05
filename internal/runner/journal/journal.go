@@ -25,7 +25,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 17
+const CurrentVersion int64 = 18
 
 // Run phases.
 const (
@@ -113,6 +113,18 @@ func (j *Journal) migrate(ctx context.Context) error {
 		}
 		if version > len(names) {
 			return fmt.Errorf("journal: version %d is newer than this runner (%d)", version, len(names))
+		}
+		// Main committed retained resumes at 16. The unreleased capability
+		// candidate used 16/17 for different tables; a version alone cannot
+		// distinguish these histories. Reject that candidate without rewriting it.
+		if version >= 16 {
+			var retained int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='retained_run_resumes'`).Scan(&retained); err != nil {
+				return fmt.Errorf("journal: read migration 16 identity: %w", err)
+			}
+			if retained != 1 {
+				return fmt.Errorf("journal: migration history conflict at version 16: retained_run_resumes is absent")
+			}
 		}
 		for i, name := range names[version:] {
 			body, err := migrationFS.ReadFile("migrations/" + name)
@@ -397,7 +409,34 @@ func (j *Journal) Replace(ctx context.Context, runID, phase, oldRequestID string
 
 // Done marks a run done and forgets its request and events.
 func (j *Journal) Done(ctx context.Context, runID string) error {
+	return j.done(ctx, runID, nil)
+}
+
+// DoneRetainedStop validates the independent Stop and preserves its outstanding
+// facts in the same transaction that ends local responsibility.
+func (j *Journal) DoneRetainedStop(ctx context.Context, runID string, stop RetainedStop) error {
+	return j.done(ctx, runID, &stop)
+}
+
+func (j *Journal) done(ctx context.Context, runID string, stop *RetainedStop) error {
 	return j.tx(ctx, func(tx *sql.Tx) error {
+		if stop != nil {
+			var raw, assignment string
+			var stopped bool
+			if err := tx.QueryRowContext(ctx, `SELECT a.authority_json,r.assignment_json,r.stopped_confirmed FROM retained_run_resumes a JOIN runs r USING(run_id) WHERE run_id=? AND r.phase<>'done'`, runID).Scan(&raw, &assignment, &stopped); err != nil {
+				return err
+			}
+			var current retainedResumeRecord
+			if err := json.Unmarshal([]byte(raw), &current); err != nil {
+				return err
+			}
+			if !stopped || current.Stop == nil || *current.Stop != *stop || stop.HelloRequestID == "" || stop.AssignmentSHA256 != assignmentDigest(assignment) {
+				return errors.New("journal: original Stop no longer authorizes completion")
+			}
+		}
+		if err := archiveRetainedStop(ctx, tx, runID); err != nil {
+			return fmt.Errorf("journal: preserve stopped strict facts: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase = 'done', updated_at = ? WHERE run_id = ?`, j.now().UnixMilli(), runID); err != nil {
 			return fmt.Errorf("journal: finish run: %w", err)
 		}

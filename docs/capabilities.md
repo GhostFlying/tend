@@ -1,6 +1,6 @@
 # 执行能力的管理与恢复
 
-本指南依据 owner 范围修订 v1 和 D174：Capability 是用户对具体 Agent 入口显式配置的有版本标签。category 只用于委托角色；模型或 CLI 名称不会自动授予标签。声明和普通 adapter 可用性共同决定调度资格，均不表示工具调用成功。旧 native 实证要求已撤销；本功能不需要工具枚举、StartWithCapabilities、真实生图或费用观测。
+本指南依据 owner 范围修订 v1 和 D176：Capability 是用户对具体 Agent 入口显式配置的有版本标签。category 只用于委托角色；模型或 CLI 名称不会自动授予标签。声明和普通 adapter 可用性共同决定调度资格，均不表示工具调用成功。旧 native 实证要求已撤销；本功能不需要工具枚举、StartWithCapabilities、真实生图或费用观测。
 
 ## 定义与声明
 
@@ -15,7 +15,7 @@ tend request show "$REQUEST_ID" --json
 
 put 使用完整 JSON，创建 revision=0，后续更新/退休使用原 revision。重复动作使用原 request_id/Envelope；stale 不自动刷新 CAS，同 ID 改 payload 冲突。查询定义的 revision 参数在 CLI 中叫 `--definition-revision`，区分写操作的 CAS `--revision`。
 
-本机配置增加 `"capability_version":1`，在具体 Agent 内增加 `"capabilities":[{"capability_id":"image_gen","definition_revision":1}]`。使用已有 `agents local validate/reload/register/registration/reconcile` 流程，按既有 Agent/runtime 修订规则更新；validate 不生效，register 登记的是声明，不确认工具。可以为用户明确选中的官方登录 Codex Agent 逐项或批量声明 image_gen，不能根据品牌自动赋值；完整配置路径和命令见 [Agent 配置指南](agent-definitions.md#显式-capability-声明d174)。这些是操作示例，不表示任何生产配置已经应用。未提供该扩展的旧快照和 hash 原样保留。声明不能被 category 或 skills 自动填入。
+本机配置增加 `"capability_version":1`，在具体 Agent 内增加 `"capabilities":[{"capability_id":"image_gen","definition_revision":1}]`。使用已有 `agents local validate/reload/register/registration/reconcile` 流程，按既有 Agent/runtime 修订规则更新；validate 不生效，register 登记的是声明，不确认工具。可以为用户明确选中的官方登录 Codex Agent 逐项或批量声明 image_gen，不能根据品牌自动赋值；完整配置路径和命令见 [Agent 配置指南](agent-definitions.md#显式-capability-声明d176)。这些是操作示例，不表示任何生产配置已经应用。未提供该扩展的旧快照和 hash 原样保留。声明不能被 category 或 skills 自动填入。
 
 ## 声明、修订与查询
 

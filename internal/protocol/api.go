@@ -5,12 +5,13 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},
 		HandoffAuditPage{}, VerifyLocalCapabilityRequest{}, LocalCapabilityRequestStatus{}, CapabilityDefinition{}, PutCapabilityPayload{}, CapabilityPage{}, CapabilityEvidencePage{}, AgentCapabilityQuery{}, AgentCapabilityPage{}, AgentCapabilityRevisionPage{}, TaskCapabilityExplanation{}, RunCapabilityBinding{},
 		SetIssueAcceptancePolicyPayload{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
 		QuestionInputPayload{}, RevokeQuestionInputsPayload{}, QuestionInputPage{},
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},
-		ManagerRunReconciliation{}, ReconcileManagerRunPayload{},
+		ManagerRunReconciliation{}, ReconcileManagerRunPayload{}, RetainedRunReconciliation{}, ContinueRetainedRunPayload{},
 		ConcurrencyGroupPage{}, ConcurrencyHistoryPage{}, ConfigureConcurrencyPayload{}, ConcurrencyQuery{},
 		HostMaintenancePayload{}, UpgradeControlPayload{}, LocalRepositoryBinding{}, BindLocalRepositoryRequest{}, LocalRepositoryStatus{},
 		TriggerQuery{}, TriggerEventPage{}, TriggerSchedulePage{}, WebhookSubscription{}, WebhookSubscriptionPage{}, WebhookSubscriptionPayload{}, WebhookReceipt{},
@@ -32,6 +33,7 @@ func APITypes() []any {
 // APIEnums lists the values of every string enum in the owner API.
 func APIEnums() []any {
 	return []any{
+		[]DecisionContinuationMode{DecisionContinueNow, DecisionWait, DecisionDependency},
 		IssueWorkStatusValues(),
 		[]ArchiveState{ArchiveReady, ArchiveUnsupported, ArchiveUnavailable},
 		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},

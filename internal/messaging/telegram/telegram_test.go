@@ -14,9 +14,11 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
+
+var telegramFixture storefixture.Template
 
 func testTelegram(t *testing.T, handler http.HandlerFunc) (*Client, *app.App, protocol.IDGen) {
 	t.Helper()
@@ -24,7 +26,7 @@ func testTelegram(t *testing.T, handler http.HandlerFunc) (*Client, *app.App, pr
 	t.Cleanup(server.Close)
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 55)
-	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"), clock.Now)
+	s, err := telegramFixture.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

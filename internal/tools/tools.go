@@ -119,7 +119,7 @@ var tools = []tool{
 	{"actions_create", "Request another implementation or acceptance after the owner decided to retry.", (*Service).actionsCreate},
 	{"decisions_open", "Ask the owner a question that blocks a decision you cannot make.", (*Service).decisionsOpen},
 	{"question_inputs_read", "Read exact question input grants, file metadata and next steps. This does not grant files or resume execution.", (*Service).questionInputsRead},
-	{"decisions_resolve", "Record the answer the owner gave you to an open decision. For a worker question, resolve that existing decision so its waiting run receives the answer; do not create a retry. Hosted answers reference the actual owner message, never a background notice. For options of decisions tend opened, the result says what tend carried out.", (*Service).decisionsResolve},
+	{"decisions_resolve", "Record the answer the owner gave you to an open decision. For a worker question, relay the actual owner message to the original decision. Legacy answers preserve the original automatic handoff contract. For conditional worker scheduling use decision_continuation_answer with the complete explicit policy; free text never supplies typed readiness. Do not create a retry or invent owner authority.", (*Service).decisionsResolve},
 	{"artifacts_read", "Read an artifact: repository commits, optional Markdown report with evidence and uncertainties, delivery file manifest, and independent verdicts.", (*Service).artifactsRead},
 	{"attachments_read", "Read an original conversation attachment by file_id. Returns metadata, a bounded UTF-8 text window and a hosted local path or download command. Binary originals, including full animated GIFs, remain unchanged; do not infer their contents from metadata. The hosted dispatcher passes needed file IDs in spec.inputs and delegates technical analysis to workers; workers use download_file, not this tool.", (*Service).attachmentsRead},
 	{"files_read", "Read a bounded UTF-8 text window of a finalized delivery file. Use only when its content is needed; binary files return metadata only.", (*Service).filesRead},
@@ -480,12 +480,16 @@ func (s *Service) decisionsOpen(ctx context.Context, c Call) (any, error) {
 type resolveArgs struct {
 	DecisionID string `json:"decision_id"`
 	Version    int64  `json:"version"`
-	Option     string `json:"option"`
-	Text       string `json:"text"`
-	Reason     string `json:"reason"`
+	Option     string `json:"option,omitempty"`
+	Text       string `json:"text,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(c.Arguments, &raw) == nil && raw["continuation"] != nil {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "use explicit typed decision_continuation_answer for a worker handoff policy")
+	}
 	var a resolveArgs
 	if err := decode(c.Arguments, &a); err != nil {
 		return nil, err
@@ -493,6 +497,7 @@ func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
 	if err := requireMessage(c); err != nil {
 		return nil, err
 	}
+
 	cmd := app.AnswerDecision{FromMessage: true}
 	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "decision", ID: a.DecisionID}, nil, a.Reason, map[string]any{
 		"version": a.Version, "option": a.Option, "text": a.Text, "source_message_id": c.SourceMessageID,

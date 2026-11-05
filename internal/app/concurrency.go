@@ -467,12 +467,40 @@ func putConcurrencyExecution(ctx context.Context, tx *store.Tx, source protocol.
 
 // Observation time advances the controller; lastSeen only establishes liveness.
 func putConcurrencyExecutionObserved(ctx context.Context, tx *store.Tx, source protocol.ConcurrencySource, state string, lastSeen, now int64) error {
+	return putConcurrencyExecutionSampled(ctx, tx, source, state, lastSeen, now, nil)
+}
+
+// concurrencySamples reuses only observations of an unchanged execution set
+// within one sync call. Any mutation invalidates every group because child
+// relationships can change a parent's leaf load across group boundaries.
+type concurrencySamples struct {
+	seen map[string]bool
+}
+
+func (s *concurrencySamples) sample(ctx context.Context, tx *store.Tx, ids []string, now int64) error {
+	if s == nil {
+		return sampleConcurrencyGroups(ctx, tx, ids, now)
+	}
+	for _, id := range ids {
+		if id == "" || s.seen[id] {
+			continue
+		}
+		if err := sampleConcurrencyGroups(ctx, tx, []string{id}, now); err != nil {
+			return err
+		}
+		s.seen[id] = true
+	}
+	return nil
+}
+
+func putConcurrencyExecutionSampled(ctx context.Context, tx *store.Tx, source protocol.ConcurrencySource, state string, lastSeen, now int64, samples *concurrencySamples) error {
 	group, err := concurrencyBinding(ctx, tx.Q(), source.EnvironmentID, source.RuntimeID)
 	if err != nil {
 		return err
 	}
-	var previousRaw, previousGroup string
-	lookup := tx.Q().QueryRowContext(ctx, `SELECT source_json,group_id FROM concurrency_executions WHERE execution_id=?`, source.ExecutionID).Scan(&previousRaw, &previousGroup)
+	var previousRaw, previousGroup, previousState, previousParent string
+	var previousSeen int64
+	lookup := tx.Q().QueryRowContext(ctx, `SELECT source_json,group_id,state,last_seen,parent_execution_id FROM concurrency_executions WHERE execution_id=?`, source.ExecutionID).Scan(&previousRaw, &previousGroup, &previousState, &previousSeen, &previousParent)
 	if lookup != nil && !errors.Is(lookup, sql.ErrNoRows) {
 		return lookup
 	}
@@ -488,18 +516,40 @@ func putConcurrencyExecutionObserved(ctx context.Context, tx *store.Tx, source p
 			source.EventID = previous.EventID
 		}
 	}
-	if err := sampleConcurrencyGroups(ctx, tx, []string{group, previousGroup}, now); err != nil {
+	groups := []string{group, previousGroup}
+	if err := samples.sample(ctx, tx, groups, now); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(source)
 	if err != nil {
 		return err
 	}
+	effectiveGroup := group
+	if state == "stopped" && lookup == nil {
+		effectiveGroup = previousGroup
+	}
+	sameFacts := lookup == nil && previousRaw == string(raw) && previousState == state && previousGroup == effectiveGroup && previousParent == source.ParentExecutionID
+	if samples != nil && sameFacts && previousSeen >= lastSeen {
+		return nil
+	}
+	// A heartbeat still persists its new liveness, but cannot change leaf load
+	// when every other fact and the health classification at this sync's now
+	// are unchanged. Crossing freshness must retain the original pre/post sample.
+	sameLoad := false
+	if samples != nil && sameFacts {
+		unhealthy := func(seen int64) bool {
+			return state == "unknown" || state == "running" && source.NativeSessionID == "" || now-seen > RunnerOfflineAfter.Milliseconds()
+		}
+		sameLoad = state == "stopped" || unhealthy(previousSeen) == unhealthy(max(previousSeen, lastSeen))
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO concurrency_executions(execution_id,environment_id,runtime_id,state,source_json,last_seen,group_id,parent_execution_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(execution_id) DO UPDATE SET state=excluded.state,source_json=excluded.source_json,last_seen=MAX(concurrency_executions.last_seen,excluded.last_seen),parent_execution_id=excluded.parent_execution_id,group_id=CASE WHEN excluded.state='stopped' THEN concurrency_executions.group_id ELSE excluded.group_id END`, source.ExecutionID, source.EnvironmentID, source.RuntimeID, state, string(raw), lastSeen, group, source.ParentExecutionID)
 	if err != nil {
 		return err
 	}
-	return sampleConcurrencyGroups(ctx, tx, []string{group, previousGroup}, now)
+	if samples != nil && !sameLoad {
+		clear(samples.seen)
+	}
+	return samples.sample(ctx, tx, groups, now)
 }
 func concurrencyAvailable(ctx context.Context, q store.Querier, env, runtime, execution string, now int64) (bool, error) {
 	return views.RuntimeConcurrencyAvailable(ctx, q, env, runtime, execution, now)

@@ -36,6 +36,10 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		}
 	case "decide":
 		note = fs.String("note", "", "a free-form answer, with or instead of an option")
+		fs.Usage = func() {
+			fmt.Fprint(e.Stderr, commandUsage([]string{"decide"}))
+			fs.PrintDefaults()
+		}
 	case "retry":
 		kind = fs.String("kind", "implement", "implement or accept")
 	case "status":
@@ -505,8 +509,7 @@ func (o owner) writeResult(ctx context.Context, op string, target protocol.Targe
 	fmt.Fprintf(o.e.Stderr, "request %s (%s); inspect with tend request show %s; preserve the original Envelope for retry\n", env.RequestID, env.Operation, env.RequestID)
 
 	var res protocol.APIResponse
-	// A lost answer is resent once under the same request ID: the server
-	// returns the recorded outcome instead of acting twice.
+	// An unconfirmed answer must be reconciled before an explicit replay.
 	res, err = o.sendEnvelope(ctx, env)
 	if err != nil {
 		return nil, err
@@ -623,13 +626,13 @@ func (o owner) cancel(ctx context.Context, id string) error {
 	return o.write(ctx, "tasks.cancel", protocol.Target{Type: "task", ID: id}, &rev, map[string]any{})
 }
 
-// sendEnvelope is shared transport only: every retry retains the exact request.
-// It does not re-read a revision, rebuild a payload, or infer a new owner action.
+// sendEnvelope makes one submission. A transport failure cannot prove that the
+// original request was not accepted; the owner must reconcile its identity first.
 func (o owner) sendEnvelope(ctx context.Context, env protocol.Envelope) (protocol.APIResponse, error) {
 	var res protocol.APIResponse
 	err := o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
 	if isTransport(err) {
-		err = o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
+		err = fmt.Errorf("%w: %w", protocol.Errorf(protocol.CodeUnknownOutcome, "request %s has no confirmed outcome; inspect with tend request show %s before replaying its original Envelope", env.RequestID, env.RequestID), err)
 	}
 	return res, err
 }
