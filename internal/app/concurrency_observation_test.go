@@ -167,6 +167,10 @@ func TestConcurrencyCompactFeedbackAndCooldown(t *testing.T) {
 	if state, err := h.app.CompactState(t.Context(), "compact-next"); err != nil || state != "queued" {
 		t.Fatalf("capacity rejection must retain queued state: %s %v", state, err)
 	}
+	if h.count("agent_compaction_runtimes") != 1 {
+		t.Fatal("rejected compact admission left a runtime pin outside its transaction")
+	}
+
 }
 func TestConcurrencyRunnerSamplingUsesObservationTime(t *testing.T) {
 	h, r, p, hash := inventorySetup(t)

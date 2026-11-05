@@ -422,11 +422,11 @@ func (a *App) hostedRuntimeStartupSelection(ctx context.Context, q store.Querier
 	}
 	// A manual compact has no main turn. Restore its native completion stream
 	// independently of a newer input's startup hold, without replaying compact.
-	var compactRequest string
-	err = q.QueryRowContext(ctx, `SELECT COALESCE((SELECT o.request_id FROM outbox o WHERE o.operation='conversation.compact' AND o.destination=? AND json_extract(o.payload_json,'$.operation_id')=c.operation_id ORDER BY o.seq LIMIT 1),'') FROM agent_compactions c WHERE c.conversation_id=? AND c.status IN ('starting','running','unknown') ORDER BY c.created_at,c.operation_id LIMIT 1`, store.ConversationDestination(store.ConversationID(conversation)), store.ConversationID(conversation)).Scan(&compactRequest)
+	var compactRequest, compactOperation, compactThread string
+	err = q.QueryRowContext(ctx, `SELECT c.operation_id,c.thread_id,COALESCE((SELECT o.request_id FROM outbox o WHERE o.operation='conversation.compact' AND o.destination=? AND json_extract(o.payload_json,'$.operation_id')=c.operation_id ORDER BY o.seq LIMIT 1),'') FROM agent_compactions c WHERE c.conversation_id=? AND c.status IN ('starting','running','unknown') ORDER BY c.created_at,c.operation_id LIMIT 1`, store.ConversationDestination(store.ConversationID(conversation)), store.ConversationID(conversation)).Scan(&compactOperation, &compactThread, &compactRequest)
 	if err == nil {
-		attachment = AgentStartupAttachment{RequestID: compactRequest, Reconciliation: true}
-		selected, named, err := namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+		attachment = AgentStartupAttachment{RequestID: compactRequest, Reconciliation: true, compactThread: compactThread}
+		selected, named, err := a.compactionRuntimeSelection(ctx, q, conversation, compactOperation, compactThread)
 		return selected, named, attachment, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {

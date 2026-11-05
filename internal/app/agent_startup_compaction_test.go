@@ -6,13 +6,18 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func startupCompact(t *testing.T, h *harness, conversation, state string) (string, string, string) {
+func startupCompact(t *testing.T, h *harness, conversation, state string, selected ...*hostedconfig.Selection) (string, string, string) {
 	t.Helper()
-	thread := "original-compact-thread"
+	return startupCompactOnThread(t, h, conversation, state, "original-compact-thread", selected...)
+}
+
+func startupCompactOnThread(t *testing.T, h *harness, conversation, state, thread string, selected ...*hostedconfig.Selection) (string, string, string) {
+	t.Helper()
 	if err := h.app.RecordAgentUsage(t.Context(), conversation, protocol.AgentContextUsage{ThreadID: thread, Revision: 1, Measurement: "observed", CompactSupported: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +53,7 @@ func startupCompact(t *testing.T, h *harness, conversation, state string) (strin
 	if err != nil || !ok || delivery.RequestID != request {
 		t.Fatal("compact fixture did not claim its original request", delivery, ok, err)
 	}
-	if err := h.app.SetCompactState(t.Context(), compact.ID, thread, "starting"); err != nil {
+	if err := h.app.SetCompactState(t.Context(), compact.ID, thread, "starting", selected...); err != nil {
 		t.Fatal(err)
 	}
 	outcome := Unknown

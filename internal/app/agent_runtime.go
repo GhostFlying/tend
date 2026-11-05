@@ -80,7 +80,7 @@ func (a *App) CompactState(ctx context.Context, op string) (string, error) {
 }
 func (a *App) SetCompactState(ctx context.Context, op, thread, state string, selection ...*hostedconfig.Selection) error {
 	return a.store.Write(ctx, func(tx *store.Tx) error {
-		if state == "starting" && len(selection) > 0 && selection[0] != nil {
+		if state == "starting" && len(selection) > 0 {
 			var conversation, current string
 			if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,status FROM agent_compactions WHERE operation_id=?`, op).Scan(&conversation, &current); err != nil {
 				return err
@@ -88,8 +88,13 @@ func (a *App) SetCompactState(ctx context.Context, op, thread, state string, sel
 			if current != "queued" {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "compaction already started; reconcile first")
 			}
-			if err := acquireAuxiliaryConcurrency(ctx, tx, "aux:compact:"+op, conversation, selection[0], a.now().UnixMilli()); err != nil {
+			if err := tx.InsertCompactionRuntime(ctx, store.CompactionRuntime{OperationID: op, ThreadID: thread, Selection: selection[0], CreatedAt: a.now().UnixMilli()}); err != nil {
 				return err
+			}
+			if selection[0] != nil {
+				if err := acquireAuxiliaryConcurrency(ctx, tx, "aux:compact:"+op, conversation, selection[0], a.now().UnixMilli()); err != nil {
+					return err
+				}
 			}
 		}
 		result, err := tx.Exec(ctx, `UPDATE agent_compactions SET started_after_seq=CASE WHEN ?='starting' AND status='queued' THEN COALESCE((SELECT MAX(seq) FROM agent_rollout_events e WHERE e.conversation_id=agent_compactions.conversation_id),0) ELSE started_after_seq END,status=?,thread_id=?,updated_at=? WHERE operation_id=? AND status<>'completed'`, state, state, thread, a.now().UnixMilli(), op)
