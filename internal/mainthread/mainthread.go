@@ -81,6 +81,7 @@ type Manager struct {
 	startupExited      chan error    // pre-ready local exit (nil means intentional pause); used by the pool
 	active             *turn
 	maintenanceBlocked bool
+	compactRecovery    bool // original compact event stream, never fresh native work
 	summaryActive      bool
 	auxiliaryOwner     *concurrencyOwner
 	lastActivity       time.Time
@@ -193,6 +194,7 @@ func (m *Manager) Run(ctx context.Context) error {
 // handles the thread's events until the session ends.
 func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	started := false
+	defer func() { m.mu.Lock(); m.compactRecovery = false; m.mu.Unlock() }()
 	var startupAttachment app.AgentStartupAttachment
 	diagnostics := m.sessionDiagnostics(nil)
 	defer func() { diagnostics.exit(ctx, startupErr) }()
@@ -314,7 +316,8 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.named = &selected
 		m.namedMu.Unlock()
 	}
-	th, err := m.openThread(ctx, s)
+	compactRecovery := startupAttachment.NativeCompactThread() != ""
+	th, err := m.openThread(ctx, s, startupAttachment.NativeCompactThread())
 	if err != nil {
 		return err
 	}
@@ -363,7 +366,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if !remote {
 		m.archiveStarting = false
 	}
-	m.ownerSourcesReady = installed == hash || (bound && binding.ThreadID == th.ID() && binding.ToolsetHash == hash)
+	m.ownerSourcesReady = !compactRecovery && (installed == hash || (bound && binding.ThreadID == th.ID() && binding.ToolsetHash == hash))
 	if !remote {
 		close(m.ready)
 		started = true
@@ -588,6 +591,18 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			if compactRecovery {
+				pending, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID)
+				if err != nil {
+					return err
+				}
+				// The original completion is durable (and its event, if any,
+				// was acknowledged). Re-enter ordinary startup and toolset
+				// handoff before this session may accept any fresh input.
+				if !pending {
+					return nil
+				}
+			}
 			if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
 				return fmt.Errorf("mainthread: flush replies: %w", err)
 			}
@@ -719,7 +734,7 @@ func (m *Manager) restoreReceiptOnlyModel(ctx context.Context, selected hostedco
 // openThread resumes the instance's front thread, or starts a new one
 // when there is none or it cannot be resumed. A new thread has no
 // baseline, so its first turn gets a full snapshot.
-func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Thread, error) {
+func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThread ...string) (harness.Thread, error) {
 	p, err := m.app.ArchivePreparation(ctx)
 	if err != nil {
 		return nil, err
@@ -745,18 +760,33 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session) (harness.Th
 	}
 	// A compact has no main turn. Resume its original native thread directly,
 	// before toolset handoff or any fallback to another binding or new thread.
-	if id, pending, err := m.app.UncertainCompactThread(ctx, m.cfg.ConversationID); err != nil {
-		return nil, err
-	} else if pending {
-		if err := m.app.SettleOpenTurns(ctx, id); err != nil {
+	var compactID string
+	var compactPending bool
+	if len(compactThread) > 0 {
+		compactID, compactPending = compactThread[0], compactThread[0] != ""
+	} else {
+		var err error
+		compactID, compactPending, err = m.app.UncertainCompactThread(ctx, m.cfg.ConversationID)
+		if err != nil {
 			return nil, err
 		}
-		th, err := s.ResumeThread(ctx, id, m.threadConfig())
+	}
+	if compactPending {
+		if err := m.app.SettleOpenTurns(ctx, compactID); err != nil {
+			return nil, err
+		}
+		th, err := s.ResumeThread(ctx, compactID, m.threadConfig())
 		if errors.Is(err, harness.ErrRejected) {
 			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "original compact thread cannot be resumed; reconcile before replacing it")
 		}
+		if err == nil {
+			m.mu.Lock()
+			m.compactRecovery = true
+			m.mu.Unlock()
+		}
 		return th, err
 	}
+
 	if p.Prepared || parkRead || receiptRead {
 		id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 		if err != nil {
@@ -963,7 +993,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		return harness.ToolResult{Text: "Receipt-only attachments cannot execute native tool callbacks."}
 	}
 	m.mu.Lock()
-	blocked := m.maintenanceBlocked || (m.cfg.MaintenanceEnabled && (m.thread == nil || m.thread.ID() != c.ThreadID))
+	blocked := m.compactRecovery || m.maintenanceBlocked || (m.cfg.MaintenanceEnabled && (m.thread == nil || m.thread.ID() != c.ThreadID))
 	m.mu.Unlock()
 	if blocked {
 		return harness.ToolResult{Text: "Tend tools are disabled while preparing a conversation handoff."}
@@ -1101,6 +1131,12 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // Deliver implements dispatch.Handler: it hands a message to the front
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	m.mu.Lock()
+	compactRecovery := m.compactRecovery
+	m.mu.Unlock()
+	if compactRecovery {
+		return retry(errors.New("native compact attachment must finish normal toolset startup before new work"))
+	}
 	if selected := m.namedSelection(); selected != nil && selected.RequireReceiptReader {
 		return app.DeliveryResult{Outcome: app.Retry, Reason: "Receipt-only attachments cannot start native work."}
 	}
@@ -1122,6 +1158,12 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	}
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
+	m.mu.Lock()
+	compactRecovery = m.compactRecovery
+	m.mu.Unlock()
+	if compactRecovery {
+		return retry(errors.New("native compact attachment must finish normal toolset startup before new work"))
+	}
 	if blocked, err := m.app.AgentRecoveryUncertain(ctx, m.cfg.ConversationID); err != nil {
 		return retry(err)
 	} else if blocked {
