@@ -167,6 +167,7 @@ type workerState struct {
 	RootRebindSessionID       string `json:"root_rebind_session_id,omitempty"`
 	RootObservationPhase      string `json:"root_observation_phase,omitempty"`
 	RootObservationIdentity   string `json:"root_observation_identity,omitempty"`
+	RootObservationFactHash   string `json:"root_observation_fact_hash,omitempty"`
 	RootObservationRevision   int    `json:"root_observation_revision,omitempty"`
 	RootRuntimeID             string `json:"root_runtime_id,omitempty"`
 	RootLaunchID              string `json:"root_launch_id,omitempty"`
