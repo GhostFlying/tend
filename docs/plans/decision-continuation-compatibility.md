@@ -35,3 +35,26 @@ D174 初版把旧 `decisions.respond` / `resolve_from_message` 未携带策略�
 - 冻结新 head 后重新定向验证和 CI；最终完整检查、独立 review 仍覆盖最终候选。
 
 Refs: D174。
+
+## 独立评审追加修正
+
+本轮完整评审发现三处必须修复的边界，原冻结版本和失败证据保留：
+
+1. 旧 `decisions_resolve` 使用原 map 载荷，始终包含 `option` / `text` 空串键。
+   不能改成 `omitempty` struct，否则旧合法 callback 的同 request/native identity
+   跨版本回放会变为 conflict_payload。新增 typed 入口继续使用自己的完整载荷。
+2. 两条 Attention named tool 描述明确省略策略保持 legacy 自动续接；需要等待必须
+   显式 wait，不能承诺省略时只存答案。
+3. dependency 是真实 Task 等待边，必须并入既有 canonical Issue/Task 和 legacy stage
+   的同事务等待图。回答入账后、调度前校验候选边；后续 Issue 依赖/阶段/primary
+   修改复用同一收集器，不能只在新 answer 入口单独判环。原 task_dependencies 历史
+   事实也参与，当前不新增其写入口。无 canonical Issue 时仍校验 Task 间等待。
+   已结束合同或已实际领取 successor 不再形成旧等待；当前待停、等待依赖、已排队未
+   领取的 continuation 都保留等待边。依赖仅 exact spec 已完成时不再等待，不把
+   stale/unknown 当已完成。复用现有纯图环检查，不新增全局刷新、轮询或 workflow。
+
+验证先建立真实 RED：旧完整载荷成功 receipt 后以同 callback 回放，覆盖 option-only /
+text-only 和显式/native request identity；两个 stopped handoff 的 A→B/B→A；现有 Task
+前提与 continuation 混合环；后续 canonical/legacy plan 加边关闭环。GREEN 同时验证合法
+无环链、原回答/策略/版本/失败回执原子性与原有兼容矩阵。只执行工具包全量和相关图/问答
+边界，不重复完整检查。最终实质 delta 交独立 reviewer 评估复审范围，不沿用旧结论。
