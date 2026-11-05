@@ -140,7 +140,7 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 				env.Operation = "decisions.resolve_from_message"
 			}
 			env.Payload, _ = json.Marshal(protocol.AnswerDecisionPayload(p))
-			out, e := (AnswerDecision{FromMessage: from}).Apply(ctx, &inner, tx)
+			out, e := (AnswerDecision{FromMessage: from, TypedContinuation: p.Continuation != nil}).Apply(ctx, &inner, tx)
 			if e != nil {
 				return Outcome{}, e
 			}

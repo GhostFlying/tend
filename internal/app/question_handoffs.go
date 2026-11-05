@@ -58,10 +58,10 @@ func resumeAnsweredQuestion(ctx context.Context, x *Exec, tx *store.Tx, decision
 	}
 	run = ids[0]
 	policy, err := store.GetDecisionContinuation(ctx, tx.Q(), decision)
-	if err != nil || policy == nil || policy.State != "ready" {
+	if err != nil || policy != nil && policy.State != "ready" {
 		return err
 	}
-	if policy.Policy.Mode == protocol.DecisionDependency {
+	if policy != nil && policy.Policy.Mode == protocol.DecisionDependency {
 		ready, _, err := store.DecisionDependencyReady(ctx, tx.Q(), policy.Policy.Dependency)
 		if err != nil || !ready {
 			return err
@@ -91,10 +91,12 @@ func resumeAnsweredQuestion(ctx context.Context, x *Exec, tx *store.Tx, decision
 	if _, err := tx.Exec(ctx, `UPDATE run_question_handoffs SET continuation_action_id=? WHERE run_id=?`, a.ActionID, r.RunID); err != nil {
 		return err
 	}
-	policy.State, policy.UpdatedAt = "continued", x.Now.UnixMilli()
-	policy.Revision++
-	if err := tx.PutDecisionContinuation(ctx, *policy); err != nil {
-		return err
+	if policy != nil {
+		policy.State, policy.UpdatedAt = "continued", x.Now.UnixMilli()
+		policy.Revision++
+		if err := tx.PutDecisionContinuation(ctx, *policy); err != nil {
+			return err
+		}
 	}
 	return tx.SetActionStatus(ctx, original, protocol.ActionDone, x.Now.UnixMilli())
 }

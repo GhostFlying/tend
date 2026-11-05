@@ -12,7 +12,7 @@ import (
 
 func decisionContinuationPolicy(p *protocol.DecisionContinuationPolicy) protocol.DecisionContinuationPolicy {
 	if p == nil {
-		return protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "explicit continuation admission required"}
+		return protocol.DecisionContinuationPolicy{}
 	}
 	policy := *p
 	policy.Reason = strings.TrimSpace(policy.Reason)
@@ -20,21 +20,19 @@ func decisionContinuationPolicy(p *protocol.DecisionContinuationPolicy) protocol
 }
 
 func recordDecisionContinuation(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRow, p *protocol.DecisionContinuationPolicy) error {
-	if d.Worker == nil {
-		if p != nil {
-			return protocol.Errorf(protocol.CodeInvalidRequest, "continuation disposition requires a worker handoff question")
-		}
+	// Legacy answers retain their original automatic handoff contract.
+	if p == nil {
 		return nil
+	}
+	if d.Worker == nil {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "continuation disposition requires a worker handoff question")
 	}
 	h, err := store.GetQuestionHandoff(ctx, tx.Q(), d.Worker.RunID)
 	if err != nil {
 		return err
 	}
 	if h == nil {
-		if p != nil {
-			return protocol.Errorf(protocol.CodeInvalidRequest, "the question has no frozen handoff contract")
-		}
-		return nil
+		return protocol.Errorf(protocol.CodeInvalidRequest, "the question has no frozen handoff contract")
 	}
 	policy := decisionContinuationPolicy(p)
 	state := "waiting"
@@ -147,10 +145,10 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 	if !valid {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "original handoff agreement or responsibility changed")
 	}
-	if c.Reconcile && v.Policy.Mode != protocol.DecisionDependency {
+	if c.Reconcile && (v.Policy == nil || v.Policy.Mode != protocol.DecisionDependency) {
 		return Outcome{}, continuationBlocked(v, "this wait requires explicit resume, not readiness reconciliation")
 	}
-	if v.Policy.Mode == protocol.DecisionDependency {
+	if v.Policy != nil && v.Policy.Mode == protocol.DecisionDependency {
 		ready, reason, err := store.DecisionDependencyReady(ctx, tx.Q(), v.Policy.Dependency)
 		if err != nil {
 			return Outcome{}, err
@@ -167,7 +165,7 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 	if row == nil {
 		// Preserve the legacy answer; this new request supplies independent
 		// permission and does not retroactively invent an old answer policy.
-		row = &store.DecisionContinuationRow{DecisionID: v.DecisionID, Policy: v.Policy, CreatedAt: x.Now.UnixMilli()}
+		row = &store.DecisionContinuationRow{DecisionID: v.DecisionID, Policy: protocol.DecisionContinuationPolicy{Mode: protocol.DecisionContinueNow, Reason: "independent explicit resume of the original contract"}, CreatedAt: x.Now.UnixMilli()}
 	}
 	row.Revision++
 	row.State, row.ResumeRequestID, row.UpdatedAt = "ready", x.Env.RequestID, x.Now.UnixMilli()
@@ -193,7 +191,7 @@ func continuationBlocked(v protocol.DecisionContinuationView, message string) er
 }
 
 // ReadDecisionContinuation is a read-only ledger projection, including legacy
-// waiting and exact blocking facts. It does not probe or resume a provider.
+// contracts and exact blocking facts. It does not probe or resume a provider.
 func (a *App) ReadDecisionContinuation(ctx context.Context, decision string) (protocol.DecisionContinuationView, error) {
 	var out protocol.DecisionContinuationView
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {

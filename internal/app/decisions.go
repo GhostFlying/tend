@@ -91,6 +91,8 @@ func dedupe(s []string) []string {
 // answered decision again with the same answer returns the recorded result;
 // a different answer gets stale_revision and the current state.
 type AnswerDecision struct {
+	// TypedContinuation selects explicit scheduling policy instead of the legacy answer contract.
+	TypedContinuation bool
 	// FromMessage selects decisions.resolve_from_message.
 	FromMessage bool
 	// Responsible is an internal path after the current supervisor was verified.
@@ -107,6 +109,12 @@ type decisionAnswer struct {
 
 // Operation implements Command.
 func (c AnswerDecision) Operation() string {
+	if c.TypedContinuation {
+		if c.FromMessage {
+			return protocol.OpResolveDecisionContinuation
+		}
+		return protocol.OpAnswerDecisionContinuation
+	}
 	if c.FromMessage {
 		return "decisions.resolve_from_message"
 	}
@@ -127,6 +135,12 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if c.TypedContinuation && (p.Continuation == nil || p.Version < 1 || x.Env.Target.Type != "decision") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "typed continuation requires a decision target, original version and explicit policy")
+	}
+	if !c.TypedContinuation && p.Continuation != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "use the explicit typed continuation operation")
+	}
 	if p.Option == "" && p.Text == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "option or text is required")
 	}
@@ -138,6 +152,22 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	d, err := store.GetDecision(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
 		return Outcome{}, errNotFound(err, "decision %s does not exist", x.Env.Target.ID)
+	}
+	if c.TypedContinuation && x.Env.Operation == c.Operation() {
+		if d.Worker == nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "typed continuation requires a worker handoff question")
+		}
+		expected, err := requireRevision(x.Env)
+		if err != nil {
+			return Outcome{}, err
+		}
+		task, err := store.GetTask(ctx, tx.Q(), d.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if expected != task.ControlRevision {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "parent task control revision changed")
+		}
 	}
 	if c.Responsible {
 		var delivery bool

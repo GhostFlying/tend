@@ -642,7 +642,7 @@ export interface DecisionContinuationView {
   continuation_action_id?: string;
   decision_id: string;
   decision_version: number;
-  policy: DecisionContinuationPolicy;
+  policy?: DecisionContinuationPolicy;
   resume_condition: string;
   resume_request_id?: string;
   revision: number;

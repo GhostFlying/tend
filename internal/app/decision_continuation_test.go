@@ -9,61 +9,116 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestDecisionContinuationUntypedAnswerWaitsForExplicitAdmission(t *testing.T) {
+func TestDecisionContinuationLegacyAnswerPreservesAutomaticHandoff(t *testing.T) {
+	decisionContinuationCompatibility(t, false)
+}
+func TestDecisionContinuationTypedWaitRequiresExplicitAdmission(t *testing.T) {
+	decisionContinuationCompatibility(t, true)
+}
+
+func decisionContinuationCompatibility(t *testing.T, typed bool) {
 	for _, wire := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
 		for _, answerFirst := range []bool{false, true} {
 			t.Run(fmt.Sprintf("wire-%d/answer-first-%t", wire, answerFirst), func(t *testing.T) {
 				h := newHarness(t)
-				runtime := testRuntime("decision-continuation-runner")
+				runtime := testRuntime("continuation-compat-runner")
 				runtime.Protocol, runtime.ProtocolMin, runtime.ProtocolMax = wire, wire, wire
 				runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs)
 				if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
-				issue := createCanonicalOwnerTestIssue(t, h)
-				task := createCanonicalTaskForTest(t, h, issue)
+				task := createCanonicalTaskForTest(t, h, createCanonicalOwnerTestIssue(t, h))
 				as, ok := h.claimInputRun(runtime)
-				if !ok || !as.QuestionHandoffs {
-					t.Fatal("handoff execution unavailable", as)
+				if !ok {
+					t.Fatal(as)
 				}
-				if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
-					t.Fatal(op)
-				}
+				h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
 				q := askQuestion(t, h, as, scopeQuestion)
-				env := h.env("decisions.respond", protocol.Target{Type: "decision", ID: q.DecisionID},
-					protocol.AnswerDecisionPayload{Version: q.Version, Option: scopeQuestion.Options[0],
-						Text: "Wait for the dependency before continuing."}, nil)
+				payload := protocol.AnswerDecisionPayload{Version: q.Version, Option: scopeQuestion.Options[0], Text: "Wait for the dependency before continuing."}
+				cmd := AnswerDecision{TypedContinuation: typed}
+				var expected *int64
+				if typed {
+					payload.Continuation = &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await explicit continuation"}
+					expected = rev(h.task(task).ControlRevision)
+				}
+				env := h.env(cmd.Operation(), protocol.Target{Type: "decision", ID: q.DecisionID}, payload, expected)
 				answer := func() {
 					t.Helper()
-					if op := h.exec(owner, env, AnswerDecision{}); op.Status != protocol.OpSucceeded {
-						t.Fatal("recording an answer must remain legal", op)
+					if op := h.exec(owner, env, cmd); op.Status != protocol.OpSucceeded {
+						t.Fatal(op)
 					}
 				}
 				if answerFirst {
 					answer()
 				}
-				if op := h.runAs(as, protocol.OpRunsYieldQuestion,
-					protocol.YieldQuestionPayload{DecisionID: q.DecisionID, ThreadID: "original-session"}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
+				if op := h.runAs(as, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: q.DecisionID, ThreadID: "original-session"}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
 				if !answerFirst {
 					answer()
 				}
-				answer() // Reconcile the original request without inventing another action.
+				answer()
 				if h.run(as.RunID).ObservedState != protocol.RunFinished || h.lease(as.RunID).Status != store.LeaseReleased {
-					t.Fatal("waiting retained physical worker capacity")
+					t.Fatal("handoff retained physical worker")
 				}
-				if got := h.count("plan_actions WHERE effect_key='question_continuation|" + q.DecisionID + "'"); got != 0 {
-					t.Errorf("an untyped answer manufactured %d continuation actions", got)
-				}
-				if next, ok := h.claimInputRun(runtime); ok {
-					t.Fatalf("an answer without machine admission restarted work: run=%s action=%s", next.RunID, next.ActionID)
-				}
-				if state := h.executionTask(task).Execution.State; state != protocol.ExecutionWaitingOwner {
-					t.Fatalf("durable waiting was lost after recording the answer: %s", state)
+				count := h.count("plan_actions WHERE effect_key='question_continuation|" + q.DecisionID + "'")
+				next, claimed := h.claimInputRun(runtime)
+				if typed {
+					if count != 0 || claimed {
+						t.Fatal("typed wait scheduled", count, next)
+					}
+					if h.executionTask(task).Execution.State != protocol.ExecutionWaitingOwner {
+						t.Fatal("typed waiting was lost")
+					}
+				} else {
+					if count != 1 || !claimed || next.TaskID != task || next.QuestionContinuation == nil {
+						t.Fatal("legacy valid default changed", count, next, claimed)
+					}
+					if h.count("decision_continuations WHERE decision_id='"+q.DecisionID+"'") != 0 {
+						t.Fatal("legacy answer acquired a fabricated policy")
+					}
 				}
 			})
 		}
+	}
+}
+
+func TestDecisionContinuationTypedAnswerRequiresCompleteExplicitContract(t *testing.T) {
+	for _, missing := range []string{"policy", "version", "task_revision", "stale_task_revision", "decision_target", "legacy_operation"} {
+		t.Run(missing, func(t *testing.T) {
+			f := newContinuationFixture(t, nil)
+			cmd := AnswerDecision{TypedContinuation: true}
+			payload := protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await independent resume"}}
+			expected := rev(f.h.task(f.task).ControlRevision)
+			target := protocol.Target{Type: "decision", ID: f.q.DecisionID}
+			want := protocol.CodeInvalidRequest
+			switch missing {
+			case "policy":
+				payload.Continuation = nil
+			case "version":
+				payload.Version = 0
+			case "task_revision":
+				expected = nil
+			case "stale_task_revision":
+				expected = rev(*expected + 1)
+				want = protocol.CodeStaleRevision
+			case "decision_target":
+				target.Type = "task"
+			case "legacy_operation":
+				cmd.TypedContinuation = false
+			}
+			env := f.h.env(cmd.Operation(), target, payload, expected)
+			first := f.h.exec(owner, env, cmd)
+			if first.Status != protocol.OpFailed || first.Error.Code != want {
+				t.Fatal("incomplete typed intent admitted", first)
+			}
+			if replay := f.h.exec(owner, env, cmd); !reflect.DeepEqual(replay, first) {
+				t.Fatal("original failure receipt changed", first, replay)
+			}
+			if v := f.view(t); v.Policy != nil || v.BlockedReason != "answer_pending" || f.h.count("decision_continuations") != 0 {
+				t.Fatal("rejected intent changed the original answer or scheduling", v)
+			}
+		})
 	}
 }
 
@@ -105,8 +160,13 @@ func (f continuationFixture) stop(t *testing.T) {
 
 func (f continuationFixture) answer(t *testing.T, policy *protocol.DecisionContinuationPolicy) *protocol.Envelope {
 	t.Helper()
-	env := f.h.env("decisions.respond", protocol.Target{Type: "decision", ID: f.q.DecisionID}, protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Text: "The answer is recorded independently of scheduling.", Continuation: policy}, nil)
-	if op := f.h.exec(owner, env, AnswerDecision{}); op.Status != protocol.OpSucceeded {
+	cmd := AnswerDecision{TypedContinuation: policy != nil}
+	var expected *int64
+	if policy != nil {
+		expected = rev(f.h.task(f.task).ControlRevision)
+	}
+	env := f.h.env(cmd.Operation(), protocol.Target{Type: "decision", ID: f.q.DecisionID}, protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Text: "The answer is recorded independently of scheduling.", Continuation: policy}, expected)
+	if op := f.h.exec(owner, env, cmd); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	return env
@@ -193,7 +253,7 @@ func TestDecisionContinuationWaitPersistsAndIndependentResumeReplays(t *testing.
 	if string(replay.Result) != string(op.Result) {
 		t.Fatal("original resume did not replay", op, replay)
 	}
-	if original := f.h.exec(owner, answer, AnswerDecision{}); original.Status != protocol.OpSucceeded {
+	if original := f.h.exec(owner, answer, AnswerDecision{TypedContinuation: true}); original.Status != protocol.OpSucceeded {
 		t.Fatal(original)
 	}
 	after := f.view(t)
@@ -215,8 +275,8 @@ func TestDecisionContinuationAnswerCannotRewritePolicy(t *testing.T) {
 	f := newContinuationFixture(t, nil)
 	f.stop(t)
 	f.answer(t, &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Dependency is not established"})
-	env := f.h.env("decisions.respond", protocol.Target{Type: "decision", ID: f.q.DecisionID}, protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Text: "The answer is recorded independently of scheduling.", Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionContinueNow}}, nil)
-	if op := f.h.exec(owner, env, AnswerDecision{}); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeStaleRevision {
+	env := f.h.env(protocol.OpAnswerDecisionContinuation, protocol.Target{Type: "decision", ID: f.q.DecisionID}, protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Text: "The answer is recorded independently of scheduling.", Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionContinueNow}}, rev(f.h.task(f.task).ControlRevision))
+	if op := f.h.exec(owner, env, AnswerDecision{TypedContinuation: true}); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeStaleRevision {
 		t.Fatal("answer replay changed scheduling permission", op)
 	}
 	if got := f.view(t); got.State != "waiting" || got.Policy.Mode != protocol.DecisionWait {
@@ -226,18 +286,10 @@ func TestDecisionContinuationAnswerCannotRewritePolicy(t *testing.T) {
 
 func TestDecisionContinuationLegacyAnswerRequiresExplicitRevisionZero(t *testing.T) {
 	f := newContinuationFixture(t, nil)
-	f.stop(t)
-	f.answer(t, nil)
-	// Historical answers predate the new independent policy table.
-	if err := f.h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM decision_continuations WHERE decision_id=?`, f.q.DecisionID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	answer := f.answer(t, nil)
 	v := f.view(t)
-	if v.Revision != 0 || v.BlockedReason != "legacy_answer_requires_explicit_resume" {
-		t.Fatal(v)
+	if v.Revision != 0 || v.Policy != nil || v.State != "legacy" {
+		t.Fatal("fabricated legacy policy", v)
 	}
 	for _, raw := range []string{`{}`, `{"expected_revision":null}`, `{"expected_revision":-1}`} {
 		env := f.h.env(protocol.OpResumeDecisionContinuation, protocol.Target{Type: "decision", ID: f.q.DecisionID}, nil, rev(v.TaskControlRevision))
@@ -250,8 +302,15 @@ func TestDecisionContinuationLegacyAnswerRequiresExplicitRevisionZero(t *testing
 	if op := f.h.exec(owner, env, cmd); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if got := f.view(t); got.AnswerRequestID != "" || got.ResumeRequestID != env.RequestID || got.State != "continued" {
-		t.Fatal("legacy answer identity was invented", got)
+	if got := f.view(t); got.AnswerRequestID != "" || got.ResumeRequestID != env.RequestID || got.State != "ready" {
+		t.Fatal("legacy answer identity invented", got)
+	}
+	if op := f.h.exec(owner, answer, AnswerDecision{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	f.stop(t)
+	if got := f.view(t); got.State != "continued" {
+		t.Fatal(got)
 	}
 }
 
@@ -297,7 +356,7 @@ func TestDecisionContinuationDependencyUsesRealCompletionAndClaimRechecks(t *tes
 func TestDecisionContinuationChangedParentContractDoesNotResume(t *testing.T) {
 	f := newContinuationFixture(t, nil)
 	f.stop(t)
-	f.answer(t, nil)
+	f.answer(t, &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await independent resume"})
 	if op := f.h.exec(owner, f.h.env("tasks.cancel", taskTarget(f.task), map[string]any{}, rev(f.h.task(f.task).ControlRevision)), CancelTask{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -321,11 +380,11 @@ func TestDecisionContinuationRejectsManagerDependencyIncludingHistoricalPolicy(t
 		t.Fatal(err)
 	}
 	policy := &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionDependency, Reason: "Await coordination", Dependency: &protocol.DecisionContinuationDependency{TaskID: created.TaskID, SpecVersion: 1}}
-	env := f.h.env("decisions.respond", protocol.Target{Type: "decision", ID: f.q.DecisionID}, protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Continuation: policy}, nil)
-	if op := f.h.exec(owner, env, AnswerDecision{}); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeInvalidRequest {
+	env := f.h.env(protocol.OpAnswerDecisionContinuation, protocol.Target{Type: "decision", ID: f.q.DecisionID}, protocol.AnswerDecisionPayload{Version: f.q.Version, Option: scopeQuestion.Options[0], Continuation: policy}, rev(f.h.task(f.task).ControlRevision))
+	if op := f.h.exec(owner, env, AnswerDecision{TypedContinuation: true}); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeInvalidRequest {
 		t.Fatal("unsupported manager dependency admitted", op)
 	}
-	f.answer(t, nil)
+	f.answer(t, &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await independent resume"})
 	if err := f.h.store.Write(t.Context(), func(tx *store.Tx) error {
 		if _, err := tx.Exec(t.Context(), `DELETE FROM decision_continuations WHERE decision_id=?`, f.q.DecisionID); err != nil {
 			return err
@@ -346,7 +405,7 @@ func TestDecisionContinuationRejectsManagerDependencyIncludingHistoricalPolicy(t
 func TestDecisionContinuationConcurrentIndependentResumeCreatesOneSuccessor(t *testing.T) {
 	f := newContinuationFixture(t, nil)
 	f.stop(t)
-	f.answer(t, nil)
+	f.answer(t, &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await independent resume"})
 	a, cmd := f.resumeEnvelope(t, false)
 	b, _ := f.resumeEnvelope(t, false)
 	type result struct {

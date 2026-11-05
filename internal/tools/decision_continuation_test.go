@@ -43,7 +43,10 @@ func TestDecisionContinuationNamedToolsExposeBothCASAndAdmittedSource(t *testing
 			}
 			payload := planningSchemaAt(t, root, "payload")
 			fields := []string{"expected_revision"}
-			if spec.Name == "decision_continuation_resume" {
+			if spec.Name == "decision_continuation_answer" {
+				fields = []string{"version", "continuation"}
+			}
+			if spec.Name == "decision_continuation_resume" || spec.Name == "decision_continuation_answer" {
 				fields = append(fields, "source_message_id")
 			}
 			for _, field := range fields {
@@ -58,19 +61,23 @@ func TestDecisionContinuationNamedToolsExposeBothCASAndAdmittedSource(t *testing
 				t.Fatal("caller readiness claim became a public input")
 			}
 		}
-		for _, name := range []string{"decision_continuation_read", "decision_continuation_resume", "decision_continuation_reconcile"} {
+		for _, name := range []string{"decision_continuation_read", "decision_continuation_answer", "decision_continuation_resume", "decision_continuation_reconcile"} {
 			if found[name] != (purpose != agentconfig.Consultation) {
 				t.Fatal("continuation capability escaped its responsibility", purpose, name, found)
 			}
 		}
 	}
 	var schema map[string]any
-	if err := json.Unmarshal([]byte(schemas["decisions_resolve"]), &schema); err != nil {
-		t.Fatal(err)
+	for _, spec := range NamedSpecs(agentconfig.Main) {
+		if spec.Name == "decision_continuation_answer" {
+			if err := json.Unmarshal(spec.InputSchema, &schema); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	mode := planningSchemaAt(t, schema, "continuation", "mode")["enum"].([]any)
+	mode := planningSchemaAt(t, schema, "payload", "continuation", "mode")["enum"].([]any)
 	if !slices.Equal(mode, []any{"continue_now", "wait", "dependency"}) {
-		t.Fatal("answer tool lost typed continuation modes", mode)
+		t.Fatal("typed answer tool lost modes", mode)
 	}
 	for _, spec := range NamedSpecs(agentconfig.Main) {
 		if spec.Name != "attentions_respond" && spec.Name != "attentions_resolve" {
@@ -92,7 +99,7 @@ func TestDecisionContinuationNamedToolsExposeBothCASAndAdmittedSource(t *testing
 	}
 }
 
-func TestDecisionResolveToolPreservesTypedPolicyInsteadOfDroppingIt(t *testing.T) {
+func TestDecisionResolveToolRedirectsUnsupportedTypedPolicyWithoutDroppingIt(t *testing.T) {
 	e := newEnv(t)
 	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
 		_, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: "msg_1", Author: "owner", Body: "Wait for an independent resume"})
@@ -109,11 +116,11 @@ func TestDecisionResolveToolPreservesTypedPolicyInsteadOfDroppingIt(t *testing.T
 	if !opened.OK || json.Unmarshal(opened.Result, &created) != nil || created.Outcome.DecisionID == "" {
 		t.Fatal(opened)
 	}
-	args := resolveArgs{DecisionID: created.Outcome.DecisionID, Version: 1, Option: "bounded", Continuation: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await independent resume"}}
+	args := map[string]any{"decision_id": created.Outcome.DecisionID, "version": 1, "option": "bounded", "continuation": protocol.DecisionContinuationPolicy{Mode: protocol.DecisionWait, Reason: "Await independent resume"}}
 	first := e.call("decisions_resolve", args, "original-answer")
 	// A non-worker decision cannot accept a worker handoff policy. If the tool
 	// drops the new field, this call would silently succeed and answer it.
-	if first.OK || first.Error == nil || first.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(first.Error.Message, "worker") {
+	if first.OK || first.Error == nil || first.Error.Code != protocol.CodeInvalidRequest || !strings.Contains(first.Error.Message, "explicit typed") {
 		t.Fatal("typed continuation was dropped before the real app handler", first)
 	}
 	replay := e.call("decisions_resolve", args, "original-answer")
@@ -121,7 +128,7 @@ func TestDecisionResolveToolPreservesTypedPolicyInsteadOfDroppingIt(t *testing.T
 		t.Fatal("original tool callback changed its failure receipt", first, replay)
 	}
 	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		decision, err := store.GetDecision(t.Context(), tx.Q(), args.DecisionID)
+		decision, err := store.GetDecision(t.Context(), tx.Q(), created.Outcome.DecisionID)
 		if err == nil && (decision.Status != store.DecisionOpen || decision.AnswerJSON != "") {
 			t.Fatal("failed typed answer changed original answer fact", decision)
 		}
@@ -181,9 +188,15 @@ func TestDecisionContinuationNamedDispatchUsesOriginalExecutionAndRequest(t *tes
 	if err := json.Unmarshal([]byte(result.Text), &read); err != nil || read.OK || read.Error == nil || read.Error.Code != protocol.CodeNotFound {
 		t.Fatal("named read did not reach its real handler", result, err)
 	}
-	for i, name := range []string{"decision_continuation_resume", "decision_continuation_reconcile"} {
+	for i, name := range []string{"decision_continuation_answer", "decision_continuation_resume", "decision_continuation_reconcile"} {
 		call.Tool, call.Native, call.RequestID = name, "original-"+name, ids.New(protocol.PrefixRequest)
-		call.Arguments, _ = json.Marshal(hostedMutationArgs{TargetID: "missing", ExpectedControlRevision: new(int64), EffectSeq: int64(i + 1), Payload: json.RawMessage(`{"expected_revision":0,"source_message_id":"` + input.MessageID + `"}`)})
+		payload := json.RawMessage(`{"expected_revision":0,"source_message_id":"` + input.MessageID + `"}`)
+		operation := "decisions.continuation." + strings.TrimPrefix(name, "decision_continuation_")
+		if name == "decision_continuation_answer" {
+			operation = protocol.OpResolveDecisionContinuation
+			payload = json.RawMessage(`{"version":1,"text":"Wait","continuation":{"mode":"wait","reason":"Await original dependency"},"source_message_id":"` + input.MessageID + `"}`)
+		}
+		call.Arguments, _ = json.Marshal(hostedMutationArgs{TargetID: "missing", ExpectedControlRevision: new(int64), EffectSeq: int64(i + 1), Payload: payload})
 		first := e.svc.Handle(t.Context(), call)
 		var receipt answerView
 		if err := json.Unmarshal([]byte(first.Text), &receipt); err != nil || receipt.OK || receipt.Error == nil || receipt.Error.Code != protocol.CodeNotFound {
@@ -193,7 +206,7 @@ func TestDecisionContinuationNamedDispatchUsesOriginalExecutionAndRequest(t *tes
 		if first.Text != again.Text || first.Success != again.Success {
 			t.Fatal("original native callback changed its receipt", first, again)
 		}
-		expected := protocol.Envelope{RequestID: call.RequestID, Operation: "decisions.continuation." + strings.TrimPrefix(name, "decision_continuation_"), Target: protocol.Target{Type: "decision", ID: "missing"}, ExpectedControlRevision: new(int64), Payload: json.RawMessage(`{"expected_revision":0,"source_message_id":"` + input.MessageID + `"}`)}
+		expected := protocol.Envelope{RequestID: call.RequestID, Operation: operation, Target: protocol.Target{Type: "decision", ID: "missing"}, ExpectedControlRevision: new(int64), Payload: payload}
 		wantHash, err := protocol.PayloadHash(&expected)
 		if err != nil {
 			t.Fatal(err)

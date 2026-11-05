@@ -250,7 +250,7 @@ func (c HandleAttention) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		if err != nil {
 			return Outcome{}, err
 		}
-		out, e := (AnswerDecision{Responsible: x.Principal.Kind != protocol.PrincipalOwner}).Apply(ctx, &inner, tx)
+		out, e := (AnswerDecision{Responsible: x.Principal.Kind != protocol.PrincipalOwner, TypedContinuation: p.Continuation != nil}).Apply(ctx, &inner, tx)
 		if e != nil {
 			return Outcome{}, e
 		}
