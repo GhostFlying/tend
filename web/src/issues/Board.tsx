@@ -45,6 +45,8 @@ import {
 } from "../ui/index.ts";
 import styles from "./Board.module.css";
 
+const cancelledPreferenceKey = "tend.board.cancelled-expanded.v2";
+
 export function IssueBoard({
   onSelect,
   onInbox,
@@ -81,7 +83,7 @@ export function IssueBoard({
   const [filterOpen, setFilterOpen] = useState(false);
   const [cancelledExpanded, setCancelledExpanded] = useState(() => {
     try {
-      return localStorage.getItem("tend.board.cancelled-expanded") !== "false";
+      return localStorage.getItem(cancelledPreferenceKey) !== "false";
     } catch {
       return true;
     }
@@ -91,13 +93,15 @@ export function IssueBoard({
   const [menu, setMenu] = useState<IssueSummary | null>(null);
   const [over, setOver] = useState<IssueWorkStatus | null>(null);
   const dragged = useRef<IssueSummary | null>(null);
-  useEffect(() => {
+  const toggleCancelled = () => {
+    const expanded = !cancelledExpanded;
+    setCancelledExpanded(expanded);
     try {
-      localStorage.setItem("tend.board.cancelled-expanded", String(cancelledExpanded));
+      localStorage.setItem(cancelledPreferenceKey, String(expanded));
     } catch {
       /* Keep the session preference when storage is unavailable. */
     }
-  }, [cancelledExpanded]);
+  };
   useLayoutEffect(() => {
     mobileTabs.current
       ?.querySelector('[aria-selected="true"]')
@@ -291,9 +295,7 @@ export function IssueBoard({
                 over={over === id}
                 closed={closed}
                 collapsed={id === "cancelled" && !cancelledExpanded}
-                onToggle={
-                  id === "cancelled" ? () => setCancelledExpanded(!cancelledExpanded) : undefined
-                }
+                onToggle={id === "cancelled" ? toggleCancelled : undefined}
                 onDragOver={(event) => {
                   if (dragged.current && online) {
                     event.preventDefault();
