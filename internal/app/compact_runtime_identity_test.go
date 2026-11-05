@@ -146,3 +146,32 @@ func TestCompactThreadDiscoveryPreservesPendingTurnPriority(t *testing.T) {
 		t.Fatal("compact thread overrode the selected native turn attachment", thread, pending, err)
 	}
 }
+
+func TestPendingAgentConversationsQuarantinesUnprovenCompactLocally(t *testing.T) {
+	h := hostedManagerHarness(t)
+	blocked := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	normal := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	blockedID, normalID := "issue:"+blocked.IssueID, "issue:"+normal.IssueID
+	startupCompact(t, h, blockedID, "unknown")
+	submitHostedAdmissionInput(t, h, blockedID)
+	submitHostedAdmissionInput(t, h, normalID)
+	ids, err := h.app.PendingAgentConversations(t.Context())
+	if err != nil {
+		t.Fatal("one local compact quarantine aborted the entire pool scan", err)
+	}
+	found := false
+	for _, id := range ids {
+		if id == blockedID {
+			t.Fatal("unproven runtime became runnable")
+		}
+		if id == normalID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("unrelated manager lost pool eligibility", ids)
+	}
+	if _, _, _, err := h.app.HostedRuntimeStartupSelection(t.Context(), blockedID); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		t.Fatal("quarantine erased the original unknown", err)
+	}
+}

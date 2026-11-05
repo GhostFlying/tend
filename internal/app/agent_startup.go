@@ -31,6 +31,10 @@ type AgentStartupAttachment struct {
 	compactThread string
 }
 
+// NativeCompactThread is the original thread selected with this attachment's
+// runtime snapshot. Empty means another input or native receipt was selected.
+func (a AgentStartupAttachment) NativeCompactThread() string { return a.compactThread }
+
 func readAgentStartupState(ctx context.Context, q store.Querier, request string) (agentStartupState, error) {
 	var state agentStartupState
 	var raw string
@@ -73,7 +77,7 @@ func agentStartupNativeWork(ctx context.Context, q store.Querier, request string
 func (a *App) agentStartupAllowed(ctx context.Context, q store.Querier, conversation string, now int64) (bool, error) {
 	_, _, attachment, err := a.hostedRuntimeStartupSelection(ctx, q, conversation)
 	if err != nil {
-		if protocol.CodeOf(err) == protocol.CodeInvalidTransition || protocol.CodeOf(err) == protocol.CodeForbidden {
+		if protocol.CodeOf(err) == protocol.CodeInvalidTransition || protocol.CodeOf(err) == protocol.CodeForbidden || protocol.CodeOf(err) == protocol.CodeUnknownOutcome {
 			return false, nil
 		}
 		return false, err
