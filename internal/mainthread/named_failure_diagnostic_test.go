@@ -2,6 +2,8 @@ package mainthread
 
 import (
 	"context"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,11 @@ import (
 // Capture only failed synthetic tests, without changing their deadline or result.
 func logNamedPoolFailure(t *testing.T, e *env, pool *BackgroundPool, requests map[string]string) {
 	t.Helper()
+	if e.trace != nil {
+		e.trace.log(t)
+	} else {
+		logNamedGoroutines(t)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if !pool.mu.TryLock() {
@@ -79,4 +86,66 @@ func TestNamedFailureDiagnosticDoesNotWaitForPoolOrManagerLocks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Each synthetic env owns its bounded observations. Capture never writes logs
+// or holds the database writer; successful tests emit nothing.
+type namedFailureTrace struct {
+	mu                    sync.Mutex
+	started               time.Time
+	tools                 [64]namedToolPhase
+	writes                [128]store.WriteObservation
+	toolCount, writeCount int
+	logged                bool
+}
+type namedToolPhase struct {
+	At                        time.Duration
+	Thread, Turn, Tool, Phase string
+}
+
+func newNamedFailureTrace() *namedFailureTrace { return &namedFailureTrace{started: time.Now()} }
+func (d *namedFailureTrace) tool(thread, turn, tool string) func() {
+	record := func(phase string) {
+		d.mu.Lock()
+		d.tools[d.toolCount%len(d.tools)] = namedToolPhase{At: time.Since(d.started), Thread: thread, Turn: turn, Tool: tool, Phase: phase}
+		d.toolCount++
+		d.mu.Unlock()
+	}
+	record("enter")
+	return func() { record("exit") }
+}
+func (d *namedFailureTrace) write(o store.WriteObservation) {
+	d.mu.Lock()
+	d.writes[d.writeCount%len(d.writes)] = o
+	d.writeCount++
+	d.mu.Unlock()
+}
+func (d *namedFailureTrace) log(t *testing.T) {
+	t.Helper()
+	if !d.mu.TryLock() {
+		t.Log("named phase observations unavailable: capture lock busy")
+		logNamedGoroutines(t)
+		return
+	}
+	if d.logged {
+		d.mu.Unlock()
+		return
+	}
+	d.logged = true
+	tools, writes, toolCount, writeCount := d.tools, d.writes, d.toolCount, d.writeCount
+	d.mu.Unlock()
+	for i := max(0, toolCount-len(tools)); i < toolCount; i++ {
+		t.Logf("named tool phase=%+v", tools[i%len(tools)])
+	}
+	for i := max(0, writeCount-len(writes)); i < writeCount; i++ {
+		o := writes[i%len(writes)]
+		t.Logf("named writer caller=%s operation=%s stage=%s outcome=%s total=%s connection_wait=%s callback=%s", o.Caller, o.Source.Operation, o.Stage, o.Outcome, o.Total, o.ConnectionWait, o.Callback)
+	}
+	logNamedGoroutines(t)
+}
+func logNamedGoroutines(t *testing.T) {
+	t.Helper()
+	stack := make([]byte, 256<<10)
+	n := runtime.Stack(stack, true)
+	t.Logf("named goroutines bytes=%d bounded=%t\n%s", n, n == len(stack), stack[:n])
 }
