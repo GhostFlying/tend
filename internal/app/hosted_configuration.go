@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -365,44 +366,73 @@ func (a *App) freezeHostedExecution(ctx context.Context, tx *store.Tx, m store.M
 // HostedRuntimeSelection restores the executor needed to reconcile outstanding
 // native history before opening a session with the current file configuration.
 func (a *App) HostedRuntimeSelection(ctx context.Context, conversation string) (hostedconfig.Selection, bool, error) {
+	selected, named, _, err := a.HostedRuntimeStartupSelection(ctx, conversation)
+	return selected, named, err
+}
+
+// HostedRuntimeStartupSelection freezes the executor and its actual input in the
+// same snapshot. An outstanding native receipt is an attachment to that original
+// execution, independently of any newer serviceable or deferred input.
+func (a *App) HostedRuntimeStartupSelection(ctx context.Context, conversation string) (hostedconfig.Selection, bool, AgentStartupAttachment, error) {
 	var selected hostedconfig.Selection
 	var named bool
+	var attachment AgentStartupAttachment
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE h.conversation_id=? AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) OR EXISTS(SELECT 1 FROM agent_recoveries r WHERE r.root_request_id=h.execution_id AND r.status IN ('starting','running','unknown')) OR EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=h.execution_id AND o.status='sending' AND t.status IN ('completed','rejected'))) ORDER BY h.execution_id`, store.ConversationID(conversation))
-		if err != nil {
-			return err
+		var err error
+		selected, named, attachment, err = a.hostedRuntimeStartupSelection(ctx, tx.Q(), conversation)
+		if err == nil && selected.RunnerManaged {
+			err = rebindRunnerRuntime(ctx, tx.Q(), &selected)
 		}
-		if len(ids) > 0 {
-			row, err := store.GetHostedExecution(ctx, tx.Q(), ids[0])
-			selected, named = row.Selection, true
-			if err == nil && !selected.RunnerManaged && row.IssueID != "" {
-				issue, readErr := store.GetCanonicalIssue(ctx, tx.Q(), row.IssueID)
-				if readErr != nil {
-					return readErr
-				}
-				selected.ReceiptOnly = issue.AssignmentEpoch != row.AssignmentEpoch
-			}
-			return err
-		}
-		destination := MainThreadDestination
-		if store.ConversationID(conversation) != "main" {
-			destination = "background_thread:" + conversation
-		}
-		head, err := a.hostedServiceableHead(ctx, tx.Q(), destination)
-		if err == nil {
-			selected, named, err = a.hostedSelectionForAdmission(ctx, tx.Q(), head.RequestID, conversation)
-			return err
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-		selected, named, err = namedHostedSelection(ctx, tx.Q(), a.hostedConfiguration, conversation)
 		return err
 	})
-	if err == nil && selected.RunnerManaged {
-		err = a.store.Read(ctx, func(tx *store.ReadTx) error { return rebindRunnerRuntime(ctx, tx.Q(), &selected) })
+	return selected, named, attachment, err
+}
+
+func (a *App) hostedRuntimeStartupSelection(ctx context.Context, q store.Querier, conversation string) (hostedconfig.Selection, bool, AgentStartupAttachment, error) {
+	var attachment AgentStartupAttachment
+	ids, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE h.conversation_id=? AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) OR EXISTS(SELECT 1 FROM agent_recoveries r WHERE r.root_request_id=h.execution_id AND r.status IN ('starting','running','unknown')) OR EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=h.execution_id AND o.status='sending' AND t.status IN ('completed','rejected'))) ORDER BY h.execution_id`, store.ConversationID(conversation))
+	if err != nil {
+		return hostedconfig.Selection{}, false, attachment, err
 	}
-	return selected, named, err
+	if len(ids) > 0 {
+		attachment = AgentStartupAttachment{RequestID: ids[0], Reconciliation: true}
+		row, err := store.GetHostedExecution(ctx, q, ids[0])
+		selected := row.Selection
+		if err == nil && !selected.RunnerManaged && row.IssueID != "" {
+			issue, readErr := store.GetCanonicalIssue(ctx, q, row.IssueID)
+			if readErr != nil {
+				return selected, true, attachment, readErr
+			}
+			selected.ReceiptOnly = issue.AssignmentEpoch != row.AssignmentEpoch
+		}
+		return selected, true, attachment, err
+	}
+	// Legacy native executions have no named snapshot, but their original
+	// receipts still own the attachment ahead of any newer input's budget.
+	var receiptRequest string
+	err = q.QueryRowContext(ctx, `SELECT t.request_id FROM main_turns t JOIN native_turn_receipts_pending p USING(request_id) JOIN conversation_messages m ON m.message_id=t.message_id WHERE m.conversation_id=? ORDER BY t.created_at,t.request_id LIMIT 1`, store.ConversationID(conversation)).Scan(&receiptRequest)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return hostedconfig.Selection{}, false, attachment, err
+	}
+	if receiptRequest != "" {
+		attachment = AgentStartupAttachment{RequestID: receiptRequest, Reconciliation: true}
+		selected, named, err := namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+		return selected, named, attachment, err
+	}
+	head, err := a.hostedServiceableHead(ctx, q, store.ConversationDestination(store.ConversationID(conversation)))
+	if err == nil {
+		attachment.RequestID = head.RequestID
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns WHERE request_id=?) OR EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, head.RequestID, head.RequestID).Scan(&attachment.Reconciliation); err != nil {
+			return hostedconfig.Selection{}, false, attachment, err
+		}
+		selected, named, err := a.hostedSelectionForAdmission(ctx, q, head.RequestID, conversation)
+		return selected, named, attachment, err
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return hostedconfig.Selection{}, false, attachment, err
+	}
+	selected, named, err := namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+	return selected, named, attachment, err
 }
 
 // canonicalManagerAdmission replaces the legacy baseline gate only for an

@@ -21,8 +21,12 @@ type agentStartupState struct {
 	AttentionID   string `json:"attention_id,omitempty"`
 }
 
-func agentStartupHead(ctx context.Context, q store.Querier, conversation string) (store.OutboxMessage, error) {
-	return store.HeadOutboxPrioritized(ctx, q, store.ConversationDestination(store.ConversationID(conversation)), OpHandleEvent)
+// AgentStartupAttachment identifies what the chosen runtime will attach to.
+// Reconciliation preserves discovery of existing native work independently of
+// the startup budget for any newer, not-yet-admitted input.
+type AgentStartupAttachment struct {
+	RequestID      string
+	Reconciliation bool
 }
 
 func readAgentStartupState(ctx context.Context, q store.Querier, request string) (agentStartupState, error) {
@@ -38,15 +42,11 @@ func readAgentStartupState(ctx context.Context, q store.Querier, request string)
 	return state, err
 }
 
-func agentStartupAllowed(ctx context.Context, q store.Querier, conversation string, now int64) (bool, error) {
-	head, err := agentStartupHead(ctx, q, conversation)
-	if errors.Is(err, store.ErrNotFound) {
+func agentStartupAttachmentAllowed(ctx context.Context, q store.Querier, attachment AgentStartupAttachment, now int64) (bool, error) {
+	if attachment.Reconciliation || attachment.RequestID == "" {
 		return true, nil
 	}
-	if err != nil || head.Status != store.OutboxPending {
-		return err == nil, err
-	}
-	state, err := readAgentStartupState(ctx, q, head.RequestID)
+	state, err := readAgentStartupState(ctx, q, attachment.RequestID)
 	if err != nil {
 		return false, err
 	}
@@ -57,13 +57,35 @@ func agentStartupAllowed(ctx context.Context, q store.Querier, conversation stri
 	return state.NextAttemptAt <= now, nil
 }
 
-// AgentStartupAllowed gates only pending input's automatic attachment retries.
-// Sending input retains its existing native receipt reconciliation path.
+func (a *App) agentStartupAllowed(ctx context.Context, q store.Querier, conversation string, now int64) (bool, error) {
+	_, _, attachment, err := a.hostedRuntimeStartupSelection(ctx, q, conversation)
+	if err != nil {
+		if protocol.CodeOf(err) == protocol.CodeInvalidTransition || protocol.CodeOf(err) == protocol.CodeForbidden {
+			return false, nil
+		}
+		return false, err
+	}
+	return agentStartupAttachmentAllowed(ctx, q, attachment, now)
+}
+
+// AgentStartupAllowed gates only the actual unadmitted input's startup retries.
+// A dispatch claim without native intent is still a local pre-ready startup.
 func (a *App) AgentStartupAllowed(ctx context.Context, conversation string) (bool, error) {
 	var allowed bool
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		allowed, err = agentStartupAllowed(ctx, tx.Q(), conversation, a.now().UnixMilli())
+		allowed, err = a.agentStartupAllowed(ctx, tx.Q(), conversation, a.now().UnixMilli())
+		return err
+	})
+	return allowed, err
+}
+
+// AgentStartupAttachmentAllowed checks the identity frozen with runtime selection.
+func (a *App) AgentStartupAttachmentAllowed(ctx context.Context, attachment AgentStartupAttachment) (bool, error) {
+	var allowed bool
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		allowed, err = agentStartupAttachmentAllowed(ctx, tx.Q(), attachment, a.now().UnixMilli())
 		return err
 	})
 	return allowed, err
@@ -80,31 +102,61 @@ func (a *App) writeAgentStartupState(ctx context.Context, tx *store.Tx, request 
 
 // AgentStartupSucceeded ends this local failure window without fabricating a turn.
 func (a *App) AgentStartupSucceeded(ctx context.Context, conversation string) error {
+	_, _, attachment, err := a.HostedRuntimeStartupSelection(ctx, conversation)
+	if err != nil {
+		return err
+	}
+	return a.AgentStartupAttachmentSucceeded(ctx, attachment)
+}
+
+// AgentStartupAttachmentSucceeded settles only the attachment that became ready.
+func (a *App) AgentStartupAttachmentSucceeded(ctx context.Context, attachment AgentStartupAttachment) error {
+	if attachment.RequestID == "" {
+		return nil
+	}
 	return a.store.Write(ctx, func(tx *store.Tx) error {
-		head, err := agentStartupHead(ctx, tx.Q(), conversation)
+		state, err := readAgentStartupState(ctx, tx.Q(), attachment.RequestID)
+		if err != nil || state.Attempts == 0 {
+			return err
+		}
+		if state.AttentionID != "" {
+			attention, err := store.GetAttention(ctx, tx.Q(), state.AttentionID)
+			if err != nil || attention.Status == "open" {
+				return err
+			}
+		}
+		return a.writeAgentStartupState(ctx, tx, attachment.RequestID, agentStartupState{})
+	})
+}
+
+func (a *App) deferAgentStartup(ctx context.Context, conversation string) error {
+	_, _, attachment, err := a.HostedRuntimeStartupSelection(ctx, conversation)
+	if err != nil {
+		return err
+	}
+	return a.DeferAgentStartupAttachment(ctx, conversation, attachment)
+}
+
+// DeferAgentStartupAttachment records the chosen attachment, never a later head.
+// Native reconciliation retains its original outbox state and discovery path.
+func (a *App) DeferAgentStartupAttachment(ctx context.Context, conversation string, attachment AgentStartupAttachment) error {
+	if attachment.RequestID == "" {
+		return nil
+	}
+	noticeQueued := false
+	err := a.store.Write(ctx, func(tx *store.Tx) error {
+		head, err := store.GetOutboxByRequest(ctx, tx.Q(), attachment.RequestID)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		state, err := readAgentStartupState(ctx, tx.Q(), head.RequestID)
-		if err != nil || state.Attempts == 0 {
-			return err
+		if head.Destination != store.ConversationDestination(store.ConversationID(conversation)) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "startup attachment belongs to another conversation")
 		}
-		return a.writeAgentStartupState(ctx, tx, head.RequestID, agentStartupState{})
-	})
-}
-
-func (a *App) deferAgentStartup(ctx context.Context, conversation string) error {
-	noticeQueued := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
-		head, err := agentStartupHead(ctx, tx.Q(), conversation)
-		if errors.Is(err, store.ErrNotFound) {
+		if !attachment.Reconciliation && head.Status != store.OutboxPending && head.Status != store.OutboxSending {
 			return nil
-		}
-		if err != nil || head.Status != store.OutboxPending {
-			return err
 		}
 		state, err := readAgentStartupState(ctx, tx.Q(), head.RequestID)
 		if err != nil {
@@ -128,7 +180,7 @@ func (a *App) deferAgentStartup(ctx context.Context, conversation string) error 
 		state.NextAttemptAt = now.Add(30 * time.Second).UnixMilli()
 		policy := a.agentRecoveryPolicy
 		if state.Attempts >= policy.MaxAttempts || now.UnixMilli()-state.FirstFailedAt >= policy.MaxElapsed.Milliseconds() {
-			state.AttentionID, err = a.createAgentStartupAttention(ctx, tx, conversation, head)
+			state.AttentionID, err = a.createAgentStartupAttention(ctx, tx, conversation, head, attachment.Reconciliation)
 			if err != nil {
 				return err
 			}
@@ -136,6 +188,9 @@ func (a *App) deferAgentStartup(ctx context.Context, conversation string) error 
 		}
 		if err := a.writeAgentStartupState(ctx, tx, head.RequestID, state); err != nil {
 			return err
+		}
+		if attachment.Reconciliation {
+			return nil
 		}
 		return tx.TransitionOutbox(ctx, store.OutboxTransition{OutboxID: head.OutboxID, From: head.Status, FromAttempts: head.Attempts, To: head.Status, Attempts: head.Attempts, NextAttemptAt: max(head.NextAttemptAt, state.NextAttemptAt), Now: now.UnixMilli()})
 	})
@@ -148,13 +203,16 @@ func (a *App) deferAgentStartup(ctx context.Context, conversation string) error 
 	return err
 }
 
-func (a *App) createAgentStartupAttention(ctx context.Context, tx *store.Tx, conversation string, head store.OutboxMessage) (string, error) {
+func (a *App) createAgentStartupAttention(ctx context.Context, tx *store.Tx, conversation string, head store.OutboxMessage, reconciliation bool) (string, error) {
 	var input HandleMessage
 	if err := json.Unmarshal([]byte(head.PayloadJSON), &input); err != nil {
 		return "", fmt.Errorf("app: decode startup input: %w", err)
 	}
 	x := &Exec{IDs: a.ids, Now: a.now(), Env: &protocol.Envelope{RequestID: head.RequestID}, Principal: protocol.Principal{Kind: protocol.PrincipalSystem}}
 	attention := protocol.Attention{AttentionID: a.ids.New(protocol.Prefix("attn")), Kind: "action", Status: "open", Title: "Agent 启动持续失败，原输入尚未接收；请核对执行配置与启动故障，保留原输入及未知执行事实。", SourceMessageID: input.MessageID, RaisedBy: x.Principal, CreatedAt: x.Now.UnixMilli()}
+	if reconciliation {
+		attention.Title = "Agent 对账会话启动持续失败；请核对执行配置与启动故障，保留原输入及未知执行事实。"
+	}
 	if store.ConversationID(conversation) != "main" {
 		c, err := store.AgentConversation(ctx, tx.Q(), conversation)
 		if err != nil {
@@ -170,7 +228,7 @@ func (a *App) createAgentStartupAttention(ctx context.Context, tx *store.Tx, con
 			if err := responsibilityRecipient(ctx, tx.Q(), r, issue.IssueID); err != nil {
 				return "", err
 			}
-			r.History = append(r.History, responsibilityHop(r, "responsible Agent startup exhausted its technical recovery budget before receiving the original input", head.RequestID))
+			r.History = append(r.History, responsibilityHop(r, "responsible Agent startup exhausted its technical recovery budget for this original input", head.RequestID))
 			if err := responsibilityRecipient(ctx, tx.Q(), r, issue.ParentIssueID); err != nil {
 				return "", err
 			}
