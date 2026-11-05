@@ -1,6 +1,6 @@
 # 恢复修复的最终集成与验证
 
-Refs: D174、D175、D176、D149。
+Refs: D159、D174、D175、D149。
 
 ## 范围与来源
 
@@ -30,3 +30,11 @@ Refs: D174、D175、D176、D149。
 - 每次启动保存完整身份、有效参数、阶段起止和逐包结果，终态记录真实退出/异常与源码绑定；失败与 unknown 不改写，未执行的阶段不记通过。
 - 本地完整、整栈独立 review、required CI 与 fresh main/head/base/protection 全部满足后，使用 expected-head rebase & merge；实际 main tree 必须等于最终测试树。不直接 push main，不 squash 或生成 merge commit。
 - 正式更新由独立受控交付与真实 worker 安全门决定，不因 PR 标签或合入自动重启服务。
+
+## 整合记录
+
+四项来源共22个自有提交：#247与#249的15个原提交直接保留，#248的5个与#250的2个按原顺序重放。另有本批实施计划与整合记录提交。文档冲突将 D174 与 D175 两段全部保留；D159 的原严格继续边界不改。
+
+`recovery.go` 两次上下文冲突已获两位来源作者确认：中间版本先保留 retained-resume guard，再保留当时的 transcript-supplement guard；D175 原后继最终撤销后者。最终 `recovery.go`、`client.go`、`historical.go`、`root_turn.go` 全字节等于整合前 #249；`worker.go` 相对 #249 仅切换原观测记录调用到事实补证 helper。该 helper 不改变生命周期 Agent 或恢复/完成授权。中间历史提交不是发布候选。
+
+后续验收只绑定最终集成 head/tree；来源候选原有CI失败、review及未完成full均不改写。本记录不声称完整检查或最终整栈review已完成。
