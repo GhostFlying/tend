@@ -18,8 +18,8 @@ func TestCapacityAdaptsToEffectiveCPUsAndSupportsSequentialRecovery(t *testing.T
 	}{
 		{64, budget{7, 8, 4, 6, 2, false}},
 		{32, budget{7, 4, 2, 3, 2, false}},
-		{16, budget{4, 2, 1, 1, 3, true}},
-		{8, budget{2, 1, 1, 1, 4, true}},
+		{16, budget{4, 2, 2, 1, 2, true}},
+		{8, budget{2, 2, 2, 1, 2, true}},
 		{2, budget{1, 1, 1, 1, 2, true}},
 	} {
 		got, err := capacity(tc.cpus, 0, 0, 0)
@@ -164,5 +164,29 @@ func TestSchedulerWaitsForCancellation(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestExplicitSerialBudgetRequiresReason(t *testing.T) {
+	for _, tc := range []struct {
+		cpus, requested int
+		reason          string
+		wantError       bool
+	}{
+		{8, 1, "", true}, {8, 1, "  ", true},
+		{8, 1, "shared host maintenance budget", false},
+		{1, 1, "", false}, {2, 0, "", false}, {8, 0, "", false},
+	} {
+		b, err := capacity(tc.cpus, tc.requested, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reason, err := serialReason(tc.cpus, tc.requested, b, tc.reason)
+		if (err != nil) != tc.wantError {
+			t.Fatalf("serialReason(%+v) = %q, %v", tc, reason, err)
+		}
+		if err == nil && b.jobs == 1 && reason == "" {
+			t.Fatalf("unrecorded serial budget: %+v", tc)
+		}
 	}
 }

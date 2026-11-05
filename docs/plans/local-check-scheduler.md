@@ -19,7 +19,7 @@ Refs: D149，延续 D145、D148。
 ## 本地入口
 
 - `make check`：按有效 CPU 自动选择预算，完整检查；Web 在私有临时目录构建并清理。
-- `CHECK_JOBS=1 make check`：顺序回退，自动 App 分片也降为一个。
+- `CHECK_JOBS=1 CHECK_SERIAL_REASON="shared resource budget" make check`：顺序回退，自动 App 分片也降为一个。
 - `APP_TEST_SHARDS=4 make check`：显式选择 App 分片，组并发仍可独立调整。
 - `TEST_COUNT=1 make check`：强制重跑 race 测试，用于衡量真实调度耗时；日常默认保留 Go 原生缓存。
 - `make web` / `make web-check`：默认仍在原嵌入目录生成构建产物。
