@@ -599,6 +599,8 @@ D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适�
 
 明确未发送的普通 `rejected` 输入在没有 pending native receipt 时仍受原启动预算约束；具名 sending/rejected 的冻结恢复合同及显式 pending receipt 的只读发现保持有效。原输入的 hold 同时约束 outbox 领取和首次 native starting 的事务准入，防止较新输入打开会话后绕过旧输入的技术待办；已有 native 执行事实的读取和结算继续保留。见[审查修正计划](plans/startup-hold-admission-review.md)。
 
+原生 compact 的 starting/running/unknown 也独立恢复其原会话完成流，以原 compact outbox request 对账，不借用较新输入的身份或清除其 hold；缺原 outbox 的旧事实仅保留只读发现，不捏造请求。queued 或已结束的 compact 不授予未知原生操作豁免，完成事件只结算原 operation/thread，不重发 compact。见[补充审查计划](plans/startup-native-compaction-review.md)。
+
 新 runner 以可选能力 `supervisor-questions-v1` 协商，并在创建 run 时冻结答复合同；新运行的 `ask_owner` 表示提交给 Issue owner，其答复不能扩大原授权。旧运行仍保留真实用户答复语义，但问题先按责任链上报。字段可选，默认关闭；runner wire 继续为 2/1，不改变旧请求的有效性。实施计划见 docs/plans/issue-responsibility-routing.md。
 
 
