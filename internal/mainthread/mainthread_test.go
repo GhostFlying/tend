@@ -42,20 +42,29 @@ type env struct {
 	signal  *dispatch.Signal
 	cancel  context.CancelFunc
 	stopped sync.WaitGroup
+	trace   *namedFailureTrace
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func newEnv(t *testing.T, h *testkit.Harness, opts ...func(*Config)) *env {
 	t.Helper()
+	return newEnvWithTrace(t, h, nil, opts...)
+}
+
+func newEnvWithTrace(t *testing.T, h *testkit.Harness, trace *namedFailureTrace, opts ...func(*Config)) *env {
+	t.Helper()
 	s, err := mainFixtureTemplate.Open(context.Background(), filepath.Join(t.TempDir(), "tend.db"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if trace != nil {
+		store.WithWriteObserver(time.Now, 0, trace.write)(s)
+	}
 	ids := protocol.NewULIDGen(time.Now, nil)
 	sig := dispatch.NewSignal()
 	a := app.New(s, ids, time.Now, app.WithNotifier(sig))
-	e := &env{t: t, store: s, app: a, ids: ids, now: time.Now, h: h, signal: sig}
+	e := &env{t: t, store: s, app: a, ids: ids, now: time.Now, h: h, signal: sig, trace: trace}
 	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 	}, app.SyncConfig{})

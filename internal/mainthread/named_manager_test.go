@@ -64,6 +64,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	trace := newNamedFailureTrace()
 	h := testkit.NewHarness()
 	h.Models = []harness.Model{{ID: "manager-model", Name: "native-manager-model", SupportedEfforts: []string{"high"}, DefaultEffort: "high"}}
 	var e *env
@@ -86,7 +87,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		n := 0
 		invoke := func(name string, args any, out any) bool {
 			n++
+			done := trace.tool(th.ID(), turn, name)
 			result := th.CallTool(context.Background(), turn, fmt.Sprintf("named-tool-%d", n), name, args)
+			done()
 			var body struct {
 				OK     bool            `json:"ok"`
 				Result json.RawMessage `json:"result"`
@@ -109,7 +112,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		}
 		reject := func(name string, args any, code protocol.Code) bool {
 			n++
+			done := trace.tool(th.ID(), turn, name)
 			result := th.CallTool(context.Background(), turn, fmt.Sprintf("named-tool-%d", n), name, args)
+			done()
 			var response struct {
 				OK    bool            `json:"ok"`
 				Error *protocol.Error `json:"error"`
@@ -552,7 +557,12 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		return "completed"
 	}
 	namedTurn := h.Turn
-	e = newEnv(t, h)
+	e = newEnvWithTrace(t, h, trace)
+	t.Cleanup(func() {
+		if t.Failed() {
+			trace.log(t)
+		}
+	})
 	e.stop()
 	if repairMode || managerRepair {
 		h.Turn = namedTurn
@@ -653,7 +663,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	case issue = <-managerDone:
 	case err := <-failed:
 		t.Fatal(err)
-	case <-time.After(10 * time.Second):
+	// A hang guard for the entire synthetic planner/manager/database chain,
+	// independent of every product deadline and final ledger assertion.
+	case <-time.After(30 * time.Second):
 		logNamedPoolFailure(t, e, pool, nil)
 		t.Fatal("actual pooled manager did not complete its scoped tool chain")
 	}
