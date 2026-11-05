@@ -4,6 +4,15 @@
 
 当前候选从 `7c7696fb` 续接，工作树核验干净，原 PR244 OPEN 且存在冲突；不另建 Task/Issue/环境，不改其他责任。完整 heavy 检查仍 HOLD，本轮仅源代码修订、必要低负载 targeted 和候选准备。独立 formal review 由 Tend 原责任链安排，不在本 worker 内启动其他 Agent。合入、安装与部署不在本轮授权。
 
+## 当前与保留 pin 渲染修复计划（编码前）
+
+本轮接续对 `aa01c7fe` 的独立验收 finding。后端 R6 分页修复保留；owner v1、原分支/PR244 及全部历史不变。
+
+1. 用真实 React DOM 渲染 TaskCapabilityFacts，输入同 environment/Agent/backend 的当前 alpha@2、保留 alpha@1 和 beta，再通过原“重新读取匹配”按钮移除两个 alpha。先记录旧代码遗留 alpha 行的失败，覆盖 A20/A23 的 API 与 UI 一致性。
+2. React candidate key 使用完整冻结 RunExecutionPin 的稳定字段序列，覆盖 identity、Agent/runtime/inventory revision、snapshot/hash、profile、worker/backend/purpose。仅缺省 pin 时使用明确独立的 identity/Agent revision/runtime fallback，不用可变匹配状态或数组下标补 key。
+3. 补字段区分及稳定性单元测试与渲染刷新回归，保留相同 Task 组件和读实例，断言移除/重新加入后 DOM 精确对应返回候选且无重复 key 警告。浏览器回归进入既有 CI layout 组，不建 Tend 环境、不调用模型。
+4. 更新 D174 与当前验收矩阵 R7；仅运行低负载定向 Web 验证。协议、迁移、claim、冻结 pin、声明和普通预算不变。heavy full 继续 HOLD；独立 review、仓库 review、required CI、目标集成分别报告，不 merge/deploy。
+
 ## 修订后的实施批次
 
 1. 更新 D174 和[替代验收矩阵](capability-declarative-acceptance.md)，逐条标注原 P0–P6、A01–A28 的适用、撤销或替代。

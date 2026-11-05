@@ -990,3 +990,5 @@ D174 验收前置等待补充：首次 named 实现分配需要同 host/backend 
 首次分配前的 acceptance 查询解释实际 implementation action 的 reviewer 前置，不套用尚不存在的验收 artifact 生命周期。只读 reviewer filter 限定配对候选而不改写原验收身份、profile、runtime 或 backend；全局 eligibility 与 Claim 的首次配对检查一致。通知的角色与 `task capability-explain --role` 恢复入口明确对应。
 
 D174 候选分页补充：Task 能力解释可同时投影同入口的当前 Agent revision 与在途保留 revision，分页身份使用完整冻结 RunExecutionPin，不能仅用 environment/Agent/runtime/backend 合并。排序键和 after 边界保持同一全序，当前无声明与原保留声明独立返回。游标仍绑定筛选、水位及事实签名；排序格式变化拒绝旧游标并要求重新分页，不改变 server/runner wire、迁移、claim 或历史 pin。
+
+D174 候选渲染补充：Task 能力列表的 React 身份同样绑定完整冻结 pin，保证同入口当前与保留 revision 能独立更新、移除和重排。仅在 pin 缺省时按投影的 identity、Agent revision 与 runtime reference 使用独立 fallback；匹配状态不是渲染身份。不改变 API、协议、迁移或调度合同。

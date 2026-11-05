@@ -1,8 +1,45 @@
 import { useEffect, useMemo, useState } from "react";
-import type { TaskSummary, TaskCapabilityExplanation } from "../api/generated/api.ts";
+import type {
+  AgentCapabilityView,
+  TaskSummary,
+  TaskCapabilityExplanation,
+} from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { WorkItemRead } from "../workitems/live.ts";
+
+// Current and retained executions can share an Agent and backend. Use every
+// frozen pin field, in a fixed order independent of JSON object property order.
+export function capabilityCandidateKey(candidate: AgentCapabilityView): string {
+  const pin = candidate.pin;
+  return JSON.stringify(
+    pin
+      ? [
+          "pinned",
+          pin.identity.execution_environment_id,
+          pin.identity.local_id,
+          pin.agent_revision,
+          pin.runtime.runtime_id,
+          pin.runtime.revision,
+          pin.inventory_revision,
+          pin.snapshot_id,
+          pin.public_sha256,
+          pin.profile.model,
+          pin.profile.effort ?? "",
+          pin.worker,
+          pin.backend_id ?? "",
+          pin.purpose ?? "",
+        ]
+      : [
+          "unpinned",
+          candidate.identity.execution_environment_id,
+          candidate.identity.local_id,
+          candidate.agent_revision,
+          candidate.runtime_binding_ref.runtime_id,
+          candidate.runtime_binding_ref.revision,
+        ],
+  );
+}
 
 export function TaskCapabilityFacts({ task }: { task: TaskSummary }) {
   const { client } = useServices();
@@ -57,9 +94,7 @@ export function TaskCapabilityFacts({ task }: { task: TaskSummary }) {
             ))}
           </ul>
           {state.value.candidates?.map((candidate) => (
-            <div
-              key={`${candidate.identity.execution_environment_id}/${candidate.identity.local_id}/${candidate.pin?.backend_id}`}
-            >
+            <div key={capabilityCandidateKey(candidate)}>
               <strong>
                 {candidate.identity.execution_environment_id}/{candidate.identity.local_id}
               </strong>

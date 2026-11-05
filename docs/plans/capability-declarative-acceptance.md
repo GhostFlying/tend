@@ -55,3 +55,4 @@
 | R4 / A12、A13、A20 | 配置存在而从未 Hello 的主机是未观测事实，不能中断全任务解释或等待通知。健康声明 executor 的 explanation/claim 保持一致；未观测主机有明确原因，不能获得执行资格；超过十分钟的等待仍只持久通知一次且不 probe。其他存储错误仍返回。 |
 | R5 / A10、A12、A13、A15 | implementation required 为空时，首次分配受 acceptance required 阻塞也必须十分钟后产生一次 acceptance 通知，解释保留 acceptance required，implementation 不继承标签。双角色按各自 role 去重；waived、已分配而不再检查前置、健康 reviewer 不产生多余验收通知；重复及并发 sweep 不重复 Attention/事件，不创建工具证据或执行。 |
 | R6 / A20 | 同 Agent/runtime/backend 的当前与在途保留 pin 均须跨页完整返回，游标以完整冻结 pin 区分 Agent/runtime/inventory revision、snapshot/hash、profile、worker/backend/purpose。limit=1/2 与不分页集合一致、无重复；当前无声明与原保留声明独立呈现。游标继续绑定筛选/事实水位，旧键格式或事实变动明确拒绝并要求重新分页。 |
+| R7 / A20、A23 | Task 候选 React key 使用完整冻结 pin，仅无 pin 时使用独立 fallback；同入口当前 alpha@2 与保留 alpha@1 同时显示后，重新读取返回仅 beta 时不得遗留 alpha 的声明/资格行。真实 React DOM 覆盖移除、重排与重新加入，查询不变更 Task 身份且无重复 key 警告。 |
