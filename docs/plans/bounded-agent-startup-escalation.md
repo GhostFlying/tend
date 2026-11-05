@@ -22,3 +22,6 @@
 - manager lease expiry、原生 reader 协议、强制释放或恢复 unknown。
 - 新 timer、运行时探活、泛工作流、模型切换、生产状态修改。
 
+## 独立审查后的输入身份修正
+
+先保留并复现当前输入错归因、原未知回执被新输入预算挡住，以及 dispatcher 先 claim 为 sending 的真实主入口。启动时必须在同一读取快照中获得实际 runtime selection 与其原 request/message 身份；失败与成功只结算该 attachment，不能重新读取 raw 队头。未知 native intent/receipt 的只读 attachment 独立发现，不能由另一 pending 输入的预算阻断。sending 仅在尚无 native intent/receipt 的 pre-ready 情形计本地启动预算，保持 sending、原 ID 和未发生 native turn 的事实，不做普遍重派或释放。补实际 RED/GREEN 后以独立原子修复交接。
