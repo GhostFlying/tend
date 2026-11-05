@@ -80,3 +80,21 @@ Hello/heartbeat 与 request/CAS/原pin保留回归覆盖库存变化后的继续
 同一并发链中，Continue 在 reporting executor 尚未退出时撤销旧 Stop，不能只更新
 当前 active 条目后丢失后继启动；该控制同样设置既有 reconcileOnExit，复用退出唤醒，
 限定 reporting 场景，不扩展普通工作中的调度或控制状态机。
+
+最终 strict 报告尝试补正：正式 RPC 将受保护原 release 的 durable accepted 回执映射为
+unknown_outcome/HTTP 500，原 spec 后继替换后 lease 仍可鉴权且原 accepted 不改写。
+如果 strict 报告沿 host lifetime 无限 transport retry，已经持久的 Hello Stop 无法重新读取，
+退出唤醒也无从发生。先用真实 App/RPC 的 accepted→spec supersession→Hello Stop
+复现，保留原 Run/lease/pin/请求回执；事件上传的相同 transport 等待链也做受控故障对照。
+仅 strict 报告采用一次现有 request-timeout 内的上传尝试，然后保留原 envelope/请求身份、
+原事件及 unknown，返回 pending 并唤醒 Hello；普通 legacy retry 语义不变，不新增全局
+超时，不把 accepted/500 作为业务完成，不释放服务端旧 lease 或重放 native 输入。
+
+strict 单次尝试之后仍须保留既有 RetryDelay，避免成功 Hello Continue 立即再建 reporting
+executor 而跳过原退避；等待只在 strict pending 报告退出前发生，独立 Stop/runner 取消
+可提前打断。用真实 wire 计数验证短于既有间隔的观察窗内不会重复 POST，并验证 Stop
+仍能收尾；不限制无关 RPC。
+
+本 PR 的新 journal 16 也暴露旧 CI 历史 fixture：它先建当前库，只删一个表后把版本号
+退为 14，留下 16 新表使迁移重复 CREATE。仅修测试，直接运行前 14 条真实迁移并写入
+原 usage/cursor，再用正式 Open 升级到当前版验证保留；已提交迁移内容保持不变。

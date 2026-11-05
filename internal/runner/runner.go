@@ -343,6 +343,16 @@ func (r *Runner) retry(ctx context.Context, fn func() error) error {
 	}
 }
 
+// sendOnce leaves an uncertain original request for its caller to reconcile.
+// The existing client request timeout still bounds this single wire attempt.
+func (r *Runner) sendOnce(ctx context.Context, cred credential, env *protocol.Envelope) (protocol.Operation, error) {
+	op, err := r.c.do(ctx, cred, env)
+	if err == nil && op.Status == protocol.OpFailed && op.Error != nil {
+		return op, op.Error
+	}
+	return op, err
+}
+
 // send delivers env, resending it unchanged on transport failures.
 func (r *Runner) send(ctx context.Context, cred credential, env *protocol.Envelope) (protocol.Operation, error) {
 	var op protocol.Operation

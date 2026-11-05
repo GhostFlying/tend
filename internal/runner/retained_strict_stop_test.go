@@ -27,7 +27,7 @@ import (
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
-// This uses the production RPC handler and unchanged legacy client/report loop.
+// This uses the production RPC handler and bounded strict reporting attempts.
 // A durable accepted fact must never become a successful wire finalization on
 // retry; only a new explicit owner cancellation may settle the business run.
 func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T) {
@@ -179,8 +179,14 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 	defer server.Close()
 	ws := &recoveryFinishProbe{}
 	r := New(Config{Journal: j, Workspaces: ws, ServerURL: server.URL, HTTPClient: server.Client(), Now: clock.Now, IDs: ids, HostID: "worker", HostToken: "host-secret", Worker: protocol.WorkerOrca, InstanceID: "worker-process", RetryDelay: time.Millisecond, RequestTimeout: time.Second, Log: slog.New(slog.DiscardHandler)})
-	if err := r.report(attemptCtx, as); !errors.Is(err, context.Canceled) {
-		t.Fatal("report did not remain pending", err)
+	for i := range 3 {
+		err := r.report(attemptCtx, as)
+		if !isCompletionPending(err) || i < 2 && protocol.CodeOf(err) != protocol.CodeUnknownOutcome || i == 2 && !errors.Is(err, context.Canceled) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+			t.Fatal("original report did not remain pending between bounded attempts", i, err)
+		}
+	}
+	if !errors.Is(attemptCtx.Err(), context.Canceled) {
+		t.Fatal("bounded attempts did not reach the test's explicit cancellation")
 	}
 	mu.Lock()
 	for i, got := range requests {
@@ -397,6 +403,11 @@ func testRetainedStrictStopWireLostArtifactReceipt(t *testing.T, forbidPendingEv
 	defer server.Close()
 	ws := &recoveryFinishProbe{}
 	r := New(Config{Journal: j, Worker: protocol.WorkerOrca, Workspaces: ws, HostID: "worker", HostToken: "host-secret", ServerURL: server.URL, HTTPClient: server.Client(), Now: clock.Now, IDs: ids, RetryDelay: time.Millisecond, RequestTimeout: time.Second, Log: slog.New(slog.DiscardHandler)})
+	if err = r.report(ctx, as); !isCompletionPending(err) || !isRetryable(err) {
+		t.Fatal("lost receipt did not preserve its uncertain original request", err)
+	}
+	// A later attempt keeps the original envelope. Its now-revoked credential
+	// remains a pending fact until authenticated Hello independently says Stop.
 	if err = r.report(ctx, as); !isCompletionPending(err) || protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("lost receipt did not reconcile original request through revoked credential", err)
 	}

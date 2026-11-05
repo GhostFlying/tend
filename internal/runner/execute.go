@@ -86,7 +86,23 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 				r.mu.Lock()
 				a.reporting = true
 				r.mu.Unlock()
-				return r.report(ctx, as)
+				reportErr := r.report(ctx, as)
+				if isCompletionPending(reportErr) {
+					strict, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
+					if err != nil {
+						return &completionPending{errors.Join(reportErr, err)}
+					}
+					if strict != nil {
+						// Hello can record Stop while this executor is present.
+						// Preserve retry spacing without blocking that control.
+						select {
+						case <-ctx.Done():
+						case <-runCtx.Done():
+						case <-time.After(r.cfg.RetryDelay):
+						}
+					}
+				}
+				return reportErr
 			}
 		default:
 			return fmt.Errorf("runner: run %s has unknown phase %q", runID, run.Phase)
@@ -750,7 +766,17 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	// execute has confirmed the process stopped before entering reporting.
 	if ok {
 		// Facts go out before the result that ends the run's credential.
-		if err := r.retry(ctx, func() error { return r.flushEvents(ctx, as) }); err != nil {
+		flush := func() error { return r.flushEvents(ctx, as) }
+		var eventErr error
+		if strictResume != nil {
+			// A durable Stop may arrive while the credential still works.
+			// Yield uncertain uploads to Hello instead of retrying forever
+			// inside a report that cannot reread that independent control.
+			eventErr = flush()
+		} else {
+			eventErr = r.retry(ctx, flush)
+		}
+		if err := eventErr; err != nil {
 			if strictResume != nil {
 				r.requestReconcile()
 				return &completionPending{err}
@@ -760,7 +786,11 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			}
 			r.cfg.Log.ErrorContext(ctx, "tend rejected run events", "run_id", as.RunID, "err", err)
 		}
-		op, err := r.send(ctx, runCredential(as), &req.Envelope)
+		send := r.send
+		if strictResume != nil {
+			send = r.sendOnce
+		}
+		op, err := send(ctx, runCredential(as), &req.Envelope)
 		if strictResume != nil {
 			if err != nil {
 				r.requestReconcile()

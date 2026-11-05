@@ -821,7 +821,10 @@ worktree/terminal/pane/session/runtime/launch/turn 完整一致，且当前原 t
 只以 lease active 或健康主机验收。首次附着只接回 started journal；最终阶段仅恢复同一
 严格许可下已持久记录的真实 worker 结果，不能结算旧 give-up/release。严格附着的 setup、
 观察和本地事件保存失败保持 pending；最终请求只有业务成功回执才清理，accepted 或未知
-结果保留原请求身份。最终请求或前置事件上传失败均显式唤醒 Hello 对账，不依赖其他库存变化。
+结果保留原请求身份。strict 最终请求和前置事件仅作一次现有请求超时内的上传尝试；
+未知结果保留原请求/事件，显式唤醒 Hello 对账以观察后续 Stop；strict pending 报告在
+退出前沿既有 RetryDelay 等待，Stop/runner 取消可提前打断，避免成功 Hello 绕过退避。
+不依赖凭据撤销、进程重启或其他库存变化。普通 legacy 的 transport retry 语义保持不变。
 另一个 authenticated Hello 的独立 Stop 可结束同一原 journal
 责任；它以原 Assignment/lease 摘要持久化，不清 strict 约束，不将 Forbidden 当业务成功。
 物理停止后，在 Done 同一事务保存原请求/事件历史再退出 pending；原 server 业务回执

@@ -1,6 +1,8 @@
 package journal
 
 import (
+	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -68,20 +70,46 @@ func TestCleanupPreservesRegisteredOriginalAndArtifacts(t *testing.T) {
 
 func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
-	j := open(t, path)
+	// Build the committed historical schema directly. Downgrading a current
+	// database version would leave tables introduced after version 14.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries[:14] {
+		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(t.Context(), string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
-	if err := j.RegisterUsageSource(t.Context(), source); err != nil {
+	state, err := json.Marshal(source)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Recreate the committed v14 schema before the rollout locator table existed.
-	if _, err := j.db.ExecContext(t.Context(), "DROP TABLE rollout_sources; PRAGMA user_version=14"); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO native_usage_sources(source_id,run_id,state_json) VALUES(?,?,?)`, source.ID, source.RunID, string(state)); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Close(); err != nil {
+	if _, err := db.ExecContext(t.Context(), "PRAGMA user_version=14"); err != nil {
 		t.Fatal(err)
 	}
-	j = open(t, path)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j := open(t, path)
 	defer j.Close()
+	var version int64
+	if err := j.db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&version); err != nil || version != CurrentVersion {
+		t.Fatal("historical journal did not migrate to the current version", version, err)
+	}
 	sources, err := j.UsageSources(t.Context())
 	if err != nil || len(sources) != 1 || sources[0].Cursors["original"].Offset != 42 {
 		t.Fatal(sources, err)
