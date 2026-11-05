@@ -14,6 +14,12 @@
 4. 保留 main 的 D174/D175，将 Capability 当前设计引用改为 D176；旧提交内 D174 继续可追溯。更新验收矩阵的整合/迁移补充。仅串行 nice19 的必要定向 Go/协议/类型/格式验证，所有临时输出在当前 run scratch。不得运行 full/race 全套或创建完整 clone/测试环境；heavy HOLD 未释放。独立 review 不从本 worker 启动，原链另行针对新 head 执行。
 5. 普通 push 原 PR 分支，记录 fresh main/PR head/base、tree、任务及整合前后 diff、迁移兼容与初始失败/结果。查询实际 CI workflow/check/ruleset；queued/running 不作 passed。required CI、完整本地检查、新独立验收和父版本化交付门全部保留，无 merge/deploy/install 权限。
 
+## CI 独立 DOM 入口兼容补充（编码前）
+
+整合提交 `0acc4dea` 已普通 push，PR base 读回为 fresh main、状态 MERGEABLE。CI 42062467939 的 web job 确切失败是 `layout-fixture.test.ts` 把独立 `test:task-capabilities` 当成需要共享 app assets 的 layout 脚本；该入口实际只运行隔离 React DOM/Vite/Playwright，不启动 Tend。其他已运行单测为 426 passed，此失败不等于产品 DOM 行为失败。
+
+保留所有使用 app assets 的 layout 的 isolated build runner 断言，只为这个已登记的精确 standalone 命令增加明确分支；不对其他入口开通 bypass、不改变产品或 CI workflow、不创建 Tend 测试环境。先本地定向复现 guard 的失败，再修断言并串行运行 fixture/group/genapi 与 Capability 相关单测、格式/lint。保 `0acc4dea`、该失败日志及原 12 个提交；新增原分支后续 commit，重新读取新 head/CI。Go 产品源码未变化，原 Go targeted 仅作相同 Go bytes 的可复用证据，最终 full、required CI、新独立 review/验收仍待各自门，heavy HOLD 不变。
+
 ## 当前与保留 pin 渲染修复计划（编码前）
 
 本轮接续对 `aa01c7fe` 的独立验收 finding。后端 R6 分页修复保留；owner v1、原分支/PR244 及全部历史不变。
