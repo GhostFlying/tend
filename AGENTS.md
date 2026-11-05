@@ -123,6 +123,7 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 ## 4. 测试
 
 - `make check` = 格式检查 + vet + staticcheck + `go test -race ./...`，加上 Web 的类型检查、lint、prettier 检查、vitest 和构建。允许本地检查尚未结束时先 commit、push 并创建 PR，让 GitHub CI 与本地检查并行；PR 描述必须如实标注待完成的检查。合入前，本地完整 `make check` 和 PR 所需 CI 都必须通过；CI 在每个 PR 上执行同样的检查，外加 Windows 和 macOS 的交叉编译。
+- 完整本地检查复用 `make check` 的有效 CPU 自动预算（`CHECK_JOBS=0`），不要在外部启动器无理由固定为串行。多 CPU 下显式 `CHECK_JOBS=1` 必须设置 `CHECK_SERIAL_REASON` 记录原因，例行资源例外由执行者据实际预算决定，无需另索审批。八 CPU 的默认预算是两组并行、App/suite 各两片、子进程 GOMAXPROCS=2、包并行=1，E2E 独占；其他容量自动调整。启动时核对预算行，用阶段起止时间核实重叠。长检查向现有协调者报告当前 phase、原逐例日志中的 case 与 elapsed，不新增巡检计时器、不自动重跑；所有原门槛和超时保持。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
 - v0.1 §17.2 的故障场景对应的测试命名为 `TestFault_*`，便于对照检查。
