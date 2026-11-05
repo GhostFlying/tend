@@ -2,7 +2,10 @@ package orca
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -24,7 +27,33 @@ func (w *worker) recordObservedRoot(ctx context.Context, a Agent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return w.recordRootObservation(ctx, a)
+	before := w.st
+	trackFact := w.ws.opts.Agent == protocol.AgentTraex && a.AgentType == "traex" && a.RootTurn != nil
+	if trackFact {
+		fact := *a.RootTurn
+		fact.ObservedAt = 0 // Sampling time does not change the observed fact.
+		body, err := json.Marshal(fact)
+		if err != nil {
+			return err
+		}
+		fingerprint := fmt.Sprintf("%x", sha256.Sum256(body))
+		if w.st.RootObservationFactHash != fingerprint {
+			w.st.RootObservationFactHash = fingerprint
+			// The canonical recorder persists the new fingerprint and one
+			// revision together before publishing. Its native identity stays
+			// unchanged; this key is only its observation deduplication state.
+			w.st.RootObservationIdentity = ""
+		}
+	}
+	err := w.recordRootObservation(ctx, a)
+	if err != nil && trackFact {
+		// A failed save must not make a later attempt skip persistence.
+		w.st.RootObservationPhase = before.RootObservationPhase
+		w.st.RootObservationIdentity = before.RootObservationIdentity
+		w.st.RootObservationRevision = before.RootObservationRevision
+		w.st.RootObservationFactHash = before.RootObservationFactHash
+	}
+	return err
 }
 
 // observeTraexRoot supplements only an otherwise bound native history snapshot
