@@ -183,6 +183,16 @@ func retainedRunReconciliation(ctx context.Context, q store.Querier, id string) 
 				break
 			}
 		}
+		// Current inventory may retire a definition while its exact original
+		// pin remains available for continuation. This never selects new work.
+		if !available && runtimeSupportsAgentContinuation(&rt.Runtime) && rt.Runtime.ContinuationBackend == pin.BackendID {
+			for _, executor := range rt.Runtime.AgentContinuations {
+				if executor.Pin == *pin && executor.Available {
+					available = true
+					break
+				}
+			}
+		}
 		if !available {
 			s.Blockers = append(s.Blockers, "original_executor_unavailable")
 		}

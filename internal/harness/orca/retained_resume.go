@@ -28,5 +28,6 @@ func (w *worker) beginRetained(ctx context.Context) error {
 	if a.RootTurn.State != "running" && (a.RootTurn.State != "completed" || a.RootTurn.Operations != "settled") {
 		return fmt.Errorf("%w: original root cannot be attached without an independent continuation", harness.ErrRetainedResumePending)
 	}
+	w.retainedAttached = true
 	return nil
 }

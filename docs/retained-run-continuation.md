@@ -64,3 +64,8 @@ worker 失败关闭原 terminal。明确 Stop、paused、held 仍遵循既有独
 同一事务保存为未确认历史，再移出 pending 队列；server 的原 Accepted/Succeeded
 回执保持原文。消息投递等专用回执仍按其独立的 post-stop 凭据先对账。重启保留
 Stop 许可；后续 Retain、Continue 或新的附着许可使旧 Stop 失效。
+
+显式 Pause 仍中断本次已验证附着的原 terminal；fence/shutdown 不获得自动输入权限，
+未知或未附着的原生身份同样不发送输入。当前库存移除定义后，已协商 continuation
+能力与原 backend 下的完整精确 pin 可由 AgentContinuations 提供可用性；不能用新的
+定义、revision、provider 或 snapshot 代替原 pin，也不将该库存作为新任务候选。
