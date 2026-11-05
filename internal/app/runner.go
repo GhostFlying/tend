@@ -1177,6 +1177,7 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 	now := a.now().UnixMilli()
 	n := 0
 	lapsed := 0
+	wakeQueued := false
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		expired, err := store.ListExpiredLeases(ctx, tx.Q(), now)
 		if err != nil {
@@ -1207,12 +1208,20 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 			}); err != nil {
 				return err
 			}
+			queued, err := a.recordManagerLeaseProblem(ctx, tx, run, l.LeaseID, time.UnixMilli(now))
+			if err != nil {
+				return err
+			}
+			wakeQueued = wakeQueued || queued
 			n++
 		}
 		return nil
 	})
 	if err == nil && lapsed > 0 {
 		a.notifyChange()
+	}
+	if err == nil && wakeQueued && a.notifier != nil {
+		a.notifier.Notify()
 	}
 	return n, err
 }

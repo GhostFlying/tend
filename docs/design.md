@@ -600,6 +600,8 @@ D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适�
 
 交接与容量合同：新执行按 `issue-question-handoffs-v1` 冻结分轮交接能力。提问持久保存原问题并由 runner 确认真正停止后结束本轮、释放 slot；代表 Issue owner 的执行自动提交父 Issue owner，根 Issue 提交唯一主协调 Agent。答复与退出确认均持久后才创建接续 Action/Run，沿用原 spec、artifact 和 generation，不消耗实现尝试额度，不复活旧 Run。固定原主机、执行配置和 workspace 互斥；可恢复的实现会话保留原生 thread，验收与不支持原生接续的适配器通过原问题及完整合同重建上下文。协调与执行均严格使用配置容量，不提供额外名额。新合同仅向明确协商的执行启用，历史 Run 保留原等待合同并受控排空；wire 仍为 2/1。详见 docs/plans/issue-run-handoffs.md。Agent 决策和行动完成不能用作真实人工授权证据。
 
+manager（含 receipt-only 对账运行）真实失租转为 unknown 时，同事务按原 run/lease 建立唯一技术 action Attention，绑定原执行事实并交实际父 Issue 负责人，根到 main，复用上述责任通知与逐级升级；责任已交接时先由当前 owner 承接。发现者记录为 system，不冒充 manager 业务请求。原 unknown、lease、冻结 pin、native pending 与输入保持不变，不自动重派或认定业务失败；没有真实失租的 pause 或条件等待不产生故障。此触发不回填历史已失租运行；历史技术责任须按原身份单独补齐，不以部署替代恢复。无需迁移、API/CLI 或 runner wire 变更。见 [实施计划](plans/manager-lease-reconciliation-attention.md)。
+
 ## D152：验收后交付责任与 owner 重开恢复
 
 Task 的 completed 仅表示冻结产物通过独立验收。canonical Issue 在同一完成事务中按原完成事件建立独立交付核对义务，保存 task、acceptance、候选版本、问题、后续执行和结清证据；计划阶段为空或完成通知被确认均不能消除该责任。关闭与取消终点同时校验这条账本。历史已完成任务仅补待核对事实，不补 owner 批准、不批量提问、不重开历史事项或重放执行。
