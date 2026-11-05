@@ -10,6 +10,7 @@ import type { TaskDetail, ArtifactView, AcceptanceView } from "../api/generated/
 import { useServices } from "../app/services.tsx";
 import { DecisionCard } from "../decisions/DecisionCard.tsx";
 import { currentWork } from "../tasks/facts.ts";
+import { TaskCapabilityFacts } from "../tasks/CapabilityFacts.tsx";
 import { TaskExecution } from "../tasks/Execution.tsx";
 import { WorkspaceFacts } from "../tasks/WorkspaceFacts.tsx";
 import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
@@ -152,6 +153,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
       {tab === "supplement" && <RunConversation task={t} controls={<TaskControls task={t} />} />}
       <div hidden={tab !== "execution"}>
         <TaskExecution task={t} />
+        <TaskCapabilityFacts task={t} />
         <LogSection task={t} />
       </div>
       {!!t.issue_ids?.length && (

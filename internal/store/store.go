@@ -256,6 +256,18 @@ func (s *Store) migrate(ctx context.Context, upTo int) error {
 		if current > len(migrations) {
 			return fmt.Errorf("store: database schema version %d is newer than this binary (%d)", current, len(migrations))
 		}
+		// An unreleased capability candidate used 88 before main allocated it.
+		// Do not interpret that database as the committed main history or try
+		// to repair it by replaying unrelated migrations over its original data.
+		if current >= 88 {
+			var name string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT name FROM schema_migrations WHERE version=88`).Scan(&name); err != nil {
+				return fmt.Errorf("store: read migration 88 identity: %w", err)
+			}
+			if name != migrations[87].name {
+				return fmt.Errorf("store: migration history conflict at version 88: recorded %q, expected %q", name, migrations[87].name)
+			}
+		}
 		for _, m := range migrations[current:] {
 			if _, err := tx.Exec(ctx, m.sql); err != nil {
 				return fmt.Errorf("store: apply migration %04d_%s: %w", m.version, m.name, err)

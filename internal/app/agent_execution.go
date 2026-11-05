@@ -31,6 +31,16 @@ func runtimeSupportsAgentExecution(r *protocol.RunnerRuntime) bool {
 
 func checkNamedRunRecovery(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) error {
 	if runtimeSupportsAgentExecution(runtime) {
+		if runtimeSupportsCapabilityDeclarations(runtime) {
+			return nil
+		}
+		var count int
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_capability_bindings b JOIN runs r USING(run_id) WHERE r.host_id=? AND r.observed_state NOT IN ('finished','failed') AND (?=0 OR COALESCE(json_extract(b.binding_json,'$.match_policy'),'')<>'')`, host, runtimeSupportsExecutorCapabilities(runtime)).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "capability-constrained runs require their declaration scheduling contract")
+		}
 		return nil
 	}
 	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
@@ -51,4 +61,15 @@ func checkNamedRunRecovery(ctx context.Context, q store.Querier, host string, ru
 
 func runtimeSupportsAgentContinuation(r *protocol.RunnerRuntime) bool {
 	return runtimeSupportsAgentExecution(r) && slices.Contains(r.Capabilities, protocol.CapabilityAgentContinuation)
+}
+
+func runtimeSupportsExecutorCapabilities(r *protocol.RunnerRuntime) bool {
+	return runtimeSupportsAgentExecution(r) && r.JournalVersion >= 16 && slices.Contains(r.Capabilities, protocol.CapabilityExecutorEvidence)
+}
+
+func runtimeSupportsCapabilityDeclarations(r *protocol.RunnerRuntime) bool {
+	return runtimeSupportsAgentExecution(r) && r.JournalVersion >= 17 && slices.Contains(r.Capabilities, protocol.CapabilityExecutorDeclarations)
+}
+func runtimeSupportsCapabilityInventory(r *protocol.RunnerRuntime) bool {
+	return runtimeSupportsExecutorCapabilities(r) || runtimeSupportsCapabilityDeclarations(r)
 }

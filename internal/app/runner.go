@@ -128,7 +128,7 @@ func roleOf(kind protocol.ActionKind) protocol.RunRole {
 }
 
 // buildAssignment describes a run to the runner that will execute it.
-func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lease store.LeaseRow, ttl time.Duration) (protocol.Assignment, error) {
+func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lease store.LeaseRow, ttl time.Duration, now int64) (protocol.Assignment, error) {
 	if run.Role == protocol.RoleIssueManager {
 		return buildManagerAssignment(ctx, q, run, lease, ttl)
 	}
@@ -236,6 +236,29 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		}
 		as.ConcurrencyFeedback = slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAdaptiveConcurrency)
 		as.Execution = pin
+		if binding, err := store.GetRunCapabilityBinding(ctx, q, run.RunID); err == nil {
+			if !runtimeSupportsCapabilityDeclarations(&runtime.Runtime) && (binding.MatchPolicy != "" || !runtimeSupportsExecutorCapabilities(&runtime.Runtime)) {
+				return as, protocol.Errorf(protocol.CodeInvalidTransition, "runner cannot recover capability-constrained execution")
+			}
+			match, err := currentRunCapabilityMatch(ctx, q, binding, runtime.Runtime, now)
+			if err != nil {
+				return as, err
+			}
+			if runtimeSupportsCapabilityDeclarations(&runtime.Runtime) {
+				binding.CurrentMatch = &match
+			}
+			if recovery, err := store.GetRunCapabilityRevalidation(ctx, q, run.RunID); err == nil {
+				if match.State == "eligible" && slices.Equal(recovery.EvidenceIDs, match.EvidenceIDs) {
+					binding.Revalidation = &recovery
+				}
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return as, err
+			}
+			as.CapabilityBinding = &binding
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return as, err
+		}
+
 		as.Workspace.BackendID = pin.BackendID
 	} else if !errors.Is(e, store.ErrNotFound) {
 		return as, e
@@ -343,6 +366,14 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 
+	if !runtimeSupportsCapabilityDeclarations(p.Runtime) {
+		for i := range executors {
+			executors[i].CapabilitySupport = false
+		}
+		for i := range continuations {
+			continuations[i].CapabilitySupport = false
+		}
+	}
 	schedulingHost := scheduler.Host{
 		QuestionHandoffs: p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 		IssueOwners:      p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
@@ -392,6 +423,28 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if err := tx.InsertRunExecution(ctx, run.RunID, *execution); err != nil {
 			return Outcome{}, err
 		}
+		if refs := scheduler.RequiredCapabilities(pick); len(refs) > 0 {
+			binding := protocol.RunCapabilityBinding{MatchPolicy: "declaration_v1", Evidence: []protocol.ExecutorCapabilityEvidence{}, Required: slices.Clone(refs), RequiredSHA256: protocol.CapabilityRequiredDigest(refs), EvidenceIDs: []string{}, Pin: *execution, BoundAtMillis: now}
+			// A handoff can retain the original inventory receipt while an unrelated
+			// edit changes the current enclosing snapshot. Validate declarations at the
+			// selected original pin, just as reconnect does; never substitute a new pin.
+			runtime, err := store.GetHostRuntime(ctx, q, host.HostID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			match, err := currentRunCapabilityMatch(ctx, q, binding, runtime.Runtime, now)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if match.State != "eligible" {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "capability declaration became ineligible")
+			}
+
+			if err := tx.InsertRunCapabilityBinding(ctx, run.RunID, binding); err != nil {
+				return Outcome{}, err
+			}
+		}
+
 	}
 
 	if execution != nil && !(pick.Manager != nil && pick.Manager.ReceiptOnly) {
@@ -450,7 +503,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if _, err = tx.Exec(ctx, `INSERT INTO workspace_runs(run_id,workspace_id) VALUES(?,?)`, run.RunID, resource.WorkspaceID); err != nil {
 		return Outcome{}, fmt.Errorf("app: bind workspace run: %w", err)
 	}
-	as, err := buildAssignment(ctx, q, run, lease, x.LeaseTTL)
+	as, err := buildAssignment(ctx, q, run, lease, x.LeaseTTL, x.Now.UnixMilli())
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -541,6 +594,8 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 				return Outcome{}, err
 			}
 		}
+		res.ExecutorCapabilities = runtimeSupportsExecutorCapabilities(p.Runtime)
+		res.CapabilityDeclarations = runtimeSupportsCapabilityDeclarations(p.Runtime)
 		res.AgentExecution = runtimeSupportsAgentExecution(p.Runtime)
 		res.AgentInventory = protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityAgentInventory)
 	}
@@ -679,7 +734,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 				return Outcome{}, err
 			}
 			lease.ExpiresAt = expires
-			as, err := buildAssignment(ctx, q, run, lease, x.LeaseTTL)
+			as, err := buildAssignment(ctx, q, run, lease, x.LeaseTTL, x.Now.UnixMilli())
 			if err != nil {
 				return Outcome{}, err
 			}

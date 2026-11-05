@@ -138,6 +138,15 @@ func (r *Runner) RegisterAgentInventory(ctx context.Context) error {
 	if local.Revision == 0 || local.Projection == nil || (local.Projection.FormatVersion == 2 && runtime.Protocol < 2) {
 		return nil
 	}
+	if local.Projection.CapabilityVersion != 0 && !slices.Contains(runtime.Capabilities, protocol.CapabilityExecutorEvidence) && !slices.Contains(runtime.Capabilities, protocol.CapabilityExecutorDeclarations) {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "server does not support capability declarations")
+	}
+	r.controlMu.Lock()
+	declarationSupported := r.executorCapabilitiesSupported || r.capabilityDeclarationsSupported
+	r.controlMu.Unlock()
+	if local.Projection.CapabilityVersion != 0 && !declarationSupported {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "capability declarations require mutual hello negotiation")
+	}
 	if local.Revision > math.MaxInt64 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "local inventory revision exceeds wire range")
 	}
@@ -236,6 +245,7 @@ func (r *Runner) AgentRegistrationStatus(ctx context.Context) (protocol.LocalAge
 
 // AgentInventoryHandler extends the existing private control listener only.
 func (r *Runner) AgentInventoryHandler(next http.Handler) http.Handler {
+	next = r.CapabilityHandler(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		register := q.Method == http.MethodPost && q.URL.Path == "/agents/register"
 		status := q.Method == http.MethodGet && q.URL.Path == "/agents/registration"

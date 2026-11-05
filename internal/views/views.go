@@ -103,7 +103,13 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return d, err
 		}
-		d.Runs = append(d.Runs, protocol.RunView{Preparation: failure, RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
+		var capabilityBinding *protocol.RunCapabilityBinding
+		if binding, err := store.GetRunCapabilityBinding(ctx, q, r.RunID); err == nil {
+			capabilityBinding = &binding
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return d, err
+		}
+		d.Runs = append(d.Runs, protocol.RunView{CapabilityBinding: capabilityBinding, Preparation: failure, RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
 	}
 	arts, err := store.ListArtifactsByTask(ctx, q, row.TaskID)
 	if err != nil {

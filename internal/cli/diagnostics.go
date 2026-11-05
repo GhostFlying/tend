@@ -180,6 +180,9 @@ func runDoctor(ctx context.Context, e *Env, args []string) error {
 }
 
 func runLocalAgentCommand(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "capabilities" {
+		return runLocalCapabilityCommand(ctx, e, args[1:])
+	}
 	if len(args) == 0 {
 		return usagef("agents local status|validate|reload|reconcile|register|registration --socket <path>")
 	}

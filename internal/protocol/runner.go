@@ -75,25 +75,29 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
-	NativeUsage        bool              `json:"native_usage,omitempty"`
-	RolloutPreview     bool              `json:"rollout_preview,omitempty"`
-	DeploymentID       string            `json:"deployment_id,omitempty"`
-	AgentContinuation  bool              `json:"agent_continuation,omitempty"`
-	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
-	ProtocolMax        int64             `json:"protocol_max,omitempty"`
-	AgentExecution     bool              `json:"agent_execution,omitempty"`
-	AgentInventory     bool              `json:"agent_inventory,omitempty"`
-	RepositoryBindings bool              `json:"repository_bindings,omitempty"`
-	Control            *RunnerControl    `json:"control,omitempty"`
+	ExecutorCapabilities bool              `json:"executor_capabilities,omitempty"`
+	NativeUsage          bool              `json:"native_usage,omitempty"`
+	RolloutPreview       bool              `json:"rollout_preview,omitempty"`
+	DeploymentID         string            `json:"deployment_id,omitempty"`
+	AgentContinuation    bool              `json:"agent_continuation,omitempty"`
+	RetainedExecutions   []RunExecutionPin `json:"retained_executions,omitempty"`
+	ProtocolMax          int64             `json:"protocol_max,omitempty"`
+	AgentExecution       bool              `json:"agent_execution,omitempty"`
+	AgentInventory       bool              `json:"agent_inventory,omitempty"`
+	RepositoryBindings   bool              `json:"repository_bindings,omitempty"`
+	Control              *RunnerControl    `json:"control,omitempty"`
 	// LeaseTTLMillis is the lease duration tend currently grants.
 	LeaseTTLMillis int64        `json:"lease_ttl_ms"`
 	Runs           []RunVerdict `json:"runs"`
 	Reassigned     []Assignment `json:"reassigned"`
+
+	CapabilityDeclarations bool `json:"capability_declarations,omitempty"`
 }
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	ConcurrencyFeedback bool `json:"concurrency_feedback,omitempty"`
+	CapabilityBinding   *RunCapabilityBinding `json:"capability_binding,omitempty"`
+	ConcurrencyFeedback bool                  `json:"concurrency_feedback,omitempty"`
 	// PreparationDiagnostics permits the optional release diagnosis. Older
 	// servers omit it, so new runners retain the original release payload.
 	PreparationDiagnostics bool                     `json:"preparation_diagnostics,omitempty"`

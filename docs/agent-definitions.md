@@ -110,3 +110,69 @@ tend agents concurrency history --issue issue-example --session native-session-e
 部分参数更新只在首次执行时读取当前值补齐；重放 update 应使用原完整 --data
 或 --file，或完整的 name/min/initial/max 标志，不能重读新默认值。
 也可将 dry-run 原信封交给 `tend request replay`，以原 request_id 和版本恢复。
+
+## 显式 Capability 声明（D176）
+
+Capability 是用户配置标签，与 categories、CLI/model、工具实际可用性分别表达。
+`image_gen@1` 已有定义可用作标签；旧定义中的工具策略元数据保留历史，不是调度门。
+创建其他标签使用具名 CLI；只读与写入分别沿 owner API 和原 request_id/CAS：
+
+```sh
+tend capability put render --revision 0 --data '{"title":"Render","description":"User-declared label","state":"active","contract_version":1,"verification_policy":"declaration_v1"}'
+tend capability list --state active --limit 50
+tend capability show image_gen --definition-revision 1
+tend capability history image_gen --limit 50
+```
+
+在完整本机配置根节点加入 `"capability_version": 1`，并在用户明确选中的
+Agent 上加入 `"capabilities": [{"capability_id":"image_gen","definition_revision":1}]`。
+例如可以为使用官方登录 Codex 的既有 Agent 明确声明此标签；登录和工具可用性
+由该入口原有配置负责，本功能不读取凭据，也不按 `cli: "codex"` 自动赋值。
+逐项修改一个 Agent，或在同一个完整配置中批量修改用户明确选定的多个 Agent，
+都先写入 runner bootstrap 中 `agents.source_file` 指向的完整配置文件，再走同一
+validate → reload → register 路径；命令不接收任意文件路径。修改每个 Agent 的声明须递增它的
+revision，保留其 env/local_id、唯一 runtime、CLI/model/effort 与其他 Agent。
+本机 reload 与服务端 register 会拒绝复用同一 Agent revision 的不同声明，
+包括删除后重加 Agent；此时须提高 Agent revision，再用新的业务 request_id 提交。
+本机错误码为 `capability_revision_conflict`，服务端为 `conflict_payload`。
+原已接受请求的 replay、历史快照和相同旧声明的恢复不变。
+
+```sh
+tend agents local validate --socket "$TEND_RUNNER_SOCKET"
+tend agents local reload --socket "$TEND_RUNNER_SOCKET" --revision 1 --request-id "$RELOAD_REQUEST"
+tend agents local register --socket "$TEND_RUNNER_SOCKET"
+tend agents local registration --socket "$TEND_RUNNER_SOCKET"
+tend agents capabilities list --environment runner-a --capability image_gen --limit 50
+tend agents capabilities show runner-a cedar
+tend agents capabilities revisions runner-a cedar --agent-revision 2 --limit 50
+```
+
+本机命令的完整输入和 request 恢复方式见各命令 `--help`；reload 的原请求结果
+未知时先用 `agents local reconcile` 对账，同 ID 不改 payload/CAS。
+声明修订查询对应 `GET /api/v1/agent-capabilities/{environment}/{agent}/revisions`，
+支持 agent_revision、after、limit；每项保留定义、Agent revision、声明、登记版本和
+snapshot/hash。旧实证历史另用 `agents capabilities history`，不能混称声明历史。
+
+Task 的完整 create/update 输入中，两 role 分别配置：
+
+```json
+{
+  "implementation": {
+    "category_id": "implementation",
+    "required_capabilities": [{"capability_id":"image_gen","definition_revision":1}]
+  },
+  "acceptance": {"category_id":"formal-review"}
+}
+```
+
+这是 `agent_selection` 对象的示例，须放入完整 Task 请求，不是可单独发送的请求。
+未声明者不会领取 required image_gen 的任务；空 required 不增加标签门，验收角色
+不会继承实施角色要求。`tend task capability-explain <task-id> --role implement`
+与 `--role accept` 分别查询，支持 spec-version、候选筛选和 after/limit。
+只读查询不验证工具或启动会话；离线/容量等待为 pending，未声明、revision 不匹配
+或不支持声明协议为 unavailable。修订配置不回写既有 spec/run/pin。
+匹配仍受普通 executor 可用性、原单入口身份、workspace/backend 和共享预算约束。
+
+本节命令是配置路径示例，未在任何生产 Agent 上执行，不代表已配置或部署。
+可选 legacy 工具实证 verify/status/reconcile 仅用于历史诊断/原请求对账，不参与
+声明匹配或普通 Start；本功能不要求真实生图和费用观测。

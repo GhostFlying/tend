@@ -90,6 +90,11 @@ func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A historical fixture must not pre-create capability or retained tables.
+	var futureTables int
+	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('capability_verifications','run_capability_receipts','retained_run_resumes')`).Scan(&futureTables); err != nil || futureTables != 0 {
+		t.Fatal("version-14 fixture contains future tables", futureTables, err)
+	}
 	source := UsageSource{ID: "usage", RunID: "run", Coverage: "registered", Cursors: map[string]nativeusage.Cursor{"original": {Offset: 42}}}
 	state, err := json.Marshal(source)
 	if err != nil {

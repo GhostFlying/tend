@@ -329,6 +329,21 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 		return s.app.Execute(ctx, p, env, app.RegisterNativeUsage{})
 	case protocol.OpRunnerUsageUpload:
 		return s.app.Execute(ctx, p, env, app.UploadNativeUsage{})
+	case protocol.OpRunnerCapabilityEvidenceStatus:
+		if env.Target.Type != "host" || env.Target.ID != p.Subject {
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "evidence request belongs to this runner")
+		}
+		var input protocol.AgentInventoryStatusPayload
+		if err := decodeStrict(env.Payload, &input); err != nil {
+			return protocol.Operation{}, err
+		}
+		value, err := s.app.CapabilityEvidenceRequest(ctx, p, input)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, value)
+	case protocol.OpRunnerCapabilityEvidence:
+		return s.app.Execute(ctx, p, env, app.ReportCapabilityEvidence{})
 	case protocol.OpRunnerInventoryRegister:
 		return s.app.Execute(ctx, p, env, app.RegisterAgentInventory{})
 	case protocol.OpRunnerInventoryStatus:
@@ -507,6 +522,9 @@ func (s *Server) SweepLeases(ctx context.Context, interval time.Duration) {
 		}
 		if _, err := s.app.SweepRunnerPresence(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "runner presence sweep failed", "err", err)
+		}
+		if err := s.app.SweepCapabilityWaits(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "capability wait sweep failed", "err", err)
 		}
 		if n, err := s.app.ExpireLeases(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "lease sweep failed", "err", err)

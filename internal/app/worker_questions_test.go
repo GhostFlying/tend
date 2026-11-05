@@ -295,7 +295,7 @@ func TestWorkerQuestionCapabilityGuardsRecoveryAndAssignment(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		assignment, err := buildAssignment(t.Context(), tx.Q(), run, lease, h.app.leaseTTL)
+		assignment, err := buildAssignment(t.Context(), tx.Q(), run, lease, h.app.leaseTTL, h.clock.Now().UnixMilli())
 		if err != nil {
 			return err
 		}

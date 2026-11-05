@@ -11,6 +11,7 @@ export const layoutGroups: Record<string, string[]> = {
     "test:decision-layout",
     "test:work-items-layout",
     "test:agent-directory",
+    "test:task-capabilities",
     "test:delivery-refresh",
     "test:navigation-layout",
   ],

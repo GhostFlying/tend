@@ -13,6 +13,12 @@ import (
 // HostContinuations are usable only by the exact responsibility pin that caused
 // their retention. They are never merged into HostExecutors' fresh candidates.
 func HostContinuations(ctx context.Context, q store.Querier, host string, now int64) ([]scheduler.Executor, error) {
+	return hostContinuations(ctx, q, host, now, false)
+}
+
+// includeUnavailable retains ordinary readiness facts for read-only explanations.
+// Scheduling callers always use the public function with this flag false.
+func hostContinuations(ctx context.Context, q store.Querier, host string, now int64, includeUnavailable bool) ([]scheduler.Executor, error) {
 	runtime, err := store.GetHostRuntime(ctx, q, host)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
@@ -20,7 +26,7 @@ func HostContinuations(ctx context.Context, q store.Querier, host string, now in
 	if err != nil {
 		return nil, err
 	}
-	if !runtime.Online || !protocol.RunnerProtocolSupported(runtime.Runtime.Protocol) || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation) || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentExecution) || (now > 0 && now-runtime.LastHeartbeatAt >= 60000) {
+	if (!includeUnavailable && !runtime.Online) || !protocol.RunnerProtocolSupported(runtime.Runtime.Protocol) || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation) || !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentExecution) || (!includeUnavailable && now > 0 && now-runtime.LastHeartbeatAt >= 60000) {
 		return nil, nil
 	}
 	required, err := store.RequiredAgentExecutions(ctx, q, host)
@@ -29,7 +35,7 @@ func HostContinuations(ctx context.Context, q store.Querier, host string, now in
 	}
 	out := []scheduler.Executor{}
 	for _, e := range runtime.Runtime.AgentContinuations {
-		if !e.Available || !slices.Contains(required, e.Pin) {
+		if (!includeUnavailable && !e.Available) || !slices.Contains(required, e.Pin) {
 			continue
 		}
 		inv, err := store.GetAgentInventoryAt(ctx, q, e.Pin)
@@ -45,7 +51,7 @@ func HostContinuations(ctx context.Context, q store.Querier, host string, now in
 				binding = *a.OwnerBinding
 			}
 			if a.Identity == e.Pin.Identity && a.Revision == e.Pin.AgentRevision && binding == e.Pin.Runtime && a.RequestedModel == e.Pin.Profile.Model && a.RequestedEffort == e.Pin.Profile.Effort {
-				out = append(out, scheduler.Executor{Continuation: true, Pin: e.Pin, Categories: slices.Clone(a.Categories)})
+				out = append(out, scheduler.Executor{Continuation: true, Pin: e.Pin, Categories: slices.Clone(a.Categories), DeclaredCapabilities: slices.Clone(a.Capabilities), CapabilitySupport: runtime.Runtime.JournalVersion >= 17 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityExecutorDeclarations), CapabilityNowMillis: now})
 			}
 		}
 	}

@@ -7,15 +7,21 @@ import { readFileSync } from "node:fs";
 
 afterEach(() => vi.unstubAllEnvs());
 
-test("every CI layout entry uses the isolated build runner", () => {
+test("CI layout entries isolate app assets or use the standalone DOM bundle", () => {
   const { scripts } = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
     scripts: Record<string, string>;
   };
   for (const [name, command] of Object.entries(scripts)) {
-    if (name.startsWith("test:"))
+    if (!name.startsWith("test:")) continue;
+    if (name === "test:task-capabilities") {
+      // This DOM regression builds its own in-memory Vite bundle and uses
+      // page.setContent. It neither reads shared app assets nor starts Tend.
+      expect(command).toBe("node scripts/task-capability-render.ts");
+    } else {
       expect(command).toMatch(/^node scripts\/layout-fixture\.ts scripts\//);
+    }
   }
 });
 

@@ -10,14 +10,15 @@ type ObservationScope struct {
 
 // RunObservation is a live ledger snapshot, not browser or filesystem evidence.
 type RunObservation struct {
-	Version     int64               `json:"version"`
-	Seq         int64               `json:"seq"`
-	ObservedAt  int64               `json:"observed_at"`
-	RunID       string              `json:"run_id"`
-	TaskID      string              `json:"task_id"`
-	SpecVersion int64               `json:"spec_version"`
-	WorkItems   []ObservedWorkItem  `json:"work_items"`
-	Deployment  *ObservedDeployment `json:"deployment,omitempty"`
+	CapabilityBinding *RunCapabilityBinding `json:"capability_binding,omitempty"`
+	Version           int64                 `json:"version"`
+	Seq               int64                 `json:"seq"`
+	ObservedAt        int64                 `json:"observed_at"`
+	RunID             string                `json:"run_id"`
+	TaskID            string                `json:"task_id"`
+	SpecVersion       int64                 `json:"spec_version"`
+	WorkItems         []ObservedWorkItem    `json:"work_items"`
+	Deployment        *ObservedDeployment   `json:"deployment,omitempty"`
 }
 
 type ObservedWorkItem struct {

@@ -232,6 +232,12 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 			}
 			out = append(out, harness.ToolSpec{Name: name, Description: description, InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedIssueResourceArgs{})))})
 		}
+		out = append(out, harness.ToolSpec{Name: "capabilities_list", Description: "Read versioned capability definitions; declarations and tool exposure do not prove execution success. No probing or writes.", InputSchema: exportSchema(json.RawMessage(argumentSchema(capabilityListArgs{})))})
+		out = append(out, harness.ToolSpec{Name: "capabilities_read", Description: "Read one exact capability definition revision, or current when revision is omitted.", InputSchema: exportSchema(json.RawMessage(argumentSchema(capabilityReadArgs{})))})
+		for _, name := range []string{"agents_capabilities_list", "agents_capabilities_read"} {
+			out = append(out, harness.ToolSpec{Name: name, Description: "Read declared capabilities, exact executor evidence and expiry; no verification or confirmation writes. Agent requires environment; use after/limit for pages.", InputSchema: exportSchema(json.RawMessage(argumentSchema(protocol.AgentCapabilityQuery{})))})
+		}
+		out = append(out, harness.ToolSpec{Name: "tasks_capability_explain", Description: "Explain this Issue Task's frozen role requirements and actual scheduling eligibility without probing or allocating a lease.", InputSchema: exportSchema(json.RawMessage(argumentSchema(taskCapabilityArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "agent_categories_list", Description: "Read the latest global Agent classifications; classification is not execution permission. Default active, limit 50, maximum 100.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedCategoryListArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "agents_runner_read", Description: "Read a runner host public registration, last executor observations and heartbeat presence separately. Reading neither probes nor changes runtime capability.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedRunnerReadArgs{})))})
 	}
@@ -508,6 +514,9 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return err
 		})
 		return hostedAnswer(value, err), true
+	}
+	if result, handled := s.hostedCapabilities(ctx, c, execution); handled {
+		return result, true
 	}
 	if c.Tool == "agent_categories_list" || c.Tool == "agents_runner_read" {
 		if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {

@@ -1050,3 +1050,56 @@ wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 
 ## D175：TraeX 原 rollout 的终态补证
 
 独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证只在原 observation record 位置的局部副本上发布真实事实，不覆盖冲突身份或已有确定原生结果；生命周期 Agent 始终沿用原 native-api 观测，补证不参与完成、恢复、控制或历史清理。每轮只发布一次 projection，不反复切换原弱观测与补证 revision，不创建会话或重发输入。TraeX 观测以持久语义指纹区分相同原生身份的 running 与后续终态/结束时钟/operations；排除采样时间，真实变化只推进一次 revision，相同事实及重启重放沿用原事件身份。指纹仅用于观测去重，不改变原生绑定或生命周期权限；旧 thread JSON 缺失字段仍可读取，首次补齐语义元数据可追加一次事实。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。
+
+## D176：执行 Capability 的声明、版本与冻结约束
+
+以下至“D176 范围修订”之前是旧候选的历史实现记录；native 资格门已撤销。当前合同以该范围修订及后续兼容补充为准，旧记录仅用于审计和历史 evidence-only 运行恢复。
+
+Capability 与角色 category、runner feature 和 CLI 覆盖目录分别建模。能力定义追加 revision，`capabilities.put` 通过 owner request_id/CAS 与事件同事务提交；`image_gen@1` 是初始定义，其工具名为 `image_gen__imagegen`。定义退休拒绝新声明和新 Task，不改写历史 spec、pin 或证据。
+
+私有配置和公共登记采用可选 `capability_version=1` 扩展，Agent 的 `capabilities` 是显式 definition revision 集合。省略扩展和声明时不改变旧序列化与 hash。集合排序、去重校验和深复制覆盖公私投影与两 role required。声明不产生可用性，不给任意 CLI、模型、hosted 或第二用途入口补能力；同执行四元组仍允许多个稳定身份。仅消费 worker 的原 RuntimeID，不改既有单入口责任的接口或历史。
+
+证据是受信任 adapter 经 runner 身份上报的追加事实，绑定完整 execution pin、incarnation/generation、单调 sequence、工具来源/版本/schema/config/executable 摘要和观测期限。owner/协调工具/普通 worker 没有 confirmed 写入口。工具 inventory、simulation、execution 分开；execution 成功不能代替工具 inventory 资格。最高 sequence 决定当前工具事实，迟到事实保留历史，重复 sequence 冲突。TTL 最多五分钟，同时受当前 runner incarnation 和六十秒在线围栏限制；新 heartbeat 不续工具 TTL。
+
+`harness.CapabilityWorkers` 是本变更新增的最小受信任边界，不是已有外部服务：只读、无模型的完整 profile 工具登记加 `StartWithCapabilities`，后者必须在会话创建时、业务 turn 前原子核对同一配置和工具来源。当前生产 Orca/TraeX adapters 未实现该接口，明确返回 `unverified/adapter_evidence_unsupported`。session scope 无 prepare/adopt 路径时返回 `session_adoption_unsupported`，不创建额外 session、不把会话观察推广为 profile。不能用本次模拟测试声称真实 image_gen 已贯通。
+
+Task 两 role 在既有 AgentRequirement 中分别冻结 `required_capabilities`。定义必须显式 revision；集合比较/克隆/规范化不丢字段。claim 在既有身份、owner、reviewer、host/backend、workspace、共享预算围栏之内使用统一纯 matcher；所有 required 必须来自同一 pin。证据与 required digest 独立写入不可变 RunCapabilityBinding，与 run/pin/lease/request/event 原子提交，保持 RunExecutionPin 的可比较性。assignment 只向协商 peer 发送新 binding；启动前检查原 TTL、incarnation 和来源，再调用 adapter 的原子启动入口，失败记录 capability_lost，不能换身份或 provider。
+
+本机 `agents local capabilities verify/status/reconcile` 使用新增 journal 16/17 追加表。先持久记录原请求，唯一插入者最多探测一次，timeout≤30s，无付费调用。未知/丢响应不重新探测；reconcile 只读同原 server 请求与 payload hash。新 incarnation 已围栏原进程且 server 原请求未记录时，才能明确结束旧未知状态并由管理员发起新动作。status 保留原输入、信封与 receipt；控制 API 不接收用户自填证据。
+
+公共定义、Agent 当前/历史证据及 Task explain 提供具名 CLI/API；协调工具只有读取目录和合法 Issue Task 的能力解释。worker 的原观察接口仅补本 run binding，role 指令携带本 role required。分页游标固定筛选、水位；可变目录/匹配事实发生变化时拒绝旧游标，不能悄然跳项。Task list 可按 capability 与 role 筛选，Task show/run 保留冻结 binding。必要 UI 在现有 Agent/Task 详情展示声明、工具实证、最近调用、失效及候选原因，不实施其他 UI 产品目标。
+
+已有维护 sweep 对等待十分钟仍不满足的 Task/spec/role 产生一次持久 Attention 和事件，不调用模型/验证、不循环派发 probe。Task 仍诚实等待，可修同入口配置、显式补证据或修订未来 spec；未知先对账。
+
+协议经逐发送点评估采用 2/1 上的显式 feature `executor-capabilities-v1`：新 runner 先声明 feature，server 仅对 journal≥16 的 peer 回 ack；登记扩展要求双方协商，旧 peer 的 status 不带扩展 projection，非空 required 不给不支持的新请求或重放。新字段不进入旧默认 assignment/spec，旧无要求任务保持原义，因此本变更不递增协议、不删 1 适配。server schema 追加 88，runner journal 追加 16/17；旧 reader 必须拒绝新存储，历史 snapshot/hash 不重写。实际部署前的协议库存/排空和 downgrade 验证属于独立交付合同。
+
+本候选的设计边界是保守可用的基础逻辑与 adapter 合同；真实入口工具枚举、受信任 profile/同 session 执行与一次有界 image_gen 验证仍须取得真实证据，不能把 unknown 当完成。Refs: D123、D128、D142。实施计划见 `docs/plans/capability-foundation.md`。
+
+D176 续接补充：显式验证同一已保留 snapshot 可以追加 run.capability_revalidated 事实和证据引用，不修改原 RunCapabilityBinding。assignment 的 current_match/revalidation 指明当前资格，runner 在 journal 17 追加原服务器 receipt 投影；原 assignment_json、选择 pin 和原证据字节不变。未验证、过期或失效仍阻止启动；复验不替代原租约、control 和 unknown 对账，也不自动恢复业务。
+
+
+D176 范围修订（优先于以上 native-gate 历史文字）：依据 owner source `msg_01M6NRJFA40Y2ABY7GKMCEHEPV` v1，Capability 是配置标签。匹配只要求同一 Agent 的显式声明覆盖 Task 本 role required 的精确 definition revision，另保普通 executor 在线/可用性、单 RuntimeID、身份/profile/backend、共享预算和原冻结 pin。声明是用户意图，既非真实工具实证，也不表示调用必成功。image_gen 可以逐项或批量明确配置给官方登录的 Codex Agent；不得按品牌自动补值或声称实际已部署。
+
+工具 inventory/source/schema/TTL/profile/session、prepare/adopt/consume/nativeguard、StartWithCapabilities、真实调用及费用观测全部撤销为匹配、启动和验收门禁。旧 evidence/verification/revalidation 数据与原请求对账接口仅为历史/可选诊断，不参与声明资格。新 claim 的 RunCapabilityBinding 保存 required/digest 和原 pin，Agent revision 通过原 immutable inventory 精确恢复声明。launch 使用普通 Start；precheck 在 NextAttempt 之前，失败不清旧停止证明。解释使用注入时钟，不能覆盖用户冻结的 AgentID/RuntimeID/backend。
+
+声明调度使用独立协商 feature `executor-capability-declarations-v1`，旧 `executor-capabilities-v1` 保留历史证据接口；旧 native-gated runner 不接收新声明任务。无 required 的旧任务和 2/1 默认 wire 不变，兼容依据是双方协商及发送点验证，并非“新增字段自然兼容”。历史配置/hash/spec/pin/unknown 和迁移均不重写。原 P2/P5 的 native 依赖已撤销；新矩阵见 `plans/capability-declarative-acceptance.md`。完整检查资源 HOLD、独立 review/CI 和正式交付分别留证，不能拿旧候选通过代替新对象。
+
+D176 兼容补充：新 binding 显式 `match_policy=declaration_v1`，仅声明 feature peer 可接收。旧 binding 字段缺省仍保持原字节，原 evidence-only peer 的已分配运行可继续读取/恢复，不向它添加声明 current_match；新 runner 使用原冻结配置声明和普通 resolver。旧验证请求和 evidence 只作为可选诊断与原请求对账，不能生成新 Run 的资格或重写历史绑定。配置严格解码增加 int64 definition revision 的合法整数读取，仍拒绝分数、字符串、溢出及非正 revision；这是修复声明文件路径，不改变旧有效配置的默认值。
+
+D176 旧运行恢复及等待投影补充：缺省 match_policy 的历史 evidence-only binding 保留专用历史恢复适配；原请求上报可同事务追加同 pin 的新鲜 revalidation，并向旧协商 peer 返回原有格式。该适配不参与 declaration_v1 的新匹配或启动，不能把旧工具实证门加回声明式运行。只读解释保留不可用 executor 的身份与声明事实，普通容量/adapter 等待按完整冻结约束判为 pending；claim 始终只使用普通可用 executor。当前恢复指导为显式登记声明、恢复同入口可用性及 unknown 原请求对账。
+
+D176 未观测主机补充：已配置主机尚未发送 Hello 时，缺失 host_runtime 是该主机未观测的普通可用性事实，不能使其他主机的 Task 能力解释或十分钟持久等待通知整体失败。查询保留健康候选并明确该主机原因，不推断其在线、声明或 executor；非缺失类存储错误仍返回。冻结身份、声明修订、原入口及共享预算围栏保持不变。
+
+D176 验收前置等待补充：首次 named 实现分配需要同 host/backend 的验收候选时，十分钟等待检测同时检查 acceptance 自身的非空 required，即使 implementation required 为空。通知以实际阻塞的 task/spec/role 持久去重并携带该角色解释，不复制标签到实现角色。waived 或不再检查该前置的已分配任务不新增 acceptance 通知；验收 action 仍仅检查验收角色。该修复仅调整维护通知，无 wire、迁移或旧运行冻结语义变更。
+
+首次分配前的 acceptance 查询解释实际 implementation action 的 reviewer 前置，不套用尚不存在的验收 artifact 生命周期。只读 reviewer filter 限定配对候选而不改写原验收身份、profile、runtime 或 backend；全局 eligibility 与 Claim 的首次配对检查一致。通知的角色与 `task capability-explain --role` 恢复入口明确对应。
+
+D176 候选分页补充：Task 能力解释可同时投影同入口的当前 Agent revision 与在途保留 revision，分页身份使用完整冻结 RunExecutionPin，不能仅用 environment/Agent/runtime/backend 合并。排序键和 after 边界保持同一全序，当前无声明与原保留声明独立返回。游标仍绑定筛选、水位及事实签名；排序格式变化拒绝旧游标并要求重新分页，不改变 server/runner wire、迁移、claim 或历史 pin。
+
+D176 候选渲染补充：Task 能力列表的 React 身份同样绑定完整冻结 pin，保证同入口当前与保留 revision 能独立更新、移除和重排。仅在 pin 缺省时按投影的 identity、Agent revision 与 runtime reference 使用独立 fallback；匹配状态不是渲染身份。不改变 API、协议、迁移或调度合同。
+
+D176 main 整合补充：main 的 D174/D175 与原迁移历史保持不变，Capability 原候选的 D174 在本整合候选改用 D176；原提交仍是旧编号的审计来源。未部署候选迁移原 SQL 顺延到 server 91、journal 17/18，保留 main 的 server 88–90、journal 16 原字节；journal 当前版本为 18。相同编号的旧候选数据库不能冒充 main schema，打开时明确拒绝冲突并保留原文件，不自动删表/重放/转换。正式安装库存、升级副本及回滚窗口审计由父交付合同执行，本轮无生产事实断言。协议仍是 feature 协商的 2/1；保留 main 的严格原生重连，声明 precheck 在 NextAttempt 前，普通 Start 接收原 retained-resume 权限。重连、配置标签与原停止证明各自保持原围栏。
+
+D176 声明修订围栏补充：已接受的 `(environment, Agent local_id, Agent revision)` 唯一确定 capability 引用集合。registry.Commit（含本机 reload）和服务端库存登记均在原请求 replay/unknown/CAS 之后、写入之前检查全部接受历史；添加、移除或变更 definition revision 不能复用同一 Agent revision。集合次序及 nil/empty 等价，另一身份独立；选用旧 revision 的原声明合法，但删除后重加或从新 revision 退回也不能改写旧声明。旧快照/hash/pin 和坏历史只读保留，原请求回放返回原回执。此项落实既有修订合同，无新 wire/schema/迁移或合法旧默认变化，现有 2/1 及声明 feature 协商保持。
+
+D176 Task required 更新补充：Capability 引用校验独立于 workspace mount 变化。创建校验两个 role 的全部 required；更新分别以同 role 的当前冻结引用为基线，只校验新增或替换的精确 definition revision，跨 role 转移属于新引用。未变历史引用在定义退休后仍可读及保留，合法其他字段或 mount 更新不重验其 active 状态；删除无需重新激活定义。新增引用必须存在且所引 revision 与当前定义均 active。原 spec/run/pin/binding 字节、请求 replay/CAS/事务及 runner 2/1 feature 合同保持，无 schema/迁移变化。

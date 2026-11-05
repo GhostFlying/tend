@@ -11,6 +11,12 @@ import (
 )
 
 func HostExecutors(ctx context.Context, q store.Querier, host string, now int64) ([]scheduler.Executor, error) {
+	return hostExecutors(ctx, q, host, now, false)
+}
+
+// includeUnavailable retains ordinary readiness facts for read-only explanations.
+// Scheduling callers always use the public function with this flag false.
+func hostExecutors(ctx context.Context, q store.Querier, host string, now int64, includeUnavailable bool) ([]scheduler.Executor, error) {
 	runtime, err := store.GetHostRuntime(ctx, q, host)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
@@ -18,7 +24,7 @@ func HostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 	if err != nil {
 		return nil, err
 	}
-	if !runtime.Online || !(protocol.RunnerProtocolSupported(runtime.Runtime.Protocol) && runtime.Runtime.JournalVersion >= 12 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentExecution)) || (now > 0 && now-runtime.LastHeartbeatAt >= 60000) {
+	if (!includeUnavailable && !runtime.Online) || !(protocol.RunnerProtocolSupported(runtime.Runtime.Protocol) && runtime.Runtime.JournalVersion >= 12 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentExecution)) || (!includeUnavailable && now > 0 && now-runtime.LastHeartbeatAt >= 60000) {
 		return nil, nil
 	}
 	inv, err := store.GetAgentInventory(ctx, q, host)
@@ -31,7 +37,7 @@ func HostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 	var out []scheduler.Executor
 	for _, e := range runtime.Runtime.AgentExecutors {
 		p := e.Pin
-		if (p.Purpose == "issue_manager" && runtime.Runtime.JournalVersion < 13) || !e.Available || p.Validate(host) != nil || p.SnapshotID != inv.Receipt.SnapshotID || p.InventoryRevision != inv.Receipt.LocalRevision || p.PublicSHA256 != inv.Receipt.PublicSHA256 {
+		if (p.Purpose == "issue_manager" && runtime.Runtime.JournalVersion < 13) || (!includeUnavailable && !e.Available) || p.Validate(host) != nil || p.SnapshotID != inv.Receipt.SnapshotID || p.InventoryRevision != inv.Receipt.LocalRevision || p.PublicSHA256 != inv.Receipt.PublicSHA256 {
 			continue
 		}
 		for _, a := range inv.Projection.Agents {
@@ -61,7 +67,7 @@ func HostExecutors(ctx context.Context, q store.Querier, host string, now int64)
 					categories = append(categories, id)
 				}
 			}
-			out = append(out, scheduler.Executor{Pin: p, Categories: categories})
+			out = append(out, scheduler.Executor{Pin: p, Categories: categories, DeclaredCapabilities: slices.Clone(a.Capabilities), CapabilitySupport: runtime.Runtime.JournalVersion >= 17 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityExecutorDeclarations), CapabilityNowMillis: now})
 		}
 	}
 	return out, nil

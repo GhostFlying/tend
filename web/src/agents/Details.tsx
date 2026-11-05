@@ -1,3 +1,4 @@
+import { CapabilityFacts } from "./CapabilityFacts.tsx";
 import { AgentIssues, type AgentIssueModel } from "./Issues.tsx";
 import { href } from "../app/router.ts";
 import type { AgentCategory } from "../api/generated/api.ts";
@@ -96,6 +97,7 @@ export function AgentDetails({
             );
           })}
         </dd>
+        <CapabilityFacts catalog={catalog} agent={agent} historical={!!entry.history} />
         <dt>配置</dt>
         <dd>{agent.enabled ? "已启用" : "已停用"}</dd>
         <dt>登记版本</dt>
