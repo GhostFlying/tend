@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -344,6 +345,17 @@ func TestDecisionContinuationDependencyUsesRealCompletionAndClaimRechecks(t *tes
 	}
 	if v := f.view(t); v.BlockedReason != "dependency_spec_changed" {
 		t.Fatal(v)
+	}
+	// The predecessor action is already done, but this unclaimed continuation
+	// still waits on its frozen dependency and must remain in later graph checks.
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		waits, err := store.TaskWaitDependencies(t.Context(), tx.Q())
+		if err == nil && !slices.Contains(waits[f.task], dependency) {
+			t.Fatal("queued continuation lost its dependency edge", waits)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if next, ok := h.claimInputRun(f.runtime); ok {
 		t.Fatal("stale dependency admitted successor", next)

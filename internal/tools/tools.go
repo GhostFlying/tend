@@ -499,8 +499,8 @@ func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
 	}
 
 	cmd := app.AnswerDecision{FromMessage: true}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "decision", ID: a.DecisionID}, nil, a.Reason, protocol.AnswerDecisionPayload{
-		Version: a.Version, Option: a.Option, Text: a.Text, SourceMessageID: c.SourceMessageID,
+	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "decision", ID: a.DecisionID}, nil, a.Reason, map[string]any{
+		"version": a.Version, "option": a.Option, "text": a.Text, "source_message_id": c.SourceMessageID,
 	}, cmd)
 }
 

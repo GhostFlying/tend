@@ -1000,7 +1000,9 @@ reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能�
 的条件答复通过新入口把机器续接意图与自由文本分开：
 `continue_now` 在原执行确已停止且原合同仍有效后续接；`wait` 保存非空原因并等待独立的显式
 resume；`dependency` 保存另一个普通 execution Task 的精确 spec 版本，仅该版本的真实 completed 账本事实
-满足条件。旧 `decisions.respond` / `resolve_from_message` 的有效无策略输入保留原有
+满足条件。Task 前提、canonical Issue 与 legacy stage 的等待边在同一纯图中检查；
+新增 dependency 答案及后续图修改均在原事务中拒绝环，不能由另一条入口绕过。
+旧 `decisions.respond` / `resolve_from_message` 的有效无策略输入保留原有
 answered 与 stopped 齐备后的续接默认；没有 policy row 的历史 handoff 仍沿原合同，不伪造
 一个旧 wait 决定。新入口缺 policy 拒绝，只有显式 typed wait 才等待；不从自由文本推断
 typed 条件。既有 Attention 通过非空 typed 字段显式 opt-in，省略时保持旧行为。
