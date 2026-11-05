@@ -20,6 +20,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/issues/{id}/artifact-shares", s.artifactShares},
 		{"GET /api/v1/artifact-shares/{id}", s.artifactShare},
 		{"GET /api/v1/decisions/{id}/inputs", s.questionInputs},
+		{"GET /api/v1/decisions/{id}/continuation", s.decisionContinuation},
 		{"GET /api/v1/messaging/feishu", s.feishuBinding},
 		{"GET /api/v1/messaging/feishu/inputs", s.feishuInputs},
 		{"GET /api/v1/concurrency-groups", s.concurrencyGroups},

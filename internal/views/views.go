@@ -122,7 +122,14 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	for _, x := range decs {
-		d.Decisions = append(d.Decisions, Decision(x))
+		decision := Decision(x)
+		continuation, err := store.ReadDecisionContinuation(ctx, q, x.DecisionID)
+		if err == nil {
+			decision.Continuation = &continuation
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return d, err
+		}
+		d.Decisions = append(d.Decisions, decision)
 	}
 	if d.WorkspaceState, err = workspace(ctx, q, row.TaskID); err != nil {
 		return d, err

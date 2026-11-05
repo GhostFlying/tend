@@ -37,6 +37,7 @@ var ownerCommands = commandMap(
 	app.HostMaintenance{},
 	app.ControlUpgrade{},
 	app.AnswerDecision{}, app.QuestionInputCommand{}, app.QuestionInputCommand{Revoke: true},
+	app.ResumeDecisionContinuation{}, app.ResumeDecisionContinuation{Reconcile: true},
 	app.CreateAction{},
 	app.SetControlMode{},
 	app.RateTask{},

@@ -891,6 +891,9 @@
     "AnswerDecisionPayload": {
       "additionalProperties": false,
       "properties": {
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
         "option": {
           "type": "string"
         },
@@ -3661,6 +3664,111 @@
       "title": "DecisionChoice",
       "type": "object"
     },
+    "DecisionContinuationDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "spec_version"
+      ],
+      "title": "DecisionContinuationDependency",
+      "type": "object"
+    },
+    "DecisionContinuationMode": {
+      "enum": [
+        "continue_now",
+        "wait",
+        "dependency"
+      ],
+      "title": "DecisionContinuationMode",
+      "type": "string"
+    },
+    "DecisionContinuationPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency": {
+          "$ref": "#/definitions/DecisionContinuationDependency"
+        },
+        "mode": {
+          "$ref": "#/definitions/DecisionContinuationMode"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "DecisionContinuationPolicy",
+      "type": "object"
+    },
+    "DecisionContinuationView": {
+      "additionalProperties": false,
+      "properties": {
+        "answer_request_id": {
+          "type": "string"
+        },
+        "blocked_reason": {
+          "type": "string"
+        },
+        "continuation_action_id": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "decision_version": {
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
+        "resume_condition": {
+          "type": "string"
+        },
+        "resume_request_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "successor_run_id": {
+          "type": "string"
+        },
+        "task_control_revision": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "run_id",
+        "task_id",
+        "revision",
+        "decision_version",
+        "task_control_revision",
+        "policy",
+        "state",
+        "resume_condition"
+      ],
+      "title": "DecisionContinuationView",
+      "type": "object"
+    },
     "DecisionEffect": {
       "enum": [
         "implement",
@@ -3718,6 +3826,9 @@
         "answer": {},
         "briefing": {
           "$ref": "#/definitions/DecisionBriefing"
+        },
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationView"
         },
         "decision_id": {
           "type": "string"
@@ -4393,6 +4504,9 @@
     "HandleAttentionPayload": {
       "additionalProperties": false,
       "properties": {
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
         "expected_assignment_epoch": {
           "type": "integer"
         },
@@ -9957,6 +10071,9 @@
     "RespondAttentionPayload": {
       "additionalProperties": false,
       "properties": {
+        "continuation": {
+          "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
         "option": {
           "type": "string"
         },
@@ -10021,6 +10138,22 @@
         "body"
       ],
       "title": "ResultReport",
+      "type": "object"
+    },
+    "ResumeDecisionContinuationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_revision"
+      ],
+      "title": "ResumeDecisionContinuationPayload",
       "type": "object"
     },
     "RetainedAgentDefinition": {
@@ -14598,6 +14731,9 @@
     "CreateIssueTaskPayload": {
       "$ref": "#/definitions/CreateIssueTaskPayload"
     },
+    "DecisionContinuationView": {
+      "$ref": "#/definitions/DecisionContinuationView"
+    },
     "DownloadURLResponse": {
       "$ref": "#/definitions/DownloadURLResponse"
     },
@@ -14843,6 +14979,9 @@
     },
     "RespondInteraction": {
       "$ref": "#/definitions/RespondInteraction"
+    },
+    "ResumeDecisionContinuationPayload": {
+      "$ref": "#/definitions/ResumeDecisionContinuationPayload"
     },
     "RetainedRunReconciliation": {
       "$ref": "#/definitions/RetainedRunReconciliation"

@@ -57,6 +57,8 @@ func CapabilityBindings() []CapabilityBinding {
 			capability = cmd.Operation
 			if cmd.Operation == protocol.OpContinueRetainedRun {
 				args = append(args, "--data", retainedRunProofExample())
+			} else if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
+				args = append(args, "--data", `{"expected_revision":0}`)
 			} else if cmd.Operation == protocol.OpReconcileManagerRun {
 				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
 			} else {
@@ -310,6 +312,14 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nRetained ordinary Orca Run recovery: maintenance-reconciliation is ledger-only; can_continue does not prove a live native turn or restored execution. Copy identity, every protection entry (including original_requests_json), protection_set_sha256 and task_revision from the exact original Run. continue-retained accepts the identity fields at the payload top level, the complete protections array, its hash and an independent reason; a cited source_message_id also requires expected_source_revision.\n")
 		out.WriteString("Use --revision with that original Task control revision, an explicit --request-id and --file <proof.json> (or --data <json>). Save --dry-run output as the original Envelope before submitting. The command authorizes strict attachment through the original journal and same lease only; it does not send a continuation, create a session or clear historical protection/unknown facts. Missing native evidence, old runners, pending business or a new maintenance capture keep recovery blocked.\n")
 		out.WriteString("If the result is unknown, retain the original ID, input, revision and Envelope. Run tend request show <original-id> before tend request replay --file <original-envelope.json>; replay exact bytes only, never replace the ID or refresh the proof to retry an unknown request.\n")
+	}
+	if name == "decide" || name == "decision-continuation" || strings.HasPrefix(name, "decision-continuation ") {
+		out.WriteString("\nWorker handoff answers without a typed continuation record the answer only; they do not automatically resume a stopped worker. Free text never proves readiness. Supply the complete answer with decide --data or --file, including version and option/text.\n")
+		out.WriteString("tend decide <decision_id> --data '{\"version\":1,\"text\":\"Proceed\",\"continuation\":{\"mode\":\"continue_now\"}}'\n")
+		out.WriteString("tend decide <decision_id> --data '{\"version\":1,\"text\":\"Wait\",\"continuation\":{\"mode\":\"wait\",\"reason\":\"Await an independent resume decision\"}}'\n")
+		out.WriteString("tend decide <decision_id> --data '{\"version\":1,\"text\":\"After the dependency\",\"continuation\":{\"mode\":\"dependency\",\"reason\":\"Await exact dependency completion\",\"dependency\":{\"task_id\":\"<dependency_task>\",\"spec_version\":1}}}'\n")
+		out.WriteString("Read decision-continuation show <decision_id> --json for policy, state, blocked_reason, continuation revision and parent task_control_revision. resume explicitly releases a wait; reconcile checks exact ordinary execution Task/spec completion without accepting a caller readiness claim. Manager Task dependencies are rejected; historical unsupported dependencies stay blocked. Both preserve physical-stop and current-contract guards.\n")
+		out.WriteString("tend decision-continuation resume <decision_id> --revision <task_control_revision> --request-id <new-request-id> --data '{\"expected_revision\":1}' --dry-run\nUse reconcile with the same input shape for dependency reconciliation. On unknown outcome keep the original request ID, payload, both revisions and saved Envelope; run tend request show <original-id>, then request replay --file <original-envelope.json> for an identical retry.\n")
 	}
 	return out.String()
 }

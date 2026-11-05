@@ -77,6 +77,11 @@ export type TaskLifecycle =
 export type Rating = "" | "p0" | "p1" | "p2" | "p3";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionContinuationMode".
+ */
+export type DecisionContinuationMode = "continue_now" | "wait" | "dependency";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "DecisionEffect".
  */
 export type DecisionEffect = "implement" | "accept" | "cancel" | "start_over";
@@ -284,6 +289,7 @@ export interface TendAPI {
   CreateConsultationPayload?: CreateConsultationPayload;
   CreateIssuePayload?: CreateIssuePayload;
   CreateIssueTaskPayload?: CreateIssueTaskPayload;
+  DecisionContinuationView?: DecisionContinuationView;
   DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
   ExecutionCounts?: ExecutionCounts;
@@ -366,6 +372,7 @@ export interface TendAPI {
   RequestView?: RequestView;
   RespondAttentionPayload?: RespondAttentionPayload;
   RespondInteraction?: RespondInteraction;
+  ResumeDecisionContinuationPayload?: ResumeDecisionContinuationPayload;
   RetainedRunReconciliation?: RetainedRunReconciliation;
   ReuseIssuePayload?: ReuseIssuePayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
@@ -586,6 +593,7 @@ export interface WorkItemChoice {
 export interface DecisionView {
   answer?: unknown;
   briefing?: DecisionBriefing;
+  continuation?: DecisionContinuationView;
   decision_id: string;
   effects?: {
     [k: string]: DecisionEffect | undefined;
@@ -623,6 +631,43 @@ export interface DecisionIssue {
   source: string;
   status: string;
   summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionContinuationView".
+ */
+export interface DecisionContinuationView {
+  answer_request_id?: string;
+  blocked_reason?: string;
+  continuation_action_id?: string;
+  decision_id: string;
+  decision_version: number;
+  policy: DecisionContinuationPolicy;
+  resume_condition: string;
+  resume_request_id?: string;
+  revision: number;
+  run_id: string;
+  state: string;
+  successor_run_id?: string;
+  task_control_revision: number;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionContinuationPolicy".
+ */
+export interface DecisionContinuationPolicy {
+  dependency?: DecisionContinuationDependency;
+  mode: DecisionContinuationMode;
+  reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DecisionContinuationDependency".
+ */
+export interface DecisionContinuationDependency {
+  spec_version: number;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1417,6 +1462,7 @@ export interface AgentRolloutWindow {
  * via the `definition` "AnswerDecisionPayload".
  */
 export interface AnswerDecisionPayload {
+  continuation?: DecisionContinuationPolicy;
   option?: string;
   source_message_id?: string;
   text?: string;
@@ -2543,6 +2589,7 @@ export interface GrantArtifactSharePayload {
  * via the `definition` "HandleAttentionPayload".
  */
 export interface HandleAttentionPayload {
+  continuation?: DecisionContinuationPolicy;
   expected_assignment_epoch: number;
   option?: string;
   reason: string;
@@ -3957,6 +4004,7 @@ export interface RequestView {
  * via the `definition` "RespondAttentionPayload".
  */
 export interface RespondAttentionPayload {
+  continuation?: DecisionContinuationPolicy;
   option?: string;
   source_message_id?: string;
   text?: string;
@@ -3971,6 +4019,14 @@ export interface RespondInteraction {
   option?: string;
   text?: string;
   version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ResumeDecisionContinuationPayload".
+ */
+export interface ResumeDecisionContinuationPayload {
+  expected_revision: number;
+  source_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

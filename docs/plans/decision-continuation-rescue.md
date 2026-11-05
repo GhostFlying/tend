@@ -3,7 +3,8 @@
 ## 范围与现状
 
 先核对 `6438629c9a9a2cd38a9395f70746ba55a4914568` 的现状，实施显式 stack 在其后
-冻结的 `671912119faa18e852ef3d66453368e51c7a535f`，保留完整的既有迁移 0088。
+冻结的 `6ad5f9a6291d5ba3fb6d4cb29314fc1d8c1b01a8`，保留完整的既有迁移 0088。
+原始计划与 RED 基线为更早的同栈版本；集成时只更新上游修复，不改本计划的业务范围。
 本计划落实已核对的
 owner 原缺陷来源和隔离 follow-up 授权；精确来源与授权原件保存在机器私有证据中。
 仅修改 AnswerDecision 到 question handoff continuation 的剩余合同，不重做执行器、
@@ -18,7 +19,7 @@ retained-run 恢复、CLI transport、用量观测、Capability 或 UI 工作，
 
 1. AnswerDecision 增加可选的 typed continuation disposition：`continue_now`、`wait`、
    `dependency`。答复始终是独立事实；option/text 不参与续跑准入，也不做自然语言推断。
-   `wait` 必须带原因，恢复条件为独立显式恢复；`dependency` 必须绑定一项 Task 及其
+   `wait` 必须带原因，恢复条件为独立显式恢复；`dependency` 必须绑定一项普通 execution Task（拒绝 manager Task）及其
    spec version，以该 exact spec 的真实 completed 状态作为机器就绪证据。
    不实现任意脚本、外部 HTTP 条件或通用 workflow。
 2. 追加独立持久表，保存原 decision、answer request、disposition、revision、等待原因、

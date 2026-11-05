@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -97,10 +98,11 @@ type AnswerDecision struct {
 }
 
 type decisionAnswer struct {
-	Option string                 `json:"option,omitempty"`
-	Text   string                 `json:"text,omitempty"`
-	Effect *protocol.EffectResult `json:"effect,omitempty"`
-	Actor  *protocol.Principal    `json:"actor,omitempty"`
+	Continuation *protocol.DecisionContinuationPolicy `json:"continuation,omitempty"`
+	Option       string                               `json:"option,omitempty"`
+	Text         string                               `json:"text,omitempty"`
+	Effect       *protocol.EffectResult               `json:"effect,omitempty"`
+	Actor        *protocol.Principal                  `json:"actor,omitempty"`
 }
 
 // Operation implements Command.
@@ -156,6 +158,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if d.Status == store.DecisionAnswered {
 		var prev decisionAnswer
 		if err := json.Unmarshal([]byte(d.AnswerJSON), &prev); err == nil && prev.Option == p.Option && prev.Text == p.Text {
+			if p.Continuation != nil && (prev.Continuation == nil || !reflect.DeepEqual(decisionContinuationPolicy(p.Continuation), *prev.Continuation)) {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "recorded continuation policy is immutable; use its independent resume operation")
+			}
 			return Outcome{Result: answerResult(d, d.Version, []byte(d.AnswerJSON), prev.Effect)}, nil
 		}
 	}
@@ -211,6 +216,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			}
 		}
 	}
+	if err := recordDecisionContinuation(ctx, x, tx, d, p.Continuation); err != nil {
+		return Outcome{}, err
+	}
 	effect, effectEvents, err := answerEffect(ctx, x, tx, d, p.Option)
 	if err != nil {
 		return Outcome{}, err
@@ -221,7 +229,11 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		sourceEvents = append(sourceEvents, Event{ObjectType: "message", ObjectID: p.SourceMessageID, Kind: "conversation.turn_reviewed"})
 	}
-	value := decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect}
+	value := decisionAnswer{Option: p.Option, Text: p.Text, Effect: effect, Continuation: p.Continuation}
+	if value.Continuation != nil {
+		policy := decisionContinuationPolicy(value.Continuation)
+		value.Continuation = &policy
+	}
 	if c.Responsible {
 		actor := x.Principal
 		value.Actor = &actor
