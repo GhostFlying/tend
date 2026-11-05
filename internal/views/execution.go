@@ -281,6 +281,14 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		if handoff == nil || !handoff.Stopped || handoff.SuccessorRunID != "" {
 			continue
 		}
+		continuation, err := store.ReadDecisionContinuation(ctx, q, handoff.DecisionID)
+		if err != nil {
+			return nil, err
+		}
+		if continuation.State == "continued" && continuation.BlockedReason != "" && current[continuation.ContinuationActionID] {
+			v.State, v.RunID, v.Role = protocol.ExecutionWaitingSupervisor, runs[i].RunID, runs[i].Role
+			return v, nil
+		}
 		valid, err := store.QuestionHandoffCurrent(ctx, q, runs[i].RunID)
 		if err != nil {
 			return nil, err
@@ -292,7 +300,10 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 		if err != nil {
 			return nil, err
 		}
-		if question.Status != store.DecisionOpen {
+		if question.Status != store.DecisionOpen && question.Status != store.DecisionAnswered {
+			continue
+		}
+		if question.Status == store.DecisionAnswered && continuation.State == "continued" {
 			continue
 		}
 		human, err := store.HumanProblem(ctx, q, "decision", question.DecisionID)

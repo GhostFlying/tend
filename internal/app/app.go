@@ -384,6 +384,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 
 func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Outcome, rec *store.RequestRecord) error {
 	defer tx.ObservePhase(store.WritePersistOutcome)()
+	if err := reconcileDecisionDependencies(ctx, x, tx, &out); err != nil {
+		return err
+	}
 	if err := cancelObsoleteQuestions(ctx, x, tx, &out); err != nil {
 		return err
 	}

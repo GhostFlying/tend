@@ -170,6 +170,7 @@
 | D167 | 创建者或显式用户决定后续 Task 是否强制独立验收；真实来源及政策冻结，免验仍需合法结果、责任核对和交付证明，不伪造通过记录，不追溯撤销在途验收。 | 实施中 |
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
+| D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；历史及未声明意图保守等待，双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
 
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
@@ -991,3 +992,28 @@ manager transport 的 failed 不直接代表业务失败。会话清理前的结
 reader 使用新 Run 的正常 lease，不能续活旧 lapsed lease，也不能绕维护、park 或其他执行占位。它只按原 binding resume 原 thread，沿冻结 AppliedModel/provider/effort；缺身份或配置继续阻塞，不以当前模型目录、业务 readiness probe、新 thread、摘要、迁移或业务工具替代读取。只有原身份的真实 native 终态与完整 consumed sources 能经既有对账事务结清原 pending；物理停止、内部 repair 审计或日志里的终态线索不能代替该回执。
 
 实现复用既有 receipt-only 动作与普通请求去重，并新增可选 Assignment `require_receipt_reader` 标志。默认 false 保留历史 receipt-only 的 resolver、模型恢复与 native 操作规则；仅新 proof-bound 来源且已协商能力的 reader 为 true，启用冻结配置/noModels/严格 resolver。该临时约束不进入原 thread 的 binding identity，重连与后继代次从原 action 来源重建。字段可选且默认语义不变，不升级协议代际。新模式仅对显式报告 `runner-manager-receipt-reader-v1` 的原 host 准入；该模式新动作的 claim 与重启恢复同样要求此能力，避免旧执行器在读取前做普通业务探活。原待对账请求集合尚未清空时，非终态或失败读取后的后继代次继续携带原请求来源与能力要求；该原集合全部对清后，不把限制传播到无关责任。原 closing Run 的事件消费优先恢复同一 Run、精确 thread 的已确认 resume 内实际模型配置；仅历史 resume 缺该配置时再读该 Run 已有缓存模型目录。不能为了缺少当前 hosted turn 快照而切断原事件泵，也不因此访问当前模型目录或创建 native 会话。已持久化 compaction 的账本对账仍可完成，创建 compaction 与其他 native 维护继续禁止。历史 receipt-only 与普通业务协议不因此收紧。新 runner 的内部受限解析跳过业务探活，普通执行保持既有探活和模型选择。部署需同时更新实际 runner 才具备这条受限读取实现。见[实施计划](plans/proved-close-receipt-reader.md)。
+
+## D174：回答事实与执行续接权限分离
+
+`AnswerDecision` 记录答案时，worker handoff 必须把机器续接意图与自由文本分开：
+`continue_now` 在原执行确已停止且原合同仍有效后续接；`wait` 保存非空原因并等待独立的显式
+resume；`dependency` 保存另一个普通 execution Task 的精确 spec 版本，仅该版本的真实 completed 账本事实
+满足条件。未声明策略及升级前已回答但未续接的历史记录默认等待，不从文字、answered 或 stopped
+推导调度许可。普通非 handoff 问题保留原有回答语义。
+
+答案及其原 request_id 保持不可变。独立 continuation 记录保存自己的 revision、等待原因、冻结
+依赖和 resume 请求；`decisions.continuation.resume` / `reconcile` 同时校验 continuation revision
+与父 Task control_revision，并继续校验原 spec / action generation / artifact / Issue assignment
+及执行 pin。reconcile 只能读取已冻结依赖的真实就绪事实，不能用客户端布尔值解除等待；wait
+只能由独立 resume 解除。托管主会话及当前 Issue owner 通过已有 execution/effect_seq 和 source
+准入执行这些动作；显式 resume 绑定实际 owner source，技术依赖对账不要求新的人工答复。
+
+真实 Task 完成事件通过 dependency 索引定点唤醒相关等待项；创建后尚未领取的 continuation
+仍在 scheduler 事实收集时重查冻结依赖，依赖改版或未完成不能因旧 ready 投影被领取。全过程
+仍保留原 handoff 的进程停止证明、原协议与执行器 pin、原 generation 和工作区合同，不创建
+新的业务责任、不占用等待中的 worker 槽位、不重放旧业务请求。CLI、owner API 与托管工具
+提供一致的 typed 输入、只读阻塞事实及双 CAS 控制；输出明确区分 waiting / ready / continued。
+
+迁移 89 只追加独立 continuation 账本，不改写历史答案或伪造旧请求的策略。已有已提交 successor
+动作保留其历史身份；新增策略只约束本次新准入与依赖。协议 N/N−1 均保留原 handoff wire 字段，
+该 owner 策略为保守新增能力，不以 runner 协议升级代替答案与调度的区分。

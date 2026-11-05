@@ -36,6 +36,10 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		}
 	case "decide":
 		note = fs.String("note", "", "a free-form answer, with or instead of an option")
+		fs.Usage = func() {
+			fmt.Fprint(e.Stderr, commandUsage([]string{"decide"}))
+			fs.PrintDefaults()
+		}
 	case "retry":
 		kind = fs.String("kind", "implement", "implement or accept")
 	case "status":

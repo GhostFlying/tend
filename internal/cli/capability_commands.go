@@ -37,6 +37,9 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "artifact-share list", Route: "/api/v1/issues/{id}/artifact-shares", Queries: "status after limit", JSONDefault: true},
 	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
 	{Name: "question-inputs show", Route: "/api/v1/decisions/{id}/inputs", JSONDefault: true},
+	{Name: "decision-continuation show", Route: "/api/v1/decisions/{id}/continuation", JSONDefault: true},
+	{Name: "decision-continuation resume", Operation: protocol.OpResumeDecisionContinuation, Target: "decision", RevisionRoute: "-", JSONDefault: true},
+	{Name: "decision-continuation reconcile", Operation: protocol.OpReconcileDecisionContinuation, Target: "decision", RevisionRoute: "-", JSONDefault: true},
 	{Name: "question-inputs grant", Operation: "decisions.grant_inputs", Target: "decision", RevisionRoute: "/api/v1/decisions/{id}/inputs", RevisionField: "revision", JSONDefault: true},
 	{Name: "question-inputs revoke", Operation: "decisions.revoke_inputs", Target: "decision", RevisionRoute: "/api/v1/decisions/{id}/inputs", RevisionField: "revision", JSONDefault: true},
 	{Name: "task manager-reconciliation", Route: "/api/v1/tasks/{id}/manager-reconciliation", Queries: "run=run_id", JSONDefault: true},
@@ -159,7 +162,7 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		return runManagerReconciliation(ctx, e, args)
 	}
 	fs := newFlags(e, cmd.Name)
-	if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" {
+	if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" || strings.HasPrefix(cmd.Name, "decision-continuation ") {
 		fs.Usage = func() {
 			fmt.Fprint(e.Stderr, commandUsage(strings.Fields(cmd.Name)))
 			fs.PrintDefaults()
@@ -317,6 +320,17 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return usagef("payload must be a JSON object")
+	}
+	if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
+		var payload protocol.ResumeDecisionContinuationPayload
+		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			return usagef("invalid continuation payload: %v", err)
+		}
+		if fields["expected_revision"] == nil || string(fields["expected_revision"]) == "null" || payload.ExpectedRevision < 0 {
+			return usagef("expected_revision must be the original nonnegative continuation revision")
+		}
 	}
 	target := protocol.Target{Type: cmd.Target}
 	if len(pos) > 0 {

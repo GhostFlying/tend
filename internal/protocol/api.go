@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},
 		HandoffAuditPage{},
 		SetIssueAcceptancePolicyPayload{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
@@ -32,6 +33,7 @@ func APITypes() []any {
 // APIEnums lists the values of every string enum in the owner API.
 func APIEnums() []any {
 	return []any{
+		[]DecisionContinuationMode{DecisionContinueNow, DecisionWait, DecisionDependency},
 		IssueWorkStatusValues(),
 		[]ArchiveState{ArchiveReady, ArchiveUnsupported, ArchiveUnavailable},
 		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},

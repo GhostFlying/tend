@@ -202,19 +202,7 @@ var schemas = map[string]string{
   "additionalProperties": false
 }`,
 	"question_inputs_read": argumentSchema(questionInputsReadArgs{}),
-	"decisions_resolve": `{
-  "type": "object",
-  "description": "Record the owner's answer to an open decision.",
-  "properties": {
-    "decision_id": {"type": "string"},
-    "version": {"type": "integer", "description": "The decision version you last read."},
-    "option": {"type": "string"},
-    "text": {"type": "string"},
-    "reason": {"type": "string", "maxLength": 500, "description": "One sentence on why, kept with the change."}
-  },
-  "required": ["decision_id", "version"],
-  "additionalProperties": false
-}`,
+	"decisions_resolve":    decisionResolveSchema(),
 	"artifacts_read": `{
   "type": "object",
   "properties": {"artifact_id": {"type": "string"}},

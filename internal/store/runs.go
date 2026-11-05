@@ -51,7 +51,12 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		COALESCE(t.current_artifact_id, ''), t.rating, t.project, t.title,
 		COALESCE((SELECT p.weight FROM projects p WHERE p.project = t.project), 1),
 		NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dt ON dt.task_id = d.depends_on
-			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed'),
+			WHERE d.task_id = t.task_id AND dt.lifecycle <> 'completed')
+		AND NOT EXISTS (SELECT 1 FROM run_question_handoffs h
+			JOIN decision_continuations c ON c.decision_id=h.decision_id
+			LEFT JOIN tasks dt ON dt.task_id=c.dependency_task_id
+			WHERE h.continuation_action_id=a.action_id AND c.mode='dependency'
+			AND (dt.task_id IS NULL OR dt.kind<>'execution' OR dt.spec_version<>c.dependency_spec_version OR dt.lifecycle<>'completed')),
 		COALESCE((SELECT w.host_id FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id WHERE b.task_id=t.task_id), ''),
 		COALESCE((SELECT CASE WHEN w.backend_id<>'' THEN w.backend_id WHEN w.path<>'' AND w.provider_id<>'' THEN 'orca' WHEN w.path<>'' THEN 'git' ELSE '' END FROM task_workspace_bindings b JOIN workspaces w ON w.workspace_id=b.workspace_id WHERE b.task_id=t.task_id), ''),
         EXISTS (SELECT 1 FROM runs nr JOIN run_agent_executions ne ON ne.run_id=nr.run_id

@@ -246,7 +246,7 @@ func (c HandleAttention) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		env := *x.Env
 		inner.Env = &env
 		env.Target = protocol.Target{Type: "decision", ID: a.DecisionID}
-		env.Payload, err = json.Marshal(protocol.AnswerDecisionPayload{Version: p.Version, Option: p.Option, Text: p.Text})
+		env.Payload, err = json.Marshal(protocol.AnswerDecisionPayload{Version: p.Version, Option: p.Option, Text: p.Text, Continuation: p.Continuation})
 		if err != nil {
 			return Outcome{}, err
 		}
