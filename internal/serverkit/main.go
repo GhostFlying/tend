@@ -280,6 +280,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		}))
 	}
 	a := app.New(s, ids, now, opts...)
+	if err := a.RefreshUsageProjection(ctx); err != nil {
+		return err
+	}
 	if err := syncConfig(ctx, a, ids, cfg); err != nil {
 		return err
 	}

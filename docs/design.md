@@ -172,6 +172,8 @@
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
 | D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
 
+| D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
+
 | D168 | 新普通任务规则问题在原不可变开问事件冻结真实 spec 与可证 action；替代仅关闭明确过期问题，pause 与旧来源未知不猜失效，原答案及请求回放保真。 | 实现中 |
 
 D146 卡片进度补充：卡片仅展示真实直接子 Issue 的完成进度与子项，移除阶段标题、阶段计数及阶段进度条；无直接子 Issue 时隐藏子项区块。计划阶段保留在详情，明确与直接子 Issue 区分。复用已有 `children` 摘要与父筛选分页，既有阶段 API 字段保留兼容。见 [实施计划](plans/issue-card-child-only-progress.md)。
@@ -1068,3 +1070,12 @@ BackgroundPool 在同一 conversation 的既有互斥与升级准入内先消费
 ## D175：TraeX 原 rollout 的终态补证
 
 独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证只在原 observation record 位置的局部副本上发布真实事实，不覆盖冲突身份或已有确定原生结果；生命周期 Agent 始终沿用原 native-api 观测，补证不参与完成、恢复、控制或历史清理。每轮只发布一次 projection，不反复切换原弱观测与补证 revision，不创建会话或重发输入。TraeX 观测以持久语义指纹区分相同原生身份的 running 与后续终态/结束时钟/operations；排除采样时间，真实变化只推进一次 revision，相同事实及重启重放沿用原事件身份。指纹仅用于观测去重，不改变原生绑定或生命周期权限；旧 thread JSON 缺失字段仍可读取，首次补齐语义元数据可追加一次事实。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。
+
+
+## D176：Token 用量写时投影
+
+原始事实与 current 身份不变。追加迁移 91 建立可重建的请求贡献、四小时汇总与持久 dirty 队列；app 的统一事务收尾解析受影响请求的归属、逐请求价格和有效计量，只更新受影响的汇总桶。任何失败连同业务写入一起回滚。服务在开放监听前处理历史补齐，不在 GET 中补算，也没有新的定时任务。
+
+归属证据、执行状态、Task 标题、Issue 标题/父链、冻结 inventory 和本地 actor 的真实变化登记相应历史请求。覆盖状态、游标、普通心跳和无关 Issue 内容不触发历史重算。当前报价内容改变时写时重算价格，报价刷新但内容相同时仅推进报价时间。冲突隔离、legacy/native 重叠及其回退沿 D117/D157 原合同维护。
+
+读取以同一快照中的汇总为主；滚动或自然时间窗切开的桶读取已投影贡献，逐请求明细最多读取 51 条。分组列表省略明细查询。原生未来时点在查询截止之前仍算时间未知，时钟推进会自然转为已知；未知时间不进入趋势，缺失计数不填零，精确十进制逐请求计价不变。API/CLI 的窗口、归属筛选、分页与输出合同保留，runner wire 无变化。详见[实施计划](plans/token-usage-projection.md)。

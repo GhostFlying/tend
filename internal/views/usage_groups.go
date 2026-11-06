@@ -119,22 +119,20 @@ func sessionID(r protocol.TokenUsageRecord) string {
 	return "legacy:" + r.Subject
 }
 
-func addSession(groups map[string]*protocol.UsageSession, r protocol.TokenUsageRecord) {
+func addSession(groups map[string]*protocol.UsageSession, a UsageAggregate) {
+	r := a.Record
 	id := sessionID(r)
 	s := groups[id]
 	if s == nil {
 		s = &protocol.UsageSession{ID: id, ParentSessionID: r.ParentSessionID, Models: []string{}, Attributions: []protocol.UsageAttribution{}}
 		groups[id] = s
 	}
-	addUsageRecord(&s.Totals, r)
-	if r.OccurredAt != nil {
-		at := *r.OccurredAt
-		if s.FirstAt == nil || at < *s.FirstAt {
-			s.FirstAt = &at
-		}
-		if s.LastAt == nil || at > *s.LastAt {
-			s.LastAt = &at
-		}
+	MergeUsageTotals(&s.Totals, a.Totals)
+	if a.FirstAt != nil && (s.FirstAt == nil || *a.FirstAt < *s.FirstAt) {
+		s.FirstAt = a.FirstAt
+	}
+	if a.LastAt != nil && (s.LastAt == nil || *a.LastAt > *s.LastAt) {
+		s.LastAt = a.LastAt
 	}
 	{
 		model := r.Model
@@ -164,7 +162,7 @@ func addSession(groups map[string]*protocol.UsageSession, r protocol.TokenUsageR
 		b, _ := json.Marshal(s.Executions[i].Attribution)
 		if string(b) == string(key) {
 			execution := &s.Executions[i]
-			addUsageRecord(&execution.Totals, r)
+			MergeUsageTotals(&execution.Totals, a.Totals)
 			measurement := -1
 			for j, m := range execution.Measurements {
 				if m.Model == r.Model && m.CLI == r.Provider && m.CLIVersion == r.NativeVersion {
@@ -176,7 +174,7 @@ func addSession(groups map[string]*protocol.UsageSession, r protocol.TokenUsageR
 				execution.Measurements = append(execution.Measurements, protocol.UsageMeasurement{Model: r.Model, CLI: r.Provider, CLIVersion: r.NativeVersion})
 				measurement = len(execution.Measurements) - 1
 			}
-			addUsageRecord(&execution.Measurements[measurement].Totals, r)
+			MergeUsageTotals(&execution.Measurements[measurement].Totals, a.Totals)
 			break
 		}
 	}
@@ -213,7 +211,12 @@ func newUsageGrouping() *usageGrouping {
 	return &usageGrouping{sessions: map[string]*protocol.UsageSession{}, issues: map[string]*protocol.UsageIssue{}, issueSessions: map[string]map[string]*protocol.UsageSession{}}
 }
 func (g *usageGrouping) add(r protocol.TokenUsageRecord) {
-	addSession(g.sessions, r)
+	g.addAggregate(UsageAggregate{Record: r, Totals: UsageRecordTotals(r), FirstAt: r.OccurredAt, LastAt: r.OccurredAt})
+}
+
+func (g *usageGrouping) addAggregate(a UsageAggregate) {
+	r := a.Record
+	addSession(g.sessions, a)
 	path := r.Attribution.IssuePath
 	if len(path) == 0 {
 		path = []protocol.UsageIssueRef{{ID: "", Title: "主会话与未归属用量"}}
@@ -240,14 +243,13 @@ func (g *usageGrouping) add(r protocol.TokenUsageRecord) {
 			issue.Models = append(issue.Models, model)
 			sort.Strings(issue.Models)
 		}
-		addUsageRecord(&issue.Totals, r)
-		if r.OccurredAt != nil && (issue.LastAt == nil || *r.OccurredAt > *issue.LastAt) {
-			at := *r.OccurredAt
-			issue.LastAt = &at
+		MergeUsageTotals(&issue.Totals, a.Totals)
+		if a.LastAt != nil && (issue.LastAt == nil || *a.LastAt > *issue.LastAt) {
+			issue.LastAt = a.LastAt
 		}
 		if i == len(path)-1 {
-			addUsageRecord(&issue.Direct, r)
-			addSession(g.issueSessions[ref.ID], r)
+			MergeUsageTotals(&issue.Direct, a.Totals)
+			addSession(g.issueSessions[ref.ID], a)
 		}
 	}
 }
