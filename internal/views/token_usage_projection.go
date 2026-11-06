@@ -205,7 +205,7 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 	}
 	sort.Slice(v.Trend, func(i, j int) bool { return v.Trend[i].Start < v.Trend[j].Start })
 	grouping.finish(&v)
-	if !filter.Summary {
+	{
 		keys := []string{}
 		for key, match := range matched {
 			if match {
@@ -216,21 +216,33 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 		if e != nil {
 			return v, e
 		}
-		rows, err = q.QueryContext(ctx, `SELECT record_json FROM token_usage_contributions WHERE visible=1 AND conflict=0 AND dimension_key IN (SELECT value FROM json_each(?)) AND (?=0 OR fact_seq<?) AND ((occurred_at<? AND (? IS NULL OR occurred_at>=?)) OR (?='total' AND (occurred_at IS NULL OR (native=1 AND occurred_at>=?)))) ORDER BY fact_seq DESC LIMIT 51`, string(raw), before, before, cutoff, start, start, kind, v.AsOf)
+		columns := "record_json"
+		if filter.Summary {
+			columns = "fact_seq"
+		}
+		rows, err = q.QueryContext(ctx, `SELECT `+columns+` FROM token_usage_contributions WHERE visible=1 AND conflict=0 AND dimension_key IN (SELECT value FROM json_each(?)) AND (?=0 OR fact_seq<?) AND ((occurred_at<? AND (? IS NULL OR occurred_at>=?)) OR (?='total' AND (occurred_at IS NULL OR (native=1 AND occurred_at>=?)))) ORDER BY fact_seq DESC LIMIT 51`, string(raw), before, before, cutoff, start, start, kind, v.AsOf)
 		if err != nil {
 			return v, err
 		}
+		count := 0
 		for rows.Next() {
+			if count == 50 {
+				v.More = true
+				break
+			}
+			count++
+			if filter.Summary {
+				if err = rows.Scan(&v.Next); err != nil {
+					break
+				}
+				continue
+			}
 			var raw string
 			if err = rows.Scan(&raw); err != nil {
 				break
 			}
 			var r protocol.TokenUsageRecord
 			if err = json.Unmarshal([]byte(raw), &r); err != nil {
-				break
-			}
-			if len(v.Records) == 50 {
-				v.More = true
 				break
 			}
 			if r.RecordID != "" && r.OccurredAt != nil && *r.OccurredAt >= v.AsOf {

@@ -90,7 +90,10 @@ func TestUsageProjectionSummariesPricesAndBoundedDetails(t *testing.T) {
 	if len(last.Records) != 20 || last.More {
 		t.Fatal("wrong terminal page", last)
 	}
-	_, queries = projectionView(t, h, "24h", 0, views.UsageFilter{Summary: true})
+	summary, queries := projectionView(t, h, "total", 0, views.UsageFilter{Summary: true})
+	if summary.Next != v.Next || summary.More != v.More || len(summary.Records) != 0 {
+		t.Fatal("summary changed the existing cursor contract")
+	}
 	for _, q := range queries {
 		if strings.Contains(q, "record_json FROM") {
 			t.Fatal("summary fetched request details")
@@ -287,5 +290,35 @@ func TestUsageProjectionMigrationBackfillAndReopen(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUsageProjectionLegacyRevisionReleasesPendingNativeOverlap(t *testing.T) {
+	h := newHarness(t)
+	legacy := protocol.TokenUsageSample{Source: "legacy", RequestID: "response", ThreadID: "native-thread", TurnID: "native-turn", Revision: 1, Settlement: "final", Total: usageNumber(100)}
+	if err := h.app.RecordTokenUsage(t.Context(), "main", legacy); err != nil {
+		t.Fatal(err)
+	}
+	native := nativeSample(h.clock.Now().UnixMilli())
+	native.RequestID = legacy.RequestID
+	if err := h.app.RecordNativeConversationUsage(t.Context(), "main", []protocol.TokenUsageSample{native}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
+	if before.Totals.Requests != 1 || before.Totals.Total != 100 || before.Conflicts != 1 {
+		t.Fatal("fixture should retain legacy on unmatched overlap", before)
+	}
+	// The old legacy sequence is no longer current, so its unresolved native peer
+	// must be released even when the new legacy fact creates no alias itself.
+	if err := h.app.write(t.Context(), func(tx *store.Tx) error {
+		legacy.Revision = 2
+		legacy.TurnID = "corrected-turn"
+		return recordTokenUsage(t.Context(), tx, legacy, "conversation:main", "main", h.clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
+	if after.Totals.Requests != 2 || after.Totals.Total != 210 || after.Conflicts != 0 {
+		t.Fatal("old legacy sequence kept native peer quarantined", after)
 	}
 }
