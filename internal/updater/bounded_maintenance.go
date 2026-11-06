@@ -118,6 +118,9 @@ func (s *Supervisor) authorizeBoundedMaintenanceWindow(ctx context.Context, p pr
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
+	if err := rejectUpdaterOnlyRequest(s.cfg, a.RequestID); err != nil {
+		return err
+	}
 	m := s.state.Maintenance
 	if m == nil || digest(m.Plan) != digest(p) || a.Role != "server" || a.Source != p.PreviousProcess || a.Target != p.Successor || a.PlanSHA256 != digest(p) || !protocol.ValidID(protocol.PrefixRequest, a.RequestID) || a.RequestID == p.RequestID || a.RequestID == p.LinkRequestID || a.Reason == "" {
 		return errors.New("updater: exact independent bounded maintenance authority required")
@@ -408,6 +411,9 @@ func (s *Supervisor) CancelBoundedMaintenance(ctx context.Context, p protocol.Co
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.durabilityError(); err != nil {
+		return err
+	}
+	if err := rejectUpdaterOnlyRequest(s.cfg, a.RequestID); err != nil {
 		return err
 	}
 	m := s.state.Maintenance
