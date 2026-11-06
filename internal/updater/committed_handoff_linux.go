@@ -517,7 +517,7 @@ func CommittedHandoffStatus(ctx context.Context, cfg Config) (CommittedHandoffJo
 	if err != nil {
 		return j, err
 	}
-	if s.Maintenance != nil && digest(s.Maintenance.Plan) == digest(j.Plan.Maintenance) && o.Updater.SHA256 == j.Plan.CandidateSHA256 {
+	if s.Maintenance != nil && digest(s.Maintenance.Plan) == digest(j.Plan.Maintenance) && (o.Updater.SHA256 == j.Plan.CandidateSHA256 || verifyUpdaterOnlyAdoptedController(ctx, cfg, j.Plan, o.Updater) == nil) {
 		j.Phase = s.Maintenance.Phase
 		j.State = &s
 		return j, nil

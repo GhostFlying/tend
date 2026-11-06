@@ -465,15 +465,16 @@ func TestBoundedRealProcessLostStartReplyReconcilesOnce(t *testing.T) {
 	}
 	launch := "bounded-lost-start-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	t.Cleanup(func() {
-		cleanup, done := context.WithTimeout(context.Background(), 2*time.Second)
+		cleanup, done := context.WithTimeout(context.Background(), 5*time.Second)
 		defer done()
+		// Race-instrumented helpers wait before exit; leave grace beyond that delay.
 		// Reconcile even if a failing injection never observed Start's result.
 		found, findErr := (LinuxProcess{}).Find(cleanup, launch, sum)
 		if findErr != nil {
 			t.Error("reconcile exact lost-start fixture during cleanup", findErr)
 		}
 		for _, id := range found {
-			if e := (LinuxProcess{}).Stop(cleanup, id, time.Second); e != nil {
+			if e := (LinuxProcess{}).Stop(cleanup, id, 3*time.Second); e != nil {
 				t.Error(e)
 			}
 		}

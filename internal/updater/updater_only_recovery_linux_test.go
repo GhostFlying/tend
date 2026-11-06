@@ -414,6 +414,103 @@ func TestUpdaterOnlyRecoveryPendingAttemptPreservesAdoptedStartup(t *testing.T) 
 	}
 }
 
+func TestUpdaterOnlyRecoveryStatusRequiresAdoptedControllerAuthority(t *testing.T) {
+	for _, kind := range []string{"missing head", "missing journal", "unadopted", "incomplete receipt", "foreign scope", "foreign head", "changed parent", "changed lock", "unverified controller"} {
+		t.Run(kind, func(t *testing.T) {
+			h, p, a := updaterOnlyLinkedFixture(t)
+			cfg := h.s.cfg
+			if err := os.MkdirAll(filepath.Dir(committedJournalPath(cfg, p.Maintenance.MaintenanceID)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSON(committedJournalPath(cfg, p.Maintenance.MaintenanceID), CommittedHandoffJournal{Plan: p, Phase: "starting_adopt"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeJSON(committedHeadPath(cfg), committedHandoffHead{MaintenanceID: p.Maintenance.MaintenanceID, PlanSHA256: digest(p)}); err != nil {
+				t.Fatal(err)
+			}
+			headSHA, journalSHA, err := updaterOnlyOriginalFiles(cfg, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF2"
+			actual := Identity{PID: 789, StartTicks: 1000, SHA256: a.UpdaterTarget.CandidateSHA256}
+			j := updaterOnlyJournal{Format: 1, Scope: updaterOnlyScope{Authorization: a, ConfigSHA256: digest(cfg), OriginalHeadSHA256: headSHA, OriginalJournalSHA256: journalSHA, OriginalState: h.s.Status(), Retained: h.s.Status().Process}, Phase: "adopted", AdoptedUpdater: actual}
+			if _, err := publishUpdaterOnlyAttempt(cfg, p, j); err != nil {
+				t.Fatal(err)
+			}
+			head := updaterOnlyHead{Format: 1, RequestID: a.RequestID, ScopeSHA256: digest(j.Scope)}
+			if _, err := selectUpdaterOnlyStartup(cfg, p, head, actual.SHA256); err != nil {
+				t.Fatal("baseline adopted scope is invalid", err)
+			}
+			// This component fixture has no installed controller. Establish the
+			// exact physical boundary, then require each invalid authority to fail
+			// earlier for its own reason rather than passing on the same missing file.
+			if err := verifyUpdaterOnlyAdoptedController(t.Context(), cfg, p, actual); err == nil || !strings.Contains(err.Error(), p.ConfigFile) {
+				t.Fatal("baseline did not reach physical controller validation", err)
+			}
+			want := ""
+			switch kind {
+			case "missing head":
+				want = updaterOnlyHeadPath(cfg)
+				err = os.Remove(updaterOnlyHeadPath(cfg))
+			case "missing journal":
+				want = updaterOnlyJournalPath(cfg, a.RequestID)
+				err = os.Remove(updaterOnlyJournalPath(cfg, a.RequestID))
+			case "unadopted":
+				want = "current controller has no adopted receipt"
+				j.Phase = "starting_updater"
+			case "incomplete receipt":
+				want = "current controller has no adopted receipt"
+				j.AdoptedUpdater = Identity{}
+			case "foreign scope":
+				want = "scope configuration changed"
+				j.Scope.ConfigSHA256 = strings.Repeat("f", 64)
+			case "foreign head":
+				want = "startup scope or artifact changed"
+				head.ScopeSHA256 = strings.Repeat("f", 64)
+				err = writeJSON(updaterOnlyHeadPath(cfg), head)
+			case "changed parent":
+				want = "original handoff history changed"
+				p.ParentHandoffSHA256 = strings.Repeat("f", 64)
+			case "changed lock":
+				want = "ownership inode changed"
+				lock := filepath.Join(cfg.StateDir, "supervisor.lock")
+				if err = os.Rename(lock, lock+".old"); err == nil {
+					err = os.WriteFile(lock, nil, 0o600)
+				}
+			case "unverified controller":
+				want = "current controller is unconfirmed"
+				actual = Identity{}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "unadopted" || kind == "incomplete receipt" || kind == "foreign scope" {
+				if err := writeJSON(updaterOnlyJournalPath(cfg, a.RequestID), j); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "foreign scope" {
+					head.ScopeSHA256 = digest(j.Scope)
+					if err := writeJSON(updaterOnlyHeadPath(cfg), head); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			before, err := privateFile(filepath.Join(cfg.StateDir, "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyUpdaterOnlyAdoptedController(t.Context(), cfg, p, actual); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("authority rejected at wrong boundary: want %q, got %v", want, err)
+			}
+			after, err := privateFile(filepath.Join(cfg.StateDir, "state.json"))
+			if err != nil || bytesDigest(after) != bytesDigest(before) {
+				t.Fatal("status authority check changed durable state", err)
+			}
+		})
+	}
+}
+
 func TestUpdaterOnlyRecoveryInstallerWindowReservesRequest(t *testing.T) {
 	h, _, a := updaterOnlyLinkedFixture(t)
 	for index, action := range []string{"updater_only_takeover", "force", "apply"} {
@@ -746,6 +843,96 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if adopted.AdoptedUpdater.SHA256 != candidateSHA || adopted.AdoptedUpdater.PID == oldUpdater.PID {
 		t.Fatal("wrong replacement updater")
 	}
+	statusEvidence := map[string]CommittedHandoffJournal{}
+	assertOriginalStatus := func(label string, controller Identity) {
+		t.Helper()
+		before, err := privateFile(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, replay := range []bool{false, true} {
+			var got CommittedHandoffJournal
+			if replay {
+				got, err = ApplyCommittedHandoff(ctx, cfg, p)
+			} else {
+				got, err = CommittedHandoffStatus(ctx, cfg)
+			}
+			if err != nil || got.State == nil || got.State.Maintenance == nil || got.Phase != got.State.Maintenance.Phase || digest(got.Plan) != digest(p) || got.Observation == nil || got.Observation.Updater != controller || got.Observation.InstalledSHA256 != controller.SHA256 {
+				t.Fatalf("%s original status/replay=%v: error=%v result=%+v", label, replay, err, got)
+			}
+			statusEvidence[label+"-replay-"+strconv.FormatBool(replay)] = got
+		}
+		after, err := privateFile(statePath)
+		if err != nil || bytesDigest(after) != bytesDigest(before) {
+			t.Fatal("original status/replay changed persisted state", err)
+		}
+		if h, j, err := updaterOnlyOriginalFiles(cfg, p); err != nil || h != originalHead || j != originalJournal {
+			t.Fatal("original status/replay changed committed history", err)
+		}
+		if actual, err := (LinuxProcess{}).Inspect(ctx, controller.PID); err != nil || actual != controller {
+			t.Fatal("original status/replay restarted controller", err)
+		}
+	}
+	assertOriginalStatus("adopted replacement", adopted.AdoptedUpdater)
+	headRaw, err := privateFile(updaterOnlyHeadPath(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adoptedRaw, err := privateFile(updaterOnlyJournalPath(cfg, a.RequestID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"missing head", "unadopted", "foreign scope", "foreign lock"} {
+		t.Run("status "+kind, func(t *testing.T) {
+			defer func() {
+				if err := atomicWrite(updaterOnlyJournalPath(cfg, a.RequestID), adoptedRaw, 0o600); err != nil {
+					t.Error(err)
+				}
+				if err := atomicWrite(updaterOnlyHeadPath(cfg), headRaw, 0o600); err != nil {
+					t.Error(err)
+				}
+			}()
+			bad := adopted
+			if kind == "missing head" {
+				if err := os.Remove(updaterOnlyHeadPath(cfg)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				switch kind {
+				case "unadopted":
+					bad.Phase = "starting_updater"
+				case "foreign scope":
+					bad.Scope.ConfigSHA256 = strings.Repeat("f", 64)
+				case "foreign lock":
+					lock := *a.UpdaterLock
+					lock.Inode++
+					bad.Scope.Authorization.UpdaterLock = &lock
+				}
+				if err := writeJSON(updaterOnlyJournalPath(cfg, a.RequestID), bad); err != nil {
+					t.Fatal(err)
+				}
+				if err := writeJSON(updaterOnlyHeadPath(cfg), updaterOnlyHead{Format: 1, RequestID: a.RequestID, ScopeSHA256: digest(bad.Scope)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := CommittedHandoffStatus(ctx, cfg)
+			if !errors.Is(err, ErrUnknown) || got.State != nil {
+				t.Fatal("status accepted invalid adopted authority", err)
+			}
+		})
+		assertOriginalStatus("restored "+kind, adopted.AdoptedUpdater)
+	}
+	for _, kind := range []string{"manager PID", "kernel start"} {
+		bad := adopted.AdoptedUpdater
+		if kind == "manager PID" {
+			bad.PID = os.Getpid()
+		} else {
+			bad.StartTicks++
+		}
+		if err := verifyUpdaterOnlyAdoptedController(ctx, cfg, p, bad); err == nil {
+			t.Fatal("status accepted mismatched", kind)
+		}
+	}
 	if actual, err := (LinuxProcess{}).Inspect(ctx, child.PID); err != nil || actual != child {
 		t.Fatal("updater-only replacement stopped or restarted service", err)
 	}
@@ -786,6 +973,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if pending.Scope.PreviousAdopted == nil || pending.Scope.PreviousAdopted.RequestID != a.RequestID {
 		t.Fatal("pending production publisher did not preserve installed authority")
 	}
+	assertOriginalStatus("pre-start same-bytes successor", adopted.AdoptedUpdater)
 	// An ordinary later reopen remains valid after legitimate completion state
 	// changes. Its durable adopted receipt does not freeze the entire old state.
 	if _, err := (systemdUser{}).call(ctx, "stop", unit); err != nil {
@@ -845,6 +1033,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertOriginalStatus("ordinary updater and service restarts", currentUpdater)
 	currentState, err := readState(statePath)
 	if err != nil {
 		t.Fatal(err)
@@ -868,6 +1057,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if sameAdopted.AdoptedUpdater.PID == currentUpdater.PID || sameAdopted.AdoptedUpdater.SHA256 != currentUpdater.SHA256 {
 		t.Fatal("same-bytes takeover did not replace exactly its controller")
 	}
+	assertOriginalStatus("same-bytes adopted successor", sameAdopted.AdoptedUpdater)
 	if err := verifyUpdaterOnlyRetained(ctx, child); err != nil {
 		t.Fatal("same-bytes takeover affected committed service", err)
 	}
@@ -878,5 +1068,5 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if preStart {
 		evidenceName = "updater-only-pre-start-recovery"
 	}
-	boundedFixtureEvidence(t, evidenceName, map[string]any{"unit": unit, "old_updater": oldUpdater, "new_updater": adopted.AdoptedUpdater, "retained_committed_service": child, "exited_original_predecessor": predecessor, "original_head_sha256": originalHead, "original_journal_sha256": originalJournal, "original_plan": p, "original_authorization": a, "adopted_continuation": adopted, "unchanged_service_and_deadlines": true, "ordinary_completion_reopen": true, "pending_replacement_preserved_adopted_startup": true, "pending_attempt": pending, "historical_committed_service": historicalChild, "verified_service_restart": restartedState, "same_bytes_source_controller": currentUpdater, "same_bytes_adopted": sameAdopted})
+	boundedFixtureEvidence(t, evidenceName, map[string]any{"unit": unit, "old_updater": oldUpdater, "new_updater": adopted.AdoptedUpdater, "retained_committed_service": child, "exited_original_predecessor": predecessor, "original_head_sha256": originalHead, "original_journal_sha256": originalJournal, "original_plan": p, "original_authorization": a, "adopted_continuation": adopted, "unchanged_service_and_deadlines": true, "ordinary_completion_reopen": true, "pending_replacement_preserved_adopted_startup": true, "pending_attempt": pending, "historical_committed_service": historicalChild, "verified_service_restart": restartedState, "same_bytes_source_controller": currentUpdater, "same_bytes_adopted": sameAdopted, "original_status_and_replays": statusEvidence})
 }

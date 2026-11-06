@@ -167,4 +167,6 @@ PreparationRevision 表示预期 prepare 成功后的 revision，原 prepare CAS
 - updater-only 请求从独立 installer window 建立起即占用原 ID，其他维护 action 不能重新占用；普通 force/apply 的原窗口重放保持。旧 controller 已确认退出且 manager 没有 pending Job 时，明确未 Start 的计划可用新独立授权前滚；inactive/dead 与 failed/failed 都按真实状态核验，不改写失败或从 MainPID=0 推导未知 Start 可重发。
 - 新授权、启动前恢复和启动采用均校验原 committed handoff 固定的 lock device/inode；新授权不能用替换后的锁文件覆盖原身份。回归分别保留原锁连续性的成功路径和 rename 后新 inode 的拒绝证据。
 - 当前活服务以稳定的 committed binding、当前版本与最新 committed process proof 固定；原安装 receipt 与 maintenance process 仍按原身份互相校验，不改写历史。通过既有 Supervisor.Step 完成的同版本正常重启可提供新的精确 kernel identity；缺少当前 proof、变更 binding、未完成操作或未知进程仍拒绝。组件回归与原生进程验收覆盖正常重启后的 updater 替换。
+- 原 committed handoff 的 status/replay 在 updater-only adopted 后识别新的 controller，须只读核验独立 scope/adopted receipt、原 handoff 来源、实际 manager/kernel identity 和原锁连续性。返回真实持久 state 与观测，不改原 journal/plan，不把未 adopted、丢失或不符的凭据转成成功；原请求重放不增加 Start。
+- 真实进程用例的清理窗口覆盖 race runtime 自身退出等待，仍仅清理精确归属的 helper，保留业务断言和业务阶段超时；CI 的原始清理失败单独保存，不以重跑替代原因校准。
 - 回归覆盖真正不同 updater bytes、原始 handoff journal 与活服务：旧 updater 退出后新 updater 获得同 lock，服务 PID/start/hash 保持；候选、kernel identity、lock、CAS 或 proof 不符拒绝。旧回执/unknown 不改写，不将本机 updater 更新宣称为服务再次部署。
