@@ -243,6 +243,17 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	if next == nil {
 		return nil
 	} // Legacy servers cannot authorize maintenance.
+	var boundedTarget protocol.UpgradeBinding
+	if release := next.BoundedRecoveryRelease; release != nil {
+		boundedTarget = release.Successor
+	} else if next.Mode == protocol.RunnerNormal {
+		r.controlMu.Lock()
+		if q := r.boundedRecovery; q != nil && q.AdmissionRelease != nil {
+			boundedTarget = q.AdmissionRelease.Successor
+		}
+		r.controlMu.Unlock()
+	}
+	boundedProcessMatches := r.boundedAdmissionProcessMatches(ctx, boundedTarget)
 	defer r.maybeCancelStaged(ctx)
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
@@ -285,9 +296,12 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 			return err
 		}
 		if !known {
+			if !boundedProcessMatches {
+				return errors.New("runner: bounded admission release has no matching committed process proof")
+			}
 			if r.boundedRecovery == nil || release.RecoveryAuthorizationID != r.boundedRecovery.Authorization.RequestID ||
 				release.HostID != r.cfg.HostID || release.Successor != r.boundedRecovery.Authorization.Target || release.RunnerGeneration != r.generation ||
-				release.Successor.ProcessInstanceID != r.instanceID || release.Successor.ArtifactSHA256 != r.cfg.Build.BinarySHA256 ||
+				release.Successor.ArtifactSHA256 != r.cfg.Build.BinarySHA256 ||
 				next.Mode != protocol.RunnerNormal || release.ExpectedControlRevision >= next.Revision || release.Reason == "" {
 				return errors.New("runner: independent bounded admission release binding changed")
 			}
@@ -311,7 +325,7 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	if q := r.boundedRecovery; q != nil && q.AdmissionRelease != nil && next.Mode == protocol.RunnerNormal {
 		release := q.AdmissionRelease
 		releasedBootstrap = release.RecoveryAuthorizationID == q.Authorization.RequestID && release.Successor == q.Authorization.Target &&
-			release.Successor.UpgradeID == r.cfg.UpgradeID && release.Successor.ProcessInstanceID == r.instanceID && release.Successor.ArtifactSHA256 == r.cfg.Build.BinarySHA256
+			release.Successor == boundedTarget && boundedProcessMatches
 	}
 	r.control = stored
 	if (next.UpgradeID == r.cfg.UpgradeID && next.Revision > 0 || cancelledBootstrap || releasedBootstrap) && (hello || r.helloConfirmed) {

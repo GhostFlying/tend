@@ -20,7 +20,9 @@ type RetainedStop struct {
 
 type retainedResumeRecord struct {
 	protocol.RetainedRunResume
-	Stop *RetainedStop `json:"independent_stop,omitempty"`
+	Stop         *RetainedStop                `json:"independent_stop,omitempty"`
+	BoundedFinal *BoundedFinalAcknowledgement `json:"bounded_final_ack,omitempty"`
+	StopHistory  json.RawMessage              `json:"stop_history,omitempty"`
 }
 
 func assignmentDigest(body string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(body))) }
@@ -121,5 +123,10 @@ func (j *Journal) RetainedResume(ctx context.Context, id string) (*protocol.Reta
 	}
 	var p protocol.RetainedRunResume
 	err = json.Unmarshal([]byte(raw), &p)
+	if err == nil && p.RequestID == "" && p.Mode == "" {
+		// A terminal receipt may share this reconciliation record without
+		// granting permission to attach to the predecessor's native work.
+		return nil, nil
+	}
 	return &p, err
 }

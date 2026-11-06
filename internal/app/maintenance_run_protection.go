@@ -239,14 +239,18 @@ func settleMaintenanceStopsOnOwnerControl(ctx context.Context, x *Exec, tx *stor
 		return nil
 	}
 	query := `WITH RECURSIVE scope(id) AS(SELECT ? UNION ALL SELECT i.issue_id FROM issue_controls i JOIN scope p ON i.parent_issue_id=p.id)
- SELECT DISTINCT r.run_id FROM maintenance_protected_runs p JOIN maintenance_physical_stops s ON s.run_id=p.run_id AND s.lease_id=p.lease_id JOIN runs r ON r.run_id=p.run_id AND r.task_id=p.task_id AND r.action_id=p.action_id JOIN tasks t ON t.task_id=r.task_id JOIN plan_actions a ON a.action_id=r.action_id JOIN leases l ON l.run_id=r.run_id AND l.lease_id=p.lease_id
+ SELECT DISTINCT r.run_id FROM maintenance_physical_stops s JOIN runs r ON r.run_id=s.run_id JOIN tasks t ON t.task_id=r.task_id JOIN plan_actions a ON a.action_id=r.action_id JOIN leases l ON l.run_id=r.run_id AND l.lease_id=s.lease_id AND l.host_id=r.host_id
  WHERE ` + scope + ` AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')
  AND (r.desired_state='stopped' OR t.lifecycle IN ('completed','cancelled') OR a.status IN ('cancelled','superseded') OR EXISTS(SELECT 1 FROM issue_manager_tasks m JOIN issue_controls i ON i.issue_id=m.issue_id WHERE m.task_id=r.task_id AND i.state IN ('cancelling','cancelled','closed')))
+ AND (EXISTS(SELECT 1 FROM maintenance_protected_runs p WHERE p.maintenance_id=s.maintenance_id AND p.run_id=r.run_id AND p.task_id=r.task_id AND p.action_id=r.action_id AND p.host_id=r.host_id AND p.lease_id=l.lease_id)
+ OR EXISTS(SELECT 1 FROM events e JOIN json_each(e.body_json,'$.protections') p WHERE e.source='app' AND e.object_type='host' AND e.object_id=r.host_id AND e.kind=?
+ AND json_extract(p.value,'$.maintenance_id')=s.maintenance_id AND json_extract(p.value,'$.run_id')=r.run_id AND json_extract(p.value,'$.task_id')=r.task_id AND json_extract(p.value,'$.action_id')=r.action_id AND json_extract(p.value,'$.host_id')=r.host_id AND json_extract(p.value,'$.lease_id')=l.lease_id))
  ORDER BY r.run_id`
 	args := []any{x.Env.Target.ID}
 	if scope == `r.task_id=?` {
 		args = append(args, x.Env.Target.ID)
 	}
+	args = append(args, boundedRunnerAuthorizedEvent)
 	ids, err := store.FollowupIDs(ctx, tx.Q(), query, args...)
 	if err != nil {
 		return err

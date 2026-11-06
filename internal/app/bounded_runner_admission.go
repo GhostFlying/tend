@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"slices"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -52,7 +51,7 @@ func (ReleaseBoundedRunnerAdmission) Apply(ctx context.Context, x *Exec, tx *sto
 		return Outcome{}, err
 	}
 	rt := runtime.Runtime
-	if rt.InstanceID != p.Successor.ProcessInstanceID || rt.Build.BinarySHA256 != p.Successor.ArtifactSHA256 || rt.Generation != p.RunnerGeneration || rt.Generation <= grant.Plan.RunnerGeneration || rt.BoundedRecoveryAuthorizationID != p.RecoveryAuthorizationID || rt.JournalVersion < 17 || !slices.Contains(rt.Capabilities, protocol.CapabilityBoundedRunnerRecovery) {
+	if rt.Generation != p.RunnerGeneration || !boundedRunnerRuntimeMatches(grant, rt) {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "exact bounded recovery successor observation required")
 	}
 	originalJournal := grant.Plan.Journal

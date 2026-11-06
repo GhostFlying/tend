@@ -117,14 +117,41 @@ func (r *Runner) replayBoundedFacts(ctx context.Context) {
 		if ctx.Err() != nil || request.RunID == "" || blocked[request.RunID] {
 			continue
 		}
+		protected, err := r.cfg.Journal.BoundedRequestQuarantined(ctx, request.Envelope.RequestID)
+		if err != nil || !protected {
+			continue
+		}
 		run, err := r.cfg.Journal.Run(ctx, request.RunID)
 		if err != nil || !boundedFactualRequest(run, request) {
 			continue
 		}
-		if _, err := r.sendOnce(ctx, runCredential(run.Assignment), &request.Envelope); err != nil {
+		op, err := r.sendOnce(ctx, runCredential(run.Assignment), &request.Envelope)
+		if err != nil || op.RequestID != request.Envelope.RequestID || op.Status != protocol.OpSucceeded {
 			blocked[request.RunID] = true
 			r.cfg.Log.WarnContext(ctx, "bounded recovery fact remains pending", "run_id", request.RunID, "request_id", request.Envelope.RequestID, "err", err)
 			continue
+		}
+		if request.Envelope.Operation == protocol.OpRunsSubmitArtifact || request.Envelope.Operation == protocol.OpAcceptancesSubmit {
+			if err := r.cfg.Journal.AcknowledgeBoundedFinal(ctx, request, op); err != nil {
+				blocked[request.RunID] = true
+				r.cfg.Log.WarnContext(ctx, "bounded recovery terminal fact remains pending", "run_id", request.RunID, "request_id", request.Envelope.RequestID, "err", err)
+			}
+			continue
+		}
+		if run.Assignment.Role == protocol.RoleIssueManager && run.StoppedConfirmed && (run.Phase == journal.PhaseStarted || run.Phase == journal.PhaseReleasing) {
+			terminal := request.Envelope.Operation == protocol.OpManagerNativeStopped
+			if request.Envelope.Operation == protocol.OpManagerNativeReply {
+				closed, err := r.cfg.Journal.CompletedManagerClose(ctx, request.RunID)
+				var reply protocol.ManagerNativeReply
+				terminal = err == nil && closed != nil && json.Unmarshal(request.Envelope.Payload, &reply) == nil && reply.ID == closed.ID
+			}
+			if terminal {
+				if err := r.cfg.Journal.AcknowledgeBoundedFinal(ctx, request, op); err != nil {
+					blocked[request.RunID] = true
+					r.cfg.Log.WarnContext(ctx, "bounded recovery manager terminal fact remains pending", "run_id", request.RunID, "request_id", request.Envelope.RequestID, "err", err)
+				}
+				continue
+			}
 		}
 		if err := r.cfg.Journal.DeleteRequest(ctx, request.Envelope.RequestID); err != nil {
 			blocked[request.RunID] = true
@@ -147,9 +174,9 @@ func boundedFactualRequest(run journal.Run, request journal.Request) bool {
 	case protocol.OpManagerNativeStopped:
 		return run.Assignment.Role == protocol.RoleIssueManager && run.StoppedConfirmed
 	case protocol.OpRunsSubmitArtifact:
-		return run.Assignment.Role == protocol.RoleImplement && run.Phase == journal.PhaseSubmitting
+		return run.Assignment.Role == protocol.RoleImplement && run.Phase == journal.PhaseSubmitting && run.StoppedConfirmed
 	case protocol.OpAcceptancesSubmit:
-		return run.Assignment.Role == protocol.RoleAccept && run.Phase == journal.PhaseSubmitting
+		return run.Assignment.Role == protocol.RoleAccept && run.Phase == journal.PhaseSubmitting && run.StoppedConfirmed
 	default:
 		return false
 	}
