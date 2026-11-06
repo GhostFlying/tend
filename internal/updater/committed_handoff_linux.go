@@ -497,6 +497,7 @@ func continueCommittedHandoff(ctx context.Context, cfg Config, j CommittedHandof
 }
 
 func CommittedHandoffStatus(ctx context.Context, cfg Config) (CommittedHandoffJournal, error) {
+	normalizeConfig(&cfg)
 	j, err := readCommittedJournal(cfg)
 	if err != nil {
 		return j, err

@@ -603,6 +603,13 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if !filepath.IsAbs(candidate) {
 		t.Fatal("exact replacement updater artifact required")
 	}
+	statusReader := os.Getenv("TEND_TEST_STATUS_UPDATER")
+	if statusReader == "" {
+		statusReader = candidate
+	}
+	if !filepath.IsAbs(statusReader) {
+		t.Fatal("exact status reader artifact required")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	root, err := os.MkdirTemp("", "tend-bounded-fixture-")
@@ -630,11 +637,19 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if err := os.WriteFile(dataFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{InstanceID: "bounded-fixture", Role: "server", StateDir: stateDir, InitialBinary: self, Args: []string{"-test.run=^TestBoundedSystemdProcessHelper$"}, EnvFiles: []string{envFile}, DataFiles: []string{dataFile}, LogPath: filepath.Join(root, "child.log"), AuthoritySocket: filepath.Join(root, "absent.sock"), CoordinatorSocket: filepath.Join(root, "absent.sock"), AuthorizeURL: "http://localhost/updater/authorize", HealthURL: "http://localhost/updater/health", Protocol: protocol.CurrentRunnerProtocol, StorageVersion: 1, StopTimeoutSeconds: 2, HealthTimeoutSeconds: 3}
+	cfg := Config{InstanceID: "bounded-fixture", Role: "server", StateDir: stateDir, InitialBinary: self, Args: []string{"-test.run=^TestBoundedSystemdProcessHelper$"}, EnvFiles: []string{envFile}, DataFiles: []string{dataFile}, LogPath: filepath.Join(root, "child.log"), AuthoritySocket: filepath.Join(root, "absent.sock"), CoordinatorSocket: filepath.Join(root, "absent.sock"), AuthorizeURL: "http://localhost/updater/authorize", HealthURL: "http://localhost/updater/health", Protocol: protocol.CurrentRunnerProtocol, StorageVersion: 1}
+	rawConfig := cfg
 	normalizeConfig(&cfg)
 	configFile := filepath.Join(root, "updater.json")
-	if err := writeJSON(configFile, cfg); err != nil {
+	if err := writeJSON(configFile, rawConfig); err != nil {
 		t.Fatal(err)
+	}
+	configRaw, err := privateFile(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := strictJSON(configRaw, &rawConfig); err != nil || strings.Contains(string(configRaw), "stop_timeout_seconds") || strings.Contains(string(configRaw), "health_timeout_seconds") || cfg.StopTimeoutSeconds != 30 || cfg.HealthTimeoutSeconds != 120 || digest(rawConfig) == digest(cfg) {
+		t.Fatal("fixture must load an unchanged raw configuration with omitted timeout defaults", err)
 	}
 	selfSHA, err := hashFile(self)
 	if err != nil {
@@ -704,7 +719,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configRaw, err := os.ReadFile(configFile)
+	configRaw, err = os.ReadFile(configFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +845,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 		}
 		boundedSystemdWait(t, ctx, "definite pre-start source exit and idle manager", func() bool { m, _, err := managerSnapshot(ctx, unit); return err == nil && updaterOnlyManagerIdle(m) })
 	}
-	if _, err := BoundedCommand(ctx, cfg, "takeover", planFile, authFile, a.RequestID, a.ExpectedGeneration, a.ExpectedPhase); err != nil {
+	if _, err := BoundedCommand(ctx, rawConfig, "takeover", planFile, authFile, a.RequestID, a.ExpectedGeneration, a.ExpectedPhase); err != nil {
 		raw, _ := os.ReadFile(filepath.Join(root, "child.log"))
 		t.Fatalf("updater-only takeover: %v; child log: %s", err, raw)
 	}
@@ -850,18 +865,32 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		var persisted State
+		if err := strictJSON(before, &persisted); err != nil {
+			t.Fatal(err)
+		}
 		for _, replay := range []bool{false, true} {
 			var got CommittedHandoffJournal
 			if replay {
-				got, err = ApplyCommittedHandoff(ctx, cfg, p)
+				got, err = ApplyCommittedHandoff(ctx, rawConfig, p)
 			} else {
-				got, err = CommittedHandoffStatus(ctx, cfg)
+				got, err = CommittedHandoffStatus(ctx, rawConfig)
 			}
-			if err != nil || got.State == nil || got.State.Maintenance == nil || got.Phase != got.State.Maintenance.Phase || digest(got.Plan) != digest(p) || got.Observation == nil || got.Observation.Updater != controller || got.Observation.InstalledSHA256 != controller.SHA256 {
+			if err != nil || got.State == nil || got.State.Maintenance == nil || got.Phase != got.State.Maintenance.Phase || digest(*got.State) != digest(persisted) || digest(got.Plan) != digest(p) || got.Observation == nil || got.Observation.Updater != controller || got.Observation.InstalledSHA256 != controller.SHA256 {
 				t.Fatalf("%s original status/replay=%v: error=%v result=%+v", label, replay, err, got)
 			}
 			statusEvidence[label+"-replay-"+strconv.FormatBool(replay)] = got
 		}
+		command := exec.CommandContext(ctx, statusReader, "maintenance", "status", "--config", configFile)
+		output, err := command.Output()
+		if err != nil {
+			t.Fatalf("%s raw configuration CLI status: %v; stdout: %s", label, err, output)
+		}
+		var cliStatus CommittedHandoffJournal
+		if err := strictJSON(output, &cliStatus); err != nil || cliStatus.State == nil || cliStatus.State.Maintenance == nil || cliStatus.Phase != cliStatus.State.Maintenance.Phase || digest(*cliStatus.State) != digest(persisted) || cliStatus.Observation == nil || cliStatus.Observation.Updater != controller {
+			t.Fatalf("%s raw configuration CLI status mismatch: %v; stdout: %s", label, err, output)
+		}
+		statusEvidence[label+"-cli"] = cliStatus
 		after, err := privateFile(statePath)
 		if err != nil || bytesDigest(after) != bytesDigest(before) {
 			t.Fatal("original status/replay changed persisted state", err)
@@ -869,11 +898,38 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 		if h, j, err := updaterOnlyOriginalFiles(cfg, p); err != nil || h != originalHead || j != originalJournal {
 			t.Fatal("original status/replay changed committed history", err)
 		}
+		if raw, err := privateFile(configFile); err != nil || bytesDigest(raw) != bytesDigest(configRaw) {
+			t.Fatal("status/replay changed raw fixed configuration", err)
+		}
 		if actual, err := (LinuxProcess{}).Inspect(ctx, controller.PID); err != nil || actual != controller {
 			t.Fatal("original status/replay restarted controller", err)
 		}
 	}
 	assertOriginalStatus("adopted replacement", adopted.AdoptedUpdater)
+	// Diagnostic reads preserve pending/unknown operation facts and failures;
+	// they do not turn those raw facts into permission to repeat an operation.
+	func() {
+		before, err := privateFile(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := atomicWrite(statePath, before, 0o600); err != nil {
+				t.Error(err)
+			}
+		}()
+		diagnostic, err := readState(statePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		diagnostic.Maintenance.LastError = "fixture diagnostic failure"
+		diagnostic.Operation = &Operation{ID: "fixture-unknown-start", Kind: "restart", Phase: "starting", LastError: "native start outcome is unknown"}
+		if err := writeJSON(statePath, diagnostic); err != nil {
+			t.Fatal(err)
+		}
+		assertOriginalStatus("raw pending unknown and failure", adopted.AdoptedUpdater)
+	}()
+	assertOriginalStatus("restored diagnostic state", adopted.AdoptedUpdater)
 	headRaw, err := privateFile(updaterOnlyHeadPath(cfg))
 	if err != nil {
 		t.Fatal(err)
@@ -915,7 +971,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 					t.Fatal(err)
 				}
 			}
-			got, err := CommittedHandoffStatus(ctx, cfg)
+			got, err := CommittedHandoffStatus(ctx, rawConfig)
 			if !errors.Is(err, ErrUnknown) || got.State != nil {
 				t.Fatal("status accepted invalid adopted authority", err)
 			}
