@@ -1123,3 +1123,23 @@ runner force 需要独立 owner/CAS grant，不从普通升级 grant 或本地�
 原封存结果通过普通启动围栏前的专用只读入口恢复，验证原工作区及关闭证明，不新增 attempt 或重新准备工作区；先保存原结果，再记录停止，使中途崩溃只能继续提交原结果。文件选择在明确尚无封存 intent、上传请求或外部副作用时可以纠正并保留拒绝事实，其他未知继续沿原身份对账。 输入验证采用独立的 fresh 只读阶段，只有该阶段能明确拒绝无效路径，读取原身份或 intent 的失败不降级。文件 verdict 确认后，任何后续调用在写 pending 前核验 durable 原输入；同输入幂等，不同输入拒绝，原 ACK 与关闭范围保持不可变。 尚无结果目录或候选的普通已停止验收交回原启动围栏，不把专用入口变成额外永久阻塞。特殊文件在阻塞打开前拒绝，打开后复核普通文件；上传取消后仍以独立有界的本机只读审计保存真实完整封存身份，使实际关闭记录不依赖已取消的网络 context。
 
 线上协议仍为 2/1，新增可选能力必须显式协商；未协商的旧请求保持原义，缺少文件清单不代表文件已持久化。server schema 95 追加验收清单与冻结合同，runner journal 18 防止旧 17 writer 恢复时静默丢弃新引用；真实历史迁移保留原请求、执行身份与隔离。具体接口、权限与验证见[实施计划](plans/acceptance-evidence-files.md)。
+
+## D182：已关闭 manager 的原工具生命周期事实
+
+原成功关闭回执仍须精确覆盖事件尾游标，并在同一事务内确认全部事件已应用。
+对于明确属于原内部 repair turn，且已存在同 Run/thread/turn/call 身份、成功投递且未 rejected 的原 `tool_result`，
+可在该事务中消费与原调用严格匹配的 `dynamicToolCall` started/completed 生命周期
+元数据。projection、raw、工具与参数身份必须一致，结果语义以原持久化 payload
+为来源；业务工具失败可以是真实已投递结果，不能从 native completed 推导业务成功。
+消费保留原事件和结果字节，审计分别关联原 native close 与回执 Envelope 请求、
+事件序号与摘要及原结果请求。被 rejected 的 close 不授予此事实消费权限。
+
+普通业务 turn 的 rollout/tool use 仍由原消费者保存，不经此入口跳过用户工具展示。
+该路径不执行工具、不发送 native 请求、不恢复会话或 lease，不结算原逻辑执行、
+repair 或业务 unknown。缺失、未确认、不匹配或其它类型的事件继续阻止关闭，
+任一拒绝保持整个关闭事务回滚。原 close/stopped 真实归账后，后继 receipt reader
+仍须满足原独立合同。既有 bounded fact replay 沿原 Envelope、ID、次序和单次预算
+输送；不以维护完成或全局 admission release 替代逐 Run 的停止与业务证明。
+
+无 wire、schema、journal 或 owner 权限变更；继续使用现有关闭入口与 manager
+对账 CLI。详见[实施计划](plans/closed-manager-factual-events.md)。
