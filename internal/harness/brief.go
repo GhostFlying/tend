@@ -36,9 +36,12 @@ var VerdictToolSpec = ToolSpec{
 // VerdictTool; the last valid call counts.
 type Verdicts struct {
 	StateDir string
+	Spec     WorkerSpec
 	// RequireBinding prevents acknowledgments before a native send is journaled.
 	RequireBinding bool
 	binding        string
+	nativeBinding  string
+	sealedIdentity string
 	mu             sync.Mutex
 	verdict        *protocol.VerdictPayload
 }
@@ -49,45 +52,49 @@ func (v *Verdicts) Bind(binding string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.binding != binding {
-		v.binding, v.verdict = binding, nil
+		v.binding, v.verdict, v.nativeBinding, v.sealedIdentity = binding, nil, "", ""
 	}
 }
 
 type boundVerdict struct {
-	Binding string                  `json:"binding"`
-	Payload protocol.VerdictPayload `json:"payload"`
+	Binding        string                  `json:"binding"`
+	NativeBinding  string                  `json:"native_binding,omitempty"`
+	SealedIdentity string                  `json:"sealed_identity,omitempty"`
+	Payload        protocol.VerdictPayload `json:"payload"`
 }
 
 // Handle answers a call of VerdictTool.
-func (v *Verdicts) Handle(_ context.Context, c ToolCall) ToolResult {
+func (v *Verdicts) Handle(ctx context.Context, c ToolCall) ToolResult {
 	if c.Tool != VerdictTool {
 		return ToolResult{Text: "unknown tool"}
 	}
-	var p protocol.VerdictPayload
-	if err := json.Unmarshal(c.Arguments, &p); err != nil || !p.Verdict.Valid() {
-		return ToolResult{Text: "the verdict must be passed, changes_required, blocked or inconclusive"}
+	p, selections, canonical, err := decodeVerdictCall(c.Arguments, v.Spec.AcceptanceEvidenceFiles)
+	if err != nil {
+		return ToolResult{Text: err.Error()}
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.RequireBinding && v.binding == "" {
 		return ToolResult{Text: "original verdict execution is not journaled"}
 	}
-	if v.StateDir != "" {
-		if err := os.MkdirAll(v.StateDir, 0o700); err != nil {
+	if !v.Spec.AcceptanceEvidenceFiles && v.stateDir() != "" {
+		pending, err := v.readPendingVerdict()
+		if err != nil || pending != nil {
+			return ToolResult{Text: "original evidence submission must be reconciled before another verdict"}
+		}
+	}
+	if v.Spec.AcceptanceEvidenceFiles {
+		binding := v.binding
+		if binding == "" && c.ThreadID != "" && c.TurnID != "" {
+			raw, _ := json.Marshal(struct{ ThreadID, TurnID string }{c.ThreadID, c.TurnID})
+			binding = string(raw)
+		}
+		if err := v.recordFileVerdict(ctx, binding, canonical, selections, &p); err != nil {
 			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
 		}
-		var record any = p
-		if v.binding != "" {
-			record = boundVerdict{Binding: v.binding, Payload: p}
-		}
-		body, _ := json.Marshal(record)
-		path := filepath.Join(v.StateDir, "verdict.json")
-		if err := os.WriteFile(path+".tmp", body, 0o600); err != nil {
-			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
-		}
-		if err := os.Rename(path+".tmp", path); err != nil {
-			return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
-		}
+		v.nativeBinding = binding
+	} else if err := v.persistVerdict(p, "", ""); err != nil {
+		return ToolResult{Text: fmt.Sprintf("verdict was not recorded: %v", err)}
 	}
 	v.verdict = &p
 	return ToolResult{Success: true, Text: "verdict recorded"}
@@ -95,13 +102,22 @@ func (v *Verdicts) Handle(_ context.Context, c ToolCall) ToolResult {
 
 // Restore retains an acknowledged verdict across attempts of the same run.
 func (v *Verdicts) Restore() error {
+	return v.RestoreContext(context.Background())
+}
+
+// RestoreContext reconciles an unfinished original submission before a worker
+// can start another native turn. It never reopens a selection under a new input.
+func (v *Verdicts) RestoreContext(ctx context.Context) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.verdict = nil
-	if v.StateDir == "" {
+	v.verdict, v.nativeBinding, v.sealedIdentity = nil, "", ""
+	if v.stateDir() == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(filepath.Join(v.StateDir, "verdict.json"))
+	if err := v.restorePendingVerdict(ctx); err != nil {
+		return fmt.Errorf("%w: restore original verdict submission: %w", ErrRetainedResumePending, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(v.stateDir(), "verdict.json"))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -109,20 +125,24 @@ func (v *Verdicts) Restore() error {
 		return fmt.Errorf("read original verdict: %w", err)
 	}
 	var p protocol.VerdictPayload
-	if v.binding != "" {
-		var record boundVerdict
-		if err := json.Unmarshal(raw, &record); err != nil {
-			return fmt.Errorf("decode original verdict: %w", err)
-		}
+	var record boundVerdict
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return fmt.Errorf("decode original verdict: %w", err)
+	}
+	if v.binding != "" || record.NativeBinding != "" {
 		if record.Binding != v.binding {
 			return nil
 		}
 		p = record.Payload
+		v.nativeBinding, v.sealedIdentity = record.NativeBinding, record.SealedIdentity
 	} else if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("decode original verdict: %w", err)
 	}
 	if !p.Verdict.Valid() {
 		return fmt.Errorf("original verdict is invalid")
+	}
+	if err := validateVerdictManifests(p.Files, nil); err != nil {
+		return fmt.Errorf("original verdict files are invalid: %w", err)
 	}
 	v.verdict = &p
 	return nil
@@ -277,6 +297,9 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 			"When a required check ran and failed, report changes_required with the unmet requirement and the necessary diagnosis or repair, even if its precise cause is unknown. Do not infer a product defect from an exit code alone. " +
 			"Use blocked only when evidence establishes an external prerequisite that prevents checking; name that prerequisite and the next action. " +
 			"Use inconclusive when the evidence cannot establish whether a requirement holds; state the uncertainty and the next investigation. Unknown cause alone does not turn an observed unmet quality gate into an environment failure."
+		if spec.AcceptanceEvidenceFiles {
+			instructions += " Acceptance scratch is temporary and deleted after acknowledged final submission. Preserve evidence by explicitly selecting ordinary files with submit_verdict files: [{path, name}], for any verdict including blocked. Tend seals those bytes and confirms durable file references before acknowledging the verdict. Paths mentioned only in evidence JSON do not preserve files. Do not resubmit changed bytes or a different selection while an original submission is awaiting reconciliation."
+		}
 		input = "Review the submitted work against this task.\n\n" + b.String()
 		return instructions, input
 	}
@@ -290,6 +313,13 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		input += "\nThe last review asked for changes:\n" + string(spec.Feedback.Issues) + "\n"
 		if len(spec.Feedback.Evidence) > 0 {
 			input += "Its evidence:\n" + string(spec.Feedback.Evidence) + "\n"
+		}
+		if len(spec.Feedback.Files) > 0 {
+			input += "\nPreserved evidence files from acceptance " + spec.Feedback.AcceptanceID + ":\n"
+			for _, file := range spec.Feedback.Files {
+				input += fmt.Sprintf("- file_id: %s; name: %q; size: %d; sha256: %s\n", file.FileID, file.Name, file.Size, file.SHA256)
+			}
+			input += "Use download_file with only the explicitly listed file IDs to obtain verified local copies. Paths inside evidence JSON are observations, not downloadable file references.\n"
 		}
 	}
 	if spec.Attempt > 1 {

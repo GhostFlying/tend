@@ -359,12 +359,13 @@ func (w *worker) openBridge(ctx context.Context) error {
 			verdictDir = filepath.Join(filepath.Dir(state), "tend-verdicts", fmt.Sprintf("%x", run))
 		}
 		w.verdicts.StateDir = verdictDir
+		w.verdicts.Spec = w.spec
 		w.verdicts.RequireBinding = true
 		w.bindVerdict()
-		if err := w.verdicts.Restore(); err != nil {
+		if err := w.verdicts.RestoreContext(ctx); err != nil {
 			return err
 		}
-		tools = []harness.ToolSpec{harness.VerdictToolSpec}
+		tools = []harness.ToolSpec{harness.VerdictToolFor(w.spec)}
 		handle = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
 				return w.verdicts.Handle(ctx, c)
@@ -926,6 +927,12 @@ func (w *worker) run(ctx context.Context) {
 			return
 		}
 		if done {
+			if w.spec.Role == protocol.RoleAccept && w.spec.AcceptanceEvidenceFiles {
+				if err := w.verdicts.RestoreContext(ctx); err != nil {
+					w.err = err
+					return
+				}
+			}
 			if w.st.Recovery != nil && w.st.Recovery.Phase == recoveryRunning {
 				w.st.Recovery.Phase = recoveryCompleted
 				if err := w.save(); err != nil {

@@ -6,16 +6,17 @@ const CurrentRunnerProtocol int64 = 2
 const PreviousRunnerProtocol int64 = CurrentRunnerProtocol - 1
 
 const (
-	RunnerNormal                     = "normal"
-	RunnerMaintenance                = "maintenance"
-	RunnerReady                      = "ready"
-	CapabilityRepositoryBindings     = "runner-repositories-v1"
-	CapabilityProtocolNegotiation    = "runner-protocol-negotiation-v1"
-	CapabilityRunnerHeartbeat        = "runner-heartbeat-v1"
-	CapabilityRunnerMaintenance      = "runner-maintenance-v1"
-	CapabilityStrictRetainedResume   = "runner-strict-retained-resume-v1"
-	CapabilityRetainedReconciliation = "runner-retained-reconciliation-v1"
-	CapabilityBoundedRunnerRecovery  = "runner-bounded-recovery-v1"
+	RunnerNormal                      = "normal"
+	RunnerMaintenance                 = "maintenance"
+	RunnerReady                       = "ready"
+	CapabilityRepositoryBindings      = "runner-repositories-v1"
+	CapabilityProtocolNegotiation     = "runner-protocol-negotiation-v1"
+	CapabilityRunnerHeartbeat         = "runner-heartbeat-v1"
+	CapabilityRunnerMaintenance       = "runner-maintenance-v1"
+	CapabilityStrictRetainedResume    = "runner-strict-retained-resume-v1"
+	CapabilityRetainedReconciliation  = "runner-retained-reconciliation-v1"
+	CapabilityBoundedRunnerRecovery   = "runner-bounded-recovery-v1"
+	CapabilityAcceptanceEvidenceFiles = "acceptance-evidence-files-v1"
 )
 
 // RunnerBuild identifies the immutable executable and process for supervision.

@@ -1805,9 +1805,20 @@ export interface AcceptanceView {
   acceptance_id: string;
   artifact_id: string;
   evidence?: unknown;
+  files?: ArtifactFile[];
   issues: unknown;
   spec_version: number;
   verdict: Verdict;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ArtifactFile".
+ */
+export interface ArtifactFile {
+  file_id: string;
+  name: string;
+  sha256: string;
+  size: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1826,16 +1837,6 @@ export interface ArtifactPayload {
   files?: ArtifactFile[];
   mounts: ArtifactMount[] | null;
   report?: ResultReport;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "ArtifactFile".
- */
-export interface ArtifactFile {
-  file_id: string;
-  name: string;
-  sha256: string;
-  size: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4074,6 +4075,7 @@ export interface TaskInput {
   name?: string;
   sha256?: string;
   size?: number;
+  source_acceptance_id?: string;
   source_artifact_id?: string;
   source_message_id?: string;
   source_task_id?: string;

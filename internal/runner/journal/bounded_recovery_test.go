@@ -255,8 +255,8 @@ func TestBoundedRecoveryValidatesIncarnationBeforeMigratingOriginalJournal15(t *
 				t.Fatal(err)
 			}
 			identity, err := upgraded.BoundedDataIdentity(t.Context())
-			if err != nil || identity.Version != 17 {
-				t.Fatalf("journal15 did not migrate to17: %+v %v", identity, err)
+			if err != nil || identity.Version != CurrentVersion {
+				t.Fatalf("journal15 did not migrate to current schema: %+v %v", identity, err)
 			}
 			run, err := upgraded.Run(t.Context(), as.RunID)
 			if err != nil || !run.Held || !run.Fenced || run.StoppedConfirmed {

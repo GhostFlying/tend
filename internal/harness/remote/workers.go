@@ -23,6 +23,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/procx"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/coder/websocket"
 )
 
@@ -80,6 +81,14 @@ type execution struct {
 	drainDone     chan struct{}
 }
 
+type restoredVerdictWorker struct {
+	events chan harness.WorkerEvent
+	result harness.WorkerResult
+}
+
+func (w *restoredVerdictWorker) Events() <-chan harness.WorkerEvent  { return w.events }
+func (w *restoredVerdictWorker) Wait() (harness.WorkerResult, error) { return w.result, nil }
+
 func NewWorkers(opts WorkerOptions) *Workers {
 	bin := opts.Bin
 	if bin == "" {
@@ -95,6 +104,19 @@ func NewWorkers(opts WorkerOptions) *Workers {
 }
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker harness.Worker, err error) {
 	defer func() { err = startupError(ctx, err) }()
+	// Reconcile the original tool input before opening another native executor
+	// or transport. The full spec and sealing hook remain runner-owned.
+	if spec.Role == protocol.RoleAccept && spec.AcceptanceEvidenceFiles {
+		verdicts := harness.Verdicts{Spec: spec}
+		if err := verdicts.RestoreContext(ctx); err != nil {
+			return nil, err
+		}
+		if verdicts.Verdict() != nil {
+			events := make(chan harness.WorkerEvent)
+			close(events)
+			return &restoredVerdictWorker{events: events, result: harness.WorkerResult{Verdict: verdicts.Verdict()}}, nil
+		}
+	}
 	if spec.NativeDial == nil || spec.Lifetime == nil {
 		return nil, fmt.Errorf("%w: native run transport unavailable", harness.ErrWorkerNotStarted)
 	}

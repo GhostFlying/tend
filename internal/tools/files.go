@@ -24,7 +24,8 @@ type fileWindow struct {
 	Text       string `json:"text,omitempty"`
 }
 
-// filesRead exposes only finalized result files, with no write or run credentials.
+// filesRead exposes finalized result and acceptance evidence files, with no
+// write or run credentials. Uploaded bytes alone do not grant this read.
 func (s *Service) filesRead(ctx context.Context, c Call) (any, error) {
 	var a fileArgs
 	if err := decode(c.Arguments, &a); err != nil {

@@ -27,7 +27,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 17
+const CurrentVersion int64 = 18
 
 // Run phases.
 const (

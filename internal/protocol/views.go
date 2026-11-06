@@ -118,6 +118,7 @@ type ArtifactView struct {
 
 // AcceptanceView is a verdict on an artifact.
 type AcceptanceView struct {
+	Files        []ArtifactFile  `json:"files,omitempty"`
 	AcceptanceID string          `json:"acceptance_id"`
 	ArtifactID   string          `json:"artifact_id"`
 	SpecVersion  int64           `json:"spec_version"`

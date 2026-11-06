@@ -42,6 +42,7 @@ func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error
 	for i := range spec.Inputs {
 		spec.Inputs[i].SourceTaskID = ""
 		spec.Inputs[i].SourceArtifactID = ""
+		spec.Inputs[i].SourceAcceptanceID = ""
 	}
 	return json.Marshal(spec)
 }

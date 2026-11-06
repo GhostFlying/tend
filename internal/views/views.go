@@ -167,6 +167,7 @@ func Acceptances(rows []store.AcceptanceRow, evidence bool) []protocol.Acceptanc
 	out := make([]protocol.AcceptanceView, 0, len(rows))
 	for _, a := range rows {
 		v := protocol.AcceptanceView{AcceptanceID: a.AcceptanceID, ArtifactID: a.ArtifactID, SpecVersion: a.SpecVersion, Verdict: a.Verdict, Issues: json.RawMessage(a.IssuesJSON)}
+		_ = json.Unmarshal([]byte(a.FilesJSON), &v.Files)
 		if evidence {
 			v.Evidence = json.RawMessage(a.EvidenceJSON)
 		}

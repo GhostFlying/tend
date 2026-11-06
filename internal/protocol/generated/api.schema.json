@@ -56,6 +56,12 @@
           "type": "string"
         },
         "evidence": {},
+        "files": {
+          "items": {
+            "$ref": "#/definitions/ArtifactFile"
+          },
+          "type": "array"
+        },
         "issues": {},
         "spec_version": {
           "type": "integer"
@@ -12553,6 +12559,9 @@
         },
         "size": {
           "type": "integer"
+        },
+        "source_acceptance_id": {
+          "type": "string"
         },
         "source_artifact_id": {
           "type": "string"

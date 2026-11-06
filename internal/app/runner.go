@@ -202,6 +202,11 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		return protocol.Assignment{}, err
 	}
 	if action.Kind == protocol.ActionAccept {
+		contract, err := runAcceptanceEvidenceContract(ctx, q, run.RunID)
+		if err != nil {
+			return protocol.Assignment{}, err
+		}
+		as.AcceptanceEvidenceFiles = contract.Allowed
 		as.AcceptanceExecution = spec.AcceptanceExecution
 		ref, err := store.GetArtifactRef(ctx, q, action.TargetArtifactID)
 		if err != nil {
@@ -215,13 +220,23 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 	if action.Kind == protocol.ActionImplement && action.Generation > 1 {
 		// A later generation should know what the last acceptance of this
 		// spec version asked to change.
+		contract, err := runAcceptanceEvidenceContract(ctx, q, run.RunID)
+		if err != nil {
+			return protocol.Assignment{}, err
+		}
 		accs, err := store.ListAcceptances(ctx, q, run.TaskID, "")
 		if err != nil {
 			return protocol.Assignment{}, err
 		}
 		for i := len(accs) - 1; i >= 0; i-- {
-			if a := accs[i]; a.SpecVersion == action.TargetSpecVersion && a.Verdict == protocol.VerdictChangesRequired {
+			if a := accs[i]; a.SpecVersion == action.TargetSpecVersion && a.Verdict == protocol.VerdictChangesRequired && (!contract.Found || a.AcceptanceID == contract.FeedbackID) {
 				as.Feedback = &protocol.Feedback{Verdict: a.Verdict, Issues: json.RawMessage(a.IssuesJSON), Evidence: json.RawMessage(a.EvidenceJSON)}
+				if contract.Allowed {
+					as.Feedback.AcceptanceID = a.AcceptanceID
+					if err := json.Unmarshal([]byte(a.FilesJSON), &as.Feedback.Files); err != nil {
+						return protocol.Assignment{}, err
+					}
+				}
 				break
 			}
 		}
@@ -376,6 +391,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
 	}
+	if run.Role != protocol.RoleIssueManager {
+		if err := freezeAcceptanceEvidenceContract(ctx, tx, run, p.Runtime); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO run_question_contracts(run_id,supervisor_allowed,handoff_allowed) VALUES(?,?,?)`, run.RunID, p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilitySupervisorQuestions), p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs)); err != nil {
 		return Outcome{}, err
 	}
@@ -460,6 +480,31 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			"task_id": run.TaskID, "action_id": run.ActionID, "role": run.Role, "host_id": host.HostID,
 		}}),
 	}, nil
+}
+
+// freezeAcceptanceEvidenceContract binds both the optional wire feature and
+// the entire feedback row before the original claim result is committed.
+func freezeAcceptanceEvidenceContract(ctx context.Context, tx *store.Tx, run store.RunRow, runtime *protocol.RunnerRuntime) error {
+	feedbackID := ""
+	if run.Role == protocol.RoleImplement && run.Generation > 1 {
+		action, err := store.GetAction(ctx, tx.Q(), run.ActionID)
+		if err != nil {
+			return err
+		}
+		accs, err := store.ListAcceptances(ctx, tx.Q(), run.TaskID, "")
+		if err != nil {
+			return err
+		}
+		for i := len(accs) - 1; i >= 0; i-- {
+			if a := accs[i]; a.SpecVersion == action.TargetSpecVersion && a.Verdict == protocol.VerdictChangesRequired {
+				feedbackID = a.AcceptanceID
+				break
+			}
+		}
+	}
+	allowed := runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityAcceptanceEvidenceFiles)
+	_, err := tx.Exec(ctx, `INSERT INTO run_acceptance_evidence_contracts(run_id,files_allowed,feedback_acceptance_id) VALUES(?,?,?)`, run.RunID, allowed, feedbackID)
+	return err
 }
 
 // Hello handles runner.hello: the runner reports the runs its journal holds

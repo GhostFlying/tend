@@ -170,6 +170,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	capabilities := []string{protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityRetainedReconciliation, protocol.CapabilityStrictRetainedResume, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
 	capabilities = append(capabilities, protocol.CapabilityBoundedRunnerRecovery)
+	capabilities = append(capabilities, protocol.CapabilityAcceptanceEvidenceFiles)
 	if len(r.cfg.RolloutRoots) > 0 {
 		capabilities = append(capabilities, protocol.CapabilityRolloutPreview)
 	}

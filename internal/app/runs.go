@@ -281,6 +281,26 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if rc.action.Kind != protocol.ActionAccept {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "run %s is not an acceptance run", rc.run.RunID)
 	}
+	if len(p.Files) > 0 {
+		contract, err := runAcceptanceEvidenceContract(ctx, tx.Q(), rc.run.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !contract.Allowed {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "acceptance evidence files were not negotiated for this run")
+		}
+		if err := checkAcceptanceFiles(ctx, tx.Q(), rc, p.Files); err != nil {
+			return Outcome{}, err
+		}
+	}
+	files := "[]"
+	if len(p.Files) > 0 {
+		encoded, err := json.Marshal(p.Files)
+		if err != nil {
+			return Outcome{}, err
+		}
+		files = string(encoded)
+	}
 	evidence, issues := string(p.Evidence), string(p.Issues)
 	if evidence == "" {
 		evidence = "{}"
@@ -297,6 +317,9 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	acceptanceID := x.IDs.New(protocol.PrefixAcceptance)
 	if err := tx.InsertAcceptance(ctx, acceptanceID, rc.task.TaskID, rc.run.RunID, rc.action.TargetSpecVersion,
 		rc.action.TargetArtifactID, p.Verdict, evidence, issues, x.Now.UnixMilli()); err != nil {
+		return Outcome{}, err
+	}
+	if err := tx.SetAcceptanceFiles(ctx, acceptanceID, files); err != nil {
 		return Outcome{}, err
 	}
 	d, fenced, err := fenceChangedTaskContext(ctx, tx.Q(), rc, "acceptance.submitted", acceptanceID)
@@ -323,7 +346,31 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		events = append(events, ownerEvents...)
 	}
+	if len(p.Files) > 0 {
+		events = append(events, Event{ObjectType: "acceptance", ObjectID: acceptanceID, Kind: "acceptance.files_finalized", Body: map[string]any{
+			"task_id": rc.task.TaskID, "run_id": rc.run.RunID, "artifact_id": rc.action.TargetArtifactID,
+			"spec_version": rc.action.TargetSpecVersion, "files": p.Files,
+		}})
+	}
 	return Outcome{Result: map[string]any{"acceptance_id": acceptanceID, "task": newTaskResult(d.Task, actions)}, Events: events}, nil
+}
+
+func checkAcceptanceFiles(ctx context.Context, q store.Querier, rc runContext, files []protocol.ArtifactFile) error {
+	seen, names := map[string]bool{}, map[string]bool{}
+	for _, file := range files {
+		if !protocol.ValidID(protocol.PrefixFile, file.FileID) || seen[file.FileID] || names[file.Name] {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "acceptance files require distinct immutable identities and names")
+		}
+		seen[file.FileID], names[file.Name] = true, true
+		stored, err := store.GetDeliverableFile(ctx, q, file.FileID)
+		if err != nil {
+			return errNotFound(err, "acceptance evidence file does not exist")
+		}
+		if stored.RunID != rc.run.RunID || stored.TaskID != rc.task.TaskID || stored.ArtifactFile != file {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "acceptance evidence does not match this run's immutable upload")
+		}
+	}
+	return nil
 }
 
 // checkResult validates required deliverables and immutable uploaded manifests.

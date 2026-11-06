@@ -39,6 +39,9 @@ func issueScopedFile(ctx context.Context, q store.Querier, issue string, epoch i
 	// Publication adds attachment provenance without removing the independent
 	// authority of this Issue's own finalized deliverable.
 	delivery, _, deliveryErr := store.GetFinalizedDeliverableFile(ctx, q, id)
+	if errors.Is(deliveryErr, store.ErrNotFound) {
+		delivery, _, deliveryErr = store.GetFinalizedAcceptanceFile(ctx, q, id)
+	}
 	if deliveryErr != nil && !errors.Is(deliveryErr, store.ErrNotFound) {
 		return protocol.ArtifactFile{}, deliveryErr
 	}
