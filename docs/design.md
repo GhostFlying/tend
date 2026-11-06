@@ -1141,5 +1141,9 @@ repair 或业务 unknown。缺失、未确认、不匹配或其它类型的事�
 仍须满足原独立合同。既有 bounded fact replay 沿原 Envelope、ID、次序和单次预算
 输送；不以维护完成或全局 admission release 替代逐 Run 的停止与业务证明。
 
+工具 callback 与 native item 通知可以异步交错，匹配不要求 call 先于 started。
+已无未应用事件的关闭不进入新增历史消费者；需收束的事件按原身份分组，已应用
+的整组在查询证明前跳过，使新增匹配开销只对应尚待确认的生命周期事实。
+
 无 wire、schema、journal 或 owner 权限变更；继续使用现有关闭入口与 manager
 对账 CLI。详见[实施计划](plans/closed-manager-factual-events.md)。

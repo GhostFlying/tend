@@ -127,6 +127,83 @@ func (f closedToolFixture) original(t *testing.T) []string {
 	return out
 }
 
+func reorderClosedToolEvents(t *testing.T, f closedToolFixture, order [3]int) {
+	t.Helper()
+	if err := f.h.store.Write(t.Context(), func(tx *store.Tx) error {
+		var bodies [3]string
+		for i := range bodies {
+			if err := tx.Q().QueryRowContext(t.Context(), `SELECT body_json FROM manager_native_events WHERE run_id=? AND seq=?`, f.as.RunID, 20+i).Scan(&bodies[i]); err != nil {
+				return err
+			}
+		}
+		for i, source := range order {
+			if _, err := tx.Exec(t.Context(), `UPDATE manager_native_events SET body_json=? WHERE run_id=? AND seq=?`, bodies[source], f.as.RunID, 20+i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClosedManagerRepairAcceptsStartedBeforeCallback(t *testing.T) {
+	f := closedRepairToolFixture(t, true)
+	reorderClosedToolEvents(t, f, [3]int{1, 0, 2})
+	before := f.original(t)
+	if op, err := f.execute(t); err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal("asynchronous started/callback ordering blocked original close", op, err)
+	}
+	if f.h.countWhere(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, f.as.RunID) != 0 || !reflect.DeepEqual(before, f.original(t)) {
+		t.Fatal("asynchronous metadata was not consumed without rewriting its original bytes")
+	}
+	if f.h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending`) != 1 || f.h.countWhere(`SELECT COUNT(*) FROM logical_turns WHERE status='unknown'`) != 1 {
+		t.Fatal("asynchronous metadata changed original business uncertainty")
+	}
+}
+
+func TestClosedManagerRepairSkipsUnneededHistoryProof(t *testing.T) {
+	for _, scenario := range []string{"ordinary_close", "applied_group"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := closedRepairToolFixture(t, true)
+			if err := f.h.store.Write(t.Context(), func(tx *store.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE manager_native_events SET applied=1 WHERE run_id=?`, f.as.RunID); err != nil {
+					return err
+				}
+				// This dependency belongs only to new factual consumption. A
+				// historical proof failure must not affect already applied facts.
+				if _, err := tx.Exec(t.Context(), `UPDATE run_agent_executions SET pin_json='{' WHERE run_id=?`, f.as.RunID); err != nil {
+					return err
+				}
+				if scenario == "ordinary_close" {
+					_, err := tx.Exec(t.Context(), `UPDATE logical_turn_executions SET repair=0`)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO manager_native_events(run_id,seq,body_json,applied) VALUES(?,23,'{"thread_id":"native","native":{"Kind":"turn_started","TurnID":"original-turn"}}',0)`, f.as.RunID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := f.original(t)
+			if scenario == "ordinary_close" {
+				if op, err := f.execute(t); err != nil || op.Status != protocol.OpSucceeded {
+					t.Fatal("ordinary close queried unnecessary historical proof", op, err)
+				}
+			} else if err := f.h.store.Write(t.Context(), func(tx *store.Tx) error {
+				return consumeClosedManagerRepairFacts(t.Context(), &Exec{Env: f.close}, tx, f.as.RunID)
+			}); err != nil {
+				t.Fatal("already applied lifecycle queried unnecessary historical proof", err)
+			}
+			if !reflect.DeepEqual(before, f.original(t)) || f.h.countWhere(`SELECT COUNT(*) FROM events WHERE kind='run.manager_closed_tool_facts_consumed'`) != 0 {
+				t.Fatal("skipped historical facts changed bytes or emitted a new audit")
+			}
+			if scenario == "applied_group" && f.h.countWhere(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, f.as.RunID) != 1 {
+				t.Fatal("unrelated pending event was consumed")
+			}
+		})
+	}
+}
+
 func TestClosedManagerRepairConsumesOriginalRepliedToolFacts(t *testing.T) {
 	f := closedRepairToolFixture(t, true)
 	before := f.original(t)
@@ -200,11 +277,15 @@ func TestClosedManagerRepairPreservesFailedToolResultAndJSONValues(t *testing.T)
 }
 
 func TestClosedManagerRepairRejectsUnprovenFactsAtomically(t *testing.T) {
-	for _, scenario := range []string{"ordinary_turn", "changed_pin", "missing_result", "started_result", "unknown_result", "wrong_result_id", "rejected_close", "wrong_cursor", "unsupported_event", "audit_failure"} {
+	for _, scenario := range []string{"ordinary_turn", "changed_pin", "missing_result", "started_result", "unknown_result", "wrong_result_id", "rejected_close", "wrong_cursor", "unsupported_event", "audit_failure", "callback_after_completion", "completed_before_started"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := closedRepairToolFixture(t, true)
 			wantPending := 3
-			if scenario == "wrong_cursor" || scenario == "rejected_close" {
+			if scenario == "callback_after_completion" {
+				reorderClosedToolEvents(t, f, [3]int{1, 2, 0})
+			} else if scenario == "completed_before_started" {
+				reorderClosedToolEvents(t, f, [3]int{0, 2, 1})
+			} else if scenario == "wrong_cursor" || scenario == "rejected_close" {
 				var close protocol.ManagerNativeReply
 				_ = json.Unmarshal(f.close.Payload, &close)
 				if scenario == "wrong_cursor" {
