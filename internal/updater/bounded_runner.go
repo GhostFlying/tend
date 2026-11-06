@@ -35,6 +35,24 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	if !release.ValidID(p.Target.UpgradeID) || !release.ValidID(p.Target.ReleaseID) || !release.ValidSHA(p.Target.ManifestSHA256) || !release.ValidSHA(p.Target.ArtifactSHA256) || p.Target.ProcessInstanceID == "" || p.Target.ProcessInstanceID == p.Source.LaunchID {
 		return errors.New("updater: complete independent runner successor required")
 	}
+	for _, history := range s.state.BoundedHistory {
+		if original, exists := history.Authorizations[a.RequestID]; exists {
+			previous, known := s.state.BoundedRunnerGrants[a.RequestID]
+			if action == "cancel" && history.Outcome == "cancelled" && digest(original) == digest(a) && known && digest(previous) == digest(grant) {
+				for _, entry := range history.Audit {
+					if entry.RequestID == a.RequestID && entry.Action == "cancel" && entry.Outcome == "cancelled_before_stop" {
+						return nil
+					}
+				}
+			}
+			return errors.New("updater: historical runner request requires its original action and payload")
+		}
+	}
+	for _, history := range s.state.BoundedHistory {
+		if history.Authorization.PlanSHA256 == a.PlanSHA256 && history.Outcome == "cancelled" {
+			return errors.New("updater: cancelled runner maintenance requires a new source plan")
+		}
+	}
 	if s.state.Bounded == nil && grant.RecoveryAuthorizationID != a.RequestID {
 		return errors.New("updater: initial runner recovery lineage changed")
 	}
@@ -53,11 +71,6 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	for _, run := range grant.Runs {
 		if run.Run.Host != p.HostID {
 			return errors.New("updater: runner grant includes another host")
-		}
-	}
-	for _, history := range s.state.BoundedHistory {
-		if _, exists := history.Authorizations[a.RequestID]; exists {
-			return errors.New("updater: historical runner request requires reconciliation, not a new source plan")
 		}
 	}
 	if b := s.state.Bounded; b != nil {
@@ -231,6 +244,10 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	previous.StorageVersion = p.Journal.Version
 	originalState := cloneState(s.state)
 	originalOperation := originalState.Operation
+	sourceSupervised := originalState.Process == p.Source && originalState.Current == previous && done(originalOperation)
+	if originalState.Bounded != nil && originalOperation != nil && originalOperation.Phase == "cancelled" {
+		sourceSupervised = sourceSupervised && originalOperation.BoundedSourceOwned
+	}
 	if originalOperation != nil {
 		if prior, exists := s.state.OperationHistory[originalOperation.ID]; exists && digest(prior) != digest(*originalOperation) {
 			return errors.New("updater: original operation identity already has different archived facts")
@@ -282,7 +299,7 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		}
 		s.state.OperationHistory[original.ID] = *original
 	}
-	s.state.Operation = &Operation{ID: p.Target.UpgradeID, Kind: "upgrade", Binding: p.Target, Previous: previous, PreviousProcess: p.Source, LaunchID: p.Target.ProcessInstanceID, Phase: "bounded_staging", StartedAt: s.opts.Now()}
+	s.state.Operation = &Operation{ID: p.Target.UpgradeID, Kind: "upgrade", Binding: p.Target, Previous: previous, PreviousProcess: p.Source, LaunchID: p.Target.ProcessInstanceID, Phase: "bounded_staging", StartedAt: s.opts.Now(), BoundedSourceOwned: sourceSupervised}
 	if err := s.save(); err != nil {
 		return err
 	}
@@ -360,7 +377,10 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 		return false, nil
 	}
 	if op.Phase == "cancelled" {
-		return true, nil
+		if !s.boundedRunnerCancelledOwnedScope() {
+			return true, errors.New("updater: cancelled runner source is not supervisor-owned; an independent new source plan is required")
+		}
+		return false, nil
 	}
 	if op.Phase == "committed" {
 		if !s.boundedRunnerCommittedScope() || op.Binding != s.state.CommittedProof.Binding {
@@ -789,6 +809,21 @@ func (s *Supervisor) boundedRunnerCommittedScope() bool {
 func (s *Supervisor) boundedRunnerSupervisedRestart(op *Operation) bool {
 	return op != nil && op.Kind == "restart" && s.boundedRunnerCommittedScope() &&
 		op.Binding == s.state.CommittedProof.Binding && op.Previous == s.state.Current && op.Candidate == s.state.Current
+}
+
+// Cancellation preserves only supervision that already existed before the
+// replacement was authorized. It never adopts a manual or uncommitted source.
+func (s *Supervisor) boundedRunnerCancelledOwnedScope() bool {
+	b, op := s.state.Bounded, s.state.Operation
+	return s.cfg.Role == "runner" && b != nil && b.Authorization.Role == "runner" && b.Outcome == "cancelled" && b.SourceExit == nil &&
+		op != nil && op.Kind == "upgrade" && op.Phase == "cancelled" && op.BoundedSourceOwned &&
+		validIdentity(s.state.Process) && s.state.Process == b.Authorization.Source && op.PreviousProcess == s.state.Process &&
+		op.Previous == s.state.Current && op.Previous.Artifact.SHA256 == s.state.Process.SHA256
+}
+
+func (s *Supervisor) boundedRunnerCancelledRestart(op *Operation) bool {
+	return s.cfg.Role == "runner" && op != nil && op.Kind == "restart" && op.BoundedSourceOwned &&
+		op.Previous == op.Candidate && op.Previous == s.state.Current
 }
 
 func (s *Supervisor) boundedRunnerRestartSourceGone(ctx context.Context, source Identity) error {

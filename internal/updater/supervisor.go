@@ -667,7 +667,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	}
 }
 func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) error {
-	if s.boundedRunnerSupervisedRestart(op) {
+	if s.boundedRunnerSupervisedRestart(op) || s.boundedRunnerCancelledRestart(op) {
 		if err := s.boundedRunnerRestartSourceGone(ctx, op.PreviousProcess); err != nil {
 			return err
 		}
@@ -813,7 +813,9 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 		return err
 	}
 	bounded := s.boundedRunnerCommittedScope()
-	if bounded {
+	cancelled := s.boundedRunnerCancelledOwnedScope()
+	cancelledRestart := s.boundedRunnerCancelledRestart(s.state.Operation)
+	if bounded || cancelled || cancelledRestart {
 		if err := s.verifyBoundedRunnerSourceGone(ctx, s.state.Process); err != nil {
 			return err
 		}
@@ -824,8 +826,10 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 		return err
 	}
 	binding := Binding{}
-	if bounded {
-		binding = s.state.CommittedProof.Binding
+	if bounded || cancelled || cancelledRestart {
+		if proof := s.state.CommittedProof; proof != nil && proof.Version == s.state.Current && proof.Process == s.state.Process {
+			binding = proof.Binding
+		}
 		if original := cloneState(s.state).Operation; original != nil {
 			if prior, exists := s.state.OperationHistory[original.ID]; exists && digest(prior) != digest(original) {
 				return errors.New("updater: original supervised operation has conflicting archived facts")
@@ -835,8 +839,20 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 			}
 			s.state.OperationHistory[original.ID] = *original
 		}
+		if cancelled {
+			original := cloneState(s.state).Bounded
+			key := boundedRunnerRecoveryID(original)
+			if prior, exists := s.state.BoundedHistory[key]; exists && digest(prior) != digest(original) {
+				return errors.New("updater: original cancellation has conflicting archived facts")
+			}
+			if s.state.BoundedHistory == nil {
+				s.state.BoundedHistory = map[string]protocol.BoundedMaintenanceState{}
+			}
+			s.state.BoundedHistory[key] = *original
+			s.state.Bounded, s.state.BoundedRunnerGrant = nil, nil
+		}
 	}
-	s.state.Operation = &Operation{ID: "restart-" + id, Kind: "restart", Binding: binding, Previous: s.state.Current, PreviousProcess: s.state.Process, Candidate: s.state.Current, Phase: "backed_up", LaunchID: id, StartedAt: s.opts.Now()}
+	s.state.Operation = &Operation{ID: "restart-" + id, Kind: "restart", Binding: binding, Previous: s.state.Current, PreviousProcess: s.state.Process, Candidate: s.state.Current, Phase: "backed_up", LaunchID: id, StartedAt: s.opts.Now(), BoundedSourceOwned: cancelled || cancelledRestart}
 	return s.save()
 }
 
