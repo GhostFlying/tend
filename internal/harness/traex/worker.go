@@ -112,6 +112,16 @@ func (w *worker) Wait() (harness.WorkerResult, error) {
 	return w.res, w.err
 }
 
+// ReconcileAcceptanceVerdict reads only the original frozen result and owned
+// close receipt. Native session creation and turn execution are excluded.
+func (ws *Workers) ReconcileAcceptanceVerdict(ctx context.Context, spec harness.WorkerSpec) (harness.WorkerResult, error) {
+	verdicts := harness.Verdicts{Spec: spec}
+	if err := verdicts.RestoreOwnedSessionContext(ctx, spec.Thread); err != nil {
+		return harness.WorkerResult{}, err
+	}
+	return harness.WorkerResult{Verdict: verdicts.Verdict()}, nil
+}
+
 // Start implements harness.Workers.
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
 	verdicts := harness.Verdicts{StateDir: spec.StateDir, Spec: spec}

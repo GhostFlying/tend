@@ -15,14 +15,27 @@ import (
 // Reattach reads an original workspace without repeating preparation effects.
 // In particular, a missing state, checkout or scratch directory is not repaired.
 func (w *Workspaces) Reattach(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
+	return w.reattach(ctx, as, true)
+}
+
+// ReattachAcceptanceVerdict reads an acceptance workspace solely to reconcile
+// its original sealed verdict. It never prepares or recreates any directory.
+func (w *Workspaces) ReattachAcceptanceVerdict(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
+	if as.Role != protocol.RoleAccept || !as.AcceptanceEvidenceFiles {
+		return runner.Prepared{}, errors.New("gitws: acceptance evidence reconciliation is unavailable")
+	}
+	return w.reattach(ctx, as, false)
+}
+
+func (w *Workspaces) reattach(ctx context.Context, as protocol.Assignment, orcaOnly bool) (runner.Prepared, error) {
 	if as.Workspace.BackendID != "" && as.Workspace.BackendID != w.backendID {
 		view, err := w.Backend(as.Workspace.BackendID)
 		if err != nil {
 			return runner.Prepared{}, err
 		}
-		return view.Reattach(ctx, as)
+		return view.reattach(ctx, as, orcaOnly)
 	}
-	if _, ok := w.layout.(orcaLayout); !ok {
+	if _, ok := w.layout.(orcaLayout); orcaOnly && !ok {
 		return runner.Prepared{}, errors.New("gitws: strict attachment requires the original Orca workspace backend")
 	}
 	home := w.home(as)
@@ -38,7 +51,8 @@ func (w *Workspaces) Reattach(ctx context.Context, as protocol.Assignment) (runn
 	if err != nil {
 		return runner.Prepared{}, err
 	}
-	if as.Workspace.ID == "" || st.ResourceID != as.Workspace.ID || st.BackendID != as.Workspace.BackendID || st.ProviderID == "" {
+	_, providerBacked := w.layout.(orcaLayout)
+	if as.Workspace.ID == "" || st.ResourceID != as.Workspace.ID || st.BackendID != as.Workspace.BackendID || providerBacked && st.ProviderID == "" || !providerBacked && (st.ProviderID != "" || st.ProviderInstanceID != "") {
 		return runner.Prepared{}, errors.New("gitws: original workspace resource identity differs")
 	}
 	if as.Workspace.ProviderID != "" && as.Workspace.ProviderID != st.ProviderID || as.Workspace.ProviderInstanceID != "" && as.Workspace.ProviderInstanceID != st.ProviderInstanceID {

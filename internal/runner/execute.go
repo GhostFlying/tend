@@ -255,6 +255,12 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 		return err
 	}
+	if recovered, recoveryErr := r.reconcileAcceptanceVerdict(runCtx, as); recovered {
+		if recoveryErr != nil {
+			return &completionPending{recoveryErr}
+		}
+		return nil
+	}
 	if err := r.requireRunWorker(runCtx, as.RunID); err != nil {
 		return &completionPending{err}
 	}

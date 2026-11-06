@@ -118,6 +118,7 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 			spec.SealVerdictFiles = func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 				return []protocol.ArtifactFile{manifest}, nil
 			}
+			spec.Thread = "owned-thread"
 			if unknown {
 				altered := spec
 				altered.VerdictFilesIdentity = func(context.Context, string, json.RawMessage) (string, error) { return strings.Repeat("c", 64), nil }
@@ -165,6 +166,19 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 				t.Fatal("verdict recovery launched another native session")
 				return nil, nil
 			}
+			reconciledUploads := 0
+			spec.SealVerdictFiles = func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+				reconciledUploads++
+				return []protocol.ArtifactFile{manifest}, nil
+			}
+			reconciled, reconcileErr := reopened.ReconcileAcceptanceVerdict(ctx, spec)
+			if scenario != "confirmed" && scenario != "upload unknown" {
+				if !errors.Is(reconcileErr, harness.ErrRetainedResumePending) || reconciled.Verdict != nil || reconciledUploads != 0 {
+					t.Fatalf("result-only recovery bypassed original close before upload: result=%+v error=%v uploads=%d", reconciled, reconcileErr, reconciledUploads)
+				}
+			} else if reconcileErr != nil || reconciled.Verdict == nil || !reflect.DeepEqual(reconciled.Verdict.Files, []protocol.ArtifactFile{manifest}) {
+				t.Fatalf("result-only recovery lost original evidence: %+v %v", reconciled, reconcileErr)
+			}
 			w, err = reopened.Start(ctx, spec)
 			if scenario != "confirmed" && scenario != "upload unknown" {
 				if w != nil || !errors.Is(err, harness.ErrRetainedResumePending) {
@@ -207,6 +221,21 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+func TestAcceptanceVerdictReconcilerWithoutFrozenInputDoesNotStart(t *testing.T) {
+	ws := NewWorkers(WorkerOptions{})
+	ws.start = func(context.Context, Options) (*Session, error) {
+		t.Fatal("result-only reconciliation started native execution")
+		return nil, nil
+	}
+	_, err := ws.ReconcileAcceptanceVerdict(t.Context(), harness.WorkerSpec{RunID: "original-run", Role: protocol.RoleAccept, AcceptanceEvidenceFiles: true, StateDir: t.TempDir(), Thread: "original-thread", SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+		t.Fatal("missing frozen input reached uploads")
+		return nil, nil
+	}})
+	if !errors.Is(err, harness.ErrNoAcceptanceVerdict) {
+		t.Fatalf("missing candidate became native authority: %v", err)
 	}
 }
 
