@@ -76,6 +76,15 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	// Runner execution HTTP lives in runnerapi; the updater callbacks below
 	// remain explicitly classified as internal machine-authority operations.
 	internal := map[string]string{"/updater/authorize": "updater authority binding", "/updater/health": "updater health receipt", "/updater/recovery/health": "successor readiness callback", "/recovery/link": "server ledger linkage callback", "/maintenance/link": "server committed maintenance linkage callback", "/bootstrap": "fixed updater installation bootstrap", "/upgrade": "coordinator executor action", "/stage-config": "coordinator configuration action", "/restart": "disabled direct restart", "/retry": "coordinator retry", "/cancel": "coordinator cancellation"}
+	// Bounded operator actions run through the pinned independent installer;
+	// these executor callbacks retain its complete plan and authority checks.
+	internal["/bounded/authorize"] = "independent bounded installer authorization"
+	internal["/bounded/cancel"] = "independent bounded installer cancellation"
+	// Foreground native usage reconciliation delegates its existing journal
+	// transaction to the live runner's single writer, preserving original IDs.
+	internal["/runner/v1/usage/pending"] = "native usage journal owner request read"
+	internal["/runner/v1/usage/source"] = "native usage journal owner source registration"
+	internal["/runner/v1/usage/queue"] = "native usage journal owner cursor and request commit"
 	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/upgrades/maintenance/status": true, "/status": true}
 	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl", "../updater"} {
 		err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
