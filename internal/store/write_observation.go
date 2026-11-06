@@ -35,6 +35,13 @@ const (
 	WriteManagerRefresh  WritePhase = "manager_refresh"
 	WriteMaintenance     WritePhase = "maintenance_settlement"
 	WriteRequestInsert   WritePhase = "request_insert"
+	WriteManagerTasks    WritePhase = "manager_tasks"
+	WriteClaimCandidates WritePhase = "claim_candidates"
+	WriteClaimExecutors  WritePhase = "claim_executors"
+	WriteConcurrencySync WritePhase = "concurrency_sync"
+	WriteConcurrencyWait WritePhase = "concurrency_waiting"
+	WriteConcurrencyLoad WritePhase = "concurrency_load"
+	WriteConcurrencyGC   WritePhase = "concurrency_history"
 )
 
 // WritePhaseDuration records an inclusive duration, not exclusive CPU time.
@@ -182,7 +189,8 @@ func (t *Tx) ObservePhase(phase WritePhase) func() {
 		return func() {}
 	}
 	switch phase {
-	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert:
+	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert,
+		WriteManagerTasks, WriteClaimCandidates, WriteClaimExecutors, WriteConcurrencySync, WriteConcurrencyWait, WriteConcurrencyLoad, WriteConcurrencyGC:
 	default:
 		return func() {}
 	}

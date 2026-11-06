@@ -80,6 +80,7 @@ func concurrencyHostedSource(ctx context.Context, q store.Querier, request strin
 // syncConcurrencyExecutions adopts preexisting executions, and derives closure
 // from the original ledger's terminal proof rather than an elapsed permit TTL.
 func syncConcurrencyExecutions(ctx context.Context, tx *store.Tx, now int64) error {
+	defer tx.ObservePhase(store.WriteConcurrencySync)()
 	samples := &concurrencySamples{seen: map[string]bool{}}
 	rows, err := tx.Q().QueryContext(ctx, `SELECT r.run_id,e.pin_json,r.observed_state,COALESCE(h.last_seen_at,0),COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0) FROM runs r JOIN run_agent_executions e USING(run_id) LEFT JOIN plan_actions a ON a.action_id=r.action_id LEFT JOIN hosts h ON h.host_id=r.host_id WHERE r.observed_state NOT IN ('finished','failed') OR EXISTS(SELECT 1 FROM concurrency_executions c WHERE c.execution_id='run:'||r.run_id AND c.state<>'stopped')`)
 	if err != nil {
@@ -393,6 +394,7 @@ func concurrencyRunFeedback(ctx context.Context, tx *store.Tx, run store.RunRow,
 }
 
 func (a *App) updateConcurrencyWaiting(ctx context.Context, tx *store.Tx) error {
+	defer tx.ObservePhase(store.WriteConcurrencyWait)()
 	waiting, err := views.ConcurrencyWaiting(ctx, tx.Q(), a.now().UnixMilli())
 	if err != nil {
 		return err

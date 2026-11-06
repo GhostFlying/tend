@@ -571,6 +571,7 @@ func concurrencyAvailable(ctx context.Context, q store.Querier, env, runtime, ex
 	return now >= s.Group.CooldownUntil && occupied < s.Group.Current, err
 }
 func refreshConcurrencyLoad(ctx context.Context, tx *store.Tx, s *domain.ConcurrencyState, now int64) error {
+	defer tx.ObservePhase(store.WriteConcurrencyLoad)()
 	rows, err := tx.Q().QueryContext(ctx, `SELECT e.state,e.last_seen,COALESCE(json_extract(e.source_json,'$.native_session_id'),'') FROM concurrency_executions e JOIN concurrency_bindings b USING(environment_id,runtime_id) WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurrency_executions child WHERE child.parent_execution_id=e.execution_id AND child.state<>'stopped')`, s.Group.ID)
 	if err != nil {
 		return err

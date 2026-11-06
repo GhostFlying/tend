@@ -654,6 +654,11 @@ D153 串行准备补充：上限为一时，runner 负责人尚无活动 turn �
 原负责人正在执行或有未知操作则不能借用。正常可并行的摘要仍独立申请。关闭
 原生 session 只核销该 session 实际创建的摘要额度，不能核销其他进程的未知执行。
 
+D153 事务观测补充：慢写日志区分 manager 任务刷新、领取候选与执行器解析、
+并发执行同步、等待计算与负载采样。阶段为包含式耗时，允许与外层 apply 重叠；
+仅使用固定名称，不记录请求内容、SQL 参数或配置，观测在释放写连接后输出。
+见[实施计划](plans/concurrency-maintenance-latency.md)。
+
 ## D154：固定 updater 的原窗口前进恢复
 
 针对 terminal 升级账本与本机 irreversible checking 不一致、旧健康条件不可由 updater 改变的恢复，新增独立 forward recovery。旧 batch/start、operation 全快照、旧 proof、失败与 unconfirmed 历史保留；新 binding 的健康和 receipt 不解释为旧 batch committed。恢复不调用旧 terminal retry、不新建升级 batch、不回滚已接单数据库。
