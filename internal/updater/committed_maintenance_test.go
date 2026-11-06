@@ -304,7 +304,7 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 			a.archive.HostedDrained = !forced
 			if forced {
 				a.archive.Blockers = []string{"native receipt reads: 3", "summary operations: 14", "hosted operations are active or uncertain"}
-				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor, Reason: "explicit unknown predecessor recovery", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor, Reason: "explicit unknown predecessor recovery", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 				if err := h.s.AuthorizeBoundedMaintenance(ctx, p, auth, "force"); err != nil {
 					t.Fatal(err)
 				}
@@ -371,7 +371,7 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 				if err := h.s.AuthorizeCommittedMaintenance(ctx, next, h.s.Status().Generation); err == nil {
 					t.Fatal("ordinary forward converted the old forced observation into drain proof")
 				}
-				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF2", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(next), Role: "server", Source: next.PreviousProcess, Target: next.Successor, Reason: "independently authorize the repaired candidate", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF2", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(next), Role: "server", DataIdentity: boundedServerTestData(h), Source: next.PreviousProcess, Target: next.Successor, Reason: "independently authorize the repaired candidate", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 				if err := h.s.AuthorizeBoundedMaintenance(ctx, next, auth, "force"); err != nil {
 					t.Fatal("cannot explicitly forward from forced parent", err)
 				}

@@ -29,6 +29,7 @@ func (deferredReportWorkspace) Cleanup(context.Context, protocol.WorkspaceCleanu
 func startDeferredResourceNode(n *node) {
 	n.t.Helper()
 	j := n.journal()
+	n.activeJournal = j
 	ctx, cancel := context.WithCancel(context.Background())
 	n.cancel, n.done = cancel, make(chan error, 1)
 	r := runner.New(runner.Config{ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test", HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: deferredReportWorkspace{n.ws}, Now: time.Now, IDs: protocol.NewULIDGen(time.Now, nil), Log: quiet(), RetryDelay: 20 * time.Millisecond, HeartbeatInterval: 20 * time.Millisecond, EventFlush: n.flush})

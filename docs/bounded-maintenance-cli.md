@@ -57,7 +57,7 @@ tend updater bounded reconcile \
 
 `takeover` 使用同一独立 installer 的接管入口，仍需完整的新授权及 fresh CAS。installer 必须核对旧 updater 和旧服务的精确身份；尚未证明旧 writer 退出时不能启动第二个 writer。强制替换 runner 不证明其旧 native worker 退出，不释放 held slot，也不清除 journal unknown。
 
-takeover 授权额外提供 `updater_source`（PID、start_ticks、launch_id、sha256）和 `updater_lock`（device/inode）。`data_identity` 则独立绑定原业务库或 journal；不能用 updater lock 的空闲代替业务 writer 已退出的证明。
+takeover 授权额外提供 `updater_source`（PID、start_ticks、launch_id、sha256）和 `updater_lock`（device/inode）。`data_identity` 则独立绑定原业务库或 journal；不能用 updater lock 的空闲代替业务 writer 已退出的证明。server 的 `plan` 从固定配置的唯一 ledger 文件取得实际 path/device/inode，变更授权必须保留并重新核验该身份。相同路径换成另一个 inode、缺失身份或错误路径会在停止、备份及启动前被拒绝；schema 迁移不要求文件的旧版本号保持不变。
 
 `--dry-run` 只输出 installer 参数和完整 typed input，不执行 installer，也不偷偷转成一次 plan 调用。它用于审阅原请求，不构成物理状态或安装成功的证据。
 

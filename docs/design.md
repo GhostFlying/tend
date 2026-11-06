@@ -1091,6 +1091,8 @@ D176 汇总大小补充：每个四小时桶再按不可变 fact sequence 分片
 
 普通准入条件保持。新增本机显式 force 接受原组件的未完成和未知，包括不完整诊断、未响应 ACK 和 HostedDrained=false；这些事实不改写为 drained、healthy 或业务完成。独立 installer 可在 control socket 或进程 mutex 失灵时，验证固定配置、产物、实际 updater PID/start/hash、unit 与原 flock；有界请求 manager stop 以抑制自动重启，再只终止精确旧 updater 并保留 child。同 inode 的锁须真正释放且被本控制器持有，旧 state/CAS 再核无漂移后才接管。原 server/runner writer 未确认退出不得启动第二 writer；native child 的退出与业务效果仍是独立未知。丢失 stop/start 回执只观察原身份，不发第二 start。copy/fsync 的外部截止由独立 installer 进程边界保证，不能用 context 包装宣称文件系统必然可中断。
 
+server force 绑定固定配置的实际 ledger path/device/inode，授权及停止、备份、启动边界重新核验，不能把请求中的数值本身当作物理证明。schema 版本只保留来源信息，不把迁移后仍相同 inode 的库拒于恢复之外。普通 apply 的优雅停止超时不授予强杀权限，必须有相应持久 force/takeover 或预授权超时事实。
+
 updater 新模式使用 format 4；旧 1/2/3 继续读取，进入 4 后取消、重开、普通后续维护和前滚均不降回旧格式。旧程序在写前拒绝 4，不能通过宽松 JSON 解码擦除权限。不可变 source plan、启动/恢复 lineage 与当前预算授权分开：fresh window 可更换预算 request，但原 launch force ID、原 grant、冻结 run set 和旧窗口保持。status/reconcile 按原任一 request 读取历史，不能因为新窗口归档而遗失旧身份。候选启动或迁移之后只前滚；失败 force parent 由独立新候选及新授权承接原真实未知，不把原 false archive 当作普通排空证明。
 
 新 server 在任何业务入口之前从实际 updater format 4、自身 kernel identity 和 predecessor exit 验证 force。注册与数据库全量 open run 保护同事务，包含停止前诊断遗漏的晚到 run，保持原 lease、pin、请求和未知；prelink 原生 fence 保留。原 started summary 没有可用 fork 身份，按实际 post-stop 数据库冻结其 source lineage，防止自动重 claim、消费、发布或覆盖旧 verdict；不同独立 source 保留原能力。该保护不是部署前等待旧 native 完成的门。

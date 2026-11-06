@@ -138,6 +138,125 @@ func TestBoundedRunnerLostStartOnlyFindsOriginalLaunch(t *testing.T) {
 	}
 }
 
+func TestBoundedRunnerAuthorityCoversEveryAcceptedWindow(t *testing.T) {
+	for _, action := range []string{"force", "apply", "takeover", "extend"} {
+		t.Run(action, func(t *testing.T) {
+			h, grant := boundedRunnerFixture(t)
+			if action == "extend" {
+				if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force"); err != nil {
+					t.Fatal(err)
+				}
+				grant.Plan.Authorization.RequestID = "req_00000000000000000000000002"
+				grant.Plan.Authorization.ExpectedGeneration = h.s.Status().Generation
+				grant.Plan.Authorization.ExpectedPhase = h.s.Status().Bounded.Phase
+			}
+			before := h.s.Status()
+			grant.Plan.Authorization.ExpiresAtMillis = h.now.Add(time.Millisecond).UnixMilli()
+			if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, action); err == nil {
+				t.Fatal("authority shorter than the full fixed window was accepted")
+			}
+			if !reflect.DeepEqual(before, h.s.Status()) || h.p.stops != 0 || h.p.starts != 0 {
+				t.Fatal("rejected window changed durable recovery or invoked a process action")
+			}
+		})
+	}
+}
+
+func TestBoundedRunnerPreviouslySavedShortAuthorityCannotStopAfterExpiry(t *testing.T) {
+	h, grant := boundedRunnerFixture(t)
+	if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force"); err != nil {
+		t.Fatal(err)
+	}
+	// A previous binary could persist a full window beyond its owner's expiry.
+	h.s.state.Bounded.Authorization.ExpiresAtMillis = h.now.Add(time.Millisecond).UnixMilli()
+	h.now = h.now.Add(2 * time.Millisecond)
+	h.boot += 2
+	if err := boundedRunnerTestStep(t, h); err == nil {
+		t.Fatal("expired persisted authority allowed another destructive transition")
+	}
+	if h.p.stops != 0 || h.p.starts != 0 || h.s.Status().Bounded.SourceExit != nil {
+		t.Fatal("expired authority stopped a runner or invented an exit")
+	}
+}
+
+type boundedRunnerExpiringInspect struct {
+	*fakeProcess
+	expire func()
+}
+
+func (p *boundedRunnerExpiringInspect) Inspect(ctx context.Context, pid int) (Identity, error) {
+	p.expire()
+	return p.fakeProcess.Inspect(ctx, pid)
+}
+
+func TestBoundedRunnerRechecksAuthorityAfterInspectBeforeStop(t *testing.T) {
+	h, grant := boundedRunnerFixture(t)
+	if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force"); err != nil {
+		t.Fatal(err)
+	}
+	h.s.opts.Process = &boundedRunnerExpiringInspect{fakeProcess: h.p, expire: func() {
+		h.now = time.UnixMilli(grant.Plan.Authorization.ExpiresAtMillis)
+	}}
+	if err := boundedRunnerTestStep(t, h); err == nil {
+		t.Fatal("inspection crossing the authority expiry still allowed a stop")
+	}
+	if h.p.stops != 0 || h.p.starts != 0 || h.s.Status().Bounded.SourceExit != nil {
+		t.Fatal("expired authority caused a signal or invented predecessor exit")
+	}
+}
+
+type boundedRunnerUncertainStop struct {
+	*fakeProcess
+	stopCalls, killCalls int
+}
+
+func (p *boundedRunnerUncertainStop) Stop(context.Context, Identity, time.Duration) error {
+	p.stopCalls++
+	return ErrUnknown
+}
+
+func (p *boundedRunnerUncertainStop) Crash(_ context.Context, id Identity, _ time.Duration) error {
+	p.killCalls++
+	delete(p.live, id.PID)
+	return nil
+}
+
+func TestBoundedRunnerLostStopReconcilesAcrossRestartBeforeAuthorizedKill(t *testing.T) {
+	h, grant := boundedRunnerFixture(t)
+	p := &boundedRunnerUncertainStop{fakeProcess: h.p}
+	h.s.opts.Process, h.opts.Process = p, p
+	if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := boundedRunnerTestStep(t, h); !errors.Is(err, ErrUnknown) {
+			t.Fatalf("unconfirmed original stop lost its uncertainty: %v", err)
+		}
+	}
+	if err := h.s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	h.s, err = Open(h.cfg, h.opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := boundedRunnerTestStep(t, h); !errors.Is(err, ErrUnknown) {
+		t.Fatalf("reopened original stop lost its uncertainty: %v", err)
+	}
+	if p.stopCalls != 1 || p.killCalls != 0 || h.p.starts != 0 || h.s.Status().Bounded.SourceExit != nil {
+		t.Fatalf("same stop was repeated or its exit invented: stop=%d kill=%d", p.stopCalls, p.killCalls)
+	}
+	h.now = h.now.Add(time.Duration(grant.Plan.Authorization.Timeouts.StopMillis+1) * time.Millisecond)
+	h.boot += grant.Plan.Authorization.Timeouts.StopMillis + 1
+	if err := boundedRunnerTestStep(t, h); err != nil {
+		t.Fatal(err)
+	}
+	if p.stopCalls != 1 || p.killCalls != 1 || h.s.Status().Bounded.SourceExit == nil || h.p.starts != 0 {
+		t.Fatal("persisted force authority could not advance the original unknown stop to exact termination")
+	}
+}
+
 func TestBoundedRunnerWrongSourceAndJournalCannotStopOrStart(t *testing.T) {
 	for _, scenario := range []string{"source", "journal", "generation", "expired"} {
 		t.Run(scenario, func(t *testing.T) {

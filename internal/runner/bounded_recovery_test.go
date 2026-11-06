@@ -187,7 +187,10 @@ func bindRunnerBoundedTestAuthority(t *testing.T, j *journal.Journal, authority 
 func TestBoundedRecoveryAdmissionReleaseKeepsRunProtectionAndHistoricalControls(t *testing.T) {
 	r, as, path := retainedStrictFixture(t)
 	r.cfg.InstanceID = "forced-candidate"
-	authority := protocol.BoundedMaintenanceAuthorization{RequestID: "original-force", Role: "runner", Target: protocol.UpgradeBinding{InstanceID: "updater", ProcessInstanceID: r.cfg.InstanceID, ArtifactSHA256: r.cfg.Build.BinarySHA256}}
+	r.cfg.UpgradeID = "forced-upgrade"
+	r.cfg.InitialMaintenance = true
+	r.bootstrapMaintenance = true
+	authority := protocol.BoundedMaintenanceAuthorization{RequestID: "original-force", Role: "runner", Target: protocol.UpgradeBinding{UpgradeID: r.cfg.UpgradeID, InstanceID: "updater", ProcessInstanceID: r.cfg.InstanceID, ArtifactSHA256: r.cfg.Build.BinarySHA256}}
 	bindRunnerBoundedTestAuthority(t, r.cfg.Journal, &authority)
 	if err := r.cfg.Journal.QuarantineBoundedRecovery(t.Context(), authority); err != nil {
 		t.Fatal(err)
@@ -208,6 +211,9 @@ func TestBoundedRecoveryAdmissionReleaseKeepsRunProtectionAndHistoricalControls(
 	}
 	if r.boundedRecoveryPending() || !r.boundedRunQuarantined(t.Context(), as.RunID) {
 		t.Fatal("global release cleared original run isolation or kept global admission blocked")
+	}
+	if r.maintenance() {
+		t.Fatal("validated owner release left the successor bootstrap fence blocking new work")
 	}
 	for _, verdict := range []string{protocol.VerdictContinue, protocol.VerdictStop} {
 		retainedStrictHello(t, r, protocol.RunVerdict{RunID: as.RunID, Verdict: verdict, Desired: protocol.DesiredRun})
@@ -243,6 +249,9 @@ func TestBoundedRecoveryAdmissionReleaseKeepsRunProtectionAndHistoricalControls(
 	command.Revision++
 	if err := r.applyControl(t.Context(), &command, r.cfg.Now(), true); err != nil {
 		t.Fatalf("historical release blocked a later process generation: %v", err)
+	}
+	if r.maintenance() {
+		t.Fatal("persisted release failed to clear the restarted successor's bootstrap fence")
 	}
 	after, afterRequests := retainedStrictSnapshot(t, j, as.RunID)
 	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(requests, afterRequests) {

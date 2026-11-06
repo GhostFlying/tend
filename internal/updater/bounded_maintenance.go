@@ -125,12 +125,19 @@ func (s *Supervisor) authorizeBoundedMaintenanceWindow(ctx context.Context, p pr
 	if err := validateTimeoutPolicy(a.Timeouts); err != nil {
 		return err
 	}
+	if err := validateBoundedServerData(s.cfg, a.DataIdentity); err != nil {
+		return err
+	}
 	for _, history := range s.state.BoundedHistory {
 		if _, ok := history.Authorizations[a.RequestID]; ok {
 			return errors.New("updater: historical bounded request cannot authorize another maintenance")
 		}
 	}
 	if b := s.state.Bounded; b != nil {
+		prior := b.Authorization.DataIdentity
+		if prior == nil || prior.Path != a.DataIdentity.Path || prior.Device != a.DataIdentity.Device || prior.Inode != a.DataIdentity.Inode {
+			return errors.New("updater: original bounded server ledger identity changed")
+		}
 		if old, ok := b.Authorizations[a.RequestID]; ok {
 			if digest(old) != digest(a) {
 				return errors.New("updater: bounded request payload changed")
@@ -244,6 +251,9 @@ func (s *Supervisor) boundedMaintenanceStep(ctx context.Context) (bool, error) {
 	if m == nil || m.Phase == "cancelled" || m.Phase == "ledger_linked" {
 		return false, nil
 	}
+	if err := validateBoundedServerData(s.cfg, b.Authorization.DataIdentity); err != nil {
+		return true, err
+	}
 	if b.Phase == "observation_drain" && m.Phase == "updater_adopted" {
 		authority, ok := s.opts.Authority.(MaintenanceArchiveAuthority)
 		var observationErr error
@@ -294,7 +304,7 @@ func (s *Supervisor) boundedMaintenanceStep(ctx context.Context) (bool, error) {
 	if _, err := s.boundedRemaining(); err != nil {
 		// An explicit force decision permits one exact-process escalation after the
 		// persisted graceful deadline. A lost kill reply only permits observation.
-		if m.Phase == "stopping_old" && b.Phase == "stop" {
+		if m.Phase == "stopping_old" && b.Phase == "stop" && boundedRunnerMayKill(b) {
 			if err := s.boundedEnter("kill", b.Authorization.Timeouts.KillMillis); err != nil {
 				return true, err
 			}

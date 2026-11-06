@@ -290,6 +290,12 @@ func runBoundedSystemdTakeoverFixture(t *testing.T, mutexHung bool, role string)
 		phase = st.Maintenance.Phase
 	}
 	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: st.Generation, ExpectedPhase: phase, PlanSHA256: digest(maintenance), Role: role, Source: child, Target: maintenance.Successor, Reason: "isolated external takeover of an unresponsive updater", ExpiresAtMillis: expires, Timeouts: protocol.DefaultMaintenanceTimeoutPolicy(), UpdaterSource: &oldUpdater, UpdaterLock: &protocol.BoundedDataIdentity{Device: dev, Inode: ino}}
+	if role == "server" {
+		auth.DataIdentity, err = boundedServerDataIdentity(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	planFile, authFile := filepath.Join(root, "plan.json"), filepath.Join(root, "authorization.json")
 	var inputPlan any = plan
 	if role == "runner" {
