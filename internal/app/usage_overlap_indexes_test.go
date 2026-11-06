@@ -102,6 +102,9 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			if err := New(db, nil, clock.Now).RefreshUsageProjection(ctx); err != nil {
+				t.Fatal(err)
+			}
 			before := usageIndexView(t, db, clock.Now())
 			beforeHistory := usageIndexHistory(t, db)
 			migration, err := os.ReadFile(filepath.Join("..", "store", "migrations", "0083_usage_overlap_query_indexes.sql"))

@@ -33,7 +33,7 @@ func (s *Server) tokenUsage(w http.ResponseWriter, r *http.Request) {
 		if order := params.Get("sort"); order != "" && order != "recent" && order != "total" {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid usage order")
 		}
-		v, err := views.TokenUsageFiltered(r.Context(), q, kind, offset, params.Get("model"), params.Get("subject"), before, s.cfg.Now(), views.UsageFilter{Agent: params.Get("agent"), Role: params.Get("role"), Issue: params.Get("issue"), Session: params.Get("session"), Sort: params.Get("sort")})
+		v, err := views.TokenUsageFiltered(r.Context(), q, kind, offset, params.Get("model"), params.Get("subject"), before, s.cfg.Now(), views.UsageFilter{Agent: params.Get("agent"), Role: params.Get("role"), Issue: params.Get("issue"), Session: params.Get("session"), Sort: params.Get("sort"), Summary: params.Get("group_by") != "" && params.Get("details") != "1"})
 		if err != nil {
 			return nil, err
 		}
