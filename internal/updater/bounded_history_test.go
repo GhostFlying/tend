@@ -80,7 +80,7 @@ func boundedHistoryAuthorization(h *harness, p protocol.CommittedMaintenancePlan
 	state := h.s.Status()
 	return protocol.BoundedMaintenanceAuthorization{
 		RequestID: request, ExpectedGeneration: state.Generation, ExpectedPhase: state.Maintenance.Phase,
-		PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor,
+		PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor,
 		Reason:          "Independently recover while retaining original unknown work",
 		ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy(),
 	}

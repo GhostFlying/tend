@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,11 +73,15 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := updater.State{Format: 2, InstanceID: "server", UpdaterEpoch: "installed-updater-epoch", Recovery: &updater.ForwardRecovery{Plan: plan, Phase: "starting_successor"}}
+	var stateFormat atomic.Int64
+	stateFormat.Store(2)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/status" {
 			t.Error("unexpected control side effect", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state})
+		responseState := state
+		responseState.Format = int(stateFormat.Load())
+		_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: responseState})
 	}), ReadHeaderTimeout: time.Second}
 	done := make(chan struct{})
 	go func() { defer close(done); _ = server.Serve(ln) }()
@@ -93,9 +98,19 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.InitializeRecovery(ctx, plan.RecoveryID); err != nil {
-		t.Fatal(err)
+	for _, format := range []int64{2, 3, 4} {
+		stateFormat.Store(format)
+		if err := c.InitializeRecovery(ctx, plan.RecoveryID); err != nil {
+			t.Fatalf("retained updater format %d rejected forward startup: %v", format, err)
+		}
 	}
+	for _, format := range []int64{1, 5} {
+		stateFormat.Store(format)
+		if err := c.InitializeRecovery(ctx, plan.RecoveryID); err == nil {
+			t.Fatalf("unsupported updater format %d admitted forward startup", format)
+		}
+	}
+	stateFormat.Store(4)
 	// Real terminal health remains false even if drainer readiness changes.
 	health, err := a.ServerUpgradeHealth(ctx, plan.Original)
 	if err != nil || health.Healthy || !health.ServerConfirmed {

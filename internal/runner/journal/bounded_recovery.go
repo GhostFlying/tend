@@ -246,8 +246,14 @@ func (j *Journal) BoundedWorkspaceQuarantined(ctx context.Context, workspaceID, 
 // server Continue cannot manufacture this new permission or broaden its set.
 func validateBoundedContinuation(ctx context.Context, tx *sql.Tx, runID string, resume protocol.RetainedRunResume) error {
 	var authority string
-	err := tx.QueryRowContext(ctx, `SELECT request_id FROM bounded_recovery_quarantines WHERE active=1 ORDER BY rowid DESC LIMIT 1`).Scan(&authority)
+	err := tx.QueryRowContext(ctx, `SELECT q.request_id
+	 FROM bounded_recovery_quarantines q,json_each(q.snapshot_json,'$.runs') original
+	 WHERE q.active=1 AND json_extract(original.value,'$.assignment.run_id')=?
+	 ORDER BY q.rowid DESC LIMIT 1`, runID).Scan(&authority)
 	if errors.Is(err, sql.ErrNoRows) {
+		if resume.RecoveryAuthorizationID != "" {
+			return errors.New("journal: bounded recovery continuation is outside its original run set")
+		}
 		return nil
 	}
 	if err != nil {

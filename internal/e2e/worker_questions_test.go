@@ -50,8 +50,7 @@ func TestEndToEnd_LegacyWorkerQuestionsKeepRunAndLease(t *testing.T) {
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
-	j := n.journal()
-	defer j.Close()
+	j := n.runningJournal()
 	for i, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
 		var decision protocol.DecisionView
 		eventually(t, "worker question becomes visible to owner", func() bool {
@@ -170,8 +169,7 @@ func TestFault_LegacyWorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
 		return false
 	})
 	first := n.workers.Started()[0]
-	j := n.journal()
-	defer j.Close()
+	j := n.runningJournal()
 	original, err := j.Run(t.Context(), first.RunID)
 	if err != nil || original.Thread == "" {
 		t.Fatalf("original waiting thread: %q, %v", original.Thread, err)

@@ -307,8 +307,14 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	modeChanged := r.control.Mode != stored.Mode || r.control.UpgradeID != stored.UpgradeID
 	attemptChanged := modeChanged || next.Mode == protocol.RunnerMaintenance && next.Revision > r.control.Revision && next.Upgrade == nil
 	cancelledBootstrap := next.Mode == protocol.RunnerNormal && next.UpgradeID == "" && r.control.UpgradeID == r.cfg.UpgradeID && r.cfg.UpgradeID != "" && next.Revision > r.control.Revision
+	releasedBootstrap := false
+	if q := r.boundedRecovery; q != nil && q.AdmissionRelease != nil && next.Mode == protocol.RunnerNormal {
+		release := q.AdmissionRelease
+		releasedBootstrap = release.RecoveryAuthorizationID == q.Authorization.RequestID && release.Successor == q.Authorization.Target &&
+			release.Successor.UpgradeID == r.cfg.UpgradeID && release.Successor.ProcessInstanceID == r.instanceID && release.Successor.ArtifactSHA256 == r.cfg.Build.BinarySHA256
+	}
 	r.control = stored
-	if (next.UpgradeID == r.cfg.UpgradeID && next.Revision > 0 || cancelledBootstrap) && (hello || r.helloConfirmed) {
+	if (next.UpgradeID == r.cfg.UpgradeID && next.Revision > 0 || cancelledBootstrap || releasedBootstrap) && (hello || r.helloConfirmed) {
 		r.bootstrapMaintenance = false
 	}
 	r.mu.Lock()

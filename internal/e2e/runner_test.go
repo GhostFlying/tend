@@ -377,12 +377,13 @@ type node struct {
 	ws      *workspaces
 	net     *network
 	// flush is how often the runner uploads run events.
-	repositories func() []protocol.RunnerRepository
-	heartbeat    time.Duration
-	flush        time.Duration
-	log          *slog.Logger
-	cancel       context.CancelFunc
-	done         chan error
+	repositories  func() []protocol.RunnerRepository
+	heartbeat     time.Duration
+	flush         time.Duration
+	log           *slog.Logger
+	cancel        context.CancelFunc
+	done          chan error
+	activeJournal *journal.Journal
 }
 
 func newNode(t *testing.T, srv *server, script func(harness.WorkerSpec) testkit.WorkerScript) *node {
@@ -411,9 +412,19 @@ func (n *node) journal() *journal.Journal {
 	return j
 }
 
+// runningJournal borrows the current runner's writer; only its lifecycle closes it.
+func (n *node) runningJournal() *journal.Journal {
+	n.t.Helper()
+	if n.activeJournal == nil {
+		n.t.Fatal("runner journal is not active")
+	}
+	return n.activeJournal
+}
+
 func (n *node) start() {
 	n.t.Helper()
 	j := n.journal()
+	n.activeJournal = j
 	ctx, cancel := context.WithCancel(context.Background())
 	n.cancel, n.done = cancel, make(chan error, 1)
 	log := n.log
@@ -453,8 +464,10 @@ func (n *node) stop() {
 	n.cancel()
 	select {
 	case <-n.done:
+		n.activeJournal = nil
 	case <-time.After(10 * time.Second):
 		n.t.Error("runner did not stop")
+		return
 	}
 	n.cancel = nil
 }
@@ -494,8 +507,7 @@ func TestEndToEnd_RunnerCompletesTask(t *testing.T) {
 	eventually(t, "the implement events are uploaded", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 2 })
 	// The task completes when tend commits the verdict; the runner forgets
 	// the run only once the answer reaches it.
-	j := n.journal()
-	defer j.Close()
+	j := n.runningJournal()
 	eventually(t, "the runner forgets its runs", func() bool {
 		runs, err := j.Runs(context.Background())
 		return err == nil && len(runs) == 0
@@ -585,8 +597,7 @@ func TestFault_HeartbeatLostRunnerAlive_Runner(t *testing.T) {
 			n.diagnoseFailure(task)
 			eventually(t, "the worker starts with a durable thread", func() bool { return len(n.workers.Started()) == 1 })
 			first := n.workers.Started()[0]
-			j := n.journal()
-			defer j.Close()
+			j := n.runningJournal()
 			original, err := j.Run(t.Context(), first.RunID)
 			if err != nil || original.Thread == "" {
 				t.Fatalf("initial thread: %+v, %v", original, err)
@@ -995,8 +1006,7 @@ func TestTakeoverWhilePausedIsHandedBack(t *testing.T) {
 	eventually(t, "the paused worker is stopped", func() bool { return len(n.workers.Stopped()) == 1 })
 	// No worker runs when the owner takes over and later hands back.
 	srv.setMode(task, protocol.ControlHumanControl)
-	j := n.journal()
-	defer j.Close()
+	j := n.runningJournal()
 	runID := n.workers.Started()[0].RunID
 	eventually(t, "the runner journals the owner's hold", func() bool {
 		run, err := j.Run(t.Context(), runID)
@@ -1168,12 +1178,16 @@ func (n *node) diagnoseFailure(task string) {
 		if err != nil {
 			n.t.Logf("server diagnostics: %v", err)
 		}
-		j, err := journal.Open(ctx, n.path, n.srv.now)
-		if err != nil {
-			n.t.Logf("journal diagnostics: %v", err)
-			return
+		j := n.activeJournal
+		if j == nil {
+			var err error
+			j, err = journal.Open(ctx, n.path, n.srv.now)
+			if err != nil {
+				n.t.Logf("journal diagnostics: %v", err)
+				return
+			}
+			defer j.Close()
 		}
-		defer j.Close()
 		runs, err := j.Runs(ctx)
 		if err != nil {
 			n.t.Logf("journal runs: %v", err)

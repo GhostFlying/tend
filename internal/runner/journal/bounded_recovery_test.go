@@ -133,6 +133,38 @@ func TestBoundedRecoveryContinuationRequiresIndependentAuthorityAndFrozenRun(t *
 	}
 }
 
+func TestBoundedRecoveryReleasedAdmissionKeepsOrdinaryContinuationForNewRuns(t *testing.T) {
+	j := open(t, filepath.Join(t.TempDir(), "journal.db"))
+	defer j.Close()
+	original := protocol.Assignment{RunID: "original-run", LeaseID: "original-lease", Role: protocol.RoleImplement}
+	if err := j.AcceptAssignment(t.Context(), original, ""); err != nil {
+		t.Fatal(err)
+	}
+	authority := protocol.BoundedMaintenanceAuthorization{RequestID: "original-force", Role: "runner", Target: protocol.UpgradeBinding{InstanceID: "host", ProcessInstanceID: "successor"}}
+	bindBoundedTestAuthority(t, j, &authority)
+	if err := j.QuarantineBoundedRecovery(t.Context(), authority); err != nil {
+		t.Fatal(err)
+	}
+	release := protocol.BoundedRunnerAdmissionRelease{RequestID: "owner-admission-release", RecoveryAuthorizationID: authority.RequestID, Successor: authority.Target, Journal: *authority.DataIdentity}
+	if err := j.ReleaseBoundedAdmission(t.Context(), release); err != nil {
+		t.Fatal(err)
+	}
+	later := protocol.Assignment{RunID: "post-release-run", LeaseID: "later-lease", Role: protocol.RoleImplement}
+	if err := j.AcceptAssignment(t.Context(), later, ""); err != nil {
+		t.Fatal(err)
+	}
+	permit := protocol.RetainedRunResume{RequestID: "later-maintenance-continuation", Mode: "attach"}
+	if err := j.SetRetainedResume(t.Context(), later.RunID, permit); err != nil {
+		t.Fatalf("unrelated original quarantine blocked new work's ordinary strict continuation: %v", err)
+	}
+	if err := j.SetRetainedResume(t.Context(), original.RunID, permit); err == nil {
+		t.Fatal("ordinary permission also released the original protected run")
+	}
+	if protected, err := j.BoundedRunQuarantined(t.Context(), original.RunID); err != nil || !protected {
+		t.Fatal("old run lost its independent recovery protection", protected, err)
+	}
+}
+
 func bindBoundedTestAuthority(t *testing.T, j *Journal, authority *protocol.BoundedMaintenanceAuthorization) {
 	t.Helper()
 	if _, err := j.NextProcessGeneration(t.Context()); err != nil {

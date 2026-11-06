@@ -5,6 +5,7 @@ package updater
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestBoundedMaintenanceForcePreservesUndrainedObservationAndCommits(t *testi
 	a.archive.HostedDrained = false
 	a.archive.Blockers = []string{"native receipt reads: 3", "summary operations: 14", "hosted operations are active or uncertain"}
 	original := h.s.Status()
-	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: original.Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor, Reason: "explicit recovery of unconfirmed hosted work", ExpiresAtMillis: h.s.opts.Now().Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: original.Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor, Reason: "explicit recovery of unconfirmed hosted work", ExpiresAtMillis: h.s.opts.Now().Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 	if err := h.s.AuthorizeBoundedMaintenance(t.Context(), p, auth, "force"); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestBoundedMaintenanceForcePreservesUndrainedObservationAndCommits(t *testi
 func TestBoundedMaintenancePollingCannotRenewDeadline(t *testing.T) {
 	h, p, _ := committedFixture(t)
 	st := h.s.Status()
-	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: st.Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor, Reason: "bounded recovery", ExpiresAtMillis: h.s.opts.Now().Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: st.Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor, Reason: "bounded recovery", ExpiresAtMillis: h.s.opts.Now().Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 	if err := h.s.AuthorizeBoundedMaintenance(t.Context(), p, auth, "force"); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestBoundedMaintenanceKillEntersFreshBackupAndHealthBudgets(t *testing.T) {
 	process := &boundedHungStop{&receiptCrashProcess{fakeProcess: h.p}}
 	h.s.opts.Process = process
 	st := h.s.Status()
-	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: st.Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor, Reason: "bounded exact termination", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: st.Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor, Reason: "bounded exact termination", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 	if err := h.s.AuthorizeBoundedMaintenance(t.Context(), p, auth, "force"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +123,12 @@ func TestBoundedMaintenanceCancellationKeepsIndependentRequest(t *testing.T) {
 	if err := h.s.PrepareCommittedMaintenance(t.Context(), p, h.s.Status().Generation); err != nil {
 		t.Fatal(err)
 	}
-	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor, Reason: "independent cancellation before physical replacement", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+	auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor, Reason: "independent cancellation before physical replacement", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 	if err := h.s.CancelBoundedMaintenance(t.Context(), p, auth); err != nil {
 		t.Fatal(err)
 	}
 	st := h.s.Status()
-	if st.Format != 4 || st.Bounded.Authorization != auth || st.Bounded.Outcome != "cancelled" || st.Maintenance.Phase != "cancelled" || len(st.Bounded.Audit) != 1 || st.Bounded.Audit[0].Action != "cancel" || h.p.stops != 0 || a.archive.Preparation.Prepared {
+	if st.Format != 4 || !reflect.DeepEqual(st.Bounded.Authorization, auth) || st.Bounded.Outcome != "cancelled" || st.Maintenance.Phase != "cancelled" || len(st.Bounded.Audit) != 1 || st.Bounded.Audit[0].Action != "cancel" || h.p.stops != 0 || a.archive.Preparation.Prepared {
 		t.Fatal("cancellation lost independent authority or changed the original writer")
 	}
 	if err := h.s.CancelBoundedMaintenance(t.Context(), p, auth); err != nil {

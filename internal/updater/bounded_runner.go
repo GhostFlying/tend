@@ -65,6 +65,14 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 			if digest(old) != digest(a) || !known || digest(previous) != digest(grant) {
 				return errors.New("updater: bounded runner request payload changed")
 			}
+			for _, entry := range b.Audit {
+				if entry.RequestID == a.RequestID {
+					if entry.Action != action {
+						return errors.New("updater: bounded runner request action changed")
+					}
+					break
+				}
+			}
 			return nil
 		}
 	}
@@ -98,6 +106,9 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		s.state.Operation.Phase = "cancelled"
 		return s.save()
 	}
+	if err := validateBoundedRunnerWindow(a, s.opts.Now().UnixMilli()); err != nil {
+		return err
+	}
 	if action == "extend" {
 		b := s.state.Bounded
 		if b == nil || s.state.BoundedRunnerGrant == nil || b.Authorization.PlanSHA256 != a.PlanSHA256 || b.Authorization.Source != a.Source || b.Authorization.Target != a.Target ||
@@ -108,14 +119,20 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		if err != nil {
 			return err
 		}
+		now := s.opts.Now().UnixMilli()
+		if err := validateBoundedRunnerWindow(a, now); err != nil {
+			return err
+		}
 		b.Authorizations[a.RequestID] = a
 		b.Audit = append(b.Audit, protocol.BoundedMaintenanceAudit{RequestID: a.RequestID, Action: action, Phase: b.Phase, Reason: a.Reason, RecordedAtMillis: s.opts.Now().UnixMilli(), Outcome: "fresh_external_window", PreviousWindow: boundedWindowSnapshot(b)})
 		b.Authorization = a
 		b.BootID = boot
-		b.OverallDeadlineMillis = s.opts.Now().UnixMilli() + a.Timeouts.OverallMillis
+		b.OverallStartedAtMillis = now
+		b.OverallDeadlineMillis = now + a.Timeouts.OverallMillis
 		b.OverallDeadlineMono = mono + a.Timeouts.OverallMillis
 		budget := boundedRunnerPhaseBudget(b.Phase, a.Timeouts)
-		b.PhaseDeadlineMillis = min(s.opts.Now().UnixMilli()+budget, b.OverallDeadlineMillis)
+		b.PhaseEnteredAtMillis = now
+		b.PhaseDeadlineMillis = min(now+budget, b.OverallDeadlineMillis)
 		b.PhaseDeadlineMono = min(mono+budget, b.OverallDeadlineMono)
 		s.state.BoundedRunnerGrant = &grant
 		if s.state.BoundedRunnerGrants == nil {
@@ -135,14 +152,20 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		if err != nil {
 			return err
 		}
+		now := s.opts.Now().UnixMilli()
+		if err := validateBoundedRunnerWindow(a, now); err != nil {
+			return err
+		}
 		previousWindow := boundedWindowSnapshot(b)
 		b.Authorizations[a.RequestID] = a
 		b.Authorization = a
 		b.BootID = boot
-		b.OverallDeadlineMillis = s.opts.Now().UnixMilli() + a.Timeouts.OverallMillis
+		b.OverallStartedAtMillis = now
+		b.OverallDeadlineMillis = now + a.Timeouts.OverallMillis
 		b.OverallDeadlineMono = mono + a.Timeouts.OverallMillis
 		budget := boundedRunnerPhaseBudget(b.Phase, a.Timeouts)
-		b.PhaseDeadlineMillis = min(s.opts.Now().UnixMilli()+budget, b.OverallDeadlineMillis)
+		b.PhaseEnteredAtMillis = now
+		b.PhaseDeadlineMillis = min(now+budget, b.OverallDeadlineMillis)
 		b.PhaseDeadlineMono = min(mono+budget, b.OverallDeadlineMono)
 		b.Audit = append(b.Audit, protocol.BoundedMaintenanceAudit{RequestID: a.RequestID, Action: action, Phase: b.Phase, Reason: a.Reason, RecordedAtMillis: s.opts.Now().UnixMilli(), Outcome: "original_launch_and_unknown_work_retained", PreviousWindow: previousWindow})
 		s.state.BoundedRunnerGrant = &grant
@@ -209,6 +232,9 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		return err
 	}
 	now := s.opts.Now().UnixMilli()
+	if err := validateBoundedRunnerWindow(a, now); err != nil {
+		return err
+	}
 	b := &protocol.BoundedMaintenanceState{RecoveryAuthorizationID: grant.RecoveryAuthorizationID, Authorization: a, Authorizations: map[string]protocol.BoundedMaintenanceAuthorization{a.RequestID: a}, Phase: "handoff", PhaseEnteredAtMillis: now, PhaseDeadlineMillis: now + a.Timeouts.HandoffMillis, OverallStartedAtMillis: now, OverallDeadlineMillis: now + a.Timeouts.OverallMillis, BootID: boot, PhaseDeadlineMono: mono + a.Timeouts.HandoffMillis, OverallDeadlineMono: mono + a.Timeouts.OverallMillis}
 	if b.RecoveryAuthorizationID == "" {
 		b.RecoveryAuthorizationID = a.RequestID
@@ -329,8 +355,12 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 	if op.Phase == "bounded_staging" {
 		return true, errors.New("updater: staging outcome requires explicit external reconciliation")
 	}
+	if b.Authorization.ExpiresAtMillis <= s.opts.Now().UnixMilli() {
+		_, err := s.boundedRunnerRemaining()
+		return true, err
+	}
 	if op.Phase == "staged" {
-		remaining, err := s.boundedRemaining()
+		remaining, err := s.boundedRunnerRemaining()
 		if err != nil && !b.Authorization.ForceOnDrainTimeout {
 			return true, err
 		}
@@ -361,7 +391,7 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 			return true, err
 		}
 	}
-	remaining, deadlineErr := s.boundedRemaining()
+	remaining, deadlineErr := s.boundedRunnerRemaining()
 	if deadlineErr != nil {
 		if op.Phase == "stopping" && b.Phase == "stop" && boundedRunnerMayKill(b) {
 			if err := s.boundedEnter("kill", b.Authorization.Timeouts.KillMillis); err != nil {
@@ -417,7 +447,7 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 
 func (s *Supervisor) boundedRunnerStop(ctx context.Context, kill bool) error {
 	b, op := s.state.Bounded, s.state.Operation
-	remaining, err := s.boundedRemaining()
+	remaining, err := s.boundedRunnerRemaining()
 	if err != nil {
 		return err
 	}
@@ -450,7 +480,7 @@ func (s *Supervisor) boundedRunnerStop(ctx context.Context, kill bool) error {
 		if err := s.save(); err != nil {
 			return err
 		}
-		remaining, err := s.boundedRemaining()
+		remaining, err := s.boundedRunnerRemaining()
 		if err != nil {
 			return err
 		}
@@ -459,8 +489,26 @@ func (s *Supervisor) boundedRunnerStop(ctx context.Context, kill bool) error {
 		if err := crash.Crash(killCtx, op.PreviousProcess, remaining); err != nil {
 			return err
 		}
-	} else if err := s.opts.Process.Stop(ctx, op.PreviousProcess, remaining); err != nil {
-		return err
+	} else {
+		for _, entry := range b.Audit {
+			previous := b.Authorizations[entry.RequestID]
+			if entry.Action == "stop_predecessor" && previous.PlanSHA256 == b.Authorization.PlanSHA256 && previous.Source == b.Authorization.Source {
+				return ErrUnknown
+			}
+		}
+		b.Audit = append(b.Audit, protocol.BoundedMaintenanceAudit{RequestID: b.Authorization.RequestID, Action: "stop_predecessor", Phase: "stop", Reason: b.Authorization.Reason, RecordedAtMillis: s.opts.Now().UnixMilli(), Outcome: "started"})
+		if err := s.save(); err != nil {
+			return err
+		}
+		remaining, err := s.boundedRunnerRemaining()
+		if err != nil {
+			return err
+		}
+		stopCtx, cancel := context.WithTimeout(ctx, remaining)
+		defer cancel()
+		if err := s.opts.Process.Stop(stopCtx, op.PreviousProcess, remaining); err != nil {
+			return err
+		}
 	}
 	if _, err := s.opts.Process.Inspect(ctx, op.PreviousProcess.PID); !errors.Is(err, ErrNotRunning) {
 		if err != nil {
@@ -504,9 +552,14 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 		}
 		identity = found[0]
 	} else {
+		remaining, err := s.boundedRunnerRemaining()
+		if err != nil {
+			return err
+		}
+		startCtx, cancel := context.WithTimeout(ctx, remaining)
+		defer cancel()
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": op.LaunchID, "TEND_UPDATER_LAUNCH_ID": op.LaunchID, "TEND_RELEASE_SHA256": op.Candidate.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": op.Candidate.ReleaseID, "TEND_UPGRADE_ID": op.ID, "TEND_UPDATER_MAINTENANCE": "1", "TEND_BOUNDED_RECOVERY_REQUEST_ID": boundedRunnerRecoveryID(b)}
-		var err error
-		identity, err = s.opts.Process.Start(ctx, op.Candidate.Binary, s.cfg, extra)
+		identity, err = s.opts.Process.Start(startCtx, op.Candidate.Binary, s.cfg, extra)
 		if err != nil {
 			return err
 		}
@@ -520,6 +573,37 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 	op.Irreversible = true
 	s.state.Process = identity
 	return s.save()
+}
+
+func validateBoundedRunnerWindow(a protocol.BoundedMaintenanceAuthorization, now int64) error {
+	if a.ExpiresAtMillis-now < a.Timeouts.OverallMillis {
+		return errors.New("updater: runner authority must cover its entire fixed recovery window")
+	}
+	return nil
+}
+
+func (s *Supervisor) boundedRunnerRemaining() (time.Duration, error) {
+	b := s.state.Bounded
+	authorizedMillis := b.Authorization.ExpiresAtMillis - s.opts.Now().UnixMilli()
+	if authorizedMillis <= 0 {
+		b.Outcome = "timed_out"
+		recorded := false
+		for _, entry := range b.Audit {
+			if entry.RequestID == b.Authorization.RequestID && entry.Action == "authority_expired" {
+				recorded = true
+				break
+			}
+		}
+		if !recorded {
+			b.Audit = append(b.Audit, protocol.BoundedMaintenanceAudit{RequestID: b.Authorization.RequestID, Action: "authority_expired", Phase: b.Phase, Reason: b.Authorization.Reason, RecordedAtMillis: s.opts.Now().UnixMilli(), Outcome: "timed_out", PreviousWindow: boundedWindowSnapshot(b)})
+		}
+		return 0, errors.New("updater: bounded runner authority expired; explicit external recovery required")
+	}
+	remaining, err := s.boundedRemaining()
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(min(int64(remaining/time.Millisecond), authorizedMillis)) * time.Millisecond, nil
 }
 
 func (s *Supervisor) checkBoundedRunner(ctx context.Context) error {

@@ -75,6 +75,11 @@ func boundedCommand(ctx context.Context, cfg Config, action, planFile, authoriza
 			return state, err
 		}
 		if action == "plan" {
+			data, err := boundedServerDataIdentity(cfg)
+			if err != nil {
+				return state, err
+			}
+			auth.DataIdentity = data
 			auth.Source, auth.Target, auth.PlanSHA256 = plan.Maintenance.PreviousProcess, plan.Maintenance.Successor, digest(plan.Maintenance)
 			auth.ExpectedGeneration = state.Generation
 			auth.ExpectedPhase = "handoff"
@@ -88,6 +93,11 @@ func boundedCommand(ctx context.Context, cfg Config, action, planFile, authoriza
 		}
 		if auth.Source != plan.Maintenance.PreviousProcess || auth.Target != plan.Maintenance.Successor || auth.PlanSHA256 != digest(plan.Maintenance) {
 			return state, errors.New("updater: bounded source or target differs from its frozen handoff plan")
+		}
+		if action != "cancel" {
+			if err := validateBoundedServerData(cfg, auth.DataIdentity); err != nil {
+				return state, err
+			}
 		}
 		req.Maintenance = &plan.Maintenance
 		if action == "takeover" {
@@ -170,10 +180,7 @@ func boundedCommand(ctx context.Context, cfg Config, action, planFile, authoriza
 	} else {
 		return state, errors.New("updater: unsupported bounded component")
 	}
-	if action == "cancel" {
-		if req.Maintenance == nil {
-			return state, errors.New("updater: runner cancellation requires explicit owner recovery")
-		}
+	if action == "cancel" && req.Maintenance != nil {
 		st, e := Call(ctx, cfg, "bounded/cancel", ControlRequest{Maintenance: req.Maintenance, ExpectedGeneration: auth.ExpectedGeneration, BoundedAuthorization: &auth})
 		return st, e
 	}
@@ -197,6 +204,9 @@ func boundedCommand(ctx context.Context, cfg Config, action, planFile, authoriza
 // takeoverBoundedServer and takeoverBoundedRunner share the process-external
 // mechanism. Neither entry requires the old control socket or mutex to answer.
 func takeoverBoundedServer(ctx context.Context, cfg Config, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization) (any, error) {
+	if err := validateBoundedServerData(cfg, a.DataIdentity); err != nil {
+		return nil, err
+	}
 	target := protocol.BoundedUpdaterTarget{Unit: p.Unit, UnitSHA256: p.UnitSHA256, ManagerSHA256: p.ManagerSHA256, UpdaterBinary: p.UpdaterBinary, Candidate: p.Candidate, CandidateSHA256: p.CandidateSHA256, ConfigFile: p.ConfigFile, ConfigFileSHA256: p.ConfigFileSHA256}
 	return takeoverBounded(ctx, cfg, target, a, func(st State) error {
 		if st.Maintenance == nil || st.Maintenance.Phase != a.ExpectedPhase || digest(st.Maintenance.Plan) != digest(p.Maintenance) || a.PlanSHA256 != digest(p.Maintenance) || a.Source != p.Maintenance.PreviousProcess || a.Target != p.Maintenance.Successor {
