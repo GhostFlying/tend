@@ -15,7 +15,7 @@ import (
 // raw events remain the durable text; the audit records consumption, never a
 // user reply, native terminal result or successful business outcome.
 func (a *App) AcknowledgeManagerRepairPrefix(ctx context.Context, run string, sequence int64, thread, turn, item, body string, consumed []int64) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		covered := map[int64]bool{}
 		for _, delta := range consumed {
 			if delta <= 0 || delta > sequence || covered[delta] {

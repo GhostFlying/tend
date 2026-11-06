@@ -151,7 +151,7 @@ func (a *App) ReceiveFeishu(ctx context.Context, m FeishuIncoming) (protocol.Ope
 	raw, _ := json.Marshal(m)
 	request, owner := "", ""
 	var revision int64
-	err = a.store.Write(ctx, func(tx *store.Tx) error {
+	err = a.write(ctx, func(tx *store.Tx) error {
 		b, err := readFeishuBinding(ctx, tx.Q())
 		if err != nil {
 			return err
@@ -273,7 +273,7 @@ func (a *App) ConfigureFeishuRuntime(ctx context.Context, configured bool) error
 	if configured {
 		health = "configured_unverified"
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE messaging_channels SET health=?,last_observed_at=? WHERE channel_id='feishu'`, health, a.now().UnixMilli())
 		return err
 	})
@@ -370,7 +370,7 @@ func (a *App) ObserveFeishuConnection(ctx context.Context, state string) error {
 	default:
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid Feishu connection state")
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE messaging_channels SET health=?,last_observed_at=? WHERE channel_id='feishu' AND health<>'disabled'`, state, a.now().UnixMilli())
 		return err
 	})

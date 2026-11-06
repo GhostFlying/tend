@@ -227,7 +227,7 @@ func (a *App) CheckAgentRecoveryRead(ctx context.Context, request, thread string
 
 func (a *App) admitAgentRecovery(ctx context.Context, request, thread string, confirm, reserve bool, expectedRevision ...int64) (bool, error) {
 	admitted := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		r, err := store.RecoveryForRequest(ctx, tx.Q(), request)
 		if err != nil {
 			return err
@@ -368,7 +368,7 @@ func (a *App) endAgentRecovery(ctx context.Context, tx *store.Tx, r store.AgentR
 
 // BlockAgentRecovery retains an uncertain start or unconfirmed native operation.
 func (a *App) BlockAgentRecovery(ctx context.Context, request, reason string) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		r, err := store.RecoveryForRequest(ctx, tx.Q(), request)
 		if err != nil {
 			return err
@@ -430,7 +430,7 @@ func cancelAgentRecoveries(ctx context.Context, tx *store.Tx, ids protocol.IDGen
 
 // RequeueRejectedAgentRecovery only retries a definite native rejection.
 func (a *App) RequeueRejectedAgentRecovery(ctx context.Context, request string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE main_turns SET status='rejected',updated_at=? WHERE request_id=? AND status='starting' AND COALESCE(turn_id,'')=''`, a.now().UnixMilli(), request); err != nil {
 			return err
 		}
@@ -498,7 +498,7 @@ func (a *App) AgentRecoveryUncertain(ctx context.Context, conversation string) (
 // RejectAgentRecovery records a known pre-start failure, separately from an
 // uncertain native operation. Only call this before sending native input.
 func (a *App) RejectAgentRecovery(ctx context.Context, request, reason string) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		r, err := store.RecoveryForRequest(ctx, tx.Q(), request)
 		if err != nil {
 			return err
@@ -537,7 +537,7 @@ func uncertainRecoveryInput(ctx context.Context, q store.Querier, request string
 // DeferAgentReceiptRead persists read-only polling independently of model retries.
 func (a *App) DeferAgentReceiptRead(ctx context.Context, conversation string) (bool, error) {
 	pending := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		res, err := tx.Exec(ctx, `UPDATE agent_recoveries SET next_reconcile_at=? WHERE conversation_id=? AND (active_request_id IN (SELECT request_id FROM native_turn_receipts_pending) OR successor_message_id IN (SELECT t.message_id FROM main_turns t JOIN native_turn_receipts_pending p ON p.request_id=t.request_id))`, a.now().Add(30*time.Second).UnixMilli(), conversation)
 		if err != nil {
 			return err

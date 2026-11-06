@@ -83,7 +83,7 @@ func (a *App) NextDelivery(ctx context.Context, destination string) (Delivery, t
 		wake time.Time
 		ok   bool
 	)
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		if destination == MainThreadDestination || strings.HasPrefix(destination, "background_thread:") {
 			if prepared, err := archivePrepared(ctx, tx.Q()); err != nil {
 				return err
@@ -246,7 +246,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 	default:
 		return fmt.Errorf("app: invalid delivery outcome %d", r.Outcome)
 	}
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		// Check under the same transaction as the transition: native item
 		// consumption can race a lost RPC answer on the delivery goroutine.
 		if d.Destination == MainThreadDestination && r.Outcome != Delivered {
@@ -408,7 +408,7 @@ func (a *App) FinishDelivery(ctx context.Context, d Delivery, r DeliveryResult) 
 // later fails internally, a retry of the same call still gets the same ID.
 func (a *App) NativeRequestID(ctx context.Context, source, nativeKey string) (string, error) {
 	var id string
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var err error
 		id, err = tx.MapNativeRequest(ctx, source, nativeKey, a.ids.New(protocol.PrefixRequest), a.now().UnixMilli())
 		return err

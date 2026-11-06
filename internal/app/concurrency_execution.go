@@ -197,7 +197,7 @@ func (a *App) ObserveConcurrencyActivity(ctx context.Context, conversation, thre
 	if thread == "" {
 		return nil
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE concurrency_executions SET last_seen=MAX(last_seen,?) WHERE state='running' AND json_extract(source_json,'$.conversation_id')=? AND json_extract(source_json,'$.native_session_id')=? AND (?='' OR json_extract(source_json,'$.turn_id')=? OR execution_id LIKE 'aux:compact:%')`, a.now().UnixMilli(), store.ConversationID(conversation), thread, turn, turn)
 		return err
 	})
@@ -297,7 +297,7 @@ func (a *App) concurrencyAdmitHosted(ctx context.Context, tx *store.Tx, m store.
 }
 func (a *App) RecordHostedConcurrencyEvent(ctx context.Context, request string, event protocol.ConcurrencyFeedback) error {
 	if request == "" {
-		return a.store.Write(ctx, func(tx *store.Tx) error {
+		return a.write(ctx, func(tx *store.Tx) error {
 			var raw string
 			err := tx.Q().QueryRowContext(ctx, `SELECT e.source_json FROM concurrency_executions e JOIN agent_compactions c ON e.execution_id='aux:compact:'||c.operation_id WHERE c.thread_id=? AND c.status IN ('starting','running','unknown') AND e.state<>'stopped'`, event.SessionID).Scan(&raw)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -314,7 +314,7 @@ func (a *App) RecordHostedConcurrencyEvent(ctx context.Context, request string, 
 			return recordConcurrencyFeedback(ctx, tx, source, event, a.now().UnixMilli())
 		})
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		execution, err := store.GetHostedExecution(ctx, tx.Q(), request)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
@@ -436,7 +436,7 @@ func (a *App) noteConcurrencyWait(ctx context.Context, m store.MainTurn) error {
 	if m.Hosted == nil {
 		return nil
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO concurrency_waiters(request_id,environment_id,runtime_id,last_seen) VALUES(?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET last_seen=excluded.last_seen`, m.RequestID, m.Hosted.Identity.ExecutionEnvironmentID, m.Hosted.Runtime.ID, a.now().UnixMilli())
 		return err
 	})

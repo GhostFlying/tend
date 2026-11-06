@@ -199,7 +199,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		queued  bool
 		applied bool
 	)
-	err = a.store.Write(ctx, func(tx *store.Tx) error {
+	err = a.write(ctx, func(tx *store.Tx) error {
 
 		rec, err := store.GetRequest(ctx, tx.Q(), domain, env.RequestID)
 		switch {

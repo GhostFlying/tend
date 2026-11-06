@@ -114,7 +114,7 @@ func recordTokenUsage(ctx context.Context, tx *store.Tx, sample protocol.TokenUs
 // RecordTokenUsage persists an observed request from a hosted native session.
 // It is internal maintenance, not an owner-requested business operation.
 func (a *App) RecordTokenUsage(ctx context.Context, conversation string, sample protocol.TokenUsageSample) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		role := "main"
 		if store.ConversationID(conversation) != "main" {
 			role = "background"

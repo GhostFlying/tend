@@ -297,7 +297,7 @@ func knownCountersMatch(a, b protocol.TokenUsageSample) bool {
 // RecordNativeConversationUsage is also used by hosted sessions and the owner
 // reconciliation command; callers supply a pre-existing conversation binding.
 func (a *App) RecordNativeConversationUsage(ctx context.Context, conversation string, samples []protocol.TokenUsageSample) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		id := store.ConversationID(conversation)
 		if _, err := store.AgentConversation(ctx, tx.Q(), id); err != nil {
 			return err

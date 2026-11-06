@@ -22,7 +22,7 @@ func (a *App) RecordUsagePriceCatalog(ctx context.Context, raw json.RawMessage) 
 	if err != nil {
 		return err
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO token_usage_price_catalogs(collected_at,catalog_json) VALUES(?,?) ON CONFLICT(collected_at) DO NOTHING`, a.now().UnixMilli(), string(canonical))
 		return err
 	})

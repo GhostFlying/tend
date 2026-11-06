@@ -35,7 +35,7 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 	if s.RunID == "" {
 		s.ConversationID = store.ConversationID(s.ConversationID)
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		if s.RunID != "" {
 			if _, err := store.GetRun(ctx, tx.Q(), s.RunID); err != nil {
 				return err
@@ -75,7 +75,7 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 	if s.RunID == "" {
 		s.ConversationID = store.ConversationID(s.ConversationID)
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		var registered, registeredRun string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,run_id FROM token_usage_local_sources WHERE source_key=?`, s.ID).Scan(&registered, &registeredRun); err != nil {
 			return err
@@ -122,14 +122,14 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 // Empty thread closes every local source of the stopped owning harness.
 func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string) error {
 	conversation = store.ConversationID(conversation)
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1 WHERE conversation_id=? AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, conversation, thread, thread)
 		return err
 	})
 }
 
 func (a *App) StopRunUsage(ctx context.Context, run string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1 WHERE run_id=?`, run)
 		return err
 	})

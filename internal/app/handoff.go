@@ -135,7 +135,7 @@ func (a *App) PendingHandoff(ctx context.Context, instance string) (v store.Thre
 }
 
 func (a *App) handoffWrite(ctx context.Context, f func(*store.Tx) error) error {
-	err := a.store.Write(ctx, f)
+	err := a.write(ctx, f)
 	if err == nil {
 		a.notifyChange()
 	}

@@ -690,7 +690,7 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 }
 
 func (a *App) RunConcurrency(ctx context.Context, log *slog.Logger) {
-	if err := a.store.Write(ctx, func(tx *store.Tx) error {
+	if err := a.write(ctx, func(tx *store.Tx) error {
 		ids, err := concurrencyIDs(ctx, tx.Q())
 		if err != nil {
 			return err
@@ -726,7 +726,7 @@ func (a *App) RunConcurrency(ctx context.Context, log *slog.Logger) {
 func (a *App) tickConcurrency(ctx context.Context) error {
 	now := a.now().UnixMilli()
 	notify := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var count int
 		if err := tx.Q().QueryRowContext(ctx, `SELECT count(*) FROM concurrency_groups`).Scan(&count); err != nil {
 			return err

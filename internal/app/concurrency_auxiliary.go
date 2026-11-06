@@ -19,7 +19,7 @@ func (a *App) AcquireAuxiliaryConcurrency(ctx context.Context, conversation stri
 	}
 	id := "aux:" + a.ids.New(protocol.PrefixRequest)
 	now := a.now().UnixMilli()
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		return acquireAuxiliaryConcurrency(ctx, tx, id, conversation, selection, now)
 	})
 	if err != nil {
@@ -107,7 +107,7 @@ func (a *App) ObserveAuxiliaryConcurrency(ctx context.Context, id string, f prot
 	if id == "" {
 		return nil
 	}
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var raw, state string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT source_json,state FROM concurrency_executions WHERE execution_id=?`, id).Scan(&raw, &state); err != nil {
 			return err
@@ -144,7 +144,7 @@ func (a *App) ObserveAuxiliaryConcurrency(ctx context.Context, id string, f prot
 
 // StopAuxiliaryConcurrency settles only forks owned by the exact closed session.
 func (a *App) StopAuxiliaryConcurrency(ctx context.Context, ids []string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		for _, id := range ids {
 			if _, err := tx.Exec(ctx, `UPDATE concurrency_executions SET state='stopped',last_seen=? WHERE execution_id=? AND execution_id LIKE 'aux:%'`, a.now().UnixMilli(), id); err != nil {
 				return err

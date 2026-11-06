@@ -12,7 +12,7 @@ import (
 // RememberMessagingNativeInput freezes the exact input before its native call.
 // Repairs and empty continuations never register a new consumption witness.
 func (a *App) RememberMessagingNativeInput(ctx context.Context, execution, id, text string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO messaging_native_inputs(request_id,message_id,content_revision,input_hash) SELECT t.request_id,m.message_id,d.content_revision,? FROM main_turns t JOIN messaging_messages m ON m.message_id=t.message_id JOIN message_dispositions d ON d.message_id=m.message_id WHERE t.request_id=? AND t.message_id=? AND t.status='starting' ON CONFLICT(request_id) DO UPDATE SET content_revision=excluded.content_revision,input_hash=excluded.input_hash`, fmt.Sprintf("%x", sha256.Sum256([]byte(text))), execution, id)
 		return err
 	})
@@ -33,7 +33,7 @@ func (a *App) ConfigureMessagingReadCapability(ctx context.Context, channel, mod
 	if mode != "" && mode != "message" && mode != "cursor" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid read capability")
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE messaging_channels SET mark_read_mode=? WHERE channel_id=?`, mode, channel)
 		return err
 	})
@@ -77,7 +77,7 @@ func queueCommunicationReads(ctx context.Context, x *Exec, tx *store.Tx) error {
 // queue admission. Returning exact original content is witnessed source reading.
 func (a *App) ReadCommunicationInput(ctx context.Context, execution, id string) (protocol.MessagingMessage, error) {
 	var result protocol.MessagingMessage
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		turn, err := store.GetMainTurn(ctx, tx.Q(), execution)
 		if err != nil {
 			return err
