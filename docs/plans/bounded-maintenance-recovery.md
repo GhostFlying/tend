@@ -128,3 +128,12 @@ CLI 同一变更覆盖全部能力：固定 targets/预算的 plan、apply、显
 - committed runner 的物理退出继续由既有 monitor 监督同版本重启：先确认原 exact PID 退出且原 launch/hash 无其他 live writer，归档原 operation，再持久记录独立 restart attempt 和新的 launch。只启动已 committed 的不可变当前 bytes；原 Binding、force lineage、window、SourceExit 与 journal quarantine 保留，不重发未知原生工作。新进程不继承 force startup hint，启动仍读取持久 quarantine。App 和 runner 复用既有 UpdaterReceipt 的 immutable Binding 与已确认 CurrentProcessInstanceID/CurrentSHA256 后继证明，核当前实际 self、stable recovery ID、journal/capability 和递增 generation；fresh owner release 仍绑定原 target 并只解除全局 admission。不能复用旧 InstanceID 冒充新 generation，也不改普通 checkRuntime 规则。丢失 restart Start 回执仍只 Find 原 attempt；控制 socket、进程身份或 receipt 不符保留 unknown，外部接管沿既有独立授权入口。
 
 文件所有权：updater 的 cancelled/extend/history、supervisor monitor 与其组件测试由核心实现者独占；runner 终态 ACK、停止证明和逐 Run 收口只由 runner 修复者修改 internal/runner；App give-up/owner-control 仅由 App 修复者修改 internal/app/bounded_runner_maintenance.go、maintenance_run_protection.go 的对应 settler 和独立测试。计划由核心实现者单写；共享 protocol、schema 不在该最小修正中新增字段或版本。
+
+## 第三轮独立审阅的取消监督与 release 修正
+
+- 取消 bounded 维护不取消原有进程监督。仅原 fixed updater 已拥有且 Current、Process 与冻结 source 完整相同的 runner，取消后仍可按既有同版本监督在 exact source 退出、原 launch/hash 无其他 live writer 时记录独立 restart attempt。授权时持久捕获原 Current/Process 与 source 相同且原 operation 为 nil/terminal 的既有监督事实；旧记录缺少该事实不推导 ownership，未提交 candidate 不因取消转成受管版本。归档原 cancelled operation/window，新的 matching source-version restart 不被已取消 candidate target 抢占，原 cancel request 在归档和重开后仍按完整 payload/action/grant 幂等返回；丢失 Start 仍只核对原 attempt，错误 bytes、source 身份及 live sibling 拒绝启动。
+- manual source 的空 Process 不等于旧进程退出。取消不新增永久 adoption 权限；即使 source 后来退出，也不从取消推导自动 Start。状态明确说明未受管并要求独立新 source plan。已有监督与 manual 源分别使用真实组件正负反例验证，重开不改变该边界。
+- 独立 admission release 只有在固定 updater 的 committed receipt 已绑定原 target 与当前实际 runtime process/hash 时才可接受，首次 target 也不能仅凭同 instance、journal 版本及 capability 在 checking 阶段提前 release。安装期 health 的 first-target 原条件保留，不通过放宽 updater commit fence 消除反例。
+- 同一 recovery lineage 已成功 release 后，不同新 request 明确拒绝并引导对账原 release。按不可变 host release event 查重，不能仅依赖可能被普通 control 或新维护替换的当前 control pointer。原 request 去重重放保持，新独立 lineage 在自身 commit 后仍可 release；runner journal 的完整 release JSON 身份校验不放宽。
+
+本轮 updater 核心与设计/计划由核心实现者独占；App release 与其 committed-receipt helper、独立测试由 App 修复者独占。完整检查、正式 review 与 CI 的旧通过仅绑定旧候选；完成必要 focused 验证后再次统一冻结，不在修复过程中自行 full、提交或发布。

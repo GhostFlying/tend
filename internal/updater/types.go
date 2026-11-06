@@ -70,6 +70,7 @@ type Operation struct {
 	Configuration         *StagedConfiguration `json:"configuration,omitempty"`
 	RollbackAuthorization *Health              `json:"rollback_authorization,omitempty"`
 	CandidateNotStarted   bool                 `json:"candidate_not_started,omitempty"`
+	BoundedSourceOwned    bool                 `json:"bounded_source_supervised,omitempty"`
 	ID                    string               `json:"id"`
 	Kind                  string               `json:"kind"`
 	Binding               Binding              `json:"binding"`

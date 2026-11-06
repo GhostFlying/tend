@@ -27,6 +27,7 @@ func boundedRunnerAdmissionFixture(t *testing.T) (*harness, protocol.Assignment,
 		r.Runtime.BoundedRecoveryAuthorizationID = plan.Authorization.RequestID
 		r.Runtime.Capabilities = append(r.Runtime.Capabilities, protocol.CapabilityBoundedRunnerRecovery)
 		r.Runtime.JournalVersion = 17
+		r.Runtime.UpdaterReceipt = &protocol.UpdaterReceipt{Binding: plan.Target, Phase: "committed", CommittedConfirmed: true, CurrentProcessInstanceID: r.Runtime.InstanceID, CurrentSHA256: r.Runtime.Build.BinarySHA256}
 		// Unknown operations, the missing maintenance ACK and offline status
 		// remain explicit; they are not prerequisites for owner intervention.
 		return tx.PutHostRuntime(t.Context(), plan.HostID, r)
