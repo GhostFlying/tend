@@ -287,7 +287,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.wg.Go(func() { r.heartbeats(ctx) })
 	r.wg.Go(func() { r.watchdog(ctx) })
 	r.wg.Go(func() { r.reconciler(ctx) })
-	if !r.boundedRecoveryPending() {
+	factLoopsStarted := !r.boundedRecoveryPending()
+	if factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 		if err := r.resendClaims(ctx); err != nil {
@@ -311,6 +312,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+	}
+	if !factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	}

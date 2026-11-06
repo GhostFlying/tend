@@ -292,7 +292,7 @@ func TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity(t *testing
 }
 
 func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T) {
-	for _, mode := range []string{"checking-live", "checking-gone", "committed-unlinked", "launch-exited", "force-checking-live"} {
+	for _, mode := range []string{"checking-live", "checking-gone", "committed-unlinked", "launch-exited", "force-checking-live", "force-checking-unobserved"} {
 		t.Run(mode, func(t *testing.T) {
 			forced := strings.HasPrefix(mode, "force-")
 			mode = strings.TrimPrefix(mode, "force-")
@@ -304,6 +304,7 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 			a.archive.HostedDrained = !forced
 			if forced {
 				a.archive.Blockers = []string{"native receipt reads: 3", "summary operations: 14", "hosted operations are active or uncertain"}
+				a.blockArchive = mode == "checking-unobserved"
 				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", DataIdentity: boundedServerTestData(h), Source: p.PreviousProcess, Target: p.Successor, Reason: "explicit unknown predecessor recovery", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
 				if err := h.s.AuthorizeBoundedMaintenance(ctx, p, auth, "force"); err != nil {
 					t.Fatal(err)
@@ -322,6 +323,9 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 			parent := before.Maintenance
 			if parent.Phase != "checking_successor" && parent.Phase != "successor_committed" && parent.Phase != "launch_exited" {
 				t.Fatal("failed parent shape not reached", parent.Phase)
+			}
+			if mode == "checking-unobserved" && parent.ArchiveAuthorization != nil {
+				t.Fatal("failed observation was replaced by a synthetic archive")
 			}
 			next := p
 			next.MaintenanceID = "forward-failed-maintenance"
@@ -368,11 +372,32 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 			a.blockArchive = true
 			a.unready = false
 			if forced {
+				if mode == "checking-unobserved" {
+					beforePrepare := h.s.Status()
+					if err := h.s.PrepareCommittedMaintenance(ctx, next, beforePrepare.Generation); err == nil || !reflect.DeepEqual(beforePrepare, h.s.Status()) {
+						t.Fatal("ordinary preparation changed an unobserved forced parent", err)
+					}
+				}
 				if err := h.s.AuthorizeCommittedMaintenance(ctx, next, h.s.Status().Generation); err == nil {
 					t.Fatal("ordinary forward converted the old forced observation into drain proof")
 				}
 				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF2", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(next), Role: "server", DataIdentity: boundedServerTestData(h), Source: next.PreviousProcess, Target: next.Successor, Reason: "independently authorize the repaired candidate", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
-				if err := h.s.AuthorizeBoundedMaintenance(ctx, next, auth, "force"); err != nil {
+				if mode == "checking-unobserved" {
+					root := t.TempDir()
+					planFile, authFile := filepath.Join(root, "plan.json"), filepath.Join(root, "authorization.json")
+					if err := writeJSON(planFile, CommittedHandoffPlan{Maintenance: next}); err != nil {
+						t.Fatal(err)
+					}
+					if err := writeJSON(authFile, auth); err != nil {
+						t.Fatal(err)
+					}
+					stop := boundedCancelServe(t, h)
+					_, err := BoundedCommand(ctx, h.cfg, "force", planFile, authFile, auth.RequestID, auth.ExpectedGeneration, auth.ExpectedPhase)
+					stop()
+					if err != nil {
+						t.Fatal("bounded installer could not independently authorize forward recovery", err)
+					}
+				} else if err := h.s.AuthorizeBoundedMaintenance(ctx, next, auth, "force"); err != nil {
 					t.Fatal("cannot explicitly forward from forced parent", err)
 				}
 				if err := ValidateBoundedMaintenanceParent(h.s.Status(), *parent); err != nil {

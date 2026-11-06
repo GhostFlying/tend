@@ -137,3 +137,12 @@ CLI 同一变更覆盖全部能力：固定 targets/预算的 plan、apply、显
 - 同一 recovery lineage 已成功 release 后，不同新 request 明确拒绝并引导对账原 release。按不可变 host release event 查重，不能仅依赖可能被普通 control 或新维护替换的当前 control pointer。原 request 去重重放保持，新独立 lineage 在自身 commit 后仍可 release；runner journal 的完整 release JSON 身份校验不放宽。
 
 本轮 updater 核心与设计/计划由核心实现者独占；App release 与其 committed-receipt helper、独立测试由 App 修复者独占。完整检查、正式 review 与 CI 的旧通过仅绑定旧候选；完成必要 focused 验证后再次统一冻结，不在修复过程中自行 full、提交或发布。
+
+
+## 第四轮独立审阅的三个局部修正
+
+- 缺少 archive observation 的 forced parent 仍可保留原有效 force 历史，但普通 Prepare/Authorize 必须明确返回需要独立 bounded 授权的错误，不能解引用 nil、补零观测或借旧 force 授权新候选。通过实际 BoundedCommand 和 live supervisor 入口证明 fresh force 可推进新的 target，原 nil observation 与 parent 历史保持不变。
+- 已记录的 active server force 请求先按同一 plan、完整 authorization payload 和 action 精确去重，再检查新请求的过期时间。原请求过期重放只返回已记录结果，不保存、不续 deadline、不执行 native 动作；新过期请求和修改原 payload/action 仍拒绝。历史 maintenance 继续使用原 status/reconcile，不新增跨计划授权。
+- runner 初始 Hello 可以解除 global admission fence。receipt reader 与 usage 循环以本次 Run 内的实际启动标记协调，在 Hello 前后共用启动点，保证解除 fence 后恰好启动一次；不改变上传请求、cursor、journal writer 或旧未知事实。
+
+核心实现者独占 updater 两处局部修正、其回归和设计/计划；runner 实现者独占 runner.go 的循环启动局部及独立测试。原完整审阅与完整检查证据保留，完成原 probe 和必要负例后冻结 source，新的 full 与 CI 仍须覆盖最终候选。
