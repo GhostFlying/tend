@@ -146,3 +146,21 @@ CLI 同一变更覆盖全部能力：固定 targets/预算的 plan、apply、显
 - runner 初始 Hello 可以解除 global admission fence。receipt reader 与 usage 循环以本次 Run 内的实际启动标记协调，在 Hello 前后共用启动点，保证解除 fence 后恰好启动一次；不改变上传请求、cursor、journal writer 或旧未知事实。
 
 核心实现者独占 updater 两处局部修正、其回归和设计/计划；runner 实现者独占 runner.go 的循环启动局部及独立测试。原完整审阅与完整检查证据保留，完成原 probe 和必要负例后冻结 source，新的 full 与 CI 仍须覆盖最终候选。
+
+
+## 已安装服务未建立 archive fence 的收尾
+
+PreparationRevision 表示预期 prepare 成功后的 revision，原 prepare CAS 是该值减一；操作计划应使用 fresh archive revision 加一。问题：显式 force 可在原 archive prepare 的 CAS 已明确落后时完成服务安装和 ledger link，但严格 finish 仍重放原失败 CAS，导致没有实际 fence 可恢复的维护无法收尾。原计划、失败请求和观测均不可修改，健康服务不应再次 Stop/Start。
+
+- 只在既有 same-plan ledger_linked、fresh CAS 和有效 complete 窗口内，检查原 force audit 及对应完整 saved authorization 的 source、target、plan digest、真实 predecessor exit 和当前 committed proof/receipt/process/version。
+- 从不可变原 force audit 取得完整 prepared=false 基线；fresh Preparation 全字段相同，且原 prepare CAS 严格小于该基线 revision，使延迟原请求不能日后建立 fence。所有原 host PreviousMode 必须是 maintenance；fresh host 集合/control 与原 audit、原计划精确一致，动态 runtime ACK 不作为 control 身份。
+- 满足时只追加说明未建立 fence、无需恢复外部状态的审计，并完成已安装服务的维护；不调用 archive/host 写入、不 Stop/Start、不改已 adopt 计划、原 409/timeout/unknown 或任何业务事实。普通 finish 和所有身份、prepared、revision、host 漂移仍使用原严格行为。
+- 在实际 off-by-one prepare-CAS 失败后 force/install/link/finish 的组件链上先留真实 RED，再验证 GREEN；覆盖持久重开/重复 finish、原失败与 audit 不变、零外部写/进程动作，以及上述 proof/baseline/control 反例。实现仅 updater 与设计/计划，不改 CLI、wire、schema 或状态结构。
+
+
+## 仅替换 updater 的安装后恢复
+
+- 复用独立 bounded takeover 与显式 UpdaterTarget pin，在服务已 commit/link 的前提下只替换 fixed updater；原 maintenance plan、committed handoff journal、服务进程、业务状态和维护 deadline 不变，不重新授权服务 Stop/Start。
+- 原 authorizing source 仍保留在原计划；另从当前 Current/CommittedProof、linked receipt、SourceExit 固定实际 retained server。每个破坏与启动边界验证当前 server 的真实 kernel identity、原 updater identity、固定 manager/unit/config 和同一 lock inode。
+- 独立 versioned continuation 与 hash-bound head 保存新的 updater candidate、原 handoff journal hash、当前服务 proof 与原 installer 有界窗口。新 updater 启动只能通过该独立证明认可不同 candidate SHA；原 journal/hash 不覆盖。启动回执丢失只核对原 attempt，不重复 native start；后续同 bytes supervisor 启动继续校验持久来源。
+- 回归覆盖真正不同 updater bytes、原始 handoff journal 与活服务：旧 updater 退出后新 updater 获得同 lock，服务 PID/start/hash 保持；候选、kernel identity、lock、CAS 或 proof 不符拒绝。旧回执/unknown 不改写，不将本机 updater 更新宣称为服务再次部署。

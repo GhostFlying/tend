@@ -542,7 +542,7 @@ func AdoptCommittedHandoff(ctx context.Context, s *Supervisor) (bool, error) {
 		return true, err
 	}
 	if exe != p.CandidateSHA256 {
-		return true, errors.New("updater: maintenance startup artifact changed")
+		return true, adoptUpdaterOnlyHandoff(ctx, s, p, exe)
 	}
 	if err := verifyCommittedParent(s.cfg, p); err != nil {
 		return true, err
