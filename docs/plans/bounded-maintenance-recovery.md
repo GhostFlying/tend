@@ -114,3 +114,17 @@ CLI 同一变更覆盖全部能力：固定 targets/预算的 plan、apply、显
 后续正常维护增加稳定 reader admission fence 和分组件诊断，以减少需要 force 的次数。这个改进不阻止本轮外部强制恢复，也不改变 force 必须如实承接未知和单 writer 的核心边界。
 
 配置中的 NodeSelector 只声明主机准入选择器，不冒充实际 tailnet 节点证明。本机 installer 通过固定 instance、实际 PID/start/hash/launch 与 journal 的 device/inode/incarnation 核验物理目标。
+
+## 第二轮独立审阅的恢复边界修正
+
+完整检查通过不替代独立故障探针。当前审阅原件与反例保持不变；在审阅源证据封存之前只读准备，封存后追加本段再修改实现。各项先保存可编译的真实 RED，再验证 GREEN；不自动重跑完整检查，不在本轮自行提交或发布。
+
+- 取消是原窗口终态。server 与 runner 对同一已取消 source/maintenance plan 的新 apply、force、extend、takeover 明确拒绝并给出创建独立新 plan 的恢复入口，不能返回成功却仍停留 cancelled，也不复活旧窗口。原 cancel request 的幂等读取保持。
+- fresh extend 只更新授权预算，不撤销同一 source plan、source process、target 和恢复 lineage 中已经明确授予的 force 权限。普通 apply 加 extend 不能取得强杀权限，不相关历史 replacement 的 force 也不能传入。原 stop/kill 已发出但回执未知时仍只核对原身份，不能因 fresh window 重发原副作用。
+- 第二次 runner replacement 在覆盖活动 Bounded 之前，完整归档旧窗口、所有授权、审计、outcome 与 SourceExit，保留旧 grant 和 operation。新 replacement 只使用自身 lineage；旧 request 经实际 status/reconcile 和进程重开仍可回读原完整事实。
+- runner 最终提交重放继续要求原 StoppedConfirmed；只发送已有原 Envelope，不制造新的业务动作。原成功终态 ACK 与原 assignment 的事实需持久保存。只有匹配的 host Stop、原成功 ACK、原停止证明和精确冻结 run/lease 共同满足时，才允许收口这一原 Run；accepted、失败、缺少停止证明或身份不符均保留原 request/run、quarantine 和资源未知。
+- 托管 manager 的原 releasing 事实也必须有窄收口：原 managerStopped Envelope 已获得真正成功 ACK，保留 server 已验证的停止合同，再加原物理停止证明和新的匹配 host Stop，才结算该原 Run。unexpected-exit 路径不额外要求不存在的 completed close；若使用 closeReply 作为终态证明，则必须匹配原 completed close request 与冻结 LastSequence。不据普通 turn reply、错误 cursor、unknown 或本机清理推断完成，不创建 native 请求、workspace 操作或替代 manager 身份。该路径与普通 artifact/verdict 终态分别验证。
+- App 将 bounded runner 的不可变保护库存与既有 server maintenance 保护一起纳入 owner-control 的 saved give-up 收口。只消费已有 run-authenticated 原 fact；独立 owner cancel/pause/terminal control 必须匹配原 run/task/action/host/lease。裸 owner control、force grant 或 admission release 不会替其他未知 Run 伪造结束，Reason 文本不能作为 native 物理停止证明。
+- committed runner 的物理退出继续由既有 monitor 监督同版本重启：先确认原 exact PID 退出且原 launch/hash 无其他 live writer，归档原 operation，再持久记录独立 restart attempt 和新的 launch。只启动已 committed 的不可变当前 bytes；原 Binding、force lineage、window、SourceExit 与 journal quarantine 保留，不重发未知原生工作。新进程不继承 force startup hint，启动仍读取持久 quarantine。App 和 runner 复用既有 UpdaterReceipt 的 immutable Binding 与已确认 CurrentProcessInstanceID/CurrentSHA256 后继证明，核当前实际 self、stable recovery ID、journal/capability 和递增 generation；fresh owner release 仍绑定原 target 并只解除全局 admission。不能复用旧 InstanceID 冒充新 generation，也不改普通 checkRuntime 规则。丢失 restart Start 回执仍只 Find 原 attempt；控制 socket、进程身份或 receipt 不符保留 unknown，外部接管沿既有独立授权入口。
+
+文件所有权：updater 的 cancelled/extend/history、supervisor monitor 与其组件测试由核心实现者独占；runner 终态 ACK、停止证明和逐 Run 收口只由 runner 修复者修改 internal/runner；App give-up/owner-control 仅由 App 修复者修改 internal/app/bounded_runner_maintenance.go、maintenance_run_protection.go 的对应 settler 和独立测试。计划由核心实现者单写；共享 protocol、schema 不在该最小修正中新增字段或版本。

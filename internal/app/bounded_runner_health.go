@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -48,7 +47,7 @@ func (a *App) boundedRunnerUpgradeHealth(ctx context.Context, binding protocol.U
 		health.BoundedRecoveryAuthorizationID = rt.BoundedRecoveryAuthorizationID
 		health.JournalVersion = rt.JournalVersion
 		health.HeartbeatSequence = uint64(max(0, rt.Sequence))
-		health.ServerConfirmed = runtime.Online && a.now().UnixMilli()-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && rt.InstanceID == binding.ProcessInstanceID && rt.Build.BinarySHA256 == binding.ArtifactSHA256 && rt.Generation > grant.Plan.RunnerGeneration && rt.BoundedRecoveryAuthorizationID == grant.RecoveryAuthorizationID && rt.JournalVersion >= 17 && protocol.RunnerProtocolSupported(rt.Protocol) && slices.Contains(rt.Capabilities, protocol.CapabilityBoundedRunnerRecovery)
+		health.ServerConfirmed = runtime.Online && a.now().UnixMilli()-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && protocol.RunnerProtocolSupported(rt.Protocol) && boundedRunnerRuntimeMatches(grant, rt)
 		health.NewWorkAccepted = control.BoundedRecoveryRelease != nil && control.BoundedRecoveryRelease.RecoveryAuthorizationID == grant.RecoveryAuthorizationID
 		health.AdmissionFenced = health.ServerConfirmed && !health.NewWorkAccepted && rt.Mode == protocol.RunnerMaintenance
 		health.Healthy = health.AdmissionFenced

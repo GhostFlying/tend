@@ -68,7 +68,7 @@ func (AuthorizeBoundedRunnerMaintenance) Apply(ctx context.Context, x *Exec, tx 
 		previous = &records[len(records)-1]
 	}
 	originalSource := runtime.Runtime.InstanceID == p.RunnerInstanceID && runtime.Runtime.Generation == p.RunnerGeneration && runtime.Runtime.Build.PID == int64(p.Source.PID) && runtime.Runtime.Build.BinarySHA256 == p.Source.SHA256
-	knownSuccessor := previous != nil && runtime.Runtime.InstanceID == p.Target.ProcessInstanceID && runtime.Runtime.Generation > p.RunnerGeneration && runtime.Runtime.Build.BinarySHA256 == p.Target.ArtifactSHA256 && runtime.Runtime.BoundedRecoveryAuthorizationID == previous.Grant.RecoveryAuthorizationID && runtime.Runtime.JournalVersion >= 17 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityBoundedRunnerRecovery)
+	knownSuccessor := previous != nil && boundedRunnerRuntimeMatches(previous.Grant, runtime.Runtime)
 	if !originalSource && !knownSuccessor {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "runner source differs from its last accepted observation")
 	}
@@ -211,6 +211,21 @@ func boundedRunnerProtectionRecords(ctx context.Context, q store.Querier, host s
 	return result, rows.Err()
 }
 
+// A committed same-version supervisor restart keeps the installation binding
+// while its receipt identifies the new process. Ordinary Hello still verifies
+// the process generation before this observation can authorize recovery.
+func boundedRunnerRuntimeMatches(grant protocol.BoundedRunnerMaintenanceGrant, runtime protocol.RunnerRuntime) bool {
+	p := grant.Plan
+	if grant.RecoveryAuthorizationID == "" || runtime.InstanceID == "" || runtime.BoundedRecoveryAuthorizationID != grant.RecoveryAuthorizationID || runtime.Build.BinarySHA256 != p.Target.ArtifactSHA256 || runtime.Generation <= p.RunnerGeneration || runtime.JournalVersion < 17 || !slices.Contains(runtime.Capabilities, protocol.CapabilityBoundedRunnerRecovery) {
+		return false
+	}
+	if runtime.InstanceID == p.Target.ProcessInstanceID {
+		return true
+	}
+	receipt := runtime.UpdaterReceipt
+	return receipt != nil && receipt.CommittedConfirmed && !receipt.RollbackConfirmed && receipt.Phase == "committed" && receipt.Binding == p.Target && receipt.CurrentProcessInstanceID == runtime.InstanceID && receipt.CurrentSHA256 == runtime.Build.BinarySHA256
+}
+
 func activeBoundedRunnerRunProtection(ctx context.Context, q store.Querier, r store.RunRow) (*store.MaintenanceRunProtection, error) {
 	records, err := boundedRunnerProtectionRecords(ctx, q, r.HostID)
 	if err != nil || len(records) == 0 {
@@ -257,8 +272,7 @@ func boundedRunnerReconciliationProtections(ctx context.Context, q store.Querier
 	if latest == nil {
 		return nil, "", false, nil
 	}
-	p := latest.Plan
-	matched := runtime.BoundedRecoveryAuthorizationID == latest.RecoveryAuthorizationID && runtime.InstanceID == p.Target.ProcessInstanceID && runtime.Build.BinarySHA256 == p.Target.ArtifactSHA256 && runtime.Generation > p.RunnerGeneration && runtime.JournalVersion >= 17 && slices.Contains(runtime.Capabilities, protocol.CapabilityBoundedRunnerRecovery)
+	matched := boundedRunnerRuntimeMatches(*latest, runtime)
 	// A runner capture is not a server committed-maintenance ledger. Linked
 	// here denotes the exact successor's accepted startup observation only.
 	for i := range protections {

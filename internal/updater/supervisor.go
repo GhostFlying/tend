@@ -667,6 +667,11 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	}
 }
 func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) error {
+	if s.boundedRunnerSupervisedRestart(op) {
+		if err := s.boundedRunnerRestartSourceGone(ctx, op.PreviousProcess); err != nil {
+			return err
+		}
+	}
 	rollback := op.Phase == "rollback_starting"
 	v := op.Candidate
 	if rollback {
@@ -807,12 +812,31 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 	if !errors.Is(err, ErrNotRunning) {
 		return err
 	}
+	bounded := s.boundedRunnerCommittedScope()
+	if bounded {
+		if err := s.verifyBoundedRunnerSourceGone(ctx, s.state.Process); err != nil {
+			return err
+		}
+	}
 	// A normal crash restarts the committed binary, never a prior data snapshot.
 	id, err := s.opts.NewID()
 	if err != nil {
 		return err
 	}
-	s.state.Operation = &Operation{ID: "restart-" + id, Kind: "restart", Previous: s.state.Current, PreviousProcess: s.state.Process, Candidate: s.state.Current, Phase: "backed_up", LaunchID: id, StartedAt: s.opts.Now()}
+	binding := Binding{}
+	if bounded {
+		binding = s.state.CommittedProof.Binding
+		if original := cloneState(s.state).Operation; original != nil {
+			if prior, exists := s.state.OperationHistory[original.ID]; exists && digest(prior) != digest(original) {
+				return errors.New("updater: original supervised operation has conflicting archived facts")
+			}
+			if s.state.OperationHistory == nil {
+				s.state.OperationHistory = map[string]Operation{}
+			}
+			s.state.OperationHistory[original.ID] = *original
+		}
+	}
+	s.state.Operation = &Operation{ID: "restart-" + id, Kind: "restart", Binding: binding, Previous: s.state.Current, PreviousProcess: s.state.Process, Candidate: s.state.Current, Phase: "backed_up", LaunchID: id, StartedAt: s.opts.Now()}
 	return s.save()
 }
 

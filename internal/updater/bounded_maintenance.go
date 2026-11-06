@@ -153,6 +153,9 @@ func (s *Supervisor) authorizeBoundedMaintenanceWindow(ctx context.Context, p pr
 			return nil
 		}
 	}
+	if m.Phase == "cancelled" {
+		return errors.New("updater: cancelled server maintenance requires a new plan")
+	}
 	originalHandoff := a.ExpectedPhase == "handoff" && a.ExpectedGeneration == p.ExpectedGeneration && m.Phase == "updater_adopted"
 	if !originalHandoff && (!s.boundedGenerationMatches(a.ExpectedGeneration) || a.ExpectedPhase != m.Phase) {
 		return errors.New("updater: stale bounded maintenance generation or phase")

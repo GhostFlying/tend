@@ -560,6 +560,15 @@ func (r *Runner) hello(ctx context.Context) error {
 }
 
 func (r *Runner) helloLocked(ctx context.Context) error {
+	// Global admission release does not settle the predecessor's original
+	// requests. Keep that bounded factual path reachable through the existing
+	// reconciler, without holding controlMu or the heartbeat/claim loops.
+	r.controlMu.Lock()
+	bounded := r.boundedRecovery != nil
+	r.controlMu.Unlock()
+	if bounded {
+		r.replayBoundedFacts(ctx)
+	}
 	// Keep the last confirmed capability receipt while reconciling. A pending
 	// hello is not evidence that the server withdrew its previous support.
 	runs, err := r.cfg.Journal.Runs(ctx)
@@ -627,8 +636,26 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		as := run.Assignment
 		as.Desired = v.Desired
 		if r.boundedRunQuarantined(ctx, v.RunID) && (v.Verdict != protocol.VerdictContinueRetained || !r.boundedContinuationMatches(v.RetainedResume)) {
-			// Neither an ordinary Continue/Stop nor an old strict attachment
-			// grant authorizes work quarantined by forced process replacement.
+			// A host Stop can settle an already committed terminal fact only
+			// after the original worker's physical exit was independently known.
+			// It never authorizes reattachment or stops an unknown predecessor.
+			if v.Verdict == protocol.VerdictStop && v.Desired == protocol.DesiredStopped && op.RequestID == env.RequestID && op.Status == protocol.OpSucceeded {
+				stop, err := r.cfg.Journal.AuthorizeBoundedFinalStop(ctx, run.Assignment, env.RequestID)
+				if err != nil {
+					return err
+				}
+				if stop != nil {
+					if run.Assignment.Role == protocol.RoleIssueManager {
+						if _, err := r.settleRun(ctx, v.RunID, func() error { return r.cfg.Journal.DoneRetainedStop(ctx, v.RunID, *stop) }); err != nil {
+							return err
+						}
+						continue
+					}
+					if err := r.cleanupReportedRunWithStop(ctx, run.Assignment, stop); err != nil {
+						return err
+					}
+				}
+			}
 			continue
 		}
 		switch {
