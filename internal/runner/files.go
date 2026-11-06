@@ -40,18 +40,11 @@ func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepa
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(p.Dir, path)
 	}
-	f, err := os.Open(path)
+	f, st, err := openRegularEvidence(ctx, path)
 	if err != nil {
 		return protocol.ArtifactFile{}, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return protocol.ArtifactFile{}, err
-	}
-	if !st.Mode().IsRegular() {
-		return protocol.ArtifactFile{}, errors.New("delivery file must be regular")
-	}
 	sum := sha256.New()
 	if _, err := io.Copy(sum, transferReader{ctx: ctx, r: f}); err != nil {
 		return protocol.ArtifactFile{}, err

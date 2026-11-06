@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -96,19 +97,49 @@ func (t *receiptBridgeThread) FindTurn(_ context.Context, identity, turn string)
 }
 
 func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
+	var phaseMu sync.Mutex
+	lastPhase := "initializing"
+	var requestTrace []string
+	bufferedReplies := 0
+	mark := func(phase string, env *protocol.Envelope) {
+		phaseMu.Lock()
+		lastPhase = phase
+		var requestID, operation string
+		if env != nil {
+			requestID, operation = env.RequestID, env.Operation
+			if phase == "http-request" {
+				requestTrace = append(requestTrace, requestID+":"+operation)
+			}
+		}
+		if phase == "reply-buffered" {
+			bufferedReplies++
+		}
+		count := bufferedReplies
+		phaseMu.Unlock()
+		t.Logf("phase=%s elapsed=%s request_id=%q operation=%q buffered_replies=%d", phase, time.Since(started), requestID, operation, count)
+	}
+	diagnostic := func() string {
+		phaseMu.Lock()
+		defer phaseMu.Unlock()
+		return fmt.Sprintf("last_phase=%s elapsed=%s buffered_replies=%d requests=%v", lastPhase, time.Since(started), bufferedReplies, requestTrace)
+	}
 	clock := testkit.NewClock()
+	mark("journal-open", nil)
 	j, err := journal.Open(ctx, filepath.Join(t.TempDir(), "journal.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer j.Close()
+	mark("journal-ready", nil)
 	pin := protocol.RunExecutionPin{Profile: protocol.ExecutionProfile{Model: "original-catalog-alias", Effort: "low"}}
 	as := protocol.Assignment{Protocol: 2, RunID: "receipt-reader", LeaseID: "reader-lease", Role: protocol.RoleIssueManager, Execution: &pin, Manager: &protocol.IssueManagerAssignment{RequireReceiptReader: true, ReceiptOnly: true, ConversationID: "original-conversation"}}
 	if err := j.AcceptAssignment(ctx, as, ""); err != nil {
 		t.Fatal(err)
 	}
+	mark("assignment-saved", nil)
 	native := &receiptBridgeSession{thread: &receiptBridgeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
 	resolver := &receiptBridgeResolver{native: native, pin: pin}
 	resume, _ := json.Marshal(coordination.Request{ThreadID: "original-thread", Config: harness.ThreadConfig{Model: "original-applied-model", Sandbox: "read-only", ApprovalPolicy: "never", Config: map[string]any{"model_provider": "original-provider", "model_reasoning_effort": "high"}}})
@@ -122,6 +153,7 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		mark("http-request", &env)
 		var result any = map[string]any{}
 		if env.Operation == protocol.OpManagerNativeClaim {
 			index := claims.Add(1) - 1
@@ -137,15 +169,18 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 				t.Error(err)
 			}
 			replies <- reply
+			mark("reply-buffered", &env)
 		}
 		raw, _ := json.Marshal(result)
 		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: raw}})
 	}))
 	defer server.Close()
 	r := New(Config{Journal: j, Executions: resolver, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), ServerURL: server.URL, HTTPClient: server.Client(), RequestTimeout: time.Second, Log: slog.New(slog.DiscardHandler)})
+	mark("manager-native", nil)
 	if err := r.managerNative(ctx, ctx, as); err != nil {
-		t.Fatal("actual runner could not read the original native receipt", err)
+		t.Fatalf("actual runner could not read the original native receipt: %v; %s", err, diagnostic())
 	}
+	mark("manager-native-completed", nil)
 	if resolver.receipts.Load() != 1 || resolver.business.Load() != 0 || native.models != 0 || native.starts != 0 || native.resumes != 1 || native.thread.reads != 1 || native.thread.ModelDefaults() != (harness.ModelSelection{Model: "original-applied-model", Provider: "original-provider", Effort: "high"}) {
 		t.Fatal("runner receipt-only mode was lost before native history", resolver.receipts.Load(), resolver.business.Load(), native.models, native.starts, native.resumes, native.thread.reads)
 	}

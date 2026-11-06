@@ -85,10 +85,13 @@ func (w *Workspaces) reattach(ctx context.Context, as protocol.Assignment, orcaO
 		p.Baseline = append(p.Baseline, harness.MountBaseline{Path: m.Path, StartHEAD: taskBase(as, ms), ResourceBase: ms.Base})
 		p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{Path: m.Path, Directory: ms.dir(home, m.Path), ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch})
 	}
-	for _, dir := range []string{p.Dir, p.StateDir, p.ScratchDir} {
+	for _, dir := range []string{p.Dir, p.ScratchDir} {
 		if err := retainedDirectory(dir); err != nil {
 			return runner.Prepared{}, err
 		}
+	}
+	if err := retainedDirectory(p.StateDir); err != nil && (orcaOnly || !errors.Is(err, os.ErrNotExist)) {
+		return runner.Prepared{}, err
 	}
 	p.Report.BackendID, p.Report.ProviderID, p.Report.ProviderInstanceID, p.Report.Path = st.BackendID, st.ProviderID, st.ProviderInstanceID, root
 	return p, nil

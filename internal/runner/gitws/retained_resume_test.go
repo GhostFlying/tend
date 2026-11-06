@@ -13,7 +13,7 @@ import (
 )
 
 func TestRetainedWorkspaceReattachNeverPreparesOrRecreates(t *testing.T) {
-	for _, kind := range []string{"existing", "missing-state", "missing-checkout", "changed-resource", "changed-provider", "missing-scratch"} {
+	for _, kind := range []string{"existing", "missing-state", "missing-run-state", "missing-checkout", "changed-resource", "changed-provider", "missing-scratch"} {
 		t.Run(kind, func(t *testing.T) {
 			f, _ := newOrcaFixture(t)
 			as := f.implement()
@@ -33,6 +33,8 @@ func TestRetainedWorkspaceReattachNeverPreparesOrRecreates(t *testing.T) {
 			switch kind {
 			case "missing-state":
 				err = os.Remove(statePath(f.ws.home(as)))
+			case "missing-run-state":
+				err = os.Remove(p.StateDir)
 			case "missing-checkout":
 				err = os.Rename(p.Dir, p.Dir+"-retained")
 			case "changed-resource":
@@ -81,7 +83,7 @@ func TestRetainedWorkspaceReattachNeverPreparesOrRecreates(t *testing.T) {
 }
 
 func TestAcceptanceVerdictReattachReadsLocalClonesWithoutPreparation(t *testing.T) {
-	for _, scenario := range []string{"original", "missing-state", "missing-checkout", "missing-scratch", "changed-resource", "changed-provider", "feature-disabled"} {
+	for _, scenario := range []string{"original", "not-yet-result-state", "missing-state", "missing-checkout", "missing-scratch", "changed-resource", "changed-provider", "feature-disabled"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newFixture(t, nil)
 			as := f.implement()
@@ -115,6 +117,8 @@ func TestAcceptanceVerdictReattachReadsLocalClonesWithoutPreparation(t *testing.
 				t.Fatal(err)
 			}
 			switch scenario {
+			case "not-yet-result-state":
+				err = os.Remove(p.StateDir)
 			case "missing-state":
 				err = os.Remove(stateFile)
 			case "missing-checkout":
@@ -133,9 +137,14 @@ func TestAcceptanceVerdictReattachReadsLocalClonesWithoutPreparation(t *testing.
 			}
 			f.ws.git.bin = filepath.Join(t.TempDir(), "forbidden-git")
 			got, err := f.ws.ReattachAcceptanceVerdict(t.Context(), as)
-			if scenario == "original" {
+			if scenario == "original" || scenario == "not-yet-result-state" {
 				if err != nil || got.Dir != p.Dir || got.StateDir != p.StateDir || got.ScratchDir != p.ScratchDir || got.ProviderID != "" {
 					t.Fatalf("local original workspace was not read: %+v err=%v", got, err)
+				}
+				if scenario == "not-yet-result-state" {
+					if _, err := os.Stat(p.StateDir); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("read-only reconciliation created a result directory", err)
+					}
 				}
 			} else if err == nil {
 				t.Fatal("missing or foreign original scope was accepted", scenario)
