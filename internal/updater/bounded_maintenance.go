@@ -119,7 +119,7 @@ func (s *Supervisor) authorizeBoundedMaintenanceWindow(ctx context.Context, p pr
 		return err
 	}
 	m := s.state.Maintenance
-	if m == nil || digest(m.Plan) != digest(p) || a.Role != "server" || a.Source != p.PreviousProcess || a.Target != p.Successor || a.PlanSHA256 != digest(p) || !protocol.ValidID(protocol.PrefixRequest, a.RequestID) || a.RequestID == p.RequestID || a.RequestID == p.LinkRequestID || a.Reason == "" || a.ExpiresAtMillis <= s.opts.Now().UnixMilli() {
+	if m == nil || digest(m.Plan) != digest(p) || a.Role != "server" || a.Source != p.PreviousProcess || a.Target != p.Successor || a.PlanSHA256 != digest(p) || !protocol.ValidID(protocol.PrefixRequest, a.RequestID) || a.RequestID == p.RequestID || a.RequestID == p.LinkRequestID || a.Reason == "" {
 		return errors.New("updater: exact independent bounded maintenance authority required")
 	}
 	if err := validateTimeoutPolicy(a.Timeouts); err != nil {
@@ -152,6 +152,9 @@ func (s *Supervisor) authorizeBoundedMaintenanceWindow(ctx context.Context, p pr
 			}
 			return nil
 		}
+	}
+	if a.ExpiresAtMillis <= s.opts.Now().UnixMilli() {
+		return errors.New("updater: independent bounded maintenance authority expired")
 	}
 	if m.Phase == "cancelled" {
 		return errors.New("updater: cancelled server maintenance requires a new plan")

@@ -65,6 +65,9 @@ func (s *Supervisor) validateFailedAdmission(ctx context.Context, p protocol.Com
 	// The failed service need not expose any API. This is the original persisted
 	// preparation/owner-drain/host-ack proof from before its predecessor stopped,
 	// combined with a fresh operator resource handoff and exact physical writer.
+	if parent.ArchiveAuthorization == nil {
+		return errors.New("updater: missing parent archive observation requires independent bounded authority")
+	}
 	if digest(p.ReceiptRecoveryStop) != digest(parent.Plan.ReceiptRecoveryStop) {
 		return errors.New("updater: failed parent receipt recovery inventory changed")
 	}
