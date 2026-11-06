@@ -1107,4 +1107,6 @@ runner force 需要独立 owner/CAS grant，不从普通升级 grant 或本地�
 
 原 maintenance 的只读 status 与原请求 replay 可凭已 adopted 的独立 controller 凭据识别新 updater，必须核验原 handoff、config、manager、实际 controller 和原锁连续性。返回真实持久 state/phase 与观测，保留服务 pending、unknown 或失败供诊断；读取成功本身不证明服务健康或新的安装成功，也不增加 Start。
 
+配置摘要的读取与执行入口统一先补齐现有默认值；文件中省略默认 stop/health 超时不改变配置身份，也不改写文件或原凭据。
+
 本次实现独立 component/host 窗口，旧批量 coordinator 已固定 targets，但总预算仍会随旧阶段/host 推进重设；该 batch 总 deadline 明确留作后续，不声称本次已修。独立本机 force 不经过旧 batch 的等待门。详见[实施计划](plans/bounded-maintenance-recovery.md)、[CLI](bounded-maintenance-cli.md)与[实际进程验收计划](plans/bounded-systemd-acceptance.md)。
