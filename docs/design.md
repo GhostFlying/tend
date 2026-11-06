@@ -1055,6 +1055,8 @@ BackgroundPool 在同一 conversation 的既有互斥与升级准入内先消费
 
 同一 run 的 pending、started、unknown close 复用原控制命令，原 payload、结果和 request ID 不变；已有升级 park 继续拥有新 close 的准入与专用错误围栏。普通 completed-error close 的旧有效通信行为保持，不能仅以无字段变更为由收紧其后续请求；改变该状态另需版本化设计。find 只合并同 run、相同完整 payload、尚无结果的未决只读查询，完成后可取得新鲜读取；不合并 turn、inject 或 tool_result。历史积压保留原记录，不直接删除或改成成功。本次不改 runner wire、journal、旧有效 payload、物理停止证明或新的业务权限。详见[实施计划](plans/manager-native-transport-liveness.md)。
 
+原生 reply 回执的持续未确认与传输失败由同一个本机循环处理，每轮只发送一次原 Envelope，包含 HTTP 500 包装的 unknown。首次等待保留 RetryDelay（默认两秒），随后加倍至默认 30 秒上限；显式配置更长间隔时不缩短。明确拒绝立即返回，context 取消保留原 journal 请求，恢复仍先对账原 close，不重新打开 native 或生成新的关闭边界。非 reply RPC 的通用重试规则不变。原事件消费完成后在下一次有界重传取得确认；该退避不改变 all-applied 接纳条件、原业务 unknown、通信协议或持久格式。见[回执退避计划](plans/manager-native-receipt-retry.md)。
+
 ## D178：验收未满足与执行受阻的事实边界
 
 约定的质量门已经执行且未满足时，`changes_required` 可以要求实现方诊断并解决该失败，不要求验收者先证明某一产品缺陷；执行结果与根因归属必须分开。`blocked` 仅表达有证据的外部前提阻止验收，`inconclusive` 表达证据尚不足以判断要求是否满足，二者都保留原证据、后续调查及负责人处理责任。验收者仍不修改实现。
