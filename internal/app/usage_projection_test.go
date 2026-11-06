@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -320,5 +321,134 @@ func TestUsageProjectionLegacyRevisionReleasesPendingNativeOverlap(t *testing.T)
 	after, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
 	if after.Totals.Requests != 2 || after.Totals.Total != 210 || after.Conflicts != 0 {
 		t.Fatal("old legacy sequence kept native peer quarantined", after)
+	}
+}
+
+func TestUsageProjectionDirtyAndExecutionPlansStayWithinIndexedScope(t *testing.T) {
+	h := newHarness(t)
+	var samples []protocol.TokenUsageSample
+	for i := 0; i < 128; i++ {
+		s := nativeSample(h.clock.Now().UnixMilli())
+		s.RecordID, s.RequestID = fmt.Sprint(i), fmt.Sprint(i)
+		samples = append(samples, s)
+	}
+	if err := h.app.RecordNativeConversationUsage(t.Context(), "main", samples); err != nil {
+		t.Fatal(err)
+	}
+	// Registering a different native source must not invalidate the main
+	// conversation's entire historical ledger.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO token_usage_local_sources(source_key,conversation_id,source_json,updated_at) VALUES('unrelated','main','{"thread_id":"unrelated","session_id":"unrelated"}',1)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if h.count("token_usage_dirty") != 0 {
+		t.Fatal("unrelated actor invalidated historical requests")
+	}
+	s := nativeSample(h.clock.Now().UnixMilli())
+	s.RecordID, s.RequestID = "new", "new"
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		return recordTokenUsage(t.Context(), tx, s, "session:native-session", "native", h.clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		q := &projectionReadQueries{Querier: tx.Q()}
+		inputs, err := views.UsageProjectionInputs(t.Context(), q)
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 1 {
+			t.Fatal("dirty read included unrelated history", len(inputs))
+		}
+		queries := []string{usageDirtyGroupsSQL, expandUsageOverlapSQL}
+		for _, query := range q.queries {
+			if strings.Contains(query, "FROM token_usage_dirty d") {
+				queries = append(queries, query)
+			}
+		}
+		// Exercise the SELECT embedded in the actual migration trigger, rather
+		// than a hand-maintained query that could diverge from production.
+		var trigger string
+		if err = tx.Q().QueryRowContext(t.Context(), `SELECT sql FROM sqlite_schema WHERE name='usage_projection_local_hosted_executions_insert'`).Scan(&trigger); err != nil {
+			return err
+		}
+		statement := regexp.MustCompile(`(?s)INSERT INTO token_usage_dirty .*?;`).FindString(trigger)
+		if statement == "" {
+			t.Fatal("missing hosted invalidation statement")
+		}
+		queries = append(queries, strings.ReplaceAll(statement, "NEW.execution_id", "'new-execution'"))
+		for _, query := range queries {
+			rows, err := tx.Q().QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+					rows.Close()
+					return err
+				}
+				if strings.HasPrefix(detail, "SCAN c") || strings.HasPrefix(detail, "SCAN p") {
+					t.Fatalf("write scans historical current/contributions: %s\n%s", detail, query)
+				}
+			}
+			if err = rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
+			if err = rows.Close(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUsageProjectionOverlapInvalidationFollowsOnlyConnectedPeers(t *testing.T) {
+	h := newHarness(t)
+	var native []protocol.TokenUsageSample
+	for i := 0; i < 20; i++ {
+		s := nativeSample(h.clock.Now().UnixMilli())
+		s.RecordID, s.RequestID, s.ThreadID, s.TurnID = fmt.Sprintf("native-%d", i), fmt.Sprintf("response-%d", i), fmt.Sprintf("thread-%d", i), fmt.Sprintf("turn-%d", i)
+		legacy := protocol.TokenUsageSample{Source: "legacy", RequestID: s.RequestID, ThreadID: s.ThreadID, TurnID: s.TurnID, Revision: 1, Settlement: "final", Total: usageNumber(110)}
+		if err := h.app.RecordTokenUsage(t.Context(), "main", legacy); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.app.RecordNativeConversationUsage(t.Context(), "main", []protocol.TokenUsageSample{s}); err != nil {
+			t.Fatal(err)
+		}
+		native = append(native, s)
+	}
+	// Two legacy sequences share a native peer, so invalidation must traverse
+	// that dependency while leaving the other eighteen pairs untouched.
+	if err := h.app.write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO token_usage_legacy_candidates(legacy_seq,native_source,native_request_id,matched) SELECT fact_seq,?,?,0 FROM token_usage_current WHERE source='legacy' AND request_id=?`, native[1].Source, native[1].RecordID, native[0].RequestID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE token_usage_current SET conflict=1 WHERE source=? AND request_id=?`, native[0].Source, native[0].RecordID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), expandUsageOverlapSQL)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.count("token_usage_dirty"); n != 4 {
+		t.Fatalf("overlap invalidated unrelated history or missed peers: got %d, want 4", n)
+	}
+	if err := h.app.RefreshUsageProjection(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
+	if v.Totals.Requests != 20 || v.Totals.Total != 2200 || v.Conflicts != 2 || v.Collection.LegacyRequests != 2 || h.count("token_usage_overlap_dirty") != 0 {
+		t.Fatal("connected conflict lost legacy fallback or conservation", v)
 	}
 }

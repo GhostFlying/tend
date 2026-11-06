@@ -20,7 +20,7 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 		return v, err
 	}
 	var dirty bool
-	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_dirty)`).Scan(&dirty); err != nil {
+	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_dirty) OR EXISTS(SELECT 1 FROM token_usage_overlap_dirty)`).Scan(&dirty); err != nil {
 		return v, err
 	}
 	if dirty {

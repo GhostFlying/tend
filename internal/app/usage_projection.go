@@ -23,16 +23,48 @@ type usageSummaryKey struct {
 	bucket    int64
 }
 
+const usageDirtyGroupsSQL = `SELECT DISTINCT p.dimension_key,p.bucket,p.dimension_json FROM token_usage_dirty d CROSS JOIN token_usage_contributions p USING(source,request_id)`
+
+// Expand only the connected overlap component. Each recursive step starts from
+// an affected legacy sequence and follows indexed native peer identities.
+const expandUsageOverlapSQL = `WITH RECURSIVE affected(legacy_seq) AS (
+ SELECT legacy_seq FROM token_usage_overlap_dirty
+ UNION SELECT peer.legacy_seq FROM affected a
+ CROSS JOIN token_usage_legacy_candidates edge ON edge.legacy_seq=a.legacy_seq
+ CROSS JOIN token_usage_legacy_candidates peer ON peer.native_source=edge.native_source AND peer.native_request_id=edge.native_request_id
+ UNION SELECT peer.legacy_seq FROM affected a
+ CROSS JOIN token_usage_legacy_candidates edge ON edge.legacy_seq=a.legacy_seq
+ CROSS JOIN token_usage_legacy_links peer ON peer.native_source=edge.native_source AND peer.native_request_id=edge.native_request_id
+ UNION SELECT peer.legacy_seq FROM affected a
+ CROSS JOIN token_usage_legacy_links edge ON edge.legacy_seq=a.legacy_seq
+ CROSS JOIN token_usage_legacy_candidates peer ON peer.native_source=edge.native_source AND peer.native_request_id=edge.native_request_id
+ UNION SELECT peer.legacy_seq FROM affected a
+ CROSS JOIN token_usage_legacy_links edge ON edge.legacy_seq=a.legacy_seq
+ CROSS JOIN token_usage_legacy_links peer ON peer.native_source=edge.native_source AND peer.native_request_id=edge.native_request_id
+ ) INSERT INTO token_usage_dirty SELECT * FROM (
+ SELECT c.source,c.request_id FROM affected a CROSS JOIN token_usage_current c ON c.fact_seq=a.legacy_seq
+ UNION SELECT e.native_source,e.native_request_id FROM affected a CROSS JOIN token_usage_legacy_candidates e ON e.legacy_seq=a.legacy_seq
+ UNION SELECT e.native_source,e.native_request_id FROM affected a CROSS JOIN token_usage_legacy_links e ON e.legacy_seq=a.legacy_seq
+ ) WHERE true ON CONFLICT(source,request_id) DO NOTHING`
+
 func refreshUsageProjection(ctx context.Context, tx *store.Tx) error {
-	var pending bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_dirty)`).Scan(&pending); err != nil {
+	var pending, overlap bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_dirty),EXISTS(SELECT 1 FROM token_usage_overlap_dirty)`).Scan(&pending, &overlap); err != nil {
 		return err
 	}
-	if !pending {
+	if !pending && !overlap {
 		return nil
 	}
+	if overlap {
+		if _, err := tx.Exec(ctx, expandUsageOverlapSQL); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM token_usage_overlap_dirty`); err != nil {
+			return err
+		}
+	}
 	groups := map[usageSummaryKey]string{}
-	rows, err := tx.Q().QueryContext(ctx, `SELECT DISTINCT p.dimension_key,p.bucket,p.dimension_json FROM token_usage_dirty d JOIN token_usage_contributions p USING(source,request_id)`)
+	rows, err := tx.Q().QueryContext(ctx, usageDirtyGroupsSQL)
 	if err != nil {
 		return err
 	}
@@ -84,7 +116,7 @@ func refreshUsageProjection(ctx context.Context, tx *store.Tx) error {
 		if r.RecordID == "" && strings.HasPrefix(r.Subject, "conversation:") {
 			conversation = strings.TrimPrefix(r.Subject, "conversation:")
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO token_usage_contributions(source,request_id,fact_seq,thread_id,turn_id,root_turn_id,run_id,task_id,conversation_id,dimension_key,bucket,occurred_at,visible,conflict,native,record_json,dimension_json,totals_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Source, c.RequestID, r.Seq, r.ThreadID, r.TurnID, r.RootTurnID, r.Attribution.RunID, r.Attribution.TaskID, conversation, key.dimension, key.bucket, r.OccurredAt, c.Visible, r.Conflict, r.RecordID != "", string(record), string(dimension), string(totals)); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO token_usage_contributions(source,request_id,fact_seq,thread_id,turn_id,root_turn_id,parent_thread_id,session_id,run_id,task_id,conversation_id,dimension_key,bucket,occurred_at,visible,conflict,native,record_json,dimension_json,totals_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Source, c.RequestID, r.Seq, r.ThreadID, r.TurnID, r.RootTurnID, r.ParentThreadID, r.SessionID, r.Attribution.RunID, r.Attribution.TaskID, conversation, key.dimension, key.bucket, r.OccurredAt, c.Visible, r.Conflict, r.RecordID != "", string(record), string(dimension), string(totals)); err != nil {
 			return err
 		}
 		groups[key] = string(dimension)

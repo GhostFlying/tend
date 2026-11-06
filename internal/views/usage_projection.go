@@ -74,8 +74,8 @@ func UsageProjectionInputs(ctx context.Context, q store.Querier) ([]UsageContrib
  (c.conflict OR `+store.UsagePendingOverlapSQLFor("f")+`),f.payload_json,
  COALESCE(b.run_id,''),COALESCE(b.conversation_id,''),COALESCE(b.attribution_conflict,0),
  `+store.UsageLegacyLinkedSQL("f.seq")+`
- FROM token_usage_dirty d JOIN token_usage_current c USING(source,request_id)
- JOIN token_usage_facts f ON f.seq=c.fact_seq
+ FROM token_usage_dirty d CROSS JOIN token_usage_current c USING(source,request_id)
+ CROSS JOIN token_usage_facts f ON f.seq=c.fact_seq
  LEFT JOIN token_usage_bindings b ON b.source=f.source AND b.request_id=f.request_id
  ORDER BY f.seq DESC`)
 	if err != nil {
