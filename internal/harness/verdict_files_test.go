@@ -328,3 +328,70 @@ func TestSealedVerdictRecoveryChecksIdentityBeforeUpload(t *testing.T) {
 		})
 	}
 }
+
+func TestDefiniteVerdictSelectionRejectionAllowsCorrection(t *testing.T) {
+	for _, kind := range []string{"invalid basename", "definite missing path", "unknown missing path", "already sealed", "prior unknown preflight"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			uploads, intent := 0, false
+			spec := WorkerSpec{StateDir: dir, Dir: t.TempDir(), AcceptanceEvidenceFiles: true,
+				VerdictFilesIdentity: func(context.Context, string, json.RawMessage) (string, error) {
+					if !intent {
+						return "", errors.New("no intent was created")
+					}
+					return strings.Repeat("b", 64), nil
+				},
+				SealVerdictFiles: func(_ context.Context, _ string, _ json.RawMessage, files []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+					uploads++
+					if files[0].Path == "missing.log" {
+						if kind == "definite missing path" {
+							return nil, errors.Join(ErrVerdictSelectionRejected, errors.New("file does not exist"))
+						}
+						intent = kind == "already sealed"
+						return nil, errors.New("selection or upload is unknown")
+					}
+					intent = true
+					return []protocol.ArtifactFile{{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}}, nil
+				}}
+			v := Verdicts{Spec: spec}
+			call := func(path, name string) ToolCall {
+				return ToolCall{ThreadID: "thread", TurnID: "turn", Tool: VerdictTool, Arguments: json.RawMessage(`{"verdict":"blocked","evidence":{},"files":[{"path":"` + path + `","name":"` + name + `"}]}`)}
+			}
+			invalid := call("missing.log", "checks.log")
+			if kind == "invalid basename" {
+				invalid = call("actual.log", "logs/checks.log")
+			}
+			if got := v.Handle(t.Context(), invalid); got.Success {
+				t.Fatal("invalid selection was acknowledged")
+			}
+			if kind == "already sealed" || kind == "prior unknown preflight" {
+				v.Spec.SealVerdictFiles = func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+					uploads++
+					return nil, ErrVerdictSelectionRejected
+				}
+				if got := v.Handle(t.Context(), invalid); got.Success {
+					t.Fatal("contradictory sealed rejection was acknowledged")
+				}
+			}
+			before := uploads
+			got := v.Handle(t.Context(), call("actual.log", "checks.log"))
+			correctable := kind == "invalid basename" || kind == "definite missing path"
+			if got.Success != correctable {
+				t.Fatalf("correction classification differs: %+v", got)
+			}
+			if !correctable && uploads != before {
+				t.Fatal("uncertain or sealed input was replaced")
+			}
+			facts, err := filepath.Glob(filepath.Join(dir, "verdict-rejections", "*.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if correctable && len(facts) != 1 {
+				t.Fatalf("definite rejection fact was lost: %v", facts)
+			}
+			if !correctable && len(facts) != 0 {
+				t.Fatal("unknown effect was recorded as a definite rejection")
+			}
+		})
+	}
+}

@@ -191,6 +191,21 @@ type Workers interface {
 	Start(ctx context.Context, spec WorkerSpec) (Worker, error)
 }
 
+// FileVerdictReconciler restores only a frozen original acceptance submission.
+// It must not start or attach native execution or create an execution attempt.
+// ErrNoAcceptanceVerdict leaves the ordinary launch gate in charge; any
+// unresolved original submission returns ErrRetainedResumePending instead.
+type FileVerdictReconciler interface {
+	ReconcileAcceptanceVerdict(context.Context, WorkerSpec) (WorkerResult, error)
+}
+
+var ErrNoAcceptanceVerdict = errors.New("no frozen acceptance verdict is available")
+
+// ErrVerdictSelectionRejected is returned only when the sealing owner proves
+// this call created no intent, upload request or external effect. An ordinary
+// error, an absent cache, or a failed upload cannot establish this fact.
+var ErrVerdictSelectionRejected = errors.New("acceptance evidence selection was rejected before effects")
+
 // ErrRetainedResumePending leaves the original execution unresolved and intact.
 // Missing identity is not a business failure or permission to launch again.
 var ErrRetainedResumePending = errors.New("original retained native execution requires reconciliation")

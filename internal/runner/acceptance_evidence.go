@@ -231,8 +231,17 @@ func (e *acceptanceEvidence) seal(ctx context.Context, binding string, input jso
 			file := &intent.Files[i]
 			file.Size, file.SHA256, err = hashEvidence(ctx, file.Path)
 			if err != nil {
+				// No intent has ever been written for this binding, so this
+				// definite missing-source rejection precedes every upload.
+				// Persistence and other I/O failures remain unknown.
+				if errors.Is(err, os.ErrNotExist) {
+					return nil, fmt.Errorf("%w: %v", harness.ErrVerdictSelectionRejected, err)
+				}
 				return nil, err
 			}
+		}
+		for i := range intent.Files {
+			file := &intent.Files[i]
 			var pending struct {
 				RequestID string `json:"request_id"`
 			}

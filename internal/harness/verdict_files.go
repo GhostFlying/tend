@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -91,7 +93,7 @@ func decodeVerdictCall(raw json.RawMessage, allowFiles bool) (protocol.VerdictPa
 func (v *Verdicts) validateVerdictSelections(files []VerdictFileSelection) error {
 	names, paths := map[string]bool{}, map[string]bool{}
 	for _, file := range files {
-		if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Name) == "" {
+		if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Name) == "" || file.Name == "." || file.Name == ".." || pathpkg.Base(file.Name) != file.Name || strings.ContainsAny(file.Name, "\\\r\n\x00") || !utf8.ValidString(file.Name) || len(file.Name) > 255 {
 			return errors.New("files require a path and delivery name")
 		}
 		path := file.Path
@@ -181,6 +183,7 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 	if err != nil {
 		return err
 	}
+	createdPending := pending == nil
 	if pending != nil {
 		if pending.NativeBinding != binding || pending.RecordBinding != v.binding || !bytes.Equal(pending.Input, input) {
 			return fmt.Errorf("%w: the original verdict submission must be reconciled first", ErrRetainedResumePending)
@@ -196,7 +199,7 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		}
 	} else {
 		if err := v.validateVerdictSelections(selections); err != nil {
-			return err
+			return errors.Join(err, v.preserveRejectedSelection(pendingVerdict{NativeBinding: binding, RecordBinding: v.binding, Input: input}, err, false))
 		}
 		pending = &pendingVerdict{NativeBinding: binding, RecordBinding: v.binding, Input: input}
 		body, err := json.Marshal(pending)
@@ -226,6 +229,9 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		}
 	}
 	if uploadErr != nil || identityErr != nil {
+		if createdPending && errors.Is(uploadErr, ErrVerdictSelectionRejected) && pending.SealedIdentity == "" {
+			return errors.Join(uploadErr, identityErr, v.preserveRejectedSelection(*pending, uploadErr, true))
+		}
 		return errors.Join(uploadErr, identityErr)
 	}
 	// Distinguish a no-file input from an unconstrained restore validation.
@@ -243,6 +249,52 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		return err
 	}
 	v.sealedIdentity = identity
+	if err := os.Remove(filepath.Join(v.stateDir(), "pending-verdict.json")); err != nil {
+		return err
+	}
+	return syncVerdictDirectory(v.stateDir())
+}
+
+func (v *Verdicts) preserveRejectedSelection(pending pendingVerdict, rejection error, removePending bool) error {
+	if pending.SealedIdentity != "" {
+		return errors.New("a sealed original selection cannot be discarded")
+	}
+	var record = struct {
+		pendingVerdict
+		Reason string `json:"reason"`
+	}{pending, rejection.Error()}
+	body, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(append(append([]byte(pending.NativeBinding), 0), pending.Input...))
+	dir := filepath.Join(v.stateDir(), "verdict-rejections")
+	path := filepath.Join(dir, hex.EncodeToString(digest[:])+".json")
+	prior, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := writeVerdictState(path, body); err != nil {
+			return err
+		}
+		if err := syncVerdictDirectory(v.stateDir()); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else {
+		var original struct {
+			pendingVerdict
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(prior, &original); err != nil {
+			return err
+		}
+		if original.NativeBinding != pending.NativeBinding || original.RecordBinding != pending.RecordBinding || !bytes.Equal(original.Input, pending.Input) || original.SealedIdentity != "" {
+			return errors.New("original rejected selection differs")
+		}
+	}
+	if !removePending {
+		return nil
+	}
 	if err := os.Remove(filepath.Join(v.stateDir(), "pending-verdict.json")); err != nil {
 		return err
 	}
@@ -328,6 +380,58 @@ func (v *Verdicts) ConfirmOwnedSessionClose() error {
 	if v.verdict == nil {
 		return errors.New("original verdict is not confirmed")
 	}
+	return v.confirmOwnedSessionClose(false)
+}
+
+// RestoreOwnedSessionContext is a result-only recovery entry. It validates the
+// already recorded local close and exact original native thread before allowing
+// any original upload reconciliation. It never starts native execution.
+func (v *Verdicts) RestoreOwnedSessionContext(ctx context.Context, threadID string) error {
+	if v.Spec.Role != protocol.RoleAccept || !v.Spec.AcceptanceEvidenceFiles {
+		return ErrNoAcceptanceVerdict
+	}
+	if v.Spec.RunID == "" || v.stateDir() == "" || threadID == "" {
+		return fmt.Errorf("%w: original acceptance scope is unavailable", ErrRetainedResumePending)
+	}
+	v.mu.Lock()
+	var candidate bool
+	for _, name := range []string{"pending-verdict.json", "verdict.json"} {
+		_, err := os.Stat(filepath.Join(v.stateDir(), name))
+		if err == nil {
+			candidate = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			v.mu.Unlock()
+			return fmt.Errorf("%w: inspect original verdict: %w", ErrRetainedResumePending, err)
+		}
+	}
+	if !candidate {
+		v.mu.Unlock()
+		return ErrNoAcceptanceVerdict
+	}
+	scope, err := v.ownedSessionCloseScope()
+	if err == nil {
+		var native struct{ ThreadID, TurnID string }
+		if json.Unmarshal([]byte(scope.NativeBinding), &native) != nil || native.ThreadID != threadID || native.TurnID == "" {
+			err = errors.New("original acceptance native thread differs")
+		}
+	}
+	if err == nil {
+		err = v.confirmOwnedSessionClose(true)
+	}
+	v.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("%w: original owned acceptance close is unavailable: %w", ErrRetainedResumePending, err)
+	}
+	if err := v.RestoreContext(ctx); err != nil {
+		return fmt.Errorf("%w: restore original closed acceptance verdict: %w", ErrRetainedResumePending, err)
+	}
+	if err := v.ConfirmOwnedSessionClose(); err != nil {
+		return fmt.Errorf("%w: confirm original acceptance close: %w", ErrRetainedResumePending, err)
+	}
+	return nil
+}
+
+func (v *Verdicts) confirmOwnedSessionClose(allowPending bool) error {
 	want, err := v.ownedSessionCloseScope()
 	if err != nil {
 		return err
@@ -349,6 +453,15 @@ func (v *Verdicts) ConfirmOwnedSessionClose() error {
 		return errors.New("original owned session close receipt differs from the sealed verdict")
 	}
 	if got.VerdictSHA256 == "" {
+		if allowPending {
+			pending, err := v.readPendingVerdict()
+			if err != nil {
+				return err
+			}
+			if pending != nil {
+				return nil
+			}
+		}
 		composition, err := os.ReadFile(filepath.Join(v.stateDir(), "owned-session-close-verdict.json"))
 		if err != nil {
 			return err
