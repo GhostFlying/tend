@@ -190,6 +190,9 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if err := settleClosedManagerToolResults(ctx, tx, run); err != nil {
 				return Outcome{}, err
 			}
+			if err := consumeClosedManagerRepairFacts(ctx, x, tx, run); err != nil {
+				return Outcome{}, err
+			}
 			if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, run).Scan(&pending); err != nil {
 				return Outcome{}, err
 			}
