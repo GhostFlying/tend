@@ -535,7 +535,7 @@ func (a *App) MainThread(ctx context.Context, instance string) (string, bool, er
 
 // SetMainThread records the front thread of a harness instance.
 func (a *App) SetMainThread(ctx context.Context, instance, threadID string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.PutMainThread(ctx, instance, threadID, a.now().UnixMilli()) })
+	return a.write(ctx, func(tx *store.Tx) error { return tx.PutMainThread(ctx, instance, threadID, a.now().UnixMilli()) })
 }
 
 // MainTurn returns the turn of a delivery to the main thread.
@@ -631,7 +631,7 @@ func mainTurnBusinessStatus(ctx context.Context, q store.Querier, m store.MainTu
 // message reached when that changes.
 func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 	now := a.now().UnixMilli()
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		prev, err := store.GetMainTurn(ctx, tx.Q(), m.RequestID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
@@ -851,7 +851,7 @@ func (a *App) TurnDelivery(ctx context.Context, threadID, turnID string) (store.
 func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 	now := a.now().UnixMilli()
 	settled := 0
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		if err := markNativeReceiptsPending(ctx, tx, threadID, now); err != nil {
 			return err
 		}

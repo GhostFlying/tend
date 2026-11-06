@@ -15,7 +15,7 @@ import (
 // RecordPacket stores a rendered packet before it is injected, so its
 // identity and content are fixed even if injection fails.
 func (a *App) RecordPacket(ctx context.Context, p store.Packet) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		return tx.InsertPacket(ctx, p, a.now().UnixMilli())
 	})
 }
@@ -27,7 +27,7 @@ func (a *App) RecordPacket(ctx context.Context, p store.Packet) error {
 // changes nothing.
 func (a *App) ConfirmPacket(ctx context.Context, packetID string) error {
 	now := a.now().UnixMilli()
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		p, err := store.GetPacket(ctx, tx.Q(), packetID)
 		if err != nil {
 			return err
@@ -52,7 +52,7 @@ func (a *App) FailPacket(ctx context.Context, packetID string, unknown bool) err
 	if unknown {
 		status = store.PacketUnknown
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		p, err := store.GetPacket(ctx, tx.Q(), packetID)
 		if err != nil {
 			return err
@@ -68,7 +68,7 @@ func (a *App) FailPacket(ctx context.Context, packetID string, unknown bool) err
 // snapshot, for example after the harness compacted its history.
 func (a *App) InvalidateBaseline(ctx context.Context, threadKey string) error {
 	now := a.now().UnixMilli()
-	return a.store.Write(ctx, func(tx *store.Tx) error { return invalidate(ctx, tx, threadKey, now) })
+	return a.write(ctx, func(tx *store.Tx) error { return invalidate(ctx, tx, threadKey, now) })
 }
 
 func invalidate(ctx context.Context, tx *store.Tx, threadKey string, now int64) error {

@@ -12,13 +12,13 @@ import (
 
 // RegisterAgentThread retains the native generation chain independently of processes.
 func (a *App) RegisterAgentThread(ctx context.Context, id, thread string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT OR IGNORE INTO agent_thread_history(thread_id,conversation_id,created_at) VALUES(?,?,?)`, thread, store.ConversationID(id), a.now().UnixMilli())
 		return err
 	})
 }
 func (a *App) RecordAgentUsage(ctx context.Context, id string, usage protocol.AgentContextUsage) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		usage.UpdatedAt = a.now().UnixMilli()
 		raw, err := json.Marshal(usage)
 		if err != nil {
@@ -29,7 +29,7 @@ func (a *App) RecordAgentUsage(ctx context.Context, id string, usage protocol.Ag
 	})
 }
 func (a *App) RecordRolloutEvent(ctx context.Context, id, thread, turn, item, kind string, data json.RawMessage) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		if len(data) == 0 {
 			data = json.RawMessage(`{}`)
 		}
@@ -79,7 +79,7 @@ func (a *App) CompactState(ctx context.Context, op string) (string, error) {
 	return state, err
 }
 func (a *App) SetCompactState(ctx context.Context, op, thread, state string, selection ...*hostedconfig.Selection) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		if state == "starting" && len(selection) > 0 {
 			var conversation, current string
 			if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,status FROM agent_compactions WHERE operation_id=?`, op).Scan(&conversation, &current); err != nil {
@@ -108,7 +108,7 @@ func (a *App) SetCompactState(ctx context.Context, op, thread, state string, sel
 	})
 }
 func (a *App) CompleteNativeCompact(ctx context.Context, id, thread, item string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		var exists bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_compactions WHERE thread_id=? AND item_id=?)`, thread, item).Scan(&exists); err != nil {
 			return err

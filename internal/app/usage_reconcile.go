@@ -177,7 +177,7 @@ func (ReconcileConversationUsage) Apply(ctx context.Context, x *Exec, tx *store.
 func (a *App) PreviewUsage(ctx context.Context, p protocol.Principal, input protocol.UsageUpload) (protocol.UsagePreview, error) {
 	result := protocol.UsagePreview{}
 	rollback := errors.New("usage preview rollback")
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var command Command = UploadNativeUsage{}
 		payload := any(input)
 		target := protocol.Target{Type: "host", ID: p.Subject}

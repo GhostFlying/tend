@@ -30,7 +30,7 @@ func (a *App) ConfigureTelegram(ctx context.Context, bot int64) error {
 	if bot <= 0 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid bot identity")
 	}
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE messaging_channels SET chat_id=CASE WHEN bot_id=? THEN chat_id ELSE 0 END,status=CASE WHEN user_id=0 THEN 'disabled' WHEN bot_id=? AND chat_id<>0 THEN 'ready' ELSE 'waiting_start' END,revision=revision+CASE WHEN bot_id=? THEN 0 ELSE 1 END,bot_id=?,updated_at=? WHERE channel_id='telegram'`, bot, bot, bot, bot, a.now().UnixMilli())
 		return err
 	})
@@ -61,7 +61,7 @@ func (a *App) PersistTelegramBatch(ctx context.Context, bot int64, updates []Tel
 		return err
 	}
 	defer done()
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		var offset int64
 		for _, u := range updates {
 			if u.UpdateID <= 0 || len(u.Payload) > 1<<20 || !json.Valid(u.Payload) {
@@ -94,14 +94,14 @@ func (a *App) PendingTelegram(ctx context.Context, bot int64) (TelegramInbox, bo
 	return u, err == nil, err
 }
 func (a *App) SettleTelegramInput(ctx context.Context, u TelegramInbox, reason string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE telegram_inbox SET state='rejected',reason=? WHERE bot_id=? AND update_id=? AND state='pending'`, reason, u.BotID, u.UpdateID)
 		return err
 	})
 }
 func (a *App) TelegramFileRequest(ctx context.Context, u TelegramInbox, position int) (string, error) {
 	var id string
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO telegram_file_requests(bot_id,update_id,position,request_id) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, u.BotID, u.UpdateID, position, a.ids.New(protocol.PrefixRequest))
 		if err != nil {
 			return err
@@ -238,7 +238,7 @@ func (a *App) TelegramUploadedFile(ctx context.Context, request string) (string,
 // RejectTelegramInput retains a definite input failure and queues a factual
 // transport response, without admitting partial content to any agent.
 func (a *App) RejectTelegramInput(ctx context.Context, u TelegramInbox, reason string) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var state string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT state FROM telegram_inbox WHERE bot_id=? AND update_id=?`, u.BotID, u.UpdateID).Scan(&state); err != nil {
 			return err
@@ -282,7 +282,7 @@ func (a *App) RejectTelegramInput(ctx context.Context, u TelegramInbox, reason s
 // DisableTelegramRuntime preserves the binding for a later configured restart,
 // while new notifications cannot become an implicit historical backlog.
 func (a *App) DisableTelegramRuntime(ctx context.Context) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE messaging_channels SET status=CASE WHEN user_id>0 THEN 'unavailable' ELSE 'disabled' END,health='disabled' WHERE channel_id='telegram'`)
 		return err
 	})
@@ -293,7 +293,7 @@ func (a *App) ObserveTelegramHealth(ctx context.Context, health string) error {
 	if health != "ready" && health != "poll_failed" && health != "input_prepare_failed" && health != "disabled" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "unknown Telegram health code")
 	}
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var old string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT health FROM messaging_channels WHERE channel_id='telegram'`).Scan(&old); err != nil {
 			return err

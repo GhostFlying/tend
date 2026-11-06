@@ -31,7 +31,7 @@ func WithHostLostAfter(d time.Duration) Option {
 // SeeHost records that a runner of the host is polling for work. An idle
 // runner sends nothing else, so without this it would look lost.
 func (a *App) SeeHost(ctx context.Context, hostID string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error { return tx.SeeHost(ctx, hostID, a.now().UnixMilli()) })
+	return a.write(ctx, func(tx *store.Tx) error { return tx.SeeHost(ctx, hostID, a.now().UnixMilli()) })
 }
 
 // CheckWorkspaces runs a workspace check as tend itself and returns the

@@ -22,7 +22,7 @@ func (a *App) DeploymentID(ctx context.Context) (string, error) {
 	}
 	// The read transaction has ended. Recheck under the writer so concurrent
 	// first callers cannot create or return different identities.
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		if err := read(tx.Q()); err != nil {
 			return err
 		}

@@ -52,7 +52,7 @@ func (a *App) AgentConversation(ctx context.Context, id string) (protocol.AgentC
 }
 func (a *App) AgentContext(ctx context.Context, id string, request string) (string, error) {
 	var text string
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		c, err := store.AgentConversation(ctx, tx.Q(), id)
 		if err != nil {
 			return err

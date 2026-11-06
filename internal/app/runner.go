@@ -969,7 +969,7 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 		return res, protocol.Errorf(protocol.CodeForbidden, "only runners send heartbeats")
 	}
 	now := a.now()
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		q := tx.Q()
 		host, err := store.GetHost(ctx, q, p.Subject)
 		if err != nil || host.Status != store.HostActive {
@@ -1071,7 +1071,7 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 	}
 	now := a.now().UnixMilli()
 	changed, wakeQueued := false, false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
 			return errNotFound(err, "run %s does not exist", runID)
@@ -1178,7 +1178,7 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 	n := 0
 	lapsed := 0
 	wakeQueued := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		expired, err := store.ListExpiredLeases(ctx, tx.Q(), now)
 		if err != nil {
 			return err

@@ -621,7 +621,7 @@ func communicationSourceVisible(ctx context.Context, q store.Querier, id string)
 
 // RecordMessagingConsumption persists witnessed native input consumption immediately.
 func (a *App) RecordMessagingConsumption(ctx context.Context, execution, id, evidence string) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		resolved, err := store.MainExecutionRequest(ctx, tx.Q(), execution)
 		if err != nil {
 			return err

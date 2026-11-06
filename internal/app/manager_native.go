@@ -516,7 +516,7 @@ func (a *App) ManagerAppliedCursor(ctx context.Context, run string) (int64, erro
 // AcknowledgeManagerEvent is invoked only after the server applied the event.
 // Completing an item/transport flush also covers its previously buffered deltas.
 func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=?`, run, seq); err != nil {
 			return err
 		}

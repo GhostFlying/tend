@@ -131,7 +131,7 @@ func (a *App) AgentStartupAttachmentSucceeded(ctx context.Context, attachment Ag
 	if attachment.RequestID == "" {
 		return nil
 	}
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		state, err := readAgentStartupState(ctx, tx.Q(), attachment.RequestID)
 		if err != nil || state.Attempts == 0 {
 			return err
@@ -161,7 +161,7 @@ func (a *App) DeferAgentStartupAttachment(ctx context.Context, conversation stri
 		return nil
 	}
 	noticeQueued := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		head, err := store.GetOutboxByRequest(ctx, tx.Q(), attachment.RequestID)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil

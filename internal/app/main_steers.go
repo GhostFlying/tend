@@ -14,7 +14,7 @@ import (
 // SetMainThreadWithToolset records tools installed by a confirmed fresh native
 // thread, including legacy mode which does not maintain handoff bindings.
 func (a *App) SetMainThreadWithToolset(ctx context.Context, instance, threadID, hash string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error {
+	return a.write(ctx, func(tx *store.Tx) error {
 		if err := tx.PutMainThread(ctx, instance, threadID, a.now().UnixMilli()); err != nil {
 			return err
 		}
@@ -38,7 +38,7 @@ func (a *App) MainThreadToolset(ctx context.Context, instance, threadID string) 
 func (a *App) ClaimMainSteer(ctx context.Context, activeRequestID, threadID, turnID string) (Delivery, bool, error) {
 	var d Delivery
 	var ok bool
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		active, err := store.GetMainTurn(ctx, tx.Q(), activeRequestID)
 		if err != nil {
 			return err
@@ -101,7 +101,7 @@ func (a *App) ClaimMainSteer(ctx context.Context, activeRequestID, threadID, tur
 // NoteMainSteerWaiting leaves unsupported input withdrawable and queued.
 func (a *App) NoteMainSteerWaiting(ctx context.Context, activeRequestID, threadID, turnID, reason string) error {
 	changed := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		m, err := store.HeadSteer(ctx, tx.Q(), activeRequestID)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
@@ -166,7 +166,7 @@ func (a *App) MainSteerByInput(ctx context.Context, threadID, turnID, text strin
 // UpdateMainSteer does not downgrade an already witnessed native user item when
 // the RPC answer arrives later, or overwrite a terminal recovery decision.
 func (a *App) UpdateMainSteer(ctx context.Context, m store.MainSteer) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		old, err := store.GetMainSteer(ctx, tx.Q(), m.RequestID)
 		if err != nil {
 			return err
@@ -217,7 +217,7 @@ func steerState(status string) protocol.MessageState {
 func (a *App) ConsumeMainSteer(ctx context.Context, threadID, turnID, text, itemID string) (store.MainSteer, bool, error) {
 	var m store.MainSteer
 	var ok bool
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		var requestID string
 		err := tx.Q().QueryRowContext(ctx, `SELECT request_id FROM main_steers WHERE thread_id=? AND turn_id=? AND input_text=? AND input_text<>'' AND status IN ('sending','accepted','unknown')`, threadID, turnID, text).Scan(&requestID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -285,7 +285,7 @@ func (a *App) ConsumedMainSteers(ctx context.Context, threadID, turnID string) (
 }
 
 func (a *App) SettleMainSteers(ctx context.Context, threadID, turnID, status string) error {
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		return a.settleMainSteers(ctx, tx, threadID, turnID, status, a.now().UnixMilli())
 	})
 	if err == nil {
@@ -377,7 +377,7 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 // BindMainToolSource freezes the first callback's source across native replay.
 func (a *App) BindMainToolSource(ctx context.Context, native, messageID, requestID string, item store.ToolUseRow) (string, string, error) {
 	changed := false
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO main_tool_sources(native_key,message_id,request_id) VALUES(?,?,?) ON CONFLICT DO NOTHING`, native, messageID, requestID); err != nil {
 			return fmt.Errorf("app: bind native source: %w", err)
 		}

@@ -576,7 +576,7 @@ func markNativeReceiptsPending(ctx context.Context, tx *store.Tx, thread string,
 
 // AwaitNativeReceipts fences completion before disconnect notifications wake Deliver.
 func (a *App) AwaitNativeReceipts(ctx context.Context, thread string) error {
-	return a.store.Write(ctx, func(tx *store.Tx) error { return markNativeReceiptsPending(ctx, tx, thread, a.now().UnixMilli()) })
+	return a.write(ctx, func(tx *store.Tx) error { return markNativeReceiptsPending(ctx, tx, thread, a.now().UnixMilli()) })
 }
 
 func (a *App) NativeReceiptPending(ctx context.Context, request string) (bool, error) {

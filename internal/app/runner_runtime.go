@@ -149,7 +149,7 @@ func checkClaimRuntime(ctx context.Context, x *Exec, q store.Querier) error {
 // last observation, including clients reconnecting after the transition.
 func (a *App) SweepRunnerPresence(ctx context.Context) (int, error) {
 	n := 0
-	err := a.store.Write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		rows, err := tx.Q().QueryContext(ctx, `SELECT host_id FROM host_runtime WHERE online=1 AND last_heartbeat_at<=?`, a.now().Add(-RunnerOfflineAfter).UnixMilli())
 		if err != nil {
 			return fmt.Errorf("app: find silent runners: %w", err)
