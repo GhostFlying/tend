@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,14 +140,15 @@ func TestFault_ManagerCompletedCloseReplaysBeforeOpeningNativeProcess(t *testing
 				t.Fatal(err)
 			}
 			defer j.Close()
-			seen := make(chan string, 4)
+			seen := make(chan protocol.Envelope, 4)
+			var replyAttempts atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var env protocol.Envelope
 				if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 					t.Error(err)
 					return
 				}
-				seen <- env.Operation
+				seen <- env
 				if env.Operation == protocol.OpManagerNativeReply {
 					var got protocol.ManagerNativeReply
 					if err := json.Unmarshal(env.Payload, &got); err != nil || got.ID != reply.ID || got.LastSequence != 1 {
@@ -155,18 +157,32 @@ func TestFault_ManagerCompletedCloseReplaysBeforeOpeningNativeProcess(t *testing
 					if savedEnvelope && env.RequestID != "reply-original" {
 						t.Error("original reply identity changed")
 					}
+					if replyAttempts.Add(1) <= 2 {
+						w.WriteHeader(http.StatusInternalServerError)
+						_ = json.NewEncoder(w).Encode(rpcResponse{Error: protocol.Errorf(protocol.CodeUnknownOutcome, "native close must cover all applied events")})
+						return
+					}
 				}
 				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
 			}))
 			defer server.Close()
 			// No execution resolver: recovering a completed close must not open
 			// any native session, even when its old runtime is unavailable.
-			r := New(Config{Journal: j, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), ServerURL: server.URL, HTTPClient: server.Client(), Log: slog.New(slog.DiscardHandler)})
+			r := New(Config{Journal: j, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), ServerURL: server.URL, HTTPClient: server.Client(), RetryDelay: time.Millisecond, Log: slog.New(slog.DiscardHandler)})
 			if err := r.managerNative(ctx, ctx, as); err != nil {
 				t.Fatal(err)
 			}
-			if len(seen) != 2 || <-seen != protocol.OpManagerNativeEvent || <-seen != protocol.OpManagerNativeReply {
+			if len(seen) != 4 || (<-seen).Operation != protocol.OpManagerNativeEvent {
 				t.Fatal("recovery must flush old events then only the original close")
+			}
+			original := <-seen
+			if original.Operation != protocol.OpManagerNativeReply {
+				t.Fatal("recovery did not send the original close reply", original)
+			}
+			for range 2 {
+				if retried := <-seen; !reflect.DeepEqual(retried, original) {
+					t.Fatal("unconfirmed close retry changed the frozen envelope", original, retried)
+				}
 			}
 			run, err := j.Run(ctx, as.RunID)
 			if !errors.Is(err, journal.ErrNotFound) {

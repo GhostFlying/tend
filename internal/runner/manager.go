@@ -463,16 +463,35 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 
 // A close proof may reach the server before the final uploaded event has
 // finished applying. Retry that same immutable receipt, never the native call.
+// Prolonged uncertainty backs off, including HTTP 500 responses wrapped as
+// transport failures. The shared send loop would otherwise retry them forever
+// at its fixed interval before this receipt loop could observe the error.
 func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment, env *protocol.Envelope) error {
-	for {
+	if env.Operation != protocol.OpManagerNativeReply {
 		_, err := r.send(ctx, runCredential(as), env)
-		if env.Operation != protocol.OpManagerNativeReply || protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		return err
+	}
+	delay := r.cfg.RetryDelay
+	limit := max(delay, 30*time.Second)
+	for {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
+		_, err := r.sendOnce(ctx, runCredential(as), env)
+		if err == nil || !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r.cfg.Log.WarnContext(ctx, "manager native receipt pending", "run_id", as.RunID, "request_id", env.RequestID, "trace_id", env.TraceID, "retry_delay", delay, "err", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(r.cfg.RetryDelay):
+		case <-time.After(delay):
+		}
+		if delay < limit {
+			delay = min(2*delay, limit)
 		}
 	}
 }
