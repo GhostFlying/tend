@@ -452,3 +452,46 @@ func TestUsageProjectionOverlapInvalidationFollowsOnlyConnectedPeers(t *testing.
 		t.Fatal("connected conflict lost legacy fallback or conservation", v)
 	}
 }
+
+func TestUsageProjectionUnknownTimeHistoryHasBoundedWritePartitions(t *testing.T) {
+	h := newHarness(t)
+	const count = 5000
+	s := protocol.TokenUsageSample{Source: "legacy", ThreadID: "thread", Revision: 1, Settlement: "final", Total: usageNumber(1)}
+	if err := h.app.write(t.Context(), func(tx *store.Tx) error {
+		for i := 0; i < count; i++ {
+			s.RequestID = fmt.Sprint(i)
+			if err := recordTokenUsage(t.Context(), tx, s, "conversation:main", "main", h.clock.Now().UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want int64) {
+		t.Helper()
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			var largest int64
+			if err := tx.Q().QueryRowContext(t.Context(), `SELECT MAX(n) FROM (SELECT COUNT(*) n FROM token_usage_contributions GROUP BY dimension_key,bucket)`).Scan(&largest); err != nil {
+				return err
+			}
+			if largest > usageSummaryPartitionSize {
+				t.Fatalf("unknown-time history creates an unbounded write bucket: %d", largest)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		all, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
+		period, _ := projectionView(t, h, "24h", 0, views.UsageFilter{})
+		if all.Totals.Requests != want || all.Unattributed.Requests != want || period.Totals.Requests != 0 || period.Unattributed.Requests != want {
+			t.Fatal("partitioning changed unknown-time accounting", all.Totals, all.Unattributed, period.Totals, period.Unattributed)
+		}
+	}
+	check(count)
+	s.RequestID = "appended"
+	if err := h.app.RecordTokenUsage(t.Context(), "main", s); err != nil {
+		t.Fatal(err)
+	}
+	check(count + 1)
+}
