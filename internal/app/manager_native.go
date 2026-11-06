@@ -67,6 +67,13 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if prior != nil {
 				return Outcome{NoEffect: true, Result: *prior}, nil
 			}
+			prior, err = unresolvedManagerClose(ctx, tx.Q(), run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if prior != nil {
+				return Outcome{NoEffect: true, Result: *prior}, nil
+			}
 		}
 		if r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager native process already stopped")
@@ -90,6 +97,17 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if !allowed && !managerNativeReceiptMethod(p.Method) {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "fenced manager may only read and reconcile native receipts")
+		}
+		if p.Method == "find" {
+			var prior string
+			err := tx.Q().QueryRowContext(ctx, `SELECT request_id FROM manager_native_requests WHERE run_id=? AND method='find' AND payload_json=? AND status IN ('pending','started','unknown') AND result_json IS NULL ORDER BY created_at,rowid LIMIT 1`, run, string(p.Payload)).Scan(&prior)
+			if err == nil {
+				p.ID = prior
+				return Outcome{NoEffect: true, Result: p}, nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return Outcome{}, err
+			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES(?,?,?,?,'pending',?)`, p.ID, run, p.Method, string(p.Payload), x.Now.UnixMilli())
 		return Outcome{Result: p}, err
@@ -292,6 +310,22 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		return Outcome{Result: map[string]any{"ack": p.Sequence}}, err
 	}
 	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager transport operation")
+}
+
+// A caller timing out cannot authorize another physical close. Preserve the
+// first unresolved command without changing completed-error legacy semantics.
+func unresolvedManagerClose(ctx context.Context, q store.Querier, run string) (*protocol.ManagerNativeRequest, error) {
+	var prior protocol.ManagerNativeRequest
+	var payload string
+	err := q.QueryRowContext(ctx, `SELECT request_id,payload_json FROM manager_native_requests WHERE run_id=? AND method='close' AND status IN ('pending','started','unknown') ORDER BY created_at,rowid LIMIT 1`, run).Scan(&prior.ID, &payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	prior.Method, prior.Payload = "close", json.RawMessage(payload)
+	return &prior, nil
 }
 
 // A queued tool_result proves the server finished the business tool handler.

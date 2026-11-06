@@ -19,22 +19,45 @@ type ManagerReplyReplay struct {
 }
 
 func (a *App) LapsedManagerReplyReplay(ctx context.Context, conversation string) (*ManagerReplyReplay, error) {
+	return a.managerReplyReplay(ctx, conversation, false)
+}
+
+// ClosingManagerReplyReplay also consumes internal repair prefixes from an
+// active lease whose original native process is already being closed. It
+// never opens that process or treats prefix consumption as a business result.
+func (a *App) ClosingManagerReplyReplay(ctx context.Context, conversation string) (*ManagerReplyReplay, error) {
+	return a.managerReplyReplay(ctx, conversation, true)
+}
+
+func (a *App) managerReplyReplay(ctx context.Context, conversation string, includeActive bool) (*ManagerReplyReplay, error) {
 	var replay *ManagerReplyReplay
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT r.run_id FROM issue_manager_tasks m JOIN runs r USING(task_id) JOIN leases l USING(run_id) JOIN hosted_executions h ON json_extract(h.private_snapshot,'$.runner_run_id')=r.run_id JOIN main_turns t ON t.request_id=h.execution_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id WHERE m.conversation_id=? AND h.conversation_id=m.conversation_id AND r.role='issue_manager' AND l.status='lapsed' AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND EXISTS(SELECT 1 FROM manager_native_requests n WHERE n.run_id=r.run_id AND n.method='close' AND n.status IN ('pending','started','unknown')) AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0) ORDER BY r.run_id`, conversation)
+		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT r.run_id
+ FROM issue_manager_tasks m JOIN runs r USING(task_id) JOIN leases l USING(run_id)
+ JOIN hosted_executions h ON json_extract(h.private_snapshot,'$.runner_run_id')=r.run_id
+ JOIN main_turns t ON t.request_id=h.execution_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id
+ WHERE m.conversation_id=? AND h.conversation_id=m.conversation_id AND r.role='issue_manager'
+ AND (l.status='lapsed' OR (? AND l.status='active'
+   AND EXISTS(SELECT 1 FROM logical_turn_executions e WHERE e.request_id=t.request_id AND e.repair=1)
+   AND 1=(SELECT COUNT(*) FROM hosted_executions original JOIN native_turn_receipts_pending pending ON pending.request_id=original.execution_id
+     WHERE original.conversation_id=m.conversation_id AND json_extract(original.private_snapshot,'$.runner_run_id')=r.run_id)))
+ AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')
+ AND EXISTS(SELECT 1 FROM manager_native_requests n WHERE n.run_id=r.run_id AND n.method='close' AND n.status IN ('pending','started','unknown'))
+ AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
+ ORDER BY r.run_id`, conversation, includeActive)
 		if err != nil || len(ids) == 0 {
 			return err
 		}
 		if len(ids) != 1 {
-			return protocol.Errorf(protocol.CodeUnknownOutcome, "multiple lapsed manager responsibilities require reconciliation")
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "multiple closing manager responsibilities require reconciliation")
 		}
-		replay, err = lapsedManagerReplyReplay(ctx, tx.Q(), conversation, ids[0])
+		replay, err = managerReplyReplay(ctx, tx.Q(), conversation, ids[0], includeActive)
 		return err
 	})
 	return replay, err
 }
 
-func lapsedManagerReplyReplay(ctx context.Context, q store.Querier, conversation, run string) (*ManagerReplyReplay, error) {
+func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run string, includeActive bool) (*ManagerReplyReplay, error) {
 	r, err := store.GetRun(ctx, q, run)
 	if err != nil {
 		return nil, err
@@ -51,12 +74,25 @@ func lapsedManagerReplyReplay(ctx context.Context, q store.Querier, conversation
 	if err != nil {
 		return nil, err
 	}
-	if l.Status != store.LeaseLapsed || l.HostID != r.HostID || m.HostID != r.HostID || m.ConversationID != conversation || m.Pin == nil || !reflect.DeepEqual(m.Pin, pin) || pin.Validate(r.HostID) != nil {
-		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "lapsed manager original execution identity differs")
+	active := l.Status == store.LeaseActive && includeActive
+	if (!active && l.Status != store.LeaseLapsed) || l.HostID != r.HostID || m.HostID != r.HostID || m.ConversationID != conversation || m.Pin == nil || !reflect.DeepEqual(m.Pin, pin) || pin.Validate(r.HostID) != nil {
+		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "closing manager original execution identity differs")
+	}
+	if active {
+		closing, err := managerRunClosing(ctx, q, run)
+		if err != nil {
+			return nil, err
+		}
+		if !closing {
+			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "active repair prefix requires its original closing responsibility")
+		}
 	}
 	requests, err := store.FollowupIDs(ctx, q, `SELECT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id WHERE h.conversation_id=? AND json_extract(h.private_snapshot,'$.runner_run_id')=? ORDER BY h.execution_id`, conversation, run)
 	if err != nil {
 		return nil, err
+	}
+	if active && len(requests) != 1 {
+		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "active closing repair has ambiguous original receipts")
 	}
 	replay := &ManagerReplyReplay{RunID: run, LeaseID: l.LeaseID}
 	turns := map[string]bool{}
@@ -68,6 +104,15 @@ func lapsedManagerReplyReplay(ctx context.Context, q store.Querier, conversation
 		var thread, turn string
 		if err := q.QueryRowContext(ctx, `SELECT COALESCE(thread_id,''),COALESCE(turn_id,'') FROM main_turns WHERE request_id=?`, request).Scan(&thread, &turn); err != nil {
 			return nil, err
+		}
+		if active {
+			var repair bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions WHERE request_id=? AND repair=1)`, request).Scan(&repair); err != nil {
+				return nil, err
+			}
+			if !repair {
+				return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "active closing prefix requires its original internal repair execution")
+			}
 		}
 		s := e.Selection
 		if thread == "" || turn == "" || replay.ThreadID != "" && replay.ThreadID != thread || e.IssueID != m.IssueID || e.AssignmentEpoch != m.AssignmentEpoch || s.IssueID != m.IssueID || s.AssignmentEpoch != m.AssignmentEpoch || s.Purpose != "issue_manager" || !s.RunnerManaged || s.RunnerRunID != run || s.Identity != pin.Identity || s.ConfigurationHash != pin.PublicSHA256 || s.Definition.LocalID != pin.Identity.LocalID || s.Definition.RuntimeID != pin.Runtime.RuntimeID || s.Definition.Revision != pin.AgentRevision || s.Definition.Model != pin.Profile.Model || s.Definition.Effort != pin.Profile.Effort || s.Runtime.ID != pin.Runtime.RuntimeID || s.Runtime.Revision != pin.Runtime.Revision {

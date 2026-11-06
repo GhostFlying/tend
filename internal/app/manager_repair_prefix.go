@@ -82,7 +82,7 @@ func (a *App) AcknowledgeManagerRepairPrefix(ctx context.Context, run string, se
 		if len(conversations) != 1 {
 			return protocol.Errorf(protocol.CodeUnknownOutcome, "repair prefix has no matching pending original responsibility")
 		}
-		scope, err := lapsedManagerReplyReplay(ctx, tx.Q(), conversations[0], run)
+		scope, err := managerReplyReplay(ctx, tx.Q(), conversations[0], run, true)
 		if err != nil {
 			return err
 		}

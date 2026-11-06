@@ -23,9 +23,9 @@ var VerdictToolSpec = ToolSpec{
   "type": "object",
   "properties": {
     "verdict": {"type": "string", "enum": ["passed", "changes_required", "blocked", "inconclusive"],
-      "description": "passed: every check holds. changes_required: the work falls short. blocked: you could not check because the environment failed. inconclusive: you could not reach a verdict for another reason."},
-    "evidence": {"type": "object", "description": "What you ran and saw, briefly."},
-    "issues": {"type": "array", "items": {"type": "string"}, "description": "For changes_required: each thing to fix."}
+      "description": "passed: every required check holds. changes_required: a required outcome or quality gate is unmet, including a check that ran and failed; the precise cause may still need diagnosis. blocked: a demonstrated external prerequisite prevents checking. inconclusive: the available evidence cannot establish whether a requirement holds; do not assume an environment failure."},
+    "evidence": {"type": "object", "description": "What you ran, its result, and the evidence for any unavailable prerequisite or remaining uncertainty. Separate observed failure from its cause."},
+    "issues": {"type": "array", "items": {"type": "string"}, "description": "For changes_required: each unmet requirement and the necessary diagnosis or repair. A known product defect is not required when an agreed quality gate failed."}
   },
   "required": ["verdict", "evidence"],
   "additionalProperties": false
@@ -274,7 +274,9 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 			"You may build and run tests, but do not edit code, clean the working trees, commit or otherwise change git history. " +
 			"For operational tasks verify resulting state and evidence without repeating mutations. Use download_file for submitted files. " +
 			"Run whatever the acceptance checks need, then call " + VerdictTool + " exactly once with your verdict and evidence. " +
-			"If you cannot run the checks because the environment fails, the verdict is blocked, not changes_required."
+			"When a required check ran and failed, report changes_required with the unmet requirement and the necessary diagnosis or repair, even if its precise cause is unknown. Do not infer a product defect from an exit code alone. " +
+			"Use blocked only when evidence establishes an external prerequisite that prevents checking; name that prerequisite and the next action. " +
+			"Use inconclusive when the evidence cannot establish whether a requirement holds; state the uncertainty and the next investigation. Unknown cause alone does not turn an observed unmet quality gate into an environment failure."
 		input = "Review the submitted work against this task.\n\n" + b.String()
 		return instructions, input
 	}

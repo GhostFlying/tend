@@ -136,10 +136,15 @@ func AcceptanceSubmitted(t Task, a AcceptanceFact) (Decision, error) {
 				"实现次数已用完，验收仍要求修改。这个任务接下来怎么办？"))
 		}
 	case protocol.VerdictBlocked, protocol.VerdictInconclusive:
-		// An unusable acceptance environment is neither a defect in the
-		// artifact nor a pass.
+		// Keep the historical waiting code without treating it as proof of
+		// an environment failure. The original verdict and evidence govern
+		// the responsible supervisor's diagnosis.
 		t.Block = protocol.BlockAcceptanceEnvUnavailable
-		d.OpenDecisions = append(d.OpenDecisions, acceptanceDecision("验收未能得出结论。这个任务接下来怎么办？"))
+		question := "验收报告执行受阻，请核对原验收证据中的外部前提并安排后续处理。这个任务接下来怎么办？"
+		if a.Verdict == protocol.VerdictInconclusive {
+			question = "验收报告无结论，尚不能据此认定环境故障。请核对原验收证据并安排有界调查。这个任务接下来怎么办？"
+		}
+		d.OpenDecisions = append(d.OpenDecisions, acceptanceDecision(question))
 	}
 	d.Task = t
 	return d, nil

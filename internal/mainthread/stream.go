@@ -112,7 +112,7 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, draft
 		return nil
 	}
 	for _, r := range drafts {
-		if !r.persisted || r.state == protocol.AssistantStreaming || r.event.Kind != harness.EventAgentMessageDelta {
+		if r.state == protocol.AssistantStreaming || r.event.Kind != harness.EventAgentMessageDelta {
 			continue
 		}
 		repair, err := m.isRepairEvent(ctx, th, r.event)
@@ -125,6 +125,9 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, draft
 					return err
 				}
 			}
+			continue
+		}
+		if !r.persisted {
 			continue
 		}
 		if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event, r.consumed); err != nil {

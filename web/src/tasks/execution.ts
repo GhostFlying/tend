@@ -75,7 +75,7 @@ export function executionCounts(counts: ExecutionCounts): { state: string; text:
 const waitLabels = {
   waiting_decision: "等待用户决定",
   waiting_approval: "等待批准",
-  acceptance_env_unavailable: "等待验收环境恢复",
+  acceptance_env_unavailable: "等待处理验收结论与证据",
   budget_exhausted: "等待调整实现次数",
   workspace_unavailable: "等待工作区恢复",
   preparation_required: "等待负责人修正执行配置",

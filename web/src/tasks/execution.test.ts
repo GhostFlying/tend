@@ -27,7 +27,7 @@ describe("server execution facts", () => {
   test("owner decisions take precedence over broad implementation and acceptance lifecycles", () => {
     for (const [lifecycle, block_reason, reason] of [
       ["changes_required", "budget_exhausted", "等待调整实现次数"],
-      ["awaiting_acceptance", "acceptance_env_unavailable", "等待验收环境恢复"],
+      ["awaiting_acceptance", "acceptance_env_unavailable", "等待处理验收结论与证据"],
       ["running", "workspace_unavailable", "等待工作区恢复"],
     ] as const) {
       const task = {

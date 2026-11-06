@@ -30,6 +30,14 @@ func TestFault_LapsedManagerRepairReplayCommitsItsOriginalClose(t *testing.T) {
 	lapsedManagerReplayCommitsOriginalClose(t, true)
 }
 
+func TestFault_ActiveClosingManagerRepairReplayCommitsItsOriginalClose(t *testing.T) {
+	managerReplayCommitsOriginalClose(t, true, managerReplayOptions{active: true})
+}
+
+func TestFault_ActiveClosingManagerEmptyRepairReplayCommitsItsOriginalClose(t *testing.T) {
+	managerReplayCommitsOriginalClose(t, true, managerReplayOptions{active: true, empty: true})
+}
+
 type databaseReplayFixture struct {
 	server             *server
 	assignment         *protocol.Assignment
@@ -38,6 +46,13 @@ type databaseReplayFixture struct {
 }
 
 func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained ...bool) databaseReplayFixture {
+	t.Helper()
+	return managerReplayCommitsOriginalClose(t, repair, managerReplayOptions{retained: len(retained) > 0 && retained[0]})
+}
+
+type managerReplayOptions struct{ active, empty, retained bool }
+
+func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options managerReplayOptions) databaseReplayFixture {
 	t.Helper()
 	s := newServer(t, time.Hour)
 	ctx := t.Context()
@@ -147,7 +162,11 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 	for sequence := int64(1); sequence <= 19; sequence++ {
 		body := json.RawMessage(`{"thread_id":"original-native","native":{"Kind":"request_usage"}}`)
 		if sequence >= 17 {
-			body = json.RawMessage(fmt.Sprintf(`{"thread_id":"original-native","native":{"Kind":"agent_message_delta","TurnID":"original-turn","ItemID":"original-item","Text":"part%d"}}`, sequence))
+			text := fmt.Sprintf("part%d", sequence)
+			if options.empty {
+				text = ""
+			}
+			body = json.RawMessage(fmt.Sprintf(`{"thread_id":"original-native","native":{"Kind":"agent_message_delta","TurnID":"original-turn","ItemID":"original-item","Text":%q}}`, text))
 		}
 		native(protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: body})
 		if sequence < 17 {
@@ -166,14 +185,18 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 	if _, err := s.app.Execute(ctx, principal, frozenClose, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 		t.Fatal("original frozen close bypassed unapplied deltas", err)
 	}
-	if err := s.store.Write(ctx, func(tx *store.Tx) error {
-		if err := tx.UpdateRunObserved(ctx, as.RunID, protocol.RunUnknown, s.now().UnixMilli()); err != nil {
+	leaseStatus := "active"
+	if !options.active {
+		leaseStatus = "lapsed"
+		if err := s.store.Write(ctx, func(tx *store.Tx) error {
+			if err := tx.UpdateRunObserved(ctx, as.RunID, protocol.RunUnknown, s.now().UnixMilli()); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE leases SET status='lapsed' WHERE run_id=?`, as.RunID)
 			return err
+		}); err != nil {
+			t.Fatal(err)
 		}
-		_, err := tx.Exec(ctx, `UPDATE leases SET status='lapsed' WHERE run_id=?`, as.RunID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
 	}
 	instance := "database-replay/" + as.Manager.ConversationID
 	binding := selection
@@ -191,7 +214,7 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 			t.Error("database replay admission was not serialized with drain", drained, err)
 		}
 		return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, quiet()), mainthread.Config{Instance: "database-replay/" + id, ConversationID: id, Log: quiet(), OpenNamed: func(context.Context, hostedconfig.Selection) (harness.Session, error) {
-			t.Error("lapsed database replay opened a native session or queried models")
+			t.Error("closing database replay opened a native session or queried models")
 			return nil, fmt.Errorf("native execution is forbidden")
 		}}), nil
 	}}
@@ -204,11 +227,11 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 	for s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) != 0 {
 		select {
 		case <-deadline.C:
-			t.Fatal("lapsed original deltas have no database consumer")
+			t.Fatal("original closing deltas have no database consumer")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=?`, as.RunID) != 2 || s.count(`SELECT COUNT(*) FROM runs`) != 1 || s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='lapsed'`, as.RunID) != 1 {
+	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=?`, as.RunID) != 2 || s.count(`SELECT COUNT(*) FROM runs`) != 1 || s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status=?`, as.RunID, leaseStatus) != 1 {
 		t.Fatal("database replay queued native work, created a run or renewed the lease")
 	}
 	if repair {
@@ -224,7 +247,7 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, business) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != 19 {
 		t.Fatal("prefix replay fabricated business completion or changed raw native events")
 	}
-	if len(retained) > 0 && retained[0] {
+	if options.retained {
 		cancel()
 		wg.Wait()
 		prepare, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest)}, true)
@@ -254,7 +277,7 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 	if result, err := s.app.Execute(ctx, principal, frozenClose, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); err != nil || result.Status != protocol.OpSucceeded {
 		t.Fatal("same original close envelope could not commit after consumption", result, err)
 	}
-	if len(retained) > 0 && retained[0] {
+	if options.retained {
 		native(protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original physical process exited", LastSequence: 19})
 	}
 	return databaseReplayFixture{server: s, assignment: as, runtime: runtime, business: business, instance: instance}

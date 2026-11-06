@@ -378,6 +378,9 @@ func (o owner) task(ctx context.Context, id string) error {
 	}
 	for _, a := range d.Acceptances {
 		fmt.Fprintf(out, "verdict on %s (spec v%d): %s\n", a.ArtifactID, a.SpecVersion, a.Verdict)
+		if len(a.Evidence) > 0 {
+			fmt.Fprintf(out, "  evidence: %s\n", a.Evidence)
+		}
 		var issues []any
 		_ = json.Unmarshal(a.Issues, &issues)
 		for _, i := range issues {
