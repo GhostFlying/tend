@@ -271,6 +271,10 @@ export interface TendAPI {
   BindFeishu?: BindFeishu;
   BindLocalRepositoryRequest?: BindLocalRepositoryRequest;
   BindTelegram?: BindTelegram;
+  BoundedMaintenanceAuthorization?: BoundedMaintenanceAuthorization;
+  BoundedMaintenanceState?: BoundedMaintenanceState;
+  BoundedRunnerAdmissionRelease?: BoundedRunnerAdmissionRelease;
+  BoundedRunnerMaintenanceGrant?: BoundedRunnerMaintenanceGrant;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
   ConcurrencyGroupPage?: ConcurrencyGroupPage;
   ConcurrencyHistoryPage?: ConcurrencyHistoryPage;
@@ -385,6 +389,7 @@ export interface TendAPI {
   RunMessagePage?: RunMessagePage;
   RunRolloutPage?: RunRolloutPage;
   RunnerAgentCatalog?: RunnerAgentCatalog;
+  RunnerBoundedMaintenancePlan?: RunnerBoundedMaintenancePlan;
   RunnerRepository?: RunnerRepository;
   SendRunMessagePayload?: SendRunMessagePayload;
   SessionRequest?: SessionRequest;
@@ -1567,6 +1572,7 @@ export interface ArchiveHostStatus {
  */
 export interface RunnerControl {
   authorization?: MaintenanceAuthorization;
+  bounded_recovery_release?: BoundedRunnerAdmissionRelease;
   cancelled_upgrade_id?: string;
   mode: string;
   release_id?: string;
@@ -1583,6 +1589,31 @@ export interface MaintenanceAuthorization {
   id: string;
   remaining_ms: number;
   run_ids: string[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedRunnerAdmissionRelease".
+ */
+export interface BoundedRunnerAdmissionRelease {
+  expected_control_revision: number;
+  host_id: string;
+  journal: BoundedDataIdentity;
+  reason: string;
+  recovery_authorization_id: string;
+  request_id: string;
+  runner_generation: number;
+  successor: UpgradeBinding;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedDataIdentity".
+ */
+export interface BoundedDataIdentity {
+  device: number;
+  incarnation?: string;
+  inode: number;
+  path?: string;
+  version?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1615,6 +1646,7 @@ export interface RunnerRuntime {
   authorization_deadline_ms?: number;
   authorization_id?: string;
   blockers?: string[];
+  bounded_recovery_authorization_id?: string;
   build: RunnerBuild;
   capabilities: string[] | null;
   configuration_sha256?: string;
@@ -1945,6 +1977,162 @@ export interface BindTelegram {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedMaintenanceAuthorization".
+ */
+export interface BoundedMaintenanceAuthorization {
+  data_identity?: BoundedDataIdentity;
+  expected_generation: number;
+  expected_phase: string;
+  expires_at_ms: number;
+  force_on_drain_timeout: boolean;
+  plan_sha256: string;
+  reason: string;
+  request_id: string;
+  role: string;
+  source: RecoveryIdentity;
+  target: UpgradeBinding;
+  timeouts: MaintenanceTimeoutPolicy;
+  updater_lock?: BoundedDataIdentity;
+  updater_source?: RecoveryIdentity;
+  updater_target?: BoundedUpdaterTarget;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RecoveryIdentity".
+ */
+export interface RecoveryIdentity {
+  launch_id: string;
+  pid: number;
+  sha256: string;
+  start_ticks: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MaintenanceTimeoutPolicy".
+ */
+export interface MaintenanceTimeoutPolicy {
+  backup_ms: number;
+  complete_ms: number;
+  drain_ms: number;
+  fence_ms: number;
+  handoff_ms: number;
+  kill_ms: number;
+  overall_ms: number;
+  start_health_ms: number;
+  stop_ms: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedUpdaterTarget".
+ */
+export interface BoundedUpdaterTarget {
+  candidate: string;
+  candidate_sha256: string;
+  config_file: string;
+  config_file_sha256: string;
+  manager_sha256: string;
+  unit: string;
+  unit_sha256: string;
+  updater_binary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedMaintenanceState".
+ */
+export interface BoundedMaintenanceState {
+  audit?: BoundedMaintenanceAudit[];
+  authorization: BoundedMaintenanceAuthorization;
+  authorizations?: {
+    [k: string]: BoundedMaintenanceAuthorization | undefined;
+  };
+  boot_id: string;
+  outcome: string;
+  overall_deadline_mono_ms: number;
+  overall_deadline_ms: number;
+  overall_started_at_ms: number;
+  phase: string;
+  phase_deadline_mono_ms: number;
+  phase_deadline_ms: number;
+  phase_entered_at_ms: number;
+  recovery_authorization_id?: string;
+  source_exit?: BoundedProcessExit;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedMaintenanceAudit".
+ */
+export interface BoundedMaintenanceAudit {
+  action: string;
+  archive?: ArchiveOnlineStatus;
+  observation_error?: string;
+  outcome: string;
+  phase: string;
+  previous_window?: BoundedMaintenanceWindowSnapshot;
+  reason: string;
+  recorded_at_ms: number;
+  request_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedMaintenanceWindowSnapshot".
+ */
+export interface BoundedMaintenanceWindowSnapshot {
+  boot_id: string;
+  outcome: string;
+  overall_deadline_mono_ms: number;
+  overall_deadline_ms: number;
+  overall_started_at_ms: number;
+  phase: string;
+  phase_deadline_mono_ms: number;
+  phase_deadline_ms: number;
+  phase_entered_at_ms: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedProcessExit".
+ */
+export interface BoundedProcessExit {
+  confirmed_at_ms: number;
+  method: string;
+  process: RecoveryIdentity;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BoundedRunnerMaintenanceGrant".
+ */
+export interface BoundedRunnerMaintenanceGrant {
+  control_revision: number;
+  plan: RunnerBoundedMaintenancePlan;
+  protection_set_sha256: string;
+  recovery_authorization_id: string;
+  runs: CommittedRetainedRun[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerBoundedMaintenancePlan".
+ */
+export interface RunnerBoundedMaintenancePlan {
+  authorization: BoundedMaintenanceAuthorization;
+  expected_control_revision: number;
+  host_id: string;
+  journal: BoundedDataIdentity;
+  node_selector: string;
+  release_dir: string;
+  runner_generation: number;
+  runner_instance_id: string;
+  source: RecoveryIdentity;
+  target: UpgradeBinding;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CommittedRetainedRun".
+ */
+export interface CommittedRetainedRun {
+  run: RunView;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CancelIssueDeadlinePayload".
  */
 export interface CancelIssueDeadlinePayload {
@@ -2110,6 +2298,7 @@ export interface ContinueRetainedRunPayload {
   protection_set_sha256: string;
   protections: RetainedRunProtection[] | null;
   reason: string;
+  recovery_authorization_id?: string;
   source_message_id?: string;
   spec_version: number;
   task_id: string;
@@ -4044,6 +4233,7 @@ export interface RetainedRunReconciliation {
   pending_business_receipts: boolean;
   protection_set_sha256: string;
   protections: RetainedRunProtection[] | null;
+  recovery_authorization_id?: string;
   role: RunRole;
   run_id: string;
   task_revision: number;

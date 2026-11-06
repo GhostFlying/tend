@@ -154,12 +154,14 @@ func TestReceiptRecoveryStartupAcceptsDistinctCompleteObservations(t *testing.T)
 // Unix updater status, app registration transaction and original lease capture.
 // The previous service is absent; no pre-stop API can rescue a rejected startup.
 func TestReceiptRecoveryChangedObservationsActualSuccessorStartup(t *testing.T) {
-	if os.Getenv("TEND_CHANGED_RECOVERY_STARTUP_TEST") != "1" {
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestReceiptRecoveryChangedObservationsActualSuccessorStartup$")
-		cmd.Env = append(os.Environ(), "TEND_CHANGED_RECOVERY_STARTUP_TEST=1", "TEND_UPDATER_LAUNCH_ID=changed-recovery-successor")
-		raw, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("actual successor startup: %v\n%s", err, raw)
+	if os.Getenv("TEND_CHANGED_RECOVERY_STARTUP_TEST") == "" {
+		for _, mode := range []string{"ordinary", "force"} {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestReceiptRecoveryChangedObservationsActualSuccessorStartup$")
+			cmd.Env = append(os.Environ(), "TEND_CHANGED_RECOVERY_STARTUP_TEST="+mode, "TEND_UPDATER_LAUNCH_ID=changed-recovery-successor")
+			raw, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("actual successor startup %s: %v\n%s", mode, err, raw)
+			}
 		}
 		return
 	}
@@ -216,6 +218,24 @@ func TestReceiptRecoveryChangedObservationsActualSuccessorStartup(t *testing.T) 
 		t.Fatal(err)
 	}
 	state := updater.State{Format: 3, InstanceID: "server", Generation: 3, Maintenance: &source}
+	if os.Getenv("TEND_CHANGED_RECOVERY_STARTUP_TEST") == "force" {
+		source.Plan.PreviousProcess = protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: "previous", SHA256: source.Plan.Previous.ArtifactSHA256}
+		// The post-stop authoritative set includes work absent from pre-stop diagnostics.
+		source.Plan.ReceiptRecoveryStop.Runs = nil
+		source.ReceiptRecoveryAuthorized = false
+		source.ReceiptRecoveryRequestID = ""
+		source.ReceiptRecoveryAuthorization = nil
+		source.ArchiveAuthorization.HostedDrained = false
+		source.ArchiveAuthorization.Blockers = []string{"native receipt reads: 3", "summary operations: 14", "hosted operations are active or uncertain"}
+		auth := protocol.BoundedMaintenanceAuthorization{RequestID: ids.New(protocol.PrefixRequest), Role: "server", Source: source.Plan.PreviousProcess, Target: source.Plan.Successor, Reason: "explicit external recovery", Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+		raw, _ := json.Marshal(source.Plan)
+		sum := sha256.Sum256(raw)
+		auth.PlanSHA256 = hex.EncodeToString(sum[:])
+		state.Format = 4
+		state.Bounded = &protocol.BoundedMaintenanceState{Authorization: auth, SourceExit: &protocol.BoundedProcessExit{Process: auth.Source, ConfirmedAtMillis: time.Now().UnixMilli(), Method: "exact_process_exit_observed"}}
+		t.Setenv("TEND_BOUNDED_RECOVERY_REQUEST_ID", auth.RequestID)
+	}
+
 	socket := filepath.Join(root, "updater.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
@@ -325,5 +345,46 @@ func TestReceiptRecoveryLaunchExitParentRequiresExactOwnedHistory(t *testing.T) 
 				t.Fatal("unproven launch exit authorized a successor")
 			}
 		})
+	}
+}
+
+func TestBoundedFailedParentKeepsUnknownArchiveForForwardStartup(t *testing.T) {
+	source := changedRecoveryObservations(t)
+	source.Plan.PreviousProcess = protocol.RecoveryIdentity{PID: 111, StartTicks: 222, LaunchID: "old-server", SHA256: strings.Repeat("a", 64)}
+	source.Plan.Previous = protocol.UpgradeBinding{InstanceID: "server", ProcessInstanceID: "old-server", ArtifactSHA256: source.Plan.PreviousProcess.SHA256}
+	source.Plan.Successor = protocol.UpgradeBinding{UpgradeID: source.Plan.MaintenanceID, InstanceID: "server", ProcessInstanceID: "failed-server", ArtifactSHA256: strings.Repeat("b", 64)}
+	source.Process = protocol.RecoveryIdentity{PID: 333, StartTicks: 444, LaunchID: "failed-server", SHA256: source.Plan.Successor.ArtifactSHA256}
+	source.Phase = "checking_successor"
+	source.Irreversible = true
+	source.ReceiptRecoveryAuthorized = false
+	source.ReceiptRecoveryRequestID = ""
+	source.ArchiveAuthorization.HostedDrained = false
+	source.ArchiveAuthorization.Blockers = []string{"native receipt reads: 3", "summary operations: 14", "hosted operations are active or uncertain"}
+	raw, _ := json.Marshal(source.Plan)
+	sum := sha256.Sum256(raw)
+	archive, _ := json.Marshal(source.ArchiveAuthorization)
+	archiveHash := sha256.Sum256(archive)
+	child := source.Plan
+	child.MaintenanceID = "repair-bounded-parent"
+	child.ParentMaintenanceID = source.Plan.MaintenanceID
+	child.ParentPlan = &source.Plan
+	child.ParentPlanSHA256 = hex.EncodeToString(sum[:])
+	child.ParentArchiveSHA256 = hex.EncodeToString(archiveHash[:])
+	child.Previous = source.Plan.Successor
+	child.PreviousProcess = source.Process
+	state := updater.State{Format: 4, MaintenanceHistory: map[string]updater.CommittedMaintenance{source.Plan.MaintenanceID: source}}
+	if err := verifyMaintenanceParent(state, child); err == nil {
+		t.Fatal("unknown archive became ordinary drain proof")
+	}
+	auth := protocol.BoundedMaintenanceAuthorization{RequestID: protocol.NewULIDGen(time.Now, nil).New(protocol.PrefixRequest), Role: "server", PlanSHA256: hex.EncodeToString(sum[:]), Source: source.Plan.PreviousProcess, Target: source.Plan.Successor, Reason: "original explicit unknown recovery"}
+	proof := protocol.BoundedMaintenanceState{Authorization: auth, SourceExit: &protocol.BoundedProcessExit{Process: auth.Source, ConfirmedAtMillis: 1}}
+	state.BoundedHistory = map[string]protocol.BoundedMaintenanceState{auth.RequestID: proof}
+	if err := verifyMaintenanceParent(state, child); err != nil {
+		t.Fatal("exact force parent could not forward", err)
+	}
+	proof.SourceExit = nil
+	state.BoundedHistory[auth.RequestID] = proof
+	if err := verifyMaintenanceParent(state, child); err == nil {
+		t.Fatal("parent forward lost physical exit proof")
 	}
 }

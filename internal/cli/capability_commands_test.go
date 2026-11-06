@@ -167,6 +167,21 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 	if err := os.WriteFile(maintenancePath, maintenanceJSON, 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "handoff.json"), maintenanceJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
+	boundedAuthorization := filepath.Join(dir, "bounded-authorization.json")
+	boundedJSON, err := json.Marshal(protocol.BoundedMaintenanceAuthorization{
+		RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEZ", ExpectedGeneration: 2,
+		ExpectedPhase: "prepared", PlanSHA256: strings.Repeat("a", 64),
+		Role: "server", Reason: "Keep original unknown work through maintenance", ExpiresAtMillis: 9999999999999,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(boundedAuthorization, boundedJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
 	firstCapture, secondCapture := filepath.Join(dir, "first-capture.json"), filepath.Join(dir, "second-capture.json")
 	for _, path := range []string{firstCapture, secondCapture} {
 		if err := os.WriteFile(path, []byte("[]"), 0600); err != nil {
@@ -186,7 +201,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			_ = os.Remove(output)
 			args := append([]string(nil), entry.Example...)
 			for i, arg := range args {
-				args[i] = strings.NewReplacer("{server}", remote.URL, "{server-binary}", serverPath, "{server-sha256}", hex.EncodeToString(serverSum[:]), "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
+				args[i] = strings.NewReplacer("{server}", remote.URL, "{server-binary}", serverPath, "{server-sha256}", hex.EncodeToString(serverSum[:]), "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{bounded-authorization}", boundedAuthorization, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
 			}
 			mu.Lock()
 			calls = nil
@@ -206,6 +221,10 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			if strings.HasPrefix(entry.Capability, "local EXEC updater maintenance ") {
 				action := strings.TrimPrefix(entry.Capability, "local EXEC updater maintenance ")
 				matched = strings.Contains(env.out.String(), "maintenance\n"+action+"\n--config\n")
+			}
+			if strings.HasPrefix(entry.Capability, "local EXEC updater bounded ") {
+				action := strings.TrimPrefix(entry.Capability, "local EXEC updater bounded ")
+				matched = strings.Contains(env.out.String(), "bounded\n"+action+"\n--config\n")
 			}
 			for _, call := range seen {
 				if method, path, ok := strings.Cut(expected, " "); ok {
@@ -297,6 +316,37 @@ func TestCapabilityWritesKeepOriginalIdentityAndUncertainty(t *testing.T) {
 					if entry.Command == cmd.Name {
 						args = append([]string(nil), entry.Example...)
 						break
+					}
+				}
+				if cmd.Operation == boundedRunnerOwnerOperation || cmd.Operation == protocol.OpReleaseBoundedRunnerAdmission {
+					// This operation freezes the explicit request inside the typed
+					// authorization as well as in the owner Envelope.
+					for i := range args {
+						if args[i] == "--data" && i+1 < len(args) {
+							if cmd.Operation == protocol.OpReleaseBoundedRunnerAdmission {
+								var release protocol.BoundedRunnerAdmissionRelease
+								if err := json.Unmarshal([]byte(args[i+1]), &release); err != nil {
+									t.Fatal(err)
+								}
+								release.RequestID = id
+								raw, err := json.Marshal(release)
+								if err != nil {
+									t.Fatal(err)
+								}
+								args[i+1] = string(raw)
+								continue
+							}
+							var plan protocol.RunnerBoundedMaintenancePlan
+							if err := json.Unmarshal([]byte(args[i+1]), &plan); err != nil {
+								t.Fatal(err)
+							}
+							plan.Authorization.RequestID = id
+							raw, err := json.Marshal(plan)
+							if err != nil {
+								t.Fatal(err)
+							}
+							args[i+1] = string(raw)
+						}
 					}
 				}
 				args = append(args, "--request-id", id)

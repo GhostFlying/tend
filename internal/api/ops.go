@@ -34,7 +34,7 @@ var ownerCommands = commandMap(
 	app.CanonicalOwnerTaskCreate{}, app.CanonicalOwnerTaskUpdate{}, app.RequestIssueManager{}, app.RequestIssueOwner{}, app.ManagerMigration{}, app.HostedIssueAssignment{}, app.HostedIssueAssignment{Finish: true}, app.PutAgentCategory{}, app.RegisterRepository{}, app.SetIssueMessageAssociations{},
 	app.WithdrawMessage{},
 	app.UpdateWorkItemChoice{Action: "respond"},
-	app.HostMaintenance{},
+	app.HostMaintenance{}, app.AuthorizeBoundedRunnerMaintenance{}, app.ReleaseBoundedRunnerAdmission{},
 	app.ControlUpgrade{},
 	app.AnswerDecision{}, app.AnswerDecision{TypedContinuation: true}, app.QuestionInputCommand{}, app.QuestionInputCommand{Revoke: true},
 	app.ResumeDecisionContinuation{}, app.ResumeDecisionContinuation{Reconcile: true},

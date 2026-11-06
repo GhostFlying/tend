@@ -55,7 +55,7 @@ func TestRetainedRunCLIDiagnosticPreservesUnknownLedgerFacts(t *testing.T) {
 	f := newFakeServer(t)
 	te := newTestEnv(t, f.srv.URL)
 	p := retainedCLIProof()
-	want := protocol.RetainedRunReconciliation{RunID: retainedCLIRun, Identity: p.RetainedRunIdentity, TaskRevision: 7, Role: protocol.RoleImplement, Observed: protocol.RunUnknown, LeaseStatus: "lapsed", Protections: p.Protections, ProtectionSetSHA256: p.ProtectionSetSHA256, OriginalRequestIDs: []string{"original-business"}, UnresolvedNativeRequests: 1, UnappliedEvents: 3, PendingBusinessReceipts: true, Blockers: []string{"native_requests_unreconciled", "native_events_unreconciled"}}
+	want := protocol.RetainedRunReconciliation{RecoveryAuthorizationID: "original-force-authorization", RunID: retainedCLIRun, Identity: p.RetainedRunIdentity, TaskRevision: 7, Role: protocol.RoleImplement, Observed: protocol.RunUnknown, LeaseStatus: "lapsed", Protections: p.Protections, ProtectionSetSHA256: p.ProtectionSetSHA256, OriginalRequestIDs: []string{"original-business"}, UnresolvedNativeRequests: 1, UnappliedEvents: 3, PendingBusinessReceipts: true, Blockers: []string{"native_requests_unreconciled", "native_events_unreconciled"}}
 	route := "GET /api/v1/runs/" + retainedCLIRun + "/maintenance-reconciliation"
 	f.answer(route, want)
 	if code := te.main("run", "maintenance-reconciliation", retainedCLIRun, "--json"); code != exitOK {
@@ -74,6 +74,7 @@ func TestRetainedRunCLIDataFileDryRunAndExplicitReplayPreserveIdentity(t *testin
 	f := newFakeServer(t)
 	te := newTestEnv(t, f.srv.URL)
 	want := retainedCLIProof()
+	want.RecoveryAuthorizationID = "original-force-authorization"
 	raw, _ := json.Marshal(want)
 	args := retainedCLIArgs(raw)
 	if code := te.main(append(slices.Clone(args), "--dry-run")...); code != exitOK {

@@ -615,7 +615,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 					}
 				}
 				events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.retained_continued", Body: map[string]any{"continuation_request_id": continuation.RequestID, "lease_id": lease.LeaseID}})
-				res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinueRetained, Desired: desired, RetainedResume: &protocol.RetainedRunResume{RequestID: continuation.RequestID, Mode: "attach"}})
+				res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinueRetained, Desired: desired, RetainedResume: &protocol.RetainedRunResume{RequestID: continuation.RequestID, Mode: "attach", RecoveryAuthorizationID: retainedContinuationRecoveryAuthorization(continuation)}})
 				continue
 			}
 			// The negotiated peer retains this exact journal. Registration and

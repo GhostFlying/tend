@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -291,15 +292,23 @@ func TestCommittedMaintenanceUnknownStopAndStartReconcileSameIdentity(t *testing
 }
 
 func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T) {
-	for _, mode := range []string{"checking-live", "checking-gone", "committed-unlinked", "launch-exited"} {
+	for _, mode := range []string{"checking-live", "checking-gone", "committed-unlinked", "launch-exited", "force-checking-live"} {
 		t.Run(mode, func(t *testing.T) {
+			forced := strings.HasPrefix(mode, "force-")
+			mode = strings.TrimPrefix(mode, "force-")
 			h, p, a := committedFixture(t)
 			ctx := t.Context()
 			if err := h.s.PrepareCommittedMaintenance(ctx, p, h.s.Status().Generation); err != nil {
 				t.Fatal(err)
 			}
-			a.archive.HostedDrained = true
-			if err := h.s.AuthorizeCommittedMaintenance(ctx, p, h.s.Status().Generation); err != nil {
+			a.archive.HostedDrained = !forced
+			if forced {
+				a.archive.Blockers = []string{"native receipt reads: 3", "summary operations: 14", "hosted operations are active or uncertain"}
+				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF1", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(p), Role: "server", Source: p.PreviousProcess, Target: p.Successor, Reason: "explicit unknown predecessor recovery", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+				if err := h.s.AuthorizeBoundedMaintenance(ctx, p, auth, "force"); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := h.s.AuthorizeCommittedMaintenance(ctx, p, h.s.Status().Generation); err != nil {
 				t.Fatal(err)
 			}
 			a.unready = mode != "committed-unlinked"
@@ -358,11 +367,24 @@ func TestCommittedMaintenanceFailedCandidateCanForwardWithoutItsAPI(t *testing.T
 			}
 			a.blockArchive = true
 			a.unready = false
-			if err := h.s.PrepareCommittedMaintenance(ctx, next, h.s.Status().Generation); err != nil {
-				t.Fatal("child depended on broken API", err)
-			}
-			if err := h.s.AuthorizeCommittedMaintenance(ctx, next, h.s.Status().Generation); err != nil {
-				t.Fatal("cannot authorize forward without broken API", err)
+			if forced {
+				if err := h.s.AuthorizeCommittedMaintenance(ctx, next, h.s.Status().Generation); err == nil {
+					t.Fatal("ordinary forward converted the old forced observation into drain proof")
+				}
+				auth := protocol.BoundedMaintenanceAuthorization{RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF2", ExpectedGeneration: h.s.Status().Generation, ExpectedPhase: "updater_adopted", PlanSHA256: digest(next), Role: "server", Source: next.PreviousProcess, Target: next.Successor, Reason: "independently authorize the repaired candidate", ExpiresAtMillis: h.now.Add(10 * time.Minute).UnixMilli(), Timeouts: protocol.DefaultMaintenanceTimeoutPolicy()}
+				if err := h.s.AuthorizeBoundedMaintenance(ctx, next, auth, "force"); err != nil {
+					t.Fatal("cannot explicitly forward from forced parent", err)
+				}
+				if err := ValidateBoundedMaintenanceParent(h.s.Status(), *parent); err != nil {
+					t.Fatal("lost original unknown parent authority", err)
+				}
+			} else {
+				if err := h.s.PrepareCommittedMaintenance(ctx, next, h.s.Status().Generation); err != nil {
+					t.Fatal("child depended on broken API", err)
+				}
+				if err := h.s.AuthorizeCommittedMaintenance(ctx, next, h.s.Status().Generation); err != nil {
+					t.Fatal("cannot authorize forward without broken API", err)
+				}
 			}
 			for i := 0; i < 7; i++ {
 				h.step(t)

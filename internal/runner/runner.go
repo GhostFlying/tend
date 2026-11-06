@@ -213,6 +213,7 @@ type Runner struct {
 	upgradeError                string
 	downloadedBytes             int64
 	confirmedRuntime            protocol.RunnerRuntime
+	boundedRecovery             *journal.BoundedRecoveryQuarantine
 }
 
 // New returns a Runner.
@@ -263,6 +264,10 @@ func New(cfg Config) *Runner {
 // resume after the next start.
 func (r *Runner) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
+	if err := r.loadBoundedRecovery(ctx); err != nil {
+		cancel()
+		return err
+	}
 	if err := r.loadControl(ctx); err != nil {
 		cancel()
 		return err
@@ -282,13 +287,32 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.wg.Go(func() { r.heartbeats(ctx) })
 	r.wg.Go(func() { r.watchdog(ctx) })
 	r.wg.Go(func() { r.reconciler(ctx) })
-	r.wg.Go(func() { r.finalMessageReceipts(ctx) })
-	r.wg.Go(func() { r.nativeUsageLoop(ctx) })
-	if err := r.resendClaims(ctx); err != nil {
-		return err
+	if !r.boundedRecoveryPending() {
+		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
+		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
+		if err := r.resendClaims(ctx); err != nil {
+			return err
+		}
 	}
 	if err := r.retry(ctx, func() error { return r.reconcileHello(ctx) }); err != nil {
 		return err
+	}
+	if r.boundedRecoveryPending() {
+		// A replacement process is observable before any old native work is
+		// authorized to continue. The original queues are recovery facts.
+		r.replayBoundedFacts(ctx)
+		for ctx.Err() == nil && r.boundedRecoveryPending() {
+			select {
+			case <-ctx.Done():
+			case <-time.After(max(r.cfg.RetryDelay, 5*time.Second)):
+				r.replayBoundedFacts(ctx)
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
+		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	}
 	if len(r.cfg.RolloutRoots) > 0 {
 		r.wg.Go(func() { r.rolloutPreviews(ctx) })
@@ -417,6 +441,13 @@ func (r *Runner) resendClaims(ctx context.Context) error {
 		if req.Envelope.Operation != protocol.OpRunnerClaim {
 			continue
 		}
+		protected, err := r.cfg.Journal.BoundedRequestQuarantined(ctx, req.Envelope.RequestID)
+		if err != nil {
+			return err
+		}
+		if protected {
+			continue
+		}
 		env := req.Envelope
 		if err := r.claimOnce(ctx, &env, time.Time{}); err != nil {
 			if !errors.Is(err, errClaimRefused) {
@@ -439,7 +470,7 @@ func (r *Runner) claims(ctx context.Context) {
 			return
 		}
 		r.controlMu.Lock()
-		if r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance {
+		if r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance || r.boundedRecovery != nil && r.boundedRecovery.AdmissionRelease == nil {
 			r.controlMu.Unlock()
 			if runtime.PendingClaims > 0 {
 				if err := r.resendClaims(ctx); err == nil {
@@ -595,6 +626,11 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		// What tend wants now, not what it wanted when it assigned the run.
 		as := run.Assignment
 		as.Desired = v.Desired
+		if r.boundedRunQuarantined(ctx, v.RunID) && (v.Verdict != protocol.VerdictContinueRetained || !r.boundedContinuationMatches(v.RetainedResume)) {
+			// Neither an ordinary Continue/Stop nor an old strict attachment
+			// grant authorizes work quarantined by forced process replacement.
+			continue
+		}
 		switch {
 		case v.Verdict == protocol.VerdictRetain:
 			if _, exists := byID[v.RunID]; !exists {
@@ -684,6 +720,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		}
 	}
 	for _, as := range res.Reassigned {
+		if r.boundedRecoveryPending() {
+			continue
+		}
 		if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, as, "", assignmentWorker(as, r.cfg.Worker)); err != nil {
 			return err
 		}
@@ -735,6 +774,12 @@ func (r *Runner) lookup(runID string) *active {
 // start launches the executor of a journaled run unless one is running.
 func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt time.Time) {
 	runID := as.RunID
+	if r.boundedRunQuarantined(ctx, runID) {
+		permit, err := r.cfg.Journal.RetainedResume(ctx, runID)
+		if err != nil || !r.boundedContinuationMatches(permit) {
+			return
+		}
+	}
 	if !protocol.RunnerProtocolSupported(as.Protocol) {
 		r.cfg.Log.ErrorContext(ctx, "run protocol unsupported; preserving assignment", "run_id", as.RunID, "protocol", as.Protocol)
 		return

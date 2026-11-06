@@ -85,6 +85,14 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 	attemptedReservation := false
 	releaseIntents := map[protocol.WorkspaceRelease]bool{}
 	for _, p := range pending {
+		protected, err := r.cfg.Journal.BoundedRequestQuarantined(ctx, p.Envelope.RequestID)
+		if err != nil {
+			return err
+		}
+		if protected {
+			heldResources = true
+			continue
+		}
 		switch p.Envelope.Operation {
 		case protocol.OpWorkspaceRelease:
 			var release protocol.WorkspaceRelease
@@ -119,6 +127,14 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 		return errors.Join(append(deferred, err)...)
 	}
 	for _, p := range releases {
+		protected, err := r.cfg.Journal.BoundedWorkspaceQuarantined(ctx, p.WorkspaceID, p.TaskID)
+		if err != nil {
+			return err
+		}
+		if protected {
+			heldResources = true
+			continue
+		}
 		if reconcileErr != nil || blocked[p.WorkspaceID] || releaseIntents[p] {
 			continue
 		}
@@ -154,7 +170,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 		r.controlMu.Lock()
 		var env *protocol.Envelope
 		var reserveErr error
-		if r.control.Mode != protocol.RunnerMaintenance && !r.bootstrapMaintenance {
+		if r.control.Mode != protocol.RunnerMaintenance && !r.bootstrapMaintenance && (r.boundedRecovery == nil || r.boundedRecovery.AdmissionRelease != nil) {
 			env, reserveErr = r.newEnvelope(protocol.OpWorkspaceCleanup, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.WorkspaceCleanupRequest{Limit: 10, AgentExecution: r.agentExecutionSupported && r.cfg.Executions != nil})
 			if reserveErr == nil {
 				reserveErr = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})

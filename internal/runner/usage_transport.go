@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
 // localUsageRPC reuses the running runner's authenticated networking on its
@@ -30,11 +31,99 @@ func (r *Runner) localUsageRPC(w http.ResponseWriter, q *http.Request) {
 		http.Error(w, "only native usage operations are allowed", http.StatusForbidden)
 		return
 	}
+	if env.Operation == protocol.OpRunnerUsageUpload {
+		pending, err := r.cfg.Journal.Requests(q.Context())
+		if err != nil {
+			http.Error(w, "usage journal unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		for _, request := range pending {
+			if request.Envelope.RequestID != env.RequestID {
+				continue
+			}
+			want, werr := protocol.PayloadHash(&request.Envelope)
+			got, gerr := protocol.PayloadHash(&env)
+			if werr != nil || gerr != nil || want != got {
+				http.Error(w, "usage request identity changed", http.StatusConflict)
+				return
+			}
+		}
+	}
 	op, err := r.c.do(q.Context(), r.c.host(), &env)
 	if err != nil {
 		http.Error(w, "usage server is unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if env.Operation == protocol.OpRunnerUsageUpload && op.Status == protocol.OpSucceeded && op.Error == nil {
+		if err := r.cfg.Journal.DeleteRequest(q.Context(), env.RequestID); err != nil {
+			http.Error(w, "usage acknowledgement remains pending", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &op})
+}
+
+// localUsageJournal keeps foreground usage maintenance in the live runner's
+// single writer. Existing pending envelopes and cursor commits stay together.
+func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
+	if !r.supportsNativeUsage() {
+		http.Error(w, "native usage capability is pending", http.StatusServiceUnavailable)
+		return
+	}
+	if q.URL.Path == "/runner/v1/usage/pending" {
+		if q.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		requests, err := r.cfg.Journal.Requests(q.Context())
+		if err != nil {
+			http.Error(w, "usage journal unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		pending := []journal.Request{}
+		for _, request := range requests {
+			if request.Envelope.Operation == protocol.OpRunnerUsageUpload {
+				pending = append(pending, request)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(pending)
+		return
+	}
+	if q.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, q.Body, 16<<20))
+	decoder.DisallowUnknownFields()
+	var err error
+	if q.URL.Path == "/runner/v1/usage/source" {
+		var source journal.UsageSource
+		if err = decoder.Decode(&source); err == nil {
+			if source.ID == "" {
+				http.Error(w, "invalid usage source", http.StatusBadRequest)
+				return
+			}
+			err = r.cfg.Journal.RegisterUsageSource(q.Context(), source)
+		}
+	} else {
+		var input struct {
+			Source   journal.UsageSource `json:"source"`
+			Envelope *protocol.Envelope  `json:"envelope"`
+		}
+		if err = decoder.Decode(&input); err == nil {
+			if input.Source.ID == "" || input.Envelope != nil && (input.Envelope.RequestID == "" || input.Envelope.Operation != protocol.OpRunnerUsageUpload || input.Envelope.Target.Type != "host" || input.Envelope.Target.ID != r.cfg.HostID) {
+				http.Error(w, "invalid usage upload binding", http.StatusBadRequest)
+				return
+			}
+			err = r.cfg.Journal.QueueUsage(q.Context(), input.Source, input.Envelope)
+		}
+	}
+	if err != nil {
+		http.Error(w, "usage journal operation not confirmed", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct{}{})
 }

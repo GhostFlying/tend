@@ -11,6 +11,28 @@ import (
 )
 
 func captureMaintenanceRunProtection(ctx context.Context, x *Exec, tx *store.Tx, p protocol.CommittedMaintenancePlan) error {
+	return captureMaintenanceRunProtectionSet(ctx, x, tx, p, false)
+}
+
+// The successor transaction is authoritative after the predecessor exited.
+// Pre-stop diagnostics never limit which unfinished executions remain protected.
+func captureBoundedMaintenanceRunProtection(ctx context.Context, x *Exec, tx *store.Tx, p protocol.CommittedMaintenancePlan) error {
+	open, err := store.MaintenanceOpenRuns(ctx, tx.Q())
+	if err != nil {
+		return err
+	}
+	p.ReceiptRecoveryStop = &protocol.CommittedReceiptRecoveryStop{}
+	for _, r := range open {
+		action, err := store.GetAction(ctx, tx.Q(), r.ActionID)
+		if err != nil {
+			return err
+		}
+		p.ReceiptRecoveryStop.Runs = append(p.ReceiptRecoveryStop.Runs, protocol.CommittedRetainedRun{TaskID: r.TaskID, Run: protocol.RunView{RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: action.TargetSpecVersion, Host: r.HostID, Observed: r.ObservedState}})
+	}
+	return captureMaintenanceRunProtectionSet(ctx, x, tx, p, true)
+}
+
+func captureMaintenanceRunProtectionSet(ctx context.Context, x *Exec, tx *store.Tx, p protocol.CommittedMaintenancePlan, force bool) error {
 	if p.ReceiptRecoveryStop == nil {
 		return nil
 	}
@@ -61,7 +83,7 @@ func captureMaintenanceRunProtection(ctx context.Context, x *Exec, tx *store.Tx,
 		if err != nil {
 			return err
 		}
-		if len(requests) == 0 && r.Role == protocol.RoleIssueManager {
+		if len(requests) == 0 && r.Role == protocol.RoleIssueManager && !force {
 			continue
 		}
 		lease, err := store.GetLeaseByRun(ctx, tx.Q(), id)
@@ -106,6 +128,10 @@ func maintenanceRunWanted(ctx context.Context, q store.Querier, r store.RunRow) 
 }
 
 func activeMaintenanceRunProtection(ctx context.Context, q store.Querier, r store.RunRow) (*store.MaintenanceRunProtection, error) {
+	bounded, err := activeBoundedRunnerRunProtection(ctx, q, r)
+	if err != nil || bounded != nil {
+		return bounded, err
+	}
 	rows, err := store.MaintenanceProtectedRuns(ctx, q, r.RunID)
 	if err != nil || len(rows) == 0 {
 		return nil, err

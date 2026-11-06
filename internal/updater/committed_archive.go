@@ -126,6 +126,10 @@ func (s *Supervisor) PrepareCommittedMaintenance(ctx context.Context, p protocol
 func (s *Supervisor) CancelCommittedMaintenance(ctx context.Context, p protocol.CommittedMaintenancePlan, generation uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.cancelCommittedMaintenanceLocked(ctx, p, generation)
+}
+
+func (s *Supervisor) cancelCommittedMaintenanceLocked(ctx context.Context, p protocol.CommittedMaintenancePlan, generation uint64) error {
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
@@ -210,9 +214,38 @@ func (s *Supervisor) FinishCommittedMaintenance(ctx context.Context, p protocol.
 	if generation != s.state.Generation {
 		return errors.New("updater: stale maintenance generation")
 	}
+	if bounded := s.state.Bounded; bounded != nil {
+		if bounded.Outcome == "completed" {
+			return nil
+		}
+		remaining, err := s.boundedRemaining()
+		if err != nil {
+			bounded.Outcome = "installed_recovery_pending"
+			if digest(s.state) != digest(s.durable) {
+				if saveErr := s.save(); saveErr != nil {
+					return saveErr
+				}
+			}
+			return err
+		}
+		finishCtx, cancel := context.WithTimeout(ctx, remaining)
+		defer cancel()
+		ctx = finishCtx
+	}
 	a, ok := s.opts.Authority.(MaintenanceArchiveAuthority)
 	if !ok {
 		return errors.New("updater: maintenance archive authority unavailable")
 	}
-	return restoreMaintenanceArchive(ctx, a, p)
+	err := restoreMaintenanceArchive(ctx, a, p)
+	if bounded := s.state.Bounded; bounded != nil {
+		if err == nil {
+			bounded.Outcome = "completed"
+		} else {
+			bounded.Outcome = "installed_recovery_pending"
+		}
+		if e := s.save(); e != nil {
+			return e
+		}
+	}
+	return err
 }

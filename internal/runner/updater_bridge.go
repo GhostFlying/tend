@@ -85,6 +85,10 @@ func (r *Runner) serveUpdater(ctx context.Context, listener net.Listener) {
 
 func (r *Runner) updaterHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if q.URL.Path == "/runner/v1/usage/pending" || q.URL.Path == "/runner/v1/usage/source" || q.URL.Path == "/runner/v1/usage/queue" {
+			r.localUsageJournal(w, q)
+			return
+		}
 		if q.URL.Path == "/runner/v1/rpc" && q.Method == http.MethodPost {
 			r.localUsageRPC(w, q)
 			return

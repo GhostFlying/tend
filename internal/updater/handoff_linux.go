@@ -72,6 +72,7 @@ type systemdUser struct{}
 func (systemdUser) call(ctx context.Context, args ...string) ([]byte, error) {
 	// The fixed executable bypasses PATH; arguments are never shell interpreted.
 	cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", append([]string{"--user", "--no-pager"}, args...)...)
+	cmd.WaitDelay = 2 * time.Second
 	raw, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("updater: systemd-user %s failed: %w", args[0], err)

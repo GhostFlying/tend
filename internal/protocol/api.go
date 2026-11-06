@@ -13,6 +13,7 @@ func APITypes() []any {
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},
 		ManagerRunReconciliation{}, ReconcileManagerRunPayload{}, RetainedRunReconciliation{}, ContinueRetainedRunPayload{},
 		ConcurrencyGroupPage{}, ConcurrencyHistoryPage{}, ConfigureConcurrencyPayload{}, ConcurrencyQuery{},
+		RunnerBoundedMaintenancePlan{}, BoundedRunnerMaintenanceGrant{}, BoundedRunnerAdmissionRelease{}, BoundedMaintenanceAuthorization{}, BoundedMaintenanceState{},
 		HostMaintenancePayload{}, UpgradeControlPayload{}, LocalRepositoryBinding{}, BindLocalRepositoryRequest{}, LocalRepositoryStatus{},
 		TriggerQuery{}, TriggerEventPage{}, TriggerSchedulePage{}, WebhookSubscription{}, WebhookSubscriptionPage{}, WebhookSubscriptionPayload{}, WebhookReceipt{},
 		MessagingEvent{}, MessagingChannel{}, MessagingInput{}, MessagingPublication{}, BindTelegram{}, MessagingReadPayload{}, MessagingMessage{}, MessagingPage{}, MessagingRead{}, MessagingDelivery{}, MessagingReceipts{}, MessagingTrace{}, MessagingInteraction{}, RespondInteraction{},

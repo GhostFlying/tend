@@ -99,6 +99,11 @@ func (a *App) RunnerUpgradeHealth(ctx context.Context, p protocol.Principal, b p
 	if p.Kind != protocol.PrincipalRunner || p.Subject != b.InstanceID {
 		return health, protocol.Errorf(protocol.CodeForbidden, "runner may only read its own upgrade")
 	}
+	if bounded, err := a.boundedRunnerUpgradeHealth(ctx, b); err != nil {
+		return health, err
+	} else if bounded != nil {
+		return *bounded, nil
+	}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		r, err := store.GetUpgrade(ctx, tx.Q(), b.UpgradeID)
 		if err != nil {

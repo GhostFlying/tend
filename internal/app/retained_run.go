@@ -117,6 +117,10 @@ func retainedRunReconciliation(ctx context.Context, q store.Querier, id string) 
 			}
 		}
 	}
+	boundedRecovery, err := attachBoundedRunnerReconciliation(ctx, q, r, &s)
+	if err != nil {
+		return s, err
+	}
 	slices.SortFunc(s.Protections, func(a, b protocol.RetainedRunProtection) int {
 		return strings.Compare(a.MaintenanceID, b.MaintenanceID)
 	})
@@ -162,7 +166,7 @@ func retainedRunReconciliation(ctx context.Context, q store.Querier, id string) 
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return s, err
 	}
-	if control.Mode != protocol.RunnerNormal {
+	if control.Mode != protocol.RunnerNormal && !(boundedRecovery && control.Mode == protocol.RunnerMaintenance) {
 		s.Blockers = append(s.Blockers, "host_not_normal")
 	}
 	rt, err := store.GetHostRuntime(ctx, q, r.HostID)
@@ -172,7 +176,7 @@ func retainedRunReconciliation(ctx context.Context, q store.Querier, id string) 
 	if err != nil || !runtimeSupportsStrictRetainedResume(&rt.Runtime) {
 		s.Blockers = append(s.Blockers, "strict_resume_runner_unsupported")
 	}
-	if rt.Runtime.Mode != protocol.RunnerNormal {
+	if rt.Runtime.Mode != protocol.RunnerNormal && !(boundedRecovery && rt.Runtime.Mode == protocol.RunnerMaintenance) {
 		s.Blockers = append(s.Blockers, "runner_not_normal")
 	}
 	if pin != nil {
@@ -238,7 +242,7 @@ func (ContinueRetainedRun) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
-	if expected != s.TaskRevision || p.RetainedRunIdentity != s.Identity || p.ProtectionSetSHA256 != s.ProtectionSetSHA256 || !reflect.DeepEqual(p.Protections, s.Protections) {
+	if expected != s.TaskRevision || p.RetainedRunIdentity != s.Identity || p.ProtectionSetSHA256 != s.ProtectionSetSHA256 || !reflect.DeepEqual(p.Protections, s.Protections) || p.RecoveryAuthorizationID != s.RecoveryAuthorizationID {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "original Run identity, control or maintenance protection set changed")
 	}
 	if !s.CanContinue {
@@ -285,7 +289,7 @@ func retainedContinuation(ctx context.Context, q store.Querier, id string, activ
 	if json.Unmarshal([]byte(record.PayloadJSON), &p) != nil {
 		return nil, protocol.Errorf(protocol.CodeInternal, "invalid continuation record")
 	}
-	if !s.CanContinue || record.TaskRevision != s.TaskRevision || record.LeaseID != s.Identity.LeaseID || record.ProtectionSHA256 != s.ProtectionSetSHA256 || p.RetainedRunIdentity != s.Identity || !reflect.DeepEqual(p.Protections, s.Protections) {
+	if !s.CanContinue || record.TaskRevision != s.TaskRevision || record.LeaseID != s.Identity.LeaseID || record.ProtectionSHA256 != s.ProtectionSetSHA256 || p.RetainedRunIdentity != s.Identity || !reflect.DeepEqual(p.Protections, s.Protections) || p.RecoveryAuthorizationID != s.RecoveryAuthorizationID {
 		return nil, nil
 	}
 	return &record, nil

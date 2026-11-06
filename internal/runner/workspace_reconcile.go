@@ -86,6 +86,9 @@ func (r *Runner) reconcileWorkspace(ctx context.Context, p protocol.WorkspaceRec
 		return errors.New("resource has no run identities to verify")
 	}
 	for _, id := range p.RunIDs {
+		if r.boundedRunQuarantined(ctx, id) {
+			return errors.New("workspace remains in the original bounded recovery quarantine")
+		}
 		run, err := r.cfg.Journal.HistoricalRun(ctx, id)
 		if err != nil {
 			return fmt.Errorf("historical run %s unavailable: %w", id, err)

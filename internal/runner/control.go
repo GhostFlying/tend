@@ -99,6 +99,15 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		return nil, err
 	}
 	blockers := []string{}
+	recoveryID := ""
+	recoveryPending := false
+	if r.boundedRecovery != nil {
+		recoveryID = r.boundedRecovery.Authorization.RequestID
+		recoveryPending = r.boundedRecovery.AdmissionRelease == nil
+		if recoveryPending {
+			blockers = append(blockers, "bounded_recovery_quarantine")
+		}
+	}
 	claims := int64(0)
 	for _, p := range requests {
 		if p.Envelope.Operation == protocol.OpRunnerClaim {
@@ -140,7 +149,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	phase, upgradeError, downloaded := r.upgradePhase, r.upgradeError, r.downloadedBytes
 	r.mu.Unlock()
 	mode := r.control.Mode
-	if r.bootstrapMaintenance {
+	if r.bootstrapMaintenance || recoveryPending {
 		mode = protocol.RunnerMaintenance
 	}
 	if mode == protocol.RunnerMaintenance {
@@ -160,6 +169,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	}
 	capabilities := []string{protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityRetainedReconciliation, protocol.CapabilityStrictRetainedResume, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
+	capabilities = append(capabilities, protocol.CapabilityBoundedRunnerRecovery)
 	if len(r.cfg.RolloutRoots) > 0 {
 		capabilities = append(capabilities, protocol.CapabilityRolloutPreview)
 	}
@@ -214,7 +224,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		executors = slices.DeleteFunc(executors, func(e protocol.AgentExecutor) bool { return e.Pin.Purpose == "issue_manager" })
 	}
 	r.sequence++
-	return &protocol.RunnerRuntime{ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {
@@ -268,6 +278,28 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	stored := *next
 	if grant == nil && r.control.Authorization != nil {
 		stored.Authorization = r.control.Authorization
+	}
+	if release := next.BoundedRecoveryRelease; release != nil {
+		known, err := r.cfg.Journal.BoundedAdmissionReleaseKnown(ctx, *release)
+		if err != nil {
+			return err
+		}
+		if !known {
+			if r.boundedRecovery == nil || release.RecoveryAuthorizationID != r.boundedRecovery.Authorization.RequestID ||
+				release.HostID != r.cfg.HostID || release.Successor != r.boundedRecovery.Authorization.Target || release.RunnerGeneration != r.generation ||
+				release.Successor.ProcessInstanceID != r.instanceID || release.Successor.ArtifactSHA256 != r.cfg.Build.BinarySHA256 ||
+				next.Mode != protocol.RunnerNormal || release.ExpectedControlRevision >= next.Revision || release.Reason == "" {
+				return errors.New("runner: independent bounded admission release binding changed")
+			}
+			if err := r.cfg.Journal.ReleaseBoundedAdmission(ctx, *release); err != nil {
+				return err
+			}
+			quarantine, err := r.cfg.Journal.BoundedRecovery(ctx)
+			if err != nil {
+				return err
+			}
+			r.boundedRecovery = quarantine
+		}
 	}
 	if err := r.cfg.Journal.SaveControl(ctx, stored); err != nil {
 		return fmt.Errorf("persist runner control: %w", err)
@@ -331,5 +363,5 @@ func (r *Runner) authorizedDeadline(runID string, normal time.Time) time.Time {
 func (r *Runner) maintenance() bool {
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
-	return r.controlLoaded && (r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance)
+	return r.controlLoaded && (r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance || r.boundedRecovery != nil && r.boundedRecovery.AdmissionRelease == nil)
 }

@@ -52,6 +52,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: tend-updater serve|bootstrap|upgrade|restart|status|retry|cancel|verify --config <file>")
 	}
+	if args[0] == "bounded" {
+		return runBounded(ctx, args[1:], out)
+	}
 	command := args[0]
 	action := ""
 	if command == "handoff" || command == "maintenance" {

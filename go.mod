@@ -5,8 +5,10 @@ go 1.27.1
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/go-telegram/bot v1.27.0
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/larksuite/oapi-sdk-go/v3 v3.12.1
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
+	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.60.1
 	tailscale.com v1.104.1
 )
@@ -27,7 +29,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.2 // indirect
@@ -53,7 +54,6 @@ require (
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect

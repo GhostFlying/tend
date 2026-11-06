@@ -171,6 +171,7 @@
 | D169 | 仅在原 manager 成功 close、原事件与 native/业务回执均对清后，以独立 Task CAS/原 Run+lease 证明收束 waiting；缺 session/证明仍保 unknown，不重跑原动作。 | 实现中 |
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
 | D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
+| D180 | 独立 server/runner 维护窗口持久限时，显式外部 force 接受未完成与未知；固定原进程与数据身份、先退出后接管，保留原请求、逐 run 隔离及独立恢复准入。 | 实现中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1083,3 +1084,19 @@ BackgroundPool 在同一 conversation 的既有互斥与升级准入内先消费
 D176 写入规模与 UPSERT 补充：dirty 队列使用显式 `ON CONFLICT DO NOTHING`，不依赖会受外层 UPSERT 覆盖的 `OR IGNORE`。刷新查询固定由 dirty 身份驱动索引连接；托管执行按原生 turn 定点失效，本地 actor 按 conversation 与 thread/parent/session 索引失效，避免新用量或新执行扫描历史贡献。
 
 D176 汇总大小补充：每个四小时桶再按不可变 fact sequence 分片，每个汇总最多包含 128 条请求身份。时间未知或未来时点也遵守此界限，单次追加不再随其历史积累而扩大写事务。迁移 94 只登记投影重建，不修改原始时间或事实；读取仍按原窗口合并这些小汇总。
+
+## D180：有界维护窗口与外部接管
+
+独立本机 server 及每个 runner 目标共享持久预算：总计默认 360 秒，handoff 60 秒、admission fence 30 秒、观察排空 60 秒、优雅停止 30 秒、精确强杀 10 秒、备份 30 秒、启动与健康 90 秒、commit/link/恢复 30 秒。首次进入阶段先保存时间、boot 与单调截止及原 inflight 身份；轮询、重开及同请求重放不续期。显式延时必须新 request、fresh CAS 与审计，保存旧阶段完整 deadline/outcome。逻辑排空到期可使用先前保存的 force-on-timeout 权限；没有该权限时只输出真实超时及外部入口。
+
+普通准入条件保持。新增本机显式 force 接受原组件的未完成和未知，包括不完整诊断、未响应 ACK 和 HostedDrained=false；这些事实不改写为 drained、healthy 或业务完成。独立 installer 可在 control socket 或进程 mutex 失灵时，验证固定配置、产物、实际 updater PID/start/hash、unit 与原 flock；有界请求 manager stop 以抑制自动重启，再只终止精确旧 updater 并保留 child。同 inode 的锁须真正释放且被本控制器持有，旧 state/CAS 再核无漂移后才接管。原 server/runner writer 未确认退出不得启动第二 writer；native child 的退出与业务效果仍是独立未知。丢失 stop/start 回执只观察原身份，不发第二 start。copy/fsync 的外部截止由独立 installer 进程边界保证，不能用 context 包装宣称文件系统必然可中断。
+
+updater 新模式使用 format 4；旧 1/2/3 继续读取，进入 4 后取消、重开、普通后续维护和前滚均不降回旧格式。旧程序在写前拒绝 4，不能通过宽松 JSON 解码擦除权限。不可变 source plan、启动/恢复 lineage 与当前预算授权分开：fresh window 可更换预算 request，但原 launch force ID、原 grant、冻结 run set 和旧窗口保持。status/reconcile 按原任一 request 读取历史，不能因为新窗口归档而遗失旧身份。候选启动或迁移之后只前滚；失败 force parent 由独立新候选及新授权承接原真实未知，不把原 false archive 当作普通排空证明。
+
+新 server 在任何业务入口之前从实际 updater format 4、自身 kernel identity 和 predecessor exit 验证 force。注册与数据库全量 open run 保护同事务，包含停止前诊断遗漏的晚到 run，保持原 lease、pin、请求和未知；prelink 原生 fence 保留。原 started summary 没有可用 fork 身份，按实际 post-stop 数据库冻结其 source lineage，防止自动重 claim、消费、发布或覆盖旧 verdict；不同独立 source 保留原能力。该保护不是部署前等待旧 native 完成的门。
+
+runner force 需要独立 owner/CAS grant，不从普通升级 grant 或本地超时推导。配置 NodeSelector 只证明配置成员；物理目标由本机固定 instance、实际进程及 journal device/inode/incarnation 核验。journal 17 在迁移前先核 force 身份，真实文件锁覆盖数据库 inode 的整个 writer 生命周期；旧 16 在写前拒绝 17，15 可完整迁移。新 runner 在 admission 前事务保存原完整 run/request set 的持久隔离；普通 Continue、Stop、重开和清理不能解除，也不假释放资源。owner 的逐 run strict continuation 保原 assignment 与 request；独立 release-admission 只解除全局新业务 fence，未知 run 的隔离、占用和事实继续保留。进程安装健康与业务 Ready 分开。host usage apply 由持 writer 的 live runner 操作原 journal，维持旧 Envelope 去重而不引入第二 writer。
+
+兼容性：wire 仍支持现有 N/N−1。新增 owner operations、本机 bounded 命令和明确能力协商的可选字段，不改变旧有效请求、普通 grant/health 或缺省 retained continuation 语义；旧 peer 不获得 force 权限。format 4、journal 17 与 server schema 是独立持久边界，发布范围须覆盖实际源 schema 的完整迁移。CLI 同步提供 plan/apply/force/extend/cancel/status/reconcile/takeover、owner grant、逐 run 继续和 admission release，保原 request/CAS、完整输入输出、dry-run 与不依赖旧 socket 的诊断。
+
+本次实现独立 component/host 窗口，旧批量 coordinator 已固定 targets，但总预算仍会随旧阶段/host 推进重设；该 batch 总 deadline 明确留作后续，不声称本次已修。独立本机 force 不经过旧 batch 的等待门。详见[实施计划](plans/bounded-maintenance-recovery.md)、[CLI](bounded-maintenance-cli.md)与[实际进程验收计划](plans/bounded-systemd-acceptance.md)。
