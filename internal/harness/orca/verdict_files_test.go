@@ -28,6 +28,7 @@ func TestRetainedAcceptanceReconcilesOriginalEvidenceSubmission(t *testing.T) {
 			original.st.Worktree, original.st.SessionID = original.wt, a.ProviderSession.ID
 			original.spec.Role, original.spec.StateDir = protocol.RoleAccept, t.TempDir()
 			original.spec.AcceptanceEvidenceFiles = true
+			original.spec.ValidateVerdictFiles = testValidateVerdictFiles
 			original.spec.VerdictFilesIdentity = testVerdictFilesIdentity
 			original.spec.SealVerdictFiles = func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 				return nil, errors.New("original upload is unknown")
@@ -80,4 +81,8 @@ func TestRetainedAcceptanceReconcilesOriginalEvidenceSubmission(t *testing.T) {
 
 func testVerdictFilesIdentity(context.Context, string, json.RawMessage) (string, error) {
 	return strings.Repeat("b", 64), nil
+}
+
+func testValidateVerdictFiles(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) error {
+	return nil
 }

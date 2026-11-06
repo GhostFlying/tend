@@ -80,7 +80,7 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 			dir := t.TempDir()
 			manifest := protocol.ArtifactFile{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}
 			unknown := scenario == "upload unknown"
-			spec := harness.WorkerSpec{Role: protocol.RoleAccept, RunID: "original-run", StateDir: dir, AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			spec := harness.WorkerSpec{Role: protocol.RoleAccept, RunID: "original-run", StateDir: dir, AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 					if unknown {
 						return nil, errors.New("original upload receipt is unknown")
@@ -230,7 +230,7 @@ func TestAcceptanceVerdictReconcilerWithoutFrozenInputDoesNotStart(t *testing.T)
 		t.Fatal("result-only reconciliation started native execution")
 		return nil, nil
 	}
-	_, err := ws.ReconcileAcceptanceVerdict(t.Context(), harness.WorkerSpec{RunID: "original-run", Role: protocol.RoleAccept, AcceptanceEvidenceFiles: true, StateDir: t.TempDir(), Thread: "original-thread", SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+	_, err := ws.ReconcileAcceptanceVerdict(t.Context(), harness.WorkerSpec{RunID: "original-run", Role: protocol.RoleAccept, AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, StateDir: t.TempDir(), Thread: "original-thread", SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 		t.Fatal("missing frozen input reached uploads")
 		return nil, nil
 	}})
@@ -277,7 +277,7 @@ func TestConnectedWorkerCannotMintOwnedSessionCloseReceipt(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer session.Close()
-			spec := harness.WorkerSpec{Role: protocol.RoleAccept, RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			spec := harness.WorkerSpec{Role: protocol.RoleAccept, RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 					return []protocol.ArtifactFile{{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}}, nil
 				}}

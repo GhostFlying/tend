@@ -177,12 +177,30 @@ func (v *Verdicts) readPendingVerdict() (*pendingVerdict, error) {
 }
 
 func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input json.RawMessage, selections []VerdictFileSelection, p *protocol.VerdictPayload) error {
-	if binding == "" || v.Spec.SealVerdictFiles == nil || v.Spec.VerdictFilesIdentity == nil || v.stateDir() == "" {
-		return errors.New("original verdict binding, durable state and evidence sealing are required")
+	if binding == "" || v.Spec.ValidateVerdictFiles == nil || v.Spec.SealVerdictFiles == nil || v.Spec.VerdictFilesIdentity == nil || v.stateDir() == "" {
+		return errors.New("original verdict binding, durable state, validation and evidence sealing are required")
 	}
 	pending, err := v.readPendingVerdict()
 	if err != nil {
 		return err
+	}
+	acknowledged, err := v.readAcknowledgedFileVerdict(ctx, binding, input, selections, *p)
+	if err != nil {
+		return err
+	}
+	if acknowledged != nil && pending == nil {
+		// A confirmed call is immutable, including across collector restarts.
+		// Do not create a new pending call or repeat its upload effects.
+		if _, err := os.Stat(filepath.Join(v.stateDir(), "owned-session-close.json")); err == nil {
+			if err := v.confirmOwnedSessionClose(false); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		*p = acknowledged.Payload
+		v.sealedIdentity = acknowledged.SealedIdentity
+		return nil
 	}
 	createdPending := pending == nil
 	if pending != nil {
@@ -202,6 +220,10 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		if err := v.validateVerdictSelections(selections); err != nil {
 			return errors.Join(err, v.preserveRejectedSelection(pendingVerdict{NativeBinding: binding, RecordBinding: v.binding, Input: input}, err, false))
 		}
+		validationErr := v.Spec.ValidateVerdictFiles(ctx, binding, input, selections)
+		if errors.Is(validationErr, ErrVerdictSelectionRejected) {
+			return errors.Join(validationErr, v.preserveRejectedSelection(pendingVerdict{NativeBinding: binding, RecordBinding: v.binding, Input: input}, validationErr, false))
+		}
 		pending = &pendingVerdict{NativeBinding: binding, RecordBinding: v.binding, Input: input}
 		body, err := json.Marshal(pending)
 		if err != nil {
@@ -209,6 +231,9 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		}
 		if err := writeVerdictState(filepath.Join(v.stateDir(), "pending-verdict.json"), body); err != nil {
 			return err
+		}
+		if validationErr != nil {
+			return validationErr
 		}
 	}
 	files, uploadErr := v.Spec.SealVerdictFiles(ctx, binding, input, selections)
@@ -260,6 +285,70 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		return err
 	}
 	return syncVerdictDirectory(v.stateDir())
+}
+
+// readAcknowledgedFileVerdict checks the durable ACK before any new submission
+// state is written. The owner validates the full canonical input and original
+// selected bytes; the saved payload supplies the already confirmed manifests.
+func (v *Verdicts) readAcknowledgedFileVerdict(ctx context.Context, binding string, input json.RawMessage, selections []VerdictFileSelection, candidate protocol.VerdictPayload) (*boundVerdict, error) {
+	raw, err := os.ReadFile(filepath.Join(v.stateDir(), "verdict.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read acknowledged verdict: %w", err)
+	}
+	var saved boundVerdict
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&saved); err != nil {
+		return nil, fmt.Errorf("decode acknowledged verdict: %w", err)
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("acknowledged verdict has trailing content")
+	}
+	if saved.Binding != v.binding || saved.NativeBinding != binding || !validVerdictIdentity(saved.SealedIdentity) || !saved.Payload.Verdict.Valid() {
+		return nil, errors.New("acknowledged verdict belongs to another original submission")
+	}
+	if selections == nil {
+		selections = []VerdictFileSelection{}
+	}
+	if err := validateVerdictManifests(saved.Payload.Files, selections); err != nil {
+		return nil, fmt.Errorf("acknowledged verdict manifests differ: %w", err)
+	}
+	facts := func(payload protocol.VerdictPayload) ([]byte, error) {
+		payload.Files = nil
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		var value any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	}
+	original, err := facts(saved.Payload)
+	if err != nil {
+		return nil, err
+	}
+	wanted, err := facts(candidate)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(original, wanted) {
+		return nil, errors.New("acknowledged verdict cannot be amended")
+	}
+	identity, err := v.Spec.VerdictFilesIdentity(ctx, binding, input)
+	if err != nil {
+		return nil, fmt.Errorf("read acknowledged verdict identity: %w", err)
+	}
+	if identity != saved.SealedIdentity {
+		return nil, errors.New("acknowledged verdict canonical input or sealed identity differs")
+	}
+	return &saved, nil
 }
 
 func (v *Verdicts) preserveRejectedSelection(pending pendingVerdict, rejection error, removePending bool) error {

@@ -55,6 +55,10 @@ type WorkerSpec struct {
 	// AcceptanceEvidenceFiles is negotiated for this assignment, not inferred
 	// from the installed runner or the availability of implementation uploads.
 	AcceptanceEvidenceFiles bool
+	// ValidateVerdictFiles checks fresh selections without writing state,
+	// allocating upload identities or uploading. Definite rejections precede
+	// the durable pending call; uncertain failures retain its original input.
+	ValidateVerdictFiles func(context.Context, string, json.RawMessage, []VerdictFileSelection) error
 	// SealVerdictFiles durably seals every selection under the original native
 	// binding before uploading any bytes, and confirms the immutable manifests.
 	// Replays must reconcile the same input and upload identities.

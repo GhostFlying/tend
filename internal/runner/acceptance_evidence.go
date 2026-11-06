@@ -10,11 +10,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	pathpkg "path"
 	"path/filepath"
-	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -70,6 +67,10 @@ func hashEvidence(ctx context.Context, path string) (int64, string, error) {
 		return 0, "", err
 	}
 	defer f.Close()
+	return hashEvidenceBytes(ctx, f, st)
+}
+
+func hashEvidenceBytes(ctx context.Context, f *os.File, st os.FileInfo) (int64, string, error) {
 	sum := sha256.New()
 	n, err := io.Copy(sum, transferReader{ctx: ctx, r: f})
 	if err != nil {
@@ -156,82 +157,22 @@ func (e *acceptanceEvidence) identity(ctx context.Context, binding string, input
 func (e *acceptanceEvidence) seal(ctx context.Context, binding string, input json.RawMessage, selections []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if e.as.Role != protocol.RoleAccept || !e.as.AcceptanceEvidenceFiles || e.as.RunID == "" || e.prepared.StateDir == "" || binding == "" {
-		return nil, errors.New("acceptance evidence requires negotiated run and original native binding")
-	}
-	body, err := canonicalEvidenceInput(input)
+	base := filepath.Join(e.prepared.StateDir, "acceptance-evidence")
+	intent, dir, err := e.selectionIntent(ctx, binding, input, selections)
 	if err != nil {
 		return nil, err
 	}
-	var declared struct {
-		Files []harness.VerdictFileSelection `json:"files"`
-	}
-	if err := json.Unmarshal(body, &declared); err != nil || len(declared.Files) != len(selections) {
-		return nil, errors.New("acceptance evidence differs from the original verdict input")
-	}
-	paths, names := map[string]bool{}, map[string]bool{}
-	wanted := make([]sealedEvidenceFile, len(selections))
-	for i, selected := range selections {
-		if selected != declared.Files[i] || strings.TrimSpace(selected.Path) == "" || strings.TrimSpace(selected.Name) == "" || selected.Name == "." || selected.Name == ".." || pathpkg.Base(selected.Name) != selected.Name || strings.ContainsAny(selected.Name, "\\\r\n\x00") || !utf8.ValidString(selected.Name) || len(selected.Name) > 255 {
-			return nil, errors.New("acceptance evidence requires an original path and valid unique name")
-		}
-		path := selected.Path
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(e.prepared.Dir, path)
-		}
-		path, err = filepath.Abs(path)
-		if err != nil {
-			return nil, err
-		}
-		if paths[path] || names[selected.Name] {
-			return nil, errors.New("acceptance evidence paths and names must be unique")
-		}
-		paths[path], names[selected.Name] = true, true
-		wanted[i] = sealedEvidenceFile{Path: path, Name: selected.Name}
-	}
-	base := filepath.Join(e.prepared.StateDir, "acceptance-evidence")
-	dir := filepath.Join(base, evidenceDigest([]byte(binding)))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	if err := errors.Join(syncUploadDirectory(e.prepared.StateDir), syncUploadDirectory(base)); err != nil {
-		return nil, err
-	}
 	path := filepath.Join(dir, "intent.json")
-	intent := acceptanceEvidenceIntent{Format: 1, RunID: e.as.RunID, TaskID: e.as.TaskID, ActionID: e.as.ActionID, SpecVersion: e.as.SpecVersion, Binding: binding, Input: body, Files: wanted}
-	old, err := os.ReadFile(path)
-	if err == nil {
-		var saved acceptanceEvidenceIntent
-		if err := json.Unmarshal(old, &saved); err != nil {
+	intent, fresh, err := e.prepareEvidenceIntent(ctx, path, intent)
+	if err != nil {
+		return nil, err
+	}
+	if fresh {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
-		if saved.Format != 1 || saved.RunID != intent.RunID || saved.TaskID != intent.TaskID || saved.ActionID != intent.ActionID || saved.SpecVersion != intent.SpecVersion || saved.Binding != binding || !bytes.Equal(saved.Input, body) || len(saved.Files) != len(wanted) {
-			return nil, errors.New("original acceptance evidence intent changed; reconcile the original verdict")
-		}
-		for i, file := range saved.Files {
-			if file.Path != wanted[i].Path || file.Name != wanted[i].Name || file.Size < 0 || len(file.SHA256) != 64 || file.RequestID == "" {
-				return nil, errors.New("original acceptance evidence selection changed")
-			}
-		}
-		intent = saved
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	} else {
-		for i := range intent.Files {
-			file := &intent.Files[i]
-			file.Size, file.SHA256, err = hashEvidence(ctx, file.Path)
-			if err != nil {
-				// No intent has ever been written for this binding, so this
-				// definite missing-source rejection precedes every upload.
-				// Persistence and other I/O failures remain unknown.
-				if errors.Is(err, os.ErrNotExist) || errors.Is(err, errEvidenceNonRegular) {
-					return nil, fmt.Errorf("%w: %v", harness.ErrVerdictSelectionRejected, err)
-				}
-				return nil, err
-			}
+		if err := errors.Join(syncUploadDirectory(e.prepared.StateDir), syncUploadDirectory(base)); err != nil {
+			return nil, err
 		}
 		for i := range intent.Files {
 			file := &intent.Files[i]

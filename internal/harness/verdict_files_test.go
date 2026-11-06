@@ -26,7 +26,7 @@ func TestVerdictFilesRequireNegotiatedCapability(t *testing.T) {
 	if strings.Contains(string(VerdictToolSpec.InputSchema), `"files"`) {
 		t.Fatal("legacy verdict tool advertises files")
 	}
-	if !strings.Contains(string(VerdictToolFor(WorkerSpec{AcceptanceEvidenceFiles: true}).InputSchema), `"files"`) {
+	if !strings.Contains(string(VerdictToolFor(WorkerSpec{AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles}).InputSchema), `"files"`) {
 		t.Fatal("negotiated verdict tool omits files")
 	}
 }
@@ -51,7 +51,7 @@ func TestVerdictFilesSealBeforeAcknowledgmentAndRestore(t *testing.T) {
 			calls := 0
 			var binding string
 			var input json.RawMessage
-			spec := WorkerSpec{AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity, StateDir: dir, SealVerdictFiles: func(_ context.Context, b string, raw json.RawMessage, files []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+			spec := WorkerSpec{AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity, StateDir: dir, SealVerdictFiles: func(_ context.Context, b string, raw json.RawMessage, files []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 				calls++
 				if _, err := os.Stat(filepath.Join(dir, "verdict.json")); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("verdict existed before files were confirmed: %v", err)
@@ -100,7 +100,7 @@ func TestVerdictFileFailureNeverAcknowledgesOrFallsBackToUpload(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
-			v := Verdicts{Spec: WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			v := Verdicts{Spec: WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				UploadFile: func(context.Context, string, string) (protocol.ArtifactFile, error) {
 					t.Fatal("verdict bypassed sealing")
 					return protocol.ArtifactFile{}, nil
@@ -128,7 +128,7 @@ func TestVerdictFilesRejectCollisionsBeforeSealing(t *testing.T) {
 		`[{"path":"checks.log","name":""}]`,
 		`[{"path":" ","name":"checks.log"}]`,
 	} {
-		v := Verdicts{Spec: WorkerSpec{AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity, Dir: t.TempDir(), StateDir: t.TempDir(), SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+		v := Verdicts{Spec: WorkerSpec{AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity, Dir: t.TempDir(), StateDir: t.TempDir(), SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			t.Fatal("invalid selection reached sealing")
 			return nil, nil
 		}}}
@@ -158,7 +158,7 @@ func TestPendingVerdictRestoresOriginalInputBeforeAnotherSubmission(t *testing.T
 	manifest := protocol.ArtifactFile{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}
 	input := json.RawMessage(`{"files":[{"name":"checks.log","path":"scratch/checks.log"}],"evidence":{"z":2,"a":1},"verdict":"blocked"}`)
 	calls := 0
-	spec := WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity, SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+	spec := WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity, SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 		calls++
 		return nil, errors.New("upload receipt is unknown")
 	}}
@@ -226,7 +226,7 @@ func TestPendingVerdictRestoresOriginalInputBeforeAnotherSubmission(t *testing.T
 func TestNegotiatedNoFileVerdictsStillPinOriginalInput(t *testing.T) {
 	for _, fields := range []string{"", `,"files":[]`} {
 		calls := 0
-		v := Verdicts{Spec: WorkerSpec{StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity, SealVerdictFiles: func(_ context.Context, binding string, input json.RawMessage, files []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+		v := Verdicts{Spec: WorkerSpec{StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity, SealVerdictFiles: func(_ context.Context, binding string, input json.RawMessage, files []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			calls++
 			if binding == "" || len(files) != 0 || !strings.Contains(string(input), `"evidence":{}`) {
 				t.Fatalf("no-file input lost identity: %q %s %+v", binding, input, files)
@@ -241,10 +241,14 @@ func TestNegotiatedNoFileVerdictsStillPinOriginalInput(t *testing.T) {
 
 func TestVerdictFilePersistenceFailureRetainsRecoveryIntent(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "verdict.json"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	v := Verdicts{Spec: WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity, SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+	first := true
+	v := Verdicts{Spec: WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity, SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
+		if first {
+			first = false
+			if err := os.Mkdir(filepath.Join(dir, "verdict.json"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
 		return nil, nil
 	}}}
 	got := v.Handle(t.Context(), ToolCall{ThreadID: "thread", TurnID: "turn", Tool: VerdictTool, Arguments: json.RawMessage(`{"verdict":"passed","evidence":{}}`)})
@@ -273,7 +277,7 @@ func TestSealedVerdictRecoveryChecksIdentityBeforeUpload(t *testing.T) {
 			uploads := 0
 			var originalBinding string
 			var originalInput json.RawMessage
-			spec := WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			spec := WorkerSpec{StateDir: dir, AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				SealVerdictFiles: func(_ context.Context, binding string, input json.RawMessage, _ []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 					uploads++
 					originalBinding, originalInput = binding, append(json.RawMessage(nil), input...)
@@ -334,7 +338,7 @@ func TestDefiniteVerdictSelectionRejectionAllowsCorrection(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()
 			uploads, intent := 0, false
-			spec := WorkerSpec{StateDir: dir, Dir: t.TempDir(), AcceptanceEvidenceFiles: true,
+			spec := WorkerSpec{StateDir: dir, Dir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles,
 				VerdictFilesIdentity: func(context.Context, string, json.RawMessage) (string, error) {
 					if !intent {
 						return "", errors.New("no intent was created")
@@ -394,4 +398,8 @@ func TestDefiniteVerdictSelectionRejectionAllowsCorrection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testValidateVerdictFiles(context.Context, string, json.RawMessage, []VerdictFileSelection) error {
+	return nil
 }

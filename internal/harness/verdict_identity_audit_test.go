@@ -19,7 +19,7 @@ func TestCanceledVerdictUploadPreservesIndependentSealedAudit(t *testing.T) {
 	defer cancel()
 	var binding string
 	var input json.RawMessage
-	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true,
+	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles,
 		SealVerdictFiles: func(callCtx context.Context, b string, raw json.RawMessage, _ []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			if callCtx != ctx {
 				t.Fatal("upload received a replacement context")
@@ -56,7 +56,7 @@ func TestCanceledVerdictUploadPreservesIndependentSealedAudit(t *testing.T) {
 
 func TestVerdictSealedAuditDeadlineCannotMintProof(t *testing.T) {
 	originalFailure := errors.New("original upload outcome is unknown")
-	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true,
+	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles,
 		SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			return nil, originalFailure
 		},
@@ -84,7 +84,7 @@ func TestVerdictSealedAuditDeadlineCannotMintProof(t *testing.T) {
 func TestIncompleteVerdictSealedAuditCannotMintProof(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true,
+	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles,
 		SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			cancel()
 			return nil, context.Canceled
@@ -106,7 +106,7 @@ func TestCanceledVerdictAuditCannotReplaceChangedSealedScope(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	uploads, audits := 0, 0
-	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true,
+	v := Verdicts{Spec: WorkerSpec{RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles,
 		SealVerdictFiles: func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			uploads++
 			if uploads == 2 {

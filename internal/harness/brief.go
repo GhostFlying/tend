@@ -33,7 +33,8 @@ var VerdictToolSpec = ToolSpec{
 }
 
 // Verdicts records the verdict an acceptance worker reports through
-// VerdictTool; the last valid call counts.
+// VerdictTool. Legacy calls retain the last valid verdict; negotiated evidence
+// submissions preserve the original acknowledged verdict and its sealed input.
 type Verdicts struct {
 	StateDir string
 	Spec     WorkerSpec
