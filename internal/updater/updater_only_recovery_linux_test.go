@@ -174,6 +174,11 @@ func TestUpdaterOnlyRecoveryPreStartFreshCAS(t *testing.T) {
 	if err := validateUpdaterOnlyPreStartRecovery(h.cfg, p, fresh, st, idle); err != nil {
 		t.Fatal(err)
 	}
+	failed := map[string]string{"MainPID": "0", "ActiveState": "failed", "SubState": "failed", "Job": "0"}
+	if err := validateUpdaterOnlyPreStartRecovery(h.cfg, p, fresh, st, failed); err != nil {
+		t.Fatal("exact source exit may leave a failed idle manager", err)
+	}
+
 	for _, phase := range []string{"starting_updater", "adopted"} {
 		j.Phase = phase
 		publish()
@@ -222,6 +227,164 @@ func TestUpdaterOnlyRecoveryRequiresIndependentRequest(t *testing.T) {
 	st.BoundedHistory = map[string]protocol.BoundedMaintenanceState{fresh: {}}
 	if err := validateUpdaterOnlyFreshRequest(st, fresh); err == nil {
 		t.Fatal("accepted archived bounded request")
+	}
+}
+
+func TestUpdaterOnlyRecoveryPendingAttemptPreservesAdoptedStartup(t *testing.T) {
+	h, p, a := updaterOnlyLinkedFixture(t)
+	cfg := h.s.cfg
+	if err := os.MkdirAll(filepath.Dir(committedJournalPath(cfg, p.Maintenance.MaintenanceID)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(committedJournalPath(cfg, p.Maintenance.MaintenanceID), CommittedHandoffJournal{Plan: p, Phase: "starting_adopt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(committedHeadPath(cfg), committedHandoffHead{MaintenanceID: p.Maintenance.MaintenanceID, PlanSHA256: digest(p)}); err != nil {
+		t.Fatal(err)
+	}
+	headSHA, journalSHA, err := updaterOnlyOriginalFiles(cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF2"
+	a.UpdaterSource = &Identity{PID: 123, StartTicks: 456, SHA256: p.CandidateSHA256}
+	prior := updaterOnlyJournal{Format: 1, Scope: updaterOnlyScope{Authorization: a, ConfigSHA256: digest(cfg), OriginalHeadSHA256: headSHA, OriginalJournalSHA256: journalSHA, OriginalState: h.s.Status(), Retained: h.s.Status().Process}, Phase: "adopted", AdoptedUpdater: Identity{PID: 789, StartTicks: 1000, SHA256: a.UpdaterTarget.CandidateSHA256}}
+	prior, err = publishUpdaterOnlyAttempt(cfg, p, prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorRaw, err := privateFile(updaterOnlyJournalPath(cfg, a.RequestID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := prior
+	next.Phase = "planned"
+	next.AdoptedUpdater = Identity{}
+	next.Scope.Authorization.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF3"
+	source := prior.AdoptedUpdater
+	next.Scope.Authorization.UpdaterSource = &source
+	target := *a.UpdaterTarget
+	target.CandidateSHA256 = strings.Repeat("f", 64)
+	next.Scope.Authorization.UpdaterTarget = &target
+	next, err = publishUpdaterOnlyAttempt(cfg, p, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Scope.PreviousAdopted == nil || next.Scope.PreviousAdopted.RequestID != a.RequestID || next.Scope.PreviousAdopted.JournalSHA256 != bytesDigest(priorRaw) {
+		t.Fatal("publisher did not bind its adopted predecessor")
+	}
+	head := updaterOnlyHead{Format: 1, RequestID: next.Scope.Authorization.RequestID, ScopeSHA256: digest(next.Scope)}
+	selected, err := selectUpdaterOnlyStartup(cfg, p, head, prior.AdoptedUpdater.SHA256)
+	if err != nil || selected.Scope.Authorization.RequestID != a.RequestID {
+		t.Fatal("pending replacement blocked installed predecessor", err)
+	}
+	if raw, _ := privateFile(updaterOnlyJournalPath(cfg, a.RequestID)); bytesDigest(raw) != bytesDigest(priorRaw) {
+		t.Fatal("ordinary predecessor selection rewrote adopted receipt")
+	}
+	// A further pre-start interruption inherits the same single exact receipt.
+	third := next
+	third.Scope.Authorization.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF4"
+	third, err = publishUpdaterOnlyAttempt(cfg, p, third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Scope.PreviousAdopted == nil || *third.Scope.PreviousAdopted != *next.Scope.PreviousAdopted {
+		t.Fatal("pre-start continuation lost adopted predecessor")
+	}
+	// Same bytes remain a valid independent controller takeover. Before Start,
+	// selection still belongs to the adopted predecessor; after Start it belongs
+	// to this new attempt and must pass its original initial-adoption window.
+	same := third
+	same.Scope.Authorization.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF6"
+	sameTarget := *same.Scope.Authorization.UpdaterTarget
+	sameTarget.CandidateSHA256 = prior.AdoptedUpdater.SHA256
+	same.Scope.Authorization.UpdaterTarget = &sameTarget
+	same, err = publishUpdaterOnlyAttempt(cfg, p, same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameHead := updaterOnlyHead{Format: 1, RequestID: same.Scope.Authorization.RequestID, ScopeSHA256: digest(same.Scope)}
+	selected, err = selectUpdaterOnlyStartup(cfg, p, sameHead, prior.AdoptedUpdater.SHA256)
+	if err != nil || selected.Scope.Authorization.RequestID != a.RequestID {
+		t.Fatal("same-bytes pre-start shadowed adopted predecessor", err)
+	}
+	same.Phase = "starting_updater"
+	if err := writeJSON(updaterOnlyJournalPath(cfg, same.Scope.Authorization.RequestID), same); err != nil {
+		t.Fatal(err)
+	}
+	selected, err = selectUpdaterOnlyStartup(cfg, p, sameHead, prior.AdoptedUpdater.SHA256)
+	if err != nil || selected.Scope.Authorization.RequestID != same.Scope.Authorization.RequestID {
+		t.Fatal("recorded same-bytes Start did not select current adoption window", err)
+	}
+	for _, kind := range []string{"missing receipt", "wrong receipt", "unknown start"} {
+		t.Run(kind, func(t *testing.T) {
+			bad := third
+			bad.Scope.Authorization.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF5"
+			copy := *third.Scope.PreviousAdopted
+			bad.Scope.PreviousAdopted = &copy
+			switch kind {
+			case "missing receipt":
+				bad.Scope.PreviousAdopted = nil
+			case "wrong receipt":
+				bad.Scope.PreviousAdopted.JournalSHA256 = strings.Repeat("a", 64)
+			case "unknown start":
+				bad.Phase = "starting_updater"
+			}
+			if err := writeJSON(updaterOnlyJournalPath(cfg, bad.Scope.Authorization.RequestID), bad); err != nil {
+				t.Fatal(err)
+			}
+			head := updaterOnlyHead{Format: 1, RequestID: bad.Scope.Authorization.RequestID, ScopeSHA256: digest(bad.Scope)}
+			if _, err := selectUpdaterOnlyStartup(cfg, p, head, prior.AdoptedUpdater.SHA256); err == nil {
+				t.Fatal("invalid predecessor fallback accepted")
+			}
+		})
+	}
+}
+
+func TestUpdaterOnlyRecoveryInstallerWindowReservesRequest(t *testing.T) {
+	h, _, a := updaterOnlyLinkedFixture(t)
+	for index, action := range []string{"updater_only_takeover", "force", "apply"} {
+		t.Run(action, func(t *testing.T) {
+			auth := a
+			auth.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF" + strconv.Itoa(index+7)
+			auth.ExpiresAtMillis = time.Now().Add(10 * time.Minute).UnixMilli()
+			if _, err := beginBoundedInstaller(h.cfg, auth, action); err != nil {
+				t.Fatal(err)
+			}
+			err := rejectUpdaterOnlyRequest(h.cfg, auth.RequestID)
+			if action == "updater_only_takeover" && err == nil {
+				t.Fatal("partial updater-only attempt lost request identity")
+			}
+			if action != "updater_only_takeover" && err != nil {
+				t.Fatal("ordinary maintenance window was rejected", err)
+			}
+		})
+	}
+}
+
+func TestUpdaterOnlyRecoveryRequestCannotBecomeAnotherAction(t *testing.T) {
+	h, p, a := updaterOnlyLinkedFixture(t)
+	a.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF2"
+	path := updaterOnlyJournalPath(h.cfg, a.RequestID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	j := updaterOnlyJournal{Format: 1, Scope: updaterOnlyScope{Authorization: a, ConfigSHA256: digest(h.cfg), OriginalState: h.s.Status()}, Phase: "adopted"}
+	if err := writeJSON(path, j); err != nil {
+		t.Fatal(err)
+	}
+	other := a
+	other.Reason = "a different action cannot reuse the original updater-only identity"
+	other.UpdaterTarget = nil
+	before := h.s.Status()
+	if err := h.s.AuthorizeBoundedMaintenance(t.Context(), p.Maintenance, other, "extend"); err == nil {
+		t.Fatal("accepted extend under original updater-only identity")
+	}
+	if err := h.s.CancelBoundedMaintenance(t.Context(), p.Maintenance, other); err == nil {
+		t.Fatal("accepted cancel under original updater-only identity")
+	}
+	if digest(before) != digest(h.s.Status()) {
+		t.Fatal("rejected identity reuse changed state")
 	}
 }
 
@@ -331,14 +494,14 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 		_, _ = (systemdUser{}).call(cleanup, "stop", unit)
 		for _, id := range []Identity{child, predecessor} {
 			if id.PID > 1 {
-				if err := (LinuxProcess{}).Stop(cleanup, id, time.Second); err != nil {
+				if err := (LinuxProcess{}).Stop(cleanup, id, 3*time.Second); err != nil {
 					t.Error(err)
 				}
 			}
 		}
 		_, _ = (systemdUser{}).call(cleanup, "reset-failed", unit)
 	})
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-run", "--user", "--unit="+unit, "--property=Type=simple", "--property=KillMode=process", "--property=Restart=on-failure", "--property=TimeoutStopSec=4s", "--setenv=TEND_BOUNDED_UPDATER_HELPER=1", "--setenv=TEND_UPDATER_LAUNCH_ID=updater-only-controller", "--", fixed, "serve", "--config", configFile)
+	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-run", "--user", "--unit="+unit, "--property=Type=simple", "--property=KillMode=process", "--property=Restart=on-failure", "--property=TimeoutStopSec=4s", "--setenv=TEND_BOUNDED_UPDATER_HELPER=1", "--", fixed, "serve", "--config", configFile)
 	if raw, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("start fixture: %v %s", err, raw)
 	}
@@ -356,7 +519,7 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 		t.Fatal(err)
 	}
 	predecessor = boundedRealHelper(t, ctx, root, "predecessor")
-	if err := (LinuxProcess{}).Stop(ctx, predecessor, time.Second); err != nil {
+	if err := (LinuxProcess{}).Stop(ctx, predecessor, 3*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	manager, policy, err := managerSnapshot(ctx, unit)
@@ -433,9 +596,10 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 		t.Fatal(err)
 	}
 	// Stale CAS, changed retained proof and lock fail before any updater effect.
-	for _, kind := range []string{"stale", "lock", "retained", "physical retained"} {
+	for index, kind := range []string{"stale", "lock", "retained", "physical retained"} {
 		t.Run(kind, func(t *testing.T) {
 			bad := a
+			bad.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF" + strconv.Itoa(index+3)
 			lockCopy := *a.UpdaterLock
 			bad.UpdaterLock = &lockCopy
 			switch kind {
@@ -530,6 +694,25 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if actual, err := (LinuxProcess{}).Inspect(ctx, adopted.AdoptedUpdater.PID); err != nil || actual != adopted.AdoptedUpdater {
 		t.Fatal("original replay restarted updater", err)
 	}
+	// Publish a second real installer attempt, then interrupt it before Stop.
+	// The already installed updater must retain its exact adopted startup proof.
+	pendingAuth := a
+	pendingAuth.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF7"
+	pendingAuth.ExpectedGeneration = latest.Generation
+	pendingAuth.UpdaterSource = &adopted.AdoptedUpdater
+	pendingTarget := *a.UpdaterTarget
+	pendingAuth.UpdaterTarget = &pendingTarget
+	if _, err := beginBoundedInstaller(cfg, pendingAuth, "updater_only_takeover"); err != nil {
+		t.Fatal(err)
+	}
+	pending := updaterOnlyJournal{Format: 1, Scope: updaterOnlyScope{Authorization: pendingAuth, ConfigSHA256: digest(cfg), OriginalHeadSHA256: originalHead, OriginalJournalSHA256: originalJournal, OriginalState: latest, Retained: child}, Phase: "planned"}
+	pending, err = publishUpdaterOnlyAttempt(cfg, p, pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Scope.PreviousAdopted == nil || pending.Scope.PreviousAdopted.RequestID != a.RequestID {
+		t.Fatal("pending production publisher did not preserve installed authority")
+	}
 	// An ordinary later reopen remains valid after legitimate completion state
 	// changes. Its durable adopted receipt does not freeze the entire old state.
 	if _, err := (systemdUser{}).call(ctx, "stop", unit); err != nil {
@@ -554,6 +737,44 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if err := verifyUpdaterOnlyRetained(ctx, child); err != nil {
 		t.Fatal(err)
 	}
+	currentManager, _, err := managerSnapshot(ctx, unit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentPID, err := strconv.Atoi(currentManager["MainPID"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentUpdater, err := (LinuxProcess{}).Inspect(ctx, currentPID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentState, err := readState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameAuth := a
+	sameAuth.RequestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF8"
+	sameAuth.ExpectedGeneration = currentState.Generation
+	sameAuth.UpdaterSource = &currentUpdater
+	if err := writeJSON(authFile, sameAuth); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BoundedCommand(ctx, cfg, "takeover", planFile, authFile, sameAuth.RequestID, sameAuth.ExpectedGeneration, sameAuth.ExpectedPhase); err != nil {
+		t.Fatal("exact same-bytes controller takeover failed", err)
+	}
+	var sameAdopted updaterOnlyJournal
+	boundedSystemdWait(t, ctx, "same-bytes controller adopted under its own original window", func() bool {
+		var err error
+		sameAdopted, err = readUpdaterOnlyJournal(cfg, sameAuth.RequestID)
+		return err == nil && sameAdopted.Phase == "adopted"
+	})
+	if sameAdopted.AdoptedUpdater.PID == currentUpdater.PID || sameAdopted.AdoptedUpdater.SHA256 != currentUpdater.SHA256 {
+		t.Fatal("same-bytes takeover did not replace exactly its controller")
+	}
+	if err := verifyUpdaterOnlyRetained(ctx, child); err != nil {
+		t.Fatal("same-bytes takeover affected committed service", err)
+	}
 	if _, err := (LinuxProcess{}).Inspect(ctx, oldUpdater.PID); !errors.Is(err, ErrNotRunning) {
 		t.Fatal("original controller still live")
 	}
@@ -561,5 +782,5 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if preStart {
 		evidenceName = "updater-only-pre-start-recovery"
 	}
-	boundedFixtureEvidence(t, evidenceName, map[string]any{"unit": unit, "old_updater": oldUpdater, "new_updater": adopted.AdoptedUpdater, "retained_committed_service": child, "exited_original_predecessor": predecessor, "original_head_sha256": originalHead, "original_journal_sha256": originalJournal, "original_plan": p, "original_authorization": a, "adopted_continuation": adopted, "unchanged_service_and_deadlines": true, "ordinary_completion_reopen": true})
+	boundedFixtureEvidence(t, evidenceName, map[string]any{"unit": unit, "old_updater": oldUpdater, "new_updater": adopted.AdoptedUpdater, "retained_committed_service": child, "exited_original_predecessor": predecessor, "original_head_sha256": originalHead, "original_journal_sha256": originalJournal, "original_plan": p, "original_authorization": a, "adopted_continuation": adopted, "unchanged_service_and_deadlines": true, "ordinary_completion_reopen": true, "pending_replacement_preserved_adopted_startup": true, "pending_attempt": pending, "same_bytes_source_controller": currentUpdater, "same_bytes_adopted": sameAdopted})
 }

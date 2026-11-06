@@ -18,7 +18,13 @@ import (
 
 // This local installer journal has its own version. It does not extend the
 // updater state or the server/runner protocol. The original handoff stays exact.
+type updaterOnlyAdoptedReceipt struct {
+	RequestID     string `json:"request_id"`
+	JournalSHA256 string `json:"journal_sha256"`
+}
+
 type updaterOnlyScope struct {
+	PreviousAdopted       *updaterOnlyAdoptedReceipt               `json:"previous_adopted,omitempty"`
 	Authorization         protocol.BoundedMaintenanceAuthorization `json:"authorization"`
 	ConfigSHA256          string                                   `json:"config_sha256"`
 	OriginalHeadSHA256    string                                   `json:"original_head_sha256"`
@@ -38,6 +44,17 @@ type updaterOnlyHead struct {
 	Format      int    `json:"format"`
 	RequestID   string `json:"request_id"`
 	ScopeSHA256 string `json:"scope_sha256"`
+}
+
+// A controller need not carry the supervised service's launch environment.
+// Exact inspection still compares every supplied identity field, including an
+// optional real controller launch ID.
+func validUpdaterOnlyController(id Identity) bool {
+	return id.PID > 1 && id.StartTicks > 0 && release.ValidSHA(id.SHA256)
+}
+
+func updaterOnlyPreStart(phase string) bool {
+	return phase == "planned" || phase == "stopping_updater" || phase == "installing_updater"
 }
 
 func updaterOnlyHeadPath(cfg Config) string {
@@ -156,7 +173,8 @@ func updaterOnlyLock(cfg Config, lock *os.File, a protocol.BoundedMaintenanceAut
 // intent is never converted into permission to issue another native Start.
 func updaterOnlyManagerIdle(manager map[string]string) bool {
 	job, known := manager["Job"]
-	return known && (job == "0" || job == "") && manager["MainPID"] == "0" && manager["ActiveState"] == "inactive" && manager["SubState"] == "dead"
+	terminal := manager["ActiveState"] == "inactive" && manager["SubState"] == "dead" || manager["ActiveState"] == "failed" && manager["SubState"] == "failed"
+	return known && (job == "0" || job == "") && manager["MainPID"] == "0" && terminal
 }
 
 func validateUpdaterOnlyPreStartRecovery(cfg Config, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization, before State, manager map[string]string) error {
@@ -176,7 +194,7 @@ func validateUpdaterOnlyPreStartRecovery(cfg Config, p CommittedHandoffPlan, a p
 		return err
 	}
 	old := j.Scope.Authorization
-	if head.Format != 1 || head.ScopeSHA256 != digest(j.Scope) || head.RequestID == a.RequestID || j.Phase != "planned" && j.Phase != "stopping_updater" && j.Phase != "installing_updater" || j.Scope.ConfigSHA256 != digest(cfg) || old.UpdaterSource == nil || *old.UpdaterSource != *a.UpdaterSource || old.PlanSHA256 != a.PlanSHA256 || old.Target != a.Target || old.Source != a.Source || j.Scope.Retained != before.Process || digest(j.Scope.OriginalState) != digest(before) {
+	if head.Format != 1 || head.ScopeSHA256 != digest(j.Scope) || head.RequestID == a.RequestID || !updaterOnlyPreStart(j.Phase) || j.Scope.ConfigSHA256 != digest(cfg) || old.UpdaterSource == nil || *old.UpdaterSource != *a.UpdaterSource || old.PlanSHA256 != a.PlanSHA256 || old.Target != a.Target || old.Source != a.Source || j.Scope.Retained != before.Process || digest(j.Scope.OriginalState) != digest(before) {
 		return errors.New("updater: updater-only prior attempt is not a definite pre-start interruption")
 	}
 	h, journal, err := updaterOnlyOriginalFiles(cfg, p)
@@ -224,8 +242,131 @@ func validateUpdaterOnlyFreshRequest(st State, id string) error {
 	return nil
 }
 
+func validateUpdaterOnlyScope(cfg Config, p CommittedHandoffPlan, scope updaterOnlyScope) error {
+	if scope.ConfigSHA256 != digest(cfg) {
+		return errors.New("updater: updater-only scope configuration changed")
+	}
+	h, journal, err := updaterOnlyOriginalFiles(cfg, p)
+	if err != nil || h != scope.OriginalHeadSHA256 || journal != scope.OriginalJournalSHA256 {
+		return errors.New("updater: updater-only original handoff history changed")
+	}
+	if err := validateUpdaterOnlyTarget(p, scope.Authorization); err != nil {
+		return err
+	}
+	return validateUpdaterOnlyState(scope.OriginalState, p, scope.Authorization)
+}
+
+func readUpdaterOnlyAdoptedReceipt(cfg Config, p CommittedHandoffPlan, receipt updaterOnlyAdoptedReceipt) (updaterOnlyJournal, error) {
+	var j updaterOnlyJournal
+	if !protocol.ValidID(protocol.PrefixRequest, receipt.RequestID) || !release.ValidSHA(receipt.JournalSHA256) {
+		return j, errors.New("updater: updater-only previous receipt is incomplete")
+	}
+	raw, err := privateFile(updaterOnlyJournalPath(cfg, receipt.RequestID))
+	if err != nil {
+		return j, err
+	}
+	if bytesDigest(raw) != receipt.JournalSHA256 {
+		return j, errors.New("updater: updater-only previous receipt changed")
+	}
+	j, err = readUpdaterOnlyJournal(cfg, receipt.RequestID)
+	if err != nil {
+		return j, err
+	}
+	if j.Phase != "adopted" || !validUpdaterOnlyController(j.AdoptedUpdater) || j.Scope.Authorization.UpdaterTarget == nil || j.AdoptedUpdater.SHA256 != j.Scope.Authorization.UpdaterTarget.CandidateSHA256 {
+		return j, errors.New("updater: updater-only previous receipt was not adopted")
+	}
+	return j, validateUpdaterOnlyScope(cfg, p, j.Scope)
+}
+
+// publishUpdaterOnlyAttempt binds at most one already adopted predecessor. It
+// never searches arbitrary history, and preserves the original predecessor file.
+func publishUpdaterOnlyAttempt(cfg Config, p CommittedHandoffPlan, j updaterOnlyJournal) (updaterOnlyJournal, error) {
+	j.Scope.PreviousAdopted = nil
+	if j.Scope.Authorization.UpdaterSource != nil && j.Scope.Authorization.UpdaterSource.SHA256 != p.CandidateSHA256 {
+		raw, err := privateFile(updaterOnlyHeadPath(cfg))
+		if err != nil {
+			return j, err
+		}
+		var head updaterOnlyHead
+		if err := strictJSON(raw, &head); err != nil {
+			return j, err
+		}
+		prior, err := readUpdaterOnlyJournal(cfg, head.RequestID)
+		if err != nil {
+			return j, err
+		}
+		if head.Format != 1 || digest(prior.Scope) != head.ScopeSHA256 {
+			return j, errors.New("updater: updater-only preceding head changed")
+		}
+		if err := validateUpdaterOnlyScope(cfg, p, prior.Scope); err != nil {
+			return j, err
+		}
+		var receipt *updaterOnlyAdoptedReceipt
+		if prior.Phase == "adopted" {
+			priorRaw, err := privateFile(updaterOnlyJournalPath(cfg, head.RequestID))
+			if err != nil {
+				return j, err
+			}
+			receipt = &updaterOnlyAdoptedReceipt{RequestID: head.RequestID, JournalSHA256: bytesDigest(priorRaw)}
+		} else if updaterOnlyPreStart(prior.Phase) {
+			receipt = prior.Scope.PreviousAdopted
+		}
+		if receipt == nil {
+			return j, errors.New("updater: installed controller has no adopted receipt to preserve")
+		}
+		if receipt != nil {
+			adopted, err := readUpdaterOnlyAdoptedReceipt(cfg, p, *receipt)
+			if err != nil {
+				return j, err
+			}
+			if adopted.AdoptedUpdater.SHA256 != j.Scope.Authorization.UpdaterSource.SHA256 {
+				return j, errors.New("updater: updater-only prior receipt differs from installed source")
+			}
+			copy := *receipt
+			j.Scope.PreviousAdopted = &copy
+		}
+	}
+	path := updaterOnlyJournalPath(cfg, j.Scope.Authorization.RequestID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return j, err
+	}
+	if err := writeJSON(path, j); err != nil {
+		return j, err
+	}
+	return j, writeJSON(updaterOnlyHeadPath(cfg), updaterOnlyHead{Format: 1, RequestID: j.Scope.Authorization.RequestID, ScopeSHA256: digest(j.Scope)})
+}
+
+func selectUpdaterOnlyStartup(cfg Config, p CommittedHandoffPlan, head updaterOnlyHead, exe string) (updaterOnlyJournal, error) {
+	j, err := readUpdaterOnlyJournal(cfg, head.RequestID)
+	if err != nil {
+		return j, err
+	}
+	if head.Format != 1 || digest(j.Scope) != head.ScopeSHA256 || j.Scope.Authorization.UpdaterTarget == nil {
+		return j, errors.New("updater: updater-only startup scope or artifact changed")
+	}
+	if err := validateUpdaterOnlyScope(cfg, p, j.Scope); err != nil {
+		return j, err
+	}
+	// Before native Start, even a same-bytes replacement must retain the already
+	// adopted predecessor's entitlement to restart. Once Start is recorded, this
+	// attempt alone owns initial adoption under its unchanged original window.
+	if updaterOnlyPreStart(j.Phase) && j.Scope.PreviousAdopted != nil {
+		prior, err := readUpdaterOnlyAdoptedReceipt(cfg, p, *j.Scope.PreviousAdopted)
+		if err != nil {
+			return j, err
+		}
+		if prior.AdoptedUpdater.SHA256 == exe {
+			return prior, nil
+		}
+	}
+	if j.Scope.Authorization.UpdaterTarget.CandidateSHA256 == exe {
+		return j, nil
+	}
+	return j, errors.New("updater: installed controller has no bound adopted predecessor authority")
+}
+
 func takeoverCommittedUpdaterOnly(ctx context.Context, cfg Config, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization) (any, error) {
-	if a.UpdaterSource == nil || !validIdentity(*a.UpdaterSource) || a.UpdaterLock == nil || !protocol.ValidID(protocol.PrefixRequest, a.RequestID) || a.Role != "server" || cfg.Role != "server" || a.Target.InstanceID != cfg.InstanceID || a.Reason == "" {
+	if a.UpdaterSource == nil || !validUpdaterOnlyController(*a.UpdaterSource) || a.UpdaterLock == nil || !protocol.ValidID(protocol.PrefixRequest, a.RequestID) || a.Role != "server" || cfg.Role != "server" || a.Target.InstanceID != cfg.InstanceID || a.Reason == "" {
 		return nil, errors.New("updater: updater-only recovery requires exact local authority")
 	}
 	if err := validateUpdaterOnlyTarget(p, a); err != nil {
@@ -322,13 +463,8 @@ func takeoverCommittedUpdaterOnly(ctx context.Context, cfg Config, p CommittedHa
 	}
 	j := updaterOnlyJournal{Format: 1, Scope: updaterOnlyScope{Authorization: a, ConfigSHA256: digest(cfg), OriginalHeadSHA256: headSHA, OriginalJournalSHA256: journalSHA, OriginalState: before, Retained: before.Process}, Phase: "planned"}
 	path := updaterOnlyJournalPath(cfg, a.RequestID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return before, err
-	}
-	if err := writeJSON(path, j); err != nil {
-		return before, err
-	}
-	if err := writeJSON(updaterOnlyHeadPath(cfg), updaterOnlyHead{Format: 1, RequestID: a.RequestID, ScopeSHA256: digest(j.Scope)}); err != nil {
+	j, err = publishUpdaterOnlyAttempt(cfg, p, j)
+	if err != nil {
 		return j, err
 	}
 	// Recheck the real child and fixed manager at the destructive boundary.
@@ -452,12 +588,12 @@ func adoptUpdaterOnlyHandoff(ctx context.Context, s *Supervisor, p CommittedHand
 	if head.Format != 1 {
 		return errors.New("updater: unsupported updater-only head")
 	}
-	j, err := readUpdaterOnlyJournal(s.cfg, head.RequestID)
+	j, err := selectUpdaterOnlyStartup(s.cfg, p, head, exe)
 	if err != nil {
 		return err
 	}
 	a := j.Scope.Authorization
-	if digest(j.Scope) != head.ScopeSHA256 || j.Scope.ConfigSHA256 != digest(s.cfg) || a.UpdaterTarget == nil || a.UpdaterTarget.CandidateSHA256 != exe {
+	if j.Scope.ConfigSHA256 != digest(s.cfg) || a.UpdaterTarget == nil || a.UpdaterTarget.CandidateSHA256 != exe {
 		return errors.New("updater: updater-only startup scope or artifact changed")
 	}
 	if err := validateUpdaterOnlyTarget(p, a); err != nil {
@@ -484,13 +620,6 @@ func adoptUpdaterOnlyHandoff(ctx context.Context, s *Supervisor, p CommittedHand
 		}
 		defer cancel()
 		ctx = startupCtx
-	}
-	h, journal, err := updaterOnlyOriginalFiles(s.cfg, p)
-	if err != nil || h != j.Scope.OriginalHeadSHA256 || journal != j.Scope.OriginalJournalSHA256 {
-		return errors.New("updater: updater-only original handoff history changed")
-	}
-	if err := validateUpdaterOnlyState(j.Scope.OriginalState, p, a); err != nil {
-		return err
 	}
 	if err := updaterOnlyLock(s.cfg, s.lock, a); err != nil {
 		return err
@@ -519,7 +648,7 @@ func adoptUpdaterOnlyHandoff(ctx context.Context, s *Supervisor, p CommittedHand
 		return errors.New("updater: updater-only startup current maintenance changed")
 	}
 	if j.Phase == "adopted" {
-		if !validIdentity(j.AdoptedUpdater) || j.AdoptedUpdater.SHA256 != exe {
+		if !validUpdaterOnlyController(j.AdoptedUpdater) || j.AdoptedUpdater.SHA256 != exe {
 			return errors.New("updater: updater-only adopted receipt is incomplete")
 		}
 		return nil

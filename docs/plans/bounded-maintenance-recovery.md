@@ -163,4 +163,6 @@ PreparationRevision 表示预期 prepare 成功后的 revision，原 prepare CAS
 - 复用独立 bounded takeover 与显式 UpdaterTarget pin，在服务已 commit/link 的前提下只替换 fixed updater；原 maintenance plan、committed handoff journal、服务进程、业务状态和维护 deadline 不变，不重新授权服务 Stop/Start。
 - 原 authorizing source 仍保留在原计划；另从当前 Current/CommittedProof、linked receipt、SourceExit 固定实际 retained server。每个破坏与启动边界验证当前 server 的真实 kernel identity、原 updater identity、固定 manager/unit/config 和同一 lock inode。
 - 独立 versioned continuation 与 hash-bound head 保存新的 updater candidate、原 handoff journal hash、当前服务 proof 与原 installer 有界窗口。新 updater 启动只能通过该独立证明认可不同 candidate SHA；原 journal/hash 不覆盖。启动回执丢失只核对原 attempt，不重复 native start；后续同 bytes supervisor 启动继续校验持久来源。
+- updater controller 的身份使用真实 PID/start/hash，launch 字段允许为空，有值时仍须精确匹配；业务 retained service 的 launch 约束保持。新的启动前计划只继承一个以 request ID 和完整 journal hash 固定的已 adopted 凭据，避免遮住仍安装版本的启动权；不扫描历史选择候选。启动前仍安装旧 bytes 时优先核对该凭据，记录 starting 后只采用当前计划的固定窗口与原 attempt。
+- updater-only 请求从独立 installer window 建立起即占用原 ID，其他维护 action 不能重新占用；普通 force/apply 的原窗口重放保持。旧 controller 已确认退出且 manager 没有 pending Job 时，明确未 Start 的计划可用新独立授权前滚；inactive/dead 与 failed/failed 都按真实状态核验，不改写失败或从 MainPID=0 推导未知 Start 可重发。
 - 回归覆盖真正不同 updater bytes、原始 handoff journal 与活服务：旧 updater 退出后新 updater 获得同 lock，服务 PID/start/hash 保持；候选、kernel identity、lock、CAS 或 proof 不符拒绝。旧回执/unknown 不改写，不将本机 updater 更新宣称为服务再次部署。
