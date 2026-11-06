@@ -236,7 +236,10 @@ func (s *Supervisor) FinishCommittedMaintenance(ctx context.Context, p protocol.
 	if !ok {
 		return errors.New("updater: maintenance archive authority unavailable")
 	}
-	err := restoreMaintenanceArchive(ctx, a, p)
+	completed, err := s.completeUnestablishedBoundedFence(ctx, a, p)
+	if err == nil && !completed {
+		err = restoreMaintenanceArchive(ctx, a, p)
+	}
 	if bounded := s.state.Bounded; bounded != nil {
 		if err == nil {
 			bounded.Outcome = "completed"

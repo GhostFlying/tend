@@ -44,6 +44,11 @@ func boundedCommand(ctx context.Context, cfg Config, action, planFile, authoriza
 				return map[string]any{"state": state, "bounded": b, "authorization": a}, nil
 			}
 		}
+		if j, e := readUpdaterOnlyJournal(cfg, requestID); e == nil {
+			return map[string]any{"state": state, "updater_only": j}, nil
+		} else if !os.IsNotExist(e) {
+			return state, e
+		}
 		if raw, e := privateFile(boundedInstallerPath(cfg, requestID)); e == nil {
 			var j boundedInstallerJournal
 			if e := strictJSON(raw, &j); e != nil {
@@ -204,6 +209,9 @@ func boundedCommand(ctx context.Context, cfg Config, action, planFile, authoriza
 // takeoverBoundedServer and takeoverBoundedRunner share the process-external
 // mechanism. Neither entry requires the old control socket or mutex to answer.
 func takeoverBoundedServer(ctx context.Context, cfg Config, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization) (any, error) {
+	if a.UpdaterTarget != nil {
+		return takeoverCommittedUpdaterOnly(ctx, cfg, p, a)
+	}
 	if err := validateBoundedServerData(cfg, a.DataIdentity); err != nil {
 		return nil, err
 	}
