@@ -125,7 +125,12 @@ func validateUpdaterOnlyState(st State, p CommittedHandoffPlan, a protocol.Bound
 	if m.Phase != "ledger_linked" && m.Phase != "completed" {
 		return errors.New("updater: updater-only recovery requires a linked committed service")
 	}
-	if !m.Irreversible || m.HealthCount < 2 || !validIdentity(st.Process) || st.Process.LaunchID != p.Maintenance.Successor.ProcessInstanceID || st.Process.SHA256 != p.Maintenance.Successor.ArtifactSHA256 || st.Process != m.Process || st.Current.ReleaseID != p.Maintenance.Successor.ReleaseID || st.Current.ManifestSHA256 != p.Maintenance.Successor.ManifestSHA256 || st.Current.Artifact.SHA256 != st.Process.SHA256 || digest(st.Current) != digest(m.Target) || st.CommittedProof == nil || st.CommittedProof.Process != st.Process || digest(st.CommittedProof.Version) != digest(st.Current) || st.CommittedProof.Binding != p.Maintenance.Successor || m.Receipt == nil || m.Receipt.Process != st.Process || m.Receipt.Successor != p.Maintenance.Successor || m.Receipt.MaintenanceID != p.Maintenance.MaintenanceID || m.Receipt.RequestID != p.Maintenance.RequestID || m.Receipt.Previous != p.Maintenance.Previous || m.Receipt.Generation == 0 || m.Receipt.Generation > st.Generation || m.Receipt.Epoch == "" || m.Receipt.Epoch != m.Epoch || m.Receipt.FirstSequence == 0 || m.Receipt.FirstSequence != m.FirstSequence || m.Receipt.SecondSequence <= m.Receipt.FirstSequence || m.Receipt.SecondSequence != m.LastSequence {
+	// The original maintenance receipt remains bound to its original launch.
+	// Ordinary same-version supervision updates only the current proof/process.
+	if !m.Irreversible || m.HealthCount < 2 || !validIdentity(m.Process) || m.Process.LaunchID != p.Maintenance.Successor.ProcessInstanceID || m.Process.SHA256 != p.Maintenance.Successor.ArtifactSHA256 || m.Receipt == nil || m.Receipt.Process != m.Process || m.Receipt.Successor != p.Maintenance.Successor || m.Receipt.MaintenanceID != p.Maintenance.MaintenanceID || m.Receipt.RequestID != p.Maintenance.RequestID || m.Receipt.Previous != p.Maintenance.Previous || m.Receipt.Generation == 0 || m.Receipt.Generation > st.Generation || m.Receipt.Epoch == "" || m.Receipt.Epoch != m.Epoch || m.Receipt.FirstSequence == 0 || m.Receipt.FirstSequence != m.FirstSequence || m.Receipt.SecondSequence <= m.Receipt.FirstSequence || m.Receipt.SecondSequence != m.LastSequence {
+		return errors.New("updater: updater-only original maintenance receipt changed")
+	}
+	if !done(st.Operation) || !validIdentity(st.Process) || st.Process.SHA256 != p.Maintenance.Successor.ArtifactSHA256 || st.Current.ReleaseID != p.Maintenance.Successor.ReleaseID || st.Current.ManifestSHA256 != p.Maintenance.Successor.ManifestSHA256 || st.Current.Artifact.SHA256 != st.Process.SHA256 || digest(st.Current) != digest(m.Target) || st.CommittedProof == nil || st.CommittedProof.Process != st.Process || digest(st.CommittedProof.Version) != digest(st.Current) || st.CommittedProof.Binding != p.Maintenance.Successor {
 		return errors.New("updater: updater-only retained service lacks exact committed proof")
 	}
 	if st.Bounded == nil || st.Bounded.SourceExit == nil || st.Bounded.SourceExit.Process != p.Maintenance.PreviousProcess || st.Bounded.SourceExit.ConfirmedAtMillis <= 0 {
@@ -142,6 +147,13 @@ func verifyUpdaterOnlyRetained(ctx context.Context, id Identity) error {
 	matches, err := (LinuxProcess{}).Find(ctx, id.LaunchID, id.SHA256)
 	if err != nil || len(matches) != 1 || matches[0] != id {
 		return errors.New("updater: updater-only retained service is not unique")
+	}
+	return nil
+}
+
+func validateUpdaterOnlyLockPin(p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization) error {
+	if p.LockDevice == 0 || p.LockInode == 0 || a.UpdaterLock == nil || a.UpdaterLock.Device != p.LockDevice || a.UpdaterLock.Inode != p.LockInode {
+		return errors.New("updater: updater-only authority changed the original handoff lock")
 	}
 	return nil
 }
@@ -178,6 +190,9 @@ func updaterOnlyManagerIdle(manager map[string]string) bool {
 }
 
 func validateUpdaterOnlyPreStartRecovery(cfg Config, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization, before State, manager map[string]string) error {
+	if err := validateUpdaterOnlyLockPin(p, a); err != nil {
+		return err
+	}
 	if !updaterOnlyManagerIdle(manager) {
 		return errors.New("updater: updater-only prior controller exit has pending manager work")
 	}
@@ -194,6 +209,12 @@ func validateUpdaterOnlyPreStartRecovery(cfg Config, p CommittedHandoffPlan, a p
 		return err
 	}
 	old := j.Scope.Authorization
+	if err := validateUpdaterOnlyLockPin(p, old); err != nil {
+		return err
+	}
+	if old.UpdaterLock.Device != a.UpdaterLock.Device || old.UpdaterLock.Inode != a.UpdaterLock.Inode {
+		return errors.New("updater: updater-only continuation changed its preceding ownership lock")
+	}
 	if head.Format != 1 || head.ScopeSHA256 != digest(j.Scope) || head.RequestID == a.RequestID || !updaterOnlyPreStart(j.Phase) || j.Scope.ConfigSHA256 != digest(cfg) || old.UpdaterSource == nil || *old.UpdaterSource != *a.UpdaterSource || old.PlanSHA256 != a.PlanSHA256 || old.Target != a.Target || old.Source != a.Source || j.Scope.Retained != before.Process || digest(j.Scope.OriginalState) != digest(before) {
 		return errors.New("updater: updater-only prior attempt is not a definite pre-start interruption")
 	}
@@ -243,6 +264,9 @@ func validateUpdaterOnlyFreshRequest(st State, id string) error {
 }
 
 func validateUpdaterOnlyScope(cfg Config, p CommittedHandoffPlan, scope updaterOnlyScope) error {
+	if err := validateUpdaterOnlyLockPin(p, scope.Authorization); err != nil {
+		return err
+	}
 	if scope.ConfigSHA256 != digest(cfg) {
 		return errors.New("updater: updater-only scope configuration changed")
 	}
@@ -372,6 +396,9 @@ func takeoverCommittedUpdaterOnly(ctx context.Context, cfg Config, p CommittedHa
 	if err := validateUpdaterOnlyTarget(p, a); err != nil {
 		return nil, err
 	}
+	if err := validateUpdaterOnlyLockPin(p, a); err != nil {
+		return nil, err
+	}
 	install, err := committedInstallerLock(cfg)
 	if err != nil {
 		return nil, err
@@ -398,6 +425,9 @@ func takeoverCommittedUpdaterOnly(ctx context.Context, cfg Config, p CommittedHa
 		return before, err
 	}
 	if err := validateUpdaterOnlyFreshRequest(before, a.RequestID); err != nil {
+		return before, err
+	}
+	if err := updaterOnlyLock(cfg, nil, a); err != nil {
 		return before, err
 	}
 	window, err := beginBoundedInstaller(cfg, a, "updater_only_takeover")
