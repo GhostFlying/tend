@@ -173,6 +173,10 @@ func TestLapsedManagerReplayPreservesScopeAndActiveSelection(t *testing.T) {
 				t.Fatal("ineligible responsibility entered database replay", scope)
 			}
 			if change == "active" {
+				ordinary, closingErr := h.app.ClosingManagerReplyReplay(t.Context(), as.Manager.ConversationID)
+				if ordinary != nil || closingErr != nil {
+					t.Fatal("ordinary active reply was intercepted by the internal repair consumer", ordinary, closingErr)
+				}
 				selection, named, readErr := h.app.HostedRuntimeSelection(t.Context(), as.Manager.ConversationID)
 				if err != nil || readErr != nil || !named || selection.RunnerRunID != as.RunID || !selection.ReceiptOnly {
 					t.Fatal("ordinary active closing attachment changed", selection, named, readErr, err)

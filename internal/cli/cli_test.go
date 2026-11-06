@@ -402,6 +402,28 @@ func TestTaskShowsArtifactsAndIssues(t *testing.T) {
 	}
 }
 
+func TestTaskShowsUncertainAcceptanceEvidenceWithoutIssues(t *testing.T) {
+	for _, verdict := range []protocol.Verdict{protocol.VerdictBlocked, protocol.VerdictInconclusive} {
+		t.Run(string(verdict), func(t *testing.T) {
+			f := newFakeServer(t)
+			f.answer("GET /api/v1/tasks/task_1", protocol.TaskDetail{
+				TaskSummary: protocol.TaskSummary{TaskID: "task_1", Lifecycle: protocol.TaskAwaitingAcceptance, BlockReason: protocol.BlockAcceptanceEnvUnavailable},
+				Acceptances: []protocol.AcceptanceView{{ArtifactID: "art_1", SpecVersion: 1, Verdict: verdict,
+					Evidence: json.RawMessage(`{"command":"make check","exit_code":2,"cause":"unknown"}`), Issues: json.RawMessage(`[]`)}},
+			})
+			te := newTestEnv(t, f.srv.URL)
+			if code := te.main("task", "task_1"); code != exitOK {
+				t.Fatalf("task = %d: %s", code, te.errOut)
+			}
+			for _, want := range []string{"acceptance_env_unavailable", "verdict on art_1 (spec v1): " + string(verdict), `evidence: {"command":"make check","exit_code":2,"cause":"unknown"}`} {
+				if !strings.Contains(te.out.String(), want) {
+					t.Errorf("task output lost original acceptance fact %q:\n%s", want, te.out)
+				}
+			}
+		})
+	}
+}
+
 func TestTailnetHostsSkipTheProxy(t *testing.T) {
 	for host, want := range map[string]bool{
 		"tend.example-tailnet.ts.net": true, "TEND.Example.ts.net.": true, "tend": true,

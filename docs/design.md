@@ -1047,6 +1047,22 @@ wire 字段和既有 capability 的默认语义均不变，因此不提升 wire 
 需要登记退役；未来若要移除旧默认，必须独立实施版本化迁移。详见[兼容修正计划](plans/decision-continuation-compatibility.md)。
 
 
+## D179：仍持租约的原关闭流程消费内部输出
+
+原生进程的成功 close 回执可已持久化，而 server 因尚未消费的内部 repair delta 保持未知；不能以停止等待、重复物理关闭或伪造业务完成解除该等待。原数据库 prefix 消费器扩展到 active 且已进入关闭流程的原 manager，但新增分支仅接受唯一原 pending repair receipt、原 close、已确认 thread 元数据、冻结 runtime/pin、Issue 与 assignment epoch，且固定 slice 只能包含该 repair 的完整 agent delta。active 普通用户答复不进入此分支，原 lapsed 普通回复和 repair 行为保留。
+
+BackgroundPool 在同一 conversation 的既有互斥与升级准入内先消费固定数据库 slice，不打开 harness、不申请新租约、不启动原生线程。内部 repair 正文仍仅保存在原始事件；按完整已消费 cursor 和正文摘要原子记录审计及 applied，包括空正文。晚到 delta、不完整消费、身份变化和事务失败不能被确认。消费 prefix 不产生 native terminal，不发布 repair 为用户答复，也不结清原业务 unknown。原 close 的 all-applied 接纳门保持，原 runner 的相同 Envelope 自然重传后才释放原物理责任；旧排队命令沿既有停止结算明确记录从未执行，已领取的未知操作保留原对账。
+
+同一 run 的 pending、started、unknown close 复用原控制命令，原 payload、结果和 request ID 不变；已有升级 park 继续拥有新 close 的准入与专用错误围栏。普通 completed-error close 的旧有效通信行为保持，不能仅以无字段变更为由收紧其后续请求；改变该状态另需版本化设计。find 只合并同 run、相同完整 payload、尚无结果的未决只读查询，完成后可取得新鲜读取；不合并 turn、inject 或 tool_result。历史积压保留原记录，不直接删除或改成成功。本次不改 runner wire、journal、旧有效 payload、物理停止证明或新的业务权限。详见[实施计划](plans/manager-native-transport-liveness.md)。
+
+## D178：验收未满足与执行受阻的事实边界
+
+约定的质量门已经执行且未满足时，`changes_required` 可以要求实现方诊断并解决该失败，不要求验收者先证明某一产品缺陷；执行结果与根因归属必须分开。`blocked` 仅表达有证据的外部前提阻止验收，`inconclusive` 表达证据尚不足以判断要求是否满足，二者都保留原证据、后续调查及负责人处理责任。验收者仍不修改实现。
+
+历史 `acceptance_env_unavailable` 同时用于上述两类 verdict 及验收 Run 自身失败，仅是兼容性的待处理码，不是环境故障证明。保留 wire、历史 verdict、调度和既有显式重验收入口，Web 将该通用码展示为“验收待处理”，CLI 文本同时保留原 verdict、Issues 与 Evidence。负责人沿当前原 Attention、Task 合同、CAS、assignment epoch 和预算安排有界后续；没有 effect 的 Task 规则答复不自动产生 worker handoff 后继。metadata repair 只能完成其原上下文义务，不因此获得业务续办权限。
+
+本次不新增 verdict 必填字段、结构化硬约束、返修 effect 或自动重试，也不改变旧有效请求。worker 提示随 runner 版本生效，只有 server 部署不能证明旧 runner 已采用新合同。运行中的未知事实与原生收口另行验证，不能以文案改动认定现场已恢复。详见[实施计划](plans/acceptance-failure-contract.md)。
+
 ## D175：TraeX 原 rollout 的终态补证
 
 独立原生历史连接可能把仍活动的其他连接回合投影为 interrupted，但缺少真实结束时间；不能删掉 ending_unconfirmed 守卫或以观察时间制造结束事实。已冻结的 TraeX runtime/session/launch/turn 与工作区身份完全匹配时，可只读原 providerSession 指定的 rollout，核对 managed launch/input、原 session/turn 和显式原生结束事件及其时间。该补证只在原 observation record 位置的局部副本上发布真实事实，不覆盖冲突身份或已有确定原生结果；生命周期 Agent 始终沿用原 native-api 观测，补证不参与完成、恢复、控制或历史清理。每轮只发布一次 projection，不反复切换原弱观测与补证 revision，不创建会话或重发输入。TraeX 观测以持久语义指纹区分相同原生身份的 running 与后续终态/结束时钟/operations；排除采样时间，真实变化只推进一次 revision，相同事实及重启重放沿用原事件身份。指纹仅用于观测去重，不改变原生绑定或生命周期权限；旧 thread JSON 缺失字段仍可读取，首次补齐语义元数据可追加一次事实。原生取消仅证明 turn cancelled，不证明物理进程停止；工具调用、原生进程和子工作收敛独立校验，缺失或未知保持 pending/unknown。补证本身不授权新的模型 continuation，已有 Codex 与直接原生回执路径不变。无需新 wire 字段或迁移，实际 runner 必须具备实现。见[实施计划](plans/traex-root-observation.md)。

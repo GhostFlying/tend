@@ -38,7 +38,7 @@ export const blockLabels: Record<BlockReason, string> = {
   waiting_resource: "等待资源",
   waiting_decision: "待决",
   waiting_approval: "等待批准",
-  acceptance_env_unavailable: "验收环境不可用",
+  acceptance_env_unavailable: "验收待处理",
   budget_exhausted: "实现次数用完",
   workspace_unavailable: "工作区不可用",
   preparation_required: "待负责人修正执行配置",

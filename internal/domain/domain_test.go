@@ -3,6 +3,7 @@ package domain
 import (
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -242,7 +243,7 @@ func TestStaleAcceptanceDoesNotComplete(t *testing.T) {
 	}
 }
 
-func TestAcceptanceEnvFailureBlocks(t *testing.T) {
+func TestAcceptanceWithoutConclusionRetainsSupervision(t *testing.T) {
 	for _, v := range []protocol.Verdict{protocol.VerdictBlocked, protocol.VerdictInconclusive} {
 		task := taskIn(protocol.TaskAwaitingAcceptance)
 		d, err := AcceptanceSubmitted(task, verdictOn(task, v))
@@ -251,6 +252,15 @@ func TestAcceptanceEnvFailureBlocks(t *testing.T) {
 		}
 		if d.Task.Lifecycle != protocol.TaskAwaitingAcceptance || d.Task.Block != protocol.BlockAcceptanceEnvUnavailable || len(d.Actions) != 0 {
 			t.Errorf("%s: %+v", v, d)
+		}
+		if len(d.OpenDecisions) != 1 || len(d.OpenDecisions[0].Effects) != 2 {
+			t.Fatalf("%s lost its explicit follow-up decision: %+v", v, d)
+		}
+		if v == protocol.VerdictInconclusive && !strings.Contains(d.OpenDecisions[0].Question, "尚不能据此认定环境故障") {
+			t.Fatal("an inconclusive verdict was treated as an environment fault", d.OpenDecisions[0])
+		}
+		if v == protocol.VerdictBlocked && !strings.Contains(d.OpenDecisions[0].Question, "原验收证据") {
+			t.Fatal("a blocked verdict lost its evidence obligation", d.OpenDecisions[0])
 		}
 	}
 }

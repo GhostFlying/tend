@@ -72,10 +72,12 @@ type BlockReason string
 
 // Block reasons.
 const (
-	BlockNone                     BlockReason = "none"
-	BlockWaitingResource          BlockReason = "waiting_resource"
-	BlockWaitingDecision          BlockReason = "waiting_decision"
-	BlockWaitingApproval          BlockReason = "waiting_approval"
+	BlockNone            BlockReason = "none"
+	BlockWaitingResource BlockReason = "waiting_resource"
+	BlockWaitingDecision BlockReason = "waiting_decision"
+	BlockWaitingApproval BlockReason = "waiting_approval"
+	// BlockAcceptanceEnvUnavailable is the historical waiting code for blocked,
+	// inconclusive and failed acceptance runs, not proof of an environment fault.
 	BlockAcceptanceEnvUnavailable BlockReason = "acceptance_env_unavailable"
 	BlockBudgetExhausted          BlockReason = "budget_exhausted"
 	// BlockWorkspaceUnavailable: the host holding the task's workspace is
