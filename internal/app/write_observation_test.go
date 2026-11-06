@@ -81,6 +81,54 @@ func TestExecuteWriteObservationPreservesReplay(t *testing.T) {
 }
 
 func TestClaimAndConcurrencyWritePhases(t *testing.T) {
+	h, observed := newConcurrencyObservedHarness(t)
+	h.hello("linux-1")
+	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 1, Max: 2})
+	h.createTask(owner, createTaskPayload{Title: "work", Spec: testSpec})
+	*observed = nil
+	_, ok, env := h.claim("linux-1")
+	if !ok || len(*observed) != 1 {
+		t.Fatalf("claim=%v observations=%+v", ok, *observed)
+	}
+	assertWritePhases(t, (*observed)[0], store.WriteManagerTasks, store.WriteClaimCandidates, store.WriteClaimExecutors, store.WriteConcurrencySync)
+	*observed = nil
+	if _, ok := h.claimWith("linux-1", env); !ok || len(*observed) != 1 || len((*observed)[0].Phases) != 0 {
+		t.Fatalf("claim replay reran work: ok=%v observations=%+v", ok, *observed)
+	}
+	*observed = nil
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	if len(*observed) != 1 {
+		t.Fatalf("tick observations=%+v", *observed)
+	}
+	assertWritePhases(t, (*observed)[0], store.WriteConcurrencySync, store.WriteConcurrencyWait, store.WriteConcurrencyLoad)
+	*observed = nil
+	if err := h.app.cleanConcurrencyHistory(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*observed) != 1 {
+		t.Fatalf("history cleanup observations=%+v", *observed)
+	}
+	assertWritePhases(t, (*observed)[0], store.WriteConcurrencyGC)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `DROP VIEW hosted_executions`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	*observed = nil
+	if err := h.app.tickConcurrency(t.Context(), true); err == nil {
+		t.Fatal("broken execution query succeeded")
+	}
+	if len(*observed) != 1 || (*observed)[0].Outcome != "error" || (*observed)[0].Commit != 0 {
+		t.Fatalf("failed sync observations=%+v", *observed)
+	}
+	assertWritePhases(t, (*observed)[0], store.WriteConcurrencySync)
+}
+
+func newConcurrencyObservedHarness(t *testing.T) (*harness, *[]store.WriteObservation) {
+	t.Helper()
 	clock := testkit.NewClock()
 	path := filepath.Join(t.TempDir(), "tend.db")
 	initial, err := openAppFixture(t.Context(), path, clock.Now)
@@ -102,41 +150,7 @@ func TestClaimAndConcurrencyWritePhases(t *testing.T) {
 	ids := testkit.NewIDGen(clock, 42)
 	h := &harness{t: t, app: New(s, ids, clock.Now), store: s, clock: clock, ids: ids}
 	h.syncConfig(testConfig())
-	h.hello("linux-1")
-	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 1, Max: 2})
-	h.createTask(owner, createTaskPayload{Title: "work", Spec: testSpec})
-	observations = nil
-	_, ok, env := h.claim("linux-1")
-	if !ok || len(observations) != 1 {
-		t.Fatalf("claim=%v observations=%+v", ok, observations)
-	}
-	assertWritePhases(t, observations[0], store.WriteManagerTasks, store.WriteClaimCandidates, store.WriteClaimExecutors, store.WriteConcurrencySync)
-	observations = nil
-	if _, ok := h.claimWith("linux-1", env); !ok || len(observations) != 1 || len(observations[0].Phases) != 0 {
-		t.Fatalf("claim replay reran work: ok=%v observations=%+v", ok, observations)
-	}
-	observations = nil
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if len(observations) != 1 {
-		t.Fatalf("tick observations=%+v", observations)
-	}
-	assertWritePhases(t, observations[0], store.WriteConcurrencySync, store.WriteConcurrencyWait, store.WriteConcurrencyLoad)
-	if err := s.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `DROP VIEW hosted_executions`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	observations = nil
-	if err := h.app.tickConcurrency(t.Context()); err == nil {
-		t.Fatal("broken execution query succeeded")
-	}
-	if len(observations) != 1 || observations[0].Outcome != "error" || observations[0].Commit != 0 {
-		t.Fatalf("failed sync observations=%+v", observations)
-	}
-	assertWritePhases(t, observations[0], store.WriteConcurrencySync)
+	return h, &observations
 }
 
 func assertWritePhases(t *testing.T, observation store.WriteObservation, phases ...store.WritePhase) {

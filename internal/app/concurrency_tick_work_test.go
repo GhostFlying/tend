@@ -60,7 +60,7 @@ func concurrencyTickWorkFixture(t *testing.T, active, history int) *harness {
 			t.Fatal(err)
 		}
 	}
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	return h

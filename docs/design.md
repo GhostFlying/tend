@@ -659,6 +659,13 @@ D153 事务观测补充：慢写日志区分 manager 任务刷新、领取候选
 仅使用固定名称，不记录请求内容、SQL 参数或配置，观测在释放写连接后输出。
 见[实施计划](plans/concurrency-maintenance-latency.md)。
 
+D153 维护节奏补充：执行状态与健康证据每五秒采样，超过十秒的缺口仍中断观察。
+完整调度等待需求每三十秒刷新；已有证据可能升档时，在同一事务重新核对实际需求，
+旧等待值不能授权升档。拥塞反馈和最终领取准入仍同步处理，unknown 与停止证明规则
+不变。历史清理独立为一分钟一次、每表最多 256 条的事务；清理失败不回滚采样，
+保留反馈去重身份。维护节奏仅为循环本地提示，重启、时钟倒退和失败后重新到期；
+业务采样时刻在取得写连接后读取，避免把写队列等待误认为较早时刻的观察。
+
 ## D154：固定 updater 的原窗口前进恢复
 
 针对 terminal 升级账本与本机 irreversible checking 不一致、旧健康条件不可由 updater 改变的恢复，新增独立 forward recovery。旧 batch/start、operation 全快照、旧 proof、失败与 unconfirmed 历史保留；新 binding 的健康和 receipt 不解释为旧 batch committed。恢复不调用旧 terminal retry、不新建升级 batch、不回滚已接单数据库。

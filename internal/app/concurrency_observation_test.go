@@ -66,7 +66,7 @@ func TestConcurrencyHostedLivenessRequiresNativeActivity(t *testing.T) {
 			if err := h.app.ObserveNativeStart(t.Context(), d.RequestID, "native", "turn"); err != nil {
 				t.Fatal(err)
 			}
-			if err := h.app.tickConcurrency(t.Context()); err != nil {
+			if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 				t.Fatal(err)
 			}
 			for i := 1; i <= int(2*RunnerOfflineAfter/time.Second); i++ {
@@ -81,7 +81,7 @@ func TestConcurrencyHostedLivenessRequiresNativeActivity(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if err := h.app.tickConcurrency(t.Context()); err != nil {
+				if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -110,7 +110,7 @@ func TestConcurrencyCompactUnknownAndEarlyCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.clock.Advance(time.Hour)
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.app.AcquireAuxiliaryConcurrency(t.Context(), "main", &sel); !errors.Is(err, ErrConcurrencyCapacity) {
@@ -207,7 +207,7 @@ func TestConcurrencyRunnerSamplingUsesObservationTime(t *testing.T) {
 	if _, err := h.app.RecordRunEvents(t.Context(), runPrincipal(run, protocol.RoleImplement), run, []protocol.RunEvent{{Seq: 1, Kind: "worker.concurrency", Body: b}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	initial, err := h.app.ConcurrencyGroup(t.Context(), "shared")
@@ -222,7 +222,7 @@ func TestConcurrencyRunnerSamplingUsesObservationTime(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := h.app.tickConcurrency(t.Context()); err != nil {
+		if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 			t.Fatal(err)
 		}
 	}

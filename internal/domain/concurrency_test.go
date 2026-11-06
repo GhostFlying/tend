@@ -2,9 +2,34 @@ package domain
 
 import (
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+func TestConcurrencyFiveSecondSamplesPreserveWindow(t *testing.T) {
+	start := int64(100000)
+	s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Min: 1, Current: 1, Max: 2}}
+	for elapsed := time.Duration(0); elapsed <= ConcurrencyWindow; elapsed += 5 * time.Second {
+		now := start + elapsed.Milliseconds()
+		s.Sample(now, 1, 1, 1, true)
+		if elapsed == 10*time.Second {
+			s.Successes = append(s.Successes, now)
+		}
+		if elapsed < ConcurrencyWindow && s.CanIncrease(now) {
+			t.Fatal("five-second sampling shortened the stable window")
+		}
+	}
+	now := start + ConcurrencyWindow.Milliseconds()
+	if s.Group.SaturatedMillis != ConcurrencyWindow.Milliseconds() || !s.CanIncrease(now) || !s.Increase(now) || s.Group.Current != 2 {
+		t.Fatalf("five-second sampling lost stable proof: %+v", s)
+	}
+	s.Sample(now+5000, 2, 2, 1, true)
+	s.Sample(now+15001, 2, 2, 1, true)
+	if s.Group.SaturatedMillis != 0 || s.Group.ObservationSince != now+15001 {
+		t.Fatalf("a gap over ten seconds preserved healthy proof: %+v", s)
+	}
+}
 
 func TestConcurrencyRequiresObservedSaturationAndDemand(t *testing.T) {
 	start := int64(100000)

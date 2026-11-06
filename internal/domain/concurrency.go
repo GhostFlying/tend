@@ -86,12 +86,18 @@ func (s *ConcurrencyState) Congested(now int64) bool {
 	return true
 }
 
-func (s *ConcurrencyState) Increase(now int64) bool {
+// CanIncrease checks the current proof, including the observed waiting demand.
+// Callers must refresh that demand before committing an increase.
+func (s *ConcurrencyState) CanIncrease(now int64) bool {
 	g := &s.Group
-	if !g.FeedbackHealthy || g.Current >= g.Max || now < g.CooldownUntil || now-g.ObservationSince < ConcurrencyWindow.Milliseconds() || g.SaturatedMillis < ConcurrencySaturation.Milliseconds() || g.SuccessfulTurns == 0 || g.Waiting == 0 {
+	return g.FeedbackHealthy && g.Current < g.Max && now >= g.CooldownUntil && now-g.ObservationSince >= ConcurrencyWindow.Milliseconds() && g.SaturatedMillis >= ConcurrencySaturation.Milliseconds() && g.SuccessfulTurns > 0 && g.Waiting > 0
+}
+
+func (s *ConcurrencyState) Increase(now int64) bool {
+	if !s.CanIncrease(now) {
 		return false
 	}
-	g.Current++
+	s.Group.Current++
 	s.Reset(now)
 	return true
 }
