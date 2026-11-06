@@ -257,7 +257,9 @@ func (s *Supervisor) AdoptRecovery(ctx context.Context, p protocol.ForwardRecove
 	if err != nil {
 		return err
 	}
-	s.state.Format = 2
+	if s.state.Format < 2 {
+		s.state.Format = 2
+	}
 	boot, _, err := s.opts.BootClock()
 	if err != nil {
 		return err

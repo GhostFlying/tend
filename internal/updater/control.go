@@ -15,6 +15,10 @@ import (
 )
 
 type ControlRequest struct {
+	BoundedWindow              *protocol.BoundedMaintenanceState           `json:"bounded_window,omitempty"`
+	BoundedAuthorization       *protocol.BoundedMaintenanceAuthorization   `json:"bounded_authorization,omitempty"`
+	BoundedRunnerGrant         *protocol.BoundedRunnerMaintenanceGrant     `json:"bounded_runner_grant,omitempty"`
+	BoundedAction              string                                      `json:"bounded_action,omitempty"`
 	MaintenanceReceiptRecovery *protocol.MaintenanceReceiptRecoveryRequest `json:"maintenance_receipt_recovery,omitempty"`
 	MaintenanceContinuation    *protocol.MaintenanceContinuation           `json:"maintenance_continuation,omitempty"`
 	Maintenance                *protocol.CommittedMaintenancePlan          `json:"maintenance,omitempty"`
@@ -87,6 +91,22 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 		}
 		var err error
 		switch r.URL.Path {
+		case "/bounded/cancel":
+			if req.Maintenance == nil || req.BoundedAuthorization == nil {
+				err = errors.New("updater: bounded cancellation inputs required")
+			} else {
+				err = s.CancelBoundedMaintenance(r.Context(), *req.Maintenance, *req.BoundedAuthorization)
+			}
+		case "/bounded/authorize":
+			if req.BoundedAuthorization == nil {
+				err = errors.New("updater: independent bounded authorization required")
+			} else if req.BoundedAuthorization.Role == "server" && req.Maintenance != nil {
+				err = s.authorizeBoundedMaintenanceWindow(r.Context(), *req.Maintenance, *req.BoundedAuthorization, req.BoundedAction, req.BoundedWindow)
+			} else if req.BoundedAuthorization.Role == "runner" && req.BoundedRunnerGrant != nil {
+				err = s.AuthorizeBoundedRunnerMaintenance(r.Context(), *req.BoundedRunnerGrant, req.BoundedAction)
+			} else {
+				err = errors.New("updater: bounded source plan required")
+			}
 		case "/bootstrap":
 			err = s.Bootstrap(r.Context(), req.PID)
 		case "/upgrade":

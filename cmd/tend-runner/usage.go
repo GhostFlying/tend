@@ -76,16 +76,24 @@ func runUsageCommand(args []string, out, errout io.Writer) int {
 			}
 			h, err = cfgfile.Path(h)
 			c.Journal = filepath.Join(h, "runner", "journal.db")
-			if err == nil && cfg.Tailnet != nil {
+			if err == nil {
 				socket := cfg.UpdaterSocket
 				if socket == "" {
 					socket = filepath.Join(h, "runner", "usage-control", "usage.sock")
 				}
 				socket, err = cfgfile.Path(socket)
-				c.Server = "http://localhost"
-				c.HTTP = &http.Client{Timeout: time.Minute, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-				}}}
+				if err == nil {
+					_, socketErr := os.Lstat(socket)
+					if socketErr != nil && !os.IsNotExist(socketErr) {
+						err = socketErr
+					} else if cfg.Tailnet != nil || socketErr == nil {
+						c.Server = "http://localhost"
+						c.LiveJournal = true
+						c.HTTP = &http.Client{Timeout: time.Minute, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+							return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+						}}}
+					}
+				}
 			}
 		}
 	}

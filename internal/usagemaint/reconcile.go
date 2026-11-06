@@ -23,9 +23,12 @@ import (
 type Config struct {
 	Server, Token, HostID, DeploymentID, NativeHome, Provider, Journal string
 	Apply                                                              bool
-	HTTP                                                               *http.Client
-	Now                                                                func() time.Time
-	IDs                                                                protocol.IDGen
+	// LiveJournal uses the private control transport of the existing runner,
+	// whose writer owns the original journal and every pending request.
+	LiveJournal bool
+	HTTP        *http.Client
+	Now         func() time.Time
+	IDs         protocol.IDGen
 }
 
 type Result struct {
@@ -121,14 +124,44 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		return err
 	}
 	var j *journal.Journal
+	deleteRequest := func(ctx context.Context, request string) error {
+		if c.LiveJournal {
+			// The live writer acknowledges only a committed server receipt.
+			return nil
+		}
+		return j.DeleteRequest(ctx, request)
+	}
+	registerSource := func(ctx context.Context, source journal.UsageSource) error {
+		if c.LiveJournal {
+			return call(ctx, "POST", "/runner/v1/usage/source", source, nil)
+		}
+		return j.RegisterUsageSource(ctx, source)
+	}
+	queueUsage := func(ctx context.Context, source journal.UsageSource, env *protocol.Envelope) error {
+		if c.LiveJournal {
+			return call(ctx, "POST", "/runner/v1/usage/queue", struct {
+				Source   journal.UsageSource `json:"source"`
+				Envelope *protocol.Envelope  `json:"envelope"`
+			}{source, env}, nil)
+		}
+		return j.QueueUsage(ctx, source, env)
+	}
 	if c.Apply {
 		var err error
-		j, err = journal.Open(ctx, c.Journal, c.Now)
-		if err != nil {
-			return err
+		var pending []journal.Request
+		if c.LiveJournal {
+			if c.HostID == "" {
+				return errors.New("live usage reconciliation requires the original runner host")
+			}
+			err = call(ctx, "GET", "/runner/v1/usage/pending", nil, &pending)
+		} else {
+			j, err = journal.Open(ctx, c.Journal, c.Now)
+			if err != nil {
+				return err
+			}
+			defer j.Close()
+			pending, err = j.Requests(ctx)
 		}
-		defer j.Close()
-		pending, err := j.Requests(ctx)
 		if err != nil {
 			return err
 		}
@@ -144,7 +177,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 			if err != nil {
 				return err
 			}
-			if err = j.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
+			if err = deleteRequest(ctx, p.Envelope.RequestID); err != nil {
 				return err
 			}
 		}
@@ -227,7 +260,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		if c.Apply {
 			hash := sha256.Sum256([]byte(target.RunID + "\x00" + src.Provider + "\x00" + src.Path))
 			state := journal.UsageSource{ID: hex.EncodeToString(hash[:]), RunID: target.RunID, ConversationID: target.ConversationID, Source: src, Cursors: map[string]nativeusage.Cursor{}, Files: files, DiscoveredAt: c.Now().UnixMilli(), WriterStopped: target.Stopped}
-			if err = j.RegisterUsageSource(ctx, state); err != nil {
+			if err = registerSource(ctx, state); err != nil {
 				return err
 			}
 			for i, batch := range batches {
@@ -248,7 +281,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 				}
 				raw, _ := json.Marshal(value)
 				env := protocol.Envelope{RequestID: c.IDs.New(protocol.PrefixRequest), Operation: operation, Target: destination, Payload: raw}
-				if err = j.QueueUsage(ctx, state, &env); err != nil {
+				if err = queueUsage(ctx, state, &env); err != nil {
 					return err
 				}
 				if c.HostID != "" {
@@ -259,7 +292,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 				if err != nil {
 					return err
 				}
-				if err = j.DeleteRequest(ctx, env.RequestID); err != nil {
+				if err = deleteRequest(ctx, env.RequestID); err != nil {
 					return err
 				}
 			}

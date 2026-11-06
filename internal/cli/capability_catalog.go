@@ -32,6 +32,13 @@ func CapabilityBindings() []CapabilityBinding {
 	for _, action := range protocol.CommittedHandoffActions() {
 		out = append(out, binding("local EXEC updater maintenance "+action, "updater maintenance "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))
 	}
+	for _, action := range protocol.BoundedMaintenanceActions() {
+		args := []string{"--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--json"}
+		if action != "status" && action != "reconcile" {
+			args = append(args, "--plan", "{handoff}", "--authorization", "{bounded-authorization}")
+		}
+		out = append(out, binding("local EXEC updater bounded "+action, "updater bounded "+action, args...))
+	}
 	for _, cmd := range capabilityCommands {
 		args := []string{}
 		variables := commandVariables(cmd.Route)
@@ -57,6 +64,10 @@ func CapabilityBindings() []CapabilityBinding {
 			capability = cmd.Operation
 			if cmd.Operation == protocol.OpContinueRetainedRun {
 				args = append(args, "--data", retainedRunProofExample())
+			} else if cmd.Operation == boundedRunnerOwnerOperation {
+				args = append(args, "--data", boundedRunnerPlanExample())
+			} else if cmd.Operation == protocol.OpReleaseBoundedRunnerAdmission {
+				args = append(args, "--data", boundedRunnerAdmissionReleaseExample())
 			} else if cmd.Operation == protocol.OpAnswerDecisionContinuation {
 				args = append(args, "--data", `{"version":1,"text":"Wait for independent resume","continuation":{"mode":"wait","reason":"Await explicit continuation"}}`)
 			} else if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
@@ -314,6 +325,7 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nRetained ordinary Orca Run recovery: maintenance-reconciliation is ledger-only; can_continue does not prove a live native turn or restored execution. Copy identity, every protection entry (including original_requests_json), protection_set_sha256 and task_revision from the exact original Run. continue-retained accepts the identity fields at the payload top level, the complete protections array, its hash and an independent reason; a cited source_message_id also requires expected_source_revision.\n")
 		out.WriteString("Use --revision with that original Task control revision, an explicit --request-id and --file <proof.json> (or --data <json>). Save --dry-run output as the original Envelope before submitting. The command authorizes strict attachment through the original journal and same lease only; it does not send a continuation, create a session or clear historical protection/unknown facts. Missing native evidence, old runners, pending business or a new maintenance capture keep recovery blocked.\n")
 		out.WriteString("If the result is unknown, retain the original ID, input, revision and Envelope. Run tend request show <original-id> before tend request replay --file <original-envelope.json>; replay exact bytes only, never replace the ID or refresh the proof to retry an unknown request.\n")
+		out.WriteString("After bounded runner replacement, also copy recovery_authorization_id from the original Run diagnostic into the continuation payload. Ordinary host mode changes do not release that recovery quarantine; the independent continuation must match its original authorization and full frozen Run proof.\n")
 	}
 	if name == "decide" || name == "decision-continuation" || strings.HasPrefix(name, "decision-continuation ") {
 		out.WriteString("\nLegacy decide preserves automatic handoff after answer and stopped receipts. Use decision-continuation answer for conditional scheduling; it requires the parent Task --revision plus complete version, option/text and explicit continuation. Free text never proves a typed dependency.\n")
@@ -322,6 +334,21 @@ func commandUsage(prefix []string) string {
 		out.WriteString("tend decision-continuation answer <decision_id> --revision <task_control_revision> --data '{\"version\":1,\"text\":\"After the dependency\",\"continuation\":{\"mode\":\"dependency\",\"reason\":\"Await exact dependency completion\",\"dependency\":{\"task_id\":\"<dependency_task>\",\"spec_version\":1}}}'\n")
 		out.WriteString("Read decision-continuation show <decision_id> --json for policy, state, blocked_reason, continuation revision and parent task_control_revision. resume explicitly releases a wait; reconcile checks exact ordinary execution Task/spec completion without accepting a caller readiness claim. Manager Task dependencies are rejected; historical unsupported dependencies stay blocked. Both preserve physical-stop and current-contract guards.\n")
 		out.WriteString("tend decision-continuation resume <decision_id> --revision <task_control_revision> --request-id <new-request-id> --data '{\"expected_revision\":1}' --dry-run\nUse reconcile with the same input shape for dependency reconciliation. On unknown outcome keep the original request ID, payload, both revisions and saved Envelope; run tend request show <original-id>, then request replay --file <original-envelope.json> for an identical retry.\n")
+	}
+	if name == "updater bounded" || strings.HasPrefix(name, "updater bounded ") {
+		out.WriteString("\nBounded server/runner maintenance uses the reviewed independent installer, including status and reconcile when the old control socket is unavailable. Inputs: --installer <absolute-file> --installer-sha256 <reviewed-sha256> --config <absolute-file>.\n")
+		out.WriteString("plan reads --plan <complete-source-plan> and --authorization <typed-json>; the installer fills factual source/target, generation, phase and canonical plan_sha256. Save its complete output before apply. apply, force, extend, cancel and takeover require an independent stable request_id and fresh expected_generation/expected_phase in that authorization; optional matching flags never replace them. force explicitly accepts retained unknown work; takeover independently reconciles the old updater and writer.\n")
+		out.WriteString("authorization supports role (server/runner), source, target, reason, expires_at_ms, timeouts and force_on_drain_timeout. The timeout policy fields are overall_ms, handoff_ms, fence_ms, drain_ms, stop_ms, kill_ms, backup_ms, start_health_ms and complete_ms. Defaults are 360000, 60000, 30000, 60000, 30000, 10000, 30000, 90000 and 30000. Phase budgets sum to 340 seconds; the component/host total remains 360 seconds. Budget renewal requires a distinct extend request and fresh CAS; status or replay cannot renew it.\n")
+		out.WriteString("takeover additionally binds updater_source (PID, start_ticks, launch_id and sha256) plus updater_lock (device/inode); data_identity binds the original ledger or journal separately. Those exact local identities are checked by the installer, not inferred from a server summary.\n")
+		out.WriteString("--dry-run exports the exact installer arguments and typed inputs without executing. status/reconcile require only the fixed configuration and optionally --request-id to inspect the original request; their command timeout defaults to 10s. Other installer commands default to a 370s outer wait via --timeout. A mutation timeout reports unknown and prints the original request/CAS plus the next reconcile command. Keep the original plan, authorization and request; reconcile before repeating exact bytes. Installer termination does not prove that its managed service or native workers exited. Installed, healthy, linked and restored remain separate durable facts.\n")
+	}
+	if name == "host authorize-bounded-maintenance" {
+		out.WriteString("\nProvide the complete typed RunnerBoundedMaintenancePlan with --data <json> or --file <file|->. It binds host_id, configured node_selector, runner_instance_id, runner_generation, the absolute release_dir, source, journal, target, expected_control_revision and the independent authorization. The nested authorization source/target/data_identity must equal the outer source/target/journal. A configured selector is not physical node proof; the independent installer checks local process and journal identities.\n")
+		out.WriteString("The owner Envelope uses authorization.request_id and expected_control_revision from the original plan; optional --request-id/--revision must match them. No revision or request is refreshed automatically. --dry-run saves the original Envelope. On unknown outcome, use tend request show <original-id>, then tend request replay --file <original-envelope.json> with the original bytes. Grant, physical stop, installation, retained native work and independent resume are separate facts.\n")
+	}
+	if name == "host release-bounded-admission" {
+		out.WriteString("\nProvide the complete typed BoundedRunnerAdmissionRelease with --data <json> or --file <file|->. It binds request_id, host_id, recovery_authorization_id, the exact observed successor binding, runner_generation, journal, expected_control_revision and reason. The owner Envelope uses the payload request and host CAS; optional flags must match and no state is refreshed automatically.\n")
+		out.WriteString("This independent owner decision releases global admission only after the successor is reconciled. It keeps every old Run quarantine, unknown native request, held slot and workspace; it does not declare old work complete or make an unobserved successor Ready. Use --dry-run to save the original Envelope. On unknown outcome, inspect tend request show <original-id> before an identical tend request replay --file <original-envelope.json>.\n")
 	}
 	return out.String()
 }

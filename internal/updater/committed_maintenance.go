@@ -187,6 +187,13 @@ func (s *Supervisor) AdoptCommittedMaintenance(ctx context.Context, p protocol.C
 		}
 		s.state.MaintenanceHistory[s.state.Maintenance.Plan.MaintenanceID] = *s.state.Maintenance
 	}
+	if b := s.state.Bounded; b != nil {
+		if s.state.BoundedHistory == nil {
+			s.state.BoundedHistory = map[string]protocol.BoundedMaintenanceState{}
+		}
+		s.state.BoundedHistory[b.Authorization.RequestID] = *b
+		s.state.Bounded = nil
+	}
 	s.state.Maintenance = &CommittedMaintenance{Plan: p, OriginalStateSHA256: p.StateSHA256, OriginalProof: *s.state.CommittedProof, Target: target, Phase: "updater_adopted"}
 	if p.ParentMaintenanceID != "" && p.ReceiptRecoveryStop != nil {
 		parent := s.state.MaintenanceHistory[p.ParentMaintenanceID]
@@ -208,7 +215,9 @@ func (s *Supervisor) AdoptCommittedMaintenance(ctx context.Context, p protocol.C
 		s.state.UpdaterEpoch = epoch
 		s.state.UpdaterBootID = boot
 	}
-	s.state.Format = 3
+	if s.state.Format < 3 {
+		s.state.Format = 3
+	}
 	return s.save()
 }
 
@@ -275,6 +284,10 @@ func (s *Supervisor) AuthorizeCommittedMaintenance(ctx context.Context, p protoc
 }
 
 func (s *Supervisor) maintenanceAuthorityValid(m *CommittedMaintenance) error {
+	if b := s.state.Bounded; b != nil && b.Authorization.Role == "server" {
+		_, err := s.boundedRemaining()
+		return err
+	}
 	boot, mono, err := s.opts.BootClock()
 	if err != nil {
 		return err
@@ -328,7 +341,7 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 		if err := s.maintenanceAuthorityValid(m); err != nil {
 			return err
 		}
-		if err := verifyResourceEvidence(maintenanceActiveResources(m), s.opts.Now()); err != nil {
+		if err := verifyResourceEvidence(maintenanceActiveResources(m), s.opts.Now()); s.state.Bounded == nil && err != nil {
 			return err
 		}
 		id := m.Plan.PreviousProcess
@@ -345,7 +358,9 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 				return ErrUnknown
 			}
 		}
-		if m.Plan.ParentMaintenanceID == "" {
+		if s.state.Bounded != nil && s.state.Bounded.Authorization.Role == "server" {
+			// Explicit force keeps the raw observation; it does not assert drain.
+		} else if m.Plan.ParentMaintenanceID == "" {
 			a, ok := s.opts.Authority.(MaintenanceArchiveAuthority)
 			if !ok {
 				return errors.New("updater: maintenance archive authority unavailable")
@@ -386,7 +401,13 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 				}
 				stopErr = crash.Crash(ctx, id, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second)
 			} else {
-				stopErr = s.opts.Process.Stop(ctx, id, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second)
+				stopTimeout := time.Duration(s.cfg.StopTimeoutSeconds) * time.Second
+				if b := s.state.Bounded; b != nil {
+					stopTimeout = time.Duration(b.Authorization.Timeouts.StopMillis) * time.Millisecond
+				}
+				stopCtx, cancel := context.WithTimeout(ctx, stopTimeout)
+				stopErr = s.opts.Process.Stop(stopCtx, id, stopTimeout)
+				cancel()
 			}
 			if stopErr != nil {
 				return stopErr
@@ -425,6 +446,9 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 			return err
 		}
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": m.Plan.Successor.ProcessInstanceID, "TEND_UPDATER_LAUNCH_ID": m.Plan.Successor.ProcessInstanceID, "TEND_RELEASE_SHA256": m.Target.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": m.Target.ReleaseID, "TEND_COMMITTED_MAINTENANCE_ID": m.Plan.MaintenanceID, "TEND_COMMITTED_MAINTENANCE_SOCKET": SocketPath(s.cfg)}
+		if b := s.state.Bounded; b != nil {
+			extra["TEND_BOUNDED_RECOVERY_REQUEST_ID"] = boundedRecoveryID(b)
+		}
 		start := s.opts.Process.Start
 		if launcher, ok := s.opts.Process.(maintenanceLauncher); ok {
 			start = launcher.StartMaintenance
@@ -476,6 +500,9 @@ func (s *Supervisor) maintenanceRecordOldExit(ctx context.Context, m *CommittedM
 		return err
 	}
 	m.Phase = "old_exited"
+	if b := s.state.Bounded; b != nil {
+		b.SourceExit = &protocol.BoundedProcessExit{Process: m.Plan.PreviousProcess, ConfirmedAtMillis: s.opts.Now().UnixMilli(), Method: "exact_process_exit_observed"}
+	}
 	return s.save()
 }
 
@@ -515,6 +542,9 @@ func (s *Supervisor) maintenanceCheck(ctx context.Context, m *CommittedMaintenan
 	s.state.CommittedProof = &CommittedProof{Binding: m.Plan.Successor, Version: m.Target, Process: m.Process}
 	m.Phase = "successor_committed"
 	m.Receipt = &protocol.CommittedMaintenanceReceipt{MaintenanceID: m.Plan.MaintenanceID, RequestID: m.Plan.RequestID, Previous: m.Plan.Previous, Successor: m.Plan.Successor, Process: m.Process, Generation: s.state.Generation + 1, Epoch: m.Epoch, FirstSequence: m.FirstSequence, SecondSequence: m.LastSequence}
+	if b := s.state.Bounded; b != nil {
+		return s.boundedEnter("complete", b.Authorization.Timeouts.CompleteMillis)
+	}
 	return s.save()
 }
 
@@ -533,6 +563,17 @@ func (s *Supervisor) LinkCommittedMaintenance(proof protocol.CommittedMaintenanc
 	}
 	if generation != s.state.Generation || m.Phase != "successor_committed" {
 		return errors.New("updater: stale maintenance receipt generation")
+	}
+	if s.state.Bounded != nil {
+		if _, err := s.boundedRemaining(); err != nil {
+			s.state.Bounded.Outcome = "installed_recovery_pending"
+			if digest(s.state) != digest(s.durable) {
+				if saveErr := s.save(); saveErr != nil {
+					return saveErr
+				}
+			}
+			return err
+		}
 	}
 	m.Phase = "ledger_linked"
 	return s.save()

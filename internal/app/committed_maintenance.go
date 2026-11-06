@@ -33,6 +33,7 @@ func (a *App) committedMaintenanceFenced(ctx context.Context, q store.Querier) (
 }
 
 type registerCommittedMaintenance struct {
+	Bounded *protocol.BoundedMaintenanceState
 	Plan    protocol.CommittedMaintenancePlan
 	Process protocol.RecoveryIdentity
 }
@@ -60,7 +61,7 @@ func (c registerCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *st
 	if err != nil {
 		return Outcome{}, err
 	}
-	if !prepared.Prepared || prepared.Revision != p.PreparationRevision {
+	if c.Bounded == nil && (!prepared.Prepared || prepared.Revision != p.PreparationRevision) {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "committed maintenance preparation changed")
 	}
 	if err := validateCommittedMaintenanceParent(ctx, tx.Q(), p); err != nil {
@@ -84,10 +85,24 @@ func (c registerCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *st
 	if err := tx.PutCommittedMaintenance(ctx, row, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	if err := captureMaintenanceRunProtection(ctx, x, tx, p); err != nil {
-		return Outcome{}, err
+	var captureErr error
+	if c.Bounded != nil {
+		captureErr = captureBoundedMaintenanceRunProtection(ctx, x, tx, p)
+	} else {
+		captureErr = captureMaintenanceRunProtection(ctx, x, tx, p)
 	}
-	return Outcome{Result: row, Events: []Event{{ObjectType: "maintenance", ObjectID: p.MaintenanceID, ObjectVersion: 1, Kind: "committed_maintenance_registered", Body: map[string]any{"admission_fenced": true}}}}, nil
+	if captureErr != nil {
+		return Outcome{}, captureErr
+	}
+	events := []Event{{ObjectType: "maintenance", ObjectID: p.MaintenanceID, ObjectVersion: 1, Kind: "committed_maintenance_registered", Body: map[string]any{"admission_fenced": true}}}
+	if c.Bounded != nil {
+		sources, err := boundedSummarySources(ctx, tx.Q())
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, Event{ObjectType: "maintenance", ObjectID: p.MaintenanceID, Kind: "maintenance.bounded_force_registered", Body: map[string]any{"bounded": c.Bounded, "summary_unknowns": sources}})
+	}
+	return Outcome{Result: row, Events: events}, nil
 }
 
 type linkCommittedMaintenance struct {
@@ -124,7 +139,11 @@ func (c linkCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *store.
 	if err != nil {
 		return Outcome{}, err
 	}
-	if !prepared.Prepared || prepared.Revision != row.Plan.PreparationRevision {
+	var forced bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE object_type='maintenance' AND object_id=? AND kind='maintenance.bounded_force_registered')`, proof.MaintenanceID).Scan(&forced); err != nil {
+		return Outcome{}, err
+	}
+	if !forced && (!prepared.Prepared || prepared.Revision != row.Plan.PreparationRevision) {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "committed maintenance preparation changed before linkage")
 	}
 	row.Linked = true
@@ -137,15 +156,45 @@ func (c linkCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *store.
 }
 
 func (a *App) RegisterCommittedMaintenance(ctx context.Context, p protocol.CommittedMaintenancePlan, process protocol.RecoveryIdentity) (protocol.CommittedMaintenanceLedger, error) {
-	raw, err := json.Marshal(struct {
-		Plan    protocol.CommittedMaintenancePlan `json:"plan"`
-		Process protocol.RecoveryIdentity         `json:"process"`
-	}{p, process})
+	return a.registerCommittedMaintenance(ctx, p, process, nil)
+}
+
+func (a *App) RegisterBoundedCommittedMaintenance(ctx context.Context, p protocol.CommittedMaintenancePlan, process protocol.RecoveryIdentity, b protocol.BoundedMaintenanceState) (protocol.CommittedMaintenanceLedger, error) {
+	raw, err := json.Marshal(p)
 	if err != nil {
 		return protocol.CommittedMaintenanceLedger{}, err
 	}
-	env := &protocol.Envelope{RequestID: p.RequestID, Operation: "maintenance.register", Target: protocol.Target{Type: "maintenance", ID: p.MaintenanceID}, Payload: raw, Reason: "Register the exact locally authorized committed maintenance process before admission."}
-	op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, registerCommittedMaintenance{Plan: p, Process: process})
+	sum := sha256.Sum256(raw)
+	if b.Authorization.Role != "server" || b.Authorization.PlanSHA256 != hex.EncodeToString(sum[:]) || b.Authorization.Source != p.PreviousProcess || b.Authorization.Target != p.Successor || b.SourceExit == nil || b.SourceExit.Process != p.PreviousProcess || b.SourceExit.ConfirmedAtMillis <= 0 || !protocol.ValidID(protocol.PrefixRequest, b.Authorization.RequestID) || b.Authorization.Reason == "" {
+		return protocol.CommittedMaintenanceLedger{}, protocol.Errorf(protocol.CodeInvalidRequest, "independent bounded server startup authority required")
+	}
+	frozen := protocol.BoundedMaintenanceState{Authorization: b.Authorization, SourceExit: b.SourceExit}
+	for _, entry := range b.Audit {
+		if entry.RequestID == b.Authorization.RequestID {
+			frozen.Audit = []protocol.BoundedMaintenanceAudit{entry}
+			break
+		}
+	}
+	return a.registerCommittedMaintenance(ctx, p, process, &frozen)
+}
+
+func (a *App) registerCommittedMaintenance(ctx context.Context, p protocol.CommittedMaintenancePlan, process protocol.RecoveryIdentity, bounded *protocol.BoundedMaintenanceState) (protocol.CommittedMaintenanceLedger, error) {
+	raw, err := json.Marshal(struct {
+		Plan    protocol.CommittedMaintenancePlan `json:"plan"`
+		Process protocol.RecoveryIdentity         `json:"process"`
+		Bounded *protocol.BoundedMaintenanceState `json:"bounded,omitempty"`
+	}{p, process, bounded})
+	if err != nil {
+		return protocol.CommittedMaintenanceLedger{}, err
+	}
+	requestID := p.RequestID
+	parentRequestID := ""
+	if bounded != nil {
+		requestID = bounded.Authorization.RequestID
+		parentRequestID = p.RequestID
+	}
+	env := &protocol.Envelope{RequestID: requestID, ParentRequestID: parentRequestID, Operation: "maintenance.register", Target: protocol.Target{Type: "maintenance", ID: p.MaintenanceID}, Payload: raw, Reason: "Register the exact locally authorized committed maintenance process before admission."}
+	op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, registerCommittedMaintenance{Plan: p, Process: process, Bounded: bounded})
 	if err != nil {
 		return protocol.CommittedMaintenanceLedger{}, err
 	}

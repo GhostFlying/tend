@@ -2244,6 +2244,393 @@
       "title": "BlockReason",
       "type": "string"
     },
+    "BoundedDataIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "type": "integer"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "inode": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device",
+        "inode"
+      ],
+      "title": "BoundedDataIdentity",
+      "type": "object"
+    },
+    "BoundedMaintenanceAudit": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "archive": {
+          "$ref": "#/definitions/ArchiveOnlineStatus"
+        },
+        "observation_error": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "previous_window": {
+          "$ref": "#/definitions/BoundedMaintenanceWindowSnapshot"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recorded_at_ms": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "action",
+        "phase",
+        "reason",
+        "recorded_at_ms",
+        "outcome"
+      ],
+      "title": "BoundedMaintenanceAudit",
+      "type": "object"
+    },
+    "BoundedMaintenanceAuthorization": {
+      "additionalProperties": false,
+      "properties": {
+        "data_identity": {
+          "$ref": "#/definitions/BoundedDataIdentity"
+        },
+        "expected_generation": {
+          "type": "integer"
+        },
+        "expected_phase": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "type": "integer"
+        },
+        "force_on_drain_timeout": {
+          "type": "boolean"
+        },
+        "plan_sha256": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "target": {
+          "$ref": "#/definitions/UpgradeBinding"
+        },
+        "timeouts": {
+          "$ref": "#/definitions/MaintenanceTimeoutPolicy"
+        },
+        "updater_lock": {
+          "$ref": "#/definitions/BoundedDataIdentity"
+        },
+        "updater_source": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "updater_target": {
+          "$ref": "#/definitions/BoundedUpdaterTarget"
+        }
+      },
+      "required": [
+        "request_id",
+        "expected_generation",
+        "expected_phase",
+        "plan_sha256",
+        "role",
+        "source",
+        "target",
+        "reason",
+        "expires_at_ms",
+        "timeouts",
+        "force_on_drain_timeout"
+      ],
+      "title": "BoundedMaintenanceAuthorization",
+      "type": "object"
+    },
+    "BoundedMaintenanceState": {
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "items": {
+            "$ref": "#/definitions/BoundedMaintenanceAudit"
+          },
+          "type": "array"
+        },
+        "authorization": {
+          "$ref": "#/definitions/BoundedMaintenanceAuthorization"
+        },
+        "authorizations": {
+          "additionalProperties": {
+            "$ref": "#/definitions/BoundedMaintenanceAuthorization"
+          },
+          "type": "object"
+        },
+        "boot_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "overall_deadline_mono_ms": {
+          "type": "integer"
+        },
+        "overall_deadline_ms": {
+          "type": "integer"
+        },
+        "overall_started_at_ms": {
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "phase_deadline_mono_ms": {
+          "type": "integer"
+        },
+        "phase_deadline_ms": {
+          "type": "integer"
+        },
+        "phase_entered_at_ms": {
+          "type": "integer"
+        },
+        "recovery_authorization_id": {
+          "type": "string"
+        },
+        "source_exit": {
+          "$ref": "#/definitions/BoundedProcessExit"
+        }
+      },
+      "required": [
+        "authorization",
+        "phase",
+        "phase_entered_at_ms",
+        "phase_deadline_ms",
+        "overall_started_at_ms",
+        "overall_deadline_ms",
+        "boot_id",
+        "phase_deadline_mono_ms",
+        "overall_deadline_mono_ms",
+        "outcome"
+      ],
+      "title": "BoundedMaintenanceState",
+      "type": "object"
+    },
+    "BoundedMaintenanceWindowSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "boot_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "overall_deadline_mono_ms": {
+          "type": "integer"
+        },
+        "overall_deadline_ms": {
+          "type": "integer"
+        },
+        "overall_started_at_ms": {
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "phase_deadline_mono_ms": {
+          "type": "integer"
+        },
+        "phase_deadline_ms": {
+          "type": "integer"
+        },
+        "phase_entered_at_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "phase",
+        "phase_entered_at_ms",
+        "phase_deadline_ms",
+        "overall_started_at_ms",
+        "overall_deadline_ms",
+        "boot_id",
+        "phase_deadline_mono_ms",
+        "overall_deadline_mono_ms",
+        "outcome"
+      ],
+      "title": "BoundedMaintenanceWindowSnapshot",
+      "type": "object"
+    },
+    "BoundedProcessExit": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmed_at_ms": {
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        }
+      },
+      "required": [
+        "process",
+        "confirmed_at_ms",
+        "method"
+      ],
+      "title": "BoundedProcessExit",
+      "type": "object"
+    },
+    "BoundedRunnerAdmissionRelease": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "journal": {
+          "$ref": "#/definitions/BoundedDataIdentity"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recovery_authorization_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "runner_generation": {
+          "type": "integer"
+        },
+        "successor": {
+          "$ref": "#/definitions/UpgradeBinding"
+        }
+      },
+      "required": [
+        "request_id",
+        "host_id",
+        "recovery_authorization_id",
+        "successor",
+        "runner_generation",
+        "journal",
+        "expected_control_revision",
+        "reason"
+      ],
+      "title": "BoundedRunnerAdmissionRelease",
+      "type": "object"
+    },
+    "BoundedRunnerMaintenanceGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "control_revision": {
+          "type": "integer"
+        },
+        "plan": {
+          "$ref": "#/definitions/RunnerBoundedMaintenancePlan"
+        },
+        "protection_set_sha256": {
+          "type": "string"
+        },
+        "recovery_authorization_id": {
+          "type": "string"
+        },
+        "runs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CommittedRetainedRun"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "recovery_authorization_id",
+        "plan",
+        "control_revision",
+        "runs",
+        "protection_set_sha256"
+      ],
+      "title": "BoundedRunnerMaintenanceGrant",
+      "type": "object"
+    },
+    "BoundedUpdaterTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate": {
+          "type": "string"
+        },
+        "candidate_sha256": {
+          "type": "string"
+        },
+        "config_file": {
+          "type": "string"
+        },
+        "config_file_sha256": {
+          "type": "string"
+        },
+        "manager_sha256": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "unit_sha256": {
+          "type": "string"
+        },
+        "updater_binary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit",
+        "unit_sha256",
+        "manager_sha256",
+        "updater_binary",
+        "candidate",
+        "candidate_sha256",
+        "config_file",
+        "config_file_sha256"
+      ],
+      "title": "BoundedUpdaterTarget",
+      "type": "object"
+    },
     "CancelIssueDeadlinePayload": {
       "additionalProperties": false,
       "properties": {
@@ -2276,6 +2663,23 @@
       ],
       "title": "Code",
       "type": "string"
+    },
+    "CommittedRetainedRun": {
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "$ref": "#/definitions/RunView"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "run"
+      ],
+      "title": "CommittedRetainedRun",
+      "type": "object"
     },
     "CompletionReviewAcknowledgement": {
       "additionalProperties": false,
@@ -2823,6 +3227,9 @@
           ]
         },
         "reason": {
+          "type": "string"
+        },
+        "recovery_authorization_id": {
           "type": "string"
         },
         "source_message_id": {
@@ -7826,6 +8233,51 @@
       "title": "MaintenanceAuthorization",
       "type": "object"
     },
+    "MaintenanceTimeoutPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "backup_ms": {
+          "type": "integer"
+        },
+        "complete_ms": {
+          "type": "integer"
+        },
+        "drain_ms": {
+          "type": "integer"
+        },
+        "fence_ms": {
+          "type": "integer"
+        },
+        "handoff_ms": {
+          "type": "integer"
+        },
+        "kill_ms": {
+          "type": "integer"
+        },
+        "overall_ms": {
+          "type": "integer"
+        },
+        "start_health_ms": {
+          "type": "integer"
+        },
+        "stop_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "overall_ms",
+        "handoff_ms",
+        "fence_ms",
+        "drain_ms",
+        "stop_ms",
+        "kill_ms",
+        "backup_ms",
+        "start_health_ms",
+        "complete_ms"
+      ],
+      "title": "MaintenanceTimeoutPolicy",
+      "type": "object"
+    },
     "ManagerMigrationPayload": {
       "additionalProperties": false,
       "properties": {
@@ -9871,6 +10323,31 @@
       "title": "ReconcileManagerRunPayload",
       "type": "object"
     },
+    "RecoveryIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "launch_id": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "start_ticks": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "start_ticks",
+        "launch_id",
+        "sha256"
+      ],
+      "title": "RecoveryIdentity",
+      "type": "object"
+    },
     "RegisterRepositoryPayload": {
       "additionalProperties": false,
       "properties": {
@@ -10329,6 +10806,9 @@
               "type": "null"
             }
           ]
+        },
+        "recovery_authorization_id": {
+          "type": "string"
         },
         "role": {
           "$ref": "#/definitions/RunRole"
@@ -11088,6 +11568,55 @@
       "title": "RunnerAgentCatalog",
       "type": "object"
     },
+    "RunnerBoundedMaintenancePlan": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization": {
+          "$ref": "#/definitions/BoundedMaintenanceAuthorization"
+        },
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "journal": {
+          "$ref": "#/definitions/BoundedDataIdentity"
+        },
+        "node_selector": {
+          "type": "string"
+        },
+        "release_dir": {
+          "type": "string"
+        },
+        "runner_generation": {
+          "type": "integer"
+        },
+        "runner_instance_id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "target": {
+          "$ref": "#/definitions/UpgradeBinding"
+        }
+      },
+      "required": [
+        "host_id",
+        "node_selector",
+        "runner_instance_id",
+        "runner_generation",
+        "source",
+        "journal",
+        "release_dir",
+        "target",
+        "expected_control_revision",
+        "authorization"
+      ],
+      "title": "RunnerBoundedMaintenancePlan",
+      "type": "object"
+    },
     "RunnerBuild": {
       "additionalProperties": false,
       "properties": {
@@ -11152,6 +11681,9 @@
       "properties": {
         "authorization": {
           "$ref": "#/definitions/MaintenanceAuthorization"
+        },
+        "bounded_recovery_release": {
+          "$ref": "#/definitions/BoundedRunnerAdmissionRelease"
         },
         "cancelled_upgrade_id": {
           "type": "string"
@@ -11225,6 +11757,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "bounded_recovery_authorization_id": {
+          "type": "string"
         },
         "build": {
           "$ref": "#/definitions/RunnerBuild"
@@ -14676,6 +15211,18 @@
     "BindTelegram": {
       "$ref": "#/definitions/BindTelegram"
     },
+    "BoundedMaintenanceAuthorization": {
+      "$ref": "#/definitions/BoundedMaintenanceAuthorization"
+    },
+    "BoundedMaintenanceState": {
+      "$ref": "#/definitions/BoundedMaintenanceState"
+    },
+    "BoundedRunnerAdmissionRelease": {
+      "$ref": "#/definitions/BoundedRunnerAdmissionRelease"
+    },
+    "BoundedRunnerMaintenanceGrant": {
+      "$ref": "#/definitions/BoundedRunnerMaintenanceGrant"
+    },
     "CancelIssueDeadlinePayload": {
       "$ref": "#/definitions/CancelIssueDeadlinePayload"
     },
@@ -15017,6 +15564,9 @@
     },
     "RunnerAgentCatalog": {
       "$ref": "#/definitions/RunnerAgentCatalog"
+    },
+    "RunnerBoundedMaintenancePlan": {
+      "$ref": "#/definitions/RunnerBoundedMaintenancePlan"
     },
     "RunnerRepository": {
       "$ref": "#/definitions/RunnerRepository"

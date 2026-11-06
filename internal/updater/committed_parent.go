@@ -25,7 +25,7 @@ func (s *Supervisor) maintenanceParent(p protocol.CommittedMaintenancePlan) (*Co
 	} else if old, ok := s.state.MaintenanceHistory[p.ParentMaintenanceID]; ok {
 		parent = &old
 	}
-	if p.ParentMaintenanceID == "" || parent == nil || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || p.ParentPlan.MaintenanceID != p.ParentMaintenanceID || digest(parent.Plan) != p.ParentPlanSHA256 || digest(*p.ParentPlan) != p.ParentPlanSHA256 || !parent.Irreversible || parent.Plan.Successor != p.Previous || parent.Process != p.PreviousProcess || parent.ArchiveAuthorization == nil || !release.ValidSHA(p.ParentArchiveSHA256) || digest(parent.ArchiveAuthorization) != p.ParentArchiveSHA256 {
+	if p.ParentMaintenanceID == "" || parent == nil || p.ParentPlan == nil || p.ParentMaintenanceID == p.MaintenanceID || p.ParentPlan.MaintenanceID != p.ParentMaintenanceID || digest(parent.Plan) != p.ParentPlanSHA256 || digest(*p.ParentPlan) != p.ParentPlanSHA256 || !parent.Irreversible || parent.Plan.Successor != p.Previous || parent.Process != p.PreviousProcess || parent.ArchiveAuthorization == nil && ValidateBoundedMaintenanceParent(s.state, *parent) != nil || !release.ValidSHA(p.ParentArchiveSHA256) || digest(parent.ArchiveAuthorization) != p.ParentArchiveSHA256 {
 		return nil, errors.New("updater: exact irreversible failed maintenance parent required")
 	}
 	knownProcess := (parent.Phase == "checking_successor" || parent.Phase == "successor_committed") && validIdentity(parent.Process)

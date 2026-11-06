@@ -32,6 +32,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/agentcontrol"
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/updater"
 )
 
 // profile is a prepare step as written in the configuration.
@@ -226,7 +227,31 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		log.Info("joined the tailnet", "name", tn.DNSName())
 	}
 
-	j, err := journal.Open(ctx, filepath.Join(state, "journal.db"), time.Now)
+	var j *journal.Journal
+	if request := os.Getenv("TEND_BOUNDED_RECOVERY_REQUEST_ID"); request != "" {
+		socket, e := cfgfile.Path(cfg.UpdaterControlSocket)
+		if e != nil || socket == "" {
+			return errors.New("bounded runner startup requires the fixed updater control socket")
+		}
+		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		supervisor, e := updater.CallSocket(startupCtx, socket, "status", updater.ControlRequest{})
+		if e != nil {
+			cancel()
+			return e
+		}
+		actual, e := (updater.LinuxProcess{}).Inspect(startupCtx, os.Getpid())
+		cancel()
+		if e != nil {
+			return e
+		}
+		authority, e := updater.ValidateBoundedRecoveryStartup(supervisor, "runner", actual, request)
+		if e != nil {
+			return e
+		}
+		j, err = journal.OpenForBoundedRecovery(ctx, filepath.Join(state, "journal.db"), time.Now, *authority)
+	} else {
+		j, err = journal.Open(ctx, filepath.Join(state, "journal.db"), time.Now)
+	}
 	if err != nil {
 		return err
 	}
@@ -341,7 +366,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		return errors.New("updater bridge, control socket and bundle directory must be configured together")
 	}
 	controlSocket := cfg.UpdaterSocket
-	if controlSocket == "" && cfg.Tailnet != nil {
+	if controlSocket == "" {
 		controlSocket = filepath.Join(state, "usage-control", "usage.sock")
 	}
 	observer, providers, err := cfg.DeliveryObserver.build()

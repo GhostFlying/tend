@@ -94,6 +94,9 @@ func (j *Journal) SetRetainedResume(ctx context.Context, id string, p protocol.R
 		return err
 	}
 	return j.tx(ctx, func(tx *sql.Tx) error {
+		if err := validateBoundedContinuation(ctx, tx, id, p); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO retained_run_resumes(run_id,authority_json)
 		 SELECT run_id,? FROM runs WHERE run_id=? AND phase<>'done'
 		 ON CONFLICT(run_id) DO UPDATE SET authority_json=excluded.authority_json`, string(b), id)

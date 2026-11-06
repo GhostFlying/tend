@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -25,7 +27,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 16
+const CurrentVersion int64 = 17
 
 // Run phases.
 const (
@@ -65,13 +67,32 @@ type Request struct {
 
 // Journal is the runner's journal file.
 type Journal struct {
-	path string
-	db   *sql.DB
-	now  func() time.Time
+	path      string
+	db        *sql.DB
+	now       func() time.Time
+	writer    *os.File
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Open opens or creates the journal at path.
 func Open(ctx context.Context, path string, now func() time.Time) (*Journal, error) {
+	return openJournal(ctx, path, now, nil)
+}
+
+// OpenForBoundedRecovery verifies the exact source before applying migrations.
+func OpenForBoundedRecovery(ctx context.Context, path string, now func() time.Time, authority protocol.BoundedMaintenanceAuthorization) (*Journal, error) {
+	return openJournal(ctx, path, now, &authority)
+}
+
+func openJournal(ctx context.Context, path string, now func() time.Time, authority *protocol.BoundedMaintenanceAuthorization) (*Journal, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	writer, err := acquireWriter(path)
+	if err != nil {
+		return nil, err
+	}
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "busy_timeout(5000)")
@@ -79,19 +100,36 @@ func Open(ctx context.Context, path string, now func() time.Time) (*Journal, err
 	q.Set("_txlock", "immediate")
 	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
 	if err != nil {
+		_ = writer.Close()
 		return nil, fmt.Errorf("journal: open: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	j := &Journal{db: db, now: now, path: path}
+	j := &Journal{db: db, now: now, path: path, writer: writer}
+	if authority != nil {
+		if err := j.validateBoundedSource(ctx, *authority, false); err != nil {
+			_ = j.Close()
+			return nil, err
+		}
+	}
 	if err := j.migrate(ctx); err != nil {
-		db.Close()
+		_ = j.Close()
 		return nil, err
 	}
 	return j, nil
 }
 
 // Close closes the journal.
-func (j *Journal) Close() error { return j.db.Close() }
+func (j *Journal) Close() error {
+	j.closeOnce.Do(func() {
+		// Keep ownership while database/sql waits for outstanding writes to stop.
+		// A caller that cannot join them must stop this process before replacement.
+		j.closeErr = j.db.Close()
+		if j.writer != nil {
+			j.closeErr = errors.Join(j.closeErr, j.writer.Close())
+		}
+	})
+	return j.closeErr
+}
 
 func (j *Journal) migrate(ctx context.Context) error {
 	entries, err := fs.ReadDir(migrationFS, "migrations")

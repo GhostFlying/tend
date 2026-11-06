@@ -114,6 +114,8 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "conversation handoff-settings set", Operation: "conversation.set_handoff_settings", Target: "conversation", RevisionRoute: "/api/v1/conversation/handoff", RevisionField: "revision"},
 	{Name: "issue notifications set", Operation: "issues.set_notification_settings", Target: "issue_settings", RevisionRoute: "/api/v1/issue-notification-settings", RevisionField: "revision"},
 	{Name: "host maintenance", Operation: "hosts.maintenance", Target: "host", RevisionRoute: "/api/v1/snapshot", RevisionField: "host"},
+	{Name: "host authorize-bounded-maintenance", Operation: boundedRunnerOwnerOperation, Target: "host", RevisionRoute: "-"},
+	{Name: "host release-bounded-admission", Operation: protocol.OpReleaseBoundedRunnerAdmission, Target: "host", RevisionRoute: "-"},
 	{Name: "upgrade control", Operation: "upgrades.control", Target: "upgrade", RevisionRoute: "/api/v1/upgrades/{id}", RevisionField: "upgrade.revision"},
 }
 
@@ -159,6 +161,12 @@ func findCapabilityCommand(args []string) (capabilityCommand, []string, bool) {
 }
 
 func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, args []string) error {
+	if cmd.Name == "host release-bounded-admission" {
+		return runBoundedRunnerAdmissionRelease(ctx, e, args)
+	}
+	if cmd.Name == "host authorize-bounded-maintenance" {
+		return runBoundedRunnerOwner(ctx, e, args)
+	}
 	if cmd.Name == "task reconcile-manager" {
 		return runManagerReconciliation(ctx, e, args)
 	}

@@ -23,17 +23,20 @@ type Options struct {
 	BootClock             func() (string, int64, error)
 }
 type Supervisor struct {
-	durable        State
-	persistenceErr error
-	writeState     func(string, State) error
-	mu             sync.Mutex
-	cfg            Config
-	opts           Options
-	state          State
-	lock           *os.File
+	externalGeneration *uint64
+	durable            State
+	persistenceErr     error
+	writeState         func(string, State) error
+	mu                 sync.Mutex
+	cfg                Config
+	opts               Options
+	state              State
+	lock               *os.File
 }
 
-func Open(cfg Config, opts Options) (*Supervisor, error) {
+func Open(cfg Config, opts Options) (*Supervisor, error) { return openSupervisor(cfg, opts, nil) }
+
+func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, error) {
 	if err := supported(); err != nil {
 		return nil, err
 	}
@@ -81,9 +84,12 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("updater: state directory must be private and not a symlink")
 	}
-	lock, err := lockDir(cfg.StateDir)
-	if err != nil {
-		return nil, err
+	lock := heldLock
+	if lock == nil {
+		lock, err = lockDir(cfg.StateDir)
+		if err != nil {
+			return nil, err
+		}
 	}
 	fail := func(err error) (*Supervisor, error) { _ = unlock(lock); return nil, err }
 	if opts.Process == nil {
@@ -111,7 +117,7 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	} else if err != nil {
 		return fail(err)
 	}
-	if (state.Format != 1 && state.Format != 2 && state.Format != 3) || state.InstanceID != cfg.InstanceID {
+	if (state.Format != 1 && state.Format != 2 && state.Format != 3 && state.Format != 4) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
 	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
@@ -119,6 +125,9 @@ func Open(cfg Config, opts Options) (*Supervisor, error) {
 	}
 	if state.Format == 3 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Maintenance == nil) {
 		return fail(errors.New("updater: incomplete committed maintenance ownership"))
+	}
+	if state.Format == 4 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Bounded == nil && len(state.BoundedHistory) == 0 || state.Maintenance == nil && state.Operation == nil) {
+		return fail(errors.New("updater: incomplete bounded maintenance ownership"))
 	}
 	if state.Format >= 2 {
 		epoch, err := opts.NewID()
@@ -343,6 +352,14 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 		return err
 	}
 	b := Binding{UpgradeID: id, InstanceID: s.cfg.InstanceID, ProcessInstanceID: processID, ReleaseID: candidate.ReleaseID, ManifestSHA256: candidate.ManifestSHA256, ArtifactSHA256: candidate.Artifact.SHA256}
+	if bounded := s.state.Bounded; bounded != nil {
+		if s.state.BoundedHistory == nil {
+			s.state.BoundedHistory = map[string]protocol.BoundedMaintenanceState{}
+		}
+		s.state.BoundedHistory[bounded.Authorization.RequestID] = *bounded
+		s.state.Bounded = nil
+		s.state.BoundedRunnerGrant = nil
+	}
 	s.state.Operation = &Operation{Configuration: staged, ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}
 	return s.save()
 }
@@ -465,8 +482,31 @@ func (s *Supervisor) Step(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if handled, err := s.boundedRunnerStep(ctx); handled {
+		if err != nil && s.persistenceErr == nil && s.state.Operation != nil && s.state.Operation.LastError != err.Error() {
+			s.state.Operation.LastError = err.Error()
+			if saveErr := s.save(); saveErr != nil {
+				return saveErr
+			}
+		}
+		return err
+	}
 	if m := s.state.Maintenance; !maintenanceTerminal(m) {
-		err := s.maintenanceStep(ctx)
+		handled, err := s.boundedMaintenanceStep(ctx)
+		if !handled && err == nil {
+			if b := s.state.Bounded; b != nil {
+				remaining, e := s.boundedRemaining()
+				if e != nil {
+					err = e
+				} else {
+					stepCtx, cancel := context.WithTimeout(ctx, remaining)
+					err = s.maintenanceStep(stepCtx)
+					cancel()
+				}
+			} else {
+				err = s.maintenanceStep(ctx)
+			}
+		}
 		if err != nil && s.persistenceErr == nil && (m.LastError != err.Error() || digest(s.state) != digest(s.durable)) {
 			m.LastError = err.Error()
 			if saveErr := s.save(); saveErr != nil {

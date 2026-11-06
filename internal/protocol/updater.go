@@ -23,13 +23,15 @@ type UpgradeGrant struct {
 // Health must come from the configured authority, not the candidate's own
 // unauthenticated HTTP server. Sequence identifies distinct accepted heartbeats.
 type UpgradeHealth struct {
-	Binding           UpgradeBinding `json:"binding"`
-	ServerConfirmed   bool           `json:"server_confirmed"`
-	ServerRevision    int64          `json:"server_revision"`
-	Healthy           bool           `json:"healthy"`
-	HeartbeatSequence uint64         `json:"heartbeat_sequence"`
-	NewWorkAccepted   bool           `json:"new_work_accepted"`
-	RollbackSafe      bool           `json:"rollback_safe"`
+	BoundedRecoveryAuthorizationID string         `json:"bounded_recovery_authorization_id,omitempty"`
+	JournalVersion                 int64          `json:"journal_version,omitempty"`
+	Binding                        UpgradeBinding `json:"binding"`
+	ServerConfirmed                bool           `json:"server_confirmed"`
+	ServerRevision                 int64          `json:"server_revision"`
+	Healthy                        bool           `json:"healthy"`
+	HeartbeatSequence              uint64         `json:"heartbeat_sequence"`
+	NewWorkAccepted                bool           `json:"new_work_accepted"`
+	RollbackSafe                   bool           `json:"rollback_safe"`
 	// AdmissionFenced promises that this candidate cannot accept new work until
 	// its supervisor publishes an irreversible committed receipt. ControlRevision
 	// binds that promise to the host control observed in the same transaction.

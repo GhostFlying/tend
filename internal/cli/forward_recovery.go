@@ -20,6 +20,9 @@ import (
 )
 
 func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "bounded" {
+		return runBoundedMaintenance(ctx, e, args[1:])
+	}
 	if len(args) < 2 || (args[0] != "handoff" && args[0] != "maintenance") {
 		return usagef("updater expects handoff plan|apply|status")
 	}

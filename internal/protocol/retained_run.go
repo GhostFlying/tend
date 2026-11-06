@@ -28,6 +28,7 @@ type RetainedRunIdentity struct {
 
 // ContinueRetainedRunPayload cannot declare unknown receipts settled.
 type ContinueRetainedRunPayload struct {
+	RecoveryAuthorizationID string `json:"recovery_authorization_id,omitempty"`
 	IssueSourceReference
 	RetainedRunIdentity
 	Protections         []RetainedRunProtection `json:"protections"`
@@ -37,6 +38,7 @@ type ContinueRetainedRunPayload struct {
 
 // RetainedRunReconciliation is a ledger read, not a provider observation.
 type RetainedRunReconciliation struct {
+	RecoveryAuthorizationID  string                  `json:"recovery_authorization_id,omitempty"`
 	RunID                    string                  `json:"run_id"`
 	Identity                 RetainedRunIdentity     `json:"identity"`
 	TaskRevision             int64                   `json:"task_revision"`
@@ -58,6 +60,7 @@ type RetainedRunReconciliation struct {
 // RetainedRunResume is sent only to an explicitly negotiated strict runner.
 // The request identity selects a durable independent continuation permission.
 type RetainedRunResume struct {
-	RequestID string `json:"request_id"`
-	Mode      string `json:"mode"`
+	RecoveryAuthorizationID string `json:"recovery_authorization_id,omitempty"`
+	RequestID               string `json:"request_id"`
+	Mode                    string `json:"mode"`
 }

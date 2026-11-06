@@ -69,6 +69,9 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	for _, action := range protocol.CommittedHandoffActions() {
 		expected["local EXEC updater maintenance "+action] = true
 	}
+	for _, action := range protocol.BoundedMaintenanceActions() {
+		expected["local EXEC updater bounded "+action] = true
+	}
 	// Scan every operator-handler source, not a hand-maintained file subset.
 	// Runner execution HTTP lives in runnerapi; the updater callbacks below
 	// remain explicitly classified as internal machine-authority operations.

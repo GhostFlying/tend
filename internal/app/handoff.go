@@ -95,6 +95,11 @@ func (a *App) HandoffSummary(ctx context.Context, instance string) (v store.Hand
 		if err != nil {
 			return err
 		}
+		if protected, e := boundedSummaryProtected(ctx, tx.Q(), v.Snapshot); e != nil {
+			return e
+		} else if protected {
+			return sql.ErrNoRows
+		}
 		watermark := v.Snapshot.Version
 		if v.FormatVersion >= 3 || v.Snapshot.ConversationVersion != 0 || v.Snapshot.LedgerVersion != 0 {
 			watermark = v.Snapshot.ConversationVersion
@@ -193,6 +198,11 @@ func (a *App) SaveHandoffSummary(ctx context.Context, v store.HandoffSummary) (s
 		return v, err
 	}
 	err = a.handoffWrite(ctx, func(tx *store.Tx) error {
+		if protected, e := boundedSummaryProtected(ctx, tx.Q(), v.Snapshot); e != nil {
+			return e
+		} else if protected {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "legacy summary source remains unknown after forced maintenance")
+		}
 		inserted, err := tx.Exec(ctx, `INSERT INTO conversation_summaries(summary_id,instance,source_thread_id,source_version,snapshot_json,body,format_version,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(instance,source_thread_id,source_version,format_version) DO NOTHING`, v.ID, v.Instance, v.Snapshot.ThreadID, v.Snapshot.Version, string(snapshot), v.Body, v.FormatVersion, v.CreatedAtMillis)
 		if err != nil {
 			return err
@@ -365,6 +375,11 @@ func (a *App) ClaimSummaryAttempt(ctx context.Context, snap store.HandoffSnapsho
 		return false, protocol.Errorf(protocol.CodeInvalidRequest, "summary attempt needs a quiescent snapshot and nonnegative backoff")
 	}
 	err = a.handoffWrite(ctx, func(tx *store.Tx) error {
+		if protected, e := boundedSummaryProtected(ctx, tx.Q(), snap); e != nil {
+			return e
+		} else if protected {
+			return nil
+		}
 		current, err := store.GetHandoffSnapshot(ctx, tx.Q(), snap.Instance)
 		if err != nil {
 			return err
@@ -404,6 +419,11 @@ func (a *App) FinishSummaryAttempt(ctx context.Context, snap store.HandoffSnapsh
 		status = "succeeded"
 	}
 	return a.handoffWrite(ctx, func(tx *store.Tx) error {
+		if protected, e := boundedSummaryProtected(ctx, tx.Q(), snap); e != nil {
+			return e
+		} else if protected {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "legacy summary result requires independent reconciliation")
+		}
 		result, err := tx.Exec(ctx, `UPDATE conversation_summary_attempts SET status=?,updated_at=? WHERE instance=? AND source_thread_id=? AND source_version=? AND binding_generation=? AND status<>?`, status, a.now().UnixMilli(), snap.Instance, snap.ThreadID, snap.Version, snap.BindingGeneration, status)
 		if err != nil {
 			return err
