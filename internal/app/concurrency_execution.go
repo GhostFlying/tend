@@ -80,6 +80,7 @@ func concurrencyHostedSource(ctx context.Context, q store.Querier, request strin
 // syncConcurrencyExecutions adopts preexisting executions, and derives closure
 // from the original ledger's terminal proof rather than an elapsed permit TTL.
 func syncConcurrencyExecutions(ctx context.Context, tx *store.Tx, now int64) error {
+	defer tx.ObservePhase(store.WriteConcurrencySync)()
 	samples := &concurrencySamples{seen: map[string]bool{}}
 	rows, err := tx.Q().QueryContext(ctx, `SELECT r.run_id,e.pin_json,r.observed_state,COALESCE(h.last_seen_at,0),COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0) FROM runs r JOIN run_agent_executions e USING(run_id) LEFT JOIN plan_actions a ON a.action_id=r.action_id LEFT JOIN hosts h ON h.host_id=r.host_id WHERE r.observed_state NOT IN ('finished','failed') OR EXISTS(SELECT 1 FROM concurrency_executions c WHERE c.execution_id='run:'||r.run_id AND c.state<>'stopped')`)
 	if err != nil {
@@ -392,44 +393,31 @@ func concurrencyRunFeedback(ctx context.Context, tx *store.Tx, run store.RunRow,
 	return recordConcurrencyFeedback(ctx, tx, source, f, now)
 }
 
-func (a *App) updateConcurrencyWaiting(ctx context.Context, tx *store.Tx) error {
-	waiting, err := views.ConcurrencyWaiting(ctx, tx.Q(), a.now().UnixMilli())
+func readConcurrencyWaiting(ctx context.Context, tx *store.Tx, now int64) (map[string]int64, error) {
+	defer tx.ObservePhase(store.WriteConcurrencyWait)()
+	waiting, err := views.ConcurrencyWaiting(ctx, tx.Q(), now)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	rows, err := tx.Q().QueryContext(ctx, `SELECT b.group_id,count(*) FROM concurrency_waiters w JOIN concurrency_bindings b USING(environment_id,runtime_id) JOIN outbox o ON o.request_id=w.request_id WHERE w.last_seen>=? AND o.status IN ('pending','sending') GROUP BY b.group_id`, a.now().UnixMilli()-30000)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT b.group_id,count(*) FROM concurrency_waiters w JOIN concurrency_bindings b USING(environment_id,runtime_id) JOIN outbox o ON o.request_id=w.request_id WHERE w.last_seen>=? AND o.status IN ('pending','sending') GROUP BY b.group_id`, now-30000)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for rows.Next() {
 		var id string
 		var n int64
 		if err := rows.Scan(&id, &n); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
 		waiting[id] += n
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ids, err := concurrencyIDs(ctx, tx.Q())
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		s, err := concurrencyState(ctx, tx.Q(), id)
-		if err != nil {
-			return err
-		}
-		s.Group.Waiting = waiting[id]
-		if err := saveConcurrency(ctx, tx, s); err != nil {
-			return err
-		}
-	}
-	return nil
+	return waiting, nil
 }
 
 func (a *App) noteConcurrencyWait(ctx context.Context, m store.MainTurn) error {

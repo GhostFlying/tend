@@ -16,7 +16,13 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-const concurrencyRetention = 7 * 24 * time.Hour
+const (
+	concurrencyRetention       = 7 * 24 * time.Hour
+	concurrencySampleInterval  = 5 * time.Second
+	concurrencyWaitingInterval = 30 * time.Second
+	concurrencyHistoryInterval = time.Minute
+	concurrencyHistoryBatch    = 256
+)
 
 func concurrencyState(ctx context.Context, q store.Querier, id string) (domain.ConcurrencyState, error) {
 	var s domain.ConcurrencyState
@@ -571,6 +577,7 @@ func concurrencyAvailable(ctx context.Context, q store.Querier, env, runtime, ex
 	return now >= s.Group.CooldownUntil && occupied < s.Group.Current, err
 }
 func refreshConcurrencyLoad(ctx context.Context, tx *store.Tx, s *domain.ConcurrencyState, now int64) error {
+	defer tx.ObservePhase(store.WriteConcurrencyLoad)()
 	rows, err := tx.Q().QueryContext(ctx, `SELECT e.state,e.last_seen,COALESCE(json_extract(e.source_json,'$.native_session_id'),'') FROM concurrency_executions e JOIN concurrency_bindings b USING(environment_id,runtime_id) WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurrency_executions child WHERE child.parent_execution_id=e.execution_id AND child.state<>'stopped')`, s.Group.ID)
 	if err != nil {
 		return err
@@ -710,40 +717,64 @@ func (a *App) RunConcurrency(ctx context.Context, log *slog.Logger) {
 	}); err != nil {
 		log.ErrorContext(ctx, "reset concurrency observation", "err", err)
 	}
-	ticker := time.NewTicker(time.Second)
+	// Five seconds leaves room below the controller's ten-second proof gap.
+	// Admission and congestion still use their original synchronous paths.
+	ticker := time.NewTicker(concurrencySampleInterval)
 	defer ticker.Stop()
+	var maintenance concurrencyMaintenance
 	for {
+		a.maintainConcurrency(ctx, log, &maintenance)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := a.tickConcurrency(ctx); err != nil {
-				log.ErrorContext(ctx, "update concurrency budgets", "err", err)
-			}
 		}
 	}
 }
-func (a *App) tickConcurrency(ctx context.Context) error {
-	now := a.now().UnixMilli()
+
+// Cadence is local to the controller loop, not authoritative execution state.
+// Failed commits do not advance it; restart and clock rollback make work due.
+type concurrencyMaintenance struct {
+	waitingAt time.Time
+	historyAt time.Time
+}
+
+func concurrencyMaintenanceDue(now, last time.Time, interval time.Duration) bool {
+	return last.IsZero() || now.Before(last) || now.Sub(last) >= interval
+}
+
+func (a *App) maintainConcurrency(ctx context.Context, log *slog.Logger, maintenance *concurrencyMaintenance) {
+	refreshWaiting := concurrencyMaintenanceDue(a.now(), maintenance.waitingAt, concurrencyWaitingInterval)
+	if err := a.tickConcurrency(ctx, refreshWaiting); err != nil {
+		log.ErrorContext(ctx, "update concurrency budgets", "err", err)
+	} else if refreshWaiting {
+		maintenance.waitingAt = a.now()
+	}
+	if concurrencyMaintenanceDue(a.now(), maintenance.historyAt, concurrencyHistoryInterval) {
+		if err := a.cleanConcurrencyHistory(ctx); err != nil {
+			log.ErrorContext(ctx, "clean concurrency history", "err", err)
+		} else {
+			maintenance.historyAt = a.now()
+		}
+	}
+}
+
+func (a *App) tickConcurrency(ctx context.Context, refreshWaiting bool) error {
 	notify := false
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
-		var count int
-		if err := tx.Q().QueryRowContext(ctx, `SELECT count(*) FROM concurrency_groups`).Scan(&count); err != nil {
+		// Pool waiting must not backdate a new observation or an increase.
+		now := a.now().UnixMilli()
+		ids, err := concurrencyIDs(ctx, tx.Q())
+		if err != nil {
 			return err
 		}
-		if count == 0 {
+		if len(ids) == 0 {
 			return nil
 		}
 		if err := syncConcurrencyExecutions(ctx, tx, now); err != nil {
 			return err
 		}
-		if err := a.updateConcurrencyWaiting(ctx, tx); err != nil {
-			return err
-		}
-		ids, err := concurrencyIDs(ctx, tx.Q())
-		if err != nil {
-			return err
-		}
+		states := make([]domain.ConcurrencyState, 0, len(ids))
 		for _, id := range ids {
 			s, err := concurrencyState(ctx, tx.Q(), id)
 			if err != nil {
@@ -755,6 +786,21 @@ func (a *App) tickConcurrency(ctx context.Context) error {
 			}
 			if s.Group.Occupied < previousOccupied || previousSample < s.Group.CooldownUntil && now >= s.Group.CooldownUntil {
 				notify = true
+			}
+			// A stale positive demand may trigger a fresh check, never an increase.
+			refreshWaiting = refreshWaiting || s.CanIncrease(now)
+			states = append(states, s)
+		}
+		var waiting map[string]int64
+		if refreshWaiting {
+			waiting, err = readConcurrencyWaiting(ctx, tx, now)
+			if err != nil {
+				return err
+			}
+		}
+		for _, s := range states {
+			if refreshWaiting {
+				s.Group.Waiting = waiting[s.Group.ID]
 			}
 			proof := s
 			before := s.Group.Current
@@ -769,16 +815,24 @@ func (a *App) tickConcurrency(ctx context.Context) error {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE concurrency_feedback SET source_json='{}' WHERE source_json<>'{}' AND received_at<?`, now-concurrencyRetention.Milliseconds()); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `DELETE FROM concurrency_changes WHERE at<?`, now-concurrencyRetention.Milliseconds())
-		return err
+		return nil
 	})
 	if err == nil && notify {
 		a.notifyChange()
 	}
 	return err
+}
+
+func (a *App) cleanConcurrencyHistory(ctx context.Context) error {
+	return a.store.Write(ctx, func(tx *store.Tx) error {
+		defer tx.ObservePhase(store.WriteConcurrencyGC)()
+		cutoff := a.now().Add(-concurrencyRetention).UnixMilli()
+		if _, err := tx.Exec(ctx, `UPDATE concurrency_feedback SET source_json='{}' WHERE feedback_id IN (SELECT feedback_id FROM concurrency_feedback WHERE source_json<>'{}' AND received_at<? LIMIT ?)`, cutoff, concurrencyHistoryBatch); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM concurrency_changes WHERE change_id IN (SELECT change_id FROM concurrency_changes WHERE at<? ORDER BY at,change_id LIMIT ?)`, cutoff, concurrencyHistoryBatch)
+		return err
+	})
 }
 
 // Error keeps the ordinary dispatcher retry path; no native execution was sent.

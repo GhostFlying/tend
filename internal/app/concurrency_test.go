@@ -51,7 +51,7 @@ func TestConcurrencyOwnerCASAndHistory(t *testing.T) {
 	if err != nil || len(next.Items) != 1 || next.Items[0].Reason != "initial" {
 		t.Fatal(next, err)
 	}
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -101,7 +101,10 @@ func TestConcurrencyFeedbackAttributionCoalescingAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.clock.Advance(8 * 24 * time.Hour)
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.cleanConcurrencyHistory(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	history, err = h.app.ConcurrencyHistory(t.Context(), protocol.ConcurrencyQuery{})
@@ -203,7 +206,7 @@ func TestConcurrencyClaimReservesBeforeNextClaimAndCountsWaiting(t *testing.T) {
 	if second := claim(); second.RunID != "" {
 		t.Fatal("second claim exceeded group", second)
 	}
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	g, err := h.app.ConcurrencyGroup(t.Context(), "shared")
@@ -366,7 +369,7 @@ func TestConcurrencyPendingHostedReceiptRetainsPermit(t *testing.T) {
 	if err := h.app.SettleOpenTurns(t.Context(), "native"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.app.tickConcurrency(t.Context()); err != nil {
+	if err := h.app.tickConcurrency(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	group, err := h.app.ConcurrencyGroup(t.Context(), "shared")

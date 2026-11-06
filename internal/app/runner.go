@@ -306,39 +306,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := refreshManagerTasks(ctx, x, tx); err != nil {
 		return Outcome{}, err
 	}
-	rows, err := store.ListClaimCandidates(ctx, q)
+	candidates, err := claimCandidates(ctx, tx, p.Runtime)
 	if err != nil {
 		return Outcome{}, err
 	}
-	candidates, err := candidatesOf(rows)
-	if err != nil {
-		return Outcome{}, err
-	}
-	managerCandidates, err := issueManagerCandidates(ctx, q)
-	if err != nil {
-		return Outcome{}, err
-	}
-	if parked, err := store.ManagerUpgradeParked(ctx, q); err != nil {
-		return Outcome{}, err
-	} else if parked {
-		managerCandidates = nil
-	}
-	candidates = append(candidates, managerCandidates...)
-	candidates, err = filterManagerReceiptReaders(ctx, q, candidates, p.Runtime)
-	if err != nil {
-		return Outcome{}, err
-	}
-	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
-		return Outcome{}, err
-	}
-	var executors []scheduler.Executor
-	if runtimeSupportsAgentExecution(p.Runtime) {
-		executors, err = hostExecutors(ctx, q, host.HostID, x.Now.UnixMilli())
-		if err != nil {
-			return Outcome{}, err
-		}
-	}
-	continuations, err := views.HostContinuations(ctx, q, host.HostID, x.Now.UnixMilli())
+	executors, continuations, err := claimExecutors(ctx, tx, host.HostID, p.Runtime, x.Now.UnixMilli())
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -460,6 +432,51 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			"task_id": run.TaskID, "action_id": run.ActionID, "role": run.Role, "host_id": host.HostID,
 		}}),
 	}, nil
+}
+
+func claimCandidates(ctx context.Context, tx *store.Tx, runtime *protocol.RunnerRuntime) ([]scheduler.Candidate, error) {
+	defer tx.ObservePhase(store.WriteClaimCandidates)()
+	q := tx.Q()
+	rows, err := store.ListClaimCandidates(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := candidatesOf(rows)
+	if err != nil {
+		return nil, err
+	}
+	managers, err := issueManagerCandidates(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	if parked, err := store.ManagerUpgradeParked(ctx, q); err != nil {
+		return nil, err
+	} else if parked {
+		managers = nil
+	}
+	candidates = append(candidates, managers...)
+	candidates, err = filterManagerReceiptReaders(ctx, q, candidates, runtime)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
+		return nil, err
+	}
+	return candidates, nil
+}
+
+func claimExecutors(ctx context.Context, tx *store.Tx, host string, runtime *protocol.RunnerRuntime, now int64) ([]scheduler.Executor, []scheduler.Executor, error) {
+	defer tx.ObservePhase(store.WriteClaimExecutors)()
+	var executors []scheduler.Executor
+	if runtimeSupportsAgentExecution(runtime) {
+		var err error
+		executors, err = hostExecutors(ctx, tx.Q(), host, now)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	continuations, err := views.HostContinuations(ctx, tx.Q(), host, now)
+	return executors, continuations, err
 }
 
 // Hello handles runner.hello: the runner reports the runs its journal holds
