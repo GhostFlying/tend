@@ -298,3 +298,144 @@ func TestAcceptanceEvidenceRunnerRecoversOwnedCloseBeforeNativeGate(t *testing.T
 		})
 	}
 }
+
+func TestAcceptanceEvidenceNoCandidateDoesNotRequireCreatedResultDirectory(t *testing.T) {
+	clock := testkit.NewClock()
+	j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	as := protocol.Assignment{RunID: "run_paused", TaskID: "task", Role: protocol.RoleAccept, AcceptanceEvidenceFiles: true}
+	if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerAppServer); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetPhase(t.Context(), as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.NextAttempt(t.Context(), as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetThread(t.Context(), as.RunID, "original-thread"); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.ConfirmStopped(t.Context(), as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(t.TempDir(), "uncreated-result-directory")
+	spaces := &acceptanceReconcileSpaces{p: Prepared{Dir: t.TempDir(), StateDir: state}}
+	workers := &acceptanceReconcileWorkers{inner: traex.NewWorkers(traex.WorkerOptions{})}
+	r := New(Config{Journal: j, Worker: protocol.WorkerAppServer, Workers: workers, Workspaces: spaces})
+	if recovered, err := r.reconcileAcceptanceVerdict(t.Context(), as); recovered || err != nil {
+		t.Fatal("no verdict could not return to the original launch gate", recovered, err)
+	}
+	if err := r.requireRunWorker(t.Context(), as.RunID); err != nil {
+		t.Fatal("original stopped-session gate was changed", err)
+	}
+	if workers.starts != 0 || spaces.prepares != 0 {
+		t.Fatal("no-candidate observation started or prepared work")
+	}
+	if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("no-candidate observation created state", err)
+	}
+}
+
+func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+	defer cancel()
+	originalCtx, cancelOriginal := context.WithCancel(ctx)
+	defer cancelOriginal()
+	confirmed := false
+	var requestIDs []string
+	e, cfg := acceptanceEvidenceFixture(t, func(w http.ResponseWriter, q *http.Request) {
+		if q.URL.Query().Get("name") == "" {
+			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
+			return
+		}
+		body, _ := io.ReadAll(q.Body)
+		if string(body) != "original selected bytes" {
+			t.Error("upload replaced the original bytes")
+		}
+		requestIDs = append(requestIDs, q.URL.Query().Get("request_id"))
+		if !confirmed {
+			cancelOriginal()
+			return
+		}
+		replyEvidence(w, "check.log", body)
+	})
+	if err := os.WriteFile(filepath.Join(e.prepared.Dir, "check.log"), []byte("original selected bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clock := testkit.NewClock()
+	journalPath := filepath.Join(t.TempDir(), "journal.db")
+	j, err := journal.Open(ctx, journalPath, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	as := e.as
+	as.Desired = protocol.DesiredRun
+	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeLog := filepath.Join(t.TempDir(), "native-methods")
+	workers := &acceptanceReconcileWorkers{inner: traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: bin, Env: []string{acceptanceRunnerServer + "=" + nativeLog}}})}
+	spaces := &acceptanceReconcileSpaces{p: e.prepared}
+	cfg.Journal, cfg.Worker, cfg.Workers, cfg.Workspaces = j, protocol.WorkerAppServer, workers, spaces
+	cfg.Log = slog.New(slog.DiscardHandler)
+	a := &active{as: as, desired: protocol.DesiredRun}
+	if err := New(cfg).work(ctx, originalCtx, as, a); err == nil {
+		t.Fatal("canceled upload acknowledged the verdict")
+	}
+	closePath := filepath.Join(e.prepared.StateDir, "owned-session-close.json")
+	closeBytes, err := os.ReadFile(closePath)
+	if err != nil {
+		t.Fatal("real owned Close lost its fully sealed scope after upload cancellation", err)
+	}
+	nativeBytes, err := os.ReadFile(nativeLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := j.Run(ctx, as.RunID)
+	if err != nil || before.Attempts != 1 || before.Phase != journal.PhaseStarted || len(before.WorkerResult) != 0 || len(requestIDs) == 0 {
+		t.Fatal("upload cancellation changed original pending facts", before, err)
+	}
+	if err := os.WriteFile(filepath.Join(e.prepared.Dir, "check.log"), []byte("changed source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j, err = journal.Open(ctx, journalPath, clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Journal = j
+	confirmed = true
+	workers.inner = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: filepath.Join(t.TempDir(), "forbidden-native")}})
+	if err := New(cfg).work(ctx, ctx, as, a); err != nil {
+		t.Fatal("original canceled upload could not reconcile after real Close", err)
+	}
+	result, err := j.Run(ctx, as.RunID)
+	if err != nil || result.Attempts != 1 || result.Phase != journal.PhaseWorkerDone || !result.StoppedConfirmed || workers.starts != 1 || spaces.prepares != 1 {
+		t.Fatal("canceled original restarted native work", result, err)
+	}
+	for _, id := range requestIDs {
+		if id == "" || id != requestIDs[0] {
+			t.Fatal("cancellation lost the original upload request identity", requestIDs)
+		}
+	}
+	if after, _ := os.ReadFile(closePath); !bytes.Equal(after, closeBytes) {
+		t.Fatal("reconciliation rewrote the historical Close receipt")
+	}
+	if after, _ := os.ReadFile(nativeLog); !bytes.Equal(after, nativeBytes) {
+		t.Fatal("reconciliation executed another native request")
+	}
+}

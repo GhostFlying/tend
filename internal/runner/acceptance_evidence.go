@@ -65,18 +65,11 @@ func writeEvidenceState(path string, value any) error {
 }
 
 func hashEvidence(ctx context.Context, path string) (int64, string, error) {
-	f, err := os.Open(path)
+	f, st, err := openRegularEvidence(ctx, path)
 	if err != nil {
 		return 0, "", err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return 0, "", err
-	}
-	if !st.Mode().IsRegular() {
-		return 0, "", errors.New("acceptance evidence must be a regular file")
-	}
 	sum := sha256.New()
 	n, err := io.Copy(sum, transferReader{ctx: ctx, r: f})
 	if err != nil {
@@ -234,7 +227,7 @@ func (e *acceptanceEvidence) seal(ctx context.Context, binding string, input jso
 				// No intent has ever been written for this binding, so this
 				// definite missing-source rejection precedes every upload.
 				// Persistence and other I/O failures remain unknown.
-				if errors.Is(err, os.ErrNotExist) {
+				if errors.Is(err, os.ErrNotExist) || errors.Is(err, errEvidenceNonRegular) {
 					return nil, fmt.Errorf("%w: %v", harness.ErrVerdictSelectionRejected, err)
 				}
 				return nil, err
@@ -267,15 +260,11 @@ func (e *acceptanceEvidence) seal(ctx context.Context, binding string, input jso
 		sealedPaths[i] = sealed
 		if _, err := os.Stat(sealed); errors.Is(err, os.ErrNotExist) {
 			if err := replaceUploadState(sealed, func(dst *os.File) error {
-				src, err := os.Open(file.Path)
+				src, _, err := openRegularEvidence(ctx, file.Path)
 				if err != nil {
 					return err
 				}
 				defer src.Close()
-				st, err := src.Stat()
-				if err != nil || !st.Mode().IsRegular() {
-					return errors.New("original acceptance evidence is no longer a regular file")
-				}
 				sum := sha256.New()
 				n, err := io.Copy(io.MultiWriter(dst, sum), transferReader{ctx: ctx, r: src})
 				if err != nil {

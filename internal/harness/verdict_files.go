@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -211,21 +212,27 @@ func (v *Verdicts) recordFileVerdict(ctx context.Context, binding string, input 
 		}
 	}
 	files, uploadErr := v.Spec.SealVerdictFiles(ctx, binding, input, selections)
-	identity, identityErr := v.Spec.VerdictFilesIdentity(ctx, binding, input)
+	// Preserve already sealed local facts even when the upload was canceled.
+	// Only this read-only audit outlives that call, for at most five seconds.
+	auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	identity, identityErr := v.Spec.VerdictFilesIdentity(auditCtx, binding, input)
+	identityErr = errors.Join(identityErr, auditCtx.Err())
+	cancelAudit()
+	uploadErr = errors.Join(uploadErr, ctx.Err())
 	if identityErr == nil && !validVerdictIdentity(identity) {
 		identityErr = errors.New("fully sealed verdict identity is invalid")
 	}
 	if identityErr == nil {
 		if pending.SealedIdentity != "" && pending.SealedIdentity != identity {
-			return errors.New("fully sealed original verdict identity changed")
+			return errors.Join(uploadErr, errors.New("fully sealed original verdict identity changed"))
 		}
 		pending.SealedIdentity = identity
 		body, err := json.Marshal(pending)
 		if err != nil {
-			return err
+			return errors.Join(uploadErr, err)
 		}
 		if err := writeVerdictState(filepath.Join(v.stateDir(), "pending-verdict.json"), body); err != nil {
-			return err
+			return errors.Join(uploadErr, err)
 		}
 	}
 	if uploadErr != nil || identityErr != nil {
