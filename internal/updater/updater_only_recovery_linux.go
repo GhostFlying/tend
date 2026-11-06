@@ -389,6 +389,55 @@ func selectUpdaterOnlyStartup(cfg Config, p CommittedHandoffPlan, head updaterOn
 	return j, errors.New("updater: installed controller has no bound adopted predecessor authority")
 }
 
+// A status caller does not own the controller's lock or process. Validate the
+// current manager-owned controller against its durable adopted authority instead
+// of requiring it to retain the original handoff's updater bytes or receipt PID.
+func verifyUpdaterOnlyAdoptedController(ctx context.Context, cfg Config, p CommittedHandoffPlan, actual Identity) error {
+	if !validUpdaterOnlyController(actual) {
+		return errors.New("updater: updater-only current controller is unconfirmed")
+	}
+	raw, err := privateFile(updaterOnlyHeadPath(cfg))
+	if err != nil {
+		return err
+	}
+	var head updaterOnlyHead
+	if err := strictJSON(raw, &head); err != nil {
+		return err
+	}
+	j, err := selectUpdaterOnlyStartup(cfg, p, head, actual.SHA256)
+	if err != nil {
+		return err
+	}
+	if j.Phase != "adopted" || !validUpdaterOnlyController(j.AdoptedUpdater) || j.AdoptedUpdater.SHA256 != actual.SHA256 {
+		return errors.New("updater: updater-only current controller has no adopted receipt")
+	}
+	a := j.Scope.Authorization
+	if err := updaterOnlyLock(cfg, nil, a); err != nil {
+		return err
+	}
+	target := *a.UpdaterTarget
+	target.Candidate = target.UpdaterBinary
+	if err := validateBoundedUpdaterTarget(ctx, cfg, target); err != nil {
+		return err
+	}
+	manager, _, err := managerSnapshot(ctx, p.Unit)
+	if err != nil || manager["MainPID"] != strconv.Itoa(actual.PID) {
+		return errors.New("updater: updater-only current manager changed")
+	}
+	if err := verifyUpdaterCommand(actual.PID, HandoffPlan{UpdaterBinary: p.UpdaterBinary, ConfigFile: p.ConfigFile}); err != nil {
+		return err
+	}
+	owns, err := processOwnsFlock(ctx, "/proc", actual.PID, a.UpdaterLock.Device, a.UpdaterLock.Inode)
+	if err != nil || !owns {
+		return errors.New("updater: updater-only current controller does not own the original flock")
+	}
+	observed, err := (LinuxProcess{}).Inspect(ctx, actual.PID)
+	if err != nil || observed != actual {
+		return errors.New("updater: updater-only current controller identity changed")
+	}
+	return ctx.Err()
+}
+
 func takeoverCommittedUpdaterOnly(ctx context.Context, cfg Config, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization) (any, error) {
 	if a.UpdaterSource == nil || !validUpdaterOnlyController(*a.UpdaterSource) || a.UpdaterLock == nil || !protocol.ValidID(protocol.PrefixRequest, a.RequestID) || a.Role != "server" || cfg.Role != "server" || a.Target.InstanceID != cfg.InstanceID || a.Reason == "" {
 		return nil, errors.New("updater: updater-only recovery requires exact local authority")
