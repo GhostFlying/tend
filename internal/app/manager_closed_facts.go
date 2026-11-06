@@ -281,6 +281,13 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 		if call.ThreadID == "" || call.TurnID == "" || call.CallID == "" || call.Tool == "" || r.e.ThreadID != call.ThreadID || !json.Valid(call.Arguments) {
 			continue
 		}
+		key := [3]string{call.ThreadID, call.TurnID, call.CallID}
+		items := itemGroups[key]
+		// Started notifications may precede the callback, but completing the
+		// native tool still requires that callback's original replied result.
+		if callCounts[key] != 1 || len(items) != 2 || items[0].e.Native.Kind != "item_started" || items[1].e.Native.Kind != "item_completed" || items[1].seq <= r.seq || items[0].applied && items[1].applied {
+			continue
+		}
 		proof, success, text, err := closedToolProof(ctx, tx.Q(), run, call)
 		if err != nil {
 			return err
@@ -288,9 +295,7 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 		if proof == nil {
 			continue
 		}
-		key := [3]string{call.ThreadID, call.TurnID, call.CallID}
-		items := itemGroups[key]
-		if callCounts[key] != 1 || len(items) != 2 || items[0].seq <= r.seq || items[0].e.Native.Kind != "item_started" || items[1].e.Native.Kind != "item_completed" || !closedItemMatches(items[0].e, call, *success, *text) || !closedItemMatches(items[1].e, call, *success, *text) || items[0].applied && items[1].applied {
+		if !closedItemMatches(items[0].e, call, *success, *text) || !closedItemMatches(items[1].e, call, *success, *text) {
 			continue
 		}
 		for _, fact := range append([]row{r}, items...) {
