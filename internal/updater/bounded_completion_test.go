@@ -200,3 +200,69 @@ func TestBoundedCompletionDoesNotClassifyViableLatePrepareAsImpossible(t *testin
 		t.Fatal("fixture did not preserve the original delayed prepare's valid CAS", err)
 	}
 }
+
+func restartUnfinishedBoundedCompletion(t *testing.T, h *harness) State {
+	t.Helper()
+	before := h.s.Status()
+	if before.Maintenance.Phase != "ledger_linked" || before.Bounded.Outcome == "completed" {
+		t.Fatal("fixture must retain its unfinished linked maintenance")
+	}
+	delete(h.p.live, before.Process.PID)
+	for range 4 {
+		if err := h.s.Step(t.Context()); err != nil {
+			t.Fatal("existing same-version supervision failed", err)
+		}
+	}
+	after := h.s.Status()
+	if after.Operation == nil || after.Operation.Kind != "restart" || after.Operation.Phase != "committed" || after.Current != before.Current || after.Process == before.Process || after.Process.SHA256 != before.Process.SHA256 || after.CommittedProof.Binding != before.CommittedProof.Binding || after.CommittedProof.Process != after.Process || !reflect.DeepEqual(before.Maintenance, after.Maintenance) || !reflect.DeepEqual(before.Bounded, after.Bounded) {
+		t.Fatal("supervision changed historical maintenance or failed to prove its current writer")
+	}
+	return before
+}
+
+func TestBoundedCompletionAcceptsExistingSupervisedWriter(t *testing.T) {
+	h, p, a := unpreparedBoundedCompletionFixture(t)
+	original := restartUnfinishedBoundedCompletion(t, h)
+	before := h.s.Status()
+	controls, starts, stops := len(a.controls), h.p.starts, h.p.stops
+	if err := h.s.FinishCommittedMaintenance(t.Context(), p, before.Generation); err != nil {
+		t.Fatal("legitimately supervised current writer could not finish", err)
+	}
+	after := h.s.Status()
+	if after.Bounded.Outcome != "completed" || !reflect.DeepEqual(original.Maintenance, after.Maintenance) || !reflect.DeepEqual(before.CommittedProof, after.CommittedProof) || after.Process != before.Process || after.Current != before.Current || len(a.controls) != controls || h.p.starts != starts || h.p.stops != stops {
+		t.Fatal("completion replaced historical proof or performed another service action")
+	}
+}
+
+func TestBoundedCompletionRejectsUnprovenSupervisedWriter(t *testing.T) {
+	for _, change := range []string{"historical_process", "historical_receipt", "current_binding", "current_proof", "current_process", "kernel_process", "unknown_operation"} {
+		t.Run(change, func(t *testing.T) {
+			h, p, _ := unpreparedBoundedCompletionFixture(t)
+			restartUnfinishedBoundedCompletion(t, h)
+			s := &h.s.state
+			switch change {
+			case "historical_process":
+				s.Maintenance.Process = s.Process
+			case "historical_receipt":
+				s.Maintenance.Receipt.Process = s.Process
+			case "current_binding":
+				s.CommittedProof.Binding.ProcessInstanceID = s.Process.LaunchID
+			case "current_proof":
+				s.CommittedProof.Process.StartTicks++
+			case "current_process":
+				s.Process.StartTicks++
+			case "kernel_process":
+				delete(h.p.live, s.Process.PID)
+			case "unknown_operation":
+				s.Operation.Phase = "starting"
+			}
+			if err := h.s.save(); err != nil {
+				t.Fatal(err)
+			}
+			starts, stops := h.p.starts, h.p.stops
+			if err := h.s.FinishCommittedMaintenance(t.Context(), p, h.s.Status().Generation); err == nil || h.p.starts != starts || h.p.stops != stops || h.s.Status().Bounded.Outcome == "completed" {
+				t.Fatal("unproven current/historical writer was accepted", err)
+			}
+		})
+	}
+}

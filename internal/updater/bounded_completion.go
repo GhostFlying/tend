@@ -12,7 +12,7 @@ import (
 func (s *Supervisor) completeUnestablishedBoundedFence(ctx context.Context, a MaintenanceArchiveAuthority, p protocol.CommittedMaintenancePlan) (bool, error) {
 	b, m, proof := s.state.Bounded, s.state.Maintenance, s.state.CommittedProof
 	if s.cfg.Role != "server" || s.state.Format != 4 || b == nil || b.Phase != "complete" || m == nil || m.Phase != "ledger_linked" || !m.Irreversible || m.Receipt == nil || proof == nil ||
-		proof.Binding != p.Successor || proof.Version != s.state.Current || proof.Version != m.Target || proof.Process != s.state.Process || proof.Process != m.Process || !validIdentity(m.Process) ||
+		!done(s.state.Operation) || proof.Binding != p.Successor || proof.Version != s.state.Current || proof.Version != m.Target || proof.Version.Artifact.SHA256 != p.Successor.ArtifactSHA256 || proof.Process != s.state.Process || !validIdentity(s.state.Process) || s.state.Process.SHA256 != p.Successor.ArtifactSHA256 || !validIdentity(m.Process) ||
 		m.Process.LaunchID != p.Successor.ProcessInstanceID || m.Process.SHA256 != p.Successor.ArtifactSHA256 {
 		return false, nil
 	}
@@ -43,6 +43,15 @@ func (s *Supervisor) completeUnestablishedBoundedFence(ctx context.Context, a Ma
 	}
 	if baseline == nil || baseline.Preparation.Prepared || p.PreparationRevision-1 >= baseline.Preparation.Revision || len(baseline.Hosts) != len(p.HostControls) {
 		return false, nil
+	}
+	// The immutable receipt still names the original launch. An existing
+	// same-version supervisor restart updates only the current committed proof.
+	actual, err := s.opts.Process.Inspect(ctx, s.state.Process.PID)
+	if err != nil {
+		return false, err
+	}
+	if actual != s.state.Process {
+		return false, ErrUnknown
 	}
 	fresh, err := a.MaintenanceArchiveStatus(ctx)
 	if err != nil {

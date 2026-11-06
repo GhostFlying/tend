@@ -40,6 +40,12 @@ func updaterOnlyLinkedFixture(t *testing.T) (*harness, CommittedHandoffPlan, pro
 	}
 	auth.ExpectedGeneration, auth.ExpectedPhase = h.s.state.Generation, "ledger_linked"
 	plan := CommittedHandoffPlan{Maintenance: p, Unit: "fixture.service", UnitSHA256: strings.Repeat("a", 64), ManagerSHA256: strings.Repeat("b", 64), UpdaterBinary: "/fixture/fixed", Candidate: "/fixture/old", CandidateSHA256: strings.Repeat("c", 64), ConfigFile: "/fixture/config", ConfigFileSHA256: strings.Repeat("d", 64)}
+	dev, ino, err := lockIdentity(h.cfg.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.LockDevice, plan.LockInode = dev, ino
+	auth.UpdaterLock = &protocol.BoundedDataIdentity{Device: dev, Inode: ino}
 	auth.UpdaterTarget = &protocol.BoundedUpdaterTarget{Unit: plan.Unit, UnitSHA256: plan.UnitSHA256, ManagerSHA256: plan.ManagerSHA256, UpdaterBinary: plan.UpdaterBinary, Candidate: "/fixture/new", CandidateSHA256: strings.Repeat("e", 64), ConfigFile: plan.ConfigFile, ConfigFileSHA256: plan.ConfigFileSHA256}
 	return h, plan, auth
 }
@@ -62,6 +68,7 @@ func TestUpdaterOnlyRecoveryRequiresExactCommittedWriter(t *testing.T) {
 		"target version":       func(s *State) { s.Maintenance.Target.StorageVersion++ },
 		"irreversible":         func(s *State) { s.Maintenance.Irreversible = false },
 		"missing receipt":      func(s *State) { s.Maintenance.Receipt = nil },
+		"pending operation":    func(s *State) { s.Operation = &Operation{Kind: "restart", Phase: "starting"} },
 		"missing exit":         func(s *State) { s.Bounded.SourceExit = nil },
 		"wrong exited process": func(s *State) { s.Bounded.SourceExit.Process = s.Process },
 	}
@@ -76,6 +83,72 @@ func TestUpdaterOnlyRecoveryRequiresExactCommittedWriter(t *testing.T) {
 	}
 	if h.p.stops != 1 {
 		t.Fatal("pure validation changed native service effects")
+	}
+}
+
+func TestUpdaterOnlyRecoveryAfterVerifiedServiceRestarts(t *testing.T) {
+	h, p, a := updaterOnlyLinkedFixture(t)
+	historical := h.s.Status()
+	for range 2 {
+		delete(h.p.live, h.s.state.Process.PID)
+		for range 5 {
+			if err := h.s.Step(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	st := h.s.Status()
+	a.ExpectedGeneration = st.Generation
+	if st.Process == historical.Process || st.CommittedProof.Binding != historical.CommittedProof.Binding || st.CommittedProof.Process != st.Process || digest(st.Maintenance) != digest(historical.Maintenance) {
+		t.Fatal("ordinary supervision did not preserve original maintenance facts")
+	}
+	starts, stops := h.p.starts, h.p.stops
+	if err := validateUpdaterOnlyState(st, p, a); err != nil {
+		t.Fatal("verified current incarnation rejected", err)
+	}
+	if h.p.starts != starts || h.p.stops != stops || digest(st) != digest(h.s.Status()) {
+		t.Fatal("updater-only validation changed service or history")
+	}
+	for _, kind := range []string{"rewritten binding", "proof process", "historical receipt", "historical launch", "pending operation", "changed bytes"} {
+		t.Run(kind, func(t *testing.T) {
+			bad := cloneState(st)
+			switch kind {
+			case "rewritten binding":
+				bad.CommittedProof.Binding.ProcessInstanceID = bad.Process.LaunchID
+			case "proof process":
+				bad.CommittedProof.Process.StartTicks++
+			case "historical receipt":
+				bad.Maintenance.Receipt.Process = bad.Process
+			case "historical launch":
+				bad.Maintenance.Process.LaunchID = bad.Process.LaunchID
+			case "pending operation":
+				bad.Operation.Phase = "starting"
+			case "changed bytes":
+				bad.Current.Artifact.SHA256 = strings.Repeat("f", 64)
+			}
+			if err := validateUpdaterOnlyState(bad, p, a); err == nil {
+				t.Fatal("changed restart proof accepted")
+			}
+		})
+	}
+}
+
+func TestUpdaterOnlyRecoveryOriginalOwnershipLockIsImmutable(t *testing.T) {
+	h, p, a := updaterOnlyLinkedFixture(t)
+	if err := validateUpdaterOnlyLockPin(p, a); err != nil {
+		t.Fatal(err)
+	}
+	fresh := a
+	copy := *a.UpdaterLock
+	copy.Inode++
+	fresh.UpdaterLock = &copy
+	if err := validateUpdaterOnlyLockPin(p, fresh); err == nil {
+		t.Fatal("fresh authority reset original ownership identity")
+	}
+	// Scope validation is shared by both startup and inherited adopted receipts.
+	scope := updaterOnlyScope{Authorization: fresh, ConfigSHA256: digest(h.s.cfg), OriginalState: h.s.Status(), Retained: h.s.state.Process}
+	if err := validateUpdaterOnlyScope(h.s.cfg, p, scope); err == nil {
+		t.Fatal("startup accepted an authority under a different original inode")
 	}
 }
 
@@ -113,7 +186,7 @@ func TestUpdaterOnlyRecoveryTargetRetainsFixedConfiguration(t *testing.T) {
 func TestUpdaterOnlyRecoveryReplayOnlyObservesOriginalAttempt(t *testing.T) {
 	h, p, a := updaterOnlyLinkedFixture(t)
 	a.UpdaterSource = &Identity{PID: 123, StartTicks: 456, LaunchID: "fixture-controller", SHA256: strings.Repeat("a", 64)}
-	a.UpdaterLock = &protocol.BoundedDataIdentity{Device: 1, Inode: 2}
+	a.UpdaterLock = &protocol.BoundedDataIdentity{Device: p.LockDevice, Inode: p.LockInode}
 	path := updaterOnlyJournalPath(h.cfg, a.RequestID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -139,7 +212,7 @@ func TestUpdaterOnlyRecoveryReplayOnlyObservesOriginalAttempt(t *testing.T) {
 func TestUpdaterOnlyRecoveryPreStartFreshCAS(t *testing.T) {
 	h, p, a := updaterOnlyLinkedFixture(t)
 	a.UpdaterSource = &Identity{PID: 123, StartTicks: 456, LaunchID: "fixture-controller", SHA256: strings.Repeat("a", 64)}
-	a.UpdaterLock = &protocol.BoundedDataIdentity{Device: 1, Inode: 2}
+	a.UpdaterLock = &protocol.BoundedDataIdentity{Device: p.LockDevice, Inode: p.LockInode}
 	if err := os.MkdirAll(filepath.Dir(committedJournalPath(h.cfg, p.Maintenance.MaintenanceID)), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -737,6 +810,29 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if err := verifyUpdaterOnlyRetained(ctx, child); err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the supervisor's existing same-version restart contract. The
+	// original maintenance receipt stays historical while the current proof moves.
+	historicalChild := child
+	beforeServiceRestart, err := readState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (LinuxProcess{}).Stop(ctx, child, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var restartedState State
+	boundedSystemdWait(t, ctx, "ordinary same-version service restart retained original committed binding", func() bool {
+		var e error
+		restartedState, e = readState(statePath)
+		return e == nil && restartedState.Process != historicalChild && validIdentity(restartedState.Process) && restartedState.Operation != nil && restartedState.Operation.Kind == "restart" && restartedState.Operation.Phase == "committed" && restartedState.CommittedProof != nil && restartedState.CommittedProof.Process == restartedState.Process && restartedState.CommittedProof.Binding == beforeServiceRestart.CommittedProof.Binding
+	})
+	child = restartedState.Process
+	if digest(restartedState.Maintenance) != digest(beforeServiceRestart.Maintenance) || restartedState.Current != beforeServiceRestart.Current {
+		t.Fatal("ordinary restart rewrote immutable maintenance receipt")
+	}
+	if err := verifyUpdaterOnlyRetained(ctx, child); err != nil {
+		t.Fatal(err)
+	}
 	currentManager, _, err := managerSnapshot(ctx, unit)
 	if err != nil {
 		t.Fatal(err)
@@ -782,5 +878,5 @@ func runUpdaterOnlySystemdFixture(t *testing.T, preStart bool) {
 	if preStart {
 		evidenceName = "updater-only-pre-start-recovery"
 	}
-	boundedFixtureEvidence(t, evidenceName, map[string]any{"unit": unit, "old_updater": oldUpdater, "new_updater": adopted.AdoptedUpdater, "retained_committed_service": child, "exited_original_predecessor": predecessor, "original_head_sha256": originalHead, "original_journal_sha256": originalJournal, "original_plan": p, "original_authorization": a, "adopted_continuation": adopted, "unchanged_service_and_deadlines": true, "ordinary_completion_reopen": true, "pending_replacement_preserved_adopted_startup": true, "pending_attempt": pending, "same_bytes_source_controller": currentUpdater, "same_bytes_adopted": sameAdopted})
+	boundedFixtureEvidence(t, evidenceName, map[string]any{"unit": unit, "old_updater": oldUpdater, "new_updater": adopted.AdoptedUpdater, "retained_committed_service": child, "exited_original_predecessor": predecessor, "original_head_sha256": originalHead, "original_journal_sha256": originalJournal, "original_plan": p, "original_authorization": a, "adopted_continuation": adopted, "unchanged_service_and_deadlines": true, "ordinary_completion_reopen": true, "pending_replacement_preserved_adopted_startup": true, "pending_attempt": pending, "historical_committed_service": historicalChild, "verified_service_restart": restartedState, "same_bytes_source_controller": currentUpdater, "same_bytes_adopted": sameAdopted})
 }

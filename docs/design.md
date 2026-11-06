@@ -1103,4 +1103,6 @@ runner force 需要独立 owner/CAS grant，不从普通升级 grant 或本地�
 
 独立 updater-only 请求在 installer window 建立时即占用原 ID。controller 以真实 PID/start/hash 识别，launch 可以为空，不将业务进程的 launch 条件套到 controller。新的启动前计划以 request ID 和完整 journal hash 继承一个已 adopted 的启动凭据，保留仍安装版本的启动权；starting 或未知 Start 仍只能核对当前原 attempt。已确认 controller 退出、同锁与 retained service 完整保持且无 pending Job 的启动前失败，可以通过新独立授权继续，保留真实 failed 状态。以上不放宽业务进程身份或改变 updater state 格式。
 
+原 committed handoff 固定的 lock device/inode 贯穿后续 updater-only 授权、启动前恢复与采用，新授权不能替换这份身份。ledger-linked 后既有正常监督可更新当前 committed process proof；后续 updater 替换及无外部写的维护完成，以稳定 successor binding、当前版本与最新 process proof 校验当前服务，原安装 receipt 与 maintenance process 仍保留并校验原身份，未完成或未知的操作不取得该权限。
+
 本次实现独立 component/host 窗口，旧批量 coordinator 已固定 targets，但总预算仍会随旧阶段/host 推进重设；该 batch 总 deadline 明确留作后续，不声称本次已修。独立本机 force 不经过旧 batch 的等待门。详见[实施计划](plans/bounded-maintenance-recovery.md)、[CLI](bounded-maintenance-cli.md)与[实际进程验收计划](plans/bounded-systemd-acceptance.md)。
