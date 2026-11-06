@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -22,6 +23,10 @@ type usageSummaryKey struct {
 	dimension string
 	bucket    int64
 }
+
+// A time bucket alone cannot bound retained unknown or future timestamps.
+// Fact sequence partitions cap every summary at this many request identities.
+const usageSummaryPartitionSize int64 = 128
 
 const usageDirtyGroupsSQL = `SELECT DISTINCT p.dimension_key,p.bucket,p.dimension_json FROM token_usage_dirty d CROSS JOIN token_usage_contributions p USING(source,request_id)`
 
@@ -100,7 +105,8 @@ func refreshUsageProjection(ctx context.Context, tx *store.Tx) error {
 			return err
 		}
 		hash := sha256.Sum256(dimension)
-		key := usageSummaryKey{dimension: hex.EncodeToString(hash[:]), bucket: -1}
+		partition := strconv.FormatInt((r.Seq-1)/usageSummaryPartitionSize, 10)
+		key := usageSummaryKey{dimension: hex.EncodeToString(hash[:]) + "/" + partition, bucket: -1}
 		if r.OccurredAt != nil {
 			key.bucket = *r.OccurredAt / views.UsageBucketWidth * views.UsageBucketWidth
 		}
