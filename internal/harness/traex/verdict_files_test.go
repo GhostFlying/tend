@@ -15,7 +15,7 @@ import (
 func TestAcceptanceEvidenceFilesUseOriginalNativeToolScope(t *testing.T) {
 	ws, servers := fakeWorkers(t)
 	manifest := protocol.ArtifactFile{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}
-	spec := harness.WorkerSpec{Role: protocol.RoleAccept, StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+	spec := harness.WorkerSpec{Role: protocol.RoleAccept, StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 		SealVerdictFiles: func(_ context.Context, binding string, input json.RawMessage, files []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 			if !strings.Contains(binding, "th_w") || !strings.Contains(binding, "tu_w") || len(files) != 1 || files[0].Name != "checks.log" || !strings.Contains(string(input), `"verdict":"blocked"`) {
 				t.Errorf("lost native verdict scope: %q %s %+v", binding, input, files)
@@ -47,7 +47,7 @@ func TestAcceptanceEvidenceFilesUseOriginalNativeToolScope(t *testing.T) {
 func TestAcceptancePendingEvidenceReconcilesWithoutStartingNativeTurn(t *testing.T) {
 	for _, succeeds := range []bool{false, true} {
 		t.Run(map[bool]string{false: "still unknown", true: "confirmed"}[succeeds], func(t *testing.T) {
-			spec := harness.WorkerSpec{Role: protocol.RoleAccept, StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			spec := harness.WorkerSpec{Role: protocol.RoleAccept, StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 					return nil, errors.New("original upload is unknown")
 				}}
@@ -91,7 +91,7 @@ func TestAcceptancePendingEvidenceAtTurnEndCannotBecomeInconclusive(t *testing.T
 		t.Run(map[bool]string{false: "still unknown", true: "confirmed"}[confirmed], func(t *testing.T) {
 			ws, servers := fakeWorkers(t)
 			calls := 0
-			spec := harness.WorkerSpec{Role: protocol.RoleAccept, StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			spec := harness.WorkerSpec{Role: protocol.RoleAccept, StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 					calls++
 					if confirmed && calls > 1 {
@@ -126,4 +126,8 @@ func TestAcceptancePendingEvidenceAtTurnEndCannotBecomeInconclusive(t *testing.T
 
 func testVerdictFilesIdentity(context.Context, string, json.RawMessage) (string, error) {
 	return strings.Repeat("b", 64), nil
+}
+
+func testValidateVerdictFiles(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) error {
+	return nil
 }

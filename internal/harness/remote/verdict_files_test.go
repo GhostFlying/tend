@@ -17,7 +17,7 @@ func TestRemotePendingVerdictReconcilesBeforeNativeExecutor(t *testing.T) {
 	for _, confirmed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "still unknown", true: "confirmed"}[confirmed], func(t *testing.T) {
 			manifest := protocol.ArtifactFile{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}
-			spec := harness.WorkerSpec{Role: protocol.RoleAccept, RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, VerdictFilesIdentity: testVerdictFilesIdentity,
+			spec := harness.WorkerSpec{Role: protocol.RoleAccept, RunID: "original-run", StateDir: t.TempDir(), AcceptanceEvidenceFiles: true, ValidateVerdictFiles: testValidateVerdictFiles, VerdictFilesIdentity: testVerdictFilesIdentity,
 				SealVerdictFiles: func(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) ([]protocol.ArtifactFile, error) {
 					return nil, errors.New("upload receipt is unknown")
 				}}
@@ -68,4 +68,8 @@ func TestRemotePendingVerdictReconcilesBeforeNativeExecutor(t *testing.T) {
 
 func testVerdictFilesIdentity(context.Context, string, json.RawMessage) (string, error) {
 	return strings.Repeat("b", 64), nil
+}
+
+func testValidateVerdictFiles(context.Context, string, json.RawMessage, []harness.VerdictFileSelection) error {
+	return nil
 }

@@ -59,7 +59,7 @@ func (r *Runner) reconcileAcceptanceVerdict(ctx context.Context, as protocol.Ass
 	result, err := reconciler.ReconcileAcceptanceVerdict(ctx, harness.WorkerSpec{
 		RunID: as.RunID, Role: as.Role, Dir: p.Dir, StateDir: p.StateDir,
 		Thread: run.Thread, Attempt: run.Attempts, AcceptanceEvidenceFiles: true,
-		SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity,
+		ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity,
 	})
 	if errors.Is(err, harness.ErrNoAcceptanceVerdict) {
 		return false, nil
