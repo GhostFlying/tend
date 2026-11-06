@@ -152,6 +152,7 @@ type AcceptanceRow struct {
 	ArtifactID   string
 	Verdict      protocol.Verdict
 	EvidenceJSON string
+	FilesJSON    string
 	IssuesJSON   string
 	CreatedAt    int64
 }
@@ -160,7 +161,7 @@ type AcceptanceRow struct {
 // artifactID is set, in creation order.
 func ListAcceptances(ctx context.Context, q Querier, taskID, artifactID string) ([]AcceptanceRow, error) {
 	rows, err := q.QueryContext(ctx, `SELECT acceptance_id, task_id, run_id, spec_version, artifact_id, verdict, evidence_json,
-		issues_json, created_at FROM acceptances WHERE task_id = ? AND (? = '' OR artifact_id = ?) ORDER BY created_at, acceptance_id`,
+		issues_json, files_json, created_at FROM acceptances WHERE task_id = ? AND (? = '' OR artifact_id = ?) ORDER BY created_at, acceptance_id`,
 		taskID, artifactID, artifactID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list acceptances: %w", err)
@@ -170,7 +171,7 @@ func ListAcceptances(ctx context.Context, q Querier, taskID, artifactID string) 
 	for rows.Next() {
 		var a AcceptanceRow
 		if err := rows.Scan(&a.AcceptanceID, &a.TaskID, &a.RunID, &a.SpecVersion, &a.ArtifactID, &a.Verdict, &a.EvidenceJSON,
-			&a.IssuesJSON, &a.CreatedAt); err != nil {
+			&a.IssuesJSON, &a.FilesJSON, &a.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan acceptance: %w", err)
 		}
 		out = append(out, a)

@@ -310,13 +310,19 @@ func (o owner) task(ctx context.Context, id string) error {
 	out := o.e.Stdout
 	printSummary(out, d.TaskSummary)
 	var spec struct {
-		Goal       string   `json:"goal"`
-		Acceptance []string `json:"acceptance"`
+		Goal       string               `json:"goal"`
+		Acceptance []string             `json:"acceptance"`
+		Inputs     []protocol.TaskInput `json:"inputs"`
 	}
 	_ = json.Unmarshal(d.Spec, &spec)
 	fmt.Fprintf(out, "goal: %s\n", spec.Goal)
 	for _, a := range spec.Acceptance {
 		fmt.Fprintf(out, "  accept if: %s\n", a)
+	}
+	for _, input := range spec.Inputs {
+		if input.SourceAcceptanceID != "" {
+			fmt.Fprintf(out, "  input: %s %q, %d bytes, sha256 %s, source acceptance %s\n", input.FileID, input.Name, input.Size, input.SHA256, input.SourceAcceptanceID)
+		}
 	}
 	if ws := d.WorkspaceState; ws != nil {
 		fmt.Fprintf(out, "workspace on %s (%s)\n", ws.Host, ws.Status)
@@ -378,6 +384,12 @@ func (o owner) task(ctx context.Context, id string) error {
 	}
 	for _, a := range d.Acceptances {
 		fmt.Fprintf(out, "verdict on %s (spec v%d): %s\n", a.ArtifactID, a.SpecVersion, a.Verdict)
+		if a.AcceptanceID != "" {
+			fmt.Fprintf(out, "  acceptance: %s\n", a.AcceptanceID)
+		}
+		for _, file := range a.Files {
+			fmt.Fprintf(out, "  evidence file: %s %q, %d bytes, sha256 %s\n", file.FileID, file.Name, file.Size, file.SHA256)
+		}
 		if len(a.Evidence) > 0 {
 			fmt.Fprintf(out, "  evidence: %s\n", a.Evidence)
 		}

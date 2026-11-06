@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path"
@@ -32,8 +33,10 @@ type UploadFile struct {
 // UploadDeliverableFile streams the original bytes before committing their
 // manifest. The envelope retains the existing binary upload request identity.
 func (a *App) UploadDeliverableFile(ctx context.Context, p protocol.Principal, requestID, name string, body io.Reader) (protocol.Operation, error) {
-	if p.Kind != protocol.PrincipalRun || p.Role != protocol.RoleImplement {
-		return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "only an implementation run may upload files")
+	if err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		return authorizeFileUpload(ctx, tx.Q(), p, p.Subject)
+	}); err != nil {
+		return protocol.Operation{}, err
 	}
 	object, err := a.store.FileStore().Put(ctx, body)
 	if err != nil {
@@ -49,8 +52,47 @@ func (a *App) UploadDeliverableFile(ctx context.Context, p protocol.Principal, r
 }
 
 func (UploadFile) Operation() string { return OpRunsUploadFile }
-func (UploadFile) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return authorizeRunSelf(x, protocol.RoleImplement)
+func (UploadFile) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	return authorizeFileUpload(ctx, q, x.Principal, x.Env.Target.ID)
+}
+
+// Upload permission is frozen by the original claim. A later capable runner
+// must not grant new file-producing authority to an older acceptance.
+func authorizeFileUpload(ctx context.Context, q store.Querier, p protocol.Principal, runID string) error {
+	if p.Kind != protocol.PrincipalRun || p.Subject != runID || p.Role != protocol.RoleImplement && p.Role != protocol.RoleAccept {
+		return protocol.Errorf(protocol.CodeForbidden, "only the producing run may upload files")
+	}
+	run, err := store.GetRun(ctx, q, runID)
+	if err != nil {
+		return errNotFound(err, "upload run does not exist")
+	}
+	if p.Role != run.Role {
+		return protocol.Errorf(protocol.CodeForbidden, "upload role does not match the run")
+	}
+	if run.Role == protocol.RoleAccept {
+		contract, err := runAcceptanceEvidenceContract(ctx, q, runID)
+		if err != nil {
+			return err
+		}
+		if !contract.Allowed {
+			return protocol.Errorf(protocol.CodeForbidden, "acceptance evidence uploads were not negotiated for this run")
+		}
+	}
+	return nil
+}
+
+type acceptanceEvidenceContract struct {
+	Found      bool
+	Allowed    bool
+	FeedbackID string
+}
+
+func runAcceptanceEvidenceContract(ctx context.Context, q store.Querier, runID string) (acceptanceEvidenceContract, error) {
+	var c acceptanceEvidenceContract
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_acceptance_evidence_contracts WHERE run_id=?),
+ COALESCE((SELECT files_allowed FROM run_acceptance_evidence_contracts WHERE run_id=?),0),
+ COALESCE((SELECT feedback_acceptance_id FROM run_acceptance_evidence_contracts WHERE run_id=?),'')`, runID, runID, runID).Scan(&c.Found, &c.Allowed, &c.FeedbackID)
+	return c, err
 }
 func (c UploadFile) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var manifest protocol.ArtifactFile
@@ -103,7 +145,15 @@ func (a *App) DeliverableFile(ctx context.Context, p protocol.Principal, id stri
 		if err != nil {
 			return err
 		}
+		if p.Role != rc.run.Role {
+			return protocol.Errorf(protocol.CodeForbidden, "run role does not match")
+		}
 		if rc.run.RunID == f.RunID {
+			return nil
+		}
+		if allowed, err := acceptanceFeedbackFile(ctx, tx.Q(), rc, f); err != nil {
+			return err
+		} else if allowed {
 			return nil
 		}
 		if rc.run.Role != protocol.RoleAccept || rc.task.TaskID != f.TaskID || rc.action.TargetArtifactID == "" {
@@ -128,6 +178,29 @@ func (a *App) DeliverableFile(ctx context.Context, p protocol.Principal, id stri
 		return store.DeliverableFileRow{}, err
 	}
 	return f, nil
+}
+
+// Only the acceptance selected by this implementation's original assignment
+// can authorize feedback downloads. Other files of the same Task stay private.
+func acceptanceFeedbackFile(ctx context.Context, q store.Querier, rc runContext, file store.DeliverableFileRow) (bool, error) {
+	if rc.run.Role != protocol.RoleImplement {
+		return false, nil
+	}
+	contract, err := runAcceptanceEvidenceContract(ctx, q, rc.run.RunID)
+	if err != nil || !contract.Allowed || contract.FeedbackID == "" {
+		return false, err
+	}
+	stored, acceptance, err := store.GetFinalizedAcceptanceFile(ctx, q, file.FileID)
+	if err != nil {
+		// An unselected upload has no finalized acceptance provenance.
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return stored.ArtifactFile == file.ArtifactFile && acceptance.AcceptanceID == contract.FeedbackID &&
+		acceptance.TaskID == rc.task.TaskID && acceptance.SpecVersion == rc.action.TargetSpecVersion &&
+		acceptance.Verdict == protocol.VerdictChangesRequired, nil
 }
 
 // OpenDeliverableFile authorizes metadata before opening the immutable bytes.

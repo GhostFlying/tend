@@ -115,11 +115,14 @@ func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepa
 	if out.Operation.Error != nil {
 		return protocol.ArtifactFile{}, out.Operation.Error
 	}
+	if out.Operation.Status != protocol.OpSucceeded {
+		return protocol.ArtifactFile{}, errors.New("file upload is not confirmed; reconcile the original request")
+	}
 	var file protocol.ArtifactFile
 	if err := json.Unmarshal(out.Operation.Result, &file); err != nil {
 		return file, err
 	}
-	if file.SHA256 != digest || file.Size != st.Size() {
+	if file.FileID == "" || file.Name != name || file.SHA256 != digest || file.Size != st.Size() {
 		return file, errors.New("uploaded file changed during submission")
 	}
 	pending.File = &file
@@ -276,7 +279,14 @@ func assignmentFile(as protocol.Assignment, id string) (protocol.ArtifactFile, s
 			return file, "deliverables", nil
 		}
 	}
-	return protocol.ArtifactFile{}, "", errors.New("file is not a task input or submitted artifact")
+	if as.Feedback != nil && as.Feedback.AcceptanceID != "" {
+		for _, file := range as.Feedback.Files {
+			if file.FileID == id {
+				return file, "acceptance-feedback", nil
+			}
+		}
+	}
+	return protocol.ArtifactFile{}, "", errors.New("file is not a task input, submitted artifact or declared acceptance feedback")
 }
 
 // File transfers follow the caller's run lifetime rather than the short RPC

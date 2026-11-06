@@ -51,6 +51,14 @@ func freezeTaskInputs(ctx context.Context, x *Exec, q store.Querier, spec *domai
 		f, err := store.GetConversationAttachment(ctx, q, input.FileID)
 		if errors.Is(err, store.ErrNotFound) {
 			file, artifactID, err := store.GetFinalizedDeliverableFile(ctx, q, input.FileID)
+			if errors.Is(err, store.ErrNotFound) {
+				file, acceptance, err := store.GetFinalizedAcceptanceFile(ctx, q, input.FileID)
+				if err != nil {
+					return errNotFound(err, "input file must be a conversation attachment or a file in a submitted artifact or acceptance; pass its file_id in spec.inputs")
+				}
+				spec.Inputs[i] = protocol.TaskInput{FileID: file.FileID, Name: file.Name, Size: file.Size, SHA256: file.SHA256, SourceTaskID: file.TaskID, SourceAcceptanceID: acceptance.AcceptanceID}
+				continue
+			}
 			if err != nil {
 				return errNotFound(err, "input file must be a conversation attachment or a file in a submitted artifact; pass its file_id in spec.inputs")
 			}
@@ -137,7 +145,7 @@ func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host str
 	if err := checkManagerReceiptReaderRecovery(ctx, q, host, runtime); err != nil {
 		return err
 	}
-	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) && runtimeSupportsAcceptanceExecution(runtime) {
+	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) && runtimeSupportsAcceptanceExecution(runtime) && runtimeSupportsAcceptanceEvidenceFiles(runtime) {
 		return nil
 	}
 	open, err := store.ListOpenRunsOnHost(ctx, q, host)
@@ -151,6 +159,13 @@ func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host str
 		}
 		if desiredFor(run, rc.action, rc.task) == protocol.DesiredStopped {
 			continue
+		}
+		contract, err := runAcceptanceEvidenceContract(ctx, q, run.RunID)
+		if err != nil {
+			return err
+		}
+		if contract.Allowed && !runtimeSupportsAcceptanceEvidenceFiles(runtime) {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "runner requires acceptance-evidence-files-v1 to recover its assigned evidence contract")
 		}
 		body, err := store.GetSpec(ctx, q, run.TaskID, rc.action.TargetSpecVersion)
 		if err != nil {
@@ -175,4 +190,8 @@ func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host str
 
 func runtimeSupportsAcceptanceExecution(runtime *protocol.RunnerRuntime) bool {
 	return runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityAcceptanceExecution)
+}
+
+func runtimeSupportsAcceptanceEvidenceFiles(runtime *protocol.RunnerRuntime) bool {
+	return runtime != nil && slices.Contains(runtime.Capabilities, protocol.CapabilityAcceptanceEvidenceFiles)
 }

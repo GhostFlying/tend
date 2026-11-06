@@ -29,7 +29,7 @@ func TestRetainedAcceptanceRestoresOriginalBridgeVerdict(t *testing.T) {
 				t.Fatal(err)
 			}
 			if change == "write-failure" {
-				if err := os.Mkdir(filepath.Join(original.spec.StateDir, "verdict.json.tmp"), 0700); err != nil {
+				if err := os.Mkdir(filepath.Join(original.spec.StateDir, "verdict.json"), 0700); err != nil {
 					t.Fatal(err)
 				}
 			}

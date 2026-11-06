@@ -52,6 +52,17 @@ type WorkerSpec struct {
 	ProviderID           string
 	StateDir             string
 	UploadFile           func(context.Context, string, string) (protocol.ArtifactFile, error)
+	// AcceptanceEvidenceFiles is negotiated for this assignment, not inferred
+	// from the installed runner or the availability of implementation uploads.
+	AcceptanceEvidenceFiles bool
+	// SealVerdictFiles durably seals every selection under the original native
+	// binding before uploading any bytes, and confirms the immutable manifests.
+	// Replays must reconcile the same input and upload identities.
+	SealVerdictFiles func(context.Context, string, json.RawMessage, []VerdictFileSelection) ([]protocol.ArtifactFile, error)
+	// VerdictFilesIdentity reads and validates the fully sealed original input,
+	// selected bytes and upload request IDs. Confirmed upload receipts do not
+	// change this identity. An incomplete selection has no such identity.
+	VerdictFilesIdentity func(context.Context, string, json.RawMessage) (string, error)
 	DownloadFile         func(context.Context, string) (string, error)
 	ReadObservation      func(context.Context) (protocol.RunObservation, error)
 	Role                 protocol.RunRole

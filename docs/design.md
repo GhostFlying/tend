@@ -172,6 +172,7 @@
 | D173 | 原 close 与独立 stopped 及事件已对清后，以原 Task CAS/Run/lease/pin/epoch 结束旧 transport、排唯一 receipt-only 后继；只恢复原 thread 读取真实回执，未知业务不因此完成。 | 实现中 |
 | D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
 | D180 | 独立 server/runner 维护窗口持久限时，显式外部 force 接受未完成与未知；固定原进程与数据身份、先退出后接管，保留原请求、逐 run 隔离及独立恢复准入。 | 实现中 |
+| D181 | 验收通过、返修及受阻结论均可显式提交不可变证据文件；首次领取冻结能力与精确反馈来源，文件原件和稳定上传身份先于 verdict 确认，事务关联与逐文件权限使原证据在 scratch 清理后仍可读取。旧无文件结论保持原义，不推断本机路径持久化；runner journal 18 阻止旧 writer 静默丢文件引用。详见 docs/plans/acceptance-evidence-files.md。 | 实现中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1110,3 +1111,13 @@ runner force 需要独立 owner/CAS grant，不从普通升级 grant 或本地�
 配置摘要的读取与执行入口统一先补齐现有默认值；文件中省略默认 stop/health 超时不改变配置身份，也不改写文件或原凭据。
 
 本次实现独立 component/host 窗口，旧批量 coordinator 已固定 targets，但总预算仍会随旧阶段/host 推进重设；该 batch 总 deadline 明确留作后续，不声称本次已修。独立本机 force 不经过旧 batch 的等待门。详见[实施计划](plans/bounded-maintenance-recovery.md)、[CLI](bounded-maintenance-cli.md)与[实际进程验收计划](plans/bounded-systemd-acceptance.md)。
+
+## D181：验收证据文件的持久交付
+
+验收可显式选择文件，经 D87 不可变内容存储上传后，在原 verdict 事务中绑定完整文件清单；passed、changes_required 和 blocked 使用同一合同。上传未确认时不确认 verdict，也不因本机路径可读就声明交付成功。evidence JSON 原样保存，不解析其中的路径或自动收集 scratch。原 scratch 仍按既有生命周期清理；正式文件引用提供清理后的原字节读取，不承诺恢复已经删除的历史原件。
+
+文件能力和反馈 AcceptanceID 在首次 claim 的同一事务中冻结。后续 Hello 不给旧 run 补授权，较新验收不改变已领取返修 run 的反馈来源。文件读取按完整 manifest、精确反馈、显式输入和既有 Issue 责任范围校验；同 Task、同名或同 hash 不自行授予权限。owner、主 Agent、CLI 和后继 worker 均使用实际文件身份，跨任务输入保留 source acceptance。
+
+恢复先封存原字节和原上传请求身份，再对账原结果。上传确认与原生会话关闭是两份独立事实：直接本机 app-server 仅在实际拥有的进程 Session.Close 成功后保存关闭记录；流连接断开或引用释放不产生该记录。此记录沿用原本机根进程退出及进程组终止调用合同，不扩张为进程组已空或所有外部业务效果已知的证明。关闭时上传仍未知的，可绑定完整封存输入及原请求身份；恢复后仅与这些原请求的真实确认组合，并固定最终 verdict 字节，不能用缓存结果补造历史关闭。关闭失败、缺失或绑定不符保持待对账，不发新模型 turn 来重建 verdict。
+
+线上协议仍为 2/1，新增可选能力必须显式协商；未协商的旧请求保持原义，缺少文件清单不代表文件已持久化。server schema 95 追加验收清单与冻结合同，runner journal 18 防止旧 17 writer 恢复时静默丢弃新引用；真实历史迁移保留原请求、执行身份与隔离。具体接口、权限与验证见[实施计划](plans/acceptance-evidence-files.md)。

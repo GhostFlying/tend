@@ -93,7 +93,10 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	ConcurrencyFeedback bool `json:"concurrency_feedback,omitempty"`
+	// AcceptanceEvidenceFiles enables explicitly selected durable verdict files.
+	// An absent flag retains the original verdict-only wire contract.
+	AcceptanceEvidenceFiles bool `json:"acceptance_evidence_files,omitempty"`
+	ConcurrencyFeedback     bool `json:"concurrency_feedback,omitempty"`
 	// PreparationDiagnostics permits the optional release diagnosis. Older
 	// servers omit it, so new runners retain the original release payload.
 	PreparationDiagnostics bool                     `json:"preparation_diagnostics,omitempty"`
@@ -141,9 +144,11 @@ type Assignment struct {
 
 // Feedback is an acceptance verdict an implementation must address.
 type Feedback struct {
-	Verdict  Verdict         `json:"verdict"`
-	Issues   json.RawMessage `json:"issues"`
-	Evidence json.RawMessage `json:"evidence,omitempty"`
+	AcceptanceID string          `json:"acceptance_id,omitempty"`
+	Files        []ArtifactFile  `json:"files,omitempty"`
+	Verdict      Verdict         `json:"verdict"`
+	Issues       json.RawMessage `json:"issues"`
+	Evidence     json.RawMessage `json:"evidence,omitempty"`
 }
 
 // AssignmentWorkspace tells the runner how to lay out the workspace.
@@ -296,6 +301,7 @@ type ArtifactMount struct {
 
 // VerdictPayload submits the conclusion of an acceptance run.
 type VerdictPayload struct {
+	Files    []ArtifactFile  `json:"files,omitempty"`
 	Verdict  Verdict         `json:"verdict"`
 	Evidence json.RawMessage `json:"evidence"`
 	Issues   json.RawMessage `json:"issues,omitempty"`

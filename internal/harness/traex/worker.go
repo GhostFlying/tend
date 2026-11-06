@@ -68,6 +68,14 @@ type worker struct {
 	err    error
 }
 
+type restoredVerdictWorker struct {
+	events chan harness.WorkerEvent
+	result harness.WorkerResult
+}
+
+func (w *restoredVerdictWorker) Events() <-chan harness.WorkerEvent  { return w.events }
+func (w *restoredVerdictWorker) Wait() (harness.WorkerResult, error) { return w.result, nil }
+
 var _ harness.LiveMessenger = (*worker)(nil)
 
 func (w *worker) MessageTarget() (string, string) { return w.thread.ID(), w.turnID }
@@ -106,6 +114,20 @@ func (w *worker) Wait() (harness.WorkerResult, error) {
 
 // Start implements harness.Workers.
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
+	verdicts := harness.Verdicts{StateDir: spec.StateDir, Spec: spec}
+	if spec.Role == protocol.RoleAccept {
+		if err := verdicts.RestoreContext(ctx); err != nil {
+			return nil, err
+		}
+		if spec.AcceptanceEvidenceFiles && verdicts.Verdict() != nil {
+			if err := verdicts.ConfirmOwnedSessionClose(); err != nil {
+				return nil, fmt.Errorf("%w: original acceptance session closure is unconfirmed: %w", harness.ErrRetainedResumePending, err)
+			}
+			events := make(chan harness.WorkerEvent)
+			close(events)
+			return &restoredVerdictWorker{events: events, result: harness.WorkerResult{Verdict: verdicts.Verdict()}}, nil
+		}
+	}
 	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
 	opts.Dir = spec.Dir
@@ -130,13 +152,6 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		return nil, err
 	}
 	instructions, input := harness.Brief(spec)
-	verdicts := harness.Verdicts{StateDir: spec.StateDir}
-	if spec.Role == protocol.RoleAccept {
-		if err := verdicts.Restore(); err != nil {
-			release(err)
-			return nil, err
-		}
-	}
 	results := harness.Results{Spec: spec}
 	if err := results.Restore(); err != nil {
 		release(err)
@@ -148,7 +163,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		Tools:                 []harness.ToolSpec{harness.ResultToolSpec}, OnToolCall: results.Handle,
 	}
 	if spec.Role == protocol.RoleAccept {
-		cfg.Tools = []harness.ToolSpec{harness.VerdictToolSpec}
+		cfg.Tools = []harness.ToolSpec{harness.VerdictToolFor(spec)}
 		cfg.OnToolCall = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
 				return verdicts.Handle(ctx, c)
@@ -216,7 +231,21 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	go func() {
 		defer close(w.done)
 		defer close(w.events)
-		defer func() { release(w.err) }()
+		defer func() {
+			release(w.err)
+			if spec.Role != protocol.RoleAccept || !spec.AcceptanceEvidenceFiles || ws.opts.Acquire != nil {
+				return
+			}
+			if !s.ownedSessionCloseSucceeded() {
+				if verdicts.Verdict() != nil {
+					w.err = fmt.Errorf("%w: original owned acceptance session close was not confirmed", harness.ErrRetainedResumePending)
+				}
+				return
+			}
+			if err := verdicts.RecordOwnedSessionClose(); err != nil && verdicts.Verdict() != nil {
+				w.err = fmt.Errorf("%w: record original owned acceptance session close: %w", harness.ErrRetainedResumePending, err)
+			}
+		}()
 		var summary string
 	events:
 		for {
@@ -297,6 +326,12 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					case w.events <- nativeRolloutEvent(th.ID(), ev):
 					case <-ctx.Done():
 						break events
+					}
+					if spec.Role == protocol.RoleAccept && spec.AcceptanceEvidenceFiles {
+						if err := verdicts.RestoreContext(ctx); err != nil {
+							w.err = err
+							return
+						}
 					}
 					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Result: results.Result(), Summary: summary}
 					if ev.TurnStatus != "completed" {

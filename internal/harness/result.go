@@ -23,7 +23,7 @@ var ResultToolSpec = ToolSpec{
 
 var DownloadFileToolSpec = ToolSpec{
 	Name:        "download_file",
-	Description: "Download an original task input or a submitted artifact file by file_id into this run's scratch directory. Verifies its size and SHA-256 and returns its local path.",
+	Description: "Download an explicitly listed original task input, submitted artifact file, or preserved acceptance feedback file by file_id into this run's scratch directory. Verifies its size and SHA-256 and returns its local path.",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"file_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}`),
 }
 

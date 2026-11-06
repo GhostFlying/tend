@@ -86,11 +86,18 @@ func ReadFinalizedDeliverableFile(ctx context.Context, q Querier, id string, off
 	}
 	var f DeliverableFileRow
 	err := q.QueryRowContext(ctx, `SELECT f.file_id,f.task_id,f.run_id,f.name,f.size,f.sha256,f.created_at
- FROM deliverable_files f WHERE f.file_id=? AND EXISTS (
+ FROM deliverable_files f WHERE f.file_id=? AND (EXISTS (
  SELECT 1 FROM artifacts a, json_each(a.ref_json, '$.files') entry
  WHERE a.task_id=f.task_id AND a.run_id=f.run_id
  AND json_extract(entry.value, '$.file_id')=f.file_id
- )`, id).Scan(&f.FileID, &f.TaskID, &f.RunID, &f.Name, &f.Size, &f.SHA256, &f.CreatedAt)
+ ) OR EXISTS (
+ SELECT 1 FROM acceptances a,json_each(a.files_json) entry
+ WHERE a.task_id=f.task_id AND a.run_id=f.run_id
+ AND json_extract(entry.value,'$.file_id')=f.file_id
+ AND json_extract(entry.value,'$.name')=f.name
+ AND json_extract(entry.value,'$.size')=f.size
+ AND json_extract(entry.value,'$.sha256')=f.sha256
+ ))`, id).Scan(&f.FileID, &f.TaskID, &f.RunID, &f.Name, &f.Size, &f.SHA256, &f.CreatedAt)
 	if err != nil {
 		return DeliverableFileRow{}, notFound(err, "finalized file "+id)
 	}

@@ -16,6 +16,13 @@ import (
 const envProbeServer = "TEND_TRAEX_TEST_ENV_SERVER"
 
 func TestMain(m *testing.M) {
+	if os.Getenv(envAcceptanceCloseServer) == "1" {
+		if err := serveAcceptanceCloseProbe(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if os.Getenv(envProbeServer) == "1" {
 		if err := serveEnvProbe(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

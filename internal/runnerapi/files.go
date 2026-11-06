@@ -16,8 +16,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, nil, err)
 		return
 	}
-	if p.Kind != protocol.PrincipalRun || p.Role != protocol.RoleImplement {
-		s.writeError(w, r, nil, protocol.Errorf(protocol.CodeForbidden, "only an implementation run may upload files"))
+	if p.Kind != protocol.PrincipalRun || p.Role != protocol.RoleImplement && p.Role != protocol.RoleAccept {
+		s.writeError(w, r, nil, protocol.Errorf(protocol.CodeForbidden, "only an implementation or acceptance run may upload files"))
 		return
 	}
 	env := protocol.Envelope{RequestID: r.URL.Query().Get("request_id"), Operation: app.OpRunsUploadFile}

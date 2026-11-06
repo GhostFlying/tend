@@ -58,6 +58,8 @@ type Session struct {
 	stopped        chan struct{}
 	closed         sync.Once
 	closeErr       error
+	ownedProcess   bool
+	ownedCloseOK   bool
 	hostedBoundary *hostedToolBoundary
 }
 
@@ -121,6 +123,7 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 		kill()
 		return err
 	}
+	s.ownedProcess = true
 	if err := s.initialize(ctx, opts.Version); err != nil {
 		_ = s.Close()
 		return nil, err
@@ -199,8 +202,20 @@ func (s *Session) Close() error {
 	s.closed.Do(func() {
 		close(s.stopped)
 		s.closeErr = s.stop()
+		s.mu.Lock()
+		s.ownedCloseOK = s.ownedProcess && s.closeErr == nil
+		s.mu.Unlock()
 	})
 	return s.closeErr
+}
+
+// ownedSessionCloseSucceeded applies only to the local process created by
+// startProcess: its Wait returned successfully and the existing group kill was
+// invoked. It does not claim all descendants or external native effects ended.
+func (s *Session) ownedSessionCloseSucceeded() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ownedCloseOK
 }
 
 func dynamicTools(specs []harness.ToolSpec) []DynamicToolSpec {
