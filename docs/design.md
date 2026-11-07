@@ -1158,6 +1158,9 @@ repair 或业务 unknown。缺失、未确认、不匹配或其它类型的事�
 Capability 为独立的版本化业务标签。定义由 owner request/CAS 追加，Agent 配置显式声明
 definition revision；同 Agent revision 的声明不可变。Task implementation/acceptance 各自
 冻结 required，新增 exact reference 检查 active 定义，原角色保留引用允许历史继续。
+Agent 注册保留已接受 identity/revision 的原声明，包括移除后恢复；定义退役不阻断
+无关 Agent 更新。新 Agent identity 或 revision 仍检查 active 准入，同 revision 改声明
+仍被 revision fence 拒绝。见[兼容修复计划](plans/capability-retired-declarations.md)。
 普通 executor readiness、角色、runtime/model/effort/backend、共享预算及 retained pin 约束
 仍由同一 scheduler 决定，定义标签不证明 native 工具或实际执行。
 

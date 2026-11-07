@@ -132,11 +132,23 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err := protocol.ValidateAgentCapabilityRevisions(history, p.Projection.Agents); err != nil {
 		return Outcome{}, err
 	}
+	type declarationKey struct {
+		identity protocol.AgentIdentity
+		revision uint64
+	}
+	accepted := make(map[declarationKey]bool, len(history))
+	for _, a := range history {
+		accepted[declarationKey{a.Identity, a.Revision}] = true
+	}
 	categories := []protocol.AgentCategory{}
 	seen := map[string]bool{}
 	for _, a := range p.Projection.Agents {
-		if err := checkCapabilityReferences(ctx, tx.Q(), a.Capabilities); err != nil {
-			return Outcome{}, err
+		// The revision fence above already proved historical declarations unchanged.
+		// Retirement only prevents admission of new identities or revisions.
+		if !accepted[declarationKey{a.Identity, a.Revision}] {
+			if err := checkCapabilityReferences(ctx, tx.Q(), a.Capabilities); err != nil {
+				return Outcome{}, err
+			}
 		}
 		for _, id := range a.Categories {
 			if seen[id] {
