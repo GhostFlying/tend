@@ -51,6 +51,9 @@ type Dependencies struct {
 	OpenTelegram     TelegramOpener
 	Now              func() time.Time
 	IDs              protocol.IDGen
+	// UpgradeTickInterval controls the reconciliation clock in isolated assembly
+	// tests. Zero retains the controller's production default.
+	UpgradeTickInterval time.Duration
 	// Configure runs after static resource sync and before hosted admission.
 	Configure  func(context.Context, *app.App, protocol.IDGen) error
 	Initialize func(context.Context, *Runtime) error

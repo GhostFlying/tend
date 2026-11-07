@@ -79,7 +79,7 @@ func executableSHA256() (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.Manager, background *mainthread.BackgroundPool, ids protocol.IDGen, log *slog.Logger) (*upgradectl.Controller, error) {
+func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.Manager, background *mainthread.BackgroundPool, ids protocol.IDGen, log *slog.Logger, interval time.Duration) (*upgradectl.Controller, error) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -111,7 +111,7 @@ func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.
 			return errors.New("agent compaction needs reconciliation")
 		}
 		return nil
-	}, Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds()}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
+	}, Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds(), Interval: interval}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
 		var agents []upgradeDrainer
 		if front != nil {
 			agents = append(agents, front)

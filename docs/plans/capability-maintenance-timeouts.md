@@ -28,3 +28,20 @@ Capability 的间接影响。原日志缺少具体失败阶段。调查只覆盖
 不调整原 Sandbox 十分钟、fake429 九十秒、resolver 五秒及这两例二十五秒预算；
 不扩展 UI、Capability 整合范围或 Agent/model/effort；最终仍交指定独立 reviewer。
 无 merge/deploy 授权。Refs: D183。
+
+## 阶段结论及最小修复选择
+
+一次带诊断的双例样本中，seed-open 至 seed-configure 为 13.50/14.51 秒；真实装配后
+health 请求约 0.25–0.31 秒；独立 updater 状态提交至 ACK 又等待 4.14/4.20 秒。
+一次 task base 对照的同例 fresh 迁移为 14.26 秒、总 helper 21.61 秒。
+这支持“原装配测试在固定总预算内混入昂贵 fresh 迁移与实际五秒轮询相位”的结论；
+不证明原整轮超时的具体失败阶段或负载根因，不据此关闭历史未知。
+
+最小修复选择：复用 upgradectl.Config 已有 Interval，仅经 serverkit.Dependencies 的
+可选 UpgradeTickInterval 传入；RunFile 的空依赖仍为零，继续使用 controller 原五秒默认。
+两项隔离装配测试显式使用短 interval，运行同一真实 controller tick、readiness、kernel
+identity、独立 updater 状态/ACK 和数据库 link，消除测试与五秒轮询相位的无关等待。
+不改变 fresh 迁移、25 秒起点或任何 deadline，不 stub 成功、不直接写 link 事实。
+改动路径限 dependencies.go、main.go、upgrades.go 和原测试；保留阶段诊断。
+预期证据为同预算下 link 等待缩短且 verified 及全部历史未知/原 pin 断言仍成立，再以
+一次带逐例 JSON 的完整默认预算检查收口。若失败则保留并重新评估，不反复 full 挑成功。
