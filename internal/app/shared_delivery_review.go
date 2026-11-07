@@ -104,20 +104,33 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		case "start", "recheck":
 			if p.Action == "recheck" && r.Status == "passed" {
 				current := r
-				if err := store.SharedDeliveryReviewCurrent(ctx, tx.Q(), &current); err != nil {
+				changed, err := store.SharedDeliveryReviewChanged(ctx, tx.Q(), &current)
+				if err != nil {
 					return Outcome{}, err
 				}
 				if current.Valid {
 					return Outcome{Result: current}, nil
 				}
+				if !changed {
+					return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "await the current bounded server observation; temporary provider uncertainty retains the actual passed review and its original budget")
+				}
 			}
 			if r.Status == "reviewing" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "the delivery already has an active reviewer")
 			}
-			if len(r.Rounds) >= 2 {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "review budget exhausted; resolve the escalated responsibility instead of starting another review")
+			if len(r.Rounds) >= sharedReviewRoundLimit(r) {
+				if p.Action == "recheck" && r.Status == "passed" {
+					// Its actual passed result is retained above. A changed
+					// candidate cannot spend an exhausted budget, so expose the
+					// same explicit escalation and external recovery path.
+					if err := escalateSharedDeliveryReview(ctx, x, tx, i, &r); err != nil {
+						return Outcome{}, err
+					}
+					break
+				}
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "review budget exhausted; escalate and request external user authorize_recheck with the current review revision before another review")
 			}
-			if p.Action == "recheck" && (len(r.Rounds) != 1 || (r.Status != "passed" && (r.Status != "changes_requested" || !reviewFindingsResolved(r)))) {
+			if p.Action == "recheck" && (len(r.Rounds) < 1 || (r.Status != "passed" && (r.Status != "changes_requested" || !reviewFindingsResolved(r)))) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "one consolidated finding disposition is required before the original reviewer's recheck")
 			}
 			if p.Action == "start" && len(r.Rounds) > 0 {
@@ -149,6 +162,9 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			r.HeadSHA, r.BaseSHA, r.RequirementsDigest, r.Reviewer, r.Status = o.Observation.HeadSHA, o.Observation.BaseSHA, digest, round.Reviewer, "reviewing"
 			round.Number, round.HeadSHA, round.BaseSHA, round.Requirements = len(r.Rounds)+1, r.HeadSHA, r.BaseSHA, digest
 			r.Rounds = append(r.Rounds, round)
+			// Earlier dispositions remain in immutable review history; they do
+			// not settle recurring finding IDs in the next actual review.
+			r.Dispositions = nil
 		case "record":
 			if r.Status != "reviewing" || len(r.Rounds) == 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no active frozen shared review")
@@ -174,25 +190,26 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if result.Verdict == "passed" {
 				r.Status = "passed"
 			}
-			if r.Status == "changes_requested" && len(r.Rounds) == 2 {
-				r.Status = "escalated"
-				r.EscalationIssueID = i.ParentIssueID
-				message := x.IDs.New(protocol.PrefixMessage)
-				conversation := "main"
-				if i.ParentIssueID != "" {
-					conversation = "issue:" + i.ParentIssueID
-				}
-				if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "system", Body: fmt.Sprintf("Shared PR review %s for %s #%d exhausted its initial review and one focused fix/recheck. The original review and findings remain. The parent responsibility must decide scope, remediation or further escalation; do not schedule another automatic review or treat this as human approval.", r.ReviewID, r.Repository, r.Number), CreatedAt: x.Now.UnixMilli()}); err != nil {
-					return Outcome{}, err
-				}
-				event := x.IDs.New(protocol.PrefixEvent)
-				if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: event, Source: "app", ObjectType: "message", ObjectID: message, Kind: "conversation.message", BodyJSON: `{"author":"system"}`, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
-					return Outcome{}, err
-				}
-				if err := appendBackgroundSource(ctx, x, tx, "review_escalation:"+r.ReviewID, i.ParentIssueID, message, event, "delivery.review_escalated", nil); err != nil {
+			if r.Status == "changes_requested" && len(r.Rounds) >= sharedReviewRoundLimit(r) {
+				if err := escalateSharedDeliveryReview(ctx, x, tx, i, &r); err != nil {
 					return Outcome{}, err
 				}
 			}
+		case "authorize_recheck":
+			if x.Principal.Kind != protocol.PrincipalOwner || x.coordinationExecution != nil {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only an independent authenticated external user may authorize an additional review round")
+			}
+			if p.ExpectedReviewRevision == nil || *p.ExpectedReviewRevision < 1 {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "expected_review_revision is required for additional review authority")
+			}
+			if *p.ExpectedReviewRevision != r.Revision {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "shared review changed before the additional round was authorized")
+			}
+			if r.Status != "escalated" || len(r.Rounds) != sharedReviewRoundLimit(r) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "authorize exactly one further round only after the current review budget is exhausted")
+			}
+			r.BudgetAuthorizations = append(r.BudgetAuthorizations, protocol.SharedReviewBudgetAuthorization{RequestID: x.Env.RequestID, Round: len(r.Rounds) + 1, Reason: p.Reason})
+			r.Status = "changes_requested"
 		case "supplement":
 			if r.Status != "reviewing" || len(r.Rounds) == 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only an unresolved original acceptance import can receive focused evidence")
@@ -237,7 +254,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			r.Dispositions = slices.Clone(p.Dispositions)
 		default:
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review action must be link, unlink, start, record, supplement, resolve, assess or recheck")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review action must be link, unlink, start, record, supplement, resolve, assess, recheck or authorize_recheck")
 		}
 	}
 	if len(r.Rounds) == 0 {
@@ -264,6 +281,27 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{}, err
 	}
 	return Outcome{Result: r, Notify: true, Events: []Event{{ObjectType: "issue", ObjectID: i.IssueID, Kind: "issue.delivery_review_changed", Body: map[string]any{"review_id": r.ReviewID, "review_revision": r.Revision, "status": r.Status}}}}, nil
+}
+
+func sharedReviewRoundLimit(r protocol.SharedDeliveryReview) int {
+	return 2 + len(r.BudgetAuthorizations)
+}
+
+func escalateSharedDeliveryReview(ctx context.Context, x *Exec, tx *store.Tx, i protocol.Issue, r *protocol.SharedDeliveryReview) error {
+	r.Status, r.EscalationIssueID = "escalated", i.ParentIssueID
+	message := x.IDs.New(protocol.PrefixMessage)
+	conversation := "main"
+	if i.ParentIssueID != "" {
+		conversation = "issue:" + i.ParentIssueID
+	}
+	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "system", Body: fmt.Sprintf("Shared PR review %s for %s #%d exhausted its authorized budget after %d actual rounds. The original review and findings remain. The parent responsibility must decide scope, remediation or further escalation. If a further focused review is required, an external authenticated user can authorize_recheck with the current Issue and review revisions and an explicit reason, granting exactly one additional round. Do not self-authorize another review or treat escalation as approval.", r.ReviewID, r.Repository, r.Number, len(r.Rounds)), CreatedAt: x.Now.UnixMilli()}); err != nil {
+		return err
+	}
+	event := x.IDs.New(protocol.PrefixEvent)
+	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: event, Source: "app", ObjectType: "message", ObjectID: message, Kind: "conversation.message", BodyJSON: `{"author":"system"}`, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+		return err
+	}
+	return appendBackgroundSource(ctx, x, tx, "review_escalation:"+r.ReviewID, i.ParentIssueID, message, event, "delivery.review_escalated", nil)
 }
 
 func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, task, acceptance string) (protocol.SharedDeliveryReviewRound, error) {

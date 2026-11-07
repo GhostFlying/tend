@@ -113,6 +113,11 @@ function ReviewRecord({ review }: { review: SharedDeliveryReview }) {
       ) : null}
       <details>
         <summary>查看审阅过程与关联</summary>
+        {(review.budget_authorizations ?? []).map((authorization) => (
+          <p key={authorization.request_id}>
+            额外复查授权 · 第 {authorization.round} 轮 · {authorization.reason}
+          </p>
+        ))}
         {(review.rounds ?? []).map((round) => (
           <p key={round.number}>
             第 {round.number} 轮 ·{" "}

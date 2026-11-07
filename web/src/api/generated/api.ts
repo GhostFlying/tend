@@ -4707,6 +4707,7 @@ export interface SharedDeliveryReview {
   assessed_requirements_digest?: string;
   assessment_reason?: string;
   base_sha: string;
+  budget_authorizations?: SharedReviewBudgetAuthorization[];
   dispositions?: SharedReviewDisposition[];
   escalation_issue_id?: string;
   head_sha: string;
@@ -4723,6 +4724,15 @@ export interface SharedDeliveryReview {
   rounds: SharedDeliveryReviewRound[] | null;
   status: string;
   valid: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewBudgetAuthorization".
+ */
+export interface SharedReviewBudgetAuthorization {
+  reason: string;
+  request_id: string;
+  round: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5598,6 +5608,7 @@ export interface UpdateSharedDeliveryReviewPayload {
   delivery_id: string;
   dispositions?: SharedReviewDisposition[];
   expected_assignment_epoch: number;
+  expected_review_revision?: number;
   expected_source_revision?: number;
   reason?: string;
   reviewer_task_id?: string;
