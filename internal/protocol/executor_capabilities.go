@@ -130,15 +130,24 @@ type CapabilityPage struct {
 }
 
 type AgentCapabilityView struct {
-	SchedulingReason *QueueWaitReason      `json:"scheduling_reason,omitempty"`
-	Binding          AgentRuntimeReference `json:"runtime_binding_ref"`
-	Categories       []string              `json:"categories"`
-	Purposes         []string              `json:"purposes"`
-	Identity         AgentIdentity         `json:"identity"`
-	AgentRevision    uint64                `json:"agent_revision"`
-	Declared         []CapabilityReference `json:"declared"`
-	Pin              *RunExecutionPin      `json:"pin,omitempty"`
-	Current          CapabilityMatch       `json:"current"`
+	SchedulingReason   *QueueWaitReason             `json:"scheduling_reason,omitempty"`
+	Binding            AgentRuntimeReference        `json:"runtime_binding_ref"`
+	Categories         []string                     `json:"categories"`
+	Purposes           []string                     `json:"purposes"`
+	Identity           AgentIdentity                `json:"identity"`
+	AgentRevision      uint64                       `json:"agent_revision"`
+	Declared           []CapabilityReference        `json:"declared"`
+	DefinitionStatuses []CapabilityDefinitionStatus `json:"definition_statuses,omitempty"`
+	Pin                *RunExecutionPin             `json:"pin,omitempty"`
+	Current            CapabilityMatch              `json:"current"`
+}
+
+// CapabilityDefinitionStatus separates the current definition from an immutable
+// declaration and its frozen matching semantics. It does not change admission.
+type CapabilityDefinitionStatus struct {
+	Declared          CapabilityReference   `json:"declared"`
+	CurrentDefinition *CapabilityDefinition `json:"current_definition,omitempty"`
+	Explanation       string                `json:"explanation"`
 }
 
 type AgentCapabilityPage struct {

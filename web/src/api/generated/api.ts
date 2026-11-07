@@ -1407,6 +1407,7 @@ export interface AgentCapabilityView {
   categories: string[] | null;
   current: CapabilityMatch;
   declared: CapabilityReference[] | null;
+  definition_statuses?: CapabilityDefinitionStatus[];
   identity: AgentIdentity;
   pin?: RunExecutionPin;
   purposes: string[] | null;
@@ -1432,6 +1433,28 @@ export interface CapabilityReason {
   reason: string;
   recovery: string;
   state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityDefinitionStatus".
+ */
+export interface CapabilityDefinitionStatus {
+  current_definition?: CapabilityDefinition;
+  declared: CapabilityReference;
+  explanation: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CapabilityDefinition".
+ */
+export interface CapabilityDefinition {
+  capability_id: string;
+  contract_version: number;
+  description: string;
+  revision: number;
+  state: string;
+  title: string;
+  verification_policy: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2385,19 +2408,6 @@ export interface CancelIssueDeadlinePayload {
   expected_source_revision?: number;
   reason?: string;
   source_message_id?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "CapabilityDefinition".
- */
-export interface CapabilityDefinition {
-  capability_id: string;
-  contract_version: number;
-  description: string;
-  revision: number;
-  state: string;
-  title: string;
-  verification_policy: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

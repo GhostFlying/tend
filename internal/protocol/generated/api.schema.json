@@ -292,6 +292,12 @@
             }
           ]
         },
+        "definition_statuses": {
+          "items": {
+            "$ref": "#/definitions/CapabilityDefinitionStatus"
+          },
+          "type": "array"
+        },
         "identity": {
           "$ref": "#/definitions/AgentIdentity"
         },
@@ -2899,6 +2905,26 @@
         "verification_policy"
       ],
       "title": "CapabilityDefinition",
+      "type": "object"
+    },
+    "CapabilityDefinitionStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "current_definition": {
+          "$ref": "#/definitions/CapabilityDefinition"
+        },
+        "declared": {
+          "$ref": "#/definitions/CapabilityReference"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "declared",
+        "explanation"
+      ],
+      "title": "CapabilityDefinitionStatus",
       "type": "object"
     },
     "CapabilityMatch": {

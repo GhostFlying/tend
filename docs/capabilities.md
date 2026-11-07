@@ -50,6 +50,12 @@ tend task list --all --capability image_gen --capability-role accept --json
 `eligible` 使用真实 scheduler 的角色、pin、backend、依赖及容量边界；`pending` 表示可恢复
 的普通 readiness/容量等待；`unavailable` 提供缺失声明、revision 不匹配或冻结选择不满足的原因。
 只读查询不预留资源。首次分配所需的 reviewer 仍为原调度前提；waiver 不引入额外 reviewer 要求。
+
+Agent list/show 和 Task explanation 候选的 `declared` 保留原配置的精确引用；
+`definition_statuses` 另列该引用对应定义的当前 revision/state 及说明。例如 Agent 声明
+`image_gen@1`，定义当前为 revision 2 / `retired` 时，两项同时显示，并明确新引用被拒绝。
+`current.state=eligible` 是既有冻结需求的声明匹配结果，不表示可以向新声明或新任务添加退役引用。
+原始 Agent revisions 历史仍返回当时接受的配置，不用当前定义状态改写旧声明或 pin。
 过期等待由现有 sweep 记录一次每 Task/spec/role 的通知，不新建独立定时器或模型调用。
 
 所有分页返回 `next_after` 与 `as_of`，续页传 `--after` 原 cursor 和原筛选条件。
