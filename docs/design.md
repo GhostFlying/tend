@@ -1170,6 +1170,10 @@ Agent 查询、Task 解释、CLI/API/只读工具与等待通知共用真实调�
 
 详见[实施计划](plans/capability-current-main.md)与[接口说明](capabilities.md)。
 
+关联维护装配验证沿 D133 外部边界注入已有 controller interval，隔离测试消除固定轮询相位
+等待，生产空依赖保持原默认值。它不放宽 readiness、物理身份、独立 updater/DB link 或原
+总 deadline；原失败、阶段样本与完整检查分开保存。见[阶段证据](findings/capability-maintenance-deadline.md)。
+
 ## D184：负责人判断任务约定的适用性
 
 Issue 的已提交变化进入现有通知窗口及后台批次，由当前负责人判断状态说明与真实任务变化。自产处理不形成循环，也不取消尚未处理的外部变化。来源审阅完成后，剩余的任务影响判断继续作为正常协调责任。

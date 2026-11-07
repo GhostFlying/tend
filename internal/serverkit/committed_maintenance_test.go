@@ -76,6 +76,11 @@ func TestReceiptRecoveryStartupProductionAssembly(t *testing.T) {
 
 func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bool) {
 	t.Helper()
+	started := time.Now()
+	phase := "initializing"
+	mark := func(next string) { phase = next; t.Logf("assembly phase=%s elapsed=%s", phase, time.Since(started)) }
+	defer func() { t.Logf("assembly last_phase=%s elapsed=%s", phase, time.Since(started)) }()
+	mark("seed-open")
 	// Fresh migrations construct the retained ledger. The production scenario
 	// below reopens that ledger and has its own bounded recovery budget.
 	setupCtx, setupCancel := context.WithTimeout(t.Context(), maintenanceAssemblySetupTimeout)
@@ -94,6 +99,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 	if err != nil {
 		t.Fatalf("prepare maintenance assembly ledger: %v", err)
 	}
+	mark("seed-configure")
 	seed := app.New(db, ids, time.Now)
 	prep, err := seed.ChangeArchivePreparation(setupCtx, protocol.ArchiveControlRequest{RequestID: ids.New(protocol.PrefixRequest)}, true)
 	if err != nil {
@@ -166,10 +172,12 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
+	mark("seed-process-inspect")
 	actual, err := (updater.LinuxProcess{}).Inspect(setupCtx, os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}
+	mark("seed-process-inspected")
 	plan := protocol.CommittedMaintenancePlan{MaintenanceID: "assembly-maintenance", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), PreparationRevision: prep.Revision, Previous: protocol.UpgradeBinding{UpgradeID: "previous", InstanceID: "server", ProcessInstanceID: "previous-process", ArtifactSHA256: strings.Repeat("a", 64)}, Successor: protocol.UpgradeBinding{UpgradeID: "assembly-maintenance", InstanceID: "server", ProcessInstanceID: actual.LaunchID, ArtifactSHA256: actual.SHA256, ManifestSHA256: strings.Repeat("b", 64), ReleaseID: "assembly-successor"}}
 	if receiptRecovery {
 		plan.ReceiptRecoveryStop = &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{{TaskID: taskID, Run: protocol.RunView{RunID: runID, Role: retained.Role, Generation: 1, SpecVersion: 1, Host: retained.HostID, Observed: retained.ObservedState}}}}
@@ -241,7 +249,11 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 		return (&net.Dialer{}).DialContext(ctx, "unix", controlSocket)
 	}}}
 	defer localClient.CloseIdleConnections()
-	request := func(method, path string, input, out any) error {
+	request := func(method, path string, input, out any) (requestErr error) {
+		requestStarted := time.Now()
+		defer func() {
+			t.Logf("assembly request=%s %s elapsed=%s total=%s error=%v", method, path, time.Since(requestStarted), time.Since(started), requestErr)
+		}()
 		var body io.Reader
 		if input != nil {
 			raw, err := json.Marshal(input)
@@ -265,14 +277,19 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	cfg := Config{DataDir: data, MainAgent: &MainAgentConfig{Named: &named}, Upgrades: &UpgradeConfig{Instance: "server", ControlSocket: controlSocket, UpdaterSocket: updaterSocket, ReleaseDir: filepath.Join(root, "releases")}}
+	mark("production-run")
 	err = Run(ctx, cfg, []byte("isolated-assembly-secret"), Dependencies{
-		Listeners: []net.Listener{listener},
+		// Exercise the real reconciliation without spending the assembly budget
+		// waiting for the production five-second polling phase.
+		UpgradeTickInterval: 20 * time.Millisecond,
+		Listeners:           []net.Listener{listener},
 		OpenSession: func(context.Context, SessionSpec) (harness.Session, error) {
 			opens.Add(1)
 			return nil, errors.New("no model operation is needed while prepared")
 		},
 		Configure: func(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 			configured = true
+			mark("configured")
 			if _, err := a.BeginOwnerMutation(ctx); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
 				return errors.New("construction did not fence owner admission")
 			}
@@ -283,6 +300,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 		},
 		Initialize: func(ctx context.Context, r *Runtime) error {
 			initialized = true
+			mark("initialized")
 			row, _, err := r.App.CommittedMaintenanceReadiness(ctx, plan.MaintenanceID)
 			if err != nil {
 				return err
@@ -293,6 +311,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			return nil
 		},
 		Background: func(ctx context.Context, r *Runtime) error {
+			mark("first-health")
 			var health protocol.CommittedMaintenanceHealth
 			for ctx.Err() == nil {
 				if err := request(http.MethodPost, "/updater/maintenance/health", plan, &health); err == nil {
@@ -303,9 +322,12 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			mark("first-health-returned")
+			t.Logf("assembly first_health ready=%v sequence=%d failures=%v", health.Ready, health.Sequence, health.Failures)
 			if health.Ready || health.Sequence != 0 || !health.Registered || !health.Fenced {
 				return fmt.Errorf("real startup readiness ignored uncertain compaction: %+v", health)
 			}
+			mark("archive-status")
 			var archive protocol.ArchiveOnlineStatus
 			if err := request(http.MethodGet, "/archive/status", nil, &archive); err != nil {
 				return err
@@ -313,6 +335,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			if !archive.Preparation.Prepared || archive.ActiveOwnerRequests != 0 || !archive.HostedDrained {
 				return fmt.Errorf("real mainthread prepared drain: %+v", archive)
 			}
+			mark("resolve-startup-fact")
 			// The injected external completion resolves only the seeded startup fact.
 			// Production readiness, managers, and all retained business rows stay real.
 			if err := r.Store.Write(ctx, func(tx *store.Tx) error {
@@ -330,10 +353,12 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			mark("ready-health-returned")
 			first := health
 			if receiptRecovery && opens.Load() != 0 {
 				return errors.New("native receipt process started before maintenance DB link")
 			}
+			mark("second-ready-health")
 			if err := request(http.MethodPost, "/updater/maintenance/health", plan, &health); err != nil {
 				return err
 			}
@@ -341,6 +366,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 				return fmt.Errorf("real assembly health samples differ: %+v %+v", first, health)
 			}
 			proof := protocol.CommittedMaintenanceReceipt{MaintenanceID: plan.MaintenanceID, RequestID: plan.RequestID, Previous: plan.Previous, Successor: plan.Successor, Process: actual, Generation: 8, Epoch: health.Epoch, FirstSequence: first.Sequence, SecondSequence: health.Sequence}
+			mark("await-independent-link")
 			stateMu.Lock()
 			state.Maintenance.Phase = "successor_committed"
 			state.Maintenance.Receipt = &proof
@@ -353,6 +379,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+			mark("linked")
 			var row protocol.CommittedMaintenanceLedger
 			if err := request(http.MethodGet, "/upgrades/maintenance/status?maintenance_id="+plan.MaintenanceID, nil, &row); err != nil {
 				return err
@@ -396,6 +423,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 				return err
 			}
 			done()
+			mark("verified")
 			return finished
 		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
