@@ -44,7 +44,7 @@ tend agents capabilities show example-host example-agent --json
 tend agents capabilities revisions example-host example-agent --agent-revision 2 --limit 50 --json
 tend task capability-explain TASK --role implement --spec-version 1 --limit 50 --json
 tend task capability-explain TASK --role accept --json
-tend task list --capability image_gen --capability-role accept --json
+tend task list --all --capability image_gen --capability-role accept --json
 ```
 
 `eligible` 使用真实 scheduler 的角色、pin、backend、依赖及容量边界；`pending` 表示可恢复
