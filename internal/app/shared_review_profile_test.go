@@ -205,6 +205,8 @@ func TestSharedReviewProfileDigestAndFrozenEmptyRequirements(t *testing.T) {
 	otherCategory := sharedProfileSourceTask(t, h, issue, protocol.AgentRequirement{CategoryID: "implementer"})
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	namedReviewer := sharedProfileSourceTask(t, h, issue, protocol.AgentRequirement{CategoryID: "reviewer", AgentID: "linux-1/beta"})
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	capabilityReviewer := sharedProfileSourceTask(t, h, issue, protocol.AgentRequirement{CategoryID: "reviewer", RequiredCapabilities: []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}})
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		digest := func(task string) (string, error) {
 			return store.SharedReviewRequirements(t.Context(), tx.Q(), protocol.SharedDeliveryReview{Links: []protocol.SharedDeliveryReviewLink{{IssueID: issue.IssueID, DeliveryID: "pr", TaskID: task}}})
@@ -213,13 +215,13 @@ func TestSharedReviewProfileDigestAndFrozenEmptyRequirements(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for _, task := range []string{constrained, otherCategory, namedReviewer} {
+		for _, task := range []string{constrained, otherCategory, namedReviewer, capabilityReviewer} {
 			after, err := digest(task)
 			if err != nil {
 				return err
 			}
 			if before == after {
-				t.Fatal("a formal reviewer model, category or identity requirement did not change the requirements digest", task)
+				t.Fatal("a formal reviewer model, category, identity or capability requirement did not change the requirements digest", task)
 			}
 		}
 		return nil

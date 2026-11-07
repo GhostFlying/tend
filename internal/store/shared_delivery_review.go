@@ -108,7 +108,7 @@ func SharedReviewRequirements(ctx context.Context, q Querier, r protocol.SharedD
 			if len(formal.Profiles) > 0 {
 				spec.FormalExecution = formal
 			}
-			if spec.AgentSelection != nil && spec.AgentSelection.Acceptance != (protocol.AgentRequirement{}) {
+			if spec.AgentSelection != nil && !spec.AgentSelection.Acceptance.IsZero() {
 				reviewer := spec.AgentSelection.Acceptance
 				spec.FormalReviewer = &reviewer
 			}

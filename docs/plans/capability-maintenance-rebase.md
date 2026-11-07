@@ -22,6 +22,13 @@
 8. 检查远端 main/head，使用精确旧 head 的 force-with-lease 更新原 PR 分支。描述如实绑定最终 head/base/tree、检查及待独立整 PR 审阅状态；保留 draft。
 9. 读取一次最终服务端 PR/CI 事实。pending 或不可用如实交付，由 owner durable 观察接续；不持槽等待 CI，不自行提交 formal verdict。
 
+## 实际整合补充
+
+rebase 后编译发现维护新增的 `store.SharedReviewRequirements` 直接比较 `AgentRequirement` 与空结构。
+Capability 的声明 slice 使该类型不再可比较。修订前确认采用既有 `AgentRequirement.IsZero()`，
+保留维护的空 reviewer 判断，并在现有 shared-review digest 回归中加入相同 reviewer 的 capability
+要求变化，证明该变化仍进入实际整 PR 的要求指纹。此处只修复两侧装配，不改变审阅机制或预算。
+
 ## 证据
 
 输入、provider 回执、bundle、完整本地检查日志和 manifest 通过任务交付保存。账本、部署进程事实、源码/CI、当前执行和历史 unknown 分开报告。若存在无法归属的 dirty、远端并发改写或真实语义不确定，保留现场并向原 owner handoff。
