@@ -268,10 +268,14 @@ func TestAcceptanceEvidenceNoFilesPreservesOriginalInputAndCapability(t *testing
 	}
 }
 
-func TestAcceptanceFeedbackDownloadsOnlyDeclaredOriginalManifest(t *testing.T) {
+func TestAcceptanceFeedbackManifestRemainsFastPathWithIssueMetadataFallback(t *testing.T) {
 	body := []byte("original blocked acceptance log")
 	file := protocol.ArtifactFile{FileID: "file_acceptance", Name: "native.log", Size: int64(len(body)), SHA256: evidenceDigest(body)}
 	e, _ := acceptanceEvidenceFixture(t, func(w http.ResponseWriter, q *http.Request) {
+		if q.URL.Path == "/runner/v1/files/undeclared/metadata" {
+			http.NotFound(w, q)
+			return
+		}
 		if q.URL.Path != "/runner/v1/files/"+file.FileID {
 			t.Error("undeclared feedback file reached the server")
 		}
@@ -281,7 +285,7 @@ func TestAcceptanceFeedbackDownloadsOnlyDeclaredOriginalManifest(t *testing.T) {
 	e.as.Feedback = &protocol.Feedback{AcceptanceID: "acceptance_original", Verdict: protocol.VerdictBlocked, Files: []protocol.ArtifactFile{file}, Evidence: json.RawMessage(`{"path":"/opaque/not-a-file-reference"}`)}
 	e.prepared.ScratchDir = t.TempDir()
 	if _, err := e.r.downloadFile(t.Context(), e.as, e.prepared, "undeclared"); err == nil {
-		t.Fatal("opaque evidence or undeclared file was promoted into download authority")
+		t.Fatal("a file absent from both feedback and Issue metadata was downloaded")
 	}
 	path, err := e.r.downloadFile(t.Context(), e.as, e.prepared, file.FileID)
 	if err != nil {

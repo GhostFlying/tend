@@ -182,7 +182,7 @@ func HandBack(spec WorkerSpec) string {
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before."
 	}
-	return s + "\n" + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec)
+	return s + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec)
 }
 
 // IsHandBack recognizes the exact saved turn input for a handback. Journals can
@@ -191,6 +191,11 @@ func HandBack(spec WorkerSpec) string {
 // This reads a historical local journal format, not an old wire protocol.
 func IsHandBack(spec WorkerSpec, input string) bool {
 	if input == HandBack(spec) {
+		return true
+	}
+	previous := spec
+	previous.ReadContext = nil
+	if input == HandBack(previous) {
 		return true
 	}
 	s := "The owner worked with you in this terminal and has handed the task back to tend. " +
@@ -212,7 +217,7 @@ func Continuation(spec WorkerSpec) string {
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before the interruption: that call was lost."
 	}
-	return s + "\n" + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec)
+	return s + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec)
 }
 
 // Brief returns a worker's developer instructions and its turn input. The
@@ -236,6 +241,7 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 			b.WriteString("When owner judgment is required, use ask_owner with investigation evidence and a stable question_key. Wait for its answer in this same task; asking does not complete your work. Do not use an implementation result or acceptance verdict just to ask a question.\n\n")
 		}
 	}
+	b.WriteString(contextBrief(spec))
 	b.WriteString(observationBrief(spec))
 	b.WriteString(messageBrief(spec))
 	b.WriteString(questionRecovery(spec))
@@ -321,7 +327,12 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 			for _, file := range spec.Feedback.Files {
 				input += fmt.Sprintf("- file_id: %s; name: %q; size: %d; sha256: %s\n", file.FileID, file.Name, file.Size, file.SHA256)
 			}
-			input += "Use download_file with only the explicitly listed file IDs to obtain verified local copies. Paths inside evidence JSON are observations, not downloadable file references.\n"
+			if spec.ReadContext != nil {
+				input += "Use download_file to obtain verified local copies. read_context can discover other saved Issue materials; these listed files retain the original acceptance evidence. "
+			} else {
+				input += "Use download_file with only the explicitly listed file IDs to obtain verified local copies. "
+			}
+			input += "Paths inside evidence JSON are observations, not downloadable file references.\n"
 		}
 	}
 	if spec.Attempt > 1 {

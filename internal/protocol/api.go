@@ -5,7 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
-		ObservedDeployment{},
+		ObservedDeployment{}, IssueMaterialsQuery{}, IssueMaterialFile{}, IssueMaterials{}, RunContext{},
 		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},
 		HandoffAuditPage{}, CapabilityDefinition{}, PutCapabilityPayload{}, CapabilityPage{}, AgentCapabilityQuery{}, AgentCapabilityPage{}, AgentCapabilityRevisionPage{}, TaskCapabilityExplanation{}, RunCapabilityBinding{},
 		SetIssueAcceptancePolicyPayload{},

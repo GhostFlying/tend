@@ -245,11 +245,19 @@ func TestTaskInputsDownloadOriginalBytesForBothWorkerRoles(t *testing.T) {
 			t.Run(fixture.name+"/"+string(role), func(t *testing.T) {
 				digest := sha256.Sum256(fixture.body)
 				input := protocol.TaskInput{FileID: "file_input", Name: fixture.name, MediaType: fixture.mediaType, Size: int64(len(fixture.body)), SHA256: hex.EncodeToString(digest[:]), SourceMessageID: "msg_owner"}
-				calls := 0
+				calls, metadataReads := 0, 0
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
-					calls++
-					if q.URL.Path != "/runner/v1/files/file_input" || q.Header.Get(headerRun) != "run_input" || q.Header.Get("Authorization") != "Bearer run-only" {
+					if q.Header.Get(headerRun) != "run_input" || q.Header.Get("Authorization") != "Bearer run-only" {
 						t.Error("input download did not use its run identity")
+					}
+					if q.URL.Path == "/runner/v1/files/file_unrelated/metadata" {
+						metadataReads++
+						http.NotFound(w, q)
+						return
+					}
+					calls++
+					if q.URL.Path != "/runner/v1/files/file_input" {
+						t.Error("snapshot input used a different bytes endpoint", q.URL.Path)
 					}
 					_, _ = w.Write(fixture.body)
 				}))
@@ -260,11 +268,11 @@ func TestTaskInputsDownloadOriginalBytesForBothWorkerRoles(t *testing.T) {
 				as := protocol.Assignment{Role: role, RunID: "run_input", RunToken: "run-only", Spec: spec}
 				r := New(Config{ServerURL: srv.URL, HTTPClient: srv.Client()})
 				p := Prepared{ScratchDir: t.TempDir()}
-				if _, err := r.downloadFile(t.Context(), as, p, "file_unrelated"); err == nil || calls != 0 {
+				if _, err := r.downloadFile(t.Context(), as, p, "file_unrelated"); err == nil || calls != 0 || metadataReads != 1 {
 					t.Fatalf("unrelated input reached server: calls=%d err=%v", calls, err)
 				}
 				path, err := r.downloadFile(t.Context(), as, p, input.FileID)
-				if err != nil {
+				if err != nil || calls != 1 || metadataReads != 1 {
 					t.Fatal(err)
 				}
 				got, err := os.ReadFile(path)

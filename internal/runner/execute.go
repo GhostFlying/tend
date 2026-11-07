@@ -418,6 +418,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		AskOwner: askOwner, Questions: questions,
 		ReceiveMessages: receiveMessages, AckMessage: ackMessage,
 		ReadObservation: r.observationReader(toolLifetime, as),
+		ReadContext:     r.contextReader(toolLifetime, as),
 		UploadFile: func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
 			return r.uploadFile(ctx, as, p, path, name)
 		},

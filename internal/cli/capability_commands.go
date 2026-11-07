@@ -46,6 +46,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
 	{Name: "issue delivery-reviews", Route: "/api/v1/issues/{id}/delivery-reviews", Queries: "delivery=delivery_id after limit", JSONDefault: true},
 	{Name: "issue deployment-preparation", Route: "/api/v1/issues/{id}/deployment-preparation", JSONDefault: true},
+	{Name: "issue materials", Route: "/api/v1/issues/{id}/materials", Queries: "kind id after limit", JSONDefault: true},
 	{Name: "question-inputs show", Route: "/api/v1/decisions/{id}/inputs", JSONDefault: true},
 	{Name: "decision-continuation answer", Operation: protocol.OpAnswerDecisionContinuation, Target: "decision", RevisionRoute: "-", JSONDefault: true},
 	{Name: "decision-continuation show", Route: "/api/v1/decisions/{id}/continuation", JSONDefault: true},
@@ -297,6 +298,11 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		if cmd.Name == "message list" {
 			if err := validateMessageListQuery(query); err != nil {
 				return err
+			}
+		}
+		if cmd.Name == "issue materials" {
+			if _, err := protocol.ParseIssueMaterialsQuery(query); err != nil {
+				return usagef("%s", err)
 			}
 		}
 		if cmd.Name == "task list" {

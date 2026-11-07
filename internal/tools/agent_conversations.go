@@ -205,6 +205,18 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 	if p.Offset < 0 {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid evidence offset")
 	}
+	if p.FileID != "" && p.ArtifactID == "" {
+		var issueID string
+		err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			conversation, err := store.AgentConversation(ctx, tx.Q(), c.Principal.ConversationID)
+			issueID = conversation.WorkItemID
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		return s.issueMaterialWindow(ctx, issueID, p.FileID, p.Offset)
+	}
 	var out any
 	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		conv, err := store.AgentConversation(ctx, tx.Q(), c.Principal.ConversationID)
@@ -262,15 +274,6 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 		if visible.Body != msg.Body {
 			return protocol.Errorf(protocol.CodeForbidden, "source is not admitted")
 		}
-		if p.FileID != "" {
-			if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_message_attachments WHERE message_id=? AND file_id=?)`, p.MessageID, p.FileID).Scan(&linked); err != nil {
-				return err
-			}
-			if !linked {
-				return protocol.Errorf(protocol.CodeForbidden, "attachment is not linked to source")
-			}
-			return nil
-		}
 		runes := []rune(msg.Body)
 		start := min(p.Offset, int64(len(runes)))
 		end := min(start+16000, int64(len(runes)))
@@ -279,18 +282,6 @@ func (s *Service) backgroundEvidence(ctx context.Context, c Call) (any, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-	if p.FileID != "" && p.ArtifactID == "" {
-		args, _ := json.Marshal(fileArgs{FileID: p.FileID, Offset: p.Offset})
-		c.Arguments = args
-		value, err := s.attachmentsRead(ctx, c)
-		if err != nil {
-			return nil, err
-		}
-		window := value.(attachmentWindow)
-		window.DownloadCommand = ""
-		window.LocalPath = ""
-		return window, nil
 	}
 	return out, nil
 }

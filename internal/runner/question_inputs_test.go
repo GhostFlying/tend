@@ -18,7 +18,7 @@ func TestQuestionInputsDownloadUsesFreshOriginalRunMetadata(t *testing.T) {
 	input := protocol.TaskInput{FileID: "fil_original", Name: "answer.bin", Size: int64(len(raw)), SHA256: hex.EncodeToString(digest[:])}
 	as := protocol.Assignment{RunID: "run_question", RunToken: "run-only", TaskID: "task", ActionID: "action", SpecVersion: 1, Role: protocol.RoleImplement, WorkerQuestions: true}
 	question := protocol.WorkerQuestion{RunID: as.RunID, ActionID: as.ActionID, SpecVersion: as.SpecVersion, Role: as.Role, Status: "answered", InputRevision: 1, Inputs: []protocol.TaskInput{input}}
-	reads, downloads := 0, 0
+	reads, downloads, metadataReads := 0, 0, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get(headerRun) != as.RunID || r.Header.Get("Authorization") != "Bearer "+as.RunToken {
 			t.Error("not original run credentials")
@@ -30,6 +30,9 @@ func TestQuestionInputsDownloadUsesFreshOriginalRunMetadata(t *testing.T) {
 		case "/runner/v1/files/" + input.FileID:
 			downloads++
 			_, _ = w.Write(raw)
+		case "/runner/v1/files/" + input.FileID + "/metadata":
+			metadataReads++
+			http.NotFound(w, r)
 		default:
 			t.Error(r.URL.Path)
 			http.NotFound(w, r)
@@ -56,7 +59,7 @@ func TestQuestionInputsDownloadUsesFreshOriginalRunMetadata(t *testing.T) {
 	if _, err := q.r.downloadFile(t.Context(), as, p, input.FileID); err == nil {
 		t.Fatal("inherited other run inputs")
 	}
-	if reads != 3 || downloads != 1 {
-		t.Fatal("fresh metadata checks missing", reads, downloads)
+	if reads != 3 || downloads != 1 || metadataReads != 2 {
+		t.Fatal("fresh question metadata or Issue fallback checks missing", reads, downloads, metadataReads)
 	}
 }

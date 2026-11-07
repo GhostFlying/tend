@@ -68,6 +68,7 @@ type WorkerSpec struct {
 	// change this identity. An incomplete selection has no such identity.
 	VerdictFilesIdentity func(context.Context, string, json.RawMessage) (string, error)
 	DownloadFile         func(context.Context, string) (string, error)
+	ReadContext          func(context.Context, protocol.IssueMaterialsQuery) (protocol.RunContext, error)
 	ReadObservation      func(context.Context) (protocol.RunObservation, error)
 	Role                 protocol.RunRole
 	// Dir is the workspace root; the worker starts there.

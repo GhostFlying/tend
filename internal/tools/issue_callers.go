@@ -12,12 +12,24 @@ import (
 
 func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution store.HostedExecution) (harness.ToolResult, bool) {
 	switch c.Tool {
-	case "issues_reuse_status", "issues_list", "issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read", "issues_delivery_reviews_read", "issues_deployment_preparation_read":
+	case "issues_materials_read", "issues_reuse_status", "issues_list", "issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read", "issues_delivery_reviews_read", "issues_deployment_preparation_read":
 	default:
 		return harness.ToolResult{}, false
 	}
 	if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {
 		return hostedAnswer(nil, protocol.Errorf(protocol.CodeForbidden, "consultation has no Issue planning reads")), true
+	}
+	if c.Tool == "issues_materials_read" {
+		var args hostedIssueMaterialsArgs
+		if err := decode(c.Arguments, &args); err != nil {
+			return hostedAnswer(nil, err), true
+		}
+		if args.IssueID == "" {
+			args.IssueID = execution.IssueID
+		}
+		query := protocol.IssueMaterialsQuery{Kind: args.Kind, ID: args.ID, After: args.After, Limit: args.Limit}
+		value, err := s.app.ReadScopedIssueMaterials(ctx, execution.IssueID, args.IssueID, query)
+		return hostedAnswer(value, err), true
 	}
 	if c.Tool == "issues_deployment_preparation_read" {
 		var p hostedDeploymentPreparationArgs
