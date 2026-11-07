@@ -174,6 +174,13 @@ func readDeploymentLedger(ctx context.Context, q store.Querier, d *protocol.Obse
 	if !available {
 		p.Blockers = append(p.Blockers, protocol.ObservedDeploymentBlocker{Source: "server.delivery_target_available", Kind: "controlled_target_busy"})
 	}
+	retiredRuns, err := store.CountOpenRunsOnRetiredHosts(ctx, q)
+	if err != nil {
+		return err
+	}
+	if retiredRuns > 0 {
+		p.Blockers = append(p.Blockers, protocol.ObservedDeploymentBlocker{Source: "server.upgrade_admission/retired_hosts", Kind: "retired_hosts_open_runs", Status: "unfinished", Count: retiredRuns})
+	}
 	hosts, err := store.ListActiveHosts(ctx, q)
 	if err != nil {
 		return err
@@ -181,6 +188,11 @@ func readDeploymentLedger(ctx context.Context, q store.Querier, d *protocol.Obse
 	for _, host := range hosts {
 		h := protocol.ObservedDeploymentHost{HostID: host.HostID, OS: host.OS, Arch: host.Arch, Slots: host.Slots, InstallationStatus: "unavailable", InstallationSource: "server.host_runtime/installation_receipts"}
 		p.HostIDs = append(p.HostIDs, host.HostID)
+		latestGrant, authorization, err := readBoundedRunnerAuthorization(ctx, q, host.HostID, "")
+		if err != nil {
+			return err
+		}
+		h.LatestBoundedAuthorization = authorization
 		var runtime *store.HostRuntimeRow
 		h.Runner, runtime, err = observedRunner(ctx, q, host.HostID, now)
 		if err != nil {
@@ -201,6 +213,9 @@ func readDeploymentLedger(ctx context.Context, q store.Querier, d *protocol.Obse
 			}
 			if h.InstallationStatus == "confirmed" && !h.Runner.Online {
 				h.InstallationStatus, h.InstallationReason = "unknown", "current_runtime_unavailable"
+			}
+			if authorization != nil && latestGrant != nil && h.InstallationStatus == "confirmed" {
+				authorization.CurrentInstallation = latestGrant.Plan.HostID == host.HostID && latestGrant.Plan.Target.InstanceID == host.HostID && boundedRunnerInstallationMatches(*latestGrant, runtime.Runtime)
 			}
 		}
 		if h.InstallationStatus != "confirmed" {
@@ -234,21 +249,20 @@ func observedRunnerInstallation(ctx context.Context, q store.Querier, host strin
 	row, err := store.GetUpgrade(ctx, q, receipt.Binding.UpgradeID)
 	if errors.Is(err, store.ErrNotFound) {
 		// Bounded takeover appends its own authority rather than inventing an
-		// ordinary upgrade row. Read only the latest indexed host grant; its
-		// private plan is used for matching and never enters the projection.
-		var raw string
-		err := q.QueryRowContext(ctx, `SELECT json_extract(body_json,'$.grant') FROM events WHERE source='app' AND object_type='host' AND object_id=? AND kind=? ORDER BY event_seq DESC LIMIT 1`, host, boundedRunnerAuthorizedEvent).Scan(&raw)
-		if errors.Is(err, sql.ErrNoRows) {
+		// ordinary upgrade row. Read only this runtime's exact host authority;
+		// a newer unexecuted grant must not replace current installation proof.
+		// Its private plan never enters the projection.
+		if rt.BoundedRecoveryAuthorizationID == "" {
 			return "unconfirmed", "supervisor_receipt_batch_missing", nil
 		}
+		grant, _, err := readBoundedRunnerAuthorization(ctx, q, host, rt.BoundedRecoveryAuthorizationID)
 		if err != nil {
 			return "", "", err
 		}
-		var grant protocol.BoundedRunnerMaintenanceGrant
-		if err := json.Unmarshal([]byte(raw), &grant); err != nil {
-			return "", "", err
+		if grant == nil {
+			return "unconfirmed", "supervisor_receipt_batch_missing", nil
 		}
-		if grant.Plan.HostID == host && grant.Plan.Target.InstanceID == host && boundedRunnerInstallationMatches(grant, rt) {
+		if grant.Plan.HostID == host && grant.Plan.Target.InstanceID == host && boundedRunnerInstallationMatches(*grant, rt) {
 			return "confirmed", "", nil
 		}
 		return "mismatch", "supervisor_receipt_does_not_match_current_bounded_installation", nil
@@ -267,9 +281,34 @@ func observedRunnerInstallation(ctx context.Context, q store.Querier, host strin
 	return "mismatch", "supervisor_receipt_host_not_in_batch", nil
 }
 
+func readBoundedRunnerAuthorization(ctx context.Context, q store.Querier, host, request string) (*protocol.BoundedRunnerMaintenanceGrant, *protocol.ObservedBoundedRunnerAuthorization, error) {
+	query := `SELECT json_extract(body_json,'$.grant'),request_id,event_seq FROM events WHERE source='app' AND object_type='host' AND object_id=? AND kind=?`
+	args := []any{host, boundedRunnerAuthorizedEvent}
+	if request != "" {
+		query += ` AND request_id=?`
+		args = append(args, request)
+	}
+	query += ` ORDER BY event_seq DESC LIMIT 1`
+	var raw, requestID string
+	var seq int64
+	err := q.QueryRowContext(ctx, query, args...).Scan(&raw, &requestID, &seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var grant protocol.BoundedRunnerMaintenanceGrant
+	if err := json.Unmarshal([]byte(raw), &grant); err != nil {
+		return nil, nil, err
+	}
+	summary := &protocol.ObservedBoundedRunnerAuthorization{Source: "server.events/host.bounded_maintenance_authorized", RequestID: requestID, RecoveryAuthorizationID: grant.RecoveryAuthorizationID, ControlRevision: grant.ControlRevision, EventSeq: seq, ExpiresAtMillis: grant.Plan.Authorization.ExpiresAtMillis}
+	return &grant, summary, nil
+}
+
 func readPreparationUpgrades(ctx context.Context, q store.Querier, p *protocol.ObservedDeploymentPreparation) error {
 	var settled string
-	err := q.QueryRowContext(ctx, `SELECT upgrade_id FROM upgrades WHERE status='completed' ORDER BY created_at DESC,rowid DESC LIMIT 1`).Scan(&settled)
+	err := q.QueryRowContext(ctx, `SELECT upgrade_id FROM upgrades WHERE status IN ('completed','cancelled') ORDER BY created_at DESC,rowid DESC LIMIT 1`).Scan(&settled)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

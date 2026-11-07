@@ -212,18 +212,32 @@ type ObservedDeploymentPreparation struct {
 // ObservedDeploymentHost keeps heartbeat assertions separate from supervisor
 // installation proof. A mismatched receipt is retained as evidence, not success.
 type ObservedDeploymentHost struct {
-	HostID             string          `json:"host_id"`
-	OS                 string          `json:"os"`
-	Arch               string          `json:"arch"`
-	Slots              int64           `json:"slots"`
-	Runner             *ObservedRunner `json:"runner,omitempty"`
-	UpdaterReceipt     *UpdaterReceipt `json:"updater_receipt,omitempty"`
-	InstallationStatus string          `json:"installation_status"`
-	InstallationSource string          `json:"installation_source"`
-	InstallationReason string          `json:"installation_reason,omitempty"`
-	OpenRuns           int64           `json:"open_runs"`
-	UnknownRuns        int64           `json:"unknown_runs"`
-	PendingBlockers    int64           `json:"pending_blockers"`
+	LatestBoundedAuthorization *ObservedBoundedRunnerAuthorization `json:"latest_bounded_authorization,omitempty"`
+	HostID                     string                              `json:"host_id"`
+	OS                         string                              `json:"os"`
+	Arch                       string                              `json:"arch"`
+	Slots                      int64                               `json:"slots"`
+	Runner                     *ObservedRunner                     `json:"runner,omitempty"`
+	UpdaterReceipt             *UpdaterReceipt                     `json:"updater_receipt,omitempty"`
+	InstallationStatus         string                              `json:"installation_status"`
+	InstallationSource         string                              `json:"installation_source"`
+	InstallationReason         string                              `json:"installation_reason,omitempty"`
+	OpenRuns                   int64                               `json:"open_runs"`
+	UnknownRuns                int64                               `json:"unknown_runs"`
+	PendingBlockers            int64                               `json:"pending_blockers"`
+}
+
+// ObservedBoundedRunnerAuthorization is a registration receipt, not proof that
+// a replacement executed. The original deadline is reported without extending
+// it or converting an expired registration into an installation blocker.
+type ObservedBoundedRunnerAuthorization struct {
+	Source                  string `json:"source"`
+	RequestID               string `json:"request_id"`
+	RecoveryAuthorizationID string `json:"recovery_authorization_id"`
+	ControlRevision         int64  `json:"control_revision"`
+	EventSeq                int64  `json:"event_seq"`
+	ExpiresAtMillis         int64  `json:"expires_at_ms"`
+	CurrentInstallation     bool   `json:"current_installation"`
 }
 
 // ObservedDeploymentBlocker exposes target-relevant control facts without the

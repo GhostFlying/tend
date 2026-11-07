@@ -10397,6 +10397,43 @@
       "title": "ObservationScope",
       "type": "object"
     },
+    "ObservedBoundedRunnerAuthorization": {
+      "additionalProperties": false,
+      "properties": {
+        "control_revision": {
+          "type": "integer"
+        },
+        "current_installation": {
+          "type": "boolean"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "expires_at_ms": {
+          "type": "integer"
+        },
+        "recovery_authorization_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "request_id",
+        "recovery_authorization_id",
+        "control_revision",
+        "event_seq",
+        "expires_at_ms",
+        "current_installation"
+      ],
+      "title": "ObservedBoundedRunnerAuthorization",
+      "type": "object"
+    },
     "ObservedDeliveryApproval": {
       "additionalProperties": false,
       "properties": {
@@ -10775,6 +10812,9 @@
         },
         "installation_status": {
           "type": "string"
+        },
+        "latest_bounded_authorization": {
+          "$ref": "#/definitions/ObservedBoundedRunnerAuthorization"
         },
         "open_runs": {
           "type": "integer"
