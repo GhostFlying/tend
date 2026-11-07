@@ -279,6 +279,9 @@ func commandUsage(prefix []string) string {
 		fmt.Fprintf(&out, "  %s\n", command)
 	}
 	if name != "" {
+		if name == "issue deployment-preparation" {
+			out.WriteString("\nRead-only deployment preparation for this Issue: the current fixed server, complete active hosts, runtime/control revisions, installation receipts and relevant blockers. The full response preserves source, observed_at, event sequence and explicit unknown or missing facts. Heartbeat and process observations do not substitute for installation receipts.\nUse: tend issue deployment-preparation <issue_id> [--json]. No target selector is required. Reading never refreshes a provider, schedules an upgrade or authorizes deployment. An interrupted read can be repeated; it creates no mutation request.\n")
+		}
 		if name == "issue context" {
 			out.WriteString("\nRead canonical Issue context diagnostics with --after-source <sequence>.\nprepared reports the historical baseline; dispatch_ready describes context review, owned receipts and frozen task agreements.\nThese fields are not the admission result of issue create-task. Submit the formal task command with current Issue/source/assignment versions for that decision; do not prepare a legacy global baseline.\n")
 		}

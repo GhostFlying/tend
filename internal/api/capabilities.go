@@ -99,6 +99,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/issues/{id}/followups/{rule}/history", s.issueFollowupHistory},
 		{"GET /api/v1/issues/{id}/deliveries", s.issueDeliveries},
 		{"GET /api/v1/issues/{id}/delivery-reviews", s.issueDeliveryReviews},
+		{"GET /api/v1/issues/{id}/deployment-preparation", s.issueDeploymentPreparation},
 		{"GET /api/v1/files/{id}", s.downloadFile},
 		{"GET /api/v1/files/{id}/metadata", s.fileMetadata},
 		{"GET /api/v1/runs/{id}/logs", s.runLogs},

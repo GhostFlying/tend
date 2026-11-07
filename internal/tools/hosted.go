@@ -55,6 +55,9 @@ type hostedSharedReviewReadArgs struct {
 	After      string `json:"after,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
 }
+type hostedDeploymentPreparationArgs struct {
+	IssueID string `json:"issue_id,omitempty"`
+}
 type hostedRunnerReadArgs struct {
 	HostID string `json:"host_id"`
 }
@@ -246,6 +249,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		}
 		out = append(out, harness.ToolSpec{Name: "tasks_capability_explain", Description: "Explain this Issue Task's frozen role requirements and actual scheduling eligibility without probing or allocating a lease.", InputSchema: exportSchema(json.RawMessage(argumentSchema(taskCapabilityArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "issues_delivery_reviews_read", Description: "Read this Issue or a descendant shared PR review, frozen candidate and requirements, actual reviewer rounds and result applicability. Optional delivery_id, after review-ID cursor and limit (default 50, maximum 100). Reading grants no control and never starts a review or probes a provider.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedSharedReviewReadArgs{})))})
+		out = append(out, harness.ToolSpec{Name: "issues_deployment_preparation_read", Description: "Read the complete recorded deployment preparation for this Issue or a descendant: the fixed server, active hosts, runtime/control revisions, installation receipts, registered delivery facts and blockers, with source/time/sequence and explicit unknowns. Omit issue_id for the current manager Issue; Main must select an Issue. Reading grants no deployment authority, never refreshes a provider or schedules an upgrade, and accepts no host/provider selectors.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedDeploymentPreparationArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "agent_categories_list", Description: "Read the latest global Agent classifications; classification is not execution permission. Default active, limit 50, maximum 100.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedCategoryListArgs{})))})
 		out = append(out, harness.ToolSpec{Name: "agents_runner_read", Description: "Read a runner host public registration, last executor observations and heartbeat presence separately. Reading neither probes nor changes runtime capability.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedRunnerReadArgs{})))})
 	}

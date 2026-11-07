@@ -64,8 +64,7 @@ func (ReleaseBoundedRunnerAdmission) Apply(ctx context.Context, x *Exec, tx *sto
 	if rt.Generation != p.RunnerGeneration || !boundedRunnerRuntimeMatches(grant, rt) {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "exact bounded recovery successor observation required")
 	}
-	proof := rt.UpdaterReceipt
-	if proof == nil || !proof.CommittedConfirmed || proof.RollbackConfirmed || proof.Phase != "committed" || proof.Binding != p.Successor || proof.CurrentProcessInstanceID != rt.InstanceID || proof.CurrentSHA256 != rt.Build.BinarySHA256 {
+	if !boundedRunnerInstallationMatches(grant, rt) {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "committed runner installation receipt required before admission release")
 	}
 	originalJournal := grant.Plan.Journal
