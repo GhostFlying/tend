@@ -38,7 +38,8 @@ type TaskSummary struct {
 
 // TaskDetail is one task in full.
 type TaskDetail struct {
-	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
+	DeliveryAuthorization *DeliveryExecutionAuthority `json:"delivery_authorization,omitempty"`
+	AcceptancePolicy      *IssueAcceptancePolicy      `json:"acceptance_policy,omitempty"`
 	// IssueIDs contains canonical responsibilities, never secondary result links.
 	IssueIDs    []string `json:"issue_ids,omitempty"`
 	WorkItemIDs []string `json:"work_item_ids,omitempty"`
@@ -234,7 +235,8 @@ type QueueEntry struct {
 
 // Snapshot is the owner's overview of the ledger, read at one point.
 type Snapshot struct {
-	Upgrade *UpgradeView `json:"upgrade,omitempty"`
+	DeliveryObserver *DeliveryObserverStatus `json:"delivery_observer,omitempty"`
+	Upgrade          *UpgradeView            `json:"upgrade,omitempty"`
 	// EventSeq is the last event the snapshot reflects.
 	EventSeq int64 `json:"event_seq"`
 	// Tasks are the unfinished tasks.

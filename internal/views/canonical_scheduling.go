@@ -3,7 +3,6 @@ package views
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -67,16 +66,12 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 		return err
 	}
 	controls := map[string]protocol.IssueControl{}
-	inheritedPlans := map[string]protocol.IssuePlan{}
 	issue, err := store.GetCanonicalIssue(ctx, q, primary)
 	if err != nil {
 		return err
 	}
 	for current := issue; ; {
 		controls[current.IssueID] = current.IssueControl
-		if current.IssueID != primary {
-			inheritedPlans[current.IssueID] = current.Plan
-		}
 		if current.ParentIssueID == "" {
 			break
 		}
@@ -114,23 +109,11 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 			// Keep the current ownership, lifecycle and ancestry checks above/below.
 			continue
 		}
-		if inherited, ok := inheritedPlans[binding.WorkItemID]; ok {
-			// Parent plan edits do not have a disposition of this child's task.
-			// Compare only the inherited semantic inputs frozen at that revision;
-			// metadata/membership revisions and primary continue_existing remain valid.
-			previous, err := store.GetCanonicalIssueRevision(ctx, q, binding.WorkItemID, binding.Revision)
-			if err != nil {
-				return err
-			}
-			if previous.Plan.Intent != inherited.Intent || previous.Plan.Scope != inherited.Scope || !slices.Equal(previous.Plan.CompletionCriteria, inherited.CompletionCriteria) || !slices.Equal(previous.Plan.Background, inherited.Background) {
-				c.ContextPending = true
-			}
-		}
-		digest, _, err := store.EffectiveContext(ctx, q, binding.WorkItemID)
+		current, err := store.TaskContextBindingCurrent(ctx, q, c.TaskID, c.SpecVersion, binding)
 		if err != nil {
 			return err
 		}
-		if binding.ContextDigest != "" && binding.ContextDigest != digest {
+		if !current {
 			c.ContextPending = true
 		}
 	}

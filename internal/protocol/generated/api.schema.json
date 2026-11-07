@@ -4297,6 +4297,160 @@
       "title": "DeliveryActor",
       "type": "object"
     },
+    "DeliveryCI": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DeliveryCheck"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error_kind": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "head_sha",
+        "state",
+        "checks"
+      ],
+      "title": "DeliveryCI",
+      "type": "object"
+    },
+    "DeliveryCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "conclusion": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "title": "DeliveryCheck",
+      "type": "object"
+    },
+    "DeliveryExecutionAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/definitions/ObservedDeliveryApproval"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "candidate": {
+          "$ref": "#/definitions/IssueDeliveryCandidate"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "current_assignment_epoch": {
+          "type": "integer"
+        },
+        "current_duty_revision": {
+          "type": "integer"
+        },
+        "duty_revision": {
+          "type": "integer"
+        },
+        "duty_status": {
+          "type": "string"
+        },
+        "grant": {
+          "$ref": "#/definitions/IssueDeliveryGrant"
+        },
+        "invalid_reason": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/definitions/ObservedDeliveryPolicy"
+        },
+        "provider": {
+          "$ref": "#/definitions/ObservedDeliveryProvider"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "shared_review": {
+          "$ref": "#/definitions/ObservedDeliveryReview"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_task_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "task_id",
+        "source_task_id",
+        "issue_id",
+        "assignment_epoch",
+        "current_assignment_epoch",
+        "duty_revision",
+        "current_duty_revision",
+        "duty_status",
+        "control_revision",
+        "spec_version",
+        "candidate",
+        "valid"
+      ],
+      "title": "DeliveryExecutionAuthority",
+      "type": "object"
+    },
     "DeliveryObservation": {
       "additionalProperties": false,
       "properties": {
@@ -4315,6 +4469,9 @@
         "checked_at": {
           "type": "integer"
         },
+        "ci": {
+          "$ref": "#/definitions/DeliveryCI"
+        },
         "closed_at": {
           "type": "string"
         },
@@ -4327,13 +4484,22 @@
         "error_kind": {
           "type": "string"
         },
+        "error_message": {
+          "type": "string"
+        },
         "generation": {
           "type": "integer"
         },
         "head_sha": {
           "type": "string"
         },
+        "lineage_error_kind": {
+          "type": "string"
+        },
         "merge_sha": {
+          "type": "string"
+        },
+        "mergeability": {
           "type": "string"
         },
         "merged_at": {
@@ -4342,11 +4508,20 @@
         "merged_by": {
           "$ref": "#/definitions/DeliveryActor"
         },
+        "observer": {
+          "type": "string"
+        },
         "provider_updated_at": {
           "type": "string"
         },
         "refresh_pending": {
           "type": "boolean"
+        },
+        "retry_at": {
+          "type": "integer"
+        },
+        "retry_count": {
+          "type": "integer"
         },
         "state": {
           "type": "string"
@@ -4371,6 +4546,51 @@
         "generation"
       ],
       "title": "DeliveryObservation",
+      "type": "object"
+    },
+    "DeliveryObserverStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "executables": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "providers",
+        "executables",
+        "timeout_ms"
+      ],
+      "title": "DeliveryObserverStatus",
       "type": "object"
     },
     "DownloadURLResponse": {
@@ -6473,6 +6693,9 @@
         "attention_id": {
           "type": "string"
         },
+        "authorization": {
+          "$ref": "#/definitions/IssueDeliveryGrant"
+        },
         "candidate": {
           "$ref": "#/definitions/IssueDeliveryCandidate"
         },
@@ -6486,6 +6709,9 @@
           "type": "array"
         },
         "execution_task_id": {
+          "type": "string"
+        },
+        "policy_attention_id": {
           "type": "string"
         },
         "reason": {
@@ -6510,6 +6736,31 @@
       "title": "IssueDeliveryDuty",
       "type": "object"
     },
+    "IssueDeliveryGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "policy_digest": {
+          "type": "string"
+        },
+        "policy_issue_id": {
+          "type": "string"
+        },
+        "policy_revision": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "IssueDeliveryGrant",
+      "type": "object"
+    },
     "IssueDeliveryObservation": {
       "additionalProperties": false,
       "properties": {
@@ -6519,8 +6770,17 @@
         "base_sha": {
           "type": "string"
         },
+        "baseline_upgrade_id": {
+          "type": "string"
+        },
+        "baseline_upgrade_revision": {
+          "type": "integer"
+        },
         "checked_at": {
           "type": "integer"
+        },
+        "ci": {
+          "$ref": "#/definitions/DeliveryCI"
         },
         "closed_at": {
           "type": "string"
@@ -6534,6 +6794,9 @@
         "error_kind": {
           "type": "string"
         },
+        "error_message": {
+          "type": "string"
+        },
         "generation": {
           "type": "integer"
         },
@@ -6543,7 +6806,13 @@
         "issue_id": {
           "type": "string"
         },
+        "lineage_error_kind": {
+          "type": "string"
+        },
         "merge_sha": {
+          "type": "string"
+        },
+        "mergeability": {
           "type": "string"
         },
         "merged_at": {
@@ -6552,11 +6821,20 @@
         "merged_by": {
           "$ref": "#/definitions/DeliveryActor"
         },
+        "observer": {
+          "type": "string"
+        },
         "provider_updated_at": {
           "type": "string"
         },
         "refresh_pending": {
           "type": "boolean"
+        },
+        "retry_at": {
+          "type": "integer"
+        },
+        "retry_count": {
+          "type": "integer"
         },
         "state": {
           "type": "string"
@@ -7362,6 +7640,53 @@
       "title": "IssueOwnerRequest",
       "type": "object"
     },
+    "IssuePRPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "$ref": "#/definitions/IssuePRPolicyAuthority"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "repository",
+        "reason"
+      ],
+      "title": "IssuePRPolicy",
+      "type": "object"
+    },
+    "IssuePRPolicyAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "scope_digest": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "scope_digest"
+      ],
+      "title": "IssuePRPolicyAuthority",
+      "type": "object"
+    },
     "IssuePage": {
       "additionalProperties": false,
       "properties": {
@@ -7439,6 +7764,9 @@
         },
         "intent": {
           "type": "string"
+        },
+        "pr_policy": {
+          "$ref": "#/definitions/IssuePRPolicy"
         },
         "project": {
           "type": "string"
@@ -7864,6 +8192,15 @@
         "action": {
           "$ref": "#/definitions/IssueTaskDispositionAction"
         },
+        "context_revisions": {
+          "items": {
+            "$ref": "#/definitions/LogicalContextReview"
+          },
+          "type": "array"
+        },
+        "expected_control_revision": {
+          "type": "integer"
+        },
         "reason": {
           "type": "string"
         },
@@ -8247,6 +8584,23 @@
         "repositories"
       ],
       "title": "LocalRepositoryStatus",
+      "type": "object"
+    },
+    "LogicalContextReview": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "integer"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_item_id",
+        "revision"
+      ],
+      "title": "LogicalContextReview",
       "type": "object"
     },
     "LogicalTurnReview": {
@@ -9578,6 +9932,260 @@
       "title": "ObservationScope",
       "type": "object"
     },
+    "ObservedDeliveryApproval": {
+      "additionalProperties": false,
+      "properties": {
+        "answered_at": {
+          "type": "integer"
+        },
+        "attention_id": {
+          "type": "string"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "current_source_revision": {
+          "type": "integer"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "decision_status": {
+          "type": "string"
+        },
+        "decision_version": {
+          "type": "integer"
+        },
+        "option": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_request_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "current",
+        "attention_id",
+        "decision_id",
+        "decision_version",
+        "decision_status"
+      ],
+      "title": "ObservedDeliveryApproval",
+      "type": "object"
+    },
+    "ObservedDeliveryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_revision": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "issue_id",
+        "issue_revision",
+        "mode",
+        "repository",
+        "digest"
+      ],
+      "title": "ObservedDeliveryPolicy",
+      "type": "object"
+    },
+    "ObservedDeliveryProvider": {
+      "additionalProperties": false,
+      "properties": {
+        "attempted_at": {
+          "type": "integer"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "checked_at": {
+          "type": "integer"
+        },
+        "ci": {
+          "$ref": "#/definitions/DeliveryCI"
+        },
+        "error_kind": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "merge_sha": {
+          "type": "string"
+        },
+        "mergeability": {
+          "type": "string"
+        },
+        "refresh_pending": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "target_sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "state",
+        "head_sha",
+        "base_sha",
+        "target_sha",
+        "checked_at",
+        "attempted_at",
+        "refresh_pending"
+      ],
+      "title": "ObservedDeliveryProvider",
+      "type": "object"
+    },
+    "ObservedDeliveryReview": {
+      "additionalProperties": false,
+      "properties": {
+        "assessed_requirements_digest": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "invalid_reason": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "review_id": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "round": {
+          "$ref": "#/definitions/ObservedDeliveryReviewRound"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "review_id",
+        "revision",
+        "status",
+        "head_sha",
+        "base_sha",
+        "requirements_digest",
+        "valid"
+      ],
+      "title": "ObservedDeliveryReview",
+      "type": "object"
+    },
+    "ObservedDeliveryReviewRound": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "repository_check": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "supplement_artifact_id": {
+          "type": "string"
+        },
+        "supplement_run_id": {
+          "type": "string"
+        },
+        "supplement_spec_version": {
+          "type": "integer"
+        },
+        "supplement_task_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "task_id",
+        "spec_version",
+        "head_sha",
+        "base_sha",
+        "requirements_digest"
+      ],
+      "title": "ObservedDeliveryReviewRound",
+      "type": "object"
+    },
     "OpStatus": {
       "enum": [
         "succeeded",
@@ -10716,6 +11324,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "shared_review": {
+          "$ref": "#/definitions/SharedReviewResult"
         },
         "uncertainties": {
           "items": {
@@ -12242,6 +12853,217 @@
       "title": "SetIssueStatusPayload",
       "type": "object"
     },
+    "SharedDeliveryReview": {
+      "additionalProperties": false,
+      "properties": {
+        "assessed_requirements_digest": {
+          "type": "string"
+        },
+        "assessment_reason": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "dispositions": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewDisposition"
+          },
+          "type": "array"
+        },
+        "escalation_issue_id": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "invalid_reason": {
+          "type": "string"
+        },
+        "links": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SharedDeliveryReviewLink"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "number": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "review_id": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "rounds": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SharedDeliveryReviewRound"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "review_id",
+        "provider",
+        "repository",
+        "number",
+        "revision",
+        "status",
+        "head_sha",
+        "base_sha",
+        "requirements_digest",
+        "valid",
+        "links",
+        "rounds"
+      ],
+      "title": "SharedDeliveryReview",
+      "type": "object"
+    },
+    "SharedDeliveryReviewLink": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "delivery_id"
+      ],
+      "title": "SharedDeliveryReviewLink",
+      "type": "object"
+    },
+    "SharedDeliveryReviewPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SharedDeliveryReview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "SharedDeliveryReviewPage",
+      "type": "object"
+    },
+    "SharedDeliveryReviewRound": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/definitions/SharedReviewResult"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "supplement_artifact_id": {
+          "type": "string"
+        },
+        "supplement_run_id": {
+          "type": "string"
+        },
+        "supplement_spec_version": {
+          "type": "integer"
+        },
+        "supplement_task_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec_version",
+        "number",
+        "task_id",
+        "head_sha",
+        "base_sha",
+        "requirements_digest"
+      ],
+      "title": "SharedDeliveryReviewRound",
+      "type": "object"
+    },
     "SharedFact": {
       "additionalProperties": false,
       "properties": {
@@ -12275,6 +13097,124 @@
       "title": "SharedFactKind",
       "type": "string"
     },
+    "SharedReviewDisposition": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "finding_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_id",
+        "action",
+        "reason"
+      ],
+      "title": "SharedReviewDisposition",
+      "type": "object"
+    },
+    "SharedReviewEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "repository_check": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "repository",
+        "number",
+        "head_sha",
+        "base_sha",
+        "requirements_digest",
+        "repository_check"
+      ],
+      "title": "SharedReviewEvidence",
+      "type": "object"
+    },
+    "SharedReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "priority",
+        "body"
+      ],
+      "title": "SharedReviewFinding",
+      "type": "object"
+    },
+    "SharedReviewResult": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewFinding"
+          },
+          "type": "array"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "repository_check": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "review_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "review_id",
+        "head_sha",
+        "base_sha",
+        "requirements_digest",
+        "verdict",
+        "repository_check"
+      ],
+      "title": "SharedReviewResult",
+      "type": "object"
+    },
     "Snapshot": {
       "additionalProperties": false,
       "properties": {
@@ -12290,6 +13230,9 @@
               "type": "null"
             }
           ]
+        },
+        "delivery_observer": {
+          "$ref": "#/definitions/DeliveryObserverStatus"
         },
         "event_seq": {
           "type": "integer"
@@ -12515,6 +13458,9 @@
               "type": "null"
             }
           ]
+        },
+        "delivery_authorization": {
+          "$ref": "#/definitions/DeliveryExecutionAuthority"
         },
         "ended_at": {
           "type": "integer"
@@ -13942,6 +14888,9 @@
         "expected_assignment_epoch": {
           "type": "integer"
         },
+        "expected_context_revision": {
+          "type": "integer"
+        },
         "expected_source_revision": {
           "type": "integer"
         },
@@ -14009,6 +14958,51 @@
         "expected_assignment_epoch"
       ],
       "title": "UpdateIssueTaskPayload",
+      "type": "object"
+    },
+    "UpdateSharedDeliveryReviewPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "dispositions": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewDisposition"
+          },
+          "type": "array"
+        },
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_source_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reviewer_task_id": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_assignment_epoch",
+        "delivery_id",
+        "action"
+      ],
+      "title": "UpdateSharedDeliveryReviewPayload",
       "type": "object"
     },
     "UpdateWorkItemChoicePayload": {
@@ -15727,6 +16721,12 @@
     "SetIssueStatusPayload": {
       "$ref": "#/definitions/SetIssueStatusPayload"
     },
+    "SharedDeliveryReviewPage": {
+      "$ref": "#/definitions/SharedDeliveryReviewPage"
+    },
+    "SharedReviewEvidence": {
+      "$ref": "#/definitions/SharedReviewEvidence"
+    },
     "Snapshot": {
       "$ref": "#/definitions/Snapshot"
     },
@@ -15777,6 +16777,9 @@
     },
     "UpdateIssueTaskPayload": {
       "$ref": "#/definitions/UpdateIssueTaskPayload"
+    },
+    "UpdateSharedDeliveryReviewPayload": {
+      "$ref": "#/definitions/UpdateSharedDeliveryReviewPayload"
     },
     "UpdateWorkItemChoicePayload": {
       "$ref": "#/definitions/UpdateWorkItemChoicePayload"

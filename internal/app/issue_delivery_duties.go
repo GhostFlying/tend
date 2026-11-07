@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"reflect"
 	"slices"
@@ -183,6 +182,76 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			events = append(events, attentionEvent(old))
 		}
 
+		policyIssue, policy, err := store.EffectiveIssuePRPolicy(ctx, tx.Q(), issue)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if policy == nil {
+			if d.PolicyAttentionID != "" && reflect.DeepEqual(d.Candidate, p.Candidate) && d.AssignmentEpoch == issue.AssignmentEpoch {
+				return Outcome{Result: d}, nil
+			}
+			repository := ""
+			for _, ref := range issue.Plan.Deliveries {
+				if ref.DeliveryID == p.Candidate.DeliveryID {
+					repository = ref.Repository
+				}
+			}
+			attention, policyEvents, err := ensureIssuePRPolicyQuestion(ctx, x, tx, issue, repository)
+			if err != nil {
+				return Outcome{}, err
+			}
+			d.Candidate, d.AssignmentEpoch, d.Status, d.PolicyAttentionID = p.Candidate, issue.AssignmentEpoch, "preparing", attention
+			d.Authorization = nil
+			d.AttentionID = ""
+			d.Reason = p.Reason
+			d.Revision++
+			if err := tx.PutIssueDeliveryDuty(ctx, issue.IssueID, d); err != nil {
+				return Outcome{}, err
+			}
+			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")
+			out.Result = d
+			out.Events = append(out.Events, events...)
+			out.Events = append(out.Events, policyEvents...)
+			return out, err
+		}
+		d.PolicyAttentionID = ""
+		if policy != nil && policy.Mode == "auto" && !p.Candidate.Deploy {
+			reviewDuty := d
+			reviewDuty.Candidate = p.Candidate
+			if err := store.RequireDeliveryDutyReview(ctx, tx.Q(), issue, reviewDuty); err != nil {
+				return Outcome{}, err
+			}
+			if err := store.RequireDeliveryChecks(ctx, tx.Q(), issue, *p.Candidate); err != nil {
+				return Outcome{}, err
+			}
+			if d.Status == "authorized" && d.AssignmentEpoch == issue.AssignmentEpoch && reflect.DeepEqual(d.Candidate, p.Candidate) && store.DeliveryGrantValid(ctx, tx.Q(), issue, d) == nil {
+				return Outcome{Result: d}, nil
+			}
+			grant := &protocol.IssueDeliveryGrant{Mode: "auto", PolicyIssueID: policyIssue.IssueID, PolicyRevision: policyIssue.Revision, PolicyDigest: store.IssuePRPolicyDigest(policy)}
+			if policy.Authority != nil {
+				grant.RequestID = policy.Authority.RequestID
+			}
+			d.Candidate, d.Authorization, d.AttentionID, d.AssignmentEpoch, d.Status = p.Candidate, grant, "", issue.AssignmentEpoch, "authorized"
+			if err := store.DeliveryGrantValid(ctx, tx.Q(), issue, d); err != nil {
+				return Outcome{}, err
+			}
+			d.Revision++
+			d.Reason = p.Reason
+			if err := tx.PutIssueDeliveryDuty(ctx, issue.IssueID, d); err != nil {
+				return Outcome{}, err
+			}
+			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")
+			out.Result = d
+			out.Events = append(out.Events, events...)
+			return out, err
+		}
+		if policy != nil {
+			reviewDuty := d
+			reviewDuty.Candidate = p.Candidate
+			if err := store.RequireDeliveryDutyReview(ctx, tx.Q(), issue, reviewDuty); err != nil {
+				return Outcome{}, err
+			}
+		}
 		inner := *x
 		env := *x.Env
 		inner.Env = &env
@@ -195,6 +264,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		a := out.Result.(protocol.Attention)
 		d.Candidate, d.AttentionID, d.Status, d.AssignmentEpoch = p.Candidate, a.AttentionID, "awaiting_owner", issue.AssignmentEpoch
+		d.Authorization = &protocol.IssueDeliveryGrant{Mode: "manual"}
 		evidence = nil
 		events = append(events, out.Events...)
 	case "report":
@@ -269,12 +339,19 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if d.Status != "executing" || d.Revision != executionRevision {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "delivery candidate expired; reconcile the original execution before settling responsibility")
 		}
-		option, err := deliveryOwnerOption(ctx, tx.Q(), d)
-		if err != nil {
+		if err := store.DeliveryGrantValid(ctx, tx.Q(), issue, d); err != nil {
 			return Outcome{}, err
 		}
-		if option != "approve" {
-			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "completion requires the current original owner approval")
+		if d.Authorization != nil {
+			_, policy, err := store.EffectiveIssuePRPolicy(ctx, tx.Q(), issue)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if policy != nil {
+				if err := store.RequireDeliveryDutyReview(ctx, tx.Q(), issue, d); err != nil {
+					return Outcome{}, err
+				}
+			}
 		}
 		task, err := store.GetTask(ctx, tx.Q(), d.ExecutionTaskID)
 		if err != nil {
@@ -286,6 +363,9 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		obs, err := store.GetDeliveryObservation(ctx, tx.Q(), issue.IssueID, d.Candidate.DeliveryID)
 		if err != nil {
 			return Outcome{}, err
+		}
+		if x.serverDeliveryObservations && obs.Observation.Observer != "server" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "request issues.refresh_delivery and await the bounded server observation before completing this existing execution; historical runner facts do not establish current server verification")
 		}
 		if obs.Observation.ErrorKind != "" || obs.Observation.RefreshPending || obs.Observation.State != "merged" || obs.Observation.HeadSHA != d.Candidate.HeadSHA || obs.Observation.MergeSHA == "" || (d.Candidate.MergeSHA != "" && obs.Observation.MergeSHA != d.Candidate.MergeSHA) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "verified matching provider merge is required")
@@ -365,14 +445,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 }
 
 func deliveryCandidateQuestion(c protocol.IssueDeliveryCandidate) string {
-	mergeScope := "merge authorized on approve"
-	if c.ProviderState == "merged" {
-		mergeScope = "existing merge " + c.MergeSHA + "; deployment only from current target " + c.TargetSHA + "; never merge again"
-	}
-	if c.Reconciliation != nil {
-		mergeScope = fmt.Sprintf("verification only: existing merge %s; accepted evidence task %s; completed upgrade %s; installed source %s; no merge/deploy mutations authorized", c.MergeSHA, c.Reconciliation.EvidenceTaskID, c.Reconciliation.UpgradeID, c.Reconciliation.SourceCommit)
-	}
-	return fmt.Sprintf("Approve this delivery candidate and scope? PR %s; head %s; base %s; target %s; provider %s; validation %s; %s; deploy=%t; deployment scope: %s. Defer retains responsibility without merge/deploy; end_delivery explicitly ends remaining delivery responsibility without integration. A changed candidate needs a new question.", c.URL, c.HeadSHA, c.BaseSHA, c.TargetSHA, c.ProviderState, c.Validation, mergeScope, c.Deploy, c.DeploymentScope) + deliveryDeploymentQuestion(c)
+	return protocol.DeliveryCandidateQuestion(c)
 }
 func validateDeliveryCandidate(ctx context.Context, q store.Querier, issue protocol.Issue, c protocol.IssueDeliveryCandidate) error {
 	u, err := url.Parse(c.URL)
@@ -430,35 +503,7 @@ func validDeliverySHA(s string) bool {
 }
 
 func deliveryOwnerOption(ctx context.Context, q store.Querier, d protocol.IssueDeliveryDuty) (string, error) {
-	if d.Candidate == nil || d.AttentionID == "" {
-		return "", nil
-	}
-	a, err := store.GetAttention(ctx, q, d.AttentionID)
-	if err != nil {
-		return "", err
-	}
-	decision, err := store.GetDecision(ctx, q, a.DecisionID)
-	if err != nil {
-		return "", err
-	}
-	if decision.Status != store.DecisionAnswered || decision.Version != 2 || decision.Question != deliveryCandidateQuestion(*d.Candidate) {
-		return "", nil
-	}
-	// Extra free text can change the scope. Retain it for coordination, never
-	// silently execute an old option with additional requirements.
-	var answer decisionAnswer
-	if err := json.Unmarshal([]byte(decision.AnswerJSON), &answer); err != nil {
-		return "", err
-	}
-	if answer.Text != "" {
-		return "", nil
-	}
-	var sourceCurrent bool
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) LEFT JOIN message_dispositions d USING(message_id) WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0 AND COALESCE(d.content_revision,1)=(SELECT content_revision FROM issue_delivery_answers WHERE decision_id=? AND message_id=m.message_id))`, decision.AnsweredMessageID, decision.DecisionID).Scan(&sourceCurrent)
-	if err != nil || !sourceCurrent {
-		return "", err
-	}
-	return answer.Option, nil
+	return store.DeliveryOwnerOption(ctx, q, d)
 }
 
 func deliveryExecutionAuthorized(ctx context.Context, q store.Querier, issue protocol.Issue, auth protocol.IssueDeliveryAuthorization) (protocol.IssueDeliveryDuty, error) {
@@ -466,15 +511,49 @@ func deliveryExecutionAuthorized(ctx context.Context, q store.Querier, issue pro
 	if err != nil {
 		return d, err
 	}
-	if d.AssignmentEpoch != issue.AssignmentEpoch || d.Revision != auth.Revision || (d.Status != "awaiting_owner" && d.Status != "executing") {
+	if d.AssignmentEpoch != issue.AssignmentEpoch || d.Revision != auth.Revision || (d.Status != "awaiting_owner" && d.Status != "authorized" && d.Status != "executing") {
 		return d, protocol.Errorf(protocol.CodeStaleRevision, "delivery candidate changed")
 	}
-	option, err := deliveryOwnerOption(ctx, q, d)
-	if err != nil {
+	if err := store.DeliveryGrantValid(ctx, q, issue, d); err != nil {
 		return d, err
 	}
-	if option != "approve" {
-		return d, protocol.Errorf(protocol.CodeForbidden, "delivery needs the original versioned owner approval")
+	if d.Authorization != nil && d.Candidate != nil {
+		_, policy, err := store.EffectiveIssuePRPolicy(ctx, q, issue)
+		if err != nil {
+			return d, err
+		}
+		if policy != nil {
+			if err := store.RequireDeliveryDutyReview(ctx, q, issue, d); err != nil {
+				return d, err
+			}
+			if d.Status != "executing" || d.Candidate.ProviderState != "open" {
+				if err := store.RequireDeliveryChecks(ctx, q, issue, *d.Candidate); err != nil {
+					return d, err
+				}
+			} else {
+				observed, err := store.GetDeliveryObservation(ctx, q, issue.IssueID, d.Candidate.DeliveryID)
+				if err != nil {
+					return d, err
+				}
+				if observed.Observation.State == "open" {
+					if err := store.RequireDeliveryChecks(ctx, q, issue, *d.Candidate); err != nil {
+						return d, err
+					}
+				}
+			}
+		}
+	}
+	if d.Status == "executing" && d.ExecutionTaskID != "" && d.Candidate.ProviderState == "open" {
+		observed, err := store.GetDeliveryObservation(ctx, q, issue.IssueID, d.Candidate.DeliveryID)
+		if err != nil {
+			return d, err
+		}
+		if observed.Observation.State == "merged" {
+			if _, err := deliveryDeploymentSource(*d.Candidate, observed.Observation); err != nil {
+				return d, err
+			}
+			return d, nil
+		}
 	}
 	if err := validateDeliveryCandidate(ctx, q, issue, *d.Candidate); err != nil {
 		return d, err
@@ -554,7 +633,7 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 	var events []Event
 	for _, d := range duties {
 		c := d.Candidate
-		if c == nil || c.DeliveryID != o.DeliveryID || (d.Status != "awaiting_owner" && d.Status != "deferred" && d.Status != "executing") {
+		if c == nil || c.DeliveryID != o.DeliveryID || (d.Status != "awaiting_owner" && d.Status != "authorized" && d.Status != "deferred" && d.Status != "executing") {
 			continue
 		}
 		baselineCurrent := !c.Deploy || c.Deployment == nil || (o.BaselineUpgradeID == c.Deployment.BaselineUpgradeID && o.BaselineUpgradeRevision == c.Deployment.BaselineUpgradeRevision)
@@ -596,20 +675,6 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 		events = append(events, Event{ObjectType: "issue", ObjectID: o.WorkItemID, Kind: "issue.delivery_candidate_expired", Body: map[string]any{"task_id": d.TaskID, "delivery_id": o.DeliveryID, "duty_revision": d.Revision}})
 	}
 	return events, nil
-}
-
-func deliveryDeploymentQuestion(c protocol.IssueDeliveryCandidate) string {
-	if c.Deployment == nil {
-		return ""
-	}
-	if c.Reconciliation != nil {
-		return fmt.Sprintf(" Verify existing installation only: server instance %s; complete host set %v; read back the referenced completed upgrade and original Issue before independent acceptance; no build, merge or installation is authorized. Baseline upgrade %s revision %d.", c.Deployment.ServerInstance, c.Deployment.HostIDs, c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
-	}
-	park := ""
-	if c.Deployment.ParkIdleManagers {
-		park = " This scope explicitly permits parking idle managers on those hosts through confirmed native close, retaining their logical responsibility for new runs after the window. Busy or unknown operations remain blockers; no business task cancellation or replay is authorized."
-	}
-	return park + fmt.Sprintf(" Tend executes the controlled self-update itself: server instance %s; complete host set %v; build from the verified merge and read back installed server/hosts and this original Issue before independent acceptance.", c.Deployment.ServerInstance, c.Deployment.HostIDs) + fmt.Sprintf(" Baseline upgrade %s revision %d.", c.Deployment.BaselineUpgradeID, c.Deployment.BaselineUpgradeRevision)
 }
 
 func deliveryUpgradeBinding(ctx context.Context, q store.Querier, target protocol.IssueDeliveryDeployment, id string, executionStarted int64) (store.UpgradeRow, error) {

@@ -20,6 +20,7 @@ var issueOperations = map[string]string{
 	"reuse":                 "issues.reuse",
 	"set-acceptance-policy": "issues.set_acceptance_policy",
 	"update-delivery":       "issues.update_delivery",
+	"review-delivery":       "issues.review_delivery",
 	"set-status":            "issues.set_status",
 	"request-owner":         protocol.OpIssueRequestOwner,
 	"refresh-delivery":      "issues.refresh_delivery", "followups-create": "issues.followups_create", "followups-update": "issues.followups_update", "followups-pause": "issues.followups_pause", "followups-resume": "issues.followups_resume", "followups-cancel": "issues.followups_cancel", "followups-trigger": "issues.followups_trigger",
@@ -31,6 +32,8 @@ var issueOperations = map[string]string{
 func runIssue(ctx context.Context, e *Env, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "pr-policy":
+			return runIssuePRPolicy(ctx, e, args[1:])
 		case "handoff-prompt":
 			return runIssueHandoffPrompt(ctx, e, args[1:])
 		case "events", "schedules", "webhooks":

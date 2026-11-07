@@ -39,6 +39,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	serverDeliveryObservations    bool
 	webhookKeys                   WebhookKeys
 	interactionOrigin             *communicationOrigin
 	coordinationExecution         *store.HostedExecution
@@ -109,26 +110,28 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
-	forwardRecoveryID      string
-	committedMaintenanceID string
-	preview                rolloutPreviewBroker
-	localRolloutPreview    func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
-	webhookKeys            WebhookKeys
-	archiveAdmission       sync.Mutex
-	archiveOwnerRequests   int64
-	hostedConfiguration    *hostedconfig.Prepared
-	agentRecoveryPolicy    domain.AgentRecoveryPolicy
-	followupsEnabled       bool
-	observeDeployment      func(context.Context) (protocol.ObservedDeployment, error)
-	store                  *store.Store
-	ids                    protocol.IDGen
-	now                    func() time.Time
-	notifier               Notifier
-	changes                *Broadcast
-	logs                   *Broadcast
-	leaseTTL               time.Duration
-	waitPer                float64
-	hostLost               time.Duration
+	deliveryObserverStatus     *protocol.DeliveryObserverStatus
+	serverDeliveryObservations bool
+	forwardRecoveryID          string
+	committedMaintenanceID     string
+	preview                    rolloutPreviewBroker
+	localRolloutPreview        func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
+	webhookKeys                WebhookKeys
+	archiveAdmission           sync.Mutex
+	archiveOwnerRequests       int64
+	hostedConfiguration        *hostedconfig.Prepared
+	agentRecoveryPolicy        domain.AgentRecoveryPolicy
+	followupsEnabled           bool
+	observeDeployment          func(context.Context) (protocol.ObservedDeployment, error)
+	store                      *store.Store
+	ids                        protocol.IDGen
+	now                        func() time.Time
+	notifier                   Notifier
+	changes                    *Broadcast
+	logs                       *Broadcast
+	leaseTTL                   time.Duration
+	waitPer                    float64
+	hostLost                   time.Duration
 }
 
 // Option configures an App.
@@ -186,7 +189,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
 		if p.Kind != protocol.PrincipalMainAgent {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")
@@ -419,6 +422,9 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 			ObjectVersion: e.ObjectVersion, Kind: e.Kind, BodyJSON: string(body), RequestID: x.Env.RequestID,
 			TraceID: x.TraceID, ActorJSON: string(actor), CreatedAt: now,
 		}); err != nil {
+			return err
+		}
+		if err := recordIssueChangeEvent(ctx, x, tx, e, eventID); err != nil {
 			return err
 		}
 		if e.Kind == "conversation.processing_stopped" {

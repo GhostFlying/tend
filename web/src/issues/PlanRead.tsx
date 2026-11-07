@@ -46,6 +46,23 @@ export function IssuePlanRead({
       ) : (
         <p className={styles.muted}>该版本未记录完成条件。</p>
       )}
+      <h3>PR 合入授权</h3>
+      {plan.pr_policy ? (
+        <>
+          <p>
+            {plan.pr_policy.mode === "auto"
+              ? "通过审阅和检查后自动合入"
+              : plan.pr_policy.mode === "manual"
+                ? "合入前需要人工审批"
+                : plan.pr_policy.mode}{" "}
+            · {plan.pr_policy.repository}
+          </p>
+          <Markdown text={plan.pr_policy.reason} />
+          <p className={styles.muted}>此策略不包含部署授权。</p>
+        </>
+      ) : (
+        <p className={styles.muted}>该版本未约定 PR 合入方式，交付前由负责人确认。</p>
+      )}
       <h3>背景与约束</h3>
       {(plan.background ?? []).map((fact, index) => (
         <section key={index}>

@@ -47,6 +47,7 @@ type canonicalOwnerIssueUpdate struct {
 	Plan                    protocol.IssuePlan              `json:"plan"`
 	ExpectedAssignmentEpoch int64                           `json:"expected_assignment_epoch"`
 	TaskDispositions        []protocol.IssueTaskDisposition `json:"task_dispositions,omitempty"`
+	ExpectedContextRevision *int64                          `json:"expected_context_revision,omitempty"`
 }
 
 func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
@@ -265,11 +266,15 @@ func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, curre
 	if err := validateIssueDispositions(ctx, tx.Q(), projection, p.Plan, p.TaskDispositions); err != nil {
 		return Outcome{}, err
 	}
+	if err := validateTaskAgreementAssessment(ctx, tx.Q(), current, p); err != nil {
+		return Outcome{}, err
+	}
 
 	if reflect.DeepEqual(current.Plan, p.Plan) && p.SourceMessageID == "" {
 		// Canonical controls retain an exact success receipt even without a business
 		// change. Replays reauthorize and return this result after later revisions.
-		return Outcome{Result: current}, nil
+		events, err := assessTaskAgreements(ctx, x, tx, current, p)
+		return Outcome{Result: current, Events: events, Notify: len(events) > 0}, err
 	}
 	next := current
 	next.Plan = p.Plan
@@ -280,7 +285,14 @@ func updateCanonicalOwnerIssue(ctx context.Context, x *Exec, tx *store.Tx, curre
 	if err := validateCanonicalOwnerGraph(ctx, tx.Q(), next, nil, false); err != nil {
 		return Outcome{}, err
 	}
-	return saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, p.canonicalOwnerIssueSource, p, "issue.updated")
+	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, p.canonicalOwnerIssueSource, p, "issue.updated")
+	if err != nil {
+		return Outcome{}, err
+	}
+	events, err := assessTaskAgreements(ctx, x, tx, next, p)
+	out.Events = append(out.Events, events...)
+	out.Notify = out.Notify || len(events) > 0
+	return out, err
 }
 
 func validateCanonicalUnboundPlan(x *Exec, plan protocol.IssuePlan, previous *protocol.IssuePlan) error {
@@ -348,6 +360,14 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 		var err error
 		previous, err = store.GetCanonicalIssue(ctx, tx.Q(), next.IssueID)
 		if err != nil {
+			return Outcome{}, err
+		}
+	}
+	if err := validateIssuePRPolicyChange(ctx, x, tx.Q(), previous, &next); err != nil {
+		return Outcome{}, err
+	}
+	if next.Plan.PRPolicy != nil {
+		if err := settleIssuePRPolicyQuestion(ctx, x, tx, next.IssueID); err != nil {
 			return Outcome{}, err
 		}
 	}

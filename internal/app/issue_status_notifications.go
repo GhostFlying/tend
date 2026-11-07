@@ -28,16 +28,21 @@ func readIssueStatusNotice(ctx context.Context, q store.Querier, id string) (iss
 }
 
 func recordIssueStatusChange(ctx context.Context, x *Exec, tx *store.Tx, before, after protocol.Issue) error {
+	self, err := currentIssueWriter(ctx, x, tx.Q(), after)
+	if err != nil {
+		return err
+	}
+	if self {
+		// The current owner already knows its own write. An older external
+		// notification is independent input and must not be cancelled here.
+		return nil
+	}
 	pending, err := readIssueStatusNotice(ctx, tx.Q(), after.IssueID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	queued, err := cancelQueuedIssueStatusNotice(ctx, x, tx, after.IssueID)
 	if err != nil {
-		return err
-	}
-	if x.coordinationExecution != nil || x.Principal.Kind != protocol.PrincipalOwner {
-		_, err = tx.Exec(ctx, `DELETE FROM issue_status_notifications WHERE issue_id=?`, after.IssueID)
 		return err
 	}
 	baseline := before.BoardStatus()
@@ -55,6 +60,9 @@ func recordIssueStatusChange(ctx context.Context, x *Exec, tx *store.Tx, before,
 	now := x.Now.UnixMilli()
 	_, err = tx.Exec(ctx, `INSERT INTO issue_status_notifications(issue_id,baseline,latest,last_changed_at,due_at) VALUES(?,?,?,?,?) ON CONFLICT(issue_id) DO UPDATE SET baseline=excluded.baseline,latest=excluded.latest,last_changed_at=excluded.last_changed_at,due_at=excluded.due_at`, after.IssueID, baseline, after.BoardStatus(), now, now+int64(settings.DelayMinutes)*60000)
 	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE issue_change_notifications SET due_at=? WHERE issue_id=? AND due_at>0`, now+int64(settings.DelayMinutes)*60000, after.IssueID); err != nil {
 		return err
 	}
 	if settings.DelayMinutes == 0 {
@@ -113,7 +121,7 @@ func flushIssueStatusNotice(ctx context.Context, x *Exec, tx *store.Tx, id strin
 	if err != nil {
 		return err
 	}
-	if issue.BoardStatus() != notice.Latest || issue.Assignee.Kind != protocol.IssueAssigneeAgent {
+	if issue.Assignee.Kind != protocol.IssueAssigneeAgent {
 		_, err = tx.Exec(ctx, `DELETE FROM issue_status_notifications WHERE issue_id=?`, id)
 		return err
 	}
@@ -126,7 +134,7 @@ func flushIssueStatusNotice(ctx context.Context, x *Exec, tx *store.Tx, id strin
 		return err
 	}
 	message, event := x.IDs.New(protocol.PrefixMessage), x.IDs.New(protocol.PrefixEvent)
-	body := fmt.Sprintf("用户调整了 Issue「%s」的工作状态，最终状态为 %s。连续调整已合并。读取当前 Issue 与已有授权后处理；工作状态不代表 worker 正在执行，也不授权额外合入或部署。", issue.Plan.Title, issueStatusLabel(notice.Latest))
+	body := fmt.Sprintf("Issue「%s」收到工作状态变更，记录状态为 %s，当前状态为 %s。连续调整已合并。读取当前 Issue 与已有授权后判断任务约定是否变化；工作状态不代表 worker 正在执行，也不授权额外合入或部署。", issue.Plan.Title, issueStatusLabel(notice.Latest), issueStatusLabel(issue.BoardStatus()))
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: message, Author: "system", Body: body, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return err
@@ -135,9 +143,9 @@ func flushIssueStatusNotice(ctx context.Context, x *Exec, tx *store.Tx, id strin
 		return err
 	}
 	data, _ := json.Marshal(map[string]any{"issue_id": id, "status": notice.Latest, "changed_at": notice.LastChanged})
-	// Keep reversible status input separate from ordinary wakes, including the
-	// manager's source-less initial assignment batch. Returning to the baseline
-	// must never retire that independently required wake.
+	// Keep reversible changes separate from ordinary wakes, including the
+	// manager's source-less initial assignment batch. Other Issue changes share
+	// this pending batch and survive cancellation of only the status sources.
 	if err = appendBackgroundSource(ctx, x, tx, "issue_status:"+id, id, message, event, "issue.status_changed", data); err != nil {
 		return err
 	}
@@ -212,6 +220,18 @@ func (SetIssueNotificationSettings) Apply(ctx context.Context, x *Exec, tx *stor
 			return Outcome{}, err
 		}
 	}
+	changeIDs, err := store.FollowupIDs(ctx, tx.Q(), `SELECT issue_id FROM issue_change_notifications WHERE due_at>0 ORDER BY issue_id`)
+	if err != nil {
+		return Outcome{}, err
+	}
+	for _, id := range changeIDs {
+		if _, err := tx.Exec(ctx, `UPDATE issue_change_notifications SET due_at=last_changed_at+? WHERE issue_id=?`, int64(settings.DelayMinutes)*60000, id); err != nil {
+			return Outcome{}, err
+		}
+		if err := flushIssueChangeNotice(ctx, x, tx, id); err != nil {
+			return Outcome{}, err
+		}
+	}
 	return Outcome{Result: settings, Notify: true, Events: []Event{{ObjectType: "issue_settings", ObjectID: "notifications", ObjectVersion: settings.Revision, Kind: "issue.notification_settings_changed"}}}, nil
 }
 
@@ -231,7 +251,11 @@ func (SweepIssueStatusNotifications) Apply(ctx context.Context, x *Exec, tx *sto
 			return Outcome{}, err
 		}
 	}
-	return Outcome{NoEffect: len(ids) == 0, Notify: len(ids) > 0}, nil
+	changed, err := sweepIssueChangeNotices(ctx, x, tx)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{NoEffect: len(ids)+changed == 0, Notify: len(ids)+changed > 0}, nil
 }
 
 // RunIssueStatusNotifications discovers due persisted windows without keeping
@@ -242,7 +266,7 @@ func (a *App) RunIssueStatusNotifications(ctx context.Context, log *slog.Logger)
 	for ctx.Err() == nil {
 		var due bool
 		err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_status_notifications WHERE due_at>0 AND due_at<=?)`, a.now().UnixMilli()).Scan(&due)
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_status_notifications WHERE due_at>0 AND due_at<=?) OR EXISTS(SELECT 1 FROM issue_change_notifications WHERE due_at>0 AND due_at<=?)`, a.now().UnixMilli(), a.now().UnixMilli()).Scan(&due)
 		})
 		if err == nil && due {
 			command := SweepIssueStatusNotifications{}

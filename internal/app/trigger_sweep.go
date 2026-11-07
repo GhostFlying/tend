@@ -48,6 +48,9 @@ func (SweepTriggers) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 }
 
 func stageDeliveryObservations(ctx context.Context, x *Exec, tx *store.Tx) (int, error) {
+	if x.serverDeliveryObservations {
+		return 0, nil
+	}
 	items, err := store.ListIssues(ctx, tx.Q(), "", "")
 	if err != nil {
 		return 0, err

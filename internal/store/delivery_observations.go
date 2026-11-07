@@ -15,13 +15,14 @@ type DeliveryObservationRow struct {
 	Nonce, HostID, InstanceID string
 	QueryUntil, NextCheckAt   int64
 	RefreshRequested          bool
+	ServerRefreshRevision     int64
 }
 
 func GetDeliveryObservation(ctx context.Context, q Querier, item, id string) (DeliveryObservationRow, error) {
 	var row DeliveryObservationRow
 	var raw string
 	var generation int64
-	err := q.QueryRowContext(ctx, `SELECT generation,nonce,host_id,instance_id,query_until,next_check_at,refresh_requested,observation_json FROM delivery_observations WHERE work_item_id=? AND delivery_id=?`, item, id).Scan(&generation, &row.Nonce, &row.HostID, &row.InstanceID, &row.QueryUntil, &row.NextCheckAt, &row.RefreshRequested, &raw)
+	err := q.QueryRowContext(ctx, `SELECT generation,nonce,host_id,instance_id,query_until,next_check_at,refresh_requested,server_refresh_revision,observation_json FROM delivery_observations WHERE work_item_id=? AND delivery_id=?`, item, id).Scan(&generation, &row.Nonce, &row.HostID, &row.InstanceID, &row.QueryUntil, &row.NextCheckAt, &row.RefreshRequested, &row.ServerRefreshRevision, &raw)
 	if err != nil {
 		return row, notFound(err, "delivery observation")
 	}
@@ -40,7 +41,7 @@ func (t *Tx) PutDeliveryObservation(ctx context.Context, row DeliveryObservation
 	if err != nil {
 		return err
 	}
-	_, err = t.Exec(ctx, `INSERT INTO delivery_observations(work_item_id,delivery_id,generation,nonce,host_id,instance_id,query_until,next_check_at,refresh_requested,observation_json) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_item_id,delivery_id) DO UPDATE SET generation=excluded.generation,nonce=excluded.nonce,host_id=excluded.host_id,instance_id=excluded.instance_id,query_until=excluded.query_until,next_check_at=excluded.next_check_at,refresh_requested=excluded.refresh_requested,observation_json=excluded.observation_json`, o.WorkItemID, o.DeliveryID, o.Generation, row.Nonce, row.HostID, row.InstanceID, row.QueryUntil, row.NextCheckAt, row.RefreshRequested, string(raw))
+	_, err = t.Exec(ctx, `INSERT INTO delivery_observations(work_item_id,delivery_id,generation,nonce,host_id,instance_id,query_until,next_check_at,refresh_requested,server_refresh_revision,observation_json) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_item_id,delivery_id) DO UPDATE SET generation=excluded.generation,nonce=excluded.nonce,host_id=excluded.host_id,instance_id=excluded.instance_id,query_until=excluded.query_until,next_check_at=excluded.next_check_at,refresh_requested=excluded.refresh_requested,server_refresh_revision=excluded.server_refresh_revision,observation_json=excluded.observation_json`, o.WorkItemID, o.DeliveryID, o.Generation, row.Nonce, row.HostID, row.InstanceID, row.QueryUntil, row.NextCheckAt, row.RefreshRequested, row.ServerRefreshRevision, string(raw))
 	if err != nil {
 		return fmt.Errorf("store: put delivery observation: %w", err)
 	}

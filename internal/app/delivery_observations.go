@@ -30,6 +30,9 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	result := protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{}}
+	if x.serverDeliveryObservations {
+		return Outcome{Result: result, NoEffect: true}, nil
+	}
 	if rt.Mode != protocol.RunnerNormal {
 		return Outcome{Result: result, NoEffect: true}, nil
 	}
@@ -180,6 +183,15 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if x.serverDeliveryObservations {
+		saved, err := retainRetiredDeliveryReport(ctx, x, tx, p)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if saved {
+			return Outcome{Result: protocol.DeliveryReportResult{}}, nil
+		}
+	}
 	if _, err := deliveryRuntime(ctx, x, tx.Q(), p.InstanceID); err != nil {
 		return Outcome{}, err
 	}
@@ -221,6 +233,10 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	previous := row.Observation
 	manualRefresh := row.RefreshRequested
 	row.Observation.AttemptedAt = x.Now.UnixMilli()
+	row.Observation.Observer = "runner"
+	row.Observation.RetryCount = 0
+	row.Observation.RetryAt = 0
+	row.Observation.ErrorMessage = ""
 	row.Observation.ErrorKind = p.ErrorKind
 	if p.Snapshot != nil {
 		row.Observation.DeliverySnapshot = *p.Snapshot
@@ -311,6 +327,16 @@ func (RefreshDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	row, err := observationRow(ctx, tx.Q(), item.WorkItemID, p.DeliveryID)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if x.serverDeliveryObservations {
+		if err := retireRunnerDeliveryQuery(ctx, x, tx, &row); err != nil {
+			return Outcome{}, err
+		}
+		// Capture ordering independently of the wall clock: a refresh queued
+		// after an external read began must not consume that earlier result.
+		if err := tx.Q().QueryRowContext(ctx, `UPDATE server_delivery_jobs SET next_at=?,attempts=0,refresh_revision=refresh_revision+1 WHERE (provider,repository,number) IN (SELECT provider,repository,number FROM server_delivery_references WHERE issue_id=? AND delivery_id=?) RETURNING refresh_revision`, x.Now.UnixMilli(), item.WorkItemID, p.DeliveryID).Scan(&row.ServerRefreshRevision); err != nil {
+			return Outcome{}, err
+		}
 	}
 	row.Observation.Generation++
 	row.Nonce = ""

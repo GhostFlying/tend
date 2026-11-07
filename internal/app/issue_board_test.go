@@ -110,20 +110,20 @@ func TestIssueBoardStateNoopReplayEpochAndEndpoints(t *testing.T) {
 	}
 }
 
-func TestIssueBoardAgentStatusDoesNotSelfWake(t *testing.T) {
+func TestIssueBoardAgentStatusPreservesEarlierExternalWake(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	issue = moveBoardIssue(t, h, issue, protocol.IssueInProgress)
 	turn, principal := startHostedIssueReview(t, h, issue)
 	p := protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInReview}
 	issue = canonicalLifecycleIssue(t, hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "issue", ID: issue.IssueID}, rev(issue.Revision), p, CanonicalOwnerIssueCommand{Action: "set_status"}))
-	if _, ok := statusNotice(t, h, issue.IssueID); ok {
-		t.Fatal("agent change retained a self-wake window")
+	if _, ok := statusNotice(t, h, issue.IssueID); !ok {
+		t.Fatal("agent change discarded the earlier external notification")
 	}
 	h.clock.Advance(5 * time.Minute)
 	sweepStatus(t, h)
-	if statusSourceCount(t, h, false) != 0 {
-		t.Fatal("agent change generated its own input")
+	if statusSourceCount(t, h, false) != 1 {
+		t.Fatal("the earlier external status must be delivered exactly once")
 	}
 	p.Status = protocol.IssueDone
 	command := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "set_status"}, ExecutionID: turn.RequestID, EffectSeq: 2}

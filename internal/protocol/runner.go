@@ -315,9 +315,10 @@ type ReleasePayload struct {
 
 // ResultReport is a durable Markdown investigation or operation report.
 type ResultReport struct {
-	Body          string   `json:"body"`
-	Evidence      []string `json:"evidence,omitempty"`
-	Uncertainties []string `json:"uncertainties,omitempty"`
+	SharedReview  *SharedReviewResult `json:"shared_review,omitempty"`
+	Body          string              `json:"body"`
+	Evidence      []string            `json:"evidence,omitempty"`
+	Uncertainties []string            `json:"uncertainties,omitempty"`
 }
 
 // ArtifactFile identifies a durable immutable uploaded file.

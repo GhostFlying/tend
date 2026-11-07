@@ -112,6 +112,22 @@ func runDoctor(ctx context.Context, e *Env, args []string) error {
 	check("session", "/api/v1/session", &session)
 	var snapshot protocol.Snapshot
 	if check("ledger", "/api/v1/snapshot", &snapshot) {
+		if observer := snapshot.DeliveryObserver; observer != nil {
+			state := "disabled"
+			if observer.Enabled {
+				state = "ok"
+				if len(observer.Providers) == 0 {
+					state = "abnormal"
+				}
+				for _, provider := range observer.Providers {
+					if !observer.Executables[provider] {
+						state = "unavailable"
+					}
+				}
+			}
+			checks = append(checks, diagnosticCheck{"delivery-observer", state, observer})
+			failed = failed || state == "abnormal" || state == "unavailable"
+		}
 		for _, host := range snapshot.Hosts {
 			state := "unavailable"
 			if host.Online != nil {

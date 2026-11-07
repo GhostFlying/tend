@@ -3,6 +3,7 @@ package protocol
 // IssuePlan is the editable responsibility ledger. Existing stable IDs and
 // task links survive revisions; implementation designs belong in task specs.
 type IssuePlan struct {
+	PRPolicy               *IssuePRPolicy  `json:"pr_policy,omitempty"`
 	Title                  string          `json:"title"`
 	Project                string          `json:"project"`
 	Intent                 string          `json:"intent"`
@@ -80,10 +81,12 @@ type IssueClosure struct {
 // IssueTaskDisposition explicitly acknowledges the agreement of an active
 // task when the surrounding plan changes; it never mutates that task's spec.
 type IssueTaskDisposition struct {
-	TaskID      string                     `json:"task_id"`
-	Action      IssueTaskDispositionAction `json:"action"`
-	SpecVersion int64                      `json:"spec_version"`
-	Reason      string                     `json:"reason"`
+	TaskID                  string                     `json:"task_id"`
+	Action                  IssueTaskDispositionAction `json:"action"`
+	SpecVersion             int64                      `json:"spec_version"`
+	Reason                  string                     `json:"reason"`
+	ExpectedControlRevision *int64                     `json:"expected_control_revision,omitempty"`
+	ContextRevisions        []LogicalContextReview     `json:"context_revisions,omitempty"`
 }
 
 // CreateWorkItemPayload supplies the initial plan; it always starts open.

@@ -32,9 +32,10 @@ type canonicalOwnerTaskPayload struct {
 	UseDefaultWorkspace     bool                    `json:"use_default_workspace,omitempty"`
 }
 type canonicalTaskCreateContext struct {
-	Issue  protocol.Issue
-	Source canonicalOwnerIssueSource
-	Reason canonicalOwnerTaskPayload
+	AcceptancePolicy *protocol.IssueAcceptancePolicy
+	Issue            protocol.Issue
+	Source           canonicalOwnerIssueSource
+	Reason           canonicalOwnerTaskPayload
 }
 
 func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
@@ -84,7 +85,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	spec := p.Spec
 	var deliveryDuty *protocol.IssueDeliveryDuty
 	if input.DeliveryAuthorization == nil && x.coordinationExecution != nil {
-		spec.Constraints = append(slices.Clone(spec.Constraints), "This implementation/preparation agreement grants no merge or deployment authority. Accepted code delivery requires the original Issue delivery duty, an exact versioned owner approval, and a separate task with delivery_authorization. Do not merge or deploy under this task.")
+		spec.Constraints = append(slices.Clone(spec.Constraints), "This implementation/preparation agreement grants no merge or deployment authority. Accepted code delivery requires the original Issue delivery duty, the Issue automatic-integration policy or a real versioned owner approval, a shared formal PR review, and a separate task with delivery_authorization. Do not merge or deploy under this task.")
 	}
 
 	if input.DeliveryAuthorization != nil {
@@ -95,11 +96,11 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		if d.ExecutionTaskID != "" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery already has a frozen execution; reconcile it rather than starting another")
 		}
-		if d.Candidate.Deploy {
-			observed := protocol.ObservationScope{Deployment: true, WorkItemIDs: []string{current.IssueID}}
+		if d.Candidate.Deploy || d.Authorization != nil {
+			observed := protocol.ObservationScope{Deployment: d.Candidate.Deploy, WorkItemIDs: []string{current.IssueID}}
 			if spec.Observation != nil {
 				observed = *spec.Observation
-				observed.Deployment = true
+				observed.Deployment = observed.Deployment || d.Candidate.Deploy
 				observed.WorkItemIDs = slices.Clone(spec.Observation.WorkItemIDs)
 				if !slices.Contains(observed.WorkItemIDs, current.IssueID) {
 					observed.WorkItemIDs = append(observed.WorkItemIDs, current.IssueID)
@@ -112,7 +113,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		}
 		spec.Acceptance = append(slices.Clone(spec.Acceptance), "Independently verify the approved candidate merge and, when deploy=true, its merged-source release provenance, completed controlled upgrade ID, actual server/host installation readbacks and the original Issue behavior. A report or provider merged flag alone cannot establish successful deployment.")
 		deliveryDuty = &d
-		spec.Constraints = append(slices.Clone(spec.Constraints), deliveryCandidateQuestion(*d.Candidate), "Execute only the approved candidate and scope. Recheck provider head/base before the first mutation. An unknown provider result requires reconciliation, never repeat merge/deploy. If reconciliation is present, this task only verifies the referenced existing completed delivery and must never merge, start or retry an installation. Otherwise Tend must execute the approved merge only when provider_state=open, rechecking the frozen head, historical PR base_sha and current target_sha before merging. After that merge, verify the historical PR base_sha is unchanged and the current target is exactly the resulting merge_sha; build that verified merge_sha. For provider_state=merged verify the frozen existing merge_sha is an ancestor of target_sha and never merge again; build the frozen target_sha. The historical PR base_sha is not the deployment source. Target drift beyond these approved transitions or changed lineage requires a new candidate and owner answer. Only when deploy=true, build that verified merged source, start the existing controlled upgrade through its local CLI with --delivery-task set to this task ID, and verify installed server version/hash, the complete approved host set, and the original Issue behavior. Do not leave merge or deployment to an external operator. A rebase changing the head needs a new candidate and owner answer. Keep a stable upgrade/request identity across retries; reconcile unknown outcomes through upgrade status and installed receipts before another mutation. Persist provider merge receipt, release provenance and the exact upgrade:<id> reference in required report.evidence; the server binds that started batch before scheduling independent acceptance. If this worker runs on a deployment target, submit that durable started-batch report and release its run instead of waiting while holding its own drain lease; retain responsibility until independent acceptance reads the completed batch, actual server/host installations and original Issue behavior. Do not claim started means deployed.")
+		spec.Constraints = append(slices.Clone(spec.Constraints), deliveryExecutionScope(*d.Candidate, d.Authorization), "Execute only the approved candidate and scope. Recheck provider head/base before the first mutation. An unknown provider result requires reconciliation, never repeat merge/deploy. If reconciliation is present, this task only verifies the referenced existing completed delivery and must never merge, start or retry an installation. Otherwise Tend must execute the approved merge only when provider_state=open, rechecking the frozen head, historical PR base_sha and current target_sha before merging. After that merge, verify the historical PR base_sha is unchanged and the current target is exactly the resulting merge_sha; build that verified merge_sha. For provider_state=merged verify the frozen existing merge_sha is an ancestor of target_sha and never merge again; build the frozen target_sha. The historical PR base_sha is not the deployment source. Target drift beyond these approved transitions or changed lineage requires a new candidate and the applicable Issue policy or owner approval. Only when deploy=true, build that verified merged source, start the existing controlled upgrade through its local CLI with --delivery-task set to this task ID, and verify installed server version/hash, the complete approved host set, and the original Issue behavior. Do not leave merge or deployment to an external operator. A rebase changing the head needs a new candidate and the applicable Issue policy or owner approval. Keep a stable upgrade/request identity across retries; reconcile unknown outcomes through upgrade status and installed receipts before another mutation. Persist provider merge receipt, release provenance and the exact upgrade:<id> reference in required report.evidence; the server binds that started batch before scheduling independent acceptance. If this worker runs on a deployment target, submit that durable started-batch report and release its run instead of waiting while holding its own drain lease; retain responsibility until independent acceptance reads the completed batch, actual server/host installations and original Issue behavior. Do not claim started means deployed.")
 	}
 	if p.UseDefaultWorkspace {
 		if current.Plan.DefaultWorkspaceTaskID == "" {
@@ -127,13 +128,30 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, err
 	}
 	payload := createTaskPayload{Title: p.Title, Spec: spec, Rating: p.Rating, Project: current.Plan.Project, WorkspaceName: p.WorkspaceName, StageIDs: p.StageIDs, Relations: p.Relations}
-	out, err := createTask(ctx, x, tx, payload, &canonicalTaskCreateContext{Issue: current, Source: p.canonicalOwnerIssueSource, Reason: p})
+	creation := &canonicalTaskCreateContext{Issue: current, Source: p.canonicalOwnerIssueSource, Reason: p}
+	_, prPolicy, err := store.EffectiveIssuePRPolicy(ctx, tx.Q(), current)
+	if err != nil {
+		return Outcome{}, err
+	}
+	defaultAcceptance, err := issueAcceptanceWasDefault(ctx, tx.Q(), current)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if prPolicy != nil && defaultAcceptance && (deliveryDuty == nil || !deliveryDuty.Candidate.Deploy) {
+		policy := protocol.IssueAcceptancePolicy{Required: false, Reason: "Formal code review belongs to the shared PR delivery; reports and intermediate results use self-check", RequestID: x.Env.RequestID, IssueRevision: current.Revision}
+		if current.AcceptancePolicy != nil {
+			policy.Creator = current.AcceptancePolicy.Creator
+			policy.DecidedBy = current.AcceptancePolicy.DecidedBy
+		}
+		creation.AcceptancePolicy = &policy
+	}
+	out, err := createTask(ctx, x, tx, payload, creation)
 	if err != nil {
 		return Outcome{}, err
 	}
 	if deliveryDuty != nil {
 		task := out.Result.(taskResult).TaskID
-		raw, err := json.Marshal(deliveryExecutionSnapshot{IssueDeliveryCandidate: *deliveryDuty.Candidate, AssignmentEpoch: current.AssignmentEpoch})
+		raw, err := json.Marshal(deliveryExecutionSnapshot{IssueDeliveryCandidate: *deliveryDuty.Candidate, AssignmentEpoch: current.AssignmentEpoch, Authorization: deliveryDuty.Authorization})
 		if err != nil {
 			return Outcome{}, err
 		}

@@ -474,10 +474,10 @@ func TestDeliveryDeferSurvivesPrepareProviderAndBaselineDrift(t *testing.T) {
 					t.Fatal(op)
 				}
 				resumed := deliveryDutyForTest(t, h, i.IssueID, source)
-				if resumed.Status != "awaiting_owner" || resumed.AttentionID == d.AttentionID || h.count("attentions") != 2 {
+				if (resumed.Status != "awaiting_owner" && (resumed.Status != "preparing" || resumed.PolicyAttentionID == "")) || resumed.AttentionID == d.AttentionID || h.count("attentions") != 2 {
 					t.Fatal(resumed)
 				}
-				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, resumed), protocol.CodeForbidden)
+				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, resumed), historicalOrPolicyReadinessCode(resumed))
 				if h.task(source).Lifecycle != protocol.TaskCompleted {
 					t.Fatal("original completed task changed")
 				}
@@ -591,10 +591,10 @@ func TestDeliveryDeferredManagerNeedsCurrentOwnerResumeSource(t *testing.T) {
 		t.Fatal(op)
 	}
 	resumed := deliveryDutyForTest(t, h, i.IssueID, source)
-	if resumed.Status != "awaiting_owner" || resumed.AttentionID == d.AttentionID || h.count("attentions") != 2 {
+	if (resumed.Status != "awaiting_owner" && (resumed.Status != "preparing" || resumed.PolicyAttentionID == "")) || resumed.AttentionID == d.AttentionID || h.count("attentions") != 2 {
 		t.Fatal(resumed)
 	}
-	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, resumed), protocol.CodeForbidden)
+	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, resumed), historicalOrPolicyReadinessCode(resumed))
 }
 
 func TestDeliveryMergedCandidateRequiresCurrentIntegratedTarget(t *testing.T) {

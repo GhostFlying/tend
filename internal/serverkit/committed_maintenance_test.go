@@ -33,12 +33,20 @@ import (
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
+const (
+	maintenanceAssemblySetupTimeout    = 25 * time.Second
+	maintenanceAssemblyScenarioTimeout = 25 * time.Second
+	maintenanceAssemblyProcessTimeout  = maintenanceAssemblySetupTimeout + maintenanceAssemblyScenarioTimeout + 5*time.Second
+)
+
 // This test runs the actual production assembly, mainthread managers and local
 // control handler. Only the updater transport and external session opener are
 // replaced; hosted draining and startup readiness are never stubbed true.
 func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 	if os.Getenv("TEND_MAINTENANCE_ASSEMBLY_TEST") != "1" {
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestCommittedMaintenanceProductionAssembly$", "-test.v")
+		ctx, cancel := context.WithTimeout(t.Context(), maintenanceAssemblyProcessTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCommittedMaintenanceProductionAssembly$", "-test.v")
 		cmd.Env = append(os.Environ(), "TEND_MAINTENANCE_ASSEMBLY_TEST=1", "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
@@ -52,7 +60,9 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 
 func TestReceiptRecoveryStartupProductionAssembly(t *testing.T) {
 	if os.Getenv("TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST") != "1" {
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestReceiptRecoveryStartupProductionAssembly$", "-test.v")
+		ctx, cancel := context.WithTimeout(t.Context(), maintenanceAssemblyProcessTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestReceiptRecoveryStartupProductionAssembly$", "-test.v")
 		cmd.Env = append(os.Environ(), "TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST=1", "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
@@ -66,8 +76,10 @@ func TestReceiptRecoveryStartupProductionAssembly(t *testing.T) {
 
 func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bool) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
-	defer cancel()
+	// Fresh migrations construct the retained ledger. The production scenario
+	// below reopens that ledger and has its own bounded recovery budget.
+	setupCtx, setupCancel := context.WithTimeout(t.Context(), maintenanceAssemblySetupTimeout)
+	defer setupCancel()
 	root, err := os.MkdirTemp("", "tend-ma-")
 	if err != nil {
 		t.Fatal(err)
@@ -78,12 +90,12 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 		t.Fatal(err)
 	}
 	ids := protocol.NewULIDGen(time.Now, nil)
-	db, err := store.Open(ctx, filepath.Join(data, "tend.db"), time.Now)
+	db, err := store.Open(setupCtx, filepath.Join(data, "tend.db"), time.Now)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("prepare maintenance assembly ledger: %v", err)
 	}
 	seed := app.New(db, ids, time.Now)
-	prep, err := seed.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: ids.New(protocol.PrefixRequest)}, true)
+	prep, err := seed.ChangeArchivePreparation(setupCtx, protocol.ArchiveControlRequest{RequestID: ids.New(protocol.PrefixRequest)}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,68 +105,68 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 		retained.HostID = "retained-host"
 	}
 	pin := protocol.RunExecutionPin{SnapshotID: "retained-snapshot", AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "retained-worker", Revision: 1}, Profile: protocol.ExecutionProfile{Model: "retained-model", Effort: "high"}}
-	if err := db.Write(ctx, func(tx *store.Tx) error {
+	if err := db.Write(setupCtx, func(tx *store.Tx) error {
 		if receiptRecovery {
-			if err := tx.UpsertHost(ctx, store.HostRow{HostID: retained.HostID, OS: "linux", Arch: "amd64", Slots: 1}, 0); err != nil {
+			if err := tx.UpsertHost(setupCtx, store.HostRow{HostID: retained.HostID, OS: "linux", Arch: "amd64", Slots: 1}, 0); err != nil {
 				return err
 			}
 		}
-		if err := tx.InsertAgentCategory(ctx, protocol.AgentCategory{CategoryID: "planning", Revision: 1, Title: "Planning", State: "active"}, ids.New(protocol.PrefixRequest)); err != nil {
+		if err := tx.InsertAgentCategory(setupCtx, protocol.AgentCategory{CategoryID: "planning", Revision: 1, Title: "Planning", State: "active"}, ids.New(protocol.PrefixRequest)); err != nil {
 			return err
 		}
-		if err := tx.InsertTask(ctx, store.TaskRow{TaskID: taskID, Title: "retained unknown", Lifecycle: protocol.TaskRunning, ControlMode: protocol.ControlManaged, ControlRevision: 1, SpecVersion: 1}); err != nil {
+		if err := tx.InsertTask(setupCtx, store.TaskRow{TaskID: taskID, Title: "retained unknown", Lifecycle: protocol.TaskRunning, ControlMode: protocol.ControlManaged, ControlRevision: 1, SpecVersion: 1}); err != nil {
 			return err
 		}
-		if err := tx.InsertAction(ctx, store.ActionRow{ActionID: actionID, TaskID: taskID, Kind: protocol.ActionImplement, EffectKey: "retained-effect", TriggerJSON: `{}`, AuthorizationJSON: `{}`, TargetSpecVersion: 1, Generation: 1, Status: protocol.ActionDispatched}); err != nil {
+		if err := tx.InsertAction(setupCtx, store.ActionRow{ActionID: actionID, TaskID: taskID, Kind: protocol.ActionImplement, EffectKey: "retained-effect", TriggerJSON: `{}`, AuthorizationJSON: `{}`, TargetSpecVersion: 1, Generation: 1, Status: protocol.ActionDispatched}); err != nil {
 			return err
 		}
-		if err := tx.InsertRun(ctx, retained); err != nil {
+		if err := tx.InsertRun(setupCtx, retained); err != nil {
 			return err
 		}
 		if receiptRecovery {
-			if err := tx.InsertLease(ctx, store.LeaseRow{LeaseID: ids.New(protocol.PrefixLease), RunID: runID, HostID: retained.HostID, ExpiresAt: time.Now().Add(time.Hour).UnixMilli()}, 0); err != nil {
+			if err := tx.InsertLease(setupCtx, store.LeaseRow{LeaseID: ids.New(protocol.PrefixLease), RunID: runID, HostID: retained.HostID, ExpiresAt: time.Now().Add(time.Hour).UnixMilli()}, 0); err != nil {
 				return err
 			}
 		}
-		if err := tx.InsertRunExecution(ctx, runID, pin); err != nil {
+		if err := tx.InsertRunExecution(setupCtx, runID, pin); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_conversations(conversation_id,created_at) VALUES('startup-evidence',0)`); err != nil {
+		if _, err := tx.Exec(setupCtx, `INSERT INTO agent_conversations(conversation_id,created_at) VALUES('startup-evidence',0)`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO agent_compactions(operation_id,conversation_id,status,source,created_at,updated_at) VALUES('startup-compaction','startup-evidence','unknown','manual',0,0)`)
+		_, err := tx.Exec(setupCtx, `INSERT INTO agent_compactions(operation_id,conversation_id,status,source,created_at,updated_at) VALUES('startup-compaction','startup-evidence','unknown','manual',0,0)`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if receiptRecovery {
-		if err := db.Write(ctx, func(tx *store.Tx) error {
+		if err := db.Write(setupCtx, func(tx *store.Tx) error {
 			message, request := ids.New(protocol.PrefixMessage), ids.New(protocol.PrefixRequest)
-			if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: "main", Author: "owner", Body: "retained uncertain native history"}); err != nil {
+			if _, err := tx.InsertMessage(setupCtx, store.MessageRow{MessageID: message, ConversationID: "main", Author: "owner", Body: "retained uncertain native history"}); err != nil {
 				return err
 			}
-			if err := tx.PutMainThread(ctx, "main", "original-main", 0); err != nil {
+			if err := tx.PutMainThread(setupCtx, "main", "original-main", 0); err != nil {
 				return err
 			}
-			if err := tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, MessageID: message, ThreadID: "original-main", TurnID: "original-turn", Status: store.TurnInterrupted}, 0); err != nil {
+			if err := tx.PutMainTurn(setupCtx, store.MainTurn{RequestID: request, MessageID: message, ThreadID: "original-main", TurnID: "original-turn", Status: store.TurnInterrupted}, 0); err != nil {
 				return err
 			}
-			_, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
+			_, err := tx.Exec(setupCtx, `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var schema int64
-	if err := db.Read(ctx, func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&schema)
+	if err := db.Read(setupCtx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(setupCtx, `SELECT MAX(version) FROM schema_migrations`).Scan(&schema)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	actual, err := (updater.LinuxProcess{}).Inspect(ctx, os.Getpid())
+	actual, err := (updater.LinuxProcess{}).Inspect(setupCtx, os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +228,12 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := setupCtx.Err(); err != nil {
+		t.Fatalf("prepare maintenance assembly: %v", err)
+	}
+	setupCancel()
+	ctx, cancel := context.WithTimeout(t.Context(), maintenanceAssemblyScenarioTimeout)
+	defer cancel()
 	var opens atomic.Int64
 	configured, initialized := false, false
 	finished := errors.New("production assembly verified")

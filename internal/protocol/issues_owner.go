@@ -34,6 +34,9 @@ type UpdateIssuePayload struct {
 	Plan                    IssuePlan              `json:"plan"`
 	ExpectedAssignmentEpoch int64                  `json:"expected_assignment_epoch"`
 	TaskDispositions        []IssueTaskDisposition `json:"task_dispositions,omitempty"`
+	// Supplying this revision explicitly assesses the current sources without
+	// rewriting a task spec. Omission retains historical plan-only dispositions.
+	ExpectedContextRevision *int64 `json:"expected_context_revision,omitempty"`
 }
 
 type IssueControlPayload struct {

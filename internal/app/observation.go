@@ -100,6 +100,18 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 		if err != nil {
 			return err
 		}
+		result.DeliveryAuthorization, err = views.DeliveryExecutionAuthority(ctx, q, rc.run.TaskID)
+		if err != nil {
+			return err
+		}
+		if authority := result.DeliveryAuthorization; authority != nil {
+			lease, err := store.GetLeaseByRun(ctx, q, rc.run.RunID)
+			if err != nil {
+				return err
+			}
+			authority.ObservedAt, authority.RunID, authority.LeaseID, authority.Role = now, rc.run.RunID, lease.LeaseID, rc.run.Role
+			authority.SpecVersion = rc.action.TargetSpecVersion
+		}
 		for _, id := range allowed.WorkItemIDs {
 			v, err := views.Issue(ctx, q, id)
 			if err != nil {
@@ -136,6 +148,15 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 		}
 		if allowed.Deployment {
 			result.Deployment = deployment
+			archive, err := store.ArchivePreparation(ctx, q)
+			if err != nil {
+				return err
+			}
+			fenced, err := store.CommittedMaintenanceFenced(ctx, q)
+			if err != nil {
+				return err
+			}
+			deployment.Admission = &protocol.ObservedServerAdmission{Source: "server.archive_preparation/committed_maintenances", ObservedAt: now, ArchivePrepared: archive.Prepared, ArchiveRevision: archive.Revision, ArchiveUpdatedAt: archive.UpdatedAtMillis, CommittedMaintenanceFence: fenced}
 			runtime, err := store.GetHostRuntime(ctx, q, rc.run.HostID)
 			if err != nil && !errors.Is(err, store.ErrNotFound) {
 				return err
@@ -147,6 +168,14 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 				}
 				rt := runtime.Runtime
 				deployment.Runner = &protocol.ObservedRunner{HostID: rc.run.HostID, InstanceID: rt.InstanceID, Online: runtime.Online && now-runtime.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && now >= runtime.LastHeartbeatAt, LastHeartbeatAt: runtime.LastHeartbeatAt, Mode: rt.Mode, ControlMode: control.Mode, ControlRevision: control.Revision, AppliedControlRevision: rt.AppliedControlRevision, Build: rt.Build, Capabilities: append([]string{}, rt.Capabilities...)}
+				deployment.Runner.Source = "server.host_runtime/host_controls"
+				deployment.Runner.PendingOperations, deployment.Runner.PendingClaims = &rt.PendingOperations, &rt.PendingClaims
+				deployment.Runner.UpgradeID, deployment.Runner.UpgradePhase = rt.UpgradeID, rt.UpgradePhase
+				deployment.Runner.BoundedRecoveryAuthorizationID = rt.BoundedRecoveryAuthorizationID
+				if release := control.BoundedRecoveryRelease; release != nil {
+					deployment.Runner.PublishedRecoveryReleaseID = release.RequestID
+					deployment.Runner.PublishedRecoveryAuthorizationID = release.RecoveryAuthorizationID
+				}
 			}
 
 			if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&deployment.SchemaVersion); err != nil {
@@ -159,6 +188,9 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 			if err == nil {
 				u := latest.View
 				upgrade := &protocol.ObservedUpgrade{UpgradeID: u.UpgradeID, ReleaseID: u.ReleaseID, ManifestSHA256: latest.ManifestSHA256, Revision: u.Revision, Status: u.Status, Phase: u.Phase, Hosts: []protocol.ObservedUpgradeHost{}}
+				if !u.UpdatedAt.IsZero() {
+					upgrade.UpdatedAt = u.UpdatedAt.UnixMilli()
+				}
 				for _, h := range u.Hosts {
 					upgrade.Hosts = append(upgrade.Hosts, protocol.ObservedUpgradeHost{HostID: h.HostID, Status: h.Status, Phase: h.Phase})
 				}

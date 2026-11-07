@@ -140,7 +140,14 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if err := checkWorkspaceProtocol(ctx, tx.Q(), p.Spec); err != nil {
 		return Outcome{}, err
 	}
-	required := canonical == nil || canonical.Issue.AcceptancePolicy == nil || canonical.Issue.AcceptancePolicy.Required
+	var taskPolicy *protocol.IssueAcceptancePolicy
+	if canonical != nil {
+		taskPolicy = canonical.Issue.AcceptancePolicy
+		if canonical.AcceptancePolicy != nil {
+			taskPolicy = canonical.AcceptancePolicy
+		}
+	}
+	required := taskPolicy == nil || taskPolicy.Required
 	d, err := domain.NewTaskWithAcceptance(taskID, project.Project, p.Spec, p.Rating, required)
 	if err != nil {
 		return Outcome{}, err
@@ -162,7 +169,7 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	}
 
 	if canonical != nil {
-		if err := tx.FreezeTaskAcceptancePolicy(ctx, taskID, canonical.Issue.AcceptancePolicy); err != nil {
+		if err := tx.FreezeTaskAcceptancePolicy(ctx, taskID, taskPolicy); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -200,7 +207,9 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 			return Outcome{}, err
 		}
 		if agent != nil {
-			ownerEvents, err := recordOwnerExecution(ctx, x, tx, canonical.Issue, taskID, *agent, p.Spec)
+			executionIssue := canonical.Issue
+			executionIssue.AcceptancePolicy = taskPolicy
+			ownerEvents, err := recordOwnerExecution(ctx, x, tx, executionIssue, taskID, *agent, p.Spec)
 			if err != nil {
 				return Outcome{}, err
 			}

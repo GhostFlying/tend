@@ -24,10 +24,11 @@ func TaskContextBlockers(ctx context.Context, q Querier, item string) ([]protoco
 		return nil, err
 	}
 	type binding struct {
-		id      string
-		version int64
-		control int64
-		digest  string
+		id            string
+		version       int64
+		control       int64
+		issueRevision int64
+		digest        string
 	}
 	var bindings []binding
 	for rows.Next() {
@@ -46,7 +47,7 @@ func TaskContextBlockers(ctx context.Context, q Querier, item string) ([]protoco
 		}
 		for _, c := range spec.Contexts {
 			if c.WorkItemID == item && c.ContextDigest != "" {
-				bindings = append(bindings, binding{id, version, control, c.ContextDigest})
+				bindings = append(bindings, binding{id, version, control, c.Revision, c.ContextDigest})
 			}
 		}
 	}
@@ -59,13 +60,13 @@ func TaskContextBlockers(ctx context.Context, q Querier, item string) ([]protoco
 	if len(bindings) == 0 {
 		return out, nil
 	}
-	digest, _, err := EffectiveContext(ctx, q, item)
-	if err != nil {
-		return nil, err
-	}
 	for _, b := range bindings {
-		if b.digest != digest {
-			out = append(out, protocol.ContextBlocker{Code: "task_agreement", ObjectID: b.id, Revision: b.control, ControlRevision: b.control, SpecVersion: b.version, Message: "task's frozen source context differs; explicitly revise its agreement or keep it paused"})
+		current, err := TaskContextBindingCurrent(ctx, q, b.id, b.version, protocol.TaskWorkContext{WorkItemID: item, Revision: b.issueRevision, ContextDigest: b.digest})
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			out = append(out, protocol.ContextBlocker{Code: "task_agreement", ObjectID: b.id, Revision: b.control, ControlRevision: b.control, SpecVersion: b.version, Message: "source context changed; the Issue owner must assess whether this spec remains applicable, revise it, or keep the task paused"})
 		}
 	}
 	return out, nil

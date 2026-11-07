@@ -11,6 +11,7 @@ import type { OpOutcome } from "../app/ops.ts";
 import { useState } from "react";
 import { issueCommand } from "./actions.ts";
 import { IssueFollowups } from "./Followups.tsx";
+import { IssueSharedReviews } from "./SharedReviews.tsx";
 import styles from "./Issues.module.css";
 
 const labels: Record<string, string> = {
@@ -59,6 +60,7 @@ export function IssueFollowupsDelivery({ issue }: { issue: IssueView }) {
       {deliveries.value && !deliveries.value.items?.length && (
         <p className={styles.muted}>暂无已登记交付。</p>
       )}
+      <IssueSharedReviews key={issue.issue_id} issueID={issue.issue_id} />
     </>
   );
 }
@@ -162,6 +164,14 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
     }
   };
   const observation = item.observation;
+  const ci = observation.ci;
+  const ciLabels: Record<string, string> = {
+    success: "已通过",
+    failure: "未通过",
+    pending: "进行中",
+    skipped: "全部按条件跳过",
+    unknown: "待核实",
+  };
   return (
     <section className={styles.taskPeek}>
       <h4>
@@ -189,6 +199,40 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
           <CommitHash value={observation.head_sha} />
         </p>
       )}
+      {ci && (
+        <div>
+          <p>
+            CI：
+            {ci.head_sha !== observation.head_sha || ci.truncated
+              ? "结果不完整或候选已变化，待核实"
+              : ciLabels[ci.state] || ci.state}
+          </p>
+          <details>
+            <summary>查看检查结果（{ci.checks?.length ?? 0}）</summary>
+            <p className={styles.muted}>
+              候选：
+              <CommitHash value={ci.head_sha} />
+            </p>
+            <ul>
+              {(ci.checks ?? []).map((check, index) => (
+                <li key={`${check.name}:${index}`}>
+                  {check.url ? (
+                    <a href={check.url} target="_blank" rel="noreferrer">
+                      {check.name}
+                    </a>
+                  ) : (
+                    check.name
+                  )}
+                  {" · "}
+                  {check.conclusion === "skipped"
+                    ? "按条件跳过"
+                    : ciLabels[check.conclusion || check.state] || check.conclusion || check.state}
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
       {observation.merge_sha && (
         <p className={styles.muted}>
           Merge：
@@ -206,7 +250,15 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
         </p>
       )}
       {observation.error_kind && (
-        <p className={styles.warning}>最近观察未完成：{observation.error_kind}，保留上次事实。</p>
+        <p className={styles.warning}>
+          最近观察未完成：{observation.error_message || observation.error_kind}，保留上次事实。
+        </p>
+      )}
+      {!!observation.retry_at && (
+        <p className={styles.muted}>
+          计划于 {new Date(observation.retry_at).toLocaleString("zh-CN")} 再次核对，已尝试{" "}
+          {observation.retry_count ?? 0} 次。
+        </p>
       )}
       <button
         className={styles.button}

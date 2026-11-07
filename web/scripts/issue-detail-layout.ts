@@ -6,7 +6,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { chromium } from "playwright";
-import { openIssueAux, issueSidebar } from "./issue-detail-helpers.ts";
+import { openIssueAux, openIssueDefinition, issueSidebar } from "./issue-detail-helpers.ts";
 import type {
   Envelope,
   IssueView,
@@ -14,6 +14,8 @@ import type {
   IssueTranscriptBlock,
   IssueResultPage,
   AttentionView,
+  SharedDeliveryReviewPage,
+  UpdateIssuePayload,
 } from "../src/api/generated/api.ts";
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set TEND_LAYOUT_OUTPUT");
@@ -32,6 +34,7 @@ let thirdPage = false;
 let pagedRevision = 0;
 let pagedChildren = false;
 let pagedActivity = false;
+let sharedReviews: SharedDeliveryReviewPage = { items: [], more: false };
 const streams = new Set<ServerResponse>();
 const writes: Envelope[] = [];
 const requests: string[] = [];
@@ -288,6 +291,7 @@ const server = createServer(async (req, res) => {
     });
   if (p.startsWith("/api/v1/issues/")) {
     const current = p.includes(child.issue_id) ? child : issue;
+    if (p.endsWith("/delivery-reviews")) return json(sharedReviews);
     if (p.endsWith("/activity")) {
       if (activityDelay) await new Promise((resolve) => setTimeout(resolve, activityDelay));
       if (pagedActivity && u.searchParams.has("before") && holdEarlier) {
@@ -496,6 +500,24 @@ const server = createServer(async (req, res) => {
     for await (const c of req) chunks.push(c);
     const envelope = JSON.parse(Buffer.concat(chunks).toString()) as Envelope;
     writes.push(envelope);
+    if (envelope.operation === "issues.update") {
+      const payload = envelope.payload as UpdateIssuePayload;
+      if (
+        envelope.target.id !== issue.issue_id ||
+        envelope.expected_control_revision !== issue.revision ||
+        payload.expected_assignment_epoch !== issue.assignment_epoch
+      )
+        return json({
+          operation: {
+            status: "failed",
+            error: { code: "stale_revision", message: "Issue changed" },
+          },
+        });
+      issue.plan = payload.plan;
+      issue.revision++;
+      publish();
+      return json({ operation: { status: "succeeded", result: issue } });
+    }
     if (envelope.operation === "issues.update_progress") {
       if (dropProgressReply) {
         progressRequests.set(envelope.request_id, envelope);
@@ -543,6 +565,168 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  // D186: policy editing preserves the agreement; shared review is candidate-bound.
+  for (const width of [1440, 390]) {
+    const originalPlan = structuredClone(issue.plan);
+    const originalRevision = issue.revision;
+    const originalReviews = sharedReviews;
+    const context = await browser.newContext({
+      viewport: { width, height: 1000 },
+      isMobile: width < 760,
+      hasTouch: width < 760,
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      // This warning is produced by this context's explicit fixture isolation.
+      if (
+        message.type() === "warning" &&
+        message.text() === "Service Worker registration blocked by Playwright"
+      )
+        return;
+      if (message.type() === "error" || message.type() === "warning") errors.push(message.text());
+    });
+    try {
+      issue.plan = {
+        ...originalPlan,
+        background: [
+          { kind: "user_constraint", source: "owner", text: "保留原约束和任务冻结身份" },
+        ],
+        deliveries: [
+          {
+            delivery_id: "external-one",
+            provider: "github",
+            repository: "sample/repo",
+            number: 42,
+            url: "https://example.invalid/sample/repo/pull/42",
+          },
+        ],
+        pr_policy: { mode: "manual", repository: "sample/repo", reason: "原版本要求明确人工批准" },
+      };
+      sharedReviews = { items: [], more: false };
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      await detail.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
+      assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
+      assert(await page.title());
+      await openIssueDefinition(page);
+      await detail.getByRole("heading", { name: "PR 合入授权", exact: true }).waitFor();
+      await detail.getByText("合入前需要人工审批 · sample/repo", { exact: true }).waitFor();
+      for (const mode of ["auto", "manual"] as const) {
+        const baseline = structuredClone(issue.plan);
+        const revision = issue.revision;
+        const beforeWrites = writes.length;
+        const editor = await openIssueAux(page, "编辑定义");
+        await editor.waitFor({ state: "visible" });
+        await editor.getByRole("combobox", { name: /^合入方式/ }).selectOption(mode);
+        await editor.getByLabel("授权仓库", { exact: true }).fill("sample/repo");
+        const reason =
+          mode === "auto" ? "审阅和检查通过后按原责任自动合入" : "保留当前候选，合入前明确人工批准";
+        await editor.getByRole("textbox", { name: /^授权说明/ }).fill(reason);
+        await page.screenshot({ path: join(output, `pr-policy-${mode}-${width}.png`) });
+        const response = page.waitForResponse(
+          (value) => value.url().endsWith("/api/v1/ops") && value.request().method() === "POST",
+        );
+        await editor.getByRole("button", { name: "保存定义", exact: true }).click();
+        await response;
+        await editor.waitFor({ state: "hidden" });
+        const submitted = writes.slice(beforeWrites);
+        assert.equal(submitted.length, 1, "policy editing must submit one owner command");
+        const envelope = submitted[0]!;
+        assert.equal(envelope.operation, "issues.update");
+        assert.equal(envelope.target.id, issue.issue_id);
+        assert.equal(envelope.expected_control_revision, revision);
+        assert(envelope.request_id, "saved policy lacks its request identity");
+        const payload = envelope.payload as UpdateIssuePayload;
+        assert.equal(payload.expected_assignment_epoch, issue.assignment_epoch);
+        assert.equal(
+          "task_dispositions" in payload,
+          false,
+          "policy editing silently altered task applicability",
+        );
+        assert.deepEqual(payload.plan, {
+          ...baseline,
+          pr_policy: { mode, repository: "sample/repo", reason },
+        });
+        assert.equal(issue.revision, revision + 1);
+        await openIssueDefinition(page);
+        await detail.getByText(reason, { exact: true }).waitFor();
+      }
+      await openIssueAux(page, "外部交付");
+      const external = page.getByRole("dialog", { name: "跟进与外部交付", exact: true });
+      const reviews = external.getByRole("region", { name: "共享 PR 审阅", exact: true });
+      await reviews.getByText("暂无共享 PR 审阅记录。", { exact: true }).waitFor();
+      sharedReviews = {
+        more: false,
+        items: [
+          {
+            review_id: "review-shared-one",
+            provider: "github",
+            repository: "sample/repo",
+            number: 42,
+            revision: 3,
+            status: "passed",
+            valid: false,
+            invalid_reason: "requirements changed",
+            reason: "原审阅结论保留，当前需求变更仍需负责人核对。",
+            head_sha: "a".repeat(40),
+            base_sha: "b".repeat(40),
+            requirements_digest: "c".repeat(64),
+            links: [
+              {
+                issue_id: issue.issue_id,
+                delivery_id: "external-one",
+                task_id: results.items![0]!.task_id,
+              },
+            ],
+            rounds: [
+              {
+                number: 1,
+                task_id: results.items![0]!.task_id,
+                spec_version: 1,
+                head_sha: "a".repeat(40),
+                base_sha: "b".repeat(40),
+                requirements_digest: "c".repeat(64),
+              },
+            ],
+          },
+        ],
+      };
+      publish();
+      await reviews.getByText("原审阅结论待核对当前适用性", { exact: true }).waitFor();
+      assert.equal(await reviews.getByText("审阅通过", { exact: true }).count(), 0);
+      await reviews.getByText("查看审阅过程与关联", { exact: true }).click();
+      await reviews.getByRole("button", { name: "查看关联 Issue", exact: true }).waitFor();
+      const beforeReviewReads = writes.length;
+      await page.screenshot({ path: join(output, `shared-review-invalid-${width}.png`) });
+      assert(await external.evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await reviews.getByRole("button", { name: "查看实际审阅任务", exact: true }).click();
+      const task = page.getByRole("region", { name: "任务详情", exact: true });
+      await task.getByText("执行任务 A", { exact: true }).waitFor();
+      assert(requests.some((url) => url === `/api/v1/tasks/${results.items![0]!.task_id}`));
+      assert.equal(
+        writes.length,
+        beforeReviewReads,
+        "reading a review association mutated responsibility",
+      );
+      assert.deepEqual(errors, []);
+      console.log(
+        `PASS delivery policy/review ${width}: original plan/CAS preserved, no implicit task disposition, invalid passed result and actual task link`,
+      );
+    } catch (error) {
+      await page.screenshot({ path: join(output, `delivery-maintenance-failure-${width}.png`) });
+      throw error;
+    } finally {
+      await context.close();
+      issue.plan = originalPlan;
+      issue.revision = originalRevision;
+      sharedReviews = originalReviews;
+    }
+  }
   // S11 hierarchy uses the same real read, pagination and tool controls as other scenarios.
   for (const width of [1440, 390]) {
     const original = structuredClone(activity.items);
