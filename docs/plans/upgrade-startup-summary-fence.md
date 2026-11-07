@@ -153,3 +153,7 @@ PrepareOnly 的其他无摘要原因仍保持当前行为；本次不把所有�
 同一入口的权限核对进一步确认，既有 main `handoffPrompt` 与 `HandoffSummaryInput` 是全局范围；直接用于 Issue 会把无关 sibling 事实及 main 摘要注入 Issue。新增的正常 Issue 迁移只复用 D81 原生 create/inject/CAS/unknown 流程，事实包改读已注册 conversation 对应 Issue 的规范只读视图、实际继承约束与 source 分页；不调用全局摘要准备，也不注入该实例曾经由 main 输入生成的缓存。main 路径不改变，不通过扩大工具权限解决。用真实 canonical Issue 与注册 conversation、无关 sibling 内容以及旧缓存验证交接包和摘要准入均不越界。
 
 正式独立审阅确认 acceptance 等待恢复的同根死路：两个真实 blocked/inconclusive 耗尽后，外部授权将协调状态置为 changes_requested，但同产物复核仍按 mutable status 判断而拒绝。修正以最后记录的真实 acceptance verdict（及同 Task/产物）识别等待证据资格，不用协调状态猜测。两轮默认预算保持，第三轮仍必须真实外部一次授权与新的实际 acceptance Run；旧 Run/verdict 不能重计，质量 changes_required 不得到此例外。回归两次真实等待→拒绝未授权→外部授权→同产物新 Run→真实 passed。
+
+### 实际接续中的状态回执分类
+
+正式审阅导入后，负责人将仅说明导入完成、原候选及范围未变的回执保存成 constraint，导致原 passed 结果的当前需求摘要失效。原 Issue 计划、Task spec、候选和检查均未变化，负责人也已明确确认语义不变。沿既有 assess 留下当前适用性确认，保原结论、轮次与历史事实；不通过忽略所有 constraint 或重新审阅解决。工具指引明确普通进展、安装和审阅回执使用 observation，真实业务约束仍进入需求；单独摘要变化由负责人判断，必要时 assess，不机械修订合同。已有业务约束变化→原结果失效→显式适用确认的回归继续保留。
