@@ -14,7 +14,7 @@ import (
 // updater authority and the actual process. It does not classify native work.
 func ValidateBoundedRecoveryStartup(state State, role string, actual protocol.RecoveryIdentity, requestID string) (*protocol.BoundedMaintenanceAuthorization, error) {
 	b := state.Bounded
-	if state.Format != 4 || b == nil || boundedRecoveryID(b) != requestID || b.Authorization.Role != role || b.SourceExit == nil || b.SourceExit.Process != b.Authorization.Source || b.SourceExit.ConfirmedAtMillis <= 0 || !validIdentity(actual) {
+	if !boundedStateFormat(state.Format) || b == nil || boundedRecoveryID(b) != requestID || b.Authorization.Role != role || b.SourceExit == nil || b.SourceExit.Process != b.Authorization.Source || b.SourceExit.ConfirmedAtMillis <= 0 || !validIdentity(actual) {
 		return nil, errors.New("updater: bounded startup authority or predecessor exit is not confirmed")
 	}
 	a := b.Authorization
@@ -231,7 +231,7 @@ func (s *Supervisor) authorizeBoundedMaintenanceWindow(ctx context.Context, p pr
 		audit.ObservationError = "maintenance archive observation unavailable"
 	}
 	b.Audit = append(b.Audit, audit)
-	s.state.Format = 4
+	s.state.Format = max(s.state.Format, 4)
 	if action == "force" || action == "takeover" && m.Phase == "updater_adopted" {
 		m.Phase = "authorized"
 		b.Phase = "stop"
@@ -383,7 +383,7 @@ func (s *Supervisor) boundedGenerationMatches(expected uint64) bool {
 // failed successor needs a separately authorized forward candidate. It does not
 // grant that candidate permission to stop or start any process.
 func ValidateBoundedMaintenanceParent(state State, parent CommittedMaintenance) error {
-	if state.Format != 4 || !parent.Irreversible {
+	if !boundedStateFormat(state.Format) || !parent.Irreversible {
 		return errors.New("updater: bounded parent history unavailable")
 	}
 	matches := func(b *protocol.BoundedMaintenanceState) bool {
@@ -473,7 +473,7 @@ func (s *Supervisor) CancelBoundedMaintenance(ctx context.Context, p protocol.Co
 		b.PhaseDeadlineMono = min(mono+a.Timeouts.CompleteMillis, b.OverallDeadlineMono)
 		b.Outcome = "running"
 		b.Audit = append(b.Audit, protocol.BoundedMaintenanceAudit{RequestID: a.RequestID, Action: "cancel", Phase: m.Phase, Reason: a.Reason, RecordedAtMillis: s.opts.Now().UnixMilli(), Outcome: "cancellation_authorized", PreviousWindow: previousWindow})
-		s.state.Format = 4
+		s.state.Format = max(s.state.Format, 4)
 		if err := s.save(); err != nil {
 			return err
 		}

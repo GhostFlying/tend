@@ -67,6 +67,8 @@ type BackupFile struct {
 	Mode    uint32 `json:"mode"`
 }
 type Operation struct {
+	HealthWindow          *HealthWindow        `json:"health_window,omitempty"`
+	LaunchExit            *LaunchExitProof     `json:"launch_exit,omitempty"`
 	Configuration         *StagedConfiguration `json:"configuration,omitempty"`
 	RollbackAuthorization *Health              `json:"rollback_authorization,omitempty"`
 	CandidateNotStarted   bool                 `json:"candidate_not_started,omitempty"`

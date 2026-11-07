@@ -44,7 +44,8 @@ func (registerCommittedMaintenance) Authorize(_ context.Context, x *Exec, _ stor
 }
 func (c registerCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	p, process := c.Plan, c.Process
-	if !release.ValidID(p.MaintenanceID) || !protocol.ValidID(protocol.PrefixRequest, p.RequestID) || !protocol.ValidID(protocol.PrefixRequest, p.LinkRequestID) || p.RequestID == p.LinkRequestID || p.PreparationRevision < 1 || process.PID <= 1 || process.StartTicks == 0 || process.LaunchID != p.Successor.ProcessInstanceID || !release.ValidSHA(process.SHA256) || process.SHA256 != p.Successor.ArtifactSHA256 || p.Successor.InstanceID == "" || p.Successor.InstanceID != p.Previous.InstanceID || p.Successor.UpgradeID != p.MaintenanceID || p.Successor.ProcessInstanceID == p.Previous.ProcessInstanceID || p.Successor.ArtifactSHA256 == p.Previous.ArtifactSHA256 {
+	independentArtifact := p.Successor.ArtifactSHA256 != p.Previous.ArtifactSHA256 || p.SourceOperation != nil && p.SourceOperation.Kind == "restart"
+	if !release.ValidID(p.MaintenanceID) || !protocol.ValidID(protocol.PrefixRequest, p.RequestID) || !protocol.ValidID(protocol.PrefixRequest, p.LinkRequestID) || p.RequestID == p.LinkRequestID || p.PreparationRevision < 1 || process.PID <= 1 || process.StartTicks == 0 || process.LaunchID != p.Successor.ProcessInstanceID || !release.ValidSHA(process.SHA256) || process.SHA256 != p.Successor.ArtifactSHA256 || p.Successor.InstanceID == "" || p.Successor.InstanceID != p.Previous.InstanceID || p.Successor.UpgradeID != p.MaintenanceID || p.Successor.ProcessInstanceID == p.Previous.ProcessInstanceID || !independentArtifact {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid independent committed maintenance binding")
 	}
 	old, err := store.GetCommittedMaintenance(ctx, tx.Q(), p.MaintenanceID)
@@ -95,6 +96,13 @@ func (c registerCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *st
 		return Outcome{}, captureErr
 	}
 	events := []Event{{ObjectType: "maintenance", ObjectID: p.MaintenanceID, ObjectVersion: 1, Kind: "committed_maintenance_registered", Body: map[string]any{"admission_fenced": true}}}
+	if p.SourceOperation != nil {
+		original, err := maintenanceOperationSource(ctx, tx.Q(), p)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, Event{ObjectType: "maintenance", ObjectID: p.MaintenanceID, Kind: "maintenance.source_operation_retained", Body: map[string]any{"source_operation": p.SourceOperation, "original": original, "original_health_unconfirmed": true}})
+	}
 	if c.Bounded != nil {
 		sources, err := boundedSummarySources(ctx, tx.Q())
 		if err != nil {
@@ -145,6 +153,9 @@ func (c linkCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *store.
 	}
 	if !forced && (!prepared.Prepared || prepared.Revision != row.Plan.PreparationRevision) {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "committed maintenance preparation changed before linkage")
+	}
+	if err := supersedeMaintenanceOperation(ctx, x, tx, row.Plan); err != nil {
+		return Outcome{}, err
 	}
 	row.Linked = true
 	row.Receipt = &proof
@@ -240,6 +251,10 @@ func (a *App) CommittedMaintenanceReadiness(ctx context.Context, id string) (pro
 }
 
 func validateCommittedMaintenanceParent(ctx context.Context, q store.Querier, p protocol.CommittedMaintenancePlan) error {
+	if p.SourceOperation != nil {
+		_, err := maintenanceOperationSource(ctx, q, p)
+		return err
+	}
 	if p.ParentMaintenanceID == "" {
 		if p.ParentPlan != nil || p.ParentReceipt != nil || p.ParentLaunchExit != nil || p.ParentPlanSHA256 != "" || p.ParentArchiveSHA256 != "" || p.ParentGeneration != 0 || p.FailedProcessExited {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "maintenance parent provenance is incomplete")

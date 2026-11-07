@@ -74,7 +74,11 @@ func (s *Supervisor) committedBundle(p protocol.CommittedMaintenancePlan) (*rele
 			return nil, a, errors.New("updater: successor must cover all irreversible parent schema versions")
 		}
 	}
-	if b.Manifest.ReleaseID != p.Successor.ReleaseID || b.ManifestSHA256 != p.Successor.ManifestSHA256 || a.SHA256 != p.Successor.ArtifactSHA256 || !b.Manifest.Protocol.Contains(s.state.Current.Protocol) || !b.Manifest.Storage.ServerSchema.Contains(s.state.Current.StorageVersion) {
+	protocolVersion, storageVersion := s.state.Current.Protocol, s.state.Current.StorageVersion
+	if source := p.SourceOperation; source != nil {
+		protocolVersion, storageVersion = source.Protocol, source.StorageVersion
+	}
+	if b.Manifest.ReleaseID != p.Successor.ReleaseID || b.ManifestSHA256 != p.Successor.ManifestSHA256 || a.SHA256 != p.Successor.ArtifactSHA256 || !b.Manifest.Protocol.Contains(protocolVersion) || !b.Manifest.Storage.ServerSchema.Contains(storageVersion) {
 		return nil, a, errors.New("updater: maintenance successor is incompatible with committed data")
 	}
 	return b, a, nil
@@ -87,13 +91,24 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 	if err := validateMaintenanceRequests(p); err != nil {
 		return err
 	}
-	if s.cfg.AuthoritySocket == "" || s.cfg.CoordinatorSocket == "" || s.state.CommittedProof == nil || s.state.Current != s.state.CommittedProof.Version || s.state.Process != s.state.CommittedProof.Process {
+	if s.cfg.AuthoritySocket == "" || s.cfg.CoordinatorSocket == "" {
+		return errors.New("updater: fixed maintenance authority required")
+	}
+	if p.SourceOperation != nil {
+		if err := s.validateOperationSource(ctx, p); err != nil {
+			return err
+		}
+	} else if s.state.CommittedProof == nil || s.state.Current != s.state.CommittedProof.Version || s.state.Process != s.state.CommittedProof.Process {
 		return errors.New("updater: exact committed service proof required")
 	}
-	if !done(s.state.Operation) || s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
+	if p.SourceOperation == nil && !done(s.state.Operation) || s.state.Recovery != nil && s.state.Recovery.Phase != "ledger_linked" {
 		return errors.New("updater: another legacy operation owns this service")
 	}
-	if p.ParentMaintenanceID == "" {
+	if p.SourceOperation != nil {
+		if !maintenanceTerminal(s.state.Maintenance) {
+			return errors.New("updater: another maintenance owns the unfinished source")
+		}
+	} else if p.ParentMaintenanceID == "" {
 		if !maintenanceTerminal(s.state.Maintenance) || p.ParentPlan != nil || p.ParentPlanSHA256 != "" || p.ParentArchiveSHA256 != "" || p.ParentGeneration != 0 || p.ParentReceipt != nil || p.ParentLaunchExit != nil || p.FailedProcessExited || s.state.CommittedProof.Binding != p.Previous || s.state.Process != p.PreviousProcess {
 			return errors.New("updater: exact committed service source required")
 		}
@@ -106,7 +121,7 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 			return errors.New("updater: failed maintenance source or admission responsibility changed")
 		}
 	}
-	exitedLaunch := p.ParentMaintenanceID != "" && p.PreviousProcess == (Identity{})
+	exitedLaunch := (p.ParentMaintenanceID != "" || p.SourceOperation != nil) && p.PreviousProcess == (Identity{})
 	// Ordinary maintenance already matches the historical committed binding and
 	// the current verified process separately. A same-version restart preserves
 	// that binding; failed-parent recovery must retain its original launch.
@@ -117,7 +132,7 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 	if generation && (p.ExpectedGeneration != s.state.Generation || p.StateSHA256 != digest(s.state)) {
 		return errors.New("updater: committed state generation changed")
 	}
-	if p.Successor.UpgradeID != p.MaintenanceID || !validRollbackBinding(p.Successor, s.cfg.InstanceID) || p.Successor.ProcessInstanceID == p.Previous.ProcessInstanceID || p.Successor.ProcessInstanceID == p.PreviousProcess.LaunchID || p.Successor.ArtifactSHA256 == p.Previous.ArtifactSHA256 {
+	if p.Successor.UpgradeID != p.MaintenanceID || !validRollbackBinding(p.Successor, s.cfg.InstanceID) || p.Successor.ProcessInstanceID == p.Previous.ProcessInstanceID || p.Successor.ProcessInstanceID == p.PreviousProcess.LaunchID || !independentMaintenanceArtifact(p) {
 		return errors.New("updater: independent maintenance successor required")
 	}
 	if err := verifyResourceEvidence(maintenanceResources(p), s.opts.Now()); err != nil {
@@ -125,6 +140,9 @@ func (s *Supervisor) validateCommittedMaintenance(ctx context.Context, p protoco
 	}
 	if _, _, err := s.committedBundle(p); err != nil {
 		return err
+	}
+	if p.SourceOperation != nil {
+		return nil
 	}
 	if exitedLaunch {
 		parent, err := s.maintenanceParent(p)
@@ -194,7 +212,14 @@ func (s *Supervisor) AdoptCommittedMaintenance(ctx context.Context, p protocol.C
 		s.state.BoundedHistory[b.Authorization.RequestID] = *b
 		s.state.Bounded = nil
 	}
-	s.state.Maintenance = &CommittedMaintenance{Plan: p, OriginalStateSHA256: p.StateSHA256, OriginalProof: *s.state.CommittedProof, Target: target, Phase: "updater_adopted"}
+	originalProof := CommittedProof{}
+	if s.state.CommittedProof != nil {
+		originalProof = *s.state.CommittedProof
+	}
+	if err := s.archiveOperationSource(p); err != nil {
+		return err
+	}
+	s.state.Maintenance = &CommittedMaintenance{Plan: p, OriginalStateSHA256: p.StateSHA256, OriginalProof: originalProof, Target: target, Phase: "updater_adopted"}
 	if p.ParentMaintenanceID != "" && p.ReceiptRecoveryStop != nil {
 		parent := s.state.MaintenanceHistory[p.ParentMaintenanceID]
 		s.state.Maintenance.ReceiptRecoveryAuthorized = parent.ReceiptRecoveryAuthorized
@@ -299,6 +324,13 @@ func (s *Supervisor) maintenanceAuthorityValid(m *CommittedMaintenance) error {
 }
 
 func (s *Supervisor) maintenanceOldGone(ctx context.Context, m *CommittedMaintenance) error {
+	if source := m.Plan.SourceOperation; source != nil && m.Plan.PreviousProcess == (Identity{}) {
+		op, exists := s.state.OperationHistory[source.OperationID]
+		if !exists || digest(op) != source.OperationSHA256 {
+			return errors.New("updater: original launch history unavailable")
+		}
+		return s.operationSourceExited(ctx, m.Plan, &op)
+	}
 	if m.Plan.ParentMaintenanceID != "" && m.Plan.PreviousProcess == (Identity{}) {
 		parent, err := s.maintenanceParent(m.Plan)
 		if err != nil {

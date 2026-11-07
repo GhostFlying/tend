@@ -8686,6 +8686,80 @@
       "title": "MaintenanceAuthorization",
       "type": "object"
     },
+    "MaintenanceLaunchExitProof": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "launch_id": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "signal": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "launch_id",
+        "artifact_sha256",
+        "exit_code"
+      ],
+      "title": "MaintenanceLaunchExitProof",
+      "type": "object"
+    },
+    "MaintenanceOperationSource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "launch_exit": {
+          "$ref": "#/definitions/MaintenanceLaunchExitProof"
+        },
+        "launch_id": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "operation_sha256": {
+          "type": "string"
+        },
+        "original_ledger": {
+          "$ref": "#/definitions/UpgradeView"
+        },
+        "original_request_id": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "storage_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "kind",
+        "phase",
+        "operation_sha256",
+        "launch_id",
+        "protocol",
+        "storage_version"
+      ],
+      "title": "MaintenanceOperationSource",
+      "type": "object"
+    },
     "MaintenanceTimeoutPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -10091,6 +10165,15 @@
         "invalid_reason": {
           "type": "string"
         },
+        "number": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "repository": {
+          "type": "string"
+        },
         "requirements_digest": {
           "type": "string"
         },
@@ -10105,6 +10188,12 @@
         },
         "round": {
           "$ref": "#/definitions/ObservedDeliveryReviewRound"
+        },
+        "round_limit": {
+          "type": "integer"
+        },
+        "rounds_used": {
+          "type": "integer"
         },
         "source": {
           "type": "string"
@@ -10135,11 +10224,17 @@
         "acceptance_id": {
           "type": "string"
         },
+        "acceptance_verdict": {
+          "$ref": "#/definitions/Verdict"
+        },
         "artifact_id": {
           "type": "string"
         },
         "base_sha": {
           "type": "string"
+        },
+        "execution_requirements": {
+          "$ref": "#/definitions/SharedReviewExecutionRequirements"
         },
         "head_sha": {
           "type": "string"
@@ -10155,6 +10250,12 @@
         },
         "reviewer": {
           "type": "string"
+        },
+        "reviewer_profile": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "reviewer_role": {
+          "$ref": "#/definitions/RunRole"
         },
         "run_id": {
           "type": "string"
@@ -12329,6 +12430,9 @@
         "source": {
           "$ref": "#/definitions/RecoveryIdentity"
         },
+        "source_operation": {
+          "$ref": "#/definitions/MaintenanceOperationSource"
+        },
         "target": {
           "$ref": "#/definitions/UpgradeBinding"
         }
@@ -13022,6 +13126,9 @@
         "acceptance_id": {
           "type": "string"
         },
+        "acceptance_verdict": {
+          "$ref": "#/definitions/Verdict"
+        },
         "artifact_id": {
           "type": "string"
         },
@@ -13045,6 +13152,12 @@
         },
         "reviewer": {
           "type": "string"
+        },
+        "reviewer_profile": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "reviewer_role": {
+          "$ref": "#/definitions/RunRole"
         },
         "run_id": {
           "type": "string"
@@ -13159,6 +13272,12 @@
       "properties": {
         "base_sha": {
           "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewFinding"
+          },
+          "type": "array"
         },
         "head_sha": {
           "type": "string"
@@ -15064,6 +15183,9 @@
         },
         "reason": {
           "type": "string"
+        },
+        "reviewer_role": {
+          "$ref": "#/definitions/RunRole"
         },
         "reviewer_task_id": {
           "type": "string"

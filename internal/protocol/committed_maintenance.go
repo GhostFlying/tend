@@ -33,6 +33,7 @@ type MaintenanceLaunchExitProof struct {
 }
 
 type CommittedMaintenancePlan struct {
+	SourceOperation            *MaintenanceOperationSource   `json:"source_operation,omitempty"`
 	ParentLaunchExit           *MaintenanceLaunchExitProof   `json:"parent_launch_exit,omitempty"`
 	ReceiptRecoveryStop        *CommittedReceiptRecoveryStop `json:"receipt_recovery_stop,omitempty"`
 	ParentReceipt              *CommittedMaintenanceReceipt  `json:"parent_receipt,omitempty"`
@@ -61,6 +62,21 @@ type CommittedMaintenancePlan struct {
 	ResourceSHA256             string                        `json:"resource_sha256"`
 	ExpiresAtMillis            int64                         `json:"expires_at_millis"`
 	PreparationRevision        int64                         `json:"preparation_revision"`
+}
+
+// MaintenanceOperationSource preserves an unfinished physical attempt. It does
+// not assert that its upgrade or any retained business effect completed.
+type MaintenanceOperationSource struct {
+	OperationID       string                      `json:"operation_id"`
+	Kind              string                      `json:"kind"`
+	Phase             string                      `json:"phase"`
+	OperationSHA256   string                      `json:"operation_sha256"`
+	LaunchID          string                      `json:"launch_id"`
+	Protocol          int64                       `json:"protocol"`
+	StorageVersion    int64                       `json:"storage_version"`
+	OriginalRequestID string                      `json:"original_request_id,omitempty"`
+	OriginalLedger    *UpgradeView                `json:"original_ledger,omitempty"`
+	LaunchExit        *MaintenanceLaunchExitProof `json:"launch_exit,omitempty"`
 }
 
 // CommittedMaintenanceReceipt proves this window's independent successor.

@@ -368,6 +368,10 @@ func (a *App) CommitHandoff(ctx context.Context, id string) (v store.MainThreadB
 	return
 }
 
+// ErrSummaryPaused means the frozen source was not admitted for new model work.
+// Existing summary results can still be saved and settled under the same fence.
+var ErrSummaryPaused = errors.New("summary admission is paused for maintenance")
+
 // ClaimSummaryAttempt durably throttles the same source snapshot across restarts.
 // retryAfterMillis is a duration, measured against the injected application clock.
 func (a *App) ClaimSummaryAttempt(ctx context.Context, snap store.HandoffSnapshot, retryAfterMillis int64) (claimed bool, err error) {
@@ -379,6 +383,11 @@ func (a *App) ClaimSummaryAttempt(ctx context.Context, snap store.HandoffSnapsho
 			return e
 		} else if protected {
 			return nil
+		}
+		if paused, e := a.mainWorkPaused(ctx, tx.Q()); e != nil {
+			return e
+		} else if paused {
+			return ErrSummaryPaused
 		}
 		current, err := store.GetHandoffSnapshot(ctx, tx.Q(), snap.Instance)
 		if err != nil {

@@ -117,7 +117,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	} else if err != nil {
 		return fail(err)
 	}
-	if (state.Format != 1 && state.Format != 2 && state.Format != 3 && state.Format != 4) || state.InstanceID != cfg.InstanceID {
+	if (state.Format < 1 || state.Format > 5) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
 	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
@@ -128,6 +128,9 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	}
 	if state.Format == 4 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Bounded == nil && len(state.BoundedHistory) == 0 || state.Maintenance == nil && state.Operation == nil) {
 		return fail(errors.New("updater: incomplete bounded maintenance ownership"))
+	}
+	if state.Format == 5 && (state.Generation == 0 || state.UpdaterEpoch == "") {
+		return fail(errors.New("updater: incomplete critical operation ownership"))
 	}
 	if state.Format >= 2 {
 		epoch, err := opts.NewID()
@@ -541,7 +544,7 @@ func (s *Supervisor) Step(ctx context.Context) error {
 		return err
 	}
 	err := s.step(ctx, op)
-	if err != nil {
+	if err != nil && (op.LastError != err.Error() || digest(s.state) != digest(s.durable)) {
 		op.LastError = err.Error()
 		if saveErr := s.save(); saveErr != nil {
 			return fmt.Errorf("updater: persist failed operation: %w", saveErr)
@@ -623,6 +626,8 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		return s.start(ctx, op, false)
 	case "starting":
 		return s.start(ctx, op, true)
+	case "launch_exited":
+		return errors.New("updater: owned candidate exited; independent bounded replacement required")
 	case "checking":
 		return s.check(ctx, op)
 	case "rollback_stopping":
@@ -682,6 +687,15 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 	}
 	var id Identity
 	if recovering {
+		if proof, err := LoadOwnedLaunchExit(s.cfg, op.LaunchID, v.Artifact.SHA256); err != nil {
+			return err
+		} else if proof != nil {
+			if err := s.criticalState(); err != nil {
+				return err
+			}
+			op.LaunchExit, op.Phase = proof, "launch_exited"
+			return s.save()
+		}
 		found, err := s.opts.Process.Find(ctx, op.LaunchID, v.Artifact.SHA256)
 		if err != nil {
 			return err
@@ -691,6 +705,14 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 		}
 		id = found[0]
 	} else {
+		if s.state.Format < 5 {
+			if err := s.criticalState(); err != nil {
+				return err
+			}
+			if err := s.save(); err != nil {
+				return err
+			}
+		}
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": op.LaunchID, "TEND_UPDATER_LAUNCH_ID": op.LaunchID, "TEND_RELEASE_SHA256": v.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": v.ReleaseID}
 		if op.Kind == "upgrade" {
 			extra["TEND_UPGRADE_ID"] = op.ID
@@ -699,6 +721,16 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 		var err error
 		id, err = s.opts.Process.Start(ctx, v.Binary, s.cfg, extra)
 		if err != nil {
+			var exited *launchExitedError
+			if errors.As(err, &exited) {
+				op.LaunchExit, op.Phase = &exited.proof, "launch_exited"
+				if err := s.criticalState(); err != nil {
+					return err
+				}
+				if saveErr := s.save(); saveErr != nil {
+					return saveErr
+				}
+			}
 			if errors.Is(err, ErrNotStarted) {
 				if rollback {
 					op.Phase = "rollback_ready"
@@ -741,7 +773,29 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 	}
 	return s.save()
 }
-func (s *Supervisor) check(ctx context.Context, op *Operation) error {
+func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
+	if err := s.ensureHealthWindow(op); err != nil {
+		return err
+	}
+	defer func() { result = s.finishHealthRead(op, result) }()
+	readCtx, cancel, err := s.healthReadContext(ctx, op)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	ctx = readCtx
+	if proof, err := LoadOwnedLaunchExit(s.cfg, op.LaunchID, op.Candidate.Artifact.SHA256); err != nil {
+		return err
+	} else if proof != nil {
+		if op.CandidateProcess.PID != proof.PID || op.CandidateProcess.LaunchID != proof.LaunchID || op.CandidateProcess.SHA256 != proof.ArtifactSHA256 {
+			return ErrUnknown
+		}
+		op.LaunchExit, op.Phase = proof, "launch_exited"
+		if err := s.save(); err != nil {
+			return err
+		}
+		return errors.New("updater: original owned candidate exited; independent bounded replacement required")
+	}
 	if s.opts.Authority == nil {
 		return errors.New("updater: authority unavailable")
 	}
@@ -759,12 +813,12 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) error {
 		}
 	}
 	id, processErr := s.opts.Process.Inspect(ctx, op.CandidateProcess.PID)
-	running := processErr == nil && id.StartTicks == op.CandidateProcess.StartTicks && id.SHA256 == op.Candidate.Artifact.SHA256
+	running := processErr == nil && id == op.CandidateProcess && id.SHA256 == op.Candidate.Artifact.SHA256
 	if processErr != nil && !errors.Is(processErr, ErrNotRunning) {
 		return processErr
 	}
 	if running && h.Healthy && op.Configuration != nil {
-		sum, err := configurationDigest(s.cfg.ServiceConfig)
+		sum, err := configurationDigestContext(ctx, s.cfg.ServiceConfig)
 		if err != nil || sum != op.Configuration.Target.SHA256 {
 			return errors.New("updater: candidate configuration changed before commitment")
 		}

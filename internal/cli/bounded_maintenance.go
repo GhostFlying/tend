@@ -27,7 +27,7 @@ func runBoundedMaintenance(ctx context.Context, e *Env, args []string) error {
 	installer := fs.String("installer", "", "absolute reviewed independent installer artifact")
 	installerSHA := fs.String("installer-sha256", "", "reviewed installer SHA-256")
 	config := fs.String("config", "", "exact fixed private updater configuration")
-	plan := fs.String("plan", "", "complete private source plan; original bytes are pinned before execution")
+	plan := fs.String("plan", "", "complete private source plan; optional source_operation pins the unfinished attempt and original ledger CAS")
 	authorization := fs.String("authorization", "", "typed independent bounded authorization; plan may fill factual bindings")
 	request := fs.String("request-id", "", "original stable request identity; mutation flags must match the authorization")
 	generation := fs.Uint64("expected-generation", 0, "fresh durable generation; must match the authorization")
