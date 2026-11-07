@@ -636,8 +636,7 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 		}
 		identity = found[0]
 	} else {
-		remaining, err := s.boundedRunnerRemaining()
-		if err != nil {
+		if _, err := s.boundedRunnerRemaining(); err != nil {
 			return err
 		}
 		if err := s.criticalState(); err != nil {
@@ -646,7 +645,7 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 		if err := s.save(); err != nil {
 			return err
 		}
-		remaining, err = s.boundedRunnerRemaining()
+		remaining, err := s.boundedRunnerRemaining()
 		if err != nil {
 			return err
 		}

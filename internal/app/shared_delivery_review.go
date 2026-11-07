@@ -166,10 +166,17 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
+			waitingEvidence := false
+			if len(r.Rounds) > 0 {
+				last := r.Rounds[len(r.Rounds)-1]
+				// Coordination status changes on an external budget grant.
+				// Eligibility belongs to the last immutable waiting verdict.
+				waitingEvidence = last.ReviewerRole == protocol.RoleAccept && last.TaskID == round.TaskID && last.ArtifactID == round.ArtifactID && (last.AcceptanceVerdict == protocol.VerdictBlocked || last.AcceptanceVerdict == protocol.VerdictInconclusive)
+			}
 			for _, previous := range r.Rounds {
 				sameTask := previous.TaskID == round.TaskID || previous.SupplementTaskID != "" && previous.SupplementTaskID == round.TaskID
 				accept := round.ReviewerRole == protocol.RoleAccept
-				if sameTask && (!accept || previous.ArtifactID == round.ArtifactID && r.Status != "waiting") || round.RunID != "" && previous.RunID == round.RunID || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
+				if sameTask && (!accept || previous.ArtifactID == round.ArtifactID && !waitingEvidence) || round.RunID != "" && previous.RunID == round.RunID || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
 					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "a focused acceptance review requires a new real artifact/run; earlier tasks, runs or acceptances cannot be recounted")
 				}
 			}

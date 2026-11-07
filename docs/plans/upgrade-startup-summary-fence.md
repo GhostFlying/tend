@@ -105,6 +105,8 @@ PrepareOnly 的其他无摘要原因仍保持当前行为；本次不把所有�
 
 ### 复用 D180 的来源和两端责任移交
 
+完整检查发现固定健康截止的返回汇总误把已保存精确回滚授权、正常进入 `rollback_stopping` 的成功状态转换改成超时错误，令既有配置恢复与持久 admission fence 回归尚未执行其断言就提前失败。最小修正仍保存一次原 deadline 到期事实，但对本次已成功保存且满足原 binding、server/control revision、admission fence、rollback-safe、未接纳新业务条件的回滚转换返回成功；实际停止和恢复继续执行既有 fresh authority 与持久围栏校验，不以 timeout 授予新回滚权限。无授权、authority 未确认及普通健康零继续返回超时。同步删除 bounded runner 在持久化前只用于检查错误却未使用值的 `remaining` 局部赋值，持久化后仍重新读取原剩余期限再发 Start。复用全部原失败叶子并追加“已授权转换保留到期事实、缺失或失效围栏不获成功”的聚焦回归，不改变原截止或删除安全断言。forward-recovery 真实进程 fixture 的可读格式正例扩到 5，未来未知格式拒绝例相应使用 6，格式 1 的旧负例保留。
+
 1. 可选的 source operation 模式固定原未提交操作的完整快照、摘要、阶段、binding、原请求、launch、实际 process 或真实退出隔离证据，并沿现有 plan 固定 generation、state/config 摘要、数据身份和主机控制 CAS。健康零的 checking 不要求先伪造旧 ledger completed 或 irreversible。
 2. successor 兼容性依据实际已迁移的候选格式，不依据仍指向旧已提交版本的 Current。保留原数据，不从旧备份降级 schema。正常修复使用真实修复产物；同 artifact 只在显式同版本恢复模式下允许独立新请求和新 launch。
 3. 新窗口复用现有固定总体与阶段预算。相同请求对账不重复 Start、不续时。force 只扩大明确授予的物理停止与安装范围，不把 active/unknown 业务伪造为 drained 或已完成。
@@ -141,3 +143,13 @@ PrepareOnly 的其他无摘要原因仍保持当前行为；本次不把所有�
 ## 实施与验证状态
 
 已实现摘要事务准入、正常 Issue 工具集交接、共享审阅受限读取与真实 acceptance 结论接续、固定健康截止，以及原未提交安装的独立前向接管。关键启动身份和截止使用 format 5，普通历史读取与默认协议语义保留。聚焦故障和 race 回归已覆盖真实结论、超过一页的无关审阅历史、健康提前返回、晚到原健康、owned Wait 和原安装责任移交；最终完整检查、独立整 PR 审阅与 CI 由唯一协调入口完成，结果记在 PR。源码交付、固定 updater 安装及业务实际接续分别验收。
+
+### 完整检查暴露的 Issue 启动兼容回归
+
+正常 Issue 启用 D81 工具集迁移后，后续成功恢复无条件调用 history-location 写入口；runner coordination adapter 和合法无文件历史的 harness 返回空 rollout path，而该写入口正确地拒绝空索引。结果是已恢复的原线程仍无法 ready，阻断后续 completion owner turn 和原配置冻结 repair。另旧 `ReceiptOnly=true` / 未启用严格 receipt reader 的路径被错误归入正常 Issue，改变了原 resume / fallback 语义。
+
+修正仅在实际返回非空 history index 时登记 location；空索引仍作为不可用历史保留，不清除已存索引、不伪造来源。正常 Issue 的新工具迁移条件排除旧 receipt-only，严格 receipt reader、park、compact 及 native unknown 继续先走原对账分支。App 的 location 校验、原超时、source CAS 和未知不重放边界保持。新增当前 hash + 空 history index 的实际恢复回归，并复跑原 named repair、legacy receipt-only、manager E2E 故障叶子；不扩大阶段预算或重跑完整检查。
+
+同一入口的权限核对进一步确认，既有 main `handoffPrompt` 与 `HandoffSummaryInput` 是全局范围；直接用于 Issue 会把无关 sibling 事实及 main 摘要注入 Issue。新增的正常 Issue 迁移只复用 D81 原生 create/inject/CAS/unknown 流程，事实包改读已注册 conversation 对应 Issue 的规范只读视图、实际继承约束与 source 分页；不调用全局摘要准备，也不注入该实例曾经由 main 输入生成的缓存。main 路径不改变，不通过扩大工具权限解决。用真实 canonical Issue 与注册 conversation、无关 sibling 内容以及旧缓存验证交接包和摘要准入均不越界。
+
+正式独立审阅确认 acceptance 等待恢复的同根死路：两个真实 blocked/inconclusive 耗尽后，外部授权将协调状态置为 changes_requested，但同产物复核仍按 mutable status 判断而拒绝。修正以最后记录的真实 acceptance verdict（及同 Task/产物）识别等待证据资格，不用协调状态猜测。两轮默认预算保持，第三轮仍必须真实外部一次授权与新的实际 acceptance Run；旧 Run/verdict 不能重计，质量 changes_required 不得到此例外。回归两次真实等待→拒绝未授权→外部授权→同产物新 Run→真实 passed。

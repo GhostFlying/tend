@@ -98,13 +98,13 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, format := range []int64{2, 3, 4} {
+	for _, format := range []int64{2, 3, 4, 5} {
 		stateFormat.Store(format)
 		if err := c.InitializeRecovery(ctx, plan.RecoveryID); err != nil {
 			t.Fatalf("retained updater format %d rejected forward startup: %v", format, err)
 		}
 	}
-	for _, format := range []int64{1, 5} {
+	for _, format := range []int64{1, 6} {
 		stateFormat.Store(format)
 		if err := c.InitializeRecovery(ctx, plan.RecoveryID); err == nil {
 			t.Fatalf("unsupported updater format %d admitted forward startup", format)

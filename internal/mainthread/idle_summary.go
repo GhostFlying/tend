@@ -54,8 +54,13 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 		m.mu.Lock()
 		m.maintenanceBlocked = true
 		m.mu.Unlock()
-	} else if err := m.app.RecordMainThreadLocation(ctx, m.bindingInstance(), id, rolloutPath(th)); err != nil {
-		return nil, err
+	} else if path := rolloutPath(th); path != "" {
+		// Native history locations are optional (including runner-hosted
+		// coordination). An unavailable index neither blocks a valid resume
+		// nor erases the original index already retained in the binding.
+		if err := m.app.RecordMainThreadLocation(ctx, m.bindingInstance(), id, path); err != nil {
+			return nil, err
+		}
 	}
 	if !needsHandoff {
 		return th, nil
