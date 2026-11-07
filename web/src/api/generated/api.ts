@@ -364,6 +364,7 @@ export interface TendAPI {
   NativeEntry?: NativeEntry;
   NativeUsageRegistration?: NativeUsageRegistration;
   NextActionPage?: NextActionPage;
+  ObservedDeployment?: ObservedDeployment;
   PlannerEntry?: PlannerEntry;
   PresentAttentionPayload?: PresentAttentionPayload;
   PromoteConsultationPayload?: PromoteConsultationPayload;
@@ -4312,6 +4313,146 @@ export interface PlannerEntry {
   status: string;
   title: string;
   updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedDeployment".
+ */
+export interface ObservedDeployment {
+  actual_server?: ObservedServer;
+  admission?: ObservedServerAdmission;
+  committed_proof?: UpdaterReceipt;
+  latest_upgrade?: ObservedUpgrade;
+  observed_at: number;
+  preparation?: ObservedDeploymentPreparation;
+  proof_status: string;
+  runner?: ObservedRunner;
+  schema_version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedServer".
+ */
+export interface ObservedServer {
+  binary_sha256: string;
+  commit?: string;
+  modified: boolean;
+  pid: number;
+  process_instance_id: string;
+  version?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedServerAdmission".
+ */
+export interface ObservedServerAdmission {
+  archive_prepared: boolean;
+  archive_revision: number;
+  archive_updated_at: number;
+  committed_maintenance_fence: boolean;
+  observed_at: number;
+  source: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedUpgrade".
+ */
+export interface ObservedUpgrade {
+  hosts: ObservedUpgradeHost[] | null;
+  manifest_sha256: string;
+  phase: string;
+  release_id: string;
+  revision: number;
+  status: string;
+  updated_at?: number;
+  upgrade_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedUpgradeHost".
+ */
+export interface ObservedUpgradeHost {
+  host_id: string;
+  phase: string;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedDeploymentPreparation".
+ */
+export interface ObservedDeploymentPreparation {
+  blockers: ObservedDeploymentBlocker[] | null;
+  complete: boolean;
+  deliveries: IssueDeliveryPage[] | null;
+  delivery_target_available?: boolean;
+  host_ids: string[] | null;
+  hosts: ObservedDeploymentHost[] | null;
+  issue_ids: string[] | null;
+  missing: string[] | null;
+  observed_at: number;
+  seq: number;
+  server_instance?: string;
+  settled_baseline?: ObservedUpgrade;
+  source: string;
+  target_complete: boolean;
+  target_source: string;
+  unsettled_upgrades: ObservedUpgrade[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedDeploymentBlocker".
+ */
+export interface ObservedDeploymentBlocker {
+  count?: number;
+  host_id?: string;
+  id?: string;
+  kind: string;
+  phase?: string;
+  revision?: number;
+  source: string;
+  status?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedDeploymentHost".
+ */
+export interface ObservedDeploymentHost {
+  arch: string;
+  host_id: string;
+  installation_reason?: string;
+  installation_source: string;
+  installation_status: string;
+  open_runs: number;
+  os: string;
+  pending_blockers: number;
+  runner?: ObservedRunner;
+  slots: number;
+  unknown_runs: number;
+  updater_receipt?: UpdaterReceipt;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedRunner".
+ */
+export interface ObservedRunner {
+  applied_control_revision: number;
+  bounded_recovery_authorization_id?: string;
+  build: RunnerBuild;
+  capabilities: string[] | null;
+  control_mode: string;
+  control_revision: number;
+  host_id: string;
+  instance_id: string;
+  last_heartbeat_at: number;
+  mode: string;
+  online: boolean;
+  pending_claims?: number;
+  pending_operations?: number;
+  published_recovery_authorization_id?: string;
+  published_recovery_release_id?: string;
+  source?: string;
+  upgrade_id?: string;
+  upgrade_phase?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

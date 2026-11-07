@@ -176,14 +176,67 @@ type ObservedTask struct {
 
 // ObservedDeployment separates actual process facts from historical release state.
 type ObservedDeployment struct {
-	Admission      *ObservedServerAdmission `json:"admission,omitempty"`
-	Runner         *ObservedRunner          `json:"runner,omitempty"`
-	ObservedAt     int64                    `json:"observed_at"`
-	SchemaVersion  int64                    `json:"schema_version"`
-	ActualServer   *ObservedServer          `json:"actual_server,omitempty"`
-	ProofStatus    string                   `json:"proof_status"`
-	CommittedProof *UpdaterReceipt          `json:"committed_proof,omitempty"`
-	LatestUpgrade  *ObservedUpgrade         `json:"latest_upgrade,omitempty"`
+	Preparation    *ObservedDeploymentPreparation `json:"preparation,omitempty"`
+	Admission      *ObservedServerAdmission       `json:"admission,omitempty"`
+	Runner         *ObservedRunner                `json:"runner,omitempty"`
+	ObservedAt     int64                          `json:"observed_at"`
+	SchemaVersion  int64                          `json:"schema_version"`
+	ActualServer   *ObservedServer                `json:"actual_server,omitempty"`
+	ProofStatus    string                         `json:"proof_status"`
+	CommittedProof *UpdaterReceipt                `json:"committed_proof,omitempty"`
+	LatestUpgrade  *ObservedUpgrade               `json:"latest_upgrade,omitempty"`
+}
+
+// ObservedDeploymentPreparation is evidence for the fixed service target, never
+// an installation grant. Complete describes available facts, not readiness to
+// deploy: known pending work and unknown physical outcomes remain explicit.
+type ObservedDeploymentPreparation struct {
+	Source                  string                      `json:"source"`
+	ObservedAt              int64                       `json:"observed_at"`
+	Seq                     int64                       `json:"seq"`
+	IssueIDs                []string                    `json:"issue_ids"`
+	ServerInstance          string                      `json:"server_instance,omitempty"`
+	TargetSource            string                      `json:"target_source"`
+	TargetComplete          bool                        `json:"target_complete"`
+	HostIDs                 []string                    `json:"host_ids"`
+	Hosts                   []ObservedDeploymentHost    `json:"hosts"`
+	SettledBaseline         *ObservedUpgrade            `json:"settled_baseline,omitempty"`
+	UnsettledUpgrades       []ObservedUpgrade           `json:"unsettled_upgrades"`
+	Deliveries              []IssueDeliveryPage         `json:"deliveries"`
+	DeliveryTargetAvailable *bool                       `json:"delivery_target_available,omitempty"`
+	Blockers                []ObservedDeploymentBlocker `json:"blockers"`
+	Complete                bool                        `json:"complete"`
+	Missing                 []string                    `json:"missing"`
+}
+
+// ObservedDeploymentHost keeps heartbeat assertions separate from supervisor
+// installation proof. A mismatched receipt is retained as evidence, not success.
+type ObservedDeploymentHost struct {
+	HostID             string          `json:"host_id"`
+	OS                 string          `json:"os"`
+	Arch               string          `json:"arch"`
+	Slots              int64           `json:"slots"`
+	Runner             *ObservedRunner `json:"runner,omitempty"`
+	UpdaterReceipt     *UpdaterReceipt `json:"updater_receipt,omitempty"`
+	InstallationStatus string          `json:"installation_status"`
+	InstallationSource string          `json:"installation_source"`
+	InstallationReason string          `json:"installation_reason,omitempty"`
+	OpenRuns           int64           `json:"open_runs"`
+	UnknownRuns        int64           `json:"unknown_runs"`
+	PendingBlockers    int64           `json:"pending_blockers"`
+}
+
+// ObservedDeploymentBlocker exposes target-relevant control facts without the
+// business prose, private configuration or native records behind them.
+type ObservedDeploymentBlocker struct {
+	Source   string `json:"source"`
+	Kind     string `json:"kind"`
+	ID       string `json:"id,omitempty"`
+	HostID   string `json:"host_id,omitempty"`
+	Revision int64  `json:"revision,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Phase    string `json:"phase,omitempty"`
+	Count    int64  `json:"count,omitempty"`
 }
 
 type ObservedServer struct {

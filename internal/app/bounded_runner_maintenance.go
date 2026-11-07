@@ -258,6 +258,13 @@ func boundedRunnerRuntimeMatches(grant protocol.BoundedRunnerMaintenanceGrant, r
 	return receipt != nil && receipt.CommittedConfirmed && !receipt.RollbackConfirmed && receipt.Phase == "committed" && receipt.Binding == p.Target && receipt.CurrentProcessInstanceID == runtime.InstanceID && receipt.CurrentSHA256 == runtime.Build.BinarySHA256
 }
 
+// A matching target process alone is not an installation receipt. Reads and
+// admission release require the same complete supervisor proof.
+func boundedRunnerInstallationMatches(grant protocol.BoundedRunnerMaintenanceGrant, runtime protocol.RunnerRuntime) bool {
+	proof := runtime.UpdaterReceipt
+	return boundedRunnerRuntimeMatches(grant, runtime) && proof != nil && proof.CommittedConfirmed && !proof.RollbackConfirmed && proof.Phase == "committed" && proof.Binding == grant.Plan.Target && proof.CurrentProcessInstanceID == runtime.InstanceID && proof.CurrentSHA256 == runtime.Build.BinarySHA256
+}
+
 func activeBoundedRunnerRunProtection(ctx context.Context, q store.Querier, r store.RunRow) (*store.MaintenanceRunProtection, error) {
 	records, err := boundedRunnerProtectionRecords(ctx, q, r.HostID)
 	if err != nil || len(records) == 0 {

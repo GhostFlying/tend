@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -224,6 +225,20 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		if !answer.OK || strings.Contains(string(answer.Result), "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK") {
 			t.Fatal("named main received unadmitted preview", response.Text)
 		}
+		for _, args := range []json.RawMessage{json.RawMessage(`{}`), json.RawMessage(`{"issue_id":"` + sibling.IssueID + `"}`)} {
+			response := e.svc.Handle(t.Context(), Call{Principal: protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "named-main", Thread: main.ThreadID}, Native: main.ThreadID + "/" + main.TurnID + "/" + ids.New(protocol.PrefixRequest), TurnID: main.TurnID, ExecutionRequestID: main.RequestID, ParentRequestID: d.RequestID, Tool: "issues_deployment_preparation_read", Arguments: args})
+			var answer answerView
+			if err := json.Unmarshal([]byte(response.Text), &answer); err != nil {
+				t.Fatal(response.Text, err)
+			}
+			if string(args) == "{}" {
+				if answer.OK || answer.Error == nil || answer.Error.Code != protocol.CodeInvalidRequest {
+					t.Fatal("Main read requires an explicit Issue", answer)
+				}
+			} else if !answer.OK || !strings.Contains(string(answer.Result), `"preparation"`) || strings.Contains(string(answer.Result), "QUEUED_OWNER_MATERIAL_MUST_NOT_LEAK") {
+				t.Fatal("Main lost its complete Issue deployment preparation scope", answer)
+			}
+		}
 		var control protocol.MessageControl
 		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
@@ -250,7 +265,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 			for _, read := range []struct {
 				tool string
 				args any
-			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}, {"issues_context_read", map[string]any{"issue_id": r.issue}}, {"issues_followups_list", map[string]any{"issue_id": r.issue}}, {"issues_deliveries_read", map[string]any{"issue_id": r.issue}}, {"issues_delivery_reviews_read", map[string]any{"issue_id": r.issue, "limit": 1}}} {
+			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}, {"issues_context_read", map[string]any{"issue_id": r.issue}}, {"issues_followups_list", map[string]any{"issue_id": r.issue}}, {"issues_deliveries_read", map[string]any{"issue_id": r.issue}}, {"issues_delivery_reviews_read", map[string]any{"issue_id": r.issue, "limit": 1}}, {"issues_deployment_preparation_read", map[string]any{"issue_id": r.issue}}} {
 				a := call(read.tool, read.args)
 				if r.allowed {
 					if !a.OK {
@@ -271,6 +286,19 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 			}
 		})
 	}
+	t.Run("deployment-preparation-current-issue-and-exact-input", func(t *testing.T) {
+		answer := call("issues_deployment_preparation_read", map[string]any{})
+		var got protocol.ObservedDeployment
+		if !answer.OK || json.Unmarshal(answer.Result, &got) != nil || got.Preparation == nil || !slices.Equal(got.Preparation.IssueIDs, []string{parent.IssueID}) {
+			t.Fatal("manager default lost its current Issue", answer)
+		}
+		for _, extra := range []map[string]any{{"host_id": "unrelated"}, {"provider": "github"}, {"limit": 1}} {
+			answer := call("issues_deployment_preparation_read", extra)
+			if answer.OK || answer.Error == nil || answer.Error.Code != protocol.CodeInvalidRequest {
+				t.Fatal("deployment preparation accepted unrelated selectors", answer)
+			}
+		}
+	})
 	t.Run("explicit-sibling-artifact-share", func(t *testing.T) {
 		original := cases["sibling"]
 		var ref string

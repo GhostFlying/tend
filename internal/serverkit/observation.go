@@ -38,8 +38,21 @@ func deploymentObservation(cfg *UpgradeConfig, ids protocol.IDGen) (app.Option, 
 		socket = cfg.UpdaterSocket
 	}
 	return app.WithDeploymentObserver(func(ctx context.Context) (protocol.ObservedDeployment, error) {
-		return readDeploymentObservation(ctx, actual, socket)
+		instance := ""
+		if cfg != nil {
+			instance = cfg.Instance
+		}
+		return configuredDeploymentObservation(ctx, actual, socket, instance)
 	}), nil
+}
+
+func configuredDeploymentObservation(ctx context.Context, actual protocol.ObservedServer, socket, instance string) (protocol.ObservedDeployment, error) {
+	d, err := readDeploymentObservation(ctx, actual, socket)
+	d.Preparation = &protocol.ObservedDeploymentPreparation{ServerInstance: instance}
+	if d.CommittedProof != nil && instance != "" && d.CommittedProof.Binding.InstanceID != instance {
+		d.ProofStatus, d.CommittedProof = "mismatch", nil
+	}
+	return d, err
 }
 
 func readDeploymentObservation(ctx context.Context, actual protocol.ObservedServer, socket string) (protocol.ObservedDeployment, error) {

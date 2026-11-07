@@ -10684,6 +10684,492 @@
       "title": "ObservedDeliveryReviewRound",
       "type": "object"
     },
+    "ObservedDeployment": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_server": {
+          "$ref": "#/definitions/ObservedServer"
+        },
+        "admission": {
+          "$ref": "#/definitions/ObservedServerAdmission"
+        },
+        "committed_proof": {
+          "$ref": "#/definitions/UpdaterReceipt"
+        },
+        "latest_upgrade": {
+          "$ref": "#/definitions/ObservedUpgrade"
+        },
+        "observed_at": {
+          "type": "integer"
+        },
+        "preparation": {
+          "$ref": "#/definitions/ObservedDeploymentPreparation"
+        },
+        "proof_status": {
+          "type": "string"
+        },
+        "runner": {
+          "$ref": "#/definitions/ObservedRunner"
+        },
+        "schema_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "observed_at",
+        "schema_version",
+        "proof_status"
+      ],
+      "title": "ObservedDeployment",
+      "type": "object"
+    },
+    "ObservedDeploymentBlocker": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind"
+      ],
+      "title": "ObservedDeploymentBlocker",
+      "type": "object"
+    },
+    "ObservedDeploymentHost": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "installation_reason": {
+          "type": "string"
+        },
+        "installation_source": {
+          "type": "string"
+        },
+        "installation_status": {
+          "type": "string"
+        },
+        "open_runs": {
+          "type": "integer"
+        },
+        "os": {
+          "type": "string"
+        },
+        "pending_blockers": {
+          "type": "integer"
+        },
+        "runner": {
+          "$ref": "#/definitions/ObservedRunner"
+        },
+        "slots": {
+          "type": "integer"
+        },
+        "unknown_runs": {
+          "type": "integer"
+        },
+        "updater_receipt": {
+          "$ref": "#/definitions/UpdaterReceipt"
+        }
+      },
+      "required": [
+        "host_id",
+        "os",
+        "arch",
+        "slots",
+        "installation_status",
+        "installation_source",
+        "open_runs",
+        "unknown_runs",
+        "pending_blockers"
+      ],
+      "title": "ObservedDeploymentHost",
+      "type": "object"
+    },
+    "ObservedDeploymentPreparation": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ObservedDeploymentBlocker"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "deliveries": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueDeliveryPage"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery_target_available": {
+          "type": "boolean"
+        },
+        "host_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ObservedDeploymentHost"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issue_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missing": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_at": {
+          "type": "integer"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "server_instance": {
+          "type": "string"
+        },
+        "settled_baseline": {
+          "$ref": "#/definitions/ObservedUpgrade"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target_complete": {
+          "type": "boolean"
+        },
+        "target_source": {
+          "type": "string"
+        },
+        "unsettled_upgrades": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ObservedUpgrade"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "observed_at",
+        "seq",
+        "issue_ids",
+        "target_source",
+        "target_complete",
+        "host_ids",
+        "hosts",
+        "unsettled_upgrades",
+        "deliveries",
+        "blockers",
+        "complete",
+        "missing"
+      ],
+      "title": "ObservedDeploymentPreparation",
+      "type": "object"
+    },
+    "ObservedRunner": {
+      "additionalProperties": false,
+      "properties": {
+        "applied_control_revision": {
+          "type": "integer"
+        },
+        "bounded_recovery_authorization_id": {
+          "type": "string"
+        },
+        "build": {
+          "$ref": "#/definitions/RunnerBuild"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "control_mode": {
+          "type": "string"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "last_heartbeat_at": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "pending_claims": {
+          "type": "integer"
+        },
+        "pending_operations": {
+          "type": "integer"
+        },
+        "published_recovery_authorization_id": {
+          "type": "string"
+        },
+        "published_recovery_release_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        },
+        "upgrade_phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host_id",
+        "instance_id",
+        "online",
+        "last_heartbeat_at",
+        "mode",
+        "control_mode",
+        "control_revision",
+        "applied_control_revision",
+        "build",
+        "capabilities"
+      ],
+      "title": "ObservedRunner",
+      "type": "object"
+    },
+    "ObservedServer": {
+      "additionalProperties": false,
+      "properties": {
+        "binary_sha256": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "boolean"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "process_instance_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binary_sha256",
+        "modified",
+        "process_instance_id",
+        "pid"
+      ],
+      "title": "ObservedServer",
+      "type": "object"
+    },
+    "ObservedServerAdmission": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_prepared": {
+          "type": "boolean"
+        },
+        "archive_revision": {
+          "type": "integer"
+        },
+        "archive_updated_at": {
+          "type": "integer"
+        },
+        "committed_maintenance_fence": {
+          "type": "boolean"
+        },
+        "observed_at": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "observed_at",
+        "archive_prepared",
+        "archive_revision",
+        "archive_updated_at",
+        "committed_maintenance_fence"
+      ],
+      "title": "ObservedServerAdmission",
+      "type": "object"
+    },
+    "ObservedUpgrade": {
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ObservedUpgradeHost"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upgrade_id",
+        "release_id",
+        "manifest_sha256",
+        "revision",
+        "status",
+        "phase",
+        "hosts"
+      ],
+      "title": "ObservedUpgrade",
+      "type": "object"
+    },
+    "ObservedUpgradeHost": {
+      "additionalProperties": false,
+      "properties": {
+        "host_id": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host_id",
+        "status",
+        "phase"
+      ],
+      "title": "ObservedUpgradeHost",
+      "type": "object"
+    },
     "OpStatus": {
       "enum": [
         "succeeded",
@@ -17365,6 +17851,9 @@
     },
     "NextActionPage": {
       "$ref": "#/definitions/NextActionPage"
+    },
+    "ObservedDeployment": {
+      "$ref": "#/definitions/ObservedDeployment"
     },
     "PlannerEntry": {
       "$ref": "#/definitions/PlannerEntry"
