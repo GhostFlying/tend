@@ -250,7 +250,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 			for _, read := range []struct {
 				tool string
 				args any
-			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}, {"issues_context_read", map[string]any{"issue_id": r.issue}}, {"issues_followups_list", map[string]any{"issue_id": r.issue}}, {"issues_deliveries_read", map[string]any{"issue_id": r.issue}}} {
+			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}, {"issues_context_read", map[string]any{"issue_id": r.issue}}, {"issues_followups_list", map[string]any{"issue_id": r.issue}}, {"issues_deliveries_read", map[string]any{"issue_id": r.issue}}, {"issues_delivery_reviews_read", map[string]any{"issue_id": r.issue, "limit": 1}}} {
 				a := call(read.tool, read.args)
 				if r.allowed {
 					if !a.OK {

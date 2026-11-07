@@ -15,7 +15,7 @@ type LaunchExitProof = protocol.MaintenanceLaunchExitProof
 type launchExitedError struct{ proof LaunchExitProof }
 
 func (e *launchExitedError) Error() string {
-	return "updater: owned maintenance child exited before identity observation"
+	return "updater: owned launch child exited before identity observation"
 }
 func (e *launchExitedError) Unwrap() error { return ErrUnknown }
 

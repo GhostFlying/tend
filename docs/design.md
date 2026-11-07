@@ -178,6 +178,7 @@
 | D185 | PR 与 CI 观察由显式配置的 server 程序服务统一负责，同一交付共享事实并合并通知；读取、刷新与重试有期限，保留旧 runner 查询及迟到结果身份。 | 实现中 |
 | D186 | 涉及 PR 的 Issue 明确自动合入或人工审批策略；同 PR 共享唯一正式 reviewer 和候选绑定结论，默认一次初审及最多一次修复复查，部署权限另行约定。 | 实现中 |
 | D187 | 交付 worker 经 run 受限视图读取自身真实授权绑定、当前有效性和恢复事实，不获取 owner 凭据，也不从 Task spec 中猜测独立授权记录。 | 实现中 |
+| D188 | 升级与恢复围栏在同一事务阻止新摘要，工具集交接仍可用原事实；普通候选健康固定截止覆盖所有返回分支，未提交安装可凭精确进程或 owned Wait 证明经独立维护前向接管，旧操作及未知保留。 | 实现中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1204,10 +1205,24 @@ PR 交付在 Issue 中明确自动合入或人工审批。自动合入只覆盖�
 
 同一 PR 的 Task 与子 Issue 共用整份交付的唯一正式 reviewer。实际独立执行产生结构化 findings、处置及结论，绑定候选与需求范围；符合要求的同一执行结果同时满足 Tend 和仓库要求。默认一次初审、最多一次集中修复及原 reviewer 复查；未闭合先交父负责人或主 Agent 判断。预算耗尽后，外部已认证用户可用 Issue 与审阅双 CAS 明确授权恰好一轮额外复查；原轮次、处置及升级历史保留，Agent 不能自授预算或直接标记通过。已通过且仍适用的结果继续复用；观察暂时未知不消耗预算、不冒充真实候选变化。原有效候选不因新增关联重复审阅，变化后明确哪些证据仍有效，不通过负责人填写 passed 代替真实审阅。
 
-每轮冻结关联任务明确要求的模型与思考强度，按实际 Run 配置核验；省略选择字段只表示使用 Agent 的真实默认配置，不能绕过要求。worker 经共享 `submit_result` 工具提交结构化审阅报告。审阅期间范围变化不拒收原范围的真实结果，而是保存历史并单独判断当前适用性；新轮清除旧候选的适用确认。共享结果变化向修改前后所有关联 Issue 发送去重事件，复用既有通知合并与自产抑制。
+每轮冻结关联任务明确要求的模型与思考强度，按实际 Run 配置核验；省略选择字段只表示使用 Agent 的真实默认配置，不能绕过要求。报告任务经 `submit_result` 提交结构化审阅报告；普通验收通过原 `submit_verdict.evidence.delivery_review` 提交整 PR 审阅证据。可选 `reviewer_role=accept` 在结论前绑定原 Task/spec、不可变产物、实际验收 Run 和精确 reviewer profile；缺省报告及已有事后验收导入保持原义。记录只读取真实不可变结论，changes_required 保留 findings 供集中修复，blocked / inconclusive 显示等待证据，不变为通过。需修改后，同 Task 的真实新产物和新验收 Run 可用唯一聚焦复核；等待证据后，真实新验收 Run 可核对同一产物。旧 Run 和旧结论不能重复计轮。
+
+普通验收的受限观察只读当前 Task/spec/产物所关联交付的真实共享审阅；Main 与 Issue manager 的具名查询复用规范视图及分页，Issue 查询保持自身范围。正常具名 Issue 启动执行工具集 hash 与既有交接，不因禁用空闲摘要而继续旧工具表；receipt-only 与原生未知仍只核对原身份。审阅期间范围变化不拒收原范围的真实结果，而是保存历史并单独判断当前适用性；新轮清除旧候选的适用确认。共享结果变化向修改前后所有关联 Issue 发送去重事件，复用既有通知合并与自产抑制。
 
 ## D187：交付执行的受限授权视图
 
 `delivery_authorization` 是创建 Task 时提交的独立输入，由服务端保存为执行绑定，不是冻结 spec 中的字段。worker 使用自身 run/lease 的既有受限观察入口读取该绑定、真实批准或策略来源、冻结候选、当前有效性及必要的恢复和准入事实；owner Task 查询提供同源只读事实。调用者不能任意选择其他执行对象，授权撤回、候选变化与历史执行保持可解释。
 
 任务需要的证据对应真实可读字段；部署验证未确认不自动阻止仅合入任务，普通进行中的 claim 不等于未结束维护。问题接续保留原始答复与证据来源，不扩张原 run 的文件权限或借补证改写冻结交付范围。以上决策与 CLI、视图、迁移及回归要求见[统一维护计划](plans/issue-change-owner-assessment.md)。
+
+## D188：摘要准入、固定健康期限与未提交安装接管
+
+摘要 claim 与升级及恢复围栏在同一 writer 事务判断，覆盖 idle、启动迁移、显式预备及重新 claim。围栏前已接纳的原摘要仍能按原身份保存真实结果；围栏后可选摘要暂停不冒充模型失败。工具集交接使用 D81 的缓存、当前账本事实及历史索引，目标创建、注入和 source CAS 均真实确认后才切换 binding。creating / injecting / unknown 不重复发送；D156 仍要求组件独立排空，不因跳过新摘要而宣告未知旧工作完成。
+
+普通候选进入 checking 后固定健康截止和 boot / 单调锚点，重开与轮询不续期。authority 失败、未确认、绑定不符、Inspect 或配置错误以及读取跨截止均记录一次原超时事实；读取 context 有界，迟到真实健康仅核对原候选的两次序列，不续 stop / start 权限。永久无法确认时输出独立前向恢复责任，不自动回滚数据或再发启动。
+
+既有独立维护增加可选 source_operation，固定原 unfinished operation 快照摘要、阶段、候选、launch、实际已迁移格式及原账本。精确 kernel process 或持久 owned child Wait 证明支持新独立授权；Find 返回零本身保持 unknown。启动器在 Start 前持久固定已验证文件摘要与单次 dispatch，Wait 事实按原 child/launch 保存，重复未知 dispatch 不再次 exec。root child 退出不证明原生子工作或业务副作用完成。
+
+接管归档原 operation 并移出 active，真实 successor commit/link 后在同一应用事务以原 batch fresh CAS 记录安装责任已移交；旧健康零、未知与原事件保留。被接管来源不生成 staged-not-started 取消回执。runner 的该路径只继承原 force grant、原 target、journal 和完整 protection set，不能因失败候选未 Hello 而重新采集或释放旧业务。新请求和新 launch 独立，原请求仅对账。
+
+上述关键所有权和截止使用 updater format 5，保留旧格式历史读取，旧 writer 必须拒绝 5；不降回旧格式或修改 Current 冒充完成。新增可选 wire 字段不改变旧有效请求和默认语义，只有显式模式获得恢复能力。CLI 提供完整 typed 输入、dry-run 与原请求恢复；实际发布必须更新固定 updater，并分别核对其字节与 server / runner，不以产品程序更新代替监督器生效。详见[实施计划](plans/upgrade-startup-summary-fence.md)。

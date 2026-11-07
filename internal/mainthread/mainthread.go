@@ -802,7 +802,7 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThre
 		return s.ResumeThread(ctx, id, m.threadConfig())
 	}
 
-	if m.cfg.MaintenanceEnabled {
+	if selected := m.namedSelection(); m.cfg.MaintenanceEnabled || selected != nil && selected.Purpose == agentconfig.IssueManager {
 		return m.openManagedThread(ctx, s)
 	}
 	id, ok, err := m.app.MainThread(ctx, m.bindingInstance())

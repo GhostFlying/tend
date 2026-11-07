@@ -11,7 +11,7 @@ import (
 // control write and never treats an observation as native completion proof.
 func (s *Supervisor) completeUnestablishedBoundedFence(ctx context.Context, a MaintenanceArchiveAuthority, p protocol.CommittedMaintenancePlan) (bool, error) {
 	b, m, proof := s.state.Bounded, s.state.Maintenance, s.state.CommittedProof
-	if s.cfg.Role != "server" || s.state.Format != 4 || b == nil || b.Phase != "complete" || m == nil || m.Phase != "ledger_linked" || !m.Irreversible || m.Receipt == nil || proof == nil ||
+	if s.cfg.Role != "server" || !boundedStateFormat(s.state.Format) || b == nil || b.Phase != "complete" || m == nil || m.Phase != "ledger_linked" || !m.Irreversible || m.Receipt == nil || proof == nil ||
 		!done(s.state.Operation) || proof.Binding != p.Successor || proof.Version != s.state.Current || proof.Version != m.Target || proof.Version.Artifact.SHA256 != p.Successor.ArtifactSHA256 || proof.Process != s.state.Process || !validIdentity(s.state.Process) || s.state.Process.SHA256 != p.Successor.ArtifactSHA256 || !validIdentity(m.Process) ||
 		m.Process.LaunchID != p.Successor.ProcessInstanceID || m.Process.SHA256 != p.Successor.ArtifactSHA256 {
 		return false, nil

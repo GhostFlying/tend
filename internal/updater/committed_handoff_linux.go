@@ -77,7 +77,7 @@ func validateCommittedStatic(cfg Config, p CommittedHandoffPlan) error {
 	// The old server identity is absent only for an independently proven owned
 	// child exit. Manager identity is still checked by its actual kernel identity,
 	// command, unit and lock; it does not acquire a fabricated server launch ID.
-	exited := p.Maintenance.ParentMaintenanceID != "" && p.Maintenance.FailedProcessExited && p.Maintenance.PreviousProcess == (Identity{}) && p.Maintenance.ParentLaunchExit != nil
+	exited := p.Maintenance.FailedProcessExited && p.Maintenance.PreviousProcess == (Identity{}) && (p.Maintenance.ParentMaintenanceID != "" && p.Maintenance.ParentLaunchExit != nil || p.Maintenance.SourceOperation != nil && p.Maintenance.SourceOperation.LaunchExit != nil)
 	return validateHandoffStaticIdentity(cfg, committedAdapter(p), !exited)
 }
 
@@ -167,10 +167,33 @@ func PrepareCommittedHandoffPlan(ctx context.Context, cfg Config, p CommittedHan
 	if err != nil {
 		return p, err
 	}
-	if state.CommittedProof == nil {
+	if state.CommittedProof == nil && p.Maintenance.SourceOperation == nil {
 		return p, errors.New("updater: no committed service proof")
 	}
 	q := &p.Maintenance
+	if source := q.SourceOperation; source != nil {
+		observed, binding, err := OperationMaintenanceSource(state)
+		if err != nil {
+			return p, err
+		}
+		if source.OperationID == "" {
+			observed.OriginalLedger, observed.OriginalRequestID = source.OriginalLedger, source.OriginalRequestID
+			q.SourceOperation = observed
+		}
+		if q.Previous.InstanceID == "" {
+			q.Previous = binding
+		}
+		if q.PreviousProcess == (Identity{}) && q.SourceOperation.LaunchExit == nil {
+			found, err := (LinuxProcess{}).Find(ctx, observed.LaunchID, binding.ArtifactSHA256)
+			if err != nil || len(found) != 1 {
+				return p, errors.New("updater: original launch unknown; exact physical identity or owned exit receipt required")
+			}
+			q.PreviousProcess = found[0]
+		}
+		if q.SourceOperation.LaunchExit != nil {
+			q.FailedProcessExited = true
+		}
+	}
 	if q.ParentMaintenanceID != "" {
 		parent := state.Maintenance
 		if parent == nil || parent.Plan.MaintenanceID != q.ParentMaintenanceID {
@@ -211,7 +234,7 @@ func PrepareCommittedHandoffPlan(ctx context.Context, cfg Config, p CommittedHan
 		q.StateSHA256 = digest(state)
 		q.ExpectedGeneration = state.Generation
 	}
-	if q.PreviousProcess.PID == 0 && q.ParentMaintenanceID == "" {
+	if q.PreviousProcess.PID == 0 && q.ParentMaintenanceID == "" && q.SourceOperation == nil {
 		q.PreviousProcess = state.Process
 	}
 	if q.Previous.InstanceID == "" {
@@ -654,7 +677,7 @@ func retainedCommittedChild(ctx context.Context, p CommittedHandoffPlan) error {
 	if !p.Maintenance.FailedProcessExited {
 		return retainedChild(ctx, committedAdapter(p))
 	}
-	if p.Maintenance.ParentMaintenanceID == "" {
+	if p.Maintenance.ParentMaintenanceID == "" && p.Maintenance.SourceOperation == nil {
 		return errors.New("updater: exited writer is limited to failed maintenance")
 	}
 	s := &Supervisor{opts: Options{Process: LinuxProcess{}}}
@@ -668,9 +691,21 @@ func retainedCommittedChild(ctx context.Context, p CommittedHandoffPlan) error {
 			return err
 		}
 		normalizeConfig(&cfg)
+		s.cfg = cfg
 		s.state, err = readState(filepath.Join(cfg.StateDir, "state.json"))
 		if err != nil {
 			return err
+		}
+		if source := p.Maintenance.SourceOperation; source != nil {
+			op := s.state.Operation
+			if op == nil {
+				archived, exists := s.state.OperationHistory[source.OperationID]
+				if !exists {
+					return errors.New("updater: original operation history missing")
+				}
+				op = &archived
+			}
+			return s.operationSourceExited(ctx, p.Maintenance, op)
 		}
 		parent, err := s.maintenanceParent(p.Maintenance)
 		if err != nil {

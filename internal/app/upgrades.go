@@ -642,16 +642,21 @@ func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude, up
 func (a *App) UpgradePausesMain(ctx context.Context) (bool, error) {
 	paused := false
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		fenced, err := a.recoveryStartupFenced(ctx, tx.Q())
-		if err != nil || fenced {
-			paused = fenced
-			return err
-		}
-		paused, err = upgradePausesMain(ctx, tx.Q())
+		var err error
+		paused, err = a.mainWorkPaused(ctx, tx.Q())
 		return err
 	})
 	return paused, err
 }
+
+// mainWorkPaused shares admission checks with callers already in a transaction.
+func (a *App) mainWorkPaused(ctx context.Context, q store.Querier) (bool, error) {
+	if fenced, err := a.recoveryStartupFenced(ctx, q); err != nil || fenced {
+		return fenced, err
+	}
+	return upgradePausesMain(ctx, q)
+}
+
 func upgradePausesMain(ctx context.Context, q store.Querier) (bool, error) {
 	if fenced, err := store.ForwardRecoveryFenced(ctx, q); err != nil || fenced {
 		return fenced, err

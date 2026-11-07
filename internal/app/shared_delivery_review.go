@@ -134,16 +134,12 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				}
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "review budget exhausted; escalate and request external user authorize_recheck with the current review revision before another review")
 			}
-			if p.Action == "recheck" && (len(r.Rounds) < 1 || (r.Status != "passed" && (r.Status != "changes_requested" || !reviewFindingsResolved(r)))) {
+			eligible := r.Status == "passed" || r.Status == "waiting" || r.Status == "changes_requested" && reviewFindingsResolved(r)
+			if p.Action == "recheck" && (len(r.Rounds) == 0 || !eligible) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "one consolidated finding disposition is required before the original reviewer's recheck")
 			}
 			if p.Action == "start" && len(r.Rounds) > 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "retain the original reviewer and use the single focused recheck")
-			}
-			if slices.ContainsFunc(r.Rounds, func(round protocol.SharedDeliveryReviewRound) bool {
-				return round.TaskID == p.ReviewerTaskID || round.SupplementTaskID != "" && round.SupplementTaskID == p.ReviewerTaskID || p.AcceptanceID != "" && round.AcceptanceID == p.AcceptanceID
-			}) {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "an earlier task, run or acceptance cannot be counted as a new focused review")
 			}
 			o, err := store.GetDeliveryObservation(ctx, tx.Q(), i.IssueID, ref.DeliveryID)
 			if err != nil {
@@ -156,9 +152,26 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
-			round, err := bindSharedReviewTask(ctx, tx.Q(), r, p.ReviewerTaskID, p.AcceptanceID)
+			if p.ReviewerRole != "" && p.ReviewerRole != protocol.RoleAccept {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reviewer_role must be accept or omitted for a report task")
+			}
+			var round protocol.SharedDeliveryReviewRound
+			if p.ReviewerRole == protocol.RoleAccept {
+				binding := r
+				binding.HeadSHA, binding.BaseSHA, binding.RequirementsDigest = o.Observation.HeadSHA, o.Observation.BaseSHA, digest
+				round, err = bindSharedAcceptanceReview(ctx, tx.Q(), binding, p.ReviewerTaskID, p.AcceptanceID)
+			} else {
+				round, err = bindSharedReviewTask(ctx, tx.Q(), r, p.ReviewerTaskID, p.AcceptanceID)
+			}
 			if err != nil {
 				return Outcome{}, err
+			}
+			for _, previous := range r.Rounds {
+				sameTask := previous.TaskID == round.TaskID || previous.SupplementTaskID != "" && previous.SupplementTaskID == round.TaskID
+				accept := round.ReviewerRole == protocol.RoleAccept
+				if sameTask && (!accept || previous.ArtifactID == round.ArtifactID && r.Status != "waiting") || round.RunID != "" && previous.RunID == round.RunID || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "a focused acceptance review requires a new real artifact/run; earlier tasks, runs or acceptances cannot be recounted")
+				}
 			}
 			if r.Reviewer != "" && r.Reviewer != round.Reviewer {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "the focused recheck belongs to the original formal reviewer")
@@ -175,13 +188,32 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no active frozen shared review")
 			}
 			last := &r.Rounds[len(r.Rounds)-1]
+			previousAcceptance, previousVerdict := last.AcceptanceID, last.AcceptanceVerdict
 			inputRound := *last
 			if last.SupplementTaskID != "" {
 				inputRound.TaskID = last.SupplementTaskID
 				inputRound.SpecVersion = last.SupplementSpecVersion
 				inputRound.AcceptanceID = ""
+				inputRound.ReviewerRole = ""
 			}
-			result, run, artifact, err := readSharedReviewResult(ctx, tx.Q(), r, inputRound)
+			var result *protocol.SharedReviewResult
+			var run, artifact string
+			if inputRound.ReviewerRole == protocol.RoleAccept {
+				result, run, artifact, err = readSharedAcceptanceResult(ctx, tx.Q(), r, &inputRound)
+				last.AcceptanceID, last.AcceptanceVerdict = inputRound.AcceptanceID, inputRound.AcceptanceVerdict
+			} else {
+				result, run, artifact, err = readSharedReviewResult(ctx, tx.Q(), r, inputRound)
+			}
+			if errors.Is(err, errAcceptanceReviewEvidence) {
+				if previousAcceptance == inputRound.AcceptanceID && previousVerdict != "" && previousVerdict == inputRound.AcceptanceVerdict {
+					return Outcome{Result: r}, nil
+				}
+				// Preserve the real acceptance without promoting a narrow or
+				// malformed verdict into whole-PR approval. The existing
+				// original-reviewer supplement can close this same round.
+				last.RunID, last.ArtifactID = run, artifact
+				break
+			}
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -195,7 +227,10 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if result.Verdict == "passed" {
 				r.Status = "passed"
 			}
-			if r.Status == "changes_requested" && len(r.Rounds) >= sharedReviewRoundLimit(r) {
+			if result.Verdict == "blocked" || result.Verdict == "inconclusive" {
+				r.Status = "waiting"
+			}
+			if (r.Status == "changes_requested" || r.Status == "waiting") && len(r.Rounds) >= sharedReviewRoundLimit(r) {
 				if err := escalateSharedDeliveryReview(ctx, x, tx, i, &r); err != nil {
 					return Outcome{}, err
 				}
@@ -453,15 +488,8 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 	} else if artifact.Report != nil {
 		result = artifact.Report.SharedReview
 	}
-	if result == nil || result.ReviewID != r.ReviewID || result.HeadSHA != round.HeadSHA || result.BaseSHA != round.BaseSHA || result.RequirementsDigest != round.Requirements || strings.TrimSpace(result.RepositoryCheck) == "" || (result.Verdict != "passed" && result.Verdict != "changes_requested") || (result.Verdict == "passed" && len(result.Findings) > 0) || (result.Verdict == "changes_requested" && len(result.Findings) == 0) {
-		return nil, "", "", protocol.Errorf(protocol.CodeInvalidRequest, "review report must bind the complete candidate, requirement digest, repository check and actual verdict")
-	}
-	seen := map[string]bool{}
-	for _, f := range result.Findings {
-		if f.ID == "" || seen[f.ID] || strings.TrimSpace(f.Body) == "" {
-			return nil, "", "", protocol.Errorf(protocol.CodeInvalidRequest, "review findings require distinct IDs and concrete descriptions")
-		}
-		seen[f.ID] = true
+	if err := validateSharedReviewResult(result, r, round); err != nil {
+		return nil, "", "", err
 	}
 	pin, err := store.GetRunExecution(ctx, q, run)
 	if err != nil {
@@ -470,11 +498,21 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 	if round.Reviewer != pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID {
 		return nil, "", "", protocol.Errorf(protocol.CodeForbidden, "review artifact was produced by a different reviewer")
 	}
-	// This is the actual result for the frozen candidate and requirements.
-	// Current applicability is projected separately after recording the fact;
-	// new requirements or a mismatched actual execution profile must not discard
-	// that fact or strand the active round. Neither can establish a valid review.
 	return result, run, a.ArtifactID, nil
+}
+
+func validateSharedReviewResult(result *protocol.SharedReviewResult, r protocol.SharedDeliveryReview, round protocol.SharedDeliveryReviewRound) error {
+	if result == nil || result.ReviewID != r.ReviewID || result.HeadSHA != round.HeadSHA || result.BaseSHA != round.BaseSHA || result.RequirementsDigest != round.Requirements || strings.TrimSpace(result.RepositoryCheck) == "" || (result.Verdict != "passed" && result.Verdict != "changes_requested") || (result.Verdict == "passed" && len(result.Findings) > 0) || (result.Verdict == "changes_requested" && len(result.Findings) == 0) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "review report must bind the complete candidate, requirement digest, repository check and actual verdict")
+	}
+	seen := map[string]bool{}
+	for _, f := range result.Findings {
+		if f.ID == "" || seen[f.ID] || strings.TrimSpace(f.Body) == "" {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "review findings require distinct IDs and concrete descriptions")
+		}
+		seen[f.ID] = true
+	}
+	return nil
 }
 
 func validateReviewDispositions(r protocol.SharedDeliveryReview, ds []protocol.SharedReviewDisposition) error {

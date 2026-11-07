@@ -20,28 +20,29 @@ type UpgradeManagerPark struct {
 // UpgradeRow keeps transition inputs and receipts alongside the public view.
 // Restoration receipts use phase rolled_back or cancelled (replacement never started).
 type UpgradeRow struct {
-	InitiatingExecutionID string                   `json:"initiating_execution_id,omitempty"`
-	StartRequestID        string                   `json:"start_request_id,omitempty"`
-	ParkIdleManagers      bool                     `json:"park_idle_managers,omitempty"`
-	ManagerParks          []UpgradeManagerPark     `json:"manager_parks,omitempty"`
-	DeliveryTaskID        string                   `json:"delivery_task_id,omitempty"`
-	View                  protocol.UpgradeView     `json:"view"`
-	Manifest              release.Manifest         `json:"manifest"`
-	ManifestSHA256        string                   `json:"manifest_sha256"`
-	ManifestSize          int64                    `json:"manifest_size"`
-	ServerPreviousHash    string                   `json:"server_previous_hash"`
-	ServerRollback        *protocol.UpdaterReceipt `json:"server_rollback,omitempty"`
-	ServerHash            string                   `json:"server_hash"`
-	ServerInstance        string                   `json:"server_instance"`
-	ServerProcess         string                   `json:"server_process"`
-	ServerGrantDeadline   int64                    `json:"server_grant_deadline"`
-	ServerHealthy         int64                    `json:"server_healthy"`
-	ServerHealthAt        int64                    `json:"server_health_at"`
-	Deadline              int64                    `json:"deadline"`
-	DrainMillis           int64                    `json:"drain_ms"`
-	RestartMillis         int64                    `json:"restart_ms"`
-	GrantMillis           int64                    `json:"grant_ms"`
-	Hosts                 []UpgradeHost            `json:"hosts"`
+	SupersededByMaintenanceID string                   `json:"superseded_by_maintenance_id,omitempty"`
+	InitiatingExecutionID     string                   `json:"initiating_execution_id,omitempty"`
+	StartRequestID            string                   `json:"start_request_id,omitempty"`
+	ParkIdleManagers          bool                     `json:"park_idle_managers,omitempty"`
+	ManagerParks              []UpgradeManagerPark     `json:"manager_parks,omitempty"`
+	DeliveryTaskID            string                   `json:"delivery_task_id,omitempty"`
+	View                      protocol.UpgradeView     `json:"view"`
+	Manifest                  release.Manifest         `json:"manifest"`
+	ManifestSHA256            string                   `json:"manifest_sha256"`
+	ManifestSize              int64                    `json:"manifest_size"`
+	ServerPreviousHash        string                   `json:"server_previous_hash"`
+	ServerRollback            *protocol.UpdaterReceipt `json:"server_rollback,omitempty"`
+	ServerHash                string                   `json:"server_hash"`
+	ServerInstance            string                   `json:"server_instance"`
+	ServerProcess             string                   `json:"server_process"`
+	ServerGrantDeadline       int64                    `json:"server_grant_deadline"`
+	ServerHealthy             int64                    `json:"server_healthy"`
+	ServerHealthAt            int64                    `json:"server_health_at"`
+	Deadline                  int64                    `json:"deadline"`
+	DrainMillis               int64                    `json:"drain_ms"`
+	RestartMillis             int64                    `json:"restart_ms"`
+	GrantMillis               int64                    `json:"grant_ms"`
+	Hosts                     []UpgradeHost            `json:"hosts"`
 }
 type UpgradeHost struct {
 	Configuration     *protocol.RunnerConfiguration `json:"configuration,omitempty"`
@@ -93,7 +94,7 @@ func (t *Tx) PutUpgrade(ctx context.Context, r UpgradeRow) error {
 // ListCancelledUpgradeIDs supplies durable cancellation intents even when a
 // newer batch has become latest before the local supervisor receives a POST.
 func ListCancelledUpgradeIDs(ctx context.Context, q Querier) ([]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT upgrade_id FROM upgrades WHERE status='cancelled' ORDER BY created_at,upgrade_id`)
+	rows, err := q.QueryContext(ctx, `SELECT upgrade_id FROM upgrades WHERE status='cancelled' AND COALESCE(json_extract(state_json,'$.superseded_by_maintenance_id'),'')='' ORDER BY created_at,upgrade_id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list cancelled upgrades: %w", err)
 	}

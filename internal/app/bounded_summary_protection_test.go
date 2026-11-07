@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -71,7 +72,24 @@ func TestBoundedServerStartupRetainsUnknownSummaryLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if claimed, err := h.app.ClaimSummaryAttempt(ctx, fresh, 0); claimed || !errors.Is(err, ErrSummaryPaused) {
+		t.Fatal("unlinked maintenance admitted new summary work", claimed, err)
+	}
+	proof := protocol.CommittedMaintenanceReceipt{MaintenanceID: p.MaintenanceID, RequestID: p.RequestID, Previous: p.Previous, Successor: p.Successor, Process: process, Generation: 1, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}
+	if _, err := h.app.LinkCommittedMaintenance(ctx, proof); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: h.ids.New(protocol.PrefixRequest), ExpectedControlRevision: prep.Revision}, false); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err = h.app.HandoffSnapshot(ctx, "independent-main")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if claimed, err := h.app.ClaimSummaryAttempt(ctx, fresh, 0); err != nil || !claimed {
 		t.Fatal("independent source was globally blocked", claimed, err)
+	}
+	if claimed, err := h.app.ClaimSummaryAttempt(ctx, snap, 0); err != nil || claimed {
+		t.Fatal("maintenance release readmitted the original unknown source", claimed, err)
 	}
 }

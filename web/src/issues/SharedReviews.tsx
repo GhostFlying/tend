@@ -11,6 +11,7 @@ import styles from "./Issues.module.css";
 const statusLabels: Record<string, string> = {
   pending: "待安排审阅",
   reviewing: "正在审阅",
+  waiting: "等待审阅证据",
   changes_requested: "待集中处理审阅意见",
   passed: "审阅通过",
   escalated: "已交上级负责人判断",
@@ -85,7 +86,7 @@ function ReviewRecord({ review }: { review: SharedDeliveryReview }) {
         </p>
       )}
       <p className={styles.muted}>
-        候选 <CommitHash value={review.head_sha} /> · 已进行 {review.rounds?.length ?? 0} 轮
+        候选 <CommitHash value={review.head_sha} /> · 已安排 {review.rounds?.length ?? 0} 轮
       </p>
       {review.reason && <Markdown text={review.reason} />}
       {latest?.result?.findings?.length ? (
@@ -121,6 +122,10 @@ function ReviewRecord({ review }: { review: SharedDeliveryReview }) {
         {(review.rounds ?? []).map((round) => (
           <p key={round.number}>
             第 {round.number} 轮 ·{" "}
+            {round.reviewer_role === "accept" || round.acceptance_id
+              ? "验收中的整 PR 审阅"
+              : "报告任务审阅"}{" "}
+            ·{" "}
             <button onClick={() => openTask(round.task_id)}>查看实际审阅任务</button>
             {round.supplement_task_id && (
               <>

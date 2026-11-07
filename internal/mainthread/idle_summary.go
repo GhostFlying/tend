@@ -158,6 +158,9 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 		return nil
 	}
 	claimed, err := m.app.ClaimSummaryAttempt(ctx, snap, int64((15*time.Minute)/time.Millisecond))
+	if errors.Is(err, app.ErrSummaryPaused) {
+		return nil
+	}
 	if err != nil || !claimed {
 		return err
 	}
@@ -180,6 +183,9 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	}
 	if !attempt.Covers(input.Snapshot) {
 		claimed, err := m.reclaimSummaryInput(ctx, attempt, input.Snapshot)
+		if errors.Is(err, app.ErrSummaryPaused) {
+			return nil
+		}
 		if err != nil || !claimed {
 			return err
 		}

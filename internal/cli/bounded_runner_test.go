@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,5 +60,74 @@ func TestBoundedRunnerOwnerCLIUsesOriginalRequestAndHostCAS(t *testing.T) {
 		if code := e.main(append(args, conflict...)...); code != exitUsage || len(f.seen("POST /api/v1/ops")) != 2 {
 			t.Fatal("conflicting owner authorization reached the server", conflict, code)
 		}
+	}
+}
+
+func TestBoundedRunnerOwnedExitCLIPreservesFrozenPlan(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	var plan protocol.RunnerBoundedMaintenancePlan
+	if err := json.Unmarshal([]byte(boundedRunnerPlanExample()), &plan); err != nil {
+		t.Fatal(err)
+	}
+	original := plan.Target
+	plan.Source = protocol.RecoveryIdentity{}
+	plan.SourceOperation = &protocol.MaintenanceOperationSource{
+		OperationID: original.UpgradeID, Kind: "upgrade", Phase: "launch_exited",
+		OperationSHA256: strings.Repeat("d", 64), LaunchID: original.ProcessInstanceID,
+		Protocol: 2, StorageVersion: 18,
+		OriginalRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEX",
+		LaunchExit: &protocol.MaintenanceLaunchExitProof{
+			PID: 4321, LaunchID: original.ProcessInstanceID,
+			ArtifactSHA256: original.ArtifactSHA256, ExitCode: 17,
+		},
+	}
+	plan.Target.UpgradeID = "replacement-window"
+	plan.Target.ProcessInstanceID = "replacement-launch"
+	plan.Authorization.Source, plan.Authorization.Target = plan.Source, plan.Target
+	var err error
+	plan.Authorization.PlanSHA256, err = protocol.RunnerBoundedMaintenancePlanSHA256(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "owned-exit-plan.json")
+	if err := os.WriteFile(file, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.main("host", "authorize-bounded-maintenance", plan.HostID, "--file", file, "--dry-run", "--json"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var frozen protocol.Envelope
+	if err := json.Unmarshal(e.out.Bytes(), &frozen); err != nil {
+		t.Fatal(err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, frozen.Payload); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(compact.Bytes(), raw) || frozen.RequestID != plan.Authorization.RequestID || frozen.ExpectedControlRevision == nil || *frozen.ExpectedControlRevision != plan.ExpectedControlRevision || len(f.requests) != 0 {
+		t.Fatal("dry run changed the frozen source operation or contacted the server", frozen, f.requests)
+	}
+	f.on("POST /api/v1/ops", func(w http.ResponseWriter, _ *http.Request, body []byte) {
+		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: frozen.RequestID, Status: protocol.OpUnknown}})
+	})
+	for _, input := range [][]string{{"--file", file}, {"--data", string(raw)}} {
+		args := []string{"host", "authorize-bounded-maintenance", plan.HostID}
+		if code := e.main(append(args, input...)...); code != exitError {
+			t.Fatal("unknown owned-exit authorization was not preserved", code, e.errOut.String())
+		}
+	}
+	requests := f.seen("POST /api/v1/ops")
+	if len(requests) != 2 || string(requests[0].body) != string(requests[1].body) || len(f.seen("GET /api/v1/snapshot")) != 0 {
+		t.Fatal("owned-exit retry replaced the original proof, request or host CAS", f.requests)
+	}
+	plan.SourceOperation.LaunchExit.ExitCode++
+	changed, _ := json.Marshal(plan)
+	if code := e.main("host", "authorize-bounded-maintenance", plan.HostID, "--data", string(changed)); code != exitUsage || len(f.seen("POST /api/v1/ops")) != 2 {
+		t.Fatal("changed exit proof bypassed the frozen plan digest", code, f.requests)
 	}
 }
