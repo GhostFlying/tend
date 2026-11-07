@@ -508,6 +508,9 @@ func (s *Server) SweepLeases(ctx context.Context, interval time.Duration) {
 		if _, err := s.app.SweepRunnerPresence(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "runner presence sweep failed", "err", err)
 		}
+		if err := s.app.SweepCapabilityWaits(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "capability wait sweep failed", "err", err)
+		}
 		if n, err := s.app.ExpireLeases(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "lease sweep failed", "err", err)
 		} else if n > 0 {

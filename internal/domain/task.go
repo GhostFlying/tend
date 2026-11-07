@@ -47,6 +47,16 @@ type Spec struct {
 // Normalize returns the spec with defaults filled in. Specs are stored
 // normalized.
 func (s Spec) Normalize() Spec {
+	if s.AgentSelection != nil {
+		selection := s.AgentSelection.Clone()
+		if canonical, err := protocol.CanonicalCapabilityReferences(selection.Implementation.RequiredCapabilities); err == nil {
+			selection.Implementation.RequiredCapabilities = canonical
+		}
+		if canonical, err := protocol.CanonicalCapabilityReferences(selection.Acceptance.RequiredCapabilities); err == nil {
+			selection.Acceptance.RequiredCapabilities = canonical
+		}
+		s.AgentSelection = &selection
+	}
 	s.Workspace = s.Workspace.Normalize()
 	return s
 }
@@ -572,5 +582,5 @@ func agentSelectionEqual(a, b *protocol.TaskAgentSelection) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return *a == *b
+	return a.Equal(*b)
 }

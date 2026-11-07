@@ -96,6 +96,11 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 			return err
 		}
 		result = protocol.RunObservation{Version: 1, ObservedAt: now, RunID: rc.run.RunID, TaskID: rc.run.TaskID, SpecVersion: rc.action.TargetSpecVersion, WorkItems: []protocol.ObservedWorkItem{}}
+		if binding, err := store.GetRunCapabilityBinding(ctx, q, rc.run.RunID); err == nil {
+			result.CapabilityBinding = &binding
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
 		result.Seq, err = store.LatestEventSeq(ctx, q)
 		if err != nil {
 			return err

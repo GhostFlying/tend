@@ -20,6 +20,10 @@ func domainSpecFromOwner(p protocol.OwnerTaskSpec) domain.Spec {
 	for _, input := range p.Inputs {
 		inputs = append(inputs, protocol.TaskInput{FileID: input.FileID})
 	}
+	if p.AgentSelection != nil {
+		selection := p.AgentSelection.Clone()
+		p.AgentSelection = &selection
+	}
 	return domain.Spec{AgentSelection: p.AgentSelection, AcceptanceExecution: p.AcceptanceExecution, Observation: p.Observation, Goal: p.Goal, Scope: p.Scope, Constraints: p.Constraints, Acceptance: p.Acceptance, Delivery: p.Delivery, Deliverables: p.Deliverables, Inputs: inputs, ImplementationContext: p.ImplementationContext, MaxImplementAttempts: p.MaxImplementAttempts, Workspace: domain.Workspace{Mode: p.Workspace.Mode, SourceTaskID: p.Workspace.SourceTaskID, IncludeExistingChanges: p.Workspace.IncludeExistingChanges, Template: p.Workspace.Template, Mounts: mounts, Profile: p.Workspace.Profile}, Requirements: domain.Requirements{HostID: p.Requirements.HostID, OS: p.Requirements.OS, Labels: p.Requirements.Labels}}
 }
 

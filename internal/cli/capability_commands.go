@@ -33,6 +33,14 @@ type capabilityCommand struct {
 }
 
 var capabilityCommands = []capabilityCommand{
+	{Name: "capability list", Route: "/api/v1/capabilities", Queries: "state search after limit", JSONDefault: true},
+	{Name: "capability show", Route: "/api/v1/capabilities/{id}", Queries: "definition-revision=revision", JSONDefault: true},
+	{Name: "capability history", Route: "/api/v1/capabilities/{id}/revisions", Queries: "state search after limit", JSONDefault: true},
+	{Name: "capability put", Operation: "capabilities.put", Target: "capability", RevisionRoute: "/api/v1/capabilities/{id}", RevisionField: "revision", JSONDefault: true},
+	{Name: "agents capabilities revisions", Route: "/api/v1/agent-capabilities/{environment}/{agent}/revisions", Queries: "agent-revision=agent_revision after limit", JSONDefault: true},
+	{Name: "agents capabilities list", Route: "/api/v1/agent-capabilities", Queries: "environment agent runtime capability state category purpose after limit", JSONDefault: true},
+	{Name: "agents capabilities show", Route: "/api/v1/agent-capabilities/{environment}/{agent}", Queries: "runtime capability state category purpose", JSONDefault: true},
+	{Name: "task capability-explain", Route: "/api/v1/tasks/{id}/capability-match", Queries: "role spec-version=spec_version environment agent runtime capability state category purpose after limit", JSONDefault: true},
 	{Name: "conversation handoff-audit", Route: "/api/v1/conversation/handoff-audit", Queries: "instance after limit", JSONDefault: true},
 	{Name: "artifact-share list", Route: "/api/v1/issues/{id}/artifact-shares", Queries: "status after limit", JSONDefault: true},
 	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
@@ -50,7 +58,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "session show", Route: "/api/v1/session"},
 	{Name: "deployment show", Route: "/api/v1/deployment"},
 	{Name: "repo list", Route: "/api/v1/repos"},
-	{Name: "task list", Route: "/api/v1/tasks", Queries: "all finished project lifecycle sort before limit"},
+	{Name: "task list", Route: "/api/v1/tasks", Queries: "all finished project lifecycle sort before limit capability capability-role=capability_role"},
 	{Name: "task show", Route: "/api/v1/tasks/{id}"},
 	{Name: "run maintenance-reconciliation", Route: "/api/v1/runs/{id}/maintenance-reconciliation", JSONDefault: true},
 	{Name: "run continue-retained", Operation: protocol.OpContinueRetainedRun, Target: "run", RevisionRoute: "-", JSONDefault: true},
@@ -193,7 +201,11 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 			qstrings[param] = fs.String(flag, "", "server query parameter "+param)
 		}
 	}
-	data := fs.String("data", "", "complete JSON payload")
+	payloadHelp := "complete JSON payload"
+	if cmd.Name == "capability put" {
+		payloadHelp = "definition JSON: title, description, state, contract_version=1, verification_policy=declaration_v1"
+	}
+	data := fs.String("data", "", payloadHelp)
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "original request identity for an identical retry")
 	revision := fs.Int64("revision", -1, "original expected control revision; first requests may read it")
