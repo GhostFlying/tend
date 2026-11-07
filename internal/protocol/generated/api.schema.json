@@ -7919,6 +7919,331 @@
       "title": "IssueManagerView",
       "type": "object"
     },
+    "IssueMaterialAcceptance": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "evidence": {},
+        "files": {
+          "items": {
+            "$ref": "#/definitions/ArtifactFile"
+          },
+          "type": "array"
+        },
+        "issues": {},
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/definitions/Verdict"
+        }
+      },
+      "required": [
+        "acceptance_id",
+        "artifact_id",
+        "spec_version",
+        "verdict",
+        "issues",
+        "task_id",
+        "run_id",
+        "created_at"
+      ],
+      "title": "IssueMaterialAcceptance",
+      "type": "object"
+    },
+    "IssueMaterialFact": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "fact_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "superseded": {
+          "type": "boolean"
+        },
+        "supersedes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_id",
+        "scope",
+        "kind",
+        "body",
+        "source_message_id",
+        "attribution",
+        "needs_review",
+        "superseded",
+        "created_at"
+      ],
+      "title": "IssueMaterialFact",
+      "type": "object"
+    },
+    "IssueMaterialFile": {
+      "additionalProperties": false,
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueMaterialSource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources_more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file_id",
+        "name",
+        "size",
+        "sha256",
+        "sources"
+      ],
+      "title": "IssueMaterialFile",
+      "type": "object"
+    },
+    "IssueMaterialSource": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "issue_id"
+      ],
+      "title": "IssueMaterialSource",
+      "type": "object"
+    },
+    "IssueMaterials": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptances": {
+          "items": {
+            "$ref": "#/definitions/IssueMaterialAcceptance"
+          },
+          "type": "array"
+        },
+        "agent_capabilities": {
+          "$ref": "#/definitions/AgentCapabilityPage"
+        },
+        "agent_capability_history": {
+          "$ref": "#/definitions/AgentCapabilityRevisionPage"
+        },
+        "artifacts": {
+          "items": {
+            "$ref": "#/definitions/ArtifactDetail"
+          },
+          "type": "array"
+        },
+        "capabilities": {
+          "$ref": "#/definitions/CapabilityPage"
+        },
+        "deliveries": {
+          "items": {
+            "$ref": "#/definitions/IssueDeliveryPage"
+          },
+          "type": "array"
+        },
+        "deployment": {
+          "$ref": "#/definitions/ObservedDeployment"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/definitions/IssueMaterialFact"
+          },
+          "type": "array"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/IssueMaterialFile"
+          },
+          "type": "array"
+        },
+        "issue_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/definitions/IssueView"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "legacy_contexts": {
+          "items": {
+            "$ref": "#/definitions/WorkItem"
+          },
+          "type": "array"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/IssueConversationItem"
+          },
+          "type": "array"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "integer"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/definitions/DecisionView"
+          },
+          "type": "array"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/IssueConversationItem"
+          },
+          "type": "array"
+        },
+        "task_capabilities": {
+          "$ref": "#/definitions/TaskCapabilityExplanation"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/definitions/TaskDetail"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "issue_ids",
+        "observed_at",
+        "seq",
+        "more"
+      ],
+      "title": "IssueMaterials",
+      "type": "object"
+    },
+    "IssueMaterialsQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "title": "IssueMaterialsQuery",
+      "type": "object"
+    },
     "IssueMessageAssociation": {
       "additionalProperties": false,
       "properties": {
@@ -12909,6 +13234,35 @@
       "title": "RunCapabilityBinding",
       "type": "object"
     },
+    "RunContext": {
+      "additionalProperties": false,
+      "properties": {
+        "materials": {
+          "$ref": "#/definitions/IssueMaterials"
+        },
+        "role": {
+          "$ref": "#/definitions/RunRole"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec_version",
+        "run_id",
+        "task_id",
+        "role",
+        "materials"
+      ],
+      "title": "RunContext",
+      "type": "object"
+    },
     "RunExecutionPin": {
       "additionalProperties": false,
       "properties": {
@@ -17292,6 +17646,97 @@
       "title": "WithdrawMessageResult",
       "type": "object"
     },
+    "WorkItem": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "items": {
+            "$ref": "#/definitions/SharedFact"
+          },
+          "type": "array"
+        },
+        "closure": {
+          "$ref": "#/definitions/IssueClosure"
+        },
+        "completion_criteria": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "default_workspace_task_id": {
+          "type": "string"
+        },
+        "deliveries": {
+          "items": {
+            "$ref": "#/definitions/IssueDelivery"
+          },
+          "type": "array"
+        },
+        "follow_ons": {
+          "items": {
+            "$ref": "#/definitions/IssueFollowOn"
+          },
+          "type": "array"
+        },
+        "intent": {
+          "type": "string"
+        },
+        "pr_policy": {
+          "$ref": "#/definitions/IssuePRPolicy"
+        },
+        "project": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "stages": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueStage"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/WorkItemStatus"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "integer"
+        },
+        "work_item_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "project",
+        "intent",
+        "stages",
+        "work_item_id",
+        "revision",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "WorkItem",
+      "type": "object"
+    },
     "WorkItemChoice": {
       "additionalProperties": false,
       "properties": {
@@ -17410,6 +17855,15 @@
       ],
       "title": "WorkItemCompletionReview",
       "type": "object"
+    },
+    "WorkItemStatus": {
+      "enum": [
+        "open",
+        "snoozed",
+        "closed"
+      ],
+      "title": "WorkItemStatus",
+      "type": "string"
     },
     "WorkerKind": {
       "enum": [
@@ -17799,6 +18253,15 @@
     "IssueManagerView": {
       "$ref": "#/definitions/IssueManagerView"
     },
+    "IssueMaterialFile": {
+      "$ref": "#/definitions/IssueMaterialFile"
+    },
+    "IssueMaterials": {
+      "$ref": "#/definitions/IssueMaterials"
+    },
+    "IssueMaterialsQuery": {
+      "$ref": "#/definitions/IssueMaterialsQuery"
+    },
     "IssueMessageAssociations": {
       "$ref": "#/definitions/IssueMessageAssociations"
     },
@@ -17978,6 +18441,9 @@
     },
     "RunCapabilityBinding": {
       "$ref": "#/definitions/RunCapabilityBinding"
+    },
+    "RunContext": {
+      "$ref": "#/definitions/RunContext"
     },
     "RunExecutionPin": {
       "$ref": "#/definitions/RunExecutionPin"

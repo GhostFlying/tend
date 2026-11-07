@@ -153,6 +153,30 @@ func TestFeedbackBriefListsOnlyExplicitFileManifests(t *testing.T) {
 	}
 }
 
+func TestFeedbackBriefDiscoversIssueMaterialsWithContextTool(t *testing.T) {
+	reads := 0
+	_, input := Brief(WorkerSpec{
+		ReadContext: func(context.Context, protocol.IssueMaterialsQuery) (protocol.RunContext, error) {
+			reads++
+			return protocol.RunContext{}, nil
+		},
+		Feedback: &protocol.Feedback{
+			AcceptanceID: "acceptance_original", Verdict: protocol.VerdictChangesRequired,
+			Issues:   json.RawMessage(`["fix the failure"]`),
+			Evidence: json.RawMessage(`{"path":"/old/scratch/opaque.log"}`),
+			Files:    []protocol.ArtifactFile{{FileID: "file_log", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}},
+		},
+	})
+	for _, want := range []string{"acceptance_original", "file_log", "checks.log", "download_file", "read_context can discover other saved Issue materials", "Paths inside evidence JSON are observations, not downloadable file references"} {
+		if !strings.Contains(input, want) {
+			t.Errorf("feedback omits %q: %s", want, input)
+		}
+	}
+	if strings.Contains(input, "only the explicitly listed file IDs") || strings.Count(input, "file_id:") != 1 || reads != 0 {
+		t.Fatalf("feedback restricted ordinary reading, promoted an opaque path, or performed a read: %s; reads=%d", input, reads)
+	}
+}
+
 func TestPendingVerdictRestoresOriginalInputBeforeAnotherSubmission(t *testing.T) {
 	dir := t.TempDir()
 	manifest := protocol.ArtifactFile{FileID: "file_original", Name: "checks.log", Size: 7, SHA256: strings.Repeat("a", 64)}

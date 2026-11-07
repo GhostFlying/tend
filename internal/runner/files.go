@@ -164,14 +164,17 @@ func syncUploadDirectory(path string) error {
 
 func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Prepared, id string) (string, error) {
 	file, category, err := assignmentFile(as, id)
+	var questionReadErr error
 	if err != nil && as.WorkerQuestions && (len(as.Spec) == 0 || json.Valid(as.Spec)) {
 		// Supplemental inputs are not revisions of the frozen assignment.
 		// Re-read their metadata through the same run credential on every
 		// download; the file endpoint independently checks current grants.
 		var questions []protocol.WorkerQuestion
-		reader := ownerQuestions{r: r, as: as, prepared: p}
-		if readErr := reader.read(ctx, "", &questions); readErr != nil {
-			return "", readErr
+		// Metadata discovery gets one bounded read. The normal question wait
+		// loop must not delay an independently readable Issue original.
+		questionReadErr = r.readRunContextJSON(ctx, as, "/runner/v1/questions", &questions)
+		if questionReadErr != nil {
+			questions = nil
 		}
 		for _, question := range questions {
 			if question.RunID != as.RunID || question.ActionID != as.ActionID || question.SpecVersion != as.SpecVersion || question.Role != as.Role || question.InputRevision < 1 || (question.Status != "answered" && question.Status != "open") {
@@ -190,18 +193,29 @@ func (r *Runner) downloadFile(ctx context.Context, as protocol.Assignment, p Pre
 			}
 		}
 	}
+	if errors.Is(err, errAssignmentFileNotFound) && (as.Role == protocol.RoleImplement || as.Role == protocol.RoleAccept) {
+		file, err := r.readIssueFileMetadata(ctx, as, id)
+		if err != nil {
+			return "", errors.Join(err, questionReadErr)
+		}
+		return r.downloadRetainedFileFrom(ctx, as, filepath.Join(p.ScratchDir, "issue-materials"), file.ArtifactFile, "/runner/v1/issue-files/")
+	}
 	if err != nil {
-		return "", err
+		return "", errors.Join(err, questionReadErr)
 	}
 	return r.downloadRetainedFile(ctx, as, filepath.Join(p.ScratchDir, category), file)
 }
 
 func (r *Runner) downloadRetainedFile(ctx context.Context, as protocol.Assignment, dir string, file protocol.ArtifactFile) (string, error) {
+	return r.downloadRetainedFileFrom(ctx, as, dir, file, "/runner/v1/files/")
+}
+
+func (r *Runner) downloadRetainedFileFrom(ctx context.Context, as protocol.Assignment, dir string, file protocol.ArtifactFile, route string) (string, error) {
 	if (file.FileID == "" || file.FileID == "." || file.FileID == ".." || filepath.Base(file.FileID) != file.FileID) || file.Size < 0 {
 		return "", errors.New("invalid file metadata")
 	}
 	id := file.FileID
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.c.base+"/runner/v1/files/"+url.PathEscape(id), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.c.base+route+url.PathEscape(id), nil)
 	if err != nil {
 		return "", err
 	}
@@ -245,6 +259,8 @@ func (r *Runner) downloadRetainedFile(ctx context.Context, as protocol.Assignmen
 	return path, nil
 }
 
+var errAssignmentFileNotFound = errors.New("file is not in the assignment's input snapshot, artifact or acceptance feedback")
+
 // assignmentFile resolves only the immutable inputs or submitted output of this
 // run. No owner credentials or host-local attachment paths are involved.
 func assignmentFile(as protocol.Assignment, id string) (protocol.ArtifactFile, string, error) {
@@ -279,7 +295,7 @@ func assignmentFile(as protocol.Assignment, id string) (protocol.ArtifactFile, s
 			}
 		}
 	}
-	return protocol.ArtifactFile{}, "", errors.New("file is not a task input, submitted artifact or declared acceptance feedback")
+	return protocol.ArtifactFile{}, "", errAssignmentFileNotFound
 }
 
 // File transfers follow the caller's run lifetime rather than the short RPC

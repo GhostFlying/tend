@@ -6,6 +6,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // ManagerFile resolves only retained bytes attributable to this run's Issue.
@@ -27,7 +28,16 @@ func (a *App) ManagerFile(ctx context.Context, p protocol.Principal, id string) 
 		if err != nil {
 			return err
 		}
-		file, err = issueScopedFile(ctx, tx.Q(), m.IssueID, m.AssignmentEpoch, id)
+		ids, err := materialIssueIDs(ctx, tx.Q(), m.IssueID)
+		if err != nil {
+			return err
+		}
+		scope, err := views.MaterialScope(ctx, tx.Q(), ids)
+		if err != nil {
+			return err
+		}
+		metadata, err := views.IssueMaterialFile(ctx, tx.Q(), scope, id)
+		file = metadata.ArtifactFile
 		return err
 	})
 	return file, err

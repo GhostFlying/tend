@@ -192,6 +192,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if harness.HasObservation(spec) {
 		cfg.Tools = append(cfg.Tools, harness.ReadObservationToolSpec)
 	}
+	if spec.ReadContext != nil {
+		cfg.Tools = append(cfg.Tools, harness.ReadContextToolSpec)
+	}
 	if spec.DownloadFile != nil {
 		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
 	}

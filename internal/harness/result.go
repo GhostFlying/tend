@@ -70,7 +70,7 @@ var ResultToolSpec = ToolSpec{
 
 var DownloadFileToolSpec = ToolSpec{
 	Name:        "download_file",
-	Description: "Download an explicitly listed original task input, submitted artifact file, or preserved acceptance feedback file by file_id into this run's scratch directory. Verifies its size and SHA-256 and returns its local path.",
+	Description: "Download an original Issue material, task input, submitted artifact or acceptance evidence file by file_id into this run's scratch directory. Use read_context to discover saved materials; spec.inputs is a starting snapshot, not a reading allowlist. Verifies size and SHA-256 and returns the local path.",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"file_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}`),
 }
 
@@ -87,6 +87,9 @@ func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
 	}
 	if c.Tool == ReadObservationTool {
 		return r.readObservation(ctx, c)
+	}
+	if c.Tool == ReadContextTool {
+		return r.readContext(ctx, c)
 	}
 	if c.Tool == AskOwnerTool {
 		return r.askOwner(ctx, c)

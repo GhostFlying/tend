@@ -376,6 +376,9 @@ func (w *worker) openBridge(ctx context.Context) error {
 	if harness.HasObservation(w.spec) {
 		tools = append(tools, harness.ReadObservationToolSpec)
 	}
+	if w.spec.ReadContext != nil {
+		tools = append(tools, harness.ReadContextToolSpec)
+	}
 	if w.spec.DownloadFile != nil {
 		tools = append(tools, harness.DownloadFileToolSpec)
 	}
