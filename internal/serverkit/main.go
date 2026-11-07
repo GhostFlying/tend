@@ -479,7 +479,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		}()
 	}
 	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir, NativeWorkers: native}, log)
-	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log)
+	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log, deps.UpgradeTickInterval)
 	if err != nil {
 		return err
 	}

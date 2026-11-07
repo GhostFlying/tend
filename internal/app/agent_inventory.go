@@ -72,12 +72,27 @@ func (RegisterAgentInventory) Authorize(ctx context.Context, x *Exec, q store.Qu
 	if x.Env.Target.Type != "host" || x.Env.Target.ID != x.Principal.Subject {
 		return protocol.Errorf(protocol.CodeForbidden, "inventory belongs to the authenticated host")
 	}
-	return authorizeInventory(ctx, q, x.Principal, p.Runtime)
+	if err := authorizeInventory(ctx, q, x.Principal, p.Runtime); err != nil {
+		return err
+	}
+	if p.Projection.CapabilityVersion != 0 {
+		current, err := store.GetHostRuntime(ctx, q, x.Principal.Subject)
+		if err != nil {
+			return err
+		}
+		if !runtimeSupportsCapabilityInventory(p.Runtime) || !runtimeSupportsCapabilityInventory(&current.Runtime) {
+			return protocol.Errorf(protocol.CodeForbidden, "capability declaration extension was not negotiated")
+		}
+	}
+	return nil
 }
 func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.RegisterAgentInventoryPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	if p.Projection.CapabilityVersion != 0 && (p.Runtime == nil || !runtimeSupportsCapabilityInventory(p.Runtime)) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "capability declarations require negotiated capability declaration support")
 	}
 	if p.Projection.FormatVersion == 2 && (p.Runtime == nil || p.Runtime.Protocol < 2) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "format-2 inventory requires runner protocol 2")
@@ -110,9 +125,31 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "inventory local revision conflicts with accepted metadata")
 	}
+	history, err := store.ListAgentCapabilityDeclarations(ctx, tx.Q(), x.Principal.Subject)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if err := protocol.ValidateAgentCapabilityRevisions(history, p.Projection.Agents); err != nil {
+		return Outcome{}, err
+	}
+	type declarationKey struct {
+		identity protocol.AgentIdentity
+		revision uint64
+	}
+	accepted := make(map[declarationKey]bool, len(history))
+	for _, a := range history {
+		accepted[declarationKey{a.Identity, a.Revision}] = true
+	}
 	categories := []protocol.AgentCategory{}
 	seen := map[string]bool{}
 	for _, a := range p.Projection.Agents {
+		// The revision fence above already proved historical declarations unchanged.
+		// Retirement only prevents admission of new identities or revisions.
+		if !accepted[declarationKey{a.Identity, a.Revision}] {
+			if err := checkCapabilityReferences(ctx, tx.Q(), a.Capabilities); err != nil {
+				return Outcome{}, err
+			}
+		}
 		for _, id := range a.Categories {
 			if seen[id] {
 				continue
@@ -151,6 +188,9 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 		}
 		result.Online, result.LastHeartbeatAtMillis = catalog.Online, catalog.LastHeartbeatAtMillis
 		result.Current, result.Projection = catalog.Current, catalog.Projection
+		if result.Projection != nil && result.Projection.CapabilityVersion != 0 && !runtimeSupportsCapabilityInventory(input.Runtime) {
+			result.Projection = nil
+		}
 		if input.RequestID != "" {
 			result.RequestState = "not_recorded"
 			rec, err := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), input.RequestID)

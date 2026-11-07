@@ -1,6 +1,9 @@
 package protocol
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 const CapabilityAgentContinuation = "runner-agent-continuation-v1"
 
@@ -8,6 +11,7 @@ const CapabilityAgentExecution = "runner-agent-execution-v1"
 
 // AgentRequirement selects metadata; the run role remains separately authorized.
 type AgentRequirement struct {
+	RequiredCapabilities []CapabilityReference `json:"required_capabilities,omitempty"`
 	// AgentID pins a concrete identity when execution is retained by its owner.
 	AgentID    string `json:"agent_id,omitempty"`
 	CategoryID string `json:"category_id"`
@@ -27,10 +31,13 @@ func (s TaskAgentSelection) Validate() error { return s.ValidateForAcceptance(tr
 // has established the immutable creator policy. Existing callers stay strict.
 func (s TaskAgentSelection) ValidateForAcceptance(required bool) error {
 	roles := []AgentRequirement{s.Implementation}
-	if required || s.Acceptance != (AgentRequirement{}) {
+	if required || !s.Acceptance.IsZero() {
 		roles = append(roles, s.Acceptance)
 	}
 	for _, r := range roles {
+		if _, err := CanonicalCapabilityReferences(r.RequiredCapabilities); err != nil {
+			return err
+		}
 		if r.AgentID != "" {
 			parts := strings.Split(r.AgentID, "/")
 			if len(parts) != 2 || !AgentInventoryID(parts[0]) || !AgentInventoryID(parts[1]) {
@@ -86,4 +93,19 @@ type AgentExecutor struct {
 // An omitted field adds no requirement, including the model's default effort.
 func (r AgentRequirement) MatchesProfile(profile ExecutionProfile) bool {
 	return (r.Model == "" || r.Model == profile.Model) && (r.Effort == "" || r.Effort == profile.Effort)
+}
+
+func (r AgentRequirement) IsZero() bool {
+	return r.AgentID == "" && r.CategoryID == "" && r.RuntimeID == "" && r.Model == "" && r.Effort == "" && len(r.RequiredCapabilities) == 0
+}
+func (r AgentRequirement) Equal(other AgentRequirement) bool {
+	return r.AgentID == other.AgentID && r.CategoryID == other.CategoryID && r.RuntimeID == other.RuntimeID && r.Model == other.Model && r.Effort == other.Effort && CapabilityReferencesEqual(r.RequiredCapabilities, other.RequiredCapabilities)
+}
+func (s TaskAgentSelection) Clone() TaskAgentSelection {
+	s.Implementation.RequiredCapabilities = slices.Clone(s.Implementation.RequiredCapabilities)
+	s.Acceptance.RequiredCapabilities = slices.Clone(s.Acceptance.RequiredCapabilities)
+	return s
+}
+func (s TaskAgentSelection) Equal(other TaskAgentSelection) bool {
+	return s.Implementation.Equal(other.Implementation) && s.Acceptance.Equal(other.Acceptance)
 }

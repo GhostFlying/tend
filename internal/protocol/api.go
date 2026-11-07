@@ -6,7 +6,7 @@ package protocol
 func APITypes() []any {
 	return []any{
 		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},
-		HandoffAuditPage{},
+		HandoffAuditPage{}, CapabilityDefinition{}, PutCapabilityPayload{}, CapabilityPage{}, AgentCapabilityQuery{}, AgentCapabilityPage{}, AgentCapabilityRevisionPage{}, TaskCapabilityExplanation{}, RunCapabilityBinding{},
 		SetIssueAcceptancePolicyPayload{},
 		UpdateSharedDeliveryReviewPayload{}, SharedDeliveryReviewPage{}, SharedReviewEvidence{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},

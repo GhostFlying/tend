@@ -379,6 +379,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		_ = r.flushEvents(flushCtx, as)
 		return nil
 	}
+	startWorker, err := r.capabilityWorkerStart(runCtx, as, execution)
+	if err != nil {
+		return err
+	}
 	// Reset stop proof only when another native attempt is actually about to
 	// start. Recovering a durable question must preserve the predecessor exit.
 	attempt, err := r.cfg.Journal.NextAttempt(ctx, as.RunID)
@@ -402,7 +406,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}
 	evidence := &acceptanceEvidence{r: r, as: as, prepared: p}
-	w, err := execution.Workers.Start(runCtx, harness.WorkerSpec{RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := startWorker(runCtx, harness.WorkerSpec{RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},

@@ -138,6 +138,15 @@ func (r *Runner) RegisterAgentInventory(ctx context.Context) error {
 	if local.Revision == 0 || local.Projection == nil || (local.Projection.FormatVersion == 2 && runtime.Protocol < 2) {
 		return nil
 	}
+	if local.Projection.CapabilityVersion != 0 && !slices.Contains(runtime.Capabilities, protocol.CapabilityExecutorDeclarations) {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "server does not support capability declarations")
+	}
+	r.controlMu.Lock()
+	declarationSupported := r.capabilityDeclarationsSupported
+	r.controlMu.Unlock()
+	if local.Projection.CapabilityVersion != 0 && !declarationSupported {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "capability declarations require mutual hello negotiation")
+	}
 	if local.Revision > math.MaxInt64 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "local inventory revision exceeds wire range")
 	}

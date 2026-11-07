@@ -91,6 +91,14 @@ func checkJSON(dec *json.Decoder, typ reflect.Type, path string) error {
 		if _, ok := token.(bool); !ok {
 			return invalid("invalid_shape", path)
 		}
+	case reflect.Int64:
+		n, ok := token.(json.Number)
+		if !ok {
+			return invalid("invalid_shape", path)
+		}
+		if _, err := strconv.ParseInt(n.String(), 10, 64); err != nil {
+			return invalid("invalid_shape", path)
+		}
 	case reflect.Uint64:
 		n, ok := token.(json.Number)
 		if !ok {

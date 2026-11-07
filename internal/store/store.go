@@ -256,6 +256,31 @@ func (s *Store) migrate(ctx context.Context, upTo int) error {
 		if current > len(migrations) {
 			return fmt.Errorf("store: database schema version %d is newer than this binary (%d)", current, len(migrations))
 		}
+		// A version number alone cannot identify an unreleased branch's history.
+		// Refuse collisions before applying SQL; never rewrite the recorded source.
+		rows, err := tx.Q().QueryContext(ctx, `SELECT version,name FROM schema_migrations ORDER BY version`)
+		if err != nil {
+			return fmt.Errorf("store: read migration identities: %w", err)
+		}
+		seen := 0
+		for rows.Next() {
+			var version int
+			var name string
+			if err := rows.Scan(&version, &name); err != nil {
+				rows.Close()
+				return fmt.Errorf("store: scan migration identity: %w", err)
+			}
+			seen++
+			if version != seen || name != migrations[version-1].name {
+				rows.Close()
+				return fmt.Errorf("store: migration history conflict at version %d", version)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: read migration identities: %w", err)
+		}
+		rows.Close()
 		for _, m := range migrations[current:] {
 			if _, err := tx.Exec(ctx, m.sql); err != nil {
 				return fmt.Errorf("store: apply migration %04d_%s: %w", m.version, m.name, err)

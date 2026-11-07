@@ -47,9 +47,13 @@ func SummariesWithExecution(ctx context.Context, q store.Querier, rows []store.T
 
 func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows []store.TaskRow) ([]protocol.TaskSummary, error) {
 	out := make([]protocol.TaskSummary, 0, len(rows))
-	var err error
+	capabilities, err := facts.capabilitySelections(ctx, q, rows)
+	if err != nil {
+		return nil, err
+	}
 	for _, row := range rows {
 		summary := Summary(row)
+		summary.RequiredCapabilities = capabilities[row.TaskID]
 		if row.Kind == protocol.TaskKindIssueManager {
 			m, e := store.GetIssueManagerTask(ctx, q, row.TaskID)
 			if e != nil {
