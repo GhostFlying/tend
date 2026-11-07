@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -85,6 +86,32 @@ func TestCapabilityDeclarationRevisionCLIAndHTTPPreserveHistory(t *testing.T) {
 	cfg.Agents[0].Revision = 2
 	cfg.Agents[0].Capabilities = []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}
 	register(2)
+	var declared protocol.AgentCapabilityView
+	if err := json.Unmarshal(c.run("agents", "capabilities", "show", "host-a", "cedar", "--json"), &declared); err != nil || len(declared.DefinitionStatuses) != 1 || declared.DefinitionStatuses[0].CurrentDefinition == nil || declared.DefinitionStatuses[0].CurrentDefinition.State != "active" {
+		t.Fatal("active definition missing from CLI projection", declared, err)
+	}
+	c.run("capability", "put", "image_gen", "--revision", "1", "--data", `{"title":"Image generation","description":"Retained label","state":"retired","contract_version":1,"verification_policy":"declaration_v1"}`)
+	for _, args := range [][]string{
+		{"agents", "capabilities", "show", "host-a", "cedar"},
+		{"agents", "capabilities", "show", "host-a", "cedar", "--json"},
+	} {
+		var current protocol.AgentCapabilityView
+		if err := json.Unmarshal(c.run(args...), &current); err != nil || len(current.Declared) != 1 || current.Declared[0].DefinitionRevision != 1 || len(current.DefinitionStatuses) != 1 {
+			t.Fatal("historical declaration lost from CLI", current, err)
+		}
+		status := current.DefinitionStatuses[0]
+		if status.CurrentDefinition == nil || status.CurrentDefinition.State != "retired" || status.CurrentDefinition.Revision != 2 || status.Declared != current.Declared[0] || !strings.Contains(status.Explanation, "new references are rejected") {
+			t.Fatal("CLI hid current retirement", current)
+		}
+	}
+	var agents protocol.AgentCapabilityPage
+	if err := json.Unmarshal(c.run("agents", "capabilities", "list", "--capability", "image_gen", "--json"), &agents); err != nil || len(agents.Items) != 1 || agents.Items[0].DefinitionStatuses[0].CurrentDefinition.State != "retired" {
+		t.Fatal("CLI list hid retirement", agents, err)
+	}
+	var httpAgent protocol.AgentCapabilityView
+	if code := e.do("GET", "/api/v1/agent-capabilities/host-a/cedar", token, nil, &httpAgent); code != http.StatusOK || len(httpAgent.DefinitionStatuses) != 1 || httpAgent.DefinitionStatuses[0].CurrentDefinition.State != "retired" {
+		t.Fatal("HTTP hid retirement", code, httpAgent)
+	}
 	var page protocol.AgentCapabilityRevisionPage
 	if err := json.Unmarshal(c.run("agents", "capabilities", "revisions", "host-a", "cedar", "--limit", "1"), &page); err != nil || len(page.Items) != 1 || page.Next == "" || page.Items[0].Definition.Revision != 1 || len(page.Items[0].Definition.Capabilities) != 0 {
 		t.Fatal(page, err)

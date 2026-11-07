@@ -46,6 +46,7 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 	// The signature rejects continuations of a listing after mutable runtime
 	// facts change. A stale cursor is explicit; it cannot silently skip results.
 	var signature []any
+	definitions := capabilityDefinitions{}
 	for _, inv := range inventories {
 		runtime, err := store.GetHostRuntime(ctx, q, inv.ExecutionEnvironmentID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -58,6 +59,10 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 		}
 		for _, agent := range inv.Agents {
 			v := protocol.AgentCapabilityView{Binding: agent.Binding, Categories: slices.Clone(agent.Categories), Purposes: slices.Clone(agent.Purposes), Identity: agent.Identity, AgentRevision: agent.Revision, Declared: slices.Clone(agent.Capabilities), Current: protocol.CapabilityMatch{State: "pending", Required: slices.Clone(agent.Capabilities), Reasons: []protocol.CapabilityReason{}, CheckedAtMillis: now}}
+			v.DefinitionStatuses, err = definitions.statuses(ctx, q, agent.Capabilities)
+			if err != nil {
+				return nil, "", err
+			}
 			found := false
 			for _, executor := range executors {
 				if executor.Pin.Identity != agent.Identity || executor.Pin.Purpose != "" {
@@ -90,8 +95,38 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 			out = append(out, v)
 		}
 	}
-	body, err := json.Marshal(signature)
+	// Definitions are mutable source facts too: a retirement must invalidate a
+	// cursor even if the runner inventory and ordinary availability did not change.
+	body, err := json.Marshal(append(signature, definitions))
 	return out, string(body), err
+}
+
+type capabilityDefinitions map[string]*protocol.CapabilityDefinition
+
+func (definitions capabilityDefinitions) statuses(ctx context.Context, q store.Querier, declared []protocol.CapabilityReference) ([]protocol.CapabilityDefinitionStatus, error) {
+	var statuses []protocol.CapabilityDefinitionStatus
+	for _, ref := range declared {
+		current, cached := definitions[ref.CapabilityID]
+		if !cached {
+			definition, err := store.GetCapabilityDefinition(ctx, q, ref.CapabilityID, 0)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return nil, err
+			}
+			if err == nil {
+				current = &definition
+			}
+			definitions[ref.CapabilityID] = current
+		}
+		status := protocol.CapabilityDefinitionStatus{Declared: ref, CurrentDefinition: current, Explanation: "current definition unavailable; the historical declaration is retained"}
+		if current != nil {
+			status.Explanation = "current definition is active; configuration declaration only, not verified tool execution"
+			if current.State == "retired" {
+				status.Explanation = "current definition is retired; historical declarations and frozen Task requirements are retained; new references are rejected"
+			}
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }
 
 // TaskCapabilities uses the scheduler's candidates, dependency facts, shared
@@ -121,6 +156,7 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 		}
 	}
 	v := protocol.TaskCapabilityExplanation{TaskID: taskID, SpecVersion: version, Role: role, Required: slices.Clone(refs), State: "unavailable", Candidates: []protocol.AgentCapabilityView{}, Reasons: []string{}, CheckedAtMillis: now, DeadlineMillis: task.CreatedAt + 600000, Recovery: "read candidate reasons; explicitly register declarations or revise a future Task spec; reconcile unknown original requests"}
+	definitions := capabilityDefinitions{}
 	facts, err := readExecutionFacts(ctx, q)
 	if err != nil {
 		return v, err
@@ -226,6 +262,10 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 				}
 			}
 			candidate := protocol.AgentCapabilityView{SchedulingReason: schedulingReason, Binding: p.Runtime, Categories: slices.Clone(executor.Categories), Purposes: []string{"worker_run"}, Identity: p.Identity, AgentRevision: p.AgentRevision, Declared: slices.Clone(executor.DeclaredCapabilities), Pin: &p, Current: m}
+			candidate.DefinitionStatuses, err = definitions.statuses(ctx, q, candidate.Declared)
+			if err != nil {
+				return v, err
+			}
 			v.Candidates = append(v.Candidates, candidate)
 			if m.State == "pending" && v.State != "eligible" {
 				v.State = "pending"

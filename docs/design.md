@@ -1155,6 +1155,11 @@ repair 或业务 unknown。缺失、未确认、不匹配或其它类型的事�
 
 ## D183：显式声明的 Capability 与双角色冻结匹配
 
+只读 Agent list/show 及 Task explanation 候选用 `definition_statuses` 将原精确声明与定义当前
+revision/state 分开呈现。当前退役说明新引用被拒绝，但不修改旧声明、冻结需求、pin 或原匹配结果；
+定义改变也使投影分页 cursor 失效。CLI 透传完整字段，原始注册历史保持不变。
+见[当前定义状态投影计划](plans/capability-definition-status.md)。
+
 Capability 为独立的版本化业务标签。定义由 owner request/CAS 追加，Agent 配置显式声明
 definition revision；同 Agent revision 的声明不可变。Task implementation/acceptance 各自
 冻结 required，新增 exact reference 检查 active 定义，原角色保留引用允许历史继续。
@@ -1176,6 +1181,10 @@ Agent 查询、Task 解释、CLI/API/只读工具与等待通知共用真实调�
 关联维护装配验证沿 D133 外部边界注入已有 controller interval，隔离测试消除固定轮询相位
 等待，生产空依赖保持原默认值。它不放宽 readiness、物理身份、独立 updater/DB link 或原
 总 deadline；原失败、阶段样本与完整检查分开保存。见[阶段证据](findings/capability-maintenance-deadline.md)。
+
+后续阶段预算修订将真实 fresh 准备与 production reopen/恢复分开，各 25 秒，HTTP 仍为 2 秒，
+父 helper 总期限为 55 秒（含 5 秒退出余量）。这是原单一 25 秒总窗口的明确增加，取代旧调查
+不得移动起点的限制；其他指定测试预算保持。见[阶段预算](plans/production-assembly-phase-budgets.md)。
 
 ## D184：负责人判断任务约定的适用性
 
