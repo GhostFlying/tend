@@ -122,6 +122,47 @@ func TestHealthReadReconcilesOriginalOwnedExitDespiteAuthorityFailure(t *testing
 	}
 }
 
+func TestHealthDeadlinePreservesOnlyAuthorizedRollbackTransition(t *testing.T) {
+	for _, which := range []string{"authorized", "unfenced", "no_revision", "unsafe", "accepted", "wrong_binding"} {
+		t.Run(which, func(t *testing.T) {
+			h := newHarness(t)
+			h.upgrade(t)
+			h.until(t, "checking")
+			h.now = h.now.Add(11 * time.Second)
+			h.boot += 11000
+			h.s.opts.Authority = deadlineAuthority{fakeAuthority: h.a, health: func(_ context.Context, b Binding) (Health, error) {
+				v := Health{Binding: b, ServerConfirmed: true, ServerRevision: 2, ControlRevision: 2, AdmissionFenced: true, RollbackSafe: true, Healthy: false, HeartbeatSequence: 1}
+				switch which {
+				case "unfenced":
+					v.AdmissionFenced = false
+				case "no_revision":
+					v.ControlRevision = 0
+				case "unsafe":
+					v.RollbackSafe = false
+				case "accepted":
+					v.NewWorkAccepted = true
+				case "wrong_binding":
+					v.Binding.ProcessInstanceID = "unrelated"
+				}
+				return v, nil
+			}}
+			stops := h.p.stops
+			err := h.s.Step(t.Context())
+			after := h.s.Status().Operation
+			if after.HealthWindow == nil || after.HealthWindow.TimedOutAtMillis == 0 || h.p.stops != stops {
+				t.Fatal("transition lost timeout or stopped candidate before fresh fence", after, err)
+			}
+			if which == "authorized" {
+				if err != nil || after.Phase != "rollback_stopping" || after.RollbackAuthorization == nil {
+					t.Fatal("authorized rollback transition reported as failed", after, err)
+				}
+			} else if err == nil || after.Phase != "checking" || after.RollbackAuthorization != nil {
+				t.Fatal("elapsed health created rollback authority", after, err)
+			}
+		})
+	}
+}
+
 func (a deadlineAuthority) Health(ctx context.Context, b Binding) (Health, error) {
 	return a.health(ctx, b)
 }

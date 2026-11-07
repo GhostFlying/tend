@@ -345,6 +345,11 @@ func (m *Manager) collectSummary(ctx context.Context, fork harness.Thread, forke
 }
 
 func (m *Manager) prepareSummary(ctx context.Context, s harness.Session, th harness.Thread) (store.HandoffSummary, bool, error) {
+	// The existing summary input covers global Main facts. Normal Issue tool
+	// migration uses scoped ledger references and never imports that input.
+	if m.issueHandoffScope() {
+		return store.HandoffSummary{}, false, nil
+	}
 	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return store.HandoffSummary{}, false, err
@@ -418,6 +423,9 @@ func (m *Manager) reclaimSummaryInput(ctx context.Context, prior, input store.Ha
 }
 
 func (m *Manager) handoffPrompt(ctx context.Context, source harness.Thread) (string, error) {
+	if m.issueHandoffScope() {
+		return m.issueHandoffPrompt(ctx, source)
+	}
 	snap, err := m.app.HandoffSnapshot(ctx, m.bindingInstance())
 	if err != nil {
 		return "", err

@@ -110,6 +110,12 @@ func (s *Supervisor) finishHealthRead(op *Operation, cause error) error {
 	if op.Phase == "committed" {
 		return cause
 	}
+	if cause == nil && op.Phase == "rollback_stopping" && !op.Irreversible && !s.hasCommittedProof(op) && op.RollbackAuthorization != nil && validRollbackAuthorization(op, *op.RollbackAuthorization) {
+		// check already persisted the independently authorized transition. Keep
+		// the timeout fact without reporting that successful transition as failed.
+		// stopRollbackCandidate still requires fresh admission authority.
+		return nil
+	}
 	if cause == nil {
 		cause = errors.New("candidate health remains unconfirmed")
 	}

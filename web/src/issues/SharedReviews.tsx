@@ -125,8 +125,7 @@ function ReviewRecord({ review }: { review: SharedDeliveryReview }) {
             {round.reviewer_role === "accept" || round.acceptance_id
               ? "验收中的整 PR 审阅"
               : "报告任务审阅"}{" "}
-            ·{" "}
-            <button onClick={() => openTask(round.task_id)}>查看实际审阅任务</button>
+            · <button onClick={() => openTask(round.task_id)}>查看实际审阅任务</button>
             {round.supplement_task_id && (
               <>
                 {" "}
