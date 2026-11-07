@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // AgentCategories reads current classifications, not category history or roles.
@@ -106,6 +107,13 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 			seen[key] = len(result.RetainedDefinitions)
 			result.RetainedDefinitions = append(result.RetainedDefinitions, protocol.RetainedAgentDefinition{Pin: pin, Definition: a, Runtimes: slices.Clone(inv.Projection.Runtimes)})
 		}
+	}
+	if result.Projection != nil {
+		result.Capabilities, _, err = views.CapabilityAgentsForHost(ctx, q, host, now)
+		if err != nil {
+			return result, err
+		}
+
 	}
 	return result, nil
 }

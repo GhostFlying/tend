@@ -76,7 +76,7 @@ func TestAcceptanceEvidenceLegacyWriterRejectsJournal18BeforeBusinessRead(t *tes
 	command := exec.CommandContext(ctx, legacy, "--config", config)
 	command.Env = []string{"PATH=" + os.Getenv("PATH"), "TEND_HOST_TOKEN=fixture-only"}
 	output, runErr := command.CombinedOutput()
-	if runErr == nil || ctx.Err() != nil || !strings.Contains(string(output), "journal: version 18 is newer than this runner (17)") {
+	if runErr == nil || ctx.Err() != nil || !strings.Contains(string(output), fmt.Sprintf("journal: version %d is newer than this runner (17)", CurrentVersion)) {
 		t.Fatalf("legacy writer did not reject at its original schema guard: %v %s", runErr, output)
 	}
 	after, err := os.ReadFile(path)
@@ -94,7 +94,7 @@ func TestAcceptanceEvidenceLegacyWriterRejectsJournal18BeforeBusinessRead(t *tes
 }
 
 func TestAcceptanceEvidenceWriterMigrationPreservesHistoricalPendingWork(t *testing.T) {
-	for _, version := range []int{15, 16, 17} {
+	for _, version := range []int{15, 16, 17, 18} {
 		t.Run(fmt.Sprintf("journal%d", version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "journal.db")
 			db, err := sql.Open("sqlite", path)
@@ -118,7 +118,7 @@ func TestAcceptanceEvidenceWriterMigrationPreservesHistoricalPendingWork(t *test
 				t.Fatal(err)
 			}
 			old := &Journal{path: path, db: db, now: func() time.Time { return time.UnixMilli(1000) }}
-			as := protocol.Assignment{RunID: "run_original", TaskID: "task_original", LeaseID: "lease_original", Role: protocol.RoleAccept}
+			as := protocol.Assignment{RunID: "run_original", TaskID: "task_original", LeaseID: "lease_original", Role: protocol.RoleAccept, AcceptanceEvidenceFiles: version >= 18}
 			if err := old.AcceptAssignment(t.Context(), as, ""); err != nil {
 				t.Fatal(err)
 			}
@@ -134,15 +134,18 @@ func TestAcceptanceEvidenceWriterMigrationPreservesHistoricalPendingWork(t *test
 				t.Fatal(err)
 			}
 			var authority, snapshot string
-			if version == 17 {
+			if version >= 17 {
 				authority = `{"request_id":"original-quarantine","role":"runner","reason":"original unknown native work"}`
 				snapshot = `{"runs":[{"native_binding":"opaque-original-turn"}],"requests":[{"request_id":"req_original_unknown"}]}`
 				if _, err := db.ExecContext(t.Context(), `INSERT INTO bounded_recovery_quarantines(request_id,authority_json,snapshot_json,active) VALUES(?,?,?,1)`, "original-quarantine", authority, snapshot); err != nil {
 					t.Fatal(err)
 				}
 			}
-			before, err := old.Run(t.Context(), as.RunID)
-			if err != nil {
+			// Read the original schema directly; the current Runs reader requires
+			// the new declaration-receipt table, which does not exist yet.
+			var before string
+			const frozen = `SELECT json_array(assignment_json,thread_id,held,attempts,fenced,stopped_confirmed,worker_kind) FROM runs WHERE run_id=?`
+			if err := db.QueryRowContext(t.Context(), frozen, as.RunID).Scan(&before); err != nil {
 				t.Fatal(err)
 			}
 			requests, err := old.Requests(t.Context())
@@ -158,18 +161,18 @@ func TestAcceptanceEvidenceWriterMigrationPreservesHistoricalPendingWork(t *test
 			}
 			defer current.Close()
 			var installed int64
-			if err := current.db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&installed); err != nil || installed != 18 {
+			if err := current.db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&installed); err != nil || installed != CurrentVersion {
 				t.Fatal("acceptance evidence writer barrier was not installed", installed, err)
 			}
-			after, err := current.Run(t.Context(), as.RunID)
-			if err != nil || !reflect.DeepEqual(before, after) {
+			var after string
+			if err := current.db.QueryRowContext(t.Context(), frozen, as.RunID).Scan(&after); err != nil || before != after {
 				t.Fatal("migration rewrote the original assignment/native binding", after, err)
 			}
 			afterRequests, err := current.Requests(t.Context())
 			if err != nil || !reflect.DeepEqual(requests, afterRequests) {
 				t.Fatal("migration changed the pending original envelope", afterRequests, err)
 			}
-			if version == 17 {
+			if version >= 17 {
 				var gotAuthority, gotSnapshot string
 				if err := current.db.QueryRowContext(t.Context(), `SELECT authority_json,snapshot_json FROM bounded_recovery_quarantines WHERE request_id=? AND active=1`, "original-quarantine").Scan(&gotAuthority, &gotSnapshot); err != nil || gotAuthority != authority || gotSnapshot != snapshot {
 					t.Fatal("migration changed the original quarantine", gotAuthority, gotSnapshot, err)

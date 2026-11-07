@@ -15,10 +15,24 @@ import (
 // a new prompt field being interpreted by an old harness.
 func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error) {
 	// Selection is negotiated separately; retain the legacy spec wire shape.
+	var required []protocol.CapabilityReference
+	if spec.AgentSelection != nil {
+		required = spec.AgentSelection.Implementation.RequiredCapabilities
+		if role == protocol.RoleAccept {
+			required = spec.AgentSelection.Acceptance.RequiredCapabilities
+		}
+	}
 	spec.AgentSelection = nil
 	spec.AcceptanceExecution = nil
 	var b strings.Builder
 	b.WriteString(spec.Scope)
+	if len(required) > 0 {
+		fmt.Fprintf(&b, "\nFrozen required capabilities for role %s (declarations are not execution proof):", role)
+		for _, r := range required {
+			fmt.Fprintf(&b, " %s@%d", r.CapabilityID, r.DefinitionRevision)
+		}
+		b.WriteString(". Keep the exact selected entry; report capability_lost rather than changing provider or identity.\n")
+	}
 	for _, c := range spec.SharedContext {
 		fmt.Fprintf(&b, "\n\nShared work-item background (%s, revision %d):\nIntent: %s\n", c.WorkItemID, c.Revision, c.Intent)
 		for _, constraint := range c.Constraints {

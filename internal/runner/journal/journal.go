@@ -27,7 +27,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 18
+const CurrentVersion int64 = 19
 
 // Run phases.
 const (
@@ -151,6 +151,23 @@ func (j *Journal) migrate(ctx context.Context) error {
 		}
 		if version > len(names) {
 			return fmt.Errorf("journal: version %d is newer than this runner (%d)", version, len(names))
+		}
+		// Unreleased capability branches assigned different meanings to 16/17.
+		// Only committed main's retained-resume and quarantine histories migrate.
+		for _, identity := range []struct {
+			version int
+			table   string
+		}{{16, "retained_run_resumes"}, {17, "bounded_recovery_quarantines"}} {
+			if version < identity.version {
+				continue
+			}
+			var count int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, identity.table).Scan(&count); err != nil {
+				return fmt.Errorf("journal: read migration identity: %w", err)
+			}
+			if count != 1 {
+				return fmt.Errorf("journal: migration history conflict at version %d: %s is absent", identity.version, identity.table)
+			}
 		}
 		for i, name := range names[version:] {
 			body, err := migrationFS.ReadFile("migrations/" + name)
@@ -290,6 +307,9 @@ func (j *Journal) AcceptAssignmentFromWorker(ctx context.Context, as protocol.As
 			as.RunID, as.LeaseID, as.RunToken, string(body), j.now().UnixMilli(), worker); err != nil {
 			return fmt.Errorf("journal: put run: %w", err)
 		}
+		if err := recordCapabilityReceipt(ctx, tx, as); err != nil {
+			return err
+		}
 		if claimID != "" {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id = ?`, claimID); err != nil {
 				return fmt.Errorf("journal: forget claim: %w", err)
@@ -311,7 +331,7 @@ func (j *Journal) BindUnstartedWorkerOrigin(ctx context.Context, runID string, w
 
 // Runs returns the runs that are not done.
 func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held, COALESCE(worker_result_json,''), COALESCE(worker_done_at,0), stopped_confirmed, worker_kind FROM runs
+	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held, COALESCE(worker_result_json,''), COALESCE(worker_done_at,0), stopped_confirmed, worker_kind, COALESCE((SELECT binding_json FROM run_capability_receipts c WHERE c.run_id=runs.run_id ORDER BY c.sequence DESC LIMIT 1),'') FROM runs
 		WHERE phase <> 'done' ORDER BY run_id`)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list runs: %w", err)
@@ -320,16 +340,24 @@ func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
 	var out []Run
 	for rows.Next() {
 		var (
-			r      Run
-			body   string
-			result string
+			r          Run
+			body       string
+			result     string
+			capability string
 		)
-		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held, &result, &r.WorkerDoneAtMillis, &r.StoppedConfirmed, &r.WorkerKind); err != nil {
+		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held, &result, &r.WorkerDoneAtMillis, &r.StoppedConfirmed, &r.WorkerKind, &capability); err != nil {
 			return nil, fmt.Errorf("journal: scan run: %w", err)
 		}
 		r.WorkerResult = json.RawMessage(result)
 		if err := json.Unmarshal([]byte(body), &r.Assignment); err != nil {
 			return nil, fmt.Errorf("journal: decode assignment: %w", err)
+		}
+		if capability != "" {
+			var binding protocol.RunCapabilityBinding
+			if err := json.Unmarshal([]byte(capability), &binding); err != nil {
+				return nil, err
+			}
+			r.Assignment.CapabilityBinding = &binding
 		}
 		out = append(out, r)
 	}

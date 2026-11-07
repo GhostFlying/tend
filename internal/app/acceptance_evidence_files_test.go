@@ -321,7 +321,7 @@ func TestAcceptanceEvidenceFilesFreezeWholeFeedbackAcrossLaterVerdict(t *testing
 		if err != nil {
 			return err
 		}
-		rebuilt, err := buildAssignment(t.Context(), tx.Q(), run, lease, DefaultLeaseTTL)
+		rebuilt, err := buildAssignment(t.Context(), tx.Q(), run, lease, DefaultLeaseTTL, h.clock.Now().UnixMilli())
 		if err != nil {
 			return err
 		}

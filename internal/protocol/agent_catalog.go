@@ -19,6 +19,7 @@ type RetainedAgentDefinition struct {
 // RunnerAgentCatalog separates registration from the last executor observation
 // and host presence. It grants no execution or configuration authority.
 type RunnerAgentCatalog struct {
+	Capabilities          []AgentCapabilityView     `json:"capabilities,omitempty"`
 	ConcurrencyBindings   []ConcurrencyBinding      `json:"concurrency_bindings,omitempty"`
 	ContinuationSupported bool                      `json:"continuation_supported,omitempty"`
 	RetainedDefinitions   []RetainedAgentDefinition `json:"retained_definitions,omitempty"`

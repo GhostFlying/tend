@@ -53,6 +53,7 @@ type AgentInventoryAvailability struct {
 // AgentInventoryProjection matches local public format 1. No private configuration
 // or executable/source references belong on this wire surface.
 type AgentInventoryProjection struct {
+	CapabilityVersion      uint64                     `json:"capability_version,omitempty"`
 	FormatVersion          uint64                     `json:"format_version"`
 	ExecutionEnvironmentID string                     `json:"execution_environment_id"`
 	SourceKind             AgentSourceKind            `json:"source_kind"`
@@ -72,6 +73,7 @@ type AgentInventoryRuntime struct {
 }
 
 type AgentInventoryDefinition struct {
+	Capabilities    []CapabilityReference      `json:"capabilities,omitempty"`
 	OwnerBinding    *AgentRuntimeReference     `json:"owner_runtime_binding_ref,omitempty"`
 	Identity        AgentIdentity              `json:"identity"`
 	Revision        uint64                     `json:"revision"`
@@ -84,6 +86,26 @@ type AgentInventoryDefinition struct {
 	Enabled         bool                       `json:"enabled"`
 	Registration    string                     `json:"registration"`
 	Availability    AgentInventoryAvailability `json:"availability"`
+}
+
+// ValidateAgentCapabilityRevisions reserves each accepted identity/revision for
+// its immutable declaration set. Callers supply accepted history, not just the
+// current inventory: removing an Agent must not release its old revisions.
+func ValidateAgentCapabilityRevisions(previous, next []AgentInventoryDefinition) error {
+	type key struct {
+		identity AgentIdentity
+		revision uint64
+	}
+	declarations := make(map[key][]CapabilityReference, len(next))
+	for _, a := range next {
+		declarations[key{a.Identity, a.Revision}] = a.Capabilities
+	}
+	for _, a := range previous {
+		if refs, ok := declarations[key{a.Identity, a.Revision}]; ok && !CapabilityReferencesEqual(a.Capabilities, refs) {
+			return Errorf(CodeConflictPayload, "agent capability declaration changed without a new agent revision")
+		}
+	}
+	return nil
 }
 
 type RegisterAgentInventoryPayload struct {
@@ -130,6 +152,9 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 	if (p.FormatVersion != 1 && p.FormatVersion != 2) || !AgentInventoryID(p.ExecutionEnvironmentID) || (p.SourceKind != AgentSourceInline && p.SourceKind != AgentSourceLocalFile) {
 		return bad()
 	}
+	if p.CapabilityVersion > 1 {
+		return bad()
+	}
 	p.Runtimes = append([]AgentInventoryRuntime{}, p.Runtimes...)
 	p.Agents = append([]AgentInventoryDefinition{}, p.Agents...)
 	runtimes := map[string]AgentInventoryRuntime{}
@@ -162,6 +187,14 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 	}
 	seen := map[string]bool{}
 	for i, a := range p.Agents {
+		if len(a.Capabilities) > 0 && p.CapabilityVersion != 1 {
+			return bad()
+		}
+		refs, err := CanonicalCapabilityReferences(a.Capabilities)
+		if err != nil {
+			return bad()
+		}
+		a.Capabilities = refs
 		r, found := runtimes[a.Binding.RuntimeID]
 		if a.Identity.ExecutionEnvironmentID != p.ExecutionEnvironmentID || !AgentInventoryID(a.Identity.LocalID) || seen[a.Identity.LocalID] || !found || a.Binding.Revision != r.Revision || a.Revision == 0 || strings.TrimSpace(a.DisplayName) == "" || strings.TrimSpace(a.RequestedModel) == "" || a.Registration != "staged" || a.Availability.Available || a.Availability.Reason != inventoryUnavailable(r, a.Enabled) {
 			return bad()

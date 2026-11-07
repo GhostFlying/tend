@@ -10,6 +10,7 @@ type ObservationScope struct {
 
 // RunObservation is a live ledger snapshot, not browser or filesystem evidence.
 type RunObservation struct {
+	CapabilityBinding     *RunCapabilityBinding       `json:"capability_binding,omitempty"`
 	DeliveryAuthorization *DeliveryExecutionAuthority `json:"delivery_authorization,omitempty"`
 	Version               int64                       `json:"version"`
 	Seq                   int64                       `json:"seq"`

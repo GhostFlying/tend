@@ -1153,6 +1153,23 @@ repair 或业务 unknown。缺失、未确认、不匹配或其它类型的事�
 无 wire、schema、journal 或 owner 权限变更；继续使用现有关闭入口与 manager
 对账 CLI。详见[实施计划](plans/closed-manager-factual-events.md)。
 
+## D183：显式声明的 Capability 与双角色冻结匹配
+
+Capability 为独立的版本化业务标签。定义由 owner request/CAS 追加，Agent 配置显式声明
+definition revision；同 Agent revision 的声明不可变。Task implementation/acceptance 各自
+冻结 required，新增 exact reference 检查 active 定义，原角色保留引用允许历史继续。
+普通 executor readiness、角色、runtime/model/effort/backend、共享预算及 retained pin 约束
+仍由同一 scheduler 决定，定义标签不证明 native 工具或实际执行。
+
+claim 原事务保存 immutable binding。重连按原 snapshot 读取声明，runner 在 NextAttempt
+之前验证原 pin/digest/声明并沿普通 Start 执行，保持原停止证明、unknown 与请求对账。
+协议 2/1 增加可选 declarations 协商；旧 peer 和无 required 的请求语义不变。
+当前 schema 97 和 journal 18 仅分别追加到 98/19，不复用未发布历史候选的冲突编号。
+Agent 查询、Task 解释、CLI/API/只读工具与等待通知共用真实调度事实；cursor 固定水位，
+并在可变候选事实改变时拒绝旧页。无声明、无 required 的旧数据兼容，不创建工具资格路径。
+
+详见[实施计划](plans/capability-current-main.md)与[接口说明](capabilities.md)。
+
 ## D184：负责人判断任务约定的适用性
 
 Issue 的已提交变化进入现有通知窗口及后台批次，由当前负责人判断状态说明与真实任务变化。自产处理不形成循环，也不取消尚未处理的外部变化。来源审阅完成后，剩余的任务影响判断继续作为正常协调责任。

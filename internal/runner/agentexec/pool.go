@@ -214,7 +214,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 		return runner.ResolvedExecution{}, errors.New("original named execution configuration differs")
 	}
 	profile := pin.Profile
-	return runner.ResolvedExecution{Workers: e.workers, Workspaces: p.options.Workspaces, Instructions: a.Instructions, Profile: &profile}, nil
+	return runner.ResolvedExecution{DeclaredCapabilities: slices.Clone(a.Capabilities), Workers: e.workers, Workspaces: p.options.Workspaces, Instructions: a.Instructions, Profile: &profile}, nil
 }
 
 // Reject records a concrete native refusal for future selection, not a fallback.

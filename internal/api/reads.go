@@ -125,7 +125,11 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		pageSize = limit
 	}
-	filter := store.TaskFilter{Project: query.Get("project")}
+	filter := store.TaskFilter{Project: query.Get("project"), Capability: query.Get("capability"), CapabilityRole: query.Get("capability_role")}
+	if (query.Has("capability") || query.Has("capability_role")) && (!all || !protocol.AgentInventoryID(filter.Capability) || (filter.CapabilityRole != "" && filter.CapabilityRole != "implement" && filter.CapabilityRole != "accept")) {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "capability filtering requires all=1 and a valid capability; optional capability_role is implement or accept"))
+		return
+	}
 	if all && query.Has("lifecycle") {
 		for _, value := range strings.Split(query.Get("lifecycle"), ",") {
 			state := protocol.TaskLifecycle(value)
