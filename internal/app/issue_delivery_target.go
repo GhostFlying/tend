@@ -192,7 +192,7 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 // Refreshes are passive observations. They fence reads started against a prior
 // deployment baseline without allocating a model turn or execution slot.
 func refreshDeliveryBaselineQueries(ctx context.Context, x *Exec, tx *store.Tx) error {
-	rows, err := tx.Q().QueryContext(ctx, `SELECT issue_id,json_extract(body_json,'$.candidate.delivery_id') FROM issue_delivery_duties WHERE status IN ('preparing','awaiting_owner','deferred','executing') AND json_extract(body_json,'$.candidate.deploy')=1`)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT DISTINCT issue_id,json_extract(body_json,'$.candidate.delivery_id') FROM issue_delivery_duties WHERE status IN ('preparing','awaiting_owner','deferred','executing') AND json_extract(body_json,'$.candidate.deploy')=1`)
 	if err != nil {
 		return err
 	}
@@ -221,13 +221,8 @@ func refreshDeliveryBaselineQueries(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return err
 		}
-		o.Observation.Generation++
-		o.Nonce = ""
-		o.QueryUntil = 0
 		o.NextCheckAt = x.Now.UnixMilli()
-		o.RefreshRequested = true
-		o.Observation.RefreshPending = true
-		if err := tx.PutDeliveryObservation(ctx, o); err != nil {
+		if err := queueDeliveryObservationRefresh(ctx, x, tx, &o); err != nil {
 			return err
 		}
 	}

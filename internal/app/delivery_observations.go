@@ -328,14 +328,23 @@ func (RefreshDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := queueDeliveryObservationRefresh(ctx, x, tx, &row); err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: row.Observation, Events: []Event{deliveryChanged(item, row.Observation)}}, nil
+}
+
+// Queue the member and its shared provider job together. A new refresh revision
+// prevents an earlier read or shared cache from settling a later request.
+func queueDeliveryObservationRefresh(ctx context.Context, x *Exec, tx *store.Tx, row *store.DeliveryObservationRow) error {
 	if x.serverDeliveryObservations {
-		if err := retireRunnerDeliveryQuery(ctx, x, tx, &row); err != nil {
-			return Outcome{}, err
+		if err := retireRunnerDeliveryQuery(ctx, x, tx, row); err != nil {
+			return err
 		}
 		// Capture ordering independently of the wall clock: a refresh queued
 		// after an external read began must not consume that earlier result.
-		if err := tx.Q().QueryRowContext(ctx, `UPDATE server_delivery_jobs SET next_at=?,attempts=0,refresh_revision=refresh_revision+1 WHERE (provider,repository,number) IN (SELECT provider,repository,number FROM server_delivery_references WHERE issue_id=? AND delivery_id=?) RETURNING refresh_revision`, x.Now.UnixMilli(), item.WorkItemID, p.DeliveryID).Scan(&row.ServerRefreshRevision); err != nil {
-			return Outcome{}, err
+		if err := tx.Q().QueryRowContext(ctx, `UPDATE server_delivery_jobs SET next_at=?,attempts=0,refresh_revision=refresh_revision+1 WHERE (provider,repository,number) IN (SELECT provider,repository,number FROM server_delivery_references WHERE issue_id=? AND delivery_id=?) RETURNING refresh_revision`, x.Now.UnixMilli(), row.Observation.WorkItemID, row.Observation.DeliveryID).Scan(&row.ServerRefreshRevision); err != nil {
+			return err
 		}
 	}
 	row.Observation.Generation++
@@ -348,8 +357,5 @@ func (RefreshDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	}
 	row.RefreshRequested = true
 	row.Observation.RefreshPending = true
-	if err := tx.PutDeliveryObservation(ctx, row); err != nil {
-		return Outcome{}, err
-	}
-	return Outcome{Result: row.Observation, Events: []Event{deliveryChanged(item, row.Observation)}}, nil
+	return tx.PutDeliveryObservation(ctx, *row)
 }
