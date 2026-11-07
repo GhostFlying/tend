@@ -354,3 +354,167 @@ func TestDeploymentPreparationFalseScopeAndUnavailableConfiguration(t *testing.T
 		t.Fatalf("missing configuration was invented or read failed: %+v %v", d, err)
 	}
 }
+
+func TestDeploymentPreparationPendingBoundedGrantKeepsCurrentInstallation(t *testing.T) {
+	for _, change := range []string{"none", "expired_pending", "wrong_authority", "wrong_host_event"} {
+		t.Run(change, func(t *testing.T) {
+			h, _, release := boundedRunnerAdmissionFixture(t)
+			issue := createCanonicalOwnerTestIssue(t, h)
+			var grant protocol.BoundedRunnerMaintenanceGrant
+			var runtime store.HostRuntimeRow
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var raw string
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT json_extract(body_json,'$.grant') FROM events WHERE source='app' AND object_type='host' AND object_id=? AND request_id=? AND kind=?`, release.HostID, release.RecoveryAuthorizationID, boundedRunnerAuthorizedEvent).Scan(&raw); err != nil {
+					return err
+				}
+				if err := json.Unmarshal([]byte(raw), &grant); err != nil {
+					return err
+				}
+				var err error
+				runtime, err = store.GetHostRuntime(t.Context(), tx.Q(), release.HostID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			runtime.Online, runtime.LastHeartbeatAt = true, h.clock.Now().UnixMilli()
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutHostRuntime(t.Context(), release.HostID, runtime) }); err != nil {
+				t.Fatal(err)
+			}
+			before, err := h.app.ReadIssueDeploymentPreparation(t.Context(), issue.IssueID)
+			if err != nil || preparationHost(t, before.Preparation, release.HostID).InstallationStatus != "confirmed" {
+				t.Fatalf("original actual installation is not confirmed: %+v %v", before, err)
+			}
+			pending := grant.Plan
+			pending.ExpectedControlRevision = grant.ControlRevision
+			pending.RunnerInstanceID, pending.RunnerGeneration = runtime.Runtime.InstanceID, runtime.Runtime.Generation
+			pending.Source = protocol.RecoveryIdentity{PID: int(runtime.Runtime.Build.PID), StartTicks: 789, LaunchID: runtime.Runtime.InstanceID, SHA256: runtime.Runtime.Build.BinarySHA256}
+			pending.Journal.Version = runtime.Runtime.JournalVersion
+			pending.Target.UpgradeID, pending.Target.ProcessInstanceID = "next-not-started", "next-not-started-process"
+			pending.Target.ReleaseID, pending.Target.ManifestSHA256 = "next-candidate", strings.Repeat("e", 64)
+			pending.Target.ArtifactSHA256 = strings.Repeat("d", 64)
+			pending.Authorization = protocol.BoundedMaintenanceAuthorization{RequestID: h.ids.New(protocol.PrefixRequest), Role: "runner", Source: pending.Source, Target: pending.Target, DataIdentity: &pending.Journal, ExpectedGeneration: 8, ExpectedPhase: "maintenance", Timeouts: protocol.DefaultMaintenanceTimeoutPolicy(), ExpiresAtMillis: h.clock.Now().Add(6 * time.Minute).UnixMilli(), Reason: "Prepare a future replacement while preserving current installation evidence"}
+			pending.Authorization.PlanSHA256, err = protocol.RunnerBoundedMaintenancePlanSHA256(pending)
+			if err != nil {
+				t.Fatal(err)
+			}
+			future, err := h.app.AuthorizeRunnerBoundedMaintenance(t.Context(), owner, pending)
+			if err != nil || future.RecoveryAuthorizationID != pending.Authorization.RequestID || future.ControlRevision != grant.ControlRevision+1 {
+				t.Fatalf("second real pending authority failed: %+v %v", future, err)
+			}
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				switch change {
+				case "expired_pending":
+					h.clock.Advance(7 * time.Minute)
+					runtime.LastHeartbeatAt = h.clock.Now().UnixMilli()
+					return tx.PutHostRuntime(t.Context(), release.HostID, runtime)
+				case "wrong_authority":
+					runtime.Runtime.BoundedRecoveryAuthorizationID = future.RecoveryAuthorizationID
+					return tx.PutHostRuntime(t.Context(), release.HostID, runtime)
+				case "wrong_host_event":
+					_, err := tx.Exec(t.Context(), `UPDATE events SET object_id='another-host' WHERE source='app' AND object_type='host' AND object_id=? AND request_id=? AND kind=?`, release.HostID, release.RecoveryAuthorizationID, boundedRunnerAuthorizedEvent)
+					return err
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			after, err := h.app.ReadIssueDeploymentPreparation(t.Context(), issue.IssueID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := preparationHost(t, after.Preparation, release.HostID)
+			latest := host.LatestBoundedAuthorization
+			if latest == nil || latest.RequestID != pending.Authorization.RequestID || latest.RecoveryAuthorizationID != future.RecoveryAuthorizationID || latest.ControlRevision != future.ControlRevision || latest.EventSeq == 0 || latest.CurrentInstallation || latest.ExpiresAtMillis != pending.Authorization.ExpiresAtMillis {
+				t.Fatalf("new registration is hidden or presented as installed: %+v", latest)
+			}
+			if change == "none" || change == "expired_pending" {
+				if host.InstallationStatus != "confirmed" || !reflect.DeepEqual(host.UpdaterReceipt, runtime.Runtime.UpdaterReceipt) || host.Runner.BoundedRecoveryAuthorizationID != release.RecoveryAuthorizationID || host.Runner.ControlRevision != future.ControlRevision {
+					t.Fatalf("pending authorization replaced current physical installation: %+v", host)
+				}
+			} else if host.InstallationStatus == "confirmed" {
+				t.Fatalf("unbound authority became current installation evidence: %+v", host)
+			}
+			if len(after.Preparation.Blockers) != 0 {
+				t.Fatal("registration or expiry invented an installation blocker", after.Preparation.Blockers)
+			}
+			raw, _ := json.Marshal(host)
+			if strings.Contains(string(raw), pending.ReleaseDir) || strings.Contains(string(raw), "protections") || strings.Contains(string(raw), "plan_sha256") {
+				t.Fatalf("private bounded plan escaped registration summary: %s", raw)
+			}
+			if h.count("upgrades") != 0 {
+				t.Fatal("observation invented an ordinary upgrade")
+			}
+		})
+	}
+}
+
+func TestDeploymentPreparationIncludesRetiredHostUpgradeBlocker(t *testing.T) {
+	h, as, _ := preparationFixture(t, protocol.RoleImplement)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if err := tx.UpdateRunObserved(t.Context(), as.RunID, protocol.RunUnknown, h.clock.Now().UnixMilli()); err != nil {
+			return err
+		}
+		return tx.RetireHostsExcept(t.Context(), []string{"linux-2"}, h.clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.app.ReadIssueDeploymentPreparation(t.Context(), issue.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := view.Preparation
+	if !slices.Equal(p.HostIDs, []string{"linux-2"}) || len(p.Hosts) != 1 || !p.Complete {
+		t.Fatalf("retired work changed active targets or imposed a report gate: %+v", p)
+	}
+	found := false
+	for _, b := range p.Blockers {
+		if b.Kind == "retired_hosts_open_runs" && b.Count == 1 && b.Source != "" {
+			found = true
+		}
+	}
+	if !found || h.run(as.RunID).ObservedState != protocol.RunUnknown {
+		t.Fatalf("actual upgrade blocker was hidden or settled: %+v", p)
+	}
+	raw, _ := json.Marshal(view)
+	if strings.Contains(string(raw), as.RunID) || strings.Contains(string(raw), as.TaskID) {
+		t.Fatalf("retired-run business identity escaped aggregate read: %s", raw)
+	}
+}
+
+func TestDeploymentPreparationCancelledBaselineMatchesPrepare(t *testing.T) {
+	for _, completedFirst := range []bool{false, true} {
+		name := "only_cancelled"
+		if completedFirst {
+			name = "completed_then_cancelled"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			issue := createCanonicalOwnerTestIssue(t, h)
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				if completedFirst {
+					if err := tx.PutUpgrade(t.Context(), store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "prior-completed", ReleaseID: "old-release", Revision: 9, Status: "completed", Phase: "completed", CreatedAt: h.clock.Now().Add(-time.Minute), UpdatedAt: h.clock.Now().Add(-time.Second)}}); err != nil {
+						return err
+					}
+				}
+				return tx.PutUpgrade(t.Context(), store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "current-cancelled", ReleaseID: "cancelled-release", Revision: 12, Status: "cancelled", Phase: "cancelled", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now()}})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			view, err := h.app.ReadIssueDeploymentPreparation(t.Context(), issue.IssueID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline := view.Preparation.SettledBaseline
+			if baseline == nil || baseline.UpgradeID != "current-cancelled" || baseline.Revision != 12 || baseline.Status != "cancelled" || len(view.Preparation.UnsettledUpgrades) != 0 {
+				t.Fatalf("advertised settled baseline differs from actual prepare baseline: %+v", view.Preparation)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				candidate := protocol.IssueDeliveryCandidate{Deploy: true, Deployment: &protocol.IssueDeliveryDeployment{BaselineUpgradeID: baseline.UpgradeID, BaselineUpgradeRevision: baseline.Revision}}
+				return checkDeliveryBaseline(t.Context(), tx.Q(), candidate)
+			}); err != nil {
+				t.Fatalf("advertised baseline immediately fails prepare: %v", err)
+			}
+		})
+	}
+}

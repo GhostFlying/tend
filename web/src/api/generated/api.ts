@@ -4422,6 +4422,7 @@ export interface ObservedDeploymentHost {
   installation_reason?: string;
   installation_source: string;
   installation_status: string;
+  latest_bounded_authorization?: ObservedBoundedRunnerAuthorization;
   open_runs: number;
   os: string;
   pending_blockers: number;
@@ -4429,6 +4430,19 @@ export interface ObservedDeploymentHost {
   slots: number;
   unknown_runs: number;
   updater_receipt?: UpdaterReceipt;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ObservedBoundedRunnerAuthorization".
+ */
+export interface ObservedBoundedRunnerAuthorization {
+  control_revision: number;
+  current_installation: boolean;
+  event_seq: number;
+  expires_at_ms: number;
+  recovery_authorization_id: string;
+  request_id: string;
+  source: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
