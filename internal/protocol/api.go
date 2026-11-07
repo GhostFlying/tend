@@ -18,7 +18,7 @@ func APITypes() []any {
 		TriggerQuery{}, TriggerEventPage{}, TriggerSchedulePage{}, WebhookSubscription{}, WebhookSubscriptionPage{}, WebhookSubscriptionPayload{}, WebhookReceipt{},
 		MessagingEvent{}, MessagingChannel{}, MessagingInput{}, MessagingPublication{}, BindTelegram{}, MessagingReadPayload{}, MessagingMessage{}, MessagingPage{}, MessagingRead{}, MessagingDelivery{}, MessagingReceipts{}, MessagingTrace{}, MessagingInteraction{}, RespondInteraction{},
 		IssueBlocker{}, SetIssueStatusPayload{}, IssueNotificationSettings{}, SetIssueNotificationSettingsPayload{},
-		ManagerMigrationPayload{}, RequestIssueManagerPayload{}, IssueManagerView{}, InjectSourcePayload{}, CreateConsultationPayload{}, PromoteConsultationPayload{}, ManualSource{}, NativeEntry{}, SendRunMessagePayload{}, RunMessagePage{},
+		ManagerMigrationPayload{}, RequestIssueManagerPayload{}, IssueManagerView{}, InjectSourcePayload{}, CreateConsultationPayload{}, PromoteConsultationPayload{}, ManualSource{}, NativeEntry{}, IssueHandoffPrompt{}, SendRunMessagePayload{}, RunMessagePage{},
 		ArchiveControlRequest{}, ArchiveHostControlRequest{}, ArchiveOnlineStatus{},
 		ArchiveCatalog{}, ArchiveSummary{}, ArchiveRecord{}, ArchiveRecordsPage{}, ArchiveOriginal{}, ArchiveOriginalPage{}, ArchiveResource{}, ArchiveResourcePage{},
 		HandleAttentionPayload{}, AttentionView{}, AttentionPage{}, CreateAttentionPayload{}, UpdateAttentionPayload{}, RespondAttentionPayload{}, ConfirmAttentionPayload{}, PresentAttentionPayload{}, IssueDeadline{}, PutIssueDeadlinePayload{}, CancelIssueDeadlinePayload{}, PlannerEntry{}, PutPlannerEntryPayload{}, NextActionPage{},

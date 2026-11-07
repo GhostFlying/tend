@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -15,6 +17,15 @@ func (s *Server) issueContext(w http.ResponseWriter, r *http.Request) {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid source cursor")
 		}
 		return views.CanonicalIssueContext(r.Context(), q, r.PathValue("id"), after)
+	})
+}
+
+func (s *Server) issueHandoffPrompt(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		return views.IssueHandoffPrompt(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("run"))
 	})
 }
 func (s *Server) issueFollowups(w http.ResponseWriter, r *http.Request) {

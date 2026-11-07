@@ -3,6 +3,9 @@ package protocol
 // NativeEntry exposes only recorded owner navigation and control facts.
 // Workspace navigation is separate from provider session/controller observation.
 type NativeEntry struct {
+	WorkspaceBackend      string           `json:"workspace_backend,omitempty"`
+	ResumeState           string           `json:"resume_state,omitempty"`
+	ResumeReason          string           `json:"resume_reason,omitempty"`
 	Identity              *NativeIdentity  `json:"identity,omitempty"`
 	IdentitySequence      int64            `json:"identity_sequence,omitempty"`
 	IdentityRecordedAt    int64            `json:"identity_recorded_at,omitempty"`

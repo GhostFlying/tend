@@ -80,7 +80,7 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 	}
 	r.View.Phase = "runners"
 	if r.View.Status == "running" {
-		r.Deadline = now + r.DrainMillis
+		r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 	}
 	return "", nil
 }
@@ -153,7 +153,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		v.CurrentVersion = rt.Runtime.Build.Version
 		v.ProtocolVersion = rt.Runtime.Protocol
 		if r.View.Status == "running" {
-			r.Deadline = now + r.DrainMillis
+			r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 		}
 		ctl.Revision++
 		ctl.Upgrade = nil

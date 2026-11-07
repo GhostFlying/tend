@@ -23,6 +23,7 @@ type ManagerRunReconciliation struct {
 	EventLastSequence        int64            `json:"event_last_sequence"`
 	UnappliedEvents          int64            `json:"unapplied_events"`
 	UnresolvedNativeRequests int64            `json:"unresolved_native_requests"`
+	UnresolvedReadRequests   int64            `json:"unresolved_read_requests,omitempty"`
 	PendingBusinessReceipts  bool             `json:"pending_business_receipts"`
 	CanSettleWaiting         bool             `json:"can_settle_waiting"`
 	Blockers                 []string         `json:"blockers"`

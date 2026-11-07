@@ -118,7 +118,11 @@ func managerRunReconciliation(ctx context.Context, q store.Querier, task, run st
 		}
 		// A transport/error reply is not evidence that native business never
 		// ran. Receipt-only read failures themselves start no new business.
-		if status != "completed" || !managerNativeReceiptMethod(method) {
+		if managerNativeObservationMethod(method) {
+			if status != "completed" {
+				out.UnresolvedReadRequests += count
+			}
+		} else if status != "completed" || !managerNativeReceiptMethod(method) {
 			out.UnresolvedNativeRequests += count
 		}
 	}

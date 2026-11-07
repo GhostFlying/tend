@@ -82,7 +82,14 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 	if err != nil {
 		return err
 	}
-	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT task_id FROM issue_manager_tasks WHERE state IN ('pending','assigned','retiring') AND (?='' OR issue_id=?) ORDER BY task_id`, issue, issue)
+	query := `SELECT task_id FROM issue_manager_tasks WHERE state IN ('pending','assigned','retiring')`
+	var args []any
+	if issue != "" {
+		query += ` AND issue_id=?`
+		args = append(args, issue)
+	}
+	query += ` ORDER BY task_id`
+	ids, err := store.FollowupIDs(ctx, tx.Q(), query, args...)
 	if err != nil {
 		return err
 	}

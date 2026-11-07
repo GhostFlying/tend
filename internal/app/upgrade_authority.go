@@ -26,6 +26,9 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if upgradeBatchExpired(r, x.Now.UnixMilli()) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "upgrade batch deadline expired; reconcile or cancel this batch")
+	}
 	if b.InstanceID != x.Principal.Subject || !bindingMatches(r, b) || r.View.Status != "running" || r.View.Phase != "runners" || b.ProcessInstanceID == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "runner upgrade is not authorized")
 	}
@@ -68,7 +71,7 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if h.GrantDeadline == 0 {
 			h.CandidateInstance = b.ProcessInstanceID
-			h.GrantDeadline = x.Now.UnixMilli() + r.GrantMillis
+			h.GrantDeadline = capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis)
 			v.Phase = "installing"
 			r.View.Revision++
 			r.View.UpdatedAt = x.Now
@@ -161,13 +164,16 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err != nil {
 		return Outcome{}, err
 	}
+	if upgradeBatchExpired(r, x.Now.UnixMilli()) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "upgrade batch deadline expired; reconcile or cancel this batch")
+	}
 	if !bindingMatches(r, b) || b.InstanceID != r.ServerInstance || b.ArtifactSHA256 != r.ServerHash || b.ProcessInstanceID == "" || r.View.Status != "running" || r.View.Phase != "server_ready" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "server is not ready for replacement")
 	}
 	if r.ServerProcess != "" && r.ServerProcess != b.ProcessInstanceID {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "server candidate changed")
 	}
-	cutoff := x.Now.UnixMilli() + r.GrantMillis
+	cutoff := capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis+r.RestartMillis) - r.RestartMillis
 	for _, h := range r.Hosts {
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
 		if err != nil {
@@ -192,7 +198,7 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if r.ServerGrantDeadline == 0 {
 		r.ServerGrantDeadline = cutoff
 		r.ServerProcess = b.ProcessInstanceID
-		r.Deadline = cutoff + r.RestartMillis
+		r.Deadline = capUpgradeDeadline(&r, cutoff+r.RestartMillis)
 		r.View.Revision++
 		r.View.UpdatedAt = x.Now
 		if err := tx.PutUpgrade(ctx, r); err != nil {
@@ -280,6 +286,9 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	switch p.Action {
 	case "retry":
+		if upgradeBatchExpired(r, x.Now.UnixMilli()) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "retry cannot extend the original batch deadline; reconcile or cancel first")
+		}
 		if r.ServerRollback != nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cancel this restored batch before starting a new release attempt")
 		}
@@ -327,7 +336,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 		r.View.Status = "running"
 		r.View.Reason = ""
-		r.Deadline = x.Now.UnixMilli() + r.DrainMillis
+		r.Deadline = capUpgradeDeadline(&r, x.Now.UnixMilli()+r.DrainMillis)
 	case "cancel":
 		if r.ServerProcess != "" && r.ServerHealthy < 2 && r.ServerRollback == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server replacement must reconcile before cancellation")

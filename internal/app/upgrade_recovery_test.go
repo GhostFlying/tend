@@ -330,7 +330,8 @@ func TestUpgradeCompletedHostGrantDoesNotBlockLaterRetry(t *testing.T) {
 	if r := upgradeRead(h); r.View.Hosts[0].Status != "completed" || r.View.Hosts[1].Phase != "draining" {
 		t.Fatal(r.View)
 	}
-	h.clock.Advance(31 * time.Minute)
+	// Expire the stage/grant while retaining the original overall batch budget.
+	h.clock.Advance(7 * time.Minute)
 	v := upgradeTick(h, ServerObservation{})
 	if v.Status != "attention" {
 		t.Fatal(v)

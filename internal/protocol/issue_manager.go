@@ -20,6 +20,7 @@ const (
 // RequestIssueManagerPayload selects a capability category and optional Agent
 // identity. Runtime installation and availability remain runner-local facts.
 type RequestIssueManagerPayload struct {
+	CorrectsRequestID       string `json:"corrects_request_id,omitempty"`
 	AgentID                 string `json:"agent_id,omitempty"`
 	Replace                 bool   `json:"replace,omitempty"`
 	CategoryID              string `json:"category_id,omitempty"`

@@ -3879,6 +3879,9 @@
         "assignee": {
           "$ref": "#/definitions/IssueAssignee"
         },
+        "corrects_request_id": {
+          "type": "string"
+        },
         "depends_on": {
           "items": {
             "type": "string"
@@ -7075,6 +7078,96 @@
       "title": "IssueFollowupRule",
       "type": "object"
     },
+    "IssueHandoffPrompt": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "context_gaps": {
+          "type": "string"
+        },
+        "context_revision": {
+          "type": "integer"
+        },
+        "context_sync_status": {
+          "type": "string"
+        },
+        "control_mode": {
+          "$ref": "#/definitions/ControlMode"
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "conversation_through": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "next_source": {
+          "type": "integer"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "queries": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "run_observed": {
+          "$ref": "#/definitions/RunObserved"
+        },
+        "sources_more": {
+          "type": "boolean"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "watermark": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "issue_id",
+        "title",
+        "revision",
+        "assignment_epoch",
+        "context_revision",
+        "watermark",
+        "context_sync_status",
+        "context_gaps",
+        "sources_more",
+        "queries",
+        "prompt"
+      ],
+      "title": "IssueHandoffPrompt",
+      "type": "object"
+    },
     "IssueManagerAssignment": {
       "additionalProperties": false,
       "properties": {
@@ -8382,6 +8475,9 @@
         },
         "unresolved_native_requests": {
           "type": "integer"
+        },
+        "unresolved_read_requests": {
+          "type": "integer"
         }
       },
       "required": [
@@ -9299,6 +9395,12 @@
         "reason": {
           "type": "string"
         },
+        "resume_reason": {
+          "type": "string"
+        },
+        "resume_state": {
+          "type": "string"
+        },
         "run_id": {
           "type": "string"
         },
@@ -9313,6 +9415,9 @@
         },
         "worker": {
           "$ref": "#/definitions/WorkerKind"
+        },
+        "workspace_backend": {
+          "type": "string"
         },
         "workspace_id": {
           "type": "string"
@@ -10503,6 +10608,9 @@
           "type": "string"
         },
         "category_id": {
+          "type": "string"
+        },
+        "corrects_request_id": {
           "type": "string"
         },
         "expected_assignment_epoch": {
@@ -14179,6 +14287,9 @@
           },
           "type": "array"
         },
+        "overall_deadline_millis": {
+          "type": "integer"
+        },
         "phase": {
           "type": "string"
         },
@@ -15384,6 +15495,9 @@
     },
     "IssueFollowupPayload": {
       "$ref": "#/definitions/IssueFollowupPayload"
+    },
+    "IssueHandoffPrompt": {
+      "$ref": "#/definitions/IssueHandoffPrompt"
     },
     "IssueManagerView": {
       "$ref": "#/definitions/IssueManagerView"

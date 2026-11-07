@@ -14,7 +14,7 @@
 
 无版本旧 runner 不具备控制接口，首次接入不能伪装为自动升级。先确认主会话没有活动 turn、每台 runner 没有活跃或未知 run、未交付结果、未确认领取或工作目录操作；保存原始程序、配置和匹配数据备份。先安装支持协议 1 的 server，再逐台安装支持协议 1 的 runner。新 server 仍接收 legacy0；新 runner 不向旧 server 静默回退。
 
-server 配置增加 `upgrades`，包含 `instance`（逻辑服务名，默认 `server`）、`control_socket`、`updater_socket`、`release_dir`；可配置 `drain_timeout`（默认 `30m`）、`restart_budget`（默认 `120s`）、`grant_duration`（默认 `300s`）。这些是本机私有路径，配置不提交仓库。
+server 配置增加 `upgrades`，包含 `instance`（逻辑服务名，默认 `server`）、`control_socket`、`updater_socket`、`release_dir`；可配置 `drain_timeout`（默认 `6m`）、`restart_budget`（默认 `120s`）、`grant_duration`（默认 `300s`）。新批次另持久保存二十分钟整体截止；阶段与 grant 均不能超过整体剩余预算，retry 不续期，到期后只对账或取消再另开批次。历史批次没有整体字段时仍按原分段期限对账。这些是本机私有路径，配置不提交仓库。
 
 runner 配置同时增加 `updater_socket`（自己的 authority socket）、`updater_control_socket`（对应 updater 的 control socket）、`updater_bundle_dir`（私有下载目录）。逻辑 updater instance 必须与 host ID 一致。保留现有 worker、gateway、槽位和数据目录配置。
 

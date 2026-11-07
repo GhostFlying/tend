@@ -86,7 +86,6 @@ func UsageProjectionInputs(ctx context.Context, q store.Querier) ([]UsageContrib
 	resolver := newUsageResolver(q)
 	// Dirty batches are small during normal writes. Indexed lookups avoid
 	// scanning unrelated historical facts and sources for each new request.
-	resolver.runsLoaded, resolver.actorsLoaded = true, true
 	cache := map[string]protocol.UsageAttribution{}
 	for rows.Next() {
 		var c UsageContribution
@@ -109,7 +108,10 @@ func UsageProjectionInputs(ctx context.Context, q store.Querier) ([]UsageContrib
 		key := string(keyRaw)
 		attribution, found := cache[key]
 		if !found {
-			attribution = resolver.attribution(ctx, *r)
+			attribution, err = resolver.attribution(ctx, *r, c.Dimension.BindingRun, c.Dimension.BindingConversation, bindingConflict)
+			if err != nil {
+				return nil, fmt.Errorf("resolve usage attribution: %w", err)
+			}
 			cache[key] = attribution
 		}
 		r.Attribution, r.Role = attribution, attribution.Role

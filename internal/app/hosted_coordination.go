@@ -235,6 +235,12 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 		}
 	}
 
+	if execution.Selection.Purpose == agentconfig.Main {
+		if err := validateDelegationCorrection(ctx, x, tx.Q(), logical, c.Operation()); err != nil {
+			return Outcome{}, err
+		}
+		x.validatedDelegationCorrection = delegationCorrection(x.Env.Payload)
+	}
 	var original string
 	err = tx.Q().QueryRowContext(ctx, `SELECT request_id FROM hosted_coordination_effects WHERE execution_id=? AND effect_seq=?`, stable, c.EffectSeq).Scan(&original)
 	if err == nil {
@@ -265,6 +271,9 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 			admitted, err := mainExecutionSourceAdmitted(ctx, tx.Q(), execution.ID, source)
 			if err != nil {
 				return Outcome{}, err
+			}
+			if !admitted && delegationCorrection(x.Env.Payload) != "" && source == hostedPayloadSource(x.Env.Payload) {
+				admitted = true
 			}
 			if !admitted {
 				admitted, err = inheritedDelegationCorrectionAdmitted(ctx, x, tx.Q(), execution.ID, source, c.Operation())

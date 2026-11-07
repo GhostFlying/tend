@@ -21,6 +21,9 @@ type WorkerOptions struct {
 	EnvironmentID  string
 	StrictResume   bool
 	ReuseUnstarted bool
+	// StartupTimeout bounds the handshake and first turn request, not execution.
+	// Zero uses one minute. Caller cancellation may impose a shorter deadline.
+	StartupTimeout time.Duration
 
 	// Session starts the app-server. Workers use the machine's own traex
 	// installation and configuration (D38); leave Env without TRAE_HOME.
@@ -49,6 +52,9 @@ var _ harness.Workers = (*Workers)(nil)
 
 // NewWorkers returns Workers.
 func NewWorkers(opts WorkerOptions) *Workers {
+	if opts.StartupTimeout <= 0 {
+		opts.StartupTimeout = time.Minute
+	}
 	if opts.Sandbox == "" {
 		opts.Sandbox = "danger-full-access"
 	}
@@ -124,6 +130,8 @@ func (ws *Workers) ReconcileAcceptanceVerdict(ctx context.Context, spec harness.
 
 // Start implements harness.Workers.
 func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
+	startupCtx, stopStartup := context.WithTimeout(ctx, ws.opts.StartupTimeout)
+	defer stopStartup()
 	verdicts := harness.Verdicts{StateDir: spec.StateDir, Spec: spec}
 	if spec.Role == protocol.RoleAccept {
 		if err := verdicts.RestoreContext(ctx); err != nil {
@@ -148,9 +156,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	var release func(error)
 	var err error
 	if ws.opts.Acquire != nil {
-		s, release, err = ws.opts.Acquire(ctx, spec)
+		s, release, err = ws.opts.Acquire(startupCtx, spec)
 	} else {
-		s, err = ws.start(ctx, opts)
+		s, err = ws.start(startupCtx, opts)
 		release = func(error) {
 			if s != nil {
 				_ = s.Close()
@@ -190,14 +198,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if spec.AskOwner != nil {
 		cfg.Tools = append(cfg.Tools, questionTool(spec))
 	}
-	th, err := ws.thread(ctx, s, spec, cfg)
+	th, err := ws.thread(startupCtx, s, spec, cfg)
 	if err != nil {
 		release(err)
 		return nil, err
 	}
 	if spec.OnUsageSource != nil {
 		if native, ok := th.(harness.NativeUsageThread); ok {
-			if err := spec.OnUsageSource(ctx, native.UsageSource()); err != nil {
+			if err := spec.OnUsageSource(startupCtx, native.UsageSource()); err != nil {
 				release(err)
 				return nil, err
 			}
@@ -214,7 +222,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		if location, ok := th.(harness.ThreadLocation); ok {
 			source.Path = location.RolloutPath()
 		}
-		if err := spec.OnNativeSource(ctx, source); err != nil {
+		if err := spec.OnNativeSource(startupCtx, source); err != nil {
 			release(err)
 			return nil, err
 		}
@@ -226,16 +234,27 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		}
 	}
 	if ws.opts.BeforeStart != nil {
-		input, err = ws.opts.BeforeStart(ctx, spec, th, input)
+		input, err = ws.opts.BeforeStart(startupCtx, spec, th, input)
 		if err != nil {
 			release(err)
 			return nil, err
 		}
 	}
-	turnID, err := th.StartTurn(ctx, harness.TurnInput{Text: input, Model: profile.Model, Effort: profile.Effort})
+	turnID, err := th.StartTurn(startupCtx, harness.TurnInput{Text: input, Model: profile.Model, Effort: profile.Effort})
 	if err != nil {
 		release(err)
 		return nil, err
+	}
+	if spec.OnStartupEvent != nil && ws.opts.Acquire == nil {
+		body, marshalErr := json.Marshal(protocol.NativeIdentity{Provider: "appserver", SessionID: th.ID(), TurnID: turnID, State: "known", ControllerObservation: "managed"})
+		if marshalErr != nil {
+			release(marshalErr)
+			return nil, marshalErr
+		}
+		if err := spec.OnStartupEvent(startupCtx, harness.WorkerEvent{Kind: protocol.EventNativeIdentity, Body: body}); err != nil {
+			release(err)
+			return nil, err
+		}
 	}
 	w := &worker{thread: th.(*thread), turnID: turnID, events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	go func() {
@@ -419,7 +438,7 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 		if err == nil {
 			return th, nil
 		}
-		if ctx.Err() != nil || ws.opts.StrictResume {
+		if ctx.Err() != nil || ws.opts.StrictResume || !errors.Is(err, harness.ErrRejected) {
 			return nil, err
 		}
 		if log := ws.opts.Session.Log; log != nil {

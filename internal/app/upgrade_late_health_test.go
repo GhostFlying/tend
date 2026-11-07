@@ -91,7 +91,8 @@ func TestUpgradeLateRunnerHealthRestoresOnlyPinnedCandidate(t *testing.T) {
 		t.Fatal(op)
 	}
 	before := upgradeRead(h)
-	h.clock.Advance(31 * time.Minute)
+	// Expire the stage/grant while retaining the original overall batch budget.
+	h.clock.Advance(7 * time.Minute)
 	if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
 		t.Fatal(v)
 	}

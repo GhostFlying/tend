@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/store"
@@ -17,14 +16,10 @@ import (
 type usageResolverQueries struct {
 	store.Querier
 	batches, singles map[string]int
-	failBatch        bool
 }
 
 func (q *usageResolverQueries) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	q.batches[query]++
-	if q.failBatch {
-		return nil, errors.New("injected batch read failure")
-	}
 	return q.Querier.QueryContext(ctx, query, args...)
 }
 
@@ -95,14 +90,14 @@ func TestUsageResolverActorsMatchOriginalSQL(t *testing.T) {
 			var want usageActorValue
 			err := tx.Q().QueryRowContext(ctx, usageActorSQL, key.conversation, key.thread, key.parent, key.session, key.thread).Scan(&want.name, &want.id, &want.categories)
 			for range 2 {
-				got, found := r.actor(ctx, key.conversation, key.thread, key.parent, key.session)
-				if found != (err == nil) || got != want {
+				got, found, lookupErr := r.actor(ctx, key.conversation, key.thread, key.parent, key.session)
+				if lookupErr != nil || found != (err == nil) || got != want {
 					t.Fatalf("actor(%+v) = %+v,%v; original = %+v,%v", key, got, found, want, err)
 				}
 			}
 		}
-		if q.singles[usageActorSQL] != 1 || len(q.batches) != 1 {
-			t.Fatalf("expected one batch and one cached ambiguous original lookup: batches=%v singles=%v", q.batches, q.singles)
+		if q.singles[usageActorSQL] != 11 || len(q.batches) != 0 {
+			t.Fatalf("expected one indexed query per key and no batch reads: batches=%v singles=%v", q.batches, q.singles)
 		}
 		return nil
 	}); err != nil {
@@ -175,47 +170,12 @@ func TestUsageResolverRunAmbiguityMatchesOriginalSQL(t *testing.T) {
 			if count != 1 {
 				want = ""
 			}
-			if got := r.runForTurn(ctx, key.thread, key.turn); got != want {
+			if got, err := r.runForTurn(ctx, key.thread, key.turn); err != nil || got != want {
 				t.Fatalf("run(%+v)=%q; original=%q", key, got, want)
 			}
 		}
-		if len(r.runs) != len(keys) || len(q.batches) != 2 || q.singles[usageRunForTurnSQL] != 0 {
-			t.Fatalf("expected only wanted keys and two batch queries: runs=%v queries=%v", r.runs, q)
-		}
-		q.failBatch = true
-		fallback := newUsageResolver(q)
-		for _, key := range keys {
-			if got, want := fallback.runForTurn(ctx, key.thread, key.turn), r.runForTurn(ctx, key.thread, key.turn); got != want {
-				t.Fatalf("failed batch run(%+v)=%q; want %q", key, got, want)
-			}
-		}
-		if q.singles[usageRunForTurnSQL] != len(keys) {
-			t.Fatalf("failed batch did not use original per-key query: %v", q.singles)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestUsageResolverBatchFailureUsesOriginalQueries(t *testing.T) {
-	ctx := context.Background()
-	s := newUsageResolverStore(t)
-	usageResolverWrite(t, s, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO token_usage_local_sources(source_key,conversation_id,source_json,coverage,updated_at) VALUES('source','conversation','{"thread_id":"thread","actor_name":"actor"}','caught_up',1)`)
-		return err
-	})
-	if err := s.Read(ctx, func(tx *store.ReadTx) error {
-		q := &usageResolverQueries{Querier: tx.Q(), batches: map[string]int{}, singles: map[string]int{}, failBatch: true}
-		r := newUsageResolver(q)
-		for range 2 {
-			got, found := r.actor(ctx, "conversation", "thread", "parent", "session")
-			if !found || got.name != "actor" || r.runForTurn(ctx, "thread", "turn") != "" {
-				t.Fatalf("original query fallback lost result: %+v %v", got, found)
-			}
-		}
-		if q.singles[usageActorSQL] != 1 || q.singles[usageRunForTurnSQL] != 2 {
-			t.Fatalf("fallback queries = %v", q.singles)
+		if len(r.runResults) != len(keys) || len(q.batches) != 0 || q.singles[usageRunForTurnSQL] != len(keys) {
+			t.Fatalf("expected indexed per-key reads only: runs=%v queries=%v", r.runResults, q)
 		}
 		return nil
 	}); err != nil {
@@ -230,8 +190,8 @@ func TestUsageResolverDoesNotCacheAcrossRequests(t *testing.T) {
 		t.Helper()
 		if err := s.Read(ctx, func(tx *store.ReadTx) error {
 			r := newUsageResolver(tx.Q())
-			actor, found := r.actor(ctx, "conversation", "thread", "parent", "session")
-			if found != (want != "") || actor.name != want {
+			actor, found, err := r.actor(ctx, "conversation", "thread", "parent", "session")
+			if err != nil || found != (want != "") || actor.name != want {
 				t.Fatalf("actor=%+v,%v want %q", actor, found, want)
 			}
 			return nil
@@ -254,7 +214,7 @@ func TestUsageResolverDoesNotCacheAcrossRequests(t *testing.T) {
 }
 
 func TestUsageResolverActorErrorDoesNotCacheFailure(t *testing.T) {
-	// A failed batch must not prevent a later original lookup from succeeding.
+	// A failed lookup must not prevent a later indexed query from succeeding.
 	// QueryRow cannot return an error directly, so use a cancelled context for
 	// the first lookup against the real driver rather than synthesizing a Row.
 	ctx := context.Background()
@@ -264,21 +224,19 @@ func TestUsageResolverActorErrorDoesNotCacheFailure(t *testing.T) {
 		return err
 	})
 	if err := s.Read(ctx, func(tx *store.ReadTx) error {
-		q := &usageResolverQueries{Querier: tx.Q(), batches: map[string]int{}, singles: map[string]int{}, failBatch: true}
+		q := &usageResolverQueries{Querier: tx.Q(), batches: map[string]int{}, singles: map[string]int{}}
 		r := newUsageResolver(q)
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
-		if _, found := r.actor(cancelled, "conversation", "thread", "parent", "session"); found {
+		if _, found, err := r.actor(cancelled, "conversation", "thread", "parent", "session"); found || !errors.Is(err, context.Canceled) {
 			t.Fatal("cancelled lookup returned an actor")
 		}
-		got, found := r.actor(ctx, "conversation", "thread", "parent", "session")
-		if !found || got.name != "actor" || len(r.actorResults) != 1 {
+		got, found, err := r.actor(ctx, "conversation", "thread", "parent", "session")
+		if err != nil || !found || got.name != "actor" || len(r.actorResults) != 1 {
 			t.Fatalf("failed lookup cached: %+v,%v", got, found)
 		}
-		for query, count := range q.batches {
-			if !strings.Contains(query, "token_usage_local_sources") || count != 1 {
-				t.Fatalf("unexpected batch retry: %s/%d", query, count)
-			}
+		if len(q.batches) != 0 || q.singles[usageActorSQL] != 2 {
+			t.Fatal("failed query was cached or used a batch read", q)
 		}
 		return nil
 	}); err != nil {

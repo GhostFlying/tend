@@ -39,13 +39,14 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
-	webhookKeys           WebhookKeys
-	interactionOrigin     *communicationOrigin
-	coordinationExecution *store.HostedExecution
-	coordinationEffectSeq int64
-	coordinationID        string
-	coordinationLogicalID string
-	hostedConfiguration   *hostedconfig.Prepared
+	webhookKeys                   WebhookKeys
+	interactionOrigin             *communicationOrigin
+	coordinationExecution         *store.HostedExecution
+	coordinationEffectSeq         int64
+	coordinationID                string
+	coordinationLogicalID         string
+	validatedDelegationCorrection string
+	hostedConfiguration           *hostedconfig.Prepared
 	// planningSource is the turn's initial delivery, supplied by the host.
 	planningSource   string
 	executionRequest string
@@ -63,8 +64,11 @@ type Exec struct {
 	WaitPerHour float64
 	// HostLostAfter is how long a host may go unheard before the
 	// workspaces on it count as unavailable; 0 never (D62).
-	HostLostAfter    time.Duration
-	reviewedContexts map[string][]string
+	HostLostAfter        time.Duration
+	reviewedContexts     map[string][]string
+	affectedIssues       map[string]bool
+	globalManagerRefresh bool
+	managersRefreshed    bool
 }
 
 // Outcome is what a successful Apply produced besides its direct writes.
@@ -247,23 +251,8 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		// Context revisions include queue and lifecycle counters. Carry only
 		// reviews that were exact before the write, independent of its actor or
 		// command alias; persistOutcome also requires valid reviewed sources.
-		x.reviewedContexts = map[string][]string{}
 		endReviewed := tx.ObservePhase(store.WriteReviewedContext)
-		defer endReviewed()
-		rows, err := tx.Q().QueryContext(ctx, `SELECT c.work_item_id,r.logical_turn_id FROM work_item_contexts c JOIN logical_turn_context_reviews r ON r.work_item_id=c.work_item_id AND r.revision=c.revision JOIN logical_turns l ON l.logical_turn_id=r.logical_turn_id WHERE l.status='processing'`)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var id, logical string
-			if err := rows.Scan(&id, &logical); err != nil {
-				rows.Close()
-				return err
-			}
-			x.reviewedContexts[id] = append(x.reviewedContexts[id], logical)
-		}
-		err = rows.Err()
-		rows.Close()
+		err = snapshotReviewedContexts(ctx, x, tx)
 		endReviewed()
 		if err != nil {
 			return err
@@ -310,7 +299,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			applyErr = a.persistOutcome(ctx, x, tx, out, &rec)
 			if applyErr == nil {
 				endRefresh := tx.ObservePhase(store.WriteManagerRefresh)
-				applyErr = refreshManagerTasks(ctx, x, tx)
+				applyErr = refreshAffectedManagers(ctx, x, tx)
 				endRefresh()
 			}
 			if applyErr == nil {
@@ -398,21 +387,21 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 	if err != nil {
 		return fmt.Errorf("app: encode principal: %w", err)
 	}
+	taskIssues := map[string][]protocol.WorkItem{}
+	eventAffected := map[string]bool{}
 	for _, e := range out.Events {
+		items, err := eventIssues(ctx, tx.Q(), e, taskIssues)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			eventAffected[item.WorkItemID] = true
+			x.affectedIssues[item.WorkItemID] = true
+		}
 		if x.Env.ParentRequestID != "" || x.executionRequest != "" {
 			request, err := x.reviewExecution(ctx, tx.Q())
 			if err != nil {
 				return err
-			}
-			items := []protocol.WorkItem{}
-			if e.ObjectType == "work_item" {
-				items = append(items, protocol.WorkItem{WorkItemID: e.ObjectID})
-			}
-			if e.ObjectType == "task" {
-				items, err = store.TaskIssueResponsibilities(ctx, tx.Q(), e.ObjectID)
-				if err != nil {
-					return err
-				}
 			}
 			for _, item := range items {
 				if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_contexts(logical_turn_id,work_item_id) SELECT logical_turn_id,? FROM logical_turn_executions WHERE request_id=? ON CONFLICT(logical_turn_id,work_item_id) DO NOTHING`, item.WorkItemID, request); err != nil {
@@ -551,20 +540,7 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}
 	}
 	for id, logicals := range x.reviewedContexts {
-		affected := false
-		for _, e := range out.Events {
-			if e.ObjectType == "work_item" && e.ObjectID == id {
-				affected = true
-			}
-			if e.ObjectType == "task" {
-				linked, err := store.TaskIssueResponsible(ctx, tx.Q(), e.ObjectID, id)
-				if err != nil {
-					return err
-				}
-				affected = affected || linked
-			}
-		}
-		if !affected {
+		if !eventAffected[id] {
 			continue
 		}
 		checked, err := store.WorkItemContextReviewed(ctx, tx.Q(), id)

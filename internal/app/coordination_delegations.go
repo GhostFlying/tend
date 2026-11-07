@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,8 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 	}
 	source := hostedPayloadSource(x.Env.Payload)
 	intent := delegationIntent(ctx, x, tx.Q(), c.Operation())
+	intentJSON := delegationCanonical(ctx, x, tx.Q(), c.Operation())
+	correction := x.validatedDelegationCorrection
 	if failure != nil && failure.Code == protocol.CodeDuplicateEffect {
 		var details struct {
 			Original string `json:"original_request_id"`
@@ -73,10 +76,10 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 		}
 		errorJSON = string(encoded)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO coordination_delegation_attempts(domain,request_id,execution_id,logical_turn_id,operation,source_message_id,target_id,intent_key,succeeded,error_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, x.Principal.DedupDomain(), x.Env.RequestID, c.ExecutionID, logical, c.Operation(), source, x.Env.Target.ID, intent, failure == nil, errorJSON, x.Now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO coordination_delegation_attempts(domain,request_id,execution_id,logical_turn_id,operation,source_message_id,target_id,intent_key,succeeded,error_json,created_at,intent_json,corrects_request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, x.Principal.DedupDomain(), x.Env.RequestID, c.ExecutionID, logical, c.Operation(), source, x.Env.Target.ID, intent, failure == nil, errorJSON, x.Now.UnixMilli(), string(intentJSON), correction); err != nil {
 		return false, err
 	}
-	body, _ := json.Marshal(map[string]any{"logical_turn_id": logical, "source_message_id": source, "operation": c.Operation(), "succeeded": failure == nil, "error": failure})
+	body, _ := json.Marshal(map[string]any{"logical_turn_id": logical, "source_message_id": source, "operation": c.Operation(), "succeeded": failure == nil, "error": failure, "corrects_request_id": correction})
 	actor, _ := json.Marshal(x.Principal)
 	turn, err := store.GetMainTurn(ctx, tx.Q(), c.ExecutionID)
 	if err != nil {
@@ -89,8 +92,12 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 // The intended contract stays fixed while source/CAS fields are corrected.
 // Creation has no target ID, so source alone cannot distinguish two Issues.
 func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation string) string {
+	return fmt.Sprintf("%x", sha256.Sum256(delegationCanonical(ctx, x, q, operation)))
+}
+
+func delegationCanonical(ctx context.Context, x *Exec, q store.Querier, operation string) []byte {
 	raw := x.Env.Payload
-	fallback := fmt.Sprintf("%x", sha256.Sum256(raw))
+	fallback := raw
 	var canonical any
 	switch operation {
 	case "issues.create":
@@ -123,6 +130,7 @@ func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation s
 			p.Manager.ExpectedAssignmentEpoch = 0
 			p.Manager.Reason = ""
 		}
+		p.CorrectsRequestID = ""
 		p.SourceMessageID = ""
 		p.ExpectedSourceRevision = nil
 		p.ExpectedParentRevision = nil
@@ -135,6 +143,7 @@ func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation s
 		if p.CategoryID == "" {
 			p.CategoryID = protocol.DefaultIssueManagerCategory
 		}
+		p.CorrectsRequestID = ""
 		p.SourceMessageID = ""
 		p.ExpectedAssignmentEpoch = 0
 		p.Reason = ""
@@ -146,17 +155,21 @@ func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation s
 	if err != nil {
 		return fallback
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+	return encoded
 }
 
 func delegationBlockReason(ctx context.Context, q store.Querier, logical string) (string, error) {
 	var failed int
-	// A correction resolves only the same source and business target. Invalid or
+	// Validated correction chains resolve only the same source and business target. Invalid or
 	// omitted sources remain explicit failures; another message cannot hide them.
 	err := q.QueryRowContext(ctx, `WITH RECURSIVE responsibility(id) AS (
- SELECT ? UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
+ SELECT ? UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id),
+ corrections(domain,request_id,root_domain,root_request_id) AS (
+ SELECT domain,request_id,domain,corrects_request_id FROM coordination_delegation_attempts WHERE corrects_request_id<>'' AND logical_turn_id IN responsibility
+ UNION
+ SELECT s.domain,s.request_id,c.root_domain,c.root_request_id FROM coordination_delegation_attempts s JOIN corrections c ON s.domain=c.domain AND s.corrects_request_id=c.request_id WHERE s.logical_turn_id IN responsibility)
  SELECT COUNT(*) FROM coordination_delegation_attempts f WHERE f.logical_turn_id IN responsibility AND f.succeeded=0 AND NOT EXISTS (
- SELECT 1 FROM coordination_delegation_attempts s WHERE s.logical_turn_id IN responsibility AND s.source_message_id=f.source_message_id AND s.operation=f.operation AND s.target_id=f.target_id AND s.intent_key=f.intent_key AND s.succeeded=1 AND s.seq>f.seq)`, logical).Scan(&failed)
+ SELECT 1 FROM coordination_delegation_attempts s WHERE s.logical_turn_id IN responsibility AND s.source_message_id=f.source_message_id AND s.operation=f.operation AND s.target_id=f.target_id AND (s.intent_key=f.intent_key OR (EXISTS(SELECT 1 FROM corrections c WHERE c.domain=s.domain AND c.request_id=s.request_id AND c.root_domain=f.domain AND c.root_request_id=f.request_id))) AND s.succeeded=1 AND s.seq>f.seq)`, logical).Scan(&failed)
 	if err != nil || failed == 0 {
 		return "", err
 	}
@@ -209,4 +222,67 @@ func inheritedDelegationCorrectionAdmitted(ctx context.Context, x *Exec, q store
 		}
 	}
 	return false, nil
+}
+
+// Explicit corrections may fill missing contract text, but cannot replace an
+// established intention or authorize unknown/rejected-source effects.
+func delegationCorrection(raw []byte) string {
+	var p struct {
+		Corrects string `json:"corrects_request_id"`
+	}
+	_ = json.Unmarshal(raw, &p)
+	return p.Corrects
+}
+
+func validateDelegationCorrection(ctx context.Context, x *Exec, q store.Querier, logical, operation string) error {
+	original := delegationCorrection(x.Env.Payload)
+	if original == "" {
+		return nil
+	}
+	var before, source, target, op, status, code, oldExecution, inheritedCorrection string
+	err := q.QueryRowContext(ctx, `WITH RECURSIVE responsibility(id) AS (
+ SELECT ? UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
+ SELECT f.intent_json,f.source_message_id,f.target_id,f.operation,r.status,r.error_code,f.execution_id,f.corrects_request_id
+ FROM coordination_delegation_attempts f JOIN request_records r ON r.domain=f.domain AND r.request_id=f.request_id
+ WHERE f.domain=? AND f.request_id=? AND f.succeeded=0 AND f.logical_turn_id IN responsibility`, logical, x.Principal.DedupDomain(), original).Scan(&before, &source, &target, &op, &status, &code, &oldExecution, &inheritedCorrection)
+	if errors.Is(err, sql.ErrNoRows) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "correction requires a failed delegation in this responsibility")
+	}
+	if err != nil {
+		return err
+	}
+	if status != "failed" || (code != "invalid_request" && code != "stale_revision") || source == "" || source != hostedPayloadSource(x.Env.Payload) || target != x.Env.Target.ID || op != operation || before == "" {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "correction does not prove the original admitted, no-effect failure")
+	}
+	admitted, err := mainExecutionSourceAdmitted(ctx, q, oldExecution, source)
+	if err != nil {
+		return err
+	}
+	if !admitted && inheritedCorrection == "" {
+		return protocol.Errorf(protocol.CodeForbidden, "original correction source was not admitted")
+	}
+	after := delegationCanonical(ctx, x, q, operation)
+	var prior, next map[string]any
+	if json.Unmarshal([]byte(before), &prior) != nil || json.Unmarshal(after, &next) != nil {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "correction intent is unavailable")
+	}
+	// Source/CAS fixes keep the same canonical intent. Missing title/intent may
+	// also be completed; established values and every other contract field stay fixed.
+	if operation == "issues.create" {
+		p, pok := prior["plan"].(map[string]any)
+		n, nok := next["plan"].(map[string]any)
+		if pok && nok {
+			for _, field := range []string{"title", "intent"} {
+				if p[field] == "" {
+					p[field] = n[field]
+				}
+			}
+		}
+	}
+	a, _ := json.Marshal(prior)
+	b, _ := json.Marshal(next)
+	if string(a) != string(b) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "correction changes established delegation intent")
+	}
+	return nil
 }

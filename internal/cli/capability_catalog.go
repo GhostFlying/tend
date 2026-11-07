@@ -153,6 +153,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("GET /api/v1/issues/{id}/results", "issue results", "sample"),
 		binding("GET /api/v1/issues/{id}/reuse-status", "issue reuse-status", "sample", "--json"),
 		binding("GET /api/v1/issues/{id}/context", "issue context", "sample"),
+		binding("GET /api/v1/issues/{id}/handoff-prompt", "issue handoff-prompt", "sample", "--json"),
 		binding("GET /api/v1/issues/{id}/followups", "issue followups", "sample"),
 		binding("GET /api/v1/issues/{id}/followups/{rule}/history", "issue followup-history", "sample", "sample"),
 		binding("GET /api/v1/issues/{id}/deliveries", "issue deliveries", "sample"),
@@ -280,6 +281,9 @@ func commandUsage(prefix []string) string {
 	if name != "" {
 		if name == "issue context" {
 			out.WriteString("\nRead canonical Issue context diagnostics with --after-source <sequence>.\nprepared reports the historical baseline; dispatch_ready describes context review, owned receipts and frozen task agreements.\nThese fields are not the admission result of issue create-task. Submit the formal task command with current Issue/source/assignment versions for that decision; do not prepare a legacy global baseline.\n")
+		}
+		if name == "issue handoff-prompt" {
+			out.WriteString("\nRead-only Issue context handoff. --run adds only an exact Run controlled by this Issue; --json includes source/history cursors and versions. Reading never creates a session or transfers control. Follow the prompt's pagination instructions, then use takeover/resume with current controls for actual workspace work.\n")
 		}
 		for _, entry := range legacyBindings() {
 			if entry.Command == name {
