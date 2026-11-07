@@ -142,23 +142,31 @@ func SharedReviewRequirements(ctx context.Context, q Querier, r protocol.SharedD
 }
 
 func SharedDeliveryReviewCurrent(ctx context.Context, q Querier, r *protocol.SharedDeliveryReview) error {
+	_, err := SharedDeliveryReviewChanged(ctx, q, r)
+	return err
+}
+
+// SharedDeliveryReviewChanged projects current applicability and reports only
+// confirmed candidate/requirement changes. Temporary provider uncertainty makes
+// the result unavailable without proving that another review is needed.
+func SharedDeliveryReviewChanged(ctx context.Context, q Querier, r *protocol.SharedDeliveryReview) (bool, error) {
 	r.Valid = false
 	r.InvalidReason = "formal review has not passed"
 	if r.Status != "passed" {
-		return nil
+		return false, nil
 	}
 	digest, err := SharedReviewRequirements(ctx, q, *r)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if digest != r.RequirementsDigest && digest != r.AssessedRequirementsDigest {
 		r.InvalidReason = "linked delivery requirements changed"
-		return nil
+		return true, nil
 	}
 	for _, link := range r.Links {
 		i, err := GetCanonicalIssue(ctx, q, link.IssueID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		found := false
 		for _, ref := range i.Plan.Deliveries {
@@ -166,20 +174,24 @@ func SharedDeliveryReviewCurrent(ctx context.Context, q Querier, r *protocol.Sha
 		}
 		if !found {
 			r.InvalidReason = "delivery link changed"
-			return nil
+			return true, nil
 		}
 		o, err := GetDeliveryObservation(ctx, q, link.IssueID, link.DeliveryID)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if o.Observation.ErrorKind != "" || o.Observation.RefreshPending || o.Observation.HeadSHA != r.HeadSHA || o.Observation.BaseSHA != r.BaseSHA {
-			r.InvalidReason = "provider candidate changed or is unknown"
-			return nil
+		if o.Observation.ErrorKind != "" || o.Observation.RefreshPending || o.Observation.HeadSHA == "" || o.Observation.BaseSHA == "" {
+			r.InvalidReason = "current provider candidate is unavailable; await the bounded server observation"
+			return false, nil
+		}
+		if o.Observation.HeadSHA != r.HeadSHA || o.Observation.BaseSHA != r.BaseSHA {
+			r.InvalidReason = "provider candidate changed"
+			return true, nil
 		}
 	}
 	r.Valid = true
 	r.InvalidReason = ""
-	return nil
+	return false, nil
 }
 
 func RequireSharedDeliveryReview(ctx context.Context, q Querier, i protocol.Issue, c protocol.IssueDeliveryCandidate) error {

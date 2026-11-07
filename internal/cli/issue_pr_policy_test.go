@@ -162,3 +162,23 @@ func TestDoctorServerDeliveryObserverConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueReviewRecoveryPreservesBothControlRevisions(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	input := `{"expected_assignment_epoch":3,"expected_review_revision":11,"delivery_id":"github:example/project#12","action":"authorize_recheck","reason":"Authorize one focused round after escalation"}`
+	if code := e.main("issue", "review-delivery", "issue", "--revision", "7", "--epoch", "3", "--data", input, "--dry-run"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var envelope protocol.Envelope
+	if err := json.Unmarshal(e.out.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var payload protocol.UpdateSharedDeliveryReviewPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.ExpectedControlRevision == nil || *envelope.ExpectedControlRevision != 7 || payload.ExpectedAssignmentEpoch != 3 || payload.ExpectedReviewRevision == nil || *payload.ExpectedReviewRevision != 11 || payload.Action != "authorize_recheck" || len(f.requests) != 0 {
+		t.Fatal("explicit review recovery lost a CAS or read a new version", envelope, payload)
+	}
+}

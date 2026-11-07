@@ -377,6 +377,170 @@ func TestIssuePRPolicyAgentCannotGrantAutomaticMergeWithoutOwnerSource(t *testin
 	}
 }
 
+func TestSharedDeliveryReviewExternalUserMayAuthorizeOneMoreRound(t *testing.T) {
+	for _, verdict := range []string{"passed", "changes_requested"} {
+		t.Run(verdict, func(t *testing.T) {
+			h, runtime, i, source, candidate, _ := sharedReviewFixture(t)
+			setPRPolicyForTest(t, h, i.IssueID, "manual")
+			sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
+			var r protocol.SharedDeliveryReview
+			for round := range 2 {
+				if round > 0 {
+					sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "resolve", DeliveryID: "pr", Dispositions: []protocol.SharedReviewDisposition{{FindingID: "F1", Action: "fixed", Reason: "Fix and validate the current round's finding"}}}))
+				}
+				task := createSharedReviewerTaskForTest(t, h, i.IssueID)
+				action := "start"
+				if round > 0 {
+					action = "recheck"
+				}
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: action, DeliveryID: "pr", ReviewerTaskID: task}))
+				executeSharedReviewForTest(t, h, runtime, r, task, "changes_requested")
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+			}
+			if r.Status != "escalated" || len(r.Rounds) != 2 || len(r.Dispositions) != 0 || len(r.BudgetAuthorizations) != 0 {
+				t.Fatal("two real failed rounds did not retain an unresolved escalation", r)
+			}
+			expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: r.Rounds[1].TaskID}), protocol.CodeInvalidTransition)
+			expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "authorize_recheck", DeliveryID: "pr"}), protocol.CodeInvalidRequest)
+			stale := r.Revision - 1
+			expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "authorize_recheck", DeliveryID: "pr", ExpectedReviewRevision: &stale}), protocol.CodeStaleRevision)
+			i = canonicalTaskIssue(t, h, i.IssueID)
+			expected := r.Revision
+			p := protocol.UpdateSharedDeliveryReviewPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "External user authorizes exactly one focused review after the parent escalation"}, Action: "authorize_recheck", DeliveryID: "pr", ExpectedReviewRevision: &expected}
+			env := h.env("issues.review_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, p, rev(i.Revision))
+			approved := h.exec(owner, env, ReviewIssueDelivery{})
+			r = sharedReviewResult(t, approved)
+			if r.Status != "changes_requested" || len(r.Rounds) != 2 || len(r.BudgetAuthorizations) != 1 || r.BudgetAuthorizations[0].Round != 3 || r.BudgetAuthorizations[0].RequestID != env.RequestID || r.BudgetAuthorizations[0].Reason != p.Reason {
+				t.Fatal("external authorization reset history or granted more than one round", r)
+			}
+			replay := h.exec(owner, env, ReviewIssueDelivery{})
+			if string(replay.Result) != string(approved.Result) {
+				t.Fatal("authorization replay changed the original grant", replay)
+			}
+			currentReview := r.Revision
+			expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "authorize_recheck", DeliveryID: "pr", ExpectedReviewRevision: &currentReview}), protocol.CodeInvalidTransition)
+			// The previous round reused F1; its old fixed disposition must not
+			// silently settle this new finding before the external extra review.
+			expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: r.Rounds[1].TaskID}), protocol.CodeInvalidTransition)
+			sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "resolve", DeliveryID: "pr", Dispositions: []protocol.SharedReviewDisposition{{FindingID: "F1", Action: "fixed", Reason: "Address the second round's actual finding before the one user-authorized recheck"}}}))
+			third := createSharedReviewerTaskForTest(t, h, i.IssueID)
+			r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: third}))
+			if len(r.Dispositions) != 0 {
+				t.Fatal("new review inherited an old finding disposition", r)
+			}
+			executeSharedReviewForTest(t, h, runtime, r, third, verdict)
+			r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+			if len(r.Rounds) != 3 || len(r.BudgetAuthorizations) != 1 || r.Rounds[2].Reviewer != r.Reviewer || r.Rounds[2].RunID == r.Rounds[1].RunID || r.Rounds[2].TaskID == r.Rounds[1].TaskID {
+				t.Fatal("additional round was not a new real result from the original reviewer", r)
+			}
+			if verdict == "passed" {
+				if !r.Valid || r.Status != "passed" {
+					t.Fatal(r)
+				}
+				validRevision := r.Revision
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: third}))
+				if !r.Valid || r.Status != "passed" || r.Revision != validRevision || len(r.Rounds) != 3 {
+					t.Fatal("valid exhausted review should be reused without escalation", r)
+				}
+				for _, temporary := range []string{"refresh_pending", "provider_error"} {
+					var original store.DeliveryObservationRow
+					if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+						var err error
+						original, err = store.GetDeliveryObservation(t.Context(), tx.Q(), i.IssueID, "pr")
+						if err != nil {
+							return err
+						}
+						unknown := original
+						if temporary == "refresh_pending" {
+							unknown.Observation.RefreshPending = true
+							unknown.RefreshRequested = true
+						} else {
+							unknown.Observation.ErrorKind = "provider_unavailable"
+						}
+						return tx.PutDeliveryObservation(t.Context(), unknown)
+					}); err != nil {
+						t.Fatal(err)
+					}
+					history, notices := h.count("shared_delivery_review_history"), h.count("background_sources")
+					op := sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: third})
+					expectWorkCode(t, op, protocol.CodeStaleRevision)
+					if h.count("shared_delivery_review_history") != history || h.count("background_sources") != notices {
+						t.Fatal("temporary provider uncertainty escalated the passed review", temporary)
+					}
+					if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+						actual, err := store.SharedDeliveryReviewForTarget(t.Context(), tx.Q(), i.Plan.Deliveries[0])
+						if err != nil {
+							return err
+						}
+						if actual.Status != "passed" || actual.Revision != validRevision || len(actual.Rounds) != 3 || len(actual.BudgetAuthorizations) != 1 || actual.Rounds[2].Result.Verdict != "passed" {
+							t.Fatal("provider uncertainty consumed budget or rewrote the actual result", actual)
+						}
+						return tx.PutDeliveryObservation(t.Context(), original)
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				candidate.HeadSHA = strings.Repeat("e", 40)
+				observeDeliveryForTest(t, h, i.IssueID, candidate, "open", "")
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: third}))
+				if r.Status != "escalated" || r.Valid || len(r.Rounds) != 3 || r.Rounds[2].Result.Verdict != "passed" || len(r.BudgetAuthorizations) != 1 {
+					t.Fatal("changed candidate lost its original passed evidence or could not reach explicit recovery", r)
+				}
+				current := r.Revision
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "authorize_recheck", DeliveryID: "pr", ExpectedReviewRevision: &current}))
+				fourth := createSharedReviewerTaskForTest(t, h, i.IssueID)
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: fourth}))
+				executeSharedReviewForTest(t, h, runtime, r, fourth, "passed")
+				r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+				if r.Status != "passed" || !r.Valid || len(r.Rounds) != 4 || len(r.BudgetAuthorizations) != 2 || r.BudgetAuthorizations[1].Round != 4 || r.Rounds[2].Result.Verdict != "passed" || r.Rounds[3].HeadSHA != candidate.HeadSHA {
+					t.Fatal("explicit user recovery did not preserve the old pass and produce a real changed-candidate result", r)
+				}
+			} else {
+				if r.Status != "escalated" || r.Valid {
+					t.Fatal("one authorization allowed unbounded extra rounds", r)
+				}
+				expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: third}), protocol.CodeInvalidTransition)
+				var notices int
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources WHERE kind='delivery.review_escalated'`).Scan(&notices)
+				}); err != nil || notices != 2 {
+					t.Fatal("third failure did not preserve and renew parent/main escalation", notices, err)
+				}
+				rejectSharedReviewManagerBudgetForTest(t, h, i.IssueID, r)
+			}
+		})
+	}
+}
+
+func rejectSharedReviewManagerBudgetForTest(t *testing.T, h *harness, issue string, review protocol.SharedDeliveryReview) {
+	t.Helper()
+	if op := h.exec(owner, h.env("categories.put", protocol.Target{Type: "category", ID: "planner"}, protocol.PutAgentCategoryPayload{Title: "Planner", State: "active"}, rev(0)), PutAgentCategory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	_, prepared := acceptHostedFixture(t, h, hostedConfigurationFixture(), 0)
+	h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(prepared))
+	i := assignHostedManager(t, h, canonicalTaskIssue(t, h, issue))
+	turn, principal := startHostedIssueReview(t, h, i)
+	p := protocol.UpdateSharedDeliveryReviewPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "The Issue manager tries to grant itself an unlimited review loop"}, Action: "authorize_recheck", DeliveryID: "pr", ExpectedReviewRevision: &review.Revision}
+	c := HostedCoordinationCommand{Command: ReviewIssueDelivery{}, ExecutionID: turn.RequestID, EffectSeq: 1}
+	op, err := h.app.Execute(t.Context(), principal, h.env(c.Operation(), protocol.Target{Type: "issue", ID: issue}, p, rev(i.Revision)), c)
+	if err == nil {
+		err = op.Error
+	}
+	if protocol.CodeOf(err) != protocol.CodeForbidden {
+		t.Fatal("Issue manager self-authorized another round", op, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		actual, err := store.SharedDeliveryReviewForTarget(t.Context(), tx.Q(), i.Plan.Deliveries[0])
+		if err == nil && (len(actual.BudgetAuthorizations) != 1 || actual.Status != "escalated") {
+			t.Fatal("rejected manager request altered the exhausted review", actual)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSharedDeliveryAutomaticMergeCompletesFromServerObservationWithoutAnotherReview(t *testing.T) {
 	h, runtime, i, source, c, acceptance := sharedReviewFixture(t)
 	importSharedReviewForTest(t, h, i, source, acceptance)

@@ -12865,6 +12865,12 @@
         "base_sha": {
           "type": "string"
         },
+        "budget_authorizations": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewBudgetAuthorization"
+          },
+          "type": "array"
+        },
         "dispositions": {
           "items": {
             "$ref": "#/definitions/SharedReviewDisposition"
@@ -13096,6 +13102,27 @@
       ],
       "title": "SharedFactKind",
       "type": "string"
+    },
+    "SharedReviewBudgetAuthorization": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "round": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "round",
+        "reason"
+      ],
+      "title": "SharedReviewBudgetAuthorization",
+      "type": "object"
     },
     "SharedReviewDisposition": {
       "additionalProperties": false,
@@ -14979,6 +15006,9 @@
           "type": "array"
         },
         "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "expected_review_revision": {
           "type": "integer"
         },
         "expected_source_revision": {

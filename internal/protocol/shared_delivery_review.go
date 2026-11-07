@@ -84,26 +84,35 @@ type SharedDeliveryReviewRound struct {
 	Result                *SharedReviewResult `json:"result,omitempty"`
 }
 
+// SharedReviewBudgetAuthorization is a real external user's one-round grant.
+// The authenticated actor remains in the original request record.
+type SharedReviewBudgetAuthorization struct {
+	RequestID string `json:"request_id"`
+	Round     int    `json:"round"`
+	Reason    string `json:"reason"`
+}
+
 type SharedDeliveryReview struct {
-	AssessedRequirementsDigest string                      `json:"assessed_requirements_digest,omitempty"`
-	AssessmentReason           string                      `json:"assessment_reason,omitempty"`
-	ReviewID                   string                      `json:"review_id"`
-	Provider                   IssueDeliveryProvider       `json:"provider"`
-	Repository                 string                      `json:"repository"`
-	Number                     int64                       `json:"number"`
-	Revision                   int64                       `json:"revision"`
-	Status                     string                      `json:"status"`
-	Reviewer                   string                      `json:"reviewer,omitempty"`
-	HeadSHA                    string                      `json:"head_sha"`
-	BaseSHA                    string                      `json:"base_sha"`
-	RequirementsDigest         string                      `json:"requirements_digest"`
-	Valid                      bool                        `json:"valid"`
-	InvalidReason              string                      `json:"invalid_reason,omitempty"`
-	Links                      []SharedDeliveryReviewLink  `json:"links"`
-	Rounds                     []SharedDeliveryReviewRound `json:"rounds"`
-	Dispositions               []SharedReviewDisposition   `json:"dispositions,omitempty"`
-	EscalationIssueID          string                      `json:"escalation_issue_id,omitempty"`
-	Reason                     string                      `json:"reason,omitempty"`
+	BudgetAuthorizations       []SharedReviewBudgetAuthorization `json:"budget_authorizations,omitempty"`
+	AssessedRequirementsDigest string                            `json:"assessed_requirements_digest,omitempty"`
+	AssessmentReason           string                            `json:"assessment_reason,omitempty"`
+	ReviewID                   string                            `json:"review_id"`
+	Provider                   IssueDeliveryProvider             `json:"provider"`
+	Repository                 string                            `json:"repository"`
+	Number                     int64                             `json:"number"`
+	Revision                   int64                             `json:"revision"`
+	Status                     string                            `json:"status"`
+	Reviewer                   string                            `json:"reviewer,omitempty"`
+	HeadSHA                    string                            `json:"head_sha"`
+	BaseSHA                    string                            `json:"base_sha"`
+	RequirementsDigest         string                            `json:"requirements_digest"`
+	Valid                      bool                              `json:"valid"`
+	InvalidReason              string                            `json:"invalid_reason,omitempty"`
+	Links                      []SharedDeliveryReviewLink        `json:"links"`
+	Rounds                     []SharedDeliveryReviewRound       `json:"rounds"`
+	Dispositions               []SharedReviewDisposition         `json:"dispositions,omitempty"`
+	EscalationIssueID          string                            `json:"escalation_issue_id,omitempty"`
+	Reason                     string                            `json:"reason,omitempty"`
 }
 
 type SharedDeliveryReviewPage struct {
@@ -116,10 +125,11 @@ type SharedDeliveryReviewPage struct {
 // record reads the bound review Task's actual artifact, never a caller's verdict.
 type UpdateSharedDeliveryReviewPayload struct {
 	IssueControlPayload
-	DeliveryID     string                    `json:"delivery_id"`
-	Action         string                    `json:"action"`
-	TaskID         string                    `json:"task_id,omitempty"`
-	ReviewerTaskID string                    `json:"reviewer_task_id,omitempty"`
-	AcceptanceID   string                    `json:"acceptance_id,omitempty"`
-	Dispositions   []SharedReviewDisposition `json:"dispositions,omitempty"`
+	ExpectedReviewRevision *int64                    `json:"expected_review_revision,omitempty"`
+	DeliveryID             string                    `json:"delivery_id"`
+	Action                 string                    `json:"action"`
+	TaskID                 string                    `json:"task_id,omitempty"`
+	ReviewerTaskID         string                    `json:"reviewer_task_id,omitempty"`
+	AcceptanceID           string                    `json:"acceptance_id,omitempty"`
+	Dispositions           []SharedReviewDisposition `json:"dispositions,omitempty"`
 }
