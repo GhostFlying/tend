@@ -51,7 +51,7 @@ func (c *Controller) InitializeCommittedMaintenance(ctx context.Context, id stri
 		return err
 	}
 	r := state.Maintenance
-	if r == nil || r.Plan.MaintenanceID != id || r.Plan.Successor.InstanceID != c.cfg.Instance || r.Plan.Successor.ProcessInstanceID != c.cfg.ProcessInstance || r.Plan.Successor.ArtifactSHA256 != c.cfg.BinarySHA256 || process.LaunchID != c.cfg.ProcessInstance || process.SHA256 != c.cfg.BinarySHA256 || state.Format != 3 && state.Format != 4 {
+	if r == nil || r.Plan.MaintenanceID != id || r.Plan.Successor.InstanceID != c.cfg.Instance || r.Plan.Successor.ProcessInstanceID != c.cfg.ProcessInstance || r.Plan.Successor.ArtifactSHA256 != c.cfg.BinarySHA256 || process.LaunchID != c.cfg.ProcessInstance || process.SHA256 != c.cfg.BinarySHA256 || state.Format < 3 || state.Format > 5 {
 		return errors.New("upgradectl: committed maintenance startup is not bound to the durable local supervisor")
 	}
 	if r.Phase != "starting_successor" && r.Phase != "checking_successor" && r.Phase != "successor_committed" && r.Phase != "ledger_linked" {
@@ -60,7 +60,7 @@ func (c *Controller) InitializeCommittedMaintenance(ctx context.Context, id stri
 	if r.Process.PID != 0 && r.Process != process {
 		return errors.New("upgradectl: successor kernel identity changed")
 	}
-	if state.Format == 4 && state.Bounded != nil {
+	if state.Format >= 4 && state.Bounded != nil {
 		if _, err := updater.ValidateBoundedRecoveryStartup(state, "server", process, os.Getenv("TEND_BOUNDED_RECOVERY_REQUEST_ID")); err != nil {
 			return err
 		}
@@ -70,7 +70,7 @@ func (c *Controller) InitializeCommittedMaintenance(ctx context.Context, id stri
 	if err := verifyMaintenanceParent(state, r.Plan); err != nil {
 		return err
 	}
-	if state.Format == 4 && state.Bounded != nil {
+	if state.Format >= 4 && state.Bounded != nil {
 		forced, ok := c.app.(interface {
 			RegisterBoundedCommittedMaintenance(context.Context, protocol.CommittedMaintenancePlan, protocol.RecoveryIdentity, protocol.BoundedMaintenanceState) (protocol.CommittedMaintenanceLedger, error)
 		})
@@ -171,6 +171,9 @@ func (c *Controller) maintenanceTick(ctx context.Context) (bool, error) {
 var _ maintenanceBackend = (*app.App)(nil)
 
 func verifyMaintenanceParent(state updater.State, p protocol.CommittedMaintenancePlan) error {
+	if p.SourceOperation != nil {
+		return updater.ValidateOperationMaintenanceSource(state, p)
+	}
 	if p.ParentMaintenanceID == "" {
 		return nil
 	}

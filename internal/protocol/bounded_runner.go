@@ -13,6 +13,9 @@ const OpReleaseBoundedRunnerAdmission = "hosts.release_bounded_admission"
 // and journal facts are independently rechecked by the trusted installer.
 type RunnerBoundedMaintenancePlan struct {
 	HostID string `json:"host_id"`
+	// SourceOperation identifies an original force-authorized launch whose owned
+	// Wait receipt proves its root child exited before any accepted Hello.
+	SourceOperation *MaintenanceOperationSource `json:"source_operation,omitempty"`
 	// NodeSelector is a configured host credential selector, not proof of a
 	// physical tailnet node. The installer verifies local process/data identity.
 	NodeSelector            string                          `json:"node_selector"`

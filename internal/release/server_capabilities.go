@@ -17,6 +17,7 @@ import (
 )
 
 const ServerCapabilityManagerPark = "manager-upgrade-park-v1"
+const ServerCapabilityOperationRecovery = "unfinished-operation-recovery-v1"
 const MaxServerCapabilitiesBytes = 64 << 10
 
 // ServerCapabilities is a read-only self-report bound to the executed artifact.
@@ -58,7 +59,7 @@ func CurrentServerCapabilities() (ServerCapabilities, error) {
 	if err != nil || n > MaxArtifactBytes {
 		return ServerCapabilities{}, errors.New("release: cannot hash the running executable")
 	}
-	return ServerCapabilities{BinarySHA256: hex.EncodeToString(hash.Sum(nil)), Capabilities: []string{ServerCapabilityManagerPark}}, nil
+	return ServerCapabilities{BinarySHA256: hex.EncodeToString(hash.Sum(nil)), Capabilities: []string{ServerCapabilityManagerPark, ServerCapabilityOperationRecovery}}, nil
 }
 
 // ProbeServerCapabilities never falls back to running a candidate normally.

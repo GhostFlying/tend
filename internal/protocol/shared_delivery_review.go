@@ -28,6 +28,7 @@ type IssueDeliveryGrant struct {
 // SharedReviewEvidence permits reuse only when the original reviewer actually
 // bound the entire PR candidate and requirement scope in its acceptance.
 type SharedReviewEvidence struct {
+	Findings           []SharedReviewFinding `json:"findings,omitempty"`
 	Provider           IssueDeliveryProvider `json:"provider"`
 	Repository         string                `json:"repository"`
 	Number             int64                 `json:"number"`
@@ -37,7 +38,8 @@ type SharedReviewEvidence struct {
 	RepositoryCheck    string                `json:"repository_check"`
 }
 
-// SharedReviewResult is submitted in the reviewer's immutable report artifact.
+// SharedReviewResult is immutable report evidence or a projection of the
+// original reviewer's actual acceptance, never an owner-provided verdict.
 type SharedReviewResult struct {
 	ReviewID           string                `json:"review_id"`
 	HeadSHA            string                `json:"head_sha"`
@@ -80,6 +82,9 @@ type SharedReviewExecutionProfile struct {
 }
 
 type SharedDeliveryReviewRound struct {
+	ReviewerRole          RunRole                            `json:"reviewer_role,omitempty"`
+	ReviewerProfile       *ExecutionProfile                  `json:"reviewer_profile,omitempty"`
+	AcceptanceVerdict     Verdict                            `json:"acceptance_verdict,omitempty"`
 	ExecutionRequirements *SharedReviewExecutionRequirements `json:"execution_requirements,omitempty"`
 	SupplementTaskID      string                             `json:"supplement_task_id,omitempty"`
 	SupplementSpecVersion int64                              `json:"supplement_spec_version,omitempty"`
@@ -138,6 +143,7 @@ type SharedDeliveryReviewPage struct {
 // UpdateSharedDeliveryReviewPayload coordinates a single review of an entire PR.
 // record reads the bound review Task's actual artifact, never a caller's verdict.
 type UpdateSharedDeliveryReviewPayload struct {
+	ReviewerRole RunRole `json:"reviewer_role,omitempty"`
 	IssueControlPayload
 	ExpectedReviewRevision *int64                    `json:"expected_review_revision,omitempty"`
 	DeliveryID             string                    `json:"delivery_id"`

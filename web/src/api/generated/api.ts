@@ -2211,7 +2211,79 @@ export interface RunnerBoundedMaintenancePlan {
   runner_generation: number;
   runner_instance_id: string;
   source: RecoveryIdentity;
+  source_operation?: MaintenanceOperationSource;
   target: UpgradeBinding;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MaintenanceOperationSource".
+ */
+export interface MaintenanceOperationSource {
+  kind: string;
+  launch_exit?: MaintenanceLaunchExitProof;
+  launch_id: string;
+  operation_id: string;
+  operation_sha256: string;
+  original_ledger?: UpgradeView;
+  original_request_id?: string;
+  phase: string;
+  protocol: number;
+  storage_version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MaintenanceLaunchExitProof".
+ */
+export interface MaintenanceLaunchExitProof {
+  artifact_sha256: string;
+  exit_code: number;
+  launch_id: string;
+  pid: number;
+  signal?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeView".
+ */
+export interface UpgradeView {
+  created_at: string;
+  hosts: UpgradeHostView[] | null;
+  manager_parks?: UpgradeManagerParkView[];
+  overall_deadline_millis?: number;
+  phase: string;
+  reason?: string;
+  release_id: string;
+  revision: number;
+  source_commit?: string;
+  status: string;
+  updated_at: string;
+  upgrade_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeHostView".
+ */
+export interface UpgradeHostView {
+  current_version?: string;
+  downloaded_bytes?: number;
+  host_id: string;
+  phase: string;
+  protocol_version: number;
+  reason?: string;
+  remaining_runs?: number;
+  status: string;
+  target_version?: string;
+  total_bytes?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeManagerParkView".
+ */
+export interface UpgradeManagerParkView {
+  phase: string;
+  reason?: string;
+  run_id: string;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4758,6 +4830,7 @@ export interface SharedDeliveryReviewLink {
  */
 export interface SharedDeliveryReviewRound {
   acceptance_id?: string;
+  acceptance_verdict?: Verdict;
   artifact_id?: string;
   base_sha: string;
   execution_requirements?: SharedReviewExecutionRequirements;
@@ -4766,6 +4839,8 @@ export interface SharedDeliveryReviewRound {
   requirements_digest: string;
   result?: SharedReviewResult;
   reviewer?: string;
+  reviewer_profile?: ExecutionProfile;
+  reviewer_role?: RunRole;
   run_id?: string;
   spec_version: number;
   supplement_artifact_id?: string;
@@ -4796,6 +4871,7 @@ export interface SharedReviewExecutionProfile {
  */
 export interface SharedReviewEvidence {
   base_sha: string;
+  findings?: SharedReviewFinding[];
   head_sha: string;
   number: number;
   provider: IssueDeliveryProvider;
@@ -4889,50 +4965,6 @@ export interface QueueEntry {
   title: string;
   unplaceable?: string;
   waited_millis: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "UpgradeView".
- */
-export interface UpgradeView {
-  created_at: string;
-  hosts: UpgradeHostView[] | null;
-  manager_parks?: UpgradeManagerParkView[];
-  overall_deadline_millis?: number;
-  phase: string;
-  reason?: string;
-  release_id: string;
-  revision: number;
-  source_commit?: string;
-  status: string;
-  updated_at: string;
-  upgrade_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "UpgradeHostView".
- */
-export interface UpgradeHostView {
-  current_version?: string;
-  downloaded_bytes?: number;
-  host_id: string;
-  phase: string;
-  protocol_version: number;
-  reason?: string;
-  remaining_runs?: number;
-  status: string;
-  target_version?: string;
-  total_bytes?: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "UpgradeManagerParkView".
- */
-export interface UpgradeManagerParkView {
-  phase: string;
-  reason?: string;
-  run_id: string;
-  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5104,11 +5136,16 @@ export interface ObservedDeliveryReview {
   base_sha: string;
   head_sha: string;
   invalid_reason?: string;
+  number?: number;
+  provider?: IssueDeliveryProvider;
+  repository?: string;
   requirements_digest: string;
   review_id: string;
   reviewer?: string;
   revision: number;
   round?: ObservedDeliveryReviewRound;
+  round_limit?: number;
+  rounds_used?: number;
   source: string;
   status: string;
   valid: boolean;
@@ -5119,13 +5156,17 @@ export interface ObservedDeliveryReview {
  */
 export interface ObservedDeliveryReviewRound {
   acceptance_id?: string;
+  acceptance_verdict?: Verdict;
   artifact_id?: string;
   base_sha: string;
+  execution_requirements?: SharedReviewExecutionRequirements;
   head_sha: string;
   number: number;
   repository_check?: string;
   requirements_digest: string;
   reviewer?: string;
+  reviewer_profile?: ExecutionProfile;
+  reviewer_role?: RunRole;
   run_id?: string;
   spec_version: number;
   supplement_artifact_id?: string;
@@ -5630,6 +5671,7 @@ export interface UpdateSharedDeliveryReviewPayload {
   expected_review_revision?: number;
   expected_source_revision?: number;
   reason?: string;
+  reviewer_role?: RunRole;
   reviewer_task_id?: string;
   source_message_id?: string;
   task_id?: string;

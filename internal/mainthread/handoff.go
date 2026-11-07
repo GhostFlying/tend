@@ -521,7 +521,7 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 	if hasPending && pending.SourceThreadID == source.ID() && pending.SourceGeneration == snap.BindingGeneration {
 		job = pending
 		if job.ToolsetHash != hash && job.Phase == "prepared" {
-			if _, _, err := m.prepareSummary(ctx, s, source); err != nil {
+			if _, _, err := m.prepareSummary(ctx, s, source); err != nil && !errors.Is(err, app.ErrSummaryPaused) {
 				m.cfg.Log.WarnContext(ctx, "retargeting handoff without a fresh summary", "err", err)
 			}
 			prompt, err := m.handoffPrompt(ctx, source)
@@ -534,7 +534,7 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 			job.ToolsetHash, job.SourceVersion, job.Prompt = hash, snap.Version, prompt
 		}
 	} else {
-		if _, _, summaryErr := m.prepareSummary(ctx, s, source); summaryErr != nil {
+		if _, _, summaryErr := m.prepareSummary(ctx, s, source); summaryErr != nil && !errors.Is(summaryErr, app.ErrSummaryPaused) {
 			m.cfg.Log.WarnContext(ctx, "using handoff facts without a fresh summary", "err", summaryErr)
 		}
 		prompt, err := m.handoffPrompt(ctx, source)
@@ -555,7 +555,7 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 			return nil, err
 		}
 		if latest.Version != job.SourceVersion {
-			if _, _, err := m.prepareSummary(ctx, s, source); err != nil {
+			if _, _, err := m.prepareSummary(ctx, s, source); err != nil && !errors.Is(err, app.ErrSummaryPaused) {
 				m.cfg.Log.WarnContext(ctx, "refreshing handoff without a fresh summary", "err", err)
 			}
 			prompt, err := m.handoffPrompt(ctx, source)
@@ -678,15 +678,7 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 	if payload.PrepareOnly {
 		// This delivery itself is pending in the outbox; the summary snapshot
 		// query distinguishes maintenance requests from owner-message deliveries.
-		_, ok, err := m.prepareSummary(ctx, s, th)
-		if err != nil {
-			m.cfg.Log.ErrorContext(ctx, "hosted maintenance failed", "request_id", d.RequestID, "err", err)
-			return app.DeliveryResult{Outcome: app.Failed, Reason: "summary preparation failed; existing history and any previous summary are preserved"}
-		}
-		if !ok {
-			return app.DeliveryResult{Outcome: app.Failed, Reason: "conversation has activity or queued messages; summary was not prepared"}
-		}
-		return app.DeliveryResult{Outcome: app.Delivered}
+		return m.deliverPreparedSummary(ctx, s, th, d.RequestID)
 	}
 	hash, err := m.currentToolsetHash()
 	if err != nil {
@@ -711,6 +703,23 @@ func (m *Manager) deliverHandoff(ctx context.Context, d app.Delivery) app.Delive
 	// committed mapping before it accepts another user delivery.
 	if current := m.detach(th); current != nil {
 		_ = m.closeSession(ctx, current, d.RequestID, "handoff_completed")
+	}
+	return app.DeliveryResult{Outcome: app.Delivered}
+}
+
+// deliverPreparedSummary preserves a paused request when its initial fence
+// check raced a maintenance transaction before summary admission.
+func (m *Manager) deliverPreparedSummary(ctx context.Context, s harness.Session, th harness.Thread, requestID string) app.DeliveryResult {
+	_, ok, err := m.prepareSummary(ctx, s, th)
+	if errors.Is(err, app.ErrSummaryPaused) {
+		return retry(err)
+	}
+	if err != nil {
+		m.cfg.Log.ErrorContext(ctx, "hosted maintenance failed", "request_id", requestID, "err", err)
+		return app.DeliveryResult{Outcome: app.Failed, Reason: "summary preparation failed; existing history and any previous summary are preserved"}
+	}
+	if !ok {
+		return app.DeliveryResult{Outcome: app.Failed, Reason: "conversation has activity or queued messages; summary was not prepared"}
 	}
 	return app.DeliveryResult{Outcome: app.Delivered}
 }

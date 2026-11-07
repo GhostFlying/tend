@@ -50,7 +50,10 @@ func TestObservationScopeArgumentsAndFailure(t *testing.T) {
 	}
 	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
 		spec.Role = role
-		_, input := Brief(spec)
+		instructions, input := Brief(spec)
+		if role == protocol.RoleAccept && (!strings.Contains(instructions, "submit_verdict evidence.delivery_review") || !strings.Contains(instructions, "Do not call submit_result")) {
+			t.Fatal("acceptance guidance selected the report role", instructions)
+		}
 		if !strings.Contains(input, "wi_one") || !strings.Contains(input, "does not prove browser") || !strings.Contains(input, "independently refresh") {
 			t.Fatal(input)
 		}
@@ -68,6 +71,7 @@ func TestObservationToolPreservesStructuredAuthorityAndOldServerAbsence(t *testi
 		spec := WorkerSpec{Spec: json.RawMessage(`{"observation":{"deployment":true}}`), ReadObservation: func(context.Context) (protocol.RunObservation, error) {
 			v := protocol.RunObservation{Version: 1, RunID: "run_one"}
 			if present {
+				v.SharedReviews = []protocol.ObservedDeliveryReview{{ReviewID: "accept-review", Repository: "example/repo", Status: "pending", RoundLimit: 2}}
 				v.DeliveryAuthorization = &protocol.DeliveryExecutionAuthority{TaskID: "task_one", SourceTaskID: "task_original", DutyRevision: 2, Valid: false, InvalidReason: "provider_candidate_changed", Provider: &protocol.ObservedDeliveryProvider{CI: &protocol.DeliveryCI{HeadSHA: "original", State: "unknown"}}, SharedReview: &protocol.ObservedDeliveryReview{ReviewID: "review_original", Valid: false, Round: &protocol.ObservedDeliveryReviewRound{AcceptanceID: "acceptance_original", RepositoryCheck: "original repository check"}}}
 			}
 			return v, nil
@@ -77,6 +81,12 @@ func TestObservationToolPreservesStructuredAuthorityAndOldServerAbsence(t *testi
 		var decoded protocol.RunObservation
 		if !got.Success || json.Unmarshal([]byte(got.Text), &decoded) != nil || (decoded.DeliveryAuthorization != nil) != present {
 			t.Fatalf("tool changed field presence: %+v", got)
+		}
+		if (len(decoded.SharedReviews) > 0) != present {
+			t.Fatal("ordinary acceptance projection presence changed", decoded)
+		}
+		if present && (decoded.SharedReviews[0].ReviewID != "accept-review" || decoded.SharedReviews[0].Round != nil || decoded.SharedReviews[0].Status != "pending") {
+			t.Fatal("pending binding was invented or lost", decoded.SharedReviews)
 		}
 		if present && (decoded.DeliveryAuthorization.Valid || decoded.DeliveryAuthorization.InvalidReason != "provider_candidate_changed") {
 			t.Fatal("rejected authority was promoted")

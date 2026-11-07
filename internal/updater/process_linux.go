@@ -237,14 +237,19 @@ func validEnvName(s string) bool {
 	return true
 }
 func (p LinuxProcess) Start(ctx context.Context, binary string, cfg Config, extra map[string]string) (Identity, error) {
-	return p.start(ctx, binary, cfg, extra, false)
+	return p.start(ctx, binary, cfg, extra)
 }
 
-// StartMaintenance retains only an owned Wait result as early-exit evidence.
+// StartMaintenance uses the same pinned executable and owned Wait receipts as
+// ordinary upgrades and runner restarts.
 func (p LinuxProcess) StartMaintenance(ctx context.Context, binary string, cfg Config, extra map[string]string) (Identity, error) {
-	return p.start(ctx, binary, cfg, extra, true)
+	return p.start(ctx, binary, cfg, extra)
 }
-func (p LinuxProcess) start(ctx context.Context, binary string, cfg Config, extra map[string]string, maintenance bool) (Identity, error) {
+func (p LinuxProcess) start(ctx context.Context, binary string, cfg Config, extra map[string]string) (Identity, error) {
+	launchID := extra["TEND_UPDATER_LAUNCH_ID"]
+	if err := replayOwnedLaunch(cfg, launchID, extra["TEND_RELEASE_SHA256"]); err != nil {
+		return Identity{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
@@ -260,62 +265,100 @@ func (p LinuxProcess) start(ctx context.Context, binary string, cfg Config, extr
 		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
 	defer log.Close()
-	var executable *os.File
-	if maintenance {
-		executable, err = os.Open(binary)
-		if err != nil {
-			return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	executable, err := os.Open(binary)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	}
+	defer executable.Close()
+	sha := sha256.New()
+	if _, err := io.Copy(sha, launchContextReader{ctx: ctx, reader: executable}); err != nil {
+		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	}
+	verifiedSHA := hex.EncodeToString(sha.Sum(nil))
+	if requested := extra["TEND_RELEASE_SHA256"]; requested != "" && verifiedSHA != requested {
+		return Identity{}, fmt.Errorf("%w: selected executable changed", ErrNotStarted)
+	}
+	receipt, err := prepareOwnedLaunch(cfg, launchID, verifiedSHA, extra)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: launch receipt preparation: %v", ErrUnknown, err)
+	}
+	if err := ctx.Err(); err != nil {
+		if releaseErr := receipt.abandonUnstarted(); releaseErr != nil {
+			return Identity{}, fmt.Errorf("%w: unstarted launch dispatch retained: %v", ErrUnknown, releaseErr)
 		}
-		defer executable.Close()
-		sha := sha256.New()
-		if _, err := io.Copy(sha, executable); err != nil {
-			return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
-		}
-		if hex.EncodeToString(sha.Sum(nil)) != extra["TEND_RELEASE_SHA256"] {
-			return Identity{}, fmt.Errorf("%w: maintenance executable changed", ErrNotStarted)
-		}
+		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
 	cmd := exec.Command(binary, cfg.Args...)
-	if executable != nil {
-		cmd.Path = "/proc/self/fd/3"
-		cmd.ExtraFiles = []*os.File{executable}
-	}
+	cmd.Path = "/proc/self/fd/3"
+	cmd.ExtraFiles = []*os.File{executable}
 	cmd.Env = env
 	cmd.Dir = cfg.Dir
 	cmd.Stdout = log
 	cmd.Stderr = log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
+		if releaseErr := receipt.abandonUnstarted(); releaseErr != nil {
+			return Identity{}, fmt.Errorf("%w: failed Start dispatch retained: %v", ErrUnknown, releaseErr)
+		}
 		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
 	// Reap children started by this supervisor. Recovered children are reaped by
 	// their adopting init process; their identity is still checked through /proc.
-	waited := make(chan *os.ProcessState, 1)
-	go func() { _ = cmd.Wait(); waited <- cmd.ProcessState }()
-	id, err := p.Inspect(context.WithoutCancel(ctx), cmd.Process.Pid)
+	type waitResult struct {
+		proof *LaunchExitProof
+		err   error
+	}
+	waited := make(chan waitResult, 1)
+	go func() {
+		_ = cmd.Wait()
+		state := cmd.ProcessState
+		if state == nil || state.Pid() != cmd.Process.Pid {
+			waited <- waitResult{err: ErrUnknown}
+			return
+		}
+		status, ok := state.Sys().(syscall.WaitStatus)
+		if !ok || (!status.Exited() && !status.Signaled()) {
+			waited <- waitResult{err: ErrUnknown}
+			return
+		}
+		// The digest came from the executable FD handed to exec, not from a
+		// requested SHA or an identity observation which may never have existed.
+		proof := LaunchExitProof{PID: cmd.Process.Pid, LaunchID: launchID, ArtifactSHA256: verifiedSHA, ExitCode: state.ExitCode()}
+		if status.Signaled() {
+			proof.Signal = int(status.Signal())
+		}
+		waited <- waitResult{proof: &proof, err: receipt.recordExit(proof)}
+	}()
+	if err := receipt.recordChild(cmd.Process.Pid); err != nil {
+		return Identity{}, fmt.Errorf("%w: child started but ownership receipt unavailable: %v", ErrUnknown, err)
+	}
+	id, err := p.Inspect(ctx, cmd.Process.Pid)
 	if err != nil {
-		if maintenance {
-			timer := time.NewTimer(250 * time.Millisecond)
-			defer timer.Stop()
-			select {
-			case state := <-waited:
-				if state != nil && state.Pid() == cmd.Process.Pid {
-					status, ok := state.Sys().(syscall.WaitStatus)
-					if ok && (status.Exited() || status.Signaled()) {
-						proof := LaunchExitProof{PID: cmd.Process.Pid, LaunchID: extra["TEND_UPDATER_LAUNCH_ID"], ArtifactSHA256: extra["TEND_RELEASE_SHA256"], ExitCode: state.ExitCode()}
-						if status.Signaled() {
-							proof.Signal = int(status.Signal())
-						}
-						return Identity{}, &launchExitedError{proof: proof}
-					}
-				}
-			case <-timer.C:
-			case <-ctx.Done():
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case result := <-waited:
+			if result.err == nil && result.proof != nil {
+				return Identity{}, &launchExitedError{proof: *result.proof}
 			}
+		case <-timer.C:
+		case <-ctx.Done():
 		}
 		return Identity{}, fmt.Errorf("updater: child started but identity unavailable: %w", ErrUnknown)
 	}
 	return id, nil
+}
+
+type launchContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r launchContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Duration) error {
 	return p.signalExact(ctx, id, timeout, syscall.SIGTERM)

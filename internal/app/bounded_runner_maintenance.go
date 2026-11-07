@@ -64,12 +64,18 @@ func (AuthorizeBoundedRunnerMaintenance) Apply(ctx context.Context, x *Exec, tx 
 		return Outcome{}, err
 	}
 	var previous *boundedRunnerProtectionRecord
+	var exitedSource *boundedRunnerProtectionRecord
+	for i := range records {
+		if runtime.Runtime.InstanceID == p.RunnerInstanceID && runtime.Runtime.Generation == p.RunnerGeneration && boundedRunnerOwnedExitSource(p, records[i].Grant) {
+			exitedSource = &records[i]
+		}
+	}
 	if len(records) > 0 && records[len(records)-1].Grant.Plan.Authorization.PlanSHA256 == p.Authorization.PlanSHA256 {
 		previous = &records[len(records)-1]
 	}
-	originalSource := runtime.Runtime.InstanceID == p.RunnerInstanceID && runtime.Runtime.Generation == p.RunnerGeneration && runtime.Runtime.Build.PID == int64(p.Source.PID) && runtime.Runtime.Build.BinarySHA256 == p.Source.SHA256
+	originalSource := p.SourceOperation == nil && runtime.Runtime.InstanceID == p.RunnerInstanceID && runtime.Runtime.Generation == p.RunnerGeneration && runtime.Runtime.Build.PID == int64(p.Source.PID) && runtime.Runtime.Build.BinarySHA256 == p.Source.SHA256
 	knownSuccessor := previous != nil && boundedRunnerRuntimeMatches(previous.Grant, runtime.Runtime)
-	if !originalSource && !knownSuccessor {
+	if !originalSource && !knownSuccessor && exitedSource == nil {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "runner source differs from its last accepted observation")
 	}
 	// An offline process, a missing ACK and retained unknown work are accepted
@@ -80,12 +86,19 @@ func (AuthorizeBoundedRunnerMaintenance) Apply(ctx context.Context, x *Exec, tx 
 	if err := tx.PutHostControl(ctx, p.HostID, control, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	if previous != nil {
+	if previous != nil || exitedSource != nil {
 		// A fresh external window retains the original launch lineage and its
 		// exact snapshot. It cannot recapture or add newly observed work.
-		record := *previous
+		prior := previous
+		if prior == nil {
+			prior = exitedSource
+		}
+		record := *prior
 		record.Grant.Plan = p
 		record.Grant.ControlRevision = control.Revision
+		if exitedSource != nil && previous == nil {
+			record.Grant.RecoveryAuthorizationID = p.Authorization.RequestID
+		}
 		return boundedRunnerAuthorizationOutcome(record), nil
 	}
 	runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), p.HostID)
@@ -136,7 +149,12 @@ func validateBoundedRunnerPlan(x *Exec, p protocol.RunnerBoundedMaintenancePlan)
 	if strings.TrimSpace(p.ReleaseDir) == "" || strings.ContainsRune(p.ReleaseDir, 0) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner source plan requires a local release bundle path")
 	}
-	if x.Env.Target.Type != "host" || x.Env.Target.ID != p.HostID || p.HostID == "" || p.NodeSelector == "" || p.RunnerInstanceID == "" || p.RunnerGeneration < 1 || p.Source.PID <= 1 || p.Source.StartTicks == 0 || p.Source.LaunchID == "" || !release.ValidSHA(p.Source.SHA256) || p.Journal.Inode == 0 || p.Journal.Incarnation == "" || p.Journal.Version <= 0 || a.RequestID != x.Env.RequestID || a.Role != "runner" || a.Source != p.Source || a.Target != p.Target || a.DataIdentity == nil || *a.DataIdentity != p.Journal || a.ExpectedPhase == "" || a.ExpiresAtMillis <= x.Now.UnixMilli() || strings.TrimSpace(a.Reason) == "" {
+	validSource := p.SourceOperation == nil && p.Source.PID > 1 && p.Source.StartTicks != 0 && p.Source.LaunchID != "" && release.ValidSHA(p.Source.SHA256)
+	if p.SourceOperation != nil {
+		source, proof := p.SourceOperation, p.SourceOperation.LaunchExit
+		validSource = p.Source == (protocol.RecoveryIdentity{}) && source.Kind == "upgrade" && source.Phase == "launch_exited" && source.OriginalLedger == nil && release.ValidID(source.OperationID) && release.ValidSHA(source.OperationSHA256) && protocol.ValidID(protocol.PrefixRequest, source.OriginalRequestID) && source.Protocol > 0 && source.StorageVersion > 0 && proof != nil && proof.PID > 1 && proof.LaunchID == source.LaunchID && proof.LaunchID != p.Target.ProcessInstanceID && release.ValidSHA(proof.ArtifactSHA256) && proof.ExitCode >= -1 && proof.ExitCode <= 255 && proof.Signal >= 0 && proof.Signal <= 64 && ((proof.Signal == 0 && proof.ExitCode >= 0) || (proof.Signal != 0 && proof.ExitCode == -1))
+	}
+	if x.Env.Target.Type != "host" || x.Env.Target.ID != p.HostID || p.HostID == "" || p.NodeSelector == "" || p.RunnerInstanceID == "" || p.RunnerGeneration < 1 || !validSource || p.Journal.Inode == 0 || p.Journal.Incarnation == "" || p.Journal.Version <= 0 || a.RequestID != x.Env.RequestID || a.Role != "runner" || a.Source != p.Source || a.Target != p.Target || a.DataIdentity == nil || *a.DataIdentity != p.Journal || a.ExpectedPhase == "" || a.ExpiresAtMillis <= x.Now.UnixMilli() || strings.TrimSpace(a.Reason) == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "complete independent runner process, journal, target and force authority required")
 	}
 	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != p.ExpectedControlRevision {
@@ -168,6 +186,20 @@ func validateBoundedRunnerPlan(x *Exec, p protocol.RunnerBoundedMaintenancePlan)
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner phase budgets exceed the overall deadline")
 	}
 	return nil
+}
+
+// The application verifies an independently recorded target, not a caller's
+// assertion that the failed candidate registered as a healthy runtime. Physical
+// owned Wait and journal checks remain the installer's responsibility.
+func boundedRunnerOwnedExitSource(p protocol.RunnerBoundedMaintenancePlan, old protocol.BoundedRunnerMaintenanceGrant) bool {
+	source := p.SourceOperation
+	if source == nil || source.LaunchExit == nil || source.OriginalRequestID != old.Plan.Authorization.RequestID || source.OriginalRequestID == p.Authorization.RequestID {
+		return false
+	}
+	prior := old.Plan
+	journal := p.Journal
+	journal.Version = prior.Journal.Version
+	return prior.HostID == p.HostID && prior.NodeSelector == p.NodeSelector && prior.RunnerInstanceID == p.RunnerInstanceID && prior.RunnerGeneration == p.RunnerGeneration && prior.Journal == journal && p.Journal.Version >= prior.Journal.Version && p.Journal.Version <= source.StorageVersion && source.OperationID == prior.Target.UpgradeID && source.LaunchID == prior.Target.ProcessInstanceID && source.LaunchExit.ArtifactSHA256 == prior.Target.ArtifactSHA256 && p.Target.UpgradeID != prior.Target.UpgradeID && p.Target.ProcessInstanceID != prior.Target.ProcessInstanceID
 }
 
 // AuthorizeRunnerBoundedMaintenance preserves the caller's original request

@@ -201,15 +201,19 @@ func observedDeliveryReview(ctx context.Context, q store.Querier, issue protocol
 	if review.HeadSHA != candidate.HeadSHA || review.BaseSHA != candidate.BaseSHA {
 		review.Valid, review.InvalidReason = false, "frozen candidate differs from reviewed candidate"
 	}
-	v := &protocol.ObservedDeliveryReview{Source: "server.shared_delivery_reviews", ReviewID: review.ReviewID, Revision: review.Revision, Status: review.Status, Reviewer: review.Reviewer, HeadSHA: review.HeadSHA, BaseSHA: review.BaseSHA, RequirementsDigest: review.RequirementsDigest, AssessedRequirementsDigest: review.AssessedRequirementsDigest, Valid: review.Valid, InvalidReason: review.InvalidReason}
+	return observedSharedReview(review), nil
+}
+
+func observedSharedReview(review protocol.SharedDeliveryReview) *protocol.ObservedDeliveryReview {
+	v := &protocol.ObservedDeliveryReview{Provider: review.Provider, Repository: review.Repository, Number: review.Number, RoundLimit: 2 + len(review.BudgetAuthorizations), RoundsUsed: len(review.Rounds), Source: "server.shared_delivery_reviews", ReviewID: review.ReviewID, Revision: review.Revision, Status: review.Status, Reviewer: review.Reviewer, HeadSHA: review.HeadSHA, BaseSHA: review.BaseSHA, RequirementsDigest: review.RequirementsDigest, AssessedRequirementsDigest: review.AssessedRequirementsDigest, Valid: review.Valid, InvalidReason: review.InvalidReason}
 	if len(review.Rounds) > 0 {
 		round := review.Rounds[len(review.Rounds)-1]
-		v.Round = &protocol.ObservedDeliveryReviewRound{Number: round.Number, TaskID: round.TaskID, SpecVersion: round.SpecVersion, RunID: round.RunID, ArtifactID: round.ArtifactID, AcceptanceID: round.AcceptanceID, Reviewer: round.Reviewer, HeadSHA: round.HeadSHA, BaseSHA: round.BaseSHA, RequirementsDigest: round.Requirements}
+		v.Round = &protocol.ObservedDeliveryReviewRound{ReviewerRole: round.ReviewerRole, ReviewerProfile: round.ReviewerProfile, ExecutionRequirements: round.ExecutionRequirements, AcceptanceVerdict: round.AcceptanceVerdict, Number: round.Number, TaskID: round.TaskID, SpecVersion: round.SpecVersion, RunID: round.RunID, ArtifactID: round.ArtifactID, AcceptanceID: round.AcceptanceID, Reviewer: round.Reviewer, HeadSHA: round.HeadSHA, BaseSHA: round.BaseSHA, RequirementsDigest: round.Requirements}
 		v.Round.SupplementTaskID, v.Round.SupplementSpecVersion = round.SupplementTaskID, round.SupplementSpecVersion
 		v.Round.SupplementRunID, v.Round.SupplementArtifactID = round.SupplementRunID, round.SupplementArtifactID
 		if round.Result != nil {
 			v.Round.Verdict, v.Round.RepositoryCheck = round.Result.Verdict, round.Result.RepositoryCheck
 		}
 	}
-	return v, nil
+	return v
 }

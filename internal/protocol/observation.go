@@ -10,6 +10,7 @@ type ObservationScope struct {
 
 // RunObservation is a live ledger snapshot, not browser or filesystem evidence.
 type RunObservation struct {
+	SharedReviews         []ObservedDeliveryReview    `json:"shared_reviews,omitempty"`
 	DeliveryAuthorization *DeliveryExecutionAuthority `json:"delivery_authorization,omitempty"`
 	Version               int64                       `json:"version"`
 	Seq                   int64                       `json:"seq"`
@@ -98,6 +99,11 @@ type ObservedDeliveryProvider struct {
 // ObservedDeliveryReview omits unrelated Issue links and finding bodies. Its
 // optional round preserves the actual formal result's immutable provenance.
 type ObservedDeliveryReview struct {
+	RoundLimit                 int                          `json:"round_limit,omitempty"`
+	RoundsUsed                 int                          `json:"rounds_used,omitempty"`
+	Provider                   IssueDeliveryProvider        `json:"provider,omitempty"`
+	Repository                 string                       `json:"repository,omitempty"`
+	Number                     int64                        `json:"number,omitempty"`
 	Source                     string                       `json:"source"`
 	ReviewID                   string                       `json:"review_id"`
 	Revision                   int64                        `json:"revision"`
@@ -113,22 +119,26 @@ type ObservedDeliveryReview struct {
 }
 
 type ObservedDeliveryReviewRound struct {
-	SupplementTaskID      string `json:"supplement_task_id,omitempty"`
-	SupplementSpecVersion int64  `json:"supplement_spec_version,omitempty"`
-	SupplementRunID       string `json:"supplement_run_id,omitempty"`
-	SupplementArtifactID  string `json:"supplement_artifact_id,omitempty"`
-	Number                int    `json:"number"`
-	TaskID                string `json:"task_id"`
-	SpecVersion           int64  `json:"spec_version"`
-	RunID                 string `json:"run_id,omitempty"`
-	ArtifactID            string `json:"artifact_id,omitempty"`
-	AcceptanceID          string `json:"acceptance_id,omitempty"`
-	Reviewer              string `json:"reviewer,omitempty"`
-	HeadSHA               string `json:"head_sha"`
-	BaseSHA               string `json:"base_sha"`
-	RequirementsDigest    string `json:"requirements_digest"`
-	Verdict               string `json:"verdict,omitempty"`
-	RepositoryCheck       string `json:"repository_check,omitempty"`
+	ReviewerRole          RunRole                            `json:"reviewer_role,omitempty"`
+	ReviewerProfile       *ExecutionProfile                  `json:"reviewer_profile,omitempty"`
+	ExecutionRequirements *SharedReviewExecutionRequirements `json:"execution_requirements,omitempty"`
+	AcceptanceVerdict     Verdict                            `json:"acceptance_verdict,omitempty"`
+	SupplementTaskID      string                             `json:"supplement_task_id,omitempty"`
+	SupplementSpecVersion int64                              `json:"supplement_spec_version,omitempty"`
+	SupplementRunID       string                             `json:"supplement_run_id,omitempty"`
+	SupplementArtifactID  string                             `json:"supplement_artifact_id,omitempty"`
+	Number                int                                `json:"number"`
+	TaskID                string                             `json:"task_id"`
+	SpecVersion           int64                              `json:"spec_version"`
+	RunID                 string                             `json:"run_id,omitempty"`
+	ArtifactID            string                             `json:"artifact_id,omitempty"`
+	AcceptanceID          string                             `json:"acceptance_id,omitempty"`
+	Reviewer              string                             `json:"reviewer,omitempty"`
+	HeadSHA               string                             `json:"head_sha"`
+	BaseSHA               string                             `json:"base_sha"`
+	RequirementsDigest    string                             `json:"requirements_digest"`
+	Verdict               string                             `json:"verdict,omitempty"`
+	RepositoryCheck       string                             `json:"repository_check,omitempty"`
 }
 
 type ObservedWorkItem struct {
