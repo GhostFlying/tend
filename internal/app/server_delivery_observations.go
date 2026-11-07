@@ -16,6 +16,10 @@ import (
 
 const serverDeliveryLease = 90 * time.Second
 
+// Terminal merges are eligible only while an existing bounded failed read has
+// a retry scheduled. Successful or exhausted terminal facts never poll forever.
+const serverDeliveryAutomaticMember = `(r.active=1 AND (COALESCE(json_extract(o.observation_json,'$.state'),'') NOT IN ('merged','closed') OR (json_extract(o.observation_json,'$.state')='merged' AND COALESCE(json_extract(o.observation_json,'$.error_kind'),'')<>'' AND COALESCE(json_extract(o.observation_json,'$.retry_at'),0)>0)))`
+
 // WithServerDeliveryObservations transfers new read ownership explicitly. The
 // legacy runner request formats remain valid; old in-flight reads are fenced by
 // their original deadline and retained identity, never silently replayed.
@@ -100,7 +104,7 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		_, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET next_at=? WHERE provider=? AND repository=? AND number=?`, oldUntil, q.Provider, q.Repository, q.Number)
 		return Outcome{}, err
 	}
-	rows, err := tx.Q().QueryContext(ctx, `SELECT r.issue_id,r.delivery_id,COALESCE(json_extract(o.observation_json,'$.attempted_at'),0),COALESCE(o.refresh_requested,0),COALESCE(o.server_refresh_revision,0) FROM server_delivery_references r LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR (r.active=1 AND COALESCE(json_extract(o.observation_json,'$.state'),'') NOT IN ('merged','closed'))) ORDER BY COALESCE(o.refresh_requested,0) DESC,COALESCE(json_extract(o.observation_json,'$.attempted_at'),0),r.issue_id,r.delivery_id LIMIT 100`, q.Provider, q.Repository, q.Number)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT r.issue_id,r.delivery_id,COALESCE(json_extract(o.observation_json,'$.attempted_at'),0),COALESCE(o.refresh_requested,0),COALESCE(o.server_refresh_revision,0) FROM server_delivery_references r LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR `+serverDeliveryAutomaticMember+`) ORDER BY COALESCE(o.refresh_requested,0) DESC,COALESCE(json_extract(o.observation_json,'$.attempted_at'),0),r.issue_id,r.delivery_id LIMIT 100`, q.Provider, q.Repository, q.Number)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -203,7 +207,7 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	// requests queued after it began require another bounded external read.
 	if !manual && (coveredRefresh || latestMemberAttempt < prior.AttemptedAt) && prior.AttemptedAt > now-(5*time.Minute).Milliseconds() && prior.AttemptedAt > 0 && prior.BaselineUpgradeID == baseline.View.UpgradeID && prior.BaselineUpgradeRevision == baseline.View.Revision {
 		var snapshot *protocol.DeliverySnapshot
-		if prior.ErrorKind == "" {
+		if prior.ErrorKind == "" || (prior.State == "merged" && prior.LineageErrorKind != "") {
 			snapshot = &prior.DeliverySnapshot
 		}
 		if _, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET refresh_revision=? WHERE query_id=?`, observedRefreshRevision, q.ID); err != nil {
@@ -312,11 +316,16 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		_, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET late_result_json=? WHERE query_id=? AND late_result_json='' `, string(raw), id)
 		return Outcome{}, err
 	}
-	if (snapshot == nil) == (kind == "") {
+	if (snapshot == nil) == (kind == "") && cached == nil {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "provider facts or a read error required")
 	}
 	if snapshot != nil && !oneOf(snapshot.State, "open", "merged", "closed") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown provider state")
+	}
+	// A partial lineage read retains the provider's known merge facts while
+	// consuming the same finite failure budget as a complete read timeout.
+	if snapshot != nil && snapshot.State == "merged" && snapshot.LineageErrorKind != "" {
+		kind = snapshot.LineageErrorKind
 	}
 	now := x.Now.UnixMilli()
 	next := x.Now.Add(5 * time.Minute).UnixMilli()
@@ -449,17 +458,23 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	}
 	// A bounded fanout can continue from the same shared cache for larger groups.
 	var more bool
-	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_delivery_references r LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR (r.active=1 AND COALESCE(json_extract(o.observation_json,'$.state'),'') NOT IN ('merged','closed') AND COALESCE(json_extract(o.observation_json,'$.attempted_at'),0)<?)))`, provider, repo, number, shared.AttemptedAt).Scan(&more); err != nil {
+	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_delivery_references r LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR (`+serverDeliveryAutomaticMember+` AND COALESCE(json_extract(o.observation_json,'$.attempted_at'),0)<?)))`, provider, repo, number, shared.AttemptedAt).Scan(&more); err != nil {
 		return Outcome{}, err
+	}
+	if shared.State == "merged" && shared.RetryAt == 0 {
+		next = int64(9223372036854775807)
 	}
 	if more {
 		next = now
+	}
+	if kind == "" {
+		attempts = 0
 	}
 	encoded, err := json.Marshal(shared)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET nonce='',query_until=0,next_at=?,observation_json=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=? AND nonce=?`, next, string(encoded), refreshRevision, provider, repo, number, id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET nonce='',query_until=0,next_at=?,attempts=?,observation_json=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=? AND nonce=?`, next, attempts, string(encoded), refreshRevision, provider, repo, number, id); err != nil {
 		return Outcome{}, err
 	}
 	status := "completed"

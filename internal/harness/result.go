@@ -17,8 +17,55 @@ const ResultTool = "submit_result"
 
 var ResultToolSpec = ToolSpec{
 	Name:        ResultTool,
-	Description: "Submit your completed implementation result. Report is optional unless required by the task. Upload only explicitly selected deliverable files. Call at the end; do not rely on your final chat message as delivery.",
-	InputSchema: json.RawMessage(`{"type":"object","properties":{"report":{"type":"object","properties":{"body":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"uncertainties":{"type":"array","items":{"type":"string"}}},"required":["body"],"additionalProperties":false},"files":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"name":{"type":"string"}},"required":["path","name"],"additionalProperties":false}}},"additionalProperties":false}`),
+	Description: "Submit your completed task result. Report is optional unless required by the task. Whole-PR reviewers include report.shared_review with the frozen candidate and requirements digest. Upload only explicitly selected deliverable files. Call at the end; do not rely on your final chat message as delivery.",
+	InputSchema: json.RawMessage(`{
+  "type":"object",
+  "properties":{
+    "report":{
+      "type":"object",
+      "properties":{
+        "body":{"type":"string"},
+        "evidence":{"type":"array","items":{"type":"string"}},
+        "uncertainties":{"type":"array","items":{"type":"string"}},
+        "shared_review":{
+          "type":"object",
+          "description":"Actual whole-PR review of the frozen candidate and linked requirements.",
+          "properties":{
+            "review_id":{"type":"string"},
+            "head_sha":{"type":"string"},
+            "base_sha":{"type":"string"},
+            "requirements_digest":{"type":"string"},
+            "verdict":{"type":"string","enum":["passed","changes_requested"]},
+            "repository_check":{"type":"string"},
+            "findings":{
+              "type":"array",
+              "items":{
+                "type":"object",
+                "properties":{"id":{"type":"string"},"priority":{"type":"string"},"body":{"type":"string"}},
+                "required":["id","priority","body"],
+                "additionalProperties":false
+              }
+            }
+          },
+          "required":["review_id","head_sha","base_sha","requirements_digest","verdict","repository_check"],
+          "additionalProperties":false
+        }
+      },
+      "required":["body"],
+      "additionalProperties":false
+    },
+    "files":{
+      "type":"array",
+      "items":{
+        "type":"object",
+        "properties":{"path":{"type":"string"},"name":{"type":"string"}},
+        "required":["path","name"],
+        "additionalProperties":false
+      }
+    }
+  },
+  "additionalProperties":false
+}`),
 }
 
 var DownloadFileToolSpec = ToolSpec{

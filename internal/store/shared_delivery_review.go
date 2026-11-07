@@ -85,18 +85,34 @@ func SharedReviewRequirements(ctx context.Context, q Querier, r protocol.SharedD
 				return "", fmt.Errorf("shared review task agreement: %w", err)
 			}
 			var spec struct {
-				Scope         string                     `json:"scope"`
-				Inputs        []protocol.TaskInput       `json:"inputs,omitempty"`
-				SharedContext []protocol.TaskWorkContext `json:"shared_context,omitempty"`
-				Goal          string                     `json:"goal"`
-				Acceptance    []string                   `json:"acceptance"`
-				Constraints   []string                   `json:"constraints"`
-				Delivery      string                     `json:"delivery"`
-				Deliverables  []string                   `json:"deliverables"`
+				Scope               string                                      `json:"scope"`
+				Inputs              []protocol.TaskInput                        `json:"inputs,omitempty"`
+				SharedContext       []protocol.TaskWorkContext                  `json:"shared_context,omitempty"`
+				Goal                string                                      `json:"goal"`
+				Acceptance          []string                                    `json:"acceptance"`
+				Constraints         []string                                    `json:"constraints"`
+				Delivery            string                                      `json:"delivery"`
+				Deliverables        []string                                    `json:"deliverables"`
+				AgentSelection      *protocol.TaskAgentSelection                `json:"agent_selection,omitempty"`
+				AcceptanceExecution *protocol.ExecutionProfile                  `json:"acceptance_execution,omitempty"`
+				FormalReviewer      *protocol.AgentRequirement                  `json:"formal_reviewer,omitempty"`
+				FormalExecution     *protocol.SharedReviewExecutionRequirements `json:"formal_execution,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 				return "", err
 			}
+			formal, err := SharedReviewExecutionRequirements(ctx, q, protocol.SharedDeliveryReview{Links: []protocol.SharedDeliveryReviewLink{link}})
+			if err != nil {
+				return "", err
+			}
+			if len(formal.Profiles) > 0 {
+				spec.FormalExecution = formal
+			}
+			if spec.AgentSelection != nil && spec.AgentSelection.Acceptance != (protocol.AgentRequirement{}) {
+				reviewer := spec.AgentSelection.Acceptance
+				spec.FormalReviewer = &reviewer
+			}
+			spec.AgentSelection, spec.AcceptanceExecution = nil, nil
 			for _, context := range spec.SharedContext {
 				texts := append([]string{"intent:" + context.Intent}, context.Constraints...)
 				facts, err := semanticSourcedReviewFacts(ctx, q, context.Facts)
@@ -161,6 +177,14 @@ func SharedDeliveryReviewChanged(ctx context.Context, q Querier, r *protocol.Sha
 	}
 	if digest != r.RequirementsDigest && digest != r.AssessedRequirementsDigest {
 		r.InvalidReason = "linked delivery requirements changed"
+		return true, nil
+	}
+	profileCurrent, err := sharedReviewExecutionCurrent(ctx, q, *r)
+	if err != nil {
+		return false, err
+	}
+	if !profileCurrent {
+		r.InvalidReason = "the actual reviewer execution does not establish the linked tasks' formal model and reasoning effort requirements"
 		return true, nil
 	}
 	for _, link := range r.Links {

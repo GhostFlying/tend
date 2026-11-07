@@ -4760,6 +4760,7 @@ export interface SharedDeliveryReviewRound {
   acceptance_id?: string;
   artifact_id?: string;
   base_sha: string;
+  execution_requirements?: SharedReviewExecutionRequirements;
   head_sha: string;
   number: number;
   requirements_digest: string;
@@ -4772,6 +4773,22 @@ export interface SharedDeliveryReviewRound {
   supplement_spec_version?: number;
   supplement_task_id?: string;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewExecutionRequirements".
+ */
+export interface SharedReviewExecutionRequirements {
+  profiles: SharedReviewExecutionProfile[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewExecutionProfile".
+ */
+export interface SharedReviewExecutionProfile {
+  effort?: string;
+  exact?: boolean;
+  model?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

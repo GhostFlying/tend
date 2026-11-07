@@ -5,10 +5,96 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+func TestSubmittedSharedReviewUsesPublishedSchemaAndSurvivesRestart(t *testing.T) {
+	type objectSchema struct {
+		Properties           map[string]json.RawMessage `json:"properties"`
+		Required             []string                   `json:"required"`
+		AdditionalProperties *bool                      `json:"additionalProperties"`
+	}
+	readObject := func(raw json.RawMessage) objectSchema {
+		t.Helper()
+		var schema objectSchema
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+			t.Fatal("result objects must retain their strict published schema")
+		}
+		return schema
+	}
+	root := readObject(ResultToolSpec.InputSchema)
+	reportSchema := readObject(root.Properties["report"])
+	reviewSchema := readObject(reportSchema.Properties["shared_review"])
+	for _, key := range []string{"review_id", "head_sha", "base_sha", "requirements_digest", "verdict", "repository_check"} {
+		if !slices.Contains(reviewSchema.Required, key) {
+			t.Fatalf("review schema does not require frozen result field %q", key)
+		}
+	}
+	var findingsSchema struct {
+		Items json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(reviewSchema.Properties["findings"], &findingsSchema); err != nil {
+		t.Fatal(err)
+	}
+	findingSchema := readObject(findingsSchema.Items)
+	for _, verdict := range []string{"passed", "changes_requested"} {
+		t.Run(verdict, func(t *testing.T) {
+			review := &protocol.SharedReviewResult{ReviewID: "review_frozen", HeadSHA: "head", BaseSHA: "base", RequirementsDigest: "requirements", Verdict: verdict, RepositoryCheck: "Reviewed the complete PR and repository instructions"}
+			if verdict == "changes_requested" {
+				review.Findings = []protocol.SharedReviewFinding{{ID: "F1", Priority: "P2", Body: "Preserve the pending result during recovery"}}
+			}
+			report := protocol.ResultReport{Body: "Complete PR review", Evidence: []string{"frozen candidate"}, Uncertainties: []string{"no deployment performed"}, SharedReview: review}
+			arguments, err := json.Marshal(map[string]any{"report": report})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Check the actual serialized report against the advertised strict
+			// object boundaries that previously excluded every shared review.
+			for _, tc := range []struct {
+				value  any
+				schema objectSchema
+			}{{report, reportSchema}, {review, reviewSchema}} {
+				encoded, err := json.Marshal(tc.value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(encoded, &fields); err != nil {
+					t.Fatal(err)
+				}
+				for key := range fields {
+					if len(tc.schema.Properties[key]) == 0 {
+						t.Fatalf("published submit_result schema rejects report field %q", key)
+					}
+				}
+			}
+			for _, key := range []string{"id", "priority", "body"} {
+				if len(findingSchema.Properties[key]) == 0 {
+					t.Fatalf("published finding schema rejects %q", key)
+				}
+			}
+			spec := WorkerSpec{StateDir: t.TempDir(), Spec: json.RawMessage(`{"deliverables":["report"]}`)}
+			r := Results{Spec: spec}
+			if got := r.Handle(t.Context(), ToolCall{Tool: ResultTool, Arguments: arguments}); !got.Success {
+				t.Fatalf("actual worker submission failed: %+v", got)
+			}
+			restored := Results{Spec: spec}
+			if err := restored.Restore(); err != nil {
+				t.Fatal(err)
+			}
+			if got := restored.Result(); got == nil || got.Report == nil || !reflect.DeepEqual(got.Report.SharedReview, review) {
+				t.Fatalf("worker result lost immutable shared review: %+v", got)
+			}
+		})
+	}
+}
 
 func TestSubmittedResultSurvivesRestart(t *testing.T) {
 	calls := 0

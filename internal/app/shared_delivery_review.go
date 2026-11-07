@@ -60,6 +60,10 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	} else if err != nil {
 		return Outcome{}, err
 	}
+	affectedIssues := map[string]bool{i.IssueID: true}
+	for _, link := range r.Links {
+		affectedIssues[link.IssueID] = true
+	}
 	if p.Action == "link" || p.Action == "unlink" {
 		if r.Status == "reviewing" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "settle the current frozen review before changing its scope")
@@ -160,6 +164,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "the focused recheck belongs to the original formal reviewer")
 			}
 			r.HeadSHA, r.BaseSHA, r.RequirementsDigest, r.Reviewer, r.Status = o.Observation.HeadSHA, o.Observation.BaseSHA, digest, round.Reviewer, "reviewing"
+			r.AssessedRequirementsDigest, r.AssessmentReason = "", ""
 			round.Number, round.HeadSHA, round.BaseSHA, round.Requirements = len(r.Rounds)+1, r.HeadSHA, r.BaseSHA, digest
 			r.Rounds = append(r.Rounds, round)
 			// Earlier dispositions remain in immutable review history; they do
@@ -221,7 +226,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if p.ReviewerTaskID == last.TaskID {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "supplement requires a distinct immutable evidence task")
 			}
-			bound, err := bindSharedReviewTask(ctx, tx.Q(), r, p.ReviewerTaskID, "")
+			bound, err := bindSharedReviewTask(ctx, tx.Q(), r, p.ReviewerTaskID, "", last.ExecutionRequirements)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -280,7 +285,19 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err := store.SharedDeliveryReviewCurrent(ctx, tx.Q(), &r); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Result: r, Notify: true, Events: []Event{{ObjectType: "issue", ObjectID: i.IssueID, Kind: "issue.delivery_review_changed", Body: map[string]any{"review_id": r.ReviewID, "review_revision": r.Revision, "status": r.Status}}}}, nil
+	for _, link := range r.Links {
+		affectedIssues[link.IssueID] = true
+	}
+	ids := make([]string, 0, len(affectedIssues))
+	for id := range affectedIssues {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	events := make([]Event, 0, len(ids))
+	for _, id := range ids {
+		events = append(events, Event{ObjectType: "issue", ObjectID: id, Kind: "issue.delivery_review_changed", Body: map[string]any{"review_id": r.ReviewID, "review_revision": r.Revision, "status": r.Status}})
+	}
+	return Outcome{Result: r, Notify: true, Events: events}, nil
 }
 
 func sharedReviewRoundLimit(r protocol.SharedDeliveryReview) int {
@@ -304,7 +321,7 @@ func escalateSharedDeliveryReview(ctx context.Context, x *Exec, tx *store.Tx, i 
 	return appendBackgroundSource(ctx, x, tx, "review_escalation:"+r.ReviewID, i.ParentIssueID, message, event, "delivery.review_escalated", nil)
 }
 
-func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, task, acceptance string) (protocol.SharedDeliveryReviewRound, error) {
+func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, task, acceptance string, frozenRequirements ...*protocol.SharedReviewExecutionRequirements) (protocol.SharedDeliveryReviewRound, error) {
 	out := protocol.SharedDeliveryReviewRound{TaskID: task, AcceptanceID: acceptance}
 	t, spec, err := loadTask(ctx, q, task)
 	if err != nil {
@@ -339,6 +356,17 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "reviewer must submit an immutable report artifact")
 		}
 	}
+	requirements, err := store.SharedReviewExecutionRequirements(ctx, q, r)
+	if err != nil {
+		return out, err
+	}
+	if len(frozenRequirements) > 0 && frozenRequirements[0] != nil {
+		requirements = frozenRequirements[0]
+	}
+	if err := validateSharedReviewTaskProfile(ctx, q, requirements, t, spec, out.RunID); err != nil {
+		return out, err
+	}
+	out.ExecutionRequirements = requirements
 	for _, link := range r.Links {
 		if link.TaskID != "" && acceptance == "" {
 			_, sourceSpec, err := loadTask(ctx, q, link.TaskID)
@@ -348,7 +376,7 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 			if sourceSpec.AgentSelection != nil && sourceSpec.AgentSelection.Acceptance.CategoryID != "" {
 				required := sourceSpec.AgentSelection.Acceptance
 				actual := spec.AgentSelection.Implementation
-				if actual.CategoryID != required.CategoryID || required.AgentID != "" && required.AgentID != out.Reviewer || required.Model != "" && actual.Model != "" && required.Model != actual.Model || required.Effort != "" && actual.Effort != "" && required.Effort != actual.Effort {
+				if actual.CategoryID != required.CategoryID || required.AgentID != "" && required.AgentID != out.Reviewer {
 					return out, protocol.Errorf(protocol.CodeForbidden, "shared reviewer must retain the linked delivery's formal category, identity and profile")
 				}
 			}
@@ -442,13 +470,10 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 	if round.Reviewer != pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID {
 		return nil, "", "", protocol.Errorf(protocol.CodeForbidden, "review artifact was produced by a different reviewer")
 	}
-	digest, err := store.SharedReviewRequirements(ctx, q, r)
-	if err != nil {
-		return nil, "", "", err
-	}
-	if digest != round.Requirements {
-		return nil, "", "", protocol.Errorf(protocol.CodeStaleRevision, "shared delivery requirements changed during review")
-	}
+	// This is the actual result for the frozen candidate and requirements.
+	// Current applicability is projected separately after recording the fact;
+	// new requirements or a mismatched actual execution profile must not discard
+	// that fact or strand the active round. Neither can establish a valid review.
 	return result, run, a.ArtifactID, nil
 }
 
@@ -468,8 +493,4 @@ func validateReviewDispositions(r protocol.SharedDeliveryReview, ds []protocol.S
 }
 func reviewFindingsResolved(r protocol.SharedDeliveryReview) bool {
 	return validateReviewDispositions(r, r.Dispositions) == nil
-}
-
-func requireSharedDeliveryReview(ctx context.Context, q store.Querier, i protocol.Issue, c protocol.IssueDeliveryCandidate) error {
-	return store.RequireSharedDeliveryReview(ctx, q, i, c)
 }

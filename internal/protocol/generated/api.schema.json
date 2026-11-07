@@ -13028,6 +13028,9 @@
         "base_sha": {
           "type": "string"
         },
+        "execution_requirements": {
+          "$ref": "#/definitions/SharedReviewExecutionRequirements"
+        },
         "head_sha": {
           "type": "string"
         },
@@ -13186,6 +13189,45 @@
         "repository_check"
       ],
       "title": "SharedReviewEvidence",
+      "type": "object"
+    },
+    "SharedReviewExecutionProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "type": "string"
+        },
+        "exact": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "title": "SharedReviewExecutionProfile",
+      "type": "object"
+    },
+    "SharedReviewExecutionRequirements": {
+      "additionalProperties": false,
+      "properties": {
+        "profiles": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SharedReviewExecutionProfile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "profiles"
+      ],
+      "title": "SharedReviewExecutionRequirements",
       "type": "object"
     },
     "SharedReviewFinding": {

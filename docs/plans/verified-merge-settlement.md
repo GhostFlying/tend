@@ -11,3 +11,7 @@ Refs: D185、D187。
 5. 回归使用既有真实共享 review/交付 Task/run/server Claim/Record 链，验证 target 前进后原执行完成及 duty/grant/binding 不变；错误 head/base、祖先未确认、lineage unknown 及部署来源变化仍拒绝。验证旧 runner 原有 target==merge 行为。
 
 本次只作上述死路的最小修复，聚焦验证后交统一最终候选检查；不做生产写入或独立完整检查。
+
+## 正式 review 的有界观察恢复补充
+
+已复现：provider 已确认 merged，但 lineage 查询 timeout/429 时，终态筛选会在下一次到期时丢弃成员，永久停止自动恢复。将该部分读取失败纳入既有有限重试：保留已知 merged/head/base/target/merge、原查询回执及 lineage 错误，同时提供可见错误和重试时间；仅仍有重试预算的 merged 失败可再次领取。完整证明成功后停止终态轮询，耗尽后结束 pending，仍可沿显式刷新恢复。成功读取重置共享 job 的连续失败预算，不让之前成功轮询消耗新的失败预算。回归先复现缺口，再验证跨关联 Issue 的恢复、超时/429 耗尽、原回执重放及显式恢复。
