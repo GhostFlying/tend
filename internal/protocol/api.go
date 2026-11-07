@@ -8,6 +8,7 @@ func APITypes() []any {
 		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},
 		HandoffAuditPage{},
 		SetIssueAcceptancePolicyPayload{},
+		UpdateSharedDeliveryReviewPayload{}, SharedDeliveryReviewPage{}, SharedReviewEvidence{},
 		ArtifactShare{}, ArtifactSharePage{}, GrantArtifactSharePayload{}, RevokeArtifactSharePayload{},
 		QuestionInputPayload{}, RevokeQuestionInputsPayload{}, QuestionInputPage{},
 		BindFeishu{}, FeishuBindingView{}, FeishuInputPage{},

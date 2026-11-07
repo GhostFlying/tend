@@ -57,8 +57,8 @@ func EffectiveContext(ctx context.Context, q Querier, id string) (string, []prot
 	if err := rows.Err(); err != nil {
 		return "", nil, err
 	}
-	// Editable plan changes already require an explicit current task disposition.
-	// This fingerprint fences sourced facts without overriding continue_existing.
+	// Issue owners assess editable definitions separately. This fingerprint
+	// fences sourced facts without overriding a recorded continue_existing.
 	raw, err := json.Marshal(records)
 	if err != nil {
 		return "", nil, err

@@ -83,6 +83,10 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	d.Spec = json.RawMessage(spec)
+	d.DeliveryAuthorization, err = DeliveryExecutionAuthority(ctx, q, taskID)
+	if err != nil {
+		return d, err
+	}
 	actions, err := store.ListActions(ctx, q, row.TaskID)
 	if err != nil {
 		return d, err

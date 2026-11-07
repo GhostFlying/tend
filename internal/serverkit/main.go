@@ -45,7 +45,8 @@ import (
 
 // Config is the server's configuration file.
 type Config struct {
-	NativeWorkers *remote.BrokerConfig `json:"native_workers,omitempty"`
+	DeliveryObserver *DeliveryObserverConfig `json:"delivery_observer,omitempty"`
+	NativeWorkers    *remote.BrokerConfig    `json:"native_workers,omitempty"`
 
 	Webhooks *struct {
 		Listen string `json:"listen"`
@@ -220,6 +221,25 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return err
 	}
 	opts = append(opts, observationOption)
+	if err := cfg.DeliveryObserver.validate(); err != nil {
+		return err
+	}
+	opts = append(opts, app.WithServerDeliveryObservations(cfg.DeliveryObserver != nil))
+	if cfg.DeliveryObserver != nil {
+		timeout := time.Duration(cfg.DeliveryObserver.Timeout)
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		status := protocol.DeliveryObserverStatus{Enabled: true, Providers: cfg.DeliveryObserver.Providers, Executables: map[string]bool{}, TimeoutMillis: timeout.Milliseconds()}
+		for _, provider := range status.Providers {
+			path := cfg.DeliveryObserver.GitHubBin
+			if provider == "codebase" {
+				path = cfg.DeliveryObserver.CodebaseBin
+			}
+			status.Executables[provider] = deliveryProviderAvailable(path)
+		}
+		opts = append(opts, app.WithServerDeliveryObserverStatus(status))
+	}
 	opts = append(opts, app.WithFollowups(cfg.MainAgent != nil))
 	if cfg.MainAgent != nil && cfg.MainAgent.Recovery != nil {
 		policy, err := cfg.MainAgent.Recovery.policy()
@@ -578,6 +598,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 	if feishuClient != nil {
 		wg.Go(func() { feishuClient.Run(runCtx) })
+	}
+	if cfg.DeliveryObserver != nil {
+		wg.Go(func() { runDeliveryObserver(runCtx, a, *cfg.DeliveryObserver, deps.DeliveryObserver, log) })
 	}
 	wg.Go(func() { a.RunFollowups(runCtx, log) })
 	wg.Go(func() { a.RunConcurrency(runCtx, log) })

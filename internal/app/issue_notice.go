@@ -26,6 +26,15 @@ func issueNotice(e Event) bool {
 }
 
 func recordIssueNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, eventID string) error {
+	var canonical bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, e.ObjectID).Scan(&canonical); err != nil {
+		return err
+	}
+	if canonical {
+		// The same committed event already enters the shared owner-change
+		// window. Retain this immediate notice path only for legacy work items.
+		return nil
+	}
 	item, err := store.GetIssue(ctx, tx.Q(), e.ObjectID)
 	if err != nil {
 		return err

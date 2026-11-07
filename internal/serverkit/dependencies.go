@@ -42,6 +42,7 @@ type TelegramOpener func(*app.App, string, *slog.Logger) (TelegramClient, error)
 // Dependencies leaves production defaults intact when empty. Injected listeners
 // transfer serving ownership to Run; WhoIs must describe their peer identity.
 type Dependencies struct {
+	DeliveryObserver DeliveryObserver
 	FetchUsagePrices func(context.Context) (json.RawMessage, error)
 	Listeners        []net.Listener
 	WhoIs            netx.WhoIs

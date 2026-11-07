@@ -49,6 +49,9 @@ export function IssueDefinition({
   );
   const [intent, setIntent] = useState(baseline?.plan.intent ?? "");
   const [scope, setScope] = useState(baseline?.plan.scope ?? "");
+  const [prMode, setPRMode] = useState(baseline?.plan.pr_policy?.mode ?? "");
+  const [prRepository, setPRRepository] = useState(baseline?.plan.pr_policy?.repository ?? "");
+  const [prReason, setPRReason] = useState(baseline?.plan.pr_policy?.reason ?? "");
   const [criteria, setCriteria] = useState(baseline?.plan.completion_criteria ?? [""]);
   const [constraints, setConstraints] = useState(
     baseline?.plan.background
@@ -108,6 +111,9 @@ export function IssueDefinition({
     setProject(payload.plan.project);
     setIntent(payload.plan.intent);
     setScope(payload.plan.scope ?? "");
+    setPRMode(payload.plan.pr_policy?.mode ?? "");
+    setPRRepository(payload.plan.pr_policy?.repository ?? "");
+    setPRReason(payload.plan.pr_policy?.reason ?? "");
     setCriteria(payload.plan.completion_criteria ?? [""]);
     setConstraints(
       payload.plan.background
@@ -144,6 +150,15 @@ export function IssueDefinition({
           ),
       ],
     };
+    delete plan.pr_policy;
+    if (prMode) {
+      plan.pr_policy =
+        old?.pr_policy?.mode === prMode &&
+        old.pr_policy.repository === prRepository &&
+        old.pr_policy.reason === prReason
+          ? old.pr_policy
+          : { mode: prMode, repository: prRepository, reason: prReason };
+    }
     try {
       const out = await operation.execute(
         reconcile
@@ -160,14 +175,6 @@ export function IssueDefinition({
             : issue
               ? issueCommand(baseline!, "update", {
                   plan,
-                  task_dispositions: (baseline?.tasks ?? [])
-                    ?.filter((t) => !["completed", "cancelled"].includes(t.lifecycle))
-                    .map((t) => ({
-                      task_id: t.task_id,
-                      spec_version: t.spec_version,
-                      action: "continue_existing",
-                      reason: "更新 Issue 定义，保留当前任务原约定",
-                    })),
                 })
               : createIssueCommand(
                   createIssueResponsibility(
@@ -222,6 +229,9 @@ export function IssueDefinition({
     ["目标", editPlan?.intent ?? "", intent],
     ["范围", editPlan?.scope ?? "", scope],
     ["约束", previousConstraints, constraints],
+    ["PR 合入方式", editPlan?.pr_policy?.mode ?? "", prMode],
+    ["PR 仓库", editPlan?.pr_policy?.repository ?? "", prRepository],
+    ["合入授权说明", editPlan?.pr_policy?.reason ?? "", prReason],
   ]) {
     if (before !== after) changes.push({ label: label!, before: before!, after: after! });
   }
@@ -242,6 +252,9 @@ export function IssueDefinition({
     setProject(issue.plan.project);
     setIntent(issue.plan.intent);
     setScope(issue.plan.scope ?? "");
+    setPRMode(issue.plan.pr_policy?.mode ?? "");
+    setPRRepository(issue.plan.pr_policy?.repository ?? "");
+    setPRReason(issue.plan.pr_policy?.reason ?? "");
     setCriteria(issue.plan.completion_criteria ?? [""]);
     setConstraints(
       issue.plan.background
@@ -374,6 +387,40 @@ export function IssueDefinition({
               </p>
             </fieldset>
           )}
+          <fieldset className={layout.policy} disabled={blocked}>
+            <legend>PR 合入授权</legend>
+            <label>
+              合入方式
+              <select
+                value={shown?.pr_policy?.mode ?? prMode}
+                onChange={(e) => setPRMode(e.target.value)}
+              >
+                <option value="">未约定，交付前由负责人确认</option>
+                <option value="auto">通过审阅和检查后自动合入</option>
+                <option value="manual">合入前需要人工审批</option>
+              </select>
+            </label>
+            {(shown?.pr_policy?.mode ?? prMode) && (
+              <>
+                <label>
+                  授权仓库
+                  <input
+                    value={shown?.pr_policy?.repository ?? prRepository}
+                    placeholder="组织/仓库"
+                    onChange={(e) => setPRRepository(e.target.value)}
+                  />
+                </label>
+                <label>
+                  授权说明
+                  <textarea
+                    value={shown?.pr_policy?.reason ?? prReason}
+                    onChange={(e) => setPRReason(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+            <p>自动合入仍须满足审阅、CI 和仓库保护规则。部署另行授权。</p>
+          </fieldset>
           {!issue && (
             <>
               <label>
@@ -469,7 +516,9 @@ export function IssueDefinition({
       )}
       <footer className={layout.footer}>
         <p>
-          {issue ? "更新 Issue 定义；已开始的任务仍按原约定执行。" : "创建后由所选负责人持续推进。"}
+          {issue
+            ? "保存变化并通知负责人，由其判断是否需要调整任务。"
+            : "创建后由所选负责人持续推进。"}
         </p>
         <div className={styles.actions}>
           {operation.pending ? (
@@ -488,7 +537,8 @@ export function IssueDefinition({
                 (!issue && !assignee) ||
                 !title.trim() ||
                 !project.trim() ||
-                !intent.trim()
+                !intent.trim() ||
+                (!!prMode && (!prRepository.trim() || !prReason.trim()))
               }
               onClick={() => void save()}
             >

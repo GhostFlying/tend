@@ -96,7 +96,12 @@ func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		return views.Snapshot(r.Context(), q, queue, r.URL.Query().Get("project"))
+		result, err := views.Snapshot(r.Context(), q, queue, r.URL.Query().Get("project"))
+		if err != nil {
+			return nil, err
+		}
+		result.DeliveryObserver = s.app.ServerDeliveryObserverStatus()
+		return result, nil
 	})
 }
 

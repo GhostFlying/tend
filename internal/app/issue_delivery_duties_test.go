@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -103,11 +104,75 @@ func observeDeliveryForTest(t *testing.T, h *harness, issue string, c protocol.I
 }
 func prepareDeliveryForTest(t *testing.T, h *harness, issue, task string, c protocol.IssueDeliveryCandidate) protocol.IssueDeliveryDuty {
 	t.Helper()
+	retainHistoricalManualCandidateForTest(t, h, issue, task, c)
 	op := updateDeliveryForTest(t, h, issue, protocol.UpdateIssueDeliveryPayload{TaskID: task, Action: "prepare", Candidate: &c, IssueControlPayload: protocol.IssueControlPayload{Reason: "Present actual candidate and requested scope in the current IM"}})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	return deliveryDutyForTest(t, h, issue, task)
+}
+
+// These legacy regressions exercise real, pre-policy candidate approvals. Seed
+// only their original proposal snapshot; the owner answer is still submitted
+// through the real versioned Attention path, never manufactured as approved.
+func retainHistoricalManualCandidateForTest(t *testing.T, h *harness, issue, task string, c protocol.IssueDeliveryCandidate) {
+	t.Helper()
+	i := canonicalTaskIssue(t, h, issue)
+	d := deliveryDutyForTest(t, h, issue, task)
+	if i.Plan.PRPolicy != nil || d.PolicyAttentionID != "" || d.Status == "deferred" {
+		return
+	}
+	if d.AttentionID != "" && reflect.DeepEqual(d.Candidate, &c) && d.Status != "preparing" && d.AssignmentEpoch == i.AssignmentEpoch {
+		return
+	}
+	if d.ExecutionTaskID != "" {
+		execution := h.task(d.ExecutionTaskID)
+		if !execution.Lifecycle.Terminal() || reflect.DeepEqual(d.Candidate, &c) {
+			return
+		}
+		var busy bool
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state IN ('starting','running','waiting','interrupted','unknown')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, d.ExecutionTaskID, d.ExecutionTaskID).Scan(&busy)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if busy {
+			return
+		}
+		d.ExecutionTaskID = ""
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		if err := normalizeDeliveryBaseline(t.Context(), tx.Q(), &c); err != nil {
+			return err
+		}
+		return validateDeliveryCandidate(t.Context(), tx.Q(), i, c)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if d.AttentionID != "" {
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			a, err := store.GetAttention(t.Context(), tx.Q(), d.AttentionID)
+			if err != nil {
+				return err
+			}
+			return withdrawDeliveryQuestion(t.Context(), &Exec{Env: h.env("historical.delivery_fixture", protocol.Target{Type: "issue", ID: issue}, map[string]any{}, nil), Now: h.clock.Now(), IDs: h.ids, Principal: owner}, tx, &a)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	op := h.exec(owner, h.env("attentions.create", protocol.Target{Type: "attention"}, protocol.CreateAttentionPayload{IssueID: issue, Kind: "decision", Title: deliveryCandidateQuestion(c), Options: []string{"approve", "defer", "end_delivery"}, BlocksClose: true}, nil), AttentionCommand{Action: "create"})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var a protocol.Attention
+	if err := json.Unmarshal(op.Result, &a); err != nil {
+		t.Fatal(err)
+	}
+	d.Candidate, d.AttentionID, d.Status, d.AssignmentEpoch = &c, a.AttentionID, "awaiting_owner", i.AssignmentEpoch
+	d.Revision++
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutIssueDeliveryDuty(t.Context(), issue, d) }); err != nil {
+		t.Fatal(err)
+	}
 }
 func answerDeliveryForTest(t *testing.T, h *harness, d protocol.IssueDeliveryDuty, option, text string) {
 	t.Helper()
@@ -359,7 +424,7 @@ func TestDeliveryChangedCandidateRecoversOnlyAfterOriginalExecutionSettles(t *te
 		t.Fatal(next)
 	}
 	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, d), protocol.CodeStaleRevision)
-	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeForbidden)
+	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), historicalOrPolicyReadinessCode(next))
 	if h.count("issue_delivery_executions") != 1 {
 		t.Fatal("original execution authorization history changed")
 	}
@@ -392,10 +457,10 @@ func TestDeliveryDeferralRetainsResponsibilityAndExplicitEndUsesOwnerEvidence(t 
 					t.Fatal(op)
 				}
 				next := deliveryDutyForTest(t, h, i.IssueID, task)
-				if next.AttentionID == d.AttentionID || next.Status != "awaiting_owner" {
+				if next.AttentionID == d.AttentionID || (next.Status != "awaiting_owner" && (next.Status != "preparing" || next.PolicyAttentionID == "")) {
 					t.Fatal("deferral could not resume without changing the candidate", next)
 				}
-				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeForbidden)
+				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), historicalOrPolicyReadinessCode(next))
 			}
 			endDeliveryForTest(t, h, i.IssueID, task)
 			settled := deliveryDutyForTest(t, h, i.IssueID, task)
@@ -526,7 +591,7 @@ func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *tes
 			if next.AttentionID == d.AttentionID {
 				t.Fatal("old approval reused after observed drift")
 			}
-			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), protocol.CodeForbidden)
+			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), historicalOrPolicyReadinessCode(next))
 		})
 	}
 }
@@ -558,4 +623,11 @@ func enableDeliveryObservationForTest(t *testing.T, h *harness) {
 			}
 		}
 	}
+}
+
+func historicalOrPolicyReadinessCode(d protocol.IssueDeliveryDuty) protocol.Code {
+	if d.PolicyAttentionID != "" && d.Status == "preparing" {
+		return protocol.CodeStaleRevision
+	}
+	return protocol.CodeForbidden
 }

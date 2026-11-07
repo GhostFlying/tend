@@ -494,6 +494,13 @@ func resolvedIssueAttentionDecision(ctx context.Context, q store.Querier, issueI
 }
 
 func validateIssueDispositions(ctx context.Context, q store.Querier, item protocol.WorkItem, next protocol.IssuePlan, dispositions []protocol.IssueTaskDisposition) error {
+	var canonicalIssue bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, item.WorkItemID).Scan(&canonicalIssue); err != nil {
+		return err
+	}
+	// A definition edit is a change for the current owner to assess, not an
+	// instruction for its editor to invent task semantics before saving it.
+	// Legacy work-item plans retain their original disposition contract.
 	affected := map[string]bool{}
 	ids, err := store.IssueTaskIDs(ctx, q, item.WorkItemID)
 	if err != nil {
@@ -539,6 +546,9 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 			}
 		}
 		if task.Lifecycle.Terminal() {
+			continue
+		}
+		if canonicalIssue && len(dispositions) == 0 && !domain.IssueTaskRetired(item.IssuePlan, next, id) {
 			continue
 		}
 		d, ok := byTask[id]

@@ -16,6 +16,9 @@ func workInvalid(format string, args ...any) error {
 
 // ValidateIssue validates a plan and preserves stable ledger identity.
 func ValidateIssue(next protocol.IssuePlan, previous *protocol.IssuePlan) error {
+	if p := next.PRPolicy; p != nil && ((p.Mode != "auto" && p.Mode != "manual") || p.Repository == "" || strings.TrimSpace(p.Repository) != p.Repository || strings.TrimSpace(p.Reason) == "") {
+		return workInvalid("pr_policy requires auto/manual, an exact repository and an explicit reason")
+	}
 	if strings.TrimSpace(next.Title) == "" || strings.TrimSpace(next.Intent) == "" || next.Project == "" {
 		return workInvalid("title, intent and project are required")
 	}

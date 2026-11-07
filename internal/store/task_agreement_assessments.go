@@ -1,0 +1,129 @@
+package store
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+)
+
+// IssueAgreementDefinitionDigest identifies the responsibility's semantic
+// definition, independently of title, progress and membership revisions.
+func IssueAgreementDefinitionDigest(plan protocol.IssuePlan) (string, error) {
+	criteria := append([]string{}, plan.CompletionCriteria...)
+	background := append([]protocol.SharedFact{}, plan.Background...)
+	raw, err := json.Marshal([]any{plan.Intent, plan.Scope, criteria, background})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// ContextSourceDigest covers all sourced fact kinds and their actual versions,
+// without task lifecycle counters or the act of recording a review itself.
+func ContextSourceDigest(ctx context.Context, q Querier, issue string) (string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT f.fact_id,f.kind,f.body,f.source_message_id,m.body,COALESCE(d.content_revision,1),COALESCE(r.revision,0),EXISTS(SELECT 1 FROM message_work_items a WHERE a.message_id=m.message_id AND a.work_item_id=f.work_item_id AND a.active=1),EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=m.message_id AND c.withdrawn_at<>0) FROM work_item_context_facts f JOIN work_items w ON w.work_item_id=? JOIN conversation_messages m ON m.message_id=f.source_message_id LEFT JOIN message_dispositions d ON d.message_id=m.message_id LEFT JOIN message_association_revisions r ON r.message_id=m.message_id WHERE f.superseded=0 AND (f.work_item_id=w.work_item_id OR f.scope='global' OR (f.scope='project' AND f.project=w.project)) ORDER BY f.fact_id`, issue)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	facts := []any{}
+	for rows.Next() {
+		var id, kind, body, source, original string
+		var content, association int64
+		var linked, withdrawn bool
+		if err := rows.Scan(&id, &kind, &body, &source, &original, &content, &association, &linked, &withdrawn); err != nil {
+			return "", err
+		}
+		facts = append(facts, []any{id, kind, body, source, original, content, association, linked, withdrawn})
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(facts)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// TaskAgreementAssessmentCurrent reads an explicit owner's judgement. It never
+// changes a frozen spec, authorizes a new action, or covers subsequent sources.
+func TaskAgreementAssessmentCurrent(ctx context.Context, q Querier, task string, version int64, binding protocol.TaskWorkContext) (bool, error) {
+	digest, _, err := EffectiveContext(ctx, q, binding.WorkItemID)
+	if err != nil {
+		return false, err
+	}
+	issue, err := GetCanonicalIssue(ctx, q, binding.WorkItemID)
+	if err != nil {
+		return false, err
+	}
+	definition, err := IssueAgreementDefinitionDigest(issue.Plan)
+	if err != nil {
+		return false, err
+	}
+	sources, err := ContextSourceDigest(ctx, q, binding.WorkItemID)
+	if err != nil {
+		return false, err
+	}
+	var current bool
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM task_agreement_assessments a
+ JOIN tasks t ON t.task_id=a.task_id AND t.spec_version=a.spec_version
+ JOIN task_work_item_owners o ON o.task_id=a.task_id AND o.work_item_id=a.issue_id
+ JOIN issue_controls i ON i.issue_id=a.issue_id
+ WHERE a.task_id=? AND a.spec_version=? AND a.context_issue_id=?
+ AND a.frozen_digest=? AND a.current_digest=? AND a.definition_digest=? AND a.source_digest=?
+ AND a.assignment_epoch=i.assignment_epoch
+ AND a.assignee_ref=i.assignee_ref AND i.assignment_state='active'
+ AND a.rowid=(SELECT MAX(latest.rowid) FROM task_agreement_assessments latest WHERE latest.task_id=a.task_id AND latest.spec_version=a.spec_version AND latest.context_issue_id=a.context_issue_id)
+ AND (a.action='continue_existing' OR (a.action='stopped' AND t.control_mode='paused')))`, task, version, binding.WorkItemID, binding.ContextDigest, digest, definition, sources).Scan(&current)
+	return current, err
+}
+
+// TaskContextBindingCurrent shares the exact same admission rule between
+// scheduler and diagnostics. Legacy contexts retain their existing semantics.
+func TaskContextBindingCurrent(ctx context.Context, q Querier, task string, version int64, binding protocol.TaskWorkContext) (bool, error) {
+	if binding.ContextDigest == "" {
+		return true, nil
+	}
+	digest, _, err := EffectiveContext(ctx, q, binding.WorkItemID)
+	if err != nil {
+		return false, err
+	}
+	var primary string
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT o.work_item_id FROM task_work_item_owners o JOIN issue_controls i ON i.issue_id=o.work_item_id WHERE o.task_id=?),'')`, task).Scan(&primary); err != nil {
+		return false, err
+	}
+	definitionChanged := false
+	if primary != "" && primary != binding.WorkItemID && binding.Revision > 0 {
+		previous, err := GetCanonicalIssueRevision(ctx, q, binding.WorkItemID, binding.Revision)
+		if err != nil {
+			return false, err
+		}
+		current, err := GetCanonicalIssue(ctx, q, binding.WorkItemID)
+		if err != nil {
+			return false, err
+		}
+		oldDefinition, err := IssueAgreementDefinitionDigest(previous.Plan)
+		if err != nil {
+			return false, err
+		}
+		newDefinition, err := IssueAgreementDefinitionDigest(current.Plan)
+		if err != nil {
+			return false, err
+		}
+		definitionChanged = oldDefinition != newDefinition
+	}
+	if digest == binding.ContextDigest && !definitionChanged {
+		return true, nil
+	}
+	if primary == "" {
+		return false, nil
+	}
+	return TaskAgreementAssessmentCurrent(ctx, q, task, version, binding)
+}

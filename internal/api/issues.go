@@ -74,3 +74,18 @@ func (s *Server) issueResults(w http.ResponseWriter, r *http.Request) {
 		return views.IssueResults(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("after"))
 	})
 }
+
+func (s *Server) issueDeliveryReviews(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 100 {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "limit must be between 1 and 100"))
+			return
+		}
+		limit = value
+	}
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		return views.SharedDeliveryReviews(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("delivery_id"), r.URL.Query().Get("after"), limit)
+	})
+}

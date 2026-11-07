@@ -47,6 +47,9 @@ func TestObservationEndpointAuthenticatesRunAndHost(t *testing.T) {
 			if err := json.NewDecoder(res.Body).Decode(&v); err != nil || v.RunID != as.RunID || v.Deployment == nil {
 				t.Fatalf("view %+v %v", v, err)
 			}
+			if v.DeliveryAuthorization != nil || v.Deployment.Admission == nil || v.Deployment.Admission.Source == "" || v.Deployment.Admission.ObservedAt != v.ObservedAt {
+				t.Fatal("ordinary run leaked another delivery or lost admission provenance", v)
+			}
 		}
 		return res.StatusCode
 	}

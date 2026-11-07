@@ -11,7 +11,8 @@ import (
 
 type deliveryExecutionSnapshot struct {
 	protocol.IssueDeliveryCandidate
-	AssignmentEpoch int64 `json:"assignment_epoch"`
+	AssignmentEpoch int64                        `json:"assignment_epoch"`
+	Authorization   *protocol.IssueDeliveryGrant `json:"authorization,omitempty"`
 }
 
 func deliveryBaseline(ctx context.Context, q store.Querier) (store.UpgradeRow, error) {

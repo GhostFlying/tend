@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 
@@ -11,6 +13,30 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+// issueAcceptanceWasDefault proves the initial default from the immutable
+// creation input. Explicit creator choices, later changes and unavailable
+// provenance retain their original independent-acceptance requirement.
+func issueAcceptanceWasDefault(ctx context.Context, q store.Querier, issue protocol.Issue) (bool, error) {
+	p := issue.AcceptancePolicy
+	if p == nil || !p.Required || p.IssueRevision != 1 || p.RequestID == "" {
+		return false, nil
+	}
+	var raw string
+	if err := q.QueryRowContext(ctx, `SELECT reason_json FROM issue_control_revisions WHERE issue_id=? AND revision=1 AND request_id=?`, issue.IssueID, p.RequestID).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	var original struct {
+		IndependentAcceptance *protocol.IndependentAcceptanceRequest `json:"independent_acceptance"`
+	}
+	if err := json.Unmarshal([]byte(raw), &original); err != nil {
+		return false, err
+	}
+	return original.IndependentAcceptance == nil, nil
+}
 
 func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequest) (*protocol.IssueAcceptancePolicy, error) {
 	creator := protocol.AcceptancePolicyCreator{}

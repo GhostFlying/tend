@@ -33,18 +33,20 @@ type IssueDeliveryCandidate struct {
 
 // IssueDeliveryDuty survives plan edits, notification review and task completion.
 type IssueDeliveryDuty struct {
-	AssignmentEpoch int64                   `json:"assignment_epoch,omitempty"`
-	TaskID          string                  `json:"task_id"`
-	EventID         string                  `json:"event_id"`
-	AcceptanceID    string                  `json:"acceptance_id,omitempty"`
-	ArtifactID      string                  `json:"artifact_id,omitempty"`
-	Revision        int64                   `json:"revision"`
-	Status          string                  `json:"status"`
-	Candidate       *IssueDeliveryCandidate `json:"candidate,omitempty"`
-	AttentionID     string                  `json:"attention_id,omitempty"`
-	ExecutionTaskID string                  `json:"execution_task_id,omitempty"`
-	Reason          string                  `json:"reason,omitempty"`
-	Evidence        []IssueEvidence         `json:"evidence,omitempty"`
+	PolicyAttentionID string                  `json:"policy_attention_id,omitempty"`
+	Authorization     *IssueDeliveryGrant     `json:"authorization,omitempty"`
+	AssignmentEpoch   int64                   `json:"assignment_epoch,omitempty"`
+	TaskID            string                  `json:"task_id"`
+	EventID           string                  `json:"event_id"`
+	AcceptanceID      string                  `json:"acceptance_id,omitempty"`
+	ArtifactID        string                  `json:"artifact_id,omitempty"`
+	Revision          int64                   `json:"revision"`
+	Status            string                  `json:"status"`
+	Candidate         *IssueDeliveryCandidate `json:"candidate,omitempty"`
+	AttentionID       string                  `json:"attention_id,omitempty"`
+	ExecutionTaskID   string                  `json:"execution_task_id,omitempty"`
+	Reason            string                  `json:"reason,omitempty"`
+	Evidence          []IssueEvidence         `json:"evidence,omitempty"`
 }
 
 type UpdateIssueDeliveryPayload struct {

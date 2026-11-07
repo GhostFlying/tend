@@ -309,6 +309,20 @@ func (o owner) task(ctx context.Context, id string) error {
 	}
 	out := o.e.Stdout
 	printSummary(out, d.TaskSummary)
+	if authority := d.DeliveryAuthorization; authority != nil {
+		fmt.Fprintf(out, "delivery authorization: source task %s, duty revision %d, valid %t", authority.SourceTaskID, authority.DutyRevision, authority.Valid)
+		if authority.InvalidReason != "" {
+			fmt.Fprintf(out, ", reason %s", authority.InvalidReason)
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "  candidate: %s head %s base %s target %s, deploy %t\n", authority.Candidate.DeliveryID, authority.Candidate.HeadSHA, authority.Candidate.BaseSHA, authority.Candidate.TargetSHA, authority.Candidate.Deploy)
+		if approval := authority.Approval; approval != nil {
+			fmt.Fprintf(out, "  approval: %s v%d %s/%s, source %s revision %d\n", approval.DecisionID, approval.DecisionVersion, approval.DecisionStatus, approval.Option, approval.SourceMessageID, approval.SourceRevision)
+		}
+		if policy := authority.Policy; policy != nil {
+			fmt.Fprintf(out, "  policy: %s on %s, source Issue %s request %s\n", policy.Mode, policy.Repository, policy.IssueID, policy.RequestID)
+		}
+	}
 	var spec struct {
 		Goal       string               `json:"goal"`
 		Acceptance []string             `json:"acceptance"`
