@@ -236,6 +236,46 @@ describe("blocked site storage", () => {
     expect(s.getItem("other")).toBe("w");
   });
 
+  test("successful reads observe external updates and deletions", () => {
+    const backing = new MemoryStorage();
+    const s = new FallbackStorage(() => backing);
+    s.setItem("k", "old");
+    backing.setItem("k", "other-tab");
+    expect(s.getItem("k")).toBe("other-tab");
+    backing.removeItem("k");
+    expect(s.getItem("k")).toBeNull();
+  });
+
+  test("failed mutations keep their local value until a mutation succeeds", () => {
+    const backing = new MemoryStorage();
+    let fail = false;
+    const s = new FallbackStorage(() => ({
+      getItem: (key) => backing.getItem(key),
+      setItem: (key, value) => {
+        if (fail) throw new Error("storage unavailable");
+        backing.setItem(key, value);
+      },
+      removeItem: (key) => {
+        if (fail) throw new Error("storage unavailable");
+        backing.removeItem(key);
+      },
+    }));
+    s.setItem("token", "old");
+    fail = true;
+    s.setItem("token", "new");
+    expect(s.getItem("token")).toBe("new");
+    expect(backing.getItem("token")).toBe("old");
+    s.removeItem("token");
+    expect(s.getItem("token")).toBeNull();
+    fail = false;
+    expect(s.getItem("token")).toBeNull();
+    s.setItem("token", "renewed");
+    backing.setItem("token", "other-tab");
+    expect(s.getItem("token")).toBe("other-tab");
+    s.removeItem("token");
+    expect(backing.getItem("token")).toBeNull();
+  });
+
   test("the client still signs in and keeps its token for the page", async () => {
     const c = new ApiClient({ fetch: tend.fetch, storage: new FallbackStorage(blocked) });
     await c.request("GET", "/api/v1/snapshot");
@@ -286,6 +326,20 @@ describe("delivery file authorization", () => {
   test("refused download preserves the owner's authorization failure", async () => {
     tend.handle = () => json(403, { error: { code: "forbidden", message: "not permitted" } });
     await expect(client.file("file_id")).rejects.toBeInstanceOf(ApiError);
+    expect(client.connection.get().status).toBe("online");
+  });
+
+  test("object permission failures preserve the authenticated application", async () => {
+    await client.get("/api/v1/snapshot");
+    tend.handle = () =>
+      json(403, { error: { code: "forbidden", message: "share belongs to another Issue" } });
+    await expect(client.get("/api/v1/object")).rejects.toMatchObject({
+      status: 403,
+      code: "forbidden",
+    });
+    expect(client.connection.get()).toEqual({ status: "online", login: "owner@example" });
+    tend.owner = false;
+    await expect(client.connect()).rejects.toMatchObject({ status: 403 });
     expect(client.connection.get().status).toBe("not-owner");
   });
   test("encodes file identities as one same-origin path segment", async () => {

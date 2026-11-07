@@ -88,7 +88,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release cannot read the current server schema")
 	}
 	if c.DrainMillis == 0 {
-		c.DrainMillis = (30 * time.Minute).Milliseconds()
+		c.DrainMillis = (6 * time.Minute).Milliseconds()
 	}
 	if c.RestartMillis == 0 {
 		c.RestartMillis = (120 * time.Second).Milliseconds()
@@ -126,7 +126,8 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
 		sourceCommit = source.Commit
 	}
-	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	r.Deadline = capUpgradeDeadline(&r, r.Deadline)
 	if len(c.RunnerConfigurations) > 0 {
 		if len(c.RunnerConfigurations) != 1 || c.ServerHash != c.CurrentServerHash {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance requires one host and the current server binary")
@@ -341,9 +342,13 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		if err := attention(restorationReason(r)); err != nil {
 			return Outcome{}, err
 		}
-	} else if r.View.Status == "attention" || (r.Deadline > 0 && now >= r.Deadline) {
+	} else if r.View.Status == "attention" || upgradeBatchExpired(r, now) || (r.Deadline > 0 && now >= r.Deadline) {
 		if r.View.Status != "attention" {
-			if err := attention("等待当前阶段超时，已暂停后续升级"); err != nil {
+			reason := "等待当前阶段超时，已暂停后续升级"
+			if upgradeBatchExpired(r, now) {
+				reason = "升级批次整体期限已到；须对账或取消后另开批次，不续期"
+			}
+			if err := attention(reason); err != nil {
 				return Outcome{}, err
 			}
 		}
@@ -384,7 +389,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 							break
 						}
 						r.View.Phase = "runners"
-						r.Deadline = now + r.DrainMillis
+						r.Deadline = capUpgradeDeadline(&r, now+r.DrainMillis)
 						break
 					}
 					r.ServerPreviousHash = c.Observation.BinarySHA256
@@ -397,7 +402,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						if err != nil {
 							return Outcome{}, err
 						}
-						grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: now + r.GrantMillis, RunIDs: []string{}}
+						grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(&r, now+r.GrantMillis), RunIDs: []string{}}
 						for _, run := range runs {
 							lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
 							if err != nil {
@@ -424,7 +429,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						}
 					}
 					r.View.Phase = "server_ready"
-					r.Deadline = now + r.GrantMillis - r.RestartMillis
+					r.Deadline = capUpgradeDeadline(&r, now+r.GrantMillis-r.RestartMillis)
 				}
 			case "server_ready", "server_checking":
 				reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
@@ -521,7 +526,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				}
 				v.Status = "skipped"
 				v.Phase = "skipped"
-				r.Deadline = now + r.DrainMillis
+				r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 				continue
 			}
 			available, err := anotherAvailableHost(ctx, tx.Q(), h.HostID, now)
@@ -546,7 +551,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			}
 			v.Status = "running"
 			v.Phase = "draining"
-			r.Deadline = now + r.DrainMillis
+			r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 			return nil
 		}
 		handled, reason, err := reconcileRunnerCandidate(ctx, x, tx, r, i)

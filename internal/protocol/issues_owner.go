@@ -8,6 +8,8 @@ type IssueSourceReference struct {
 }
 
 type CreateIssuePayload struct {
+	// CorrectsRequestID links an admitted, deterministically rejected delegation.
+	CorrectsRequestID     string                        `json:"corrects_request_id,omitempty"`
 	IndependentAcceptance *IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
 	Owner                 *IssueOwnerRequest            `json:"owner,omitempty"`
 	Manager               *RequestIssueManagerPayload   `json:"manager,omitempty"`

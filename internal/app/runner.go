@@ -321,6 +321,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := refreshManagerTasks(ctx, x, tx); err != nil {
 		return Outcome{}, err
 	}
+	x.managersRefreshed = true
 	rows, err := store.ListClaimCandidates(ctx, q)
 	if err != nil {
 		return Outcome{}, err

@@ -602,6 +602,12 @@ func settleStoppedManagerRequests(ctx context.Context, tx *store.Tx, run string)
 	return nil
 }
 
+// managerNativeObservationMethod never submits input or changes execution state.
+// Its unknown result remains recorded without invalidating an independent stop.
+func managerNativeObservationMethod(method string) bool {
+	return method == "models" || method == "find" || method == "usage"
+}
+
 func managerNativeReceiptMethod(method string) bool {
 	switch method {
 	case "models", "resume", "find", "usage", "interrupt", "close", "tool_result", "release":

@@ -173,6 +173,7 @@
 | D174 | worker handoff 的答案与续接权限分离：typed continue_now / wait / execution Task dependency；旧入口保留原默认，仅显式新 typed 入口选择等待；双 CAS resume / reconcile 仅沿原合同续接。 | 已实现，待验证 |
 | D180 | 独立 server/runner 维护窗口持久限时，显式外部 force 接受未完成与未知；固定原进程与数据身份、先退出后接管，保留原请求、逐 run 隔离及独立恢复准入。 | 实现中 |
 | D181 | 验收通过、返修及受阻结论均可显式提交不可变证据文件；首次领取冻结能力与精确反馈来源，文件原件和稳定上传身份先于 verdict 确认，事务关联与逐文件权限使原证据在 scratch 清理后仍可读取。旧无文件结论保持原义，不推断本机路径持久化；runner journal 18 阻止旧 writer 静默丢文件引用。详见 docs/plans/acceptance-evidence-files.md。 | 实现中 |
+| D183 | 自动执行使用直接 app-server 与 runner 自管 git workspace；Issue 交接 prompt 独立于 Run session 续接。原身份恢复不隐式替代，纯辅助读取 unknown 不冒充业务未知；SQL 失败与真实无归属分开。对象权限拒绝不撤销全局身份，存储降级只支配失败的键。整体维护截止不随阶段推进续期。见 docs/plans/direct-appserver-handoff.md。 | 实现中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 

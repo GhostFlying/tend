@@ -52,6 +52,9 @@ export type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem"
 export class FallbackStorage implements KeyValueStorage {
   private readonly backing: () => KeyValueStorage;
   private readonly memory = new Map<string, string>();
+  // Failed writes/removals own this key for the page until a later local
+  // mutation succeeds. Other keys keep observing cross-tab backing changes.
+  private readonly local = new Set<string>();
 
   /** backing is read on every call, so merely naming it cannot throw early. */
   constructor(backing: () => KeyValueStorage) {
@@ -59,13 +62,15 @@ export class FallbackStorage implements KeyValueStorage {
   }
 
   getItem(key: string): string | null {
-    try {
-      const v = this.backing().getItem(key);
-      if (v !== null) {
+    if (!this.local.has(key)) {
+      try {
+        const v = this.backing().getItem(key);
+        if (v === null) this.memory.delete(key);
+        else this.memory.set(key, v);
         return v;
+      } catch {
+        // A successful read, including null, becomes the next cached value.
       }
-    } catch {
-      // Fall back to memory.
     }
     return this.memory.get(key) ?? null;
   }
@@ -74,8 +79,9 @@ export class FallbackStorage implements KeyValueStorage {
     this.memory.set(key, value);
     try {
       this.backing().setItem(key, value);
+      this.local.delete(key);
     } catch {
-      // Kept in memory only.
+      this.local.add(key);
     }
   }
 
@@ -83,8 +89,9 @@ export class FallbackStorage implements KeyValueStorage {
     this.memory.delete(key);
     try {
       this.backing().removeItem(key);
+      this.local.delete(key);
     } catch {
-      // Gone from memory, which is all there is.
+      this.local.add(key);
     }
   }
 }
@@ -238,6 +245,7 @@ export class ApiClient {
         signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]) : undefined,
       ),
       signal,
+      path === "/api/v1/session",
     );
   }
 
@@ -294,7 +302,7 @@ export class ApiClient {
       try {
         const req: SessionRequest = { client_id: this.clientId, scope: "owner" };
         const res = await this.send("POST", "/api/v1/session", req);
-        const view = await this.answer<SessionView>(res);
+        const view = await this.answer<SessionView>(res, undefined, true);
         if (!view.token) {
           throw new ApiError(res.status, { code: "internal", message: "no token in the session" });
         }
@@ -356,7 +364,7 @@ export class ApiClient {
     }
   }
 
-  private async answer<T>(res: Response, signal?: AbortSignal): Promise<T> {
+  private async answer<T>(res: Response, signal?: AbortSignal, sessionCheck = false): Promise<T> {
     let body: unknown;
     try {
       body = await res.json();
@@ -373,7 +381,7 @@ export class ApiClient {
       return body as T;
     }
     const error = (body as APIResponse | undefined)?.error;
-    if (res.status === 403) {
+    if (res.status === 403 && sessionCheck) {
       this.state.set({ status: "not-owner", reason: error?.message ?? "这台设备不是 owner" });
     }
     throw new ApiError(res.status, error);

@@ -26,7 +26,7 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	reason := fs.String("reason", "", "reason retained in the operation record")
 	dry := fs.Bool("dry-run", false, "print original Envelope without sending")
 	fs.Bool("json", true, "print structured output")
-	provider := fs.String("provider", "", "optional native entry provider: orca or cove")
+	provider := fs.String("provider", "", "optional native entry provider: appserver, orca or cove")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err

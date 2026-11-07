@@ -25,17 +25,18 @@ type UpgradeManagerParkView struct {
 
 // UpgradeView remains visible after completion until the next batch starts.
 type UpgradeView struct {
-	ManagerParks []UpgradeManagerParkView `json:"manager_parks,omitempty"`
-	SourceCommit string                   `json:"source_commit,omitempty"`
-	UpgradeID    string                   `json:"upgrade_id"`
-	ReleaseID    string                   `json:"release_id"`
-	Revision     int64                    `json:"revision"`
-	Status       string                   `json:"status"`
-	Phase        string                   `json:"phase"`
-	CreatedAt    time.Time                `json:"created_at"`
-	UpdatedAt    time.Time                `json:"updated_at"`
-	Reason       string                   `json:"reason,omitempty"`
-	Hosts        []UpgradeHostView        `json:"hosts"`
+	OverallDeadlineMillis int64                    `json:"overall_deadline_millis,omitempty"`
+	ManagerParks          []UpgradeManagerParkView `json:"manager_parks,omitempty"`
+	SourceCommit          string                   `json:"source_commit,omitempty"`
+	UpgradeID             string                   `json:"upgrade_id"`
+	ReleaseID             string                   `json:"release_id"`
+	Revision              int64                    `json:"revision"`
+	Status                string                   `json:"status"`
+	Phase                 string                   `json:"phase"`
+	CreatedAt             time.Time                `json:"created_at"`
+	UpdatedAt             time.Time                `json:"updated_at"`
+	Reason                string                   `json:"reason,omitempty"`
+	Hosts                 []UpgradeHostView        `json:"hosts"`
 }
 
 // RunnerUpgradeTarget names an authenticated immutable release download.

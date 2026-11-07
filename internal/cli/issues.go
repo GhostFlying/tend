@@ -31,6 +31,8 @@ var issueOperations = map[string]string{
 func runIssue(ctx context.Context, e *Env, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "handoff-prompt":
+			return runIssueHandoffPrompt(ctx, e, args[1:])
 		case "events", "schedules", "webhooks":
 			if len(args) < 2 {
 				return usagef("issue diagnostics requires an Issue ID")

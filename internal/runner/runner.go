@@ -992,7 +992,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 				continue
 			}
 			if !r.isReporting(a) {
-				r.fence(ctx, s.RunID, a)
+				r.fence(ctx, s.RunID, a, "heartbeat_not_renewed")
 			}
 			continue
 		}
@@ -1024,7 +1024,7 @@ func (r *Runner) watchdog(ctx context.Context) {
 		r.mu.Unlock()
 		for _, id := range late {
 			if a := r.lookup(id); a != nil {
-				r.fence(ctx, id, a)
+				r.fence(ctx, id, a, "lease_deadline_elapsed")
 			}
 		}
 	}
@@ -1032,9 +1032,12 @@ func (r *Runner) watchdog(ctx context.Context) {
 
 // fence stops a run's worker because its lease cannot be relied on, and
 // asks for reconciliation.
-func (r *Runner) fence(ctx context.Context, runID string, a *active) {
+func (r *Runner) fence(ctx context.Context, runID string, a *active, cause string) {
 	if context.Cause(a.ctx) == nil {
-		r.cfg.Log.WarnContext(ctx, "fencing run", "run_id", runID)
+		r.mu.Lock()
+		deadline := a.deadline
+		r.mu.Unlock()
+		r.cfg.Log.WarnContext(ctx, "fencing run", "run_id", runID, "cause", cause, "lease_deadline", deadline, "observed_at", r.cfg.Now())
 	}
 	a.cancel(errFenced)
 	r.requestReconcile()

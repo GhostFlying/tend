@@ -326,6 +326,7 @@ export interface TendAPI {
   IssueFollowupHistory?: IssueFollowupHistory;
   IssueFollowupPage?: IssueFollowupPage;
   IssueFollowupPayload?: IssueFollowupPayload;
+  IssueHandoffPrompt?: IssueHandoffPrompt;
   IssueManagerView?: IssueManagerView;
   IssueMessageAssociations?: IssueMessageAssociations;
   IssueNotificationSettings?: IssueNotificationSettings;
@@ -2481,6 +2482,7 @@ export interface CreateConsultationPayload {
  */
 export interface CreateIssuePayload {
   assignee?: IssueAssignee;
+  corrects_request_id?: string;
   depends_on?: string[];
   expected_parent_revision?: number;
   expected_source_revision?: number;
@@ -2506,6 +2508,7 @@ export interface IndependentAcceptanceRequest {
 export interface RequestIssueManagerPayload {
   agent_id?: string;
   category_id?: string;
+  corrects_request_id?: string;
   expected_assignment_epoch: number;
   reason: string;
   replace?: boolean;
@@ -3420,6 +3423,32 @@ export interface IssueFollowupPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueHandoffPrompt".
+ */
+export interface IssueHandoffPrompt {
+  assignment_epoch: number;
+  context_gaps: string;
+  context_revision: number;
+  context_sync_status: string;
+  control_mode?: ControlMode;
+  control_revision?: number;
+  conversation_id?: string;
+  conversation_through?: number;
+  host_id?: string;
+  issue_id: string;
+  next_source?: number;
+  prompt: string;
+  queries: string[] | null;
+  revision: number;
+  run_id?: string;
+  run_observed?: RunObserved;
+  sources_more: boolean;
+  task_id?: string;
+  title: string;
+  watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueNotificationSettings".
  */
 export interface IssueNotificationSettings {
@@ -3675,6 +3704,7 @@ export interface ManagerRunReconciliation {
   task_revision: number;
   unapplied_events: number;
   unresolved_native_requests: number;
+  unresolved_read_requests?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3899,11 +3929,14 @@ export interface NativeEntry {
   provider_id?: string;
   provider_instance_id?: string;
   reason: string;
+  resume_reason?: string;
+  resume_state?: string;
   run_id: string;
   run_observed: RunObserved;
   session_recorded: boolean;
   task_id: string;
   worker?: WorkerKind;
+  workspace_backend?: string;
   workspace_id?: string;
   workspace_path?: string;
   workspace_recorded: boolean;
@@ -4642,6 +4675,7 @@ export interface UpgradeView {
   created_at: string;
   hosts: UpgradeHostView[] | null;
   manager_parks?: UpgradeManagerParkView[];
+  overall_deadline_millis?: number;
   phase: string;
   reason?: string;
   release_id: string;

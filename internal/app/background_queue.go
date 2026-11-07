@@ -36,6 +36,9 @@ func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, 
 }
 func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, item, message, event, kind string, data json.RawMessage) error {
 	if item != "" {
+		if x.affectedIssues != nil {
+			x.affectedIssues[item] = true
+		}
 		var canonical bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, item).Scan(&canonical); err != nil {
 			return err

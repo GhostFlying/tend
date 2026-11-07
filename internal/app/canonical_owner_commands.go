@@ -31,6 +31,7 @@ type canonicalOwnerIssueSource struct {
 	ExpectedSourceRevision *int64 `json:"expected_source_revision,omitempty"`
 }
 type canonicalOwnerIssueCreate struct {
+	CorrectsRequestID     string                                 `json:"corrects_request_id,omitempty"`
 	IndependentAcceptance *protocol.IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
 	Owner                 *protocol.IssueOwnerRequest            `json:"owner,omitempty"`
 	Manager               *protocol.RequestIssueManagerPayload   `json:"manager,omitempty"`
