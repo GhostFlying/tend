@@ -2,7 +2,10 @@ package updater
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +27,13 @@ type StagedConfiguration struct {
 }
 
 func configurationDigest(path string) (string, error) {
+	return configurationDigestContext(context.Background(), path)
+}
+
+func configurationDigestContext(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
@@ -31,7 +41,31 @@ func configurationDigest(path string) (string, error) {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 1<<20 {
 		return "", errors.New("updater: configuration must be a private regular file of at most 1 MiB")
 	}
-	return hashFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, configurationReader{ctx: ctx, Reader: f}); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+type configurationReader struct {
+	ctx context.Context
+	io.Reader
+}
+
+func (r configurationReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.Reader.Read(p)
 }
 
 // StageConfiguration does not alter the managed configuration or service.

@@ -46,7 +46,7 @@ func (c *Controller) InitializeRecovery(ctx context.Context, id string) error {
 		return err
 	}
 	r := state.Recovery
-	if r == nil || r.Plan.RecoveryID != id || r.Plan.Successor.InstanceID != c.cfg.Instance || r.Plan.Successor.ProcessInstanceID != c.cfg.ProcessInstance || r.Plan.Successor.ArtifactSHA256 != c.cfg.BinarySHA256 || process.LaunchID != c.cfg.ProcessInstance || process.SHA256 != c.cfg.BinarySHA256 || (state.Format < 2 || state.Format > 4) || state.UpdaterEpoch == "" {
+	if r == nil || r.Plan.RecoveryID != id || r.Plan.Successor.InstanceID != c.cfg.Instance || r.Plan.Successor.ProcessInstanceID != c.cfg.ProcessInstance || r.Plan.Successor.ArtifactSHA256 != c.cfg.BinarySHA256 || process.LaunchID != c.cfg.ProcessInstance || process.SHA256 != c.cfg.BinarySHA256 || (state.Format < 2 || state.Format > 5) || state.UpdaterEpoch == "" {
 		return errors.New("upgradectl: recovery startup is not bound to the durable local supervisor")
 	}
 	if r.Phase != "starting_successor" && r.Phase != "checking_successor" && r.Phase != "successor_committed" && r.Phase != "ledger_linked" {

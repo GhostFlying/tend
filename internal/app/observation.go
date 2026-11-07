@@ -117,6 +117,12 @@ func (a *App) ReadRunObservation(ctx context.Context, p protocol.Principal) (pro
 			authority.ObservedAt, authority.RunID, authority.LeaseID, authority.Role = now, rc.run.RunID, lease.LeaseID, rc.run.Role
 			authority.SpecVersion = rc.action.TargetSpecVersion
 		}
+		if rc.run.Role == protocol.RoleAccept {
+			result.SharedReviews, err = views.AcceptanceSharedReviews(ctx, q, rc.run.TaskID, rc.action.TargetSpecVersion, rc.action.TargetArtifactID, allowed.WorkItemIDs)
+			if err != nil {
+				return err
+			}
+		}
 		for _, id := range allowed.WorkItemIDs {
 			v, err := views.Issue(ctx, q, id)
 			if err != nil {

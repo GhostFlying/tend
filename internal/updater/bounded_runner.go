@@ -110,6 +110,9 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	if action != "apply" && action != "force" && action != "takeover" && action != "extend" && action != "cancel" {
 		return errors.New("updater: unsupported bounded runner action")
 	}
+	if p.SourceOperation != nil && action != "force" && action != "takeover" && action != "extend" {
+		return errors.New("updater: owned-exit replacement requires an independent force or takeover")
+	}
 	if action == "cancel" {
 		if s.state.Bounded == nil || s.state.Bounded.SourceExit != nil || s.state.Operation == nil || s.state.Operation.Phase != "staged" {
 			return errors.New("updater: stopped or launched runner requires explicit forward recovery")
@@ -204,15 +207,22 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	if err := s.validateBoundedRunnerData(p.Journal); err != nil {
 		return err
 	}
-	actual, inspectErr := s.opts.Process.Inspect(ctx, p.Source.PID)
-	if inspectErr != nil && !errors.Is(inspectErr, ErrNotRunning) {
-		return inspectErr
-	}
-	if inspectErr == nil && actual != p.Source {
-		return errors.New("updater: bounded runner source process changed")
-	}
-	if !validIdentity(p.Source) {
-		return errors.New("updater: bounded runner source identity is incomplete")
+	ownedExit := p.SourceOperation != nil
+	if ownedExit {
+		if err := s.validateBoundedRunnerOwnedExit(ctx, grant); err != nil {
+			return err
+		}
+	} else {
+		actual, inspectErr := s.opts.Process.Inspect(ctx, p.Source.PID)
+		if inspectErr != nil && !errors.Is(inspectErr, ErrNotRunning) {
+			return inspectErr
+		}
+		if inspectErr == nil && actual != p.Source {
+			return errors.New("updater: bounded runner source process changed")
+		}
+		if !validIdentity(p.Source) {
+			return errors.New("updater: bounded runner source identity is incomplete")
+		}
 	}
 	if prior := s.state.Operation; prior != nil && !done(prior) && (prior.Phase == "starting" || prior.Phase == "checking") {
 		if !release.ValidSHA(prior.Candidate.Artifact.SHA256) || prior.LaunchID == "" {
@@ -229,6 +239,9 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		}
 	}
 	previous := s.state.Current
+	if ownedExit {
+		previous = s.state.Operation.Candidate
+	}
 	if op := s.state.Operation; op != nil && (op.CandidateProcess == p.Source || op.Candidate.Artifact.SHA256 == p.Source.SHA256 && op.LaunchID == p.Source.LaunchID) {
 		previous = op.Candidate
 	}
@@ -238,7 +251,7 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 			return errors.New("updater: manual runner adoption source binary changed")
 		}
 		previous = Version{Binary: s.cfg.InitialBinary, Protocol: s.cfg.Protocol, StorageVersion: p.Journal.Version, Artifact: release.Artifact{Role: "runner", SHA256: sha}}
-	} else if previous.Artifact.SHA256 != p.Source.SHA256 {
+	} else if !ownedExit && previous.Artifact.SHA256 != p.Source.SHA256 {
 		return errors.New("updater: bounded runner source differs from installed bytes")
 	}
 	previous.StorageVersion = p.Journal.Version
@@ -284,7 +297,7 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		s.state.BoundedRunnerGrants = map[string]protocol.BoundedRunnerMaintenanceGrant{}
 	}
 	s.state.BoundedRunnerGrants[a.RequestID] = grant
-	s.state.Format = 4
+	s.state.Format = max(s.state.Format, 4)
 	if s.state.UpdaterEpoch == "" {
 		epoch, err := s.opts.NewID()
 		if err != nil {
@@ -300,6 +313,9 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		s.state.OperationHistory[original.ID] = *original
 	}
 	s.state.Operation = &Operation{ID: p.Target.UpgradeID, Kind: "upgrade", Binding: p.Target, Previous: previous, PreviousProcess: p.Source, LaunchID: p.Target.ProcessInstanceID, Phase: "bounded_staging", StartedAt: s.opts.Now(), BoundedSourceOwned: sourceSupervised}
+	if ownedExit {
+		s.state.Process = Identity{}
+	}
 	if err := s.save(); err != nil {
 		return err
 	}
@@ -315,6 +331,11 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	}
 	s.state.Operation.Candidate = candidate
 	s.state.Operation.Phase = "staged"
+	if ownedExit {
+		b.SourceExit = &protocol.BoundedProcessExit{Process: Identity{}, ConfirmedAtMillis: now, Method: "owned_wait_exit"}
+		s.state.Operation.Phase = "stopped"
+		return s.boundedEnter("backup", a.Timeouts.BackupMillis)
+	}
 	if action == "force" || action == "takeover" {
 		s.state.Operation.Phase = "stopping"
 		return s.boundedEnter("stop", a.Timeouts.StopMillis)
@@ -390,6 +411,30 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 	}
 	if op.Phase == "bounded_staging" {
 		return true, errors.New("updater: staging outcome requires explicit external reconciliation")
+	}
+	// Read original owned Wait evidence even after a fixed authority expires.
+	// This observation starts no process and never renews the original window.
+	if op.Phase == "starting" || op.Phase == "checking" {
+		proof, err := LoadOwnedLaunchExit(s.cfg, op.LaunchID, op.Candidate.Artifact.SHA256)
+		if err != nil {
+			return true, err
+		}
+		if proof != nil {
+			op.LaunchExit, op.Phase = proof, "launch_exited"
+			if _, err := s.boundedRunnerRemaining(); err != nil {
+				b.Outcome = "timed_out"
+			}
+			if err := s.criticalState(); err != nil {
+				return true, err
+			}
+			return true, s.save()
+		}
+	}
+	if op.Phase == "launch_exited" {
+		if _, err := s.boundedRunnerRemaining(); err != nil {
+			b.Outcome = "timed_out"
+		}
+		return true, errors.New("updater: original runner child exited; an independent owner replacement grant is required")
 	}
 	if b.Authorization.ExpiresAtMillis <= s.opts.Now().UnixMilli() {
 		_, err := s.boundedRunnerRemaining()
@@ -565,13 +610,7 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 	if b.SourceExit == nil || b.SourceExit.Process != op.PreviousProcess {
 		return errors.New("updater: old runner writer exit is not confirmed")
 	}
-	if _, err := s.opts.Process.Inspect(ctx, op.PreviousProcess.PID); !errors.Is(err, ErrNotRunning) {
-		if err != nil {
-			return err
-		}
-		return ErrUnknown
-	}
-	if err := s.verifyBoundedRunnerSourceGone(ctx, op.PreviousProcess); err != nil {
+	if err := s.boundedRunnerPreviousGone(ctx, op); err != nil {
 		return err
 	}
 	if sha, err := hashFile(op.Candidate.Binary); err != nil || sha != op.Candidate.Artifact.SHA256 {
@@ -579,6 +618,15 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 	}
 	var identity Identity
 	if recovering {
+		if proof, err := LoadOwnedLaunchExit(s.cfg, op.LaunchID, op.Candidate.Artifact.SHA256); err != nil {
+			return err
+		} else if proof != nil {
+			op.LaunchExit, op.Phase = proof, "launch_exited"
+			if err := s.criticalState(); err != nil {
+				return err
+			}
+			return s.save()
+		}
 		found, err := s.opts.Process.Find(ctx, op.LaunchID, op.Candidate.Artifact.SHA256)
 		if err != nil {
 			return err
@@ -592,11 +640,31 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 		if err != nil {
 			return err
 		}
+		if err := s.criticalState(); err != nil {
+			return err
+		}
+		if err := s.save(); err != nil {
+			return err
+		}
+		remaining, err = s.boundedRunnerRemaining()
+		if err != nil {
+			return err
+		}
 		startCtx, cancel := context.WithTimeout(ctx, remaining)
 		defer cancel()
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": op.LaunchID, "TEND_UPDATER_LAUNCH_ID": op.LaunchID, "TEND_RELEASE_SHA256": op.Candidate.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": op.Candidate.ReleaseID, "TEND_UPGRADE_ID": op.ID, "TEND_UPDATER_MAINTENANCE": "1", "TEND_BOUNDED_RECOVERY_REQUEST_ID": boundedRunnerRecoveryID(b)}
 		identity, err = s.opts.Process.Start(startCtx, op.Candidate.Binary, s.cfg, extra)
 		if err != nil {
+			var exited *launchExitedError
+			if errors.As(err, &exited) {
+				op.LaunchExit, op.Phase = &exited.proof, "launch_exited"
+				if err := s.criticalState(); err != nil {
+					return err
+				}
+				if saveErr := s.save(); saveErr != nil {
+					return saveErr
+				}
+			}
 			return err
 		}
 	}
@@ -609,6 +677,49 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 	op.Irreversible = true
 	s.state.Process = identity
 	return s.save()
+}
+
+func (s *Supervisor) validateBoundedRunnerOwnedExit(ctx context.Context, grant protocol.BoundedRunnerMaintenanceGrant) error {
+	p, source := grant.Plan, grant.Plan.SourceOperation
+	if source == nil || source.Kind != "upgrade" || source.Phase != "launch_exited" || source.OriginalLedger != nil || p.Source != (Identity{}) || source.LaunchExit == nil || !validOwnedExit(*source.LaunchExit) || source.OriginalRequestID == p.Authorization.RequestID || p.Target.UpgradeID == source.OperationID || p.Target.ProcessInstanceID == source.LaunchID {
+		return errors.New("updater: independent runner owned-exit source required")
+	}
+	old, ok := s.state.BoundedRunnerGrants[source.OriginalRequestID]
+	if !ok && s.state.BoundedRunnerGrant != nil && s.state.BoundedRunnerGrant.Plan.Authorization.RequestID == source.OriginalRequestID {
+		old, ok = *s.state.BoundedRunnerGrant, true
+	}
+	journal := p.Journal
+	journal.Version = old.Plan.Journal.Version
+	b := s.state.Bounded
+	if !ok || b == nil || b.Authorization.Target != old.Plan.Target || b.SourceExit == nil || b.SourceExit.Process != old.Plan.Source || old.Plan.Target.UpgradeID != source.OperationID || old.Plan.Target.ProcessInstanceID != source.LaunchID || old.Plan.Target.ArtifactSHA256 != source.LaunchExit.ArtifactSHA256 || old.Plan.HostID != p.HostID || old.Plan.NodeSelector != p.NodeSelector || old.Plan.RunnerInstanceID != p.RunnerInstanceID || old.Plan.RunnerGeneration != p.RunnerGeneration || old.Plan.Journal != journal || p.Journal.Version < old.Plan.Journal.Version || p.Journal.Version > source.StorageVersion || digest(old.Runs) != digest(grant.Runs) || old.ProtectionSetSHA256 != grant.ProtectionSetSHA256 {
+		return errors.New("updater: owned-exit source differs from the original runner owner grant")
+	}
+	plan := protocol.CommittedMaintenancePlan{SourceOperation: source, Previous: old.Plan.Target, FailedProcessExited: true}
+	op, err := validateOperationSourceSnapshot(s.state, plan)
+	if err != nil {
+		return err
+	}
+	return s.operationSourceExited(ctx, plan, op)
+}
+
+func (s *Supervisor) boundedRunnerPreviousGone(ctx context.Context, op *Operation) error {
+	grant := s.state.BoundedRunnerGrant
+	if grant != nil && grant.Plan.SourceOperation != nil {
+		source := grant.Plan.SourceOperation
+		original, ok := s.state.OperationHistory[source.OperationID]
+		if !ok || digest(original) != source.OperationSHA256 || s.state.Bounded.SourceExit.Method != "owned_wait_exit" || op.PreviousProcess != (Identity{}) {
+			return errors.New("updater: original owned-exit operation was not retained")
+		}
+		plan := protocol.CommittedMaintenancePlan{SourceOperation: source, FailedProcessExited: true}
+		return s.operationSourceExited(ctx, plan, &original)
+	}
+	if _, err := s.opts.Process.Inspect(ctx, op.PreviousProcess.PID); !errors.Is(err, ErrNotRunning) {
+		if err != nil {
+			return err
+		}
+		return ErrUnknown
+	}
+	return s.verifyBoundedRunnerSourceGone(ctx, op.PreviousProcess)
 }
 
 func validateBoundedRunnerWindow(a protocol.BoundedMaintenanceAuthorization, now int64) error {

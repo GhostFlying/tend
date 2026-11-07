@@ -64,7 +64,7 @@ func sharedReviewExecutionCurrent(ctx context.Context, q Querier, r protocol.Sha
 		return len(requirements.Profiles) == 0, nil
 	}
 	round := r.Rounds[len(r.Rounds)-1]
-	if len(requirements.Profiles) == 0 && (round.ExecutionRequirements == nil || len(round.ExecutionRequirements.Profiles) == 0) {
+	if len(requirements.Profiles) == 0 && round.ReviewerProfile == nil && (round.ExecutionRequirements == nil || len(round.ExecutionRequirements.Profiles) == 0) {
 		return true, nil
 	}
 	run := round.RunID
@@ -77,6 +77,9 @@ func sharedReviewExecutionCurrent(ctx context.Context, q Querier, r protocol.Sha
 	}
 	if err != nil {
 		return false, err
+	}
+	if round.ReviewerProfile != nil && *round.ReviewerProfile != pin.Profile {
+		return false, nil
 	}
 	if round.ExecutionRequirements != nil && RequireSharedReviewExecutionProfile(round.ExecutionRequirements, pin.Profile) != nil {
 		return false, nil

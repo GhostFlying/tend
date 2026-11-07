@@ -99,7 +99,7 @@ func TestIssueSharedReviewReadPreservesCursorAndResult(t *testing.T) {
 func TestIssueSharedReviewCommandPreservesActualEvidence(t *testing.T) {
 	f := newFakeServer(t)
 	e := newTestEnv(t, f.srv.URL)
-	input := `{"expected_assignment_epoch":3,"delivery_id":"github:example/project#12","action":"start","reason":"Import the existing whole-PR reviewer result","task_id":"task-code","acceptance_id":"acc-real"}`
+	input := `{"expected_assignment_epoch":3,"delivery_id":"github:example/project#12","action":"start","reason":"Import the existing whole-PR reviewer result","reviewer_task_id":"task-code","acceptance_id":"acc-real","reviewer_role":"accept"}`
 	if code := e.main("issue", "review-delivery", "issue", "--revision", "7", "--epoch", "3", "--data", input, "--dry-run"); code != exitOK {
 		t.Fatal(code, e.errOut.String())
 	}

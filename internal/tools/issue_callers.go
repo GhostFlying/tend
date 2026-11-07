@@ -12,7 +12,7 @@ import (
 
 func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution store.HostedExecution) (harness.ToolResult, bool) {
 	switch c.Tool {
-	case "issues_reuse_status", "issues_list", "issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read":
+	case "issues_reuse_status", "issues_list", "issues_context_read", "issues_followups_list", "issues_followups_history", "issues_deliveries_read", "issues_delivery_reviews_read":
 	default:
 		return harness.ToolResult{}, false
 	}
@@ -42,7 +42,13 @@ func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution stor
 			return err
 		}
 		var p hostedIssueResourceArgs
-		if err := decode(c.Arguments, &p); err != nil {
+		var reviews hostedSharedReviewReadArgs
+		if c.Tool == "issues_delivery_reviews_read" {
+			if err := decode(c.Arguments, &reviews); err != nil {
+				return err
+			}
+			p.IssueID = reviews.IssueID
+		} else if err := decode(c.Arguments, &p); err != nil {
 			return err
 		}
 		if p.IssueID == "" {
@@ -68,6 +74,8 @@ func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution stor
 			value, err = views.CanonicalIssueFollowups(ctx, tx.Q(), p.IssueID, p.After, s.app.FollowupsEnabled())
 		case "issues_followups_history":
 			value, err = views.CanonicalIssueFollowupHistory(ctx, tx.Q(), p.IssueID, p.RuleID, p.AfterOccurrence, p.AfterRevision)
+		case "issues_delivery_reviews_read":
+			value, err = views.SharedDeliveryReviews(ctx, tx.Q(), p.IssueID, reviews.DeliveryID, reviews.After, reviews.Limit)
 		case "issues_deliveries_read":
 			value, err = views.CanonicalIssueDeliveries(ctx, tx.Q(), p.IssueID)
 		}

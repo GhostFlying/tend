@@ -119,7 +119,7 @@ func validateUpdaterOnlyTarget(p CommittedHandoffPlan, a protocol.BoundedMainten
 
 func validateUpdaterOnlyState(st State, p CommittedHandoffPlan, a protocol.BoundedMaintenanceAuthorization) error {
 	m := st.Maintenance
-	if st.Format != 4 || m == nil || digest(m.Plan) != digest(p.Maintenance) || m.Phase != a.ExpectedPhase || a.PlanSHA256 != digest(p.Maintenance) || a.Source != p.Maintenance.PreviousProcess || a.Target != p.Maintenance.Successor {
+	if !boundedStateFormat(st.Format) || m == nil || digest(m.Plan) != digest(p.Maintenance) || m.Phase != a.ExpectedPhase || a.PlanSHA256 != digest(p.Maintenance) || a.Source != p.Maintenance.PreviousProcess || a.Target != p.Maintenance.Successor {
 		return errors.New("updater: updater-only original maintenance scope changed")
 	}
 	if m.Phase != "ledger_linked" && m.Phase != "completed" {

@@ -16,7 +16,7 @@ func runCommittedMaintenanceControl(ctx context.Context, e *Env, args []string) 
 	action := args[0]
 	fs := newFlags(e, "updater maintenance "+action)
 	socket := fs.String("socket", "", "fixed private updater socket; server socket for ledger/health")
-	plan := fs.String("plan", "", "exact private committed handoff plan")
+	plan := fs.String("plan", "", "exact private handoff plan; source_operation retains an unfinished operation and original ledger CAS")
 	id := fs.String("maintenance-id", "", "exact independent maintenance ledger identity")
 	generation := fs.Uint64("expected-generation", 0, "current durable updater generation")
 	request := fs.String("request-id", "", "distinct stable explicit authorization request")
