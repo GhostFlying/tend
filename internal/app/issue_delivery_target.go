@@ -237,7 +237,7 @@ func refreshDeliveryBaselineQueries(ctx context.Context, x *Exec, tx *store.Tx) 
 // BaseSHA is the PR base. Installation always uses the independently observed
 // target, proven to contain the merge, never that historical base commit.
 func deliveryDeploymentSource(candidate protocol.IssueDeliveryCandidate, o protocol.DeliveryObservation) (string, error) {
-	if o.ErrorKind != "" || o.RefreshPending || o.State != "merged" || o.HeadSHA != candidate.HeadSHA || o.MergeSHA == "" {
+	if o.ErrorKind != "" || o.RefreshPending || o.State != "merged" || o.HeadSHA != candidate.HeadSHA || o.MergeSHA == "" || (o.Observer == "server" && o.LineageErrorKind != "") {
 		return "", protocol.Errorf(protocol.CodeStaleRevision, "verify the approved head's merge before installation")
 	}
 	target := o.MergeSHA
@@ -246,8 +246,14 @@ func deliveryDeploymentSource(candidate protocol.IssueDeliveryCandidate, o proto
 			return "", protocol.Errorf(protocol.CodeStaleRevision, "merged deployment source changed")
 		}
 		target = candidate.TargetSHA
-	} else if o.BaseSHA != candidate.BaseSHA || o.TargetSHA != o.MergeSHA || !o.TargetContainsMerge {
-		return "", protocol.Errorf(protocol.CodeStaleRevision, "approved base or current target changed; confirm a current deployment source")
+	} else {
+		// The original merge-only execution needs proof of its approved merge,
+		// not authorization to deploy a newer target tip. Legacy runner facts
+		// and deployment candidates retain their exact-target requirement.
+		advancedMergeOnly := !candidate.Deploy && o.Observer == "server" && o.LineageErrorKind == "" && o.TargetSHA != ""
+		if o.BaseSHA != candidate.BaseSHA || (o.TargetSHA != o.MergeSHA && !advancedMergeOnly) || !o.TargetContainsMerge {
+			return "", protocol.Errorf(protocol.CodeStaleRevision, "approved base or current target changed; confirm a current deployment source")
+		}
 	}
 	return target, nil
 }

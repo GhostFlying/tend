@@ -646,7 +646,15 @@ func invalidateIssueDeliveryCandidates(ctx context.Context, x *Exec, tx *store.T
 			// still needs the original approval and completed installation proof.
 			baselineCurrent = bound == o.BaselineUpgradeID
 		}
-		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA && o.TargetSHA == c.TargetSHA && (c.ProviderState != "merged" || o.TargetContainsMerge)) || (d.Status == "executing" && c.ProviderState == "open" && o.State == "merged" && o.BaseSHA == c.BaseSHA && o.TargetContainsMerge && o.TargetSHA == o.MergeSHA)) {
+		// A temporary read failure must block settlement without destroying the
+		// original execution of this already known matching server merge. A
+		// later bounded read can establish ancestry without reissuing a merge.
+		boundServerMergeOnly := d.Status == "executing" && d.ExecutionTaskID != "" && !c.Deploy && c.ProviderState == "open" && o.Observer == "server" && o.State == "merged" && o.HeadSHA == c.HeadSHA && o.BaseSHA == c.BaseSHA && o.MergeSHA != "" && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA)
+		if boundServerMergeOnly && (o.ErrorKind != "" || o.LineageErrorKind != "") {
+			continue
+		}
+		advancedMergeOnly := boundServerMergeOnly && o.LineageErrorKind == "" && o.TargetSHA != ""
+		if baselineCurrent && o.ErrorKind == "" && o.HeadSHA == c.HeadSHA && (c.MergeSHA == "" || o.MergeSHA == c.MergeSHA) && ((o.State == c.ProviderState && o.BaseSHA == c.BaseSHA && o.TargetSHA == c.TargetSHA && (c.ProviderState != "merged" || o.TargetContainsMerge)) || (d.Status == "executing" && c.ProviderState == "open" && o.State == "merged" && o.BaseSHA == c.BaseSHA && o.TargetContainsMerge && (o.TargetSHA == o.MergeSHA || advancedMergeOnly))) {
 			continue
 		}
 		if d.AttentionID != "" {
