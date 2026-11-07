@@ -367,3 +367,111 @@ func TestServerDeliveryPreparationStopsNewClaimsButRetainsOriginalReport(t *test
 		t.Fatal("observer did not resume after explicit preparation cancel", next, err)
 	}
 }
+
+func TestServerDeliveryMergedLineageRetriesSharedReadAndStopsAfterRecovery(t *testing.T) {
+	h := newHarness(t)
+	h.app.serverDeliveryObservations = true
+	first, second := observerItem(t, h), observerItem(t, h)
+	query, err := h.app.ClaimServerDelivery(t.Context())
+	if err != nil || query == nil {
+		t.Fatal(query, err)
+	}
+	if err = h.app.RecordServerDelivery(t.Context(), query.ID, &protocol.DeliverySnapshot{State: "open", HeadSHA: "head"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(6 * time.Minute)
+	query, err = h.app.ClaimServerDelivery(t.Context())
+	if err != nil || query == nil {
+		t.Fatal(query, err)
+	}
+	snapshot := protocol.DeliverySnapshot{State: "merged", HeadSHA: "head", BaseSHA: "base", TargetSHA: "later-target", MergeSHA: "merge", LineageErrorKind: "timeout"}
+	if err = h.app.RecordServerDelivery(t.Context(), query.ID, &snapshot, ""); err != nil {
+		t.Fatal(err)
+	}
+	failed := readObservations(t, h, first.WorkItemID)[0]
+	if failed.State != "merged" || failed.MergeSHA != "merge" || failed.LineageErrorKind != "timeout" || failed.ErrorKind != "timeout" || failed.RetryCount != 0 || failed.RetryAt <= h.clock.Now().UnixMilli() || failed.RefreshPending {
+		t.Fatal("partial lineage failure lost facts or a fresh bounded retry budget", failed)
+	}
+	h.clock.Advance(time.Duration(failed.RetryAt-h.clock.Now().UnixMilli()) * time.Millisecond)
+	retry, err := h.app.ClaimServerDelivery(t.Context())
+	if err != nil || retry == nil || retry.ID == query.ID {
+		t.Fatal("known merge with missing lineage stopped retrying", retry, err)
+	}
+	snapshot.LineageErrorKind = ""
+	snapshot.TargetContainsMerge = true
+	if err = h.app.RecordServerDelivery(t.Context(), retry.ID, &snapshot, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []protocol.WorkItem{first, second} {
+		o := readObservations(t, h, item.WorkItemID)[0]
+		if o.State != "merged" || !o.TargetContainsMerge || o.LineageErrorKind != "" || o.ErrorKind != "" || o.RetryAt != 0 || o.RefreshPending {
+			t.Fatal("shared bounded read did not restore real ancestry", o)
+		}
+	}
+	h.clock.Advance(time.Hour)
+	if q, err := h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
+		t.Fatal("successful terminal merge kept polling", q, err)
+	}
+}
+
+func TestServerDeliveryMergedLineageExhaustsBudgetAndRetainsOriginalReceipts(t *testing.T) {
+	for _, kind := range []string{"timeout", "rate_limited"} {
+		t.Run(kind, func(t *testing.T) {
+			h := newHarness(t)
+			h.app.serverDeliveryObservations = true
+			item := observerItem(t, h)
+			snapshot := protocol.DeliverySnapshot{State: "merged", HeadSHA: "head", BaseSHA: "base", TargetSHA: "later-target", MergeSHA: "merge", LineageErrorKind: kind}
+			for attempt := 0; attempt < 3; attempt++ {
+				query, err := h.app.ClaimServerDelivery(t.Context())
+				if err != nil || query == nil {
+					t.Fatal(attempt, query, err)
+				}
+				if err = h.app.RecordServerDelivery(t.Context(), query.ID, &snapshot, ""); err != nil {
+					t.Fatal(err)
+				}
+				o := readObservations(t, h, item.WorkItemID)[0]
+				if o.ErrorKind != kind || o.LineageErrorKind != kind || o.State != "merged" || o.RetryCount != attempt || o.RefreshPending || o.ErrorMessage == "" {
+					t.Fatal(attempt, o)
+				}
+				// A lost report reply reuses the original query/request. It neither
+				// consumes another attempt nor invents another provider observation.
+				if err = h.app.RecordServerDelivery(t.Context(), query.ID, &snapshot, ""); err != nil {
+					t.Fatal(err)
+				}
+				replay := readObservations(t, h, item.WorkItemID)[0]
+				if replay.Generation != o.Generation || replay.RetryCount != o.RetryCount || replay.RetryAt != o.RetryAt {
+					t.Fatal("report replay changed original attempt identity", replay, o)
+				}
+				if attempt < 2 {
+					if o.RetryAt <= h.clock.Now().UnixMilli() {
+						t.Fatal("missing finite retry deadline", o)
+					}
+					h.clock.Advance(time.Duration(o.RetryAt-h.clock.Now().UnixMilli()) * time.Millisecond)
+				} else if o.RetryAt != 0 {
+					t.Fatal("exhausted lineage still pending", o)
+				}
+			}
+			h.clock.Advance(time.Hour)
+			if q, err := h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
+				t.Fatal("exhausted terminal lineage restarted indefinitely", q, err)
+			}
+			if h.count("server_delivery_queries") != 3 {
+				t.Fatal("unexpected external query after budget exhaustion", h.count("server_delivery_queries"))
+			}
+			serverRefreshDelivery(t, h, item)
+			q, err := h.app.ClaimServerDelivery(t.Context())
+			if err != nil || q == nil {
+				t.Fatal("explicit refresh did not recover exhausted proof", q, err)
+			}
+			snapshot.LineageErrorKind = ""
+			snapshot.TargetContainsMerge = true
+			if err = h.app.RecordServerDelivery(t.Context(), q.ID, &snapshot, ""); err != nil {
+				t.Fatal(err)
+			}
+			o := readObservations(t, h, item.WorkItemID)[0]
+			if o.ErrorKind != "" || !o.TargetContainsMerge || o.RetryAt != 0 || o.RefreshPending {
+				t.Fatal(o)
+			}
+		})
+	}
+}

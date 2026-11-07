@@ -66,22 +66,36 @@ type SharedDeliveryReviewLink struct {
 	TaskID     string `json:"task_id,omitempty"`
 }
 
+// SharedReviewExecutionRequirements distinguishes a frozen empty requirement
+// set from historical rounds that did not record their execution requirements.
+type SharedReviewExecutionRequirements struct {
+	Profiles []SharedReviewExecutionProfile `json:"profiles"`
+}
+
+type SharedReviewExecutionProfile struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	// Exact preserves acceptance_execution's native-default effort semantics.
+	Exact bool `json:"exact,omitempty"`
+}
+
 type SharedDeliveryReviewRound struct {
-	SupplementTaskID      string              `json:"supplement_task_id,omitempty"`
-	SupplementSpecVersion int64               `json:"supplement_spec_version,omitempty"`
-	SupplementRunID       string              `json:"supplement_run_id,omitempty"`
-	SupplementArtifactID  string              `json:"supplement_artifact_id,omitempty"`
-	SpecVersion           int64               `json:"spec_version"`
-	Number                int                 `json:"number"`
-	TaskID                string              `json:"task_id"`
-	ArtifactID            string              `json:"artifact_id,omitempty"`
-	RunID                 string              `json:"run_id,omitempty"`
-	AcceptanceID          string              `json:"acceptance_id,omitempty"`
-	Reviewer              string              `json:"reviewer,omitempty"`
-	HeadSHA               string              `json:"head_sha"`
-	BaseSHA               string              `json:"base_sha"`
-	Requirements          string              `json:"requirements_digest"`
-	Result                *SharedReviewResult `json:"result,omitempty"`
+	ExecutionRequirements *SharedReviewExecutionRequirements `json:"execution_requirements,omitempty"`
+	SupplementTaskID      string                             `json:"supplement_task_id,omitempty"`
+	SupplementSpecVersion int64                              `json:"supplement_spec_version,omitempty"`
+	SupplementRunID       string                             `json:"supplement_run_id,omitempty"`
+	SupplementArtifactID  string                             `json:"supplement_artifact_id,omitempty"`
+	SpecVersion           int64                              `json:"spec_version"`
+	Number                int                                `json:"number"`
+	TaskID                string                             `json:"task_id"`
+	ArtifactID            string                             `json:"artifact_id,omitempty"`
+	RunID                 string                             `json:"run_id,omitempty"`
+	AcceptanceID          string                             `json:"acceptance_id,omitempty"`
+	Reviewer              string                             `json:"reviewer,omitempty"`
+	HeadSHA               string                             `json:"head_sha"`
+	BaseSHA               string                             `json:"base_sha"`
+	Requirements          string                             `json:"requirements_digest"`
+	Result                *SharedReviewResult                `json:"result,omitempty"`
 }
 
 // SharedReviewBudgetAuthorization is a real external user's one-round grant.
