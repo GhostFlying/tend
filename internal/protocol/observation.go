@@ -79,18 +79,20 @@ type ObservedDeliveryApproval struct {
 // ObservedDeliveryProvider retains only independently recorded public candidate
 // identities and timestamps, never private query nonces or command output.
 type ObservedDeliveryProvider struct {
-	CI             *DeliveryCI `json:"ci,omitempty"`
-	Mergeability   string      `json:"mergeability,omitempty"`
-	Generation     int64       `json:"generation"`
-	State          string      `json:"state"`
-	HeadSHA        string      `json:"head_sha"`
-	BaseSHA        string      `json:"base_sha"`
-	TargetSHA      string      `json:"target_sha"`
-	MergeSHA       string      `json:"merge_sha,omitempty"`
-	CheckedAt      int64       `json:"checked_at"`
-	AttemptedAt    int64       `json:"attempted_at"`
-	RefreshPending bool        `json:"refresh_pending"`
-	ErrorKind      string      `json:"error_kind,omitempty"`
+	TargetContainsMerge bool        `json:"target_contains_merge,omitempty"`
+	LineageErrorKind    string      `json:"lineage_error_kind,omitempty"`
+	CI                  *DeliveryCI `json:"ci,omitempty"`
+	Mergeability        string      `json:"mergeability,omitempty"`
+	Generation          int64       `json:"generation"`
+	State               string      `json:"state"`
+	HeadSHA             string      `json:"head_sha"`
+	BaseSHA             string      `json:"base_sha"`
+	TargetSHA           string      `json:"target_sha"`
+	MergeSHA            string      `json:"merge_sha,omitempty"`
+	CheckedAt           int64       `json:"checked_at"`
+	AttemptedAt         int64       `json:"attempted_at"`
+	RefreshPending      bool        `json:"refresh_pending"`
+	ErrorKind           string      `json:"error_kind,omitempty"`
 }
 
 // ObservedDeliveryReview omits unrelated Issue links and finding bodies. Its

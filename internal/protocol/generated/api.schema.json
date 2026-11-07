@@ -10041,6 +10041,9 @@
         "head_sha": {
           "type": "string"
         },
+        "lineage_error_kind": {
+          "type": "string"
+        },
         "merge_sha": {
           "type": "string"
         },
@@ -10052,6 +10055,9 @@
         },
         "state": {
           "type": "string"
+        },
+        "target_contains_merge": {
+          "type": "boolean"
         },
         "target_sha": {
           "type": "string"

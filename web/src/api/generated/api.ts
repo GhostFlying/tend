@@ -5070,10 +5070,12 @@ export interface ObservedDeliveryProvider {
   error_kind?: string;
   generation: number;
   head_sha: string;
+  lineage_error_kind?: string;
   merge_sha?: string;
   mergeability?: string;
   refresh_pending: boolean;
   state: string;
+  target_contains_merge?: boolean;
   target_sha: string;
 }
 /**

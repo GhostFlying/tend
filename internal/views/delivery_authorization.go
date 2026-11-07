@@ -108,7 +108,7 @@ func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task strin
 	}
 	if err == nil {
 		o := observed.Observation
-		v.Provider = &protocol.ObservedDeliveryProvider{CI: o.CI, Mergeability: o.Mergeability, Generation: o.Generation, State: o.State, HeadSHA: o.HeadSHA, BaseSHA: o.BaseSHA, TargetSHA: o.TargetSHA, MergeSHA: o.MergeSHA, CheckedAt: o.CheckedAt, AttemptedAt: o.AttemptedAt, RefreshPending: o.RefreshPending, ErrorKind: o.ErrorKind}
+		v.Provider = &protocol.ObservedDeliveryProvider{TargetContainsMerge: o.TargetContainsMerge, LineageErrorKind: o.LineageErrorKind, CI: o.CI, Mergeability: o.Mergeability, Generation: o.Generation, State: o.State, HeadSHA: o.HeadSHA, BaseSHA: o.BaseSHA, TargetSHA: o.TargetSHA, MergeSHA: o.MergeSHA, CheckedAt: o.CheckedAt, AttemptedAt: o.AttemptedAt, RefreshPending: o.RefreshPending, ErrorKind: o.ErrorKind}
 	}
 	v.SharedReview, err = observedDeliveryReview(ctx, q, issue, v.Candidate, v.SourceTaskID)
 	if err != nil {
@@ -146,8 +146,9 @@ func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task strin
 		// A completed merge is a result within this execution's approved scope.
 		// Retain the original candidate and expose the provider's merged state;
 		// this does not authorize another merge or a different deployment source.
-		merged := v.Candidate.ProviderState == "open" && o.State == "merged" && o.HeadSHA == v.Candidate.HeadSHA && o.BaseSHA == v.Candidate.BaseSHA && o.MergeSHA != "" && o.TargetSHA == o.MergeSHA && o.TargetContainsMerge
-		if v.Provider == nil || o.ErrorKind != "" || o.RefreshPending || o.CheckedAt == 0 {
+		advancedMergeOnly := !v.Candidate.Deploy && o.Observer == "server" && o.LineageErrorKind == "" && o.TargetSHA != ""
+		merged := v.Candidate.ProviderState == "open" && o.State == "merged" && o.HeadSHA == v.Candidate.HeadSHA && o.BaseSHA == v.Candidate.BaseSHA && o.MergeSHA != "" && (o.TargetSHA == o.MergeSHA || advancedMergeOnly) && o.TargetContainsMerge
+		if v.Provider == nil || o.ErrorKind != "" || o.RefreshPending || o.CheckedAt == 0 || (o.Observer == "server" && o.LineageErrorKind != "") {
 			v.InvalidReason = "provider_observation_unavailable"
 		} else if !merged && (o.State != v.Candidate.ProviderState || o.HeadSHA != v.Candidate.HeadSHA || o.BaseSHA != v.Candidate.BaseSHA || o.TargetSHA != v.Candidate.TargetSHA || (v.Candidate.ProviderState == "merged" && (o.MergeSHA != v.Candidate.MergeSHA || !o.TargetContainsMerge))) {
 			v.InvalidReason = "provider_candidate_changed"
