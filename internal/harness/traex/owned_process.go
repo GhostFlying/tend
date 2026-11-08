@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 )
 
@@ -32,6 +33,9 @@ func (ws *Workers) SupportsOwnedWorkerStop() bool {
 
 func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec) (err error) {
 	defer func() {
+		if err == nil {
+			err = codexenv.ConfirmExecutionClosed(ctx, spec.StateDir, "run:"+spec.RunID)
+		}
 		if err != nil {
 			err = fmt.Errorf("%w: %w", harness.ErrOwnedWorkerUnconfirmed, err)
 		}

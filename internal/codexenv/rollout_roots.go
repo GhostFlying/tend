@@ -34,11 +34,15 @@ func RecordSessionHome(ctx context.Context, directory string, binding *Binding) 
 	if directory == "" || binding == nil {
 		return nil
 	}
-	status, err := (&Service{Root: binding.Directory}).Read(binding.ID)
+	dir, err := (&Service{Root: binding.Directory}).directory(binding.ID)
 	if err != nil {
 		return err
 	}
-	root := filepath.Join(status.Profile.Home, "sessions")
+	record, err := loadRecord(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(record.Status.Profile.Home, "sessions")
 	release, err := lock(ctx, directory)
 	if err != nil {
 		return err
