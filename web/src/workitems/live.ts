@@ -78,6 +78,17 @@ export class WorkItemRead<T> {
     return run;
   }
 
+  /** Cancels work while retaining the last view and its query. */
+  pause(): void {
+    this.generation++;
+    this.controller?.abort();
+    this.running = null;
+    this.dirty = false;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.state.set({ ...this.state.get(), loading: false });
+  }
+
   close(): void {
     this.generation++;
     this.path = null;

@@ -52,7 +52,7 @@ const expandUsageOverlapSQL = `WITH RECURSIVE affected(legacy_seq) AS (
  UNION SELECT e.native_source,e.native_request_id FROM affected a CROSS JOIN token_usage_legacy_links e ON e.legacy_seq=a.legacy_seq
  ) WHERE true ON CONFLICT(source,request_id) DO NOTHING`
 
-func refreshUsageProjection(ctx context.Context, tx *store.Tx) error {
+func refreshUsageProjection(ctx context.Context, tx *store.Tx, changed ...func() error) error {
 	var pending, overlap bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_dirty),EXISTS(SELECT 1 FROM token_usage_overlap_dirty)`).Scan(&pending, &overlap); err != nil {
 		return err
@@ -132,8 +132,15 @@ func refreshUsageProjection(ctx context.Context, tx *store.Tx) error {
 			return err
 		}
 	}
-	_, err = tx.Exec(ctx, `DELETE FROM token_usage_dirty`)
-	return err
+	if _, err = tx.Exec(ctx, `DELETE FROM token_usage_dirty`); err != nil {
+		return err
+	}
+	for _, notify := range changed {
+		if err := notify(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func rebuildUsageSummary(ctx context.Context, tx *store.Tx, key usageSummaryKey, dimension string) error {

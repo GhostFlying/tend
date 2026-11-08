@@ -1,3 +1,4 @@
+import { UsageData } from "../usage/data.ts";
 import { ChoiceResponse } from "../workitems/choice.ts";
 import type { OpSender } from "../app/ops.ts";
 import { issueConversationReader } from "../conversation/issueMetadata.ts";
@@ -67,6 +68,7 @@ const pageSize = 50;
 const noProcessing: ReadonlyMap<string, number> = new Map();
 
 export class LiveData {
+  readonly usage: UsageData;
   readonly queueView: ConversationQueue;
   readonly settings: ConversationSettings;
   readonly handoff: ConversationHandoff;
@@ -109,6 +111,7 @@ export class LiveData {
   ) {
     api = issueConversationReader(api, conversationID);
     this.api = api;
+    this.usage = new UsageData(api);
     this.queueView = new ConversationQueue(api, (item) => this.currentChoices(item));
     this.settings = new ConversationSettings(api, conversationID);
     this.handoff = new ConversationHandoff(api);
@@ -148,6 +151,7 @@ export class LiveData {
   /** Resume a retained conversation reader when its surface becomes visible. */
   resume(): void {
     this.stopped = false;
+    this.usage.resume();
     this.queueView.start();
     this.settings.start();
     this.handoff.start();
@@ -156,6 +160,7 @@ export class LiveData {
 
   /** Reads every view again, as after a fresh start of the event stream. */
   async reload(): Promise<void> {
+    this.usage.refresh();
     for (const listener of this.reloadListeners) listener();
     void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
     void this.repos.refresh();
@@ -244,6 +249,7 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (event.kind === "token_usage.changed") this.usage.refresh();
     for (const listener of this.eventListeners) listener(event);
     if (["category", "host", "hosted_configuration"].includes(event.object_type))
       this.agents.refresh();
@@ -575,6 +581,7 @@ export class LiveData {
   /** Stops owned timers and pending view reads. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.usage.stop();
     this.queueView.stop();
     this.dirtyLookups.clear();
     this.repos.stop();
