@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
 	"sort"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -41,40 +41,28 @@ func SharedReviewExistingEvidence(ctx context.Context, q store.Querier, review p
 			IssueID: link.IssueID, TaskID: id, Availability: "not_provided", CandidateRelation: "not_provided",
 			MissingStructuredFields: []string{"check_commands", "check_exit_codes", "check_environment", "skipped_checks", "uncovered_scope"},
 		}
-		readIssue := scope.ReaderIssueID
-		if len(scope.IssueIDs) > 0 {
-			readIssue = scope.IssueIDs[0]
-		}
-		if slices.Contains(scope.IssueIDs, link.IssueID) {
-			// Select the contributor Issue on demand so the ordinary materials
-			// route rebuilds the same context; an exact cross-project artifact
-			// share instead stays under the reader's own Issue.
-			readIssue = link.IssueID
-		}
-		taskIDs, _, _, err := store.MaterialIDs(ctx, q, scope, "tasks", id, "", 1)
+		history, err := sharedReviewOriginalQuery(ctx, q, scope, "tasks", id, link.IssueID)
 		if err != nil {
 			return out, err
 		}
-		if len(taskIDs) > 0 {
-			item.HistoryQuery = &protocol.IssueMaterialsQuery{IssueID: readIssue, Kind: "tasks", ID: id}
-		}
+		item.HistoryQuery = history
 		task, err := store.GetTask(ctx, q, id)
 		if err != nil {
 			return out, err
 		}
 		if task.CurrentArtifactID == "" {
-			if len(taskIDs) == 0 {
+			if history == nil {
 				item.Availability = "outside_context"
 			}
 			item.MissingStructuredFields = append(item.MissingStructuredFields, "artifact")
 			out.Contributions = append(out.Contributions, item)
 			continue
 		}
-		artifactIDs, _, _, err := store.MaterialIDs(ctx, q, scope, "artifacts", task.CurrentArtifactID, "", 1)
+		original, err := sharedReviewOriginalQuery(ctx, q, scope, "artifacts", task.CurrentArtifactID, link.IssueID)
 		if err != nil {
 			return out, err
 		}
-		if len(artifactIDs) == 0 {
+		if original == nil {
 			item.Availability = "outside_context"
 			out.Contributions = append(out.Contributions, item)
 			continue
@@ -124,8 +112,47 @@ func SharedReviewExistingEvidence(ctx context.Context, q store.Querier, review p
 		} else {
 			item.MissingStructuredFields = append(item.MissingStructuredFields, "report")
 		}
-		item.ReadQuery = &protocol.IssueMaterialsQuery{IssueID: readIssue, Kind: "artifacts", ID: artifact.ArtifactID}
+		item.ReadQuery = original
 		out.Contributions = append(out.Contributions, item)
 	}
 	return out, nil
+}
+
+// sharedReviewOriginalQuery returns a context selector only after the ordinary
+// read resolver proves that exact original is visible under that selector.
+func sharedReviewOriginalQuery(ctx context.Context, q store.Querier, scope store.MaterialScope, kind, id, sourceIssue string) (*protocol.IssueMaterialsQuery, error) {
+	candidates := []string{}
+	if len(scope.IssueIDs) > 0 {
+		candidates = append(candidates, scope.IssueIDs[0])
+	}
+	candidates = append(candidates, sourceIssue)
+	if kind == "artifacts" {
+		recipients, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT issue_id FROM artifact_shares WHERE artifact_id=? AND status='active' ORDER BY issue_id`, id)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, recipients...)
+	}
+	seen := map[string]bool{}
+	for _, issue := range candidates {
+		if issue == "" || seen[issue] {
+			continue
+		}
+		seen[issue] = true
+		selected, err := SelectMaterialIssue(ctx, q, scope, issue)
+		if err != nil {
+			if protocol.CodeOf(err) == protocol.CodeForbidden || protocol.CodeOf(err) == protocol.CodeNotFound || errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		ids, _, _, err := store.MaterialIDs(ctx, q, selected, kind, id, "", 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) > 0 {
+			return &protocol.IssueMaterialsQuery{IssueID: issue, Kind: kind, ID: id}, nil
+		}
+	}
+	return nil, nil
 }
