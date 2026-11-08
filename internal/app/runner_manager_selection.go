@@ -44,7 +44,11 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
 	}
-	return hostedconfig.Selection{CategoryID: m.CategoryID, Extensions: p.Extensions, NativeOwnerTools: owner && nativeMode && nativeTools && !strict && !closing && !parked, OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
+	category := ""
+	if p.Extensions != (protocol.ExtensionExecutionPin{}) {
+		category = m.CategoryID
+	}
+	return hostedconfig.Selection{CategoryID: category, Extensions: p.Extensions, NativeOwnerTools: owner && nativeMode && nativeTools && !strict && !closing && !parked, OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
 }
 
 // AgentConversationClaimed prevents the hosted pool from starting an Issue
