@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner/journal"
@@ -67,9 +68,10 @@ func TestSelfUpdateSameBinaryStillSubmitsConfiguration(t *testing.T) {
 	for _, a := range set.Artifacts {
 		os.WriteFile(filepath.Join(dir, a.Path), data, 0600)
 	}
-	var submitted atomic.Int64
+	var submitted, selfCalls atomic.Int64
 	r.cfg.UpdaterControlSocket = selfConfigurationSocket(t, func(w http.ResponseWriter, q *http.Request) {
 		if strings.HasPrefix(q.URL.Path, "/self-update/") {
+			selfCalls.Add(1)
 			json.NewEncoder(w).Encode(updater.SelfUpdateStatus{Supported: true, Observation: protocol.UpdaterSelfObservation{InstanceID: "host", Process: protocol.RecoveryIdentity{PID: 98, SHA256: sha}, SupervisedProcess: protocol.RecoveryIdentity{PID: 99, SHA256: sha, LaunchID: "instance"}, Receipt: &protocol.UpdaterSelfReceipt{RequestID: "original", UpgradeID: "batch", ReleaseSetSHA256: ssha, InstanceID: "host", Installed: protocol.RecoveryIdentity{PID: 98, SHA256: sha}}}})
 			return
 		}
@@ -81,6 +83,18 @@ func TestSelfUpdateSameBinaryStillSubmitsConfiguration(t *testing.T) {
 	ctl := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{ManifestSHA256: msha, ManifestSize: int64(len(raw)), ReleaseSet: &protocol.ReleaseSetTarget{SHA256: ssha, Size: int64(len(sr))}, Updater: &protocol.UpdaterSelfTarget{RequestID: "original"}, Configuration: &protocol.RunnerConfiguration{SHA256: strings.Repeat("e", 64), PreviousSHA256: strings.Repeat("f", 64)}}}
 	if e := r.applyControl(t.Context(), &ctl, r.cfg.Now(), true); e != nil {
 		t.Fatal(e)
+	}
+	if e := r.downloadAndSubmit(context.Background(), ctl); !errors.Is(e, errUpdaterAdmissionPending) || selfCalls.Load() != 0 || submitted.Load() != 0 {
+		t.Fatal("runner contacted updater before dispatch admission", e, selfCalls.Load(), submitted.Load())
+	}
+	selected := *ctl.Upgrade
+	authorized := *selected.Updater
+	authorized.Authorized = true
+	selected.Updater = &authorized
+	ctl.Upgrade = &selected
+	ctl.Revision++
+	if err := r.applyControl(t.Context(), &ctl, r.cfg.Now(), true); err != nil {
+		t.Fatal(err)
 	}
 	if e := r.downloadAndSubmit(context.Background(), ctl); e != nil {
 		t.Fatal(e)

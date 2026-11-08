@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
@@ -72,12 +73,30 @@ func (s *Supervisor) rejectSelf(r SelfUpdateRequest, cause error) (SelfUpdateSta
 	if s.opts.Now == nil {
 		return out, errors.Join(cause, errors.New("updater: rejection clock unavailable"))
 	}
-	now := s.opts.Now()
-	proof := protocol.UpdaterSelfRejection{RequestID: r.Target.RequestID, UpgradeID: r.UpgradeID, ReleaseSetSHA256: r.ReleaseSetSHA256, InstanceID: s.cfg.InstanceID, RejectedAtMillis: now.UnixMilli()}
+	return persistSelfRejection(s.cfg, r, s.opts.Now(), cause)
+}
+
+// persistSelfRejection requires the installer lock and proof that no stop intent
+// has been committed. Both preparation and pre-stop validation can establish it.
+func persistSelfRejection(cfg Config, r SelfUpdateRequest, now time.Time, cause error) (SelfUpdateStatus, error) {
+	out := SelfUpdateStatus{Supported: true, Observation: protocol.UpdaterSelfObservation{InstanceID: cfg.InstanceID}}
+	if r.Target.RequestID == "" || r.UpgradeID == "" || !release.ValidSHA(r.ReleaseSetSHA256) {
+		return out, cause
+	}
+	if prior, err := readSelfRejection(cfg, r.Target.RequestID); err != nil {
+		return out, errors.Join(cause, err)
+	} else if prior != nil {
+		if digest(prior.Request) != digest(r) {
+			return out, errors.New("updater: rejected request payload conflicts with history")
+		}
+		out.Observation.Rejection = &prior.Proof
+		return out, cause
+	}
+	proof := protocol.UpdaterSelfRejection{RequestID: r.Target.RequestID, UpgradeID: r.UpgradeID, ReleaseSetSHA256: r.ReleaseSetSHA256, InstanceID: cfg.InstanceID, RejectedAtMillis: now.UnixMilli()}
 	if proof.RejectedAtMillis <= 0 {
 		return out, errors.Join(cause, errors.New("updater: rejection clock unavailable"))
 	}
-	if err := writeJSON(selfRejectionPath(s.cfg, r.Target.RequestID), selfRejection{Format: 1, Request: r, Proof: proof}); err != nil {
+	if err := writeJSON(selfRejectionPath(cfg, r.Target.RequestID), selfRejection{Format: 1, Request: r, Proof: proof}); err != nil {
 		return out, errors.Join(cause, err)
 	}
 	out.Observation.Rejection = &proof
@@ -93,4 +112,26 @@ func rejectRecordedSelfRequest(cfg Config, request SelfUpdateRequest) error {
 		return errors.New("updater: original request was rejected before dispatch; use a new upgrade")
 	}
 	return nil
+}
+
+func rejectedSelfBeforeStop(cfg Config, j SelfUpdateJournal) (*selfRejection, error) {
+	if j.Phase != "prepared" {
+		return nil, nil
+	}
+	r, err := readSelfRejection(cfg, j.Plan.Request.Target.RequestID)
+	if err != nil {
+		return nil, err
+	}
+	if r != nil && digest(r.Request) != digest(j.Plan.Request) {
+		return nil, errors.New("updater: rejection does not match the current attempt")
+	}
+	return r, nil
+}
+
+func terminalSelf(cfg Config, j SelfUpdateJournal) (bool, error) {
+	if j.Phase == "verified" && j.Receipt != nil {
+		return true, nil
+	}
+	r, err := rejectedSelfBeforeStop(cfg, j)
+	return r != nil, err
 }

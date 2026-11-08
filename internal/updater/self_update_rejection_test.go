@@ -62,3 +62,37 @@ func TestSelfPreparationRejectionSurvivesLostReplyAndRestart(t *testing.T) {
 		t.Fatal("immutable rejection changed", err)
 	}
 }
+
+func TestSelfRejectedPreparedAttemptCanBeArchivedWithoutReusingItsIdentity(t *testing.T) {
+	cfg := Config{InstanceID: "server", StateDir: t.TempDir()}
+	j, now := selfEngineFixture()
+	j.Plan.Request.UpgradeID = "original"
+	j.Plan.Request.ReleaseSetSHA256 = strings.Repeat("a", 64)
+	if err := writeSelf(cfg, j); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := installerLock(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = persistSelfRejection(cfg, j.Plan.Request, now(), ErrUnknown)
+	lock.Close()
+	projected, err := SelfUpdateJournalStatus(cfg)
+	if err != nil || projected.Phase != "rejected" {
+		t.Fatal("known pre-stop rejection remained an unknown active attempt", projected, err)
+	}
+	if err := archiveSelf(cfg, j); err != nil {
+		t.Fatal(err)
+	}
+	next := j
+	next.Plan.Request.Target.RequestID = "new-request"
+	if err := writeSelf(cfg, next); err != nil {
+		t.Fatal("known rejected history prevented a fresh explicit request", err)
+	}
+	if err := rejectRecordedSelfRequest(cfg, j.Plan.Request); err == nil {
+		t.Fatal("archiving repurposed the rejected identity")
+	}
+	if err := writeSelf(cfg, j); err == nil {
+		t.Fatal("late rejected attempt overwrote the new execution")
+	}
+}

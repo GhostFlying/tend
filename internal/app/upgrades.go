@@ -573,11 +573,11 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			return err
 		}
 		v.RemainingRuns = runs
-		if runnerSelfMatches(*r, *h, rt.Runtime) {
+		if runnerSelfMatches(*r, *h, rt.Runtime) || selfUpdateRejected(*r, h.HostID, rt.Runtime.Updater) {
 			v.Updater = rt.Runtime.Updater
 		}
 		if needsSelfUpdate(*r) && h.PreviousHash == h.TargetHash && h.Configuration == nil && runnerSelfMatches(*r, *h, rt.Runtime) && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && rt.Runtime.AppliedControlRevision == ctl.Revision {
-			if v.Phase == "ready" && rt.Runtime.Mode == protocol.RunnerReady {
+			if (v.Phase == "ready" || v.Phase == "updater_handoff") && rt.Runtime.Mode == protocol.RunnerReady {
 				ctl.Revision++
 				ctl.Mode = protocol.RunnerNormal
 				ctl.Authorization = nil
@@ -591,6 +591,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				v.Status = "skipped"
 				v.Phase = "verified"
 				v.CurrentVersion = rt.Runtime.Build.Version
+				r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 				ctl.Revision++
 				ctl.UpgradeID = ""
 				ctl.ReleaseID = ""
@@ -670,6 +671,16 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			return attention(reason)
 		}
 		if handled {
+			return nil
+		}
+		if v.Phase == "ready" && ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !ctl.Upgrade.Updater.Authorized && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.UpgradeID == r.View.UpgradeID && rt.Runtime.UpgradePhase == "updater_ready" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
+			ctl.Revision++
+			ctl.Upgrade.Updater.Authorized = true
+			v.Phase = "updater_handoff"
+			r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
+			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+				return err
+			}
 			return nil
 		}
 		if v.Phase == "draining" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
@@ -848,7 +859,7 @@ func restoreUnchangedHosts(ctx context.Context, x *Exec, tx *store.Tx, r store.U
 		if err != nil {
 			return err
 		}
-		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) && !selfUpdateRejected(r, h.HostID, rt.Runtime.Updater) {
+		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && ctl.Upgrade.Updater.Authorized && !runnerSelfMatches(r, h, rt.Runtime) && !selfUpdateRejected(r, h.HostID, rt.Runtime.Updater) {
 			// The service is unchanged, but its independent supervisor installer
 			// can still be running. Keep its original target until reconciled.
 			continue

@@ -184,7 +184,7 @@ func selfExitEvidence(cfg Config, p SelfUpdatePlan) error {
 	if err = strictJSON(raw, &e); err != nil {
 		return err
 	}
-	if bytesDigest(raw) != p.ExitEvidenceSHA256 || e.ArtifactSHA256 != p.Updater.SHA256 || e.OperatorUID != os.Getuid() || e.ExitPolicy != "retains-managed-child" || e.Source == "" || e.ReviewArtifact == "" || e.ExpiresAtMillis < p.Request.Target.ExpiresAtMillis {
+	if bytesDigest(raw) != p.ExitEvidenceSHA256 || e.ArtifactSHA256 != p.Updater.SHA256 || e.OperatorUID != os.Getuid() || e.ExitPolicy != "retains-managed-child" || e.StateWritePolicy != "atomic-intent-before-effects" || e.Source == "" || e.ReviewArtifact == "" || e.ExpiresAtMillis < p.Request.Target.ExpiresAtMillis {
 		return errors.New("updater: legacy shutdown behavior needs artifact-bound reviewed evidence")
 	}
 	return nil
@@ -293,6 +293,9 @@ func prepareSelf(ctx context.Context, cfg Config, p SelfUpdatePlan, modern bool)
 		return p, err
 	}
 	if !modern {
+		if err := captureSelfStateDirectory(cfg, &p); err != nil {
+			return p, err
+		}
 		if p.ExitEvidence != "" && p.ExitEvidenceSHA256 == "" {
 			raw, e := privateFile(p.ExitEvidence)
 			if e != nil {
@@ -307,7 +310,10 @@ func prepareSelf(ctx context.Context, cfg Config, p SelfUpdatePlan, modern bool)
 	return p, nil
 }
 
-type systemSelfActions struct{ cfg Config }
+type systemSelfActions struct {
+	cfg   Config
+	fence *selfStateDirectoryFence
+}
 
 func (a systemSelfActions) Check(ctx context.Context, p SelfUpdatePlan, phase string) error {
 	if err := selfPlanStatic(a.cfg, p, time.Now(), true); err != nil {
@@ -320,6 +326,9 @@ func (a systemSelfActions) Check(ctx context.Context, p SelfUpdatePlan, phase st
 		return err
 	}
 	if phase == "active" {
+		if _, err := selfServiceState(a.cfg, p); err != nil {
+			return err
+		}
 		return selfExitEvidence(a.cfg, p)
 	}
 	return nil
@@ -342,12 +351,17 @@ func (a systemSelfActions) Install(ctx context.Context, p SelfUpdatePlan) (json.
 	if err = selfPlanStatic(a.cfg, p, time.Now(), true); err != nil {
 		return fail(err)
 	}
-	state, err := readState(filepath.Join(a.cfg.StateDir, "state.json"))
+	state, err := selfServiceState(a.cfg, p)
 	if err != nil {
 		return fail(err)
 	}
 	if state.InstanceID != a.cfg.InstanceID || state.Process != p.Child || !done(state.Operation) {
 		return fail(ErrUnknown)
+	}
+	if a.fence != nil {
+		if err := a.fence.restore(); err != nil {
+			return fail(err)
+		}
 	}
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -400,6 +414,18 @@ func ApplySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan) (j SelfU
 		return j, err
 	}
 	j, err = readSelf(cfg)
+	if err == nil && digest(j.Plan.Request) != digest(p.Request) {
+		terminal, terminalErr := terminalSelf(cfg, j)
+		if terminalErr != nil {
+			return j, terminalErr
+		}
+		if terminal {
+			if err := archiveSelf(cfg, j); err != nil {
+				return j, err
+			}
+			err = os.ErrNotExist
+		}
+	}
 	if missingSelf(err) {
 		// Bootstrap does not contact any old control protocol.
 		if p.PreparedBy != (Identity{}) {
@@ -418,15 +444,58 @@ func ApplySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan) (j SelfU
 	if digest(j.Plan) != digest(p) {
 		return j, errors.New("updater: self-update request conflicts with journal; retain original attempt")
 	}
-	err = advanceSelf(ctx, &j, func() error { return writeSelf(cfg, j) }, systemSelfActions{cfg}, time.Now)
+	var fence *selfStateDirectoryFence
+	if j.Phase == "prepared" && p.Updater.SHA256 == p.CandidateSHA256 {
+		err = (systemSelfActions{cfg: cfg}).Check(ctx, p, "active")
+		if err == nil {
+			j.Phase = "verified"
+			j.Receipt = &protocol.UpdaterSelfReceipt{RequestID: p.Request.Target.RequestID, UpgradeID: p.Request.UpgradeID, ReleaseSetSHA256: p.Request.ReleaseSetSHA256, InstanceID: cfg.InstanceID, Previous: p.Updater, Installed: p.Updater, RetainedProcess: p.Child, CompletedAtMillis: time.Now().UnixMilli()}
+			err = writeSelf(cfg, j)
+		}
+	} else {
+		if p.PreparedBy == (Identity{}) && (j.Phase == "prepared" || j.Phase == "stopping" || j.Phase == "installing") {
+			// Keep the private journal writable while fencing legacy state commits.
+			if err := writeSelf(cfg, j); err != nil {
+				return j, err
+			}
+			fence, err = fenceSelfStateDirectory(cfg, p)
+			if err != nil {
+				return j, err
+			}
+			defer func() {
+				if j.Phase == "prepared" {
+					err = errors.Join(err, fence.restore())
+				}
+			}()
+		}
+		err = advanceSelf(ctx, &j, func() error { return writeSelf(cfg, j) }, systemSelfActions{cfg: cfg, fence: fence}, time.Now)
+	}
 	if err != nil {
 		j.LastError = err.Error()
 		_ = writeSelf(cfg, j)
+		if j.Phase == "prepared" {
+			if fence != nil {
+				if restoreErr := fence.restore(); restoreErr != nil {
+					return j, errors.Join(err, restoreErr)
+				}
+			}
+			_, err = persistSelfRejection(cfg, p.Request, time.Now(), err)
+		}
 	}
 	return j, err
 }
 
-func SelfUpdateJournalStatus(cfg Config) (SelfUpdateJournal, error) { return readSelf(cfg) }
+func SelfUpdateJournalStatus(cfg Config) (SelfUpdateJournal, error) {
+	j, err := readSelf(cfg)
+	if err != nil {
+		return j, err
+	}
+	r, err := rejectedSelfBeforeStop(cfg, j)
+	if r != nil {
+		j.Phase = "rejected"
+	}
+	return j, err
+}
 
 // AdoptSelfUpdate runs after Open has acquired the original flock and before
 // ordinary supervision can launch or stop a service.
@@ -439,7 +508,11 @@ func AdoptSelfUpdate(ctx context.Context, s *Supervisor) (bool, error) {
 		return true, err
 	}
 	p := j.Plan
-	if j.Phase == "verified" {
+	rejected, rejectedErr := rejectedSelfBeforeStop(s.cfg, j)
+	if rejectedErr != nil {
+		return true, rejectedErr
+	}
+	if j.Phase == "verified" || rejected != nil {
 		legacy, committed, e := selfOtherOwners(s.cfg)
 		if e != nil {
 			return true, e
@@ -464,7 +537,7 @@ func AdoptSelfUpdate(ctx context.Context, s *Supervisor) (bool, error) {
 		if e != nil {
 			return true, e
 		}
-		if id.SHA256 != p.CandidateSHA256 || dev != p.LockDevice || ino != p.LockInode || bytesDigest(raw) != p.ConfigSHA256 {
+		if (id.SHA256 != p.CandidateSHA256 && (rejected == nil || id.SHA256 != p.Updater.SHA256)) || dev != p.LockDevice || ino != p.LockInode || bytesDigest(raw) != p.ConfigSHA256 {
 			return true, ErrUnknown
 		}
 		m, policy, e := managerSnapshot(ctx, p.Unit)
@@ -580,6 +653,12 @@ func (s *Supervisor) selfStatus(ctx context.Context) (SelfUpdateStatus, error) {
 		cached := j
 		s.selfJournal = &cached
 	}
+	if rejected, err := rejectedSelfBeforeStop(s.cfg, j); err != nil {
+		return out, err
+	} else if rejected != nil {
+		j.Phase = "rejected"
+		out.Observation.Rejection = &rejected.Proof
+	}
 	out.Journal = &j
 	out.Observation.Receipt = j.Receipt
 	return out, nil
@@ -624,9 +703,10 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 		return s.selfStatus(ctx)
 	}
 	if err == nil {
-		if j.Phase != "verified" {
+		terminal, terminalErr := terminalSelf(s.cfg, j)
+		if terminalErr != nil || !terminal {
 			s.mu.Unlock()
-			return SelfUpdateStatus{}, errors.New("updater: original self-update attempt remains unresolved")
+			return SelfUpdateStatus{}, errors.Join(errors.New("updater: original self-update attempt remains unresolved"), terminalErr)
 		}
 		if err = archiveSelf(s.cfg, j); err != nil {
 			s.mu.Unlock()
@@ -675,6 +755,7 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 		s.mu.Unlock()
 		return SelfUpdateStatus{}, err
 	}
+	s.selfIdentity = p.Updater
 	s.selfUpdating = true
 	s.mu.Unlock()
 	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-run", "--user", "--quiet", "--collect", "--unit=tend-self-"+bytesDigest([]byte(s.cfg.StateDir + r.Target.RequestID))[:24], "--property=Type=exec", installer, "self-update", "apply", "--config", p.ConfigFile, "--plan", selfPath(s.cfg))
@@ -688,7 +769,10 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 // writeSelf serializes journal writers across the installer and the adopting
 // supervisor. A late StopUnit/StartUnit error cannot erase a durable receipt.
 func writeSelf(cfg Config, next SelfUpdateJournal) error {
-	lock, err := os.OpenFile(filepath.Join(cfg.StateDir, "self-journal.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err := ensureSelfJournalDirectory(cfg); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(cfg.StateDir, "self-update", "journal.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
 	}
@@ -707,7 +791,11 @@ func writeSelf(cfg Config, next SelfUpdateJournal) error {
 	current, err := readSelf(cfg)
 	if err == nil {
 		if digest(current.Plan.Request) != digest(next.Plan.Request) {
-			if current.Phase != "verified" || (next.Phase != "prepared" && next.Phase != "verified") {
+			terminal, terminalErr := terminalSelf(cfg, current)
+			if terminalErr != nil {
+				return terminalErr
+			}
+			if !terminal || (next.Phase != "prepared" && next.Phase != "verified") {
 				return errors.New("updater: stale self-update journal writer")
 			}
 			incomingHistory := filepath.Join(cfg.StateDir, "self-update-"+bytesDigest([]byte(next.Plan.Request.Target.RequestID))+".json")

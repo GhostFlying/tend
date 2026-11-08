@@ -153,12 +153,13 @@ func installerLock(cfg Config) (*os.File, error) {
 // artifact. KillMode alone cannot prove that an updater's own exit code retains
 // its child; an unknown legacy artifact must never be stopped by this adapter.
 type UpdaterExitEvidence struct {
-	OperatorUID     int    `json:"operator_uid"`
-	ArtifactSHA256  string `json:"artifact_sha256"`
-	Source          string `json:"source"`
-	ReviewArtifact  string `json:"review_artifact"`
-	ExitPolicy      string `json:"exit_policy"`
-	ExpiresAtMillis int64  `json:"expires_at_millis"`
+	StateWritePolicy string `json:"state_write_policy,omitempty"`
+	OperatorUID      int    `json:"operator_uid"`
+	ArtifactSHA256   string `json:"artifact_sha256"`
+	Source           string `json:"source"`
+	ReviewArtifact   string `json:"review_artifact"`
+	ExitPolicy       string `json:"exit_policy"`
+	ExpiresAtMillis  int64  `json:"expires_at_millis"`
 }
 
 func validateHandoffStatic(cfg Config, p HandoffPlan) error {

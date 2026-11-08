@@ -21,6 +21,7 @@ export const hostPhases: Record<string, string> = {
   installing: "安装中",
   checking: "健康确认",
   restored: "已恢复接单",
+  updater_handoff: "更新器交接中",
   updater_only_restored: "更新器已确认，等待恢复接单",
   verified: "已核对更新器和服务",
   rolled_back: "已回退旧版本",

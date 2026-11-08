@@ -61,6 +61,7 @@ func TestSelfUpdaterOnlyNextHostAcknowledgment(t *testing.T) {
 }
 func TestSelfUpdaterOnlyRetryPendingHandoff(t *testing.T) {
 	h, _, o := selfUpdaterOnlyReady(t)
+	grantSelfRunner(t, h, "linux-1", o)
 	h.clock.Advance(7 * time.Minute)
 	upgradeAck(h, "linux-1", protocol.RunnerReady)
 	upgradeAck(h, "linux-2", protocol.RunnerNormal)
@@ -78,5 +79,20 @@ func TestSelfUpdaterOnlyRetryPendingHandoff(t *testing.T) {
 	}
 	if v.Hosts[0].Phase == "queued" {
 		t.Fatalf("retry discarded active handoff phase; verified original target remains stuck queued: %+v; control=%+v", v, upgradeCtl(h, "linux-1"))
+	}
+}
+
+func grantSelfRunner(t *testing.T, h *harness, host string, o ServerObservation) {
+	t.Helper()
+	rt := upgradeAck(h, host, protocol.RunnerReady)
+	rt.Sequence++
+	rt.UpgradePhase = "updater_ready"
+	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &rt}); err != nil {
+		t.Fatal(err)
+	}
+	upgradeTick(h, o)
+	ctl := upgradeCtl(h, host)
+	if ctl.Upgrade == nil || ctl.Upgrade.Updater == nil || !ctl.Upgrade.Updater.Authorized {
+		t.Fatalf("download readiness did not receive dispatch admission ctl=%+v target=%+v runtime=%+v view=%+v", ctl, ctl.Upgrade.Updater, rt, upgradeRead(h).View)
 	}
 }

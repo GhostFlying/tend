@@ -262,6 +262,7 @@ func TestSelfUpgradeConfigurationKeepsUntargetedHostsOutsideProofScope(t *testin
 	if untouched := upgradeCtl(h, "linux-1"); untouched.Mode != protocol.RunnerNormal || untouched.Upgrade != nil {
 		t.Fatal("configuration changed an untargeted host", untouched)
 	}
+	grantSelfRunner(t, h, "linux-2", observation)
 	h.clock.Advance(7 * time.Minute)
 	upgradeAck(h, "linux-2", protocol.RunnerReady)
 	v := upgradeTick(h, observation)

@@ -45,7 +45,7 @@ func runSelfUpdate(ctx context.Context, args []string, out io.Writer) error {
 		if err == nil {
 			journal, requestID = &j, j.Plan.Request.Target.RequestID
 		}
-		if *planFile != "" && (journal == nil || filepath.Clean(*planFile) != filepath.Join(cfg.StateDir, "self-update.json")) {
+		if *planFile != "" && (journal == nil || !selfJournalPath(cfg, *planFile)) {
 			p, err := updater.ReadSelfUpdatePlan(*planFile)
 			if err != nil {
 				return err
@@ -67,7 +67,7 @@ func runSelfUpdate(ctx context.Context, args []string, out io.Writer) error {
 	// file. Read its exact embedded plan without regenerating the request.
 	if err != nil && action == "apply" {
 		j, e := updater.SelfUpdateJournalStatus(cfg)
-		if e == nil && filepath.Clean(*planFile) == filepath.Join(cfg.StateDir, "self-update.json") {
+		if e == nil && selfJournalPath(cfg, *planFile) {
 			p, err = j.Plan, nil
 		}
 	}
@@ -116,4 +116,9 @@ func runSelfUpdate(ctx context.Context, args []string, out io.Writer) error {
 	j, err := updater.ApplySelfUpdate(ctx, cfg, p)
 	_ = json.NewEncoder(out).Encode(j)
 	return err
+}
+
+func selfJournalPath(cfg updater.Config, path string) bool {
+	clean := filepath.Clean(path)
+	return clean == updater.SelfUpdateJournalPath(cfg) || clean == filepath.Join(cfg.StateDir, "self-update.json")
 }

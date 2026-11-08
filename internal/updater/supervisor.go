@@ -492,7 +492,18 @@ func (s *Supervisor) Step(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.selfUpdating {
-		return nil
+		j, err := readSelf(s.cfg)
+		if err != nil {
+			return err
+		}
+		rejected, err := rejectedSelfBeforeStop(s.cfg, j)
+		if err != nil {
+			return err
+		}
+		if rejected == nil || j.Plan.Updater != s.selfIdentity {
+			return nil
+		}
+		s.selfUpdating = false
 	}
 	if err := s.durabilityError(); err != nil {
 		return err

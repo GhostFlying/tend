@@ -332,7 +332,11 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 					if err != nil {
 						return Outcome{}, err
 					}
-					if ctl.UpgradeID == r.View.UpgradeID && ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && ctl.Upgrade.Updater.RequestID == r.StartRequestID {
+					if ctl.UpgradeID == r.View.UpgradeID && ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && ctl.Upgrade.Updater.Authorized && ctl.Upgrade.Updater.RequestID == r.StartRequestID {
+						ctl.Revision++
+						if err := tx.PutHostControl(ctx, r.Hosts[i].HostID, ctl, x.Now.UnixMilli()); err != nil {
+							return Outcome{}, err
+						}
 						// The original independent handoff remains admitted. Retain
 						// its ready/restoration phase and fixed target on retry.
 						continue
@@ -366,7 +370,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			if err != nil {
 				return Outcome{}, err
 			}
-			if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) && !selfUpdateRejected(r, h.HostID, rt.Runtime.Updater) {
+			if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && ctl.Upgrade.Updater.Authorized && !runnerSelfMatches(r, h, rt.Runtime) && !selfUpdateRejected(r, h.HostID, rt.Runtime.Updater) {
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "runner supervisor handoff must reconcile before cancellation")
 			}
 			if ctl.UpgradeID != r.View.UpgradeID {
