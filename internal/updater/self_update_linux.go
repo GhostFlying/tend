@@ -670,7 +670,7 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 		s.mu.Unlock()
 		return SelfUpdateStatus{}, err
 	} else if prior != nil {
-		out, err := s.rejectSelf(r, errors.New("updater: original preparation was rejected before dispatch"))
+		out, err := s.rejectSelf(r, errors.New("updater: original preparation was rejected before supervisor stop"))
 		s.mu.Unlock()
 		return out, err
 	}

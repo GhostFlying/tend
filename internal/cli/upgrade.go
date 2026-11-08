@@ -140,7 +140,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	}
 	for _, h := range view.Hosts {
 		fmt.Fprintf(e.Stdout, "  %s: %s / %s; remaining runs %d\n", h.HostID, h.Status, h.Phase, h.RemainingRuns)
-		if supervisorFirst {
+		if supervisorFirst && (h.Phase != "skipped" || h.Updater != nil) {
 			writeUpdaterObservation(e.Stdout, h.HostID, h.Updater)
 		}
 	}
@@ -153,7 +153,7 @@ func writeUpdaterObservation(out io.Writer, instance string, o *protocol.Updater
 		return
 	}
 	if o.Rejection != nil {
-		fmt.Fprintf(out, "  %s updater: preparation rejected before dispatch; request %s; set %s\n", instance, o.Rejection.RequestID, o.Rejection.ReleaseSetSHA256)
+		fmt.Fprintf(out, "  %s updater: preparation rejected before supervisor stop; request %s; set %s\n", instance, o.Rejection.RequestID, o.Rejection.ReleaseSetSHA256)
 		return
 	}
 	status := "handoff unconfirmed"

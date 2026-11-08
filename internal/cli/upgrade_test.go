@@ -32,7 +32,7 @@ func TestUpgradeTextSeparatesUpdaterProofFromServiceState(t *testing.T) {
 	out.Reset()
 	o.Rejection = &protocol.UpdaterSelfRejection{RequestID: "rejected-request"}
 	writeUpdaterObservation(&out, "server", o)
-	if !strings.Contains(out.String(), "rejected before dispatch") || strings.Contains(out.String(), "verified") || strings.Contains(out.String(), "original-request") {
+	if !strings.Contains(out.String(), "rejected before supervisor stop") || strings.Contains(out.String(), "verified") || strings.Contains(out.String(), "original-request") {
 		t.Fatal(out.String())
 	}
 }
@@ -62,6 +62,7 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 		if r.Header.Get("Authorization") != "" {
 			t.Error("owner bearer leaked into local service")
 		}
+		view := protocol.UpgradeView{UpgradeID: "batch", Revision: 4, Status: "running", Phase: "runners"}
 		switch r.URL.Path {
 		case "/upgrades/start":
 			_ = json.NewDecoder(r.Body).Decode(&start)
@@ -71,10 +72,15 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 			if r.Method != http.MethodGet {
 				t.Error("status mutated")
 			}
+			view.Phase = "server_updater"
+			view.Hosts = []protocol.UpgradeHostView{
+				{HostID: "excluded", Status: "skipped", Phase: "skipped"},
+				{HostID: "updater-only", Status: "skipped", Phase: "verified", Updater: &protocol.UpdaterSelfObservation{Receipt: &protocol.UpdaterSelfReceipt{RequestID: "original-request"}}},
+			}
 		default:
 			t.Error("wrong local upgrade route")
 		}
-		_ = json.NewEncoder(w).Encode(protocol.UpgradeView{UpgradeID: "batch", Revision: 4, Status: "running", Phase: "runners"})
+		_ = json.NewEncoder(w).Encode(view)
 	})}
 	defer server.Close()
 	go func() { _ = server.Serve(listener) }()
@@ -98,6 +104,9 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	mu.Unlock()
 	if code := te.main("upgrade", "status", "--socket", socket); code != exitOK {
 		t.Fatalf("status=%d", code)
+	}
+	if strings.Contains(te.out.String(), "excluded updater:") || !strings.Contains(te.out.String(), "updater-only updater: handoff verified") {
+		t.Fatal("skipped scope confused with a verified updater-only host", te.out)
 	}
 	mu.Lock()
 	defer mu.Unlock()
