@@ -190,3 +190,53 @@ func TestFault_MaintenancePersistenceFailureIsVisibleAndExits(t *testing.T) {
 		t.Fatal("failed service retained its listener", err)
 	}
 }
+
+func TestFault_MaintenanceReceiptUnavailableIsNotMissing(t *testing.T) {
+	c, _, _, _ := fixture(t)
+	missing := httptest.NewRecorder()
+	c.Handler(nil).ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/maintenance/request/missing", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatal("missing receipt was not distinguished", missing.Code)
+	}
+	req := protocol.MaintenanceRequest{RequestID: "already-committed", ExpectedRevision: c.Status().Revision}
+	if _, err := c.Command(t.Context(), "audit", req); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c.Handler(nil).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/maintenance/request/already-committed", nil))
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "retain the original request identity") {
+		t.Fatal("unavailable receipt became apparent absence", w.Code, w.Body.String())
+	}
+}
+func TestFault_MaintenanceReconciledCreationConsumesPredecessor(t *testing.T) {
+	c, n, _, _ := fixture(t)
+	launch(t, c)
+	original := c.Status().Active.SessionID
+	backend := c.Status().Backend
+	backend.Agent = "traex"
+	command(t, c, "config", protocol.MaintenanceRequest{Backend: &backend, Mode: "interrupt"})
+	step(t, c)
+	n.complete, n.busy = true, false
+	step(t, c)
+	step(t, c)
+	n.interrupted = 0
+	c.opts.Native = &lostCreationNative{fakeNative: n, loseCreation: true}
+	if err := c.Step(t.Context()); err == nil {
+		t.Fatal("creation reply was not lost")
+	}
+	command(t, c, "reconcile", protocol.MaintenanceRequest{SessionID: "reconciled-successor", Reason: "original successor found"})
+	step(t, c)
+	if a := c.Status().Active; a.Predecessor == nil || a.Predecessor.SessionID != original || c.Status().Predecessor != nil {
+		t.Fatal("reconciliation did not consume exactly the successor predecessor", a)
+	}
+	n.complete, n.busy = true, false
+	step(t, c)
+	c.opts.Native = n
+	launch(t, c)
+	if a := c.Status().Active; a.Predecessor != nil || strings.Contains(a.Prompt, "Previous agent:") {
+		t.Fatal("unrelated audit inherited consumed interrupt context", a)
+	}
+}

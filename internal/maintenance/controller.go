@@ -132,6 +132,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		active.SessionID = req.SessionID
 		active.Phase = "idle"
 		c.state.Active = &active
+		c.state.Predecessor = nil
 	case "upgrade-plan":
 		c.state.Upgrade, err = c.planUpgrade(req.RequestID, req.ReleaseDir)
 	case "upgrade-apply":
