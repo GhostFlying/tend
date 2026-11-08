@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 
@@ -43,8 +44,8 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 		} else if _, err := store.AgentConversation(ctx, tx.Q(), s.ConversationID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO token_usage_local_sources(source_key,run_id,conversation_id,source_json,writer_stopped,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET writer_stopped=excluded.writer_stopped,coverage=CASE WHEN token_usage_local_sources.writer_stopped<>excluded.writer_stopped THEN 'pending' ELSE token_usage_local_sources.coverage END`, s.ID, s.RunID, s.ConversationID, string(s.Source), s.WriterStopped, a.now().UnixMilli())
-		return err
+		result, err := tx.Exec(ctx, `INSERT INTO token_usage_local_sources(source_key,run_id,conversation_id,source_json,writer_stopped,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET writer_stopped=excluded.writer_stopped,coverage=CASE WHEN token_usage_local_sources.writer_stopped<>excluded.writer_stopped THEN 'pending' ELSE token_usage_local_sources.coverage END WHERE token_usage_local_sources.writer_stopped<>excluded.writer_stopped`, s.ID, s.RunID, s.ConversationID, string(s.Source), s.WriterStopped, a.now().UnixMilli())
+		return usageCollectionChanged(tx, result, err)
 	})
 	if err == nil {
 		a.wakeLocalUsage()
@@ -124,8 +125,8 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET source_json=?,cursors_json=?,coverage=?,updated_at=? WHERE source_key=? AND writer_stopped=? AND (source_json<>? OR cursors_json<>? OR coverage<>?)`, string(s.Source), string(s.Cursors), s.Coverage, a.now().UnixMilli(), s.ID, s.WriterStopped, string(s.Source), string(s.Cursors), s.Coverage)
-		return err
+		result, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET source_json=?,cursors_json=?,coverage=?,updated_at=? WHERE source_key=? AND writer_stopped=? AND (source_json<>? OR cursors_json<>? OR coverage<>?)`, string(s.Source), string(s.Cursors), s.Coverage, a.now().UnixMilli(), s.ID, s.WriterStopped, string(s.Source), string(s.Cursors), s.Coverage)
+		return usageCollectionChanged(tx, result, err)
 	})
 }
 
@@ -134,8 +135,8 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string) error {
 	conversation = store.ConversationID(conversation)
 	err := a.write(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND conversation_id=? AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, conversation, thread, thread)
-		return err
+		result, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND conversation_id=? AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, conversation, thread, thread)
+		return usageCollectionChanged(tx, result, err)
 	})
 	if err == nil {
 		a.wakeLocalUsage()
@@ -145,8 +146,8 @@ func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string) e
 
 func (a *App) StopRunUsage(ctx context.Context, run string) error {
 	err := a.write(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND run_id=?`, run)
-		return err
+		result, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND run_id=?`, run)
+		return usageCollectionChanged(tx, result, err)
 	})
 	if err == nil {
 		a.wakeLocalUsage()
@@ -166,4 +167,15 @@ func (a *App) wakeLocalUsage() {
 // PendingLocalUsageSources excludes settled history before decoding its cursors.
 func (a *App) PendingLocalUsageSources(ctx context.Context, conversation string) ([]LocalUsageSource, error) {
 	return a.localUsageSources(ctx, conversation, true)
+}
+
+func usageCollectionChanged(tx *store.Tx, result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err == nil && count > 0 {
+		tx.MarkChanged("token_usage")
+	}
+	return err
 }

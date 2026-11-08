@@ -68,7 +68,13 @@ func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, pu
 
 func (m *Manager) syncNativeUsage(ctx context.Context) { m.syncNativeUsageState(ctx, false) }
 
-func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) (delay time.Duration) {
+func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) time.Duration {
+	m.mu.Lock()
+	final := m.usageSettling && (m.active == nil || m.active.finished) && !m.summaryActive
+	m.mu.Unlock()
+	return m.syncNativeUsagePass(ctx, complete, final)
+}
+func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool) (delay time.Duration) {
 	m.usageMu.Lock()
 	if m.usageRetries == nil {
 		m.usageRetries = nativeusage.Retries{}
@@ -120,8 +126,8 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) (dela
 		err = nil
 		cached := m.usageFiles[s.ID]
 		files := cached.files
-		if complete || len(files) == 0 || m.cfg.Now().UnixMilli()-cached.at >= 30000 {
-			files, err = discovery.Discover(ctx, root, complete || (s.WriterStopped && s.Coverage != "caught_up"))
+		if final || len(files) == 0 || m.cfg.Now().UnixMilli()-cached.at >= 30000 {
+			files, err = discovery.Discover(ctx, root, final)
 			if err == nil {
 				m.usageFiles[s.ID] = usageDiscovery{at: m.cfg.Now().UnixMilli(), files: files}
 			}
@@ -139,7 +145,7 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) (dela
 		caughtUp := true
 		failed := false
 		for _, src := range files {
-			page, readErr := m.usageIndex.Read(ctx, src, cursors[src.Path], 256-len(samples), complete || s.WriterStopped)
+			page, readErr := m.usageIndex.Read(ctx, src, cursors[src.Path], 256-len(samples), final)
 			if readErr != nil {
 				m.cfg.Log.WarnContext(ctx, "native usage history read pending", "err", readErr)
 				failed = true
@@ -167,6 +173,8 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) (dela
 		if len(samples) == 0 && beforeSource == string(s.Source) && beforeCursors == string(s.Cursors) && beforeCoverage == s.Coverage {
 			if !caughtUp {
 				m.usageRetries.Failed(s.ID, now)
+			} else {
+				m.usageRetries.Succeeded(s.ID)
 			}
 			continue
 		}
@@ -196,15 +204,19 @@ func (m *Manager) startNativeUsage(ctx context.Context, th harness.Thread) func(
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		delay := time.Duration(0)
+		delayedFinal := false
 		for {
-			delay = m.syncNativeUsageState(pollCtx, false)
 			m.mu.Lock()
 			active := (m.active != nil && !m.active.finished) || m.summaryActive
 			settling := m.usageSettling
 			m.usageSettling = false
 			m.mu.Unlock()
-			if (active || settling) && (delay == 0 || delay > 2*time.Second) {
+			delay := m.syncNativeUsagePass(pollCtx, false, !active && (settling || delayedFinal))
+			delayedFinal = !active && settling
+			m.mu.Lock()
+			active = (m.active != nil && !m.active.finished) || m.summaryActive
+			m.mu.Unlock()
+			if (active || delayedFinal) && (delay == 0 || delay > 2*time.Second) {
 				delay = 2 * time.Second
 			}
 			if !nativeusage.Wait(pollCtx, wake, delay) {

@@ -91,3 +91,65 @@ func TestUsageIdleReadSleepsAndResumesWithoutRewritingCursor(t *testing.T) {
 		t.Fatal(cursors, err)
 	}
 }
+
+func idleUsageManager(t *testing.T) (*Manager, *app.App, *store.Store, *testkit.Clock, string) {
+	t.Helper()
+	clock := testkit.NewClock()
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	a := app.New(db, testkit.NewIDGen(clock, 27), clock.Now)
+	m := New(a, nil, nil, Config{Now: clock.Now, Log: slog.New(slog.DiscardHandler)})
+	path := filepath.Join(t.TempDir(), "root.jsonl")
+	if err := os.WriteFile(path, []byte("{\"type\":\"session_meta\",\"payload\":{\"id\":\"root\",\"session_id\":\"root\"}}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.registerNativeUsage(t.Context(), usageHistoryThread{source: nativeusage.Source{Path: path, ThreadID: "root", SessionID: "root", Provider: "traex"}}, "")
+	if delay := m.syncNativeUsageState(t.Context(), false); delay != 0 {
+		t.Fatal(delay)
+	}
+	return m, a, db, clock, path
+}
+
+func TestUsageSuccessfulRetryDisarmsIdleCollector(t *testing.T) {
+	m, _, _, clock, path := idleUsageManager(t)
+	if err := os.Rename(path, path+".away"); err != nil {
+		t.Fatal(err)
+	}
+	if delay := m.syncNativeUsageState(t.Context(), false); delay != 2*time.Second {
+		t.Fatal(delay)
+	}
+	if err := os.Rename(path+".away", path); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Second)
+	delay := m.syncNativeUsageState(t.Context(), false)
+	if delay != 0 {
+		t.Fatalf("successful unchanged read left retry armed: delay=%v, retries=%v", delay, m.usageRetries)
+	}
+}
+
+func TestUsageFinalIdlePassDiscoversNewChild(t *testing.T) {
+	m, _, db, clock, path := idleUsageManager(t)
+	child := `{"type":"session_meta","payload":{"id":"child","session_id":"root"}}` + "\n" + `{"type":"token_usage_record","ordinal":1,"payload":{"thread_id":"child","session_id":"root","turn_id":"turn","response_id":"child-request","usage":{"total_tokens":12}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "child.jsonl"), []byte(child), 0600); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Second)
+	m.wakeNativeUsage()
+	m.syncNativeUsageState(t.Context(), false)
+	clock.Advance(2 * time.Second)
+	delay := m.syncNativeUsageState(t.Context(), false)
+	count := 0
+	if err := db.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage_facts`).Scan(&count)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("after completion and settling: delay=%v, child facts=%d", delay, count)
+	if count != 1 {
+		t.Fatalf("idle collector disarmed before discovering child: facts=%d delay=%v", count, delay)
+	}
+}

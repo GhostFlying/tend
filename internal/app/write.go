@@ -15,12 +15,14 @@ func (a *App) write(ctx context.Context, fn func(*store.Tx) error) error {
 		if err := fn(tx); err != nil {
 			return err
 		}
-		if err := refreshUsageProjection(ctx, tx, func() error {
-			_, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "app", ObjectType: "token_usage", ObjectID: "all", Kind: "token_usage.changed", BodyJSON: `{}`, CreatedAt: a.now().UnixMilli()})
-			changed = err == nil
-			return err
-		}); err != nil {
+		if err := refreshUsageProjection(ctx, tx, func() error { tx.MarkChanged("token_usage"); return nil }); err != nil {
 			return fmt.Errorf("refresh usage projection: %w", err)
+		}
+		if tx.Changed("token_usage") {
+			if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "app", ObjectType: "token_usage", ObjectID: "all", Kind: "token_usage.changed", BodyJSON: `{}`, CreatedAt: a.now().UnixMilli()}); err != nil {
+				return err
+			}
+			changed = true
 		}
 		return nil
 	})

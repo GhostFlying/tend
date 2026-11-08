@@ -71,3 +71,22 @@ func TestStaleCollectorCannotAdvanceFactsAfterWriterStop(t *testing.T) {
 		t.Fatal("stale lifecycle advanced usage")
 	}
 }
+
+func TestUsageCoverageOnlyChangeNotifiesReaders(t *testing.T) {
+	h := newHarness(t)
+	src := LocalUsageSource{ID: "review-source", WriterStopped: true, Source: []byte(`{"thread_id":"thread","session_id":"session"}`), Cursors: []byte(`{}`), Coverage: "syncing"}
+	if err := h.app.RegisterLocalUsage(t.Context(), src); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.CommitLocalUsage(t.Context(), src, nil); err != nil {
+		t.Fatal(err)
+	}
+	before := usageNotifications(t, h)
+	src.Coverage = "caught_up"
+	if err := h.app.CommitLocalUsage(t.Context(), src, nil); err != nil {
+		t.Fatal(err)
+	}
+	if after := usageNotifications(t, h); after != before+1 {
+		t.Fatalf("coverage changed without usage notification: events before=%d after=%d", before, after)
+	}
+}

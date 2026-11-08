@@ -200,7 +200,8 @@ func (UploadNativeUsage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 			return Outcome{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE token_usage_sources SET coverage=?,updated_at=? WHERE run_id=? AND thread_id=?`, p.Coverage, now, p.RunID, p.RootThreadID); err != nil {
+	result, err := tx.Exec(ctx, `UPDATE token_usage_sources SET coverage=?,updated_at=? WHERE run_id=? AND thread_id=? AND (coverage<>? OR EXISTS(SELECT 1 FROM token_usage_dirty))`, p.Coverage, now, p.RunID, p.RootThreadID, p.Coverage)
+	if err := usageCollectionChanged(tx, result, err); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: map[string]any{"accepted": len(p.Samples)}}, nil
@@ -342,6 +343,6 @@ func registerUsageSource(ctx context.Context, tx *store.Tx, run store.RunRow, ra
 	if json.Unmarshal(raw, &p) != nil || p.ThreadID == "" || (p.Provider != "codex" && p.Provider != "traex") {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid native usage source")
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO token_usage_sources(source_key,host_id,run_id,thread_id,session_id,provider,purpose,parent_session_id,coverage,updated_at) VALUES(?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(source_key) DO NOTHING`, run.RunID+"/"+p.ThreadID, run.HostID, run.RunID, p.ThreadID, p.SessionID, p.Provider, p.Purpose, p.ParentSessionID, now)
-	return err
+	result, err := tx.Exec(ctx, `INSERT INTO token_usage_sources(source_key,host_id,run_id,thread_id,session_id,provider,purpose,parent_session_id,coverage,updated_at) VALUES(?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(source_key) DO NOTHING`, run.RunID+"/"+p.ThreadID, run.HostID, run.RunID, p.ThreadID, p.SessionID, p.Provider, p.Purpose, p.ParentSessionID, now)
+	return usageCollectionChanged(tx, result, err)
 }
