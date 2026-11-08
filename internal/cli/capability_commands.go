@@ -33,6 +33,7 @@ type capabilityCommand struct {
 }
 
 var capabilityCommands = []capabilityCommand{
+	{Name: "maintenance overview", Route: "/api/v1/maintenance", JSONDefault: true},
 	{Name: "capability list", Route: "/api/v1/capabilities", Queries: "state search after limit", JSONDefault: true},
 	{Name: "capability show", Route: "/api/v1/capabilities/{id}", Queries: "definition-revision=revision", JSONDefault: true},
 	{Name: "capability history", Route: "/api/v1/capabilities/{id}/revisions", Queries: "state search after limit", JSONDefault: true},

@@ -74,6 +74,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	planFile := flags.String("plan", "", "private exact handoff plan")
 	config := flags.String("config", os.Getenv("TEND_UPDATER_CONFIG"), "fixed supervisor configuration")
 	bundle := flags.String("release", "", "release bundle directory")
+	role := flags.String("role", "", "fixed role for component verification: maintainer")
 	id := flags.String("upgrade-id", "", "stable coordinator upgrade identity")
 	candidateConfig := flags.String("candidate", "", "private candidate service configuration")
 	previousConfig := flags.String("previous-sha256", "", "expected current configuration digest")
@@ -88,7 +89,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("updater: unexpected positional arguments")
 	}
 	if command == "verify" {
-		b, err := release.Load(*bundle)
+		if *role != "" && *role != "maintainer" {
+			return errors.New("updater: invalid verification role")
+		}
+		b, err := release.LoadService(*bundle, *role)
 		if err != nil {
 			return err
 		}
@@ -226,7 +230,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 		*bundle = abs
-		b, err := release.Load(*bundle)
+		b, err := release.LoadService(*bundle, cfg.Role)
 		if err != nil {
 			return err
 		}

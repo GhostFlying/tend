@@ -30,13 +30,20 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	arch := flag.String("arch", "", "Linux target architecture")
+	component := flag.String("component", "", "standalone component: maintainer")
 	commit := flag.String("commit", "", "exact source commit")
 	out := flag.String("output", "", "output directory outside tracked source")
 	amd64 := flag.String("input-amd64", "", "verified amd64 bundle to assemble")
 	arm64 := flag.String("input-arm64", "", "verified arm64 bundle to assemble")
 	flag.Parse()
 	var err error
-	if *amd64 != "" || *arm64 != "" {
+	if *component != "" {
+		if *component != "maintainer" {
+			err = errors.New("package: unknown standalone component")
+		} else {
+			err = runComponent(ctx, *arch, *commit, *out)
+		}
+	} else if *amd64 != "" || *arm64 != "" {
 		err = merge(ctx, *amd64, *arm64, *commit, *out)
 	} else {
 		err = run(ctx, *arch, *commit, *out)

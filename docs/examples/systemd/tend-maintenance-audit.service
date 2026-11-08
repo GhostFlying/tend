@@ -1,0 +1,8 @@
+[Unit]
+Description=Submit one bounded Tend maintenance audit
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tend-maintainer audit --config %h/.config/tend/maintainer.json
+TimeoutStartSec=90
+UMask=0077

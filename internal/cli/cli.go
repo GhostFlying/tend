@@ -111,6 +111,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	switch cmd {
 	case "schedule", "event", "webhook", "observation", "request":
 		return report(e, runTriggers(ctx, e, cmd, rest))
+	case "maintenance":
+		return report(e, runMaintenance(ctx, e, rest))
 	case "message", "channel":
 		return report(e, runMessaging(ctx, e, cmd, rest))
 	case "login":

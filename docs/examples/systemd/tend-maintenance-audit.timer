@@ -1,0 +1,11 @@
+[Unit]
+Description=Independently audit Tend maintenance every hour
+
+[Timer]
+OnActiveSec=60min
+OnUnitActiveSec=60min
+AccuracySec=30s
+Unit=tend-maintenance-audit.service
+
+[Install]
+WantedBy=timers.target

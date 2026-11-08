@@ -14,6 +14,27 @@ spec.loader.exec_module(publisher)
 
 
 class PublishTest(unittest.TestCase):
+    def test_missing_maintenance_component_cannot_publish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, commit = self.fixture(directory)
+            next(root.glob("tend-maintainer-*-arm64.json")).unlink()
+            with patch.object(publisher, "gh") as gh:
+                with self.assertRaises(FileNotFoundError):
+                    publisher.publish(root, commit, "example/tend")
+                gh.assert_not_called()
+
+    def test_wrong_maintenance_platform_cannot_publish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, commit = self.fixture(directory)
+            path = next(root.glob("tend-maintainer-*-arm64.json"))
+            metadata = json.loads(path.read_text())
+            metadata["artifact"]["arch"] = "amd64"
+            path.write_text(json.dumps(metadata))
+            with patch.object(publisher, "gh") as gh:
+                with self.assertRaisesRegex(ValueError, "component source/platform"):
+                    publisher.publish(root, commit, "example/tend")
+                gh.assert_not_called()
+
     def test_first_publication_creates_tag_and_resolves_unpublished_draft(self):
         self.exercise(draft=True, first=True)
 
@@ -46,6 +67,10 @@ class PublishTest(unittest.TestCase):
             name = f"tend-main-{commit}-linux-{arch}"
             (root / (name + ".tar.gz")).write_bytes(b"complete distribution")
             (root / (name + ".json")).write_text(json.dumps({"commit": commit, "arch": "multi" if arch == "fleet" else arch}))
+        for arch in ("amd64", "arm64"):
+            name = f"tend-maintainer-main-{commit}-linux-{arch}"
+            (root / (name + ".tar.gz")).write_bytes(b"maintenance component")
+            (root / (name + ".json")).write_text(json.dumps({"commit": commit, "artifact": {"role": "maintainer", "os": "linux", "arch": arch}}))
         return root, commit
 
     def exercise(self, draft, corrupt=False, first=False, existing_checksum=False):

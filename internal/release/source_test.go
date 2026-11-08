@@ -1,9 +1,13 @@
 package release
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -40,6 +44,9 @@ func TestExecutableSourceReadsPinnedBytesAndDetectsModifiedSource(t *testing.T) 
 	if err != nil || got.Commit != commit || got.Modified {
 		t.Fatal(got, err)
 	}
+	if runtime.GOOS == "linux" {
+		verifyComponentFixture(t, executable, commit)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() { println(1) }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -50,5 +57,51 @@ func TestExecutableSourceReadsPinnedBytesAndDetectsModifiedSource(t *testing.T) 
 	}
 	if _, err := ExecutableSource(filepath.Join(dir, "main.go")); err == nil {
 		t.Fatal("source text accepted as executable identity")
+	}
+}
+
+func verifyComponentFixture(t *testing.T, executable, commit string) {
+	t.Helper()
+	dir := t.TempDir()
+	body, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	c := Component{Format: 1, ReleaseID: "fixture", Commit: commit, State: Range{Min: 1, Max: 1}, Artifact: Artifact{Role: "maintainer", OS: "linux", Arch: runtime.GOARCH, Path: "maintainer", Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:])}}
+	if err := os.WriteFile(filepath.Join(dir, "maintainer"), body, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write := func() {
+		t.Helper()
+		raw, _ := json.Marshal(c)
+		if err := os.WriteFile(filepath.Join(dir, "component.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	if b, err := LoadService(dir, "maintainer"); err != nil || b.Manifest.Storage.ServerSchema.Max != 1 {
+		t.Fatal("valid component rejected", b, err)
+	}
+	raw, _ := json.Marshal(c)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("standalone component changed the legacy service format")
+	}
+	c.Commit = strings.Repeat("a", 40)
+	write()
+	if _, err := LoadComponent(dir); err == nil {
+		t.Fatal("different executable source accepted")
+	}
+	c.Commit = commit
+	write()
+	body[0] ^= 1
+	if err := os.WriteFile(filepath.Join(dir, "maintainer"), body, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadComponent(dir); err == nil {
+		t.Fatal("corrupt artifact accepted")
 	}
 }

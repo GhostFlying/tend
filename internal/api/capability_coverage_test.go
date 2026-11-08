@@ -62,6 +62,9 @@ func TestPublicCapabilityCoverageRejectsMissingAndNewEntries(t *testing.T) {
 // Updater authorization/health callbacks are executor-only, not operator commands.
 func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	expected := map[string]bool{protocol.LocalServerCapabilities: true}
+	for _, action := range []string{"check", "audit", "pause", "resume", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
+		expected["local POST /maintenance/"+action] = true
+	}
 	for _, action := range protocol.CodexEnvironmentActions() {
 		expected["local EXEC codex-env "+action] = true
 	}
@@ -96,7 +99,7 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	internal["/runner/v1/usage/source"] = "native usage journal owner source registration"
 	internal["/runner/v1/usage/queue"] = "native usage journal owner cursor and request commit"
 	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/upgrades/maintenance/status": true, "/status": true}
-	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl", "../updater"} {
+	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl", "../updater", "../maintenance"} {
 		err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr

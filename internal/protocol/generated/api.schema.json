@@ -9985,6 +9985,60 @@
       "title": "MaintenanceOperationSource",
       "type": "object"
     },
+    "MaintenanceOverview": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "last_audit": {
+          "type": "integer"
+        },
+        "last_check": {
+          "type": "integer"
+        },
+        "observed_at": {
+          "type": "integer"
+        },
+        "open_cases": {
+          "type": "integer"
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "pending": {
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "upgrade_phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "configured",
+        "available",
+        "observed_at",
+        "paused",
+        "open_cases",
+        "pending"
+      ],
+      "title": "MaintenanceOverview",
+      "type": "object"
+    },
     "MaintenanceTimeoutPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -19228,6 +19282,9 @@
     },
     "LocalRepositoryStatus": {
       "$ref": "#/definitions/LocalRepositoryStatus"
+    },
+    "MaintenanceOverview": {
+      "$ref": "#/definitions/MaintenanceOverview"
     },
     "ManagerMigrationPayload": {
       "$ref": "#/definitions/ManagerMigrationPayload"

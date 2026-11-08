@@ -24,6 +24,34 @@ func binding(capability, command string, args ...string) CapabilityBinding {
 // The API contract checker compares this to the server's actual registrations.
 func CapabilityBindings() []CapabilityBinding {
 	var out []CapabilityBinding
+	for _, action := range []string{"status", "cases", "history", "session", "config", "upgrade-status"} {
+		out = append(out, binding("local GET /maintenance/"+action, "maintenance "+action, "--socket", "{socket}", "--json"))
+	}
+	for _, action := range []string{"show", "request"} {
+		out = append(out, binding("local GET /maintenance/"+action+"/{id}", "maintenance "+action, "--socket", "{socket}", "--id", "sample", "--json"))
+	}
+	for _, action := range []string{"check", "audit", "pause", "resume", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
+		args := []string{"--socket", "{socket}", "--revision", "2", "--request-id", "{request}", "--json"}
+		if action == "defer" || action == "resolve" {
+			args = append(args, "--id", "sample", "--reason", "Reviewed original evidence", "--until", "9999999999")
+		}
+		if action == "reconcile" {
+			args = append(args, "--session-id", "original", "--reason", "Native creation read back")
+		}
+		if action == "config" {
+			args = append(args, "--mode", "when-idle", "--data", `{"agent":"codex","socket":"/native.sock","sandbox":"workspace-write","approval_policy":"never"}`)
+		}
+		if action == "upgrade-plan" {
+			args = append(args, "--release", "{release}")
+		}
+		if action == "upgrade-apply" {
+			args = append(args, "--upgrade-id", "original")
+		}
+		if action == "review" {
+			args = append(args, "--base", "main", "--head", strings.Repeat("a", 40))
+		}
+		out = append(out, binding("local POST /maintenance/"+action, "maintenance "+action, args...))
+	}
 	for _, action := range protocol.CodexEnvironmentActions() {
 		args := []string{"--id", "sample"}
 		if action == "list" || strings.HasPrefix(action, "watch ") {
