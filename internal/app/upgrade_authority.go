@@ -338,6 +338,9 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		r.View.Reason = ""
 		r.Deadline = capUpgradeDeadline(&r, x.Now.UnixMilli()+r.DrainMillis)
 	case "cancel":
+		if r.ServerUpdaterAuthorized && !selfUpdateMatches(r, r.ServerHash, r.View.ServerUpdater) {
+			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server supervisor handoff must reconcile before cancellation")
+		}
 		if r.ServerProcess != "" && r.ServerHealthy < 2 && r.ServerRollback == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server replacement must reconcile before cancellation")
 		}
@@ -353,6 +356,9 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
 			if err != nil {
 				return Outcome{}, err
+			}
+			if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) {
+				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "runner supervisor handoff must reconcile before cancellation")
 			}
 			if ctl.UpgradeID != r.View.UpgradeID {
 				if ctl.UpgradeID == "" {

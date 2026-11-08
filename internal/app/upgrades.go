@@ -355,6 +355,11 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	}
 	before, _ := json.Marshal(r)
 	now := x.Now.UnixMilli()
+	if needsSelfUpdate(r) && selfUpdateMatches(r, r.ServerHash, c.Observation.Updater) && c.Observation.Updater.InstanceID == r.ServerInstance && c.Observation.Updater.SupervisedProcess.SHA256 == c.Observation.BinarySHA256 && c.Observation.Updater.SupervisedProcess.LaunchID == c.Observation.ProcessInstanceID {
+		// Receipt reconciliation remains live after the batch's dispatch
+		// authority expires. It neither resumes nor renews the handoff.
+		r.View.ServerUpdater = c.Observation.Updater
+	}
 	attention := func(reason string) error {
 		r.View.Status = "attention"
 		r.View.Reason = reason
@@ -825,6 +830,11 @@ func restoreUnchangedHosts(ctx context.Context, x *Exec, tx *store.Tx, r store.U
 		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 		if err != nil {
 			return err
+		}
+		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) {
+			// The service is unchanged, but its independent supervisor installer
+			// can still be running. Keep its original target until reconciled.
+			continue
 		}
 		if rt.Runtime.Build.BinarySHA256 != h.PreviousHash {
 			continue

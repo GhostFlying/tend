@@ -135,6 +135,65 @@ func TestSelfUpgradeRetryRetainsUnresolvedSupervisorPhase(t *testing.T) {
 		t.Fatal("retry bypassed original handoff", row.View)
 	}
 }
+
+func TestSelfUpgradeCancelWaitsForOriginalHandoffAndAcceptsLateReceipt(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	selfUpgradeHosts(t, h, true)
+	c.ServerUpdaterSupported = true
+	if op := startTestUpgrade(h, "cancel-self", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	row := upgradeRead(h)
+	grant := AuthorizeServerUpdater{}
+	if op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env(grant.Operation(), protocol.Target{Type: "upgrade", ID: row.View.UpgradeID}, nil, rev(row.View.Revision)), grant); op.Error != nil {
+		t.Fatal(op)
+	}
+	cancel := func() (protocol.Operation, error) {
+		v := upgradeRead(h).View
+		return h.app.Execute(t.Context(), owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: v.UpgradeID}, protocol.UpgradeControlPayload{Action: "cancel"}, rev(v.Revision)), ControlUpgrade{})
+	}
+	if op, err := cancel(); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		t.Fatal("unconfirmed installer was treated as cancelled", op, err)
+	}
+	h.clock.Advance(7 * time.Minute)
+	if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
+		t.Fatal(v)
+	}
+	observation := ServerObservation{BinarySHA256: c.ServerHash, ProcessInstanceID: "original-server"}
+	observation.Updater = selfUpgradeObservation(row, "server", "original-server", c.ServerHash)
+	v := upgradeTick(h, observation)
+	if v.Status != "attention" || v.ServerUpdater == nil || v.Phase != "server_updater" {
+		t.Fatal("late receipt resumed dispatch or was discarded", v)
+	}
+	if op, err := cancel(); err != nil || op.Error != nil || upgradeRead(h).View.Status != "cancelled" {
+		t.Fatal("confirmed original handoff did not permit cancellation", op, err)
+	}
+}
+
+func TestSelfUpgradeExpiredUndispatchedBatchCanBeCancelled(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	selfUpgradeHosts(t, h, true)
+	c.ServerUpdaterSupported = true
+	if op := startTestUpgrade(h, "expired-no-dispatch", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	h.clock.Advance(21 * time.Minute)
+	v := upgradeTick(h, ServerObservation{})
+	grant := AuthorizeServerUpdater{}
+	op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env(grant.Operation(), protocol.Target{Type: "upgrade", ID: v.UpgradeID}, nil, rev(v.Revision)), grant)
+	if op.Error == nil || upgradeRead(h).ServerUpdaterAuthorized {
+		t.Fatal("expired batch admitted an installer", op)
+	}
+	op = h.exec(owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: v.UpgradeID}, protocol.UpgradeControlPayload{Action: "cancel"}, rev(v.Revision)), ControlUpgrade{})
+	if op.Error != nil || upgradeRead(h).View.Status != "cancelled" {
+		t.Fatal("known undispatched batch could not be cancelled", op)
+	}
+	v = upgradeRead(h).View
+	op = h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env(grant.Operation(), protocol.Target{Type: "upgrade", ID: v.UpgradeID}, nil, rev(v.Revision)), grant)
+	if op.Error == nil {
+		t.Fatal("cancelled batch admitted a stale coordinator", op)
+	}
+}
 func TestSelfUpgradeConfigurationKeepsUntargetedHostsOutsideProofScope(t *testing.T) {
 	h, c := configurationUpgradeHarness(t)
 	selfUpgradeHosts(t, h, true)
@@ -174,5 +233,16 @@ func TestSelfUpgradeConfigurationKeepsUntargetedHostsOutsideProofScope(t *testin
 	}
 	if untouched := upgradeCtl(h, "linux-1"); untouched.Mode != protocol.RunnerNormal || untouched.Upgrade != nil {
 		t.Fatal("configuration changed an untargeted host", untouched)
+	}
+	h.clock.Advance(7 * time.Minute)
+	upgradeAck(h, "linux-2", protocol.RunnerReady)
+	v := upgradeTick(h, observation)
+	ctl = upgradeCtl(h, "linux-2")
+	if v.Status != "attention" || ctl.Upgrade == nil || ctl.Upgrade.Updater == nil || ctl.Mode != protocol.RunnerMaintenance {
+		t.Fatal("timeout discarded an unconfirmed independent installer", v, ctl)
+	}
+	op, err := h.app.Execute(t.Context(), owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: v.UpgradeID}, protocol.UpgradeControlPayload{Action: "cancel"}, rev(v.Revision)), ControlUpgrade{})
+	if protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		t.Fatal("pending runner supervisor was treated as cancelled", op, err)
 	}
 }
