@@ -74,6 +74,12 @@ tend maintenance review --base main --head "$CANDIDATE_COMMIT" --json
 `reconcile --session-id` 绑定原会话，不因超时创建替代执行。暂停只停止新模型调度，
 当前原生工作仍可观察；部署层停止 timer 时保留状态和配置。
 
+原生 turn 失败或被人工中断时，历史保存真实 outcome、原 turn/input 和触发索引，
+`status.failure` 与诊断概览报告故障，待办保留。普通程序检测不再次调用模型；新的
+`audit`、`resume` 或显式 backend 配置才允许新尝试，原来的人工暂停仍需 `resume`。
+这类新尝试不自动附加前会话索引。持久化失败直接出现在只读状态和日志中，
+维护器以失败退出，由进程监督器恢复，原生 daemon 继续运行。
+
 ## 发布与更新
 
 Actions 在相同提交和 GitHub Release 中附加 `tend-maintainer-main-<commit>-linux-<arch>`

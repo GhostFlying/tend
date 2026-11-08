@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -173,6 +174,9 @@ func (c *Controller) Run(ctx context.Context, p Probe) error {
 	active := time.NewTicker(5 * time.Second)
 	defer active.Stop()
 	_ = c.Check(ctx, p)
+	if err := c.persistenceFailure(ctx); err != nil {
+		return err
+	}
 	var lastEventCheck time.Time
 	for {
 		select {
@@ -204,5 +208,26 @@ func (c *Controller) Run(ctx context.Context, p Probe) error {
 			_ = c.save(ctx)
 		}
 		c.mu.Unlock()
+		if err := c.persistenceFailure(ctx); err != nil {
+			return err
+		}
 	}
+}
+
+func (c *Controller) persistenceFailure(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	c.mu.Lock()
+	fault := c.fault
+	requestID := ""
+	if c.state.Active != nil {
+		requestID = c.state.Active.InputID
+	}
+	c.mu.Unlock()
+	if fault == nil {
+		return nil
+	}
+	c.opts.Log.ErrorContext(ctx, "maintenance persistence failed", "trace_id", c.cfg.InstanceID, "request_id", requestID, "err", fault)
+	return fmt.Errorf("maintenance: durable state unavailable: %w", fault)
 }

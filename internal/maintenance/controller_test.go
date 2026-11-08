@@ -19,6 +19,7 @@ type fakeNative struct {
 	created, started, interrupted int
 	reviewed                      int
 	input, turn                   string
+	outcome                       string
 	busy, complete, loseReply     bool
 }
 
@@ -33,6 +34,9 @@ func (n *fakeNative) Read(_ context.Context, _ protocol.MaintenanceBackend, _ st
 		status := "inProgress"
 		if n.complete {
 			status = "completed"
+			if n.outcome != "" {
+				status = n.outcome
+			}
 			if n.interrupted > 0 {
 				status = "interrupted"
 			}
