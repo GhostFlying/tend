@@ -118,6 +118,9 @@ func (p *Pool) resolveManager(ctx context.Context, pin protocol.RunExecutionPin,
 			if err != nil {
 				return nil, err
 			}
+			if err = codexenv.RecordSessionHome(ctx, p.options.EnvironmentHomes, original); err != nil {
+				return nil, err
+			}
 			return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, Log: p.options.Log, HostedCoordination: !native, KillWithParent: native || original != nil, Environment: original, EnvironmentExecution: "run:" + run})
 		}
 	}

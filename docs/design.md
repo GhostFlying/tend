@@ -4,7 +4,7 @@
 
 `codexenv` 管理固定运行 home、clean/projection 扩展、AGENTS 整文件同步和不可变能力快照。Linux 使用 bubblewrap 用户 mount namespace 隔离用户技能入口与插件工作缓存；保留 HOME、项目配置和管理员要求。只共享显式 auth 文件链接，不继承主 home 的完整配置，不调用账号级插件安装或卸载。配置与管理请求以本机原子记录去重和版本校验，不访问业务账本。
 
-CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖 codexenv，codexenv 仅依赖 protocol、cfgfile/procx 及文件/进程边界，不依赖业务 app/store。TOML 采用 BurntSushi/toml，插件版本比较使用 x/mod 的语义版本实现。执行采用引用使用独立 SQLite 索引并分页读取，不把逐次运行历史复制到配置请求回执。可选 runtime 映射不替代 ExecutableRef，不改变线上协议或未配置环境的行为。自动同步只发布快照；运行和回执的生命周期决定采用时点，unknown 不自动续接。首次执行前在 run 的固定本机状态目录保存环境目录和 ID，runtime 映射变更不重定向原执行；仅禁用环境不要求重建来源。协调模式的权限限制保持优先。详见 [实施计划](plans/codex-environments.md)。
+CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖 codexenv，codexenv 仅依赖 protocol、cfgfile/procx 及文件/进程边界，不依赖业务 app/store。TOML 采用 BurntSushi/toml，插件版本比较使用 x/mod 的语义版本实现。执行采用引用使用独立 SQLite 索引并分页读取，不把逐次运行历史复制到配置请求回执。可选 runtime 映射不替代 ExecutableRef，不改变线上协议或未配置环境的行为。自动同步只发布快照；运行和回执的生命周期决定采用时点，unknown 不自动续接。首次执行前在 run 的固定本机状态目录保存环境目录和 ID，runtime 映射变更不重定向原执行；仅禁用环境不要求重建来源。已使用 home 通过小型本机目录登记表保留默认 rollout 读取范围，不扫描 run 历史；显式 roots 优先。watch 预检明确失败与已发出操作的未知结果分别记录。协调模式的权限限制保持优先。详见 [实施计划](plans/codex-environments.md)。
 
 **日期：2026-10-14**
 **基线：《中心化 Agent 任务管理服务：系统设计 v0.1》（下称 v0.1，原文应放在 `docs/design-v0.1.md`）。**

@@ -168,7 +168,8 @@ func (s *Service) Execute(ctx context.Context, q Request) (Result, error) {
 	if err = s.apply(ctx, &next, q); err != nil {
 		r.Status.LastError = err.Error()
 		state := "failed"
-		if strings.HasPrefix(q.Action, "watch ") || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		_, preflight := errors.AsType[*watchPreflightError](err)
+		if !preflight && (strings.HasPrefix(q.Action, "watch ") || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 			state = "pending"
 		}
 		view := clone(r.Status)

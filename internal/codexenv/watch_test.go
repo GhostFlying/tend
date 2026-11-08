@@ -135,3 +135,27 @@ func TestWatchRunsOnlyEnabledEnvironmentsAndStopsWithContext(t *testing.T) {
 		t.Fatal("disabled environment was synchronized")
 	}
 }
+
+func TestWatchPreflightFailureDoesNotBlockDisable(t *testing.T) {
+	s, _ := fixture(t)
+	s.Binary = "/opt/tend/bin/tend"
+	calls := 0
+	s.Systemctl = func(context.Context, []string) error { calls++; return nil }
+	enabled, err := s.Execute(t.Context(), Request{Action: "watch enable", ID: "watch-control", RequestID: "enable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Platform = func(context.Context) error { return ErrUnsupported }
+	failed, err := s.Execute(t.Context(), Request{Action: "watch enable", ID: "watch-control", RequestID: "failed-enable", ExpectedRevision: enabled.Status.Revision})
+	if !errors.Is(err, ErrUnsupported) || failed.RequestState != "failed" || calls != 2 {
+		t.Fatal(failed, err, calls)
+	}
+	status, err := s.Read("watch-control")
+	if err != nil || len(status.PendingRequestIDs) != 0 || !status.WatchEnabled {
+		t.Fatal(status, err)
+	}
+	disabled, err := s.Execute(t.Context(), Request{Action: "watch disable", ID: "watch-control", RequestID: "disable", ExpectedRevision: status.Revision})
+	if err != nil || disabled.Status.WatchEnabled || calls != 4 {
+		t.Fatal(disabled, err, calls)
+	}
+}

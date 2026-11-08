@@ -102,14 +102,20 @@ func systemdQuote(s string) string {
 func watchUnitName(root string) string {
 	return "tend-codex-env-" + digest([]byte(canonicalPath(root)))[:12] + ".service"
 }
+
+type watchPreflightError struct{ cause error }
+
+func (e *watchPreflightError) Error() string { return e.cause.Error() }
+func (e *watchPreflightError) Unwrap() error { return e.cause }
+
 func (s *Service) configureWatch(ctx context.Context, enabled bool) error {
 	if enabled {
 		if err := s.checkPlatform(ctx); err != nil {
-			return err
+			return &watchPreflightError{cause: err}
 		}
 	}
 	if !filepath.IsAbs(s.UserHome) || !filepath.IsAbs(s.Binary) {
-		return fmt.Errorf("watch requires absolute operator home and tend executable")
+		return &watchPreflightError{cause: fmt.Errorf("watch requires absolute operator home and tend executable")}
 	}
 	name := watchUnitName(s.Root)
 	path := filepath.Join(s.UserHome, ".config", "systemd", "user", name)
