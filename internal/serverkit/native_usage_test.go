@@ -14,12 +14,15 @@ import (
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/views"
 )
 
+var nativeUsageFixture storefixture.Template
+
 func TestStoppedHostedBacklogDrainsWithoutAnAgentSession(t *testing.T) {
 	clock := testkit.NewClock()
-	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	s, err := nativeUsageFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +67,7 @@ func TestStoppedHostedBacklogDrainsWithoutAnAgentSession(t *testing.T) {
 
 func TestCentralCollectorExcludesSettledHistoryAndDisarmsTimer(t *testing.T) {
 	clock := testkit.NewClock()
-	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	s, err := nativeUsageFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +96,7 @@ func TestCentralCollectorExcludesSettledHistoryAndDisarmsTimer(t *testing.T) {
 
 func TestCentralRetryStopsWhenHostedSourceReturnsToItsManager(t *testing.T) {
 	clock := testkit.NewClock()
-	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	s, err := nativeUsageFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
