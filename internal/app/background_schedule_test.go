@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -149,5 +150,67 @@ func TestCancelledRecoverySuccessorReceiptDeadline(t *testing.T) {
 	}
 	if delay != 30*time.Second {
 		t.Fatalf("cancelled recovery's successor still needs a receipt wake in 30s, got %v", delay)
+	}
+}
+
+func TestClaimedBackgroundStartupRetainsOriginalDeadline(t *testing.T) {
+	h := hostedManagerHarness(t)
+	c := createConsultationFixture(t, h)
+	startupInput(t, h, c.ID)
+	delivery, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+c.ID)
+	if err != nil || !ok {
+		t.Fatal(delivery, ok, err)
+	}
+	if err := h.app.DeferAgentStartup(t.Context(), c.ID); err != nil {
+		t.Fatal(err)
+	}
+	delay, err := h.app.BackgroundDelay(t.Context(), h.clock.Now())
+	if err != nil || delay != 30*time.Second {
+		t.Fatal("claimed startup lost original wake", delay, err)
+	}
+	before, err := h.app.PendingAgentConversations(t.Context())
+	if err != nil || hasConversation(before, c.ID) {
+		t.Fatal("backoff ignored", before, err)
+	}
+	h.clock.Advance(delay)
+	after, err := h.app.PendingAgentConversations(t.Context())
+	if err != nil || !hasConversation(after, c.ID) {
+		t.Fatal("original input did not resume", after, err)
+	}
+}
+
+func TestActiveManagerStartupHoldHasExplicitAdmissionAndDeadline(t *testing.T) {
+	h, runtime := managerClaimHarness(t)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Original input"}, rev(issue.Revision)), RequestIssueManager{})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	claimed := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil), Claim{})
+	var result struct{ Assignment *protocol.Assignment }
+	if err := json.Unmarshal(claimed.Result, &result); err != nil || result.Assignment == nil || result.Assignment.Manager == nil {
+		t.Fatal(claimed, err)
+	}
+	conversation := result.Assignment.Manager.ConversationID
+	if err := h.app.DeferAgentStartup(t.Context(), conversation); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := h.app.PendingAgentConversations(t.Context())
+	if err != nil || !hasConversation(ids, conversation) {
+		t.Fatal("fixture lost active responsibility", ids, err)
+	}
+	_, named, attachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), conversation)
+	if err != nil || !named || attachment.Reconciliation {
+		t.Fatal(attachment, named, err)
+	}
+	if allowed, err := h.app.AgentStartupAttachmentAllowed(t.Context(), attachment); err != nil || allowed {
+		t.Fatal("paused manager allowed another attachment", allowed, err)
+	}
+	if delay, err := h.app.BackgroundDelay(t.Context(), h.clock.Now()); err != nil || delay != 30*time.Second {
+		t.Fatal("paused manager lost wake", delay, err)
+	}
+	h.clock.Advance(30 * time.Second)
+	if allowed, err := h.app.AgentStartupAttachmentAllowed(t.Context(), attachment); err != nil || !allowed {
+		t.Fatal("original attachment never resumed", allowed, err)
 	}
 }
