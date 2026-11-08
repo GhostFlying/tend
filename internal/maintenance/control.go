@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,11 @@ func (c *Controller) Handler(wake chan<- struct{}) http.Handler {
 	mux.HandleFunc("GET /maintenance/request/{id}", func(w http.ResponseWriter, r *http.Request) {
 		v, err := c.Receipt(r.Context(), r.PathValue("id"))
 		if err != nil {
-			http.Error(w, "request not found", 404)
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "request not found", http.StatusNotFound)
+			} else {
+				controlError(w, http.StatusServiceUnavailable, protocol.CodeInternal, "receipt lookup is unavailable; retain the original request identity")
+			}
 			return
 		}
 		write(w, v)

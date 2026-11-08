@@ -80,6 +80,12 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	}
 	input := protocol.MaintenanceRequest{RequestID: *request, ExpectedRevision: *revision, CaseID: *id, Reason: *reason, Until: *until, Mode: *mode, SessionID: *session}
 	input.ReleaseDir = *releaseDir
+	if input.ReleaseDir != "" {
+		input.ReleaseDir, err = filepath.Abs(input.ReleaseDir)
+		if err != nil {
+			return err
+		}
+	}
 	input.UpgradeID = *upgradeID
 	input.TurnID = *turn
 	input.Base = *base
