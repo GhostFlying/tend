@@ -711,29 +711,7 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		SummaryIdleMinutes: idle,
 		Now:                now,
 		Thread:             mainthread.ThreadConfig(cwd, cfg.Model),
-		OpenNamed: func(ctx context.Context, selected hostedconfig.Selection) (harness.Session, error) {
-			if open != nil {
-				return open(ctx, SessionSpec{Config: cfg, Selection: &selected, Cwd: cwd, Env: env})
-			}
-			if selected.RunnerManaged {
-				if cfg.CodexEnvironments.Resolve(selected.Runtime.ID) != nil {
-					return nil, errors.New("runner-managed Codex environments must be configured on the executing runner")
-				}
-				if selected.RunnerRunID == "" {
-					return nil, errors.New("manager awaits its runner claim")
-				}
-				return mainthread.RunnerSession(ctx, a, selected.RunnerRunID), nil
-			}
-			bin, err := hostedExecutable(selected.Runtime.ExecutableRef)
-			if err != nil {
-				return nil, err
-			}
-			binding, execution, err := hostedCodexEnvironment(ctx, a, cfg, selected, dataDir)
-			if err != nil {
-				return nil, err
-			}
-			return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true, Environment: binding, EnvironmentExecution: execution})
-		},
+		OpenNamed:          hostedNamedSessionOpener(a, cfg, dataDir, cwd, env, open, log),
 		Open: func(ctx context.Context) (harness.Session, error) {
 			if open != nil {
 				return open(ctx, SessionSpec{Config: cfg, Cwd: cwd, Env: env})
@@ -742,6 +720,31 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		},
 		Log: log,
 	}), nil
+}
+
+// hostedNamedSessionOpener is the default production routing boundary for
+// named local sessions and already-claimed runner coordination transports.
+func hostedNamedSessionOpener(a *app.App, cfg MainAgentConfig, dataDir, cwd string, env []string, open SessionOpener, log *slog.Logger) func(context.Context, hostedconfig.Selection) (harness.Session, error) {
+	return func(ctx context.Context, selected hostedconfig.Selection) (harness.Session, error) {
+		if open != nil {
+			return open(ctx, SessionSpec{Config: cfg, Selection: &selected, Cwd: cwd, Env: env})
+		}
+		if selected.RunnerManaged {
+			if selected.RunnerRunID == "" {
+				return nil, errors.New("manager awaits its runner claim")
+			}
+			return mainthread.RunnerSession(ctx, a, selected.RunnerRunID), nil
+		}
+		bin, err := hostedExecutable(selected.Runtime.ExecutableRef)
+		if err != nil {
+			return nil, err
+		}
+		binding, execution, err := hostedCodexEnvironment(ctx, a, cfg, selected, dataDir)
+		if err != nil {
+			return nil, err
+		}
+		return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true, Environment: binding, EnvironmentExecution: execution})
+	}
 }
 
 func hostedCodexEnvironment(ctx context.Context, a *app.App, cfg MainAgentConfig, selected hostedconfig.Selection, dataDir string) (*codexenv.Binding, string, error) {
