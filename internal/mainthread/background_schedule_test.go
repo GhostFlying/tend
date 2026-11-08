@@ -127,3 +127,41 @@ func TestBackgroundPoolIgnoresMinuteOfUnrelatedReplyUpdates(t *testing.T) {
 		t.Fatal("expected startup and eligibility change only", scans, waits)
 	}
 }
+
+func TestBackgroundExpiredAttachmentRetryCannotAccelerateFailedScans(t *testing.T) {
+	clock := testkit.NewClock()
+	s, err := mainFixtureTemplate.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a := app.New(s, testkit.NewIDGen(clock, 7), clock.Now)
+	p := &BackgroundPool{App: a}
+	waits := 0
+	p.wait = func(ctx context.Context, _, _ <-chan struct{}, delay time.Duration) bool {
+		waits++
+		if waits == 1 {
+			p.mu.Lock()
+			p.deferRetryLocked("failed-conversation")
+			p.mu.Unlock()
+			clock.Advance(2 * time.Second)
+			// Fail the candidate query while keeping the startup and timer reads
+			// available, so the normal failed-scan path owns this retry.
+			if err := s.Write(ctx, func(tx *store.Tx) error {
+				_, err := tx.Exec(ctx, `ALTER TABLE agent_conversations RENAME TO unavailable_agent_conversations`)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return true
+		}
+		if delay < 2*time.Second {
+			t.Fatal("expired attachment defeated scan error backoff", delay)
+		}
+		return false
+	}
+	p.Run(t.Context())
+	if waits != 2 {
+		t.Fatal("unexpected retry count", waits)
+	}
+}

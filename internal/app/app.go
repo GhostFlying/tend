@@ -74,6 +74,8 @@ type Exec struct {
 
 // Outcome is what a successful Apply produced besides its direct writes.
 type Outcome struct {
+	// ProjectionOnly excludes output-only facts from scheduling broadcasts.
+	ProjectionOnly bool
 	// Notify wakes dispatch when a write removes a queue blocker.
 	Notify bool
 	Result any
@@ -204,9 +206,10 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: x.TraceID})
 
 	var (
-		op      protocol.Operation
-		queued  bool
-		applied bool
+		op             protocol.Operation
+		queued         bool
+		applied        bool
+		projectionOnly bool
 	)
 	err = a.write(ctx, func(tx *store.Tx) error {
 
@@ -347,6 +350,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if err := tx.Release(ctx, applySavepoint); err != nil {
 				return err
 			}
+			projectionOnly = out.ProjectionOnly || projectionOnlyOperation(cmd.Operation())
 			queued = out.Notify || x.FollowupQueued || len(out.Outbox) > 0
 			for _, event := range out.Events {
 				queued = queued || wakesMain(x.Principal, event.Kind) || questionEvent(event) || event.ObjectType == "attention"
@@ -371,7 +375,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		a.notifier.Notify()
 	}
 	if applied {
-		if projectionOnlyOperation(cmd.Operation()) && !queued {
+		if projectionOnly && !queued {
 			a.changes.Notify()
 		} else {
 			a.notifyChange()
