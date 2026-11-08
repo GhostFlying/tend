@@ -290,3 +290,155 @@ func TestSharedReviewExistingEvidenceLinkedPRDoesNotExposeIsolatedOriginal(t *te
 		t.Fatal("isolated file became readable", err)
 	}
 }
+
+func TestSharedReviewExistingEvidenceWorkerReadsSameProjectContributor(t *testing.T) {
+	h, _, review, sourceTask, body, file := sharedReviewReportedContribution(t)
+	var sourceIssue string
+	for _, link := range review.Links {
+		if link.TaskID == sourceTask {
+			sourceIssue = link.IssueID
+		}
+	}
+	other := createCanonicalOwnerTestIssue(t, h)
+	other.Plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "pr", Provider: review.Provider, Repository: review.Repository, Number: review.Number}}
+	other = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, other, "update", protocol.UpdateIssuePayload{Plan: other.Plan, ExpectedAssignmentEpoch: other.AssignmentEpoch}))
+	sharedReviewAction(t, h, other.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr"})
+	other = canonicalTaskIssue(t, h, other.IssueID)
+	spec := protocol.OwnerTaskSpec{Goal: "Assess existing same-project PR checks", Acceptance: []string{"Read the contributor's original report before selecting additional checks"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}}}
+	createdOp := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: other.IssueID}, protocol.CreateIssueTaskPayload{Title: "Assess linked evidence", ExpectedAssignmentEpoch: other.AssignmentEpoch, Spec: spec}, rev(other.Revision)), CanonicalOwnerTaskCreate{})
+	var created taskResult
+	if err := json.Unmarshal(createdOp.Result, &created); err != nil || createdOp.Status != protocol.OpSucceeded {
+		t.Fatal(createdOp, err)
+	}
+	var runtime protocol.RunnerRuntime
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		row, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+		runtime = row.Runtime
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker, ok := h.claimInputRun(&runtime)
+	if !ok || worker.TaskID != created.TaskID {
+		t.Fatalf("ordinary worker did not claim current Issue task: %+v", worker)
+	}
+	principal := runPrincipal(worker.RunID, worker.Role)
+	find := func(page *protocol.SharedDeliveryReviewPage) protocol.SharedReviewContributionEvidence {
+		t.Helper()
+		if page == nil {
+			t.Fatal("missing shared review page")
+		}
+		for _, group := range page.ExistingEvidence {
+			for _, item := range group.Contributions {
+				if item.TaskID == sourceTask {
+					return item
+				}
+			}
+		}
+		t.Fatal("linked contributor absent")
+		return protocol.SharedReviewContributionEvidence{}
+	}
+	var direct protocol.SharedDeliveryReviewPage
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		direct, err = views.SharedDeliveryReviews(t.Context(), tx.Q(), other.IssueID, "pr", "", 10)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ownerMaterials, err := h.app.ReadIssueMaterials(t.Context(), other.IssueID, protocol.IssueMaterialsQuery{Kind: "reviews", ID: "pr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerContext, err := h.app.ReadRunContext(t.Context(), principal, protocol.IssueMaterialsQuery{Kind: "reviews", ID: "pr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalID := h.task(sourceTask).CurrentArtifactID
+	for entry, page := range map[string]*protocol.SharedDeliveryReviewPage{"direct": &direct, "owner materials": ownerMaterials.SharedReviews, "ordinary worker": workerContext.Materials.SharedReviews} {
+		item := find(page)
+		if item.Availability != "available" || item.CandidateRelation != "head_matches" || item.ArtifactID != originalID || item.ReadQuery == nil {
+			t.Fatalf("%s disagrees about same-project contributor: %+v", entry, item)
+		}
+	}
+	verifyOriginal := func(item protocol.SharedReviewContributionEvidence) {
+		t.Helper()
+		if item.ReadQuery == nil {
+			t.Fatal("no original reference")
+		}
+		original, err := h.app.ReadRunContext(t.Context(), principal, *item.ReadQuery)
+		if err != nil || len(original.Materials.Artifacts) != 1 {
+			t.Fatalf("original query is not usable by the actual worker: %+v %v", item.ReadQuery, err)
+		}
+		var payload protocol.ArtifactPayload
+		if err := json.Unmarshal(original.Materials.Artifacts[0].Artifact.Ref, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Report == nil || payload.Report.Body != body || len(payload.Files) != 1 || payload.Files[0] != file {
+			t.Fatal("original report/file metadata changed")
+		}
+		metadata, err := h.app.ReadRunContextFile(t.Context(), principal, file.FileID)
+		if err != nil || metadata.ArtifactFile != file {
+			t.Fatalf("original file metadata unavailable: %+v %v", metadata, err)
+		}
+	}
+	verifyOriginal(find(workerContext.Materials.SharedReviews))
+	materialProjectForTest(t, h, sourceIssue, "isolated-contributor")
+	isolated, err := h.app.ReadRunContext(t.Context(), principal, protocol.IssueMaterialsQuery{Kind: "reviews", ID: "pr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := find(isolated.Materials.SharedReviews)
+	if item.Availability != "outside_context" || item.ArtifactID != "" || item.Report != nil || len(item.Files) != 0 || item.ReadQuery != nil {
+		t.Fatal("shared PR widened cross-project original access", item)
+	}
+	if _, err := h.app.ReadRunContext(t.Context(), principal, protocol.IssueMaterialsQuery{IssueID: sourceIssue, Kind: "artifacts", ID: originalID}); protocol.CodeOf(err) != protocol.CodeForbidden {
+		t.Fatal("cross-project original query accepted", err)
+	}
+	var original store.ArtifactRow
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		original, err = store.GetArtifact(t.Context(), tx.Q(), originalID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	other = canonicalTaskIssue(t, h, other.IssueID)
+	grant := protocol.GrantArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: other.AssignmentEpoch, Reason: "Share this exact original contributor report"}, ArtifactID: originalID, RefSHA256: store.ArtifactRefSHA256(original.RefJSON)}
+	granted := h.exec(owner, h.env(protocol.OpGrantArtifactShare, protocol.Target{Type: "issue", ID: other.IssueID}, grant, rev(other.Revision)), ArtifactShareCommand{})
+	if granted.Status != protocol.OpSucceeded {
+		t.Fatal(granted)
+	}
+	var share protocol.ArtifactShare
+	if err := json.Unmarshal(granted.Result, &share); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := h.app.ReadRunContext(t.Context(), principal, protocol.IssueMaterialsQuery{Kind: "reviews", ID: "pr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedItem := find(shared.Materials.SharedReviews)
+	if sharedItem.Availability != "available" || sharedItem.ReadQuery == nil || sharedItem.ReadQuery.IssueID != other.IssueID {
+		t.Fatal("exact existing share did not preserve reader context", sharedItem)
+	}
+	verifyOriginal(sharedItem)
+	// Restoring ordinary same-project knowledge must not erase the reader's
+	// existing explicit revocation of this exact artifact.
+	materialProjectForTest(t, h, sourceIssue, other.Plan.Project)
+	other = canonicalTaskIssue(t, h, other.IssueID)
+	revoke := protocol.RevokeArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: other.AssignmentEpoch, Reason: "Withdraw this exact contributor artifact"}, ShareID: share.ShareID, ExpectedShareRevision: share.Revision}
+	if op := h.exec(owner, h.env(protocol.OpRevokeArtifactShare, protocol.Target{Type: "issue", ID: other.IssueID}, revoke, rev(other.Revision)), ArtifactShareCommand{Revoke: true}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	revoked, err := h.app.ReadRunContext(t.Context(), principal, protocol.IssueMaterialsQuery{Kind: "reviews", ID: "pr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revokedItem := find(revoked.Materials.SharedReviews)
+	if revokedItem.Availability != "outside_context" || revokedItem.ReadQuery != nil || revokedItem.Report != nil || len(revokedItem.Files) != 0 {
+		t.Fatal("same-project expansion bypassed reader-specific revocation", revokedItem)
+	}
+	if _, err := h.app.ReadRunContext(t.Context(), principal, protocol.IssueMaterialsQuery{IssueID: sourceIssue, Kind: "artifacts", ID: originalID}); protocol.CodeOf(err) != protocol.CodeNotFound {
+		t.Fatal("original lookup lost reader-specific revocation", err)
+	}
+}

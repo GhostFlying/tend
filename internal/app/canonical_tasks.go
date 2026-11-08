@@ -147,6 +147,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		if err := tx.PutIssueDeliveryDuty(ctx, current.IssueID, *deliveryDuty); err != nil {
 			return Outcome{}, err
 		}
+		out.Events = append(out.Events, deliveryDutyContextEvent(current.IssueID, *deliveryDuty))
 	}
 	return out, nil
 }

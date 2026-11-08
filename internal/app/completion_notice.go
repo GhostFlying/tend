@@ -67,7 +67,7 @@ func recordCompletionNotice(ctx context.Context, x *Exec, tx *store.Tx, taskID, 
 			}
 		}
 		if scope.Canonical {
-			if err := recordIssueDeliveryDuty(ctx, tx, item.WorkItemID, taskID, sourceEventID, acceptanceID); err != nil {
+			if err := recordIssueDeliveryDuty(ctx, x, tx, item.WorkItemID, taskID, sourceEventID, acceptanceID); err != nil {
 				return err
 			}
 			fmt.Fprintf(&body, "\n\n事项：%s（%s）。本轮结果已按冻结策略完成，负责人须核对真实交付终点；delivery_duties 独立保留交付责任。准备可审阅 PR/diff 与验证后，用 issues_update_delivery 提出绑定候选及范围的版本化 Attention，在当前 IM 请求 owner 确认。未批准不得合入或部署；批准后按范围继续并验证。任务完成和完成通知核对都不会消除交付责任。", item.WorkItemID, item.Title)

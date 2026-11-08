@@ -13,7 +13,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func recordIssueDeliveryDuty(ctx context.Context, tx *store.Tx, issue, task, event, acceptance string) error {
+func recordIssueDeliveryDuty(ctx context.Context, x *Exec, tx *store.Tx, issue, task, event, acceptance string) error {
 	// A delivery execution discharges its original obligation after acceptance
 	// and provider verification; it does not manufacture an endless new handoff.
 	var accepted, artifact any
@@ -26,8 +26,27 @@ func recordIssueDeliveryDuty(ctx context.Context, tx *store.Tx, issue, task, eve
 		}
 		artifact = row.CurrentArtifactID
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,acceptance_id,artifact_id)
+	result, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,acceptance_id,artifact_id)
  SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM issue_delivery_executions WHERE task_id=?) ON CONFLICT DO NOTHING`, issue, task, event, accepted, artifact, task)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 0 {
+		return err
+	}
+	// Completion already schedules its existing owner notice. This event only
+	// indexes the actual newly persisted duty in the same transaction.
+	change := deliveryDutyContextEvent(issue, protocol.IssueDeliveryDuty{TaskID: task, Revision: 1, Status: "preparing"})
+	body, err := json.Marshal(change.Body)
+	if err != nil {
+		return err
+	}
+	actor, err := json.Marshal(x.Principal)
+	if err != nil {
+		return err
+	}
+	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: change.ObjectType, ObjectID: change.ObjectID, Kind: change.Kind, BodyJSON: string(body), RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: string(actor), CreatedAt: x.Now.UnixMilli()})
 	return err
 }
 
@@ -657,4 +676,10 @@ func contextDeliveryEventDetails(out *Outcome, sourceTask string) {
 			e.Body["source_task_id"] = sourceTask
 		}
 	}
+}
+
+// deliveryDutyContextEvent is emitted only by actual duty writers. It neither
+// changes the Issue definition nor authorizes its next execution.
+func deliveryDutyContextEvent(issue string, d protocol.IssueDeliveryDuty) Event {
+	return Event{ObjectType: "issue", ObjectID: issue, Kind: "issue.delivery_updated", Body: map[string]any{"source_task_id": d.TaskID, "duty_revision": d.Revision, "duty_status": d.Status}}
 }

@@ -297,7 +297,22 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		return Outcome{}, err
 	}
 	if p.Option == "defer" {
-		if _, err := tx.Exec(ctx, `UPDATE issue_delivery_duties SET status='deferred',revision=revision+1 WHERE status='awaiting_owner' AND json_extract(body_json,'$.attention_id') IN (SELECT attention_id FROM attentions WHERE decision_id=?)`, d.DecisionID); err != nil {
+		rows, err := tx.Q().QueryContext(ctx, `UPDATE issue_delivery_duties SET status='deferred',revision=revision+1 WHERE status='awaiting_owner' AND json_extract(body_json,'$.attention_id') IN (SELECT attention_id FROM attentions WHERE decision_id=?) RETURNING issue_id,task_id,revision,status`, d.DecisionID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		for rows.Next() {
+			var issue string
+			var duty protocol.IssueDeliveryDuty
+			if err := rows.Scan(&issue, &duty.TaskID, &duty.Revision, &duty.Status); err != nil {
+				rows.Close()
+				return Outcome{}, err
+			}
+			sourceEvents = append(sourceEvents, deliveryDutyContextEvent(issue, duty))
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
 			return Outcome{}, err
 		}
 	}

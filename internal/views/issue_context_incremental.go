@@ -197,7 +197,7 @@ func CanonicalIssueContextIncremental(ctx context.Context, q store.Querier, id s
  UNION ALL SELECT '2/'||j.value,'source',j.value,e.event_seq FROM changed e,json_each(e.body_json,'$.changed_source_ids') j,p WHERE e.object_id=p.issue AND e.object_type IN ('issue','work_item')
  UNION ALL SELECT '3/'||task_id,'task',task_id,seq FROM task_changes
  UNION ALL SELECT '4/'||d.task_id,'delivery',d.task_id,MAX(e.event_seq) FROM issue_delivery_duties d,p JOIN changed e ON (e.object_type='issue' AND e.object_id=p.issue AND e.kind='issue.delivery_updated' AND (json_type(e.body_json,'$.source_task_id') IS NULL OR json_extract(e.body_json,'$.source_task_id')=d.task_id)) WHERE d.issue_id=p.issue GROUP BY d.task_id
- UNION ALL SELECT '5/'||l.review_id,'review',l.review_id,MAX(e.event_seq) FROM shared_delivery_review_links l,p JOIN changed e ON e.object_type='issue' AND e.object_id=l.issue_id AND e.kind='issue.delivery_review_changed' AND json_extract(e.body_json,'$.review_id')=l.review_id WHERE l.issue_id=p.issue GROUP BY l.review_id
+ UNION ALL SELECT '5/'||json_extract(e.body_json,'$.review_id'),'review',json_extract(e.body_json,'$.review_id'),MAX(e.event_seq) FROM changed e,p WHERE e.object_type='issue' AND e.object_id=p.issue AND e.kind='issue.delivery_review_changed' AND COALESCE(json_extract(e.body_json,'$.review_id'),'')<>'' GROUP BY json_extract(e.body_json,'$.review_id')
  UNION ALL SELECT '6/'||a.attention_id,'attention',a.attention_id,MAX(e.event_seq) FROM attentions a LEFT JOIN attention_responsibilities ar USING(attention_id),p JOIN changed e ON e.object_type='attention' AND e.object_id=a.attention_id WHERE a.issue_id=p.issue OR ar.issue_id=p.issue GROUP BY a.attention_id
  UNION ALL SELECT '7/'||json_extract(e.body_json,'$.delivery_id'),'observation',json_extract(e.body_json,'$.delivery_id'),MAX(e.event_seq) FROM changed e,p WHERE e.kind='work_item.delivery_changed' AND e.object_id=p.issue AND json_extract(e.body_json,'$.delivery_id') IS NOT NULL GROUP BY json_extract(e.body_json,'$.delivery_id')
  ) SELECT key,kind,id,MAX(seq) FROM objects WHERE key>? GROUP BY key,kind,id ORDER BY key LIMIT ?`, id, string(rawIDs), issue.Plan.Project, c.From, c.ScanThrough, c.After, query.Limit+1)
@@ -222,6 +222,9 @@ func CanonicalIssueContextIncremental(ctx context.Context, q store.Querier, id s
 	if pageMore {
 		entries = entries[:query.Limit]
 	}
+	// Queue state and its reason use the same current scheduling facts as
+	// the ordinary Task view, loaded once only when this page contains Tasks.
+	var execution *executionFacts
 	for _, e := range entries {
 		item := protocol.IssueContextChange{Kind: e.kind, ID: e.id, EventSeq: e.seq}
 		switch e.kind {
@@ -238,7 +241,14 @@ func CanonicalIssueContextIncremental(ctx context.Context, q store.Querier, id s
 				return out, err
 			}
 			item.Task = &protocol.IssueTaskSummary{TaskID: t.TaskID, Title: t.Title, Lifecycle: t.Lifecycle, ControlMode: t.ControlMode, ControlRevision: t.ControlRevision, SpecVersion: t.SpecVersion, Rating: t.Rating, BlockReason: t.BlockReason}
-			item.Task.Execution, err = (executionFacts{}).task(ctx, q, t)
+			if execution == nil {
+				facts, e := readExecutionFacts(ctx, q)
+				if e != nil {
+					return out, e
+				}
+				execution = &facts
+			}
+			item.Task.Execution, err = execution.task(ctx, q, t)
 			if err != nil {
 				return out, err
 			}
@@ -261,6 +271,24 @@ func CanonicalIssueContextIncremental(ctx context.Context, q store.Querier, id s
 			item.State = d.Status
 		case "review":
 			r := protocol.IssueContextReviewRef{ReviewID: e.id}
+			var linked bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_delivery_review_links WHERE review_id=? AND issue_id=?)`, e.id, id).Scan(&linked); err != nil {
+				return out, err
+			}
+			if !linked {
+				// The original Issue's unlink event is retained even after
+				// its last current link disappears. Do not read the now
+				// inaccessible review's current details from another Issue.
+				if err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(body_json,'$.review_revision'),0) FROM events WHERE event_seq=?`, e.seq).Scan(&r.Revision); err != nil {
+					return out, err
+				}
+				r.Status = "unlinked"
+				item.Review = &r
+				item.Revision = r.Revision
+				item.State = r.Status
+				item.Removed = true
+				break
+			}
 			if err := q.QueryRowContext(ctx, `SELECT revision,json_extract(body_json,'$.status') FROM shared_delivery_reviews WHERE review_id=?`, e.id).Scan(&r.Revision, &r.Status); err != nil {
 				return out, err
 			}
