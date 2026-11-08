@@ -87,3 +87,18 @@ func TestDisablingMissingProjectionRetainsSnapshotAndRecovery(t *testing.T) {
 		t.Fatal("enabling accepted missing source")
 	}
 }
+
+func TestDisabledProfileCanRestoreDeletedEnvironment(t *testing.T) {
+	s, p := fixture(t)
+	p.Enabled = false
+	status := create(t, s, p)
+	deleted, err := s.Execute(t.Context(), Request{Action: "delete", ID: p.ID, RequestID: "delete", ExpectedRevision: status.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := deleted.Status.Profile
+	restored, err := s.Execute(t.Context(), Request{Action: "update", ID: p.ID, RequestID: "restore", ExpectedRevision: deleted.Status.Revision, Profile: &profile})
+	if err != nil || restored.Status.Deleted || restored.Status.Profile.Enabled {
+		t.Fatal(restored, err)
+	}
+}

@@ -27,10 +27,15 @@ func TestIntegrationNativeProbePreservesCancellationIdentity(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	s, p := fixture(t)
 	p.UserHome, _ = os.UserHomeDir()
-	s.Validate = nil
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
-	_, err := s.Execute(ctx, Request{Action: "create", ID: p.ID, RequestID: "cancelled-probe", Profile: &p})
+	// Start the short deadline after request admission and source staging. A
+	// busy filesystem may take longer than this to durably create the store;
+	// cancellation before admission has no original request to reconcile.
+	s.Validate = func(ctx context.Context, profile Profile, stage string) error {
+		probeCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		return s.validateNative(probeCtx, profile, stage)
+	}
+	_, err := s.Execute(t.Context(), Request{Action: "create", ID: p.ID, RequestID: "cancelled-probe", Profile: &p})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("native EOF hid probe cancellation", err)
 	}
