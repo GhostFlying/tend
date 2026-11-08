@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -108,5 +109,48 @@ func TestConcurrencyActiveNotificationsCoalesceToThirtySeconds(t *testing.T) {
 	h.app.runConcurrency(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)), wait, func() { ticks++ })
 	if ticks != 2 {
 		t.Fatal("sample count", ticks)
+	}
+}
+
+func TestConcurrencyIdleReadExpiresWindowWithoutSamplingOrWriting(t *testing.T) {
+	h := newHarness(t)
+	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 2, Max: 4})
+	now := h.clock.Now().UnixMilli()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		state, err := concurrencyState(t.Context(), tx.Q(), "shared")
+		if err != nil {
+			return err
+		}
+		state.Group.ObservationSince = now - domain.ConcurrencyWindow.Milliseconds()
+		state.Group.SaturatedMillis = domain.ConcurrencySaturation.Milliseconds()
+		state.Group.SuccessfulTurns = 1
+		state.Intervals = []domain.ConcurrencyInterval{{Start: now - domain.ConcurrencySaturation.Milliseconds(), End: now}}
+		state.Successes = []int64{now}
+		return saveConcurrency(t.Context(), tx, state)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(20 * time.Minute)
+	group, err := h.app.ConcurrencyGroup(t.Context(), "shared")
+	if err != nil || group.SaturatedMillis != (10*time.Minute).Milliseconds() || group.SuccessfulTurns != 1 {
+		t.Fatal("window was not clipped", group, err)
+	}
+	h.clock.Advance(10*time.Minute + time.Millisecond)
+	group, err = h.app.ConcurrencyGroup(t.Context(), "shared")
+	if err != nil || group.SaturatedMillis != 0 || group.SuccessfulTurns != 0 {
+		t.Fatal("expired idle evidence remained current", group, err)
+	}
+	page, err := h.app.ConcurrencyGroups(t.Context(), protocol.ConcurrencyQuery{Limit: 50})
+	if err != nil || len(page.Items) != 1 || page.Items[0].SaturatedMillis != 0 || page.Items[0].SuccessfulTurns != 0 {
+		t.Fatal("list retained expired evidence", page, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		state, err := concurrencyState(t.Context(), tx.Q(), "shared")
+		if err == nil && (state.Group.SaturatedMillis != domain.ConcurrencySaturation.Milliseconds() || len(state.Successes) != 1) {
+			t.Fatal("read rewrote stored observations", state)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
