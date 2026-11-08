@@ -91,6 +91,7 @@ type Manager struct {
 	usageIndex         *nativeusage.Discovery
 	usageRetries       nativeusage.Retries
 	usageSettling      bool
+	usageSettleUntil   time.Time
 	usageMu            sync.Mutex
 	usageFiles         map[string]usageDiscovery
 	usageWake          chan struct{}

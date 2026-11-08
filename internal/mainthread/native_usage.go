@@ -22,6 +22,7 @@ type usageDiscovery struct {
 func (m *Manager) wakeNativeUsage() {
 	m.mu.Lock()
 	m.usageSettling = true
+	m.usageSettleUntil = m.cfg.Now().Add(2 * time.Second)
 	wake := m.usageWake
 	m.mu.Unlock()
 	select {
@@ -202,33 +203,43 @@ func (m *Manager) startNativeUsage(ctx context.Context, th harness.Thread) func(
 	m.mu.Unlock()
 	pollCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		delayedFinal := false
-		for {
-			m.mu.Lock()
-			active := (m.active != nil && !m.active.finished) || m.summaryActive
-			settling := m.usageSettling
-			m.usageSettling = false
-			m.mu.Unlock()
-			delay := m.syncNativeUsagePass(pollCtx, false, !active && (settling || delayedFinal))
-			delayedFinal = !active && settling
-			m.mu.Lock()
-			active = (m.active != nil && !m.active.finished) || m.summaryActive
-			m.mu.Unlock()
-			if (active || delayedFinal) && (delay == 0 || delay > 2*time.Second) {
-				delay = 2 * time.Second
-			}
-			if !nativeusage.Wait(pollCtx, wake, delay) {
-				return
-			}
-		}
-	}()
+	go func() { defer close(done); m.nativeUsageLoop(pollCtx, wake) }()
+
 	return func() {
 		cancel()
 		<-done
 		flush, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer stop()
 		m.syncNativeUsage(flush)
+	}
+}
+
+// Completion settling is a deadline, not a count of wakeups. A buffered wake
+// cannot consume the obligation to inspect files flushed after the completion.
+func (m *Manager) nativeUsageLoop(ctx context.Context, wake <-chan struct{}) {
+	for {
+		m.mu.Lock()
+		active := (m.active != nil && !m.active.finished) || m.summaryActive
+		settling, until := m.usageSettling, m.usageSettleUntil
+		m.usageSettling = false
+		m.mu.Unlock()
+		due := !until.IsZero() && !m.cfg.Now().Before(until)
+		delay := m.syncNativeUsagePass(ctx, false, !active && (settling || due))
+		m.mu.Lock()
+		active = (m.active != nil && !m.active.finished) || m.summaryActive
+		if due && delay == 0 && !active && m.usageSettleUntil.Equal(until) {
+			m.usageSettleUntil = time.Time{}
+		}
+		until = m.usageSettleUntil
+		m.mu.Unlock()
+		if active && (delay == 0 || delay > 2*time.Second) {
+			delay = 2 * time.Second
+		}
+		if remaining := until.Sub(m.cfg.Now()); remaining > 0 && (delay == 0 || remaining < delay) {
+			delay = remaining
+		}
+		if !nativeusage.Wait(ctx, wake, delay) {
+			return
+		}
 	}
 }

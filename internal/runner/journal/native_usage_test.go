@@ -92,3 +92,29 @@ func TestNativeUsageCursorAndUploadSurviveRestartTogether(t *testing.T) {
 		t.Fatal(sources, err)
 	}
 }
+
+func TestQueuedUploadWakesCollectorAfterHistoryHasSettled(t *testing.T) {
+	j := open(t, filepath.Join(t.TempDir(), "journal.db"))
+	defer j.Close()
+	src := UsageSource{ID: "source", RunID: "run", WriterStopped: true, RegistrationQueued: true, Coverage: "caught_up", Source: nativeusage.Source{Provider: "traex", ThreadID: "thread"}}
+	if err := j.RegisterUsageSource(t.Context(), src); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-j.UsageWake():
+	default:
+	}
+	env := protocol.Envelope{RequestID: "original-upload", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}}
+	if err := j.QueueUsage(t.Context(), src, &env); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-j.UsageWake():
+	default:
+		t.Fatal("durable upload did not wake the dormant collector")
+	}
+	pending, err := j.Requests(t.Context())
+	if err != nil || len(pending) != 1 || pending[0].Envelope.RequestID != env.RequestID {
+		t.Fatal(pending, err)
+	}
+}

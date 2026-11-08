@@ -90,3 +90,27 @@ func TestUsageCoverageOnlyChangeNotifiesReaders(t *testing.T) {
 		t.Fatalf("coverage changed without usage notification: events before=%d after=%d", before, after)
 	}
 }
+
+func TestPrivateSummaryUsageDoesNotInvalidateFrozenSummaryInput(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.app.BindMainThread(t.Context(), "main", "source", "schema", "source.rollout"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.app.HandoffSnapshot(t.Context(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := LocalUsageSource{ID: "private-summary", Source: []byte(`{"thread_id":"summary","session_id":"summary","purpose":"internal_summary"}`)}
+	if err := h.app.RegisterLocalUsage(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	sample := nativeSample(h.clock.Now().UnixMilli())
+	sample.Purpose = "internal_summary"
+	if err := h.app.RecordNativeConversationUsage(t.Context(), "main", []protocol.TokenUsageSample{sample}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := h.app.HandoffSnapshot(t.Context(), "main")
+	if err != nil || !before.Covers(after) {
+		t.Fatal("accounting changed unchanged summary input", before, after, err)
+	}
+}
