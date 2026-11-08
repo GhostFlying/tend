@@ -130,3 +130,40 @@ func InheritExecution(ctx context.Context, state, execution, previousState, prev
 	}
 	return BindExecution(ctx, state, execution, original, false)
 }
+
+// ConfirmExecutionClosed records an independently verified native close. The
+// caller must first prove the original process group and descendants stopped.
+// It never selects a new binding or creates a missing adoption reference.
+func ConfirmExecutionClosed(ctx context.Context, state, execution string) error {
+	if state == "" {
+		return nil
+	}
+	binding, err := readExecutionBinding(state, execution)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || binding == nil {
+		return err
+	}
+	dir, err := (&Service{Root: binding.Directory}).directory(binding.ID)
+	if err != nil {
+		return err
+	}
+	release, err := lock(ctx, dir)
+	if err != nil {
+		return err
+	}
+	defer release()
+	prior, ok, err := readAdoption(ctx, dir, execution)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	if prior.State == "retained" {
+		return nil
+	}
+	prior.State = "retained"
+	return writeAdoption(ctx, dir, prior)
+}

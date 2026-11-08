@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/procx"
 )
@@ -202,5 +203,49 @@ func TestOwnedAppServerDetachedNativeExecutionStaysUnknownAndIsolated(t *testing
 		if err != nil || current != process || !active {
 			t.Fatal("recovery signalled an independently running session", process, err)
 		}
+	}
+}
+
+func TestOwnedRecoveryReconcilesEnvironmentOnlyAfterConfirmedClose(t *testing.T) {
+	_, spec, _, _ := ownedProcessFixture(t)
+	svc := &codexenv.Service{Root: t.TempDir(), Validate: func(context.Context, codexenv.Profile, string) error { return nil }}
+	profile := codexenv.Profile{ID: "original", Home: t.TempDir(), UserHome: t.TempDir(), Enabled: true}
+	created, err := svc.Execute(t.Context(), codexenv.Request{Action: "create", ID: profile.ID, RequestID: "create", Profile: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := &codexenv.Binding{Directory: svc.Root, ID: profile.ID}
+	if _, err = codexenv.BindExecution(t.Context(), spec.StateDir, "run:"+spec.RunID, binding, false); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := binding.Pin(t.Context(), "run:"+spec.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ref.Record(t.Context(), "unknown"); err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewWorkers(WorkerOptions{Session: Options{Bin: "must-not-launch"}})
+	changed := spec
+	changed.Thread = "wrong-thread"
+	if err = restarted.StopOwnedWorker(t.Context(), changed); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
+		t.Fatal(err)
+	}
+	status, err := svc.Read(profile.ID)
+	if err != nil || status.Adoptions["run:"+spec.RunID].State != "unknown" {
+		t.Fatal("unconfirmed stop cleared uncertainty", status, err)
+	}
+	if err = restarted.StopOwnedWorker(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	status, err = svc.Read(profile.ID)
+	if err != nil || status.Adoptions["run:"+spec.RunID].State != "retained" {
+		t.Fatal("confirmed close left execution permanently active", status, err)
+	}
+	if err = restarted.StopOwnedWorker(t.Context(), spec); err != nil {
+		t.Fatal("close reconciliation is not idempotent", err)
+	}
+	if _, err = svc.Execute(t.Context(), codexenv.Request{Action: "delete", ID: profile.ID, RequestID: "delete", ExpectedRevision: created.Status.Revision}); err != nil {
+		t.Fatal("closed execution blocked deletion", err)
 	}
 }

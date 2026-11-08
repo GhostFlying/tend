@@ -23,10 +23,14 @@ func adoptionDB(ctx context.Context, dir string, create bool) (*sql.DB, error) {
 			return nil, err
 		}
 	}
-	dsn := (&url.URL{Scheme: "file", Path: path}).String()
-	if !create {
-		dsn += "?mode=ro"
+	query := url.Values{}
+	query.Add("_pragma", "busy_timeout(5000)")
+	if create {
+		query.Add("_pragma", "journal_mode(WAL)")
+	} else {
+		query.Set("mode", "ro")
 	}
+	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}).String()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

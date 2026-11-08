@@ -3,11 +3,13 @@
 package codexenv
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecutionReferencesAreIndexedAndPaginated(t *testing.T) {
@@ -59,5 +61,49 @@ func TestEnvironmentRejectsDefaultHomeAndNonexistentAliases(t *testing.T) {
 	}
 	if !samePath(filepath.Join(actual, "future"), filepath.Join(alias, "future")) {
 		t.Fatal("nonexistent child alias was not normalized")
+	}
+}
+
+func TestAdoptionReaderDoesNotBlockNativeStatePersistence(t *testing.T) {
+	s, p := fixture(t)
+	create(t, s, p)
+	binding := &Binding{Directory: s.Root, ID: p.ID}
+	ref, err := binding.Pin(t.Context(), "run:concurrent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(s.Root, p.ID)
+	reader, err := adoptionDB(t.Context(), dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	var timeout int
+	if err = reader.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&timeout); err != nil || timeout == 0 {
+		t.Fatal(timeout, err)
+	}
+	rows, err := reader.QueryContext(t.Context(), "SELECT body FROM adoptions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("reader snapshot missing", rows.Err())
+	}
+	var before []byte
+	if err = rows.Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err = ref.Record(ctx, "ready"); err != nil {
+		t.Fatal("held inspection snapshot blocked native state persistence", err)
+	}
+	if err = rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var mode string
+	if err = reader.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
+		t.Fatal(mode, err)
 	}
 }
