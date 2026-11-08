@@ -229,6 +229,7 @@ func (c *Controller) tick(ctx context.Context) error {
 	observed.ProcessInstanceID = c.cfg.ProcessInstance
 	observed.BinarySHA256 = c.cfg.BinarySHA256
 	observed.UpdaterReceipt = c.rollbackReceipt(ctx)
+	var selfErr error
 	current, readErr := c.app.CurrentUpgrade(ctx)
 	if readErr != nil {
 		return readErr
@@ -239,17 +240,25 @@ func (c *Controller) tick(ctx context.Context) error {
 			return e
 		}
 		if row.ReleaseSet != nil && row.ReleaseSet.Format >= 2 {
-			status, e := updater.SelfUpdateCall(ctx, c.cfg.UpdaterSocket, nil)
+			readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			status, e := updater.SelfUpdateCall(readCtx, c.cfg.UpdaterSocket, nil)
 			if e == nil {
 				observed.Updater = &status.Observation
 			}
-			if current.Status == "running" && current.Phase == "server_updater" {
-				observation, e := updater.EnsureSelfUpdate(ctx, c.cfg.UpdaterSocket, updater.SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: row.StartRequestID, ExpiresAtMillis: row.View.OverallDeadlineMillis}, UpgradeID: row.View.UpgradeID, Release: filepath.Join(c.cfg.ReleaseDir, row.View.UpgradeID), ReleaseSetSHA256: row.ReleaseSetSHA256})
-				if e != nil {
-					return e
+			// Never block the ledger's original deadline waiting for an installer.
+			// A repeated target with this exact identity only observes its durable
+			// attempt in the supervisor; it cannot dispatch stop/start a second time.
+			if e == nil && current.Status == "running" && current.Phase == "server_updater" && c.cfg.Now().UnixMilli() < row.View.OverallDeadlineMillis {
+				request := updater.SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: row.StartRequestID, ExpiresAtMillis: row.View.OverallDeadlineMillis}, UpgradeID: row.View.UpgradeID, Release: filepath.Join(c.cfg.ReleaseDir, row.View.UpgradeID), ReleaseSetSHA256: row.ReleaseSetSHA256}
+				if status.Journal == nil || status.Journal.Plan.Request != request {
+					status, e = updater.SelfUpdateCall(readCtx, c.cfg.UpdaterSocket, &request)
+					if e == nil {
+						observed.Updater = &status.Observation
+					}
 				}
-				observed.Updater = &observation
 			}
+			cancel()
+			selfErr = e
 		}
 	}
 	v, err := c.app.TickUpgrade(ctx, observed)
@@ -257,7 +266,7 @@ func (c *Controller) tick(ctx context.Context) error {
 		return err
 	}
 	if v.Status != "running" || v.Phase != "server_ready" || !observed.MainDrained {
-		return nil
+		return selfErr
 	}
 	if err := c.recheckManagerParkCandidate(ctx, v.UpgradeID); err != nil {
 		return err

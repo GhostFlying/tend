@@ -90,7 +90,7 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 			if err != nil {
 				return err
 			}
-			if observation.SupervisedProcess.SHA256 == artifact.SHA256 && observation.SupervisedProcess.LaunchID == r.instanceID && int64(observation.SupervisedProcess.PID) == r.cfg.Build.PID && r.cfg.Build.BinarySHA256 == artifact.SHA256 {
+			if target.Configuration == nil && observation.SupervisedProcess.SHA256 == artifact.SHA256 && observation.SupervisedProcess.LaunchID == r.instanceID && int64(observation.SupervisedProcess.PID) == r.cfg.Build.PID && r.cfg.Build.BinarySHA256 == artifact.SHA256 {
 				r.updateUpgradeAttempt(control, func() { r.upgradePhase = "updater_verified" })
 				return nil
 			}

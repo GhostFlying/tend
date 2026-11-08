@@ -80,19 +80,10 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	receipt := r.updaterProcessReceipt(ctx)
 	var updaterObservation *protocol.UpdaterSelfObservation
 	r.controlMu.Lock()
-	known, supportedSelf := r.selfUpdateSupportKnown, r.selfUpdateSupported
+	supportedSelf := r.selfUpdateSupported
 	selectedSelf := r.helloConfirmed && r.control.Upgrade != nil && r.control.Upgrade.Updater != nil
 	r.controlMu.Unlock()
-	if r.cfg.UpdaterControlSocket != "" && !known {
-		supports, e := updater.SelfUpdateSupported(ctx, r.cfg.UpdaterControlSocket)
-		if e == nil {
-			r.controlMu.Lock()
-			r.selfUpdateSupportKnown = true
-			r.selfUpdateSupported = supports
-			r.controlMu.Unlock()
-			supportedSelf = supports
-		}
-	}
+
 	if selectedSelf && supportedSelf {
 		status, e := updater.SelfUpdateCall(ctx, r.cfg.UpdaterControlSocket, nil)
 		if e == nil {

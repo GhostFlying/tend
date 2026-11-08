@@ -49,6 +49,13 @@ func selfCandidate(request SelfUpdateRequest) (string, string, error) {
 }
 
 func selfPlanStatic(cfg Config, p SelfUpdatePlan, now time.Time, checkExpiry bool) error {
+	legacy, committed, err := selfOtherOwners(cfg)
+	if err != nil {
+		return err
+	}
+	if legacy != p.HandoffSHA256 || committed != p.CommittedHeadSHA256 {
+		return errors.New("updater: another installer changed startup ownership")
+	}
 	if checkExpiry && now.UnixMilli() >= p.Request.Target.ExpiresAtMillis {
 		return errors.New("updater: self-update authority expired")
 	}
@@ -188,14 +195,18 @@ func discoverSelfUnit(pid int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(raw), "\n") {
+	return selfUnitFromCgroup(string(raw))
+}
+func selfUnitFromCgroup(raw string) (string, error) {
+	for _, line := range strings.Split(raw, "\n") {
 		parts := strings.SplitN(line, ":", 3)
-		if len(parts) != 3 {
+		if len(parts) != 3 || !(parts[1] == "name=systemd" || parts[0] == "0" && parts[1] == "") {
 			continue
 		}
-		for _, segment := range strings.Split(parts[2], "/") {
-			if strings.HasSuffix(segment, ".service") {
-				return segment, nil
+		segments := strings.Split(parts[2], "/")
+		for i := len(segments) - 1; i >= 0; i-- {
+			if strings.HasSuffix(segments[i], ".service") {
+				return segments[i], nil
 			}
 		}
 	}
@@ -258,6 +269,10 @@ func prepareSelf(ctx context.Context, cfg Config, p SelfUpdatePlan, modern bool)
 	}
 	p.Child = st.Process
 	if err = selfChild(ctx, p); err != nil {
+		return p, err
+	}
+	p.HandoffSHA256, p.CommittedHeadSHA256, err = selfOtherOwners(cfg)
+	if err != nil {
 		return p, err
 	}
 	p.LockDevice, p.LockInode, err = lockIdentity(cfg.StateDir)
@@ -422,6 +437,18 @@ func AdoptSelfUpdate(ctx context.Context, s *Supervisor) (bool, error) {
 	}
 	p := j.Plan
 	if j.Phase == "verified" {
+		legacy, committed, e := selfOtherOwners(s.cfg)
+		if e != nil {
+			return true, e
+		}
+		if legacy != p.HandoffSHA256 || committed != p.CommittedHeadSHA256 {
+			// Completed ordinary history cannot adopt a newer independent
+			// maintenance attempt. Its existing adopter validates that authority.
+			if legacy != "" && legacy != p.HandoffSHA256 || committed != "" && committed != p.CommittedHeadSHA256 {
+				return false, nil
+			}
+			return true, ErrUnknown
+		}
 		id, e := (LinuxProcess{}).Inspect(ctx, os.Getpid())
 		if e != nil {
 			return true, e
@@ -667,8 +694,26 @@ func writeSelf(cfg Config, next SelfUpdateJournal) error {
 	current, err := readSelf(cfg)
 	if err == nil {
 		if digest(current.Plan.Request) != digest(next.Plan.Request) {
-			if current.Phase != "verified" || next.Phase != "prepared" {
+			if current.Phase != "verified" || (next.Phase != "prepared" && next.Phase != "verified") {
 				return errors.New("updater: stale self-update journal writer")
+			}
+			incomingHistory := filepath.Join(cfg.StateDir, "self-update-"+bytesDigest([]byte(next.Plan.Request.Target.RequestID))+".json")
+			if _, e := privateFile(incomingHistory); !missingSelf(e) {
+				return errors.New("updater: archived attempt cannot become current again")
+			}
+			archivedRaw, e := privateFile(filepath.Join(cfg.StateDir, "self-update-"+bytesDigest([]byte(current.Plan.Request.Target.RequestID))+".json"))
+			if e != nil {
+				return e
+			}
+			var archived SelfUpdateJournal
+			if e = strictJSON(archivedRaw, &archived); e != nil {
+				return e
+			}
+			if digest(archived) != digest(current) {
+				return errors.New("updater: previous attempt was not durably archived")
+			}
+			if next.Phase == "verified" && (next.Receipt == nil || next.Receipt.RequestID != next.Plan.Request.Target.RequestID) {
+				return ErrUnknown
 			}
 		} else {
 			if digest(current.Plan) != digest(next.Plan) {
@@ -683,4 +728,18 @@ func writeSelf(cfg Config, next SelfUpdateJournal) error {
 		return err
 	}
 	return writeJSON(selfPath(cfg), next)
+}
+
+func selfOtherOwners(cfg Config) (string, string, error) {
+	values := []string{"", ""}
+	for i, path := range []string{handoffPath(cfg), committedHeadPath(cfg)} {
+		raw, err := optionalPrivate(path)
+		if err != nil {
+			return "", "", err
+		}
+		if len(raw) > 0 {
+			values[i] = bytesDigest(raw)
+		}
+	}
+	return values[0], values[1], nil
 }

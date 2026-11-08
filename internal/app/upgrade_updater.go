@@ -39,3 +39,7 @@ func runnerSelfMatches(r store.UpgradeRow, h store.UpgradeHost, rt protocol.Runn
 	}
 	return rt.Updater != nil && rt.Updater.InstanceID == h.HostID && selfUpdateMatches(r, h.TargetHash, rt.Updater) && rt.Updater.SupervisedProcess.SHA256 == rt.Build.BinarySHA256 && int64(rt.Updater.SupervisedProcess.PID) == rt.Build.PID && rt.Updater.SupervisedProcess.LaunchID == rt.InstanceID
 }
+
+func hostNeedsSelfUpdate(r store.UpgradeRow, h store.UpgradeHost) bool {
+	return needsSelfUpdate(r) && (!r.SupervisorThenRunners || h.Configuration != nil)
+}

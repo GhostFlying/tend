@@ -21,19 +21,21 @@ type SelfUpdateRequest struct {
 }
 
 type SelfUpdatePlan struct {
-	Request         SelfUpdateRequest `json:"request"`
-	Unit            string            `json:"unit"`
-	UnitSHA256      string            `json:"unit_sha256"`
-	ManagerSHA256   string            `json:"manager_sha256"`
-	Updater         Identity          `json:"updater"`
-	UpdaterBinary   string            `json:"updater_binary"`
-	Child           Identity          `json:"child"`
-	ConfigFile      string            `json:"config_file"`
-	ConfigSHA256    string            `json:"config_sha256"`
-	Candidate       string            `json:"candidate"`
-	CandidateSHA256 string            `json:"candidate_sha256"`
-	LockDevice      uint64            `json:"lock_device"`
-	LockInode       uint64            `json:"lock_inode"`
+	HandoffSHA256       string            `json:"handoff_sha256,omitempty"`
+	CommittedHeadSHA256 string            `json:"committed_head_sha256,omitempty"`
+	Request             SelfUpdateRequest `json:"request"`
+	Unit                string            `json:"unit"`
+	UnitSHA256          string            `json:"unit_sha256"`
+	ManagerSHA256       string            `json:"manager_sha256"`
+	Updater             Identity          `json:"updater"`
+	UpdaterBinary       string            `json:"updater_binary"`
+	Child               Identity          `json:"child"`
+	ConfigFile          string            `json:"config_file"`
+	ConfigSHA256        string            `json:"config_sha256"`
+	Candidate           string            `json:"candidate"`
+	CandidateSHA256     string            `json:"candidate_sha256"`
+	LockDevice          uint64            `json:"lock_device"`
+	LockInode           uint64            `json:"lock_inode"`
 	// Standalone bootstrap cannot assert modern shutdown behavior. It supplies
 	// reviewed evidence bound to the actual old artifact instead.
 	PreparedBy         Identity `json:"prepared_by"`
@@ -169,7 +171,22 @@ func archiveSelf(cfg Config, j SelfUpdateJournal) error {
 	if j.Phase != "verified" || j.Receipt == nil {
 		return ErrUnknown
 	}
-	return writeJSON(filepath.Join(cfg.StateDir, "self-update-"+bytesDigest([]byte(j.Plan.Request.Target.RequestID))+".json"), j)
+	path := filepath.Join(cfg.StateDir, "self-update-"+bytesDigest([]byte(j.Plan.Request.Target.RequestID))+".json")
+	raw, err := privateFile(path)
+	if err == nil {
+		var prior SelfUpdateJournal
+		if err = strictJSON(raw, &prior); err != nil {
+			return err
+		}
+		if digest(prior) != digest(j) {
+			return errors.New("updater: historical self-update receipt conflicts")
+		}
+		return nil
+	}
+	if !missingSelf(err) {
+		return err
+	}
+	return writeJSON(path, j)
 }
 func missingSelf(err error) bool { return os.IsNotExist(err) }
 
