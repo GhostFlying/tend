@@ -396,6 +396,9 @@ func ApplySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan) (j SelfU
 		return j, err
 	}
 	defer lock.Close()
+	if err := rejectRecordedSelfRequest(cfg, p.Request); err != nil {
+		return j, err
+	}
 	j, err = readSelf(cfg)
 	if missingSelf(err) {
 		// Bootstrap does not contact any old control protocol.

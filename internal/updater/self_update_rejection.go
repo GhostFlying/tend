@@ -55,6 +55,20 @@ func (s *Supervisor) rejectSelf(r SelfUpdateRequest, cause error) (SelfUpdateSta
 		out.Observation.Rejection = &prior.Proof
 		return out, cause
 	}
+	// Standalone apply uses this same lock. A concurrent installer may already
+	// have crossed the stop boundary; only the lock holder can prove no dispatch.
+	lock, err := installerLock(s.cfg)
+	if err != nil {
+		return out, errors.Join(cause, ErrUnknown)
+	}
+	defer lock.Close()
+	current, readErr := readSelf(s.cfg)
+	if readErr != nil && !missingSelf(readErr) {
+		return out, errors.Join(cause, readErr)
+	}
+	if readErr == nil && current.Phase != "verified" {
+		return out, errors.Join(cause, ErrUnknown)
+	}
 	if s.opts.Now == nil {
 		return out, errors.Join(cause, errors.New("updater: rejection clock unavailable"))
 	}
@@ -68,4 +82,15 @@ func (s *Supervisor) rejectSelf(r SelfUpdateRequest, cause error) (SelfUpdateSta
 	}
 	out.Observation.Rejection = &proof
 	return out, cause
+}
+
+func rejectRecordedSelfRequest(cfg Config, request SelfUpdateRequest) error {
+	prior, err := readSelfRejection(cfg, request.Target.RequestID)
+	if err != nil {
+		return err
+	}
+	if prior != nil {
+		return errors.New("updater: original request was rejected before dispatch; use a new upgrade")
+	}
+	return nil
 }

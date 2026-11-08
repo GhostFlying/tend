@@ -50,6 +50,9 @@ func TestSelfPreparationRejectionSurvivesLostReplyAndRestart(t *testing.T) {
 	if again, err := s.requestSelf(t.Context(), r); err == nil || again.Observation.Rejection == nil || *again.Observation.Rejection != *status.Observation.Rejection {
 		t.Fatal("rejection identity was retried as new work", again, err)
 	}
+	if _, err := ApplySelfUpdate(t.Context(), cfg, SelfUpdatePlan{Request: r}); err == nil || !strings.Contains(err.Error(), "rejected before dispatch") {
+		t.Fatal("standalone apply bypassed the immutable rejection", err)
+	}
 	r.Release = "changed-payload"
 	if conflict, err := s.requestSelf(t.Context(), r); err == nil || conflict.Observation.Rejection != nil {
 		t.Fatal("rejected request accepted a different payload", conflict, err)
