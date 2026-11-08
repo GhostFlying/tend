@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
@@ -35,6 +36,10 @@ func hostExecutors(ctx context.Context, q store.Querier, host string, now int64,
 		return nil, err
 	}
 	var out []scheduler.Executor
+	state, err := store.GetExtensionState(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	for _, e := range runtime.Runtime.AgentExecutors {
 		p := e.Pin
 		if (p.Purpose == "issue_manager" && runtime.Runtime.JournalVersion < 13) || (!includeUnavailable && !e.Available) || p.Validate(host) != nil || p.SnapshotID != inv.Receipt.SnapshotID || p.InventoryRevision != inv.Receipt.LocalRevision || p.PublicSHA256 != inv.Receipt.PublicSHA256 {
@@ -57,8 +62,26 @@ func hostExecutors(ctx context.Context, q store.Querier, host string, now int64,
 			if !runtimeEnabled {
 				continue
 			}
+			managed := runtime.Runtime.Extensions != nil && runtime.Runtime.Extensions.Enabled && slices.Contains(runtime.Runtime.Extensions.Runtimes, p.Runtime.RuntimeID)
+			if managed {
+				if !slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityManagedExtensions) || state.Published == nil || p.Extensions.ReleaseID != state.Published.ID || !slices.Contains(a.Categories, p.Extensions.CategoryID) {
+					continue
+				}
+				release, _, err := store.GetExtensionRelease(ctx, q, state.Published.ID)
+				if err != nil {
+					return nil, err
+				}
+				if _, err = extensions.VerifyCombination(release, p.Extensions); err != nil {
+					continue
+				}
+			} else if p.Extensions != (protocol.ExtensionExecutionPin{}) {
+				continue
+			}
 			categories := []string{}
 			for _, id := range a.Categories {
+				if managed && id != p.Extensions.CategoryID {
+					continue
+				}
 				category, err := store.GetAgentCategory(ctx, q, id)
 				if err != nil {
 					return nil, err

@@ -373,7 +373,7 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	t.mu.Lock()
 	t.nativeSessionID = res.Thread.SessionID
 	t.mu.Unlock()
-	if err := s.environmentThreadAttached(ctx); err != nil {
+	if err := s.environmentThreadAttached(ctx, res.Thread.ID); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -425,7 +425,7 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 		t.fork = true
 	}
 	t.mu.Unlock()
-	if err := s.environmentThreadAttached(ctx); err != nil {
+	if err := s.environmentThreadAttached(ctx, res.Thread.ID); err != nil {
 		return nil, err
 	}
 	return t, nil

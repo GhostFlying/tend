@@ -1,5 +1,7 @@
 # Codex 独立环境与扩展管理
 
+本文件保留 D197 的原实施记录。D198 已按后续用户决定移除外层 bubblewrap，改为启动前、六小时节流的个人 skill 排除清单；当前行为以 [托管扩展计划](managed-extensions.md) 与 [操作说明](../codex-environments.md) 为准。
+
 ## 目标与边界
 
 为本机 Codex 提供独立的固定运行 home、skills/plugins 的 clean/projection 模式，以及 AGENTS.md 的 independent/sync 模式。保留项目能力和管理员要求，不改变协调 Agent 的权限。仅 Linux 的 bubblewrap 文件视图提供严格隔离；未配置的运行环境行为不变。本次不迁移生产配置、清除缓存或选择投影白名单。

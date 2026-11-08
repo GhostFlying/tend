@@ -3,7 +3,12 @@ package traex
 import (
 	"context"
 	"fmt"
+	"github.com/BurntSushi/toml"
+	"github.com/GhostFlying/tend/internal/protocol"
+	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -45,6 +50,11 @@ func startHostedCoordinator(ctx context.Context, opts Options) (*Session, error)
 	}
 	hook := fmt.Sprintf(`hooks.PreToolUse=[{matcher=%q,hooks=[{type="command",command=%q}]}]`, hostedNativeMatcher, hostedNativeDeny)
 	args := []string{"-c", hook}
+	managed, err := hostedManagedMCPOverrides(opts)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, managed...)
 	probe, err := startProcess(ctx, opts, args)
 	if err != nil {
 		return nil, err
@@ -69,6 +79,35 @@ func startHostedCoordinator(ctx context.Context, opts Options) (*Session, error)
 		return nil, err
 	}
 	return session, nil
+}
+
+// Managed standalone MCP definitions do not grant coordination tools. The
+// selected immutable snapshot supplies the exact user-level names; project
+// discovery and the separately scoped Tend dynamic bridge retain their rules.
+func hostedManagedMCPOverrides(opts Options) ([]string, error) {
+	ref := opts.environmentReference
+	if ref == nil || ref.Extensions == (protocol.ExtensionExecutionPin{}) {
+		return nil, nil
+	}
+	var config struct {
+		MCP map[string]any `toml:"mcp_servers"`
+	}
+	if _, err := toml.DecodeFile(filepath.Join(ref.Directory, "generations", ref.Generation, "config.toml"), &config); err != nil {
+		return nil, fmt.Errorf("managed coordinator MCP policy is unavailable")
+	}
+	names := []string{}
+	for name := range config.MCP {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	entries := []string{}
+	for _, name := range names {
+		entries = append(entries, strconv.Quote(name)+"={enabled=false,required=false}")
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	return []string{"-c", "mcp_servers={" + strings.Join(entries, ",") + "}"}, nil
 }
 
 func (s *Session) hostedHook(ctx context.Context, dir string) (hostedHookMetadata, error) {

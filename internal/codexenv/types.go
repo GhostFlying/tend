@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"path/filepath"
 	"regexp"
 	"time"
@@ -15,7 +16,7 @@ import (
 var (
 	ErrConflict    = errors.New("codex environment revision or request conflict")
 	ErrNotFound    = errors.New("codex environment not found")
-	ErrUnsupported = errors.New("strict Codex environments require Linux and bubblewrap")
+	ErrUnsupported = errors.New("managed Codex environments require Linux")
 	validID        = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`)
 )
 
@@ -35,21 +36,24 @@ type Agents struct {
 	Source string `json:"source,omitempty"`
 }
 type Profile struct {
-	Format          int       `json:"format_version"`
-	ID              string    `json:"id"`
-	Home            string    `json:"home"`
-	UserHome        string    `json:"user_home"`
-	SourceHome      string    `json:"source_home,omitempty"`
-	SourceSkills    string    `json:"source_skills,omitempty"`
-	AuthSource      string    `json:"auth_source,omitempty"`
-	BaseConfig      string    `json:"base_config,omitempty"`
-	Skills          Selection `json:"skills"`
-	Plugins         Selection `json:"plugins"`
-	Agents          Agents    `json:"agents"`
-	BundledSkills   *bool     `json:"bundled_skills,omitempty"`
-	AutoSync        *bool     `json:"auto_sync,omitempty"`
-	IntervalSeconds int       `json:"interval_seconds,omitempty"`
-	Enabled         bool      `json:"enabled"`
+	StrictNames      bool                           `json:"strict_names,omitempty"`
+	ManagedRuntimeID string                         `json:"managed_runtime_id,omitempty"`
+	ExtensionPin     protocol.ExtensionExecutionPin `json:"extension_pin,omitzero"`
+	Format           int                            `json:"format_version"`
+	ID               string                         `json:"id"`
+	Home             string                         `json:"home"`
+	UserHome         string                         `json:"user_home"`
+	SourceHome       string                         `json:"source_home,omitempty"`
+	SourceSkills     string                         `json:"source_skills,omitempty"`
+	AuthSource       string                         `json:"auth_source,omitempty"`
+	BaseConfig       string                         `json:"base_config,omitempty"`
+	Skills           Selection                      `json:"skills"`
+	Plugins          Selection                      `json:"plugins"`
+	Agents           Agents                         `json:"agents"`
+	BundledSkills    *bool                          `json:"bundled_skills,omitempty"`
+	AutoSync         *bool                          `json:"auto_sync,omitempty"`
+	IntervalSeconds  int                            `json:"interval_seconds,omitempty"`
+	Enabled          bool                           `json:"enabled"`
 }
 type Package struct {
 	Kind       string `json:"kind"`
@@ -67,17 +71,24 @@ type Snapshot struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 type Adoption struct {
-	ResumeOnly        bool   `json:"resume_original_thread,omitempty"`
-	PendingGeneration string `json:"pending_generation,omitempty"`
-	PendingReason     string `json:"pending_reason,omitempty"`
-	Previous          string `json:"previous,omitempty"`
-	BlockedGeneration string `json:"blocked_generation,omitempty"`
-	BlockedRevision   uint64 `json:"blocked_revision,omitempty"`
-	Execution         string `json:"execution"`
-	Generation        string `json:"generation"`
-	State             string `json:"state"`
+	ConfigurationHome  string                         `json:"configuration_home,omitempty"`
+	MCP                []protocol.ExtensionMCPStatus  `json:"mcp,omitempty"`
+	DesiredGeneration  string                         `json:"desired_generation,omitempty"`
+	DesiredExtensions  protocol.ExtensionExecutionPin `json:"desired_extensions,omitzero"`
+	Extensions         protocol.ExtensionExecutionPin `json:"extensions,omitzero"`
+	PreviousExtensions protocol.ExtensionExecutionPin `json:"previous_extensions,omitzero"`
+	ResumeOnly         bool                           `json:"resume_original_thread,omitempty"`
+	PendingGeneration  string                         `json:"pending_generation,omitempty"`
+	PendingReason      string                         `json:"pending_reason,omitempty"`
+	Previous           string                         `json:"previous,omitempty"`
+	BlockedGeneration  string                         `json:"blocked_generation,omitempty"`
+	BlockedRevision    uint64                         `json:"blocked_revision,omitempty"`
+	Execution          string                         `json:"execution"`
+	Generation         string                         `json:"generation"`
+	State              string                         `json:"state"`
 }
 type Status struct {
+	SkillExclusions   *SkillExclusions    `json:"skill_exclusions,omitempty"`
 	SyncHeld          bool                `json:"sync_held,omitempty"`
 	SourceStamp       string              `json:"source_stamp,omitempty"`
 	AdoptionsNext     string              `json:"adoptions_next,omitempty"`
@@ -129,6 +140,7 @@ type record struct {
 
 // Service dependencies are explicit; no process-global current environment.
 type Service struct {
+	Managed   bool
 	Root      string
 	UserHome  string
 	Binary    string
@@ -143,8 +155,12 @@ type Bindings struct {
 	Runtimes  map[string]string `json:"runtimes"`
 }
 type Binding struct {
-	Directory string
-	ID        string
+	Extensions protocol.ExtensionExecutionPin `json:"extensions,omitzero"`
+	Directory  string
+	ID         string
+	// Generation optionally selects a retained snapshot for a newly opened run.
+	// Existing execution adoptions continue to own their original generation.
+	Generation string `json:"generation,omitempty"`
 }
 
 func (b *Bindings) Resolve(runtime string) *Binding {

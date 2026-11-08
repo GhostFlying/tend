@@ -1,5 +1,11 @@
 # tend：系统设计 v0.2（相对 v0.1 的调整）
 
+## D198：按 Category / Agent 托管用户级扩展
+
+server 托管 skills、完整 plugins、MCP 定义与用户级 AGENTS.md，草稿编辑与发布分开。包获取和本机视图由独立 extensions/codexenv 模块负责；app/store 只保存可移植资源、组合 revision、发布引用与执行 pin，发布写入遵守去重、CAS、事务和事件边界。包内容先不可变暂存，引用提交后才生效。CLI 经组装注入获取包，不直接依赖 runner/server；serverkit、runner、harness 可依赖 extensions，extensions 依赖 protocol、blobstore、codexenv/procx，不依赖 app/store。app 在事务内仅调用纯组合/校验函数，文件暂存与注入的原生加载探针在事务外执行。
+
+有效组合只使用执行选中的一个 category，再叠加完整 Agent identity；Agent 层可覆盖/禁用资源，AGENTS 按类别在前、自身在后合成。组合 revision 独立于 Agent 身份与模型。项目来源、管理员要求和角色权限保持；Traex 不改变。本轮取代 D197 的 bwrap 启动层：保留原 HOME 与宿主执行语义，启动前使用本机用户共用、六小时节流的个人 skill 路径排除缓存，接受缓存窗口内新增技能尚未排除的边界。各执行使用稳定的私有配置 home，原生维护该执行的 MCP OAuth 并在重启时保留；会话、SQLite、日志、OpenAI auth 和线程锁仍指向原固定状态 home，保留历史 rollout 路径别名。MCP 定义分发，秘密/OAuth 留在执行主机。发布与分发不等于采用：新执行固定目标和组合，恢复保留原引用，长期会话仅在原门禁内更新，不改变 native thread、固定状态路径或重放 unknown 输入。可选协议扩展须经能力协商；未启用的旧语义保持。历史投影环境和快照继续支持恢复，不自动迁移生产或清理内容。详见 [实施计划](plans/managed-extensions.md)。
+
 ## D197：本机 Codex 能力环境
 
 环境映射属于实际执行节点。server 本机 named 会话才使用 server 的 runtime 映射与环境绑定；runner 托管的协调会话沿已领取的 `RunnerRunID` 建立 `RunnerSession`，由执行 runner 校验并采用自己的本机环境。两个节点可使用相同 runtime ID，server 的同名映射不构成远端连接冲突；未领取的选择仍不能建立远端会话。不改变本机绑定隔离、线上协议或角色权限。
@@ -197,6 +203,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D194 | Issue 上下文提供可选快照及增量读取，固定事件区间、分页原件索引并保留稳定会话；共享 PR reviewer 可发现对应实现检查证据，自主判断复用或复跑，整批维护统一验证和交付。 | 实现中 |
 | D196 | 托管会话交接与正常自动上下文各只注入至多 2 KiB 索引；原文按需读取，索引不确认审阅。移除自动摘要与摘要交接，保留独立 compact、历史审计及原生未知请求对账。替代 D81 的摘要流程，调整 D17/D18 的托管注入语义。 | 实现中 |
 | D197 | 本机 Codex 使用固定独立 home、clean/projection 能力快照、严格 Linux 文件视图与可对账的本机管理；运行和恢复引用控制采用边界，不改变角色权限与线上协议。 | 已实现 |
+| D198 | server 全托管用户级扩展与指令，按执行 category + Agent 合成，显式发布并自动分发，保留项目规则、角色权限及历史执行引用。 | 实施中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 

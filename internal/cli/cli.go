@@ -29,6 +29,7 @@ type Env struct {
 	HTTP             *http.Client
 	IDs              protocol.IDGen
 	CodexEnvironment func(context.Context, protocol.LocalCodexEnvironmentRequest) (json.RawMessage, error)
+	ImportExtension  func(context.Context, protocol.ExtensionImport) (protocol.ExtensionPackage, error)
 }
 
 // Command exit codes.
@@ -85,6 +86,9 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	}
 	if args[0] == "codex-env" {
 		return report(e, runCodexEnvironment(ctx, e, args[1:]))
+	}
+	if args[0] == "extensions" {
+		return report(e, runExtensions(ctx, e, args[1:]))
 	}
 	if len(args) >= 2 && args[0] == "channel" && args[1] == "feishu" {
 		return report(e, runFeishu(ctx, e, args[2:]))

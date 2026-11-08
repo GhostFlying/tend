@@ -84,13 +84,18 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 func runnerControl(ctx context.Context, q store.Querier, host string, now int64) (protocol.RunnerControl, error) {
 	c, err := store.GetHostControl(ctx, q, host)
 	if errors.Is(err, store.ErrNotFound) {
-		return protocol.RunnerControl{Mode: protocol.RunnerNormal}, nil
+		c = protocol.RunnerControl{Mode: protocol.RunnerNormal}
+		err = nil
 	}
 	if err != nil {
 		return c, err
 	}
 	if c.Authorization != nil {
 		c.Authorization.RemainingMillis = max(0, c.Authorization.DeadlineMillis-now)
+	}
+	c.Extensions, err = extensionTarget(ctx, q, host)
+	if err != nil {
+		return c, err
 	}
 	return c, nil
 }

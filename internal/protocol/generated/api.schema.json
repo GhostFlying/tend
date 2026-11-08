@@ -4204,6 +4204,21 @@
         "available": {
           "type": "boolean"
         },
+        "categories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category_editable": {
+          "type": "boolean"
+        },
+        "category_id": {
+          "type": "string"
+        },
+        "category_revision": {
+          "type": "integer"
+        },
         "effort": {
           "type": "string"
         },
@@ -4426,6 +4441,9 @@
       "additionalProperties": false,
       "properties": {
         "agent_ref": {
+          "type": "string"
+        },
+        "category_id": {
           "type": "string"
         },
         "title": {
@@ -5502,6 +5520,904 @@
         "source_message_id"
       ],
       "title": "ExplainDecisionPayload",
+      "type": "object"
+    },
+    "ExtensionAdoption": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "type": "string"
+        },
+        "mcp": {
+          "items": {
+            "$ref": "#/definitions/ExtensionMCPStatus"
+          },
+          "type": "array"
+        },
+        "pending_reason": {
+          "type": "string"
+        },
+        "pending_release": {
+          "type": "string"
+        },
+        "pin": {
+          "$ref": "#/definitions/ExtensionExecutionPin"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution",
+        "pin",
+        "state"
+      ],
+      "title": "ExtensionAdoption",
+      "type": "object"
+    },
+    "ExtensionBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "agents_md": {
+          "type": "string"
+        },
+        "bundled_skills": {
+          "type": "boolean"
+        },
+        "category_id": {
+          "type": "string"
+        },
+        "choices": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionChoice"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "choices",
+        "agents_md"
+      ],
+      "title": "ExtensionBinding",
+      "type": "object"
+    },
+    "ExtensionBindingPage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionBinding"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "ExtensionBindingPage",
+      "type": "object"
+    },
+    "ExtensionCatalog": {
+      "additionalProperties": false,
+      "properties": {
+        "agents": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionBinding"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categories": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionBinding"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionResource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "resources",
+        "categories",
+        "agents"
+      ],
+      "title": "ExtensionCatalog",
+      "type": "object"
+    },
+    "ExtensionChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ExtensionChoice",
+      "type": "object"
+    },
+    "ExtensionCombination": {
+      "additionalProperties": false,
+      "properties": {
+        "agents_md": {
+          "type": "string"
+        },
+        "bundled_skills": {
+          "type": "boolean"
+        },
+        "disabled": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionChoice"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin": {
+          "$ref": "#/definitions/ExtensionExecutionPin"
+        },
+        "resources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ResolvedExtension"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "pin",
+        "resources",
+        "disabled",
+        "agents_md",
+        "bundled_skills"
+      ],
+      "title": "ExtensionCombination",
+      "type": "object"
+    },
+    "ExtensionEditPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/definitions/ExtensionBinding"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/definitions/ExtensionResource"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "title": "ExtensionEditPayload",
+      "type": "object"
+    },
+    "ExtensionExecutionPin": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "agent_revision": {
+          "type": "integer"
+        },
+        "category_id": {
+          "type": "string"
+        },
+        "category_revision": {
+          "type": "integer"
+        },
+        "effective_sha256": {
+          "type": "string"
+        },
+        "release_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "category_id",
+        "category_revision",
+        "agent_revision",
+        "agent",
+        "effective_sha256"
+      ],
+      "title": "ExtensionExecutionPin",
+      "type": "object"
+    },
+    "ExtensionHostStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "adoptions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionAdoption"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "desired_release": {
+          "type": "string"
+        },
+        "downloaded_release": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "last_error": {
+          "type": "string"
+        },
+        "prepared": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionPrepared"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtimes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skill_exclusions": {
+          "$ref": "#/definitions/ExtensionSkillExclusionStatus"
+        }
+      },
+      "required": [
+        "runtimes",
+        "enabled",
+        "prepared",
+        "adoptions"
+      ],
+      "title": "ExtensionHostStatus",
+      "type": "object"
+    },
+    "ExtensionHostView": {
+      "additionalProperties": false,
+      "properties": {
+        "host_id": {
+          "type": "string"
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ExtensionHostStatus"
+        }
+      },
+      "required": [
+        "state",
+        "host_id",
+        "online"
+      ],
+      "title": "ExtensionHostView",
+      "type": "object"
+    },
+    "ExtensionImport": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/ExtensionSource"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version",
+        "source"
+      ],
+      "title": "ExtensionImport",
+      "type": "object"
+    },
+    "ExtensionMCP": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bearer_token_env_var": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "disabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env_http_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "env_vars": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "startup_timeout_sec": {
+          "type": "integer"
+        },
+        "tool_timeout_sec": {
+          "type": "integer"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "transport"
+      ],
+      "title": "ExtensionMCP",
+      "type": "object"
+    },
+    "ExtensionMCPStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "title": "ExtensionMCPStatus",
+      "type": "object"
+    },
+    "ExtensionPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "contentEncoding": "base64",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource": {
+          "$ref": "#/definitions/ExtensionResource"
+        }
+      },
+      "required": [
+        "resource",
+        "content"
+      ],
+      "title": "ExtensionPackage",
+      "type": "object"
+    },
+    "ExtensionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "affected": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AgentIdentity"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate": {
+          "$ref": "#/definitions/ExtensionReleaseRef"
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "draft": {
+          "$ref": "#/definitions/ExtensionCatalog"
+        },
+        "published": {
+          "$ref": "#/definitions/ExtensionRelease"
+        }
+      },
+      "required": [
+        "draft",
+        "candidate",
+        "changed",
+        "affected"
+      ],
+      "title": "ExtensionPlan",
+      "type": "object"
+    },
+    "ExtensionPrepared": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "type": "string"
+        },
+        "mcp": {
+          "items": {
+            "$ref": "#/definitions/ExtensionMCPStatus"
+          },
+          "type": "array"
+        },
+        "pin": {
+          "$ref": "#/definitions/ExtensionExecutionPin"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "runtime_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "pin",
+        "ready"
+      ],
+      "title": "ExtensionPrepared",
+      "type": "object"
+    },
+    "ExtensionPublishPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "manifest": {
+          "$ref": "#/definitions/ExtensionReleaseRef"
+        },
+        "release": {
+          "$ref": "#/definitions/ExtensionRelease"
+        }
+      },
+      "required": [
+        "release",
+        "manifest"
+      ],
+      "title": "ExtensionPublishPayload",
+      "type": "object"
+    },
+    "ExtensionRelease": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog": {
+          "$ref": "#/definitions/ExtensionCatalog"
+        },
+        "composition_version": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "composition_version",
+        "catalog"
+      ],
+      "title": "ExtensionRelease",
+      "type": "object"
+    },
+    "ExtensionReleasePage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionReleaseRef"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "ExtensionReleasePage",
+      "type": "object"
+    },
+    "ExtensionReleaseRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "manifest_size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "manifest_sha256",
+        "manifest_size"
+      ],
+      "title": "ExtensionReleaseRef",
+      "type": "object"
+    },
+    "ExtensionResource": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mcp": {
+          "$ref": "#/definitions/ExtensionMCP"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/definitions/ExtensionSource"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version",
+        "source"
+      ],
+      "title": "ExtensionResource",
+      "type": "object"
+    },
+    "ExtensionResourcePage": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionResource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "ExtensionResourcePage",
+      "type": "object"
+    },
+    "ExtensionSkillExclusionStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "excluded_paths": {
+          "type": "integer"
+        },
+        "last_attempt": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": "string"
+        },
+        "next_refresh_at": {
+          "type": "string"
+        },
+        "refreshed_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "excluded_paths"
+      ],
+      "title": "ExtensionSkillExclusionStatus",
+      "type": "object"
+    },
+    "ExtensionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "integrity": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "subdir": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ExtensionSource",
+      "type": "object"
+    },
+    "ExtensionStageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_control_revision": {
+          "type": "integer"
+        },
+        "package": {
+          "$ref": "#/definitions/ExtensionPackage"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "expected_control_revision",
+        "package"
+      ],
+      "title": "ExtensionStageRequest",
+      "type": "object"
+    },
+    "ExtensionState": {
+      "additionalProperties": false,
+      "properties": {
+        "catalog": {
+          "$ref": "#/definitions/ExtensionCatalog"
+        },
+        "published": {
+          "$ref": "#/definitions/ExtensionReleaseRef"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "catalog"
+      ],
+      "title": "ExtensionState",
+      "type": "object"
+    },
+    "ExtensionStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ExtensionHostView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        },
+        "published": {
+          "$ref": "#/definitions/ExtensionReleaseRef"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "more",
+        "revision",
+        "hosts"
+      ],
+      "title": "ExtensionStatus",
+      "type": "object"
+    },
+    "ExtensionTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "content_base_path": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "type": "string"
+        },
+        "release": {
+          "$ref": "#/definitions/ExtensionReleaseRef"
+        }
+      },
+      "required": [
+        "release",
+        "manifest_path",
+        "content_base_path"
+      ],
+      "title": "ExtensionTarget",
       "type": "object"
     },
     "FeishuBindingView": {
@@ -13271,6 +14187,23 @@
       "title": "RequestView",
       "type": "object"
     },
+    "ResolvedExtension": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/definitions/ExtensionResource"
+        }
+      },
+      "required": [
+        "resource",
+        "origin"
+      ],
+      "title": "ResolvedExtension",
+      "type": "object"
+    },
     "RespondAttentionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -13899,6 +14832,9 @@
         "backend_id": {
           "type": "string"
         },
+        "extensions": {
+          "$ref": "#/definitions/ExtensionExecutionPin"
+        },
         "identity": {
           "$ref": "#/definitions/AgentIdentity"
         },
@@ -14500,6 +15436,9 @@
         "cancelled_upgrade_id": {
           "type": "string"
         },
+        "extensions": {
+          "$ref": "#/definitions/ExtensionTarget"
+        },
         "mode": {
           "type": "string"
         },
@@ -14600,6 +15539,9 @@
         },
         "downloaded_bytes": {
           "type": "integer"
+        },
+        "extensions": {
+          "$ref": "#/definitions/ExtensionHostStatus"
         },
         "generation": {
           "type": "integer"
@@ -14814,11 +15756,17 @@
     "SetConversationSettingsPayload": {
       "additionalProperties": false,
       "properties": {
+        "category_id": {
+          "type": "string"
+        },
         "conversation_id": {
           "type": "string"
         },
         "effort": {
           "type": "string"
+        },
+        "expected_category_revision": {
+          "type": "integer"
         },
         "model": {
           "type": "string"
@@ -19138,6 +20086,48 @@
     },
     "ExplainDecisionPayload": {
       "$ref": "#/definitions/ExplainDecisionPayload"
+    },
+    "ExtensionBindingPage": {
+      "$ref": "#/definitions/ExtensionBindingPage"
+    },
+    "ExtensionCombination": {
+      "$ref": "#/definitions/ExtensionCombination"
+    },
+    "ExtensionEditPayload": {
+      "$ref": "#/definitions/ExtensionEditPayload"
+    },
+    "ExtensionHostStatus": {
+      "$ref": "#/definitions/ExtensionHostStatus"
+    },
+    "ExtensionImport": {
+      "$ref": "#/definitions/ExtensionImport"
+    },
+    "ExtensionPackage": {
+      "$ref": "#/definitions/ExtensionPackage"
+    },
+    "ExtensionPlan": {
+      "$ref": "#/definitions/ExtensionPlan"
+    },
+    "ExtensionPublishPayload": {
+      "$ref": "#/definitions/ExtensionPublishPayload"
+    },
+    "ExtensionReleasePage": {
+      "$ref": "#/definitions/ExtensionReleasePage"
+    },
+    "ExtensionResourcePage": {
+      "$ref": "#/definitions/ExtensionResourcePage"
+    },
+    "ExtensionStageRequest": {
+      "$ref": "#/definitions/ExtensionStageRequest"
+    },
+    "ExtensionState": {
+      "$ref": "#/definitions/ExtensionState"
+    },
+    "ExtensionStatus": {
+      "$ref": "#/definitions/ExtensionStatus"
+    },
+    "ExtensionTarget": {
+      "$ref": "#/definitions/ExtensionTarget"
     },
     "FeishuBindingView": {
       "$ref": "#/definitions/FeishuBindingView"

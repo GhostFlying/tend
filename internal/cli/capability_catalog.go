@@ -52,6 +52,16 @@ func CapabilityBindings() []CapabilityBinding {
 		}
 		out = append(out, binding("local POST /maintenance/"+action, "maintenance "+action, args...))
 	}
+	out = append(out,
+		binding("GET /api/v1/extensions/{view}", "extensions inventory"),
+		binding("GET /api/v1/extensions/releases/{id}", "extensions releases", "sample"),
+		binding("POST /api/v1/extensions/stage", "extensions skill add", "--revision", "0", "--data", `{"id":"sample","version":"1","path":"fixture","source":{"type":"local"}}`),
+		binding("extensions.resource_put", "extensions mcp add", "--revision", "0", "--data", `{"id":"sample","version":"1","source":{},"mcp":{"transport":"stdio","command":"fixture"}}`),
+		binding("extensions.resource_remove", "extensions skill remove", "sample", "--version", "1", "--revision", "0"),
+		binding("extensions.binding_set", "extensions category set", "sample", "--revision", "0", "--data", `{"revision":0,"choices":[],"agents_md":""}`),
+		binding("extensions.publish", "extensions publish", "--revision", "0"),
+		binding("extensions.rollback", "extensions rollback", "sample", "--revision", "0"),
+	)
 	for _, action := range protocol.CodexEnvironmentActions() {
 		args := []string{"--id", "sample"}
 		if action == "list" || strings.HasPrefix(action, "watch ") {
@@ -284,7 +294,7 @@ func legacyBindings() []CapabilityBinding {
 	}
 }
 
-var additionalHelpCommands = []string{"issue pr-policy show", "issue pr-policy set", "issue pr-policy clear", "repo local status", "channel telegram bind", "channel telegram unbind", "doctor", "host list", "host show", "queue", "logs", "resume", "takeover", "request replay", "issue replay", "issue schedules", "issue events", "issue webhooks", "observation list", "observation show", "observation refresh", "schedule list", "schedule show", "schedule create", "schedule update", "schedule pause", "schedule resume", "schedule cancel", "schedule trigger", "schedule history", "webhook list", "webhook show", "webhook create", "webhook update", "webhook pause", "webhook resume", "webhook cancel", "webhook rotate", "webhook receipts", "event trace", "event watch", "message trace", "attention read", "attention archive", "attention replay", "next-action replay", "issue followup create", "issue followup update", "issue followup pause", "issue followup resume", "issue followup cancel", "issue followup trigger"}
+var additionalHelpCommands = []string{"extensions skill update", "extensions skill show", "extensions skill list", "extensions plugin add", "extensions plugin update", "extensions plugin remove", "extensions plugin show", "extensions plugin list", "extensions mcp update", "extensions mcp remove", "extensions mcp show", "extensions mcp list", "extensions category show", "extensions agent show", "extensions agent set", "extensions resolve", "extensions plan", "extensions reconcile", "extensions status", "extensions doctor", "issue pr-policy show", "issue pr-policy set", "issue pr-policy clear", "repo local status", "channel telegram bind", "channel telegram unbind", "doctor", "host list", "host show", "queue", "logs", "resume", "takeover", "request replay", "issue replay", "issue schedules", "issue events", "issue webhooks", "observation list", "observation show", "observation refresh", "schedule list", "schedule show", "schedule create", "schedule update", "schedule pause", "schedule resume", "schedule cancel", "schedule trigger", "schedule history", "webhook list", "webhook show", "webhook create", "webhook update", "webhook pause", "webhook resume", "webhook cancel", "webhook rotate", "webhook receipts", "event trace", "event watch", "message trace", "attention read", "attention archive", "attention replay", "next-action replay", "issue followup create", "issue followup update", "issue followup pause", "issue followup resume", "issue followup cancel", "issue followup trigger"}
 
 func commandUsage(prefix []string) string {
 	if len(prefix) > 0 && prefix[0] == "planner" {

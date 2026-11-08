@@ -17,6 +17,7 @@ import {
   type Group,
 } from "./entries.ts";
 import { cliLabel, runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
+import { ExtensionsDirectory } from "./Extensions.tsx";
 import { ConcurrencyDirectory } from "./Concurrency.tsx";
 import { useAgentIssueModel } from "./Issues.tsx";
 import { AgentDetails } from "./Details.tsx";
@@ -264,14 +265,14 @@ export function AgentCatalogView() {
             onKeyDown={(event) => {
               if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
               event.preventDefault();
-              const tabs = [undefined, "categories", "concurrency"] as const;
+              const tabs = [undefined, "categories", "concurrency", "extensions"] as const;
               const current = tabs.indexOf(filters.tab);
               const next =
                 event.key === "Home"
                   ? 0
                   : event.key === "End"
-                    ? 2
-                    : (current + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+                    ? 3
+                    : (current + (event.key === "ArrowRight" ? 1 : 3)) % 4;
               update({ tab: tabs[next], search: "" });
               event.currentTarget
                 .querySelectorAll<HTMLButtonElement>('[role="tab"]')
@@ -306,8 +307,19 @@ export function AgentCatalogView() {
             >
               并发分组
             </Button>
+            <Button
+              variant="ghost"
+              role="tab"
+              aria-selected={filters.tab === "extensions"}
+              tabIndex={filters.tab === "extensions" ? 0 : -1}
+              onClick={() => update({ tab: "extensions", search: "" })}
+            >
+              托管扩展
+            </Button>
           </div>
-          {filters.tab === "concurrency" ? (
+          {filters.tab === "extensions" ? (
+            <ExtensionsDirectory refreshVersion={concurrencyRefresh} />
+          ) : filters.tab === "concurrency" ? (
             <ConcurrencyDirectory refreshVersion={concurrencyRefresh} />
           ) : filters.tab === "categories" ? (
             <>

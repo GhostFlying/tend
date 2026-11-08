@@ -21,6 +21,7 @@
 }
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--space-3);

@@ -46,7 +46,7 @@ export type DiagnosticFilters = {
   since?: string;
 };
 export type AgentFilters = {
-  tab?: "categories" | "concurrency" | undefined;
+  tab?: "categories" | "concurrency" | "extensions" | undefined;
   group?: string;
   search?: string;
   category?: string;
@@ -131,6 +131,7 @@ export function parse(input: string | URL): Route {
     const filters: AgentFilters = {};
     if (query.get("tab") === "categories") filters.tab = "categories";
     if (query.get("tab") === "concurrency") filters.tab = "concurrency";
+    if (query.get("tab") === "extensions") filters.tab = "extensions";
     for (const field of [
       "search",
       "category",

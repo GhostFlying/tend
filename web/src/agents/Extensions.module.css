@@ -1,0 +1,20 @@
+.root {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.root pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.root details {
+  padding: var(--space-2) 0;
+  overflow-wrap: anywhere;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+}

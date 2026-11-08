@@ -198,11 +198,15 @@ func TestIntegrationNativePluginMCPAndHooks(t *testing.T) {
 		t.Fatal("plugin MCP tool missing from thread runtime")
 	}
 	if model := os.Getenv("TEND_CODEX_ENV_MODEL"); model != "" {
-		ref.Profile.AuthSource = filepath.Join(p.UserHome, ".codex", "auth.json")
+		modelRef, pinErr := (&Binding{Directory: s.Root, ID: p.ID}).Pin(t.Context(), "integration:plugin-model")
+		if pinErr != nil {
+			t.Fatal(pinErr)
+		}
+		modelRef.Profile.AuthSource = filepath.Join(p.UserHome, ".codex", "auth.json")
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		trust := fmt.Sprintf("hooks.state={%q={trusted_hash=%q}}", key, hash)
-		cmd, cleanup, err := ref.Command(ctx, "codex", []string{"-c", trust, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--model", model, "--json", "Call the fixture_echo MCP tool once, then reply ENVIRONMENT_OK. Do not run shell commands."}, cwd, os.Environ())
+		cmd, cleanup, err := modelRef.Command(ctx, "codex", []string{"-c", trust, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--model", model, "--json", "Call the fixture_echo MCP tool once, then reply ENVIRONMENT_OK. Do not run shell commands."}, cwd, os.Environ())
 		if err != nil {
 			t.Fatal(err)
 		}

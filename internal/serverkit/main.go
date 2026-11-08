@@ -25,6 +25,7 @@ import (
 	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/dispatch"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/harness/remote"
@@ -112,6 +113,8 @@ type TelegramConfig struct {
 // MainAgentConfig configures the hosted main agent (D68). Every field is
 // optional.
 type MainAgentConfig struct {
+	ManagedExtensions     *extensions.Configuration `json:"managed_extensions,omitempty"`
+	extensionConsumer     *extensions.Consumer
 	CodexEnvironments     *codexenv.Bindings          `json:"codex_environments,omitempty"`
 	Named                 *hostedconfig.Configuration `json:"named,omitempty"`
 	Recovery              *AgentRecoveryConfig        `json:"recovery"`
@@ -191,7 +194,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	readWake := dispatch.NewSignal()
 	interactionWake := dispatch.NewSignal()
 	webhookKeys := &webhookauth.Files{Dir: filepath.Join(dataDir, "webhook-keys")}
-	opts := []app.Option{app.WithWebhookKeys(webhookKeys), app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
+	opts := []app.Option{app.WithExtensionValidator(extensions.ValidateNative), app.WithWebhookKeys(webhookKeys), app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
 	if recovery := os.Getenv("TEND_FORWARD_RECOVERY_ID"); recovery != "" {
 		if cfg.Upgrades == nil || os.Getenv("TEND_FORWARD_RECOVERY_SOCKET") != cfg.Upgrades.UpdaterSocket {
 			return errors.New("forward recovery requires the fixed configured updater socket")
@@ -301,6 +304,28 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			}
 			return reader.Read(ctx, run, selected, query)
 		}))
+	}
+	if cfg.MainAgent != nil && cfg.MainAgent.ManagedExtensions != nil {
+		if err = cfg.MainAgent.ManagedExtensions.ResolvePaths(cfgfile.Path); err != nil {
+			return err
+		}
+		user, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		cfg.MainAgent.extensionConsumer = &extensions.Consumer{Config: *cfg.MainAgent.ManagedExtensions, UserHome: user, Now: now}
+		for id, local := range cfg.MainAgent.ManagedExtensions.Runtimes {
+			if local.Environment == nil {
+				local.Environment = cfg.MainAgent.CodexEnvironments.Resolve(id)
+				cfg.MainAgent.ManagedExtensions.Runtimes[id] = local
+			}
+		}
+		cfg.MainAgent.extensionConsumer.Config = *cfg.MainAgent.ManagedExtensions
+		runtimeIDs := []string{}
+		for id := range cfg.MainAgent.ManagedExtensions.Runtimes {
+			runtimeIDs = append(runtimeIDs, id)
+		}
+		opts = append(opts, app.WithHostedExtensions(runtimeIDs))
 	}
 	a := app.New(s, ids, now, opts...)
 	if err := a.RefreshUsageProjection(ctx); err != nil {
@@ -536,6 +561,15 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	if cfg.MaintenanceSocket != "" {
 		ownerConfig.MaintenanceStatus = maintenanceReader(cfg.MaintenanceSocket)
 	}
+	if cfg.MainAgent != nil && cfg.MainAgent.extensionConsumer != nil {
+		ownerConfig.LocalExtensions = func(ctx context.Context) (string, protocol.ExtensionHostStatus, error) {
+			status, err := cfg.MainAgent.extensionConsumer.Status(ctx)
+			if release, e := a.PublishedExtensions(ctx); e == nil {
+				status.DesiredRelease = release.ID
+			}
+			return cfg.MainAgent.Named.EnvironmentID, status, err
+		}
+	}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus
@@ -580,6 +614,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	defer stop()
 	var wg sync.WaitGroup
 	wg.Go(func() { nativeUsage.run(runCtx) })
+	if cfg.MainAgent != nil && cfg.MainAgent.extensionConsumer != nil {
+		wg.Go(func() { runHostedExtensions(runCtx, a, *cfg.MainAgent, log) })
+	}
 	backgroundErrors := make(chan error, 2)
 	if deps.FetchUsagePrices != nil {
 		wg.Go(func() { runUsagePrices(runCtx, a, deps.FetchUsagePrices, log) })
@@ -760,7 +797,27 @@ func hostedCodexEnvironment(ctx context.Context, a *app.App, cfg MainAgentConfig
 	key := sha256.Sum256([]byte(instance))
 	state := filepath.Join(dataDir, "codex-coordinators", hex.EncodeToString(key[:]))
 	execution := "coordinator:" + instance
-	binding, err := codexenv.BindExecution(ctx, state, execution, cfg.CodexEnvironments.Resolve(selected.Runtime.ID), resumed)
+	current := cfg.CodexEnvironments.Resolve(selected.Runtime.ID)
+	if selected.Extensions != (protocol.ExtensionExecutionPin{}) {
+		if cfg.extensionConsumer == nil {
+			return nil, "", errors.New("original managed extension consumer is unavailable")
+		}
+		release, err := a.RetainedExtensionRelease(ctx, selected.Extensions.ReleaseID)
+		if err != nil {
+			return nil, "", err
+		}
+		if err = cfg.extensionConsumer.Receive(ctx, release, a.ExtensionSource()); err != nil {
+			return nil, "", err
+		}
+		current, _, err = cfg.extensionConsumer.PrepareScoped(ctx, selected.Extensions, selected.Runtime.ID, instance)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	binding, err := codexenv.BindExecution(ctx, state, execution, current, resumed)
+	if selected.Extensions != (protocol.ExtensionExecutionPin{}) && (binding == nil || current == nil || binding.Directory != current.Directory || binding.ID != current.ID) {
+		return nil, "", errors.New("existing native thread requires controlled managed-extension migration")
+	}
 	return binding, execution, err
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,6 +29,11 @@ func (s *Service) readPage(ctx context.Context, id, after string, limit int) (St
 	}
 	slices.Sort(r.Status.PendingRequestIDs)
 	if err == nil {
+		if exclusions, readErr := readExclusions(r.Status.Profile.UserHome); readErr == nil {
+			r.Status.SkillExclusions = &exclusions
+		} else if !os.IsNotExist(readErr) {
+			r.Status.SkillExclusions = &SkillExclusions{LastError: "personal skill exclusion cache is unreadable"}
+		}
 		r.Status.Adoptions, r.Status.AdoptionsNext, r.Status.AdoptionsMore, err = adoptionPage(ctx, dir, after, limit)
 		for key, adoption := range r.Status.Adoptions {
 			if adoption.Generation != r.Status.Latest {
@@ -126,6 +132,9 @@ func (s *Service) Execute(ctx context.Context, q Request) (Result, error) {
 	if err == ErrNotFound {
 		r = record{Requests: map[string]receipt{}, Status: Status{Adoptions: map[string]Adoption{}}}
 	}
+	if !s.Managed && (r.Status.Profile.ExtensionPin != (protocol.ExtensionExecutionPin{}) || q.Profile != nil && q.Profile.ExtensionPin != (protocol.ExtensionExecutionPin{})) {
+		return Result{}, fmt.Errorf("managed extension views are controlled through tend extensions")
+	}
 	if q.Action == "reconcile" {
 		prior, ok := r.Requests[q.RequestID]
 		if !ok {
@@ -172,6 +181,7 @@ func (s *Service) Execute(ctx context.Context, q Request) (Result, error) {
 			return Result{}, err
 		}
 	}
+
 	// The requested transition and its receipt commit in the same atomic file.
 	next := clone(r)
 	before := next.Status.Latest

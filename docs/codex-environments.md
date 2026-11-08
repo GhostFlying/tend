@@ -2,7 +2,11 @@
 
 `show`/`inventory` 的执行采用记录使用 `--after`、`--limit` 分页，默认且最多 100 条；`adoptions_more` 为真时沿用 `adoptions_next` 读取下一页。控制写入返回更新后的配置摘要及所选快照，完整历史通过 show/inventory 读取。
 
-`tend codex-env` 管理本机能力环境，不访问业务账本，也不安装、卸载账号级云端插件。严格隔离仅支持 Linux + bubblewrap。没有 runtime 映射的服务不受影响。
+`tend codex-env` 管理本机能力环境，不访问业务账本，也不安装、卸载账号级云端插件。当前原生启动支持 Linux，不再依赖 Tend 外层 bubblewrap。没有 runtime 映射的服务不受影响。server 托管资源与按 category/Agent 合成请使用 [集中扩展管理](managed-extensions.md)。
+
+原 HOME、设备、终端、用户组与宿主执行权限保持。每个执行有稳定的私有配置 home，进程的 CODEX_HOME 指向该目录；重启时在执行锁内更新配置和插件副本，OAuth 普通文件原生保留，不通过文件软链接共享，也不复制个人 MCP 凭据。`adoptions.configuration_home` 给出对应本机位置。会话、SQLite、日志、OpenAI auth 与线程锁使用原固定状态 home。历史配置 home 中的会话路径别名会保留，不能手动删除仍可能被恢复或对账引用的 `.tend-processes` 目录。用量采集继续读取固定状态 home 的 sessions。
+
+个人 `~/.agents/skills` 使用原生的逐 SKILL.md 禁用清单。启动前检查本机用户的持久缓存，首次立即扫描，之后至多每六小时刷新一次；server/runner 共用文件锁和缓存，没有后台轮询。缓存期内新增项可能仍被加载，这是清单过滤的边界。刷新失败保留旧清单并在 `show`/`doctor` 的 `skill_exclusions` 中报告；无有效清单时拒绝该环境的启动。项目 skills 和管理员来源不进入个人排除清单。
 
 ## 创建与检查
 
@@ -89,7 +93,7 @@ tend codex-env watch disable --revision 1
 
 watch 使用用户 systemd 服务；enable/disable 管理它自己的 revision，status 返回该值。`watch run` 是前台同步进程入口。只同步 enabled 且 auto_sync 未关闭的环境，默认每 60 秒检查选中内容；没有变化不发布新快照，也不调用模型。同步失败保留有效快照，状态给出原因；超时或退出不明时先 reconcile 原请求，不自动换请求重放未知操作。
 
-用户服务保存启用时的工具 PATH，确保非交互进程也能找到本机 Codex 和 bubblewrap。`rollback` 设置 sync_held，避免下一轮自动同步立即撤销人工回退；显式 sync 或环境 update 解除该暂停。禁用 watch 保留环境和当前快照，即使 bubblewrap 已不可用也可以停止该服务。enable 在任何外部操作前的预检失败记为明确失败，允许后续 disable；已可能发出的 systemd 操作仍按原请求对账。
+用户服务保存启用时的工具 PATH，确保非交互进程能找到本机 Codex。`rollback` 设置 sync_held，避免下一轮自动同步立即撤销人工回退；显式 sync 或环境 update 解除该暂停。禁用 watch 保留环境和当前快照。enable 在任何外部操作前的预检失败记为明确失败，允许后续 disable；已可能发出的 systemd 操作仍按原请求对账。
 
 `latest` 表示已发布版本，`adoptions` 表示执行实际固定的版本，两者可能不同；pending_generation / pending_reason 说明保留 run 引用、等待空闲、启动失败或待对账等采用限制。worker 和 runner 托管 manager 在首次 run 启动时持久化引用，同一 run 的恢复沿用该引用；后续新 run 使用最新快照。首次启动前还在 run 自己的固定状态目录保存环境目录和 ID；之后更换或移除 runtime 映射不会重定向原执行。功能启用前已有的未隔离线程继续使用其原路径。问题回答产生的新 run 若继续原线程，则从前序 run 的本机状态继承环境身份，并保存自己的引用。本机长期主会话只在 delivery、turn、维护和未确定回执均已结束，且原生 thread 确认为 idle 后重建 app-server，恢复原 thread，不生成业务输入。新进程握手成功仍保留旧引用，原生 thread 加载成功后才确认采用；加载失败且确认关闭后记录被阻止的版本并恢复旧引用，退出不明时保留 unknown。工具 schema 升级继续使用既有隔离与索引交接流程。
 

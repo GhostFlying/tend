@@ -64,9 +64,9 @@ func TestIntegrationNativeCleanAndProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The actual user home is untouched; its discovery directory is substituted
-	// only in the child mount namespace, also through its canonical alias.
-	cmd, cleanup, err := ref.Command(t.Context(), "/bin/sh", []string{"-c", `test "$HOME" = "$1" && test "$CODEX_HOME" = "$2" && test -f "$HOME/.agents/skills/$3/SKILL.md" && test "$(ls -A "$HOME/.agents/skills" | wc -l)" -eq 1`, "probe", os.Getenv("HOME"), p.Home, digest([]byte("selected"))[:16]}, t.TempDir(), os.Environ())
+	// HOME remains unchanged; only the process configuration home is private.
+	// Its sessions alias resolves to the fixed home used by usage collection.
+	cmd, cleanup, err := ref.Command(t.Context(), "/bin/sh", []string{"-c", `test "$HOME" = "$1" && test -f "$CODEX_HOME/skills/$3/SKILL.md" && test "$(readlink -f "$CODEX_HOME/sessions")" = "$(readlink -f "$2/sessions")"`, "probe", os.Getenv("HOME"), p.Home, digest([]byte("selected"))[:16]}, t.TempDir(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +75,9 @@ func TestIntegrationNativeCleanAndProjection(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	procx.KillGroup(cmd)
 	if err != nil {
-		t.Fatalf("mount view: %v %s", err, out)
+		t.Fatalf("native configuration home: %v %s", err, out)
 	}
+	cleanup()
 	// Codex's own catalog validation above creates no model turn. Exercise one
 	// explicit model turn only when the integration caller selects a model.
 	if model := os.Getenv("TEND_CODEX_ENV_MODEL"); model != "" {
