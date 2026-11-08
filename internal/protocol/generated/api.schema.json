@@ -5534,6 +5534,9 @@
           },
           "type": "array"
         },
+        "mcp_more": {
+          "type": "boolean"
+        },
         "pending_reason": {
           "type": "string"
         },
@@ -5822,6 +5825,9 @@
               "type": "null"
             }
           ]
+        },
+        "adoptions_more": {
+          "type": "boolean"
         },
         "desired_release": {
           "type": "string"

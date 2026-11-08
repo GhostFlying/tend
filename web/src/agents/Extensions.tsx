@@ -132,6 +132,7 @@ export function ExtensionsDirectory({ refreshVersion }: { refreshVersion: number
                     <li key={adoption.execution}>
                       {adoption.execution} · {adoption.state} · {adoption.pin.release_id}
                       {adoption.pending_reason ? ` · 待切换：${adoption.pending_reason}` : ""}
+                      {adoption.mcp_more && <p>MCP 观测已截断，完整记录请在执行主机分页查询。</p>}
                       {adoption.mcp && adoption.mcp.length > 0 && (
                         <details>
                           <summary>MCP 原生观测</summary>
@@ -141,6 +142,11 @@ export function ExtensionsDirectory({ refreshVersion }: { refreshVersion: number
                     </li>
                   ))}
                 </ul>
+                {host.status?.adoptions_more && (
+                  <p>
+                    活跃采用观测有后续项；完整及历史记录请用执行主机的 codex-env show 分页查询。
+                  </p>
+                )}
                 {host.status?.last_error && <p>{host.status.last_error}</p>}
               </details>
             ))}

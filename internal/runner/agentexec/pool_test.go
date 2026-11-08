@@ -125,13 +125,20 @@ type sourceFixture struct {
 	sequence uint64
 }
 
-func newSource(t *testing.T) *sourceFixture {
+func newSource(t *testing.T, runtimeIDs ...string) *sourceFixture {
 	t.Helper()
 	root := t.TempDir()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 721)
 	source := filepath.Join(root, "source.json")
-	control, err := agentcontrol.Open(t.Context(), agentcontrol.Options{Directory: filepath.Join(root, "registry"), EnvironmentID: "runner-a", Config: agentcontrol.Config{SourceFile: source, Installations: []agentcontrol.Installation{{RuntimeID: "native", ArtifactID: "installation", ExpectedSHA256: "sha256:" + strings.Repeat("a", 64), AdapterID: "appserver", AdapterRevision: "1", LocalReference: "PRIVATE_INSTALLATION"}}}, Registry: agentregistry.Options{Now: clock.Now, NewSnapshotID: func() string { return "snapshot-" + ids.New(protocol.PrefixRequest) }}})
+	if len(runtimeIDs) == 0 {
+		runtimeIDs = []string{"native"}
+	}
+	installations := []agentcontrol.Installation{}
+	for _, id := range runtimeIDs {
+		installations = append(installations, agentcontrol.Installation{RuntimeID: id, ArtifactID: "installation", ExpectedSHA256: "sha256:" + strings.Repeat("a", 64), AdapterID: "appserver", AdapterRevision: "1", LocalReference: "PRIVATE_INSTALLATION"})
+	}
+	control, err := agentcontrol.Open(t.Context(), agentcontrol.Options{Directory: filepath.Join(root, "registry"), EnvironmentID: "runner-a", Config: agentcontrol.Config{SourceFile: source, Installations: installations}, Registry: agentregistry.Options{Now: clock.Now, NewSnapshotID: func() string { return "snapshot-" + ids.New(protocol.PrefixRequest) }}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -104,7 +104,7 @@ server 与 runner 的本机配置可显式增加：
 
 该段位于现有对应本机运行配置中，不替换完整配置。server 的主 Agent 使用同样的消费端设置。已有 `codex_environments` 映射会被用于保留原本机环境身份；不得为了扩展更新另选二进制、模型、用途或 slots。
 
-runner 仅向已配置 server 鉴权下载并校验内容。状态区分已发布、已下载、组合就绪和实际采用；旧 runner 未协商能力时显示未迁移。worker 新 run 固定发布/category/Agent/revision/摘要，续跑和对账保持原 pin。长期会话只在原空闲、工具/回执和维护门禁允许后重建原生进程，恢复同一 thread；unknown 不触发输入重放。多 category 的常驻/咨询会话必须在现有会话设置中选择，唯一类别可自动选择。
+runner 仅向已配置 server 鉴权下载并校验内容。心跳仅携带有界的活跃采用观测（最多 64 项、128 KiB，单项最多 16 个 MCP 状态），截断明确标识；完整和历史采用记录通过执行主机 `codex-env show ENV_ID --after CURSOR --limit N` 分页读取，历史记录不被删除。状态区分已发布、已下载、组合就绪和实际采用；旧 runner 未协商能力时显示未迁移。worker 新 run 固定发布/category/Agent/revision/摘要，续跑和对账保持原 pin。长期会话只在原空闲、工具/回执和维护门禁允许后重建原生进程，恢复同一 thread；unknown 不触发输入重放。多 category 的常驻/咨询会话必须在现有会话设置中选择，唯一类别可自动选择。
 
 本机启动不使用外层 bwrap。稳定的执行私有配置 home 让不同执行的 AGENTS、配置和可写插件 cache 不互相覆盖，同一执行重启前持有执行锁；持久会话/SQLite/OpenAI auth/日志与用量采集保留固定状态根。MCP OAuth 在该执行的配置 home 原生保存，重启复用，不自动导入个人凭据。个人技能排除清单由启动触发，六小时内共享缓存，非实时目录隔离。历史路径和引用不自动清理。
 

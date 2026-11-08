@@ -51,7 +51,7 @@ func extensionValidationUses(ctx context.Context, q store.Querier, r protocol.Ex
 				continue
 			}
 			for _, category := range agent.Categories {
-				if !slices.ContainsFunc(r.Catalog.Categories, func(b protocol.ExtensionBinding) bool { return b.CategoryID == category }) {
+				if !slices.ContainsFunc(r.Catalog.Categories, func(b protocol.ExtensionBinding) bool { return b.CategoryID == category }) && !slices.ContainsFunc(r.Catalog.Agents, func(b protocol.ExtensionBinding) bool { return b.Agent == agent.Identity }) {
 					continue
 				}
 				out = append(out, extensions.ValidationUse{CategoryID: category, Agent: agent.Identity})

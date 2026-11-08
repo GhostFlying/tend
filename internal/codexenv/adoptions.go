@@ -129,3 +129,49 @@ func activeAdoptions(ctx context.Context, dir string) (bool, error) {
 	err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM adoptions WHERE state IN ('running','initialized','ready','unknown','pinned','pending_restart'))`).Scan(&active)
 	return active, err
 }
+
+// ActiveAdoptions is bounded telemetry. Historical receipts remain available
+// through the paginated show command and are never erased by this view.
+func (s *Service) ActiveAdoptions(ctx context.Context, id string, limit int) (Profile, []Adoption, bool, error) {
+	dir, err := s.directory(id)
+	if err != nil {
+		return Profile{}, nil, false, err
+	}
+	record, err := loadRecord(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return Profile{}, nil, false, err
+	}
+	profile := record.Status.Profile
+	out := []Adoption{}
+	if limit < 1 || limit > 100 {
+		return profile, nil, false, errors.New("active adoption limit must be 1..100")
+	}
+	db, err := adoptionDB(ctx, dir, false)
+	if errors.Is(err, ErrNotFound) {
+		return profile, out, false, nil
+	}
+	if err != nil {
+		return profile, nil, false, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT body FROM adoptions WHERE state IN ('running','initialized','ready','unknown','pinned','pending_restart') ORDER BY execution LIMIT ?`, limit+1)
+	if err != nil {
+		return profile, nil, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if len(out) == limit {
+			return profile, out, true, nil
+		}
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return profile, nil, false, err
+		}
+		var adoption Adoption
+		if err := json.Unmarshal(raw, &adoption); err != nil {
+			return profile, nil, false, err
+		}
+		out = append(out, adoption)
+	}
+	return profile, out, false, rows.Err()
+}

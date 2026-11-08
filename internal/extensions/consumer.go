@@ -447,58 +447,62 @@ func diagnoseMCP(id string, m protocol.ExtensionMCP) protocol.ExtensionMCPStatus
 	return s
 }
 
-// Adoptions reads native lifecycle receipts, rather than inferring adoption
-// from successful downloads or view preparation. Historical references remain.
-func (c *Consumer) Adoptions(ctx context.Context) ([]protocol.ExtensionAdoption, error) {
+// Adoptions returns bounded active telemetry, not all retained history.
+// Paginated local codex-env show remains the historical diagnostic source.
+func (c *Consumer) Adoptions(ctx context.Context) ([]protocol.ExtensionAdoption, bool, error) {
 	out := []protocol.ExtensionAdoption{}
 	environments, err := c.environments()
 	if err != nil {
-		return out, err
+		return out, false, err
 	}
+	more := false
+	remaining := (128 << 10) - 2
 	for _, environment := range environments {
-		s := codexenv.Service{Root: environment.Directory}
-		after := ""
-		for {
-			result, err := s.Execute(ctx, codexenv.Request{Action: "show", ID: environment.ID, After: after, Limit: 100})
-			if errors.Is(err, codexenv.ErrNotFound) {
-				break
+		profile, adoptions, extra, err := (&codexenv.Service{Root: environment.Directory}).ActiveAdoptions(ctx, environment.ID, 64)
+		if errors.Is(err, codexenv.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return out, more, err
+		}
+		more = more || extra
+		for _, adoption := range adoptions {
+			if adoption.Extensions == (protocol.ExtensionExecutionPin{}) && adoption.DesiredExtensions == (protocol.ExtensionExecutionPin{}) {
+				continue
 			}
+			row := protocol.ExtensionAdoption{Execution: adoption.Execution, Pin: adoption.Extensions, State: adoption.State, MCP: adoption.MCP}
+			if len(row.MCP) > 16 {
+				row.MCP = slices.Clone(row.MCP[:16])
+				row.MCPMore = true
+			}
+			target := profile.ExtensionPin
+			if adoption.DesiredGeneration != "" {
+				target = adoption.DesiredExtensions
+			}
+			if target != adoption.Extensions {
+				row.PendingRelease = target.ReleaseID
+				row.PendingReason = "awaiting_confirmed_idle_and_settled_receipts"
+				if strings.HasPrefix(adoption.Execution, "run:") {
+					row.PendingReason = "run_combination_pinned_for_recovery"
+				}
+				if adoption.State == "unknown" {
+					row.PendingReason = "native_receipt_requires_reconciliation"
+				}
+			}
+			raw, err := json.Marshal(row)
 			if err != nil {
-				return out, err
+				return out, more, err
 			}
-			if result.Status == nil {
-				break
+			if len(out) >= 64 || len(raw)+1 > remaining {
+				more = true
+				continue
 			}
-			status := result.Status
-			for _, adoption := range status.Adoptions {
-				if adoption.Extensions == (protocol.ExtensionExecutionPin{}) && adoption.DesiredExtensions == (protocol.ExtensionExecutionPin{}) {
-					continue
-				}
-				row := protocol.ExtensionAdoption{Execution: adoption.Execution, Pin: adoption.Extensions, State: adoption.State, MCP: adoption.MCP}
-				target := status.Profile.ExtensionPin
-				if adoption.DesiredGeneration != "" {
-					target = adoption.DesiredExtensions
-				}
-				if target != adoption.Extensions {
-					row.PendingRelease = target.ReleaseID
-					row.PendingReason = "awaiting_confirmed_idle_and_settled_receipts"
-					if strings.HasPrefix(adoption.Execution, "run:") {
-						row.PendingReason = "run_combination_pinned_for_recovery"
-					}
-					if adoption.State == "unknown" {
-						row.PendingReason = "native_receipt_requires_reconciliation"
-					}
-				}
-				out = append(out, row)
-			}
-			if !status.AdoptionsMore {
-				break
-			}
-			after = status.AdoptionsNext
+			remaining -= len(raw) + 1
+			out = append(out, row)
 		}
 	}
 	slices.SortFunc(out, func(a, b protocol.ExtensionAdoption) int { return strings.Compare(a.Execution, b.Execution) })
-	return out, nil
+	return out, more, nil
 }
 
 func (c *Consumer) Status(ctx context.Context) (protocol.ExtensionHostStatus, error) {
@@ -528,9 +532,12 @@ func (c *Consumer) Status(ctx context.Context) (protocol.ExtensionHostStatus, er
 		if err != nil {
 			return out, err
 		}
+		if status.Profile.ExtensionPin == (protocol.ExtensionExecutionPin{}) {
+			continue
+		}
 		out.Prepared = append(out.Prepared, protocol.ExtensionPrepared{RuntimeID: status.Profile.ManagedRuntimeID, Pin: status.Profile.ExtensionPin, Ready: status.Latest != "", Generation: status.Latest, Reason: status.LastError})
 	}
-	out.Adoptions, err = c.Adoptions(ctx)
+	out.Adoptions, out.AdoptionsMore, err = c.Adoptions(ctx)
 	return out, err
 }
 

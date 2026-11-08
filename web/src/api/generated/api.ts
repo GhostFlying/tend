@@ -2017,6 +2017,7 @@ export interface RunnerBuild {
  */
 export interface ExtensionHostStatus {
   adoptions: ExtensionAdoption[] | null;
+  adoptions_more?: boolean;
   desired_release?: string;
   downloaded_release?: string;
   enabled: boolean;
@@ -2032,6 +2033,7 @@ export interface ExtensionHostStatus {
 export interface ExtensionAdoption {
   execution: string;
   mcp?: ExtensionMCPStatus[];
+  mcp_more?: boolean;
   pending_reason?: string;
   pending_release?: string;
   pin: ExtensionExecutionPin;

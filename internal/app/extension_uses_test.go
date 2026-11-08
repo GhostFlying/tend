@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -69,5 +71,34 @@ func TestExtensionTargetsIncludeCodexOwnerButExcludeDisabledAgents(t *testing.T)
 	a.Enabled = false
 	if managedExtensionAgent(p, a) {
 		t.Fatal("disabled Agent was included")
+	}
+}
+
+func TestExtensionPublicationValidatesAgentOnlyCombinations(t *testing.T) {
+	h, runtime, projection, _ := inventorySetup(t)
+	projection.FormatVersion = 2
+	projection.Runtimes[0].CLI = "codex"
+	_, hash, err := protocol.CanonicalAgentInventory(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := h.exec(runner("linux-1"), inventoryRequest(h, runtime, projection, hash, 1, 0, "agent-only"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	binding := protocol.ExtensionBinding{Agent: projection.Agents[1].Identity, AgentsMD: "agent only"}
+	if op := extensionEdit(t, h, "binding_set", protocol.ExtensionEditPayload{Binding: &binding}, 0); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	checked := false
+	h.app.extensionValidator = func(_ context.Context, _ protocol.ExtensionRelease, _ extensions.ContentSource, uses []extensions.ValidationUse) error {
+		if len(uses) != 1 || uses[0].Agent != binding.Agent || uses[0].CategoryID != "implementer" {
+			t.Fatalf("Agent-only composition omitted or mixed: %+v", uses)
+		}
+		checked = true
+		return errors.New("controlled native rejection")
+	}
+	op := extensionPublish(t, h)
+	if !checked || op.Status == protocol.OpSucceeded || extensionState(t, h).Published != nil {
+		t.Fatal("Agent-only native failure was published", op)
 	}
 }

@@ -142,7 +142,7 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	cleanup := func() {}
 	if opts.environmentReference != nil {
 		var err error
-		cmd, cleanup, err = opts.environmentReference.Command(procCtx, bin, args, opts.Dir, cmd.Env)
+		cmd, cleanup, err = opts.environmentReference.CommandWithLifetime(ctx, procCtx, bin, args, opts.Dir, cmd.Env)
 		if err != nil {
 			kill()
 			return nil, fmt.Errorf("%w: environment launch view: %w", harness.ErrWorkerNotStarted, err)
