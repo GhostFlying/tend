@@ -55,3 +55,5 @@ JSON 的原等价关系，包括 nil 与空切片的区别，不缓存跨请求�
 生产部署及现场收益单独验收；旧 updater 的日常哈希须在实际二进制替换后复测。
 
 独立 review 补齐两条截止回归：扫描过程中到期的工作仍安排立即复查；已取消 recovery 的 successor 若仍有原回执，继续按原回执截止唤醒。附件即时退出暴露的竞争也已修复：已消费数据库前缀的 closing manager 等原关闭回执，不能重新打开 native 会话。
+
+启动退避同时覆盖 pending 和 sending 的原 outbox 截止；活跃 manager 虽仍由租约候选发现，后台池在创建附件前核验冻结 startup attachment 的准入，避免 intentional pause 经本地完成广播反复自唤醒。

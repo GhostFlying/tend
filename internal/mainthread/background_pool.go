@@ -102,8 +102,13 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 					failed = failed || err != nil
 					continue
 				}
-				selected, named, err := p.App.HostedRuntimeSelection(ctx, id)
+				selected, named, attachment, err := p.App.HostedRuntimeStartupSelection(ctx, id)
 				if err != nil || !named {
+					failed = failed || err != nil
+					continue
+				}
+				allowed, err := p.App.AgentStartupAttachmentAllowed(ctx, attachment)
+				if err != nil || !allowed {
 					failed = failed || err != nil
 					continue
 				}
