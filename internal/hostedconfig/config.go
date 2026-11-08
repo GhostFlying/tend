@@ -96,6 +96,7 @@ func Prepare(c Configuration) (*Prepared, error) {
 // Selection is a private execution snapshot, not a public inventory type.
 // Definition uses the sole P2/P3 model instead of copying its fields.
 type Selection struct {
+	NativeOwnerTools      bool                        `json:"native_owner_tools,omitempty"`
 	RequireReceiptReader  bool                        `json:"require_receipt_reader,omitempty"`
 	OwnershipPolicy       string                      `json:"ownership_policy,omitempty"`
 	ReceiptOnly           bool                        `json:"receipt_only,omitempty"`

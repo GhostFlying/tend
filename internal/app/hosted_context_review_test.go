@@ -331,7 +331,7 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 	turn, manager := startHostedIssueReview(t, h, child)
 	spec := testSpec
 	spec.ImplementationContext = "PRIVATE_MANAGER_EXECUTION_REASONING"
-	taskPayload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Title: "Investigate delegated scope", Spec: spec, Rating: protocol.RatingP1}
+	taskPayload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Title: "Investigate delegated scope", Spec: spec, Rating: protocol.RatingP1, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Verify independent worker acceptance, child closure and parent notification"}}
 	op := hostedEffect(t, h, manager, turn, 1, protocol.Target{Type: "issue", ID: child.IssueID}, rev(child.Revision), taskPayload, CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

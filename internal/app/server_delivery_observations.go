@@ -427,11 +427,6 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		if err = tx.PutDeliveryObservation(ctx, row); err != nil {
 			return Outcome{}, err
 		}
-		candidateEvents, err := invalidateIssueDeliveryCandidates(ctx, x, tx, row.Observation)
-		if err != nil {
-			return Outcome{}, err
-		}
-		events = append(events, candidateEvents...)
 		var trigger string
 		if err = tx.Q().QueryRowContext(ctx, `SELECT event_id FROM observation_jobs WHERE issue_id=? AND delivery_id=?`, m.issue, m.delivery).Scan(&trigger); err != nil {
 			return Outcome{}, err

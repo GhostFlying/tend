@@ -74,7 +74,7 @@ func TestDeliveryMergeOnlyCompletionRequiresCurrentIntegratedCandidate(t *testin
 			before := deliveryDutyForTest(t, h, i.IssueID, source)
 			acceptances, artifacts, runs := h.count("acceptances"), h.count("artifacts"), h.count("runs")
 			op = updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: source, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Check current merge-only delivery endpoint after independent acceptance"}})
-			if change == "valid" {
+			if change == "valid" || change == "restored-snapshot" {
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
@@ -83,8 +83,8 @@ func TestDeliveryMergeOnlyCompletionRequiresCurrentIntegratedCandidate(t *testin
 					t.Fatal(settled)
 				}
 			} else {
-				if before.Status != "preparing" || before.Revision <= d.Revision || before.ExecutionTaskID != created.TaskID {
-					t.Fatal("fresh report did not retain the expired duty", before)
+				if before.Status != "executing" || before.Revision != d.Revision || before.ExecutionTaskID != created.TaskID {
+					t.Fatal("observation rewrote the owner's original responsibility", before)
 				}
 				expectWorkCode(t, op, protocol.CodeStaleRevision)
 				if got := deliveryDutyForTest(t, h, i.IssueID, source); !reflect.DeepEqual(got, before) {
@@ -100,7 +100,7 @@ func TestDeliveryMergeOnlyCompletionRequiresCurrentIntegratedCandidate(t *testin
 					return err
 				}
 				blocked := slices.ContainsFunc(facts.OpenAttention, func(b protocol.IssueBlocker) bool { return b.Code == "delivery_responsibility" && b.ObjectID == source })
-				if blocked != (change != "valid") {
+				if blocked != (change != "valid" && change != "restored-snapshot") {
 					t.Fatal("wrong durable close blocker", facts.OpenAttention)
 				}
 				passed, err := store.ListAcceptances(t.Context(), tx.Q(), created.TaskID, acceptedTask.CurrentArtifactID)
@@ -115,15 +115,6 @@ func TestDeliveryMergeOnlyCompletionRequiresCurrentIntegratedCandidate(t *testin
 			}
 			if h.task(created.TaskID).CurrentArtifactID != acceptedTask.CurrentArtifactID || h.task(source).Lifecycle != protocol.TaskCompleted || h.count("acceptances") != acceptances || h.count("artifacts") != artifacts || h.count("runs") != runs || h.count("issue_delivery_executions") != 1 || h.count("issue_delivery_duties") != 1 {
 				t.Fatal("completion rewrote or revived delivery history")
-			}
-			if change == "restored-snapshot" {
-				// Current explicit owner disposition is supported; old approval and
-				// acceptance could not substitute for it after provider invalidation.
-				endDeliveryForTest(t, h, i.IssueID, source)
-				ended := deliveryDutyForTest(t, h, i.IssueID, source)
-				if ended.Status != "ended" || ended.EventID != before.EventID || ended.AcceptanceID != before.AcceptanceID || ended.ExecutionTaskID != created.TaskID || ended.Evidence[0].Kind != protocol.WorkItemEvidenceOwnerDecision {
-					t.Fatal(ended)
-				}
 			}
 		})
 	}
@@ -202,6 +193,11 @@ func TestDeliveryMergeOnlyCompletionRechecksPersistedFactsAndAuthorization(t *te
 // Exercise provider parsing and the normal nonce/generation report admission.
 func reportGitHubCandidate(t *testing.T, h *harness, issue string, c protocol.IssueDeliveryCandidate, ancestor bool) {
 	t.Helper()
+	reportGitHubCandidateOnHost(t, h, issue, c, ancestor, "linux-1")
+}
+
+func reportGitHubCandidateOnHost(t *testing.T, h *harness, issue string, c protocol.IssueDeliveryCandidate, ancestor bool, host string) {
+	t.Helper()
 	current := canonicalTaskIssue(t, h, issue)
 	op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: issue}, protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, DeliveryID: c.DeliveryID}, rev(current.Revision)), IssueRefreshDelivery{})
 	if op.Status != protocol.OpSucceeded {
@@ -209,7 +205,7 @@ func reportGitHubCandidate(t *testing.T, h *harness, issue string, c protocol.Is
 	}
 	var rt protocol.RunnerRuntime
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		r, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+		r, err := store.GetHostRuntime(t.Context(), tx.Q(), host)
 		rt = r.Runtime
 		return err
 	}); err != nil {
@@ -217,10 +213,10 @@ func reportGitHubCandidate(t *testing.T, h *harness, issue string, c protocol.Is
 	}
 	rt.Sequence++
 	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityDeliveryGitHub, protocol.CapabilityDeliveryCandidateIdentity, protocol.CapabilityDeliveryTargetLineage)
-	if op := h.versionedHello("linux-1", &rt); op.Status != protocol.OpSucceeded {
+	if op := h.versionedHello(host, &rt); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	assignments := pollDelivery(t, h, "linux-1", rt.InstanceID)
+	assignments := pollDelivery(t, h, host, rt.InstanceID)
 	if len(assignments) != 1 {
 		t.Fatal(assignments)
 	}
@@ -243,7 +239,7 @@ func reportGitHubCandidate(t *testing.T, h *harness, issue string, c protocol.Is
 	}
 	a := assignments[0]
 	snapshot := protocol.DeliverySnapshot{State: observed.State, HeadSHA: observed.HeadSHA, BaseSHA: observed.BaseSHA, TargetSHA: observed.TargetSHA, TargetContainsMerge: observed.TargetContainsMerge, MergeSHA: observed.MergeSHA, URL: observed.URL}
-	op = h.exec(runner("linux-1"), h.env(protocol.OpDeliveriesReport, protocol.Target{Type: "host", ID: "linux-1"}, protocol.DeliveryReportPayload{InstanceID: rt.InstanceID, WorkItemID: issue, DeliveryID: c.DeliveryID, Generation: a.Generation, Nonce: a.Nonce, Snapshot: &snapshot}, nil), ReportDelivery{})
+	op = h.exec(runner(host), h.env(protocol.OpDeliveriesReport, protocol.Target{Type: "host", ID: host}, protocol.DeliveryReportPayload{InstanceID: rt.InstanceID, WorkItemID: issue, DeliveryID: c.DeliveryID, Generation: a.Generation, Nonce: a.Nonce, Snapshot: &snapshot}, nil), ReportDelivery{})
 	if !accepted(t, op) {
 		t.Fatal(op)
 	}
@@ -354,18 +350,27 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 				if !ok || worker.TaskID != task {
 					t.Fatal(worker, env)
 				}
-				h.runAs(worker, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+				if op := h.runAs(worker, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+					t.Fatal("fixture did not start the approved execution", op)
+				}
 			}
+			d = deliveryDutyForTest(t, h, i.IssueID, source)
 			// baseRefOid and head stay fixed while the live target advances.
 			c.TargetSHA = strings.Repeat("e", 40)
 			if boundary == "merge-base" {
 				c.ProviderState, c.MergeSHA = "merged", strings.Repeat("c", 40)
 				c.BaseSHA, c.TargetSHA = strings.Repeat("e", 40), c.MergeSHA
 			}
-			reportGitHubCandidate(t, h, i.IssueID, c, true)
+			if boundary == "start" || boundary == "merge-base" {
+				// A separate observer avoids sending an empty Held set for the
+				// live worker; this tests candidate admission, not a fake restart.
+				reportGitHubCandidateOnHost(t, h, i.IssueID, c, true, "linux-2")
+			} else {
+				reportGitHubCandidate(t, h, i.IssueID, c, true)
+			}
 			expired := deliveryDutyForTest(t, h, i.IssueID, source)
-			if expired.Status != "preparing" || expired.Revision <= d.Revision {
-				t.Fatal(expired)
+			if expired.Status != d.Status || expired.Revision != d.Revision || expired.ExecutionTaskID != d.ExecutionTaskID || expired.AttentionID != d.AttentionID {
+				t.Fatal("provider observation mechanically disposed of the owner's responsibility", expired)
 			}
 			switch boundary {
 			case "answer":
@@ -378,9 +383,10 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 					t.Fatal(err)
 				}
 				op := h.exec(owner, h.env("attentions.respond", protocol.Target{Type: "attention", ID: a.AttentionID}, protocol.RespondAttentionPayload{Version: 1, Option: "approve"}, rev(a.Revision)), AttentionCommand{Action: "respond"})
-				if op.Status == protocol.OpSucceeded {
-					t.Fatal("expired question answered", op)
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal("observation withdrew the original owner question", op)
 				}
+				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, d), protocol.CodeStaleRevision)
 			case "task":
 				expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, d), protocol.CodeStaleRevision)
 			case "claim":

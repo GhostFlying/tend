@@ -128,7 +128,7 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 		}
 		seq := int64(1)
 		if len(item.Tasks) == 0 && !in.Repair {
-			task := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Title: "Fix the build", WorkspaceName: "fix-build", Rating: protocol.RatingP2, Spec: protocol.OwnerTaskSpec{Goal: "fix the build", Acceptance: []string{"build passes"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}}
+			task := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Title: "Fix the build", WorkspaceName: "fix-build", Rating: protocol.RatingP2, Spec: protocol.OwnerTaskSpec{Goal: "fix the build", Acceptance: []string{"build passes"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise changes-required remediation and a second independent verdict"}}
 			if !invoke("issues_create_task", map[string]any{"effect_seq": seq, "expected_control_revision": item.Revision, "payload": task}, nil) {
 				return "failed"
 			}

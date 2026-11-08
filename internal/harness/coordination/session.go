@@ -346,6 +346,7 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
 	RequireReceiptReader bool
+	NativeOwnerTools     bool
 	OnSource             func(context.Context, protocol.RolloutPreviewSource) error
 	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
 	LegacyRawUsage bool
@@ -381,7 +382,8 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		return nil, fmt.Errorf("%w: model catalog is unavailable", harness.ErrRejected)
 	case "start", "resume", "fork":
 		cfg := r.Config
-		if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" {
+		nativeOwner := d.NativeOwnerTools && !d.RequireReceiptReader && cfg.Purpose == NativeOwnerPurpose
+		if !nativeOwner && (cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never") {
 			return nil, fmt.Errorf("%w: manager requires read-only/never", harness.ErrRejected)
 		}
 		if d.RequireReceiptReader && (r.ThreadID == "" || cfg.Model == "" || cfg.Ephemeral) {
@@ -390,8 +392,17 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if cfg.Config == nil {
 			cfg.Config = map[string]any{}
 		}
-		for key, value := range Isolation() {
-			cfg.Config[key] = value
+		if nativeOwner {
+			// Use the same device profile as the configured native executor.
+			// Tend's presentation defaults are not an owner tool policy.
+			cfg.Sandbox, cfg.ApprovalPolicy, cfg.ApprovalsReviewer = "", "", ""
+			for key := range Isolation() {
+				delete(cfg.Config, key)
+			}
+		} else {
+			for key, value := range Isolation() {
+				cfg.Config[key] = value
+			}
 		}
 		cfg.Cwd = d.Directory
 		if !d.RequireReceiptReader {
@@ -462,7 +473,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if p, ok := t.(harness.PermissionedThread); ok {
 			info.Permissions = p.PermissionDefaults()
 		}
-		if info.Permissions.Sandbox != "read-only" || info.Permissions.ApprovalPolicy != "never" {
+		if !nativeOwner && (info.Permissions.Sandbox != "read-only" || info.Permissions.ApprovalPolicy != "never") {
 			return nil, fmt.Errorf("%w: native manager permissions differ", harness.ErrRejected)
 		}
 		if info.Model.Model != "" && info.Model.Model != cfg.Model {

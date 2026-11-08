@@ -270,7 +270,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 		if originalView.IssueID != i.IssueID || len(originalView.DeliveryDuties) != 1 || originalView.DeliveryDuties[0].Status != "executing" {
 			t.Fatal(originalView)
 		}
-		proof, err := deliveryUpgradeEvidence(t.Context(), &Exec{Now: h.clock.Now()}, tx.Q(), *candidate.Deployment, "delivery-self-update", h.task(created.TaskID).CreatedAt)
+		proof, err := store.DeliveryUpgradeEvidence(t.Context(), tx.Q(), *candidate.Deployment, "delivery-self-update", h.task(created.TaskID).CreatedAt, h.clock.Now().UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -386,6 +386,7 @@ func TestDeliveryExecutionReportIsRequiredAndVisibleToIndependentAcceptance(t *t
 	answerDeliveryForTest(t, h, duty, "approve", "")
 	i = canonicalTaskIssue(t, h, i.IssueID)
 	p := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Execute reviewed integration", Spec: protocol.OwnerTaskSpec{Goal: "Execute approved integration and retain evidence", Acceptance: []string{"Verify original candidate and result"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: original, Revision: duty.Revision}}
+	p.IndependentAcceptance = &protocol.IndependentAcceptanceRequest{Required: true, Reason: "This test verifies the actual independent acceptance input"}
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: i.IssueID}, p, rev(i.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

@@ -33,8 +33,25 @@ export function executionLabel(counts?: ExecutionCounts): string {
   if (counts.queued) return "任务排队中";
   if (counts.paused) return "执行已暂停";
   if (counts.idle) return "任务待安排";
-  if (counts.completed || counts.cancelled) return "本轮执行已结束";
   return "暂无执行";
+}
+
+// Current responsibility stays open after its historical executions finish.
+export function responsibilityLabel(item: IssueSummary): string {
+  if (item.state === "closed") return "Issue 已完成";
+  if (item.state === "cancelled") return "Issue 已取消";
+  if (item.state === "cancelling") return "取消收尾中";
+  if (item.assignment_state !== "active") return "负责人交接中";
+  const board = item.board;
+  if (board?.execution.unknown) return "执行结果待核对";
+  if (board?.owner_attention_count || board?.execution.waiting_owner) return "等待你处理";
+  if (board?.attention_count || board?.execution.waiting_supervisor) return "等待负责人处理";
+  const execution = executionLabel(board?.execution);
+  if (execution !== "暂无执行") return execution;
+  if (item.state === "paused") return "Issue 已暂停";
+  if (board?.children?.running) return "子 Issue 正在推进";
+  if (board?.progress?.next_step) return "负责人继续推进";
+  return "待负责人确认下一步";
 }
 
 export function notificationLabel(due: number, now: number): string {

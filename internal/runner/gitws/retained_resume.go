@@ -18,6 +18,12 @@ func (w *Workspaces) Reattach(ctx context.Context, as protocol.Assignment) (runn
 	return w.reattach(ctx, as, true)
 }
 
+// ReattachRecovery locates an existing run solely to reconcile its native
+// process. It never prepares, fetches or recreates the workspace.
+func (w *Workspaces) ReattachRecovery(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
+	return w.reattach(ctx, as, false)
+}
+
 // ReattachAcceptanceVerdict reads an acceptance workspace solely to reconcile
 // its original sealed verdict. It never prepares or recreates any directory.
 func (w *Workspaces) ReattachAcceptanceVerdict(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {

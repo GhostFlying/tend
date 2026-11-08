@@ -13,7 +13,7 @@ func (s *Server) manualSource(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := s.app.ManualSource(r.Context(), r.PathValue("id"))
 	if err != nil {
-		s.writeError(w, r, err)
+		s.writeError(w, r, notFound(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, v)

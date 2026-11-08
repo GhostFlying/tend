@@ -24,7 +24,7 @@ func TestManagerKeepsOriginalSnapshotAcrossUnrelatedInventoryRevision(t *testing
 	}
 }
 
-func TestContinuationKeepsBackendAndIndependentAcceptanceAdmission(t *testing.T) {
+func TestContinuationKeepsBackendAndCurrentRoleAdmission(t *testing.T) {
 	old := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "runner", LocalID: "cedar"}, AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "native", Revision: 1}, InventoryRevision: 1, SnapshotID: "original", PublicSHA256: "old", Profile: protocol.ExecutionProfile{Model: "model"}, Worker: protocol.WorkerAppServer, BackendID: "git"}
 	current := old
 	current.AgentRevision = 2
@@ -33,9 +33,14 @@ func TestContinuationKeepsBackendAndIndependentAcceptanceAdmission(t *testing.T)
 	review.Identity.LocalID = "maple"
 	h := Host{ID: "runner", IssueOwners: true, ContinuationsSupported: true, Executors: []Executor{{Pin: current, Categories: []string{"implementation"}}}, Continuations: []Executor{{Continuation: true, Pin: old, Categories: []string{"implementation"}}}}
 	c := Candidate{Kind: protocol.ActionImplement, OwnerAgentRevision: 1, OwnerRuntimeRevision: 1, OwnerPin: &old, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementation"}, Acceptance: protocol.AgentRequirement{CategoryID: "review"}}}
-	if pin, _ := SelectExecution(h, c); pin != nil {
-		t.Fatal("retention bypassed first-allocation acceptance admission", pin)
+	if pin, reason := SelectExecution(h, c); pin == nil || *pin != old || reason != "" {
+		t.Fatal("future reviewer blocked original owner continuation", pin, reason)
 	}
+	c.Kind = protocol.ActionAccept
+	if pin, _ := SelectExecution(h, c); pin != nil {
+		t.Fatal("missing current reviewer was invented", pin)
+	}
+	c.Kind = protocol.ActionImplement
 	h.Executors = append(h.Executors, Executor{Pin: review, Categories: []string{"review"}})
 	if pin, reason := SelectExecution(h, c); pin == nil || *pin != old || reason != "" {
 		t.Fatal("original owner was not selected", pin, reason)

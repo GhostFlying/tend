@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
 )
@@ -40,8 +39,6 @@ func pendingCapabilityWaits(ctx context.Context, q store.Querier, now int64) ([]
 		roles := []protocol.RunRole{protocol.RoleImplement}
 		if c.Kind == protocol.ActionAccept {
 			roles = []protocol.RunRole{protocol.RoleAccept}
-		} else if scheduler.RequiresAcceptancePrerequisite(c) {
-			roles = append(roles, protocol.RoleAccept)
 		}
 		for _, role := range roles {
 			required := c.AgentSelection.Implementation.RequiredCapabilities

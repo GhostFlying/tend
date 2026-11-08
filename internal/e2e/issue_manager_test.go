@@ -226,7 +226,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool) {
 			return "failed"
 		}
 		if delivery && len(item.Tasks) == 0 {
-			contract := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Title: "Investigate the delegated intent", Spec: protocol.OwnerTaskSpec{Goal: "Return evidence for the responsibility", Acceptance: []string{"Independent review checks the evidence"}, Deliverables: []string{"report"}, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}
+			contract := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: item.AssignmentEpoch, Title: "Investigate the delegated intent", Spec: protocol.OwnerTaskSpec{Goal: "Return evidence for the responsibility", Acceptance: []string{"Independent review checks the evidence"}, Deliverables: []string{"report"}, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise single-slot delegation through actual independent acceptance and Issue closure"}}
 			if !mutate("issues_create_task", contract, &item.Revision, nil) {
 				return "failed"
 			}

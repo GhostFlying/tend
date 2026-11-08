@@ -465,7 +465,7 @@ func plan(title, project string) protocol.IssuePlan {
 }
 
 func taskPayload(title string, epoch int64) protocol.CreateIssueTaskPayload {
-	return protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: epoch, Title: shortTitle(title), Rating: protocol.RatingP2, Spec: protocol.OwnerTaskSpec{Goal: title, Acceptance: []string{"示例报告包含进展、结果与沙盒说明"}, Deliverables: []string{"report", "files"}, MaxImplementAttempts: 1, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}
+	return protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Demonstrate the sandbox's implementation and independent acceptance lifecycle"}, ExpectedAssignmentEpoch: epoch, Title: shortTitle(title), Rating: protocol.RatingP2, Spec: protocol.OwnerTaskSpec{Goal: title, Acceptance: []string{"示例报告包含进展、结果与沙盒说明"}, Deliverables: []string{"report", "files"}, MaxImplementAttempts: 1, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}
 }
 
 func delay(ctx context.Context, duration time.Duration) bool {

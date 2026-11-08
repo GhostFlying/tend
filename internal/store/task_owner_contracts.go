@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 
@@ -56,9 +57,45 @@ func RunIssueResponsibility(ctx context.Context, q Querier, run string) (protoco
 }
 
 func TaskOwnerContractCurrent(ctx context.Context, q Querier, task string) (bool, error) {
-	var current bool
-	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=? AND (i.assignment_epoch<>c.assignment_epoch OR i.assignee_ref<>c.agent_ref OR i.assignment_state<>'active'))`, task).Scan(&current)
-	return current, err
+	var current, contract bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_execution_contracts WHERE task_id=?), NOT EXISTS(SELECT 1 FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id WHERE c.task_id=? AND (i.assignment_epoch<>c.assignment_epoch OR i.assignee_ref<>c.agent_ref OR i.assignment_state<>'active'))`, task, task).Scan(&contract, &current)
+	if err != nil || contract {
+		return current, err
+	}
+	origin, err := TaskIssueResponsibilityOrigin(ctx, q, task)
+	if errors.Is(err, ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	issue, err := GetCanonicalIssue(ctx, q, origin.IssueID)
+	if err != nil {
+		return false, err
+	}
+	return issue.AssignmentEpoch == origin.AssignmentEpoch && issue.Assignee.Ref == origin.AgentRef && issue.AssignmentState == "active", nil
+}
+
+// TaskIssueResponsibilityOrigin recovers the Issue owner that published an
+// ordinary collaboration Task. It is independent of its selected executor.
+// Existing spec1 and Issue snapshots are immutable; later context revisions
+// cannot replace this assignment epoch or create a new execution permission.
+func TaskIssueResponsibilityOrigin(ctx context.Context, q Querier, task string) (protocol.ExecutionResponsibility, error) {
+	var origin protocol.ExecutionResponsibility
+	var revision int64
+	err := q.QueryRowContext(ctx, `SELECT o.work_item_id,json_extract(c.value,'$.revision') FROM task_work_item_owners o JOIN issue_ownership_policies p ON p.issue_id=o.work_item_id JOIN task_specs s ON s.task_id=o.task_id AND s.spec_version=1 JOIN json_each(s.body_json,'$.shared_context') c WHERE o.task_id=? AND json_extract(c.value,'$.work_item_id')=o.work_item_id LIMIT 1`, task).Scan(&origin.IssueID, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return origin, ErrNotFound
+	}
+	if err != nil {
+		return origin, err
+	}
+	issue, err := GetCanonicalIssueRevision(ctx, q, origin.IssueID, revision)
+	if err != nil {
+		return origin, err
+	}
+	origin.TaskID, origin.IssueRevision, origin.AssignmentEpoch, origin.AgentRef = task, revision, issue.AssignmentEpoch, issue.Assignee.Ref
+	return origin, nil
 }
 
 func RunIssueResponsibilityCurrent(ctx context.Context, q Querier, run string) (bool, error) {

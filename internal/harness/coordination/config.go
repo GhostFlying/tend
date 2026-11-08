@@ -1,5 +1,9 @@
 package coordination
 
+// NativeOwnerPurpose selects the runner's ordinary configured owner runtime.
+// Other coordination requests retain their existing read-only defaults.
+const NativeOwnerPurpose = "issue_owner_native"
+
 // Isolation returns a fresh native execution policy for coordinator sessions.
 // CLI hooks and effective read-only permissions are independently verified.
 func Isolation() map[string]any {

@@ -93,33 +93,39 @@ func TestIssueChangesCoalesceAndPreserveExternalInputAcrossOwnerWrites(t *testin
 	}
 }
 
-func TestSourceReviewLeavesNormalOwnerAssessmentNotification(t *testing.T) {
+func TestSourceReviewDoesNotCreateTaskPermissionOrSelfWake(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	task, _ := agreementFixture(t, h, issue)
 	appendAgreementSource(t, h, issue.IssueID)
 	turn, principal := startHostedIssueReview(t, h, issue)
 	review := hostedReviewPayload(t, h, issue)
+	var pendingBefore int
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM issue_change_notifications WHERE issue_id=? AND due_at>0`, issue.IssueID).Scan(&pendingBefore)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	op := hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "issue", ID: issue.IssueID}, nil, review, ReviewHostedIssueContext{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var kind string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT kind FROM issue_change_notifications WHERE issue_id=? AND due_at>0`, issue.IssueID).Scan(&kind); err != nil {
+		var count int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM issue_change_notifications WHERE issue_id=? AND due_at>0`, issue.IssueID).Scan(&count); err != nil {
 			return err
 		}
-		if kind != "issue.task_agreement_review_required" {
-			t.Fatal("source review lost the remaining task judgement", kind)
+		if count != pendingBefore {
+			t.Fatal("owner's handled source generated a new permission wake", count)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assertAgreementAdmission(t, h, issue.IssueID, task, true)
+	assertAgreementAdmission(t, h, issue.IssueID, task, false)
 	h.clock.Advance(3 * time.Minute)
 	sweepStatus(t, h)
-	if issueChangeSources(t, h, issue.IssueID) != 1 {
-		t.Fatal("repair source work did not leave ordinary coordination input")
+	if issueChangeSources(t, h, issue.IssueID) != pendingBefore {
+		t.Fatal("handled source review woke itself again")
 	}
 }

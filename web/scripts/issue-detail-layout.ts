@@ -106,6 +106,8 @@ let decision: AttentionView = {
   created_at: now,
   updated_at: now,
 };
+let additionalAttentions: AttentionView[] = [];
+let pagedResponsibility = false;
 const results: IssueResultPage = {
   items: [
     {
@@ -482,6 +484,28 @@ const server = createServer(async (req, res) => {
             },
           ],
     });
+  }
+  if (p === "/api/v1/inbox") {
+    const query = u.searchParams;
+    const recipient = query.get("recipient") || "owner";
+    let items = [decision, ...additionalAttentions].filter(
+      (item) =>
+        (!query.get("issue_id") || item.issue_id === query.get("issue_id")) &&
+        (!query.get("responsible_issue_id") ||
+          (item.responsibility ? item.responsibility.issue_id : item.issue_id) ===
+            query.get("responsible_issue_id")) &&
+        (recipient === "all" || (item.responsibility?.recipient_kind ?? "owner") === recipient) &&
+        (!query.get("status") || item.status === query.get("status")) &&
+        (!query.get("kind") || item.kind === query.get("kind")) &&
+        (query.get("actionable_only") !== "true" || ["decision", "action"].includes(item.kind)) &&
+        (query.get("include_archived") === "true" || !item.archived_at) &&
+        (!query.get("after") || item.attention_id > query.get("after")!),
+    );
+    items.sort((a, b) => a.attention_id.localeCompare(b.attention_id));
+    const limit = Math.min(Number(query.get("limit") || 50), pagedResponsibility ? 2 : 100);
+    const more = items.length > limit;
+    items = items.slice(0, limit);
+    return json({ items, more, ...(more ? { next: items.at(-1)!.attention_id } : {}) });
   }
   if (p === "/api/v1/attentions/attention-decision") return json(decision);
   if (p.startsWith("/api/v1/requests/")) {
@@ -1285,6 +1309,117 @@ try {
     await context.close();
     conversationFailure = false;
     console.log(`PASS ${width}: sendable conversation read failure remains visible`);
+  }
+  // Current handling, immutable origin and human approval are separate facts.
+  for (const width of [1440, 390]) {
+    const originalDecision = structuredClone(decision);
+    const writeCount = writes.length;
+    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    try {
+      decision = {
+        ...decision,
+        issue_id: child.issue_id,
+        status: "open",
+        kind: "decision",
+        responsibility: {
+          origin_issue_id: child.issue_id,
+          origin_assignment_epoch: 1,
+          issue_id: issue.issue_id,
+          recipient_kind: "owner",
+          assignment_epoch: 1,
+          revision: 1,
+          ancestry: [],
+          history: [],
+        },
+      };
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      const humanDecision = detail.getByRole("button", { name: "查看并决定", exact: true });
+      await humanDecision.waitFor();
+      await humanDecision.click();
+      const original = page.getByRole("dialog", { name: "Issue 待处理事项", exact: true });
+      await original.getByRole("radio", { name: "小范围灰度", exact: true }).waitFor();
+      await original.getByRole("radio", { name: "小范围灰度", exact: true }).check();
+      assert(!(await original.getByRole("button", { name: "提交决定", exact: true }).isDisabled()));
+      await original.getByRole("button", { name: /^关闭/ }).first().click();
+
+      decision.responsibility = {
+        ...decision.responsibility!,
+        recipient_kind: "agent",
+        recipient_ref: issue.assignee.ref,
+        revision: 2,
+      };
+      additionalAttentions = ["a", "b"].map((suffix) => ({
+        ...structuredClone(decision),
+        attention_id: `attention-extra-${suffix}`,
+        kind: "action",
+        title: `当前负责人补充待办 ${suffix}`,
+      }));
+      pagedResponsibility = true;
+      publish();
+      const agentAction = detail.getByRole("button", { name: "查看当前待办", exact: true });
+      await agentAction.waitFor();
+      assert.equal(await humanDecision.count(), 0);
+      await detail.getByRole("button", { name: "加载更多当前责任待办", exact: true }).click();
+      await detail.locator("summary").filter({ hasText: "另有 2 项" }).click();
+      await detail
+        .getByRole("button", {
+          name: "等待本 Issue 负责人处理 · 当前负责人补充待办 b",
+          exact: true,
+        })
+        .waitFor();
+      assert.equal(
+        await detail
+          .getByRole("button", {
+            name: "等待本 Issue 负责人处理 · 当前负责人补充待办 a",
+            exact: true,
+          })
+          .count(),
+        1,
+      );
+      assert.equal(
+        await detail.getByRole("button", { name: "加载更多当前责任待办", exact: true }).count(),
+        0,
+      );
+      await agentAction.click();
+      await original.getByRole("heading", { name: decision.title, exact: true }).waitFor();
+      assert.equal(
+        await original.getByRole("button", { name: "提交决定", exact: true }).count(),
+        0,
+      );
+      await original
+        .getByRole("button", { name: `原始 Issue · ${child.issue_id}`, exact: true })
+        .waitFor();
+      await original.getByRole("button", { name: "打开原始事项记录 →", exact: true }).waitFor();
+      await page.screenshot({ path: join(output, `detail-current-responsibility-${width}.png`) });
+      await original.getByRole("button", { name: /^关闭/ }).first().click();
+      decision.responsibility = {
+        ...decision.responsibility,
+        issue_id: child.issue_id,
+        revision: 3,
+      };
+      additionalAttentions = [];
+      publish();
+      await agentAction.waitFor({ state: "hidden" });
+      assert.equal(await humanDecision.count(), 0);
+      assert.equal(decision.issue_id, child.issue_id);
+      assert.equal(writes.length, writeCount, "reading responsibility did not answer the question");
+      assert.deepEqual(errors, []);
+      console.log(
+        `PASS current responsibility ${width}: human decision retained; Agent original stays observational; child origin, route movement and unique pagination preserved`,
+      );
+    } finally {
+      decision = originalDecision;
+      additionalAttentions = [];
+      pagedResponsibility = false;
+      await context.close();
+    }
   }
   for (const width of [1440, 1280, 1024, 430, 390, 320]) {
     issue.progress!.summary = "发布步骤与回滚文档已完成，灰度验证等待范围确认。";

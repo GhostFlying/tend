@@ -182,6 +182,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		if _, ok := r.cfg.Executions.(ManagerExecutionResolver); ok && r.runnerProtocol >= 2 {
 			capabilities = append(capabilities, protocol.CapabilityIssueManager)
 			capabilities = append(capabilities, protocol.CapabilityIssueOwner)
+			if native, ok := r.cfg.Executions.(NativeOwnerExecutionResolver); ok && native.SupportsNativeOwnerTools() {
+				capabilities = append(capabilities, protocol.CapabilityIssueOwnerNativeTools)
+			}
 			if _, ok := r.cfg.Executions.(ManagerReceiptExecutionResolver); ok {
 				capabilities = append(capabilities, protocol.CapabilityManagerReceiptReader)
 			}

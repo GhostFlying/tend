@@ -20,10 +20,10 @@ func TestIssueContextReaderPreservesQueryPagingAndProvenanceWithoutObservationSc
 		t.Run(string(role), func(t *testing.T) {
 			as := protocol.Assignment{Role: role, RunID: "run_current", TaskID: "task_original", RunToken: "current-run-only", Spec: json.RawMessage(`{}`)}
 			calls := 0
-			query := protocol.IssueMaterialsQuery{Kind: "files", ID: "file/exact&name", After: "opaque&cursor?+", Limit: 7}
+			query := protocol.IssueMaterialsQuery{IssueID: "issue/related&scope", Kind: "files", ID: "file/exact&name", After: "opaque&cursor?+", Limit: 7}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				if r.URL.Path != "/runner/v1/context" || r.Header.Get(headerRun) != as.RunID || r.Header.Get("Authorization") != "Bearer "+as.RunToken || r.URL.Query().Get("kind") != query.Kind || r.URL.Query().Get("id") != query.ID || r.URL.Query().Get("after") != query.After || r.URL.Query().Get("limit") != "7" {
+				if r.URL.Path != "/runner/v1/context" || r.Header.Get(headerRun) != as.RunID || r.Header.Get("Authorization") != "Bearer "+as.RunToken || r.URL.Query().Get("issue_id") != query.IssueID || r.URL.Query().Get("kind") != query.Kind || r.URL.Query().Get("id") != query.ID || r.URL.Query().Get("after") != query.After || r.URL.Query().Get("limit") != "7" {
 					t.Error("context request changed its current Run or explicit page query", r.URL)
 				}
 				_ = json.NewEncoder(w).Encode(protocol.RunContext{RunID: as.RunID, TaskID: as.TaskID, Role: role, Materials: protocol.IssueMaterials{Kind: query.Kind, ObservedAt: 17, Seq: int64(calls), More: true, Next: "next-page", Files: []protocol.IssueMaterialFile{{ArtifactFile: protocol.ArtifactFile{FileID: "file_original", SHA256: "original"}, Sources: []protocol.IssueMaterialSource{{Kind: "background", Status: "history", ContentRevision: 4}}}}}})

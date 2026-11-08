@@ -23,7 +23,7 @@ func mergeSettlementFixture(t *testing.T) (*harness, protocol.Assignment, *proto
 	duty := prepareDeliveryForTest(t, h, issue.IssueID, source, candidate)
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	spec := protocol.OwnerTaskSpec{Goal: "Settle only the authorized reviewed merge", Acceptance: []string{"Verify the original head's server merge and ancestry"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", AgentID: "linux-1/alpha"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Settle approved integration", Spec: spec, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: source, Revision: duty.Revision}}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Settle approved integration", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "The complete PR already has a formal independent review; this execution reports the real server receipt"}, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: source, Revision: duty.Revision}}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -178,8 +178,8 @@ func TestDeliveryMergeSettlementRejectsUnverifiedAdvancedTarget(t *testing.T) {
 			}
 			recordSettlementSnapshot(t, h, snapshot)
 			duty := deliveryDutyForTest(t, h, authority.IssueID, authority.SourceTaskID)
-			if duty.Status != "preparing" || duty.Revision != original.Revision+1 {
-				t.Fatal("unverified fact retained authorization", duty)
+			if !reflect.DeepEqual(duty, original) {
+				t.Fatal("observation changed the owner's delivery disposition", duty)
 			}
 			view, err := h.app.ReadRunObservation(t.Context(), runPrincipal(run.RunID, run.Role))
 			if err != nil || view.DeliveryAuthorization == nil || view.DeliveryAuthorization.Valid {
@@ -194,7 +194,7 @@ func TestDeliveryMergeSettlementRejectsUnverifiedAdvancedTarget(t *testing.T) {
 				t.Fatal("source helper accepted unverified ancestry", err)
 			}
 			op := updateDeliveryForTest(t, h, authority.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: authority.SourceTaskID, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "An unverified original merge cannot settle responsibility"}})
-			expectWorkCode(t, op, protocol.CodeStaleRevision)
+			expectWorkCode(t, op, protocol.CodeInvalidTransition)
 		})
 	}
 }
@@ -248,8 +248,11 @@ func TestDeliveryMergeSettlementDoesNotAuthorizeUnboundCandidate(t *testing.T) {
 	}
 	recordSettlementSnapshot(t, h, settlementSnapshot(candidate))
 	after := deliveryDutyForTest(t, h, issue.IssueID, source)
-	if after.Status != "preparing" || after.Revision != before.Revision+1 || after.ExecutionTaskID != "" {
-		t.Fatal("a merged observation granted an unbound execution", after)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("a merged observation changed the owner's unbound candidate", after)
+	}
+	if op := createDeliveryExecutionForTest(t, h, issue.IssueID, after); op.Status == protocol.OpSucceeded {
+		t.Fatal("an observed merge authorized a new execution of the old open candidate", op)
 	}
 }
 

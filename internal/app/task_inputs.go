@@ -43,7 +43,7 @@ func freezeTaskInputs(ctx context.Context, x *Exec, q store.Querier, spec *domai
 					// The caller may plan this Issue, but this selected input is
 					// not a valid part of its new contract. Persist that exact
 					// rejected request rather than later granting it new meaning.
-					return protocol.Errorf(protocol.CodeInvalidRequest, "new task input lacks current Issue authority; select lawful material or obtain an exact current grant")
+					return protocol.Errorf(protocol.CodeInvalidRequest, "new task input is outside the Issue's available materials; select a saved related material")
 				}
 				return errNotFound(err, "input file is unavailable to the current Issue")
 			}

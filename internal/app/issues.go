@@ -500,7 +500,6 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 	}
 	// A definition edit is a change for the current owner to assess, not an
 	// instruction for its editor to invent task semantics before saving it.
-	// Legacy work-item plans retain their original disposition contract.
 	affected := map[string]bool{}
 	ids, err := store.IssueTaskIDs(ctx, q, item.WorkItemID)
 	if err != nil {
@@ -522,14 +521,8 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		dispositionIndices[d.TaskID] = i
 	}
 	liveRunQuery := `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed','interrupted'))`
-	var canonical bool
-	if len(affected) > 0 {
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, item.WorkItemID).Scan(&canonical); err != nil {
-			return err
-		}
-		if canonical {
-			liveRunQuery = `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed'))`
-		}
+	if canonicalIssue {
+		liveRunQuery = `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed'))`
 	}
 	for id := range affected {
 		task, err := store.GetTask(ctx, q, id)
@@ -548,10 +541,10 @@ func validateIssueDispositions(ctx context.Context, q store.Querier, item protoc
 		if task.Lifecycle.Terminal() {
 			continue
 		}
-		if canonicalIssue && len(dispositions) == 0 && !domain.IssueTaskRetired(item.IssuePlan, next, id) {
+		d, ok := byTask[id]
+		if !ok && !domain.IssueTaskRetired(item.IssuePlan, next, id) {
 			continue
 		}
-		d, ok := byTask[id]
 		if ok {
 			if err := domain.ValidateIssueDispositionAction(d.Action, fmt.Sprintf("task_dispositions[%d].action", dispositionIndices[id])); err != nil {
 				return err

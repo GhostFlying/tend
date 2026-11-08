@@ -28,7 +28,7 @@ import { ChildProgress } from "./ChildProgress.tsx";
 import {
   boardColumns,
   blockerLabels,
-  executionLabel,
+  responsibilityLabel,
   notificationLabel,
   workStatus,
 } from "./boardModel.ts";
@@ -592,17 +592,25 @@ const BoardCard = memo(function BoardCard({
             pendingCategoryID={item.board?.pending_manager_category_id}
           />
         </span>
-        {(!b?.children?.total || executionLabel(b?.execution) !== "暂无执行") && (
-          <Badge
-            className={styles.execution}
-            tone={b?.execution.unknown || b?.execution.waiting_owner ? "warn" : "neutral"}
-          >
-            {b?.children?.total
-              ? `本 Issue · ${executionLabel(b?.execution)}`
-              : executionLabel(b?.execution)}
-          </Badge>
-        )}
+        <Badge
+          className={styles.execution}
+          tone={
+            b?.execution.unknown || b?.execution.waiting_owner || b?.attention_count
+              ? "warn"
+              : "neutral"
+          }
+        >
+          {responsibilityLabel(item)}
+        </Badge>
       </div>
+      {!["closed", "cancelled"].includes(item.state) && b?.progress?.next_step && (
+        <p
+          className={styles.pending}
+          title={`负责人记录于 Issue 版本 ${b.progress.issue_revision}`}
+        >
+          下一步 · {b.progress.next_step}
+        </p>
+      )}
       {!!b?.children?.total && (
         <ChildProgress id={item.issue_id} summary={b.children} onSelect={onSelect} />
       )}

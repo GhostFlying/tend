@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
@@ -17,8 +18,8 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "manager task awaits a runner claim")
 	}
 	var run string
-	var strict bool
-	err := q.QueryRowContext(ctx, `SELECT r.run_id,COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'' FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND l.status='active' ORDER BY r.created_at DESC LIMIT 1`, m.TaskID).Scan(&run, &strict)
+	var strict, nativeMode bool
+	err := q.QueryRowContext(ctx, `SELECT r.run_id,COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'',COALESCE(json_extract(a.trigger_json,'$.native_owner_tools'),0) FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND l.status='active' ORDER BY r.created_at DESC LIMIT 1`, m.TaskID).Scan(&run, &strict, &nativeMode)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return hostedconfig.Selection{}, false, err
 	}
@@ -39,7 +40,11 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if owner {
 		policy = protocol.IssueOwnerPolicy
 	}
-	return hostedconfig.Selection{OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
+	nativeTools, err := runnerSupportsOwnerNativeTools(ctx, q, p.Identity.ExecutionEnvironmentID)
+	if err != nil {
+		return hostedconfig.Selection{}, false, err
+	}
+	return hostedconfig.Selection{NativeOwnerTools: owner && nativeMode && nativeTools && !strict && !closing && !parked, OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
 }
 
 // AgentConversationClaimed prevents the hosted pool from starting an Issue
@@ -126,8 +131,9 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 	}
 	selected.RunnerRunID = run
 	var receipt struct {
-		ReceiptOnly     bool   `json:"receipt_only"`
-		ReaderRequestID string `json:"receipt_reader_request_id"`
+		NativeOwnerTools bool   `json:"native_owner_tools"`
+		ReceiptOnly      bool   `json:"receipt_only"`
+		ReaderRequestID  string `json:"receipt_reader_request_id"`
 	}
 	if err = json.Unmarshal([]byte(trigger), &receipt); err != nil {
 		return err
@@ -142,5 +148,21 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 	}
 	selected.ReceiptOnly = receipt.ReceiptOnly || closing || parked
 	selected.RequireReceiptReader = receipt.ReaderRequestID != ""
+	nativeTools, err := runnerSupportsOwnerNativeTools(ctx, q, selected.Identity.ExecutionEnvironmentID)
+	if err != nil {
+		return err
+	}
+	selected.NativeOwnerTools = receipt.NativeOwnerTools && nativeTools && selected.OwnershipPolicy == protocol.IssueOwnerPolicy && !selected.ReceiptOnly && !selected.RequireReceiptReader
 	return nil
+}
+
+func runnerSupportsOwnerNativeTools(ctx context.Context, q store.Querier, host string) (bool, error) {
+	runtime, err := store.GetHostRuntime(ctx, q, host)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwnerNativeTools), nil
 }

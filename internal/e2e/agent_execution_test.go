@@ -3,10 +3,12 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +46,7 @@ func TestEndToEnd_NamedExecutionReloadRestartAndIndependentAcceptance(t *testing
 		t.Run(string(kind), func(t *testing.T) { testNamedExecutionReloadRestart(t, kind, "") })
 	}
 }
-func TestEndToEnd_NamedReusedWorkspaceFirstRunRequiresBothRoles(t *testing.T) {
+func TestEndToEnd_NamedReusedWorkspaceChecksCurrentRole(t *testing.T) {
 	for _, mode := range []string{"reuse", "default"} {
 		t.Run(mode, func(t *testing.T) { testNamedExecutionReloadRestart(t, agentconfig.AppServerWorker, mode) })
 	}
@@ -74,6 +76,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	var starts []harness.WorkerSpec
 	var reviewFactories []*testkit.Workers
 	var currentPool *agentexec.Pool
+	var reviewUnavailable atomic.Bool
 	backend := "git"
 	if reviewKind == agentconfig.OrcaWorker {
 		backend = "orca"
@@ -91,7 +94,12 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 			}
 		}
 		workspaces := &workspaces{dir: filepath.Join(f.home, "workspaces")}
-		pool, err := agentexec.New(agentexec.Options{Source: source, BackendID: backend, Workspaces: namedWorkspaces{workspaces}, Probe: func(context.Context, agentexec.BuildInput) error { return nil }, Build: func(input agentexec.BuildInput) (harness.Workers, error) {
+		pool, err := agentexec.New(agentexec.Options{Source: source, BackendID: backend, Workspaces: namedWorkspaces{workspaces}, Probe: func(_ context.Context, input agentexec.BuildInput) error {
+			if input.Runtime.ID == "review-runtime" && reviewUnavailable.Load() {
+				return errors.New("test_reviewer_unavailable")
+			}
+			return nil
+		}, Build: func(input agentexec.BuildInput) (harness.Workers, error) {
 			workers := &testkit.Workers{Script: func(spec harness.WorkerSpec) testkit.WorkerScript {
 				mu.Lock()
 				starts = append(starts, spec)
@@ -329,6 +337,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	if err != nil {
 		t.Fatal(err)
 	}
+	reviewUnavailable.Store(true)
 	for _, executor := range observed {
 		if executor.Pin.Identity.LocalID == "review" {
 			currentPool.Reject(executor.Pin, "test_adapter_unavailable")
@@ -410,13 +419,20 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	var result struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}
-	if err := json.Unmarshal(claim.Result, &result); err != nil || result.Assignment != nil {
-		t.Fatal("new reused task claimed without an eligible reviewer", result.Assignment, err)
+	if err := json.Unmarshal(claim.Result, &result); err != nil || result.Assignment == nil || result.Assignment.TaskID != follow.TaskID || result.Assignment.Role != protocol.RoleImplement || result.Assignment.Execution == nil || result.Assignment.Execution.Profile.Model != "implement-new" || result.Assignment.Workspace.BackendID != "git" || result.Assignment.Workspace.ID != sourceWorkspace {
+		t.Fatal("reused task did not select its actual current executor and backend", result.Assignment, err)
 	}
-	// New process probes the same accepted definitions again and restores both
-	// adapters. The new task may now allocate, without changing the source task's pin.
+	// A real runner executes the claimed implementation while the future
+	// reviewer remains unavailable. The actual acceptance stage must still wait.
 	start(false)
-	eventually(t, "reused task executes after both roles are available", func() bool { return s.task(follow.TaskID).Lifecycle == protocol.TaskCompleted })
+	eventually(t, "current implementation finishes before future reviewer is ready", func() bool { return s.task(follow.TaskID).Lifecycle == protocol.TaskAwaitingAcceptance })
+	if got := s.count(`SELECT count(*) FROM runs WHERE task_id=? AND role='accept'`, follow.TaskID); got != 0 {
+		t.Fatal("missing reviewer was invented", got)
+	}
+	f.stop()
+	reviewUnavailable.Store(false)
+	start(false)
+	eventually(t, "actual acceptance completes after its own adapter becomes ready", func() bool { return s.task(follow.TaskID).Lifecycle == protocol.TaskCompleted })
 	if got := readSourcePins(); !reflect.DeepEqual(got, sourcePins) {
 		t.Fatalf("workspace reuse changed the completed source's run pins: before=%+v after=%+v", sourcePins, got)
 	}

@@ -111,9 +111,11 @@ func TestWorkItemsSharedTaskLinksAndPlanAgreement(t *testing.T) {
 	w = h.work(w.WorkItemID)
 	w.Stages[0].Title = "Broader investigation"
 	payload := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(2)), UpdateIssue{}), protocol.CodeInvalidRequest)
+	if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(2)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
+		t.Fatal("ordinary plan edit required a Task applicability permission", op)
+	}
 	payload.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: task.TaskID, Action: "continue_existing", SpecVersion: 1, Reason: "Keep the original investigation agreement; expansion is a later task"}}
-	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(2)), UpdateIssue{})
+	op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(3)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -122,7 +124,7 @@ func TestWorkItemsSharedTaskLinksAndPlanAgreement(t *testing.T) {
 	}
 	w = h.work(w.WorkItemID)
 	w.Stages[0].TaskIDs = nil
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(3)), UpdateIssue{}), protocol.CodeInvalidRequest)
+	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}, rev(w.Revision)), UpdateIssue{}), protocol.CodeInvalidRequest)
 }
 
 func TestWorkItemsExplicitCloseReopenAndUnresolvedCommitments(t *testing.T) {

@@ -99,7 +99,7 @@ func TestCoordinationReplyRollsBackInvalidAuthority(t *testing.T) {
 	}
 }
 
-func TestReviewedNewConstraintFencesFrozenTaskUntilSpecRevision(t *testing.T) {
+func TestReviewedNewConstraintPreservesTaskUntilExplicitSpecRevision(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -127,8 +127,8 @@ func TestReviewedNewConstraintFencesFrozenTaskUntilSpecRevision(t *testing.T) {
 		t.Fatal(op)
 	}
 	commitFixtureTurn(t, h, turn.RequestID)
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("changed semantic inputs ran under old agreement")
+	if view := h.executionTask(identity.TaskID); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued {
+		t.Fatal("ordinary source change blocked the retained Task", view)
 	}
 	if len(h.storedSpec(identity.TaskID, 1).Constraints) != len(original.Constraints) {
 		t.Fatal("old agreement mutated")
@@ -207,7 +207,7 @@ func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
 	}
 }
 
-func TestLegacyUnclassifiedTextBlocksReviewedContext(t *testing.T) {
+func TestLegacyUnclassifiedTextPreservesReviewDutyWithoutBlockingTask(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -216,16 +216,21 @@ func TestLegacyUnclassifiedTextBlocksReviewedContext(t *testing.T) {
 	commitFixtureTurn(t, h, turn.RequestID)
 	env := h.env("tasks.create", taskTarget(""), createTaskPayload{Title: "Investigate", Spec: testSpec, WorkItemID: w.WorkItemID, WorkItemRevision: w.Revision, StageIDs: []string{"investigate"}, SourceMessageID: source, CommitSeq: 1}, nil)
 	env.ParentRequestID = turn.RequestID
-	if op := h.exec(mainAgent, env, CreateTask{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
+	created := h.exec(mainAgent, env, CreateTask{})
+	if created.Status != protocol.OpSucceeded {
+		t.Fatal(created)
+	}
+	var identity taskResult
+	if err := json.Unmarshal(created.Result, &identity); err != nil {
+		t.Fatal(err)
 	}
 	legacy := h.env("conversation.record_agent_message", protocol.Target{Type: "conversation"}, recordAgentMessagePayload{Body: "Legacy native progress", ReplyTo: source, TurnID: turn.TurnID, ItemID: "legacy"}, nil)
 	legacy.ParentRequestID = turn.RequestID
 	if op := h.exec(mainAgent, legacy, RecordAgentMessage{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("unclassified legacy text bypassed dispatch review")
+	if view := h.executionTask(identity.TaskID); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued {
+		t.Fatal("unclassified text became an execution permission", view)
 	}
 	if c := h.agentContext(w.WorkItemID); c.SyncStatus != "synced" || c.DispatchReady {
 		t.Fatal("lifecycle and semantic state conflated", c)
@@ -334,7 +339,7 @@ func TestSummaryRetainsAssociationOnlyCorrections(t *testing.T) {
 	t.Fatalf("association-only correction absent from D: %s", input.Observations)
 }
 
-func TestAcceptanceFencesChangedSourceFacts(t *testing.T) {
+func TestAcceptanceRetainsFrozenResultAcrossNewSourceFacts(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -396,12 +401,12 @@ func TestAcceptanceFencesChangedSourceFacts(t *testing.T) {
 	if op := h.submitVerdict(accept, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if h.task(task.TaskID).Lifecycle == protocol.TaskCompleted {
-		t.Fatal("acceptance completed a task after its frozen context had been invalidated")
+	if got := h.task(task.TaskID); got.Lifecycle != protocol.TaskCompleted || got.ControlMode != protocol.ControlManaged {
+		t.Fatal("new context discarded a result verified against its immutable agreement", got)
 	}
 }
 
-func TestSourceAssociationInvalidationFencesAcceptance(t *testing.T) {
+func TestSourceAssociationEditsPreserveFrozenAcceptance(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -455,8 +460,8 @@ func TestSourceAssociationInvalidationFencesAcceptance(t *testing.T) {
 	if op := h.submitVerdict(accept, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if h.task(identity.TaskID).Lifecycle == protocol.TaskCompleted {
-		t.Fatal("acceptance completed responsibility after owner removed its source association")
+	if got := h.task(identity.TaskID); got.Lifecycle != protocol.TaskCompleted || got.ControlMode != protocol.ControlManaged {
+		t.Fatal("source association edit implicitly cancelled the Task", got)
 	}
 }
 
@@ -587,7 +592,7 @@ func TestNoopAssociationAttachesHistoricalReviewSource(t *testing.T) {
 	t.Fatal("explicit source reference no longer attaches the historical message to this turn")
 }
 
-func TestDispatchViewReportsFrozenAgreementMismatch(t *testing.T) {
+func TestDispatchViewDoesNotTreatContextDigestAsTaskPermission(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -609,15 +614,15 @@ func TestDispatchViewReportsFrozenAgreementMismatch(t *testing.T) {
 	}
 	commitFixtureTurn(t, h, turn.RequestID)
 	c = h.agentContext(w.WorkItemID)
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("fixture unexpectedly dispatched")
+	if _, ok, _ := h.claim("linux-1"); !ok {
+		t.Fatal("ordinary source digest prevented dispatch")
 	}
-	if c.DispatchReady {
-		t.Fatalf("dispatch blocked by frozen digest but view claims ready; blockers=%v", c.DispatchBlockers)
+	if !c.DispatchReady {
+		t.Fatalf("reviewed source retained a mechanical digest blocker: %v", c.DispatchBlockers)
 	}
 }
 
-func TestSourceRemovalWithoutFactsFencesAcceptance(t *testing.T) {
+func TestSourceRemovalWithoutFactsPreservesFrozenAcceptance(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -653,8 +658,8 @@ func TestSourceRemovalWithoutFactsFencesAcceptance(t *testing.T) {
 	if op := h.submitVerdict(accept.RunID, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if h.task(v.TaskID).Lifecycle == protocol.TaskCompleted {
-		t.Fatal("task completed after owner removed source classification; no fact rows means unchanged empty digest")
+	if got := h.task(v.TaskID); got.Lifecycle != protocol.TaskCompleted || got.ControlMode != protocol.ControlManaged {
+		t.Fatal("source classification was used as an implicit Task cancellation", got)
 	}
 }
 
@@ -732,8 +737,8 @@ func TestNewSharedWorkItemFreezesSourcedContext(t *testing.T) {
 	commitFixtureTurn(t, h, turn.RequestID)
 	frozen := h.storedSpec(id, h.task(id).SpecVersion).SharedContext
 	t.Logf("frozen: %+v", frozen)
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("task dispatched after secondary source facts changed without a spec revision")
+	if run, ok, _ := h.claim("linux-1"); !ok || run.TaskID != id || run.SpecVersion != 2 {
+		t.Fatal("secondary source change required a new applicability permission", run)
 	}
 }
 
@@ -816,7 +821,7 @@ func TestDuplicateFactRegistersHistoricalReviewScope(t *testing.T) {
 	t.Fatal("duplicate fact did not attach its explicitly cited source to the new logical turn")
 }
 
-func TestNewFrozenSecondaryNeedsItsInitialBaseline(t *testing.T) {
+func TestNewFrozenSecondaryDoesNotRequireAnotherInitialBaseline(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	a := h.createWork(workPlan())
@@ -837,8 +842,8 @@ func TestNewFrozenSecondaryNeedsItsInitialBaseline(t *testing.T) {
 	if op := h.exec(owner, h.env("tasks.update_intent", taskTarget(id), updateIntentPayload{Spec: &next}, rev(h.task(id).ControlRevision)), UpdateIntent{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("new frozen dependency dispatched without initial source preparation")
+	if view := h.executionTask(id); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued {
+		t.Fatal("ordinary secondary source preparation became an execution gate", view)
 	}
 	h.prepareAgent(b.WorkItemID)
 	if _, ok, _ := h.claim("linux-1"); !ok {
@@ -913,7 +918,7 @@ func TestRoutineWorkerStartPreservesExactSourceReview(t *testing.T) {
 	_ = id
 }
 
-func TestUnknownOriginRetainsArtifactWithoutAdvancingTask(t *testing.T) {
+func TestUnknownCreatorReceiptKeepsKnownWorkerArtifact(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -949,13 +954,14 @@ func TestUnknownOriginRetainsArtifactWithoutAdvancingTask(t *testing.T) {
 	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(id).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if got := h.task(id); got.Lifecycle == protocol.TaskAwaitingAcceptance || got.ControlMode != protocol.ControlPaused {
-		t.Fatalf("unknown execution did not fence progression: %+v", got)
+	if got := h.task(id); got.Lifecycle != protocol.TaskAwaitingAcceptance || got.ControlMode != protocol.ControlManaged {
+		t.Fatalf("unknown creator receipt discarded a known worker artifact: %+v", got)
 	}
+	assertCreatorReceiptStillUnknown(t, h, turn, id)
 	assertUnknownResultEvidence(t, h, id, "artifacts")
 }
 
-func TestUnknownOriginRetainsVerdictWithoutCompletingTask(t *testing.T) {
+func TestUnknownCreatorReceiptKeepsKnownIndependentVerdict(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -984,9 +990,10 @@ func TestUnknownOriginRetainsVerdictWithoutCompletingTask(t *testing.T) {
 	if op := h.submitVerdict(accept.RunID, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if got := h.task(id); got.Lifecycle == protocol.TaskCompleted || got.ControlMode != protocol.ControlPaused {
-		t.Fatalf("unknown execution did not fence acceptance: %+v", got)
+	if got := h.task(id); got.Lifecycle != protocol.TaskCompleted || got.ControlMode != protocol.ControlManaged {
+		t.Fatalf("unknown creator receipt discarded the independent known verdict: %+v", got)
 	}
+	assertCreatorReceiptStillUnknown(t, h, turn, id)
 	assertUnknownResultEvidence(t, h, id, "acceptances")
 }
 
@@ -999,6 +1006,30 @@ func assertUnknownResultEvidence(t *testing.T, h *harness, task, table string) {
 		}
 		if count != 1 {
 			t.Errorf("uncertain result was not retained in %s: %d", table, count)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertCreatorReceiptStillUnknown(t *testing.T, h *harness, turn store.MainTurn, task string) {
+	t.Helper()
+	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
+	if err != nil || state.Status != "unknown" {
+		t.Fatal("worker result falsely settled the creator's native receipt", state, err)
+	}
+	pending, err := h.app.NativeReceiptPending(t.Context(), turn.RequestID)
+	if err != nil || !pending {
+		t.Fatal("creator receipt was erased", pending, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var status string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT r.status FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE e.object_type='task' AND e.object_id=? AND e.kind='task.created'`, task).Scan(&status); err != nil {
+			return err
+		}
+		if status != "succeeded" {
+			t.Fatal("fixture contained an unresolved delegate write", status)
 		}
 		return nil
 	}); err != nil {
@@ -1036,7 +1067,7 @@ func TestTaskControlWritesReturnReceiptAndPreserveSameTurnDispatch(t *testing.T)
 	}
 }
 
-func TestPendingLegacyMessageFencesCurrentAcceptance(t *testing.T) {
+func TestPendingLegacyMessagePreservesFrozenAcceptance(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -1068,8 +1099,8 @@ func TestPendingLegacyMessageFencesCurrentAcceptance(t *testing.T) {
 	if op := h.submitVerdict(accept.RunID, protocol.VerdictPassed); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if got := h.task(id); got.Lifecycle == protocol.TaskCompleted {
-		t.Errorf("completed task with an unreviewed formal message in its originating responsibility: %+v", got)
+	if got := h.task(id); got.Lifecycle != protocol.TaskCompleted || got.ControlMode != protocol.ControlManaged {
+		t.Errorf("ordinary unreviewed message cancelled a known Task result: %+v", got)
 	}
 }
 
@@ -1322,7 +1353,7 @@ func TestRejectedBackgroundFormalReplyPreservesItsPriorSilentChoice(t *testing.T
 	}
 }
 
-func TestAppliedOwnerRetriesKeepTheirAgreementButCannotOverrideNewConstraints(t *testing.T) {
+func TestAppliedOwnerRetriesPreserveAgreementAcrossOrdinarySourceChanges(t *testing.T) {
 	for _, acceptance := range []bool{false, true} {
 		for _, changed := range []bool{false, true} {
 			for _, completed := range []bool{false, true} {
@@ -1381,12 +1412,7 @@ func TestAppliedOwnerRetriesKeepTheirAgreementButCannotOverrideNewConstraints(t 
 						t.Fatal("owner retry rewrote the frozen spec")
 					}
 					next, claimed, _ := h.claim("linux-1")
-					if changed {
-						if claimed {
-							t.Fatal("retry bypassed new source constraints")
-						}
-						return
-					}
+
 					role := protocol.RoleImplement
 					if acceptance {
 						role = protocol.RoleAccept
@@ -1400,7 +1426,7 @@ func TestAppliedOwnerRetriesKeepTheirAgreementButCannotOverrideNewConstraints(t 
 	}
 }
 
-func TestOwnerRatingPreservesRunningSourceReviewButNotSourceCorrections(t *testing.T) {
+func TestOwnerRatingPreservesExecutionAcrossSourceReviewAndCorrections(t *testing.T) {
 	for _, corrected := range []bool{false, true} {
 		t.Run(fmt.Sprint("source_corrected_", corrected), func(t *testing.T) {
 			h := newHarness(t)
@@ -1431,12 +1457,7 @@ func TestOwnerRatingPreservesRunningSourceReviewButNotSourceCorrections(t *testi
 				t.Fatal(op)
 			}
 			got := h.task(id)
-			if corrected {
-				if got.ControlMode != protocol.ControlPaused || got.Lifecycle == protocol.TaskAwaitingAcceptance {
-					t.Fatal("rating cleared a source correction", got)
-				}
-				return
-			}
+
 			if got.ControlMode != protocol.ControlManaged || got.Lifecycle != protocol.TaskAwaitingAcceptance {
 				t.Fatalf("queue-only rating invalidated the execution: %+v", got)
 			}
@@ -1451,7 +1472,8 @@ func TestUnverifiedOneShotAuthorizationStillChangesTheAgreement(t *testing.T) {
 	h.associate(mainAgent, source, w.WorkItemID)
 	h.prepareAgent(w.WorkItemID)
 	commitFixtureTurn(t, h, turn.RequestID)
-	createFingerprintTask(t, h, source, turn, w)
+	task := createFingerprintTask(t, h, source, turn, w)
+	frozen := h.storedSpec(task, 1).SharedContext[0].ContextDigest
 	body, _ := json.Marshal(map[string]any{"scope": protocol.AppliedTransitionAuthorizationScope, "decision_id": "unknown-decision", "task_id": "unknown-task", "request_id": turn.RequestID})
 	c := h.agentContext(w.WorkItemID)
 	env := h.env("work_item_context.fact", workTarget(w.WorkItemID), protocol.ContextFact{Scope: "work_item", Kind: "authorization", Body: string(body), SourceMessageID: source}, rev(c.Revision))
@@ -1460,7 +1482,16 @@ func TestUnverifiedOneShotAuthorizationStillChangesTheAgreement(t *testing.T) {
 		t.Fatal(op)
 	}
 	commitFixtureTurn(t, h, turn.RequestID)
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("unverified model text was treated as an applied owner transition")
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		current, _, err := store.EffectiveContext(t.Context(), tx.Q(), w.WorkItemID)
+		if err == nil && current == frozen {
+			t.Fatal("unverified model text was hidden as a real owner receipt")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if run, ok, _ := h.claim("linux-1"); !ok || run.TaskID != task || run.SpecVersion != 1 {
+		t.Fatal("ordinary fact was promoted to an execution permission", run)
 	}
 }

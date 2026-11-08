@@ -11,12 +11,19 @@ import (
 
 // MaterialScope is derived from actual Issue relationships, never caller paths.
 type MaterialScope struct {
-	IssueIDs        []string
-	BackgroundFiles map[string][]protocol.IssueMaterialSource
+	IssueIDs      []string
+	ReaderIssueID string
+	Project       string
+	ExactFileID   string
+	SourcesMore   bool
 }
 
 // The same scoped candidates back listing and exact metadata/byte reads.
-const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?)),
+const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?1,'$.issue_ids')
+ UNION SELECT work_item_id FROM work_items WHERE ?2<>'' AND json_extract(?1,'$.project')<>'' AND project=json_extract(?1,'$.project')),
+ denied_artifacts(id) AS (
+ SELECT DISTINCT s.artifact_id FROM artifact_shares s WHERE s.issue_id=json_extract(?1,'$.reader_issue_id') AND s.status='revoked'
+ AND NOT EXISTS(SELECT 1 FROM artifact_shares active WHERE active.issue_id=s.issue_id AND active.artifact_id=s.artifact_id AND active.status='active')),
  tasks_scope(id) AS (
  SELECT task_id FROM task_work_item_owners WHERE work_item_id IN (SELECT id FROM scope)
  UNION SELECT l.task_id FROM work_item_task_links l WHERE l.work_item_id IN (SELECT id FROM scope) AND NOT EXISTS(SELECT 1 FROM issue_controls c WHERE c.issue_id=l.work_item_id)),
@@ -27,56 +34,122 @@ const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?)),
  UNION SELECT source_message_id FROM issue_control_revisions WHERE issue_id IN (SELECT id FROM scope)
  UNION SELECT source_message_id FROM work_item_context_facts WHERE work_item_id IN (SELECT id FROM scope)
  UNION SELECT s.message_id FROM background_batches b JOIN background_sources s USING(batch_id) WHERE b.work_item_id IN (SELECT id FROM scope)),
- artifacts_scope(id) AS (
+ artifact_candidates(id) AS (
  SELECT artifact_id FROM artifacts WHERE task_id IN (SELECT id FROM tasks_scope)
  UNION SELECT a.artifact_id FROM artifacts a JOIN work_item_task_links l ON l.task_id=a.task_id WHERE l.work_item_id IN (SELECT id FROM scope)
- UNION SELECT s.artifact_id FROM artifact_shares s JOIN issue_controls c ON c.issue_id=s.issue_id AND c.assignment_epoch=s.assignment_epoch JOIN artifacts a ON a.artifact_id=s.artifact_id AND a.ref_json=s.ref_json WHERE s.issue_id IN (SELECT id FROM scope) AND s.status='active' AND c.assignment_state='active'),
+ UNION SELECT s.artifact_id FROM artifact_shares s JOIN artifacts a ON a.artifact_id=s.artifact_id AND a.ref_json=s.ref_json WHERE s.issue_id IN (SELECT id FROM scope) AND s.status='active'),
+ artifacts_scope(id) AS (SELECT id FROM artifact_candidates WHERE id NOT IN (SELECT id FROM denied_artifacts)),
+ known_files(id) AS (SELECT file_id FROM conversation_attachments WHERE ?2='' OR file_id=?2
+ UNION SELECT file_id FROM deliverable_files WHERE ?2='' OR file_id=?2),
+ background_refs(id,issue_id,task_id,spec_version,locator,kind) AS (
+ SELECT k.id,w.work_item_id,'',0,COALESCE(json_extract(f.value,'$.source'),''),'background'
+ FROM known_files k JOIN work_items w ON w.work_item_id IN (SELECT id FROM scope) AND instr(w.body_json,k.id)>0,
+ json_each(w.body_json,'$.background') f
+ WHERE instr(COALESCE(json_extract(f.value,'$.source'),'')||' '||COALESCE(json_extract(f.value,'$.text'),''),k.id)>0
+ UNION SELECT k.id,COALESCE(json_extract(c.value,'$.work_item_id'),''),s.task_id,s.spec_version,COALESCE(json_extract(f.value,'$.source'),''),'task_context'
+ FROM known_files k JOIN task_specs s ON s.task_id IN (SELECT id FROM tasks_scope) AND instr(s.body_json,k.id)>0,
+ json_each(s.body_json,'$.shared_context') c,json_each(c.value,'$.facts') f
+ WHERE instr(COALESCE(json_extract(f.value,'$.source'),'')||' '||COALESCE(json_extract(f.value,'$.text'),''),k.id)>0),
  files_scope(id) AS (
  SELECT a.file_id FROM conversation_message_attachments a WHERE a.message_id IN (SELECT id FROM messages_scope)
  UNION SELECT json_extract(f.value,'$.file_id') FROM artifacts a,json_each(a.ref_json,'$.files') f WHERE a.artifact_id IN (SELECT id FROM artifacts_scope)
  UNION SELECT json_extract(f.value,'$.file_id') FROM acceptances a,json_each(a.files_json) f WHERE (a.task_id IN (SELECT id FROM tasks_scope) OR a.artifact_id IN (SELECT id FROM artifacts_scope))
- UNION SELECT json_extract(f.value,'$.file_id') FROM task_specs s,json_each(s.body_json,'$.inputs') f WHERE s.task_id IN (SELECT id FROM tasks_scope)
- UNION SELECT value FROM json_each(?)) `
+ UNION SELECT json_extract(f.value,'$.file_id') FROM task_specs s,json_each(s.body_json,'$.inputs') f WHERE s.task_id IN (SELECT id FROM tasks_scope) AND (?2='' OR instr(s.body_json,?2)>0)
+ UNION SELECT id FROM background_refs) `
 
 func materialArgs(scope MaterialScope) (string, string, error) {
-	ids, err := json.Marshal(scope.IssueIDs)
+	ids, err := json.Marshal(struct {
+		Issues  []string `json:"issue_ids"`
+		Reader  string   `json:"reader_issue_id"`
+		Project string   `json:"project"`
+	}{scope.IssueIDs, scope.ReaderIssueID, scope.Project})
 	if err != nil {
 		return "", "", err
 	}
-	files := make([]string, 0, len(scope.BackgroundFiles))
-	for id := range scope.BackgroundFiles {
-		files = append(files, id)
-	}
-	refs, err := json.Marshal(files)
-	return string(ids), string(refs), err
+	return string(ids), scope.ExactFileID, nil
 }
 
-// WalkMaterialTaskContexts streams only this Issue scope's retained Task
-// contexts. All readers use those immutable sources, independent of which Run
-// currently asks or whether the current Issue background still lists them.
-func WalkMaterialTaskContexts(ctx context.Context, q Querier, scope MaterialScope, visit func(string, int64, protocol.TaskWorkContext)) error {
+// ExactMaterialFileScope first locates an original through its saved message
+// or output identity. Only a historical context-only original needs the
+// fallback query over matching retained facts. Neither path loads project
+// Issue definitions or unrelated Task context JSON into the application.
+func ExactMaterialFileScope(ctx context.Context, q Querier, scope MaterialScope, file string) (MaterialScope, error) {
+	scope.ExactFileID = file
+	ids, _, err := materialArgs(scope)
+	if err != nil {
+		return scope, err
+	}
+	const candidates = `WITH scope(id) AS (SELECT value FROM json_each(?1,'$.issue_ids') UNION SELECT work_item_id FROM work_items WHERE project<>'' AND project=json_extract(?1,'$.project')) `
+	found, err := FollowupIDs(ctx, q, candidates+`SELECT id FROM scope WHERE
+ EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN message_work_items m USING(message_id) WHERE f.file_id=?2 AND m.work_item_id=scope.id AND m.active=1)
+ OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN conversation_messages m USING(message_id) JOIN agent_conversations c USING(conversation_id) WHERE f.file_id=?2 AND c.work_item_id=scope.id)
+ OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN message_context_obligations m USING(message_id) WHERE f.file_id=?2 AND m.work_item_id=scope.id)
+ OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN issue_control_revisions r ON r.source_message_id=f.message_id WHERE f.file_id=?2 AND r.issue_id=scope.id)
+ OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN work_item_context_facts r ON r.source_message_id=f.message_id WHERE f.file_id=?2 AND r.work_item_id=scope.id)
+ OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN background_sources s USING(message_id) JOIN background_batches b USING(batch_id) WHERE f.file_id=?2 AND b.work_item_id=scope.id)
+ OR EXISTS(SELECT 1 FROM deliverable_files f JOIN task_work_item_owners o USING(task_id) WHERE f.file_id=?2 AND o.work_item_id=scope.id)
+ OR EXISTS(SELECT 1 FROM deliverable_files f JOIN work_item_task_links o USING(task_id) WHERE f.file_id=?2 AND o.work_item_id=scope.id)
+ OR EXISTS(SELECT 1 FROM deliverable_files f JOIN artifacts a ON a.task_id=f.task_id AND a.run_id=f.run_id JOIN artifact_shares s ON s.artifact_id=a.artifact_id AND s.ref_json=a.ref_json WHERE f.file_id=?2 AND s.issue_id=scope.id AND s.status='active')
+ ORDER BY id LIMIT 101`, ids, file)
+	if err != nil {
+		return scope, err
+	}
+	if len(found) == 0 {
+		found, err = FollowupIDs(ctx, q, candidates+`SELECT id FROM scope WHERE
+ EXISTS(SELECT 1 FROM work_items w,json_each(w.body_json,'$.background') f WHERE w.work_item_id=scope.id AND instr(w.body_json,?2)>0 AND instr(COALESCE(json_extract(f.value,'$.source'),'')||' '||COALESCE(json_extract(f.value,'$.text'),''),?2)>0)
+ OR EXISTS(SELECT 1 FROM task_specs s WHERE (EXISTS(SELECT 1 FROM task_work_item_owners o WHERE o.task_id=s.task_id AND o.work_item_id=scope.id) OR EXISTS(SELECT 1 FROM work_item_task_links l WHERE l.task_id=s.task_id AND l.work_item_id=scope.id AND NOT EXISTS(SELECT 1 FROM issue_controls c WHERE c.issue_id=l.work_item_id))) AND instr(s.body_json,?2)>0 AND
+ (EXISTS(SELECT 1 FROM json_each(s.body_json,'$.inputs') f WHERE json_extract(f.value,'$.file_id')=?2)
+ OR EXISTS(SELECT 1 FROM json_each(s.body_json,'$.shared_context') c,json_each(c.value,'$.facts') f WHERE instr(COALESCE(json_extract(f.value,'$.source'),'')||' '||COALESCE(json_extract(f.value,'$.text'),''),?2)>0))) ORDER BY id LIMIT 101`, ids, file)
+		if err != nil {
+			return scope, err
+		}
+	}
+	if len(found) > 100 {
+		scope.SourcesMore = true
+		found = found[:100]
+	}
+	// Keep independently saved inputs in the reader's own context and explicit
+	// target revocations, while avoiding all-project context expansion.
+	for _, id := range found {
+		present := false
+		for _, existing := range scope.IssueIDs {
+			present = present || existing == id
+		}
+		if !present {
+			scope.IssueIDs = append(scope.IssueIDs, id)
+		}
+	}
+	scope.Project = ""
+	return scope, nil
+}
+
+// MaterialIssuePage discovers project knowledge without loading Issue bodies
+// or Task histories outside the requested page. Empty projects are not global.
+func MaterialIssuePage(ctx context.Context, q Querier, scope MaterialScope, project bool, id, after string, limit int) ([]string, bool, string, error) {
+	ids, _, err := materialArgs(scope)
+	if err != nil {
+		return nil, false, "", err
+	}
+	out, err := FollowupIDs(ctx, q, `SELECT work_item_id FROM work_items WHERE (work_item_id IN (SELECT value FROM json_each(?1,'$.issue_ids')) OR (?2 AND project<>'' AND project=json_extract(?1,'$.project'))) AND work_item_id>?3 AND (?4='' OR work_item_id=?4) ORDER BY work_item_id LIMIT ?5`, ids, project, after, id, limit+1)
+	if err != nil {
+		return nil, false, "", err
+	}
+	more, next := len(out) > limit, ""
+	if more {
+		out = out[:limit]
+		next = out[len(out)-1]
+	}
+	return out, more, next, nil
+}
+
+// MaterialDeniedTaskArtifacts applies the same explicit target exception to
+// artifact bodies nested in a public Task projection.
+func MaterialDeniedTaskArtifacts(ctx context.Context, q Querier, scope MaterialScope, task string) ([]string, error) {
 	ids, files, err := materialArgs(scope)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, materialScopeSQL+`SELECT s.task_id,s.spec_version,c.value FROM task_specs s,json_each(s.body_json,'$.shared_context') c WHERE s.task_id IN (SELECT id FROM tasks_scope) ORDER BY s.task_id,s.spec_version,c.key`, ids, files)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var task, raw string
-		var version int64
-		if err := rows.Scan(&task, &version, &raw); err != nil {
-			return err
-		}
-		var item protocol.TaskWorkContext
-		if err := json.Unmarshal([]byte(raw), &item); err != nil {
-			return fmt.Errorf("store: decode retained Issue context: %w", err)
-		}
-		visit(task, version, item)
-	}
-	return rows.Err()
+	return FollowupIDs(ctx, q, materialScopeSQL+`SELECT artifact_id FROM artifacts WHERE task_id=? AND artifact_id IN (SELECT id FROM denied_artifacts)`, ids, files, task)
 }
 
 func MaterialIDs(ctx context.Context, q Querier, scope MaterialScope, kind, id, after string, limit int) ([]string, bool, string, error) {
@@ -170,9 +243,10 @@ func MaterialFileReferences(ctx context.Context, q Querier, scope MaterialScope,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, materialScopeSQL+`SELECT 'artifact',a.task_id,a.artifact_id,'','' FROM artifacts a,json_each(a.ref_json,'$.files') f WHERE a.artifact_id IN (SELECT id FROM artifacts_scope) AND json_extract(f.value,'$.file_id')=?
- UNION ALL SELECT 'acceptance',a.task_id,'',a.acceptance_id,'' FROM acceptances a,json_each(a.files_json) f WHERE (a.task_id IN (SELECT id FROM tasks_scope) OR a.artifact_id IN (SELECT id FROM artifacts_scope)) AND json_extract(f.value,'$.file_id')=?
- UNION ALL SELECT 'task_input',s.task_id,'','',CAST(s.spec_version AS TEXT) FROM task_specs s,json_each(s.body_json,'$.inputs') f WHERE s.task_id IN (SELECT id FROM tasks_scope) AND json_extract(f.value,'$.file_id')=? LIMIT 101`, ids, files, fileID, fileID, fileID)
+	rows, err := q.QueryContext(ctx, materialScopeSQL+`SELECT 'artifact',a.task_id,a.artifact_id,'','',0,'' FROM artifacts a,json_each(a.ref_json,'$.files') f WHERE a.artifact_id IN (SELECT id FROM artifacts_scope) AND json_extract(f.value,'$.file_id')=?
+ UNION ALL SELECT 'acceptance',a.task_id,'',a.acceptance_id,'',0,'' FROM acceptances a,json_each(a.files_json) f WHERE (a.task_id IN (SELECT id FROM tasks_scope) OR a.artifact_id IN (SELECT id FROM artifacts_scope)) AND json_extract(f.value,'$.file_id')=?
+ UNION ALL SELECT 'task_input',s.task_id,'','',CAST(s.spec_version AS TEXT),0,'' FROM task_specs s,json_each(s.body_json,'$.inputs') f WHERE s.task_id IN (SELECT id FROM tasks_scope) AND instr(s.body_json,?3)>0 AND json_extract(f.value,'$.file_id')=?3
+ UNION ALL SELECT kind,task_id,'','',locator,spec_version,issue_id FROM background_refs WHERE id=?3 LIMIT 101`, ids, files, fileID, fileID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +255,11 @@ func MaterialFileReferences(ctx context.Context, q Querier, scope MaterialScope,
 	for rows.Next() {
 		var source protocol.IssueMaterialSource
 		source.Status = "retained"
-		if err = rows.Scan(&source.Kind, &source.TaskID, &source.ArtifactID, &source.AcceptanceID, &source.Locator); err != nil {
+		if err = rows.Scan(&source.Kind, &source.TaskID, &source.ArtifactID, &source.AcceptanceID, &source.Locator, &source.ContentRevision, &source.IssueID); err != nil {
 			return nil, err
+		}
+		if source.Kind == "task_context" {
+			source.Status = "frozen"
 		}
 		out = append(out, source)
 	}

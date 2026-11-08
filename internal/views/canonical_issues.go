@@ -122,7 +122,7 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 		return out, err
 	}
 	rows.Close()
-	page, err := Attentions(ctx, q, AttentionFilter{IssueID: id, IncludeArchived: true})
+	page, err := Attentions(ctx, q, AttentionFilter{ResponsibleIssueID: id, Status: "open", ActionableOnly: true, IncludeArchived: true})
 	if err != nil {
 		return out, err
 	}

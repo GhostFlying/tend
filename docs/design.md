@@ -125,7 +125,7 @@
 | D117 | 消费用量独立于 context 占用：按原生请求身份追加事实、请求 revision 替换贡献，重传、模型校正、父累计不得重复相加；同身份冲突单列并排除。全局/单 run 共享读模型，固定 Asia/Shanghai 自然周期，未知发生时点单列而非冒充接收时间。输入包含缓存明细，输出单列，缺失不填零。worker 历史/live 使用同一持久分页窗口与正式运行身份，缺口/截断可见。卡片显示当前动作和最近步骤，完整模式提供正文阅读流和工具详情；共用身份投影与轮询，切换不改变跟随状态，返回保留阅读位置。见 docs/plans/rollout-token-panel.md 与 docs/plans/rollout-reading-modes.md。 | 实施中 |
 
 | D121 | Issue/sub-issue 为同一递归责任实体，单一具体 assignee 与 assignment epoch；task 唯一 primary issue，stage 可选，执行合同及独立验收保持。支持生命周期、重挂载与围栏交接，子项、在途控制和 unknown 未核清不伪关闭。机械命名迁移先保持历史存储/wire/UI 行为，公共切换后退役活动旧入口。过渡存储以 1:1 issue_controls 扩展现有行，work_items.revision 为唯一权威，当前投影与两份不可变快照同事务保存；不自动采用历史身份，公共入口在安全闭环后启用。P1b2a 已纳入 owner-only 内部 create/update、精确资料引用与 revision/epoch 及 legacy/shared-fact 围栏；信任唯一 owner 和其控制的主机/本地配置，不防恶意本地管理员或多租户；owner 显式引用跨 Issue 真实消息不转责任、不改变原作者，不以原 request/event 证明链限制资料；业务角色/对象控制由服务端校验，CLI 工具限制按适配器能力实现，main/issue/consultation 禁执行不能仅靠 prompt；不承诺同 OS 用户恶意进程隔离或新增 OS 沙箱，worker 沿现有 CLI 权限；agent 作用域与 task/验收边界仍独立校验；P1b2b 已纳入 owner 内部生命周期与终态逐批来源收尾，维持原 endpoint/history，不因收尾重开执行或停止 main；P1b3+b4 r2+P1c 同片接通 primary/no-stage 读取/上下文、owner task 冻结/实现/独立验收/完成核对与取消收尾，并注册 owner Issue API/CLI；新 claim 检查实际来源和继承语义变化，活跃 run 沿原合同。owner 输入投影不接收服务器冻结上下文，显式合同刷新复用原 spec/action 代次规则；旧 facade/history 保留。manager、Agent assignment 在 P4 正式纳入并待组合检查，显式 named task 执行见 D123；主 Agent 保留按实际 owner 原文转录已有 decision/version 既定选项的职责，经原版本/领域规则应用既定效果，不获得自由 canonical task 规划权限。A 批补 canonical context/followup/history/delivery observation/refresh 及 named discovery caller；复用原存储/receipt/sweep/observer，owner 当前认证即授权、manager 写 own Issue，父级只读；P5 deadline-owned 规则不开放 generic 编辑。旧公开入口由后续消费者切换后统一退役，不建永久双模式。见 docs/plans/canonical-issue-callers.md、docs/issue-agent-design.md、docs/plans/issue-agent-refactor.md、docs/plans/issue-controls.md、docs/plans/issue-owner-delivery.md。 P4 receipt-only 发现按包装错误识别空队头，保持原收据退避；named transport 验证使用实际 canonical 分类工具而非恢复旧工具。P4 管理输入复用 worker 已继承的祖先只读定义/有效事实；已知本机启动失败释放后台槽位并按原 pending outbox 持久退避，不改变 native unknown 对账。 | P0–P5 已 CI/rebase 合并；P4 自主负责人本地完整检查及独立 review 完成。后继 canonical callers/owner/UI 及四项实际 caller 修正为最终集成候选，定向检查通过，最终独立复审/完整检查/CI 与生产部署分别待完成 |
-| D122 | D128 将 Issue manager 的实际原生进程迁至 runner：发布 category 任务后才领取，主 Agent 与 consultation 继续 host 托管；本项的来源审核、协调作用域及 CLI 限制继续适用。主 Agent 为默认个人助理和全局规划者，issue manager 在继承授权内独立澄清、规划、委派和推进；二者均禁止实际执行，调查也走 task。Issue 直接 owner 指令由本项审核，不经 main 重复审批；协调 execution/effect_seq 与 owner 来源分离，epoch、context 和请求身份共同围栏。P4 隔离候选复用单一本地具名配置、immutable execution 快照、实际 scoped 工具及现有 pool/outbox/batch，main 委派即可收自己的回合，manager 独立审阅本项来源。交接先围栏再核对本项旧 manager 控制/unknown，正常 worker 继续。具名 hosted adapter 复用 CLI 原生登记/回读的进程局部固定 inline PreToolUse 与 readonly/never；缺失不回退 D111，不修改 worker/owner 全局配置。允许 owner 材料呈现；CLI hook 引擎故障仍 fail-open，不宣称 OS 隔离或原子 fail-closed。取代 D111 后台原生执行开放及仅能评估、主协调独占本项派发的规则，保留 D88 的执行隔离。见 docs/issue-agent-design.md、docs/plans/hosted-issue-agents.md。 | P4 r19 规定 review 及后继窄修正、正式完整检查和交叉编译完成，PR #167 已 CI/rebase 合并；最终 owner/UI 收口及真实隔离验收另记，生产未部署 |
+| D122 | D128 将 Issue manager 的实际原生进程迁至 runner：发布 category 任务后才领取，主 Agent 与 consultation 继续 host 托管；本项的来源审核、协调作用域及 CLI 限制继续适用。主 Agent 为默认个人助理和全局规划者，issue manager 在继承授权内独立澄清、规划、委派和推进；原设计二者均禁止实际执行、调查也走 task；D193 以协商的普通工具模式取代 runner Issue 负责人这项限制，旧模式及 Main 的原配置保持。Issue 直接 owner 指令由本项审核，不经 main 重复审批；协调 execution/effect_seq 与 owner 来源分离，epoch、context 和请求身份共同围栏。P4 隔离候选复用单一本地具名配置、immutable execution 快照、实际 scoped 工具及现有 pool/outbox/batch，main 委派即可收自己的回合，manager 独立审阅本项来源。交接先围栏再核对本项旧 manager 控制/unknown，正常 worker 继续。具名 hosted adapter 复用 CLI 原生登记/回读的进程局部固定 inline PreToolUse 与 readonly/never；缺失不回退 D111，不修改 worker/owner 全局配置。允许 owner 材料呈现；CLI hook 引擎故障仍 fail-open，不宣称 OS 隔离或原子 fail-closed。取代 D111 后台原生执行开放及仅能评估、主协调独占本项派发的规则，保留 D88 的执行隔离。见 docs/issue-agent-design.md、docs/plans/hosted-issue-agents.md。 | P4 r19 规定 review 及后继窄修正、正式完整检查和交叉编译完成，PR #167 已 CI/rebase 合并；最终 owner/UI 收口及真实隔离验收另记，生产未部署 |
 | D123 | D128 新增 issue_manager purpose、配置格式 2 与无工作区 pin，manager 由 category 任务领取，首次固定 runner/Agent，后续回合保持归属并逐轮释放槽位；manager 不套用实现/验收配对资格。当前通信协议为 2/1，协议 0 通信适配退役，旧持久快照保留原 hash。以下 P2/P3 的 1/0 描述为当时交付记录。全局 category 与 runner/runtime 本机多 Agent 库存分离，hosted main/issue/consultation 同样登记；具体 Agent 的 `local_id` 是定义者明确保存的稳定 slug，`display_name` 是显示名字，职责及执行配置独立，命名不在运行时生成或随模型变化，见 [定义指南](agent-definitions.md)与[命名计划](plans/agent-naming.md)；只投影非密钥来源、版本和 hash。按 category 加可选 HARD runner 及 workspace host 选择，首次 host 必须同时支持实现及同 workspace host 的正式验收；稳定固定配置快照，恢复不重选，类别不授角色。复用既有 harness，通信按能力协商或完整协议升级。P2b 增加本机不可变私有快照、公共投影及原子 receipt/CAS/unknown 对账；通用 runner journal 11 追加可空 expected_control_revision，重启保留缺省与显式 CAS，旧 NULL 不回填，不改 wire 协议。P2c–P2d 复用 owner CLI/鉴权、runner 本机 socket/client/journal 和条件 hello ack，接通固定来源严格配置接受、全局 Category 及版本化安全库存登记。公共 DTO 唯一定义于 protocol，server 不成为第二配置源；同进程 unknown 沿原 Envelope，新 incarnation 真实围栏后才对明确 not_recorded 的前代尝试接续，登记 accepted 不等于 runtime available。P3 接通 OwnerTaskSpec 每 role 的 category/可选 HARD runtime/model/effort，过滤本机 definition 而不覆盖；空字段不加约束，旧 AcceptanceExecution 仍精确匹配，矛盾输入 invalid_request。当前 task/spec 首次 named 分配及 owner start-over 放弃 workspace 后的新资源分配，均核对同 host/backend 的实现和正式验收候选，只冻结当前 run；恢复用原 pin，后续验收分配才冻结自己的配置。多个 runtime 共用主机全局槽位及唯一 workspace 协调器，unknown 不释放资源。私有 instructions 与 model/effort 经真实 Traex/Orca 适配器注入，验收仍用独立 run/凭据/scratch/会话和受控上下文。RuntimeBinding.ExecutableRef 是实际启动命令，Installation.LocalReference 仅为本机来源元数据；不要求两者相等。wire 保持 1/0，由新 capability 和条件 ack 保持旧无选择请求与默认不变；追加 server migration 57 和 journal 12，旧 11 reader 在读 assignment 前按版本拒绝，新 reader 不给旧 run 补 pin，原无 instructions 快照不改 hash。P2e 增加 owner/named main/Issue manager 同一只读分类与 runner 安全目录；登记 receipt、executor 最后观测与在线时点分开，不授调度/配置权限或增加状态机。见 docs/plans/agent-catalog.md、docs/issue-agent-design.md、docs/plans/agent-definition-config.md、docs/plans/agent-registry.md、docs/plans/agent-inventory-control.md、docs/plans/category-agent-execution.md。 | P2/P3 的本地完整检查、独立 review、CI/rebase 合并已完成；P2e 只读目录/后继 caller 已纳入最终候选并完成旧固定完整检查，当前最终修正组合验证另记，生产未启用 |
 | D124 | 开放 main、issue、active run 和独立 named-agent consultation 的直接聊天，保留真实 owner 来源；普通咨询无 issue/task、无实际执行，显式 promotion 去重后才进入业务合同。精确 run 补充不改 spec、不复活终态、不泄露实施 rationale 给验收。Orca 查看不等于接管，owner-only human_control/handback 保留；Cove 仅定义合同。见 docs/issue-agent-design.md。 | P6 对话与原生身份旧固定完整检查及双平台编译通过；咨询零业务写入、显式 promotion 与原 Orca 运行控制已有隔离实测，最终集成检查/CI 与生产部署未完成 |
 | D125 | Attention 的 decision/action/information 与 assignment 分离，chat/Inbox/detail 共用身份，读取或归档不回答。手动来源注入先行，无飞书连接器；next action 与 deadline 保留来源，默认到期前 24 小时/到期提醒 main。Task/child 结果、owner 答复与期限明确路由到责任 manager/parent/main，复用 outbox/followup/batch，无变化静默，不增加定时器或巡逻 Agent。P5 接通稳定 Attention/原 decision 回答、当前责任人接续及 owner 人工动作确认；information 不增 ack 义务，不引入 future-dispatch/通用替换链。Deadline 复用单一 followup sweep/occurrence，具名 main 的窄 task rating 独立于用户动作与 Issue 规划顺序。owner 当前命令即有效确认，main 转录保留真实未撤回来源；期限修改同时受原有性质约束，停机不补发过时 near，关联 Attention 的行动只沿原对象收尾。见 docs/issue-agent-design.md、docs/plans/attention-planner.md。 | P5 正式五项 finding 修正独立复核、完整检查和交叉编译通过；PR #168 CI 全通过，rebase 合入 c54ee29b。最终 information UI 与关闭引用接点另片核验，生产未部署 |
@@ -174,14 +174,16 @@
 | D180 | 独立 server/runner 维护窗口持久限时，显式外部 force 接受未完成与未知；固定原进程与数据身份、先退出后接管，保留原请求、逐 run 隔离及独立恢复准入。 | 实现中 |
 | D181 | 验收通过、返修及受阻结论均可显式提交不可变证据文件；首次领取冻结能力与精确反馈来源，文件原件和稳定上传身份先于 verdict 确认，事务关联与逐文件权限使原证据在 scratch 清理后仍可读取。旧无文件结论保持原义，不推断本机路径持久化；runner journal 18 阻止旧 writer 静默丢文件引用。详见 docs/plans/acceptance-evidence-files.md。 | 实现中 |
 | D183 | 自动执行使用直接 app-server 与 runner 自管 git workspace；Issue 交接 prompt 独立于 Run session 续接。原身份恢复不隐式替代，纯辅助读取 unknown 不冒充业务未知；SQL 失败与真实无归属分开。对象权限拒绝不撤销全局身份，存储降级只支配失败的键。整体维护截止不随阶段推进续期。见 docs/plans/direct-appserver-handoff.md。 | 实现中 |
-| D184 | Issue 修改合并通知当前负责人，由其判断原任务约定是否仍适用。显式继续确认独立保存，绑定任务版本、责任与已处理来源；不改写冻结 spec，调度与诊断共用判定。 | 实现中 |
+| D184 | Issue 修改合并通知当前负责人，由其判断原任务约定是否仍适用。D193 明确普通来源变化不阻止调度或真实结果；可选显式确认独立保存历史，不改写冻结 spec。 | 实现中 |
 | D185 | PR 与 CI 观察由显式配置的 server 程序服务统一负责，同一交付共享事实并合并通知；读取、刷新与重试有期限，保留旧 runner 查询及迟到结果身份。 | 实现中 |
-| D186 | 涉及 PR 的 Issue 明确自动合入或人工审批策略；同 PR 共享唯一正式 reviewer 和候选绑定结论，默认一次初审及最多一次修复复查，部署权限另行约定。 | 实现中 |
+| D186 | 涉及 PR 的 Issue 明确自动合入或人工审批策略；同 PR 共享唯一正式 reviewer 和候选绑定结论，默认建议一次初审及一次集中复查，D193 取消两轮硬门；真实审阅轮次和用户预算保留，部署权限另行约定。 | 实现中 |
 | D187 | 交付 worker 经 run 受限视图读取自身真实授权绑定、当前有效性和恢复事实，不获取 owner 凭据，也不从 Task spec 中猜测独立授权记录。 | 实现中 |
 | D188 | 升级与恢复围栏在同一事务阻止新摘要，工具集交接仍可用原事实；普通候选健康固定截止覆盖所有返回分支，未提交安装可凭精确进程或 owned Wait 证明经独立维护前向接管，旧操作及未知保留。 | 实现中 |
 | D189 | 部署准备经同源受限视图读取固定受控服务、完整目标节点、匹配安装回执和相关未结责任；准备报告保留未知，不取得安装权限、不激活围栏或要求全局清零。 | 实现中 |
 | D190 | 部署基线失效与正式刷新复用同事务排队：同时唤醒共享 provider job并绑定刷新顺序；旧查询不结算新基线，已合入结果完成刷新后仍停止周期轮询。 | 实现中 |
 | D191 | Issue 资料作为持续上下文供负责 Agent 自主读取；spec 与 Run 保留输入快照，不作为普通资料白名单。实现、验收及新 session 共用同源索引和原件读取，追加材料无需逐文件或逐阶段授权。 | 实现中 |
+| D192 | 已完成部署以原冻结执行、原批准、原绑定安装及独立验收结清历史责任；当前候选准入不决定历史结清，旧授权不因此恢复执行能力。 | 实现中 |
+| D193 | Issue 负责人自主选择方法、资料、协作与连续交付；普通事实变化合并通知，不以摘要、默认阶段或次数自动代替语义判断。具体副作用与真实用户限制保留原身份，补正和有界恢复追加事实。 | 实现中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1194,7 +1196,7 @@ Agent 查询、Task 解释、CLI/API/只读工具与等待通知共用真实调�
 
 Issue 的已提交变化进入现有通知窗口及后台批次，由当前负责人判断状态说明与真实任务变化。自产处理不形成循环，也不取消尚未处理的外部变化。来源审阅完成后，剩余的任务影响判断继续作为正常协调责任。
 
-负责人显式确认继续原约定时，独立保存 Task/spec/CAS、Issue 责任代次、原冻结 digest 与已经处理的当前来源 digest/版本。相同计划附带新确认仍实际落账；原 spec、输入、候选及历史执行保持不变。scheduler 与上下文诊断使用同一有效性判断，后来的来源、任务或责任变化使旧确认失效。真正的要求变化仍走正式修订，确认不产生业务权限，也不清除未知副作用。
+负责人可选显式确认继续原约定，独立保存 Task/spec/CAS、Issue 责任代次、原冻结 digest 与已处理来源。D193 取消逐 Task 适用性确认作为调度和结果准入的正常前提；普通来源、定义和祖先 digest 变化只通知当前负责人，不自动暂停任务或拒收真实结果。原确认及冻结 spec、输入、候选和历史执行保留。负责人判断真正要求变化后明确修订、暂停或继续；实际责任变更及未知冲突仍按原身份处理。
 
 ## D185：server 统一交付观察
 
@@ -1206,15 +1208,15 @@ server 通过显式 provider 配置与原生 CLI 读取 PR 和 CI/checks，按�
 
 PR 交付在 Issue 中明确自动合入或人工审批。自动合入只覆盖真实授予的仓库与范围，满足独立审阅、检查和保护规则后由 Tend 自行推进；人工模式才准备具体候选并等待版本化答复。历史批准按原范围保留，自动策略不能伪造一份人工批准，合入也不自动授予部署。
 
-同一 PR 的 Task 与子 Issue 共用整份交付的唯一正式 reviewer。实际独立执行产生结构化 findings、处置及结论，绑定候选与需求范围；符合要求的同一执行结果同时满足 Tend 和仓库要求。默认一次初审、最多一次集中修复及原 reviewer 复查；未闭合先交父负责人或主 Agent 判断。预算耗尽后，外部已认证用户可用 Issue 与审阅双 CAS 明确授权恰好一轮额外复查；原轮次、处置及升级历史保留，Agent 不能自授预算或直接标记通过。已通过且仍适用的结果继续复用；观察暂时未知不消耗预算、不冒充真实候选变化。原有效候选不因新增关联重复审阅，变化后明确哪些证据仍有效，不通过负责人填写 passed 代替真实审阅。
+同一 PR 的 Task 与子 Issue 共用整份交付的唯一正式 reviewer。实际独立执行产生结构化 findings、处置及结论，绑定候选与需求范围；符合要求的同一执行结果同时满足 Tend 和仓库要求。建议一次初审、一次集中修复及原 reviewer 复查以促进收敛。D193 取消默认两轮后的人工授权硬门；负责人在既有真实用户范围和成本预算内安排必要后续，记录实际轮次、处置与升级历史。旧外部额外复查授权继续作为历史可读，Agent 不能伪造通过或改写真实用户预算。已通过且仍适用的结果继续复用；观察暂时未知不消耗预算、不冒充真实候选变化。原有效候选不因新增关联重复审阅，变化后明确哪些证据仍有效，不通过负责人填写 passed 代替真实审阅。
 
-每轮冻结关联任务明确要求的模型与思考强度，按实际 Run 配置核验；省略选择字段只表示使用 Agent 的真实默认配置，不能绕过要求。报告任务经 `submit_result` 提交结构化审阅报告；普通验收通过原 `submit_verdict.evidence.delivery_review` 提交整 PR 审阅证据。可选 `reviewer_role=accept` 在结论前绑定原 Task/spec、不可变产物、实际验收 Run 和精确 reviewer profile；缺省报告及已有事后验收导入保持原义。记录只读取真实不可变结论，changes_required 保留 findings 供集中修复，blocked / inconclusive 显示等待证据，不变为通过。需修改后，同 Task 的真实新产物和新验收 Run 可用唯一聚焦复核；等待证据后，真实新验收 Run 可核对同一产物。旧 Run 和旧结论不能重复计轮。等待证据的原轮次在外部用户明确授权额外复查后，仍允许同一产物上的真实新验收 Run，不能因协调状态切换丢失这份资格。
+每轮冻结关联任务明确要求的模型与思考强度，按实际 Run 配置核验；省略选择字段只表示使用 Agent 的真实默认配置，不能绕过要求。报告任务经 `submit_result` 提交结构化审阅报告；普通验收通过原 `submit_verdict.evidence.delivery_review` 提交整 PR 审阅证据。可选 `reviewer_role=accept` 在结论前绑定原 Task/spec、不可变产物、实际验收 Run 和精确 reviewer profile；缺省报告及已有事后验收导入保持原义。记录只读取真实不可变结论，changes_required 保留 findings 供集中修复，blocked / inconclusive 显示等待证据，不变为通过。需修改后，同 Task 的真实新产物和新验收 Run 可用于聚焦复核；等待证据后，真实新验收 Run 可核对同一产物。旧 Run 和旧结论不能重复计轮。等待证据的原轮次可由负责人安排同一产物上的真实新验收 Run；协调状态切换不将普通续办变成人工批准。D193 的 correct 读取原 reviewer 实际完成的补正报告，追加不可变来源而不覆盖旧报告、不复活终态 Task、不增加正式轮数。
 
 普通验收的受限观察只读当前 Task/spec/产物所关联交付的真实共享审阅；Main 与 Issue manager 的具名查询复用规范视图及分页，Issue 查询保持自身范围。正常具名 Issue 启动执行工具集 hash 与既有交接，不因禁用空闲摘要而继续旧工具表。Issue 交接只注入经已注册会话核验的本 Issue 事实和继承上下文，不使用全局 Main 事实、摘要输入或旧摘要缓存。不存在本机历史索引时不登记空路径，保留原可用索引；receipt-only 与原生未知仍只核对原身份。审阅期间范围变化不拒收原范围的真实结果，而是保存历史并单独判断当前适用性；新轮清除旧候选的适用确认。共享结果变化向修改前后所有关联 Issue 发送去重事件，复用既有通知合并与自产抑制。
 
 ## D187：交付执行的受限授权视图
 
-`delivery_authorization` 是创建 Task 时提交的独立输入，由服务端保存为执行绑定，不是冻结 spec 中的字段。worker 使用自身 run/lease 的既有受限观察入口读取该绑定、真实批准或策略来源、冻结候选、当前有效性及必要的恢复和准入事实；owner Task 查询提供同源只读事实。调用者不能任意选择其他执行对象，授权撤回、候选变化与历史执行保持可解释。
+`delivery_authorization` 是由服务端保存的真实执行绑定，不是冻结 spec 中的字段。原路径在创建 Task 时提交独立输入；D193 允许 live Task 用 prepare/bind 继续同一工作，无须先提交人为中间结果或另建交付 Task。worker 使用自身 run/lease 的观察或普通 read_context 入口读取该绑定、真实批准或策略来源、冻结候选、当前有效性及必要的恢复和准入事实；owner Task 及材料查询提供同源只读事实。读取其他相关历史对象不转移其执行身份；授权撤回、候选变化与历史执行保持可解释。
 
 任务需要的证据对应真实可读字段；部署验证未确认不自动阻止仅合入任务，普通进行中的 claim 不等于未结束维护。问题接续保留原始答复与证据来源，不扩张原 run 的文件权限或借补证改写冻结交付范围。以上决策与 CLI、视图、迁移及回归要求见[统一维护计划](plans/issue-change-owner-assessment.md)。
 
@@ -1253,3 +1255,59 @@ Issue 是持续目标、相关材料与责任。负责其工作的 Agent 默认�
 验收的任务资料仍排除已明确仅供实现角色使用的 `implementation_context`。D90 的可选作者报告不自动注入规则保留；验收 Agent 主动查阅已经提交的公共报告时可正常读取，并须独立核实其主张。所有关联任务保留的上下文快照均提供历史原件来源，负责人和后继 session 不依赖旧 Run 存活。
 
 Worker 的 `read_context` 与普通下载、owner API、完整 CLI 和管理工具共用该读面。原只读观察及旧文件接口保持兼容，新能力不修改 Assignment、journal 或旧有效请求。详见[实施计划](plans/agent-issue-context.md)。
+
+## D192：已完成部署的历史结清
+
+新的合入、部署和执行继续验证当前候选、授权、观察及安装基线。结清已经发生的
+部署则验证原不可变执行合同、原批准来源、精确绑定的升级和安装回执，以及原
+Task 的真实完成和验收；后续独立维护推进 target 或基线，不撤销这些历史事实。
+观察器只保存真实 provider / 安装事实并合并通知负责人；它不自动改写 duty 版本、状态或原问题。负责人判断事实变化对当前任务及既有授权的意义，具体新操作仍检查真实身份和参数。已因旧观察逻辑转入 preparing 的保留责任也使用相同历史判定，不修写旧版本或批准。
+
+历史结清只记录证据并完成原责任，不发起部署或合入，不让旧授权重新变成有效
+执行许可。当前 Issue CAS、责任代次、原执行绑定、真实未完成或未知业务副作用
+继续校验；不同执行或批次不能借用历史安装。新鲜执行有效性与派生历史结清事实
+分别表达，托管工具与正式事务共用同一业务判断，不新增独立恢复许可或状态机。
+
+负责人可以在既有用户目标内修正技术方法、安排真实剩余工作的正式后继和合理
+预算。保留已消耗尝试、已完成报告及真实用户限制；Agent 自设一次性计划不自动
+变成人类永久禁止继续的边界。失败工具回执保留真实请求身份和状态，纯读对象
+不存在按 not-found 表达，不扩大为身份失效或未知写入。详见[实施计划](plans/historical-delivery-settlement.md)。
+
+## D193：Issue 负责人自主推进
+
+Issue 是持续目标、授权、知识及责任的归属。已配置 Agent 默认使用其普通工具与
+同项目知识，自行选择短调查、协作、任务划分、审阅和连续交付的方法。明确的用户
+范围、人工审批模式、成本限制、暂停和取消继续按原来源生效。
+
+普通来源、provider、部署和阶段事实通过现有合并通知送达当前负责人；程序不从
+摘要或默认额度自动推导语义变化、暂停责任或再次向人类请求许可。具体操作仍记录
+其实际参数、身份、并发版本和结果，未知写只限制实际冲突操作。快照和历史报告
+记录当时发生的事实，负责人可追加补正，从 Issue 重建会话并进行有限恢复。
+
+普通报告的独立验收和审阅续办由负责人在真实目标、质量要求及预算内安排。终态
+业务与回复、回执收尾分别处理，关闭后的安全记录不重新打开业务。新能力同步
+CLI、工具及必要投影。详见[统一实施计划](plans/issue-owner-autonomy.md)。
+
+普通工具模式只用于本次实际协商的 runner Issue 负责人：新 runner 广告可选能力，
+server 在领取时记录原 Run 的模式标记，runner 同时核验标记和显式线程模式。
+旧 server、旧 runner、缺标记的旧 Run 及回执专用恢复保留原默认，不把新能力广告
+当作旧执行已经应用的事实。模型、思考强度及设备原生登录/profile 沿原配置。
+
+同一非空项目资料默认互通，空项目不形成全局共享；跨项目显式分享仍按原件及
+目标判断。默认读取加载当前及实际关联上下文，同项目 Issue 通过分页发现后可
+显式选择；精确原件按真实来源定位，不先加载项目全部历史。明确撤销分享不删除
+目标已冻结保存的历史输入。审阅补正读取真实原 reviewer 的完成报告并追加原件，
+原终态 Task、旧报告、结论及轮次保留。
+
+同一真实执行 Task 可呈交已登记候选并绑定后续交付，具体合入或部署仍要求已有
+真实用户授权和实际质量事实。服务端追加迁移 0102 保存候选型交付来源，历史
+验收型和结果型来源逐字迁移；未修改 runner journal 或线上协议版本。
+
+Runner 为新建 app-server 保存本地进程代次及已观测后代，重启后在有限时间内
+观察与停止原执行，不重放不确定的模型回合。无法证明关闭的旧工作保留 unknown，
+沿既有隔离和外部强行推进路径释放容量；正常关闭事实与外部业务结果分别记录。
+
+同 Issue 协作分别记录原责任出处与实际执行身份；明确责任交接后，旧代次执行
+不能继续推动当前任务。普通定义修改与同负责人新 session 不等于交接。普通工具
+配置不取消 runner 对原生负责人进程的退出约束，系统私有摘要保持原只读用途。
+最后成功的 provider 快照与最近读取尝试分开判定，后来的 timeout 不清除已知冲突。

@@ -448,7 +448,7 @@ func (a *App) ManagerReceiptCredential(ctx context.Context, run string) (leaseID
 	return
 }
 
-func authorizeRunnerCoordination(ctx context.Context, q store.Querier, p protocol.Principal, e store.HostedExecution, mutating bool, now int64) error {
+func authorizeRunnerCoordination(ctx context.Context, q store.Querier, p protocol.Principal, e store.HostedExecution, mutating bool, now int64, operations ...string) error {
 	if p.Kind != protocol.PrincipalRun || p.Role != protocol.RoleIssueManager || p.Subject != e.Selection.RunnerRunID || p.ConversationID != e.ConversationID {
 		return protocol.Errorf(protocol.CodeForbidden, "tool caller does not own the manager run")
 	}
@@ -489,7 +489,17 @@ func authorizeRunnerCoordination(ctx context.Context, q store.Querier, p protoco
 		return err
 	}
 	if !allowed {
-		return protocol.Errorf(protocol.CodeForbidden, "receipt-only manager cannot initiate business operations")
+		settlement := false
+		if len(operations) == 1 && closedIssueReceiptOperation(operations[0]) {
+			issue, err := store.GetCanonicalIssue(ctx, q, e.IssueID)
+			if err != nil {
+				return err
+			}
+			settlement = issue.State == protocol.IssueClosed && issue.AssignmentEpoch == e.AssignmentEpoch
+		}
+		if !settlement {
+			return protocol.Errorf(protocol.CodeForbidden, "receipt-only manager cannot initiate business operations")
+		}
 	}
 	return nil
 }
@@ -629,4 +639,15 @@ func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.
 		return false, err
 	}
 	return store.IssueManagerAuthorizationValid(ctx, q, r.TaskID)
+}
+
+// These receipts can settle only the same admitted turn after its Issue closes.
+// HostedCoordinationCommand still checks thread, execution, assignment and turn
+// identity; no new admission, task, delegation or lifecycle mutation is allowed.
+func closedIssueReceiptOperation(operation string) bool {
+	switch operation {
+	case "issues.review_context", "conversation.reply", "conversation.publish", "conversation.notify", "conversation.commit_turn":
+		return true
+	}
+	return false
 }

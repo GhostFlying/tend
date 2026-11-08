@@ -1,5 +1,6 @@
 // Canonical responsibility reads stay separate from the legacy work-item facade.
 import type {
+  AttentionPage,
   IssueContextView,
   IssueDeliveryPage,
   IssueFollowupHistory,
@@ -35,6 +36,7 @@ export function issuePagePath(filter: IssueFilter = {}): string {
 }
 
 export class Issues {
+  readonly attentions: IssueAttentionRead;
   readonly notificationSettings: WorkItemRead<IssueNotificationSettings>;
   readonly board: IssueBoardData;
   readonly activity: IssueActivityRead;
@@ -49,6 +51,7 @@ export class Issues {
   private readonly childReads = new Map<string, WorkItemRead<IssuePage>>();
 
   constructor(private readonly api: Reader) {
+    this.attentions = new IssueAttentionRead(api);
     this.notificationSettings = new WorkItemRead(api);
     this.board = new IssueBoardData(api);
     this.activity = new IssueActivityRead(api);
@@ -147,6 +150,7 @@ export class Issues {
   }
 
   refresh(): void {
+    void this.attentions.read.refresh();
     this.board.refresh();
     for (const read of this.reads()) {
       void read.refresh();
@@ -154,8 +158,61 @@ export class Issues {
   }
 
   stop(): void {
+    this.attentions.read.close();
     this.board.close();
     for (const read of this.reads()) read.close();
     // Reopening must preserve handles retained by subscribed React surfaces.
+  }
+}
+
+/** Refresh the loaded prefix so a resolved or escalated item cannot survive in
+ * an older page. The original Attention identity deduplicates page boundaries. */
+class IssueAttentionRead {
+  readonly read: WorkItemRead<AttentionPage>;
+  private issueID = "";
+  private pageCount = 1;
+
+  constructor(api: Reader) {
+    this.read = new WorkItemRead({
+      get: async <T>(path: string, signal?: AbortSignal): Promise<T> => {
+        let result: AttentionPage | undefined;
+        let cursor = "";
+        const pages = this.pageCount;
+        for (let index = 0; index < pages; index++) {
+          const url = new URL(path, "https://tend.invalid");
+          if (cursor) url.searchParams.set("after", cursor);
+          const page = await api.get<AttentionPage>(`${url.pathname}${url.search}`, signal);
+          if (signal?.aborted) return page as T;
+          result = result
+            ? { ...page, items: [...(result.items ?? []), ...(page.items ?? [])] }
+            : page;
+          if (!page.more || !page.next) break;
+          cursor = page.next;
+        }
+        if (!result) throw new Error("未取得当前责任待办");
+        const items = new Map((result.items ?? []).map((item) => [item.attention_id, item]));
+        return { ...result, items: [...items.values()] } as T;
+      },
+    });
+  }
+
+  open(issueID: string): Promise<void> {
+    if (issueID !== this.issueID) this.pageCount = 1;
+    this.issueID = issueID;
+    const query = new URLSearchParams({
+      responsible_issue_id: issueID,
+      recipient: "all",
+      status: "open",
+      actionable_only: "true",
+      include_archived: "true",
+    });
+    return this.read.open(`/api/v1/inbox?${query}`);
+  }
+
+  more(): Promise<void> {
+    const state = this.read.state.get();
+    if (!state.value?.more || state.loading) return Promise.resolve();
+    this.pageCount++;
+    return this.read.refresh();
   }
 }

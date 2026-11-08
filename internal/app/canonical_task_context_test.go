@@ -129,18 +129,6 @@ func TestCanonicalTaskSourceRefreshUsesPrimaryNotResultReference(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		blockers, err := store.TaskContextBlockers(t.Context(), tx.Q(), primary.IssueID)
-		if err != nil {
-			return err
-		}
-		if len(blockers) != 0 {
-			t.Fatalf("unchanged agreement blocked=%+v", blockers)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err = h.store.Write(t.Context(), func(tx *store.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE conversation_messages SET body='Deploy only after review' WHERE message_id='msg_read_source'`)
 		return err
@@ -148,20 +136,6 @@ func TestCanonicalTaskSourceRefreshUsesPrimaryNotResultReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		blockers, err := store.TaskContextBlockers(t.Context(), tx.Q(), primary.IssueID)
-		if err != nil {
-			return err
-		}
-		if len(blockers) != 1 || blockers[0].ObjectID != task || blockers[0].SpecVersion != 2 {
-			t.Fatalf("source edit not fenced=%+v", blockers)
-		}
-		other, err := store.TaskContextBlockers(t.Context(), tx.Q(), reference.IssueID)
-		if err != nil {
-			return err
-		}
-		if len(other) != 0 {
-			t.Fatalf("reference controls agreement=%+v", other)
-		}
 		next := testSpec
 		if err := refreshTaskWorkContext(t.Context(), tx.Q(), task, &next, frozen.SharedContext); err != nil {
 			return err

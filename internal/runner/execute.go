@@ -136,6 +136,12 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			// The worker was stopped for a pause or a takeover; the next
 			// attempt waits until tend wants the run again.
 			continue
+		case isOwnedRecoveryUncertain(err):
+			r.cfg.Log.WarnContext(ctx, "original app-server recovery remains unconfirmed; run retained for explicit reconciliation or bounded isolation", "run_id", runID, "err", err)
+			if fenceErr := r.markExecutorFenced(ctx, a); fenceErr != nil {
+				return errors.Join(err, fenceErr)
+			}
+			return err
 		case isCompletionPending(err):
 			retryCtx := runCtx
 			if errors.Is(cause, errStopped) {
@@ -261,6 +267,14 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 		return nil
 	}
+	if recovered, err := r.recoverAppServerAttempt(runCtx, as); recovered {
+		if err != nil {
+			return &ownedRecoveryUncertain{&completionPending{err}}
+		}
+		return failed("worker_interrupted_after_runner_restart", errors.New("runner: original app-server attempt was stopped; owner must reconcile its effects before choosing follow-up work"))
+	} else if err != nil {
+		return &completionPending{err}
+	}
 	if err := r.requireRunWorker(runCtx, as.RunID); err != nil {
 		return &completionPending{err}
 	}
@@ -362,7 +376,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}
 	if as.Responsibility != nil {
-		p.Guide += fmt.Sprintf("\nYou are executing as owner of Issue %s at assignment epoch %d, role %s. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Do not launch or delegate to another Agent outside Tend: another Agent requires its own child Issue. Preserve independent acceptance isolation. Report any need for further delegation as a blocker to this Issue's coordination turn.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
+		p.Guide += fmt.Sprintf("\nYou are executing work for Issue %s at its publishing owner's assignment epoch %d, role %s. Your execution identity remains the selected Agent. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Choose short investigation or collaboration within the existing goal using this device's configured tools. An ordinary same-Issue collaboration need not create a child Issue; independent continuing responsibility may use one. Preserve independent acceptance isolation and submit actual results with their original execution identity.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
 	}
 	persistEvent := func(eventCtx context.Context, ev harness.WorkerEvent) error {
 
@@ -901,6 +915,12 @@ func (r *Runner) stopAgent(ctx context.Context, as protocol.Assignment) error {
 	if err := r.checkRunWorker(run); err != nil {
 		return err
 	}
+	if supported, err := r.stopOwnedAppServer(ctx, as, run); supported {
+		if err != nil {
+			return err
+		}
+		return r.cfg.Journal.ConfirmStopped(ctx, as.RunID)
+	}
 	if rel, ok := execution.Workers.(harness.Releaser); ok {
 		if err := rel.Release(ctx, as.RunID, run.Thread); err != nil {
 			if ctx.Err() == nil {
@@ -924,6 +944,13 @@ func (r *Runner) recordClosedSession(ctx context.Context, as protocol.Assignment
 	}
 	if assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
 		if _, external := execution.Workers.(harness.Releaser); !external {
+			run, err := r.cfg.Journal.Run(ctx, as.RunID)
+			if err != nil {
+				return err
+			}
+			if supported, err := r.stopOwnedAppServer(ctx, as, run); supported && err != nil {
+				return err
+			}
 			return r.cfg.Journal.ConfirmStopped(ctx, as.RunID)
 		}
 	}

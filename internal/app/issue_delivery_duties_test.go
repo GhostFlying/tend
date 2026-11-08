@@ -196,7 +196,7 @@ func createDeliveryExecutionForTest(t *testing.T, h *harness, issue string, d pr
 		enableDeliveryObservationForTest(t, h)
 	}
 	spec := protocol.OwnerTaskSpec{Goal: "Execute and verify only the approved candidate and scope", Acceptance: []string{"Verify provider merge receipt and all approved post-deployment checks"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}
-	p := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Execute approved delivery", Spec: spec, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: d.TaskID, Revision: d.Revision}}
+	p := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Execute approved delivery", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "This fixture exercises the original independent-acceptance delivery contract"}, DeliveryAuthorization: &protocol.IssueDeliveryAuthorization{TaskID: d.TaskID, Revision: d.Revision}}
 	op, err := h.app.Execute(t.Context(), owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue}, p, rev(i.Revision)), CanonicalOwnerTaskCreate{})
 	if err != nil {
 		pe, ok := err.(*protocol.Error)
@@ -370,7 +370,7 @@ func TestDeliveryBoundedReportHasExplicitAcceptedEndpoint(t *testing.T) {
 	i := createCanonicalOwnerTestIssue(t, h)
 	spec := testSpec
 	spec.Deliverables = []string{domain.DeliveryReport}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: i.IssueID}, canonicalOwnerTaskPayload{Title: "Bounded report", ExpectedAssignmentEpoch: i.AssignmentEpoch, Spec: spec}, rev(i.Revision)), CanonicalOwnerTaskCreate{})
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: i.IssueID}, canonicalOwnerTaskPayload{Title: "Bounded report", ExpectedAssignmentEpoch: i.AssignmentEpoch, Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Independently accept this bounded report"}}, rev(i.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -519,7 +519,7 @@ func TestDeliveryDeferralRetainsResponsibilityAndExplicitEndUsesOwnerEvidence(t 
 
 }
 
-func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *testing.T) {
+func TestDeliveryObservedDriftRetainsOwnerDispositionAndChecksCurrentExecution(t *testing.T) {
 	for _, change := range []string{"head", "base", "closed", "unknown", "merge"} {
 		t.Run(change, func(t *testing.T) {
 			h, i, task, c := deliveryFixture(t)
@@ -574,9 +574,10 @@ func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *tes
 			}
 			report(facts, failure)
 			expired := deliveryDutyForTest(t, h, i.IssueID, task)
-			if expired.Revision != d.Revision+1 || expired.Status != "preparing" {
-				t.Fatal(expired)
+			if expired.Revision != d.Revision || expired.Status != d.Status || expired.AttentionID != d.AttentionID {
+				t.Fatal("provider facts rewrote owner authority", expired)
 			}
+			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, d), protocol.CodeStaleRevision)
 			if change == "closed" {
 				// A terminal reference is refreshed only by an explicit owner refresh.
 				current := canonicalTaskIssue(t, h, i.IssueID)
@@ -586,12 +587,9 @@ func TestDeliveryObservedDriftCannotReviveOldApprovalAfterProviderReturns(t *tes
 				}
 			}
 			report(&snapshot, "")
-			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, d), protocol.CodeStaleRevision)
-			next := prepareDeliveryForTest(t, h, i.IssueID, task, c)
-			if next.AttentionID == d.AttentionID {
-				t.Fatal("old approval reused after observed drift")
+			if op := createDeliveryExecutionForTest(t, h, i.IssueID, d); op.Status != protocol.OpSucceeded {
+				t.Fatal("current exact original approval required another human answer", op)
 			}
-			expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, next), historicalOrPolicyReadinessCode(next))
 		})
 	}
 }

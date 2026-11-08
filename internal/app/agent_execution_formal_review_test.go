@@ -35,7 +35,7 @@ func TestNamedPromotionPreservesQueuedLegacyWorkspaceContract(t *testing.T) {
 	create := func(title string, spec protocol.OwnerTaskSpec, rating protocol.Rating) string {
 		t.Helper()
 		issue = canonicalTaskIssue(t, h, issue.IssueID)
-		op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: title, Spec: spec, Rating: rating}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+		op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: title, Spec: spec, Rating: rating, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise retained workspace compatibility through independent completion"}}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}

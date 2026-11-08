@@ -18,9 +18,11 @@ func GetIssueDeliveryDuty(ctx context.Context, q Querier, issue, task string) (p
 	}
 	d.AcceptanceID = accepted.String
 	if !accepted.Valid {
-		if err := q.QueryRowContext(ctx, `SELECT artifact_id FROM issue_delivery_duties WHERE issue_id=? AND task_id=?`, issue, task).Scan(&d.ArtifactID); err != nil {
+		var artifact sql.NullString
+		if err := q.QueryRowContext(ctx, `SELECT artifact_id FROM issue_delivery_duties WHERE issue_id=? AND task_id=?`, issue, task).Scan(&artifact); err != nil {
 			return d, err
 		}
+		d.ArtifactID = artifact.String
 	}
 	var body protocol.IssueDeliveryDuty
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {

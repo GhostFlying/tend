@@ -22,14 +22,15 @@ func (CanonicalOwnerTaskCreate) Authorize(_ context.Context, x *Exec, _ store.Qu
 
 type canonicalOwnerTaskPayload struct {
 	canonicalOwnerIssueSource
-	ExpectedAssignmentEpoch int64                   `json:"expected_assignment_epoch"`
-	Title                   string                  `json:"title"`
-	Spec                    domain.Spec             `json:"spec"`
-	Rating                  protocol.Rating         `json:"rating,omitempty"`
-	WorkspaceName           string                  `json:"workspace_name,omitempty"`
-	StageIDs                []string                `json:"stage_ids,omitempty"`
-	Relations               []protocol.TaskRelation `json:"relations,omitempty"`
-	UseDefaultWorkspace     bool                    `json:"use_default_workspace,omitempty"`
+	IndependentAcceptance   *protocol.IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
+	ExpectedAssignmentEpoch int64                                  `json:"expected_assignment_epoch"`
+	Title                   string                                 `json:"title"`
+	Spec                    domain.Spec                            `json:"spec"`
+	Rating                  protocol.Rating                        `json:"rating,omitempty"`
+	WorkspaceName           string                                 `json:"workspace_name,omitempty"`
+	StageIDs                []string                               `json:"stage_ids,omitempty"`
+	Relations               []protocol.TaskRelation                `json:"relations,omitempty"`
+	UseDefaultWorkspace     bool                                   `json:"use_default_workspace,omitempty"`
 }
 type canonicalTaskCreateContext struct {
 	AcceptancePolicy *protocol.IssueAcceptancePolicy
@@ -57,7 +58,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err := decodePayload(x.Env, &input); err != nil {
 		return Outcome{}, err
 	}
-	p := canonicalOwnerTaskPayload{canonicalOwnerIssueSource: canonicalOwnerIssueSource{SourceMessageID: input.SourceMessageID, ExpectedSourceRevision: input.ExpectedSourceRevision}, ExpectedAssignmentEpoch: input.ExpectedAssignmentEpoch, Title: input.Title, Spec: domainSpecFromOwner(input.Spec), Rating: input.Rating, WorkspaceName: input.WorkspaceName, StageIDs: input.StageIDs, Relations: input.Relations, UseDefaultWorkspace: input.UseDefaultWorkspace}
+	p := canonicalOwnerTaskPayload{canonicalOwnerIssueSource: canonicalOwnerIssueSource{SourceMessageID: input.SourceMessageID, ExpectedSourceRevision: input.ExpectedSourceRevision}, IndependentAcceptance: input.IndependentAcceptance, ExpectedAssignmentEpoch: input.ExpectedAssignmentEpoch, Title: input.Title, Spec: domainSpecFromOwner(input.Spec), Rating: input.Rating, WorkspaceName: input.WorkspaceName, StageIDs: input.StageIDs, Relations: input.Relations, UseDefaultWorkspace: input.UseDefaultWorkspace}
 	if err := domain.CheckIssueEpoch(current.IssueControl, p.ExpectedAssignmentEpoch); err != nil {
 		return Outcome{}, err
 	}
@@ -84,10 +85,6 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	spec := p.Spec
 	var deliveryDuty *protocol.IssueDeliveryDuty
-	if input.DeliveryAuthorization == nil && x.coordinationExecution != nil {
-		spec.Constraints = append(slices.Clone(spec.Constraints), "This implementation/preparation agreement grants no merge or deployment authority. Accepted code delivery requires the original Issue delivery duty, the Issue automatic-integration policy or a real versioned owner approval, a shared formal PR review, and a separate task with delivery_authorization. Do not merge or deploy under this task.")
-	}
-
 	if input.DeliveryAuthorization != nil {
 		d, err := deliveryExecutionAuthorized(ctx, tx.Q(), current, *input.DeliveryAuthorization)
 		if err != nil {
@@ -129,21 +126,9 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	payload := createTaskPayload{Title: p.Title, Spec: spec, Rating: p.Rating, Project: current.Plan.Project, WorkspaceName: p.WorkspaceName, StageIDs: p.StageIDs, Relations: p.Relations}
 	creation := &canonicalTaskCreateContext{Issue: current, Source: p.canonicalOwnerIssueSource, Reason: p}
-	_, prPolicy, err := store.EffectiveIssuePRPolicy(ctx, tx.Q(), current)
+	creation.AcceptancePolicy, err = taskAcceptancePolicy(ctx, x, tx.Q(), current, spec, input.IndependentAcceptance)
 	if err != nil {
 		return Outcome{}, err
-	}
-	defaultAcceptance, err := issueAcceptanceWasDefault(ctx, tx.Q(), current)
-	if err != nil {
-		return Outcome{}, err
-	}
-	if prPolicy != nil && defaultAcceptance && (deliveryDuty == nil || !deliveryDuty.Candidate.Deploy) {
-		policy := protocol.IssueAcceptancePolicy{Required: false, Reason: "Formal code review belongs to the shared PR delivery; reports and intermediate results use self-check", RequestID: x.Env.RequestID, IssueRevision: current.Revision}
-		if current.AcceptancePolicy != nil {
-			policy.Creator = current.AcceptancePolicy.Creator
-			policy.DecidedBy = current.AcceptancePolicy.DecidedBy
-		}
-		creation.AcceptancePolicy = &policy
 	}
 	out, err := createTask(ctx, x, tx, payload, creation)
 	if err != nil {

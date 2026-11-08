@@ -16,7 +16,7 @@ func TestDeliveryReconcilesAcceptedLegacyInstallationWithoutRelabelingOrReplay(t
 	h, i, original, c := deliveryFixture(t)
 	spec := testSpec
 	spec.Deliverables = []string{domain.DeliveryReport}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: i.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Complete first installation using the existing interface", Spec: spec}, rev(i.Revision)), CanonicalOwnerTaskCreate{})
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: i.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Complete first installation using the existing interface", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Verify this actual legacy installation independently"}}, rev(i.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -163,11 +163,13 @@ func TestDeliveryTechnicalSupervisorCannotAnswerHumanIntegrationConfirmation(t *
 	if !accepted(t, h.exec(runner("linux-1"), h.env(protocol.OpDeliveriesReport, protocol.Target{Type: "host", ID: "linux-1"}, payload, nil), ReportDelivery{})) {
 		t.Fatal("new provider fact rejected")
 	}
+	h.clock.Advance(3 * time.Minute)
+	sweepStatus(t, h)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var count int
-		err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) JOIN conversation_messages m ON m.message_id=s.message_id WHERE s.kind='issue.delivery_candidate_expired' AND b.work_item_id=? AND m.conversation_id<> 'main'`, i.IssueID).Scan(&count)
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) JOIN conversation_messages m ON m.message_id=s.message_id WHERE s.kind='issue.changed' AND b.work_item_id=? AND m.conversation_id<> 'main'`, i.IssueID).Scan(&count)
 		if err == nil && count != 1 {
-			t.Fatalf("expired candidate did not route exactly once to original manager: %d", count)
+			t.Fatalf("provider fact did not route exactly once to original manager: %d", count)
 		}
 		return err
 	}); err != nil {

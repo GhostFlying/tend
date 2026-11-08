@@ -71,7 +71,7 @@ func TestAcceptanceSharedReviewPrebindUsesActualRoleAndVerdict(t *testing.T) {
 				t.Fatal(r)
 			}
 			observed, err := h.app.ReadRunObservation(t.Context(), runPrincipal(accept.RunID, accept.Role))
-			if err != nil || len(observed.SharedReviews) != 1 || observed.SharedReviews[0].Round.ReviewerRole != protocol.RoleAccept || observed.SharedReviews[0].Round.ArtifactID != round.ArtifactID || observed.SharedReviews[0].RoundLimit != 2 {
+			if err != nil || len(observed.SharedReviews) != 1 || observed.SharedReviews[0].Round.ReviewerRole != protocol.RoleAccept || observed.SharedReviews[0].Round.ArtifactID != round.ArtifactID || observed.SharedReviews[0].RoundLimit != 0 || observed.SharedReviews[0].SuggestedRounds != 2 {
 				t.Fatal(observed, err)
 			}
 			before := h.count("shared_delivery_review_history")
@@ -316,7 +316,7 @@ func TestAcceptanceSharedReviewBindingNotHiddenByUnrelatedHistory(t *testing.T) 
 	}
 }
 
-func TestAcceptanceSharedReviewExternalBudgetRestoresSameArtifactWaitingReview(t *testing.T) {
+func TestAcceptanceSharedReviewResponsibleContinuationRetainsSameArtifactWaitingReview(t *testing.T) {
 	h, rt, issue, accept, _ := acceptanceSharedReviewFixture(t)
 	r := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: accept.TaskID, ReviewerRole: protocol.RoleAccept}))
 	for n := 0; n < 2; n++ {
@@ -337,16 +337,8 @@ func TestAcceptanceSharedReviewExternalBudgetRestoresSameArtifactWaitingReview(t
 			r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: accept.TaskID, ReviewerRole: protocol.RoleAccept}))
 		}
 	}
-	if r.Status != "escalated" || len(r.Rounds) != 2 {
-		t.Fatal(r)
-	}
-	if op := sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: accept.TaskID, ReviewerRole: protocol.RoleAccept}); op.Status == protocol.OpSucceeded {
-		t.Fatal("third review admitted without external budget", op)
-	}
-	expected := r.Revision
-	r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "authorize_recheck", DeliveryID: "pr", ExpectedReviewRevision: &expected, IssueControlPayload: protocol.IssueControlPayload{Reason: "The external user authorizes exactly one further actual review after the prerequisite recovered"}}))
-	if len(r.BudgetAuthorizations) != 1 || r.Status != "changes_requested" {
-		t.Fatal(r)
+	if r.Status != "waiting" || len(r.Rounds) != 2 || len(r.BudgetAuthorizations) != 0 {
+		t.Fatal("waiting evidence became a human review-budget gate", r)
 	}
 	if op := h.requestAction(accept.TaskID, protocol.ActionAccept, 3); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -358,7 +350,7 @@ func TestAcceptanceSharedReviewExternalBudgetRestoresSameArtifactWaitingReview(t
 	h.runAs(next, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
 	r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: next.TaskID, ReviewerRole: protocol.RoleAccept}))
 	if len(r.Rounds) != 3 || r.Rounds[2].ArtifactID != r.Rounds[0].ArtifactID || r.Rounds[2].RunID == r.Rounds[0].RunID || r.Rounds[2].RunID == r.Rounds[1].RunID {
-		t.Fatal("external grant lost same-artifact waiting provenance", r)
+		t.Fatal("responsible continuation lost same-artifact waiting provenance", r)
 	}
 	if op := sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}); op.Status == protocol.OpSucceeded {
 		t.Fatal("prior waiting verdict counted as third result", op)
@@ -367,7 +359,7 @@ func TestAcceptanceSharedReviewExternalBudgetRestoresSameArtifactWaitingReview(t
 		t.Fatal(op)
 	}
 	r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
-	if !r.Valid || r.Status != "passed" || len(r.Rounds) != 3 || len(r.BudgetAuthorizations) != 1 || r.Rounds[2].RunID != next.RunID || r.Rounds[0].AcceptanceVerdict != protocol.VerdictBlocked || r.Rounds[1].AcceptanceVerdict != protocol.VerdictBlocked {
-		t.Fatal("real external recovery did not preserve history and exact budget", r)
+	if !r.Valid || r.Status != "passed" || len(r.Rounds) != 3 || len(r.BudgetAuthorizations) != 0 || r.Rounds[2].RunID != next.RunID || r.Rounds[0].AcceptanceVerdict != protocol.VerdictBlocked || r.Rounds[1].AcceptanceVerdict != protocol.VerdictBlocked {
+		t.Fatal("responsible continuation did not preserve real waiting history and costs", r)
 	}
 }

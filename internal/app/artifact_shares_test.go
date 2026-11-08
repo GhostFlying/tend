@@ -30,6 +30,7 @@ func TestArtifactShareGrantRevokePreservesImmutableResultAndRequest(t *testing.T
 		t.Fatal(op)
 	}
 	artifactID := h.task(task).CurrentArtifactID
+	materialProjectForTest(t, h, source.IssueID, "separate-source")
 	accept, ok, op := h.claim("linux-1")
 	if !ok || accept.Role != protocol.RoleAccept {
 		t.Fatal(accept, op)
@@ -133,11 +134,11 @@ func TestArtifactShareGrantRevokePreservesImmutableResultAndRequest(t *testing.T
 		t.Fatal(err)
 	}
 	target = canonicalTaskIssue(t, h, target.IssueID)
-	readable(false)
+	readable(true)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		v, err := store.GetArtifactShare(t.Context(), tx.Q(), share.ShareID)
-		if v.Status != "active" || v.Applicable {
-			t.Fatal("historical grant transferred to new epoch", v)
+		if v.Status != "active" || !v.Applicable {
+			t.Fatal("responsibility handoff erased shared knowledge", v)
 		}
 		return err
 	}); err != nil {
@@ -151,7 +152,7 @@ func TestArtifactShareGrantRevokePreservesImmutableResultAndRequest(t *testing.T
 	if result := h.exec(owner, h.env(protocol.OpRevokeArtifactShare, protocol.Target{Type: "issue", ID: target.IssueID}, wrongRevoke, rev(target.Revision)), ArtifactShareCommand{Revoke: true}); result.Status != protocol.OpFailed || result.Error.Code != protocol.CodeStaleRevision {
 		t.Fatal("stale share revoke", result)
 	}
-	readable(false)
+	readable(true)
 	closed := h.exec(owner, h.env(protocol.OpRevokeArtifactShare, protocol.Target{Type: "issue", ID: target.IssueID}, revoke, rev(target.Revision)), ArtifactShareCommand{Revoke: true})
 	if closed.Status != protocol.OpSucceeded {
 		t.Fatal(closed)
@@ -195,6 +196,7 @@ func TestArtifactShareMainRelayRequiresCurrentAdmittedOwnerSource(t *testing.T) 
 		t.Fatal(op)
 	}
 	artifactID := h.task(task).CurrentArtifactID
+	materialProjectForTest(t, h, source.IssueID, "separate-source")
 	var artifact store.ArtifactRow
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
@@ -268,6 +270,7 @@ func TestArtifactShareManagerDownloadAndFrozenWorkerInputSurviveRevocation(t *te
 		t.Fatal(op)
 	}
 	artifactID := h.task(task).CurrentArtifactID
+	materialProjectForTest(t, h, source.IssueID, "separate-source")
 	var artifact store.ArtifactRow
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
@@ -320,7 +323,9 @@ func TestArtifactShareManagerDownloadAndFrozenWorkerInputSurviveRevocation(t *te
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	read(false)
+	// The consumer's already saved input is now an independent project source;
+	// revoking the original share does not erase that retained knowledge.
+	read(true)
 	if len(saved.Inputs) != 1 || saved.Inputs[0].SourceMessageID == "" {
 		t.Fatal("published input did not retain its admitted message authority", saved)
 	}
@@ -409,6 +414,7 @@ func TestArtifactShareAuthorizationSourceDoesNotGrantOtherAttachments(t *testing
 		t.Fatal(op)
 	}
 	artifactID := h.task(task).CurrentArtifactID
+	materialProjectForTest(t, h, source.IssueID, "separate-source")
 	var artifact store.ArtifactRow
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
@@ -509,6 +515,7 @@ func TestArtifactShareNativeAuthorityRejectsClassifiedHistory(t *testing.T) {
 		t.Fatal(op)
 	}
 	artifactID := h.task(task).CurrentArtifactID
+	materialProjectForTest(t, h, source.IssueID, "separate-source")
 	var artifact store.ArtifactRow
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
@@ -583,7 +590,7 @@ func TestArtifactShareNativeAuthorityRejectsClassifiedHistory(t *testing.T) {
 	}
 }
 
-func TestArtifactShareNewInputBindingRequiresLiveAuthority(t *testing.T) {
+func TestArtifactShareHistoricalInputsRemainIndependentSavedMaterials(t *testing.T) {
 	h := hostedManagerHarness(t)
 	runtime := testRuntime("input-share-boundary")
 	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityTaskInputs)
@@ -604,6 +611,7 @@ func TestArtifactShareNewInputBindingRequiresLiveAuthority(t *testing.T) {
 		t.Fatal(op)
 	}
 	artifactID := h.task(task).CurrentArtifactID
+	materialProjectForTest(t, h, source.IssueID, "separate-source")
 	acceptance, ok := h.claimInputRun(runtime)
 	if !ok || acceptance.Role != protocol.RoleAccept {
 		t.Fatal(acceptance)
@@ -680,11 +688,13 @@ func TestArtifactShareNewInputBindingRequiresLiveAuthority(t *testing.T) {
 		t.Fatal(revoked)
 	}
 	beforeTasks, beforeSpecs = h.count("tasks"), h.count("task_specs")
-	denied, request, command := create("Cannot mint new authority after revoke", selected)
-	expectWorkCode(t, denied, protocol.CodeInvalidRequest)
+	reused, request, command := create("Reuse the original already saved in this Issue's frozen input history", selected)
+	if reused.Status != protocol.OpSucceeded {
+		t.Fatal("share revocation erased independently retained inputs", reused)
+	}
 	replayed := h.exec(manager, request, command)
-	if !reflect.DeepEqual(denied, replayed) || h.count("tasks") != beforeTasks || h.count("task_specs") != beforeSpecs {
-		t.Fatal("rejected input was not atomic/idempotent", denied, replayed)
+	if !reflect.DeepEqual(reused, replayed) || h.count("tasks") != beforeTasks+1 || h.count("task_specs") != beforeSpecs+1 {
+		t.Fatal("original input reuse was not atomic/idempotent", reused, replayed)
 	}
 	spec := testSpec
 	spec.Inputs = selected
@@ -699,11 +709,13 @@ func TestArtifactShareNewInputBindingRequiresLiveAuthority(t *testing.T) {
 	seq++
 	update := HostedCoordinationCommand{Command: CanonicalOwnerTaskUpdate{}, ExecutionID: turn.RequestID, EffectSeq: seq}
 	request = h.env(update.Operation(), taskTarget(editable.TaskID), protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: target.AssignmentEpoch, Spec: &ownerSpec}, rev(h.task(editable.TaskID).ControlRevision))
-	denied = h.exec(manager, request, update)
-	expectWorkCode(t, denied, protocol.CodeInvalidRequest)
+	reused = h.exec(manager, request, update)
+	if reused.Status != protocol.OpSucceeded {
+		t.Fatal("available saved material required another grant", reused)
+	}
 	replayed = h.exec(manager, request, update)
-	if !reflect.DeepEqual(denied, replayed) || h.count("task_specs") != beforeSpecs || len(h.storedSpec(editable.TaskID, 1).Inputs) != 0 {
-		t.Fatal("revoked input entered new spec", denied, replayed)
+	if !reflect.DeepEqual(reused, replayed) || h.count("task_specs") != beforeSpecs+2 || len(h.storedSpec(editable.TaskID, 1).Inputs) != 0 || len(h.storedSpec(editable.TaskID, 2).Inputs) != 1 {
+		t.Fatal("saved input reuse changed its original spec or request identity", reused, replayed)
 	}
 	// Existing contracts retain the bytes they were lawfully granted earlier.
 	metadata, body, err := h.app.OpenRunFile(t.Context(), runPrincipal(worker.RunID, worker.Role), file.FileID)

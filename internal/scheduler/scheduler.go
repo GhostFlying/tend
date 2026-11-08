@@ -43,10 +43,6 @@ type Candidate struct {
 	// ExecutionFilter restricts a read-only explanation to one exact candidate.
 	// It never replaces the task requirements or its frozen owner pins.
 	ExecutionFilter *protocol.RunExecutionPin
-	// ReviewExecutionFilter restricts the prerequisite reviewer in a read-only
-	// explanation of first implementation allocation. It never changes the
-	// frozen acceptance requirements or starts an acceptance action.
-	ReviewExecutionFilter *protocol.RunExecutionPin
 	// AcceptanceWaived comes only from the server-frozen task policy.
 	AcceptanceWaived            bool
 	QuestionHandoff             bool
@@ -162,7 +158,7 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		return waitReason(protocol.QueueHostRequirements, "host lacks a required label")
 	case !containsAll(h.Repos, c.Repos):
 		return waitReason(protocol.QueueHostRequirements, "host does not serve every repository")
-	case c.AgentSelection == nil && c.RequiresAcceptanceExecution && !h.AcceptanceExecution:
+	case c.Kind == protocol.ActionAccept && c.AgentSelection == nil && c.RequiresAcceptanceExecution && !h.AcceptanceExecution:
 		return waitReason(protocol.QueueHostRequirements, "runner does not support acceptance model selection")
 	case c.RequiresObservation && !h.WorkerObservation:
 		return waitReason(protocol.QueueHostRequirements, "runner does not support scoped worker observation")

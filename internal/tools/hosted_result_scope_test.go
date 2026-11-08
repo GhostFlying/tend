@@ -45,9 +45,18 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	execute(protocol.Principal{Kind: protocol.PrincipalSystem}, app.AcceptHostedConfiguration{Prepared: prepared}, protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": prepared.Revision(), "hash": prepared.Hash()}, new(int64(0)))
 	e.svc.app = app.New(e.store, ids, clock.Now, app.WithHostedConfiguration(prepared))
 	execute(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, app.Hello{}, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}}, nil)
-	create := func(parent string) protocol.Issue {
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		return tx.UpsertProject(t.Context(), store.ProjectRow{Project: "private-project", Title: "Unrelated project", Weight: 1}, clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	create := func(parent string, projects ...string) protocol.Issue {
+		project := "default"
+		if len(projects) > 0 {
+			project = projects[0]
+		}
 		t.Helper()
-		op := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{ParentIssueID: parent, Plan: protocol.IssuePlan{Title: "Investigation", Project: "default", Intent: "Review exact delegated result"}}, nil)
+		op := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{ParentIssueID: parent, Plan: protocol.IssuePlan{Title: "Investigation", Project: project, Intent: "Review exact delegated result"}}, nil)
 		var issue protocol.Issue
 		if err := json.Unmarshal(op.Result, &issue); err != nil {
 			t.Fatal(err)
@@ -59,6 +68,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	child := create(parent.IssueID)
 	descendant := create(child.IssueID)
 	sibling := create(ancestor.IssueID)
+	private := create("", "private-project")
 	current := func(id string) protocol.Issue {
 		t.Helper()
 		var issue protocol.Issue
@@ -104,11 +114,24 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	type result struct {
 		task, artifact, issue string
 		allowed               bool
+		sameProject           bool
 	}
 	cases := map[string]result{}
-	for name, issue := range map[string]protocol.Issue{"own": parent, "child": child, "descendant": descendant, "ancestor": ancestor, "sibling": sibling} {
+	for name, issue := range map[string]protocol.Issue{"own": parent, "child": child, "descendant": descendant, "ancestor": ancestor, "sibling": sibling, "unrelated-project": private} {
 		task, artifact := task(issue)
-		cases[name] = result{task, artifact, issue.IssueID, name != "ancestor" && name != "sibling"}
+		cases[name] = result{task, artifact, issue.IssueID, name != "ancestor" && name != "sibling" && name != "unrelated-project", issue.Plan.Project == parent.Plan.Project}
+	}
+
+	// An explicit cross-project share grants only its exact original artifact.
+	unsharedPrivateArtifact := ids.New(protocol.PrefixArtifact)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		original, err := store.GetArtifact(t.Context(), tx.Q(), cases["unrelated-project"].artifact)
+		if err != nil {
+			return err
+		}
+		return tx.InsertArtifact(t.Context(), unsharedPrivateArtifact, original.TaskID, original.RunID, "report", `{"report":"another private report","files":[]}`, "", clock.Now().UnixMilli())
+	}); err != nil {
+		t.Fatal(err)
 	}
 	parent = current(parent.IssueID)
 	op := execute(owner, app.HostedIssueAssignment{}, protocol.Target{Type: "issue", ID: parent.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/planner"}, Reason: "Review delegated results"}, &parent.Revision)
@@ -267,7 +290,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 				args any
 			}{{"tasks_read", taskArgs{TaskID: r.task}}, {"artifacts_read", artifactArgs{ArtifactID: r.artifact}}, {"background_evidence_read", evidenceArgs{ArtifactID: r.artifact}}, {"issues_context_read", map[string]any{"issue_id": r.issue}}, {"issues_followups_list", map[string]any{"issue_id": r.issue}}, {"issues_deliveries_read", map[string]any{"issue_id": r.issue}}, {"issues_delivery_reviews_read", map[string]any{"issue_id": r.issue, "limit": 1}}, {"issues_deployment_preparation_read", map[string]any{"issue_id": r.issue}}} {
 				a := call(read.tool, read.args)
-				if r.allowed {
+				if r.allowed || read.tool == "artifacts_read" && r.sameProject {
 					if !a.OK {
 						t.Errorf("%s lost scoped result: %+v", read.tool, a.Error)
 					}
@@ -299,8 +322,8 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 			}
 		}
 	})
-	t.Run("explicit-sibling-artifact-share", func(t *testing.T) {
-		original := cases["sibling"]
+	t.Run("explicit-cross-project-artifact-share", func(t *testing.T) {
+		original := cases["unrelated-project"]
 		var ref string
 		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			art, err := store.GetArtifact(t.Context(), tx.Q(), original.artifact)
@@ -322,7 +345,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		for _, read := range []struct {
 			tool string
 			args any
-		}{{"tasks_read", taskArgs{TaskID: original.task}}, {"background_evidence_read", evidenceArgs{ArtifactID: original.artifact}}, {"artifacts_read", artifactArgs{ArtifactID: cases["ancestor"].artifact}}} {
+		}{{"tasks_read", taskArgs{TaskID: original.task}}, {"background_evidence_read", evidenceArgs{ArtifactID: original.artifact}}, {"artifacts_read", artifactArgs{ArtifactID: unsharedPrivateArtifact}}} {
 			denied := call(read.tool, read.args)
 			if denied.OK || denied.Error == nil || denied.Error.Code != protocol.CodeForbidden {
 				t.Fatal("share widened source access", read.tool, denied)

@@ -140,7 +140,10 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 			}
 		}
 	}
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE((SELECT m.category_id FROM issue_manager_tasks m JOIN tasks t ON t.task_id=m.task_id WHERE m.issue_id=? AND m.state IN ('pending','assigned') AND COALESCE(m.host_id,'')='' AND t.lifecycle NOT IN ('completed','cancelled') LIMIT 1),'') FROM attentions WHERE issue_id=? AND status='open' AND kind IN ('action','decision')`, issue.IssueID, issue.IssueID).Scan(&card.AttentionCount, &card.PendingManagerCategoryID); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN COALESCE(r.recipient_kind,'owner')='owner' THEN 1 ELSE 0 END),0) FROM attentions a LEFT JOIN attention_responsibilities r USING(attention_id) WHERE a.attention_id IN (`+responsibleAttentionIDsSQL+`) AND a.status='open' AND a.kind IN ('action','decision')`, issue.IssueID, issue.IssueID).Scan(&card.AttentionCount, &card.OwnerAttentionCount); err != nil {
+		return card, err
+	}
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT m.category_id FROM issue_manager_tasks m JOIN tasks t ON t.task_id=m.task_id WHERE m.issue_id=? AND m.state IN ('pending','assigned') AND COALESCE(m.host_id,'')='' AND t.lifecycle NOT IN ('completed','cancelled') LIMIT 1),'')`, issue.IssueID).Scan(&card.PendingManagerCategoryID); err != nil {
 		return card, err
 	}
 	if issue.Assignee.Kind == protocol.IssueAssigneeAgent {
@@ -149,6 +152,10 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 		}
 	}
 	var err error
+	card.Progress, err = store.IssueProgress(ctx, q, issue.IssueID, issue.Revision)
+	if err != nil {
+		return card, err
+	}
 	card.Execution, err = facts.issueCounts(ctx, q, issue.IssueID)
 	if err != nil {
 		return card, err

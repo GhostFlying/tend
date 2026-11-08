@@ -3,6 +3,7 @@ import type { Reader } from "../live/data.ts";
 import { Issues, issuePagePath } from "./data.ts";
 import { AttentionData } from "../attention/data.ts";
 import { DirectConversations, conversationReader } from "../conversation/api.ts";
+import type { AttentionPage, AttentionView } from "../api/generated/api.ts";
 
 // Deliberately allow a response after abort, as a completed transport can arrive late.
 class ReaderFixture implements Reader {
@@ -18,6 +19,70 @@ const settle = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+test("current Issue responsibility pages deduplicate original questions and refresh moved work", async () => {
+  const question = (id: string): AttentionView => ({
+    attention_id: id,
+    issue_id: "origin-child",
+    title: id,
+    kind: "action",
+    status: "open",
+    revision: 1,
+    latest_action_reminders: false,
+    created_at: 1,
+    updated_at: 1,
+    raised_by: { kind: "owner" },
+    responsibility: {
+      issue_id: "current-parent",
+      origin_issue_id: "origin-child",
+      origin_assignment_epoch: 1,
+      assignment_epoch: 1,
+      recipient_kind: "agent",
+      revision: 1,
+      ancestry: [],
+      history: [],
+    },
+  });
+  let moved = false;
+  const calls: string[] = [];
+  const api: Reader = {
+    async get<T>(path: string): Promise<T> {
+      calls.push(path);
+      const query = new URL(path, "https://tend.invalid").searchParams;
+      expect(query.get("responsible_issue_id")).toBe("current-parent");
+      expect(query.get("recipient")).toBe("all");
+      expect(query.get("status")).toBe("open");
+      expect(query.get("actionable_only")).toBe("true");
+      expect(query.has("issue_id")).toBe(false);
+      const page: AttentionPage = moved
+        ? { items: [question("still-current")], more: false }
+        : query.has("after")
+          ? { items: [question("overlap"), question("last")], more: false }
+          : { items: [question("first"), question("overlap")], more: true, next: "overlap" };
+      return page as T;
+    },
+  };
+  const issues = new Issues(api);
+  await issues.attentions.open("current-parent");
+  expect(issues.attentions.read.state.get().value?.items?.map((a) => a.attention_id)).toEqual([
+    "first",
+    "overlap",
+  ]);
+  await issues.attentions.more();
+  expect(issues.attentions.read.state.get().value?.items?.map((a) => a.attention_id)).toEqual([
+    "first",
+    "overlap",
+    "last",
+  ]);
+  expect(new URL(calls.at(-1)!, "https://tend.invalid").searchParams.get("after")).toBe("overlap");
+  moved = true;
+  await issues.attentions.read.refresh();
+  expect(issues.attentions.read.state.get().value?.items?.map((a) => a.attention_id)).toEqual([
+    "still-current",
+  ]);
+  expect(issues.attentions.read.state.get().value?.more).toBe(false);
+  issues.stop();
+});
 
 test("Issue paths preserve root/child pagination and late detail cannot replace selection or history", async () => {
   const api = new ReaderFixture(),

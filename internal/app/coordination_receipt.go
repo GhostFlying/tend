@@ -77,12 +77,6 @@ func coordinationReceipt(ctx context.Context, x *Exec, tx *store.Tx, out *Outcom
 		if err != nil {
 			return err
 		}
-		bindings, err := store.TaskContextBlockers(ctx, tx.Q(), id)
-		if err != nil {
-			return err
-		}
-		blockers = append(blockers, bindings...)
-		ready = ready && len(bindings) == 0
 		if !ready {
 			pending = append(pending, map[string]any{"kind": "dispatch_blocked", "work_item_id": id, "reasons": blockers})
 		}

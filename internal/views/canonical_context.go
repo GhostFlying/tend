@@ -83,11 +83,6 @@ func canonicalContextStatus(ctx context.Context, q store.Querier, out *protocol.
 	if err := q.QueryRowContext(ctx, canonicalContextExecutions+`SELECT COALESCE((SELECT l.status FROM owned_logical o JOIN logical_turns l USING(logical_turn_id) WHERE l.status<>'completed' ORDER BY (l.status='recovering') DESC,l.updated_at DESC,l.logical_turn_id LIMIT 1),'idle')`, id, id).Scan(&out.CoordinationState); err != nil {
 		return err
 	}
-	bindings, err := store.TaskContextBlockers(ctx, q, id)
-	if err != nil {
-		return err
-	}
-	out.DispatchBlockers = append(out.DispatchBlockers, bindings...)
 	out.DispatchReady = len(out.DispatchBlockers) == 0
 	return nil
 }

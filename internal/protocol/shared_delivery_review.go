@@ -81,7 +81,22 @@ type SharedReviewExecutionProfile struct {
 	Exact bool `json:"exact,omitempty"`
 }
 
+// SharedReviewCorrection appends the original reviewer's actual immutable
+// report without reopening the original Task or counting another formal round.
+type SharedReviewCorrection struct {
+	RequestID   string             `json:"request_id"`
+	TaskID      string             `json:"task_id"`
+	SpecVersion int64              `json:"spec_version"`
+	RunID       string             `json:"run_id"`
+	ArtifactID  string             `json:"artifact_id"`
+	Profile     ExecutionProfile   `json:"profile"`
+	Result      SharedReviewResult `json:"result"`
+	Reason      string             `json:"reason"`
+	CreatedAt   int64              `json:"created_at"`
+}
+
 type SharedDeliveryReviewRound struct {
+	Corrections           []SharedReviewCorrection           `json:"corrections,omitempty"`
 	ReviewerRole          RunRole                            `json:"reviewer_role,omitempty"`
 	ReviewerProfile       *ExecutionProfile                  `json:"reviewer_profile,omitempty"`
 	AcceptanceVerdict     Verdict                            `json:"acceptance_verdict,omitempty"`
@@ -103,8 +118,9 @@ type SharedDeliveryReviewRound struct {
 	Result                *SharedReviewResult                `json:"result,omitempty"`
 }
 
-// SharedReviewBudgetAuthorization is a real external user's one-round grant.
-// The authenticated actor remains in the original request record.
+// SharedReviewBudgetAuthorization preserves historical external one-round grants.
+// The default review count is guidance; current responsibility can continue under
+// its existing scope and actual execution budgets without another such grant.
 type SharedReviewBudgetAuthorization struct {
 	RequestID string `json:"request_id"`
 	Round     int    `json:"round"`

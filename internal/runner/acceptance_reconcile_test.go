@@ -207,6 +207,12 @@ func TestAcceptanceEvidenceRunnerRecoversOwnedCloseBeforeNativeGate(t *testing.T
 				if err := os.Remove(closePath); err != nil {
 					t.Fatal(err)
 				}
+				// This legacy case has neither a Wait receipt nor independent
+				// owned-process evidence. New owned-process recovery is covered
+				// by the harness and runner restart recovery tests.
+				if err := os.Remove(filepath.Join(e.prepared.StateDir, "owned-appserver-process.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
 			case "changed thread":
 				if err := j.SetThread(ctx, as.RunID, "foreign-thread"); err != nil {
 					t.Fatal(err)

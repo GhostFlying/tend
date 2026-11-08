@@ -95,19 +95,7 @@ func TestCanonicalPrimaryScopeHasNoStageAndSeparateReferences(t *testing.T) {
 		if !canonical || len(items) != 2 || items[0].WorkItemID != primary.IssueID || items[1].WorkItemID != parent.IssueID {
 			t.Fatalf("inherited shared context=%+v", items)
 		}
-		for _, id := range []string{primary.IssueID, parent.IssueID, reference.IssueID, legacy.WorkItemID} {
-			blockers, err := TaskContextBlockers(t.Context(), tx.Q(), id)
-			if err != nil {
-				return err
-			}
-			want := 0
-			if id == primary.IssueID || id == parent.IssueID {
-				want = 1
-			}
-			if len(blockers) != want {
-				t.Fatalf("blockers%s=%+v", id, blockers)
-			}
-		}
+
 		return nil
 	}); err != nil {
 		t.Fatal(err)

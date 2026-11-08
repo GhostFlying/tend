@@ -304,6 +304,9 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 			if _, err := protocol.ParseIssueMaterialsQuery(query); err != nil {
 				return usagef("%s", err)
 			}
+			if query.Get("kind") == "delivery_authorization" && query.Get("id") == "" {
+				return usagef("delivery_authorization requires --id with the original Task ID")
+			}
 		}
 		if cmd.Name == "task list" {
 			if err := normalizeTaskListQuery(query); err != nil {

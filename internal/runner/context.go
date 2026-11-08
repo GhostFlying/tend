@@ -21,7 +21,7 @@ func (r *Runner) contextReader(runCtx context.Context, as protocol.Assignment) f
 			cancel()
 		}
 		values := url.Values{}
-		for name, value := range map[string]string{"kind": query.Kind, "id": query.ID, "after": query.After} {
+		for name, value := range map[string]string{"issue_id": query.IssueID, "kind": query.Kind, "id": query.ID, "after": query.After} {
 			if value != "" {
 				values.Set(name, value)
 			}
