@@ -90,3 +90,29 @@ func TestCentralCollectorExcludesSettledHistoryAndDisarmsTimer(t *testing.T) {
 		t.Fatal(delay, err)
 	}
 }
+
+func TestCentralRetryStopsWhenHostedSourceReturnsToItsManager(t *testing.T) {
+	clock := testkit.NewClock()
+	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a := app.New(s, testkit.NewIDGen(clock, 48), clock.Now)
+	src := app.LocalUsageSource{ID: "source", WriterStopped: true, Source: json.RawMessage(`{"path":"missing-history.jsonl","provider":"traex","thread_id":"thread"}`)}
+	if err := a.RegisterLocalUsage(t.Context(), src); err != nil {
+		t.Fatal(err)
+	}
+	collector := centralUsage{app: a, now: clock.Now, log: slog.New(slog.DiscardHandler), discovery: nativeusage.NewDiscovery()}
+	if delay, err := collector.syncWork(t.Context()); err != nil || delay != 2*time.Second {
+		t.Fatal(delay, err)
+	}
+	src.WriterStopped = false
+	if err := a.RegisterLocalUsage(t.Context(), src); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Second)
+	if delay, err := collector.syncWork(t.Context()); err != nil || delay != 0 {
+		t.Fatal("old owner retained an expired retry", delay, err)
+	}
+}

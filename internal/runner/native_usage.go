@@ -174,7 +174,15 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 	discovery := r.usageDiscovery.Cycle(r.cfg.Now().UnixMilli())
 	for _, s := range sources {
 		key := "source/" + s.ID
-		if (retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli())) || blocked[s.RunID] {
+		if blocked[s.RunID] {
+			// The pending upload owns the next wake; an expired read retry must
+			// not repeatedly wake a source that cannot yet advance.
+			if retries != nil {
+				retries.Succeeded(key)
+			}
+			continue
+		}
+		if retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli()) {
 			continue
 		}
 		if err := r.syncUsageSource(ctx, s, discovery); err != nil {
