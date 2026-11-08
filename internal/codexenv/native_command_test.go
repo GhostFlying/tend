@@ -69,7 +69,7 @@ func commandFacts() nativeCommandFacts {
 		if unix.IoctlSetPointerInt(master, unix.TIOCSPTLCK, 0) == nil {
 			number, err := unix.IoctlGetInt(master, unix.TIOCGPTN)
 			if err == nil {
-				slave, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR, 0)
+				slave, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR|unix.O_NOCTTY, 0)
 				if err == nil {
 					cmd := exec.Command("/bin/sh", "-c", "printf NATIVE_PTY_OK")
 					cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave

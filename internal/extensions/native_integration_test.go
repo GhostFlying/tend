@@ -79,6 +79,7 @@ func TestIntegrationManagedViewUsesNativeDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("filesystem view: %v %s", err, out)
 	}
+	cleanup()
 	if model := os.Getenv("TEND_CODEX_ENV_MODEL"); model != "" {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
@@ -117,6 +118,15 @@ func TestIntegrationNativeRequestsKeepProjectsAndThrottlePersonalExclusions(t *t
 		}
 	}
 	writeSkill(user, "ambient-canary", "KNOWN_PERSONAL_BODY_MUST_BE_ABSENT")
+	// Disabled personal files must not make managed publication depend on
+	// repairing unrelated personal skill metadata.
+	invalid := filepath.Join(user, ".agents", "skills", "invalid-personal")
+	if err := os.MkdirAll(invalid, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(invalid, "SKILL.md"), []byte("---\nname: [broken\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	project := t.TempDir()
 	writeSkill(project, "project-canary", "PROJECT_BODY_MUST_BE_PRESENT")
 	if err := os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte("PROJECT_AGENTS_MUST_BE_PRESENT"), 0600); err != nil {

@@ -410,6 +410,14 @@ func (s *Service) validateNative(ctx context.Context, p Profile, stage string) (
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	seen := map[int]bool{}
+	personal, err := readExclusions(p.UserHome)
+	if err != nil {
+		return fmt.Errorf("read personal exclusions for native probe: %w", err)
+	}
+	excluded := map[string]bool{}
+	for _, path := range personal.Paths {
+		excluded[path] = true
+	}
 	for scanner.Scan() {
 		var response struct {
 			ID     int             `json:"id"`
@@ -500,7 +508,16 @@ func (s *Service) validateNative(ctx context.Context, p Profile, stage string) (
 			}
 		}
 		for _, entry := range response.Result.Data {
-			if len(entry.Errors) > 0 {
+			for _, raw := range entry.Errors {
+				var failure struct {
+					Path string `json:"path"`
+				}
+				// Codex parses personal files before applying enabled=false.
+				// Ignore only native errors for explicitly excluded paths;
+				// owned, project, admin and unknown errors still fail validation.
+				if json.Unmarshal(raw, &failure) == nil && failure.Path != "" && excluded[canonicalPath(failure.Path)] {
+					continue
+				}
 				return fmt.Errorf("native skill or plugin loading reported errors")
 			}
 		}
