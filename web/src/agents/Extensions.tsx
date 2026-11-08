@@ -91,7 +91,7 @@ export function ExtensionsDirectory({ refreshVersion }: { refreshVersion: number
   return (
     <div className={styles.root}>
       <p>资源和指令通过 CLI 管理。草稿、发布、下载、组合就绪与实际采用分别展示。</p>
-      <Button variant="ghost" onClick={() => setVersion((v) => v + 1)}>
+      <Button variant="ghost" disabled={loading} onClick={() => setVersion((v) => v + 1)}>
         重新读取
       </Button>
       {error && <p role="alert">{error}</p>}
@@ -148,6 +148,7 @@ export function ExtensionsDirectory({ refreshVersion }: { refreshVersion: number
           </Section>
           <Section title="发布历史">
             <Button
+              disabled={loading}
               variant="ghost"
               onClick={() => {
                 setRelease(undefined);

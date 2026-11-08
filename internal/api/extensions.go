@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -131,35 +132,8 @@ func (s *Server) extensionView(w http.ResponseWriter, r *http.Request) {
 				plan.Published = &old
 				plan.Changed = old.ID != release.ID
 			}
-			// Inventory is an observation, not an inferred adoption receipt.
-			rows, err := q.QueryContext(r.Context(), `SELECT DISTINCT json_extract(a.value,'$.identity.execution_environment_id'),json_extract(a.value,'$.identity.local_id') FROM agent_inventory_versions v,json_each(v.projection_json,'$.agents') a`)
-			if err != nil {
-				return nil, err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var id protocol.AgentIdentity
-				if err = rows.Scan(&id.ExecutionEnvironmentID, &id.LocalID); err != nil {
-					return nil, err
-				}
-				plan.Affected = append(plan.Affected, id)
-			}
-			slices.SortFunc(plan.Affected, func(a, b protocol.AgentIdentity) int {
-				if a.ExecutionEnvironmentID < b.ExecutionEnvironmentID {
-					return -1
-				}
-				if a.ExecutionEnvironmentID > b.ExecutionEnvironmentID {
-					return 1
-				}
-				if a.LocalID < b.LocalID {
-					return -1
-				}
-				if a.LocalID > b.LocalID {
-					return 1
-				}
-				return 0
-			})
-			return plan, rows.Err()
+			plan.Affected, err = app.ExtensionAffectedAgents(r.Context(), q, release, plan.Published)
+			return plan, err
 		case "status", "doctor":
 			status := protocol.ExtensionStatus{Revision: state.Revision, Published: state.Published, Hosts: []protocol.ExtensionHostView{}}
 			hosts, err := store.ListActiveHosts(r.Context(), q)
