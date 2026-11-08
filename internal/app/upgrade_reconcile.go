@@ -20,6 +20,15 @@ func reconcilePausedCandidates(ctx context.Context, x *Exec, tx *store.Tx, r *st
 		return nil
 	}
 	for i, h := range r.Hosts {
+		if hostNeedsSelfUpdate(*r, h) {
+			rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
+			if err != nil {
+				return err
+			}
+			if runnerSelfMatches(*r, h, rt.Runtime) || selfUpdateRejected(*r, h.HostID, rt.Runtime.Updater) {
+				r.View.Hosts[i].Updater = rt.Runtime.Updater
+			}
+		}
 		if r.View.Hosts[i].Status == "completed" {
 			if err := reconcileCompletedRunner(ctx, x, tx, r, i); err != nil {
 				return err

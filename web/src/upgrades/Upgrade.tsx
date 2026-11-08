@@ -115,7 +115,9 @@ export function UpgradeDetails({
                     </>
                   )}
                 </dl>
-                {supervisorFirst && <UpdaterEvidence observation={host.updater} />}
+                {supervisorFirst && (host.phase !== "skipped" || host.updater) && (
+                  <UpdaterEvidence observation={host.updater} />
+                )}
                 {host.reason && <p className={styles.reason}>{host.reason}</p>}
               </li>
             ))}

@@ -167,6 +167,11 @@ func (s *Supervisor) Close() error {
 }
 func (s *Supervisor) statePath() string { return filepath.Join(s.cfg.StateDir, "state.json") }
 func (s *Supervisor) durabilityError() error {
+	// Every service mutation checks this under mu. An HTTP preflight alone
+	// cannot serialize admission while a concurrent request is decoding.
+	if s.selfUpdating {
+		return ErrUnknown
+	}
 	if s.persistenceErr != nil {
 		return fmt.Errorf("updater: durability unknown; reopen supervisor before further action: %w", s.persistenceErr)
 	}

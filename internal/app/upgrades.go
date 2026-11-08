@@ -182,7 +182,8 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s is offline, incompatible, or unavailable for rolling upgrade", h.HostID)
 		}
 		artifact, ok := releaseArtifact(c.Manifest, "runner", h.OS, h.Arch)
-		if needsSelfUpdate(r) && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {
+		_, configurationTarget := c.RunnerConfigurations[h.HostID]
+		if needsSelfUpdate(r) && (!r.SupervisorThenRunners || configurationTarget) && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s requires supervisor-first bootstrap", h.HostID)
 		}
 		if c.ReleaseSet != nil && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityCompleteReleaseSet) {
@@ -374,7 +375,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if selfUpdateRejected(r, r.ServerInstance, c.Observation.Updater) {
 		r.View.ServerUpdater = c.Observation.Updater
 		if r.View.Status == "running" {
-			if err := attention("server updater 准备被拒绝；installer 未派发，可取消后另开批次"); err != nil {
+			if err := attention("server updater 准备被拒绝；尚未停止或替换监督器，可取消后另开批次"); err != nil {
 				return Outcome{}, err
 			}
 		}

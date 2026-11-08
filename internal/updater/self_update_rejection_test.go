@@ -5,6 +5,7 @@ package updater
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -50,7 +51,7 @@ func TestSelfPreparationRejectionSurvivesLostReplyAndRestart(t *testing.T) {
 	if again, err := s.requestSelf(t.Context(), r); err == nil || again.Observation.Rejection == nil || *again.Observation.Rejection != *status.Observation.Rejection {
 		t.Fatal("rejection identity was retried as new work", again, err)
 	}
-	if _, err := ApplySelfUpdate(t.Context(), cfg, SelfUpdatePlan{Request: r}); err == nil || !strings.Contains(err.Error(), "rejected before dispatch") {
+	if _, err := ApplySelfUpdate(t.Context(), cfg, SelfUpdatePlan{Request: r}); err == nil || !strings.Contains(err.Error(), "rejected before supervisor stop") {
 		t.Fatal("standalone apply bypassed the immutable rejection", err)
 	}
 	r.Release = "changed-payload"
@@ -94,5 +95,20 @@ func TestSelfRejectedPreparedAttemptCanBeArchivedWithoutReusingItsIdentity(t *te
 	}
 	if err := writeSelf(cfg, j); err == nil {
 		t.Fatal("late rejected attempt overwrote the new execution")
+	}
+}
+
+func TestSelfUpdateAdmissionBlocksBoundedRunnerMutation(t *testing.T) {
+	h, grant := boundedRunnerFixture(t)
+	before := digest(h.s.Status())
+	h.s.mu.Lock()
+	h.s.selfUpdating = true
+	h.s.mu.Unlock()
+	err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force")
+	if !errors.Is(err, ErrUnknown) {
+		t.Fatal("bounded service mutation crossed supervisor handoff admission", err)
+	}
+	if after := digest(h.s.Status()); after != before {
+		t.Fatal("blocked service mutation changed state")
 	}
 }
