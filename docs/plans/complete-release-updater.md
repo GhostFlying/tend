@@ -38,3 +38,9 @@ required CI 和最新 main rebase 后经 PR 合入。发布不等于生产部署
 ### R1 首次 main 发布验证修正
 
 首次 main 构建与聚合检查成功，但发布查询使用了 GraphQL Release 不支持的 targetCommitish。改用实际 schema 的 tagCommit.oid 核对已固定标签，并让发布恢复 fixture 校验查询字段；原源码身份、draft 与资产完整性规则保持。
+
+### R2 收尾：取消与迟到交接回执
+
+已准入的独立 installer 可能在业务批次请求取消后继续运行。取消前必须对账原监督器交接；无确切完成回执不能以服务尚未替换推导没有外部工作。暂停/整体到期后仍读取并保存原回执；runner 未决目标不因恢复旧服务接单而被清除，完成观察后才释放控制。覆盖未确认取消、迟到回执与超时后保留目标。
+
+未准入的 server 交接可直接取消；coordinator 必须先在 app 事务中按批次 revision 与阶段/整体期限取得监督器派发准入，再调用 installer。准入与取消通过同一 ledger 顺序互斥，不把“尚未换服务”当作“未派发”。

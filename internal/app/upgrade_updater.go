@@ -1,9 +1,42 @@
 package app
 
 import (
+	"context"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+// AuthorizeServerUpdater serializes ordinary installer admission against owner
+// cancellation. It grants no new request identity or extension of either cutoff.
+type AuthorizeServerUpdater struct{}
+
+func (AuthorizeServerUpdater) Operation() string { return "upgrades.authorize_supervisor" }
+func (AuthorizeServerUpdater) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalSystem)
+}
+func (AuthorizeServerUpdater) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	r, err := store.GetUpgrade(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != r.View.Revision {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "upgrade changed before supervisor admission")
+	}
+	if !needsSelfUpdate(r) || r.View.Status != "running" || r.View.Phase != "server_updater" || upgradeBatchExpired(r, x.Now.UnixMilli()) || r.Deadline > 0 && x.Now.UnixMilli() >= r.Deadline {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "supervisor handoff is not dispatchable")
+	}
+	if r.ServerUpdaterAuthorized {
+		return Outcome{Result: true, NoEffect: true}, nil
+	}
+	r.ServerUpdaterAuthorized = true
+	r.View.Revision++
+	r.View.UpdatedAt = x.Now
+	if err := tx.PutUpgrade(ctx, r); err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: true, Events: []Event{upgradeEvent(r)}}, nil
+}
 
 func needsSelfUpdate(r store.UpgradeRow) bool { return r.ReleaseSet != nil && r.ReleaseSet.Format >= 2 }
 

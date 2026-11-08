@@ -56,3 +56,30 @@ func TestServerReleaseEntryGoesThroughCoordinator(t *testing.T) {
 		t.Fatal("coordinator answer missing")
 	}
 }
+
+func TestSelfUpdateDispatchResolvesCanonicalJournalPath(t *testing.T) {
+	for _, trailing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "canonical", true: "trailing_separator"}[trailing], func(t *testing.T) {
+			dir := t.TempDir()
+			stateDir := dir
+			if trailing {
+				stateDir += string(os.PathSeparator)
+			}
+			cfgPath := filepath.Join(dir, "config.json")
+			cfgRaw, _ := json.Marshal(map[string]any{"state_dir": stateDir})
+			if err := os.WriteFile(cfgPath, cfgRaw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			journalPath := filepath.Join(stateDir, "self-update.json")
+			// A verified journal exercises the real dispatch decoder without
+			// invoking a process manager or mutating a supervised process.
+			if err := os.WriteFile(journalPath, []byte(`{"format":1,"phase":"verified","plan":{}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runSelfUpdate(t.Context(), []string{"apply", "--config", cfgPath, "--plan", journalPath}, &out); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

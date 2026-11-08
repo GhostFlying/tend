@@ -7,6 +7,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/updater"
@@ -53,7 +54,7 @@ func runSelfUpdate(ctx context.Context, args []string, out io.Writer) error {
 	// file. Read its exact embedded plan without regenerating the request.
 	if err != nil && action == "apply" {
 		j, e := updater.SelfUpdateJournalStatus(cfg)
-		if e == nil && *planFile == cfg.StateDir+"/self-update.json" {
+		if e == nil && filepath.Clean(*planFile) == filepath.Join(cfg.StateDir, "self-update.json") {
 			p, err = j.Plan, nil
 		}
 	}
@@ -72,7 +73,7 @@ func runSelfUpdate(ctx context.Context, args []string, out io.Writer) error {
 		}
 		// Apply always consumes this exact plan. The operator can review stdout and
 		// the private file; no process action is issued during plan.
-		temp, err := os.CreateTemp(cfg.StateDir, ".self-plan-")
+		temp, err := os.CreateTemp(filepath.Dir(*planFile), ".self-plan-")
 		if err != nil {
 			return err
 		}
