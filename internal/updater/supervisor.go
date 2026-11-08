@@ -46,7 +46,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	if err := supported(); err != nil {
 		return nil, err
 	}
-	if cfg.InstanceID == "" || len(cfg.InstanceID) > 256 || cfg.Role != "server" && cfg.Role != "runner" || !filepath.IsAbs(cfg.StateDir) || !filepath.IsAbs(cfg.InitialBinary) || !filepath.IsAbs(cfg.LogPath) {
+	if cfg.InstanceID == "" || len(cfg.InstanceID) > 256 || cfg.Role != "server" && cfg.Role != "runner" && cfg.Role != "maintainer" || !filepath.IsAbs(cfg.StateDir) || !filepath.IsAbs(cfg.InitialBinary) || !filepath.IsAbs(cfg.LogPath) {
 		return nil, errors.New("updater: invalid service configuration")
 	}
 	if cfg.ServiceConfig != "" {
@@ -333,7 +333,7 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 		if receipt.Phase == "cancelled" {
 			return errors.New("updater: operation was cancelled")
 		}
-		bundle, err := release.Load(dir)
+		bundle, err := release.LoadService(dir, s.cfg.Role)
 		if err != nil {
 			return err
 		}

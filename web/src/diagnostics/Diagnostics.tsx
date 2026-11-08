@@ -18,6 +18,7 @@ import {
   eventSummary,
 } from "./model.ts";
 import styles from "./Diagnostics.module.css";
+import { Maintenance } from "./Maintenance.tsx";
 
 export function Diagnostics({
   filters,
@@ -131,6 +132,7 @@ export function Diagnostics({
           {page ? `数据截至 ${timeLabel(page.data_at)}` : "正在读取账本…"}
         </span>
       </header>
+      <Maintenance />
       <nav className={styles.tabs} aria-label="诊断视图">
         <button
           type="button"

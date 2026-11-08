@@ -17,6 +17,7 @@ type ownerRoute struct {
 // ownerRoutes is the actual registration table, also used by the CLI contract check.
 func (s *Server) ownerRoutes() []ownerRoute {
 	return []ownerRoute{
+		{"GET /api/v1/maintenance", s.maintenanceStatus},
 		{"GET /api/v1/capabilities", s.executionCapabilities},
 		{"GET /api/v1/capabilities/{id}", s.executionCapability},
 		{"GET /api/v1/capabilities/{id}/revisions", s.executionCapabilities},

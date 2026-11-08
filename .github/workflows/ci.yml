@@ -155,7 +155,9 @@ jobs:
       - name: build and verify complete distribution
         env:
           RELEASE_ARCH: ${{ matrix.arch }}
-        run: go run ./internal/release/packagecmd --arch "$RELEASE_ARCH" --commit "$GITHUB_SHA" --output .local/release
+        run: |
+          go run ./internal/release/packagecmd --arch "$RELEASE_ARCH" --commit "$GITHUB_SHA" --output .local/release
+          go run ./internal/release/packagecmd --component maintainer --arch "$RELEASE_ARCH" --commit "$GITHUB_SHA" --output .local/release
       - uses: actions/upload-artifact@v4
         with:
           name: distribution-linux-${{ matrix.arch }}

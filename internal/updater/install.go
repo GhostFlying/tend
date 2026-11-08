@@ -71,7 +71,7 @@ func installVersion(stateDir string, b *release.Bundle, a release.Artifact) (Ver
 	return Version{Protocol: b.Manifest.Protocol.Max, StorageVersion: storage, ReleaseID: b.Manifest.ReleaseID, ManifestSHA256: b.ManifestSHA256, Artifact: a, Binary: binary}, nil
 }
 func (s *Supervisor) stage(dir string) (Version, error) {
-	b, err := release.Load(dir)
+	b, err := release.LoadService(dir, s.cfg.Role)
 	if err != nil {
 		return Version{}, err
 	}

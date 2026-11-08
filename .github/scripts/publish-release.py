@@ -59,6 +59,13 @@ def publish(root, commit, repo):
         target_arch = "multi" if arch == "fleet" else arch
         if metadata["commit"] != commit or metadata["arch"] != target_arch:
             raise ValueError("artifact source/platform mismatch")
+    for arch in ("amd64", "arm64"):
+        name = f"tend-maintainer-{tag}-linux-{arch}"
+        expected.update((name + ".tar.gz", name + ".json"))
+        metadata = json.loads((root / (name + ".json")).read_text())
+        artifact = metadata["artifact"]
+        if metadata["commit"] != commit or artifact["role"] != "maintainer" or artifact["os"] != "linux" or artifact["arch"] != arch:
+            raise ValueError("maintenance component source/platform mismatch")
     if {p.name for p in root.iterdir()} - {"SHA256SUMS"} != expected:
         raise ValueError("incomplete or unexpected release assets")
     checksums = "".join(

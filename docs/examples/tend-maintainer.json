@@ -1,0 +1,18 @@
+{
+  "instance_id": "maintenance",
+  "state_dir": "/srv/tend-maintenance/state",
+  "control_socket": "/srv/tend-maintenance/state/control.sock",
+  "updater_socket": "/srv/tend-maintenance/updater/control.sock",
+  "workspace": "/srv/tend-maintenance/workspace",
+  "server_url": "http://127.0.0.1:8640",
+  "token_file": "/srv/tend-maintenance/owner-token",
+  "instructions_file": "/srv/tend-maintenance/instructions.md",
+  "check_seconds": 300,
+  "backend": {
+    "agent": "codex",
+    "network_access": true,
+    "socket": "/srv/native/app-server-control.sock",
+    "approval_policy": "never",
+    "sandbox": "workspace-write"
+  }
+}

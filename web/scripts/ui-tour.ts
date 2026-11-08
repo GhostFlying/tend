@@ -246,6 +246,7 @@ const defaultHandoff: ConversationHandoffView = {
 };
 let handoffView = defaultHandoff;
 let handoffUnavailable = false;
+let maintenanceUnavailable = false;
 const server = createServer(async (req, res) => {
   const url = new URL(req.url!, "http://localhost");
   const p = url.pathname;
@@ -253,6 +254,23 @@ const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify(issueBoardFixture(req.url, value)));
   };
+  if (p === "/api/v1/maintenance")
+    return json({
+      configured: true,
+      available: !maintenanceUnavailable,
+      observed_at: Math.floor(now / 1000),
+      last_check: Math.floor(now / 1000) - 60,
+      last_audit: Math.floor(now / 1000) - 3600,
+      paused: false,
+      open_cases: 2,
+      pending: 1,
+      agent: "codex",
+      session_id: "00000000-0000-0000-0000-000000000001",
+      phase: "running",
+      upgrade_phase: "completed",
+      ...(maintenanceUnavailable ? { error: "维护服务暂时不可达" } : {}),
+    });
+  if (p.startsWith("/api/v1/diagnostics/")) return json({ items: [], more: false, data_at: now });
   if (p === "/api/v1/events" || p === "/api/v1/messaging/events") {
     res.setHeader("Content-Type", "text/event-stream");
     res.write('event: start\ndata: {"event_seq":1}\n\n');
@@ -640,6 +658,7 @@ assert(address && typeof address !== "string");
 const origin = `http://127.0.0.1:${address.port}`;
 const browser = await chromium.launch();
 const routes = [
+  "/diagnostics",
   "/",
   "/diagnostics/main",
   "/chat/consultation-tour",
@@ -700,6 +719,16 @@ try {
         );
         // Let finite fixture reads and title-focus layout commits settle.
         await page.waitForTimeout(120);
+        if (path === "/diagnostics") {
+          const panel = page.getByRole("region", { name: "自维护状态" });
+          await panel.getByText("待诊断问题 2 · 待处理线索 1").waitFor();
+          maintenanceUnavailable = true;
+          await panel.getByRole("button", { name: "刷新维护状态" }).click();
+          await panel.getByText("维护服务暂时不可达").waitFor();
+          maintenanceUnavailable = false;
+          await panel.getByRole("button", { name: "刷新维护状态" }).click();
+          await panel.getByText("监测中", { exact: true }).waitFor();
+        }
         if (path === "/inbox")
           await page
             .getByText("请列出可用于灰度验收的设备和发布模块。", { exact: true })

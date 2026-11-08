@@ -1,0 +1,15 @@
+{
+  "instance_id": "maintenance",
+  "role": "maintainer",
+  "state_dir": "/srv/tend-maintenance/updater",
+  "initial_binary": "/usr/local/bin/tend-maintainer",
+  "args": ["serve", "--config", "/srv/tend-maintenance/config.json"],
+  "dir": "/srv/tend-maintenance/workspace",
+  "data_files": ["/srv/tend-maintenance/state/maintenance.db"],
+  "log_path": "/srv/tend-maintenance/maintainer.log",
+  "authority_socket": "/srv/tend-maintenance/state/control.sock",
+  "authorize_url": "http://localhost/updater/authorize",
+  "health_url": "http://localhost/updater/health",
+  "protocol": 1,
+  "storage_version": 1
+}

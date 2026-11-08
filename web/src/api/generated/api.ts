@@ -358,6 +358,7 @@ export interface TendAPI {
   LedgerEvent?: LedgerEvent;
   LocalRepositoryBinding?: LocalRepositoryBinding;
   LocalRepositoryStatus?: LocalRepositoryStatus;
+  MaintenanceOverview?: MaintenanceOverview;
   ManagerMigrationPayload?: ManagerMigrationPayload;
   ManagerRunReconciliation?: ManagerRunReconciliation;
   ManualSource?: ManualSource;
@@ -4928,6 +4929,25 @@ export interface LocalRepositoryStatus {
   control_revision: number;
   error?: string;
   repositories: RunnerRepository[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MaintenanceOverview".
+ */
+export interface MaintenanceOverview {
+  agent?: string;
+  available: boolean;
+  configured: boolean;
+  error?: string;
+  last_audit?: number;
+  last_check?: number;
+  observed_at: number;
+  open_cases: number;
+  paused: boolean;
+  pending: number;
+  phase?: string;
+  session_id?: string;
+  upgrade_phase?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -46,8 +46,9 @@ import (
 
 // Config is the server's configuration file.
 type Config struct {
-	DeliveryObserver *DeliveryObserverConfig `json:"delivery_observer,omitempty"`
-	NativeWorkers    *remote.BrokerConfig    `json:"native_workers,omitempty"`
+	MaintenanceSocket string                  `json:"maintenance_socket,omitempty"`
+	DeliveryObserver  *DeliveryObserverConfig `json:"delivery_observer,omitempty"`
+	NativeWorkers     *remote.BrokerConfig    `json:"native_workers,omitempty"`
 
 	Webhooks *struct {
 		Listen string `json:"listen"`
@@ -532,6 +533,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return true, nil
 	}}
 	ownerConfig := api.Config{WebhookKeys: webhookKeys, Archives: archives, Owners: owners, OwnerNodes: cfg.OwnerNodes, HostedMainAgent: front != nil, Now: now}
+	if cfg.MaintenanceSocket != "" {
+		ownerConfig.MaintenanceStatus = maintenanceReader(cfg.MaintenanceSocket)
+	}
 	if front != nil {
 		ownerConfig.ConversationSettings = front.Settings
 		ownerConfig.ConversationHandoff = front.HandoffStatus
