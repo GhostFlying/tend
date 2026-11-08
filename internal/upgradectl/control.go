@@ -116,12 +116,15 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		return protocol.UpgradeView{}, err
 	}
 	sources := map[string]release.SourceIdentity{}
-	for _, artifact := range bundle.Manifest.Artifacts {
+	for _, artifact := range bundle.Artifacts() {
 		path, err := release.RegularPath(bundle.Dir, artifact.Path)
 		if err != nil {
 			return protocol.UpgradeView{}, err
 		}
 		source, err := release.ExecutableSource(path)
+		if bundle.Set != nil && (err != nil || source.Modified || source.Commit != bundle.Set.Commit) {
+			return protocol.UpgradeView{}, errors.New("upgradectl: complete release executable source differs")
+		}
 		if err == nil {
 			sources[artifact.SHA256] = source
 		} else if r.DeliveryTaskID != "" {
@@ -129,18 +132,20 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		}
 	}
 	payload, err := json.Marshal(struct {
+		ReleaseSetSHA256 string                                  `json:"release_set_sha256,omitempty"`
 		DeliveryTaskID   string                                  `json:"delivery_task_id,omitempty"`
 		ReleaseID        string                                  `json:"release_id"`
 		ManifestSHA256   string                                  `json:"manifest_sha256"`
 		Configurations   map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
 		ParkIdleManagers bool                                    `json:"park_idle_managers,omitempty"`
-	}{r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations, r.ParkIdleManagers})
+	}{bundle.SetSHA256, r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations, r.ParkIdleManagers})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
 	zero := int64(0)
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
 	command := app.StartUpgrade{ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
+	command.ReleaseSet, command.ReleaseSetSHA256, command.ReleaseSetSize = bundle.Set, bundle.SetSHA256, int64(len(bundle.SetBytes))
 	if r.ParkIdleManagers || r.ExecutionRequestID != "" {
 		recorded, err := c.app.CheckUpgradeStart(ctx, env, command)
 		if err != nil {

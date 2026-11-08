@@ -1885,6 +1885,7 @@ export interface RunnerUpgradeTarget {
   manifest_path: string;
   manifest_sha256: string;
   manifest_size: number;
+  release_set?: ReleaseSetTarget;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1894,6 +1895,15 @@ export interface RunnerConfiguration {
   previous_sha256: string;
   providers: string[] | null;
   sha256: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReleaseSetTarget".
+ */
+export interface ReleaseSetTarget {
+  path: string;
+  sha256: string;
+  size: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

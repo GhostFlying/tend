@@ -96,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /runner/v1/rollout-preview", s.rolloutPreview)
 	mux.HandleFunc("POST /runner/v1/rollout-preview", s.rolloutPreview)
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/manifest", s.releaseFile)
+	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/set", s.releaseSetFile)
 	mux.HandleFunc("GET /runner/v1/releases/{upgrade}/artifacts/{sha}", s.releaseFile)
 	mux.HandleFunc("POST /runner/v1/files", s.uploadFile)
 	mux.HandleFunc("GET /runner/v1/files/{id}", s.downloadFile)

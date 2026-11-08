@@ -54,10 +54,17 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 	if target == nil || !release.ValidSHA(target.ManifestSHA256) || target.ManifestSize <= 0 || target.ManifestSize > release.MaxManifestBytes {
 		return errors.New("invalid release target")
 	}
+	key := target.ManifestSHA256
+	if target.ReleaseSet != nil {
+		if !release.ValidSHA(target.ReleaseSet.SHA256) || target.ReleaseSet.Size <= 0 || target.ReleaseSet.Size > release.MaxManifestBytes {
+			return errors.New("invalid complete release set target")
+		}
+		key += "-" + target.ReleaseSet.SHA256
+	}
 	if !r.updateUpgradeAttempt(control, func() { r.upgradePhase = "downloading"; r.downloadedBytes = 0; r.upgradeError = "" }) {
 		return errors.New("upgrade attempt changed")
 	}
-	dir, err := filepath.Abs(filepath.Join(r.cfg.UpdaterBundleDir, target.ManifestSHA256))
+	dir, err := filepath.Abs(filepath.Join(r.cfg.UpdaterBundleDir, key))
 	if err != nil {
 		return err
 	}
@@ -72,6 +79,9 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 		return nil
 	}
 	if bundle, loadErr := release.Load(dir); loadErr == nil && bundle.ManifestSHA256 == target.ManifestSHA256 && bundle.Manifest.ReleaseID == control.ReleaseID {
+		if target.ReleaseSet != nil && bundle.SetSHA256 != target.ReleaseSet.SHA256 {
+			return errors.New("existing complete release set differs")
+		}
 		return submit()
 	}
 	if _, err := os.Lstat(dir); err == nil {
@@ -113,7 +123,25 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 	if !manifest.Protocol.Contains(protocol.CurrentRunnerProtocol) || !manifest.Storage.RunnerJournal.Contains(journal.CurrentVersion) {
 		return errors.New("release does not support runner protocol or journal")
 	}
-	for _, artifact := range manifest.Artifacts {
+	artifacts := manifest.Artifacts
+	if target.ReleaseSet != nil {
+		set := target.ReleaseSet
+		path := filepath.Join(temp, "release-set.json")
+		if err := r.downloadReleaseFile(ctx, set.Path, path, set.Size, set.SHA256); err != nil {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		metadata, err := release.DecodeSet(raw, manifest, target.ManifestSHA256)
+		if err != nil {
+			return err
+		}
+		artifacts = metadata.Artifacts
+		r.updateUpgradeAttempt(control, func() { r.downloadedBytes += set.Size })
+	}
+	for _, artifact := range artifacts {
 		dest := filepath.Join(temp, artifact.Path)
 		if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 			return err
@@ -129,6 +157,9 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 	}
 	if bundle.ManifestSHA256 != target.ManifestSHA256 {
 		return errors.New("release manifest changed")
+	}
+	if target.ReleaseSet != nil && bundle.SetSHA256 != target.ReleaseSet.SHA256 {
+		return errors.New("complete release set changed")
 	}
 	if err := os.Rename(temp, dir); err != nil {
 		return err
