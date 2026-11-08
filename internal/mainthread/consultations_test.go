@@ -64,6 +64,16 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 					return fail("consultation advertised generic mutation")
 				}
 			}
+			var index protocol.ConversationContextIndex
+			if !invoke("conversation_context_index", map[string]any{}, &index) || index.Kind != "consultation" {
+				return fail("consultation index unavailable")
+			}
+			for _, tool := range []string{"conversation_context_index", "agent_rollout_read"} {
+				response := th.CallTool(context.Background(), turn, "outside-"+tool, tool, map[string]any{"conversation_id": "main"})
+				if response.Success || !strings.Contains(response.Text, string(protocol.CodeForbidden)) {
+					return fail("consultation history scope escaped")
+				}
+			}
 			var page protocol.ConversationPage
 			if !invoke("conversation_read", map[string]any{}, &page) {
 				return "failed"

@@ -92,6 +92,7 @@ type tool struct {
 }
 
 var tools = []tool{
+	{"conversation_context_index", "Read paginated state, source, fact and native-thread references without history bodies or acknowledging review. Use exact references to retrieve originals only as needed.", (*Service).conversationContextIndex},
 	{"conversation_handoff_audit", "Read a bounded retained maintenance event page for an exact instance. Identity is recorded or observation_unavailable; never a lifetime handoff count, provider queue or source of new authority. Follow next_after only when more is true.", (*Service).handoffAudit},
 	{"decisions_explain", "Explain an existing decision without answering or replacing its original question. Read task/context first; account for every original issue with impact, actor, next action and status. expected_control_revision is briefing.revision or 0; decision_version is the original question version. Owner choices stay explicit and separate from environment faults.", (*Service).decisionsExplain},
 	{"conversation_reply", "Publish a formal progress/final reply together with explicit work-item associations and fact review. Pass exact context revisions from prior receipts, all seven reviewed_kinds, and facts (empty when no new facts). Each new fact must name work_item_id and scope=work_item; it cites this reply implicitly. Assistant narration cannot grant new owner authority. Do not repeat the published body as native assistant text.", (*Service).conversationReply},

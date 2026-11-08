@@ -39,9 +39,9 @@ import (
 type Config struct {
 	UsageDiscovery *nativeusage.Discovery
 	ConversationID string
-	// MaintenanceEnabled enables private summaries and schema handoffs.
+	// MaintenanceEnabled enables explicit handoff. Schema migration remains available.
 	MaintenanceEnabled bool
-	// SummaryIdleMinutes is the default; zero disables automatic summaries.
+	// Deprecated maintenance fields are ignored; summaries are retired (D196).
 	SummaryIdleMinutes  int64
 	Now                 func() time.Time
 	MaintenanceInterval time.Duration
@@ -84,8 +84,6 @@ type Manager struct {
 	active             *turn
 	maintenanceBlocked bool
 	compactRecovery    bool // original compact event stream, never fresh native work
-	summaryActive      bool
-	auxiliaryOwner     *concurrencyOwner
 	lastActivity       time.Time
 	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
 	usageIndex         *nativeusage.Discovery
@@ -122,12 +120,6 @@ func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) 
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.MaintenanceInterval <= 0 {
-		cfg.MaintenanceInterval = time.Minute
-	}
-	if cfg.SummaryTimeout <= 0 {
-		cfg.SummaryTimeout = 2 * time.Minute
-	}
 	if cfg.RestartDelay <= 0 {
 		cfg.RestartDelay = 2 * time.Second
 	}
@@ -146,11 +138,6 @@ func (m *Manager) threadKey(threadID string) string { return m.bindingInstance()
 func (m *Manager) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var background sync.WaitGroup
-	if m.cfg.MaintenanceEnabled {
-		background.Go(func() { m.idleSummaries(ctx) })
-	}
-	defer func() { cancel(); background.Wait() }()
 	for ctx.Err() == nil {
 		if pending, err := m.app.ReceiptRecoveryStartupPending(ctx); err != nil {
 			m.notifyStartupExit(err)
@@ -272,29 +259,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if err != nil {
 		return err
 	}
-	m.mu.Lock()
-	ownedPermits := &concurrencyOwner{permits: map[string]struct{}{}}
-	m.auxiliaryOwner = ownedPermits
-	m.mu.Unlock()
+
 	defer func() {
-		m.mu.Lock()
-		ownedPermits.closed = true
-		m.mu.Unlock()
 		diagnostics.exit(ctx, startupErr)
 		closeErr := diagnostics.close(ctx, s, "serve_cleanup")
 		flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if closeErr == nil {
-			m.mu.Lock()
-			ids := make([]string, 0, len(ownedPermits.permits))
-			for id := range ownedPermits.permits {
-				ids = append(ids, id)
-			}
-			m.mu.Unlock()
-			if err := m.app.StopAuxiliaryConcurrency(flush, ids); err != nil {
-				diagnostics.cleanup(flush, slog.LevelError, "settle_auxiliary_concurrency", err)
-			}
-		}
 		m.syncNativeUsageState(flush, closeErr == nil)
 	}()
 	if named {
@@ -1304,7 +1274,7 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 			return retry(err)
 		}
 	} else if !repair {
-		packet, err = m.context.Prepare(ctx, key, focus)
+		packet, err = m.context.PrepareIndex(ctx, key, focus)
 	}
 	if err != nil {
 		return retry(err)

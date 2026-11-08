@@ -106,7 +106,7 @@ func TestAgentConversationScopeAndBaseline(t *testing.T) {
 	}
 	h.prepareAgent(w.WorkItemID)
 	text, err := h.app.AgentContext(t.Context(), v.ID, "delivery")
-	if err != nil || !strings.Contains(text, w.Title) {
+	if err != nil || !strings.Contains(text, w.WorkItemID) || strings.Contains(text, w.Title) {
 		t.Fatal(text, err)
 	}
 	op = h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: v.ID, Body: "background original"}, nil), SubmitMessage{})

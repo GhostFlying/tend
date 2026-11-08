@@ -130,22 +130,6 @@ func TestReceiptOnlyRejectsFreshDeliveriesAndToolCalls(t *testing.T) {
 	}
 }
 
-func TestReceiptOnlySkipsOtherwiseDueIdleSummary(t *testing.T) {
-	f := newHandoffFixture(t)
-	seedIdleConversation(t, f)
-	f.e.m.named = receiptOnlySelection()
-	if _, err := f.e.app.BindMainThread(t.Context(), f.e.m.bindingInstance(), f.source.ID(), "older-toolset", rolloutPath(f.source)); err != nil {
-		t.Fatal(err)
-	}
-	f.clock.Advance(time.Hour)
-	if err := f.e.m.idleSummary(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, forks, _ := f.session.counts(); forks != 0 {
-		t.Fatal("receipt attachment launched a due maintenance model", forks)
-	}
-}
-
 func TestReceiptOnlyClearsPendingOnlyForOriginalTerminalHistory(t *testing.T) {
 	for _, status := range []string{"missing", "inProgress", "completed", "interrupted", "failed"} {
 		t.Run(status, func(t *testing.T) {

@@ -25,36 +25,8 @@ func (SetConversationHandoffSettings) Operation() string { return "conversation.
 func (SetConversationHandoffSettings) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
 	return allowKinds(x.Principal, protocol.PrincipalOwner)
 }
-func (SetConversationHandoffSettings) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if x.Env.Target.Type != "conversation" || x.Env.Target.ID != "" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "target must be the shared conversation")
-	}
-	var p struct {
-		IdleMinutes *int64 `json:"idle_minutes"`
-	}
-	if err := decodePayload(x.Env, &p); err != nil {
-		return Outcome{}, err
-	}
-	if p.IdleMinutes == nil || *p.IdleMinutes < 0 || *p.IdleMinutes > 10080 {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "idle_minutes must be between 0 and 10080")
-	}
-	expected, err := requireRevision(x.Env)
-	if err != nil {
-		return Outcome{}, err
-	}
-	current, err := store.GetHandoffSettings(ctx, tx.Q())
-	if err != nil {
-		return Outcome{}, err
-	}
-	if expected != current.Revision {
-		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "handoff settings have changed; read them again")
-	}
-	next := store.HandoffSettings{IdleMinutes: *p.IdleMinutes, Revision: current.Revision + 1}
-	if _, err := tx.Exec(ctx, `INSERT INTO conversation_handoff_settings VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET idle_minutes=excluded.idle_minutes,revision=excluded.revision,updated_at=excluded.updated_at`, next.IdleMinutes, next.Revision, x.Now.UnixMilli()); err != nil {
-		return Outcome{}, err
-	}
-	result := map[string]any{"idle_minutes": next.IdleMinutes, "revision": next.Revision}
-	return Outcome{Result: result, Events: []Event{{ObjectType: "conversation", ObjectID: "main", ObjectVersion: next.Revision, Kind: "conversation.handoff_settings", Body: result}}}, nil
+func (SetConversationHandoffSettings) Apply(context.Context, *Exec, *store.Tx) (Outcome, error) {
+	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "automatic summaries are retired; use conversation context-index")
 }
 
 // ConversationHandoff serializes owner handoffs with normal user deliveries.
@@ -71,6 +43,9 @@ func (ConversationHandoff) Apply(_ context.Context, x *Exec, _ *store.Tx) (Outco
 	var p protocol.ConversationHandoffPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	if p.PrepareOnly {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "summary preparation is retired; use conversation context-index")
 	}
 	return Outcome{Result: map[string]any{"queued": true, "prepare_only": p.PrepareOnly}, Events: []Event{{ObjectType: "conversation", ObjectID: "main", Kind: "conversation.handoff_requested", Body: map[string]any{"prepare_only": p.PrepareOnly}}}, Outbox: []OutboxMessage{{Destination: MainThreadDestination, Operation: "conversation.handoff", Payload: p}}}, nil
 }

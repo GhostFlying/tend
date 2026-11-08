@@ -1,10 +1,10 @@
-import { Button, Input, Checkbox, Section } from "../ui/index.ts";
+import { Button, Section } from "../ui/index.ts";
 import { Link } from "../app/router.ts";
 import { SegmentedControl } from "../ui/Choices.tsx";
 import { theme, themeLabels, setTheme } from "../theme/theme.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 // Independent owner preferences for idle preparation; model settings stay separate.
-import { useEffect, useId, useState } from "react";
+import { useEffect } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -24,10 +24,6 @@ export function Handoff({
   const state = useStore(handoff.state);
   const choice = useStore(theme);
 
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const id = useId();
   useEffect(() => {
     handoff.start();
   }, [handoff]);
@@ -40,20 +36,8 @@ export function Handoff({
   const view = state.view;
 
   const online = connection.status === "online";
-  const blocked =
-    !online || !view?.enabled || state.saving || !!state.pendingId || !!state.readError;
-  const value = draft ?? String(view?.idle_minutes ?? 50);
-  const minutes = Number(value);
-  const valid =
-    value.trim() !== "" && Number.isInteger(minutes) && minutes >= 0 && minutes <= 10080;
-  const automatic = value.trim() === "" || minutes !== 0;
   const maintenance = view?.maintenance;
   const maintenanceFailed = maintenance?.status === "failed" || maintenance?.status === "unknown";
-  const preparing =
-    !!state.preparationRequestId ||
-    !!view?.pending ||
-    !!view?.preparing ||
-    ["pending", "sending"].includes(maintenance?.status ?? "");
   const warning = !!state.readError || !!state.error || !!state.pendingId || maintenanceFailed;
   const status = handoffStatus(state);
   return (
@@ -77,110 +61,18 @@ export function Handoff({
         </Link>
       )}
       <Section className={styles.section} title="主 Agent" aria-label="主 Agent">
-        <h3 className={styles.heading}>预备摘要</h3>
+        <h3 className={styles.heading}>会话交接</h3>
         <p className={styles.status} role="status" data-warning={warning || undefined}>
           {status}
         </p>
-        {view?.summary && (
-          <p className={styles.note}>
-            最近已保存摘要：{" "}
-            {new Date(view.summary.created_at_millis).toLocaleString([], {
-              month: "numeric",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-            {view.summary.current ? " · 覆盖当前内容" : " · 未覆盖当前内容"}
-          </p>
-        )}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!blocked && valid && minutes !== view?.idle_minutes) {
-              setDraft(null);
-              setSaved(false);
-              void handoff.save(client, { idle_minutes: minutes }).then(() => {
-                const latest = handoff.state.get();
-                setSaved(
-                  !latest.error && !latest.pendingId && latest.view?.idle_minutes === minutes,
-                );
-              });
-            }
-          }}
-        >
-          <Checkbox
-            className={styles.toggle}
-            label="自动准备摘要"
-            checked={automatic}
-            disabled={blocked}
-            onChange={(event) => {
-              setSaved(false);
-              setDraft(event.target.checked ? "50" : "0");
-            }}
-          />
-          <label className={styles.label} htmlFor={`${id}-minutes`}>
-            空闲分钟
-          </label>
-          <div className={styles.row}>
-            <Input
-              id={`${id}-minutes`}
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={10080}
-              step={1}
-              value={value}
-              onChange={(event) => {
-                setSaved(false);
-                setDraft(event.target.value);
-              }}
-              disabled={blocked || !automatic}
-              aria-describedby={`${id}-help`}
-            />
-            <span className={styles.unit}>分钟</span>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={blocked || !valid || minutes === view?.idle_minutes}
-            >
-              保存
-            </Button>
-          </div>
-        </form>
-        <p className={styles.note} role="status">
-          {saved
-            ? "设置已保存。"
-            : !valid
-              ? "请输入 0–10080 的整数。"
-              : minutes === view?.idle_minutes
-                ? "未修改设置。"
-                : blocked
-                  ? status
-                  : "有未保存的修改。"}
+        <p className={styles.note}>
+          新会话通过索引按需读取当前状态和原始历史；交接不生成摘要。手动压缩独立保留。
         </p>
-        <p id={`${id}-help`} className={styles.note}>
-          {view?.idle_minutes === 0
-            ? "自动准备已关闭。"
-            : `空闲 ${view?.idle_minutes ?? 50} 分钟后自动准备。`}{" "}
-          0 为关闭，最多 10080 分钟。
-        </p>
-        <p className={styles.note}>摘要供会话交接时参考，原会话历史仍保留。</p>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={blocked || preparing}
-          onClick={() => void handoff.prepare(client)}
-        >
-          立即生成预备摘要
-        </Button>
-        {maintenanceFailed && view?.pending && !view.preparing && (
-          <p className={styles.note}>另有主会话工作尚未结束，不表示新摘要正在生成。</p>
-        )}
         {maintenanceFailed && (
           <p className={styles.feedback} role="status">
             {maintenance?.reason ||
               (maintenance?.status === "unknown"
-                ? "暂时无法确认处理结果，请先查看当前摘要状态。"
+                ? "暂时无法确认处理结果，请先查看当前交接状态。"
                 : "这次请求未完成，可以重新读取状态。")}
           </p>
         )}
@@ -192,7 +84,7 @@ export function Handoff({
                 : state.readError
                   ? "读取失败，正在重试。"
                   : !online
-                    ? "离线时不能修改设置。"
+                    ? "离线时无法读取交接状态。"
                     : state.error}
             </p>
             {(state.readError || state.pendingId || state.error) && (
@@ -203,7 +95,7 @@ export function Handoff({
                   void (state.pendingId ? handoff.reconcile(client) : handoff.refresh());
                 }}
               >
-                {state.pendingId ? "核对设置结果" : "重新读取"}
+                {state.pendingId ? "核对交接结果" : "重新读取"}
               </Button>
             )}
           </div>

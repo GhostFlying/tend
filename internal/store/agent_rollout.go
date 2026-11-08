@@ -6,8 +6,12 @@ import (
 )
 
 // AgentRollout pages durable raw records. Long records have a separate bounded window.
-func AgentRollout(ctx context.Context, q Querier, id, turn string, after int64) (protocol.AgentRolloutPage, error) {
+func AgentRollout(ctx context.Context, q Querier, id, turn string, after int64, thread ...string) (protocol.AgentRolloutPage, error) {
 	id = ConversationID(id)
+	threadID := ""
+	if len(thread) > 0 {
+		threadID = thread[0]
+	}
 	v := protocol.AgentRolloutPage{ConversationID: id, Coverage: "Persisted native events captured since this capability was enabled. Earlier or uncollected native history is unavailable; conversation_read retains Tend message history separately.", Records: []protocol.AgentRolloutRecord{}, Threads: []string{}}
 	if _, err := AgentConversation(ctx, q, id); err != nil {
 		return v, err
@@ -15,12 +19,12 @@ func AgentRollout(ctx context.Context, q Querier, id, turn string, after int64) 
 	if after < 0 {
 		return v, protocol.Errorf(protocol.CodeInvalidRequest, "invalid rollout cursor")
 	}
-	threads, err := FollowupIDs(ctx, q, `SELECT thread_id FROM agent_thread_history WHERE conversation_id=? ORDER BY created_at,thread_id`, id)
+	threads, err := FollowupIDs(ctx, q, `SELECT thread_id FROM agent_thread_history WHERE conversation_id=? AND (?='' OR thread_id=?) ORDER BY created_at,thread_id`, id, threadID, threadID)
 	if err != nil {
 		return v, err
 	}
 	v.Threads = threads
-	rows, err := q.QueryContext(ctx, `SELECT seq,thread_id,turn_id,item_id,kind,substr(data_json,1,16000),length(data_json),created_at FROM agent_rollout_events WHERE conversation_id=? AND (?='' OR turn_id=?) AND seq>? ORDER BY seq LIMIT 31`, id, turn, turn, after)
+	rows, err := q.QueryContext(ctx, `SELECT seq,thread_id,turn_id,item_id,kind,substr(data_json,1,16000),length(data_json),created_at FROM agent_rollout_events WHERE conversation_id=? AND (?='' OR turn_id=?) AND seq>? AND (?='' OR thread_id=?) ORDER BY seq LIMIT 31`, id, turn, turn, after, threadID, threadID)
 	if err != nil {
 		return v, err
 	}

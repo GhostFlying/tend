@@ -112,6 +112,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/agent-conversations/{id}", s.agentConversation},
 		{"GET /api/v1/messages/{id}/associations", s.messageAssociations},
 		{"GET /api/v1/messages/{id}", s.ownerMessage},
+		{"GET /api/v1/agent-conversations/{id}/context-index", s.conversationContextIndex},
 		{"GET /api/v1/agent-conversations/{id}/rollout", s.agentRollout},
 		{"GET /api/v1/agent-conversations/{id}/rollout/{seq}", s.agentRolloutWindow},
 		{"GET /api/v1/agent-conversations/{id}/usage", s.agentUsage},

@@ -2,12 +2,10 @@ package app
 
 import (
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestHostedManagerReceivesCurrentInheritedWorkerContext(t *testing.T) {
@@ -25,28 +23,29 @@ func TestHostedManagerReceivesCurrentInheritedWorkerContext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got struct {
-			Inherited []protocol.TaskWorkContext `json:"inherited_context"`
-		}
-		if err = json.Unmarshal([]byte(text[strings.Index(text, "\n")+1:]), &got); err != nil {
+		var got protocol.ConversationContextIndex
+		if err = json.Unmarshal([]byte(text[strings.Index(text, "{\"format\""):]), &got); err != nil {
 			t.Fatal(err)
 		}
-		var want []protocol.TaskWorkContext
-		if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			var err error
-			want, err = freezeCanonicalTaskContext(t.Context(), tx.Q(), child)
-			return err
-		}); err != nil {
+		if got.IssueID != child.IssueID || len(text) > protocol.ContextIndexBudget {
+			t.Fatal("missing bounded scoped index", text)
+		}
+		if strings.Contains(text, ancestor.Plan.Intent) || strings.Contains(text, ancestor.Plan.Background[0].Text) {
+			t.Fatal("injected inherited prose", text)
+		}
+		// Originals remain in the current ancestry material view; an index
+		// neither erases them nor grants control over the ancestor.
+		materials, err := h.app.ReadScopedIssueMaterials(t.Context(), child.IssueID, child.IssueID, protocol.IssueMaterialsQuery{Kind: "issues", ID: ancestor.IssueID})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Inherited) != 1 || !reflect.DeepEqual(got.Inherited, want[1:]) {
-			t.Fatalf("manager inherited=%+v; worker inherited=%+v", got.Inherited, want[1:])
+		raw, _ := json.Marshal(materials)
+		if !strings.Contains(string(raw), ancestor.Plan.Background[0].Text) {
+			t.Fatal("inherited original unavailable", string(raw))
 		}
-		if !strings.Contains(text, ancestor.Plan.Intent) || !strings.Contains(text, ancestor.Plan.Background[0].Text) {
-			t.Fatal("missing inherited goal/constraint", text)
+		if ancestor.IssueID == replacement.IssueID && strings.Contains(string(raw), parent.Plan.Background[0].Text) {
+			t.Fatal("stale ancestry material")
 		}
-		if ancestor.IssueID == replacement.IssueID && strings.Contains(text, parent.Plan.Background[0].Text) {
-			t.Fatal("stale ancestry", text)
-		}
+
 	}
 }

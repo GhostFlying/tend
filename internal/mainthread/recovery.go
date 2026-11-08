@@ -159,7 +159,7 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 			return m.blockRecovery(ctx, d, "Native work-item context injection requires reconciliation.")
 		}
 	} else {
-		packet, err := m.context.Prepare(ctx, m.threadKey(th.ID()), a.sourceSeq)
+		packet, err := m.context.PrepareIndex(ctx, m.threadKey(th.ID()), a.sourceSeq)
 		if err != nil {
 			return m.rejectRecovery(ctx, d, "Could not prepare current ledger context.")
 		}

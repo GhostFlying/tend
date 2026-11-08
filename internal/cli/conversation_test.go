@@ -10,7 +10,7 @@ import (
 )
 
 func TestConversationHandoffOwnerAndPrepareOnly(t *testing.T) {
-	for _, prepare := range []bool{false, true} {
+	for _, prepare := range []bool{false} {
 		t.Run(map[bool]string{false: "handoff", true: "prepare"}[prepare], func(t *testing.T) {
 			f := newFakeServer(t)
 			f.answer("POST /api/v1/ops", protocol.APIResponse{Operation: &protocol.Operation{RequestID: "request", Status: protocol.OpAccepted}})
@@ -84,5 +84,23 @@ func TestConversationHandoffStatusShowsMaintenanceFailure(t *testing.T) {
 	}
 	if len(f.seen("POST /api/v1/ops")) != 0 {
 		t.Fatal("status retried a failed maintenance operation")
+	}
+}
+
+func TestConversationContextIndexAndRolloutThreadSelectors(t *testing.T) {
+	f := newFakeServer(t)
+	f.answer("GET /api/v1/agent-conversations/main/context-index", map[string]any{"format": "index-v1", "items": []any{}})
+	f.answer("GET /api/v1/agent-conversations/main/rollout", map[string]any{"records": []any{}})
+	te := newTestEnv(t, f.srv.URL)
+	for _, args := range [][]string{{"conversation", "context-index", "main", "--section", "threads", "--after", "old", "--limit", "2", "--json"}, {"conversation", "rollout", "main", "--thread", "old-thread", "--after", "12", "--json"}} {
+		if code := te.main(args...); code != exitOK {
+			t.Fatal(args, code, te.errOut)
+		}
+	}
+	if code := te.main("conversation", "handoff", "--prepare-only"); code != exitUsage {
+		t.Fatal("retired summary flag accepted", code)
+	}
+	if len(f.seen("POST /api/v1/ops")) != 0 {
+		t.Fatal("index query started maintenance")
 	}
 }

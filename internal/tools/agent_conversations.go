@@ -43,6 +43,7 @@ type agentListArgs struct {
 	After  string `json:"after,omitempty"`
 }
 type rolloutArgs struct {
+	ThreadID       string `json:"thread_id,omitempty"`
 	RecordSeq      int64  `json:"record_seq,omitempty"`
 	Offset         int64  `json:"offset,omitempty"`
 	ConversationID string `json:"conversation_id"`
@@ -140,13 +141,13 @@ func (s *Service) rolloutRead(ctx context.Context, c Call) (any, error) {
 		if err != nil {
 			return err
 		}
-		if err = backgroundScope(ctx, tx.Q(), c, conv.WorkItemID); err != nil {
+		if err = conversationHistoryScope(c, conv.ID); err != nil {
 			return err
 		}
 		if p.RecordSeq != 0 {
 			v, err = store.AgentRolloutWindow(ctx, tx.Q(), conv.ID, p.RecordSeq, p.Offset)
 		} else {
-			v, err = store.AgentRollout(ctx, tx.Q(), conv.ID, p.TurnID, p.After)
+			v, err = store.AgentRollout(ctx, tx.Q(), conv.ID, p.TurnID, p.After, p.ThreadID)
 		}
 		return err
 	})

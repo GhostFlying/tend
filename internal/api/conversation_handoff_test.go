@@ -9,47 +9,6 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestConversationHandoffOwnerPolicyIndependentOfModelCatalog(t *testing.T) {
-	e := newEnv(t)
-	e.server.cfg.HostedMainAgent = true
-	e.server.cfg.ConversationHandoff = func(ctx context.Context) (protocol.ConversationHandoffView, error) {
-		v, err := e.app.HandoffSettings(ctx)
-		minutes := int64(50)
-		if v.Revision > 0 {
-			minutes = v.IdleMinutes
-		}
-		return protocol.ConversationHandoffView{Enabled: true, IdleMinutes: minutes, Revision: v.Revision}, err
-	}
-	var view protocol.ConversationHandoffView
-	if status := e.do("GET", "/api/v1/conversation/handoff", "", nil, &view); status != http.StatusUnauthorized {
-		t.Fatalf("anonymous policy: %d", status)
-	}
-	agent := e.retiredAgentToken(clientID)
-	if status := e.do("GET", "/api/v1/conversation/handoff", agent, nil, &view); status != http.StatusUnauthorized {
-		t.Fatalf("agent policy: %d", status)
-	}
-	owner := e.login(protocol.ScopeOwner)
-	if status := e.do("GET", "/api/v1/conversation/handoff", owner, nil, &view); status != http.StatusOK || view.IdleMinutes != 50 || view.Revision != 0 {
-		t.Fatalf("default policy: %+v status=%d", view, status)
-	}
-	env := e.envelope("conversation.set_handoff_settings", protocol.Target{Type: "conversation"}, nil, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: 0})
-	revision := int64(0)
-	env.ExpectedControlRevision = &revision
-	var response protocol.APIResponse
-	for range 2 {
-		if status := e.do("POST", "/api/v1/ops", owner, env, &response); status != http.StatusOK || response.Operation == nil || response.Operation.Status != protocol.OpSucceeded {
-			t.Fatalf("save/replay policy without catalog: %+v HTTP%d", response, status)
-		}
-	}
-	if status := e.do("GET", "/api/v1/conversation/handoff", owner, nil, &view); status != http.StatusOK || view.IdleMinutes != 0 || view.Revision != 1 {
-		t.Fatalf("saved override: %+v HTTP%d", view, status)
-	}
-	handoff := e.envelope("conversation.handoff", protocol.Target{Type: "conversation"}, nil, protocol.ConversationHandoffPayload{PrepareOnly: true})
-	if status := e.do("POST", "/api/v1/ops", owner, handoff, &response); status != http.StatusOK || response.Operation == nil || response.Operation.Status != protocol.OpSucceeded {
-		t.Fatalf("queue handoff: %+v HTTP%d", response, status)
-	}
-}
-
 func TestConversationHandoffDisabledWithoutHostedMain(t *testing.T) {
 	e := newEnv(t)
 	owner := e.login(protocol.ScopeOwner)
@@ -86,7 +45,7 @@ func TestConversationHandoffReturnsDurableMaintenanceAndPreparing(t *testing.T) 
 		return protocol.ConversationHandoffView{Enabled: true, Pending: pending, Preparing: pending, Maintenance: maintenance}, err
 	}
 	owner := e.login(protocol.ScopeOwner)
-	env := e.envelope("conversation.handoff", protocol.Target{Type: "conversation"}, nil, protocol.ConversationHandoffPayload{PrepareOnly: true})
+	env := e.envelope("conversation.handoff", protocol.Target{Type: "conversation"}, nil, protocol.ConversationHandoffPayload{})
 	var response protocol.APIResponse
 	if code := e.do("POST", "/api/v1/ops", owner, env, &response); code != http.StatusOK {
 		t.Fatal(code)

@@ -126,7 +126,6 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `conversation.interrupt_reply` | `conversation interrupt` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.promote` | `conversation promote` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.resume_processing` | `conversation resume-processing` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
-| `conversation.set_handoff_settings` | `conversation handoff-settings set` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.set_issue_associations` | `message associate` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.set_settings` | `conversation settings set` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.submit_message` | `conversation send` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
@@ -207,7 +206,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | 分组 | CLI 入口与参数 | 缺口及验收 |
 |---|---|---|
 | Issue | issue list/show/生命周期/分配/来源/完成核对/任务合同/进展/deadline/followup；set-status、notifications show/set | board、board-status、assignee-kind/ref；原 CAS/epoch；多页与历史 |
-| 会话 | conversation list/info/show/queue/transcript/block/rollout/window/usage/compactions；interrupt/resume-processing/compact/settings/handoff-settings/handoff | 搜索、状态、conversation、before/after/limit/turn；精确会话与设置版本 |
+| 会话 | conversation list/info/show/queue/transcript/block/rollout/window/usage/compactions；interrupt/resume-processing/compact/settings/context-index/handoff | 搜索、状态、conversation、before/after/limit/turn；精确会话与设置版本 |
 | 消息与交互 | message list/show/send/reply/notify/read/receipts/trace/watch/respond/original/associations/associate/withdraw；choice show/respond；attention 全生命周期 | 选项与文字回答、重复与过期版本、历史分页、原文 |
 | 任务与运行 | task list/show 与既有 task ID；logs/run logs/rollout/message/messages/native-entry；artifact show | 生命周期与完成时间排序、日志及 rollout 游标、独立验收事实 |
 | 文件 | attachment upload/download/metadata/url；file metadata/download/url；image show/download/url | 原件和交付文件区分、SHA256、完整内容及下载失败不覆盖目标 |
@@ -289,3 +288,7 @@ D152 增量：`issues.update_delivery` 对应 `tend issue update-delivery <issue
 部署并发与首发核验补充：candidate.deployment 可携带 baseline_upgrade_id/baseline_upgrade_revision，省略时服务端填入最近已结清批次并写入原问题；变更后旧答复不可用。candidate.reconciliation 明确 evidence_task_id/upgrade_id/source_commit，仅允许核验既有已验收交付，不回填旧任务、不重放安装。`tend upgrade start --delivery-task <task-id>` 通过本机控制接口将实际当前执行、owner epoch、baseline、批准范围和已校验二进制来源一起核对；该参数仅用于 start，dry-run 保留完整请求，丢回执仍按原 request/batch 查询对账。`upgrade status --json` 的 source_commit 来自二进制 VCS 元数据及实际 server 回读，非 worker 自报。旧 manifest 和 runner 2/1 不变；本机管理员已有独立维护入口保留原权限。
 
 D152 验收修正：candidate.target_sha 为 provider 当前目标分支 tip，区别于 PR base_sha；merged 候选要求独立观测的 merge 祖先证明。deferred 下 prepare 保留原问题与延期状态；只有真实 owner 请求 action=resume 才开启新确认，manager relay 必须绑定当前 owner 来源，原 defer 消息不能复用为 resume。
+
+## D195：按需上下文
+
+`conversation context-index <id> --section state|sources|facts|threads --after <cursor> --limit 20 --json` 只读索引，不确认审阅；默认 state，最多 50 条。`conversation rollout <id> --thread <thread-id> --after <seq>` 精确读取原生 thread。`conversation handoff [--status]` 只交接索引，`--prepare-only` 与自动摘要设置已退役；显式 compact 独立保留。

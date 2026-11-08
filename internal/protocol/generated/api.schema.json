@@ -3692,6 +3692,175 @@
       "title": "ConversationAttachment",
       "type": "object"
     },
+    "ConversationContextIndex": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "changed_objects": {
+          "items": {
+            "$ref": "#/definitions/ConversationContextReference"
+          },
+          "type": "array"
+        },
+        "changes_more": {
+          "type": "boolean"
+        },
+        "context_revision": {
+          "type": "integer"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "fact_count": {
+          "type": "integer"
+        },
+        "focus_message_seq": {
+          "type": "integer"
+        },
+        "format": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ConversationContextReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        },
+        "review_required": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "section": {
+          "type": "string"
+        },
+        "source_count": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "thread_count": {
+          "type": "integer"
+        },
+        "through_event_seq": {
+          "type": "integer"
+        },
+        "through_message_seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "conversation_id",
+        "kind",
+        "revision",
+        "through_message_seq",
+        "through_event_seq",
+        "source_count",
+        "fact_count",
+        "thread_count",
+        "review_required",
+        "section",
+        "items",
+        "more",
+        "coverage"
+      ],
+      "title": "ConversationContextIndex",
+      "type": "object"
+    },
+    "ConversationContextQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "section": {
+          "type": "string"
+        }
+      },
+      "title": "ConversationContextQuery",
+      "type": "object"
+    },
+    "ConversationContextReference": {
+      "additionalProperties": false,
+      "properties": {
+        "association_revision": {
+          "type": "integer"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "rollout_path": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "superseded": {
+          "type": "boolean"
+        },
+        "withdrawn": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "needs_review"
+      ],
+      "title": "ConversationContextReference",
+      "type": "object"
+    },
     "ConversationHandoffPayload": {
       "additionalProperties": false,
       "properties": {
@@ -3722,6 +3891,9 @@
         },
         "maintenance": {
           "$ref": "#/definitions/ConversationMaintenanceView"
+        },
+        "mode": {
+          "type": "string"
         },
         "pending": {
           "type": "boolean"
@@ -18705,6 +18877,12 @@
     },
     "ConversationAttachment": {
       "$ref": "#/definitions/ConversationAttachment"
+    },
+    "ConversationContextIndex": {
+      "$ref": "#/definitions/ConversationContextIndex"
+    },
+    "ConversationContextQuery": {
+      "$ref": "#/definitions/ConversationContextQuery"
     },
     "ConversationHandoffPayload": {
       "$ref": "#/definitions/ConversationHandoffPayload"

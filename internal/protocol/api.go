@@ -29,7 +29,7 @@ func APITypes() []any {
 		RepositoryRegistration{}, RegisterRepositoryPayload{}, RunnerRepository{}, RunRolloutPage{}, RolloutPreview{}, TokenUsageSample{}, TokenUsageView{}, UsageTarget{}, UsagePreview{}, UsageReconcile{}, UsageUpload{}, NativeUsageRegistration{},
 		AgentRolloutPage{}, AgentRolloutWindow{}, IssueAgentConversation{}, IssueAgentConversationPage{}, IssueConversationPage{}, IssueConversationItem{}, IssueMessageAssociations{}, SetIssueMessageAssociationsPayload{}, AgentContextUsage{}, AgentCompactionPage{}, BackgroundSourcePage{}, CoordinationMetrics{}, FollowupSpec{}, IssueConversationQueuePage{}, IssueTranscriptPage{}, IssueTranscriptBlock{}, WithdrawMessagePayload{}, WithdrawMessageResult{}, Envelope{}, APIResponse{}, Snapshot{}, RepoRegistry{}, TaskPage{}, TaskDetail{}, RunLogPage{}, LedgerEvent{}, StreamStart{}, ArtifactDetail{}, RequestView{},
 		WorkItemChoice{}, UpdateWorkItemChoicePayload{}, SessionRequest{}, SessionView{}, InterruptReplyPayload{}, SubmitMessagePayload{}, AnswerDecisionPayload{}, AnswerResult{}, SetControlModePayload{}, RateTaskPayload{}, CreateActionPayload{},
-		ConversationAttachment{}, DownloadURLResponse{}, ConversationImageResponse{}, ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
+		ConversationAttachment{}, DownloadURLResponse{}, ConversationImageResponse{}, ConversationSettingsView{}, SetConversationSettingsPayload{}, ConversationContextIndex{}, ConversationContextQuery{}, ConversationHandoffView{}, SetConversationHandoffSettingsPayload{}, ConversationHandoffPayload{},
 		ExplainDecisionPayload{}, ArtifactPayload{}, ToolSpec{}}
 }
 

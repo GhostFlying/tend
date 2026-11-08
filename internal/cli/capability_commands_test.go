@@ -670,7 +670,7 @@ func TestCapabilityLeafHelpUsesActualFlagDefinitions(t *testing.T) {
 		{[]string{"issue", "list", "--help"}, []string{"board-status", "assignee-kind", "assignee-ref", "include-closed", "limit", "project"}},
 		{[]string{"issue", "context", "--help"}, []string{"after-source", "prepared", "dispatch_ready", "not the admission result", "issue create-task"}},
 		{[]string{"logs", "--help"}, []string{"-f", "json"}},
-		{[]string{"conversation", "handoff", "--help"}, []string{"prepare-only", "request-id", "status"}},
+		{[]string{"conversation", "handoff", "--help"}, []string{"request-id", "status"}},
 		{[]string{"message", "list", "--help"}, []string{"before", "after", "latest", "channel", "conversation"}},
 		{[]string{"agents", "local", "reload", "--help"}, []string{"socket", "request-id", "revision"}},
 		{[]string{"help", "issue", "list"}, []string{"board-status", "assignee-kind", "revision"}},

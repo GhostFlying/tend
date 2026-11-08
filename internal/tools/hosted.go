@@ -287,17 +287,17 @@ func communicationMutation(name string) bool {
 
 func namedLegacyRead(purpose agentconfig.Purpose, name string) bool {
 	if purpose == agentconfig.Consultation {
-		return name == "conversation_read"
+		return name == "conversation_read" || name == "conversation_context_index" || name == "agent_rollout_read"
 	}
 	if purpose == agentconfig.Main {
 		switch name {
-		case "conversation_handoff_audit", "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "question_inputs_read", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
+		case "conversation_context_index", "conversation_handoff_audit", "tend_context", "repos_list", "tasks_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "decisions_list", "decisions_read", "decisions_resolve", "decisions_explain", "question_inputs_read", "conversation_read", "conversation_turn_read", "conversation_turn_commit", "conversation_turn_wait", "conversation_turn_adopt", "agent_conversations_list", "agent_rollout_read", "background_sources", "background_checkin":
 			return true
 		}
 	}
 	if purpose == agentconfig.IssueManager {
 		switch name {
-		case "runs_read_messages", "repos_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "background_evidence_read", "background_sources", "agent_rollout_read", "conversation_read":
+		case "conversation_context_index", "runs_read_messages", "repos_list", "tasks_read", "actions_list", "runs_read", "artifacts_read", "background_evidence_read", "background_sources", "agent_rollout_read", "conversation_read":
 			return true
 		}
 	}
@@ -624,6 +624,17 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return nil
 		})
 		return hostedAnswer(value, err), true
+	}
+	if (execution.Selection.Purpose == agentconfig.Consultation || execution.IssueID != "") && (c.Tool == "conversation_context_index" || c.Tool == "agent_rollout_read") {
+		var p map[string]any
+		if err := decode(c.Arguments, &p); err != nil {
+			return fail(err)
+		}
+		if id, ok := p["conversation_id"]; ok && id != "" && id != execution.ConversationID {
+			return fail(protocol.Errorf(protocol.CodeForbidden, "conversation is outside this responsibility"))
+		}
+		p["conversation_id"] = execution.ConversationID
+		c.Arguments, _ = json.Marshal(p)
 	}
 	if execution.Selection.Purpose == agentconfig.Consultation && c.Tool == "conversation_read" {
 		var p conversationArgs

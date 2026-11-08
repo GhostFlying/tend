@@ -48,9 +48,6 @@ func TestIssueStartupMigratesToolsetWithIdleSummariesDisabled(t *testing.T) {
 	if !names["issues_review_delivery"] || !names["issues_delivery_reviews_read"] {
 		t.Fatal("current Issue tool catalog missing", names)
 	}
-	if err := m.idleSummary(t.Context()); err != nil {
-		t.Fatal(err)
-	}
 	_, forks, _ := f.session.counts()
 	if forks != 0 || m.cfg.MaintenanceEnabled {
 		t.Fatal("Issue tool migration enabled model summaries", forks)
@@ -121,7 +118,7 @@ func TestIssueHandoffDoesNotReadGlobalFactsOrSummaries(t *testing.T) {
 			t.Fatalf("Issue handoff exposed out-of-scope %s", forbidden)
 		}
 	}
-	if !strings.Contains(prompt, "OWN_ISSUE_SCOPE_MARKER") || !strings.Contains(prompt, own.IssueID) {
+	if strings.Contains(prompt, "OWN_ISSUE_SCOPE_MARKER") || !strings.Contains(prompt, own.IssueID) || !strings.Contains(prompt, "index-v1") {
 		t.Fatal("Issue handoff omitted its current facts", prompt)
 	}
 	before := f.e.count(`SELECT COUNT(*) FROM conversation_summary_attempts`)
