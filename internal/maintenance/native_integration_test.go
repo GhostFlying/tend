@@ -338,3 +338,84 @@ func nativeTUIGateway(t *testing.T, socket string) *httptest.Server {
 		<-done
 	}))
 }
+
+func TestFault_NativeProviderFailureAllowsExplicitBackendAdoption(t *testing.T) {
+	for _, agent := range []string{"codex", "traex"} {
+		t.Run(agent, func(t *testing.T) {
+			binary, err := exec.LookPath(agent)
+			if err != nil {
+				t.Skip("native installation required")
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+			defer cancel()
+			root, err := os.MkdirTemp("", "tend-native-failure-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(root)
+			model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, `{"error":{"message":"deterministic invalid request","type":"invalid_request_error"}}`, http.StatusBadRequest)
+			}))
+			defer model.Close()
+			socket := filepath.Join(root, "native.sock")
+			args := []string{"app-server", "--listen", "unix://" + socket, "-c", `model_provider="probe"`, "-c", `model="probe-model"`, "-c", `model_providers.probe.name="probe"`, "-c", `model_providers.probe.base_url="` + model.URL + `/v1"`, "-c", `model_providers.probe.wire_api="responses"`, "-c", `model_providers.probe.requires_openai_auth=false`}
+			for _, feature := range []string{"hooks", "plugins", "apps", "memories", "browser_use", "computer_use", "image_generation", "code_mode_host", "in_app_updates"} {
+				args = append(args, "-c", "features."+feature+"=false")
+			}
+			cmd := exec.CommandContext(ctx, binary, args...)
+			cmd.Dir = root
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "CODEX_HOME=" + root, "TRAE_HOME=" + root, "TRAECLI_HOME=" + root, "TRAE_CLI_HOME=" + root, "TEND_ADDON=off", "NO_PROXY=127.0.0.1,localhost"}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+			for {
+				if _, err := os.Stat(socket); err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+			c, _, _, _ := fixture(t)
+			n := &NativeClient{}
+			defer n.Close()
+			c.opts.Native = n
+			b := protocol.MaintenanceBackend{Agent: agent, Socket: socket, Model: "probe-model", ApprovalPolicy: "never", Sandbox: "read-only"}
+			command(t, c, "config", protocol.MaintenanceRequest{Backend: &b, Mode: "when-idle"})
+			step(t, c)
+			command(t, c, "audit", protocol.MaintenanceRequest{})
+			step(t, c)
+			step(t, c)
+			original := c.Status().Active
+			for c.Status().Failure == nil {
+				if err := c.Step(ctx); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("native system error did not settle original failure", c.Status())
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+			s := c.Status()
+			if s.Active != nil || s.Failure.Outcome != "failed" || s.Failure.TurnID != original.TurnID || s.Failure.InputID != original.InputID || len(s.Pending) == 0 {
+				t.Fatal("native failure lost original work", s)
+			}
+			command(t, c, "pause", protocol.MaintenanceRequest{})
+			b.Agent = "codex"
+			if agent == "codex" {
+				b.Agent = "traex"
+			}
+			command(t, c, "config", protocol.MaintenanceRequest{Backend: &b, Mode: "when-idle"})
+			step(t, c)
+			s = c.Status()
+			if s.Backend.Agent != b.Agent || s.PendingBackend != nil || s.Failure != nil || s.Active != nil || s.Predecessor != nil || len(s.Pending) == 0 {
+				t.Fatal("failed native turn blocked explicit adoption or injected a predecessor", s)
+			}
+			t.Log("real native provider failure retained original work and allowed explicit backend adoption without interrupt handoff")
+		})
+	}
+}
