@@ -16,7 +16,7 @@ func (b *Bundle) CopyTo(destination string) (*Bundle, error) {
 		if err != nil {
 			return nil, err
 		}
-		if existing.ManifestSHA256 != b.ManifestSHA256 {
+		if existing.ManifestSHA256 != b.ManifestSHA256 || existing.SetSHA256 != b.SetSHA256 {
 			return nil, errors.New("release: staging destination belongs to another manifest")
 		}
 		return existing, nil
@@ -32,7 +32,7 @@ func (b *Bundle) CopyTo(destination string) (*Bundle, error) {
 		return nil, err
 	}
 	defer os.RemoveAll(tmp)
-	for _, a := range b.Manifest.Artifacts {
+	for _, a := range b.Artifacts() {
 		src, err := RegularPath(b.Dir, a.Path)
 		if err != nil {
 			return nil, err
@@ -59,6 +59,18 @@ func (b *Bundle) CopyTo(destination string) (*Bundle, error) {
 	}
 	if err := mf.Close(); err != nil {
 		return nil, err
+	}
+	if b.Set != nil {
+		file, err := os.OpenFile(filepath.Join(tmp, "release-set.json"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		_, writeErr := file.Write(b.SetBytes)
+		syncErr := file.Sync()
+		closeErr := file.Close()
+		if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := Load(tmp); err != nil {
 		return nil, err

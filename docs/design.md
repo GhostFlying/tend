@@ -1356,6 +1356,20 @@ Task 的不可变 artifact、报告和文件提供候选、已有检查记录及
 成本审批或自动阻塞。周期巡检由系统守时并执行有界单次检查，不以模型反复 sleep
 代替计时器。详见[统一计划](plans/issue-delivery-efficiency.md)。
 
+## D198：完整发布集与普通 updater 交接
+
+完整发布集绑定相同源码的 server、runner、updater、CLI 和实际 Web，原格式 1
+service manifest 继续只描述 server/runner。main 的完整 CI 通过才公开不可变发布。
+普通升级的 updater 交接作为后续批次按实施计划接入；发布集本身不授予安装权限。
+见[实施计划](plans/complete-release-updater.md)。
+
+## D199：剩余调度开销的事实驱动
+
+后台会话资格跟随提交后的相关事实与实际截止重新评估；没有变化不重复完整检查，
+执行前仍新鲜校验。历史事件不因 Issue 关闭而丢弃，未知与原请求继续保留。
+性能修复以固定源码和负载的调用链及完整 API 测量为据，不引入用量响应缓存。
+见[实施计划](plans/remaining-idle-cpu.md)。
+
 ## D195：空闲采集与进程监督的工作边界
 
 原生用量采集跟随实际执行与收尾：注册、开始、恢复和完成唤醒对应采集器；

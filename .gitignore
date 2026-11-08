@@ -21,3 +21,4 @@ spikes/**/out/
 
 # pnpm store, which pnpm puts at the root of the mount it runs in
 /.pnpm-store/
+__pycache__/

@@ -50,6 +50,9 @@ type Manifest struct {
 	Artifacts []Artifact `json:"artifacts"`
 }
 type Bundle struct {
+	Set            *Set
+	SetBytes       []byte
+	SetSHA256      string
 	Dir            string
 	Manifest       Manifest
 	ManifestSHA256 string
@@ -173,6 +176,9 @@ func Load(dir string) (*Bundle, error) {
 		if err := b.Verify(a); err != nil {
 			return nil, err
 		}
+	}
+	if err := loadSet(b); err != nil {
+		return nil, err
 	}
 	return b, nil
 }

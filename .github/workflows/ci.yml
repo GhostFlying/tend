@@ -24,6 +24,8 @@ jobs:
           role: quality
       - name: static checks and capability coverage
         run: make ci-check capability-check protocol-check fmt-check vet staticcheck
+      - name: release publication recovery checks
+        run: python3 -m unittest discover -s .github/scripts -p '*_test.py'
       - name: publish main build snapshot
         if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
         uses: actions/cache/save@v4
@@ -134,16 +136,66 @@ jobs:
           path: ${{ steps.go.outputs.build-path }}
           key: ${{ steps.go.outputs.build-key }}
 
+  release-build:
+    needs: web
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-go
+        with:
+          role: release-${{ matrix.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-app
+          path: internal/webui/dist/app
+      - name: build and verify complete distribution
+        env:
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: go run ./internal/release/packagecmd --arch "$RELEASE_ARCH" --commit "$GITHUB_SHA" --output .local/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution-linux-${{ matrix.arch }}
+          path: .local/release/*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   # Keep the existing required check name while rejecting every incomplete job.
   check:
     if: ${{ always() }}
-    needs: [quality, race, web, layout, cross]
+    needs: [quality, race, web, layout, cross, release-build]
     runs-on: ubuntu-latest
     steps:
       - name: require all checks
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+
+  release-publish:
+    needs: check
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: distribution-linux-*
+          merge-multiple: true
+          path: .local/release-assets
+      - name: publish immutable complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ASSET_DIR: .local/release-assets
+        run: python3 .github/scripts/publish-release.py
 
   cache-maintenance:
     needs: check
