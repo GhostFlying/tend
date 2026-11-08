@@ -1,8 +1,6 @@
 package mainthread
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -27,8 +25,7 @@ func (m *Manager) bindingInstance() string {
 	if selected == nil {
 		return m.cfg.Instance
 	}
-	digest := sha256.Sum256([]byte(selected.BindingIdentity()))
-	return m.cfg.Instance + "/named/" + hex.EncodeToString(digest[:])
+	return selected.BindingInstance(m.cfg.Instance)
 }
 
 func resolveNamedModel(models []harness.Model, selected hostedconfig.Selection) (harness.ModelSelection, error) {

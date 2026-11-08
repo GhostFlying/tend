@@ -63,3 +63,24 @@ func TestDefaultRootsRetainUnmappedExecutionHomes(t *testing.T) {
 		}
 	}
 }
+
+func TestUnavailableMappingDoesNotBlockRetainedRunnerRoots(t *testing.T) {
+	root := t.TempDir()
+	service := &codexenv.Service{Root: filepath.Join(root, "environments"), Validate: func(context.Context, codexenv.Profile, string) error { return nil }}
+	profile := codexenv.Profile{ID: "original", Home: filepath.Join(root, "original-home"), UserHome: t.TempDir(), Enabled: true}
+	if _, err := service.Execute(t.Context(), codexenv.Request{Action: "create", ID: profile.ID, RequestID: "create", Profile: &profile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := codexenv.RecordSessionHome(t.Context(), filepath.Join(root, "codex-rollout-roots"), &codexenv.Binding{Directory: service.Root, ID: profile.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{service.Root, filepath.Join(root, "missing-store")} {
+		cfg := config{CodexEnvironments: &codexenv.Bindings{Directory: directory, Runtimes: map[string]string{"native": "missing-environment", "unrelated": profile.ID}}}
+		if err := resolveRolloutRoots(&cfg, root); err != nil {
+			t.Fatal("unavailable new mapping blocked original recovery", err)
+		}
+		if !slices.Contains(cfg.RolloutRoots, filepath.Join(profile.Home, "sessions")) || len(cfg.RolloutRoots) < 3 {
+			t.Fatal("retained/default transcript paths lost", cfg.RolloutRoots)
+		}
+	}
+}

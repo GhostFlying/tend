@@ -71,6 +71,7 @@ func (b *Bindings) SessionRoots() ([]string, error) {
 		return nil, nil
 	}
 	roots := []string{}
+	var unavailable error
 	seen := map[string]bool{}
 	for _, id := range b.Runtimes {
 		if id == "" || seen[id] {
@@ -79,12 +80,13 @@ func (b *Bindings) SessionRoots() ([]string, error) {
 		seen[id] = true
 		status, err := (&Service{Root: b.Directory}).Read(id)
 		if err != nil {
-			return nil, err
+			unavailable = errors.Join(unavailable, fmt.Errorf("environment %s: %w", id, err))
+			continue
 		}
 		roots = append(roots, filepath.Join(status.Profile.Home, "sessions"))
 	}
 	slices.Sort(roots)
-	return slices.Compact(roots), nil
+	return slices.Compact(roots), unavailable
 }
 
 func readExecutionBinding(state, execution string) (*Binding, error) {

@@ -728,7 +728,11 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 			if err != nil {
 				return nil, err
 			}
-			return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true, Environment: cfg.CodexEnvironments.Resolve(selected.Runtime.ID), EnvironmentExecution: "coordinator:" + cfg.Instance + ":" + cfg.ConversationID})
+			binding, execution, err := hostedCodexEnvironment(ctx, a, cfg, selected, dataDir)
+			if err != nil {
+				return nil, err
+			}
+			return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true, Environment: binding, EnvironmentExecution: execution})
 		},
 		Open: func(ctx context.Context) (harness.Session, error) {
 			if open != nil {
@@ -738,6 +742,19 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		},
 		Log: log,
 	}), nil
+}
+
+func hostedCodexEnvironment(ctx context.Context, a *app.App, cfg MainAgentConfig, selected hostedconfig.Selection, dataDir string) (*codexenv.Binding, string, error) {
+	instance := selected.BindingInstance(cfg.Instance)
+	_, resumed, err := a.MainThread(ctx, instance)
+	if err != nil {
+		return nil, "", err
+	}
+	key := sha256.Sum256([]byte(instance))
+	state := filepath.Join(dataDir, "codex-coordinators", hex.EncodeToString(key[:]))
+	execution := "coordinator:" + instance
+	binding, err := codexenv.BindExecution(ctx, state, execution, cfg.CodexEnvironments.Resolve(selected.Runtime.ID), resumed)
+	return binding, execution, err
 }
 
 // mainAgentWorkingDirectory keeps auto-mode writable directories independent

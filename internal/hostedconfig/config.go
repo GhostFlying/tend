@@ -125,6 +125,12 @@ func (s Selection) BindingIdentity() string {
 	return string(raw)
 }
 
+// BindingInstance identifies the native thread for one accepted definition.
+func (s Selection) BindingInstance(instance string) string {
+	digest := sha256.Sum256([]byte(s.BindingIdentity()))
+	return instance + "/named/" + hex.EncodeToString(digest[:])
+}
+
 func (p *Prepared) Select(localID string, purpose agentconfig.Purpose) (Selection, error) {
 	for _, a := range p.configuration.Definitions.Agents {
 		if a.LocalID != localID {

@@ -2,6 +2,8 @@
 
 ## D197：本机 Codex 能力环境
 
+server 本机协调会话以已有 named binding identity 保存并恢复环境目录与 ID，旧线程不会因新增映射而改变 home；runner 当前映射不可用只降低相应执行器的就绪状态，保留目录与原 run 仍可恢复。配置请求串行锁与执行引用锁分离，包复制和原生校验不阻止执行收尾；环境退役在检查引用到提交期间继续排斥新执行 pin。
+
 `codexenv` 管理固定运行 home、clean/projection 扩展、AGENTS 整文件同步和不可变能力快照。Linux 使用 bubblewrap 用户 mount namespace 隔离用户技能入口与插件工作缓存；保留 HOME、项目配置和管理员要求。只共享显式 auth 文件链接，不继承主 home 的完整配置，不调用账号级插件安装或卸载。配置与管理请求以本机原子记录去重和版本校验，不访问业务账本。
 
 CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖 codexenv，codexenv 仅依赖 protocol、cfgfile/procx 及文件/进程边界，不依赖业务 app/store。TOML 采用 BurntSushi/toml，插件版本比较使用 x/mod 的语义版本实现。执行采用引用使用独立 SQLite WAL 索引和有界锁等待并分页读取，不把逐次运行历史复制到配置请求回执。可选 runtime 映射不替代 ExecutableRef，不改变线上协议或未配置环境的行为。自动同步只发布快照；运行和回执的生命周期决定采用时点，unknown 不自动续接。首次执行前在 run 的固定本机状态目录保存环境目录和 ID，runtime 映射变更不重定向原执行；仅禁用环境不要求重建来源。已使用 home 通过小型本机目录登记表保留默认 rollout 读取范围，不扫描 run 历史；显式 roots 优先。watch 预检明确失败与已发出操作的未知结果分别记录。丢失原 Session 后，独立进程关闭证明也回写原环境执行引用；未证明关闭不得解除活跃或 unknown。协调模式的权限限制保持优先。详见 [实施计划](plans/codex-environments.md)。
