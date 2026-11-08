@@ -37,6 +37,8 @@ runner 配置同时增加 `updater_socket`（自己的 authority socket）、`up
 
 main 的完整 CI 通过后，Actions 以 `main-<完整 commit SHA>` 发布不可变 prerelease。
 Linux amd64、arm64 各有完整压缩包及发布集清单，并提供 `SHA256SUMS`。
+另提供 `linux-fleet` 完整包，包含两个架构的全部组件；混合架构的 server/runner
+升级使用 fleet 包，其 service manifest 可供既有协调器按每台主机平台选择产物。
 完整包同时包含 `tend-server`、`tend-runner`、`tend-updater`、`tend` 和
 `release-set.json`；server 嵌入同一提交实际构建的 Web。发布集绑定全部组件、
 源码 commit 与 service manifest 摘要；它不扩展旧 manifest 的角色。
@@ -52,6 +54,8 @@ go run ./internal/release/packagecmd --arch amd64 --commit "$(git rev-parse HEAD
 
 另用 `--arch arm64` 构建第二个平台。构建器拒绝源码漂移、缺少实际 Web 和
 二进制 Go VCS 身份不符；压缩包使用提交时间和固定文件属性，避免重跑改变资产。
+组合包由这两个已验证平台包生成，要求相同源码及协议/存储兼容范围，并再次验证
+所有二进制身份；不能把不同提交的包拼接成一个发布。
 现有只含 service manifest 的历史包仍可读取。完整包的自动 updater 交接由后续
 升级批次接入，不能仅下载新包就声称运行中的 updater 已更新。
 

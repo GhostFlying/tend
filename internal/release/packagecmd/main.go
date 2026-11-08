@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -31,11 +32,63 @@ func main() {
 	arch := flag.String("arch", "", "Linux target architecture")
 	commit := flag.String("commit", "", "exact source commit")
 	out := flag.String("output", "", "output directory outside tracked source")
+	amd64 := flag.String("input-amd64", "", "verified amd64 bundle to assemble")
+	arm64 := flag.String("input-arm64", "", "verified arm64 bundle to assemble")
 	flag.Parse()
-	if err := run(ctx, *arch, *commit, *out); err != nil {
+	var err error
+	if *amd64 != "" || *arm64 != "" {
+		err = merge(ctx, *amd64, *arm64, *commit, *out)
+	} else {
+		err = run(ctx, *arch, *commit, *out)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func merge(ctx context.Context, amd64, arm64, commit, output string) error {
+	if amd64 == "" || arm64 == "" || output == "" {
+		return errors.New("package: both platform inputs and output are required")
+	}
+	if err := os.MkdirAll(output, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(output, ".assemble-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	bundle, err := release.MergeTo(amd64, arm64, filepath.Join(tmp, "fleet"))
+	if err != nil {
+		return err
+	}
+	if bundle.Set.Commit != commit {
+		return errors.New("package: fleet source differs from checked commit")
+	}
+	for _, a := range bundle.Artifacts() {
+		source, err := release.ExecutableSource(filepath.Join(bundle.Dir, a.Path))
+		if err != nil || source.Modified || source.Commit != commit {
+			return errors.New("package: fleet executable source differs")
+		}
+	}
+	stamp, err := git(ctx, "show", "-s", "--format=%ct", commit)
+	if err != nil {
+		return err
+	}
+	seconds, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		return err
+	}
+	name := "tend-main-" + commit + "-linux-fleet"
+	archive := filepath.Join(tmp, name+".tar.gz")
+	if err := pack(bundle.Dir, archive, time.Unix(seconds, 0).UTC()); err != nil {
+		return err
+	}
+	if err := publishFile(archive, filepath.Join(output, name+".tar.gz")); err != nil {
+		return err
+	}
+	return publishFile(filepath.Join(bundle.Dir, "release-set.json"), filepath.Join(output, name+".json"))
 }
 
 func git(ctx context.Context, args ...string) (string, error) {
@@ -171,12 +224,13 @@ func pack(dir, target string, stamp time.Time) (result error) {
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
 	defer func() { result = errors.Join(result, tw.Close(), gz.Close(), f.Close()) }()
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range files {
-		path := filepath.Join(dir, entry.Name())
+	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() {
 			return errors.New("package: non-regular archive input")
@@ -185,7 +239,11 @@ func pack(dir, target string, stamp time.Time) (result error) {
 		if strings.HasSuffix(entry.Name(), ".json") {
 			mode = 0o644
 		}
-		if err := tw.WriteHeader(&tar.Header{Name: entry.Name(), Mode: mode, Size: info.Size(), ModTime: stamp}); err != nil {
+		relative, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: filepath.ToSlash(relative), Mode: mode, Size: info.Size(), ModTime: stamp}); err != nil {
 			return err
 		}
 		in, err := os.Open(path)
@@ -196,6 +254,6 @@ func pack(dir, target string, stamp time.Time) (result error) {
 		if err := errors.Join(copyErr, in.Close()); err != nil {
 			return err
 		}
-	}
-	return nil
+		return nil
+	})
 }
