@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,7 @@ func TestIntegrationMCPHelper(t *testing.T) {
 }
 
 type nativeProbe struct {
+	close   func()
 	input   io.WriteCloser
 	scanner *bufio.Scanner
 	next    int
@@ -104,8 +106,10 @@ func openNativeProbe(t *testing.T, ref *Reference, cwd string) *nativeProbe {
 		cleanup()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = input.Close(); procx.KillGroup(cmd); _ = cmd.Wait(); cleanup() })
 	n := &nativeProbe{input: input, scanner: bufio.NewScanner(output)}
+	var closed sync.Once
+	n.close = func() { closed.Do(func() { _ = input.Close(); procx.KillGroup(cmd); _ = cmd.Wait(); cleanup() }) }
+	t.Cleanup(n.close)
 	n.scanner.Buffer(make([]byte, 4096), 8<<20)
 	n.call(t, "initialize", map[string]any{"clientInfo": map[string]string{"name": "tend-fixture", "version": "1"}, "capabilities": map[string]bool{"experimentalApi": true}})
 	if err = json.NewEncoder(input).Encode(map[string]any{"method": "initialized"}); err != nil {
@@ -198,15 +202,12 @@ func TestIntegrationNativePluginMCPAndHooks(t *testing.T) {
 		t.Fatal("plugin MCP tool missing from thread runtime")
 	}
 	if model := os.Getenv("TEND_CODEX_ENV_MODEL"); model != "" {
-		modelRef, pinErr := (&Binding{Directory: s.Root, ID: p.ID}).Pin(t.Context(), "integration:plugin-model")
-		if pinErr != nil {
-			t.Fatal(pinErr)
-		}
-		modelRef.Profile.AuthSource = filepath.Join(p.UserHome, ".codex", "auth.json")
+		n.close()
+		ref.Profile.AuthSource = filepath.Join(p.UserHome, ".codex", "auth.json")
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		trust := fmt.Sprintf("hooks.state={%q={trusted_hash=%q}}", key, hash)
-		cmd, cleanup, err := modelRef.Command(ctx, "codex", []string{"-c", trust, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--model", model, "--json", "Call the fixture_echo MCP tool once, then reply ENVIRONMENT_OK. Do not run shell commands."}, cwd, os.Environ())
+		cmd, cleanup, err := ref.Command(ctx, "codex", []string{"-c", trust, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--model", model, "--json", "Call the fixture_echo MCP tool once, then reply ENVIRONMENT_OK. Do not run shell commands."}, cwd, os.Environ())
 		if err != nil {
 			t.Fatal(err)
 		}
