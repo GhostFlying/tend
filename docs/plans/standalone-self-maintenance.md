@@ -33,7 +33,7 @@
 
 ## 发布与更新
 
-依赖完整发布与普通 updater 自更新的最终实现，不另建竞争自更新流程。维护器作为同一提交、同一 GitHub Release 的独立 Linux amd64/arm64 组件包构建和发布；现有四组件主安装包及 service manifest 保持。
+复用完整发布与 D200 普通 updater 自更新，不另建竞争自更新流程。维护器作为同一提交、同一 GitHub Release 的独立 Linux amd64/arm64 组件包构建和发布；现有四组件主安装包及 service manifest 保持。
 
 组件清单记录源码提交、平台、大小/hash 和独立状态格式兼容范围。updater 添加维护器角色及健康/准入接点。普通更新先交接 updater，再更新业务服务，最后更新维护服务；每一项均核对实际进程与持久收据。自身更新保存原会话及待办，不终止共享 daemon。
 
@@ -53,7 +53,7 @@
 - 程序检测与事件补查、单次 audit、单原生 thread、串行原生 review、外部配置采用和中止索引交接。
 - owner 只读概览、完整本机 CLI、组件发布和维护器 updater 角色；候选读取不可逆提交收据后恢复调度。
 - 使用本机 Codex 与 TraeX 的隔离 app-server 和确定性本地 provider，验证原输入身份、同会话 TUI 展示/人工输入、实际中断后 idle 与 inline review；这些证据不等于生产 App 或服务部署验收。
-- 普通 updater 自更新依赖 [PR #280](https://github.com/GhostFlying/tend/pull/280) 交付；集成时将 `maintainer` 纳入其固定角色准入，并覆盖保留子进程与独占锁收据。不以强制恢复或手动覆盖替代，部署前完成接口和实际服务安装的联合验收。
+- 普通 updater 自更新复用已合入的 [PR #280](https://github.com/GhostFlying/tend/pull/280)；本批将 `maintainer` 纳入固定角色准入，并覆盖保留子进程、独占锁收据和独立组件加载。实际服务安装的联合验收在隔离目录及临时 unit 中进行，不以强制恢复或手动覆盖替代。
 
 ## 独立评审后的恢复修正
 
@@ -74,3 +74,7 @@
 CI 原用例清理修正：丢失 Start 回执的实际进程 fixture 已验证仅启动一次，但停止子进程后未等待原启动的异步 Wait 收据发布，导致 TempDir 删除与新收据文件创建竞争。仅在该 fixture 清理中等待原 launch、实际配置及 artifact 绑定的退出收据，再释放资源；保留原始失败日志及所有行为断言和超时门槛。
 
 CI 后续的 runner 父子进程 fixture 在父进程已被终止后读取该子进程 `/proc` 时收到 `ESRCH`，原检查只接受 `ENOENT`。将内核明确的“进程不存在”同样识别为原进程结束，仍核对原 PID/启动代次、拒绝其他读取错误，并保持原存活与超时断言。
+
+## updater 自更新合入后的集成
+
+PR #280 已进入主线。将 `maintainer` 加入其固定角色准入，普通服务更新的 supervisor-first 检查按角色读取独立组件清单。沿既有独立 installer 的 plan/apply/status 与原请求收据执行 updater 替换，不另建自更新流程；先更换 updater，再更新维护组件。扩展隔离 systemd fixture 至三种角色，核对共享 updater 替换时各自原服务进程及独占锁连续性；并验证实际维护服务的会话、待办和后续组件升级。重基后的源码组合重新完成完整检查、独立复评和 CI，不启用生产单元。

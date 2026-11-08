@@ -3,13 +3,35 @@
 package updater
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+func TestSelfUpdateStaticAdmitsOnlyManagedRoles(t *testing.T) {
+	for _, role := range []string{"server", "runner", "maintainer", "unknown"} {
+		t.Run(role, func(t *testing.T) {
+			cfg := Config{Role: role, StateDir: t.TempDir()}
+			identity := Identity{PID: 10, StartTicks: 1, LaunchID: "original", SHA256: strings.Repeat("a", 64)}
+			now := time.Unix(1000, 0)
+			p := SelfUpdatePlan{ConfigFile: filepath.Join(cfg.StateDir, "absent-config.json"), UpdaterBinary: "/fixture/updater", Unit: "tend-fixture.service", Updater: identity, Child: identity, ConfigSHA256: strings.Repeat("b", 64), ManagerSHA256: strings.Repeat("c", 64), UnitSHA256: strings.Repeat("d", 64), LockDevice: 1, LockInode: 1}
+			p.Request.Target.ExpiresAtMillis = now.Add(time.Minute).UnixMilli()
+			err := selfPlanStatic(cfg, p, now, true)
+			if role == "unknown" {
+				if err == nil || errors.Is(err, os.ErrNotExist) {
+					t.Fatal("unsupported role reached fixed configuration lookup", err)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("managed role was rejected before fixed configuration lookup", err)
+			}
+		})
+	}
+}
 
 func TestSelfUpdateLateInstallerCannotOverwriteAdoption(t *testing.T) {
 	cfg := Config{StateDir: t.TempDir()}

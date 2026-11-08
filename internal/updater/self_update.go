@@ -207,7 +207,7 @@ func archiveSelf(cfg Config, j SelfUpdateJournal) error {
 func missingSelf(err error) bool { return os.IsNotExist(err) }
 
 func (s *Supervisor) requireSelfUpdate(ctx context.Context, id, dir string) error {
-	b, err := release.Load(dir)
+	b, err := release.LoadService(dir, s.cfg.Role)
 	if err != nil {
 		return err
 	}

@@ -100,7 +100,7 @@ func testSelfUpdateSystemd(t *testing.T, intervening bool) {
 		}
 		t.Fatal(label, ctx.Err())
 	}
-	for n, role := range []string{"server", "runner"} {
+	for n, role := range []string{"server", "runner", "maintainer"} {
 		dir := filepath.Join(root, role)
 		if err = os.Mkdir(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -131,6 +131,9 @@ func testSelfUpdateSystemd(t *testing.T, intervening bool) {
 		requestID := "req_01M6F01JSS6Q9BFV6DJNSSBHEW"
 		if n == 1 {
 			requestID = "req_01M6F01JSS6Q9BFV6DJNSSBHEX"
+		}
+		if n == 2 {
+			requestID = "req_01M6F01JSS6Q9BFV6DJNSSBHEY"
 		}
 		i.plan, err = PrepareSelfUpdatePlan(ctx, cfg, SelfUpdatePlan{ConfigFile: config, Unit: unit, UpdaterBinary: fixed, ExitEvidence: evidence, Request: SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: requestID, ExpiresAtMillis: time.Now().Add(time.Minute).UnixMilli()}, UpgradeID: "fixture-upgrade", Release: bundle.Dir, ReleaseSetSHA256: bundle.SetSHA256}})
 		if err != nil {
