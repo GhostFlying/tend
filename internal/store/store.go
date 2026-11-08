@@ -108,6 +108,7 @@ func (s *Store) Close() error {
 
 // Tx is a write transaction.
 type Tx struct {
+	changed     map[string]bool
 	files       *blobstore.Store
 	tx          *sql.Tx
 	observation *writeCall
@@ -304,3 +305,12 @@ func IsUniqueViolation(err error) bool {
 	code := se.Code()
 	return code == sqlite3.SQLITE_CONSTRAINT_UNIQUE || code == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
 }
+
+// MarkChanged records a transaction-local view invalidation. It is discarded on rollback.
+func (t *Tx) MarkChanged(view string) {
+	if t.changed == nil {
+		t.changed = map[string]bool{}
+	}
+	t.changed[view] = true
+}
+func (t *Tx) Changed(view string) bool { return t.changed[view] }

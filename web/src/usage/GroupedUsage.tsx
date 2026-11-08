@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type {
   TokenUsageTotals,
   TokenUsageView,
@@ -83,6 +83,7 @@ export function CompactTokens({ totals: t }: { totals: TokenUsageTotals }) {
 }
 function useUsage(key: string | null, retry: number) {
   const { live } = useServices();
+  const lastRetry = useRef(retry);
   const [result, setResult] = useState<{
     key: string;
     value: TokenUsageView | null;
@@ -94,7 +95,8 @@ function useUsage(key: string | null, retry: number) {
     return live.usage.watch(key, (state) => setResult({ key, ...state }));
   }, [live, key]);
   useEffect(() => {
-    if (key !== null && retry > 0) live.usage.refresh(key);
+    if (key !== null && lastRetry.current !== retry) live.usage.refresh(key);
+    lastRetry.current = retry;
   }, [live, key, retry]);
   const current = result?.key === key ? result : null;
   return {
