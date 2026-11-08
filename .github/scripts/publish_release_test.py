@@ -23,6 +23,9 @@ class PublishTest(unittest.TestCase):
     def test_published_release_is_verified_without_mutation(self):
         self.exercise(draft=False)
 
+    def test_same_output_directory_can_be_retried(self):
+        self.exercise(draft=True, existing_checksum=True)
+
     def test_conflicting_asset_does_not_publish(self):
         with self.assertRaisesRegex(ValueError, "published asset differs"):
             self.exercise(draft=True, corrupt=True)
@@ -45,10 +48,13 @@ class PublishTest(unittest.TestCase):
             (root / (name + ".json")).write_text(json.dumps({"commit": commit, "arch": "multi" if arch == "fleet" else arch}))
         return root, commit
 
-    def exercise(self, draft, corrupt=False, first=False):
+    def exercise(self, draft, corrupt=False, first=False, existing_checksum=False):
         with tempfile.TemporaryDirectory() as directory:
             root, commit = self.fixture(directory)
+            if existing_checksum:
+                (root / "SHA256SUMS").write_text("interrupted local output")
             remote = {p.name: p.read_bytes() for p in root.iterdir()}
+            remote.pop("SHA256SUMS", None)
             if draft:
                 remote.pop(next(iter(remote)))
             else:

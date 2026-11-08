@@ -207,7 +207,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		}
 	}
 	if r.cfg.UpdaterSocket != "" && r.cfg.UpdaterControlSocket != "" && r.cfg.UpdaterBundleDir != "" {
-		capabilities = append(capabilities, "runner-updater-v1", protocol.CapabilityRunnerConfiguration)
+		capabilities = append(capabilities, "runner-updater-v1", protocol.CapabilityRunnerConfiguration, protocol.CapabilityCompleteReleaseSet)
 	}
 	confirmedCancelled := ""
 	if r.cancelledUpdaterID == r.control.CancelledUpgradeID {

@@ -19,6 +19,9 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
+	ReleaseSet           *release.Set
+	ReleaseSetSHA256     string
+	ReleaseSetSize       int64
 	ExecutionRequestID   string
 	ParkIdleManagers     bool
 	ServerCapabilities   []string
@@ -51,6 +54,11 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	if err := c.Manifest.Validate(); err != nil || !release.ValidSHA(c.ManifestSHA256) || c.ManifestSize <= 0 || c.ServerInstance == "" || !release.ValidSHA(c.ServerHash) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid verified release")
+	}
+	if c.ReleaseSet != nil {
+		if err := c.ReleaseSet.ValidateMetadata(c.Manifest, c.ManifestSHA256); err != nil || !release.ValidSHA(c.ReleaseSetSHA256) || c.ReleaseSetSize <= 0 || c.ReleaseSetSize > release.MaxManifestBytes {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid complete release set")
+		}
 	}
 	if c.ParkIdleManagers && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityManagerPark) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "candidate does not support manager park")
@@ -128,6 +136,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	r.Deadline = capUpgradeDeadline(&r, r.Deadline)
+	r.ReleaseSet, r.ReleaseSetSHA256, r.ReleaseSetSize = c.ReleaseSet, c.ReleaseSetSHA256, c.ReleaseSetSize
 	if len(c.RunnerConfigurations) > 0 {
 		if len(c.RunnerConfigurations) != 1 || c.ServerHash != c.CurrentServerHash {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance requires one host and the current server binary")
@@ -138,7 +147,12 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		r.View.Phase = "runners"
 	}
 	totalBytes := c.ManifestSize
-	for _, artifact := range c.Manifest.Artifacts {
+	artifacts := c.Manifest.Artifacts
+	if c.ReleaseSet != nil {
+		artifacts = c.ReleaseSet.Artifacts
+		totalBytes += c.ReleaseSetSize
+	}
+	for _, artifact := range artifacts {
 		totalBytes += artifact.Size
 	}
 	for _, h := range hosts {
@@ -157,6 +171,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s is offline, incompatible, or unavailable for rolling upgrade", h.HostID)
 		}
 		artifact, ok := releaseArtifact(c.Manifest, "runner", h.OS, h.Arch)
+		if c.ReleaseSet != nil && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityCompleteReleaseSet) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s requires complete release set bootstrap", h.HostID)
+		}
 		if !ok {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release lacks runner for host %s", h.HostID)
 		}
@@ -567,6 +584,9 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		if v.Phase == "draining" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
 			ctl.Revision++
 			ctl.Upgrade = &protocol.RunnerUpgradeTarget{Configuration: h.Configuration, ManifestPath: "/runner/v1/releases/" + r.View.UpgradeID + "/manifest", ManifestSHA256: r.ManifestSHA256, ManifestSize: r.ManifestSize, ArtifactBasePath: "/runner/v1/releases/" + r.View.UpgradeID + "/artifacts/"}
+			if r.ReleaseSet != nil {
+				ctl.Upgrade.ReleaseSet = &protocol.ReleaseSetTarget{Path: "/runner/v1/releases/" + r.View.UpgradeID + "/set", SHA256: r.ReleaseSetSHA256, Size: r.ReleaseSetSize}
+			}
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 				return err
 			}

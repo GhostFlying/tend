@@ -50,7 +50,17 @@ type RunnerConfiguration struct {
 
 const CapabilityRunnerConfiguration = "runner-config-maintenance-v1"
 
+const CapabilityCompleteReleaseSet = "complete-release-set-v1"
+
+// ReleaseSetTarget is an authenticated, immutable metadata download.
+type ReleaseSetTarget struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+}
+
 type RunnerUpgradeTarget struct {
+	ReleaseSet       *ReleaseSetTarget    `json:"release_set,omitempty"`
 	Configuration    *RunnerConfiguration `json:"configuration,omitempty"`
 	ManifestPath     string               `json:"manifest_path"`
 	ManifestSHA256   string               `json:"manifest_sha256"`

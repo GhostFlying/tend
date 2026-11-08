@@ -11,6 +11,14 @@ import (
 )
 
 func (s *Server) releaseFile(w http.ResponseWriter, r *http.Request) {
+	s.releaseMetadata(w, r, false)
+}
+
+func (s *Server) releaseSetFile(w http.ResponseWriter, r *http.Request) {
+	s.releaseMetadata(w, r, true)
+}
+
+func (s *Server) releaseMetadata(w http.ResponseWriter, r *http.Request, set bool) {
 	p, err := s.authenticate(r)
 	if err != nil {
 		s.writeError(w, r, nil, err)
@@ -42,11 +50,18 @@ func (s *Server) releaseFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bundle, err := release.Load(filepath.Join(s.cfg.ReleaseDir, id))
-	if err != nil || bundle.ManifestSHA256 != batch.ManifestSHA256 {
+	if err != nil || bundle.ManifestSHA256 != batch.ManifestSHA256 || (batch.ReleaseSetSHA256 != "" && bundle.SetSHA256 != batch.ReleaseSetSHA256) {
 		s.writeError(w, r, nil, protocol.Errorf(protocol.CodeInvalidTransition, "staged release failed verification"))
 		return
 	}
 	relative := "manifest.json"
+	if set {
+		if batch.ReleaseSetSHA256 == "" || bundle.Set == nil {
+			s.writeError(w, r, nil, protocol.Errorf(protocol.CodeNotFound, "complete release set is unavailable"))
+			return
+		}
+		relative = "release-set.json"
+	}
 	if sha := r.PathValue("sha"); sha != "" {
 		relative = ""
 		for _, a := range bundle.Artifacts() {

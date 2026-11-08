@@ -59,7 +59,7 @@ def publish(root, commit, repo):
         target_arch = "multi" if arch == "fleet" else arch
         if metadata["commit"] != commit or metadata["arch"] != target_arch:
             raise ValueError("artifact source/platform mismatch")
-    if {p.name for p in root.iterdir()} != expected:
+    if {p.name for p in root.iterdir()} - {"SHA256SUMS"} != expected:
         raise ValueError("incomplete or unexpected release assets")
     checksums = "".join(
         f"{hashlib.sha256((root / name).read_bytes()).hexdigest()}  {name}\n"

@@ -41,24 +41,56 @@ func loadSet(b *Bundle) error {
 	if err != nil || len(raw) > MaxManifestBytes {
 		return errors.New("release: cannot read release set")
 	}
-	var set Set
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&set); err != nil {
-		return fmt.Errorf("release: decode release set: %w", err)
-	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return errors.New("release: trailing release set data")
+	set, err := DecodeSet(raw, b.Manifest, b.ManifestSHA256)
+	if err != nil {
+		return err
 	}
 	if err := set.Validate(b); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(raw)
-	b.Set, b.SetBytes, b.SetSHA256 = &set, raw, hex.EncodeToString(sum[:])
+	b.Set, b.SetBytes, b.SetSHA256 = set, raw, hex.EncodeToString(sum[:])
 	return nil
 }
 
+// DecodeSet validates metadata before any artifact download. The caller still
+// verifies every declared byte before publishing or using the assembled bundle.
+func DecodeSet(raw []byte, manifest Manifest, digest string) (*Set, error) {
+	if len(raw) > MaxManifestBytes {
+		return nil, errors.New("release: oversized release set")
+	}
+	var set Set
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&set); err != nil {
+		return nil, fmt.Errorf("release: decode release set: %w", err)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("release: trailing release set data")
+	}
+	if err := set.ValidateMetadata(manifest, digest); err != nil {
+		return nil, err
+	}
+	return &set, nil
+}
+
 func (s Set) Validate(b *Bundle) error {
+	if err := s.ValidateMetadata(b.Manifest, b.ManifestSHA256); err != nil {
+		return err
+	}
+	for _, a := range s.Artifacts {
+		if err := b.Verify(a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Set) ValidateMetadata(manifest Manifest, digest string) error {
+	b := &Bundle{Manifest: manifest, ManifestSHA256: digest}
+	if err := manifest.Validate(); err != nil {
+		return err
+	}
 	commit, err := hex.DecodeString(s.Commit)
 	if s.Format != 1 || len(commit) != 20 || err != nil || s.Commit != hex.EncodeToString(commit) || s.ReleaseID != b.Manifest.ReleaseID || s.ManifestSHA256 != b.ManifestSHA256 || s.OS != "linux" || (s.Arch != "amd64" && s.Arch != "arm64" && s.Arch != "multi") || len(s.Artifacts) < 4 || len(s.Artifacts) > 8 || len(s.Artifacts) != 2*len(b.Manifest.Artifacts) {
 		return errors.New("release: invalid release set identity")
@@ -76,9 +108,6 @@ func (s Set) Validate(b *Bundle) error {
 			if err != nil || service != a {
 				return errors.New("release: service differs from release set")
 			}
-		}
-		if err := b.Verify(a); err != nil {
-			return err
 		}
 	}
 	if (s.Arch == "multi") != (len(platforms) == 2) {

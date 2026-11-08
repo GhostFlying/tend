@@ -71,18 +71,43 @@ func TestReleaseDownloadRequiresSameOriginExactBytesAndDigest(t *testing.T) {
 }
 
 func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprint("complete=", complete), func(t *testing.T) {
+			testReleaseBundleSubmission(t, complete)
+		})
+	}
+}
+
+func testReleaseBundleSubmission(t *testing.T, complete bool) {
 	r := controlRunner(t)
 	r.cfg.UpdaterBundleDir = t.TempDir()
 	artifact := []byte("runner binary fixture")
 	sum := sha256.Sum256(artifact)
 	artifactSHA := hex.EncodeToString(sum[:])
 	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
+	if complete {
+		a := manifest.Artifacts[0]
+		a.Role, a.Path = "server", "bin/server"
+		manifest.Artifacts = append(manifest.Artifacts, a)
+	}
 	raw, _ := json.Marshal(manifest)
 	manifestHash := sha256.Sum256(raw)
 	manifestSHA := hex.EncodeToString(manifestHash[:])
+	var setRaw []byte
+	if complete {
+		set := release.Set{Format: 1, ReleaseID: manifest.ReleaseID, Commit: strings.Repeat("a", 40), OS: "linux", Arch: "amd64", ManifestSHA256: manifestSHA, Artifacts: append([]release.Artifact{}, manifest.Artifacts...)}
+		for _, role := range []string{"updater", "cli"} {
+			a := manifest.Artifacts[0]
+			a.Role, a.Path = role, "bin/"+role
+			set.Artifacts = append(set.Artifacts, a)
+		}
+		setRaw, _ = json.Marshal(set)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		if q.URL.Path == "/manifest" {
 			w.Write(raw)
+		} else if q.URL.Path == "/set" {
+			w.Write(setRaw)
 		} else if q.URL.Path == "/artifacts/"+artifactSHA {
 			w.Write(artifact)
 		} else {
@@ -120,6 +145,9 @@ func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
 		if err != nil || bundle.ManifestSHA256 != manifestSHA {
 			t.Errorf("unverified bundle submitted: %v", err)
 		}
+		if complete && (bundle == nil || bundle.Set == nil || len(bundle.Artifacts()) != 4) {
+			t.Error("runner silently dropped complete release set")
+		}
 		if req.ID != "batch" {
 			t.Errorf("wrong batch: %s", req.ID)
 		}
@@ -129,6 +157,10 @@ func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
 	go supervisor.Serve(listener)
 	defer supervisor.Close()
 	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: manifestSHA, ManifestSize: int64(len(raw)), ArtifactBasePath: "/artifacts/"}}
+	if complete {
+		sum := sha256.Sum256(setRaw)
+		control.Upgrade.ReleaseSet = &protocol.ReleaseSetTarget{Path: "/set", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(setRaw))}
+	}
 	if err := r.applyControl(t.Context(), &control, r.cfg.Now(), true); err != nil {
 		t.Fatal(err)
 	}

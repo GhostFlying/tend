@@ -13057,6 +13057,27 @@
       "title": "RelationDirection",
       "type": "string"
     },
+    "ReleaseSetTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "title": "ReleaseSetTarget",
+      "type": "object"
+    },
     "ReparentIssuePayload": {
       "additionalProperties": false,
       "properties": {
@@ -14609,6 +14630,9 @@
         },
         "manifest_size": {
           "type": "integer"
+        },
+        "release_set": {
+          "$ref": "#/definitions/ReleaseSetTarget"
         }
       },
       "required": [
