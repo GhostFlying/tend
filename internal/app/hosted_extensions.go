@@ -48,6 +48,9 @@ func (a *App) currentHostedSelection(ctx context.Context, q store.Querier, conve
 	if category == "" {
 		category = selected.CategoryID
 	}
+	if category == "" && !a.managedHostedRuntimes[selected.Runtime.ID] {
+		return selected, named, nil
+	}
 	category, err = selectedCategory(selected.Definition.Categories, category, a.managedHostedRuntimes[selected.Runtime.ID])
 	if err != nil {
 		return selected, named, err
