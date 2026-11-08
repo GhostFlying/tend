@@ -415,6 +415,9 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 				return err
 			}
 			// Releasing the maintenance fence does not steal the explicit archive gate.
+			if !receiptRecovery && opens.Load() != 0 {
+				return errors.New("model session opened while archive preparation remained active")
+			}
 			if _, err := r.App.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: ids.New(protocol.PrefixRequest), ExpectedControlRevision: prep.Revision}, false); err != nil {
 				return err
 			}
@@ -427,7 +430,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			return finished
 		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if !errors.Is(err, finished) || !configured || !initialized || (!receiptRecovery && opens.Load() != 0) || (receiptRecovery && opens.Load() == 0) {
+	if !errors.Is(err, finished) || !configured || !initialized || (receiptRecovery && opens.Load() == 0) {
 		t.Fatalf("assembly result=%v configure=%v initialize=%v model_opens=%d", err, configured, initialized, opens.Load())
 	}
 }
