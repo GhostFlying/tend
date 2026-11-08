@@ -152,3 +152,14 @@ var ErrNotStarted = errors.New("updater: worker process was definitely not start
 var ErrNotRunning = errors.New("updater: process is not running")
 var ErrUnknown = errors.New("updater: outcome is unknown; reconcile before retrying")
 var ErrUnsupported = errors.New("updater: automatic supervision is supported only on Linux")
+
+// ProcessObservation is an ephemeral liveness observation, never a durable proof.
+type ProcessObservation struct {
+	Identity   Identity
+	Executable string
+}
+
+// ProcessObserver separates cheap supervision from complete artifact validation.
+type ProcessObserver interface {
+	Observe(context.Context, int) (ProcessObservation, error)
+}

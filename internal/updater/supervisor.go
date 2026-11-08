@@ -23,6 +23,8 @@ type Options struct {
 	BootClock             func() (string, int64, error)
 }
 type Supervisor struct {
+	observedProcess    ProcessObservation
+	verifiedProcess    Identity
 	externalGeneration *uint64
 	durable            State
 	persistenceErr     error
@@ -856,9 +858,9 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 	if s.state.Current.Binary == "" {
 		return nil
 	}
-	current, err := s.opts.Process.Inspect(ctx, s.state.Process.PID)
+	current, err := s.observeCurrent(ctx, s.state.Process)
 	if err == nil {
-		if current.StartTicks != s.state.Process.StartTicks || current.SHA256 != s.state.Process.SHA256 {
+		if current != s.state.Process {
 			return ErrUnknown
 		}
 		return nil
@@ -1007,4 +1009,39 @@ func (s *Supervisor) stopRollbackCandidate(ctx context.Context, op *Operation) e
 		return err
 	}
 	return s.opts.Process.Stop(ctx, op.CandidateProcess, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second)
+}
+
+// observeCurrent caches a full verification only for this exact live executable.
+// A new supervisor always verifies before trusting its first cheap observation.
+func (s *Supervisor) observeCurrent(ctx context.Context, expected Identity) (Identity, error) {
+	observer, ok := s.opts.Process.(ProcessObserver)
+	if !ok {
+		return s.opts.Process.Inspect(ctx, expected.PID)
+	}
+	observed, err := observer.Observe(ctx, expected.PID)
+	if err != nil {
+		return Identity{}, err
+	}
+	if s.verifiedProcess == expected && s.observedProcess == observed {
+		return expected, nil
+	}
+	full, err := s.opts.Process.Inspect(ctx, expected.PID)
+	if err != nil {
+		return Identity{}, err
+	}
+	if full != expected {
+		return Identity{}, ErrUnknown
+	}
+	again, err := observer.Observe(ctx, expected.PID)
+	if err != nil {
+		return Identity{}, err
+	}
+	light := full
+	light.SHA256 = ""
+	if observed != again || again.Identity != light {
+		return Identity{}, ErrUnknown
+	}
+	s.verifiedProcess = full
+	s.observedProcess = again
+	return full, nil
 }

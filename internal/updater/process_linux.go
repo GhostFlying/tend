@@ -106,6 +106,87 @@ func (LinuxProcess) Inspect(ctx context.Context, pid int) (Identity, error) {
 	}
 	return Identity{PID: pid, StartTicks: ticks, LaunchID: launch, SHA256: sum}, nil
 }
+func (LinuxProcess) Observe(ctx context.Context, pid int) (ProcessObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return ProcessObservation{}, err
+	}
+	if pid <= 1 {
+		return ProcessObservation{}, ErrNotRunning
+	}
+	root := filepath.Join("/proc", strconv.Itoa(pid))
+	raw, err := os.ReadFile(filepath.Join(root, "stat"))
+	if os.IsNotExist(err) {
+		return ProcessObservation{}, ErrNotRunning
+	}
+	if err != nil {
+		return ProcessObservation{}, err
+	}
+	end := strings.LastIndexByte(string(raw), ')')
+	if end < 0 {
+		return ProcessObservation{}, ErrUnknown
+	}
+	fields := strings.Fields(string(raw)[end+1:])
+	if len(fields) < 20 {
+		return ProcessObservation{}, ErrUnknown
+	}
+	if fields[0] == "Z" || fields[0] == "X" {
+		return ProcessObservation{}, ErrNotRunning
+	}
+	ticks, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return ProcessObservation{}, err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return ProcessObservation{}, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Getuid() {
+		return ProcessObservation{}, errors.New("updater: process belongs to another service user")
+	}
+	exe, err := os.Stat(filepath.Join(root, "exe"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ProcessObservation{}, ErrNotRunning
+		}
+		return ProcessObservation{}, err
+	}
+	executable, ok := exe.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ProcessObservation{}, ErrUnknown
+	}
+	stamp := fmt.Sprintf("%d:%d:%d:%v:%v", executable.Dev, executable.Ino, exe.Size(), executable.Mtim, executable.Ctim)
+	env, err := os.ReadFile(filepath.Join(root, "environ"))
+	if os.IsNotExist(err) {
+		return ProcessObservation{}, ErrNotRunning
+	}
+	if err != nil {
+		// A process exiting between stat and environ can temporarily return
+		// EACCES. Only explicit exit evidence makes this a stopped process.
+		if processExited(root) {
+			return ProcessObservation{}, ErrNotRunning
+		}
+		return ProcessObservation{}, err
+	}
+	launch := ""
+	for _, v := range strings.Split(string(env), "\x00") {
+		if strings.HasPrefix(v, "TEND_UPDATER_LAUNCH_ID=") {
+			launch = strings.TrimPrefix(v, "TEND_UPDATER_LAUNCH_ID=")
+		}
+	}
+	// Re-read stat after executable/env reads to detect an exit or PID reuse.
+	again, err := os.ReadFile(filepath.Join(root, "stat"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ProcessObservation{}, ErrNotRunning
+		}
+		return ProcessObservation{}, err
+	}
+	if !sameStart(again, ticks) {
+		return ProcessObservation{}, ErrUnknown
+	}
+	return ProcessObservation{Identity: Identity{PID: pid, StartTicks: ticks, LaunchID: launch}, Executable: stamp}, nil
+}
 func sameStart(raw []byte, ticks uint64) bool {
 	i := strings.LastIndexByte(string(raw), ')')
 	if i < 0 {
@@ -402,7 +483,10 @@ func (p LinuxProcess) signalExact(ctx context.Context, id Identity, timeout time
 	if errno != 0 && errno != syscall.ESRCH {
 		return fmt.Errorf("updater: stop process: %w", errno)
 	}
-	return observeSignalledProcess(ctx, id, timeout, p.Inspect)
+	return observeSignalledProcess(ctx, id, timeout, func(ctx context.Context, pid int) (Identity, error) {
+		observed, err := p.Observe(ctx, pid)
+		return observed.Identity, err
+	})
 }
 
 // Only Stop may enter this observation loop, after pinning and signalling once.
