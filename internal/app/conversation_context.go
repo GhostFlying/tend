@@ -118,9 +118,6 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 		if _, err := tx.Exec(ctx, `INSERT INTO message_work_items(message_id,work_item_id,active,owner_locked,source,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(message_id,work_item_id) DO UPDATE SET active=excluded.active,owner_locked=MAX(owner_locked,excluded.owner_locked),source=excluded.source,updated_at=excluded.updated_at`, old.MessageID, id, desired[id], owner, source, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE background_assessments SET stale=1 WHERE conversation_id IN (SELECT conversation_id FROM agent_conversations WHERE work_item_id=?)`, id); err != nil {
-			return Outcome{}, err
-		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO message_association_revisions(message_id,revision) VALUES(?,1) ON CONFLICT(message_id) DO UPDATE SET revision=revision+1`, old.MessageID); err != nil {
 		return Outcome{}, err

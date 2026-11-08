@@ -1,8 +1,6 @@
 package mainthread
 
 import (
-	"maps"
-
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/coordination"
 )
@@ -24,26 +22,3 @@ func ThreadConfig(cwd, model string) harness.ThreadConfig {
 // presentation remain useful for understanding the owner. Keys are dotted
 // harness configuration paths, also applied on resume or handoff.
 var Isolation = coordination.Isolation()
-
-// backgroundThreadConfig implements D111's temporary native auto-mode policy.
-// Tend's background tool scope is enforced separately by the tool service.
-func backgroundThreadConfig(cfg harness.ThreadConfig) harness.ThreadConfig {
-	cfg.NetworkAccess = true
-	cfg.Sandbox = "workspace-write"
-	cfg.ApprovalPolicy = "on-request"
-	cfg.ApprovalsReviewer = "auto_review"
-	cfg.Config = maps.Clone(cfg.Config)
-	if cfg.Config == nil {
-		cfg.Config = make(map[string]any)
-	}
-	// The main dispatcher's tool feature switches are not inherited by a
-	// background session. Native tools remain available under auto review.
-	for key := range Isolation {
-		delete(cfg.Config, key)
-	}
-	// The runtime rejects simultaneous permission_mode and sandbox overrides.
-	// Explicit protocol fields above select the auto-mode permission tuple.
-	delete(cfg.Config, "permission_mode")
-	cfg.Config["sandbox_workspace_write.writable_roots"] = []string{}
-	return cfg
-}

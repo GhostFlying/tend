@@ -88,93 +88,6 @@ func TestAgentAutomaticBindingConflictsWithConcurrentOwnerEdit(t *testing.T) {
 	op := h.exec(owner, h.env("conversation.set_associations", protocol.Target{Type: "message", ID: source}, protocol.SetMessageAssociationsPayload{}, rev(a.Revision)), SetMessageAssociations{})
 	expectWorkCode(t, op, protocol.CodeStaleRevision)
 }
-func TestAgentConversationScopeAndBaseline(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	op := h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	var v struct {
-		ID string `json:"conversation_id"`
-	}
-	if err := json.Unmarshal(op.Result, &v); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), v.ID, "delivery"); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
-		t.Fatal("missing baseline admitted", err)
-	}
-	h.prepareAgent(w.WorkItemID)
-	text, err := h.app.AgentContext(t.Context(), v.ID, "delivery")
-	if err != nil || !strings.Contains(text, w.WorkItemID) || strings.Contains(text, w.Title) {
-		t.Fatal(text, err)
-	}
-	op = h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: v.ID, Body: "background original"}, nil), SubmitMessage{})
-	if op.Status != protocol.OpAccepted {
-		t.Fatal(op)
-	}
-	if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		rows, err := store.RecentMessages(t.Context(), tx.Q(), 100, 0)
-		if err != nil {
-			return err
-		}
-		for _, m := range rows {
-			if m.Body == "background original" {
-				t.Fatal("background leaked into main context")
-			}
-		}
-		page, err := views.Conversation(t.Context(), tx.Q(), 0, 0, 100, v.ID)
-		if err != nil {
-			return err
-		}
-		if len(page.Items) != 1 || page.Items[0].Body != "background original" {
-			t.Fatal(page)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	h.reviewBackgroundOwnerNotices()
-	if d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(v.ID)); err != nil || !ok || d.Destination == MainThreadDestination {
-		t.Fatal(d, ok, err)
-	}
-}
-func TestAgentMissingAssessmentEscalatesExactlyOnce(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	h.prepareAgent(w.WorkItemID)
-	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	id := "work-item:" + w.WorkItemID
-	op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: id, Body: "inspect"}, nil), SubmitMessage{})
-	if op.Status != protocol.OpAccepted {
-		t.Fatal(op)
-	}
-	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(id))
-	if err != nil || !ok {
-		t.Fatal(err)
-	}
-	var p HandleMessage
-	_ = json.Unmarshal(d.Payload, &p)
-	if _, err = h.app.AgentContext(t.Context(), id, d.RequestID); err != nil {
-		t.Fatal(err)
-	}
-	turn := store.MainTurn{RequestID: d.RequestID, MessageID: p.MessageID, ThreadID: "background-thread", TurnID: "turn", Status: store.TurnStarted}
-	if err = h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	count := h.count("outbox")
-	turn.Status = store.TurnCompleted
-	for range 2 {
-		if err = h.app.PutMainTurn(t.Context(), turn); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if h.count("outbox") != count+1 {
-		t.Fatal("missing assessment was silently completed or escalated twice")
-	}
-}
-
 func TestAgentNativeCompactUnknownCannotBeReplayed(t *testing.T) {
 	h := newHarness(t)
 	usage := protocol.AgentContextUsage{ThreadID: "native-thread", Revision: 3, Measurement: "observed", CompactSupported: true}
@@ -264,7 +177,6 @@ func TestAgentRolloutWindowsRetainUnicodeAndScope(t *testing.T) {
 func TestAgentReplyDoesNotReorderMainConversation(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
-	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
 	id := "work-item:" + w.WorkItemID
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		if _, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: "main-sort", Author: "owner", Body: "main"}); err != nil {

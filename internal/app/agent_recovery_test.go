@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -176,56 +175,6 @@ func TestAgentRecoveryDeadlineAndSettingsGate(t *testing.T) {
 	}
 }
 
-func TestAgentRecoveryBackgroundDelayReleasesAdmissionAndStop(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	h.prepareAgent(w.WorkItemID)
-	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	conversation := "work-item:" + w.WorkItemID
-	h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "inspect with automatic recovery"}, nil), SubmitMessage{})
-	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-	if err != nil || !ok {
-		t.Fatal(err)
-	}
-	var input HandleMessage
-	if err := json.Unmarshal(d.Payload, &input); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
-		t.Fatal(err)
-	}
-	rec := store.MainTurn{RequestID: d.RequestID, MessageID: input.MessageID, ThreadID: "bg-thread", TurnID: "bg-failed", Status: store.TurnStarted}
-	if err := h.app.PutMainTurn(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
-	rec.Status = store.TurnFailed
-	rec.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}
-	if err := h.app.PutMainTurn(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
-		t.Fatal(err)
-	}
-	ids, err := h.app.PendingAgentConversations(t.Context())
-	if err != nil || len(ids) != 0 {
-		t.Fatalf("waiting occupied process admission: %v %v", ids, err)
-	}
-	h.clock.Advance(time.Minute)
-	ids, err = h.app.PendingAgentConversations(t.Context())
-	if err != nil || len(ids) != 1 || ids[0] != conversation {
-		t.Fatalf("due recovery not admitted: %v %v", ids, err)
-	}
-	op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "message", ID: rec.MessageID}, protocol.InterruptReplyPayload{MessageID: rec.MessageID}, nil), InterruptReply{})
-	if op.Error != nil {
-		t.Fatal(op.Error)
-	}
-	r, _, err := h.app.AgentRecovery(t.Context(), rec.RequestID)
-	if err != nil || r.Status != "cancelled" {
-		t.Fatalf("background stop %+v %v", r, err)
-	}
-}
-
 func TestAgentRecoveryLateAncestorReceiptCannotRegressStoppedMessage(t *testing.T) {
 	h := newHarness(t)
 	rec := failedRecoveryTurn(t, h)
@@ -271,74 +220,6 @@ func TestAgentRecoveryWithdrawnSuccessorRetainsResponsibility(t *testing.T) {
 		}
 	}
 	t.Fatalf("unfinished original %s not adopted by actual successor: %+v", old.MessageID, v)
-}
-
-func TestAgentRecoveryBackgroundReconnectRetainsNativeReceipt(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	h.prepareAgent(w.WorkItemID)
-	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	conversation := "work-item:" + w.WorkItemID
-	h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "inspect"}, nil), SubmitMessage{})
-	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-	if err != nil || !ok {
-		t.Fatalf("delivery %v %v", ok, err)
-	}
-	var input HandleMessage
-	if err := json.Unmarshal(d.Payload, &input); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
-		t.Fatal(err)
-	}
-	m := store.MainTurn{RequestID: d.RequestID, MessageID: input.MessageID, ThreadID: "bg-native", TurnID: "bg-root", Status: store.TurnStarted}
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	m.Status = store.TurnFailed
-	m.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded"}
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
-		t.Fatal(err)
-	}
-	h.clock.Advance(time.Minute)
-	recovery, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-	if err != nil || !ok {
-		t.Fatalf("recovery %v %v", ok, err)
-	}
-	if yes, err := h.app.AdmitAgentRecovery(t.Context(), recovery.RequestID, m.ThreadID); err != nil || !yes {
-		t.Fatalf("admit %v %v", yes, err)
-	}
-	m.RequestID = recovery.RequestID
-	m.Status = store.TurnStarting
-	m.TurnID = ""
-	m.Failure = nil
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	m.Status = store.TurnStarted
-	m.TurnID = "bg-continuation"
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.AwaitNativeReceipts(t.Context(), m.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.SettleOpenTurns(t.Context(), m.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	turns, err := h.app.UncertainNativeTurns(t.Context(), m.ThreadID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(turns) == 0 {
-		r, _, _ := h.app.AgentRecovery(t.Context(), recovery.RequestID)
-		blocked, _ := h.app.AgentRecoveryUncertain(t.Context(), conversation)
-		t.Fatalf("known continuation lost from receipt reconciliation; recovery=%+v blocked=%t", r, blocked)
-	}
 }
 
 func TestAgentRecoveryNewInputFencesAdmittedAttempt(t *testing.T) {
@@ -455,96 +336,6 @@ func TestAgentRecoveryUnknownSupplementIsNotSuccessor(t *testing.T) {
 	}
 }
 
-func TestAgentRecoveryUnknownBackgroundSchedulesReceiptReads(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	h.prepareAgent(w.WorkItemID)
-	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	conversation := "work-item:" + w.WorkItemID
-	h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "inspect"}, nil), SubmitMessage{})
-	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-	if err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	var input HandleMessage
-	if err := json.Unmarshal(d.Payload, &input); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
-		t.Fatal(err)
-	}
-	m := store.MainTurn{RequestID: d.RequestID, MessageID: input.MessageID, ThreadID: "bg-native", TurnID: "bg-root", Status: store.TurnStarted}
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	m.Status = store.TurnFailed
-	m.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded"}
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
-		t.Fatal(err)
-	}
-	h.clock.Advance(time.Minute)
-	rd, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-	if err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	if yes, err := h.app.AdmitAgentRecovery(t.Context(), rd.RequestID, m.ThreadID); err != nil || !yes {
-		t.Fatal(yes, err)
-	}
-	m.RequestID = rd.RequestID
-	m.Status = store.TurnStarting
-	m.TurnID = ""
-	m.Failure = nil
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	m.Status = store.TurnStarted
-	m.TurnID = "bg-continuation"
-	if err := h.app.PutMainTurn(t.Context(), m); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.AwaitNativeReceipts(t.Context(), m.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.SettleOpenTurns(t.Context(), m.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.BlockAgentRecovery(t.Context(), rd.RequestID, "temporary native history read failure"); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.FinishDelivery(t.Context(), rd, DeliveryResult{Outcome: Unknown}); err != nil {
-		t.Fatal(err)
-	}
-	pending, err := h.app.NativeReceiptPending(t.Context(), rd.RequestID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids, err := h.app.PendingAgentConversations(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("pending receipt=%v scheduled backgrounds=%v", pending, ids)
-	if pending && len(ids) == 0 {
-		t.Fatal("known native execution still needs receipt reads but no background process will be scheduled")
-	}
-	if pending, err := h.app.DeferAgentReceiptRead(t.Context(), conversation); err != nil || !pending {
-		t.Fatal(pending, err)
-	}
-	restarted := New(h.store, h.ids, h.clock.Now)
-	ids, err = restarted.PendingAgentConversations(t.Context())
-	if err != nil || len(ids) != 0 {
-		t.Fatalf("receipt backoff was not retained across restart: %v %v", ids, err)
-	}
-	h.clock.Advance(31 * time.Second)
-	ids, err = restarted.PendingAgentConversations(t.Context())
-	if err != nil || len(ids) != 1 || ids[0] != conversation {
-		t.Fatalf("receipt read not rescheduled: %v %v", ids, err)
-	}
-}
-
 func TestAgentRecoveryWithdrawalRestoresRetainedCandidate(t *testing.T) {
 	h := newHarness(t)
 	old := failedRecoveryTurn(t, h)
@@ -601,43 +392,6 @@ func TestAgentRecoverySuccessorProjectsOriginalMessage(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAgentRecoveryBackgroundStopBeforeFinalRateLimitIsDurable(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	h.prepareAgent(w.WorkItemID)
-	h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	conversation := "work-item:" + w.WorkItemID
-	h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "inspect"}, nil), SubmitMessage{})
-	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-	if err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	var input HandleMessage
-	if err := json.Unmarshal(d.Payload, &input); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
-		t.Fatal(err)
-	}
-	rec := store.MainTurn{RequestID: d.RequestID, MessageID: input.MessageID, ThreadID: "background-native", TurnID: "running-native", Status: store.TurnStarted}
-	if err := h.app.PutMainTurn(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
-	op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "message", ID: rec.MessageID}, protocol.InterruptReplyPayload{MessageID: rec.MessageID}, nil), InterruptReply{})
-	if op.Error != nil {
-		t.Fatal(op.Error)
-	}
-	rec.Status = store.TurnFailed
-	rec.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}
-	if err := h.app.PutMainTurn(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
-	if _, found, err := h.app.AgentRecovery(t.Context(), rec.RequestID); err != nil || found {
-		t.Fatalf("stopped background scheduled recovery: %t %v", found, err)
 	}
 }
 
@@ -707,96 +461,6 @@ func TestAgentRecoveryReplacementFailureRetainsResponsibility(t *testing.T) {
 	v, err := h.app.LogicalTurn(t.Context(), old.RequestID)
 	if err != nil || v.Status != "needs_review" {
 		t.Fatalf("stranded responsibility: %+v %v", v, err)
-	}
-}
-
-func TestAgentRecoveryUnknownBackgroundReplacementSchedulesRead(t *testing.T) {
-	for _, nativeID := range []string{"", "replacement-native"} {
-		name := nativeID
-		if name == "" {
-			name = "missing-native-id"
-		}
-		t.Run(name, func(t *testing.T) {
-			h := newHarness(t)
-			w := h.createWork(workPlan())
-			h.prepareAgent(w.WorkItemID)
-			h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-			conversation := "work-item:" + w.WorkItemID
-			submit := func(body string) {
-				h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: conversation, Body: body}, nil), SubmitMessage{})
-				h.reviewBackgroundOwnerNotices()
-			}
-			submit("original background responsibility")
-			d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-			if err != nil || !ok {
-				t.Fatal(ok, err)
-			}
-			var in HandleMessage
-			if err := json.Unmarshal(d.Payload, &in); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
-				t.Fatal(err)
-			}
-			old := store.MainTurn{RequestID: d.RequestID, MessageID: in.MessageID, ThreadID: "background-thread", TurnID: "failed-native", Status: store.TurnStarted}
-			if err := h.app.PutMainTurn(t.Context(), old); err != nil {
-				t.Fatal(err)
-			}
-			old.Status = store.TurnFailed
-			old.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded"}
-			if err := h.app.PutMainTurn(t.Context(), old); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
-				t.Fatal(err)
-			}
-			submit("replacement constraint")
-			d, _, ok, err = h.app.NextDelivery(t.Context(), store.ConversationDestination(conversation))
-			if err != nil || !ok {
-				t.Fatal(ok, err)
-			}
-			if err := json.Unmarshal(d.Payload, &in); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
-				t.Fatal(err)
-			}
-			rec := store.MainTurn{RequestID: d.RequestID, MessageID: in.MessageID, ThreadID: old.ThreadID, TurnID: nativeID, Status: store.TurnStarting}
-			if nativeID != "" {
-				rec.Status = store.TurnStarted
-			}
-			if err := h.app.PutMainTurn(t.Context(), rec); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.app.AwaitNativeReceipts(t.Context(), rec.ThreadID); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.app.SettleOpenTurns(t.Context(), rec.ThreadID); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Unknown}); err != nil {
-				t.Fatal(err)
-			}
-			pending, err := h.app.NativeReceiptPending(t.Context(), rec.RequestID)
-			if err != nil || !pending {
-				t.Fatalf("replacement lost receipt: %t %v", pending, err)
-			}
-			blocked, err := h.app.AgentRecoveryUncertain(t.Context(), conversation)
-			if err != nil || !blocked {
-				t.Fatalf("replacement lost fence: %t %v", blocked, err)
-			}
-			ids, err := h.app.PendingAgentConversations(t.Context())
-			if err != nil || len(ids) != 1 || ids[0] != conversation {
-				t.Fatalf("replacement lost read candidate: %v %v", ids, err)
-			}
-			if deferred, err := h.app.DeferAgentReceiptRead(t.Context(), conversation); err != nil || !deferred {
-				t.Fatal(deferred, err)
-			}
-			ids, err = h.app.PendingAgentConversations(t.Context())
-			if err != nil || len(ids) != 0 {
-				t.Fatalf("receipt read did not back off: %v %v", ids, err)
-			}
-		})
 	}
 }
 

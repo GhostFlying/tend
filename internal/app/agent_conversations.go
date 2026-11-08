@@ -10,23 +10,6 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-// OpenAgentConversation creates one stable logical conversation per work item.
-type OpenAgentConversation struct{}
-
-func (OpenAgentConversation) Operation() string { return "conversation.open_background" }
-func (OpenAgentConversation) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
-	return allowKinds(x.Principal, protocol.PrincipalOwner, protocol.PrincipalMainAgent)
-}
-func (OpenAgentConversation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), x.Env.Target.ID); err != nil {
-		return Outcome{}, err
-	}
-	id, err := ensureAgentConversation(ctx, x, tx, x.Env.Target.ID)
-	if err != nil {
-		return Outcome{}, err
-	}
-	return Outcome{Result: map[string]any{"conversation_id": id}, Events: []Event{{ObjectType: "conversation", ObjectID: id, Kind: "conversation.created"}}}, nil
-}
 func ensureAgentConversation(ctx context.Context, x *Exec, tx *store.Tx, item string) (string, error) {
 	if _, err := store.GetIssue(ctx, tx.Q(), item); err != nil {
 		return "", errNotFound(err, "work item does not exist")
@@ -75,15 +58,10 @@ func (a *App) AgentContext(ctx context.Context, id string, request string) (stri
 			return err
 		}
 
-		if !canonical {
-			ready, err = store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
-			if err != nil {
-				return err
-			}
+		if !canonical || !ready {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "an active registered Issue manager is required")
 		}
-		if !ready {
-			return protocol.Errorf(protocol.CodeInvalidTransition, "main agent must prepare or reconcile the context baseline before background processing")
-		}
+
 		if _, err := tx.Exec(ctx, `INSERT INTO agent_turn_contexts(request_id,conversation_id,context_revision) VALUES(?,?,?) ON CONFLICT(request_id) DO UPDATE SET context_revision=excluded.context_revision`, request, id, index.ContextRevision); err != nil {
 			return err
 		}
@@ -166,10 +144,7 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 				return err
 			}
 			if !canonical {
-				ready, err = store.WorkItemContextReady(ctx, tx.Q(), c.WorkItemID)
-				if err != nil {
-					return err
-				}
+				continue
 			}
 			if inflight || (ready && headErr == nil && head.NextAttemptAt <= a.now().UnixMilli()) || dueReceipts[id] {
 				runnable = append(runnable, id)

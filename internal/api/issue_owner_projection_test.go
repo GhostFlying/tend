@@ -95,19 +95,9 @@ func TestOwnerIssueProjectionPreservesOriginalsAndAssociationCAS(t *testing.T) {
 	if status := e.do("GET", path, token, nil, &before); status != http.StatusOK || len(before.Items) != 0 || before.Disposition != "linked" {
 		t.Fatal("historical classification invented clickable Issue", status, before)
 	}
-	open := e.envelope("conversation.open_background", protocol.Target{Type: "work_item", ID: legacyID}, nil, struct{}{})
-	opened, err := e.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}, &open, app.OpenAgentConversation{})
-	if err != nil || opened.Status != protocol.OpSucceeded {
-		t.Fatal(opened, err)
-	}
-	var logical struct {
-		ID string `json:"conversation_id"`
-	}
-	if err := json.Unmarshal(opened.Result, &logical); err != nil {
-		t.Fatal(err)
-	}
+	logicalID := "work-item:" + legacyID
 	var projectedConversation protocol.IssueAgentConversation
-	if status := e.do("GET", "/api/v1/agent-conversations/"+logical.ID+"?projection=issues", token, nil, &projectedConversation); status != http.StatusOK || projectedConversation.IssueID != "" {
+	if status := e.do("GET", "/api/v1/agent-conversations/"+logicalID+"?projection=issues", token, nil, &projectedConversation); status != http.StatusOK || projectedConversation.IssueID != "" {
 		t.Fatal("legacy chat invented an Issue", status, projectedConversation)
 	}
 	command := e.envelope("conversation.set_issue_associations", protocol.Target{Type: "message", ID: submitted.MessageID}, &before.Revision, protocol.SetIssueMessageAssociationsPayload{Disposition: "linked", ContentRevision: before.ContentRevision, IssueIDs: []string{issue.IssueID}})

@@ -33,7 +33,7 @@ func TestIntegrationNativeNetworkPermissions(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"permissions\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"total_tokens\":0}}}\n\n")
 	}))
 	defer backend.Close()
-	for _, role := range []string{"main", "background", "worker"} {
+	for _, role := range []string{"main", "worker"} {
 		t.Run(role, func(t *testing.T) {
 			home, cwd := t.TempDir(), t.TempDir()
 			config := fmt.Sprintf("model_provider = \"probe\"\n[model_providers.probe]\nname = \"probe\"\nbase_url = %q\nwire_api = \"responses\"\nrequires_openai_auth = false\n", backend.URL+"/v1")
@@ -49,12 +49,6 @@ func TestIntegrationNativeNetworkPermissions(t *testing.T) {
 			defer s.Close()
 			cfg := ThreadConfig(cwd, "probe-model")
 			want := "read-only"
-			if role == "background" {
-				cfg = backgroundThreadConfig(cfg)
-				cfg.Config["sandbox_workspace_write.exclude_slash_tmp"] = true
-				cfg.Config["sandbox_workspace_write.exclude_tmpdir_env_var"] = true
-				want = "workspace-write"
-			}
 			if role == "worker" {
 				cfg = harness.ThreadConfig{Cwd: cwd, Model: "probe-model", Sandbox: "danger-full-access", ApprovalPolicy: "never"}
 				want = "danger-full-access"
@@ -113,9 +107,7 @@ func TestIntegrationNativeNetworkPermissions(t *testing.T) {
 			if policy.Type != want || (role != "worker" && !policy.Network) {
 				t.Fatalf("native policy %+v, want %s with networking", policy, want)
 			}
-			if role == "background" && (!policy.ExcludeTmp || !policy.ExcludeEnvTmp) {
-				t.Fatalf("native filesystem exclusions lost: %+v", policy)
-			}
+
 			t.Logf("native %s: filesystem=%s network_enabled=%v", role, policy.Type, role == "worker" || policy.Network)
 		})
 	}

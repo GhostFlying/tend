@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -22,15 +20,12 @@ import (
 
 // startMainThread runs the main thread manager and the dispatcher with a
 // fake main agent.
-func (s *server) startHistoricalMainThread(h *testkit.Harness, background ...func(*testkit.FakeThread, string, harness.TurnInput) string) {
+func (s *server) startHistoricalMainThread(h *testkit.Harness) {
 	ctx, cancel := context.WithCancel(context.Background())
 	originalTurn := h.Turn
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		if ctx.Err() != nil {
 			return "interrupted"
-		}
-		if strings.HasPrefix(th.Config.Cwd, "/background/") && len(background) > 0 {
-			return background[0](th, turn, in)
 		}
 		if in.Repair {
 			return completeHistoricalFixtureReview(ctx, s, th, turn)
@@ -57,13 +52,7 @@ func (s *server) startHistoricalMainThread(h *testkit.Harness, background ...fun
 		Open: h.Open, RestartDelay: 20 * time.Millisecond, Log: quiet(),
 	})
 	handlers := map[string]dispatch.Handler{app.MainThreadDestination: m, app.MainThreadControlDestination: m.Control()}
-	if len(background) > 0 {
-		pool := &mainthread.BackgroundPool{App: s.app, Front: m, New: func(id string) (*mainthread.Manager, error) {
-			return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, quiet()), mainthread.Config{Instance: "main/" + id, ConversationID: id, Thread: harness.ThreadConfig{Cwd: "/background/" + id}, Open: h.Open, RestartDelay: 20 * time.Millisecond, Log: quiet()}), nil
-		}}
-		handlers[app.MainThreadControlDestination] = pool
-		wg.Go(func() { pool.Run(ctx) })
-	}
+
 	d := dispatch.New(s.app, handlers, s.signal, time.Now, dispatch.Config{PollInterval: 50 * time.Millisecond}, quiet())
 	wg.Go(func() { _ = m.Run(ctx) })
 	wg.Go(func() { _ = d.Run(ctx) })
@@ -188,24 +177,4 @@ func businessStarts(h *testkit.Harness) []harness.TurnInput {
 		}
 	}
 	return out
-}
-
-// Legacy assessments bind to the immutable context actually delivered at turn
-// admission, rather than a later read of current work-item metadata.
-func historicalDeliveredContextRevision(t *testing.T, h *testkit.Harness, thread string) int64 {
-	t.Helper()
-	var delivered int64
-	for _, text := range h.Injected(thread) {
-		if start := strings.Index(text, `{"format":"index-v1"`); start >= 0 {
-			var index protocol.ConversationContextIndex
-			if err := json.Unmarshal([]byte(text[start:]), &index); err != nil {
-				t.Fatal(err)
-			}
-			delivered = index.ContextRevision
-		}
-	}
-	if delivered == 0 {
-		t.Error("missing injected historical context revision")
-	}
-	return delivered
 }

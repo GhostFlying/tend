@@ -163,7 +163,7 @@ func namedHostedSelection(ctx context.Context, q store.Querier, prepared *hosted
 	}
 	issue, err := store.GetCanonicalIssue(ctx, q, current.WorkItemID)
 	if errors.Is(err, store.ErrNotFound) {
-		return hostedconfig.Selection{}, false, nil
+		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "work-item background checker has been retired")
 	}
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
