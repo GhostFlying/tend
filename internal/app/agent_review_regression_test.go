@@ -22,7 +22,7 @@ func TestReviewCancelledFollowupMustNotRemainDeliverable(t *testing.T) {
 		t.Fatal(op)
 	}
 	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination("work-item:"+w.WorkItemID))
+	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 	if err != nil {
 		t.Fatal(err)
 	}
