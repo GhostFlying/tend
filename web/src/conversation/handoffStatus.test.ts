@@ -20,10 +20,6 @@ const state = (patch: Partial<ConversationHandoffView> = {}): HandoffState => ({
 
 test("main work is not evidence that a summary is generating or queued", () => {
   expect(handoffStatus(state({ pending: true }))).toBe("主会话仍有未结工作");
-  expect(handoffStatus(state({ pending: true, preparing: true }))).toBe("正在生成预备摘要");
-  expect(handoffStatus({ ...state(), preparationRequestId: "original-request" })).toBe(
-    "摘要请求已提交，状态待更新",
-  );
   for (const status of ["pending", "sending"])
     expect(
       handoffStatus(
@@ -36,7 +32,7 @@ test("main work is not evidence that a summary is generating or queued", () => {
           },
         }),
       ),
-    ).toBe("摘要或交接请求尚未完成");
+    ).toBe("交接请求尚未完成");
 });
 
 test("unrelated pending work cannot hide the recorded failed or unknown request", () => {
@@ -61,7 +57,7 @@ test("unrelated pending work cannot hide the recorded failed or unknown request"
 
 test("an unavailable observation differs from a known request failure", () => {
   expect(handoffStatus({ ...state(), readError: "observation_unavailable" })).toBe(
-    "摘要状态暂不可读取",
+    "交接状态暂不可读取",
   );
   expect(handoffStatus({ ...state(), pendingId: "unknown-write" })).toBe("操作结果待核对");
   expect(handoffStatus({ ...state(), error: "request failed" })).toBe("操作未完成");

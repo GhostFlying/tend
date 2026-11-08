@@ -10,45 +10,15 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestHandoffSettingsRevisionAndQueuedOwnerCommand(t *testing.T) {
+func TestRetiredSummaryRequestsDoNotQueueMaintenance(t *testing.T) {
 	h := newHarness(t)
-	ctx := context.Background()
-	p := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}
-	initial, err := h.app.HandoffSettings(ctx)
-	if err != nil || initial.Revision != 0 {
-		t.Fatalf("unexpected override: %+v %v", initial, err)
-	}
-	env := h.env("conversation.set_handoff_settings", protocol.Target{Type: "conversation"}, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: 0}, rev(0))
-	first := h.exec(p, env, SetConversationHandoffSettings{})
-	if first.Status != protocol.OpSucceeded {
-		t.Fatal(first)
-	}
-	replay := h.exec(p, env, SetConversationHandoffSettings{})
-	if string(first.Result) != string(replay.Result) || h.count("conversation_handoff_settings") != 1 {
-		t.Fatalf("setting replay changed: %+v", replay)
-	}
-	stale := h.exec(p, h.env(env.Operation, env.Target, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: 50}, rev(0)), SetConversationHandoffSettings{})
-	if stale.Error == nil || stale.Error.Code != protocol.CodeStaleRevision {
-		t.Fatal(stale)
-	}
-	settings, err := h.app.ConversationSettings(ctx)
-	if err != nil || settings.Revision != 0 {
-		t.Fatalf("handoff changed model settings: %+v %v", settings, err)
-	}
-	command := h.env("conversation.handoff", env.Target, protocol.ConversationHandoffPayload{PrepareOnly: true}, nil)
+	env := h.env("conversation.set_handoff_settings", protocol.Target{Type: "conversation"}, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: 50}, rev(0))
 	for range 2 {
-		if op := h.exec(p, command, ConversationHandoff{}); op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
-		}
+		expectWorkCode(t, h.exec(owner, env, SetConversationHandoffSettings{}), protocol.CodeInvalidRequest)
 	}
-	if h.count("outbox WHERE destination='main_thread' AND operation='conversation.handoff'") != 1 {
-		t.Fatal("owner replay queued duplicate maintenance")
-	}
-	if _, err := h.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "native"}, h.env(env.Operation, env.Target, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: 50}, rev(1)), SetConversationHandoffSettings{}); protocol.CodeOf(err) != protocol.CodeForbidden {
-		t.Fatalf("agent could change policy: %v", err)
-	}
-	if snap, err := h.app.HandoffSnapshot(ctx, "main"); err != nil || snap.Pending {
-		t.Fatalf("maintenance outbox counted as user pending: %+v %v", snap, err)
+	expectWorkCode(t, h.exec(owner, h.env("conversation.handoff", env.Target, protocol.ConversationHandoffPayload{PrepareOnly: true}, nil), ConversationHandoff{}), protocol.CodeInvalidRequest)
+	if h.count("conversation_handoff_settings") != 0 || h.count("outbox WHERE operation='conversation.handoff'") != 0 {
+		t.Fatal("retired summary started maintenance")
 	}
 }
 
@@ -210,25 +180,6 @@ func TestSummaryBackoffAndStalenessSurviveAnotherAppReader(t *testing.T) {
 	h.clock.Advance(time.Hour)
 	if ok, err := other.ClaimSummaryAttempt(ctx, snap, 0); err != nil || ok {
 		t.Fatalf("successful source regenerated: %t %v", ok, err)
-	}
-}
-
-func TestHandoffSettingsRejectOutOfRangeWithoutChangingRevision(t *testing.T) {
-	h := newHarness(t)
-	p := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}
-	for _, minutes := range []int64{-1, 10081} {
-		op := h.exec(p, h.env("conversation.set_handoff_settings", protocol.Target{Type: "conversation"}, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: minutes}, rev(0)), SetConversationHandoffSettings{})
-		if op.Error == nil || op.Error.Code != protocol.CodeInvalidRequest {
-			t.Fatalf("invalid range accepted: %+v", op)
-		}
-	}
-	v, err := h.app.HandoffSettings(context.Background())
-	if err != nil || v.Revision != 0 {
-		t.Fatalf("invalid setting changed policy: %+v %v", v, err)
-	}
-	op := h.exec(p, h.env("conversation.set_handoff_settings", protocol.Target{Type: "conversation"}, protocol.SetConversationHandoffSettingsPayload{IdleMinutes: 10080}, rev(0)), SetConversationHandoffSettings{})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
 	}
 }
 

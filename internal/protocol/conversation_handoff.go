@@ -2,6 +2,7 @@ package protocol
 
 // ConversationHandoffView exposes shared summary policy and current coverage.
 type ConversationHandoffView struct {
+	Mode               string                       `json:"mode,omitempty"`
 	Enabled            bool                         `json:"enabled"`
 	IdleMinutes        int64                        `json:"idle_minutes"`
 	Revision           int64                        `json:"revision"`

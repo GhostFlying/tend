@@ -200,6 +200,70 @@ func (b *Builder) Prepare(ctx context.Context, threadKey string, messageSeq int6
 	return &Packet{ID: packet.PacketID, Text: packet.Body, Full: snap.Full}, nil
 }
 
+// PrepareIndex records a notification watermark, never a claim that source text was read.
+func (b *Builder) PrepareIndex(ctx context.Context, threadKey string, messageSeq int64) (*Packet, error) {
+	if err := b.settleUnconfirmed(ctx, threadKey); err != nil {
+		return nil, err
+	}
+	var packet store.Packet
+	err := b.store.Read(ctx, func(tx *store.ReadTx) error {
+		base, err := store.GetBaseline(ctx, tx.Q(), threadKey)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		index, err := views.ConversationContextIndex(ctx, tx.Q(), "main", protocol.ConversationContextQuery{})
+		if err != nil {
+			return err
+		}
+		if base.Valid && base.Watermark == index.ThroughEventSeq {
+			return nil
+		}
+		index.FocusMessageSeq = messageSeq
+		if base.Valid && base.Watermark > 0 {
+			args := []any{base.Watermark, index.ThroughEventSeq}
+			placeholders := make([]string, len(told))
+			for i, kind := range told {
+				placeholders[i] = "?"
+				args = append(args, kind)
+			}
+			rows, err := tx.Q().QueryContext(ctx, `SELECT object_id,kind,event_seq FROM events WHERE event_seq>? AND event_seq<=? AND kind IN (`+strings.Join(placeholders, ",")+`) ORDER BY event_seq DESC LIMIT 4`, args...)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var ref protocol.ConversationContextReference
+				if err = rows.Scan(&ref.ID, &ref.Kind, &ref.Seq); err != nil {
+					rows.Close()
+					return err
+				}
+				if len(index.ChangedObjects) == 3 {
+					index.ChangesMore = true
+					break
+				}
+				index.ChangedObjects = append(index.ChangedObjects, ref)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+		}
+		text, err := protocol.ContextIndexText(index)
+		if err != nil {
+			return err
+		}
+		packet = store.Packet{PacketID: b.ids.New(protocol.PrefixPacket), ThreadKey: threadKey, Epoch: base.Epoch + 1, Kind: "index", FromSeq: base.Watermark + 1, ToSeq: index.ThroughEventSeq, Body: text}
+		return nil
+	})
+	if err != nil || packet.PacketID == "" {
+		return nil, err
+	}
+	if err = b.app.RecordPacket(ctx, packet); err != nil {
+		return nil, err
+	}
+	return &Packet{ID: packet.PacketID, Text: packet.Body}, nil
+}
+
 // settleUnconfirmed marks a packet a previous attempt left neither
 // confirmed nor failed, for example because tend stopped while injecting,
 // as unknown; that invalidates the baseline.

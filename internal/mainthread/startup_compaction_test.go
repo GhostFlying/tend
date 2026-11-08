@@ -250,34 +250,6 @@ func (t *acknowledgedCompactThread) AcknowledgeEvent(_ context.Context, event ha
 	return nil
 }
 
-func TestCompactRecoveryBlocksIdleNativeSummary(t *testing.T) {
-	for _, state := range []string{"pending_recovery", "settled_recovery", "live_unknown"} {
-		t.Run(state, func(t *testing.T) {
-			f := newHandoffFixture(t)
-			seedIdleConversation(t, f)
-			seedUnknownCompact(t, f)
-			if state != "live_unknown" {
-				if _, err := f.e.m.openThread(t.Context(), f.session); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if state == "settled_recovery" {
-				if err := f.e.app.CompleteNativeCompact(t.Context(), "main", f.source.ID(), "original-completion"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			f.clock.Advance(time.Hour)
-			if err := f.e.m.idleSummary(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			_, forks, _ := f.session.counts()
-			if forks != 0 || f.e.count(`SELECT COUNT(*) FROM conversation_summary_attempts`) != 0 {
-				t.Fatal("compact isolation admitted a fresh native summary", forks)
-			}
-		})
-	}
-}
-
 func TestCompactResumeQuarantinesSynchronousToolCallback(t *testing.T) {
 	f := newHandoffFixture(t)
 	f.e.m.cfg.MaintenanceEnabled = false
@@ -314,22 +286,5 @@ func TestCompactResumeQuarantinesSynchronousToolCallback(t *testing.T) {
 	}
 	if !called || result.Success {
 		t.Fatal("buffered resume callback reached the tool service before quarantine", called, result)
-	}
-}
-
-func TestIdleSummaryResumesAfterLiveCompactCompletes(t *testing.T) {
-	f := newHandoffFixture(t)
-	seedIdleConversation(t, f)
-	seedUnknownCompact(t, f)
-	if err := f.e.app.CompleteNativeCompact(t.Context(), "main", f.source.ID(), "original-completion"); err != nil {
-		t.Fatal(err)
-	}
-	f.clock.Advance(time.Hour)
-	if err := f.e.m.idleSummary(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	_, forks, _ := f.session.counts()
-	if forks != 1 {
-		t.Fatal("settled live compact incorrectly disabled normal idle summary", forks)
 	}
 }

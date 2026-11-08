@@ -46,7 +46,7 @@ func TestConsultationQuestionHasNoIssueAndActualRequestDelegatesToManagerTask(t 
 		t.Fatal(selected, named, err)
 	}
 	context, err := h.app.AgentContext(t.Context(), c.ID, qa.RequestID)
-	if err != nil || !strings.Contains(context, "ordinary consultation") {
+	if err != nil || !strings.Contains(context, `"kind":"consultation"`) || len(context) > protocol.ContextIndexBudget {
 		t.Fatal(context, err)
 	}
 	reply := recordAgentMessagePayload{ReplyTo: question, TurnID: qa.TurnID, ItemID: "answer", Body: "Here is an explanation, without execution", Status: protocol.AssistantCompleted}

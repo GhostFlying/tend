@@ -227,7 +227,7 @@ func TestStartupMissingSourceUsesSummaryAndHistoryReference(t *testing.T) {
 			f := newHandoffFixture(t)
 			ctx := context.Background()
 			f.e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}}, app.SyncConfig{})
-			f.e.exec(owner, "tasks.create", protocol.Target{Type: "task"}, map[string]any{"title": "SOURCE_UNAVAILABLE_LEDGER_TASK", "spec": spec}, app.CreateTask{})
+			f.e.exec(owner, "tasks.create", protocol.Target{Type: "task"}, map[string]any{"title": "conversation_context_index", "spec": spec}, app.CreateTask{})
 
 			if cached {
 				f.saveSummary(t)
@@ -239,13 +239,13 @@ func TestStartupMissingSourceUsesSummaryAndHistoryReference(t *testing.T) {
 			}
 			assertCurrentRecoveredThread(t, f, target)
 			injected := strings.Join(f.e.h.Injected(target.ID()), "\n")
-			for _, marker := range []string{f.source.ID(), "rollout:" + f.source.ID(), "SOURCE_UNAVAILABLE_LEDGER_TASK", `"source_native_available":false`} {
+			for _, marker := range []string{f.source.ID(), "rollout:" + f.source.ID(), "conversation_context_index", `"source_native_available":false`} {
 				if !strings.Contains(injected, marker) {
 					t.Errorf("fallback missing %q", marker)
 				}
 			}
-			if cached && !strings.Contains(injected, "CACHED_SUMMARY_MARKER") {
-				t.Fatal("missing-source fallback lost cached summary")
+			if strings.Contains(injected, "CACHED_SUMMARY_MARKER") {
+				t.Fatal("missing-source fallback injected old summary")
 			}
 			starts, forks, _ := f.session.counts()
 			if starts != 2 || forks != 0 {

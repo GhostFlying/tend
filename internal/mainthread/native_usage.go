@@ -71,7 +71,7 @@ func (m *Manager) syncNativeUsage(ctx context.Context) { m.syncNativeUsageState(
 
 func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) time.Duration {
 	m.mu.Lock()
-	final := m.usageSettling && (m.active == nil || m.active.finished) && !m.summaryActive
+	final := m.usageSettling && (m.active == nil || m.active.finished)
 	m.mu.Unlock()
 	return m.syncNativeUsagePass(ctx, complete, final)
 }
@@ -219,14 +219,14 @@ func (m *Manager) startNativeUsage(ctx context.Context, th harness.Thread) func(
 func (m *Manager) nativeUsageLoop(ctx context.Context, wake <-chan struct{}) {
 	for {
 		m.mu.Lock()
-		active := (m.active != nil && !m.active.finished) || m.summaryActive
+		active := (m.active != nil && !m.active.finished)
 		settling, until := m.usageSettling, m.usageSettleUntil
 		m.usageSettling = false
 		m.mu.Unlock()
 		due := !until.IsZero() && !m.cfg.Now().Before(until)
 		delay := m.syncNativeUsagePass(ctx, false, !active && (settling || due))
 		m.mu.Lock()
-		active = (m.active != nil && !m.active.finished) || m.summaryActive
+		active = (m.active != nil && !m.active.finished)
 		if due && delay == 0 && !active && m.usageSettleUntil.Equal(until) {
 			m.usageSettleUntil = time.Time{}
 		}

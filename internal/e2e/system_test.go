@@ -196,9 +196,12 @@ func historicalDeliveredContextRevision(t *testing.T, h *testkit.Harness, thread
 	t.Helper()
 	var delivered int64
 	for _, text := range h.Injected(thread) {
-		var revision int64
-		if _, err := fmt.Sscanf(text, "Work-item context at revision %d.", &revision); err == nil {
-			delivered = revision
+		if start := strings.Index(text, `{"format":"index-v1"`); start >= 0 {
+			var index protocol.ConversationContextIndex
+			if err := json.Unmarshal([]byte(text[start:]), &index); err != nil {
+				t.Fatal(err)
+			}
+			delivered = index.ContextRevision
 		}
 	}
 	if delivered == 0 {

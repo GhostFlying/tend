@@ -54,7 +54,7 @@ func (s *Server) agentRollout(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid cursor")
 		}
-		return store.AgentRollout(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("turn_id"), after)
+		return store.AgentRollout(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("turn_id"), after, r.URL.Query().Get("thread_id"))
 	})
 }
 func (s *Server) agentUsage(w http.ResponseWriter, r *http.Request) {
@@ -90,5 +90,15 @@ func (s *Server) agentRolloutWindow(w http.ResponseWriter, r *http.Request) {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid rollout offset")
 		}
 		return store.AgentRolloutWindow(r.Context(), q, r.PathValue("id"), seq, offset)
+	})
+}
+
+func (s *Server) conversationContextIndex(w http.ResponseWriter, r *http.Request) {
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		limit, err := intParam(r.URL.Query().Get("limit"))
+		if err != nil {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid index limit")
+		}
+		return views.ConversationContextIndex(r.Context(), q, r.PathValue("id"), protocol.ConversationContextQuery{Section: r.URL.Query().Get("section"), After: r.URL.Query().Get("after"), Limit: int(limit)})
 	})
 }

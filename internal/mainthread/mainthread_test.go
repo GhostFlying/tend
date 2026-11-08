@@ -246,7 +246,7 @@ func TestMainRejectsRetiredDirectExecutionAndRetainsReply(t *testing.T) {
 		thread, err = store.GetMainThread(context.Background(), tx.Q(), "main")
 		return err
 	})
-	if inj := h.Injected(thread); len(inj) != 1 || !strings.Contains(inj[0], "kind=full") {
+	if inj := h.Injected(thread); len(inj) != 1 || !strings.Contains(inj[0], "index-v1") {
 		t.Errorf("injected = %q, want one full snapshot", inj)
 	}
 	eventually(t, "the delivery is recorded", func() bool { return e.outboxStatus() == store.OutboxDelivered })
@@ -400,7 +400,7 @@ func TestRejectedTurnStartIsRetried(t *testing.T) {
 	})
 }
 
-func TestCompactionTriggersFullSnapshot(t *testing.T) {
+func TestCompactionTriggersFreshIndex(t *testing.T) {
 	h := testkit.NewHarness()
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		if strings.Contains(in.Text, "compact") {
@@ -428,9 +428,8 @@ func TestCompactionTriggersFullSnapshot(t *testing.T) {
 		return err
 	})
 	inj := h.Injected(thread)
-	// The second turn had nothing new to inject; after its compaction the
-	// third gets a full snapshot under a new epoch.
-	if len(inj) != 2 || !strings.Contains(inj[1], "kind=full") || !strings.Contains(inj[1], "epoch=2") {
+	// Compact invalidation refreshes metadata; it never reintroduces prose.
+	if len(inj) < 2 || !strings.Contains(inj[len(inj)-1], "index-v1") || len(inj[len(inj)-1]) > protocol.ContextIndexBudget {
 		t.Errorf("injections after compaction = %q", inj)
 	}
 }

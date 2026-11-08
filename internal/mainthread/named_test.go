@@ -80,23 +80,6 @@ func TestNamedHostedMainUsesDefinitionForActualStartAndResume(t *testing.T) {
 			return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed' AND model='native-model' AND settings_revision=1`) == i+1
 		})
 	}
-	e.m.mu.Lock()
-	session, source := e.m.session, e.m.thread
-	e.m.mu.Unlock()
-	selection, err := e.m.summaryModel(t.Context(), session, source)
-	if err != nil || selection.Model != "native-model" || selection.Provider != "native-provider" || selection.Effort != "high" {
-		t.Fatalf("maintenance ignored active frozen named selection: %+v %v", selection, err)
-	}
-	forkSession := &handoffTestSession{Session: session, h: h}
-	fork, forker, err := e.m.summaryFork(t.Context(), forkSession, source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer forker.ReleaseThread(t.Context(), fork.ID())
-	forkConfig := fork.(*handoffTestThread).Thread.(*testkit.FakeThread).Config
-	if forkConfig.Model != selection.Model || forkConfig.Config["model_provider"] != selection.Provider || forkConfig.Config["model_reasoning_effort"] != selection.Effort || forkConfig.Sandbox != "read-only" || forkConfig.ApprovalPolicy != "never" || len(forkConfig.Tools) != 0 {
-		t.Fatalf("summary fork configuration differs from frozen selection: %+v want %+v", forkConfig, selection)
-	}
 	starts := businessStarts(h)
 	if len(starts) != 2 {
 		t.Fatalf("business starts=%d", len(starts))

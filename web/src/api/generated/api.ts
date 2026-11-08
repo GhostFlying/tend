@@ -293,6 +293,8 @@ export interface TendAPI {
   ConfirmAttentionPayload?: ConfirmAttentionPayload;
   ContinueRetainedRunPayload?: ContinueRetainedRunPayload;
   ConversationAttachment?: ConversationAttachment;
+  ConversationContextIndex?: ConversationContextIndex;
+  ConversationContextQuery?: ConversationContextQuery;
   ConversationHandoffPayload?: ConversationHandoffPayload;
   ConversationHandoffView?: ConversationHandoffView;
   ConversationImageResponse?: ConversationImageResponse;
@@ -2693,6 +2695,62 @@ export interface ConversationAttachment {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationContextIndex".
+ */
+export interface ConversationContextIndex {
+  assignment_epoch?: number;
+  changed_objects?: ConversationContextReference[];
+  changes_more?: boolean;
+  context_revision?: number;
+  conversation_id: string;
+  coverage: string;
+  fact_count: number;
+  focus_message_seq?: number;
+  format: string;
+  issue_id?: string;
+  items: ConversationContextReference[] | null;
+  kind: string;
+  more: boolean;
+  next?: string;
+  review_required: boolean;
+  revision: number;
+  section: string;
+  source_count: number;
+  state?: string;
+  thread_count: number;
+  through_event_seq: number;
+  through_message_seq: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationContextReference".
+ */
+export interface ConversationContextReference {
+  association_revision?: number;
+  content_revision?: number;
+  conversation_id?: string;
+  id: string;
+  issue_id?: string;
+  kind: string;
+  needs_review: boolean;
+  rollout_path?: string;
+  seq?: number;
+  source_message_id?: string;
+  superseded?: boolean;
+  withdrawn?: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ConversationContextQuery".
+ */
+export interface ConversationContextQuery {
+  after?: string;
+  conversation_id?: string;
+  limit?: number;
+  section?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConversationHandoffPayload".
  */
 export interface ConversationHandoffPayload {
@@ -2708,6 +2766,7 @@ export interface ConversationHandoffView {
   idle_minutes: number;
   last_activity_millis: number;
   maintenance?: ConversationMaintenanceView;
+  mode?: string;
   pending: boolean;
   preparing: boolean;
   revision: number;

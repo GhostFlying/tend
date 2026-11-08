@@ -3,7 +3,6 @@ package mainthread
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -108,101 +107,6 @@ func TestDistinctManualHandoffRefusesUnknownIntentAndUnblocksOwnerChat(t *testin
 	}
 	if len(businessStarts(f.e.h)) != 1 {
 		t.Fatal("maintenance request started an owner turn or replayed chat")
-	}
-}
-
-func TestHistoricalUnknownDoesNotBlockFreshSourceManualOrIdleSummary(t *testing.T) {
-	f := newHandoffFixture(t)
-	ctx := context.Background()
-	const body = "HISTORICAL_UNKNOWN_OWNER_BODY: action outcome remains unknown"
-	message := f.e.say(body)
-	delivery, _, ok, err := f.e.app.NextDelivery(ctx, app.MainThreadDestination)
-	if err != nil || !ok {
-		t.Fatalf("claim owner delivery: %v %v", ok, err)
-	}
-	if err := f.e.app.PutMainTurn(ctx, store.MainTurn{RequestID: delivery.RequestID, MessageID: message, ThreadID: "legacy-ancestor", Status: store.TurnStarting}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.e.app.FinishDelivery(ctx, delivery, app.DeliveryResult{Outcome: app.Unknown, Reason: "start response lost; old native session closed"}); err != nil {
-		t.Fatal(err)
-	}
-	inputs := make(chan string, 4)
-	f.session.summaryTurn = func(th *testkit.FakeThread, id string, in harness.TurnInput) string {
-		inputs <- in.Text
-		th.Say(id, "summary", body+". Preserve this uncertainty and never repeat the action.")
-		return "completed"
-	}
-	target, err := f.e.m.openManagedThread(ctx, f.session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertCurrentRecoveredThread(t, f, target)
-	select {
-	case originalInput := <-inputs:
-		if !strings.Contains(originalInput, body) || !strings.Contains(originalInput, `"state":"unknown"`) || !strings.Contains(originalInput, `"unconfirmed_owner_input":true`) {
-			t.Fatal("actual unknown message state/body omitted from first complete summary input")
-		}
-	default:
-		t.Fatal("startup did not prepare observed unknown history")
-	}
-	for len(inputs) > 0 {
-		<-inputs
-	}
-	f.e.m.mu.Lock()
-	f.e.m.session = f.session
-	f.e.m.thread = target
-	f.e.m.mu.Unlock()
-	manual := f.e.m.Deliver(ctx, app.Delivery{RequestID: "prepare-new-source", Operation: "conversation.handoff", Payload: []byte(`{"prepare_only":true}`)})
-	if manual.Outcome != app.Delivered {
-		t.Fatalf("historical unknown blocked manual summary: %+v", manual)
-	}
-	select {
-	case text := <-inputs:
-		if !strings.Contains(text, body) {
-			t.Fatal("manual summary lost preserved unknown-reference facts")
-		}
-	default:
-		t.Fatal("new native source did not receive private summary preparation")
-	}
-	if err := f.e.store.Write(ctx, func(tx *store.Tx) error {
-		_, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: "new-server-observation", Author: "system", Body: "A later ledger observation", CreatedAt: f.clock.Now().UnixMilli()})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	f.clock.Advance(50 * time.Minute)
-	if err := f.e.m.idleSummary(ctx); err != nil {
-		t.Fatalf("historical unknown blocked idle summary: %v", err)
-	}
-	select {
-	case text := <-inputs:
-		if !strings.Contains(text, body) {
-			t.Fatal("idle summary lost unknown facts from previous full summary")
-		}
-	default:
-		t.Fatal("historical unknown prevented idle summary from starting")
-	}
-	snapshot, err := f.e.app.HandoffSnapshot(ctx, "main")
-	if err != nil || snapshot.Pending || snapshot.Active {
-		t.Fatalf("historical unknown reported as live work %+v %v", snapshot, err)
-	}
-	summary, exists, err := f.e.app.HandoffSummary(ctx, "main")
-	if err != nil || !exists || !summary.Snapshot.Covers(snapshot) {
-		t.Fatalf("summary coverage not current %+v %v", summary, err)
-	}
-	recorded, exists, err := f.e.app.MainTurn(ctx, delivery.RequestID)
-	if err != nil || !exists || recorded.Status != store.TurnStarting || recorded.ThreadID != "legacy-ancestor" {
-		t.Fatalf("historical unknown turn changed %+v %v", recorded, err)
-	}
-	if f.e.count(`SELECT COUNT(*) FROM outbox WHERE request_id=? AND status='unknown' AND attempts=1`, delivery.RequestID) != 1 || len(businessStarts(f.e.h)) != 0 {
-		t.Fatal("historical unknown delivery was reset or replayed")
-	}
-	full, err := f.e.app.HandoffSummaryInput(ctx, "main", 256<<10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if full.PreviousSummary == nil || !strings.Contains(full.PreviousSummary.Body, body) {
-		t.Fatal("unknown outcome disappeared from immutable summary baseline")
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 
 // UpgradeDrainStatus is called after the durable gate is established. Holding
 // workMu proves no delivery or tool callback is still executing; a private
-// summary also has to finish before the harness process can be replaced.
+// Unconfirmed native operations must settle before process replacement.
 func (m *Manager) UpgradeDrainStatus(ctx context.Context) (bool, error) {
 	if _, err := m.app.UpgradePausesMain(ctx); err != nil {
 		return false, err
@@ -18,7 +18,7 @@ func (m *Manager) UpgradeDrainStatus(ctx context.Context) (bool, error) {
 	defer m.workMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.session != nil && m.thread != nil && m.active == nil && !m.summaryActive && !m.maintenanceBlocked, nil
+	return m.session != nil && m.thread != nil && m.active == nil && !m.maintenanceBlocked, nil
 }
 
 // ArchiveDrainStatus observes external operation lifecycle rather than model
@@ -33,7 +33,7 @@ func (m *Manager) ArchiveDrainStatus(ctx context.Context) (bool, error) {
 	defer m.workMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return !m.archiveStarting && !m.archiveTeardown && m.active == nil && !m.summaryActive && !m.maintenanceBlocked, nil
+	return !m.archiveStarting && !m.archiveTeardown && m.active == nil && !m.maintenanceBlocked, nil
 }
 
 // ArchiveDrainStatus includes receipt-only process startup and teardown.

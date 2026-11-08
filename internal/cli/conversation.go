@@ -13,20 +13,19 @@ func runConversation(ctx context.Context, e *Env, args []string) error {
 		return runDirectConversation(ctx, e, "conversation", args)
 	}
 	if len(args) == 0 || args[0] != "handoff" {
-		return usagef("conversation expects handoff [--prepare-only | --status] [--json]")
+		return usagef("conversation expects handoff [--status] [--json]")
 	}
 	fs := newFlags(e, "conversation handoff")
 	request := fs.String("request-id", "", "original request ID for an identical retry")
 	dry := fs.Bool("dry-run", false, "print the original Envelope without sending")
-	prepare := fs.Bool("prepare-only", false, "prepare a summary without switching the native thread")
-	status := fs.Bool("status", false, "show shared handoff and summary status")
+	status := fs.Bool("status", false, "show indexed handoff status")
 	asJSON := fs.Bool("json", false, "print the server's answer as JSON")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
 	}
-	if len(pos) != 0 || (*status && *prepare) {
-		return usagef("handoff takes no positional arguments; --status and --prepare-only are exclusive")
+	if len(pos) != 0 {
+		return usagef("handoff takes no positional arguments")
 	}
 	c, err := e.client(protocol.ScopeOwner)
 	if err != nil {
@@ -48,26 +47,16 @@ func runConversation(ctx context.Context, e *Env, args []string) error {
 			_, err = fmt.Fprintln(e.Stdout, "Hosted conversation handoff is disabled.")
 			return err
 		}
-		if view.IdleMinutes == 0 {
-			fmt.Fprintln(e.Stdout, "Automatic summary preparation: disabled")
-		} else {
-			fmt.Fprintf(e.Stdout, "Automatic summary preparation: idle %d minutes\n", view.IdleMinutes)
-		}
-		fmt.Fprintf(e.Stdout, "Settings revision: %d; handoff pending: %t; preparing: %t\n", view.Revision, view.Pending, view.Preparing)
+		fmt.Fprintf(e.Stdout, "Handoff mode: index; pending: %t; generation: %d\n", view.Pending, view.Generation)
 		if v := view.Maintenance; v != nil {
 			fmt.Fprintf(e.Stdout, "Maintenance %s: %s (request %s)\n", v.Operation, v.Status, v.RequestID)
 			if v.Reason != "" {
 				fmt.Fprintf(e.Stdout, "Reason: %s\n", v.Reason)
 			}
 		}
-		if view.Summary == nil {
-			fmt.Fprintln(e.Stdout, "No prepared summary.")
-		} else {
-			fmt.Fprintf(e.Stdout, "Summary %s; current: %t\n", view.Summary.ID, view.Summary.Current)
-		}
 		return nil
 	}
-	body, _ := json.Marshal(protocol.ConversationHandoffPayload{PrepareOnly: *prepare})
+	body, _ := json.Marshal(protocol.ConversationHandoffPayload{})
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}

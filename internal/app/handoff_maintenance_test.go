@@ -106,7 +106,7 @@ func TestConversationMaintenanceTracksOriginalOwnerAndDurableOutcome(t *testing.
 				t.Fatalf("initial %+v %v", got, err)
 			}
 			owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}
-			env := h.env("conversation.handoff", protocol.Target{Type: "conversation"}, protocol.ConversationHandoffPayload{PrepareOnly: true}, nil)
+			env := h.env("conversation.handoff", protocol.Target{Type: "conversation"}, protocol.ConversationHandoffPayload{}, nil)
 			h.exec(owner, env, ConversationHandoff{})
 			got, err := h.app.ConversationMaintenance(ctx, "main")
 			if err != nil || got.RequestID != env.RequestID || got.Status != "pending" {

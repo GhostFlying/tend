@@ -46,7 +46,7 @@ var ownerCommands = commandMap(
 
 // hostedCommands are the conversation writes, accepted only when the
 // server runs the hosted main thread (D45).
-var hostedCommands = commandMap(app.ResumeLogicalTurn{}, app.CompactConversation{}, app.SubmitMessage{}, app.InterruptReply{}, app.SetConversationHandoffSettings{}, app.ConversationHandoff{})
+var hostedCommands = commandMap(app.ResumeLogicalTurn{}, app.CompactConversation{}, app.SubmitMessage{}, app.InterruptReply{}, app.ConversationHandoff{})
 
 func commandMap(cmds ...app.Command) map[string]app.Command {
 	m := make(map[string]app.Command, len(cmds))
@@ -89,6 +89,12 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		}
 		cmd, ok = hosted, true
 	}
+	// Retired owner operation still resolves its original request receipt through
+	// app.Execute; it is no longer an advertised capability or CLI setting.
+	if env.Operation == "conversation.set_handoff_settings" && s.cfg.HostedMainAgent {
+		cmd, ok = app.SetConversationHandoffSettings{}, true
+	}
+
 	if !ok {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not available to owners", env.Operation))
 		return

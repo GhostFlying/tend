@@ -175,6 +175,22 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		}
 		return answer
 	}
+	for _, tool := range []string{"conversation_context_index", "agent_rollout_read"} {
+		for _, id := range []string{"main", "issue:" + sibling.IssueID, "issue:" + ancestor.IssueID} {
+			response := call(tool, map[string]any{"conversation_id": id})
+			if response.OK || response.Error == nil || response.Error.Code != protocol.CodeForbidden {
+				t.Fatal("history read escaped manager scope", tool, id, response)
+			}
+		}
+		response := call(tool, map[string]any{"conversation_id": conversation})
+		if !response.OK {
+			t.Fatal("own history index unavailable", tool, response)
+		}
+	}
+	automatic, err := e.svc.app.AgentContext(t.Context(), conversation, delivery.RequestID)
+	if err != nil || len(automatic) > protocol.ContextIndexBudget || strings.Contains(automatic, "Read the delegated reports") || !strings.Contains(automatic, "index-v1") {
+		t.Fatal("manager context injection is not a bounded index", len(automatic), err)
+	}
 	legacyContext := call("work_item_context_read", contextReadArgs{WorkItemID: parent.IssueID})
 	if legacyContext.OK || legacyContext.Error == nil || legacyContext.Error.Code != protocol.CodeForbidden {
 		t.Fatal("named manager still accepts retired legacy context facade", legacyContext)
