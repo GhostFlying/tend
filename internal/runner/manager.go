@@ -159,7 +159,14 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		}
 		open = resolved.OpenNative
 	}
-	session, err := open(ctx, dir)
+	var session harness.Session
+	if resolved.OpenRun != nil {
+		bindingKey := sha256.Sum256([]byte(as.RunID))
+		bindingState := filepath.Join(r.cfg.Journal.Directory(), "codex-executions", hex.EncodeToString(bindingKey[:]))
+		session, err = resolved.OpenRun(ctx, dir, bindingState, as.RunID, run.Thread != "", as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly && !as.Manager.RequireReceiptReader)
+	} else {
+		session, err = open(ctx, dir)
+	}
 	if err != nil {
 		return err
 	}

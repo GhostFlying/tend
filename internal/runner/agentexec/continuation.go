@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -38,9 +39,12 @@ func (p *Pool) ObserveRetained(ctx context.Context) ([]protocol.AgentExecutor, e
 		}
 		// Resolve retains the factory for native stop/recovery after a refusal.
 		// Selection must reflect the live refusal even before the next refresh.
-		if e := p.snapshots[out[i].Pin.SnapshotID][out[i].Pin.Identity.LocalID]; e != nil && e.reason != "" {
+		if e := p.snapshots[out[i].Pin.SnapshotID][out[i].Pin.Identity.LocalID]; e != nil && e.reason != "" && !(nativeCodex(e) && canProbe(e.reason)) {
 			out[i].Available = false
 			out[i].Reason = e.reason
+		} else if e != nil && e.environmentUnavailable && !nativeCodex(e) {
+			out[i].Available = false
+			out[i].Reason = "environment_unavailable"
 		}
 	}
 	return out, nil
@@ -57,13 +61,20 @@ func (p *Pool) refreshRetained(ctx context.Context) error {
 	for _, pin := range pins {
 		var err error
 		if pin.Purpose == "issue_manager" {
-			_, err = p.ResolveManager(ctx, pin)
+			_, err = p.ResolveManagerRun(ctx, pin)
 		} else {
 			_, err = p.Resolve(ctx, pin)
 			if err == nil {
 				p.mu.Lock()
 				e := p.snapshots[pin.SnapshotID][pin.Identity.LocalID]
-				if e == nil || e.reason != "" {
+				if e != nil && !nativeCodex(e) && p.options.Environments.Resolve(e.input.Runtime.ID) != nil {
+					err = p.environmentReady(ctx, e.input.Runtime.ID)
+					e.environmentUnavailable = err != nil
+					if err == nil && canProbe(e.reason) {
+						err = p.initialize(ctx, e)
+					}
+				}
+				if e == nil || e.workers == nil || e.reason != "" && !(nativeCodex(e) && canProbe(e.reason)) || e.environmentUnavailable && !nativeCodex(e) {
 					err = errors.New("original worker is unavailable")
 				}
 				p.mu.Unlock()
@@ -85,4 +96,10 @@ func (p *Pool) refreshRetained(ctx context.Context) error {
 		p.retainedObserved = observations
 	}
 	return retry
+}
+
+// Native Codex factories restore the run's persisted binding at startup. A
+// current mapping probe cannot determine whether that original home is ready.
+func nativeCodex(e *entry) bool {
+	return e.input.Runtime.Kind == agentconfig.AppServerWorker && e.input.Runtime.CLI == "codex"
 }

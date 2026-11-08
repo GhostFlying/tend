@@ -19,6 +19,9 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 		return nil, err
 	}
 	if !exists {
+		if environmentResumeOnly(s) {
+			return nil, errors.New("environment adoption requires the original native thread")
+		}
 		th, err := s.StartThread(ctx, m.threadConfig())
 		if err != nil {
 			return nil, err
@@ -43,7 +46,7 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 	defer func() { m.mu.Lock(); m.maintenanceBlocked = false; m.mu.Unlock() }()
 	th, err := s.ResumeThread(ctx, id, m.threadConfig())
 	if err != nil {
-		if !errors.Is(err, harness.ErrRejected) {
+		if environmentResumeOnly(s) || !errors.Is(err, harness.ErrRejected) {
 			return nil, err
 		}
 		m.cfg.Log.WarnContext(ctx, "native source unavailable; recovering from retained history references", "thread", id, "err", err)

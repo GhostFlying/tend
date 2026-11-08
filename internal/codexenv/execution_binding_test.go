@@ -1,0 +1,89 @@
+//go:build linux
+
+package codexenv
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestExecutionBindingSurvivesMappingReplacementAndRemoval(t *testing.T) {
+	state := t.TempDir()
+	original := &Binding{Directory: filepath.Join(t.TempDir(), "first"), ID: "original"}
+	pinned, err := BindExecution(t.Context(), state, "run:original", original, false)
+	if err != nil || pinned == nil || *pinned != *original {
+		t.Fatal(pinned, err)
+	}
+	for _, changed := range []*Binding{{Directory: filepath.Join(t.TempDir(), "second"), ID: "replacement"}, nil} {
+		restored, err := BindExecution(t.Context(), state, "run:original", changed, true)
+		if err != nil || restored == nil || *restored != *original {
+			t.Fatal("mapping redirected original run", restored, err)
+		}
+	}
+	if _, err = BindExecution(t.Context(), state, "run:other", original, true); err == nil {
+		t.Fatal("different run reused binding")
+	}
+	fresh, err := BindExecution(t.Context(), t.TempDir(), "run:new", &Binding{Directory: original.Directory, ID: "replacement"}, false)
+	if err != nil || fresh.ID != "replacement" {
+		t.Fatal(fresh, err)
+	}
+}
+
+func TestLegacyThreadDoesNotAdoptNewEnvironmentMapping(t *testing.T) {
+	state := t.TempDir()
+	result, err := BindExecution(t.Context(), state, "run:legacy", &Binding{Directory: t.TempDir(), ID: "new"}, true)
+	if err != nil || result != nil {
+		t.Fatal(result, err)
+	}
+	if _, err = os.Stat(filepath.Join(state, "codex-environment.json")); !os.IsNotExist(err) {
+		t.Fatal("legacy execution acquired a new binding", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err = BindExecution(ctx, state, "run:legacy", nil, true); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestDisablingMissingProjectionRetainsSnapshotAndRecovery(t *testing.T) {
+	s, p := fixture(t)
+	source := skill(t, t.TempDir(), "selected", "v1")
+	p.Skills = Selection{Mode: "projection", Allow: []Item{{ID: "selected", Path: source}}}
+	status := create(t, s, p)
+	binding := &Binding{Directory: s.Root, ID: p.ID}
+	original, err := binding.Pin(t.Context(), "run:retained")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.RemoveAll(source); err != nil {
+		t.Fatal(err)
+	}
+	disabled := status.Profile
+	disabled.Enabled = false
+	preview, err := s.Execute(t.Context(), Request{Action: "update", ID: p.ID, DryRun: true, Profile: &disabled})
+	if err != nil || !preview.Changed {
+		t.Fatal(preview, err)
+	}
+	result, err := s.Execute(t.Context(), Request{Action: "update", ID: p.ID, RequestID: "disable", ExpectedRevision: status.Revision, Profile: &disabled})
+	if err != nil || result.Status.Profile.Enabled || result.Status.Latest != status.Latest || result.Status.Revision != status.Revision+1 {
+		t.Fatal(result, err)
+	}
+	if _, err = binding.Pin(t.Context(), "run:new"); err == nil {
+		t.Fatal("disabled environment admitted new execution")
+	}
+	restored, err := binding.Pin(t.Context(), "run:retained")
+	if err != nil || restored.Generation != original.Generation {
+		t.Fatal(restored, err)
+	}
+	replay, err := s.Execute(t.Context(), Request{Action: "reconcile", ID: p.ID, RequestID: "disable"})
+	if err != nil || replay.Status.Revision != result.Status.Revision {
+		t.Fatal(replay, err)
+	}
+	disabled.Enabled = true
+	if _, err = s.Execute(t.Context(), Request{Action: "update", ID: p.ID, RequestID: "enable", ExpectedRevision: result.Status.Revision, Profile: &disabled}); err == nil {
+		t.Fatal("enabling accepted missing source")
+	}
+}

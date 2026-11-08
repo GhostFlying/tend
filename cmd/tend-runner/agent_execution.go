@@ -54,7 +54,7 @@ func assembleAgentExecutions(ctx context.Context, cfg config, source *agentcontr
 	if err != nil {
 		return nil, err
 	}
-	return agentexec.New(agentexec.Options{CentralOrca: client, ProbeCentral: func(ctx context.Context) error {
+	return agentexec.New(agentexec.Options{Environments: cfg.CodexEnvironments, CentralOrca: client, ProbeCentral: func(ctx context.Context) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ServerURL, "/")+"/runner/v1/native/status", nil)
 		if err != nil {
 			return err

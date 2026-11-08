@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -167,6 +168,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
+	var err error
+	opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Environment != nil {
+		opts.EnvironmentExecution = "run:" + spec.RunID
+	}
 	opts.Dir = spec.Dir
 	owned, err := ws.recordOwnedWorkerProcess(spec, &opts)
 	if err != nil {

@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -23,10 +24,11 @@ type Env struct {
 	Getenv func(string) string
 	// Home is the user's home directory and ConfigDir tend's own
 	// configuration directory.
-	Home      string
-	ConfigDir string
-	HTTP      *http.Client
-	IDs       protocol.IDGen
+	Home             string
+	ConfigDir        string
+	HTTP             *http.Client
+	IDs              protocol.IDGen
+	CodexEnvironment func(context.Context, protocol.LocalCodexEnvironmentRequest) (json.RawMessage, error)
 }
 
 // Command exit codes.
@@ -80,6 +82,9 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	}
 	if len(args) >= 2 && args[0] == "usage" && slices.Contains([]string{"host-sources", "host-preview", "host-upload"}, args[1]) {
 		return report(e, runHostUsage(ctx, e, args[1], args[2:]))
+	}
+	if args[0] == "codex-env" {
+		return report(e, runCodexEnvironment(ctx, e, args[1:]))
 	}
 	if len(args) >= 2 && args[0] == "channel" && args[1] == "feishu" {
 		return report(e, runFeishu(ctx, e, args[2:]))

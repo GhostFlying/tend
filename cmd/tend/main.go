@@ -3,18 +3,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cli"
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	home, _ := os.UserHomeDir()
 	configDir := os.Getenv(cli.ConfigDirEnv)
@@ -26,6 +29,11 @@ func main() {
 		Home: home, ConfigDir: configDir,
 		HTTP: &http.Client{Timeout: 60 * time.Second, Transport: cli.Transport()},
 		IDs:  protocol.NewULIDGen(time.Now, nil),
+	}
+	binary, _ := os.Executable()
+	e.CodexEnvironment = func(ctx context.Context, q protocol.LocalCodexEnvironmentRequest) (json.RawMessage, error) {
+		s := codexenv.Service{Root: q.Root, UserHome: home, Binary: binary}
+		return s.Local(ctx, q)
 	}
 	os.Exit(cli.Main(ctx, e, os.Args[1:]))
 }
