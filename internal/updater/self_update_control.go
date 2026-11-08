@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -18,6 +19,16 @@ func (s *Supervisor) selfHandler(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/self-update/status":
 		status, err = s.selfStatus(r.Context())
+		if id := r.URL.Query().Get("request_id"); id != "" {
+			rejected, readErr := readSelfRejection(s.cfg, id)
+			if readErr != nil {
+				err = errors.Join(err, readErr)
+			}
+			if rejected != nil {
+				status.Observation.InstanceID = s.cfg.InstanceID
+				status.Observation.Rejection = &rejected.Proof
+			}
+		}
 	case r.Method == http.MethodPost && r.URL.Path == "/self-update/apply":
 		var request SelfUpdateRequest
 		d := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
@@ -43,6 +54,16 @@ func (s *Supervisor) selfHandler(w http.ResponseWriter, r *http.Request) {
 // SelfUpdateCall uses a distinct endpoint. The legacy status and service
 // installation receipt remain unchanged for old local control clients.
 func SelfUpdateCall(ctx context.Context, socket string, request *SelfUpdateRequest) (SelfUpdateStatus, error) {
+	return selfUpdateCall(ctx, socket, request, "")
+}
+
+// ObserveSelfUpdate resolves immutable rejection evidence by original identity,
+// including after a lost response, restart, or the batch's dispatch deadline.
+func ObserveSelfUpdate(ctx context.Context, socket, requestID string) (SelfUpdateStatus, error) {
+	return selfUpdateCall(ctx, socket, nil, requestID)
+}
+
+func selfUpdateCall(ctx context.Context, socket string, request *SelfUpdateRequest, requestID string) (SelfUpdateStatus, error) {
 	var out SelfUpdateStatus
 	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
@@ -57,6 +78,9 @@ func SelfUpdateCall(ctx context.Context, socket string, request *SelfUpdateReque
 		if err != nil {
 			return out, err
 		}
+	}
+	if request == nil && requestID != "" {
+		path += "?request_id=" + url.QueryEscape(requestID)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, "http://localhost/self-update/"+path, bytes.NewReader(body))
 	if err != nil {

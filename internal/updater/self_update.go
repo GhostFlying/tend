@@ -93,6 +93,9 @@ func EnsureSelfUpdate(ctx context.Context, socket string, request SelfUpdateRequ
 		return status.Observation, err
 	}
 	for {
+		if rejected := status.Observation.Rejection; rejected != nil && rejected.RequestID == request.Target.RequestID && rejected.UpgradeID == request.UpgradeID && rejected.ReleaseSetSHA256 == request.ReleaseSetSHA256 && rejected.InstanceID == status.Observation.InstanceID {
+			return status.Observation, errors.New("updater: preparation rejected before installer dispatch")
+		}
 		r := status.Observation.Receipt
 		if err == nil && r != nil && r.RequestID == request.Target.RequestID && r.UpgradeID == request.UpgradeID && r.ReleaseSetSHA256 == request.ReleaseSetSHA256 && r.InstanceID == status.Observation.InstanceID && status.Observation.Process.SHA256 == r.Installed.SHA256 && status.Observation.SupervisedProcess.PID > 1 {
 			return status.Observation, nil
@@ -104,7 +107,7 @@ func EnsureSelfUpdate(ctx context.Context, socket string, request SelfUpdateRequ
 			return status.Observation, ErrUnknown
 		case <-timer.C:
 		}
-		status, err = SelfUpdateCall(ctx, socket, nil)
+		status, err = ObserveSelfUpdate(ctx, socket, request.Target.RequestID)
 		if err == nil && status.Journal != nil && digest(status.Journal.Plan.Request) != digest(request) {
 			return status.Observation, errors.New("updater: observed another handoff attempt")
 		}

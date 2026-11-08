@@ -37,14 +37,27 @@ func runSelfUpdate(ctx context.Context, args []string, out io.Writer) error {
 	}
 	if action == "status" {
 		j, err := updater.SelfUpdateJournalStatus(cfg)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		status, observationErr := updater.SelfUpdateCall(ctx, updater.SocketPath(cfg), nil)
-		result := map[string]any{"journal": j, "observed": observationErr == nil}
-		if observationErr == nil {
+		var journal *updater.SelfUpdateJournal
+		requestID := ""
+		if err == nil {
+			journal, requestID = &j, j.Plan.Request.Target.RequestID
+		}
+		if *planFile != "" && (journal == nil || filepath.Clean(*planFile) != filepath.Join(cfg.StateDir, "self-update.json")) {
+			p, err := updater.ReadSelfUpdatePlan(*planFile)
+			if err != nil {
+				return err
+			}
+			requestID = p.Request.Target.RequestID
+		}
+		status, observationErr := updater.ObserveSelfUpdate(ctx, updater.SocketPath(cfg), requestID)
+		result := map[string]any{"journal": journal, "observed": observationErr == nil}
+		if observationErr == nil || status.Observation.Rejection != nil {
 			result["observation"] = status.Observation
-		} else {
+		}
+		if observationErr != nil {
 			result["observation_error"] = observationErr.Error()
 		}
 		return json.NewEncoder(out).Encode(result)

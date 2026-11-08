@@ -20,11 +20,22 @@ type UpdaterSelfReceipt struct {
 	CompletedAtMillis int64            `json:"completed_at_millis"`
 }
 
+// UpdaterSelfRejection proves preparation ended before any installer dispatch.
+// A lost or uncertain dispatch never produces this receipt.
+type UpdaterSelfRejection struct {
+	RequestID        string `json:"request_id"`
+	UpgradeID        string `json:"upgrade_id"`
+	ReleaseSetSHA256 string `json:"release_set_sha256"`
+	InstanceID       string `json:"instance_id"`
+	RejectedAtMillis int64  `json:"rejected_at_millis"`
+}
+
 // A historical receipt and a fresh observation are separate evidence. Restarting
 // the supervisor does not rewrite the original handoff's process identity.
 type UpdaterSelfObservation struct {
-	InstanceID        string              `json:"instance_id"`
-	Process           RecoveryIdentity    `json:"process"`
-	SupervisedProcess RecoveryIdentity    `json:"supervised_process"`
-	Receipt           *UpdaterSelfReceipt `json:"receipt,omitempty"`
+	Rejection         *UpdaterSelfRejection `json:"rejection,omitempty"`
+	InstanceID        string                `json:"instance_id"`
+	Process           RecoveryIdentity      `json:"process"`
+	SupervisedProcess RecoveryIdentity      `json:"supervised_process"`
+	Receipt           *UpdaterSelfReceipt   `json:"receipt,omitempty"`
 }

@@ -241,14 +241,14 @@ func (c *Controller) tick(ctx context.Context) error {
 		}
 		if row.ReleaseSet != nil && row.ReleaseSet.Format >= 2 {
 			readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			status, e := updater.SelfUpdateCall(readCtx, c.cfg.UpdaterSocket, nil)
-			if e == nil {
+			status, e := updater.ObserveSelfUpdate(readCtx, c.cfg.UpdaterSocket, row.StartRequestID)
+			if e == nil || status.Observation.Rejection != nil {
 				observed.Updater = &status.Observation
 			}
 			// Never block the ledger's original deadline waiting for an installer.
 			// A repeated target with this exact identity only observes its durable
 			// attempt in the supervisor; it cannot dispatch stop/start a second time.
-			if e == nil && current.Status == "running" && current.Phase == "server_updater" && c.cfg.Now().UnixMilli() < row.View.OverallDeadlineMillis && (row.Deadline == 0 || c.cfg.Now().UnixMilli() < row.Deadline) {
+			if e == nil && status.Observation.Rejection == nil && current.Status == "running" && current.Phase == "server_updater" && c.cfg.Now().UnixMilli() < row.View.OverallDeadlineMillis && (row.Deadline == 0 || c.cfg.Now().UnixMilli() < row.Deadline) {
 				request := updater.SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: row.StartRequestID, ExpiresAtMillis: row.View.OverallDeadlineMillis}, UpgradeID: row.View.UpgradeID, Release: filepath.Join(c.cfg.ReleaseDir, row.View.UpgradeID), ReleaseSetSHA256: row.ReleaseSetSHA256}
 				if status.Journal == nil || status.Journal.Plan.Request != request {
 					env := &protocol.Envelope{RequestID: c.ids.New(protocol.PrefixRequest), Operation: "upgrades.authorize_supervisor", Target: protocol.Target{Type: "upgrade", ID: current.UpgradeID}, ExpectedControlRevision: &current.Revision}
@@ -259,7 +259,7 @@ func (c *Controller) tick(ctx context.Context) error {
 					}
 					if e == nil {
 						status, e = updater.SelfUpdateCall(readCtx, c.cfg.UpdaterSocket, &request)
-						if e == nil {
+						if e == nil || status.Observation.Rejection != nil {
 							observed.Updater = &status.Observation
 						}
 					}

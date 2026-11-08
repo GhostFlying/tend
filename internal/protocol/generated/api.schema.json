@@ -17501,6 +17501,9 @@
         "receipt": {
           "$ref": "#/definitions/UpdaterSelfReceipt"
         },
+        "rejection": {
+          "$ref": "#/definitions/UpdaterSelfRejection"
+        },
         "supervised_process": {
           "$ref": "#/definitions/RecoveryIdentity"
         }
@@ -17552,6 +17555,35 @@
         "completed_at_millis"
       ],
       "title": "UpdaterSelfReceipt",
+      "type": "object"
+    },
+    "UpdaterSelfRejection": {
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string"
+        },
+        "rejected_at_millis": {
+          "type": "integer"
+        },
+        "release_set_sha256": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "upgrade_id",
+        "release_set_sha256",
+        "instance_id",
+        "rejected_at_millis"
+      ],
+      "title": "UpdaterSelfRejection",
       "type": "object"
     },
     "UpdaterSelfTarget": {

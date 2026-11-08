@@ -328,6 +328,15 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if r.View.Phase == "runners" {
 			for i := range r.Hosts {
 				if r.Hosts[i].CandidateInstance == "" && r.View.Hosts[i].Status != "completed" && r.View.Hosts[i].Status != "skipped" {
+					ctl, err := runnerControl(ctx, tx.Q(), r.Hosts[i].HostID, x.Now.UnixMilli())
+					if err != nil {
+						return Outcome{}, err
+					}
+					if ctl.UpgradeID == r.View.UpgradeID && ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && ctl.Upgrade.Updater.RequestID == r.StartRequestID {
+						// The original independent handoff remains admitted. Retain
+						// its ready/restoration phase and fixed target on retry.
+						continue
+					}
 					r.View.Hosts[i].Status = "queued"
 					r.View.Hosts[i].Phase = "queued"
 					r.View.Hosts[i].Reason = ""
@@ -338,7 +347,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		r.View.Reason = ""
 		r.Deadline = capUpgradeDeadline(&r, x.Now.UnixMilli()+r.DrainMillis)
 	case "cancel":
-		if r.ServerUpdaterAuthorized && !selfUpdateMatches(r, r.ServerHash, r.View.ServerUpdater) {
+		if r.ServerUpdaterAuthorized && !selfUpdateMatches(r, r.ServerHash, r.View.ServerUpdater) && !selfUpdateRejected(r, r.ServerInstance, r.View.ServerUpdater) {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server supervisor handoff must reconcile before cancellation")
 		}
 		if r.ServerProcess != "" && r.ServerHealthy < 2 && r.ServerRollback == nil {
@@ -357,7 +366,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			if err != nil {
 				return Outcome{}, err
 			}
-			if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) {
+			if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) && !selfUpdateRejected(r, h.HostID, rt.Runtime.Updater) {
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "runner supervisor handoff must reconcile before cancellation")
 			}
 			if ctl.UpgradeID != r.View.UpgradeID {

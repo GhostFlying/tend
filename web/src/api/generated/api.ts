@@ -1978,6 +1978,7 @@ export interface UpdaterSelfObservation {
   instance_id: string;
   process: RecoveryIdentity;
   receipt?: UpdaterSelfReceipt;
+  rejection?: UpdaterSelfRejection;
   supervised_process: RecoveryIdentity;
 }
 /**
@@ -2002,6 +2003,17 @@ export interface UpdaterSelfReceipt {
   release_set_sha256: string;
   request_id: string;
   retained_process: RecoveryIdentity;
+  upgrade_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdaterSelfRejection".
+ */
+export interface UpdaterSelfRejection {
+  instance_id: string;
+  rejected_at_millis: number;
+  release_set_sha256: string;
+  request_id: string;
   upgrade_id: string;
 }
 /**

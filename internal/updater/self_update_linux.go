@@ -584,6 +584,14 @@ func (s *Supervisor) selfStatus(ctx context.Context) (SelfUpdateStatus, error) {
 
 func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (SelfUpdateStatus, error) {
 	s.mu.Lock()
+	if prior, err := readSelfRejection(s.cfg, r.Target.RequestID); err != nil {
+		s.mu.Unlock()
+		return SelfUpdateStatus{}, err
+	} else if prior != nil {
+		out, err := s.rejectSelf(r, errors.New("updater: original preparation was rejected before dispatch"))
+		s.mu.Unlock()
+		return out, err
+	}
 	j, err := readSelf(s.cfg)
 	historyPath := filepath.Join(s.cfg.StateDir, "self-update-"+bytesDigest([]byte(r.Target.RequestID))+".json")
 	if raw, e := privateFile(historyPath); e == nil {
@@ -628,8 +636,9 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 	s.selfJournal = nil
 	p, err := prepareSelf(ctx, s.cfg, SelfUpdatePlan{Request: r, ConfigFile: s.opts.ConfigFile}, true)
 	if err != nil {
+		out, rejectedErr := s.rejectSelf(r, err)
 		s.mu.Unlock()
-		return SelfUpdateStatus{}, err
+		return out, rejectedErr
 	}
 	j = SelfUpdateJournal{Format: 1, Plan: p, Phase: "prepared"}
 	if p.Updater.SHA256 == p.CandidateSHA256 {
@@ -654,8 +663,9 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 	// outside the replaced executable path and survives the old supervisor's exit.
 	installer := filepath.Join(s.cfg.StateDir, "self-installer-"+p.CandidateSHA256)
 	if err = copyPinnedAtomic(p.Candidate, installer, 0o700, p.CandidateSHA256); err != nil {
+		out, rejectedErr := s.rejectSelf(r, err)
 		s.mu.Unlock()
-		return SelfUpdateStatus{}, err
+		return out, rejectedErr
 	}
 	j.InstallerDispatched = true
 	if err = writeSelf(s.cfg, j); err != nil {
