@@ -35,7 +35,7 @@ func TestHistoricalBackgroundOwnerSourcesAndMetrics(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	d, _, ok, err := e.app.NextDelivery(t.Context(), "background_thread:work-item:"+w.WorkItemID)
+	d, _, ok, err := e.app.NextDelivery(t.Context(), app.MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
 	}
