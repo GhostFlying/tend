@@ -23,7 +23,8 @@ func ensureSelfJournalDirectory(cfg Config) error {
 	if !info.IsDir() || info.Mode().Perm() != 0o700 || !ownedFile(info) {
 		return errors.New("updater: private self-update journal directory required")
 	}
-	return nil
+	// Persist the new directory entry before an intent in it authorizes effects.
+	return syncDir(cfg.StateDir)
 }
 
 func captureSelfStateDirectory(cfg Config, p *SelfUpdatePlan) error {
