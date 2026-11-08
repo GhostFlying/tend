@@ -61,3 +61,32 @@ func TestStoppedHostedBacklogDrainsWithoutAnAgentSession(t *testing.T) {
 		t.Fatal(sources, err)
 	}
 }
+
+func TestCentralCollectorExcludesSettledHistoryAndDisarmsTimer(t *testing.T) {
+	clock := testkit.NewClock()
+	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a := app.New(s, testkit.NewIDGen(clock, 42), clock.Now)
+	for i := range 170 {
+		src := app.LocalUsageSource{ID: fmt.Sprint(i), WriterStopped: true, Source: json.RawMessage(`{"path":"missing-history.jsonl","provider":"traex","thread_id":"old"}`), Cursors: json.RawMessage(`{}`), Coverage: "caught_up"}
+		if err := a.RegisterLocalUsage(t.Context(), src); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.CommitLocalUsage(t.Context(), src, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collector := centralUsage{app: a, now: clock.Now, log: slog.New(slog.DiscardHandler), discovery: nativeusage.NewDiscovery()}
+	delay, err := collector.syncWork(t.Context())
+	if err != nil || delay != 0 {
+		t.Fatal("settled history kept collector active", delay, err)
+	}
+	clock.Advance(time.Minute)
+	delay, err = collector.syncWork(t.Context())
+	if err != nil || delay != 0 {
+		t.Fatal(delay, err)
+	}
+}

@@ -374,7 +374,8 @@ func (m *Manager) prepareSummary(ctx context.Context, s harness.Session, th harn
 	}
 	m.summaryActive = true
 	m.mu.Unlock()
-	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock() }()
+	m.wakeNativeUsage()
+	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock(); m.wakeNativeUsage() }()
 	// Claim the frozen snapshot before input construction so preparation failures back off.
 	claimed, err := m.app.ClaimSummaryAttempt(ctx, snap, int64((15*time.Minute)/time.Millisecond))
 	if err != nil {

@@ -37,6 +37,7 @@ import (
 
 // Config configures the manager.
 type Config struct {
+	UsageDiscovery *nativeusage.Discovery
 	ConversationID string
 	// MaintenanceEnabled enables private summaries and schema handoffs.
 	MaintenanceEnabled bool
@@ -88,6 +89,8 @@ type Manager struct {
 	lastActivity       time.Time
 	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
 	usageIndex         *nativeusage.Discovery
+	usageRetries       nativeusage.Retries
+	usageSettling      bool
 	usageMu            sync.Mutex
 	usageFiles         map[string]usageDiscovery
 	usageWake          chan struct{}
@@ -133,7 +136,7 @@ func New(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg Config) 
 	if cfg.SteerTimeout <= 0 {
 		cfg.SteerTimeout = 10 * time.Second
 	}
-	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), startupExited: make(chan error, 1), settled: map[string]string{}}
+	return &Manager{app: a, context: cb, tools: ts, cfg: cfg, usageIndex: cfg.UsageDiscovery, readAdmittedTurn: a.LogicalTurn, ready: make(chan struct{}), startupExited: make(chan error, 1), settled: map[string]string{}}
 }
 
 func (m *Manager) threadKey(threadID string) string { return m.bindingInstance() + "/" + threadID }
@@ -291,7 +294,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 				diagnostics.cleanup(flush, slog.LevelError, "settle_auxiliary_concurrency", err)
 			}
 		}
-		m.syncNativeUsageState(flush, true)
+		m.syncNativeUsageState(flush, closeErr == nil)
 	}()
 	if named {
 		var models []harness.Model
@@ -896,6 +899,7 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 			}
 		}
 	case ev.Kind == harness.EventTurnCompleted:
+		defer m.wakeNativeUsage()
 		m.refreshUsage(ctx, th)
 		m.mu.Lock()
 		a := m.active
@@ -1317,12 +1321,14 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	m.mu.Lock()
 	m.active = a
 	m.mu.Unlock()
+	m.wakeNativeUsage()
 	defer func() {
 		m.mu.Lock()
 		if m.active == a {
 			m.active = nil
 		}
 		m.mu.Unlock()
+		m.wakeNativeUsage()
 	}()
 	rec = store.MainTurn{RequestID: d.RequestID, MessageID: msg.MessageID, ThreadID: th.ID(), Status: store.TurnStarting,
 		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort, SettingsRevision: settingsRevision}

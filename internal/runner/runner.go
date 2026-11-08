@@ -187,7 +187,6 @@ type Runner struct {
 	inventoryMu                     sync.Mutex
 	usageDiscovery                  *nativeusage.Discovery
 	nativeUsageSupported            bool
-	usageWake                       chan struct{}
 	agentExecutionSupported         bool
 	retainedExecutions              []protocol.RunExecutionPin
 	agentContinuationSupported      bool
@@ -252,7 +251,6 @@ func New(cfg Config) *Runner {
 		reconcile:      make(chan struct{}, 1),
 		workspaceWake:  make(chan struct{}, 1),
 		helloGate:      make(chan struct{}, 1),
-		usageWake:      make(chan struct{}, 1),
 		ttl:            time.Minute,
 		ttlWake:        make(chan struct{}),
 		active:         map[string]*active{},
@@ -614,6 +612,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		return r.helloLocked(ctx)
 	}
 	r.nativeUsageSupported = res.NativeUsage
+	r.wakeNativeUsage()
 	r.previewSupported = res.RolloutPreview && res.DeploymentID != "" && len(r.cfg.RolloutRoots) > 0
 	r.previewDeployment = res.DeploymentID
 	select {

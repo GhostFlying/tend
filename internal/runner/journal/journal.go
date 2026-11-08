@@ -71,6 +71,7 @@ type Journal struct {
 	db        *sql.DB
 	now       func() time.Time
 	writer    *os.File
+	usageWake chan struct{}
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -104,7 +105,7 @@ func openJournal(ctx context.Context, path string, now func() time.Time, authori
 		return nil, fmt.Errorf("journal: open: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	j := &Journal{db: db, now: now, path: path, writer: writer}
+	j := &Journal{usageWake: make(chan struct{}, 1), db: db, now: now, path: path, writer: writer}
 	if authority != nil {
 		if err := j.validateBoundedSource(ctx, *authority, false); err != nil {
 			_ = j.Close()
@@ -203,7 +204,11 @@ func (j *Journal) tx(ctx context.Context, fn func(*sql.Tx) error) (err error) {
 
 // PutRequest records a request before it is first sent.
 func (j *Journal) PutRequest(ctx context.Context, r Request) error {
-	return j.tx(ctx, func(tx *sql.Tx) error { return putRequest(ctx, tx, r, j.now()) })
+	err := j.tx(ctx, func(tx *sql.Tx) error { return putRequest(ctx, tx, r, j.now()) })
+	if err == nil && (r.Envelope.Operation == protocol.OpRunnerUsageUpload || r.Envelope.Operation == protocol.OpRunnerUsageRegister) {
+		j.WakeUsage()
+	}
+	return err
 }
 
 func putRequest(ctx context.Context, tx *sql.Tx, r Request, now time.Time) error {

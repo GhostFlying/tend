@@ -21,6 +21,7 @@ type usageDiscovery struct {
 
 func (m *Manager) wakeNativeUsage() {
 	m.mu.Lock()
+	m.usageSettling = true
 	wake := m.usageWake
 	m.mu.Unlock()
 	select {
@@ -30,6 +31,8 @@ func (m *Manager) wakeNativeUsage() {
 }
 
 func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, purpose string) {
+	m.usageMu.Lock()
+	defer m.usageMu.Unlock()
 	native, ok := th.(harness.NativeUsageThread)
 	if !ok {
 		return
@@ -65,28 +68,47 @@ func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, pu
 
 func (m *Manager) syncNativeUsage(ctx context.Context) { m.syncNativeUsageState(ctx, false) }
 
-func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) {
+func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) (delay time.Duration) {
 	m.usageMu.Lock()
+	if m.usageRetries == nil {
+		m.usageRetries = nativeusage.Retries{}
+	}
+	now := m.cfg.Now().UnixMilli()
+	pending := false
+	paging := false
 	defer m.usageMu.Unlock()
 	if complete {
 		if err := m.app.StopLocalUsage(ctx, store.ConversationID(m.cfg.ConversationID), ""); err != nil {
 			m.cfg.Log.WarnContext(ctx, "native writer stop pending", "err", err)
-			return
+			return 2 * time.Second
 		}
+		return 0
 	}
-	sources, err := m.app.LocalUsageSources(ctx, store.ConversationID(m.cfg.ConversationID))
+	sources, err := m.app.PendingLocalUsageSources(ctx, store.ConversationID(m.cfg.ConversationID))
 	if err != nil {
 		m.cfg.Log.WarnContext(ctx, "could not read native usage sources", "err", err)
-		return
+		return 2 * time.Second
 	}
 	if m.usageIndex == nil {
 		m.usageIndex = nativeusage.NewDiscovery()
 	}
+	keys := map[string]bool{}
+	for _, s := range sources {
+		if !s.WriterStopped {
+			keys[s.ID] = true
+		}
+	}
+	m.usageRetries.Retain(keys)
 	discovery := m.usageIndex.Cycle(m.cfg.Now().UnixMilli())
 	for _, s := range sources {
+		if s.WriterStopped || !m.usageRetries.Due(s.ID, now) {
+			continue
+		}
+		beforeSource, beforeCursors, beforeCoverage := string(s.Source), string(s.Cursors), s.Coverage
 		var root nativeusage.Source
 		var cursors map[string]nativeusage.Cursor
 		if json.Unmarshal(s.Source, &root) != nil || json.Unmarshal(s.Cursors, &cursors) != nil {
+			m.usageRetries.Failed(s.ID, now)
 			continue
 		}
 		if cursors == nil {
@@ -106,6 +128,7 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) {
 		}
 		if err != nil {
 			m.cfg.Log.WarnContext(ctx, "native usage history unavailable", "err", err)
+			m.usageRetries.Failed(s.ID, now)
 			continue
 		}
 		if root.SessionID == "" && len(files) > 0 {
@@ -116,7 +139,7 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) {
 		caughtUp := true
 		failed := false
 		for _, src := range files {
-			page, readErr := nativeusage.Read(ctx, src, cursors[src.Path], 256-len(samples))
+			page, readErr := m.usageIndex.Read(ctx, src, cursors[src.Path], 256-len(samples), complete || s.WriterStopped)
 			if readErr != nil {
 				m.cfg.Log.WarnContext(ctx, "native usage history read pending", "err", readErr)
 				failed = true
@@ -131,6 +154,7 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) {
 			}
 		}
 		if failed {
+			m.usageRetries.Failed(s.ID, now)
 			continue
 		}
 		s.Coverage = "syncing"
@@ -138,11 +162,26 @@ func (m *Manager) syncNativeUsageState(ctx context.Context, complete bool) {
 			s.Coverage = "caught_up"
 		}
 		s.Cursors, _ = json.Marshal(cursors)
+		pending = pending || !caughtUp
+		paging = paging || len(samples) >= 256
+		if len(samples) == 0 && beforeSource == string(s.Source) && beforeCursors == string(s.Cursors) && beforeCoverage == s.Coverage {
+			if !caughtUp {
+				m.usageRetries.Failed(s.ID, now)
+			}
+			continue
+		}
 		if err = m.app.CommitLocalUsage(ctx, s, samples); err != nil {
+			m.usageRetries.Failed(s.ID, now)
 			m.cfg.Log.WarnContext(ctx, "native usage commit pending", "err", err)
+		} else {
+			m.usageRetries.Succeeded(s.ID)
 		}
 
 	}
+	if paging {
+		return time.Millisecond
+	}
+	return m.usageRetries.Delay(now, pending)
 }
 
 // startNativeUsage owns its goroutine and drains it before the harness closes.
@@ -157,17 +196,19 @@ func (m *Manager) startNativeUsage(ctx context.Context, th harness.Thread) func(
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		timer := time.NewTicker(2 * time.Second)
-		defer timer.Stop()
-		m.syncNativeUsage(pollCtx)
+		delay := time.Duration(0)
 		for {
-			select {
-			case <-pollCtx.Done():
+			delay = m.syncNativeUsageState(pollCtx, false)
+			m.mu.Lock()
+			active := (m.active != nil && !m.active.finished) || m.summaryActive
+			settling := m.usageSettling
+			m.usageSettling = false
+			m.mu.Unlock()
+			if (active || settling) && (delay == 0 || delay > 2*time.Second) {
+				delay = 2 * time.Second
+			}
+			if !nativeusage.Wait(pollCtx, wake, delay) {
 				return
-			case <-timer.C:
-				m.syncNativeUsage(pollCtx)
-			case <-wake:
-				m.syncNativeUsage(pollCtx)
 			}
 		}
 	}()

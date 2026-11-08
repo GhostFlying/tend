@@ -21,11 +21,15 @@ type historyIndex struct {
 // Discovery shares metadata scans across sources in the same native store.
 // It retains no conversation content and never supplies usage facts itself.
 type Discovery struct {
-	mu     sync.Mutex
-	stores map[string]historyIndex
+	mu       sync.Mutex
+	stores   map[string]historyIndex
+	headerMu sync.Mutex
+	headers  map[string]cachedHeader
 }
 
-func NewDiscovery() *Discovery { return &Discovery{stores: map[string]historyIndex{}} }
+func NewDiscovery() *Discovery {
+	return &Discovery{stores: map[string]historyIndex{}, headers: map[string]cachedHeader{}}
+}
 
 type DiscoveryCycle struct {
 	index     *Discovery
@@ -60,7 +64,7 @@ func (c *DiscoveryCycle) entries(ctx context.Context, key string, roots []string
 			if err != nil {
 				return err
 			}
-			m, _, err := header(f)
+			m, _, err := c.index.fileHeader(path, f, false)
 			_ = f.Close()
 			if err == nil {
 				headers = append(headers, historyHeader{path: path, meta: m})
@@ -74,4 +78,37 @@ func (c *DiscoveryCycle) entries(ctx context.Context, key string, roots []string
 	c.index.stores[key] = historyIndex{at: c.now, headers: headers}
 	c.refreshed[key] = true
 	return headers, nil
+}
+
+// Only metadata is retained. File content and usage facts remain cursor-backed.
+type cachedHeader struct {
+	info   os.FileInfo
+	change string
+	meta   metadata
+	prefix string
+}
+
+func (d *Discovery) fileHeader(path string, f *os.File, force bool) (metadata, string, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return metadata{}, "", err
+	}
+	change := fileChange(info)
+	d.headerMu.Lock()
+	defer d.headerMu.Unlock()
+	if d.headers == nil {
+		d.headers = map[string]cachedHeader{}
+	}
+	old, ok := d.headers[path]
+	if !force && change != "" && ok && os.SameFile(old.info, info) && old.info.Size() == info.Size() && old.info.ModTime() == info.ModTime() && old.change == change {
+		return old.meta, old.prefix, nil
+	}
+	meta, prefix, err := header(f)
+	if err == nil {
+		d.headers[path] = cachedHeader{info: info, change: change, meta: meta, prefix: prefix}
+	}
+	return meta, prefix, err
+}
+func (d *Discovery) Read(ctx context.Context, src Source, cursor Cursor, limit int, final bool) (Page, error) {
+	return read(ctx, src, cursor, limit, d, final)
 }

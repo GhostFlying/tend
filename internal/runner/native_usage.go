@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -58,37 +57,34 @@ func (r *Runner) queueUsageRegistration(ctx context.Context, source journal.Usag
 	return r.cfg.Journal.QueueUsageRegistration(ctx, source, *env)
 }
 
-func (r *Runner) wakeNativeUsage() {
-	select {
-	case r.usageWake <- struct{}{}:
-	default:
-	}
-}
-
+func (r *Runner) wakeNativeUsage() { r.cfg.Journal.WakeUsage() }
 func (r *Runner) nativeUsageLoop(ctx context.Context) {
-	timer := time.NewTicker(2 * time.Second)
-	defer timer.Stop()
+	retries := nativeusage.Retries{}
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-		case <-r.usageWake:
-		}
-		if err := r.syncNativeUsage(ctx); err != nil && ctx.Err() == nil {
+		active := false
+		err := r.syncNativeUsageWithRetries(ctx, retries, &active)
+		if err != nil && ctx.Err() == nil {
 			r.cfg.Log.WarnContext(ctx, "native usage synchronization pending", "err", err)
 		}
+		active = active || (err != nil && len(retries) == 0)
+		work, readErr := r.cfg.Journal.HasUsageWork(ctx)
+		delay := retries.Delay(r.cfg.Now().UnixMilli(), (work && active) || readErr != nil)
+		if !nativeusage.Wait(ctx, r.cfg.Journal.UsageWake(), delay) {
+			return
+		}
 	}
 }
-
 func (r *Runner) syncNativeUsage(ctx context.Context) error {
+	return r.syncNativeUsageWithRetries(ctx, nil, nil)
+}
+func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeusage.Retries, active *bool) error {
 	r.controlMu.Lock()
 	supported := r.nativeUsageSupported
 	r.controlMu.Unlock()
 	if !supported {
 		return nil
 	}
-	sources, err := r.cfg.Journal.UsageSources(ctx)
+	sources, err := r.cfg.Journal.PendingUsageSources(ctx)
 	if err != nil {
 		return err
 	}
@@ -101,6 +97,16 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if retries != nil {
+		keys := map[string]bool{}
+		for _, s := range sources {
+			keys["source/"+s.ID] = true
+		}
+		for _, p := range requests {
+			keys["request/"+p.Envelope.RequestID] = true
+		}
+		retries.Retain(keys)
+	}
 	sort.SliceStable(requests, func(i, j int) bool {
 		return requests[i].Envelope.Operation == protocol.OpRunnerUsageRegister && requests[j].Envelope.Operation != protocol.OpRunnerUsageRegister
 	})
@@ -110,8 +116,18 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 		if p.Envelope.Operation != protocol.OpRunnerUsageUpload && p.Envelope.Operation != protocol.OpRunnerUsageRegister {
 			continue
 		}
+		key := "request/" + p.Envelope.RequestID
+		if retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli()) {
+			var input protocol.UsageUpload
+			_ = json.Unmarshal(p.Envelope.Payload, &input)
+			blocked[input.RunID] = true
+			continue
+		}
 		op, err := r.c.do(ctx, r.c.host(), &p.Envelope)
 		if err != nil {
+			if retries != nil {
+				retries.Failed(key, r.cfg.Now().UnixMilli())
+			}
 			failures = append(failures, err)
 			var input protocol.UsageUpload
 			if json.Unmarshal(p.Envelope.Payload, &input) == nil {
@@ -120,6 +136,9 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 			continue
 		}
 		if op.Error != nil {
+			if retries != nil {
+				retries.Failed(key, r.cfg.Now().UnixMilli())
+			}
 			failures = append(failures, op.Error)
 			var input protocol.UsageUpload
 			if json.Unmarshal(p.Envelope.Payload, &input) == nil {
@@ -128,6 +147,9 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 			continue
 		}
 		if op.Status != protocol.OpSucceeded || op.RequestID != p.Envelope.RequestID {
+			if retries != nil {
+				retries.Failed(key, r.cfg.Now().UnixMilli())
+			}
 			failures = append(failures, errors.New("native usage: upload receipt is not a matching committed result"))
 			var input protocol.UsageUpload
 			if json.Unmarshal(p.Envelope.Payload, &input) == nil {
@@ -135,11 +157,14 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 			}
 			continue
 		}
+		if retries != nil {
+			retries.Succeeded(key)
+		}
 		if err = r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
 			return err
 		}
 	}
-	sources, err = r.cfg.Journal.UsageSources(ctx)
+	sources, err = r.cfg.Journal.PendingUsageSources(ctx)
 	if err != nil {
 		return err
 	}
@@ -148,11 +173,22 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 	}
 	discovery := r.usageDiscovery.Cycle(r.cfg.Now().UnixMilli())
 	for _, s := range sources {
-		if blocked[s.RunID] {
+		key := "source/" + s.ID
+		if (retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli())) || blocked[s.RunID] {
 			continue
 		}
 		if err := r.syncUsageSource(ctx, s, discovery); err != nil {
+			if retries != nil {
+				retries.Failed(key, r.cfg.Now().UnixMilli())
+			}
 			failures = append(failures, err)
+		} else {
+			if retries != nil {
+				retries.Succeeded(key)
+			}
+			if active != nil {
+				*active = true
+			}
 		}
 	}
 	return errors.Join(failures...)
@@ -162,8 +198,8 @@ func (r *Runner) syncUsageSource(ctx context.Context, s journal.UsageSource, dis
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	run, runErr := r.cfg.Journal.HistoricalRun(ctx, s.RunID)
-	stopped := s.WriterStopped || (runErr == nil && run.StoppedConfirmed)
+	before, _ := json.Marshal(s)
+	stopped := s.WriterStopped
 	if len(s.Files) == 0 || r.cfg.Now().UnixMilli()-s.DiscoveredAt >= 30000 || (stopped && s.Coverage != "caught_up") {
 		files, err := discovery.Discover(ctx, s.Source, stopped && s.Coverage != "caught_up")
 		if err != nil {
@@ -182,7 +218,7 @@ func (r *Runner) syncUsageSource(ctx context.Context, s journal.UsageSource, dis
 			caughtUp = false
 			break
 		}
-		page, err := nativeusage.Read(ctx, src, s.Cursors[src.Path], 256-len(samples))
+		page, err := r.usageDiscovery.Read(ctx, src, s.Cursors[src.Path], 256-len(samples), stopped)
 		if err != nil {
 			return err
 		}
@@ -206,6 +242,13 @@ func (r *Runner) syncUsageSource(ctx context.Context, s journal.UsageSource, dis
 		}
 	}
 	s.Coverage = coverage
+	after, _ := json.Marshal(s)
+	if env == nil && string(before) == string(after) {
+		if !caughtUp {
+			return errors.New("native usage: incomplete history record remains pending")
+		}
+		return nil
+	}
 	if err := r.cfg.Journal.QueueUsage(ctx, s, env); err != nil {
 		return fmt.Errorf("runner: persist native usage batch: %w", err)
 	}
