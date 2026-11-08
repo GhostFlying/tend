@@ -465,6 +465,7 @@ func TestBoundedRealProcessLostStartReplyReconcilesOnce(t *testing.T) {
 	}
 	launch := "bounded-lost-start-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	t.Cleanup(func() {
+		defer s.Close()
 		cleanup, done := context.WithTimeout(context.Background(), 5*time.Second)
 		defer done()
 		// Race-instrumented helpers wait before exit; leave grace beyond that delay.
@@ -478,7 +479,11 @@ func TestBoundedRealProcessLostStartReplyReconcilesOnce(t *testing.T) {
 				t.Error(e)
 			}
 		}
-		_ = s.Close()
+		if process.actual.PID > 1 || len(found) > 0 {
+			// Stop observes process exit; its owned Wait may still be publishing
+			// immutable receipt files. Finish publication before TempDir cleanup.
+			awaitOwnedLaunchExit(t, s.cfg, launch, sum)
+		}
 	})
 	p := protocol.CommittedMaintenancePlan{MaintenanceID: "bounded-lost-start", Successor: Binding{ProcessInstanceID: launch, ArtifactSHA256: sum}}
 	target := Version{Binary: self, Artifact: release.Artifact{SHA256: sum}}
