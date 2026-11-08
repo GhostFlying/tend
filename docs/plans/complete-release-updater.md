@@ -8,6 +8,8 @@
 runner、updater、CLI 与同源 Web。增加发布集清单，绑定源码与全部组件摘要；
 原 service manifest 保持格式 1。暂存、分发和验证不得遗漏 updater 与 CLI。
 发布使用 main 加完整 commit 的不可变 prerelease；重跑验证原资产，禁止覆盖。
+同时组合两个平台为 fleet 包，兼容既有混合架构主机选择。先建立固定 Git tag，
+使用支持 draft 的查询恢复首次/中断发布；全部资产核验完成才公开。
 
 ## R2 普通 updater 交接
 

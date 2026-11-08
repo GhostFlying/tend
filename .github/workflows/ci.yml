@@ -164,10 +164,37 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  release-assemble:
+    needs: release-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-go
+        with:
+          role: release-assemble
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: distribution-linux-*
+          merge-multiple: true
+          path: .local/platform-packages
+      - name: assemble and verify heterogeneous fleet bundle
+        run: |
+          mkdir -p .local/fleet-input/amd64 .local/fleet-input/arm64
+          tar -xzf ".local/platform-packages/tend-main-$GITHUB_SHA-linux-amd64.tar.gz" -C .local/fleet-input/amd64
+          tar -xzf ".local/platform-packages/tend-main-$GITHUB_SHA-linux-arm64.tar.gz" -C .local/fleet-input/arm64
+          go run ./internal/release/packagecmd --input-amd64 .local/fleet-input/amd64 --input-arm64 .local/fleet-input/arm64 --commit "$GITHUB_SHA" --output .local/release-fleet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution-linux-fleet
+          path: .local/release-fleet/*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   # Keep the existing required check name while rejecting every incomplete job.
   check:
     if: ${{ always() }}
-    needs: [quality, race, web, layout, cross, release-build]
+    needs: [quality, race, web, layout, cross, release-build, release-assemble]
     runs-on: ubuntu-latest
     steps:
       - name: require all checks

@@ -60,15 +60,17 @@ func loadSet(b *Bundle) error {
 
 func (s Set) Validate(b *Bundle) error {
 	commit, err := hex.DecodeString(s.Commit)
-	if s.Format != 1 || len(commit) != 20 || err != nil || s.Commit != hex.EncodeToString(commit) || s.ReleaseID != b.Manifest.ReleaseID || s.ManifestSHA256 != b.ManifestSHA256 || s.OS != "linux" || (s.Arch != "amd64" && s.Arch != "arm64") || len(s.Artifacts) != 4 || len(b.Manifest.Artifacts) != 2 {
+	if s.Format != 1 || len(commit) != 20 || err != nil || s.Commit != hex.EncodeToString(commit) || s.ReleaseID != b.Manifest.ReleaseID || s.ManifestSHA256 != b.ManifestSHA256 || s.OS != "linux" || (s.Arch != "amd64" && s.Arch != "arm64" && s.Arch != "multi") || len(s.Artifacts) < 4 || len(s.Artifacts) > 8 || len(s.Artifacts) != 2*len(b.Manifest.Artifacts) {
 		return errors.New("release: invalid release set identity")
 	}
-	roles, paths := map[string]bool{}, map[string]bool{}
+	roles, paths, platforms := map[string]bool{}, map[string]bool{}, map[string]int{}
 	for _, a := range s.Artifacts {
-		if (a.Role != "server" && a.Role != "runner" && a.Role != "updater" && a.Role != "cli") || roles[a.Role] || paths[a.Path] || !safeRelative(a.Path) || a.Path == "manifest.json" || a.Path == "release-set.json" || a.Size <= 0 || a.Size > MaxArtifactBytes || !ValidSHA(a.SHA256) || a.OS != s.OS || a.Arch != s.Arch {
+		key := a.Role + "/" + a.Arch
+		if (a.Role != "server" && a.Role != "runner" && a.Role != "updater" && a.Role != "cli") || roles[key] || paths[a.Path] || !safeRelative(a.Path) || a.Path == "manifest.json" || a.Path == "release-set.json" || a.Size <= 0 || a.Size > MaxArtifactBytes || !ValidSHA(a.SHA256) || a.OS != s.OS || (a.Arch != "amd64" && a.Arch != "arm64") || (s.Arch != "multi" && a.Arch != s.Arch) {
 			return errors.New("release: invalid release set artifact")
 		}
-		roles[a.Role], paths[a.Path] = true, true
+		roles[key], paths[a.Path] = true, true
+		platforms[a.Arch]++
 		if a.Role == "server" || a.Role == "runner" {
 			service, err := b.Artifact(a.Role, a.OS, a.Arch)
 			if err != nil || service != a {
@@ -77,6 +79,14 @@ func (s Set) Validate(b *Bundle) error {
 		}
 		if err := b.Verify(a); err != nil {
 			return err
+		}
+	}
+	if (s.Arch == "multi") != (len(platforms) == 2) {
+		return errors.New("release: release set platform coverage differs")
+	}
+	for _, count := range platforms {
+		if count != 4 {
+			return errors.New("release: incomplete platform in release set")
 		}
 	}
 	return nil
