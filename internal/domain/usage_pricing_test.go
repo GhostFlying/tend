@@ -9,6 +9,48 @@ import (
 
 func priceNumber(n int64) *int64 { return &n }
 
+func TestUsagePricingModelCaseNormalization(t *testing.T) {
+	regular := UsagePriceModel{ID: "openai/gpt-6.1-sol", Pricing: UsageRates{Prompt: "0.000002"}}
+	batch := UsagePriceModel{ID: "openai/gpt-6.1-sol:batch", Pricing: UsageRates{Prompt: "0.000001"}}
+	other := UsagePriceModel{ID: "other/GPT-6.1-Sol", Pricing: UsageRates{Prompt: "0.000003"}}
+	caseVariant := UsagePriceModel{ID: "OpenAI/GPT-6.1-Sol", Pricing: other.Pricing}
+	for _, tc := range []struct {
+		name    string
+		model   string
+		catalog []UsagePriceModel
+		wantID  string
+		wantUSD string
+	}{
+		{name: "exact id", model: regular.ID, wantID: regular.ID, wantUSD: "0.0002"},
+		{name: "mixed case id", model: "OpenAI/GPT-6.1-Sol", wantID: regular.ID, wantUSD: "0.0002"},
+		{name: "mixed case slug", model: "GPT-6.1-Sol", wantID: regular.ID, wantUSD: "0.0002"},
+		{name: "lowercase slug", model: "gpt-6.1-sol", wantID: regular.ID, wantUSD: "0.0002"},
+		{name: "batch slug", model: "GPT-6.1-Sol:BATCH", wantID: batch.ID, wantUSD: "0.0001"},
+		{name: "batch id", model: "OPENAI/GPT-6.1-SOL:BATCH", wantID: batch.ID, wantUSD: "0.0001"},
+		{name: "empty model"},
+		{name: "unknown model", model: "missing"},
+		{name: "unknown provider", model: "missing/GPT-6.1-Sol"},
+		{name: "unknown variant", model: "GPT-6.1-Sol:missing"},
+		{name: "ambiguous lowercase slug", model: "gpt-6.1-sol", catalog: []UsagePriceModel{regular, other}},
+		{name: "ambiguous mixed case slug", model: "GPT-6.1-Sol", catalog: []UsagePriceModel{regular, other}},
+		{name: "qualified id resolves provider", model: "OPENAI/GPT-6.1-SOL", catalog: []UsagePriceModel{other, regular}, wantID: regular.ID, wantUSD: "0.0002"},
+		{name: "ambiguous folded id", model: "OPENAI/GPT-6.1-SOL", catalog: []UsagePriceModel{regular, caseVariant}},
+		{name: "exact id wins", model: regular.ID, catalog: []UsagePriceModel{caseVariant, regular}, wantID: regular.ID, wantUSD: "0.0002"},
+		{name: "exact variant wins", model: caseVariant.ID, catalog: []UsagePriceModel{regular, caseVariant}, wantID: caseVariant.ID, wantUSD: "0.0003"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.catalog == nil {
+				tc.catalog = []UsagePriceModel{regular, batch}
+			}
+			s := protocol.TokenUsageSample{Model: tc.model, Input: priceNumber(100), Output: priceNumber(0), CacheRead: priceNumber(0), CacheWrite: priceNumber(0)}
+			usd, id, ok := (UsagePrices{Data: tc.catalog}).EstimateUsagePrice(s)
+			if ok != (tc.wantID != "") || id != tc.wantID || usd != tc.wantUSD {
+				t.Fatalf("EstimateUsagePrice(%q) = (%q, %q, %v), want (%q, %q, %v)", tc.model, usd, id, ok, tc.wantUSD, tc.wantID, tc.wantID != "")
+			}
+		})
+	}
+}
+
 func TestUsagePricingCalendarConditionsDoNotRejectCatalog(t *testing.T) {
 	for _, days := range []string{`["saturday","sunday"]`, `[6,0]`} {
 		t.Run(days, func(t *testing.T) {

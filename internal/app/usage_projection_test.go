@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -109,6 +110,31 @@ func TestUsageProjectionSummariesPricesAndBoundedDetails(t *testing.T) {
 	v, _ = projectionView(t, h, "total", 0, views.UsageFilter{})
 	if v.Totals.EstimatedUSD != "0.001272" || v.Records[0].Estimate.USD != "0.0000106" {
 		t.Fatal("quote update left stale contributions", v.Totals)
+	}
+}
+
+func TestUsageProjectionPricesCaseVariantsWithoutChangingFacts(t *testing.T) {
+	h := newHarness(t)
+	sample := nativeSample(h.clock.Now().UnixMilli())
+	sample.Model = "GPT-6.1-Sol"
+	sample.CacheRead, sample.CacheWrite = usageNumber(60), usageNumber(10)
+	if err := h.app.RecordNativeConversationUsage(t.Context(), "main", []protocol.TokenUsageSample{sample}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
+	if before.Totals.EstimatedRequests != 0 || len(before.Records) != 1 {
+		t.Fatal("expected an unpriced retained request", before)
+	}
+	quote := json.RawMessage(`{"data":[{"id":"openai/gpt-6.1-sol","pricing":{"prompt":"0.000002","completion":"0.00001","input_cache_read":"0.0000001","input_cache_write":"0.0000025"}}]}`)
+	if err := h.app.RecordUsagePriceCatalog(t.Context(), quote); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
+	if after.Totals.Requests != 1 || after.Totals.Total != before.Totals.Total || after.Totals.EstimatedRequests != 1 || after.Totals.EstimatedUSD != "0.000191" || after.Records[0].Estimate == nil || after.Records[0].Estimate.ModelID != "openai/gpt-6.1-sol" {
+		t.Fatal("historical request was not priced consistently", after)
+	}
+	if !reflect.DeepEqual(after.Records[0].TokenUsageSample, before.Records[0].TokenUsageSample) || h.count("token_usage_facts") != 1 || h.count("token_usage_dirty") != 0 {
+		t.Fatal("pricing rewrote the original sample or left pending work")
 	}
 }
 
