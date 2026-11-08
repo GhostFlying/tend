@@ -419,8 +419,19 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 	}
+
+	predecessorState := ""
+	if as.QuestionContinuation != nil {
+		if locator, ok := execution.Workspaces.(interface{ RunStateDirectory(string) (string, error) }); ok {
+			predecessorState, err = locator.RunStateDirectory(as.QuestionContinuation.RunID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	evidence := &acceptanceEvidence{r: r, as: as, prepared: p}
-	w, err := startWorker(runCtx, harness.WorkerSpec{RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := startWorker(runCtx, harness.WorkerSpec{PredecessorStateDir: predecessorState, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},

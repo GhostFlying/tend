@@ -169,7 +169,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
 	var err error
-	opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
+	if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && spec.PredecessorStateDir != "" {
+		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+spec.QuestionContinuation.RunID)
+	} else {
+		if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && opts.Environment != nil {
+			return nil, fmt.Errorf("isolated continuation needs original execution state")
+		}
+		opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
+	}
 	if err != nil {
 		return nil, err
 	}

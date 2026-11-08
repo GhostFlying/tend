@@ -22,6 +22,9 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	// PredecessorStateDir is a local locator for a question continuation.
+	PredecessorStateDir string
+
 	// RetainedResume forbids fallback launch or implicit provider input.
 	RetainedResume      *protocol.RetainedRunResume
 	ConcurrencyFeedback bool

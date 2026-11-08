@@ -10,6 +10,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func TestEnvironmentHandshakeRejectsRedirectedStateHome(t *testing.T) {
@@ -74,5 +75,28 @@ func TestWorkerRestoresOriginalBindingBeforeNativeStart(t *testing.T) {
 		if !errors.Is(err, stopped) {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestQuestionContinuationRestoresPredecessorBinding(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("strict environment requires Linux")
+	}
+	previous, state := t.TempDir(), t.TempDir()
+	original := &codexenv.Binding{Directory: t.TempDir(), ID: "original"}
+	if _, err := codexenv.BindExecution(t.Context(), previous, "run:before", original, false); err != nil {
+		t.Fatal(err)
+	}
+	workers := NewWorkers(WorkerOptions{Session: Options{Environment: &codexenv.Binding{Directory: t.TempDir(), ID: "replacement"}}})
+	stopped := errors.New("stop before native startup")
+	workers.start = func(_ context.Context, opts Options) (*Session, error) {
+		if opts.Environment == nil || *opts.Environment != *original || opts.EnvironmentExecution != "run:after" {
+			t.Error("question continuation lost original home", opts.Environment)
+		}
+		return nil, stopped
+	}
+	_, err := workers.Start(t.Context(), harness.WorkerSpec{RunID: "after", StateDir: state, Dir: t.TempDir(), Thread: "original-thread", PredecessorStateDir: previous, QuestionContinuation: &protocol.QuestionContinuation{RunID: "before", ThreadID: "original-thread"}})
+	if !errors.Is(err, stopped) {
+		t.Fatal(err)
 	}
 }

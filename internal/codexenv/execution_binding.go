@@ -29,26 +29,7 @@ func BindExecution(ctx context.Context, state, execution string, current *Bindin
 		return nil, fmt.Errorf("environment execution needs a fixed state directory")
 	}
 	path := filepath.Join(state, "codex-environment.json")
-	read := func() (*Binding, error) {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		var saved executionBinding
-		if err = json.Unmarshal(raw, &saved); err != nil {
-			return nil, err
-		}
-		if saved.Execution != execution {
-			return nil, fmt.Errorf("environment execution identity differs")
-		}
-		if saved.Binding != nil {
-			if _, err = (&Service{Root: saved.Binding.Directory}).directory(saved.Binding.ID); err != nil {
-				return nil, err
-			}
-		}
-		return saved.Binding, nil
-	}
-	saved, err := read()
+	saved, err := readExecutionBinding(state, execution)
 	if !errors.Is(err, os.ErrNotExist) {
 		return saved, err
 	}
@@ -73,7 +54,7 @@ func BindExecution(ctx context.Context, state, execution string, current *Bindin
 		return nil, err
 	}
 	defer release()
-	saved, err = read()
+	saved, err = readExecutionBinding(state, execution)
 	if !errors.Is(err, os.ErrNotExist) {
 		return saved, err
 	}
@@ -104,4 +85,48 @@ func (b *Bindings) SessionRoots() ([]string, error) {
 	}
 	slices.Sort(roots)
 	return slices.Compact(roots), nil
+}
+
+func readExecutionBinding(state, execution string) (*Binding, error) {
+	raw, err := os.ReadFile(filepath.Join(state, "codex-environment.json"))
+	if err != nil {
+		return nil, err
+	}
+	var saved executionBinding
+	if err = json.Unmarshal(raw, &saved); err != nil {
+		return nil, err
+	}
+	if saved.Execution != execution {
+		return nil, fmt.Errorf("environment execution identity differs")
+	}
+	if saved.Binding != nil {
+		if _, err = (&Service{Root: saved.Binding.Directory}).directory(saved.Binding.ID); err != nil {
+			return nil, err
+		}
+	}
+	return saved.Binding, nil
+
+}
+
+// InheritExecution binds a question continuation to its stopped predecessor's
+// home, even though the continuation has a new run and snapshot reference.
+func InheritExecution(ctx context.Context, state, execution, previousState, previousExecution string) (*Binding, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if saved, err := readExecutionBinding(state, execution); !errors.Is(err, os.ErrNotExist) {
+		return saved, err
+	}
+	info, err := os.Stat(previousState)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("original execution state is not a directory")
+	}
+	original, err := BindExecution(ctx, previousState, previousExecution, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	return BindExecution(ctx, state, execution, original, false)
 }
