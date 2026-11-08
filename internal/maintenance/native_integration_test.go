@@ -89,7 +89,11 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
-			b := protocol.MaintenanceBackend{Agent: agent, Socket: socket, Model: "probe-model", ApprovalPolicy: "never", Sandbox: "read-only"}
+			staging := filepath.Join(root, "staging")
+			if err := os.MkdirAll(staging, 0700); err != nil {
+				t.Fatal(err)
+			}
+			b := protocol.MaintenanceBackend{Agent: agent, Socket: socket, Model: "probe-model", ApprovalPolicy: "never", Sandbox: "workspace-write", NetworkAccess: true, WritableRoots: []string{staging}}
 			for {
 				if _, err := os.Stat(socket); err == nil {
 					break
@@ -101,22 +105,33 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 				}
 			}
 			n := NativeClient{}
-			id, path, err := n.NewThread(ctx, b, root, "Perform the one requested bounded inspection.")
+			thread, err := n.NewThread(ctx, b, root, "Perform the one requested bounded inspection.")
 			if err != nil {
 				t.Fatal(err)
 			}
+			id, path := thread.ID, thread.Path
 			if id == "" {
 				t.Fatal("empty native thread")
 			}
-			if s, err := n.Read(ctx, b, id, true); err != nil || s.Busy {
+			// A controller restart loses the creation connection. Only metadata is
+			// available until the first input materializes native history.
+			if err := n.Close(); err != nil {
+				t.Fatal(err)
+			}
+			n = NativeClient{}
+			serialized, err := json.Marshal(thread)
+			if err != nil || json.Unmarshal(serialized, &thread) != nil {
+				t.Fatal("cannot restore resolved native permissions", err)
+			}
+			if s, err := n.Read(ctx, b, id, ReadMetadata); err != nil || s.Busy {
 				t.Fatalf("unstarted native status: %+v %v", s, err)
 			}
-			turn, err := n.Start(ctx, b, id, "maintenance-input-1", "Reply with the inspection result.")
+			turn, err := n.Start(ctx, b, thread, "maintenance-input-1", "Reply with the inspection result.")
 			if err != nil {
 				t.Fatal(err)
 			}
 			for {
-				s, err := n.Read(ctx, b, id, true)
+				s, err := n.Read(ctx, b, id, ReadFullHistory)
 				if err != nil {
 					select {
 					case <-ctx.Done():
@@ -130,6 +145,43 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 						if v.InputID != "maintenance-input-1" {
 							t.Fatalf("lost original input identity: %+v", v)
 						}
+						t.Log("first input survived a controller restart on the original empty thread")
+						// Restart only this fixture's shared daemon, then recover the
+						// same durable native thread with its pinned backend policy.
+						_ = cmd.Process.Kill()
+						_ = cmd.Wait()
+						_ = os.Remove(socket)
+						next := exec.CommandContext(ctx, binary, args...)
+						next.Dir, next.Env = root, cmd.Env
+						next.Stdout, next.Stderr = logFile, logFile
+						cmd = next
+						if err := cmd.Start(); err != nil {
+							t.Fatal(err)
+						}
+						for {
+							recovered, err := n.Read(ctx, b, id, ReadFullHistory)
+							if err == nil && !recovered.Busy && len(recovered.Turns) > 0 {
+								break
+							}
+							select {
+							case <-ctx.Done():
+								t.Fatal("native daemon restart did not recover", err, readLog())
+							case <-time.After(100 * time.Millisecond):
+							}
+						}
+						probe, err := connectNative(ctx, b)
+						if err != nil {
+							t.Fatal(err)
+						}
+						var resolved struct {
+							Sandbox map[string]any `json:"sandbox"`
+						}
+						err = probe.call(ctx, "thread/resume", map[string]any{"threadId": id, "excludeTurns": true}, &resolved)
+						_ = probe.conn.Close()
+						if err != nil || resolved.Sandbox["type"] != "workspaceWrite" || resolved.Sandbox["networkAccess"] != true || !strings.Contains(fmt.Sprint(resolved.Sandbox["writableRoots"]), staging) {
+							t.Fatal("daemon restart lost the pinned backend policy", resolved.Sandbox, err)
+						}
+						t.Log("daemon restart retained configured sandbox, network access and extra writable roots")
 						t.Logf("%s same native thread readable after connection closes; rollout recorded=%t input identity=%s", agent, path != "", v.InputID)
 						remoteURL := "unix://" + socket
 						if agent == "traex" {
@@ -138,10 +190,10 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 							remoteURL = "ws" + strings.TrimPrefix(gateway.URL, "http")
 						}
 						probeNativeTUI(t, ctx, binary, id, remoteURL, model.URL, cmd.Env)
-						if _, err := n.Read(ctx, b, id, true); err != nil {
+						if _, err := n.Read(ctx, b, id, ReadFullHistory); err != nil {
 							t.Fatal("TUI exit damaged shared daemon", err)
 						}
-						holdTurn, err := n.Start(ctx, b, id, "maintenance-hold", "Hold inspection.")
+						holdTurn, err := n.Start(ctx, b, thread, "maintenance-hold", "Hold inspection.")
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -154,7 +206,7 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 							t.Fatal(err)
 						}
 						for {
-							snapshot, err := n.Read(ctx, b, id, true)
+							snapshot, err := n.Read(ctx, b, id, ReadFullHistory)
 							stopped := false
 							if err == nil && !snapshot.Busy {
 								for _, v := range snapshot.Turns {
@@ -173,12 +225,12 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 							}
 						}
 						t.Log("native interrupt confirmed idle on the original thread")
-						reviewTurn, err := n.Review(ctx, b, id, "Independent review, request_id=review-fixture. Review this isolated fixture without editing it.")
+						reviewTurn, err := n.Review(ctx, b, thread, "Independent review, request_id=review-fixture. Review this isolated fixture without editing it.")
 						if err != nil {
 							t.Fatal(err)
 						}
 						for {
-							snapshot, err := n.Read(ctx, b, id, true)
+							snapshot, err := n.Read(ctx, b, id, ReadFullHistory)
 							if err == nil {
 								for _, v := range snapshot.Turns {
 									if v.ID == reviewTurn && v.Status == "completed" {

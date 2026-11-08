@@ -14,17 +14,20 @@ import (
 )
 
 type fakeNative struct {
+	readMode                      NativeReadMode
+	thread                        NativeThread
 	created, started, interrupted int
 	reviewed                      int
 	input, turn                   string
 	busy, complete, loseReply     bool
 }
 
-func (n *fakeNative) NewThread(context.Context, protocol.MaintenanceBackend, string, string) (string, string, error) {
+func (n *fakeNative) NewThread(context.Context, protocol.MaintenanceBackend, string, string) (NativeThread, error) {
 	n.created++
-	return fmt.Sprintf("native-%d", n.created), "rollout.jsonl", nil
+	return NativeThread{ID: fmt.Sprintf("native-%d", n.created), Path: "rollout.jsonl", Sandbox: map[string]any{"type": "workspaceWrite", "excludeSlashTmp": true}}, nil
 }
-func (n *fakeNative) Read(context.Context, protocol.MaintenanceBackend, string, bool) (NativeState, error) {
+func (n *fakeNative) Read(_ context.Context, _ protocol.MaintenanceBackend, _ string, mode NativeReadMode) (NativeState, error) {
+	n.readMode = mode
 	s := NativeState{Busy: n.busy}
 	if n.turn != "" {
 		status := "inProgress"
@@ -38,7 +41,8 @@ func (n *fakeNative) Read(context.Context, protocol.MaintenanceBackend, string, 
 	}
 	return s, nil
 }
-func (n *fakeNative) Start(_ context.Context, _ protocol.MaintenanceBackend, _, input, _ string) (string, error) {
+func (n *fakeNative) Start(_ context.Context, _ protocol.MaintenanceBackend, thread NativeThread, input, _ string) (string, error) {
+	n.thread = thread
 	n.started++
 	n.input = input
 	n.turn = fmt.Sprintf("turn-%d", n.started)
@@ -54,11 +58,11 @@ func (n *fakeNative) Interrupt(context.Context, protocol.MaintenanceBackend, str
 	return nil
 }
 
-func (n *fakeNative) Review(ctx context.Context, b protocol.MaintenanceBackend, id, instructions string) (string, error) {
+func (n *fakeNative) Review(ctx context.Context, b protocol.MaintenanceBackend, thread NativeThread, instructions string) (string, error) {
 	n.reviewed++
 	_, tail, _ := strings.Cut(instructions, "request_id=")
 	input := strings.TrimSuffix(strings.Fields(tail)[0], ".")
-	return n.Start(ctx, b, id, input, instructions)
+	return n.Start(ctx, b, thread, input, instructions)
 }
 
 func fixture(t *testing.T) (*Controller, *fakeNative, Config, Options) {
@@ -105,6 +109,53 @@ func launch(t *testing.T, c *Controller) {
 	command(t, c, "audit", protocol.MaintenanceRequest{})
 	step(t, c)
 	step(t, c)
+}
+
+func TestFault_MaintenanceRestartBeforeFirstInput(t *testing.T) {
+	c, n, cfg, opts := fixture(t)
+	command(t, c, "audit", protocol.MaintenanceRequest{})
+	step(t, c)
+	id := c.Status().Active.SessionID
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	c.lock = nil
+	d, err := Open(context.Background(), cfg, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	step(t, d)
+	if n.created != 1 || n.started != 1 || n.thread.ID != id || n.thread.Sandbox["excludeSlashTmp"] != true || n.readMode != ReadMetadata {
+		t.Fatal("pre-input recovery lost native identity or resolved policy", n.thread, n.readMode)
+	}
+}
+
+func TestFault_MaintenanceReviewContinuationSurvivesBackendSwitch(t *testing.T) {
+	c, n, _, _ := fixture(t)
+	launch(t, c)
+	command(t, c, "review", protocol.MaintenanceRequest{Base: "main", Head: strings.Repeat("a", 40)})
+	n.complete, n.busy = true, false
+	step(t, c)
+	step(t, c)
+	if n.reviewed != 1 {
+		t.Fatal("review did not start")
+	}
+	backend := c.Status().Backend
+	backend.Agent = "traex"
+	command(t, c, "config", protocol.MaintenanceRequest{Backend: &backend, Mode: "when-idle"})
+	n.complete, n.busy = true, false
+	step(t, c)
+	if s := c.Status(); s.Review.Phase != "completed" || s.Active != nil || len(s.Pending) == 0 || s.Predecessor != nil {
+		t.Fatalf("review continuation was lost or gained an interrupt handoff: %+v", s)
+	}
+	step(t, c)
+	step(t, c)
+	step(t, c)
+	s := c.Status()
+	if s.Active == nil || s.Active.Backend.Agent != "traex" || !strings.Contains(s.Active.Prompt, "read the review output") || s.Active.Predecessor != nil || n.created != 2 {
+		t.Fatalf("new backend did not receive the queued continuation: %+v", s.Active)
+	}
 }
 
 func TestFault_MaintenanceRestartReconcilesLostTurnReceipt(t *testing.T) {

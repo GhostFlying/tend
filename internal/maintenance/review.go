@@ -12,7 +12,11 @@ import (
 // NativeReviewer runs the harness's independent review mode inline, after the
 // repair turn has ended. It creates neither a second thread nor an agent tool.
 type NativeReviewer interface {
-	Review(context.Context, protocol.MaintenanceBackend, string, string) (string, error)
+	Review(context.Context, protocol.MaintenanceBackend, NativeThread, string) (string, error)
+}
+
+func (c *Controller) reviewContinuation(outcome string) {
+	c.enqueue("independent review ended with status " + outcome + "; read the review output, resolve findings, verify the same head, and continue required CI and delivery")
 }
 
 func (c *Controller) startReview(ctx context.Context) error {
@@ -40,7 +44,7 @@ func (c *Controller) startReview(ctx context.Context) error {
 	if err := c.save(ctx); err != nil {
 		return err
 	}
-	id, err := reviewer.Review(ctx, a.Backend, a.SessionID, a.Prompt)
+	id, err := reviewer.Review(ctx, a.Backend, nativeThread(a), a.Prompt)
 	if err != nil {
 		if errors.Is(err, ErrNotSent) {
 			a.InputID = ""
@@ -58,8 +62,9 @@ func (c *Controller) startReview(ctx context.Context) error {
 	return c.save(ctx)
 }
 
-func (n *NativeClient) Review(ctx context.Context, b protocol.MaintenanceBackend, id, instructions string) (turnID string, err error) {
-	r, err := n.threadRPC(ctx, b, id)
+func (n *NativeClient) Review(ctx context.Context, b protocol.MaintenanceBackend, thread NativeThread, instructions string) (turnID string, err error) {
+	id := thread.ID
+	r, err := n.threadRPC(ctx, b, thread)
 	if err != nil {
 		return "", err
 	}

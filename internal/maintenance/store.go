@@ -21,10 +21,28 @@ import (
 )
 
 type Native interface {
-	NewThread(context.Context, protocol.MaintenanceBackend, string, string) (string, string, error)
-	Read(context.Context, protocol.MaintenanceBackend, string, bool) (NativeState, error)
-	Start(context.Context, protocol.MaintenanceBackend, string, string, string) (string, error)
+	NewThread(context.Context, protocol.MaintenanceBackend, string, string) (NativeThread, error)
+	Read(context.Context, protocol.MaintenanceBackend, string, NativeReadMode) (NativeState, error)
+	Start(context.Context, protocol.MaintenanceBackend, NativeThread, string, string) (string, error)
 	Interrupt(context.Context, protocol.MaintenanceBackend, string, string) error
+}
+
+// NativeThread retains the resolved permissions across controller restarts.
+type NativeThread struct {
+	ID, Path string
+	Sandbox  map[string]any
+}
+
+type NativeReadMode int
+
+const (
+	ReadMetadata NativeReadMode = iota
+	ReadWhenIdle
+	ReadFullHistory
+)
+
+func nativeThread(s *protocol.MaintenanceSession) NativeThread {
+	return NativeThread{ID: s.SessionID, Path: s.RolloutPath, Sandbox: s.SandboxPolicy}
 }
 
 // ErrNotSent proves the native mutation was never submitted or was rejected.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -69,18 +70,18 @@ func TestNativeProtocolIdentityAndOrdinaryTools(t *testing.T) {
 			b.WritableRoots = []string{filepath.Join(dir, "staging")}
 			n := &NativeClient{}
 			defer n.Close()
-			id, _, err := n.NewThread(context.Background(), b, dir, "Configured maintenance scope")
+			threadRef, err := n.NewThread(context.Background(), b, dir, "Configured maintenance scope")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := n.Start(context.Background(), b, id, "original", "Check once"); err != nil {
+			if _, err := n.Start(context.Background(), b, threadRef, "original", "Check once"); err != nil {
 				t.Fatal(err)
 			}
 			thread, turn := <-messages, <-messages
 			if _, ok := thread["dynamicTools"]; ok {
 				t.Fatal("maintenance injected tools")
 			}
-			if _, ok := thread["config"]; ok {
+			if strings.Contains(string(thread["config"]), "mcp_servers") {
 				t.Fatal("maintenance injected a hidden tool configuration")
 			}
 			field := "userMessageId"
@@ -97,7 +98,7 @@ func TestNativeProtocolIdentityAndOrdinaryTools(t *testing.T) {
 			if json.Unmarshal(turn["sandboxPolicy"], &policy) != nil || policy["networkAccess"] != true || policy["excludeSlashTmp"] != true || len(policy["writableRoots"].([]any)) != 2 {
 				t.Fatal("native filesystem or network scope changed", policy)
 			}
-			s, err := n.Read(context.Background(), b, id, true)
+			s, err := n.Read(context.Background(), b, threadRef.ID, ReadFullHistory)
 			if err != nil || s.Busy || len(s.Turns) != 1 || s.Turns[0].InputID != "original" {
 				t.Fatal(s, err)
 			}

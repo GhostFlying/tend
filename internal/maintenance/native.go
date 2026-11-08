@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 type NativeClient struct {
 	mu        sync.Mutex
 	unstarted map[string]*nativeRPC
+	sandboxes map[string]map[string]any
 }
 
 func (n *NativeClient) Close() error {
@@ -104,10 +106,52 @@ func (r *nativeRPC) call(ctx context.Context, method string, params any, result 
 	}
 }
 
-func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBackend, cwd, instructions string) (string, string, error) {
+func backendParams(b protocol.MaintenanceBackend) map[string]any {
+	params := map[string]any{"approvalPolicy": b.ApprovalPolicy, "sandbox": b.Sandbox}
+	config := map[string]any{}
+	if b.Model != "" {
+		params["model"] = b.Model
+		config["review_model"] = b.Model
+	}
+	if b.Effort != "" {
+		config["model_reasoning_effort"] = b.Effort
+	}
+	if b.Sandbox == "workspace-write" {
+		config["sandbox_workspace_write.network_access"] = b.NetworkAccess
+		if len(b.WritableRoots) > 0 {
+			config["sandbox_workspace_write.writable_roots"] = b.WritableRoots
+		}
+	}
+	if len(config) > 0 {
+		params["config"] = config
+	}
+	return params
+}
+
+func (n *NativeClient) resume(ctx context.Context, b protocol.MaintenanceBackend, id string, r *nativeRPC) error {
+	params := backendParams(b)
+	params["threadId"] = id
+	params["excludeTurns"] = true
+	var result struct {
+		Sandbox map[string]any `json:"sandbox"`
+	}
+	if err := r.call(ctx, "thread/resume", params, &result); err != nil {
+		return err
+	}
+	r.sandbox = result.Sandbox
+	n.mu.Lock()
+	if n.sandboxes == nil {
+		n.sandboxes = map[string]map[string]any{}
+	}
+	n.sandboxes[id] = result.Sandbox
+	n.mu.Unlock()
+	return nil
+}
+
+func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBackend, cwd, instructions string) (NativeThread, error) {
 	r, err := connectNative(ctx, b)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: %w", ErrNotSent, err)
+		return NativeThread{}, fmt.Errorf("%w: %w", ErrNotSent, err)
 	}
 	var result struct {
 		Sandbox map[string]any `json:"sandbox"`
@@ -116,20 +160,11 @@ func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBack
 			Path string `json:"path"`
 		} `json:"thread"`
 	}
-	params := map[string]any{"cwd": cwd, "approvalPolicy": b.ApprovalPolicy, "sandbox": b.Sandbox, "developerInstructions": instructions, "experimentalRawEvents": true, "persistExtendedHistory": true}
-	if b.Model != "" {
-		params["model"] = b.Model
-	}
-	config := map[string]any{}
-	if b.Model != "" {
-		config["review_model"] = b.Model
-	}
-	if b.Effort != "" {
-		config["model_reasoning_effort"] = b.Effort
-	}
-	if len(config) > 0 {
-		params["config"] = config
-	}
+	params := backendParams(b)
+	params["cwd"] = cwd
+	params["developerInstructions"] = instructions
+	params["experimentalRawEvents"] = true
+	params["persistExtendedHistory"] = true
 	err = r.call(ctx, "thread/start", params, &result)
 	r.sandbox = result.Sandbox
 	if err != nil {
@@ -142,10 +177,10 @@ func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBack
 		n.unstarted[result.Thread.ID] = r
 		n.mu.Unlock()
 	}
-	return result.Thread.ID, result.Thread.Path, err
+	return NativeThread{ID: result.Thread.ID, Path: result.Thread.Path, Sandbox: result.Sandbox}, err
 }
 
-func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, id string, requireHistory bool) (NativeState, error) {
+func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode) (NativeState, error) {
 	n.mu.Lock()
 	r := n.unstarted[id]
 	n.mu.Unlock()
@@ -178,18 +213,14 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 		return NativeState{}, err
 	}
 	if result.Thread.Status.Type == "notLoaded" {
-		var result struct {
-			Sandbox map[string]any `json:"sandbox"`
-		}
-		if err := r.call(ctx, "thread/resume", map[string]any{"threadId": id}, &result); err != nil {
+		if err := n.resume(ctx, b, id, r); err != nil {
 			return NativeState{}, err
 		}
-		r.sandbox = result.Sandbox
 		if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &result); err != nil {
 			return NativeState{}, err
 		}
 	}
-	if !unstarted && (requireHistory || result.Thread.Status.Type == "idle") {
+	if !unstarted && (mode == ReadFullHistory || mode == ReadWhenIdle && result.Thread.Status.Type == "idle") {
 		if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": true}, &result); err != nil {
 			return NativeState{}, err
 		}
@@ -218,9 +249,11 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 	return s, nil
 }
 
-func (n *NativeClient) threadRPC(ctx context.Context, b protocol.MaintenanceBackend, id string) (*nativeRPC, error) {
+func (n *NativeClient) threadRPC(ctx context.Context, b protocol.MaintenanceBackend, thread NativeThread) (*nativeRPC, error) {
+	id := thread.ID
 	n.mu.Lock()
 	r := n.unstarted[id]
+	sandbox := n.sandboxes[id]
 	n.mu.Unlock()
 	if r == nil {
 		var err error
@@ -228,9 +261,27 @@ func (n *NativeClient) threadRPC(ctx context.Context, b protocol.MaintenanceBack
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrNotSent, err)
 		}
-		if err := r.call(ctx, "thread/resume", map[string]any{"threadId": id}, nil); err != nil {
+		var result struct {
+			Thread struct {
+				Status struct {
+					Type string `json:"type"`
+				} `json:"status"`
+			} `json:"thread"`
+		}
+		if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &result); err != nil {
 			_ = r.conn.Close()
 			return nil, fmt.Errorf("%w: %w", ErrNotSent, err)
+		}
+		if result.Thread.Status.Type == "notLoaded" {
+			if err := n.resume(ctx, b, id, r); err != nil {
+				_ = r.conn.Close()
+				return nil, fmt.Errorf("%w: %w", ErrNotSent, err)
+			}
+		} else {
+			r.sandbox = sandbox
+			if r.sandbox == nil {
+				r.sandbox = thread.Sandbox
+			}
 		}
 	}
 	return r, nil
@@ -243,6 +294,7 @@ func (n *NativeClient) releaseRPC(id string, r *nativeRPC, result error) {
 		return
 	}
 	delete(n.unstarted, id)
+	delete(n.sandboxes, id)
 	_ = r.conn.Close()
 }
 
@@ -253,10 +305,12 @@ func (n *NativeClient) ForgetUnstarted(id string) {
 		delete(n.unstarted, id)
 		_ = r.conn.Close()
 	}
+	delete(n.sandboxes, id)
 }
 
-func (n *NativeClient) Start(ctx context.Context, b protocol.MaintenanceBackend, id, inputID, prompt string) (turnID string, err error) {
-	r, err := n.threadRPC(ctx, b, id)
+func (n *NativeClient) Start(ctx context.Context, b protocol.MaintenanceBackend, thread NativeThread, inputID, prompt string) (turnID string, err error) {
+	id := thread.ID
+	r, err := n.threadRPC(ctx, b, thread)
 	if err != nil {
 		return "", err
 	}
@@ -274,7 +328,9 @@ func (n *NativeClient) Start(ctx context.Context, b protocol.MaintenanceBackend,
 			roots, _ := policy["writableRoots"].([]any)
 			roots = append([]any(nil), roots...)
 			for _, root := range b.WritableRoots {
-				roots = append(roots, root)
+				if !slices.ContainsFunc(roots, func(v any) bool { return v == root }) {
+					roots = append(roots, root)
+				}
 			}
 			policy["writableRoots"] = roots
 		}

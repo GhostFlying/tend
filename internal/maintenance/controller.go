@@ -131,7 +131,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 	case "upgrade-plan":
 		c.state.Upgrade, err = c.planUpgrade(req.RequestID, req.ReleaseDir)
 	case "upgrade-apply":
-		if c.state.Upgrade == nil || c.state.Upgrade.ID != req.UpgradeID || c.state.Upgrade.Phase != "planned" {
+		if c.state.Upgrade == nil || c.state.Upgrade.ID != req.UpgradeID || c.state.Upgrade.Phase != "planned" && c.state.Upgrade.Phase != "rejected" {
 			err = protocol.Errorf(protocol.CodeInvalidRequest, "matching planned upgrade required")
 			break
 		}
@@ -140,7 +140,9 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 			err = e
 			break
 		}
-		if digest(plan) != digest(c.state.Upgrade) {
+		original := *c.state.Upgrade
+		original.Phase = "planned"
+		if digest(plan) != digest(original) {
 			err = protocol.Errorf(protocol.CodeInvalidRequest, "planned component changed")
 			break
 		}
@@ -258,7 +260,14 @@ func (c *Controller) Step(ctx context.Context) error {
 			}
 			return errors.New("maintenance: native creation requires reconciliation")
 		}
-		native, err := c.opts.Native.Read(ctx, a.Backend, a.SessionID, a.TurnID == "")
+		mode := ReadMetadata
+		if a.InputID != "" {
+			mode = ReadWhenIdle
+			if a.TurnID == "" {
+				mode = ReadFullHistory
+			}
+		}
+		native, err := c.opts.Native.Read(ctx, a.Backend, a.SessionID, mode)
 		if err != nil {
 			return err
 		}
@@ -313,6 +322,8 @@ func (c *Controller) Step(ctx context.Context) error {
 				if interrupted {
 					review.Phase = "queued"
 					c.enqueue("independent review requested")
+				} else {
+					c.reviewContinuation(outcome)
 				}
 			}
 			c.finish(interrupted)
@@ -322,7 +333,7 @@ func (c *Controller) Step(ctx context.Context) error {
 			if c.state.Review != nil && c.state.Review.Phase == "running" && c.state.Review.RequestID == a.InputID {
 				c.state.Review.Phase = "completed"
 				c.state.Review.Outcome = outcome
-				c.enqueue("independent review ended with status " + outcome + "; read the review output, resolve findings, verify the same head, and continue required CI and delivery")
+				c.reviewContinuation(outcome)
 			}
 			a.InputID = ""
 			a.TurnID = ""
@@ -353,7 +364,7 @@ func (c *Controller) Step(ctx context.Context) error {
 		if err := c.save(ctx); err != nil {
 			return err
 		}
-		id, path, err := c.opts.Native.NewThread(ctx, c.state.Backend, c.cfg.Workspace, string(instructions))
+		thread, err := c.opts.Native.NewThread(ctx, c.state.Backend, c.cfg.Workspace, string(instructions))
 		if err != nil {
 			if errors.Is(err, ErrNotSent) {
 				c.state.Active = nil
@@ -363,8 +374,9 @@ func (c *Controller) Step(ctx context.Context) error {
 			}
 			return err
 		}
-		c.state.Active.SessionID = id
-		c.state.Active.RolloutPath = path
+		c.state.Active.SessionID = thread.ID
+		c.state.Active.RolloutPath = thread.Path
+		c.state.Active.SandboxPolicy = thread.Sandbox
 		c.state.Active.Phase = "idle"
 		c.state.Predecessor = nil
 		return c.save(ctx)
@@ -387,7 +399,7 @@ func (c *Controller) Step(ctx context.Context) error {
 	if err := c.save(ctx); err != nil {
 		return err
 	}
-	id, err := c.opts.Native.Start(ctx, a.Backend, a.SessionID, a.InputID, a.Prompt)
+	id, err := c.opts.Native.Start(ctx, a.Backend, nativeThread(a), a.InputID, a.Prompt)
 	if err != nil {
 		if errors.Is(err, ErrNotSent) {
 			for _, reason := range a.InputReasons {
