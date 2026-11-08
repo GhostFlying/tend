@@ -273,7 +273,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if body != string(p.Body) {
 				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native event identity has different content")
 			}
-			return Outcome{Result: map[string]any{"ack": p.Sequence}}, nil
+			return Outcome{ProjectionOnly: true, Result: map[string]any{"ack": p.Sequence}}, nil
 		}
 		r, err := store.GetRun(ctx, tx.Q(), run)
 		if err != nil {
@@ -314,8 +314,16 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				}
 			}
 		}
+		projectionOnly := false
+		if parsed && event.Native != nil && event.Native.Kind == "agent_message_delta" {
+			closing, err := managerRunClosing(ctx, tx.Q(), run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			projectionOnly = !closing
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES(?,?,?)`, run, p.Sequence, string(p.Body))
-		return Outcome{Result: map[string]any{"ack": p.Sequence}}, err
+		return Outcome{ProjectionOnly: projectionOnly, Result: map[string]any{"ack": p.Sequence}}, err
 	}
 	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager transport operation")
 }

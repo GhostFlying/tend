@@ -157,7 +157,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 		delay, err := p.App.BackgroundDelay(ctx, scannedAt)
 		p.mu.Lock()
 		for _, retry := range p.retries {
-			if retry.at.IsZero() {
+			if retry.at.IsZero() || failed && !retry.at.After(p.App.BackgroundNow()) {
 				continue
 			}
 			if remaining := max(time.Millisecond, retry.at.Sub(p.App.BackgroundNow())); delay == 0 || remaining < delay {
