@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -90,6 +91,7 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	Extensions   *extensions.Agent
 	RolloutRoots []string
 
 	Executions          ExecutionResolver
@@ -275,6 +277,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Deferred calls run in reverse: stop the goroutines, then join them.
 	defer r.wg.Wait()
 	defer cancel()
+	if r.cfg.Extensions != nil {
+		r.wg.Go(func() {
+			if err := r.cfg.Extensions.Run(ctx); err != nil && ctx.Err() == nil {
+				r.cfg.Log.ErrorContext(ctx, "managed extension client stopped", "err", err)
+			}
+		})
+	}
 	if r.cfg.UpdaterSocket != "" {
 		listener, err := r.updaterListener()
 		if err != nil {

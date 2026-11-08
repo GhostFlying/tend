@@ -60,6 +60,7 @@ func (s TaskAgentSelection) ValidateForAcceptance(required bool) error {
 
 // RunExecutionPin fixes one role's selected request without private configuration.
 type RunExecutionPin struct {
+	Extensions        ExtensionExecutionPin `json:"extensions,omitzero"`
 	Purpose           string                `json:"purpose,omitempty"`
 	Identity          AgentIdentity         `json:"identity"`
 	AgentRevision     uint64                `json:"agent_revision"`
@@ -73,6 +74,9 @@ type RunExecutionPin struct {
 }
 
 func (p RunExecutionPin) Validate(host string) error {
+	if e := p.Extensions; e != (ExtensionExecutionPin{}) && (e.Agent != p.Identity || !AgentInventoryID(e.CategoryID) || !strings.HasPrefix(e.ReleaseID, "ext-") || len(e.EffectiveSHA256) != 64 || e.CategoryRevision < 0 || e.AgentRevision < 0) {
+		return Errorf(CodeInvalidRequest, "invalid managed extension pin")
+	}
 	if p.Purpose != "" && p.Purpose != "issue_manager" || p.Purpose == "issue_manager" && (p.BackendID != "" || p.Worker != WorkerAppServer) {
 		return Errorf(CodeInvalidRequest, "invalid execution purpose")
 	}

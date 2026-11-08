@@ -22,6 +22,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
 	"github.com/GhostFlying/tend/internal/codexenv"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/bridge"
 	"github.com/GhostFlying/tend/internal/harness/orca"
@@ -49,6 +50,8 @@ func (p profile) gitws() gitws.Profile {
 
 // config is the runner's configuration file.
 type config struct {
+	ManagedExtensions *extensions.Configuration `json:"managed_extensions,omitempty"`
+	extensionAgent    *extensions.Agent
 	CodexEnvironments *codexenv.Bindings     `json:"codex_environments,omitempty"`
 	Agents            *agentcontrol.Config   `json:"agents,omitempty"`
 	DeliveryObserver  deliveryObserverConfig `json:"delivery_observer"`
@@ -363,6 +366,22 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if cfg.ManagedExtensions != nil {
+		user, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		if err = cfg.ManagedExtensions.ResolvePaths(cfgfile.Path); err != nil {
+			return err
+		}
+		for id, local := range cfg.ManagedExtensions.Runtimes {
+			if local.Environment == nil {
+				local.Environment = cfg.CodexEnvironments.Resolve(id)
+				cfg.ManagedExtensions.Runtimes[id] = local
+			}
+		}
+		cfg.extensionAgent = &extensions.Agent{Consumer: &extensions.Consumer{Config: *cfg.ManagedExtensions, UserHome: user, Now: time.Now}, HTTP: client, ServerURL: cfg.ServerURL, HostID: cfg.HostID, Token: token}
+	}
 	executions, err := assembleAgentExecutions(ctx, cfg, agents, workspaces, ids, time.Now, log, client)
 	if err != nil {
 		return err
@@ -370,7 +389,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if closer, ok := executions.(interface{ Close() }); ok {
 		defer closer.Close()
 	}
-	r := runner.New(runner.Config{
+	r := runner.New(runner.Config{Extensions: cfg.extensionAgent,
 		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
 		RolloutRoots: cfg.RolloutRoots, InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
@@ -403,6 +422,11 @@ func resolveRolloutRoots(cfg *config, home string) error {
 		}
 		cfg.RolloutRoots = append(cfg.RolloutRoots, retainedRoots...)
 		cfg.RolloutRoots = append(cfg.RolloutRoots, mappedRoots...)
+		if cfg.ManagedExtensions != nil {
+			for _, local := range cfg.ManagedExtensions.Runtimes {
+				cfg.RolloutRoots = append(cfg.RolloutRoots, filepath.Join(local.Home, "sessions"))
+			}
+		}
 		for _, cli := range []struct{ env, fallback string }{{"TRAE_HOME", "~/.trae/cli"}, {"CODEX_HOME", "~/.codex"}} {
 			root := os.Getenv(cli.env)
 			if root == "" {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/cli"
 	"github.com/GhostFlying/tend/internal/codexenv"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -27,8 +28,9 @@ func main() {
 	e := &cli.Env{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv,
 		Home: home, ConfigDir: configDir,
-		HTTP: &http.Client{Timeout: 60 * time.Second, Transport: cli.Transport()},
-		IDs:  protocol.NewULIDGen(time.Now, nil),
+		HTTP:            &http.Client{Timeout: 60 * time.Second, Transport: cli.Transport()},
+		IDs:             protocol.NewULIDGen(time.Now, nil),
+		ImportExtension: extensions.Import,
 	}
 	binary, _ := os.Executable()
 	e.CodexEnvironment = func(ctx context.Context, q protocol.LocalCodexEnvironmentRequest) (json.RawMessage, error) {

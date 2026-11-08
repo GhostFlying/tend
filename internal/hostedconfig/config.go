@@ -96,28 +96,32 @@ func Prepare(c Configuration) (*Prepared, error) {
 // Selection is a private execution snapshot, not a public inventory type.
 // Definition uses the sole P2/P3 model instead of copying its fields.
 type Selection struct {
-	NativeOwnerTools      bool                        `json:"native_owner_tools,omitempty"`
-	RequireReceiptReader  bool                        `json:"require_receipt_reader,omitempty"`
-	OwnershipPolicy       string                      `json:"ownership_policy,omitempty"`
-	ReceiptOnly           bool                        `json:"receipt_only,omitempty"`
-	RunnerManaged         bool                        `json:"runner_managed,omitempty"`
-	RunnerRunID           string                      `json:"runner_run_id,omitempty"`
-	IssueID               string                      `json:"issue_id,omitempty"`
-	AssignmentEpoch       int64                       `json:"assignment_epoch,omitempty"`
-	AppliedModel          string                      `json:"applied_model,omitempty"`
-	AppliedProvider       string                      `json:"applied_provider,omitempty"`
-	AppliedEffort         string                      `json:"applied_effort,omitempty"`
-	ConfigurationRevision int64                       `json:"configuration_revision"`
-	ConfigurationHash     string                      `json:"configuration_hash"`
-	Identity              protocol.AgentIdentity      `json:"identity"`
-	Definition            agentconfig.AgentDefinition `json:"definition"`
-	Runtime               agentconfig.RuntimeBinding  `json:"runtime"`
-	Purpose               agentconfig.Purpose         `json:"purpose"`
+	CategoryID            string                         `json:"category_id,omitempty"`
+	Extensions            protocol.ExtensionExecutionPin `json:"extensions,omitzero"`
+	NativeOwnerTools      bool                           `json:"native_owner_tools,omitempty"`
+	RequireReceiptReader  bool                           `json:"require_receipt_reader,omitempty"`
+	OwnershipPolicy       string                         `json:"ownership_policy,omitempty"`
+	ReceiptOnly           bool                           `json:"receipt_only,omitempty"`
+	RunnerManaged         bool                           `json:"runner_managed,omitempty"`
+	RunnerRunID           string                         `json:"runner_run_id,omitempty"`
+	IssueID               string                         `json:"issue_id,omitempty"`
+	AssignmentEpoch       int64                          `json:"assignment_epoch,omitempty"`
+	AppliedModel          string                         `json:"applied_model,omitempty"`
+	AppliedProvider       string                         `json:"applied_provider,omitempty"`
+	AppliedEffort         string                         `json:"applied_effort,omitempty"`
+	ConfigurationRevision int64                          `json:"configuration_revision"`
+	ConfigurationHash     string                         `json:"configuration_hash"`
+	Identity              protocol.AgentIdentity         `json:"identity"`
+	Definition            agentconfig.AgentDefinition    `json:"definition"`
+	Runtime               agentconfig.RuntimeBinding     `json:"runtime"`
+	Purpose               agentconfig.Purpose            `json:"purpose"`
 }
 
 // BindingIdentity excludes transient receipt and resolved-model state, matching
 // the native thread binding across reconnects and historical execution facts.
 func (s Selection) BindingIdentity() string {
+	s.Extensions = protocol.ExtensionExecutionPin{}
+	s.CategoryID = ""
 	s.RunnerRunID = ""
 	s.ReceiptOnly, s.RequireReceiptReader = false, false
 	s.AppliedModel, s.AppliedProvider, s.AppliedEffort = "", "", ""

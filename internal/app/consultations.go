@@ -35,6 +35,10 @@ func (CreateConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if err != nil {
 		return Outcome{}, err
 	}
+	selected.CategoryID, err = selectedCategory(selected.Definition.Categories, p.CategoryID, x.managedHostedRuntimes[selected.Runtime.ID])
+	if err != nil {
+		return Outcome{}, err
+	}
 	if strings.TrimSpace(p.Title) == "" || len(p.Title) > 1000 || !utf8.ValidString(p.Title) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "a valid consultation title is required")
 	}

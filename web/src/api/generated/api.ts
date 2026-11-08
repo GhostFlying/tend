@@ -310,6 +310,20 @@ export interface TendAPI {
   Envelope?: Envelope;
   ExecutionCounts?: ExecutionCounts;
   ExplainDecisionPayload?: ExplainDecisionPayload;
+  ExtensionBindingPage?: ExtensionBindingPage;
+  ExtensionCombination?: ExtensionCombination;
+  ExtensionEditPayload?: ExtensionEditPayload;
+  ExtensionHostStatus?: ExtensionHostStatus;
+  ExtensionImport?: ExtensionImport;
+  ExtensionPackage?: ExtensionPackage;
+  ExtensionPlan?: ExtensionPlan;
+  ExtensionPublishPayload?: ExtensionPublishPayload;
+  ExtensionReleasePage?: ExtensionReleasePage;
+  ExtensionResourcePage?: ExtensionResourcePage;
+  ExtensionStageRequest?: ExtensionStageRequest;
+  ExtensionState?: ExtensionState;
+  ExtensionStatus?: ExtensionStatus;
+  ExtensionTarget?: ExtensionTarget;
   FeishuBindingView?: FeishuBindingView;
   FeishuInputPage?: FeishuInputPage;
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
@@ -1203,6 +1217,7 @@ export interface IssueManagerView {
 export interface RunExecutionPin {
   agent_revision: number;
   backend_id?: string;
+  extensions?: ExtensionExecutionPin;
   identity: AgentIdentity;
   inventory_revision: number;
   profile: ExecutionProfile;
@@ -1211,6 +1226,18 @@ export interface RunExecutionPin {
   runtime: AgentRuntimeReference;
   snapshot_id: string;
   worker: WorkerKind;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionExecutionPin".
+ */
+export interface ExtensionExecutionPin {
+  agent: AgentIdentity;
+  agent_revision: number;
+  category_id: string;
+  category_revision: number;
+  effective_sha256: string;
+  release_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1835,6 +1862,7 @@ export interface RunnerControl {
   authorization?: MaintenanceAuthorization;
   bounded_recovery_release?: BoundedRunnerAdmissionRelease;
   cancelled_upgrade_id?: string;
+  extensions?: ExtensionTarget;
   mode: string;
   release_id?: string;
   revision: number;
@@ -1875,6 +1903,24 @@ export interface BoundedDataIdentity {
   inode: number;
   path?: string;
   version?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionTarget".
+ */
+export interface ExtensionTarget {
+  content_base_path: string;
+  manifest_path: string;
+  release: ExtensionReleaseRef;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionReleaseRef".
+ */
+export interface ExtensionReleaseRef {
+  id: string;
+  manifest_sha256: string;
+  manifest_size: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1934,6 +1980,7 @@ export interface RunnerRuntime {
   confirmed_cancelled_upgrade_id?: string;
   continuation_backend?: string;
   downloaded_bytes?: number;
+  extensions?: ExtensionHostStatus;
   generation: number;
   instance_id: string;
   journal_version?: number;
@@ -1963,6 +2010,66 @@ export interface RunnerBuild {
   pid?: number;
   started_at_ms?: number;
   version?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionHostStatus".
+ */
+export interface ExtensionHostStatus {
+  adoptions: ExtensionAdoption[] | null;
+  desired_release?: string;
+  downloaded_release?: string;
+  enabled: boolean;
+  last_error?: string;
+  prepared: ExtensionPrepared[] | null;
+  runtimes: string[] | null;
+  skill_exclusions?: ExtensionSkillExclusionStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionAdoption".
+ */
+export interface ExtensionAdoption {
+  execution: string;
+  mcp?: ExtensionMCPStatus[];
+  pending_reason?: string;
+  pending_release?: string;
+  pin: ExtensionExecutionPin;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionMCPStatus".
+ */
+export interface ExtensionMCPStatus {
+  id: string;
+  observed_at?: string;
+  reason?: string;
+  source?: string;
+  state: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionPrepared".
+ */
+export interface ExtensionPrepared {
+  generation?: string;
+  mcp?: ExtensionMCPStatus[];
+  pin: ExtensionExecutionPin;
+  ready: boolean;
+  reason?: string;
+  runtime_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionSkillExclusionStatus".
+ */
+export interface ExtensionSkillExclusionStatus {
+  excluded_paths: number;
+  last_attempt?: string;
+  last_error?: string;
+  next_refresh_at?: string;
+  refreshed_at?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2888,6 +2995,10 @@ export interface ConversationImageData {
  */
 export interface ConversationSettingsView {
   available: boolean;
+  categories?: string[];
+  category_editable?: boolean;
+  category_id?: string;
+  category_revision?: number;
   effort: string;
   enabled: boolean;
   model: string;
@@ -2955,6 +3066,7 @@ export interface CreateAttentionPayload {
  */
 export interface CreateConsultationPayload {
   agent_ref: string;
+  category_id?: string;
   title: string;
 }
 /**
@@ -3151,6 +3263,228 @@ export interface ExplainDecisionPayload {
   owner_choice: string;
   source_message_id: string;
   summary: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionBindingPage".
+ */
+export interface ExtensionBindingPage {
+  items: ExtensionBinding[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionBinding".
+ */
+export interface ExtensionBinding {
+  agent?: AgentIdentity;
+  agents_md: string;
+  bundled_skills?: boolean;
+  category_id?: string;
+  choices: ExtensionChoice[] | null;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionChoice".
+ */
+export interface ExtensionChoice {
+  enabled?: boolean;
+  id: string;
+  kind: string;
+  version?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionCombination".
+ */
+export interface ExtensionCombination {
+  agents_md: string;
+  bundled_skills: boolean;
+  disabled: ExtensionChoice[] | null;
+  pin: ExtensionExecutionPin;
+  resources: ResolvedExtension[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ResolvedExtension".
+ */
+export interface ResolvedExtension {
+  origin: string;
+  resource: ExtensionResource;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionResource".
+ */
+export interface ExtensionResource {
+  content_sha256?: string;
+  id: string;
+  kind: string;
+  mcp?: ExtensionMCP;
+  size?: number;
+  source: ExtensionSource;
+  version: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionMCP".
+ */
+export interface ExtensionMCP {
+  args?: string[];
+  bearer_token_env_var?: string;
+  command?: string;
+  disabled_tools?: string[];
+  enabled_tools?: string[];
+  env_http_headers?: {
+    [k: string]: string | undefined;
+  };
+  env_vars?: string[];
+  required?: boolean;
+  startup_timeout_sec?: number;
+  tool_timeout_sec?: number;
+  transport: string;
+  url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionSource".
+ */
+export interface ExtensionSource {
+  commit?: string;
+  integrity?: string;
+  package?: string;
+  ref?: string;
+  subdir?: string;
+  type: string;
+  url?: string;
+  version?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionEditPayload".
+ */
+export interface ExtensionEditPayload {
+  binding?: ExtensionBinding;
+  id?: string;
+  kind?: string;
+  resource?: ExtensionResource;
+  version?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionImport".
+ */
+export interface ExtensionImport {
+  id: string;
+  kind: string;
+  path?: string;
+  source: ExtensionSource;
+  version: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionPackage".
+ */
+export interface ExtensionPackage {
+  content: string | null;
+  resource: ExtensionResource;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionPlan".
+ */
+export interface ExtensionPlan {
+  affected: AgentIdentity[] | null;
+  candidate: ExtensionReleaseRef;
+  changed: boolean;
+  draft: ExtensionCatalog;
+  published?: ExtensionRelease;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionCatalog".
+ */
+export interface ExtensionCatalog {
+  agents: ExtensionBinding[] | null;
+  categories: ExtensionBinding[] | null;
+  resources: ExtensionResource[] | null;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionRelease".
+ */
+export interface ExtensionRelease {
+  catalog: ExtensionCatalog;
+  composition_version: number;
+  id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionPublishPayload".
+ */
+export interface ExtensionPublishPayload {
+  manifest: ExtensionReleaseRef;
+  release: ExtensionRelease;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionReleasePage".
+ */
+export interface ExtensionReleasePage {
+  items: ExtensionReleaseRef[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionResourcePage".
+ */
+export interface ExtensionResourcePage {
+  items: ExtensionResource[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionStageRequest".
+ */
+export interface ExtensionStageRequest {
+  expected_control_revision: number;
+  package: ExtensionPackage;
+  request_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionState".
+ */
+export interface ExtensionState {
+  catalog: ExtensionCatalog;
+  published?: ExtensionReleaseRef;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionStatus".
+ */
+export interface ExtensionStatus {
+  hosts: ExtensionHostView[] | null;
+  more: boolean;
+  next?: string;
+  published?: ExtensionReleaseRef;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExtensionHostView".
+ */
+export interface ExtensionHostView {
+  host_id: string;
+  online: boolean;
+  state: string;
+  status?: ExtensionHostStatus;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5849,8 +6183,10 @@ export interface SetConversationHandoffSettingsPayload {
  * via the `definition` "SetConversationSettingsPayload".
  */
 export interface SetConversationSettingsPayload {
+  category_id?: string;
   conversation_id?: string;
   effort: string;
+  expected_category_revision?: number;
   model: string;
 }
 /**

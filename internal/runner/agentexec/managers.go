@@ -33,7 +33,7 @@ func (p *Pool) probeManager(ctx context.Context, e *entry) bool {
 		return false
 	}
 	defer os.RemoveAll(dir)
-	s, err := traex.Start(ctx, traex.Options{Bin: e.ownerInput.Runtime.ExecutableRef, Dir: dir, Log: p.options.Log, Environment: p.options.Environments.Resolve(e.ownerInput.Runtime.ID)})
+	s, err := traex.Start(ctx, traex.Options{Bin: e.ownerInput.Runtime.ExecutableRef, Dir: dir, Log: p.options.Log, Environment: p.environment(*e.ownerInput)})
 	if err != nil {
 		return false
 	}
@@ -99,7 +99,17 @@ func (p *Pool) resolveManager(ctx context.Context, pin protocol.RunExecutionPin,
 	if e == nil || !managerPurpose(e) || e.input.Agent.Revision != pin.AgentRevision || e.ownerInput.Runtime.ID != pin.Runtime.RuntimeID || e.ownerInput.Runtime.Revision != pin.Runtime.Revision || e.input.Agent.Model != pin.Profile.Model || e.input.Agent.Effort != pin.Profile.Effort {
 		return runner.ManagerExecution{}, errors.New("original manager executor is unavailable")
 	}
-	binding := p.options.Environments.Resolve(e.ownerInput.Runtime.ID)
+	binding := p.environment(*e.ownerInput)
+	if pin.Extensions != (protocol.ExtensionExecutionPin{}) {
+		if p.options.Extensions == nil {
+			return runner.ManagerExecution{}, errors.New("original managed extensions are unavailable")
+		}
+		var err error
+		binding, err = p.options.Extensions.Binding(ctx, pin.Extensions, e.ownerInput.Runtime.ID)
+		if err != nil {
+			return runner.ManagerExecution{}, err
+		}
+	}
 	if binding != nil && (e.ownerInput.Runtime.Kind != agentconfig.AppServerWorker || e.ownerInput.Runtime.CLI != "codex") {
 		return runner.ManagerExecution{}, errors.New("strict environment binding requires a native Codex app-server runtime")
 	}
@@ -108,9 +118,9 @@ func (p *Pool) resolveManager(ctx context.Context, pin protocol.RunExecutionPin,
 	}
 	bin := e.ownerInput.Runtime.ExecutableRef
 	resolved := runner.ManagerExecution{Instructions: e.input.Agent.Instructions, Profile: pin.Profile, Open: func(ctx context.Context, dir string) (harness.Session, error) {
-		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, HostedCoordination: true, Log: p.options.Log, Environment: p.options.Environments.Resolve(e.ownerInput.Runtime.ID), EnvironmentExecution: "manager:" + pin.Identity.LocalID + ":" + pin.SnapshotID})
+		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, HostedCoordination: true, Log: p.options.Log, Environment: binding, EnvironmentExecution: "manager:" + pin.Identity.LocalID + ":" + pin.SnapshotID})
 	}, OpenNative: func(ctx context.Context, dir string) (harness.Session, error) {
-		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, KillWithParent: true, Log: p.options.Log, Environment: p.options.Environments.Resolve(e.ownerInput.Runtime.ID), EnvironmentExecution: "manager-native:" + pin.Identity.LocalID + ":" + pin.SnapshotID})
+		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, KillWithParent: true, Log: p.options.Log, Environment: binding, EnvironmentExecution: "manager-native:" + pin.Identity.LocalID + ":" + pin.SnapshotID})
 	}}
 	if e.ownerInput.Runtime.CLI == "codex" || binding != nil {
 		resolved.OpenRun = func(ctx context.Context, dir, state, run string, resumed, native bool) (harness.Session, error) {

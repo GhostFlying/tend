@@ -2,8 +2,9 @@ package protocol
 
 // A named consultation is an ordinary logical conversation, never a worker.
 type CreateConsultationPayload struct {
-	AgentRef string `json:"agent_ref"`
-	Title    string `json:"title"`
+	CategoryID string `json:"category_id,omitempty"`
+	AgentRef   string `json:"agent_ref"`
+	Title      string `json:"title"`
 }
 type PromoteConsultationPayload struct {
 	Manager *RequestIssueManagerPayload `json:"manager,omitempty"`

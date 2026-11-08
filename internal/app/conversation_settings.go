@@ -44,9 +44,36 @@ func (c SetConversationSettings) Apply(ctx context.Context, x *Exec, tx *store.T
 		return Outcome{}, err
 	}
 	if x.hostedConfiguration != nil {
-		_, named, err := namedHostedSelection(ctx, tx.Q(), x.hostedConfiguration, p.ConversationID)
+		selected, named, err := namedHostedSelection(ctx, tx.Q(), x.hostedConfiguration, p.ConversationID)
 		if err != nil {
 			return Outcome{}, err
+		}
+		if named && p.CategoryID != "" {
+			if selected.RunnerManaged {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "Issue category is fixed by its assignment")
+			}
+			if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != selected.ConfigurationRevision {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "named configuration revision changed")
+			}
+			_, revision, err := store.ExtensionConversationCategory(ctx, tx.Q(), p.ConversationID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if p.ExpectedCategoryRevision == nil || *p.ExpectedCategoryRevision != revision {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "session category revision changed")
+			}
+			category, err := selectedCategory(selected.Definition.Categories, p.CategoryID, true)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if (p.Model != "" && p.Model != selected.Definition.Model) || (p.Effort != "" && p.Effort != selected.Definition.Effort) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "named model settings remain definition controlled")
+			}
+			if err = tx.PutExtensionConversationCategory(ctx, p.ConversationID, category, revision+1); err != nil {
+				return Outcome{}, err
+			}
+			result := map[string]any{"category_id": category, "category_revision": revision + 1}
+			return Outcome{Result: result, Events: []Event{{ObjectType: "conversation", ObjectID: store.ConversationID(p.ConversationID), ObjectVersion: revision + 1, Kind: "conversation.category", Body: result}}}, nil
 		}
 		if named {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "named conversation settings come from its agent definition; update the server configuration revision")

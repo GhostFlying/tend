@@ -76,6 +76,12 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			json.NewEncoder(w).Encode(protocol.SessionView{Token: "owner-token", DeploymentID: "deployment-test"})
 			return
 		}
+		if r.Method == "POST" && r.URL.Path == "/api/v1/extensions/stage" {
+			var in protocol.ExtensionStageRequest
+			_ = json.Unmarshal(body, &in)
+			_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: in.RequestID, Status: protocol.OpSucceeded}})
+			return
+		}
 		if r.Method == "POST" && r.URL.Path == "/api/v1/ops" {
 			var env protocol.Envelope
 			if err := json.Unmarshal(body, &env); err != nil {
@@ -192,6 +198,9 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 	for _, entry := range CapabilityBindings() {
 		t.Run(entry.Capability+"/"+entry.Command, func(t *testing.T) {
 			env := newTestEnv(t, remote.URL)
+			env.Env.ImportExtension = func(_ context.Context, in protocol.ExtensionImport) (protocol.ExtensionPackage, error) {
+				return protocol.ExtensionPackage{Resource: protocol.ExtensionResource{Kind: in.Kind, ID: in.ID, Version: in.Version}}, nil
+			}
 			if strings.HasPrefix(entry.Capability, "local EXEC codex-env ") {
 				env.Env.CodexEnvironment = func(_ context.Context, q protocol.LocalCodexEnvironmentRequest) (json.RawMessage, error) {
 					return json.Marshal(map[string]string{"executed": "local EXEC codex-env " + q.Action})

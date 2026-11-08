@@ -18,6 +18,9 @@ type ownerRoute struct {
 func (s *Server) ownerRoutes() []ownerRoute {
 	return []ownerRoute{
 		{"GET /api/v1/maintenance", s.maintenanceStatus},
+		{"POST /api/v1/extensions/stage", s.stageExtension},
+		{"GET /api/v1/extensions/{view}", s.extensionView},
+		{"GET /api/v1/extensions/releases/{id}", s.extensionRelease},
 		{"GET /api/v1/capabilities", s.executionCapabilities},
 		{"GET /api/v1/capabilities/{id}", s.executionCapability},
 		{"GET /api/v1/capabilities/{id}/revisions", s.executionCapabilities},

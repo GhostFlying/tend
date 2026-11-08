@@ -68,6 +68,7 @@ func GetHostControl(ctx context.Context, q Querier, host string) (protocol.Runne
 }
 
 func (t *Tx) PutHostControl(ctx context.Context, host string, c protocol.RunnerControl, now int64) error {
+	c.Extensions = nil // Content targets have their own publication revision.
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("store: encode host control: %w", err)

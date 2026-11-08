@@ -91,6 +91,8 @@ func New(a *app.App, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logg
 // Handler returns the HTTP handler of the protocol.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /runner/v1/extensions/{release}/manifest", s.extensionContent)
+	mux.HandleFunc("GET /runner/v1/extensions/{release}/content/{sha}", s.extensionContent)
 	mux.HandleFunc("GET "+remote.Path+"{channel}", s.nativeExecution)
 	mux.HandleFunc("POST "+Path, s.serve)
 	mux.HandleFunc("GET /runner/v1/rollout-preview", s.rolloutPreview)

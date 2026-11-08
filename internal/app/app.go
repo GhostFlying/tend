@@ -20,6 +20,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/domain"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -39,6 +40,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	managedHostedRuntimes         map[string]bool
 	serverDeliveryObservations    bool
 	webhookKeys                   WebhookKeys
 	interactionOrigin             *communicationOrigin
@@ -112,6 +114,8 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	managedHostedRuntimes      map[string]bool
+	extensionValidator         func(context.Context, protocol.ExtensionRelease, extensions.ContentSource, []extensions.ValidationUse) error
 	deliveryObserverStatus     *protocol.DeliveryObserverStatus
 	serverDeliveryObservations bool
 	forwardRecoveryID          string
@@ -193,7 +197,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
 		if p.Kind != protocol.PrincipalMainAgent {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")

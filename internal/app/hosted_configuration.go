@@ -210,7 +210,7 @@ func (a *App) NamedHostedSelection(ctx context.Context, conversation string) (ho
 	var named bool
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		selection, named, err = namedHostedSelection(ctx, tx.Q(), a.hostedConfiguration, conversation)
+		selection, named, err = a.currentHostedSelection(ctx, tx.Q(), conversation)
 		return err
 	})
 	return selection, named, err
@@ -247,7 +247,7 @@ func (a *App) hostedSelectionForAdmission(ctx context.Context, q store.Querier, 
 		}
 		return selected, frozen, err
 	}
-	return namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+	return a.currentHostedSelection(ctx, q, conversation)
 }
 func (a *App) hostedFrozenSelection(ctx context.Context, q store.Querier, request string) (hostedconfig.Selection, bool, error) {
 	if row, err := store.GetHostedExecution(ctx, q, request); err == nil {
@@ -417,7 +417,7 @@ func (a *App) hostedRuntimeStartupSelection(ctx context.Context, q store.Querier
 	}
 	if receiptRequest != "" {
 		attachment = AgentStartupAttachment{RequestID: receiptRequest, Reconciliation: true}
-		selected, named, err := namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+		selected, named, err := a.currentHostedSelection(ctx, q, conversation)
 		return selected, named, attachment, err
 	}
 	// A manual compact has no main turn. Restore its native completion stream
@@ -445,7 +445,7 @@ func (a *App) hostedRuntimeStartupSelection(ctx context.Context, q store.Querier
 	if !errors.Is(err, store.ErrNotFound) {
 		return hostedconfig.Selection{}, false, attachment, err
 	}
-	selected, named, err := namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+	selected, named, err := a.currentHostedSelection(ctx, q, conversation)
 	return selected, named, attachment, err
 }
 
@@ -485,7 +485,7 @@ func (a *App) canonicalManagerAdmission(ctx context.Context, q store.Querier, co
 	if frozen {
 		return true, true, nil
 	}
-	_, named, err := namedHostedSelection(ctx, q, a.hostedConfiguration, conversation)
+	_, named, err := a.currentHostedSelection(ctx, q, conversation)
 	if protocol.CodeOf(err) == protocol.CodeInvalidTransition {
 		// Keep the original assignee's pending work while its definition or
 		// execution environment is unavailable. Do not select a replacement.

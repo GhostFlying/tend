@@ -14,6 +14,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/codexenv"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/harness/remote"
@@ -27,12 +28,14 @@ import (
 // Runtime.ExecutableRef selects the native command. Installation remains frozen
 // local provenance and never overrides that requested executable.
 type BuildInput struct {
+	Environment  *codexenv.Binding
 	Runtime      agentconfig.RuntimeBinding
 	Agent        agentconfig.AgentDefinition
 	Installation agentregistry.InstallationReference
 }
 
 type Options struct {
+	Extensions       *extensions.Agent
 	EnvironmentHomes string
 
 	Environments *codexenv.Bindings
@@ -55,6 +58,8 @@ type Options struct {
 }
 
 type entry struct {
+	managedWorkerReady     map[string]bool
+	managedOwnerReady      map[string]bool
 	input                  BuildInput
 	ownerInput             *BuildInput
 	workers                harness.Workers
@@ -63,6 +68,8 @@ type entry struct {
 	environmentUnavailable bool
 }
 type Pool struct {
+	managedWorkers   map[string]harness.Workers
+	managedOwners    map[string]bool
 	retainedMu       sync.Mutex
 	retained         []protocol.RunExecutionPin
 	retainedObserved []protocol.AgentExecutor
@@ -75,7 +82,7 @@ func New(options Options) (*Pool, error) {
 	if options.Source == nil || options.Workspaces == nil || (options.BackendID != "git" && options.BackendID != "orca") {
 		return nil, errors.New("named execution needs its local source and explicit workspace backend")
 	}
-	p := &Pool{options: options, snapshots: map[string]map[string]*entry{}}
+	p := &Pool{options: options, snapshots: map[string]map[string]*entry{}, managedWorkers: map[string]harness.Workers{}, managedOwners: map[string]bool{}}
 	if p.options.Probe == nil {
 		p.options.Probe = p.probe
 	}
@@ -177,6 +184,42 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.managerReady, Reason: reason})
 		}
 	}
+	if p.options.Extensions != nil {
+		expanded := []protocol.AgentExecutor{}
+		for _, observation := range out {
+			if !p.options.Extensions.Consumer.Enabled(observation.Pin.Runtime.RuntimeID) {
+				expanded = append(expanded, observation)
+				continue
+			}
+			for _, a := range status.Projection.Agents {
+				if a.Identity != observation.Pin.Identity {
+					continue
+				}
+				for _, category := range a.Categories {
+					row := observation
+					pin, ready := p.options.Extensions.Current(row.Pin.Runtime.RuntimeID, category, a.Identity)
+					row.Pin.Extensions = pin
+					if row.Pin.Purpose == "issue_manager" {
+						row.Available = ready && entries[a.Identity.LocalID].managedOwnerReady[category]
+					} else {
+						row.Available = ready && entries[a.Identity.LocalID].managedWorkerReady[category]
+					}
+					if !ready {
+						row.Available = false
+						row.Reason = "managed_extensions_not_ready"
+					} else if !row.Available {
+						if row.Pin.Purpose == "issue_manager" {
+							row.Reason = "manager_isolation_not_verified"
+						} else {
+							row.Reason = "adapter_unavailable"
+						}
+					}
+					expanded = append(expanded, row)
+				}
+			}
+		}
+		out = expanded
+	}
 	return out, nil
 }
 func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runner.ResolvedExecution, error) {
@@ -233,6 +276,27 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 		return runner.ResolvedExecution{}, errors.New("original named execution configuration differs")
 	}
 	profile := pin.Profile
+	if pin.Extensions != (protocol.ExtensionExecutionPin{}) {
+		if p.options.Extensions == nil {
+			return runner.ResolvedExecution{}, errors.New("original managed extension cache is unavailable")
+		}
+		binding, err := p.options.Extensions.Binding(ctx, pin.Extensions, r.ID)
+		if err != nil {
+			return runner.ResolvedExecution{}, err
+		}
+		input := e.input
+		input.Environment = binding
+		key := managedWorkerKey(input, pin.Extensions)
+		workers := p.managedWorkers[key]
+		if workers == nil {
+			workers, err = p.options.Build(input)
+			if err != nil {
+				return runner.ResolvedExecution{}, err
+			}
+			p.managedWorkers[key] = workers
+		}
+		return runner.ResolvedExecution{DeclaredCapabilities: slices.Clone(a.Capabilities), Workers: workers, Workspaces: p.options.Workspaces, Instructions: a.Instructions, Profile: &profile}, nil
+	}
 	return runner.ResolvedExecution{DeclaredCapabilities: slices.Clone(a.Capabilities), Workers: e.workers, Workspaces: p.options.Workspaces, Instructions: a.Instructions, Profile: &profile}, nil
 }
 
@@ -247,7 +311,7 @@ func (p *Pool) Reject(pin protocol.RunExecutionPin, reason string) {
 	}
 }
 func (p *Pool) probe(ctx context.Context, input BuildInput) error {
-	if p.options.Environments.Resolve(input.Runtime.ID) != nil && (input.Runtime.Kind != agentconfig.AppServerWorker || input.Runtime.CLI != "codex") {
+	if p.environment(input) != nil && (input.Runtime.Kind != agentconfig.AppServerWorker || input.Runtime.CLI != "codex") {
 		return errors.New("strict environment binding requires a native Codex app-server runtime")
 	}
 	if _, err := exec.LookPath(input.Runtime.ExecutableRef); err != nil {
@@ -274,14 +338,14 @@ func (p *Pool) probe(ctx context.Context, input BuildInput) error {
 		}
 		return nil
 	}
-	session, err := traex.Start(ctx, traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.options.Environments.Resolve(input.Runtime.ID)})
+	session, err := traex.Start(ctx, traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.environment(input)})
 	if err != nil {
 		return err
 	}
 	return session.Close()
 }
 func (p *Pool) build(input BuildInput) (harness.Workers, error) {
-	if p.options.Environments.Resolve(input.Runtime.ID) != nil && (input.Runtime.Kind != agentconfig.AppServerWorker || input.Runtime.CLI != "codex") {
+	if p.environment(input) != nil && (input.Runtime.Kind != agentconfig.AppServerWorker || input.Runtime.CLI != "codex") {
 		return nil, errors.New("strict environment binding requires a native Codex app-server runtime")
 	}
 	switch input.Runtime.Kind {
@@ -291,7 +355,7 @@ func (p *Pool) build(input BuildInput) (harness.Workers, error) {
 		}
 		return remote.NewWorkers(remote.WorkerOptions{Bin: input.Runtime.ExecutableRef, Helper: p.options.BridgeCommand, Orca: p.options.CentralOrca, Model: input.Agent.Model, Effort: input.Agent.Effort, Log: p.options.Log}), nil
 	case agentconfig.AppServerWorker:
-		return traex.NewWorkers(traex.WorkerOptions{EnvironmentHomes: p.options.EnvironmentHomes, Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.options.Environments.Resolve(input.Runtime.ID)}, Model: input.Agent.Model, Effort: input.Agent.Effort, StrictResume: true}), nil
+		return traex.NewWorkers(traex.WorkerOptions{EnvironmentHomes: p.options.EnvironmentHomes, Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.environment(input)}, Model: input.Agent.Model, Effort: input.Agent.Effort, StrictResume: true}), nil
 	case agentconfig.OrcaWorker:
 		agent := protocol.AgentCodex
 		if input.Runtime.CLI == "traex" {
@@ -323,6 +387,9 @@ func (p *Pool) initialize(ctx context.Context, e *entry) error {
 // Refresh is called by the existing runner reconciler, never its heartbeat.
 func (p *Pool) Refresh(ctx context.Context) error {
 	retainedErr := p.refreshRetained(ctx)
+	if p.options.Extensions != nil {
+		defer p.options.Extensions.RefreshAdoptions(ctx)
+	}
 	status, err := p.options.Source.Status(ctx)
 	if err != nil {
 		return err
@@ -338,6 +405,11 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 	var retry error
 	for _, e := range entries {
+		if handled, err := p.refreshManaged(ctx, e, status.Projection.ExecutionEnvironmentID); handled {
+			retry = errors.Join(retry, err)
+			continue
+		}
+
 		ownerReady := true
 		if e.ownerInput != nil {
 			if err := p.environmentReady(ctx, e.ownerInput.Runtime.ID); err != nil {
@@ -380,6 +452,11 @@ func (p *Pool) environmentReady(ctx context.Context, runtime string) error {
 func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	for _, workers := range p.managedWorkers {
+		if closer, ok := workers.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
 	for _, entries := range p.snapshots {
 		for _, e := range entries {
 			if closer, ok := e.workers.(interface{ Close() }); ok {
@@ -387,4 +464,18 @@ func (p *Pool) Close() {
 			}
 		}
 	}
+}
+
+func (p *Pool) environment(input BuildInput) *codexenv.Binding {
+	if input.Environment != nil {
+		return input.Environment
+	}
+	return p.options.Environments.Resolve(input.Runtime.ID)
+}
+func managedWorkerKey(input BuildInput, pin protocol.ExtensionExecutionPin) string {
+	raw, _ := json.Marshal(struct {
+		Input BuildInput
+		Pin   protocol.ExtensionExecutionPin
+	}{input, pin})
+	return extensions.Hash(raw)
 }

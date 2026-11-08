@@ -12,22 +12,28 @@ type ConversationModel struct {
 // ConversationSettingsView describes the shared settings for the next turn.
 // A running turn keeps the settings it started with (D73).
 type ConversationSettingsView struct {
-	Source    string              `json:"source,omitempty"`
-	ReadOnly  bool                `json:"read_only,omitempty"`
-	Enabled   bool                `json:"enabled"`
-	Available bool                `json:"available"`
-	Revision  int64               `json:"revision"`
-	Model     string              `json:"model"`
-	Effort    string              `json:"effort"`
-	Models    []ConversationModel `json:"models"`
+	CategoryID       string              `json:"category_id,omitempty"`
+	Categories       []string            `json:"categories,omitempty"`
+	CategoryRevision int64               `json:"category_revision,omitempty"`
+	CategoryEditable bool                `json:"category_editable,omitempty"`
+	Source           string              `json:"source,omitempty"`
+	ReadOnly         bool                `json:"read_only,omitempty"`
+	Enabled          bool                `json:"enabled"`
+	Available        bool                `json:"available"`
+	Revision         int64               `json:"revision"`
+	Model            string              `json:"model"`
+	Effort           string              `json:"effort"`
+	Models           []ConversationModel `json:"models"`
 }
 
 // SetConversationSettingsPayload changes the next hosted turn's settings.
 // The envelope carries the expected settings revision.
 type SetConversationSettingsPayload struct {
-	ConversationID string `json:"conversation_id,omitempty"`
-	Model          string `json:"model"`
-	Effort         string `json:"effort"`
+	CategoryID               string `json:"category_id,omitempty"`
+	ExpectedCategoryRevision *int64 `json:"expected_category_revision,omitempty"`
+	ConversationID           string `json:"conversation_id,omitempty"`
+	Model                    string `json:"model"`
+	Effort                   string `json:"effort"`
 }
 
 // AssistantState describes a persisted assistant message, including drafts.

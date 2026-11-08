@@ -35,5 +35,14 @@ func (s *Server) conversationSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		view.Model, view.Effort, view.Revision = c.Model, c.Effort, c.Revision
 	}
+	category, err := s.app.HostedCategorySettings(r.Context(), r.URL.Query().Get("conversation_id"))
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if category.Source == "named_definition" {
+		category.Models = view.Models
+		view = category
+	}
 	writeJSON(w, http.StatusOK, view)
 }

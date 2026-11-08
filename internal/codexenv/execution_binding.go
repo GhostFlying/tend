@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/protocol"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 type executionBinding struct {
@@ -31,6 +33,9 @@ func BindExecution(ctx context.Context, state, execution string, current *Bindin
 	path := filepath.Join(state, "codex-environment.json")
 	saved, err := readExecutionBinding(state, execution)
 	if !errors.Is(err, os.ErrNotExist) {
+		if err == nil && saved != nil && current != nil && saved.Directory == current.Directory && saved.ID == current.ID && current.Extensions != (protocol.ExtensionExecutionPin{}) {
+			err = current.QueueAdoption(ctx, execution)
+		}
 		return saved, err
 	}
 	if resumed {
@@ -62,6 +67,35 @@ func BindExecution(ctx context.Context, state, execution string, current *Bindin
 		return nil, err
 	}
 	return &copy, nil
+}
+
+// QueueAdoption records an execution-specific target. It neither replaces a
+// process nor changes its active snapshot; the lifecycle owner retains the
+// existing idle, receipt and maintenance gate for the actual adoption.
+func (b *Binding) QueueAdoption(ctx context.Context, execution string) error {
+	if !strings.HasPrefix(execution, "coordinator:") {
+		return nil
+	}
+	s := Service{Root: b.Directory}
+	dir, err := s.directory(b.ID)
+	if err != nil {
+		return err
+	}
+	unlock, err := lock(ctx, dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	prior, ok, err := readAdoption(ctx, dir, execution)
+	if err != nil || !ok {
+		return err
+	}
+	if prior.Generation == b.Generation && prior.Extensions == b.Extensions {
+		return nil
+	}
+	prior.DesiredGeneration = b.Generation
+	prior.DesiredExtensions = b.Extensions
+	return writeAdoption(ctx, dir, prior)
 }
 
 // SessionRoots returns fixed homes for the configured runtime mappings. Explicit

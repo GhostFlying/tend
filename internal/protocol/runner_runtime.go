@@ -35,6 +35,7 @@ type RunnerBuild struct {
 // runtime observation and must still return their original assignment.
 type RunnerRuntime struct {
 	Updater                        *UpdaterSelfObservation `json:"updater,omitempty"`
+	Extensions                     *ExtensionHostStatus    `json:"extensions,omitempty"`
 	BoundedRecoveryAuthorizationID string                  `json:"bounded_recovery_authorization_id,omitempty"`
 	ContinuationBackend            string                  `json:"continuation_backend,omitempty"`
 	AgentContinuations             []AgentExecutor         `json:"agent_continuations,omitempty"`
@@ -79,6 +80,7 @@ type MaintenanceAuthorization struct {
 
 // RunnerControl is the durable, revisioned host control sent by the server.
 type RunnerControl struct {
+	Extensions             *ExtensionTarget               `json:"extensions,omitempty"`
 	BoundedRecoveryRelease *BoundedRunnerAdmissionRelease `json:"bounded_recovery_release,omitempty"`
 	CancelledUpgradeID     string                         `json:"cancelled_upgrade_id,omitempty"`
 	Upgrade                *RunnerUpgradeTarget           `json:"upgrade,omitempty"`

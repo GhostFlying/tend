@@ -270,7 +270,7 @@ export function Settings({ connection }: { connection: Connection }) {
                     aria-describedby={`${id}-model`}
                     data-pane="model"
                     className={styles.cell}
-                    disabled={disabled || !view?.models?.length}
+                    disabled={disabled || view?.read_only || !view?.models?.length}
                     onClick={() => setPane("model")}
                   >
                     <span>模型</span>
@@ -288,7 +288,7 @@ export function Settings({ connection }: { connection: Connection }) {
                     aria-describedby={`${id}-effort`}
                     data-pane="effort"
                     className={styles.cell}
-                    disabled={disabled || efforts.length === 0}
+                    disabled={disabled || view?.read_only || efforts.length === 0}
                     onClick={() => setPane("effort")}
                   >
                     <span>思考强度</span>
@@ -297,6 +297,28 @@ export function Settings({ connection }: { connection: Connection }) {
                     </span>
                     <Chevron />
                   </Button>
+                  {view?.category_editable &&
+                    view.categories?.map((category) => (
+                      <Button
+                        variant="ghost"
+                        key={category}
+                        role="menuitemradio"
+                        aria-checked={category === view.category_id}
+                        disabled={disabled}
+                        onClick={() => {
+                          close(true);
+                          if (category !== view.category_id)
+                            void settings.save(client, {
+                              model: view.model,
+                              effort: view.effort,
+                              category_id: category,
+                              expected_category_revision: view.category_revision ?? 0,
+                            });
+                        }}
+                      >
+                        Category · {category} {category === view.category_id ? "✓" : ""}
+                      </Button>
+                    ))}
                 </>
               ) : pane === "model" ? (
                 view?.models?.map((choice) => (

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -14,6 +15,7 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.EditExtensions{Action: "resource_put"}, app.EditExtensions{Action: "resource_remove"}, app.EditExtensions{Action: "binding_set"}, app.PublishExtensions{}, app.PublishExtensions{Rollback: true},
 	app.ArtifactShareCommand{}, app.ArtifactShareCommand{Revoke: true},
 	app.FeishuCommand{}, app.FeishuCommand{Unbind: true},
 	app.ReconcileManagerRun{}, app.ContinueRetainedRun{},
@@ -69,7 +71,11 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	if env.Operation != "conversation.submit_message" && len(env.Payload) > maxBody {
+	allowedBody := maxBody
+	if strings.HasPrefix(env.Operation, "extensions.") {
+		allowedBody = 4 << 20
+	}
+	if env.Operation != "conversation.submit_message" && len(env.Payload) > allowedBody {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "body is too large"))
 		return
 	}
@@ -102,6 +108,8 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 	var op protocol.Operation
 	if env.Operation == app.OpManagerMigration {
 		op, err = s.app.MigrateManager(r.Context(), p, &env)
+	} else if env.Operation == "extensions.publish" || env.Operation == "extensions.rollback" {
+		op, err = s.app.PublishExtensionDraft(r.Context(), p, &env, env.Operation == "extensions.rollback")
 	} else {
 		op, err = s.app.Execute(r.Context(), p, &env, cmd)
 	}

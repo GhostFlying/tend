@@ -61,7 +61,7 @@ export class ConversationSettings {
     this.state.set({ ...this.state.get(), reading: true });
     try {
       const received = await this.api.get<ConversationSettingsView>(
-        "/api/v1/conversation/settings",
+        `/api/v1/conversation/settings?conversation_id=${encodeURIComponent(this.conversationID)}`,
         controller.signal,
       );
       if (controller.signal.aborted) return;

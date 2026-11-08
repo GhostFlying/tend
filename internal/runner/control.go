@@ -247,8 +247,14 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.runnerProtocol < 2 {
 		executors = slices.DeleteFunc(executors, func(e protocol.AgentExecutor) bool { return e.Pin.Purpose == "issue_manager" })
 	}
+	var extensionStatus *protocol.ExtensionHostStatus
+	if r.cfg.Extensions != nil {
+		capabilities = append(capabilities, protocol.CapabilityManagedExtensions)
+		status := r.cfg.Extensions.Status()
+		extensionStatus = &status
+	}
 	r.sequence++
-	return &protocol.RunnerRuntime{Updater: updaterObservation, BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{Updater: updaterObservation, Extensions: extensionStatus, BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {
@@ -267,6 +273,14 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	if next == nil {
 		return nil
 	} // Legacy servers cannot authorize maintenance.
+	copy := *next
+	if r.cfg.Extensions != nil {
+		if err := r.cfg.Extensions.SetTarget(copy.Extensions); err != nil {
+			return err
+		}
+	}
+	copy.Extensions = nil
+	next = &copy
 	var boundedTarget protocol.UpgradeBinding
 	if release := next.BoundedRecoveryRelease; release != nil {
 		boundedTarget = release.Successor

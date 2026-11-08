@@ -6,6 +6,7 @@ package protocol
 func APITypes() []any {
 	return []any{
 		MaintenanceOverview{},
+		ExtensionImport{}, ExtensionPackage{}, ExtensionStageRequest{}, ExtensionState{}, ExtensionPlan{}, ExtensionCombination{}, ExtensionPublishPayload{}, ExtensionEditPayload{}, ExtensionResourcePage{}, ExtensionBindingPage{}, ExtensionReleasePage{}, ExtensionStatus{}, ExtensionHostStatus{}, ExtensionTarget{},
 		ObservedDeployment{}, IssueMaterialsQuery{}, IssueMaterialFile{}, IssueMaterials{}, RunContext{},
 		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},
 		HandoffAuditPage{}, CapabilityDefinition{}, PutCapabilityPayload{}, CapabilityPage{}, AgentCapabilityQuery{}, AgentCapabilityPage{}, AgentCapabilityRevisionPage{}, TaskCapabilityExplanation{}, RunCapabilityBinding{},

@@ -23,6 +23,7 @@ const maxBody = 1 << 20
 // Config configures the API. Zero values select the defaults.
 type Config struct {
 	MaintenanceStatus func(context.Context) (protocol.MaintenanceOverview, error)
+	LocalExtensions   func(context.Context) (string, protocol.ExtensionHostStatus, error)
 	WebhookKeys       *webhookauth.Files
 	// Archives are explicitly configured, already verified read-only handles.
 	Archives map[string]ConfiguredArchive
