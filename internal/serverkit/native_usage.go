@@ -49,7 +49,9 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 	}
 	keys := map[string]bool{}
 	for _, source := range sources {
-		keys[source.ID] = true
+		if source.RunID != "" || source.WriterStopped {
+			keys[source.ID] = true
+		}
 	}
 	c.retries.Retain(keys)
 	cycle := c.discovery.Cycle(c.now().UnixMilli())

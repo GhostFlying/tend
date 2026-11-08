@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -129,5 +130,34 @@ func TestSettledUsageHistoryIsNotReadOrRegisteredAgain(t *testing.T) {
 	}
 	if work, err := r.cfg.Journal.HasUsageWork(t.Context()); err != nil || work {
 		t.Fatal("settled history retained timer", work, err)
+	}
+}
+
+func TestPendingUploadOwnsWakeInsteadOfExpiredSourceRetry(t *testing.T) {
+	r := controlRunner(t)
+	r.nativeUsageSupported = true
+	now := time.Unix(100, 0)
+	r.cfg.Now = func() time.Time { return now }
+	src := journal.UsageSource{ID: "source", RunID: "past", RegistrationQueued: true, Coverage: "syncing", Source: nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: "missing-history.jsonl"}}
+	if err := r.cfg.Journal.RegisterUsageSource(t.Context(), src); err != nil {
+		t.Fatal(err)
+	}
+	env := protocol.Envelope{RequestID: "upload", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}, Payload: json.RawMessage(`{"run_id":"past"}`)}
+	if err := r.cfg.Journal.PutRequest(t.Context(), journal.Request{Envelope: env}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpAccepted}})
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	retries := nativeusage.Retries{}
+	retries.Failed("source/"+src.ID, now.Add(-3*time.Second).UnixMilli())
+	active := false
+	if err := r.syncNativeUsageWithRetries(t.Context(), retries, &active); err == nil {
+		t.Fatal("pending receipt appeared committed")
+	}
+	if delay := retries.Delay(now.UnixMilli(), active); delay != 2*time.Second {
+		t.Fatal("blocked source retained expired retry", delay, retries)
 	}
 }
