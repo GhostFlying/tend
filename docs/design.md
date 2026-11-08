@@ -1356,6 +1356,17 @@ Task 的不可变 artifact、报告和文件提供候选、已有检查记录及
 成本审批或自动阻塞。周期巡检由系统守时并执行有界单次检查，不以模型反复 sleep
 代替计时器。详见[统一计划](plans/issue-delivery-efficiency.md)。
 
+## D200：普通升级的 updater 自身交接
+
+格式 2 发布集显式要求先交接每个 updater，再更新对应服务；格式 1 和历史
+service manifest 保持原有语义。新目标与运行证明采用显式能力协商，未知 peer
+与首次 Hello 不发送新观测字段，保持 N/N−1。普通自身交接使用独立 sidecar
+journal 与 installer，不复用故障恢复授权或维护历史；固定原请求、发布集、
+配置、updater/child、原 state 与 flock 身份。stop/start 意图先持久，再派发
+一次；未知只核对原 attempt。旧 updater 真实退出后才交接锁，新 updater 保留
+原服务并验证收养后出具回执。共享文件安装串行，每实例单独核验当前进程。
+部署仍需单独授权。见[实施计划](plans/complete-release-updater.md)。
+
 ## D198：完整发布集与普通 updater 交接
 
 完整发布集绑定相同源码的 server、runner、updater、CLI 和实际 Web，原格式 1

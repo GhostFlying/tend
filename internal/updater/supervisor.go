@@ -15,6 +15,7 @@ import (
 )
 
 type Options struct {
+	ConfigFile            string
 	ValidateConfiguration func(context.Context, string, string, string) error
 	Process               Process
 	Authority             Authority
@@ -23,6 +24,9 @@ type Options struct {
 	BootClock             func() (string, int64, error)
 }
 type Supervisor struct {
+	selfJournal        *SelfUpdateJournal
+	selfUpdating       bool
+	selfIdentity       Identity
 	observedProcess    ProcessObservation
 	verifiedProcess    Identity
 	externalGeneration *uint64
@@ -333,8 +337,14 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 		}
 		return nil
 	}
+	if s.selfUpdating {
+		return ErrUnknown
+	}
 	candidate, err := s.stage(dir)
 	if err != nil {
+		return err
+	}
+	if err := s.requireSelfUpdate(ctx, id, dir); err != nil {
 		return err
 	}
 	if staged != nil && (candidate.ManifestSHA256 != staged.ManifestSHA256 || candidate.Artifact.SHA256 != s.state.Current.Artifact.SHA256) {
@@ -481,6 +491,9 @@ func (s *Supervisor) authorize(ctx context.Context, op *Operation) error {
 func (s *Supervisor) Step(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.selfUpdating {
+		return nil
+	}
 	if err := s.durabilityError(); err != nil {
 		return err
 	}

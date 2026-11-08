@@ -69,12 +69,27 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/self-update/status" || r.URL.Path == "/self-update/apply" {
+			s.selfHandler(w, r)
+			return
+		}
 		if r.URL.Path == "/status" && r.Method == http.MethodGet {
+			if s.opts.ConfigFile != "" {
+				w.Header().Set("Tend-Updater-Capabilities", protocol.CapabilityUpdaterSelfUpdate)
+			}
 			_ = json.NewEncoder(w).Encode(ControlResponse{State: s.Status()})
 			return
 		}
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		s.mu.Lock()
+		selfPending := s.selfUpdating
+		s.mu.Unlock()
+		if selfPending {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(ControlResponse{Error: "updater: original self-update attempt is pending"})
 			return
 		}
 		var req ControlRequest

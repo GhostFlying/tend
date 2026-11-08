@@ -52,6 +52,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: tend-updater serve|bootstrap|upgrade|restart|status|retry|cancel|verify --config <file>")
 	}
+	if args[0] == "self-update" {
+		return runSelfUpdate(ctx, args[1:], out)
+	}
 	if args[0] == "bounded" {
 		return runBounded(ctx, args[1:], out)
 	}
@@ -193,13 +196,19 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 				return err
 			}
 		}
-		s, err := updater.Open(cfg, updater.Options{Authority: authority})
+		s, err := updater.Open(cfg, updater.Options{ConfigFile: *config, Authority: authority})
 		if err != nil {
 			return err
 		}
 		defer s.Close()
-		if err := updater.AdoptPendingHandoff(ctx, s); err != nil {
-			return err
+		handled, selfErr := updater.AdoptSelfUpdate(ctx, s)
+		if selfErr != nil {
+			return selfErr
+		}
+		if !handled {
+			if err := updater.AdoptPendingHandoff(ctx, s); err != nil {
+				return err
+			}
 		}
 		return s.Serve(ctx)
 	}

@@ -56,8 +56,12 @@ go run ./internal/release/packagecmd --arch amd64 --commit "$(git rev-parse HEAD
 二进制 Go VCS 身份不符；压缩包使用提交时间和固定文件属性，避免重跑改变资产。
 组合包由这两个已验证平台包生成，要求相同源码及协议/存储兼容范围，并再次验证
 所有二进制身份；不能把不同提交的包拼接成一个发布。
-现有只含 service manifest 的历史包仍可读取。完整包的自动 updater 交接由后续
-升级批次接入，不能仅下载新包就声称运行中的 updater 已更新。
+现有只含 service manifest 的历史包与 format 1 发布集保持原语义。新构建使用
+format 2 发布集，明确要求 updater 先交接，不能静默退回只更新服务。开始前
+校验本机 updater 和所有 runner 的协商能力；缺能力时先按下面的独立 installer
+流程 bootstrap。server updater → server 完成后，逐台执行 runner updater → runner。
+批次状态的 server_updater 和各 host.updater 分别记录实际进程及独立交接回执。
+只有实际运行哈希和受管服务身份一致才能跳过替换；固定路径上的文件相同不足以证明。
 
 `protocol.max` 是发布当前协议，`min` 必须为上一代（首次为 0）；存储范围的 `max` 是该二进制当前迁移版本，`min` 是能升级读取的最旧版本。已提交迁移不可修改。发布目录不得包含符号链接或路径逃逸。实际服务凭据、数据和工作目录不放入 bundle。
 
@@ -206,3 +210,38 @@ D152 的后续交付执行使用 `tend upgrade start --delivery-task "$DELIVERY_
 同一目标同时只领取一个部署执行。另一 Issue 的 pending action 不占 run/slot/执行环境；第一个执行启动批次后提交包含唯一 `upgrade:<id>` 的持久报告并释放自身 run。批次完成之前其验收也不领取目标主机；unknown、失败和取消沿原批次对账，不能靠新建批次换掉身份。目标升级完成或取消后，等待 Issue 必须刷新 provider/baseline 并重新绑定当前候选，不能安装先前旧 main。
 
 首次安装 D152 前，先确认既有批次实际结清、协调工具已发布、runner 已协商 D150 的 `issue-question-handoffs-v1`。旧版本交付任务只启动一个实际批次，以原 ID 提交技术等待问题并由 runner 确认退出；协调者读取实际完成状态后答原问题，原非终态任务接续核验并交付，再走独立验收。未协商的旧运行不得强制套用新合同。D152 上线后的 reconciliation 只核验原已验收报告及真实完成批次，不重放合入、安装或事后改记旧任务授权；缺来源、安装事实或原验收时保留阻塞。
+
+## 普通 updater 自身交接与旧节点 bootstrap（D200）
+
+本轮源码实现不自动部署。首次接入旧节点时，使用新包中的独立 updater installer；
+它直接核验 systemd user manager、固定配置、旧进程、监督锁和原服务，不依赖旧 RPC。
+旧二进制必须有绑定实际 SHA-256 的 private `UpdaterExitEvidence`，其 exit_policy 为
+`retains-managed-child`，并包含来源、review 依据和固定有效期。KillMode=process
+不能替代这份旧实现的退出行为证据。正常新 updater 的同一锁持有者可以提供对应能力。
+
+先准备 private JSON seed，request 包含 target.request_id、target.expires_at_millis、
+upgrade_id、release 和 release_set_sha256；另给出固定 unit、updater_binary、
+exit_evidence。request_id 是有效 Tend request ID；所有路径来自本机配置，不改 unit 或凭据。
+
+```sh
+tend updater self-update plan --installer "$NEW_UPDATER" \
+  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$UPDATER_CONFIG" \
+  --plan "$SELF_UPDATE_PLAN" --json
+tend updater self-update apply --installer "$NEW_UPDATER" \
+  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$UPDATER_CONFIG" \
+  --plan "$SELF_UPDATE_PLAN" --json
+tend updater self-update status --installer "$NEW_UPDATER" \
+  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$UPDATER_CONFIG" --json
+```
+
+plan 只解析并持久保存事实供复核，不停止进程。apply 必须从目标 unit 之外运行；
+同一个原计划可再次 apply 对账 stopping/installing，已经发出的 stop/start 不重复发送。
+starting 表示启动已发出且仍待收养证明，不表示升级成功。status 把 journal 与实际
+socket 观测分开，旧 updater 不支持或 socket 不可用时明确报告未观测。首次部署的
+server/runner 能力接入仍须按部署计划逐台完成；旧服务不会因 updater 已替换就获得新 wire 能力。
+
+普通升级自动把 installer 固定为独立 systemd user transient unit。旧 updater 退出时
+保持服务 PID，安装器取得同一监督锁，原子替换固定 executable 并启动新 updater。
+新 updater 先取得原锁、加载原 journal、验证保留服务并写持久回执，再允许服务升级。
+共享文件的安装串行化；各实例各自交接锁、原服务和回执。回执或启动结果未知时仅观察
+原 attempt，不换 request ID、重复启动或借用维护/force 授权。配置、维护期限和健康规则不续期。

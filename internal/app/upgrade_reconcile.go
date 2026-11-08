@@ -37,9 +37,15 @@ func reconcilePausedCandidates(ctx context.Context, x *Exec, tx *store.Tx, r *st
 }
 
 func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *store.UpgradeRow, o ServerObservation) (string, error) {
-	if r.ServerProcess == "" || o.ProcessInstanceID != r.ServerProcess || o.BinarySHA256 != r.ServerHash || !o.Healthy || !o.MainDrained || (o.InstanceID != "" && o.InstanceID != r.ServerInstance) {
+	if !selfUpdateMatches(*r, r.ServerHash, o.Updater) || r.ServerProcess == "" || o.ProcessInstanceID != r.ServerProcess || o.BinarySHA256 != r.ServerHash || !o.Healthy || !o.MainDrained || (o.InstanceID != "" && o.InstanceID != r.ServerInstance) {
 		r.ServerHealthy = 0
 		return "", nil
+	}
+	if needsSelfUpdate(*r) {
+		if o.Updater.InstanceID != r.ServerInstance || o.Updater.SupervisedProcess.SHA256 != o.BinarySHA256 || o.Updater.SupervisedProcess.LaunchID != o.ProcessInstanceID {
+			return "", nil
+		}
+		r.View.ServerUpdater = o.Updater
 	}
 	if validDeliverySHA(o.Commit) && !o.Modified {
 		if r.View.SourceCommit != "" && r.View.SourceCommit != o.Commit {
@@ -102,6 +108,12 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 	if ctl.UpgradeID != r.View.UpgradeID || rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Build.BinarySHA256 != h.TargetHash || !runnerCandidateMatches(*r, *h, rt.Runtime) {
 		return false, "", nil
 	}
+	if !runnerSelfMatches(*r, *h, rt.Runtime) {
+		return true, "", nil
+	}
+	if needsSelfUpdate(*r) {
+		v.Updater = rt.Runtime.Updater
+	}
 	if !installedRunnerMatches(rt.Runtime, r.Manifest) {
 		return false, "候选 runner 的协议或 journal 版本与发布清单不一致", nil
 	}
@@ -136,7 +148,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 				ctl.Revision++
 			}
 			ctl.Mode = protocol.RunnerNormal
-			if h.Configuration == nil {
+			if h.Configuration == nil && !needsSelfUpdate(*r) {
 				ctl.Upgrade = nil
 			}
 			ctl.Authorization = nil
@@ -156,7 +168,9 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 			r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 		}
 		ctl.Revision++
-		ctl.Upgrade = nil
+		if !needsSelfUpdate(*r) {
+			ctl.Upgrade = nil
+		}
 		ctl.UpgradeID = ""
 		ctl.ReleaseID = ""
 		if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {

@@ -14583,6 +14583,9 @@
         "sequence": {
           "type": "integer"
         },
+        "updater": {
+          "$ref": "#/definitions/UpdaterSelfObservation"
+        },
         "updater_receipt": {
           "$ref": "#/definitions/UpdaterReceipt"
         },
@@ -14633,6 +14636,9 @@
         },
         "release_set": {
           "$ref": "#/definitions/ReleaseSetTarget"
+        },
+        "updater": {
+          "$ref": "#/definitions/UpdaterSelfTarget"
         }
       },
       "required": [
@@ -17483,6 +17489,88 @@
       "title": "UpdaterReceipt",
       "type": "object"
     },
+    "UpdaterSelfObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "receipt": {
+          "$ref": "#/definitions/UpdaterSelfReceipt"
+        },
+        "supervised_process": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        }
+      },
+      "required": [
+        "instance_id",
+        "process",
+        "supervised_process"
+      ],
+      "title": "UpdaterSelfObservation",
+      "type": "object"
+    },
+    "UpdaterSelfReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_at_millis": {
+          "type": "integer"
+        },
+        "installed": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "previous": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "release_set_sha256": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "retained_process": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "upgrade_id",
+        "release_set_sha256",
+        "instance_id",
+        "previous",
+        "installed",
+        "retained_process",
+        "completed_at_millis"
+      ],
+      "title": "UpdaterSelfReceipt",
+      "type": "object"
+    },
+    "UpdaterSelfTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at_millis": {
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "expires_at_millis"
+      ],
+      "title": "UpdaterSelfTarget",
+      "type": "object"
+    },
     "UpgradeBinding": {
       "additionalProperties": false,
       "properties": {
@@ -17649,6 +17737,9 @@
         },
         "total_bytes": {
           "type": "integer"
+        },
+        "updater": {
+          "$ref": "#/definitions/UpdaterSelfObservation"
         }
       },
       "required": [
@@ -17724,6 +17815,9 @@
         },
         "revision": {
           "type": "integer"
+        },
+        "server_updater": {
+          "$ref": "#/definitions/UpdaterSelfObservation"
         },
         "source_commit": {
           "type": "string"

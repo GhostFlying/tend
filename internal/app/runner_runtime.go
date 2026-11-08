@@ -22,6 +22,9 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 	if r == nil {
 		return nil
 	}
+	if r.Updater != nil && !slices.Contains(r.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "updater observations require negotiated capability")
+	}
 	if r.ContinuationBackend != "" && (!slices.Contains(r.Capabilities, protocol.CapabilityAgentContinuation) || r.ContinuationBackend != "git" && r.ContinuationBackend != "orca") {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid continuation backend")
 	}

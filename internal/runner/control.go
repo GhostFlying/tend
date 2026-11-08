@@ -10,6 +10,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/updater"
 )
 
 func (r *Runner) loadControl(ctx context.Context) error {
@@ -77,6 +78,27 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	}
 	r.maybeCancelStaged(ctx)
 	receipt := r.updaterProcessReceipt(ctx)
+	var updaterObservation *protocol.UpdaterSelfObservation
+	r.controlMu.Lock()
+	known, supportedSelf := r.selfUpdateSupportKnown, r.selfUpdateSupported
+	selectedSelf := r.helloConfirmed && r.control.Upgrade != nil && r.control.Upgrade.Updater != nil
+	r.controlMu.Unlock()
+	if r.cfg.UpdaterControlSocket != "" && !known {
+		supports, e := updater.SelfUpdateSupported(ctx, r.cfg.UpdaterControlSocket)
+		if e == nil {
+			r.controlMu.Lock()
+			r.selfUpdateSupportKnown = true
+			r.selfUpdateSupported = supports
+			r.controlMu.Unlock()
+			supportedSelf = supports
+		}
+	}
+	if selectedSelf && supportedSelf {
+		status, e := updater.SelfUpdateCall(ctx, r.cfg.UpdaterControlSocket, nil)
+		if e == nil {
+			updaterObservation = &status.Observation
+		}
+	}
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
 	if err := r.loadControlLocked(ctx); err != nil {
@@ -207,6 +229,9 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		}
 	}
 	if r.cfg.UpdaterSocket != "" && r.cfg.UpdaterControlSocket != "" && r.cfg.UpdaterBundleDir != "" {
+		if supportedSelf {
+			capabilities = append(capabilities, protocol.CapabilityUpdaterSelfUpdate)
+		}
 		capabilities = append(capabilities, "runner-updater-v1", protocol.CapabilityRunnerConfiguration, protocol.CapabilityCompleteReleaseSet)
 	}
 	confirmedCancelled := ""
@@ -228,7 +253,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		executors = slices.DeleteFunc(executors, func(e protocol.AgentExecutor) bool { return e.Pin.Purpose == "issue_manager" })
 	}
 	r.sequence++
-	return &protocol.RunnerRuntime{BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{Updater: updaterObservation, BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {

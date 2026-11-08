@@ -92,7 +92,7 @@ func (s Set) ValidateMetadata(manifest Manifest, digest string) error {
 		return err
 	}
 	commit, err := hex.DecodeString(s.Commit)
-	if s.Format != 1 || len(commit) != 20 || err != nil || s.Commit != hex.EncodeToString(commit) || s.ReleaseID != b.Manifest.ReleaseID || s.ManifestSHA256 != b.ManifestSHA256 || s.OS != "linux" || (s.Arch != "amd64" && s.Arch != "arm64" && s.Arch != "multi") || len(s.Artifacts) < 4 || len(s.Artifacts) > 8 || len(s.Artifacts) != 2*len(b.Manifest.Artifacts) {
+	if (s.Format != 1 && s.Format != 2) || len(commit) != 20 || err != nil || s.Commit != hex.EncodeToString(commit) || s.ReleaseID != b.Manifest.ReleaseID || s.ManifestSHA256 != b.ManifestSHA256 || s.OS != "linux" || (s.Arch != "amd64" && s.Arch != "arm64" && s.Arch != "multi") || len(s.Artifacts) < 4 || len(s.Artifacts) > 8 || len(s.Artifacts) != 2*len(b.Manifest.Artifacts) {
 		return errors.New("release: invalid release set identity")
 	}
 	roles, paths, platforms := map[string]bool{}, map[string]bool{}, map[string]int{}

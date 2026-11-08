@@ -19,24 +19,25 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
-	ReleaseSet           *release.Set
-	ReleaseSetSHA256     string
-	ReleaseSetSize       int64
-	ExecutionRequestID   string
-	ParkIdleManagers     bool
-	ServerCapabilities   []string
-	DeliveryTaskID       string
-	ArtifactSources      map[string]release.SourceIdentity
-	RunnerConfigurations map[string]protocol.RunnerConfiguration
-	CurrentServerHash    string
-	Manifest             release.Manifest
-	ManifestSHA256       string
-	ManifestSize         int64
-	ServerHash           string
-	ServerInstance       string
-	DrainMillis          int64
-	RestartMillis        int64
-	GrantMillis          int64
+	ServerUpdaterSupported bool
+	ReleaseSet             *release.Set
+	ReleaseSetSHA256       string
+	ReleaseSetSize         int64
+	ExecutionRequestID     string
+	ParkIdleManagers       bool
+	ServerCapabilities     []string
+	DeliveryTaskID         string
+	ArtifactSources        map[string]release.SourceIdentity
+	RunnerConfigurations   map[string]protocol.RunnerConfiguration
+	CurrentServerHash      string
+	Manifest               release.Manifest
+	ManifestSHA256         string
+	ManifestSize           int64
+	ServerHash             string
+	ServerInstance         string
+	DrainMillis            int64
+	RestartMillis          int64
+	GrantMillis            int64
 }
 
 func (StartUpgrade) Operation() string { return "upgrades.start" }
@@ -59,6 +60,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if err := c.ReleaseSet.ValidateMetadata(c.Manifest, c.ManifestSHA256); err != nil || !release.ValidSHA(c.ReleaseSetSHA256) || c.ReleaseSetSize <= 0 || c.ReleaseSetSize > release.MaxManifestBytes {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid complete release set")
 		}
+	}
+	if c.ReleaseSet != nil && c.ReleaseSet.Format >= 2 && !c.ServerUpdaterSupported {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "server updater requires standalone supervisor-first bootstrap")
 	}
 	if c.ParkIdleManagers && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityManagerPark) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "candidate does not support manager park")
@@ -137,6 +141,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	r.Deadline = capUpgradeDeadline(&r, r.Deadline)
 	r.ReleaseSet, r.ReleaseSetSHA256, r.ReleaseSetSize = c.ReleaseSet, c.ReleaseSetSHA256, c.ReleaseSetSize
+	if needsSelfUpdate(r) {
+		r.View.Phase = "server_updater"
+	}
 	if len(c.RunnerConfigurations) > 0 {
 		if len(c.RunnerConfigurations) != 1 || c.ServerHash != c.CurrentServerHash {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance requires one host and the current server binary")
@@ -171,6 +178,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s is offline, incompatible, or unavailable for rolling upgrade", h.HostID)
 		}
 		artifact, ok := releaseArtifact(c.Manifest, "runner", h.OS, h.Arch)
+		if needsSelfUpdate(r) && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s requires supervisor-first bootstrap", h.HostID)
+		}
 		if c.ReleaseSet != nil && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityCompleteReleaseSet) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s requires complete release set bootstrap", h.HostID)
 		}
@@ -298,6 +308,7 @@ func upgradeNotice(ctx context.Context, x *Exec, tx *store.Tx, r store.UpgradeRo
 
 // ServerObservation is supplied by the local controller, never by remote peers.
 type ServerObservation struct {
+	Updater                                             *protocol.UpdaterSelfObservation
 	UpdaterReceipt                                      *protocol.UpdaterReceipt
 	InstanceID, ProcessInstanceID, BinarySHA256, Commit string
 	Healthy, MainDrained, Modified                      bool
@@ -381,6 +392,12 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		}
 		if parkReady {
 			switch r.View.Phase {
+			case "server_updater":
+				if selfUpdateMatches(r, r.ServerHash, c.Observation.Updater) && c.Observation.Updater.InstanceID == r.ServerInstance && c.Observation.Updater.SupervisedProcess.SHA256 == c.Observation.BinarySHA256 && c.Observation.Updater.SupervisedProcess.LaunchID == c.Observation.ProcessInstanceID {
+					r.View.ServerUpdater = c.Observation.Updater
+					r.View.Phase = "server_draining"
+					r.Deadline = capUpgradeDeadline(&r, now+r.DrainMillis)
+				}
 			case "server_draining":
 				if c.Observation.MainDrained {
 					if c.Observation.BinarySHA256 == r.ServerHash {
@@ -459,6 +476,13 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 					}
 				}
 			case "runners":
+				if needsSelfUpdate(r) {
+					o := c.Observation
+					if !selfUpdateMatches(r, r.ServerHash, o.Updater) || o.Updater.InstanceID != r.ServerInstance || o.Updater.SupervisedProcess.SHA256 != o.BinarySHA256 || o.Updater.SupervisedProcess.LaunchID != o.ProcessInstanceID {
+						break
+					}
+					r.View.ServerUpdater = o.Updater
+				}
 				if err := advanceRunnerUpgrade(ctx, x, tx, &r, attention); err != nil {
 					return Outcome{}, err
 				}
@@ -488,12 +512,32 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		h := &r.Hosts[i]
 		v := &r.View.Hosts[i]
 		if v.Status == "completed" {
+			if needsSelfUpdate(*r) {
+				rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
+				if err != nil {
+					return err
+				}
+				if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || !runnerSelfMatches(*r, *h, rt.Runtime) {
+					return nil
+				}
+				v.Updater = rt.Runtime.Updater
+			}
 			if err := reconcileCompletedRunner(ctx, x, tx, r, i); err != nil {
 				return err
 			}
 			continue
 		}
 		if v.Status == "skipped" {
+			if needsSelfUpdate(*r) {
+				rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
+				if err != nil {
+					return err
+				}
+				if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || !runnerSelfMatches(*r, *h, rt.Runtime) {
+					return nil
+				}
+				v.Updater = rt.Runtime.Updater
+			}
 			continue
 		}
 		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
@@ -509,6 +553,33 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			return err
 		}
 		v.RemainingRuns = runs
+		if runnerSelfMatches(*r, *h, rt.Runtime) {
+			v.Updater = rt.Runtime.Updater
+		}
+		if needsSelfUpdate(*r) && h.PreviousHash == h.TargetHash && h.Configuration == nil && runnerSelfMatches(*r, *h, rt.Runtime) && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && rt.Runtime.AppliedControlRevision == ctl.Revision {
+			if v.Phase == "ready" && rt.Runtime.Mode == protocol.RunnerReady {
+				ctl.Revision++
+				ctl.Mode = protocol.RunnerNormal
+				ctl.Authorization = nil
+				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+					return err
+				}
+				v.Phase = "updater_only_restored"
+				return nil
+			}
+			if v.Phase == "updater_only_restored" && rt.Runtime.Mode == protocol.RunnerNormal {
+				v.Status = "skipped"
+				v.Phase = "verified"
+				v.CurrentVersion = rt.Runtime.Build.Version
+				ctl.Revision++
+				ctl.UpgradeID = ""
+				ctl.ReleaseID = ""
+				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		if ctl.Upgrade != nil && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.UpgradeID == r.View.UpgradeID {
 			v.DownloadedBytes = rt.Runtime.DownloadedBytes
 			if rt.Runtime.UpgradeError != "" {
@@ -537,7 +608,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 				return attention("等待升级的主机离线")
 			}
-			if h.PreviousHash == h.TargetHash && h.Configuration == nil {
+			if h.PreviousHash == h.TargetHash && h.Configuration == nil && !needsSelfUpdate(*r) {
 				if !installedRunnerMatches(rt.Runtime, r.Manifest) {
 					return attention("当前 runner 的协议或 journal 版本与发布清单不一致")
 				}
@@ -585,6 +656,9 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			ctl.Revision++
 			ctl.Upgrade = &protocol.RunnerUpgradeTarget{Configuration: h.Configuration, ManifestPath: "/runner/v1/releases/" + r.View.UpgradeID + "/manifest", ManifestSHA256: r.ManifestSHA256, ManifestSize: r.ManifestSize, ArtifactBasePath: "/runner/v1/releases/" + r.View.UpgradeID + "/artifacts/"}
 			if r.ReleaseSet != nil {
+				if needsSelfUpdate(*r) {
+					ctl.Upgrade.Updater = &protocol.UpdaterSelfTarget{RequestID: r.StartRequestID, ExpiresAtMillis: r.View.OverallDeadlineMillis}
+				}
 				ctl.Upgrade.ReleaseSet = &protocol.ReleaseSetTarget{Path: "/runner/v1/releases/" + r.View.UpgradeID + "/set", SHA256: r.ReleaseSetSHA256, Size: r.ReleaseSetSize}
 			}
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
@@ -593,6 +667,21 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			v.Phase = "ready"
 		}
 		return nil
+	}
+	if needsSelfUpdate(*r) {
+		for _, h := range r.Hosts {
+			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
+			if err != nil {
+				return err
+			}
+			if ctl.Upgrade != nil {
+				ctl.Revision++
+				ctl.Upgrade = nil
+				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	r.View.Status = "completed"
 	r.View.Phase = "completed"

@@ -23,8 +23,8 @@ func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
 	if len(args) > 0 && args[0] == "bounded" {
 		return runBoundedMaintenance(ctx, e, args[1:])
 	}
-	if len(args) < 2 || (args[0] != "handoff" && args[0] != "maintenance") {
-		return usagef("updater expects handoff plan|apply|status")
+	if len(args) < 2 || (args[0] != "handoff" && args[0] != "maintenance" && args[0] != "self-update") {
+		return usagef("updater expects handoff|self-update plan|apply|status")
 	}
 	action := args[1]
 	if args[0] == "maintenance" && (action == "recover-stop" || action == "prepare" || action == "authorize" || action == "cancel" || action == "finish" || action == "resume" || action == "ledger" || action == "health") {
@@ -33,7 +33,7 @@ func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
 	if !protocol.ValidUpdaterHandoffAction(action) && !(args[0] == "maintenance" && (action == "prepare" || action == "authorize" || action == "cancel" || action == "finish")) {
 		return usagef("handoff expects plan, apply or status")
 	}
-	fs := newFlags(e, "updater handoff "+action)
+	fs := newFlags(e, "updater "+args[0]+" "+action)
 	resumeID := fs.String("resume-request-id", "", "distinct stable request ID for guarded installer continuation")
 	generation := fs.Uint64("expected-generation", 0, "current installer journal generation for continuation")
 	installer := fs.String("installer", "", "absolute path to the reviewed new tend-updater artifact (first hop)")
@@ -85,6 +85,9 @@ func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
 	argv := []string{args[0], action, "--config", *config}
 	if *plan != "" {
 		argv = append(argv, "--plan", *plan)
+	}
+	if args[0] == "self-update" && (*resumeID != "" || *generation != 0) {
+		return usagef("self-update resumes the original request; continuation identity is not accepted")
 	}
 	if *resumeID != "" {
 		if action == "status" || !protocol.ValidID(protocol.PrefixRequest, *resumeID) || *generation == 0 {

@@ -21,7 +21,7 @@ func MergeTo(amd64, arm64, target string) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	if a.Set == nil || b.Set == nil || a.Set.Arch != "amd64" || b.Set.Arch != "arm64" || a.Set.Commit != b.Set.Commit || a.Manifest.ReleaseID != b.Manifest.ReleaseID || a.Manifest.Protocol != b.Manifest.Protocol || a.Manifest.Storage != b.Manifest.Storage {
+	if a.Set == nil || b.Set == nil || a.Set.Format != b.Set.Format || a.Set.Arch != "amd64" || b.Set.Arch != "arm64" || a.Set.Commit != b.Set.Commit || a.Manifest.ReleaseID != b.Manifest.ReleaseID || a.Manifest.Protocol != b.Manifest.Protocol || a.Manifest.Storage != b.Manifest.Storage {
 		return nil, errors.New("release: platform distributions have different source or compatibility")
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
