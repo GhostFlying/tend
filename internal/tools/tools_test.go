@@ -280,6 +280,7 @@ func tags(v any) []string {
 
 func TestSchemasMatchArgs(t *testing.T) {
 	args := map[string]any{
+		"conversation_context_index": protocol.ConversationContextQuery{},
 		"conversation_handoff_audit": handoffAuditArgs{},
 		"decisions_explain":          explainDecisionArgs{},
 		"conversation_reply":         protocol.CoordinationReply{},
