@@ -113,7 +113,7 @@ func TestCompleteSetRejectsIncompleteOrConflictingMetadata(t *testing.T) {
 			case "commit":
 				s.Commit = strings.Repeat("A", 40)
 			case "format":
-				s.Format = 2
+				s.Format = 3
 			case "corrupt":
 				if err := os.WriteFile(filepath.Join(b.Dir, "updater"), []byte("changed"), 0o755); err != nil {
 					t.Fatal(err)
@@ -135,5 +135,29 @@ func TestCompleteSetRejectsIncompleteOrConflictingMetadata(t *testing.T) {
 				t.Fatal("invalid complete set accepted")
 			}
 		})
+	}
+}
+
+func TestSupervisorFirstReleaseFormatIsExplicitAndPreserved(t *testing.T) {
+	b, s := setFixture(t)
+	if b.Set.Format != 1 {
+		t.Fatal("legacy distribution changed semantics")
+	}
+	s.Format = 2
+	writeSet(t, b.Dir, s)
+	modern, err := Load(b.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged, err := modern.CopyTo(filepath.Join(t.TempDir(), "full"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staged.Set.Format != 2 || staged.SetSHA256 != modern.SetSHA256 {
+		t.Fatal("supervisor-first selection lost during staging")
+	}
+	arm := armSet(t)
+	if _, err := MergeTo(modern.Dir, arm.Dir, filepath.Join(t.TempDir(), "mixed")); err == nil {
+		t.Fatal("mixed execution semantics silently accepted")
 	}
 }

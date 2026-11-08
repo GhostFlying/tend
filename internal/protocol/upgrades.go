@@ -4,16 +4,17 @@ import "time"
 
 // UpgradeHostView records one host's progress in a serialized release batch.
 type UpgradeHostView struct {
-	HostID          string `json:"host_id"`
-	Status          string `json:"status"`
-	Phase           string `json:"phase"`
-	RemainingRuns   int64  `json:"remaining_runs,omitempty"`
-	CurrentVersion  string `json:"current_version,omitempty"`
-	TargetVersion   string `json:"target_version,omitempty"`
-	ProtocolVersion int64  `json:"protocol_version"`
-	DownloadedBytes int64  `json:"downloaded_bytes,omitempty"`
-	TotalBytes      int64  `json:"total_bytes,omitempty"`
-	Reason          string `json:"reason,omitempty"`
+	Updater         *UpdaterSelfObservation `json:"updater,omitempty"`
+	HostID          string                  `json:"host_id"`
+	Status          string                  `json:"status"`
+	Phase           string                  `json:"phase"`
+	RemainingRuns   int64                   `json:"remaining_runs,omitempty"`
+	CurrentVersion  string                  `json:"current_version,omitempty"`
+	TargetVersion   string                  `json:"target_version,omitempty"`
+	ProtocolVersion int64                   `json:"protocol_version"`
+	DownloadedBytes int64                   `json:"downloaded_bytes,omitempty"`
+	TotalBytes      int64                   `json:"total_bytes,omitempty"`
+	Reason          string                  `json:"reason,omitempty"`
 }
 
 type UpgradeManagerParkView struct {
@@ -25,6 +26,7 @@ type UpgradeManagerParkView struct {
 
 // UpgradeView remains visible after completion until the next batch starts.
 type UpgradeView struct {
+	ServerUpdater         *UpdaterSelfObservation  `json:"server_updater,omitempty"`
 	OverallDeadlineMillis int64                    `json:"overall_deadline_millis,omitempty"`
 	ManagerParks          []UpgradeManagerParkView `json:"manager_parks,omitempty"`
 	SourceCommit          string                   `json:"source_commit,omitempty"`
@@ -60,6 +62,7 @@ type ReleaseSetTarget struct {
 }
 
 type RunnerUpgradeTarget struct {
+	Updater          *UpdaterSelfTarget   `json:"updater,omitempty"`
 	ReleaseSet       *ReleaseSetTarget    `json:"release_set,omitempty"`
 	Configuration    *RunnerConfiguration `json:"configuration,omitempty"`
 	ManifestPath     string               `json:"manifest_path"`

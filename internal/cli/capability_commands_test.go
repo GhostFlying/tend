@@ -222,6 +222,10 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			if strings.HasPrefix(entry.Capability, "local EXEC codex-env ") {
 				matched = strings.Contains(env.out.String(), entry.Capability)
 			}
+			if strings.HasPrefix(entry.Capability, "local EXEC updater self-update ") {
+				action := strings.TrimPrefix(entry.Capability, "local EXEC updater self-update ")
+				matched = strings.Contains(env.out.String(), "self-update\n"+action+"\n--config\n")
+			}
 			if strings.HasPrefix(entry.Capability, "local EXEC updater handoff ") {
 				action := strings.TrimPrefix(entry.Capability, "local EXEC updater handoff ")
 				matched = strings.Contains(env.out.String(), "handoff\n"+action+"\n--config\n")

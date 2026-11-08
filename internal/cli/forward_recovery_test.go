@@ -65,3 +65,29 @@ func TestCapabilityRecoveryHelpListsCompleteInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestCapabilitySelfUpdatePreservesOriginalPlanAndRejectsNewResumeIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable fixture")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "installer")
+	var body []byte
+	// Use the same first-hop pinning as legacy recovery, with its own command.
+	body = []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+	if err := os.WriteFile(path, body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	for _, action := range []string{"plan", "apply", "status"} {
+		env := newTestEnv(t, "")
+		args := []string{"updater", "self-update", action, "--installer", path, "--installer-sha256", hex.EncodeToString(sum[:]), "--config", filepath.Join(root, "config.json"), "--plan", filepath.Join(root, "original.json"), "--json"}
+		if code := env.main(args...); code != exitOK || !strings.Contains(env.out.String(), "self-update\n"+action+"\n--config\n") {
+			t.Fatal(code, env.out, env.errOut)
+		}
+		args = append(args, "--resume-request-id", "req_01M6F01JSS6Q9BFV6DJNSSBHEY", "--expected-generation", "4")
+		if code := env.main(args...); code != exitUsage {
+			t.Fatal("self-update accepted a replacement attempt", code, env.errOut)
+		}
+	}
+}

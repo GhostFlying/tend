@@ -1886,6 +1886,7 @@ export interface RunnerUpgradeTarget {
   manifest_sha256: string;
   manifest_size: number;
   release_set?: ReleaseSetTarget;
+  updater?: UpdaterSelfTarget;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1904,6 +1905,14 @@ export interface ReleaseSetTarget {
   path: string;
   sha256: string;
   size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdaterSelfTarget".
+ */
+export interface UpdaterSelfTarget {
+  expires_at_millis: number;
+  request_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1934,6 +1943,7 @@ export interface RunnerRuntime {
   protocol_min: number;
   repositories?: RunnerRepository[];
   sequence: number;
+  updater?: UpdaterSelfObservation;
   updater_receipt?: UpdaterReceipt;
   upgrade_error?: string;
   upgrade_id?: string;
@@ -1959,6 +1969,40 @@ export interface RunnerBuild {
 export interface RunnerRepository {
   remote_identity: string;
   repo: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdaterSelfObservation".
+ */
+export interface UpdaterSelfObservation {
+  instance_id: string;
+  process: RecoveryIdentity;
+  receipt?: UpdaterSelfReceipt;
+  supervised_process: RecoveryIdentity;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RecoveryIdentity".
+ */
+export interface RecoveryIdentity {
+  launch_id: string;
+  pid: number;
+  sha256: string;
+  start_ticks: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdaterSelfReceipt".
+ */
+export interface UpdaterSelfReceipt {
+  completed_at_millis: number;
+  installed: RecoveryIdentity;
+  instance_id: string;
+  previous: RecoveryIdentity;
+  release_set_sha256: string;
+  request_id: string;
+  retained_process: RecoveryIdentity;
+  upgrade_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2292,16 +2336,6 @@ export interface BoundedMaintenanceAuthorization {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RecoveryIdentity".
- */
-export interface RecoveryIdentity {
-  launch_id: string;
-  pid: number;
-  sha256: string;
-  start_ticks: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "MaintenanceTimeoutPolicy".
  */
 export interface MaintenanceTimeoutPolicy {
@@ -2458,6 +2492,7 @@ export interface UpgradeView {
   reason?: string;
   release_id: string;
   revision: number;
+  server_updater?: UpdaterSelfObservation;
   source_commit?: string;
   status: string;
   updated_at: string;
@@ -2478,6 +2513,7 @@ export interface UpgradeHostView {
   status: string;
   target_version?: string;
   total_bytes?: number;
+  updater?: UpdaterSelfObservation;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

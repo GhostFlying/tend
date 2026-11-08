@@ -146,6 +146,13 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
 	command := app.StartUpgrade{ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
 	command.ReleaseSet, command.ReleaseSetSHA256, command.ReleaseSetSize = bundle.Set, bundle.SetSHA256, int64(len(bundle.SetBytes))
+	if bundle.Set != nil && bundle.Set.Format >= 2 {
+		status, err := updater.SelfUpdateCall(ctx, c.cfg.UpdaterSocket, nil)
+		if err != nil || !status.Supported || status.Observation.InstanceID != c.cfg.Instance {
+			return protocol.UpgradeView{}, errors.New("upgradectl: standalone updater bootstrap required before a complete upgrade")
+		}
+		command.ServerUpdaterSupported = true
+	}
 	if r.ParkIdleManagers || r.ExecutionRequestID != "" {
 		recorded, err := c.app.CheckUpgradeStart(ctx, env, command)
 		if err != nil {
@@ -222,6 +229,29 @@ func (c *Controller) tick(ctx context.Context) error {
 	observed.ProcessInstanceID = c.cfg.ProcessInstance
 	observed.BinarySHA256 = c.cfg.BinarySHA256
 	observed.UpdaterReceipt = c.rollbackReceipt(ctx)
+	current, readErr := c.app.CurrentUpgrade(ctx)
+	if readErr != nil {
+		return readErr
+	}
+	if current.UpgradeID != "" && (current.Status == "running" || current.Status == "attention") {
+		row, e := c.app.GetUpgrade(ctx, current.UpgradeID)
+		if e != nil {
+			return e
+		}
+		if row.ReleaseSet != nil && row.ReleaseSet.Format >= 2 {
+			status, e := updater.SelfUpdateCall(ctx, c.cfg.UpdaterSocket, nil)
+			if e == nil {
+				observed.Updater = &status.Observation
+			}
+			if current.Status == "running" && current.Phase == "server_updater" {
+				observation, e := updater.EnsureSelfUpdate(ctx, c.cfg.UpdaterSocket, updater.SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: row.StartRequestID, ExpiresAtMillis: row.View.OverallDeadlineMillis}, UpgradeID: row.View.UpgradeID, Release: filepath.Join(c.cfg.ReleaseDir, row.View.UpgradeID), ReleaseSetSHA256: row.ReleaseSetSHA256})
+				if e != nil {
+					return e
+				}
+				observed.Updater = &observation
+			}
+		}
+	}
 	v, err := c.app.TickUpgrade(ctx, observed)
 	if err != nil {
 		return err

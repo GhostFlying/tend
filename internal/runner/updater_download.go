@@ -18,6 +18,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/updater"
 )
 
 func (r *Runner) maybeUpgrade(ctx context.Context) {
@@ -71,6 +72,30 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 	submit := func() error {
 		if !r.updateUpgradeAttempt(control, func() {}) {
 			return errors.New("upgrade attempt changed")
+		}
+		bundle, err := release.Load(dir)
+		if err != nil {
+			return err
+		}
+		if bundle.Set != nil && bundle.Set.Format >= 2 {
+			if target.Updater == nil || target.ReleaseSet == nil {
+				return errors.New("runner: complete upgrade requires supervisor-first selection")
+			}
+			r.updateUpgradeAttempt(control, func() { r.upgradePhase = "updater_handoff" })
+			observation, selfErr := updater.EnsureSelfUpdate(ctx, r.cfg.UpdaterControlSocket, updater.SelfUpdateRequest{Target: *target.Updater, UpgradeID: control.UpgradeID, Release: dir, ReleaseSetSHA256: target.ReleaseSet.SHA256})
+			if selfErr != nil {
+				return selfErr
+			}
+			artifact, err := bundle.Artifact("runner", r.cfg.Build.GOOS, r.cfg.Build.GOARCH)
+			if err != nil {
+				return err
+			}
+			if observation.SupervisedProcess.SHA256 == artifact.SHA256 && observation.SupervisedProcess.LaunchID == r.instanceID && int64(observation.SupervisedProcess.PID) == r.cfg.Build.PID && r.cfg.Build.BinarySHA256 == artifact.SHA256 {
+				r.updateUpgradeAttempt(control, func() { r.upgradePhase = "updater_verified" })
+				return nil
+			}
+		} else if target.Updater != nil {
+			return errors.New("runner: self-update target does not match release format")
 		}
 		if err := r.submitConfiguredUpdater(ctx, control.UpgradeID, dir, target.ManifestSHA256, target.Configuration); err != nil {
 			return err

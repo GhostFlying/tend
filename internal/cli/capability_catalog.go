@@ -35,6 +35,9 @@ func CapabilityBindings() []CapabilityBinding {
 		out = append(out, binding("local EXEC codex-env "+action, "codex-env "+action, args...))
 	}
 	out = append(out, binding(protocol.LocalServerCapabilities, "upgrade capabilities", "--binary", "{server-binary}", "--sha256", "{server-sha256}", "--json"))
+	for _, action := range protocol.UpdaterSelfUpdateActions() {
+		out = append(out, binding("local EXEC updater self-update "+action, "updater self-update "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))
+	}
 	for _, action := range protocol.UpdaterHandoffActions() {
 		out = append(out, binding("local EXEC updater handoff "+action, "updater handoff "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))
 	}

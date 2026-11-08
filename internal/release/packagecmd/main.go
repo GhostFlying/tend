@@ -141,7 +141,7 @@ func run(ctx context.Context, arch, commit, output string) error {
 		return errors.New("package: runner migrations unavailable")
 	}
 	m := release.Manifest{Format: 1, ReleaseID: "main-" + commit, Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 1, Max: int64(len(serverMigrations))}, RunnerJournal: release.Range{Min: 1, Max: int64(len(runnerMigrations))}}}
-	set := release.Set{Format: 1, ReleaseID: m.ReleaseID, Commit: commit, OS: "linux", Arch: arch}
+	set := release.Set{Format: 2, ReleaseID: m.ReleaseID, Commit: commit, OS: "linux", Arch: arch}
 	for _, role := range []string{"server", "runner", "updater", "cli"} {
 		binary := "tend-" + role
 		if role == "cli" {

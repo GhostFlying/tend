@@ -167,9 +167,11 @@ type active struct {
 
 // Runner pulls and executes runs for one host.
 type Runner struct {
-	previewSupported  bool
-	previewDeployment string
-	previewWake       chan struct{}
+	selfUpdateSupportKnown bool
+	selfUpdateSupported    bool
+	previewSupported       bool
+	previewDeployment      string
+	previewWake            chan struct{}
 
 	runnerProtocol int64
 	cfg            Config
@@ -592,6 +594,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	runtime.Updater = nil
 	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
 	if err != nil {
 		return err

@@ -12,3 +12,7 @@ func ValidUpdaterHandoffAction(action string) bool {
 	}
 	return false
 }
+
+// UpdaterSelfUpdateActions belongs to the independent ordinary installer,
+// separate from maintenance recovery and its continuation authorization.
+func UpdaterSelfUpdateActions() []string { return []string{"plan", "apply", "status"} }

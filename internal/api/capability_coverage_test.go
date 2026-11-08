@@ -65,6 +65,9 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	for _, action := range protocol.CodexEnvironmentActions() {
 		expected["local EXEC codex-env "+action] = true
 	}
+	for _, action := range protocol.UpdaterSelfUpdateActions() {
+		expected["local EXEC updater self-update "+action] = true
+	}
 	for _, action := range protocol.UpdaterHandoffActions() {
 		expected["local EXEC updater handoff "+action] = true
 	}
@@ -81,6 +84,10 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	internal := map[string]string{"/updater/authorize": "updater authority binding", "/updater/health": "updater health receipt", "/updater/recovery/health": "successor readiness callback", "/recovery/link": "server ledger linkage callback", "/maintenance/link": "server committed maintenance linkage callback", "/bootstrap": "fixed updater installation bootstrap", "/upgrade": "coordinator executor action", "/stage-config": "coordinator configuration action", "/restart": "disabled direct restart", "/retry": "coordinator retry", "/cancel": "coordinator cancellation"}
 	// Bounded operator actions run through the pinned independent installer;
 	// these executor callbacks retain its complete plan and authority checks.
+	// Ordinary self-update is dispatched by the coordinator and independently
+	// installed through the pinned EXEC interface above, never a generic CLI RPC.
+	internal["/self-update/apply"] = "ordinary upgrade coordinator self-update request"
+	internal["/self-update/status"] = "ordinary upgrade coordinator process evidence"
 	internal["/bounded/authorize"] = "independent bounded installer authorization"
 	internal["/bounded/cancel"] = "independent bounded installer cancellation"
 	// Foreground native usage reconciliation delegates its existing journal
