@@ -16,6 +16,9 @@ import (
 
 // WorkerOptions configure the workers a runner starts.
 type WorkerOptions struct {
+	// EnvironmentHomes is the runner-owned registry of historical rollout roots.
+	EnvironmentHomes string
+
 	BeforeStart func(context.Context, harness.WorkerSpec, harness.Thread, string) (string, error)
 
 	// Acquire retains a run session independently of a worker attempt. The release
@@ -178,6 +181,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err = codexenv.RecordSessionHome(startupCtx, ws.opts.EnvironmentHomes, opts.Environment); err != nil {
 		return nil, err
 	}
 	if opts.Environment != nil {

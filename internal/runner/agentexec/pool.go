@@ -33,6 +33,8 @@ type BuildInput struct {
 }
 
 type Options struct {
+	EnvironmentHomes string
+
 	Environments *codexenv.Bindings
 	CentralOrca  *orca.Client
 	ProbeCentral func(context.Context) error
@@ -289,7 +291,7 @@ func (p *Pool) build(input BuildInput) (harness.Workers, error) {
 		}
 		return remote.NewWorkers(remote.WorkerOptions{Bin: input.Runtime.ExecutableRef, Helper: p.options.BridgeCommand, Orca: p.options.CentralOrca, Model: input.Agent.Model, Effort: input.Agent.Effort, Log: p.options.Log}), nil
 	case agentconfig.AppServerWorker:
-		return traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.options.Environments.Resolve(input.Runtime.ID)}, Model: input.Agent.Model, Effort: input.Agent.Effort, StrictResume: true}), nil
+		return traex.NewWorkers(traex.WorkerOptions{EnvironmentHomes: p.options.EnvironmentHomes, Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.options.Environments.Resolve(input.Runtime.ID)}, Model: input.Agent.Model, Effort: input.Agent.Effort, StrictResume: true}), nil
 	case agentconfig.OrcaWorker:
 		agent := protocol.AgentCodex
 		if input.Runtime.CLI == "traex" {

@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/cfgfile"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
@@ -54,7 +56,15 @@ func assembleAgentExecutions(ctx context.Context, cfg config, source *agentcontr
 	if err != nil {
 		return nil, err
 	}
-	return agentexec.New(agentexec.Options{Environments: cfg.CodexEnvironments, CentralOrca: client, ProbeCentral: func(ctx context.Context) error {
+	home := cfg.Home
+	if home == "" {
+		home = "~/.tend"
+	}
+	home, err = cfgfile.Path(home)
+	if err != nil {
+		return nil, err
+	}
+	return agentexec.New(agentexec.Options{EnvironmentHomes: filepath.Join(home, "codex-rollout-roots"), Environments: cfg.CodexEnvironments, CentralOrca: client, ProbeCentral: func(ctx context.Context) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ServerURL, "/")+"/runner/v1/native/status", nil)
 		if err != nil {
 			return err

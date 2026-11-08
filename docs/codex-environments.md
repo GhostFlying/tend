@@ -89,7 +89,7 @@ tend codex-env watch disable --revision 1
 
 watch 使用用户 systemd 服务；enable/disable 管理它自己的 revision，status 返回该值。`watch run` 是前台同步进程入口。只同步 enabled 且 auto_sync 未关闭的环境，默认每 60 秒检查选中内容；没有变化不发布新快照，也不调用模型。同步失败保留有效快照，状态给出原因；超时或退出不明时先 reconcile 原请求，不自动换请求重放未知操作。
 
-用户服务保存启用时的工具 PATH，确保非交互进程也能找到本机 Codex 和 bubblewrap。`rollback` 设置 sync_held，避免下一轮自动同步立即撤销人工回退；显式 sync 或环境 update 解除该暂停。禁用 watch 保留环境和当前快照，即使 bubblewrap 已不可用也可以停止该服务。
+用户服务保存启用时的工具 PATH，确保非交互进程也能找到本机 Codex 和 bubblewrap。`rollback` 设置 sync_held，避免下一轮自动同步立即撤销人工回退；显式 sync 或环境 update 解除该暂停。禁用 watch 保留环境和当前快照，即使 bubblewrap 已不可用也可以停止该服务。enable 在任何外部操作前的预检失败记为明确失败，允许后续 disable；已可能发出的 systemd 操作仍按原请求对账。
 
 `latest` 表示已发布版本，`adoptions` 表示执行实际固定的版本，两者可能不同；pending_generation / pending_reason 说明保留 run 引用、等待空闲、启动失败或待对账等采用限制。worker 和 runner 托管 manager 在首次 run 启动时持久化引用，同一 run 的恢复沿用该引用；后续新 run 使用最新快照。首次启动前还在 run 自己的固定状态目录保存环境目录和 ID；之后更换或移除 runtime 映射不会重定向原执行。功能启用前已有的未隔离线程继续使用其原路径。问题回答产生的新 run 若继续原线程，则从前序 run 的本机状态继承环境身份，并保存自己的引用。本机长期主会话只在 delivery、turn、维护和未确定回执均已结束，且原生 thread 确认为 idle 后重建 app-server，恢复原 thread，不生成业务输入。新进程握手成功仍保留旧引用，原生 thread 加载成功后才确认采用；加载失败且确认关闭后记录被阻止的版本并恢复旧引用，退出不明时保留 unknown。工具 schema 升级继续使用既有隔离与索引交接流程。
 
@@ -116,4 +116,4 @@ server 将相同结构放在 `main_agent.codex_environments`。runner 托管的�
 
 会话、日志和 SQLite 始终位于固定运行 home。Kaboo 只需统计该 home，不应添加每个 generation 的路径；已有运行 home 未迁移时不修改 Kaboo 配置。
 
-仅需停止新执行时，从 show 返回的完整 profile 只将 enabled 改为 false，然后带当前 revision 更新；这项操作即使投影来源缺失也能提交，保留已有快照及恢复引用。再次启用仍需来源完整并通过校验。runner 未设置 rollout_roots 时自动加入映射环境的 sessions 目录；显式列表和空数组保持原义。
+仅需停止新执行时，从 show 返回的完整 profile 只将 enabled 改为 false，然后带当前 revision 更新；这项操作即使投影来源缺失也能提交，保留已有快照及恢复引用。再次启用仍需来源完整并通过校验。runner 未设置 rollout_roots 时自动加入映射环境和本机已登记执行 home 的 sessions 目录；登记表独立于当前映射，不扫描全部 run 历史；显式列表和空数组保持原义。

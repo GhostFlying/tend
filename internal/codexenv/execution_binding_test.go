@@ -125,3 +125,26 @@ func TestQuestionContinuationInheritsOriginalEnvironmentAcrossRuns(t *testing.T)
 		t.Fatal("legacy continuation acquired isolation", legacy, err)
 	}
 }
+
+func TestRecordedHomesAreIndependentOfMappingsAndRunHistory(t *testing.T) {
+	s, p := fixture(t)
+	create(t, s, p)
+	registry := filepath.Join(t.TempDir(), "homes")
+	binding := &Binding{Directory: s.Root, ID: p.ID}
+	for range 2 {
+		if err := RecordSessionHome(t.Context(), registry, binding); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roots, err := RecordedSessionRoots(registry)
+	if err != nil || len(roots) != 1 || roots[0] != filepath.Join(p.Home, "sessions") {
+		t.Fatal(roots, err)
+	}
+	if err = os.RemoveAll(s.Root); err != nil {
+		t.Fatal(err)
+	}
+	roots, err = RecordedSessionRoots(registry)
+	if err != nil || len(roots) != 1 || roots[0] != filepath.Join(p.Home, "sessions") {
+		t.Fatal("lost original home after unmapping", roots, err)
+	}
+}

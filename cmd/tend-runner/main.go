@@ -275,7 +275,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		profiles[pn] = p.gitws()
 	}
 	ids := protocol.NewULIDGen(time.Now, nil)
-	if err = resolveRolloutRoots(&cfg); err != nil {
+	if err = resolveRolloutRoots(&cfg, home); err != nil {
 		return err
 	}
 	wsCfg := gitws.Config{ProtectPath: j.ProtectRollouts, Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
@@ -391,12 +391,17 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	return r.Run(ctx)
 }
 
-func resolveRolloutRoots(cfg *config) error {
+func resolveRolloutRoots(cfg *config, home string) error {
 	if cfg.RolloutRoots == nil {
 		mappedRoots, err := cfg.CodexEnvironments.SessionRoots()
 		if err != nil {
 			return err
 		}
+		retainedRoots, err := codexenv.RecordedSessionRoots(filepath.Join(home, "codex-rollout-roots"))
+		if err != nil {
+			return err
+		}
+		cfg.RolloutRoots = append(cfg.RolloutRoots, retainedRoots...)
 		cfg.RolloutRoots = append(cfg.RolloutRoots, mappedRoots...)
 		for _, cli := range []struct{ env, fallback string }{{"TRAE_HOME", "~/.trae/cli"}, {"CODEX_HOME", "~/.codex"}} {
 			root := os.Getenv(cli.env)
