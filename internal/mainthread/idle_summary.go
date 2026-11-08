@@ -172,7 +172,8 @@ func (m *Manager) idleSummary(ctx context.Context) error {
 	m.mu.Lock()
 	m.summaryActive = true
 	m.mu.Unlock()
-	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock() }()
+	m.wakeNativeUsage()
+	defer func() { m.mu.Lock(); m.summaryActive = false; m.mu.Unlock(); m.wakeNativeUsage() }()
 	attempt := snap
 	success := false
 	defer func() {

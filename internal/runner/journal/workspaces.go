@@ -25,6 +25,7 @@ func (j *Journal) HistoricalRun(ctx context.Context, id string) (Run, error) {
 }
 
 func (j *Journal) ConfirmStopped(ctx context.Context, id string) error {
+	defer j.WakeUsage()
 	return j.exec(ctx, `UPDATE runs SET stopped_confirmed=1 WHERE run_id=?`, id)
 }
 

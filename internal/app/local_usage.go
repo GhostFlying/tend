@@ -35,7 +35,7 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 	if s.RunID == "" {
 		s.ConversationID = store.ConversationID(s.ConversationID)
 	}
-	return a.write(ctx, func(tx *store.Tx) error {
+	err := a.write(ctx, func(tx *store.Tx) error {
 		if s.RunID != "" {
 			if _, err := store.GetRun(ctx, tx.Q(), s.RunID); err != nil {
 				return err
@@ -46,12 +46,19 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 		_, err := tx.Exec(ctx, `INSERT INTO token_usage_local_sources(source_key,run_id,conversation_id,source_json,writer_stopped,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET writer_stopped=excluded.writer_stopped,coverage=CASE WHEN token_usage_local_sources.writer_stopped<>excluded.writer_stopped THEN 'pending' ELSE token_usage_local_sources.coverage END`, s.ID, s.RunID, s.ConversationID, string(s.Source), s.WriterStopped, a.now().UnixMilli())
 		return err
 	})
+	if err == nil {
+		a.wakeLocalUsage()
+	}
+	return err
 }
 
 func (a *App) LocalUsageSources(ctx context.Context, conversation string) ([]LocalUsageSource, error) {
+	return a.localUsageSources(ctx, conversation, false)
+}
+func (a *App) localUsageSources(ctx context.Context, conversation string, pending bool) ([]LocalUsageSource, error) {
 	var out []LocalUsageSource
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT source_key,run_id,conversation_id,source_json,cursors_json,coverage,writer_stopped FROM token_usage_local_sources WHERE (?='' OR conversation_id=?) ORDER BY source_key`, conversation, conversation)
+		rows, err := tx.Q().QueryContext(ctx, `SELECT source_key,run_id,conversation_id,source_json,cursors_json,coverage,writer_stopped FROM token_usage_local_sources WHERE (?='' OR conversation_id=?) AND (?=0 OR NOT(writer_stopped=1 AND coverage='caught_up')) ORDER BY source_key`, conversation, conversation, pending)
 		if err != nil {
 			return err
 		}
@@ -77,8 +84,12 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 	}
 	return a.write(ctx, func(tx *store.Tx) error {
 		var registered, registeredRun string
-		if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,run_id FROM token_usage_local_sources WHERE source_key=?`, s.ID).Scan(&registered, &registeredRun); err != nil {
+		var stopped bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,run_id,writer_stopped FROM token_usage_local_sources WHERE source_key=?`, s.ID).Scan(&registered, &registeredRun, &stopped); err != nil {
 			return err
+		}
+		if stopped != s.WriterStopped {
+			return protocol.Errorf(protocol.CodeStaleRevision, "usage source lifecycle changed")
 		}
 		if registered != s.ConversationID || registeredRun != s.RunID {
 			return protocol.Errorf(protocol.CodeForbidden, "usage source ownership changed")
@@ -113,7 +124,7 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET source_json=?,cursors_json=?,coverage=?,updated_at=? WHERE source_key=?`, string(s.Source), string(s.Cursors), s.Coverage, a.now().UnixMilli(), s.ID)
+		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET source_json=?,cursors_json=?,coverage=?,updated_at=? WHERE source_key=? AND writer_stopped=? AND (source_json<>? OR cursors_json<>? OR coverage<>?)`, string(s.Source), string(s.Cursors), s.Coverage, a.now().UnixMilli(), s.ID, s.WriterStopped, string(s.Source), string(s.Cursors), s.Coverage)
 		return err
 	})
 }
@@ -122,15 +133,37 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 // Empty thread closes every local source of the stopped owning harness.
 func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string) error {
 	conversation = store.ConversationID(conversation)
-	return a.write(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1 WHERE conversation_id=? AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, conversation, thread, thread)
+	err := a.write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND conversation_id=? AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, conversation, thread, thread)
 		return err
 	})
+	if err == nil {
+		a.wakeLocalUsage()
+	}
+	return err
 }
 
 func (a *App) StopRunUsage(ctx context.Context, run string) error {
-	return a.write(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1 WHERE run_id=?`, run)
+	err := a.write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND run_id=?`, run)
 		return err
 	})
+	if err == nil {
+		a.wakeLocalUsage()
+	}
+	return err
+}
+
+// LocalUsageWake is consumed by the central collector, after durable lifecycle changes.
+func (a *App) LocalUsageWake() <-chan struct{} { return a.usageWake }
+func (a *App) wakeLocalUsage() {
+	select {
+	case a.usageWake <- struct{}{}:
+	default:
+	}
+}
+
+// PendingLocalUsageSources excludes settled history before decoding its cursors.
+func (a *App) PendingLocalUsageSources(ctx context.Context, conversation string) ([]LocalUsageSource, error) {
+	return a.localUsageSources(ctx, conversation, true)
 }

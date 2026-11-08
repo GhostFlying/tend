@@ -127,6 +127,7 @@ type App struct {
 	ids                        protocol.IDGen
 	now                        func() time.Time
 	notifier                   Notifier
+	usageWake                  chan struct{}
 	changes                    *Broadcast
 	logs                       *Broadcast
 	leaseTTL                   time.Duration
@@ -144,7 +145,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, changes: NewBroadcast(), logs: NewBroadcast()}
+	a := &App{agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}

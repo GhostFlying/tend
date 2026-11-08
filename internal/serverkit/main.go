@@ -378,13 +378,14 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	cb := contextbuilder.New(a, s, ids, contextbuilder.Config{})
 	ts := tools.New(a, s, cb, log)
 	handlers := map[string]dispatch.Handler{app.ForwardRecoveryDestination: upgradectl.RecoveryNotification{App: a, Log: log}}
+	usageIndex := nativeusage.NewDiscovery()
 	var front *mainthread.Manager
 	var background *mainthread.BackgroundPool
 	if cfg.MainAgent != nil {
 		if cfg.MainAgent.Instance == "" {
 			cfg.MainAgent.Instance = "main"
 		}
-		if front, err = hostedMainThread(a, cb, ts, *cfg.MainAgent, dataDir, now, deps.OpenSession, log); err != nil {
+		if front, err = hostedMainThread(a, cb, ts, *cfg.MainAgent, dataDir, now, deps.OpenSession, log, usageIndex); err != nil {
 			return err
 		}
 		handlers[app.MainThreadDestination] = front
@@ -396,7 +397,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			c := *cfg.MainAgent
 			c.Instance = cfg.MainAgent.Instance + "/" + id
 			c.ConversationID = id
-			return hostedMainThread(a, cb, ts, c, dataDir, now, deps.OpenSession, log)
+			return hostedMainThread(a, cb, ts, c, dataDir, now, deps.OpenSession, log, usageIndex)
 		}}
 		handlers[app.MainThreadControlDestination] = background
 	}
@@ -447,7 +448,12 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		releaseDir = cfg.Upgrades.ReleaseDir
 	}
 	var native *remote.Broker
-	nativeUsage := &centralUsage{app: a, now: now, log: log, discovery: nativeusage.NewDiscovery()}
+	nativeUsage := &centralUsage{app: a, now: now, log: log, discovery: usageIndex}
+	defer func() {
+		final, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		nativeUsage.drain(final)
+	}()
 	if cfg.NativeWorkers != nil {
 		nativeConfig := *cfg.NativeWorkers
 		if nativeConfig.Cwd == "" {
@@ -673,7 +679,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 }
 
 // hostedMainThread prepares the hosted main agent (D68).
-func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg MainAgentConfig, dataDir string, now func() time.Time, open SessionOpener, log *slog.Logger) (*mainthread.Manager, error) {
+func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service, cfg MainAgentConfig, dataDir string, now func() time.Time, open SessionOpener, log *slog.Logger, usageIndex *nativeusage.Discovery) (*mainthread.Manager, error) {
 	idle, err := summaryIdleMinutes(cfg.SummaryIdleMinutes)
 	if err != nil {
 		return nil, err
@@ -696,6 +702,7 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		return nil, err
 	}
 	return mainthread.New(a, cb, ts, mainthread.Config{
+		UsageDiscovery:     usageIndex,
 		Instance:           cfg.Instance,
 		ConversationID:     cfg.ConversationID,
 		MaintenanceEnabled: cfg.ConversationID == "",

@@ -127,12 +127,14 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 	m.mu.Lock()
 	m.active = a
 	m.mu.Unlock()
+	m.wakeNativeUsage()
 	defer func() {
 		m.mu.Lock()
 		if m.active == a {
 			m.active = nil
 		}
 		m.mu.Unlock()
+		m.wakeNativeUsage()
 	}()
 	rec = store.MainTurn{RequestID: d.RequestID, MessageID: r.MessageID, ThreadID: th.ID(), Status: store.TurnStarting, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort, SettingsRevision: revision}
 	// Freeze the actual executor opened by serve; PutMainTurn compares this

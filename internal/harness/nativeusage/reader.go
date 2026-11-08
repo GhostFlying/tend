@@ -88,7 +88,10 @@ func header(f *os.File) (metadata, string, error) {
 
 // Read returns complete records only. The caller must durably enqueue Page and
 // its cursor together before advancing its saved reading position.
-func Read(ctx context.Context, src Source, cursor Cursor, limit int) (p Page, err error) {
+func Read(ctx context.Context, src Source, cursor Cursor, limit int) (Page, error) {
+	return read(ctx, src, cursor, limit, nil, true)
+}
+func read(ctx context.Context, src Source, cursor Cursor, limit int, index *Discovery, final bool) (p Page, err error) {
 	p = Page{Samples: []protocol.TokenUsageSample{}, Cursor: cursor}
 	if src.Provider != "codex" && src.Provider != "traex" {
 		return p, errors.New("native usage: unsupported provider")
@@ -98,7 +101,13 @@ func Read(ctx context.Context, src Source, cursor Cursor, limit int) (p Page, er
 		return p, fmt.Errorf("native usage: open history: %w", err)
 	}
 	defer f.Close()
-	meta, prefix, err := header(f)
+	var meta metadata
+	var prefix string
+	if index == nil {
+		meta, prefix, err = header(f)
+	} else {
+		meta, prefix, err = index.fileHeader(src.Path, f, final)
+	}
 	if err != nil {
 		return p, err
 	}
@@ -113,7 +122,21 @@ func Read(ctx context.Context, src Source, cursor Cursor, limit int) (p Page, er
 	if err != nil {
 		return p, fmt.Errorf("native usage: stat history: %w", err)
 	}
-	if cursor.Prefix != prefix || cursor.Offset > st.Size() || cursor.Offset < 0 || (cursor.FileID != "" && cursor.FileID != fileIdentity(f, st)) || (cursor.Anchor != "" && cursor.Anchor != cursorAnchor(f, cursor.Offset)) {
+	anchorChanged := cursor.Anchor != "" && cursor.Anchor != cursorAnchor(f, cursor.Offset)
+	if anchorChanged && index != nil {
+		if _, err = f.Seek(0, io.SeekStart); err != nil {
+			return p, err
+		}
+		meta, prefix, err = index.fileHeader(src.Path, f, true)
+		if err != nil {
+			return p, err
+		}
+		if (src.ThreadID != "" && meta.ID != src.ThreadID && (src.SessionID == "" || src.SessionID != meta.SessionID)) || (src.SessionID != "" && src.SessionID != meta.SessionID) {
+			return p, errors.New("native usage: history identity mismatch")
+		}
+		p.SessionID = meta.SessionID
+	}
+	if cursor.Prefix != prefix || cursor.Offset > st.Size() || cursor.Offset < 0 || (cursor.FileID != "" && cursor.FileID != fileIdentity(f, st)) || anchorChanged {
 		p.Cursor = Cursor{Prefix: prefix}
 	}
 	p.Cursor.FileID = fileIdentity(f, st)
@@ -274,7 +297,7 @@ func (c *DiscoveryCycle) Discover(ctx context.Context, src Source, force bool) (
 		meta = metadata{ID: src.ThreadID, SessionID: src.SessionID}
 	} else {
 		anchorExists = true
-		meta, _, err = header(f)
+		meta, _, err = c.index.fileHeader(src.Path, f, force)
 		_ = f.Close()
 		if err != nil {
 			return nil, err

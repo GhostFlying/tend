@@ -24,6 +24,7 @@ type UsageSource struct {
 }
 
 func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error {
+	defer j.WakeUsage()
 	body, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -33,7 +34,10 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 }
 
 func (j *Journal) UsageSources(ctx context.Context) ([]UsageSource, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT state_json,writer_stopped FROM native_usage_sources ORDER BY source_id`)
+	return j.usageSources(ctx, false)
+}
+func (j *Journal) usageSources(ctx context.Context, pending bool) ([]UsageSource, error) {
+	rows, err := j.db.QueryContext(ctx, `SELECT s.state_json,s.writer_stopped OR COALESCE(r.stopped_confirmed,0) FROM native_usage_sources s LEFT JOIN runs r USING(run_id) WHERE ?=0 OR COALESCE(json_extract(s.state_json,'$.registration_queued'),0)=0 OR NOT((s.writer_stopped=1 OR COALESCE(r.stopped_confirmed,0)=1) AND COALESCE(json_extract(s.state_json,'$.coverage'),'')='caught_up') ORDER BY source_id`, pending)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +75,7 @@ func (j *Journal) QueueUsage(ctx context.Context, s UsageSource, env *protocol.E
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE native_usage_sources SET state_json=? WHERE source_id=?`, string(body), s.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE native_usage_sources SET state_json=? WHERE source_id=? AND state_json<>?`, string(body), s.ID, string(body))
 		return err
 	})
 }
@@ -83,6 +87,7 @@ func (j *Journal) HasUsageSource(ctx context.Context, id string) (bool, error) {
 }
 
 func (j *Journal) StopUsageSource(ctx context.Context, run, thread string) error {
+	defer j.WakeUsage()
 	_, err := j.db.ExecContext(ctx, `UPDATE native_usage_sources SET writer_stopped=1 WHERE run_id=? AND json_extract(state_json,'$.source.thread_id')=?`, run, thread)
 	return err
 }
@@ -90,6 +95,7 @@ func (j *Journal) StopUsageSource(ctx context.Context, run, thread string) error
 // QueueUsageRegistration promotes retained local evidence into a durable host
 // request without rewinding cursors or participating in a run's event sequence.
 func (j *Journal) QueueUsageRegistration(ctx context.Context, source UsageSource, env protocol.Envelope) error {
+	defer j.WakeUsage()
 	return j.tx(ctx, func(tx *sql.Tx) error {
 		var raw string
 		err := tx.QueryRowContext(ctx, `SELECT state_json FROM native_usage_sources WHERE source_id=?`, source.ID).Scan(&raw)
@@ -120,4 +126,21 @@ func (j *Journal) QueueUsageRegistration(ctx context.Context, source UsageSource
 		}
 		return putRequest(ctx, tx, Request{Envelope: env}, j.now())
 	})
+}
+
+// UsageWake has one collector consumer and retains lifecycle notifications.
+func (j *Journal) UsageWake() <-chan struct{} { return j.usageWake }
+func (j *Journal) WakeUsage() {
+	select {
+	case j.usageWake <- struct{}{}:
+	default:
+	}
+}
+func (j *Journal) PendingUsageSources(ctx context.Context) ([]UsageSource, error) {
+	return j.usageSources(ctx, true)
+}
+func (j *Journal) HasUsageWork(ctx context.Context) (bool, error) {
+	var work bool
+	err := j.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM native_usage_sources s LEFT JOIN runs r USING(run_id) WHERE COALESCE(json_extract(s.state_json,'$.registration_queued'),0)=0 OR NOT((s.writer_stopped=1 OR COALESCE(r.stopped_confirmed,0)=1) AND COALESCE(json_extract(s.state_json,'$.coverage'),'')='caught_up')) OR EXISTS(SELECT 1 FROM requests WHERE operation IN (?,?))`, protocol.OpRunnerUsageRegister, protocol.OpRunnerUsageUpload).Scan(&work)
+	return work, err
 }

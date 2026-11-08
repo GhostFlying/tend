@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -108,5 +109,25 @@ func TestNativeUsageNegotiationAndUncertainReceiptKeepDurableUpload(t *testing.T
 	}
 	if len(calls) != 3 || calls[0] != env.RequestID || calls[1] != env.RequestID || calls[2] != env.RequestID {
 		t.Fatal("retry changed request identity", calls)
+	}
+}
+
+func TestSettledUsageHistoryIsNotReadOrRegisteredAgain(t *testing.T) {
+	r := controlRunner(t)
+	r.nativeUsageSupported = true
+	for i := range 170 {
+		s := journal.UsageSource{ID: fmt.Sprint(i), RunID: "past", WriterStopped: true, RegistrationQueued: true, Coverage: "caught_up", Source: nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: filepath.Join(t.TempDir(), "missing-history.jsonl")}}
+		if err := r.cfg.Journal.RegisterUsageSource(t.Context(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sources, err := r.cfg.Journal.PendingUsageSources(t.Context()); err != nil || len(sources) != 0 {
+		t.Fatal(len(sources), err)
+	}
+	if err := r.syncNativeUsage(t.Context()); err != nil {
+		t.Fatal("settled history was reopened", err)
+	}
+	if work, err := r.cfg.Journal.HasUsageWork(t.Context()); err != nil || work {
+		t.Fatal("settled history retained timer", work, err)
 	}
 }
