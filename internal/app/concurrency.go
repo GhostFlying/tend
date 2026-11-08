@@ -719,8 +719,19 @@ func (a *App) runConcurrency(ctx context.Context, log *slog.Logger, wait func(co
 		} else {
 			failedDelay = 0
 		}
-		if !wait(ctx, wake, delay) {
-			return
+		// Facts are applied by their own transactions. Coalesce notifications
+		// inside an active sampling interval without doing another database read.
+		due := a.now().Add(delay)
+		remaining := delay
+		for {
+			if !wait(ctx, wake, remaining) {
+				return
+			}
+			wake = a.Changes().Wait()
+			if failedDelay > 0 || delay <= 0 || delay > domain.ConcurrencySamplePeriod || !a.now().Before(due) {
+				break
+			}
+			remaining = due.Sub(a.now())
 		}
 	}
 }

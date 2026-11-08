@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	ConcurrencyWindow     = 30 * time.Minute
-	ConcurrencySaturation = 15 * time.Minute
-	ConcurrencyCooldown   = 30 * time.Second
+	ConcurrencySamplePeriod = 30 * time.Second
+	ConcurrencyWindow       = 30 * time.Minute
+	ConcurrencySaturation   = 15 * time.Minute
+	ConcurrencyCooldown     = 30 * time.Second
 )
 
 type ConcurrencyInterval struct {
@@ -39,7 +40,7 @@ func (s *ConcurrencyState) Reset(now int64) {
 // Sample integrates confirmed load; a missing controller tick invalidates proof.
 func (s *ConcurrencyState) Sample(now, occupied, running, waiting int64, healthy bool) {
 	g := &s.Group
-	if s.LastSample == 0 || now < s.LastSample || now-s.LastSample > 10000 || !healthy || !s.LastHealthy {
+	if s.LastSample == 0 || now < s.LastSample || now-s.LastSample > (2*ConcurrencySamplePeriod).Milliseconds() || !healthy || !s.LastHealthy {
 		s.Reset(max(now, g.CooldownUntil))
 		s.LastSample = now
 	} else if s.LastRunning == g.Current && s.LastSample >= g.CooldownUntil && now > s.LastSample {

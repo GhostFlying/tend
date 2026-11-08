@@ -32,6 +32,9 @@ func (p *BackgroundPool) startDatabaseReplyReplay(ctx context.Context, id string
 	if err != nil || replay == nil {
 		return false, err
 	}
+	if len(replay.Events) == 0 {
+		return true, nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.active[id] != nil {

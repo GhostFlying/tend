@@ -373,3 +373,17 @@ func TestDatabaseReplayExtendsPublishedInterruptedBackgroundPrefix(t *testing.T)
 		t.Fatal("replaying original text changed its interrupted business outcome")
 	}
 }
+
+func TestClosingManagerConsumedPrefixWaitsForOriginalReceipt(t *testing.T) {
+	h, as, _ := lapsedReplyFixture(t)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE manager_native_events SET applied=1 WHERE run_id=?`, as.RunID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scope, err := h.app.ClosingManagerReplyReplay(t.Context(), as.Manager.ConversationID)
+	if err != nil || scope == nil || scope.RunID != as.RunID || len(scope.Events) != 0 {
+		t.Fatal("consumed prefix reopened original native execution", scope, err)
+	}
+}

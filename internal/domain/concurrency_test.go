@@ -59,21 +59,21 @@ func TestConcurrencyMissingFeedbackInvalidatesProof(t *testing.T) {
 	if s.Group.SaturatedMillis != 1000 {
 		t.Fatal(s)
 	}
-	s.Sample(120000, 2, 2, 1, true)
-	if s.Group.SaturatedMillis != 0 || s.Group.ObservationSince != 120000 {
+	s.Sample(162000, 2, 2, 1, true)
+	if s.Group.SaturatedMillis != 0 || s.Group.ObservationSince != 162000 {
 		t.Fatal("gap counted as healthy", s)
 	}
-	s.Sample(121000, 2, 2, 1, false)
+	s.Sample(163000, 2, 2, 1, false)
 	if s.Group.FeedbackHealthy || s.Group.SaturatedMillis != 0 {
 		t.Fatal(s)
 	}
-	s.Sample(122000, 2, 2, 1, true)
+	s.Sample(164000, 2, 2, 1, true)
 	if s.Group.SaturatedMillis != 0 {
 		t.Fatal("unhealthy interval counted")
 	}
 	s.Group.Current = 1
-	s.Sample(123000, 2, 2, 1, true)
-	s.Sample(124000, 2, 2, 1, true)
+	s.Sample(165000, 2, 2, 1, true)
+	s.Sample(166000, 2, 2, 1, true)
 	if s.Group.SaturatedMillis != 0 {
 		t.Fatal("drain above budget counted")
 	}
@@ -88,5 +88,18 @@ func TestConcurrencyPermanentQuotaOverrides429(t *testing.T) {
 		if !ConcurrencyCongestion(&f) {
 			t.Fatal(f)
 		}
+	}
+}
+
+func TestConcurrencyThirtySecondSamplingKeepsOnlyObservedProof(t *testing.T) {
+	s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Min: 1, Current: 2, Max: 4}}
+	s.Sample(100000, 2, 2, 1, true)
+	s.Sample(130000, 2, 2, 1, true)
+	if s.Group.SaturatedMillis != 30000 {
+		t.Fatal("normal sample lost proof", s)
+	}
+	s.Sample(190001, 2, 2, 1, true)
+	if s.Group.SaturatedMillis != 0 {
+		t.Fatal("missed samples fabricated proof", s)
 	}
 }

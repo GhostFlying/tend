@@ -77,3 +77,36 @@ func TestConcurrencySchedulesCooldownAndEvidenceRetention(t *testing.T) {
 		t.Fatal("retention did not park after cleanup", delay, err)
 	}
 }
+
+func TestConcurrencyActiveNotificationsCoalesceToThirtySeconds(t *testing.T) {
+	h := newHarness(t)
+	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 2, Max: 4})
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		state, err := concurrencyState(t.Context(), tx.Q(), "shared")
+		if err != nil {
+			return err
+		}
+		state.Group.CooldownUntil = h.clock.Now().Add(30 * time.Second).UnixMilli()
+		return saveConcurrency(t.Context(), tx, state)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ticks, waits := 0, 0
+	wait := func(_ context.Context, wake <-chan struct{}, delay time.Duration) bool {
+		waits++
+		if waits > 30 {
+			return false
+		}
+		if ticks != 1 || delay != time.Duration(31-waits)*time.Second {
+			t.Fatal("notification accelerated samples", ticks, waits, delay)
+		}
+		h.clock.Advance(time.Second)
+		h.app.Changes().Notify()
+		<-wake
+		return true
+	}
+	h.app.runConcurrency(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)), wait, func() { ticks++ })
+	if ticks != 2 {
+		t.Fatal("sample count", ticks)
+	}
+}
