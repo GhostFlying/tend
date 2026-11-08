@@ -76,3 +76,11 @@ func runnerSelfMatches(r store.UpgradeRow, h store.UpgradeHost, rt protocol.Runn
 func hostNeedsSelfUpdate(r store.UpgradeRow, h store.UpgradeHost) bool {
 	return needsSelfUpdate(r) && (!r.SupervisorThenRunners || h.Configuration != nil)
 }
+
+func selfUpdateRejected(r store.UpgradeRow, instance string, o *protocol.UpdaterSelfObservation) bool {
+	if !needsSelfUpdate(r) || o == nil || o.Rejection == nil || o.InstanceID != instance {
+		return false
+	}
+	p := o.Rejection
+	return p.RequestID == r.StartRequestID && p.UpgradeID == r.View.UpgradeID && p.ReleaseSetSHA256 == r.ReleaseSetSHA256 && p.InstanceID == instance && p.RejectedAtMillis > 0
+}

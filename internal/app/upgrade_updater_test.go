@@ -194,6 +194,34 @@ func TestSelfUpgradeExpiredUndispatchedBatchCanBeCancelled(t *testing.T) {
 		t.Fatal("cancelled batch admitted a stale coordinator", op)
 	}
 }
+
+func TestSelfUpgradeDefiniteRejectionAllowsCancelAfterDeadline(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	selfUpgradeHosts(t, h, true)
+	c.ServerUpdaterSupported = true
+	if op := startTestUpgrade(h, "rejected-handoff", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	r := upgradeRead(h)
+	grant := AuthorizeServerUpdater{}
+	if op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, h.env(grant.Operation(), protocol.Target{Type: "upgrade", ID: r.View.UpgradeID}, nil, rev(r.View.Revision)), grant); op.Error != nil {
+		t.Fatal(op)
+	}
+	o := ServerObservation{Updater: &protocol.UpdaterSelfObservation{InstanceID: "server", Rejection: &protocol.UpdaterSelfRejection{RequestID: "foreign", UpgradeID: r.View.UpgradeID, ReleaseSetSHA256: r.ReleaseSetSHA256, InstanceID: "server", RejectedAtMillis: h.clock.Now().UnixMilli()}}}
+	if v := upgradeTick(h, o); v.ServerUpdater != nil {
+		t.Fatal("foreign rejection changed the original attempt", v)
+	}
+	h.clock.Advance(21 * time.Minute)
+	o.Updater.Rejection.RequestID = r.StartRequestID
+	v := upgradeTick(h, o)
+	if v.Status != "attention" || v.ServerUpdater == nil || v.ServerUpdater.Rejection == nil {
+		t.Fatal("late definitive rejection was lost", v)
+	}
+	op, err := h.app.Execute(t.Context(), owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: v.UpgradeID}, protocol.UpgradeControlPayload{Action: "cancel"}, rev(v.Revision)), ControlUpgrade{})
+	if err != nil || op.Error != nil || upgradeRead(h).View.Status != "cancelled" {
+		t.Fatal("known rejected attempt remained uncancellable", op, err)
+	}
+}
 func TestSelfUpgradeConfigurationKeepsUntargetedHostsOutsideProofScope(t *testing.T) {
 	h, c := configurationUpgradeHarness(t)
 	selfUpgradeHosts(t, h, true)

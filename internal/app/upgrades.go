@@ -371,6 +371,14 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		}
 		return upgradeNotice(ctx, x, tx, r, "upgrade_attention", "", "升级需要处理："+reason+"。现有任务和工作目录均保留。")
 	}
+	if selfUpdateRejected(r, r.ServerInstance, c.Observation.Updater) {
+		r.View.ServerUpdater = c.Observation.Updater
+		if r.View.Status == "running" {
+			if err := attention("server updater 准备被拒绝；installer 未派发，可取消后另开批次"); err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
 	rolledBack, err := reconcileUpgradeRollbacks(ctx, x, tx, &r, c.Observation)
 	if err != nil {
 		return Outcome{}, err
@@ -606,7 +614,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				return err
 			}
 			if !available {
-				pending, err := anotherHostAwaitingNormal(ctx, tx.Q(), h.HostID, r.View.UpgradeID, now)
+				pending, err := anotherHostAwaitingNormal(ctx, tx.Q(), h.HostID, *r, now)
 				if err != nil {
 					return err
 				}
@@ -729,7 +737,7 @@ func anotherAvailableHost(ctx context.Context, q store.Querier, exclude string, 
 
 // anotherHostAwaitingNormal identifies only a bounded acknowledgment gap.
 // It never makes the host available to authorize installation or start drain.
-func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude, upgradeID string, now int64) (bool, error) {
+func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude string, batch store.UpgradeRow, now int64) (bool, error) {
 	hosts, err := store.ListActiveHosts(ctx, q)
 	if err != nil {
 		return false, err
@@ -745,14 +753,23 @@ func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude, up
 		if err != nil {
 			return false, err
 		}
-		if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || rt.Runtime.UpgradeID != upgradeID {
+		if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || rt.Runtime.UpgradeID != batch.View.UpgradeID {
 			continue
 		}
 		ctl, err := runnerControl(ctx, q, h.HostID, now)
 		if err != nil {
 			return false, err
 		}
-		if ctl.Mode == protocol.RunnerNormal && ctl.Upgrade == nil && (ctl.UpgradeID == "" || ctl.UpgradeID == upgradeID) && rt.Runtime.AppliedControlRevision < ctl.Revision {
+		observationOnly := ctl.Upgrade == nil
+		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil {
+			for _, target := range batch.Hosts {
+				if target.HostID == h.HostID && runnerSelfMatches(batch, target, rt.Runtime) {
+					observationOnly = true
+					break
+				}
+			}
+		}
+		if ctl.Mode == protocol.RunnerNormal && observationOnly && (ctl.UpgradeID == "" || ctl.UpgradeID == batch.View.UpgradeID) && rt.Runtime.AppliedControlRevision < ctl.Revision {
 			return true, nil
 		}
 	}
@@ -831,7 +848,7 @@ func restoreUnchangedHosts(ctx context.Context, x *Exec, tx *store.Tx, r store.U
 		if err != nil {
 			return err
 		}
-		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) {
+		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && !runnerSelfMatches(r, h, rt.Runtime) && !selfUpdateRejected(r, h.HostID, rt.Runtime.Updater) {
 			// The service is unchanged, but its independent supervisor installer
 			// can still be running. Keep its original target until reconciled.
 			continue

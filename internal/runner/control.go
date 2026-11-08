@@ -82,11 +82,15 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	r.controlMu.Lock()
 	supportedSelf := r.selfUpdateSupported
 	selectedSelf := r.helloConfirmed && r.control.Upgrade != nil && r.control.Upgrade.Updater != nil
+	requestID := ""
+	if selectedSelf {
+		requestID = r.control.Upgrade.Updater.RequestID
+	}
 	r.controlMu.Unlock()
 
 	if selectedSelf && supportedSelf {
-		status, e := updater.SelfUpdateCall(ctx, r.cfg.UpdaterControlSocket, nil)
-		if e == nil {
+		status, e := updater.ObserveSelfUpdate(ctx, r.cfg.UpdaterControlSocket, requestID)
+		if e == nil || status.Observation.Rejection != nil {
 			updaterObservation = &status.Observation
 		}
 	}
