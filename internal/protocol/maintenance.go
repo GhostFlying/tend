@@ -34,6 +34,7 @@ type MaintenancePredecessor struct {
 }
 
 type MaintenanceSession struct {
+	SandboxPolicy      map[string]any          `json:"sandbox_policy,omitempty"`
 	InputReasons       []string                `json:"input_reasons,omitempty"`
 	InterruptRequested bool                    `json:"interrupt_requested,omitempty"`
 	ID                 string                  `json:"id"`

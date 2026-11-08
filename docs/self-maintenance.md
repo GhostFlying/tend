@@ -93,6 +93,12 @@ tend maintenance upgrade-apply --upgrade-id "$PLANNED_UPGRADE_ID" --json
 候选；候选保持准入关闭，核对固定进程和 artifact 后提供健康。只有读取 updater 的
 不可逆提交收据后恢复调度，原生会话继续沿原身份对账。共享 daemon 不受更新影响。
 
+若 updater 明确拒绝且其返回状态证明原安装尚未建立，计划保留为 `rejected`，
+维护检测和控制恢复；排除拒绝原因后可再次对同一计划执行 `upgrade-apply`。
+断线或响应无法确认则保持 `submitting`，仅查询原安装，不能据此重新提交。
+候选提交后再次被进程监督器重启时，使用原终态收据、提交证明和当前进程身份
+核对安装结果，不要求当前监督操作仍是原安装操作。
+
 业务 server 使用现有 `tend upgrade` 受控入口。普通 updater 自更新使用其独立工作
 提供的受支持交接接口（[PR #280](https://github.com/GhostFlying/tend/pull/280)）；
 其固定角色准入还需要覆盖 `maintainer`，并联合验证保留子进程、独占锁及收据。

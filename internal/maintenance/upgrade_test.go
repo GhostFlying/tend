@@ -8,12 +8,146 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/updater"
 )
+
+func upgradeServer(t *testing.T, handler http.HandlerFunc) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "tend-maint-upgrade-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "control.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: handler}
+	done := make(chan struct{})
+	go func() { defer close(done); _ = srv.Serve(listener) }()
+	t.Cleanup(func() { _ = srv.Close(); <-done })
+	return socket
+}
+
+func TestFault_MaintenanceUpgradeRejectedVersusUnknown(t *testing.T) {
+	for _, mode := range []string{"rejected", "lost-reply", "accepted-error"} {
+		t.Run(mode, func(t *testing.T) {
+			c, n, cfg, opts := fixture(t)
+			launch(t, c)
+			original := c.Status().Active.SessionID
+			var posts atomic.Int64
+			cfg.InstanceID = "maintainer"
+			cfg.UpdaterSocket = upgradeServer(t, func(w http.ResponseWriter, r *http.Request) {
+				state := updater.State{InstanceID: cfg.InstanceID}
+				if mode == "accepted-error" {
+					state.Operation = &updater.Operation{ID: "install", Phase: "staged"}
+				}
+				if r.Method == http.MethodPost {
+					posts.Add(1)
+					if mode == "lost-reply" {
+						conn, _, err := w.(http.Hijacker).Hijack()
+						if err == nil {
+							_ = conn.Close()
+						}
+						return
+					}
+					w.WriteHeader(http.StatusConflict)
+					_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state, Error: "installation not accepted"})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state})
+			})
+			c.cfg = cfg
+			c.state.Upgrade = &protocol.MaintenanceUpgrade{ID: "install", Phase: "requested"}
+			if err := c.Step(context.Background()); err == nil {
+				t.Fatal("failure was hidden")
+			}
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			c.lock = nil
+			d, err := Open(context.Background(), cfg, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			if mode == "rejected" {
+				if d.frozen() || d.Status().Upgrade.Phase != "rejected" {
+					t.Fatal("definite rejection remained frozen")
+				}
+				command(t, d, "audit", protocol.MaintenanceRequest{})
+			} else {
+				if !d.frozen() || d.Status().Upgrade.Phase != "submitting" {
+					t.Fatal("unknown acceptance was reset")
+				}
+				_ = d.Step(context.Background())
+				if !d.frozen() {
+					t.Fatal("unknown installation reopened work")
+				}
+			}
+			if posts.Load() != 1 || d.Status().Upgrade.ID != "install" || d.Status().Active.SessionID != original || n.started != 1 {
+				t.Fatal("recovery changed original installation or native execution")
+			}
+		})
+	}
+}
+
+func TestFault_MaintenanceUpgradeRetainedCommitAfterSupervisedRestart(t *testing.T) {
+	for _, mismatch := range []string{"", "binding", "process", "artifact"} {
+		t.Run("mismatch="+mismatch, func(t *testing.T) {
+			c, _, _, _ := fixture(t)
+			b := protocol.UpgradeBinding{UpgradeID: "install", InstanceID: "maintainer", ProcessInstanceID: "original-candidate", ReleaseID: "release", ManifestSHA256: strings.Repeat("a", 64), ArtifactSHA256: strings.Repeat("b", 64)}
+			version := updater.Version{ReleaseID: b.ReleaseID, ManifestSHA256: b.ManifestSHA256, Artifact: release.Artifact{SHA256: b.ArtifactSHA256}}
+			process := updater.Identity{LaunchID: "supervised-successor", SHA256: b.ArtifactSHA256}
+			proof := updater.CommittedProof{Binding: b, Version: version, Process: process}
+			switch mismatch {
+			case "binding":
+				proof.Binding.UpgradeID = "different"
+			case "process":
+				proof.Process.LaunchID = "stale-process"
+			case "artifact":
+				proof.Version.Artifact.SHA256 = strings.Repeat("c", 64)
+			}
+			state := updater.State{InstanceID: b.InstanceID, Current: version, Process: process, Operation: &updater.Operation{ID: "restart-successor", Kind: "restart", Phase: "committed"}, Terminals: map[string]updater.TerminalReceipt{b.UpgradeID: {Binding: b, Phase: "committed"}}, CommittedProof: &proof}
+			c.cfg.InstanceID = b.InstanceID
+			c.cfg.UpdaterSocket = upgradeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state})
+			})
+			c.opts.RuntimeID, c.opts.ArtifactSHA256 = process.LaunchID, process.SHA256
+			c.state.Upgrade = &protocol.MaintenanceUpgrade{ID: b.UpgradeID, ReleaseID: b.ReleaseID, ManifestSHA256: b.ManifestSHA256, ArtifactSHA256: b.ArtifactSHA256, Phase: "submitting", Binding: &b}
+			err := c.Step(context.Background())
+			if mismatch == "" {
+				if err != nil || c.frozen() || c.Status().Upgrade.Phase != "completed" {
+					t.Fatal("matching retained receipt did not restore admission", err)
+				}
+			} else if err == nil || !c.frozen() {
+				t.Fatal("mismatched retained proof reopened admission", err)
+			}
+		})
+	}
+}
+
+func TestFault_MaintenanceUnknownUpgradeAcceptsOriginalCancellationTombstone(t *testing.T) {
+	c, _, _, _ := fixture(t)
+	c.cfg.InstanceID = "maintainer"
+	c.opts.RuntimeID, c.opts.ArtifactSHA256 = "running-original", strings.Repeat("b", 64)
+	b := protocol.UpgradeBinding{InstanceID: c.cfg.InstanceID, UpgradeID: "install"}
+	state := updater.State{InstanceID: c.cfg.InstanceID, Process: updater.Identity{LaunchID: c.opts.RuntimeID, SHA256: c.opts.ArtifactSHA256}, Current: updater.Version{Artifact: release.Artifact{SHA256: c.opts.ArtifactSHA256}}, Terminals: map[string]updater.TerminalReceipt{"install": {Binding: b, Phase: "cancelled"}}}
+	c.cfg.UpdaterSocket = upgradeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state})
+	})
+	c.state.Upgrade = &protocol.MaintenanceUpgrade{ID: "install", Phase: "submitting"}
+	step(t, c)
+	if c.frozen() || c.Status().Upgrade.Phase != "cancelled" {
+		t.Fatal("durable cancellation of the original unknown submission was ignored")
+	}
+}
 
 func TestFault_MaintenanceUpgradeRetainsNativeAndFencesAdmission(t *testing.T) {
 	c, n, cfg, opts := fixture(t)

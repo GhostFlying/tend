@@ -17,8 +17,10 @@ import (
 )
 
 func (c *Controller) frozen() bool {
-	return c.state.Upgrade != nil && c.state.Upgrade.Phase != "planned" && c.state.Upgrade.Phase != "completed" && c.state.Upgrade.Phase != "rolled_back" && c.state.Upgrade.Phase != "cancelled"
+	return c.state.Upgrade != nil && c.state.Upgrade.Phase != "planned" && c.state.Upgrade.Phase != "rejected" && c.state.Upgrade.Phase != "completed" && c.state.Upgrade.Phase != "rolled_back" && c.state.Upgrade.Phase != "cancelled"
 }
+
+var errUpdaterRejected = errors.New("maintenance: updater rejected the installation")
 
 func (c *Controller) planUpgrade(id, dir string) (*protocol.MaintenanceUpgrade, error) {
 	if c.cfg.UpdaterSocket == "" {
@@ -64,7 +66,10 @@ func (c *Controller) updaterRequest(ctx context.Context, method, path string, in
 		return updater.State{}, err
 	}
 	if resp.StatusCode != 200 || result.Error != "" {
-		return updater.State{}, errors.New("maintenance: updater rejected request; inspect updater status")
+		if resp.StatusCode == http.StatusConflict && result.Error != "" {
+			return result.State, errUpdaterRejected
+		}
+		return result.State, errors.New("maintenance: updater request outcome unknown; inspect updater status")
 	}
 	return result.State, nil
 }
@@ -76,14 +81,43 @@ func (c *Controller) advanceUpgrade(ctx context.Context) error {
 		if err := c.save(ctx); err != nil {
 			return err
 		}
-		_, err := c.updaterRequest(ctx, http.MethodPost, "/upgrade", updater.ControlRequest{ID: u.ID, Release: u.ReleaseDir})
+		s, err := c.updaterRequest(ctx, http.MethodPost, "/upgrade", updater.ControlRequest{ID: u.ID, Release: u.ReleaseDir})
+		_, terminal := s.Terminals[u.ID]
+		_, historical := s.OperationHistory[u.ID]
+		if errors.Is(err, errUpdaterRejected) && u.Binding == nil && s.InstanceID == c.cfg.InstanceID && !terminal && !historical && (s.Operation == nil || s.Operation.ID != u.ID) && (s.CommittedProof == nil || s.CommittedProof.Binding.UpgradeID != u.ID) {
+			u.Phase = "rejected"
+			if saveErr := c.save(ctx); saveErr != nil {
+				return saveErr
+			}
+		}
 		return err
 	}
 	s, err := c.updaterRequest(ctx, http.MethodGet, "/status", nil)
 	if err != nil {
 		return err
 	}
-	if s.InstanceID != c.cfg.InstanceID || s.Operation == nil || s.Operation.ID != u.ID || s.Operation.Candidate.ManifestSHA256 != u.ManifestSHA256 || s.Operation.Candidate.Artifact.SHA256 != u.ArtifactSHA256 {
+	if s.InstanceID != c.cfg.InstanceID {
+		return errors.New("maintenance: updater instance does not match installation")
+	}
+	matches := func(b protocol.UpgradeBinding) bool {
+		return b.InstanceID == c.cfg.InstanceID && b.UpgradeID == u.ID && b.ReleaseID == u.ReleaseID && b.ManifestSHA256 == u.ManifestSHA256 && b.ArtifactSHA256 == u.ArtifactSHA256 && (u.Binding == nil || *u.Binding == b)
+	}
+	if receipt, ok := s.Terminals[u.ID]; ok && receipt.Phase == "cancelled" {
+		preaccept := u.Binding == nil && receipt.Binding == (protocol.UpgradeBinding{InstanceID: c.cfg.InstanceID, UpgradeID: u.ID})
+		if (preaccept || matches(receipt.Binding)) && s.Process.LaunchID == c.opts.RuntimeID && s.Process.SHA256 == c.opts.ArtifactSHA256 && s.Current.Artifact.SHA256 == c.opts.ArtifactSHA256 {
+			u.Phase = "cancelled"
+			return c.save(ctx)
+		}
+	}
+	if receipt, ok := s.Terminals[u.ID]; ok && receipt.Phase == "committed" && matches(receipt.Binding) {
+		proof := s.CommittedProof
+		if proof == nil || proof.Binding != receipt.Binding || proof.Version != s.Current || proof.Process != s.Process || proof.Version.ManifestSHA256 != u.ManifestSHA256 || proof.Version.Artifact.SHA256 != u.ArtifactSHA256 || s.Process.LaunchID != c.opts.RuntimeID || s.Process.SHA256 != c.opts.ArtifactSHA256 || c.opts.ArtifactSHA256 != u.ArtifactSHA256 {
+			return errors.New("maintenance: retained installation receipt does not match the running process")
+		}
+		u.Phase = "completed"
+		return c.save(ctx)
+	}
+	if s.Operation == nil || s.Operation.ID != u.ID || !matches(s.Operation.Binding) || s.Operation.Candidate.ManifestSHA256 != u.ManifestSHA256 || s.Operation.Candidate.Artifact.SHA256 != u.ArtifactSHA256 {
 		return errors.New("maintenance: original updater installation requires reconciliation")
 	}
 	if s.Operation.Phase == "committed" {
