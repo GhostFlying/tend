@@ -92,6 +92,7 @@ type PrepareWorkItemContextPayload struct {
 	Coverage         string   `json:"coverage"`
 	Gaps             string   `json:"gaps"`
 }
+
 // AgentContextUsage keeps a coherent native snapshot, never cumulative billing usage.
 type AgentContextUsage struct {
 	Available        bool   `json:"available"`
