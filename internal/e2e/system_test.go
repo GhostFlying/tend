@@ -76,14 +76,21 @@ func completeHistoricalFixtureReview(ctx context.Context, s *server, th *testkit
 		return status()
 	}
 	call := 0
+	staleCommit := false
 	invoke := func(name string, args any, out any) bool {
 		call++
 		result := th.CallTool(ctx, turn, fmt.Sprintf("review-%d", call), name, args)
 		var answer struct {
 			OK     bool            `json:"ok"`
 			Result json.RawMessage `json:"result"`
+			Error  *protocol.Error `json:"error"`
 		}
-		if !result.Success || json.Unmarshal([]byte(result.Text), &answer) != nil || !answer.OK {
+		decodeErr := json.Unmarshal([]byte(result.Text), &answer)
+		staleCommit = name == "conversation_turn_commit" && decodeErr == nil && answer.Error != nil && answer.Error.Code == protocol.CodeStaleRevision
+		if !result.Success || decodeErr != nil || !answer.OK {
+			if staleCommit {
+				return false
+			}
 			if ctx.Err() == nil {
 				t.Errorf("historical review tool %s: %+v", name, result)
 			}
@@ -91,82 +98,94 @@ func completeHistoricalFixtureReview(ctx context.Context, s *server, th *testkit
 		}
 		return out == nil || json.Unmarshal(answer.Result, out) == nil
 	}
-	var state protocol.LogicalTurnState
-	if !invoke("conversation_turn_read", struct{}{}, &state) {
-		return status()
-	}
-	for _, m := range state.Messages {
-		if m.Disposition != "pending" {
-			continue
-		}
-		ids := []string{}
-		for _, i := range m.Items {
-			ids = append(ids, i.WorkItemID)
-		}
-		disposition := "unassigned"
-		if len(ids) > 0 {
-			disposition = "linked"
-		}
-		if !invoke("conversation_associate", map[string]any{"message_id": m.MessageID, "content_revision": m.ContentRevision, "expected_control_revision": m.Revision, "disposition": disposition, "work_item_ids": ids}, nil) {
+	// Concurrent worker receipts may invalidate an otherwise valid source review.
+	// Retry only a rejected metadata commit, rereading its exact current versions;
+	// unknown effects and other errors still fail rather than being replayed.
+	for attempt := 0; attempt < 3; attempt++ {
+		var state protocol.LogicalTurnState
+		if !invoke("conversation_turn_read", struct{}{}, &state) {
 			return status()
 		}
-	}
-	if !invoke("conversation_turn_read", struct{}{}, &state) {
-		return status()
-	}
-	// Explicit old-ledger setup for historical transport tests, never a
-	// runtime alias or fake successful call to the retired planning tool.
-	for _, c := range state.Contexts {
-		delivery, found, err := s.app.TurnDelivery(ctx, th.ID(), turn)
-		if err != nil || !found {
-			if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		for _, m := range state.Messages {
+			if m.Disposition != "pending" {
+				continue
+			}
+			ids := []string{}
+			for _, i := range m.Items {
+				ids = append(ids, i.WorkItemID)
+			}
+			disposition := "unassigned"
+			if len(ids) > 0 {
+				disposition = "linked"
+			}
+			if !invoke("conversation_associate", map[string]any{"message_id": m.MessageID, "content_revision": m.ContentRevision, "expected_control_revision": m.Revision, "disposition": disposition, "work_item_ids": ids}, nil) {
 				return status()
 			}
-			t.Errorf("historical delivery: %v %v", found, err)
-			return "failed"
 		}
-		payload, _ := json.Marshal(protocol.PrepareWorkItemContextPayload{Coverage: "Reviewed transport fixture messages; no additional semantic facts", Gaps: "None in this fixture"})
-		var op protocol.Operation
-		for attempt := 0; attempt < 3; attempt++ {
-			// Source review is not a worker dispatch fence. A real worker may
-			// advance this context while the fake coordinator reads it; refresh
-			// only a deterministically rejected CAS, retaining its old request.
-			fresh, readErr := s.app.LogicalTurn(ctx, delivery.RequestID)
-			if readErr != nil {
-				err = readErr
-				break
+		if !invoke("conversation_turn_read", struct{}{}, &state) {
+			return status()
+		}
+		// Explicit old-ledger setup for historical transport tests, never a
+		// runtime alias or fake successful call to the retired planning tool.
+		for _, c := range state.Contexts {
+			delivery, found, err := s.app.TurnDelivery(ctx, th.ID(), turn)
+			if err != nil || !found {
+				if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+					return status()
+				}
+				t.Errorf("historical delivery: %v %v", found, err)
+				return "failed"
 			}
-			for _, current := range fresh.Contexts {
-				if current.WorkItemID == c.WorkItemID {
-					c.Revision = current.Revision
+			payload, _ := json.Marshal(protocol.PrepareWorkItemContextPayload{Coverage: "Reviewed transport fixture messages; no additional semantic facts", Gaps: "None in this fixture"})
+			var op protocol.Operation
+			for attempt := 0; attempt < 3; attempt++ {
+				// Source review is not a worker dispatch fence. A real worker may
+				// advance this context while the fake coordinator reads it; refresh
+				// only a deterministically rejected CAS, retaining its old request.
+				fresh, readErr := s.app.LogicalTurn(ctx, delivery.RequestID)
+				if readErr != nil {
+					err = readErr
+					break
+				}
+				for _, current := range fresh.Contexts {
+					if current.WorkItemID == c.WorkItemID {
+						c.Revision = current.Revision
+						break
+					}
+				}
+				op, err = s.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "historical-fixture", Thread: th.ID()}, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), ParentRequestID: delivery.RequestID, Operation: "work_item_context.prepare", Target: protocol.Target{Type: "work_item", ID: c.WorkItemID}, ExpectedControlRevision: &c.Revision, Payload: payload}, app.WithExecutionRequest(app.ContextCommand{Action: "prepare"}, delivery.RequestID))
+				if err != nil || op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
 					break
 				}
 			}
-			op, err = s.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "historical-fixture", Thread: th.ID()}, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), ParentRequestID: delivery.RequestID, Operation: "work_item_context.prepare", Target: protocol.Target{Type: "work_item", ID: c.WorkItemID}, ExpectedControlRevision: &c.Revision, Payload: payload}, app.WithExecutionRequest(app.ContextCommand{Action: "prepare"}, delivery.RequestID))
-			if err != nil || op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
-				break
+			if err != nil || op.Status != protocol.OpSucceeded {
+				if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+					return status()
+				}
+				t.Errorf("historical context setup: %+v %v", op, err)
+				return "failed"
 			}
 		}
-		if err != nil || op.Status != protocol.OpSucceeded {
-			if errors.Is(err, context.Canceled) && ctx.Err() != nil {
-				return status()
-			}
-			t.Errorf("historical context setup: %+v %v", op, err)
-			return "failed"
-		}
-	}
 
-	if !invoke("conversation_turn_read", struct{}{}, &state) {
-		return status()
+		if !invoke("conversation_turn_read", struct{}{}, &state) {
+			return status()
+		}
+		review := protocol.LogicalTurnCommit{Contexts: state.Contexts}
+		for _, m := range state.Messages {
+			review.Messages = append(review.Messages, protocol.LogicalTurnReview{MessageID: m.MessageID, ContentRevision: m.ContentRevision, AssociationRevision: m.Revision})
+		}
+		if !invoke("conversation_turn_commit", review, nil) {
+			if staleCommit {
+				continue
+			}
+			return status()
+		}
+		return "completed"
 	}
-	review := protocol.LogicalTurnCommit{Contexts: state.Contexts}
-	for _, m := range state.Messages {
-		review.Messages = append(review.Messages, protocol.LogicalTurnReview{MessageID: m.MessageID, ContentRevision: m.ContentRevision, AssociationRevision: m.Revision})
+	if ctx.Err() == nil {
+		t.Error("historical context kept changing during all review attempts")
 	}
-	if !invoke("conversation_turn_commit", review, nil) {
-		return status()
-	}
-	return "completed"
+	return status()
 }
 
 func businessStarts(h *testkit.Harness) []harness.TurnInput {
