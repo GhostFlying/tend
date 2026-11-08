@@ -1,6 +1,6 @@
 # Codex 独立环境与扩展管理
 
-本文件保留 D197 的原实施记录。D198 已按后续用户决定移除外层 bubblewrap，改为启动前、六小时节流的个人 skill 排除清单；当前行为以 [托管扩展计划](managed-extensions.md) 与 [操作说明](../codex-environments.md) 为准。
+本文件保留 D197 的原实施记录。D200 已按后续用户决定移除外层 bubblewrap，改为启动前、六小时节流的个人 skill 排除清单；当前行为以 [托管扩展计划](managed-extensions.md) 与 [操作说明](../codex-environments.md) 为准。
 
 ## 目标与边界
 
