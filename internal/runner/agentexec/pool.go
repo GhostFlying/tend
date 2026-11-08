@@ -249,7 +249,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 		return runner.ResolvedExecution{}, err
 	}
 	e := entries[pin.Identity.LocalID]
-	if e != nil && (canProbe(e.reason)) {
+	if e != nil && canProbe(e.reason) && pin.Extensions == (protocol.ExtensionExecutionPin{}) {
 		if p.options.Environments.Resolve(e.input.Runtime.ID) != nil || e.input.Runtime.Kind == agentconfig.AppServerWorker && e.input.Runtime.CLI == "codex" {
 			// Availability probes use current mappings. Native Codex recovery
 			// restores the saved run binding at startup even after its mapping
@@ -264,7 +264,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 	}
 	// A native refusal removes future availability, but original sessions still
 	// need this exact factory for stop and recovery.
-	if e == nil || e.workers == nil {
+	if e == nil || e.workers == nil && pin.Extensions == (protocol.ExtensionExecutionPin{}) {
 		return runner.ResolvedExecution{}, errors.New("original named worker adapter is unavailable")
 	}
 	a, r := e.input.Agent, e.input.Runtime

@@ -160,6 +160,7 @@ type ExtensionPrepared struct {
 }
 
 type ExtensionAdoption struct {
+	MCPMore        bool                  `json:"mcp_more,omitempty"`
 	MCP            []ExtensionMCPStatus  `json:"mcp,omitempty"`
 	Execution      string                `json:"execution"`
 	Pin            ExtensionExecutionPin `json:"pin"`
@@ -169,6 +170,7 @@ type ExtensionAdoption struct {
 }
 
 type ExtensionHostStatus struct {
+	AdoptionsMore     bool                           `json:"adoptions_more,omitempty"`
 	SkillExclusions   *ExtensionSkillExclusionStatus `json:"skill_exclusions,omitempty"`
 	Runtimes          []string                       `json:"runtimes"`
 	Enabled           bool                           `json:"enabled"`

@@ -255,8 +255,15 @@ func (a *Agent) Current(runtime, category string, agent protocol.AgentIdentity) 
 }
 
 func (a *Agent) Binding(ctx context.Context, pin protocol.ExtensionExecutionPin, runtime string) (*codexenv.Binding, error) {
-	b, _, err := a.Consumer.Prepare(ctx, pin, runtime)
-	return b, err
+	a.mu.Lock()
+	a.initializeLocked()
+	prepared := a.prepared[viewKey(runtime, pin.CategoryID, pin.Agent)]
+	a.mu.Unlock()
+	if prepared.Binding.Extensions == pin && prepared.Binding.Generation != "" {
+		binding := prepared.Binding
+		return &binding, nil
+	}
+	return a.Consumer.RetainedBinding(ctx, pin, runtime)
 }
 
 func (a *Agent) RefreshAdoptions(ctx context.Context) {
@@ -268,5 +275,6 @@ func (a *Agent) RefreshAdoptions(ctx context.Context) {
 	defer a.mu.Unlock()
 	a.initializeLocked()
 	a.status.Adoptions = status.Adoptions
+	a.status.AdoptionsMore = status.AdoptionsMore
 	a.status.SkillExclusions = status.SkillExclusions
 }

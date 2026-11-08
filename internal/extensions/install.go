@@ -169,8 +169,12 @@ func Import(ctx context.Context, in protocol.ExtensionImport) (protocol.Extensio
 		return out, err
 	}
 	if in.Source.Subdir != "" {
-		root = filepath.Join(root, filepath.FromSlash(in.Source.Subdir))
+		root, err = sourceSubdirectory(root, in.Source.Subdir)
+		if err != nil {
+			return out, err
+		}
 	}
+
 	raw, err := Pack(ctx, root)
 	if err != nil {
 		return out, err
@@ -193,4 +197,20 @@ func VerifyContent(r protocol.ExtensionResource, raw []byte) error {
 		return fmt.Errorf("package digest mismatch")
 	}
 	return nil
+}
+
+func sourceSubdirectory(root, subdir string) (string, error) {
+	parent, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	selected, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(subdir)))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(parent, selected)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("selected subdirectory escapes package source")
+	}
+	return selected, nil
 }

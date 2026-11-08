@@ -214,7 +214,13 @@ func (r *Reference) Adopt(ctx context.Context) error {
 	return writeAdoption(ctx, r.Directory, prior)
 }
 func (r *Reference) Command(ctx context.Context, bin string, args []string, cwd string, env []string) (*exec.Cmd, func(), error) {
-	cmd, cleanup, err := prepareCommandForExecution(ctx, r.Profile, filepath.Join(r.Directory, "generations", r.Generation), bin, args, cwd, env, r.Execution)
+	return r.CommandWithLifetime(ctx, ctx, bin, args, cwd, env)
+}
+
+// CommandWithLifetime bounds preparation by startup while keeping the native
+// process alive under its separately owned lifetime after startup returns.
+func (r *Reference) CommandWithLifetime(startup, lifetime context.Context, bin string, args []string, cwd string, env []string) (*exec.Cmd, func(), error) {
+	cmd, cleanup, err := prepareCommandWithLifetime(startup, lifetime, r.Profile, filepath.Join(r.Directory, "generations", r.Generation), bin, args, cwd, env, r.Execution)
 	if err == nil {
 		for _, entry := range cmd.Env {
 			if value, ok := strings.CutPrefix(entry, "CODEX_HOME="); ok {
@@ -229,6 +235,10 @@ func prepareCommand(ctx context.Context, p Profile, shot, bin string, args []str
 }
 
 func prepareCommandForExecution(ctx context.Context, p Profile, shot, bin string, args []string, cwd string, env []string, execution string) (*exec.Cmd, func(), error) {
+	return prepareCommandWithLifetime(ctx, ctx, p, shot, bin, args, cwd, env, execution)
+}
+
+func prepareCommandWithLifetime(ctx, lifetime context.Context, p Profile, shot, bin string, args []string, cwd string, env []string, execution string) (*exec.Cmd, func(), error) {
 	actualHome := ""
 	for _, entry := range env {
 		if value, ok := strings.CutPrefix(entry, "HOME="); ok {
@@ -268,7 +278,7 @@ func prepareCommandForExecution(ctx context.Context, p Profile, shot, bin string
 		unlock()
 		return nil, nil, err
 	}
-	cmd, err := platformCommand(ctx, p, shot, work, bin, args, cwd)
+	cmd, err := platformCommand(lifetime, p, shot, work, bin, args, cwd)
 	if err != nil {
 		unlock()
 		return nil, nil, err

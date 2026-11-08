@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
@@ -46,12 +47,6 @@ func TestEnvironmentRunningRecordFailurePersistsOwnedClose(t *testing.T) {
 	_, profile, binding := startupEnvironment(t)
 	t.Setenv("HOME", profile.UserHome)
 	bin := t.TempDir()
-	// The mount shim only provides a deterministic process/callback fixture;
-	// real bubblewrap isolation has separate tagged native integration coverage.
-	mount := filepath.Join(bin, "bwrap")
-	if err := os.WriteFile(mount, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	native := filepath.Join(bin, "native")
 	if err := os.WriteFile(native, []byte("#!/bin/sh\nwhile IFS= read -r fixture_line; do :; done\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -89,5 +84,39 @@ func TestEnvironmentRunningRecordFailurePersistsOwnedClose(t *testing.T) {
 	}
 	if err = NewWorkers(WorkerOptions{Session: Options{Bin: "must-not-launch"}}).StopOwnedWorker(t.Context(), spec); err != nil {
 		t.Fatal("known closure cannot reconcile", err)
+	}
+}
+
+func TestEnvironmentLaunchLockHonorsStartupCancellation(t *testing.T) {
+	_, profile, binding := startupEnvironment(t)
+	t.Setenv("HOME", profile.UserHome)
+	ref, err := binding.Pin(t.Context(), "run:locked-startup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, release, err := ref.Command(t.Context(), "/bin/true", nil, t.TempDir(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		s, err := startProcess(ctx, Options{Bin: "/bin/true", Dir: t.TempDir(), environmentReference: ref}, nil)
+		if s != nil {
+			_ = s.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, harness.ErrWorkerNotStarted) {
+			t.Fatal("startup cancellation lost known no-launch proof", err)
+		}
+	case <-time.After(2 * time.Second):
+		release()
+		<-done
+		t.Fatal("startup lock ignored the caller deadline")
 	}
 }

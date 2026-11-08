@@ -35,18 +35,19 @@ func (p *Pool) refreshManaged(ctx context.Context, e *entry, host string) (bool,
 	}
 	e.managedWorkerReady = map[string]bool{}
 	e.managedOwnerReady = map[string]bool{}
-	if !e.input.Agent.Enabled || !e.input.Runtime.Enabled || e.reason != "" && !canProbe(e.reason) {
+	if !e.input.Agent.Enabled {
 		return true, nil
 	}
 	identity := protocol.AgentIdentity{ExecutionEnvironmentID: host, LocalID: e.input.Agent.LocalID}
 	var pending error
 	anyWorker := false
 	anyOwner := false
-	if !worker {
+	workerAllowed := e.input.Runtime.Enabled && (e.reason == "" || canProbe(e.reason))
+	if !worker && workerAllowed {
 		pending = errors.Join(pending, p.initialize(ctx, e))
 	}
 	for _, category := range e.input.Agent.Categories {
-		if worker {
+		if worker && workerAllowed {
 			pin, binding, err := p.prepareManaged(ctx, e.input, category, identity)
 			if err == nil {
 				input := e.input
@@ -71,7 +72,7 @@ func (p *Pool) refreshManaged(ctx context.Context, e *entry, host string) (bool,
 			}
 			pending = errors.Join(pending, err)
 		}
-		if owner && managerPurpose(e) {
+		if owner && managerPurpose(e) && e.ownerInput.Runtime.Enabled {
 			_, binding, err := p.prepareManaged(ctx, *e.ownerInput, category, identity)
 			if err == nil {
 				input := *e.ownerInput
