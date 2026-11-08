@@ -72,9 +72,8 @@ func TestCapabilitySelfUpdatePreservesOriginalPlanAndRejectsNewResumeIdentity(t 
 	}
 	root := t.TempDir()
 	path := filepath.Join(root, "installer")
-	var body []byte
 	// Use the same first-hop pinning as legacy recovery, with its own command.
-	body = []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+	body := []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
 	if err := os.WriteFile(path, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
