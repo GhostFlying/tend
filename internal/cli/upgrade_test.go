@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -13,6 +14,28 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+func TestUpgradeTextSeparatesUpdaterProofFromServiceState(t *testing.T) {
+	var out bytes.Buffer
+	writeUpdaterObservation(&out, "server", nil)
+	if !strings.Contains(out.String(), "awaiting this batch") || strings.Contains(out.String(), "verified") {
+		t.Fatal(out.String())
+	}
+	out.Reset()
+	o := &protocol.UpdaterSelfObservation{Process: protocol.RecoveryIdentity{PID: 41, StartTicks: 10, SHA256: strings.Repeat("a", 64)}, SupervisedProcess: protocol.RecoveryIdentity{PID: 42, SHA256: strings.Repeat("b", 64)}, Receipt: &protocol.UpdaterSelfReceipt{RequestID: "original-request", ReleaseSetSHA256: strings.Repeat("c", 64), RetainedProcess: protocol.RecoveryIdentity{PID: 40, StartTicks: 9}}}
+	writeUpdaterObservation(&out, "server", o)
+	for _, value := range []string{"handoff verified", "PID 41", "service PID 42", "retained service PID 40", "original-request", strings.Repeat("a", 64)} {
+		if !strings.Contains(out.String(), value) {
+			t.Fatal(value, out.String())
+		}
+	}
+	out.Reset()
+	o.Rejection = &protocol.UpdaterSelfRejection{RequestID: "rejected-request"}
+	writeUpdaterObservation(&out, "server", o)
+	if !strings.Contains(out.String(), "rejected before dispatch") || strings.Contains(out.String(), "verified") || strings.Contains(out.String(), "original-request") {
+		t.Fatal(out.String())
+	}
+}
 
 func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	if runtime.GOOS == "windows" {
