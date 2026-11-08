@@ -287,7 +287,7 @@ func TestSchemasMatchArgs(t *testing.T) {
 		"background_evidence_read":   evidenceArgs{},
 		"conversation_turn_adopt":    protocol.AdoptClarificationPayload{},
 		"conversation_turn_wait":     protocol.TurnClarification{}, "conversation_turn_read": turnReadArgs{}, "conversation_turn_commit": protocol.LogicalTurnCommit{},
-		"conversation_associate": associateArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{}, "background_item_read": contextReadArgs{}, "background_submit": protocol.BackgroundAssessmentPayload{},
+		"conversation_associate": associateArgs{}, "agent_conversations_list": agentListArgs{}, "agent_rollout_read": rolloutArgs{},
 		"background_sources": backgroundSourceArgs{}, "background_checkin": backgroundCheckinArgs{},
 
 		"tool_failures_list": toolFailuresArgs{},
@@ -447,13 +447,10 @@ func TestHistoricalCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 	}
 }
 
-func TestBackgroundNativeAutoModeDoesNotGrantTendWrites(t *testing.T) {
+func TestUnregisteredBackgroundIdentityCannotCallTools(t *testing.T) {
 	service := &Service{}
 	principal := protocol.Principal{Kind: protocol.PrincipalBackgroundAgent, ConversationID: "work-item:fixture"}
 	for _, spec := range Specs() {
-		if backgroundTools[spec.Name] {
-			continue
-		}
 		result := service.Handle(t.Context(), Call{Principal: principal, Tool: spec.Name, Arguments: json.RawMessage(`{}`)})
 		var body answer
 		if err := json.Unmarshal([]byte(result.Text), &body); err != nil {

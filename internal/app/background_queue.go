@@ -63,8 +63,6 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 		}
 		if canonical {
 			conversation, err = ensureCanonicalManagerConversationForWake(ctx, x, tx, item)
-		} else {
-			conversation, err = ensureAgentConversation(ctx, x, tx, item)
 		}
 		if err != nil {
 			return err

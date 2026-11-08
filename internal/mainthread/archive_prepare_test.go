@@ -9,6 +9,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
@@ -126,16 +127,22 @@ func TestArchiveBackgroundPoolReconcilesOriginalReceiptWithoutNewTurn(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	const conversation = "work-item:receipt"
-	const request = "old-background-request"
+	conversation := createConsultationFixture(t, e).ID
+	selected, named, err := e.app.NamedHostedSelection(ctx, conversation)
+	if err != nil || !named {
+		t.Fatal(selected, named, err)
+	}
+	selected.AppliedModel = "consult-model"
+	binding := (&Manager{cfg: Config{Instance: "receipt-instance"}, named: &selected}).bindingInstance()
+	const request = "original-consultation-request"
 	if err := e.store.Write(ctx, func(tx *store.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_conversations(conversation_id,created_at) VALUES(?,0)`, conversation); err != nil {
+		if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: request, ConversationID: conversation, Selection: selected}); err != nil {
 			return err
 		}
 		if _, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: "receipt-owner", Author: "owner", Body: "Retained original"}); err != nil {
 			return err
 		}
-		if err := tx.PutMainThread(ctx, "receipt-instance", base.ID(), 0); err != nil {
+		if err := tx.PutMainThread(ctx, binding, base.ID(), 0); err != nil {
 			return err
 		}
 		if err := tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, MessageID: "receipt-owner", ThreadID: base.ID(), TurnID: "known-native", Status: store.TurnStarted}, 0); err != nil {
@@ -157,8 +164,11 @@ func TestArchiveBackgroundPoolReconcilesOriginalReceiptWithoutNewTurn(t *testing
 		if id != conversation {
 			t.Errorf("unexpected conversation %s", id)
 		}
-		created <- struct{}{}
-		return New(e.app, e.m.context, e.m.tools, Config{Instance: "receipt-instance", ConversationID: id, Open: func(context.Context) (harness.Session, error) { return wrapper, nil }, Log: quiet()}), nil
+		select {
+		case created <- struct{}{}:
+		default:
+		}
+		return New(e.app, e.m.context, e.m.tools, Config{Instance: "receipt-instance", ConversationID: id, OpenNamed: func(context.Context, hostedconfig.Selection) (harness.Session, error) { return wrapper, nil }, Log: quiet()}), nil
 	}}
 	run, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})

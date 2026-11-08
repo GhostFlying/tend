@@ -67,43 +67,6 @@ func TestReviewAssociationEditMustInvalidateCachedSummary(t *testing.T) {
 	}
 }
 
-func TestReviewBackgroundUnknownDeliveryMustEscalate(t *testing.T) {
-	h := newHarness(t)
-	w := h.createWork(workPlan())
-	h.prepareAgent(w.WorkItemID)
-	op := h.exec(owner, h.env("conversation.open_background", workTarget(w.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	id := "work-item:" + w.WorkItemID
-	op = h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: id, Body: "Please inspect"}, nil), SubmitMessage{})
-	if op.Status != protocol.OpAccepted {
-		t.Fatal(op)
-	}
-	h.reviewBackgroundOwnerNotices()
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(id))
-	if err != nil || !ok {
-		t.Fatal(err, ok)
-	}
-	var p HandleMessage
-	if err := json.Unmarshal(d.Payload, &p); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), id, d.RequestID); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: d.RequestID, MessageID: p.MessageID, ThreadID: "background-thread", Status: store.TurnStarting}); err != nil {
-		t.Fatal(err)
-	}
-	before := h.count("outbox")
-	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Unknown, Reason: "turn/start lost"}); err != nil {
-		t.Fatal(err)
-	}
-	if h.count("outbox") != before+1 {
-		t.Fatalf("unknown background turn produced no main escalation: outbox count %d -> %d", before, h.count("outbox"))
-	}
-}
-
 func TestReviewSummaryObservationMustIncludeCorrectedAssociations(t *testing.T) {
 	h := newHarness(t)
 	w1, w2 := h.createWork(workPlan()), h.createWork(workPlan())

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -112,36 +111,6 @@ func TestAgentStartupNamedSharedSourceReceiptKeepsExecutionConversation(t *testi
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, receipt) != 1 {
 		t.Fatal("conversation selection changed the original native receipt")
-	}
-}
-
-func TestAgentStartupLegacySharedSourceUsesAdmittedConversation(t *testing.T) {
-	h := newHarness(t)
-	work := h.createWork(workPlan())
-	h.prepareAgent(work.WorkItemID)
-	h.exec(owner, h.env("conversation.open_background", workTarget(work.WorkItemID), struct{}{}, nil), OpenAgentConversation{})
-	conversation := "work-item:" + work.WorkItemID
-	message, mainDelivery := h.say("Shared original owner source")
-	request := h.ids.New(protocol.PrefixRequest)
-	if _, err := h.app.AgentContext(t.Context(), conversation, request); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		if err := tx.PutMainTurn(t.Context(), store.MainTurn{RequestID: request, MessageID: message, ThreadID: "legacy-background-native", TurnID: "original-turn", Status: store.TurnInterrupted}, h.clock.Now().UnixMilli()); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, _, mainAttachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), "main")
-	if err != nil || mainAttachment.RequestID != mainDelivery.RequestID || mainAttachment.Reconciliation {
-		t.Fatal("legacy source message overrode its admitted execution conversation", mainAttachment, err)
-	}
-	_, named, backgroundAttachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), conversation)
-	if err != nil || named || backgroundAttachment.RequestID != request || !backgroundAttachment.Reconciliation {
-		t.Fatal("legacy receipt was not discovered in its admitted conversation", backgroundAttachment, named, err)
 	}
 }
 

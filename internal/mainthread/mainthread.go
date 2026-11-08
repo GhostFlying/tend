@@ -222,6 +222,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if err != nil {
 		return err
 	}
+	if !named && m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "non-main conversations require a registered Issue manager or consultation runtime")
+	}
 	allowed, err := m.app.AgentStartupAttachmentAllowed(ctx, startupAttachment)
 	if err != nil || !allowed {
 		return err
@@ -609,11 +612,6 @@ func (m *Manager) detach(th harness.Thread) harness.Session {
 func (m *Manager) threadConfig() harness.ThreadConfig {
 	cfg := m.cfg.Thread
 	cfg.Tools = hostedSpecs()
-	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
-		cfg.Tools = tools.BackgroundSpecs()
-		cfg = backgroundThreadConfig(cfg)
-		cfg.DeveloperInstructions = "You are a work-item background checker. Read only your assigned work item and linked evidence with the provided tools. Main agent owns all business decisions, task scheduling and completion review. Read every source page and submit background_submit with the exact context revision. Use waiting for no change, briefing for nonurgent facts, escalate for action, missing context, failure or completion review. Your natural-language reply is not formal submission. Owner messages are original authority but business changes must go through main. Native tools run in auto mode; their availability does not authorize business changes or replace worker delegation. Do not change approval settings or bypass an automatic review denial. Separate environment faults from evidence gaps and owner choices, including impact, responsible actor and next action in the formal assessment. If permissions block the check, report the limitation to main instead of retrying with broader permissions. After context compaction read the current context before proceeding."
-	}
 
 	if selected := m.namedSelection(); selected != nil {
 		cfg.Model = selected.Definition.Model

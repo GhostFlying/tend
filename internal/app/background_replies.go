@@ -180,7 +180,7 @@ func (a *App) settleBackground(ctx context.Context, tx *store.Tx, message, statu
 	if status == store.TurnStarting || status == store.TurnStarted || status == store.TurnRejected {
 		return nil
 	}
-	if err := a.settleAgentAssessment(ctx, tx, message, status, now); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_turn_contexts SET settled=1 WHERE request_id IN (SELECT request_id FROM main_turns WHERE message_id=?)`, message); err != nil {
 		return err
 	}
 	b, err := store.BackgroundByMessage(ctx, tx.Q(), message)

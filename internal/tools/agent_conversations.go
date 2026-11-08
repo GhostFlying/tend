@@ -166,30 +166,6 @@ func backgroundScope(ctx context.Context, q store.Querier, c Call, item string) 
 	}
 	return nil
 }
-func (s *Service) backgroundItemRead(ctx context.Context, c Call) (any, error) {
-	var p contextReadArgs
-	if err := decode(c.Arguments, &p); err != nil {
-		return nil, err
-	}
-	var v protocol.WorkItemView
-	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-		if err := backgroundScope(ctx, tx.Q(), c, p.WorkItemID); err != nil {
-			return err
-		}
-		var err error
-		v, err = views.Issue(ctx, tx.Q(), p.WorkItemID)
-		return err
-	})
-	return v, err
-}
-func (s *Service) backgroundSubmit(ctx context.Context, c Call) (any, error) {
-	var p protocol.BackgroundAssessmentPayload
-	if err := decode(c.Arguments, &p); err != nil {
-		return nil, err
-	}
-	cmd := app.SubmitBackgroundAssessment{MessageID: c.SourceMessageID, TurnID: c.TurnID, DeliveryID: c.ParentRequestID}
-	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "conversation", ID: c.Principal.ConversationID}, nil, "", p, cmd)
-}
 
 type evidenceArgs struct {
 	MessageID  string `json:"message_id,omitempty"`

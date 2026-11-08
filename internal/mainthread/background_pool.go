@@ -55,7 +55,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 					continue
 				}
 				selected, named, err := p.App.HostedRuntimeSelection(ctx, id)
-				if err != nil {
+				if err != nil || !named {
 					continue
 				}
 				remote := named && selected.RunnerManaged

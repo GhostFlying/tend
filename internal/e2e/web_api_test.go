@@ -326,7 +326,7 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 		if message.Author == "system" {
 			// Ledger events and stale-background coordination notices can use
 			// different prompt headers. Neither is a new owner release request.
-			if strings.HasPrefix(th.Config.Cwd, "/background/") {
+			if srv.count(`SELECT COUNT(*) FROM background_batches WHERE message_id=?`, in.UserMessageID) > 0 {
 				sourceResults <- th.CallTool(ctx, turn, "sources_"+turn, "background_sources", map[string]any{})
 			}
 			th.Say(turn, "item_"+turn, "The decision state changed; no new owner instruction.")
@@ -346,23 +346,7 @@ func TestEndToEnd_WebAnswersDecisions(t *testing.T) {
 		th.Say(turn, "item_"+turn, "Which release branch should I use?")
 		return "completed"
 	}
-	backgroundTurn := agent.Turn
-	srv.startHistoricalMainThread(agent, func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
-		status := backgroundTurn(th, turn, in)
-		item := strings.TrimPrefix(th.Config.Cwd, "/background/work-item:")
-		res := th.CallTool(context.Background(), turn, "read-context", "background_item_read", map[string]any{"work_item_id": item})
-		var v struct {
-			Result protocol.WorkItemView `json:"result"`
-		}
-		if !res.Success || json.Unmarshal([]byte(res.Text), &v) != nil || v.Result.WorkItemID != item {
-			return "failed"
-		}
-		res = th.CallTool(context.Background(), turn, "submit-background", "background_submit", protocol.BackgroundAssessmentPayload{ContextRevision: historicalDeliveredContextRevision(t, agent, th.ID()), Disposition: "waiting", Note: "Decision state read", EvidenceIDs: []string{}})
-		if !res.Success {
-			return "failed"
-		}
-		return status
-	})
+	srv.startHistoricalMainThread(agent)
 	hs := srv.startWeb()
 	web := srv.webLogin(hs.URL)
 	events := web.stream("")

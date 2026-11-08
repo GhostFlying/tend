@@ -199,10 +199,7 @@ func TestAnswerReturnLinkUsesOriginalBackgroundConversation(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			op := h.exec(owner, h.env("conversation.open_background", workTarget(item), struct{}{}, nil), OpenAgentConversation{})
-			if op.Status != protocol.OpSucceeded {
-				t.Fatal(op)
-			}
+			var op protocol.Operation
 			conversation := "work-item:" + item
 			source := h.ids.New(protocol.PrefixMessage)
 			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {

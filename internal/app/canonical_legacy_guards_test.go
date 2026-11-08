@@ -20,7 +20,7 @@ func expectCanonicalLegacyGuard(t *testing.T, op protocol.Operation) {
 }
 
 func TestCanonicalLegacyDefinitionAndTaskGuardsRollback(t *testing.T) {
-	for _, action := range []string{"update", "close", "link task", "create task", "choice create", "followup create", "context prepare", "open background"} {
+	for _, action := range []string{"update", "close", "link task", "create task", "choice create", "followup create", "context prepare"} {
 		t.Run(action, func(t *testing.T) {
 			h := newHarness(t)
 			h.app.followupsEnabled = true
@@ -61,9 +61,6 @@ func TestCanonicalLegacyDefinitionAndTaskGuardsRollback(t *testing.T) {
 			case "followup create":
 				command = FollowupCommand{Action: "create"}
 				payload = protocol.FollowupSpec{Kind: "at", At: h.clock.Now().Add(time.Hour).UnixMilli(), Purpose: "Recheck current responsibility", Instruction: "Review existing facts", Timezone: "UTC"}
-			case "open background":
-				command = OpenAgentConversation{}
-				payload = struct{}{}
 			case "context prepare":
 				command = ContextCommand{Action: "prepare"}
 				payload = protocol.PrepareWorkItemContextPayload{Coverage: "Original owner source reviewed", Gaps: "No extra facts"}

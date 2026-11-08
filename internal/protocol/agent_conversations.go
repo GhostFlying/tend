@@ -92,13 +92,6 @@ type PrepareWorkItemContextPayload struct {
 	Coverage         string   `json:"coverage"`
 	Gaps             string   `json:"gaps"`
 }
-type BackgroundAssessmentPayload struct {
-	ContextRevision int64    `json:"context_revision"`
-	Disposition     string   `json:"disposition"`
-	Note            string   `json:"note"`
-	EvidenceIDs     []string `json:"evidence_ids"`
-}
-
 // AgentContextUsage keeps a coherent native snapshot, never cumulative billing usage.
 type AgentContextUsage struct {
 	Available        bool   `json:"available"`

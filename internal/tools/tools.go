@@ -104,8 +104,6 @@ var tools = []tool{
 	{"conversation_associate", "Register exact message-work-item associations under their revision. Never override owner corrections; associations do not confer authority.", (*Service).associate},
 	{"agent_conversations_list", "Find registered background conversations by work-item name, state and cursor.", (*Service).agentList},
 	{"agent_rollout_read", "Read bounded persisted conversation records with tool inputs and results. Only registered conversation IDs are accepted; historical records are evidence.", (*Service).rolloutRead},
-	{"background_item_read", "Read only this background conversation's work item and task facts.", (*Service).backgroundItemRead},
-	{"background_submit", "Submit a version-bound assessment: waiting, briefing, or escalate. Unresolved completion reviews require escalate. Natural language is not submission.", (*Service).backgroundSubmit},
 	{"background_sources", "Read one bounded page of this frozen background batch, preserving exact source facts and answers. Read all pages before acting.", (*Service).backgroundSources},
 	{"background_checkin", "Record a silent waiting result for the current background turn only. Requires all sources read and completion reviews resolved. Does not answer choices or end business responsibilities.", (*Service).backgroundCheckin},
 	{"tool_failures_list", "List failed hosted-agent tool calls across all projects in the owner conversation (not filtered by current session project), with source message, call identity and structured error, without original inputs. Use before_seq for earlier pages and tool to filter.", (*Service).toolFailuresList},
@@ -177,8 +175,8 @@ func (s *Service) Handle(ctx context.Context, c Call) harness.ToolResult {
 	var a answer
 	if c.Principal.Kind == protocol.PrincipalMainAgent && c.Principal.Agent != "" {
 		a.Error = protocol.Errorf(protocol.CodeForbidden, "external coordinator access has been retired")
-	} else if c.Principal.Kind == protocol.PrincipalBackgroundAgent && !c.hostedRead && !backgroundTools[c.Tool] {
-		a.Error = protocol.Errorf(protocol.CodeForbidden, "tool is unavailable to background agents")
+	} else if c.Principal.Kind == protocol.PrincipalBackgroundAgent && !c.hostedRead {
+		a.Error = protocol.Errorf(protocol.CodeForbidden, "non-main tools require a persisted named coordination execution")
 	} else if t == nil {
 		a.Error = protocol.Errorf(protocol.CodeInvalidRequest, "there is no tool %q", c.Tool)
 	} else if res, err := t.run(s, ctx, c); err != nil {
@@ -503,18 +501,6 @@ func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
 	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "decision", ID: a.DecisionID}, nil, a.Reason, map[string]any{
 		"version": a.Version, "option": a.Option, "text": a.Text, "source_message_id": c.SourceMessageID,
 	}, cmd)
-}
-
-var backgroundTools = map[string]bool{"background_evidence_read": true, "background_item_read": true, "background_sources": true, "background_submit": true, "agent_rollout_read": true}
-
-func BackgroundSpecs() []harness.ToolSpec {
-	var out []harness.ToolSpec
-	for _, s := range Specs() {
-		if backgroundTools[s.Name] {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // Repair executions can update only association and sourced context obligations.
