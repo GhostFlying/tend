@@ -223,7 +223,7 @@ func (s *Service) apply(ctx context.Context, r *record, q Request) error {
 		if p.ID == "watch-control" {
 			return fmt.Errorf("reserved environment identity")
 		}
-		if q.Action == "update" && disablingOnly(r.Status.Profile, p) {
+		if q.Action == "update" && !r.Status.Deleted && disablingOnly(r.Status.Profile, p) {
 			r.Status.Profile.Enabled = false
 			return nil
 		}
@@ -340,7 +340,7 @@ func (s *Service) inspect(ctx context.Context, q Request) (Result, error) {
 	if q.Action == "show" || q.Action == "inventory" {
 		return result, nil
 	}
-	if q.Profile != nil && disablingOnly(status.Profile, defaults(*q.Profile)) {
+	if q.Profile != nil && !status.Deleted && disablingOnly(status.Profile, defaults(*q.Profile)) {
 		result.Changed = status.Profile.Enabled
 		return result, nil
 	}
