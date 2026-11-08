@@ -81,7 +81,10 @@ func (c *Controller) advanceUpgrade(ctx context.Context) error {
 		if err := c.save(ctx); err != nil {
 			return err
 		}
-		s, err := c.updaterRequest(ctx, http.MethodPost, "/upgrade", updater.ControlRequest{ID: u.ID, Release: u.ReleaseDir})
+		s, current, err := c.requestUpgradeUnlocked(ctx, u, http.MethodPost, "/upgrade", updater.ControlRequest{ID: u.ID, Release: u.ReleaseDir})
+		if !current {
+			return err
+		}
 		_, terminal := s.Terminals[u.ID]
 		_, historical := s.OperationHistory[u.ID]
 		if errors.Is(err, errUpdaterRejected) && u.Binding == nil && s.InstanceID == c.cfg.InstanceID && !terminal && !historical && (s.Operation == nil || s.Operation.ID != u.ID) && (s.CommittedProof == nil || s.CommittedProof.Binding.UpgradeID != u.ID) {
@@ -92,7 +95,10 @@ func (c *Controller) advanceUpgrade(ctx context.Context) error {
 		}
 		return err
 	}
-	s, err := c.updaterRequest(ctx, http.MethodGet, "/status", nil)
+	s, current, err := c.requestUpgradeUnlocked(ctx, u, http.MethodGet, "/status", nil)
+	if !current {
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -117,6 +123,14 @@ func (c *Controller) advanceUpgrade(ctx context.Context) error {
 		u.Phase = "completed"
 		return c.save(ctx)
 	}
+	if receipt, ok := s.Terminals[u.ID]; ok && receipt.Phase == "rolled_back" && matches(receipt.Binding) {
+		proof := s.RollbackProof
+		if proof == nil || proof.Binding != receipt.Binding || proof.Version != s.Current || proof.Process != s.Process || s.Process.LaunchID != c.opts.RuntimeID || s.Process.SHA256 != c.opts.ArtifactSHA256 || proof.Version.Artifact.SHA256 != c.opts.ArtifactSHA256 {
+			return errors.New("maintenance: retained rollback receipt does not match the running process")
+		}
+		u.Phase = "rolled_back"
+		return c.save(ctx)
+	}
 	if s.Operation == nil || s.Operation.ID != u.ID || !matches(s.Operation.Binding) || s.Operation.Candidate.ManifestSHA256 != u.ManifestSHA256 || s.Operation.Candidate.Artifact.SHA256 != u.ArtifactSHA256 {
 		return errors.New("maintenance: original updater installation requires reconciliation")
 	}
@@ -138,6 +152,23 @@ func (c *Controller) advanceUpgrade(ctx context.Context) error {
 		return c.save(ctx)
 	}
 	return nil
+}
+
+// The caller holds c.mu on entry and return. Updater callbacks need the same
+// mutex, so the RPC runs outside it. Only the same durable plan/phase may consume
+// its result; callbacks may attach that plan's binding while the RPC is running.
+func (c *Controller) requestUpgradeUnlocked(ctx context.Context, u *protocol.MaintenanceUpgrade, method, path string, input any) (updater.State, bool, error) {
+	phase := u.Phase
+	c.mu.Unlock()
+	s, err := c.updaterRequest(ctx, method, path, input)
+	c.mu.Lock()
+	if c.fault != nil {
+		return updater.State{}, false, c.fault
+	}
+	if c.state.Upgrade != u || u.Phase != phase {
+		return updater.State{}, false, nil
+	}
+	return s, true, err
 }
 
 func (c *Controller) authorizeUpgrade(ctx context.Context, b protocol.UpgradeBinding) (protocol.UpgradeGrant, error) {

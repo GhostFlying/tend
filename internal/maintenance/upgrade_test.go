@@ -3,6 +3,7 @@ package maintenance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -146,6 +147,36 @@ func TestFault_MaintenanceUnknownUpgradeAcceptsOriginalCancellationTombstone(t *
 	step(t, c)
 	if c.frozen() || c.Status().Upgrade.Phase != "cancelled" {
 		t.Fatal("durable cancellation of the original unknown submission was ignored")
+	}
+}
+
+func TestFault_MaintenanceRetainedRollbackAfterSupervisedRestart(t *testing.T) {
+	for _, stale := range []bool{false, true} {
+		t.Run(fmt.Sprint("stale=", stale), func(t *testing.T) {
+			c, _, _, _ := fixture(t)
+			b := protocol.UpgradeBinding{UpgradeID: "install", InstanceID: "maintainer", ProcessInstanceID: "candidate", ReleaseID: "candidate-release", ManifestSHA256: strings.Repeat("a", 64), ArtifactSHA256: strings.Repeat("b", 64)}
+			previous := updater.Version{ReleaseID: "previous", ManifestSHA256: strings.Repeat("d", 64), Artifact: release.Artifact{SHA256: strings.Repeat("c", 64)}}
+			process := updater.Identity{LaunchID: "supervised-rollback-successor", SHA256: previous.Artifact.SHA256}
+			proof := updater.RollbackProof{Binding: b, Version: previous, Process: process}
+			if stale {
+				proof.Process.LaunchID = "stale-rollback"
+			}
+			state := updater.State{InstanceID: b.InstanceID, Current: previous, Process: process, Operation: &updater.Operation{ID: "restart-successor", Kind: "restart", Phase: "committed"}, Terminals: map[string]updater.TerminalReceipt{b.UpgradeID: {Binding: b, Phase: "rolled_back"}}, RollbackProof: &proof}
+			c.cfg.InstanceID = b.InstanceID
+			c.cfg.UpdaterSocket = upgradeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state})
+			})
+			c.opts.RuntimeID, c.opts.ArtifactSHA256 = process.LaunchID, process.SHA256
+			c.state.Upgrade = &protocol.MaintenanceUpgrade{ID: b.UpgradeID, ReleaseID: b.ReleaseID, ManifestSHA256: b.ManifestSHA256, ArtifactSHA256: b.ArtifactSHA256, Phase: "submitting", Binding: &b}
+			err := c.Step(context.Background())
+			if stale {
+				if err == nil || !c.frozen() {
+					t.Fatal("stale rollback proof admitted a different process")
+				}
+			} else if err != nil || c.frozen() || c.Status().Upgrade.Phase != "rolled_back" {
+				t.Fatal("matching retained rollback remained frozen", err)
+			}
+		})
 	}
 }
 
