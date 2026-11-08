@@ -1,0 +1,93 @@
+//go:build linux
+
+package traex
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/GhostFlying/tend/internal/codexenv"
+	"github.com/GhostFlying/tend/internal/harness"
+)
+
+func startupEnvironment(t *testing.T) (*codexenv.Service, codexenv.Profile, *codexenv.Binding) {
+	t.Helper()
+	service := &codexenv.Service{Root: t.TempDir(), Validate: func(context.Context, codexenv.Profile, string) error { return nil }}
+	profile := codexenv.Profile{ID: "worker", Home: t.TempDir(), UserHome: t.TempDir(), Enabled: true}
+	result, err := service.Execute(t.Context(), codexenv.Request{Action: "create", ID: profile.ID, RequestID: "create", Profile: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, result.Status.Profile, &codexenv.Binding{Directory: service.Root, ID: profile.ID}
+}
+
+func TestEnvironmentPreflightPreservesKnownNotStartedProof(t *testing.T) {
+	service, profile, binding := startupEnvironment(t)
+	profile.Enabled = false
+	status, _ := service.Read(profile.ID)
+	if _, err := service.Execute(t.Context(), codexenv.Request{Action: "update", ID: profile.ID, RequestID: "disable", ExpectedRevision: status.Revision, Profile: &profile}); err != nil {
+		t.Fatal(err)
+	}
+	spec := harness.WorkerSpec{RunID: "never-started", StateDir: t.TempDir(), Dir: t.TempDir()}
+	workers := NewWorkers(WorkerOptions{Session: Options{Bin: "must-not-launch", Environment: binding}})
+	if _, err := workers.Start(t.Context(), spec); !errors.Is(err, harness.ErrWorkerNotStarted) {
+		t.Fatal("preflight lost positive no-launch proof", err)
+	}
+	if _, err := os.Stat(filepath.Join(spec.StateDir, ownedProcessFile)); !os.IsNotExist(err) {
+		t.Fatal("preflight created native ownership", err)
+	}
+}
+
+func TestEnvironmentRunningRecordFailurePersistsOwnedClose(t *testing.T) {
+	_, profile, binding := startupEnvironment(t)
+	t.Setenv("HOME", profile.UserHome)
+	bin := t.TempDir()
+	// The mount shim only provides a deterministic process/callback fixture;
+	// real bubblewrap isolation has separate tagged native integration coverage.
+	mount := filepath.Join(bin, "bwrap")
+	if err := os.WriteFile(mount, []byte("#!/bin/sh\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(bin, "native")
+	if err := os.WriteFile(native, []byte("#!/bin/sh\nwhile IFS= read -r fixture_line; do :; done\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	spec := harness.WorkerSpec{RunID: "startup-cancelled", StateDir: t.TempDir(), Dir: t.TempDir()}
+	if _, err := codexenv.BindExecution(t.Context(), spec.StateDir, "run:"+spec.RunID, binding, false); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := binding.Pin(t.Context(), "run:"+spec.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workers := NewWorkers(WorkerOptions{})
+	opts := Options{Bin: native, Dir: spec.Dir, environmentReference: ref}
+	if _, err = workers.recordOwnedWorkerProcess(spec, &opts); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	recordStart := opts.onStartProcess
+	opts.onStartProcess = func(cmd *exec.Cmd) error {
+		if err := recordStart(cmd); err != nil {
+			return err
+		}
+		cancel()
+		return nil
+	}
+	if _, err = startProcess(ctx, opts, nil); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	record, err := workers.ownedWorkerProcess(spec)
+	if err != nil || !record.CloseObserved {
+		t.Fatal("startup state failure discarded owned close", record, err)
+	}
+	if err = NewWorkers(WorkerOptions{Session: Options{Bin: "must-not-launch"}}).StopOwnedWorker(t.Context(), spec); err != nil {
+		t.Fatal("known closure cannot reconcile", err)
+	}
+}
