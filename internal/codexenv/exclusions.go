@@ -49,6 +49,9 @@ func readExclusions(user string) (SkillExclusions, error) {
 
 // ExclusionSummary reports freshness without publishing local source paths.
 func ExclusionSummary(user string) *protocol.ExtensionSkillExclusionStatus {
+	if user == "" {
+		return nil
+	}
 	cache, err := readExclusions(user)
 	if os.IsNotExist(err) {
 		return nil

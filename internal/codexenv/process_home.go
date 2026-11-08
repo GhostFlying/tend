@@ -13,7 +13,8 @@ import (
 
 // prepareProcessHome isolates configuration and writable plugin state without
 // changing HOME or creating a filesystem/user namespace. Runtime history and
-// credentials remain in the original fixed state home.
+// OpenAI auth remain in the original fixed state home. MCP OAuth stays in
+// this stable execution home for native no-follow regular-file writes.
 func prepareProcessHome(ctx context.Context, p Profile, shot, work string, exclusions SkillExclusions) error {
 	for _, name := range []string{"skills", "plugins"} {
 		if err := os.RemoveAll(filepath.Join(work, name)); err != nil {
