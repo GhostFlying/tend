@@ -73,6 +73,7 @@ type ConversationContextReference struct {
 	AssociationRevision int64  `json:"association_revision,omitempty"`
 	Seq                 int64  `json:"seq,omitempty"`
 	NeedsReview         bool   `json:"needs_review"`
+	AssociationRemoved  bool   `json:"association_removed,omitempty"`
 	Withdrawn           bool   `json:"withdrawn,omitempty"`
 	Superseded          bool   `json:"superseded,omitempty"`
 	RolloutPath         string `json:"rollout_path,omitempty"`

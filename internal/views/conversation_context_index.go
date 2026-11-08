@@ -47,9 +47,9 @@ func ConversationContextIndex(ctx context.Context, q store.Querier, id string, q
 	// Explicitly inherited contexts grant references, never ancestor control.
 	scope := `WITH RECURSIVE scope(id) AS (SELECT ? UNION SELECT c.parent_issue_id FROM issue_controls c JOIN scope s ON c.issue_id=s.id WHERE c.parent_issue_id IS NOT NULL) `
 	err = q.QueryRowContext(ctx, scope+`SELECT
-    (SELECT COUNT(*) FROM conversation_messages m WHERE m.kind='message' AND (m.conversation_id=? OR (?<>'' AND EXISTS(SELECT 1 FROM message_work_items w WHERE w.message_id=m.message_id AND w.active=1 AND w.work_item_id IN (SELECT id FROM scope))))),
+    (SELECT COUNT(*) FROM conversation_messages m WHERE m.kind='message' AND (m.conversation_id=? OR (?<>'' AND EXISTS(SELECT 1 FROM message_work_items w WHERE w.message_id=m.message_id AND w.active=1 AND w.work_item_id IN (SELECT id FROM scope)) OR EXISTS(SELECT 1 FROM message_context_obligations o WHERE o.message_id=m.message_id AND o.work_item_id=? AND o.needs_review=1)))),
     (SELECT COUNT(*) FROM work_item_context_facts f WHERE ?='main' OR (?<>'' AND (f.work_item_id IN (SELECT id FROM scope) OR f.scope='global' OR (f.scope='project' AND f.project=(SELECT project FROM work_items WHERE work_item_id=?))))),
-    (SELECT COUNT(*) FROM agent_thread_history WHERE conversation_id=?)`, v.IssueID, v.ConversationID, v.IssueID, v.Kind, v.IssueID, v.IssueID, v.ConversationID).Scan(&v.SourceCount, &v.FactCount, &v.ThreadCount)
+    (SELECT COUNT(*) FROM agent_thread_history WHERE conversation_id=?)`, v.IssueID, v.ConversationID, v.IssueID, v.IssueID, v.Kind, v.IssueID, v.IssueID, v.ConversationID).Scan(&v.SourceCount, &v.FactCount, &v.ThreadCount)
 	if err != nil {
 		return v, err
 	}
@@ -59,7 +59,7 @@ func ConversationContextIndex(ctx context.Context, q store.Querier, id string, q
 	var rows *sql.Rows
 	switch query.Section {
 	case "sources":
-		rows, err = q.QueryContext(ctx, scope+`SELECT m.message_id,m.conversation_id,m.seq,COALESCE(d.content_revision,1),COALESCE(a.revision,0),COALESCE(c.withdrawn_at,0)<>0,EXISTS(SELECT 1 FROM message_context_obligations o WHERE o.message_id=m.message_id AND o.needs_review=1 AND (?='' OR o.work_item_id=?)) FROM conversation_messages m LEFT JOIN message_dispositions d USING(message_id) LEFT JOIN message_association_revisions a USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.kind='message' AND m.message_id>? AND (m.conversation_id=? OR (?<>'' AND EXISTS(SELECT 1 FROM message_work_items w WHERE w.message_id=m.message_id AND w.active=1 AND w.work_item_id IN (SELECT id FROM scope)))) ORDER BY m.message_id LIMIT ?`, v.IssueID, v.IssueID, v.IssueID, query.After, v.ConversationID, v.IssueID, query.Limit+1)
+		rows, err = q.QueryContext(ctx, scope+`SELECT m.message_id,m.conversation_id,m.seq,COALESCE(d.content_revision,1),COALESCE(a.revision,0),COALESCE(c.withdrawn_at,0)<>0,EXISTS(SELECT 1 FROM message_context_obligations o WHERE o.message_id=m.message_id AND o.needs_review=1 AND (?='' OR o.work_item_id=?)),EXISTS(SELECT 1 FROM message_work_items w WHERE w.message_id=m.message_id AND w.work_item_id=? AND w.active=0) FROM conversation_messages m LEFT JOIN message_dispositions d USING(message_id) LEFT JOIN message_association_revisions a USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.kind='message' AND m.message_id>? AND (m.conversation_id=? OR (?<>'' AND EXISTS(SELECT 1 FROM message_work_items w WHERE w.message_id=m.message_id AND w.active=1 AND w.work_item_id IN (SELECT id FROM scope)) OR EXISTS(SELECT 1 FROM message_context_obligations o WHERE o.message_id=m.message_id AND o.work_item_id=? AND o.needs_review=1))) ORDER BY m.message_id LIMIT ?`, v.IssueID, v.IssueID, v.IssueID, v.IssueID, query.After, v.ConversationID, v.IssueID, v.IssueID, query.Limit+1)
 	case "facts":
 		rows, err = q.QueryContext(ctx, scope+`SELECT f.fact_id,COALESCE(f.work_item_id,''),f.source_message_id,f.needs_review,f.superseded,m.seq,m.conversation_id FROM work_item_context_facts f JOIN conversation_messages m ON m.message_id=f.source_message_id WHERE f.fact_id>? AND (?='main' OR (?<>'' AND (f.work_item_id IN (SELECT id FROM scope) OR f.scope='global' OR (f.scope='project' AND f.project=(SELECT project FROM work_items WHERE work_item_id=?))))) ORDER BY f.fact_id LIMIT ?`, v.IssueID, query.After, v.Kind, v.IssueID, v.IssueID, query.Limit+1)
 	case "threads":
@@ -73,7 +73,7 @@ func ConversationContextIndex(ctx context.Context, q store.Querier, id string, q
 		r := protocol.ConversationContextReference{Kind: query.Section}
 		switch query.Section {
 		case "sources":
-			err = rows.Scan(&r.ID, &r.ConversationID, &r.Seq, &r.ContentRevision, &r.AssociationRevision, &r.Withdrawn, &r.NeedsReview)
+			err = rows.Scan(&r.ID, &r.ConversationID, &r.Seq, &r.ContentRevision, &r.AssociationRevision, &r.Withdrawn, &r.NeedsReview, &r.AssociationRemoved)
 		case "facts":
 			err = rows.Scan(&r.ID, &r.IssueID, &r.SourceMessageID, &r.NeedsReview, &r.Superseded, &r.Seq, &r.ConversationID)
 		case "threads":

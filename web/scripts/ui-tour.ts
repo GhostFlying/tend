@@ -1097,20 +1097,6 @@ try {
       viewport: { width, height: 900 },
       serviceWorkers: "block",
     });
-    const saved: NonNullable<ConversationHandoffView["summary"]> = {
-      format_version: 3,
-      method: "bounded",
-      ledger_bytes: 1,
-      correction_bytes: 0,
-      batches: 1,
-      complete: true,
-      id: "previous-saved-summary",
-      source_thread_id: "original-thread",
-      version: 1,
-      max_seq: 1,
-      created_at_millis: now - 86_400_000,
-      current: false,
-    };
     const cases: {
       key: string;
       label: string;
@@ -1118,10 +1104,9 @@ try {
       unavailable?: boolean;
     }[] = [
       { key: "main-pending", label: "主会话仍有未结工作", patch: { pending: true } },
-      { key: "preparing", label: "正在生成预备摘要", patch: { pending: true, preparing: true } },
       {
         key: "maintenance-pending",
-        label: "摘要或交接请求尚未完成",
+        label: "交接请求尚未完成",
         patch: {
           pending: true,
           maintenance: {
@@ -1155,12 +1140,11 @@ try {
           },
         },
       },
-      { key: "stale", label: "预备摘要已过期", patch: {} },
-      { key: "ready", label: "预备摘要已就绪", patch: { summary: { ...saved, current: true } } },
-      { key: "observation-unavailable", label: "摘要状态暂不可读取", patch: {}, unavailable: true },
+      { key: "index-ready", label: "索引交接已启用", patch: {} },
+      { key: "observation-unavailable", label: "交接状态暂不可读取", patch: {}, unavailable: true },
     ];
     for (const item of cases) {
-      handoffView = { ...defaultHandoff, enabled: true, summary: saved, ...item.patch };
+      handoffView = { ...defaultHandoff, enabled: true, mode: "index", ...item.patch };
       handoffUnavailable = !!item.unavailable;
       const page = await context.newPage();
       await page.goto(`${origin}/settings`);
@@ -1174,21 +1158,14 @@ try {
         throw error;
       }
       assert.equal(await section.getByText("请求已排队", { exact: true }).count(), 0);
-      if (!item.unavailable) {
-        await section.getByText(/^最近已保存摘要：/).waitFor();
-        await section
-          .getByText(item.key === "ready" ? /覆盖当前内容$/ : /未覆盖当前内容$/)
-          .waitFor();
-      }
-      if (item.key === "failed-with-main-work")
-        await section
-          .getByText("另有主会话工作尚未结束，不表示新摘要正在生成。", { exact: true })
-          .waitFor();
+      await section.getByText(/新会话通过索引按需读取当前状态和原始历史/).waitFor();
+      assert.equal(await section.getByText(/最近已保存摘要|预备摘要/).count(), 0);
+      assert.equal(await section.getByRole("button", { name: /生成|准备|保存/ }).count(), 0);
       await page.screenshot({ path: join(output, `${width}-handoff-${item.key}.png`) });
       await page.close();
     }
     await context.close();
-    console.log(`PASS truthful handoff status and prior summary ${width}`);
+    console.log(`PASS index handoff status without summary controls ${width}`);
   }
   handoffView = defaultHandoff;
   handoffUnavailable = false;
