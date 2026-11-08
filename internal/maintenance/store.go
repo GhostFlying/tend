@@ -231,6 +231,11 @@ func (c *Controller) Status() protocol.MaintenanceStatus {
 	raw, _ := json.Marshal(c.state)
 	var s protocol.MaintenanceStatus
 	_ = json.Unmarshal(raw, &s)
+	if c.fault != nil {
+		s.NativeError = "maintenance: persistence failure; controller restart required"
+	} else if s.Failure != nil {
+		s.NativeError = "maintenance: native turn " + s.Failure.Outcome + "; inspect session history and request audit, resume or backend adoption before retrying"
+	}
 	s.OpenCases = 0
 	for _, v := range s.Cases {
 		if v.Status == "open" {

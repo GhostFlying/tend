@@ -56,6 +56,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 	case "check":
 		c.state.CheckRequested = true
 	case "audit":
+		c.state.Failure = nil
 		c.enqueue(action)
 		c.state.LastAudit = c.opts.Now().Unix()
 	case "review":
@@ -70,10 +71,12 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		}
 		c.state.Review = &protocol.MaintenanceReview{RequestID: req.RequestID, Base: req.Base, Head: req.Head, Phase: "queued"}
 		c.enqueue("independent review requested")
+		c.state.Failure = nil
 	case "pause":
 		c.state.Paused = true
 	case "resume":
 		c.state.Paused = false
+		c.state.Failure = nil
 	case "config":
 		if req.Backend == nil {
 			err = protocol.Errorf(protocol.CodeInvalidRequest, "backend is required")
@@ -89,6 +92,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		backend := *req.Backend
 		c.state.PendingBackend = &backend
 		c.state.SwitchMode = req.Mode
+		c.state.Failure = nil
 	case "resolve", "defer":
 		if req.Reason == "" {
 			err = protocol.Errorf(protocol.CodeInvalidRequest, "case disposition requires a reason")
@@ -219,6 +223,9 @@ func (c *Controller) finish(interrupted bool) {
 	}
 	a.EndedAt = c.opts.Now().Unix()
 	a.Phase = "completed"
+	if a.Outcome == "failed" || a.Outcome == "interrupted" {
+		a.Phase = a.Outcome
+	}
 	if interrupted {
 		a.Phase = "interrupted"
 		c.state.Predecessor = &protocol.MaintenancePredecessor{Agent: a.Backend.Agent, SessionID: a.SessionID}
@@ -240,6 +247,9 @@ func (c *Controller) Step(ctx context.Context) error {
 	if c.frozen() {
 		return c.advanceUpgrade(ctx)
 	}
+	if c.state.Failure != nil {
+		return nil
+	}
 	kept := slices.DeleteFunc(slices.Clone(c.state.Pending), func(reason string) bool {
 		id, ok := strings.CutPrefix(reason, "case ")
 		if !ok {
@@ -254,10 +264,6 @@ func (c *Controller) Step(ctx context.Context) error {
 	if c.state.Active != nil {
 		a := c.state.Active
 		if a.SessionID == "" {
-			if c.state.PendingBackend != nil && a.InputID == "" {
-				c.finish(false)
-				return c.save(ctx)
-			}
 			return errors.New("maintenance: native creation requires reconciliation")
 		}
 		mode := ReadMetadata
@@ -315,26 +321,35 @@ func (c *Controller) Step(ctx context.Context) error {
 		if !terminal || native.Busy {
 			return nil
 		}
-		if c.state.PendingBackend != nil {
-			if review := c.state.Review; review != nil && review.Phase == "running" && review.RequestID == a.InputID {
-				review.Outcome = outcome
-				review.Phase = "completed"
+		if a.InputID != "" {
+			a.Outcome = outcome
+			if c.state.Review != nil && c.state.Review.Phase == "running" && c.state.Review.RequestID == a.InputID {
+				c.state.Review.Phase = "completed"
+				c.state.Review.Outcome = outcome
 				if interrupted {
-					review.Phase = "queued"
+					c.state.Review.Phase = "queued"
 					c.enqueue("independent review requested")
 				} else {
 					c.reviewContinuation(outcome)
 				}
 			}
+			if outcome == "failed" || outcome == "interrupted" && !interrupted {
+				for _, reason := range a.InputReasons {
+					c.enqueue(reason)
+				}
+				c.finish(false)
+				if c.state.PendingBackend == nil {
+					failure := c.state.History[len(c.state.History)-1]
+					c.state.Failure = &failure
+				}
+				return c.save(ctx)
+			}
+		}
+		if c.state.PendingBackend != nil {
 			c.finish(interrupted)
 			return c.save(ctx)
 		}
 		if a.InputID != "" {
-			if c.state.Review != nil && c.state.Review.Phase == "running" && c.state.Review.RequestID == a.InputID {
-				c.state.Review.Phase = "completed"
-				c.state.Review.Outcome = outcome
-				c.reviewContinuation(outcome)
-			}
 			a.InputID = ""
 			a.TurnID = ""
 			a.Prompt = ""

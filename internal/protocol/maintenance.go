@@ -34,6 +34,7 @@ type MaintenancePredecessor struct {
 }
 
 type MaintenanceSession struct {
+	Outcome            string                  `json:"outcome,omitempty"`
 	SandboxPolicy      map[string]any          `json:"sandbox_policy,omitempty"`
 	InputReasons       []string                `json:"input_reasons,omitempty"`
 	InterruptRequested bool                    `json:"interrupt_requested,omitempty"`
@@ -51,6 +52,7 @@ type MaintenanceSession struct {
 }
 
 type MaintenanceStatus struct {
+	Failure        *MaintenanceSession     `json:"failure,omitempty"`
 	Review         *MaintenanceReview      `json:"review,omitempty"`
 	NativeError    string                  `json:"native_error,omitempty"`
 	OpenCases      int                     `json:"open_cases"`

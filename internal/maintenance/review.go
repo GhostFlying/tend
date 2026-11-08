@@ -37,6 +37,7 @@ func (c *Controller) startReview(ctx context.Context) error {
 		return c.save(ctx)
 	}
 	a.InputID = review.RequestID
+	a.InputReasons = []string{"independent review requested"}
 	a.Phase = "review-sending"
 	review.Phase = "running"
 	c.state.Pending = slices.DeleteFunc(c.state.Pending, func(reason string) bool { return reason == "independent review requested" })
