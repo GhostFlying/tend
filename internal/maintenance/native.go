@@ -225,12 +225,15 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 			return NativeState{}, err
 		}
 	}
-	if !unstarted && (mode == ReadFullHistory || mode == ReadWhenIdle && result.Thread.Status.Type == "idle") {
+	// Native provider failures leave a quiescent systemError thread. Its failed
+	// turn still needs identity-bound reconciliation before any new work.
+	quiescent := result.Thread.Status.Type == "idle" || result.Thread.Status.Type == "systemError"
+	if !unstarted && (mode == ReadFullHistory || mode == ReadWhenIdle && quiescent) {
 		if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": true}, &result); err != nil {
 			return NativeState{}, err
 		}
 	}
-	s := NativeState{Busy: result.Thread.Status.Type != "idle"}
+	s := NativeState{Busy: result.Thread.Status.Type != "idle" && result.Thread.Status.Type != "systemError"}
 	for _, t := range result.Thread.Turns {
 		turn := NativeTurn{ID: t.ID, Status: t.Status}
 		for _, item := range t.Items {
