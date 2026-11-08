@@ -349,7 +349,7 @@ const server = createServer(async (req, res) => {
     });
   }
   if (p === "/api/v1/conversation/handoff")
-    return json({ enabled: false, revision: 1, idle_minutes: 30 });
+    return json({ enabled: true, mode: "index", revision: 1 });
   if (p === "/api/v1/conversation/transcript")
     return json({
       blocks: [
