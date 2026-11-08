@@ -25,3 +25,7 @@ runner、updater、CLI 与同源 Web。增加发布集清单，绑定源码与�
 覆盖服务 PID 保持、每阶段中断、锁冲突、PID 复用、共享文件与丢失回执。
 保留历史清单/journal 与 N/N−1；聚焦验证、最终 make check、独立 review、
 required CI 和最新 main rebase 后经 PR 合入。发布不等于生产部署。
+
+### R1 首次 main 发布验证修正
+
+首次 main 构建与聚合检查成功，但发布查询使用了 GraphQL Release 不支持的 targetCommitish。改用实际 schema 的 tagCommit.oid 核对已固定标签，并让发布恢复 fixture 校验查询字段；原源码身份、draft 与资产完整性规则保持。

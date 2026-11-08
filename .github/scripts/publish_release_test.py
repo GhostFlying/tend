@@ -67,7 +67,7 @@ class PublishTest(unittest.TestCase):
                 remote[next(iter(remote))] = b"different bytes"
             if first:
                 remote = {}
-            release = {"isDraft": draft, "targetCommitish": commit, "releaseAssets": {"nodes": [{"name": name} for name in remote]}}
+            release = {"isDraft": draft, "tagCommit": {"oid": commit}, "releaseAssets": {"nodes": [{"name": name} for name in remote]}}
             mutations = []
             created = not first
             tag_created = not first
@@ -76,6 +76,9 @@ class PublishTest(unittest.TestCase):
                 nonlocal created, tag_created
                 if args[0] == "api":
                     if args[1] == "graphql":
+                        query = next(value for value in args if value.startswith("query="))
+                        self.assertNotIn("targetCommitish", query)
+                        self.assertIn("tagCommit { oid }", query)
                         return json.dumps({"data": {"repository": {"release": release if created else None}}})
                     if args[1].endswith("/git/refs"):
                         tag_created = True
