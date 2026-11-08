@@ -197,9 +197,8 @@ func testSelfUpdateSystemd(t *testing.T, intervening bool) {
 		if observed.Process.SHA256 != candidate.SHA256 || observed.SupervisedProcess != i.child || observed.Receipt.RetainedProcess != i.child || observed.Receipt.Previous != i.plan.Updater || observed.Receipt.Installed != observed.Process {
 			t.Fatal("shared path substituted per-instance process proof", observed)
 		}
-		owner, known := flockOwner(i.plan.LockDevice, i.plan.LockInode)
-		if !known || owner != observed.Process.PID {
-			t.Fatal("new updater did not own original lock", owner, known)
+		if !selfOwnsFlock(ctx, observed.Process, i.plan.LockDevice, i.plan.LockInode) {
+			t.Fatal("new updater did not own original lock", observed.Process)
 		}
 		if e = selfChild(ctx, i.plan); e != nil {
 			t.Fatal("service identity changed during bootstrap", e)
@@ -262,9 +261,8 @@ func testSelfUpdateSystemd(t *testing.T, intervening bool) {
 		if adopted.Process == previous.Observation.Process || adopted.Process.SHA256 != nextArtifact.SHA256 || adopted.SupervisedProcess != i.child || adopted.Receipt.Previous != previous.Observation.Process {
 			t.Fatal("automatic handoff skipped actual process replacement", adopted)
 		}
-		owner, known := flockOwner(i.plan.LockDevice, i.plan.LockInode)
-		if !known || owner != adopted.Process.PID {
-			t.Fatal("automatic handoff lost original lock", owner, known)
+		if !selfOwnsFlock(ctx, adopted.Process, i.plan.LockDevice, i.plan.LockInode) {
+			t.Fatal("automatic handoff lost original lock", adopted.Process)
 		}
 		t.Logf("%s automatic installer replaced its own process, retained child and original lock; shared-file proof is per instance", i.cfg.Role)
 	}
