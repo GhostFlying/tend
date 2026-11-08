@@ -235,7 +235,13 @@ func (m *Manager) nativeUsageLoop(ctx context.Context, wake <-chan struct{}) {
 		if active && (delay == 0 || delay > 2*time.Second) {
 			delay = 2 * time.Second
 		}
-		if remaining := until.Sub(m.cfg.Now()); remaining > 0 && (delay == 0 || remaining < delay) {
+		remaining := until.Sub(m.cfg.Now())
+		// A scan can itself cross the deadline. Run the now-due final scan
+		// before parking; only a completed due pass may discharge it.
+		if !until.IsZero() && remaining <= 0 && delay == 0 {
+			continue
+		}
+		if remaining > 0 && (delay == 0 || remaining < delay) {
 			delay = remaining
 		}
 		if !nativeusage.Wait(ctx, wake, delay) {

@@ -26,7 +26,7 @@ func (t usageHistoryThread) UsageSource() nativeusage.Source { return t.source }
 
 func TestUsageIdleReadSleepsAndResumesWithoutRewritingCursor(t *testing.T) {
 	clock := testkit.NewClock()
-	s, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	s, err := mainFixtureTemplate.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestUsageIdleReadSleepsAndResumesWithoutRewritingCursor(t *testing.T) {
 func idleUsageManager(t *testing.T) (*Manager, *app.App, *store.Store, *testkit.Clock, string) {
 	t.Helper()
 	clock := testkit.NewClock()
-	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	db, err := mainFixtureTemplate.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,5 +184,55 @@ func TestBufferedCompletionWakePreservesSettlingDeadline(t *testing.T) {
 		}
 		cancel()
 		<-done
+	})
+}
+
+func TestSlowReadCrossingSettlingDeadlineStillDrainsLateChild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, _, db, _, path := idleUsageManager(t)
+		m.cfg.Now = time.Now
+		wake := make(chan struct{}, 1)
+		m.usageWake = wake
+		m.wakeNativeUsage()
+		<-wake
+		indexed, release := make(chan struct{}), make(chan struct{})
+		calls := 0
+		// Stall the post-discovery clock read, so the files were indexed before
+		// the late child appears and the scan returns after the settling deadline.
+		m.cfg.Now = func() time.Time {
+			calls++
+			if calls == 4 {
+				close(indexed)
+				<-release
+			}
+			return time.Now()
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); m.nativeUsageLoop(ctx, wake) }()
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+			cancel()
+			<-done
+		}()
+		<-indexed
+		time.Sleep(100 * time.Millisecond)
+		child := `{"type":"session_meta","payload":{"id":"late-child","session_id":"root"}}` + "\n" + `{"type":"token_usage_record","ordinal":1,"payload":{"thread_id":"late-child","session_id":"root","turn_id":"turn","response_id":"late-response","usage":{"total_tokens":12}}}` + "\n"
+		if err := os.WriteFile(filepath.Join(filepath.Dir(path), "late-child.jsonl"), []byte(child), 0600); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(3 * time.Second)
+		close(release)
+		synctest.Wait()
+		var count int
+		if err := db.Read(t.Context(), func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage_facts`).Scan(&count)
+		}); err != nil || count != 1 {
+			t.Fatal("slow scan discharged an unperformed final read", count, err)
+		}
 	})
 }
