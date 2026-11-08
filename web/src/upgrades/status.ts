@@ -6,6 +6,7 @@ export const batchStatuses: Record<string, string> = {
 };
 export const batchPhases: Record<string, string> = {
   preflight: "发布预检查",
+  server_updater: "更新服务监督器",
   server_draining: "等待主会话结束",
   server_ready: "服务准备切换",
   server_checking: "服务健康确认",
@@ -20,6 +21,8 @@ export const hostPhases: Record<string, string> = {
   installing: "安装中",
   checking: "健康确认",
   restored: "已恢复接单",
+  updater_only_restored: "更新器已确认，等待恢复接单",
+  verified: "已核对更新器和服务",
   rolled_back: "已回退旧版本",
   skipped: "已跳过",
 };

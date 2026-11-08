@@ -7,6 +7,7 @@ import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { batchPhases, batchStatuses, hostPhases } from "./status.ts";
+import { UpdaterEvidence } from "./UpdaterEvidence.tsx";
 import styles from "./Upgrade.module.css";
 
 export function UpgradeDetails({
@@ -25,6 +26,7 @@ export function UpgradeDetails({
   const [readError, setReadError] = useState(false);
   const [retry, setRetry] = useState(0);
   const upgrade = matching ?? (history?.upgrade_id === id ? history : null);
+  const supervisorFirst = upgrade?.phase === "server_updater" || !!upgrade?.server_updater;
   if (matching && history !== matching) setHistory(matching);
   useEffect(() => {
     if (matching) return;
@@ -83,6 +85,7 @@ export function UpgradeDetails({
             {batchStatuses[upgrade.status] ?? upgrade.status}
           </p>
           <p>{batchPhases[upgrade.phase] ?? upgrade.phase}</p>
+          {supervisorFirst && <UpdaterEvidence observation={upgrade.server_updater} />}
           <p className={styles.note}>最后更新：{new Date(upgrade.updated_at).toLocaleString()}</p>
           {upgrade.reason && <p className={styles.reason}>{upgrade.reason}</p>}
           <ol className={styles.hosts}>
@@ -112,6 +115,7 @@ export function UpgradeDetails({
                     </>
                   )}
                 </dl>
+                {supervisorFirst && <UpdaterEvidence observation={host.updater} />}
                 {host.reason && <p className={styles.reason}>{host.reason}</p>}
               </li>
             ))}

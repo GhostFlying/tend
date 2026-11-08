@@ -134,10 +134,36 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if view.Reason != "" {
 		fmt.Fprintln(e.Stdout, view.Reason)
 	}
+	supervisorFirst := view.Phase == "server_updater" || view.ServerUpdater != nil
+	if supervisorFirst {
+		writeUpdaterObservation(e.Stdout, "server", view.ServerUpdater)
+	}
 	for _, h := range view.Hosts {
 		fmt.Fprintf(e.Stdout, "  %s: %s / %s; remaining runs %d\n", h.HostID, h.Status, h.Phase, h.RemainingRuns)
+		if supervisorFirst {
+			writeUpdaterObservation(e.Stdout, h.HostID, h.Updater)
+		}
 	}
 	return nil
+}
+
+func writeUpdaterObservation(out io.Writer, instance string, o *protocol.UpdaterSelfObservation) {
+	if o == nil {
+		fmt.Fprintf(out, "  %s updater: awaiting this batch's handoff proof\n", instance)
+		return
+	}
+	if o.Rejection != nil {
+		fmt.Fprintf(out, "  %s updater: preparation rejected before dispatch; request %s; set %s\n", instance, o.Rejection.RequestID, o.Rejection.ReleaseSetSHA256)
+		return
+	}
+	status := "handoff unconfirmed"
+	if o.Receipt != nil {
+		status = "handoff verified"
+	}
+	fmt.Fprintf(out, "  %s updater: %s; last observed PID %d start %d SHA-256 %s; service PID %d SHA-256 %s\n", instance, status, o.Process.PID, o.Process.StartTicks, o.Process.SHA256, o.SupervisedProcess.PID, o.SupervisedProcess.SHA256)
+	if o.Receipt != nil {
+		fmt.Fprintf(out, "    request %s; set %s; retained service PID %d start %d\n", o.Receipt.RequestID, o.Receipt.ReleaseSetSHA256, o.Receipt.RetainedProcess.PID, o.Receipt.RetainedProcess.StartTicks)
+	}
 }
 func localUpgradeRequest(ctx context.Context, socket, method, path string, input, out any) error {
 	var body io.Reader
