@@ -60,7 +60,10 @@ func TestSelfUpdateJournalRejectsUnsafeLock(t *testing.T) {
 	if err := os.WriteFile(target, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, filepath.Join(cfg.StateDir, "self-journal.lock")); err != nil {
+	if err := ensureSelfJournalDirectory(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(filepath.Dir(selfPath(cfg)), "journal.lock")); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := selfEngineFixture()

@@ -216,7 +216,7 @@ D152 的后续交付执行使用 `tend upgrade start --delivery-task "$DELIVERY_
 本轮源码实现不自动部署。首次接入旧节点时，使用新包中的独立 updater installer；
 它直接核验 systemd user manager、固定配置、旧进程、监督锁和原服务，不依赖旧 RPC。
 旧二进制必须有绑定实际 SHA-256 的 private `UpdaterExitEvidence`，其 exit_policy 为
-`retains-managed-child`，并包含来源、review 依据和固定有效期。KillMode=process
+`retains-managed-child`，state_write_policy 为 `atomic-intent-before-effects`，并包含来源、review 依据和固定有效期。KillMode=process
 不能替代这份旧实现的退出行为证据。正常新 updater 的同一锁持有者可以提供对应能力。
 
 先准备 private JSON seed，request 包含 target.request_id、target.expires_at_millis、
@@ -249,3 +249,5 @@ server/runner 能力接入仍须按部署计划逐台完成；旧服务不会因
 显式单主机配置维护保留原目标范围：在 format 2 下先确认本机监督器，再对目标 runner 的监督器和配置执行原维护流程；没有选中的主机保持 skipped，不要求或派发本批次的新安装证明。普通完整版本升级仍覆盖全部活跃目标主机。已完成普通交接的历史记录不会替代后来独立维护的启动授权，新维护由其原有 adopter 验证。
 
 监督器准备明确失败且 installer 尚未派发时，按原请求持久保存 rejection 证明。`self-update status --plan <original-plan>` 可在响应丢失或重启后恢复该证明；业务批次取得证明后可取消并另开批次。无法确认派发结果仍是 unknown，不由超时或缺少 journal 推导拒绝。
+
+legacy bootstrap 仅在可验证的非特权原子状态 writer 上使用目录写围栏；直接业务数据文件不能与 updater 状态文件共用该目录。交接日志位于私有 `self-update` 子目录。旧 writer 停止且原监督锁已取得后恢复原权限；停止未知时保留围栏与原计划供对账，不通过恢复写权限冒充完成。

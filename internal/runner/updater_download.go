@@ -21,6 +21,8 @@ import (
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
+var errUpdaterAdmissionPending = errors.New("runner: awaiting updater dispatch admission")
+
 func (r *Runner) maybeUpgrade(ctx context.Context) {
 	if r.cfg.UpdaterControlSocket == "" || r.cfg.UpdaterSocket == "" || r.cfg.UpdaterBundleDir == "" || !r.updaterMu.TryLock() {
 		return
@@ -36,9 +38,19 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 		r.updaterMu.Unlock()
 		return
 	}
+	r.mu.Lock()
+	waiting := r.upgradePhase == "updater_ready" && control.Upgrade.Updater != nil && !control.Upgrade.Updater.Authorized
+	r.mu.Unlock()
+	if waiting {
+		r.updaterMu.Unlock()
+		return
+	}
 	r.wg.Go(func() {
 		defer r.updaterMu.Unlock()
 		if err := r.downloadAndSubmit(ctx, control); err != nil {
+			if errors.Is(err, errUpdaterAdmissionPending) {
+				return
+			}
 			r.updateUpgradeAttempt(control, func() {
 				r.upgradePhase = "download_failed"
 				r.upgradeError = "release download or updater confirmation failed"
@@ -80,6 +92,12 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 		if bundle.Set != nil && bundle.Set.Format >= 2 {
 			if target.Updater == nil || target.ReleaseSet == nil {
 				return errors.New("runner: complete upgrade requires supervisor-first selection")
+			}
+			if !target.Updater.Authorized {
+				if !r.updateUpgradeAttempt(control, func() { r.upgradePhase = "updater_ready"; r.upgradeError = "" }) {
+					return errors.New("upgrade attempt changed")
+				}
+				return errUpdaterAdmissionPending
 			}
 			r.updateUpgradeAttempt(control, func() { r.upgradePhase = "updater_handoff" })
 			observation, selfErr := updater.EnsureSelfUpdate(ctx, r.cfg.UpdaterControlSocket, updater.SelfUpdateRequest{Target: *target.Updater, UpgradeID: control.UpgradeID, Release: dir, ReleaseSetSHA256: target.ReleaseSet.SHA256})

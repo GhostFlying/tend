@@ -1911,6 +1911,7 @@ export interface ReleaseSetTarget {
  * via the `definition` "UpdaterSelfTarget".
  */
 export interface UpdaterSelfTarget {
+  authorized?: boolean;
   expires_at_millis: number;
   request_id: string;
 }

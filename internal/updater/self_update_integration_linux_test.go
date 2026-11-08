@@ -21,6 +21,14 @@ import (
 // This opt-in fixture creates only its own units and children. It never targets
 // an installed Tend service. Default unit tests do not access systemd.
 func TestSelfUpdateSystemdRetainsServiceAndAdoptsSharedBinary(t *testing.T) {
+	testSelfUpdateSystemd(t, false)
+}
+
+func TestSelfUpdateSystemdRejectsInterveningServiceOperation(t *testing.T) {
+	testSelfUpdateSystemd(t, true)
+}
+
+func testSelfUpdateSystemd(t *testing.T, intervening bool) {
 	if os.Getenv("TEND_TEST_SELF_SYSTEMD") != "1" {
 		t.Skip("opt-in: isolated systemd user fixture and clean built release required")
 	}
@@ -117,7 +125,7 @@ func TestSelfUpdateSystemdRetainsServiceAndAdoptsSharedBinary(t *testing.T) {
 			return e == nil && i.child.PID > 1
 		})
 		evidence := filepath.Join(root, role+"-exit.json")
-		if err = writeJSON(evidence, UpdaterExitEvidence{OperatorUID: os.Getuid(), ArtifactSHA256: oldSHA, Source: "testdata/self-supervisor", ReviewArtifact: "fixture source child-retention assertion", ExitPolicy: "retains-managed-child", ExpiresAtMillis: time.Now().Add(2 * time.Minute).UnixMilli()}); err != nil {
+		if err = writeJSON(evidence, UpdaterExitEvidence{OperatorUID: os.Getuid(), ArtifactSHA256: oldSHA, Source: "testdata/self-supervisor", ReviewArtifact: "fixture source child-retention assertion", StateWritePolicy: "atomic-intent-before-effects", ExitPolicy: "retains-managed-child", ExpiresAtMillis: time.Now().Add(2 * time.Minute).UnixMilli()}); err != nil {
 			t.Fatal(err)
 		}
 		requestID := "req_01M6F01JSS6Q9BFV6DJNSSBHEW"
@@ -128,6 +136,45 @@ func TestSelfUpdateSystemdRetainsServiceAndAdoptsSharedBinary(t *testing.T) {
 		if err != nil {
 			t.Fatal("prepare legacy bootstrap", err)
 		}
+	}
+	if intervening {
+		i := instances[0]
+		busy := filepath.Join(root, "busy-service")
+		if err := os.Mkdir(busy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, artifact := range bundle.Manifest.Artifacts {
+			if err := copyAtomic(filepath.Join(bundle.Dir, artifact.Path), filepath.Join(busy, artifact.Path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := copyAtomic(filepath.Join(bundle.Dir, "manifest.json"), filepath.Join(busy, "manifest.json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		staged, err := Call(ctx, i.cfg, "upgrade", ControlRequest{ID: "intervening-upgrade", Release: busy})
+		if err != nil || staged.Operation == nil || staged.Operation.Phase != "staged" {
+			t.Fatal("stage intervening service operation", staged, err)
+		}
+		if _, err := ApplySelfUpdate(ctx, i.cfg, i.plan); err == nil {
+			t.Fatal("bootstrap accepted the intervening service operation")
+		}
+		manager, _, err := managerSnapshot(ctx, i.unit)
+		if err != nil || manager["ActiveState"] != "active" {
+			t.Fatal("rejection stopped the original supervisor", manager, err)
+		}
+		journal, err := SelfUpdateJournalStatus(i.cfg)
+		if err != nil || journal.Phase != "rejected" {
+			t.Fatal("pre-stop rejection was not durable", journal, err)
+		}
+		if err := selfChild(ctx, i.plan); err != nil {
+			t.Fatal("rejection changed the service identity", err)
+		}
+		info, err := os.Stat(i.cfg.StateDir)
+		if err != nil || info.Mode().Perm() != os.FileMode(i.plan.StateDirectoryMode).Perm() {
+			t.Fatal("rejection did not restore original directory permissions", info, err)
+		}
+		t.Log("intervening operation rejected before stop; original supervisor and service retained, write fence restored")
+		return
 	}
 	for _, i := range instances {
 		planPath := filepath.Join(root, i.cfg.Role+"-plan.json")

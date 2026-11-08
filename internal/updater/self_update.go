@@ -21,21 +21,24 @@ type SelfUpdateRequest struct {
 }
 
 type SelfUpdatePlan struct {
-	HandoffSHA256       string            `json:"handoff_sha256,omitempty"`
-	CommittedHeadSHA256 string            `json:"committed_head_sha256,omitempty"`
-	Request             SelfUpdateRequest `json:"request"`
-	Unit                string            `json:"unit"`
-	UnitSHA256          string            `json:"unit_sha256"`
-	ManagerSHA256       string            `json:"manager_sha256"`
-	Updater             Identity          `json:"updater"`
-	UpdaterBinary       string            `json:"updater_binary"`
-	Child               Identity          `json:"child"`
-	ConfigFile          string            `json:"config_file"`
-	ConfigSHA256        string            `json:"config_sha256"`
-	Candidate           string            `json:"candidate"`
-	CandidateSHA256     string            `json:"candidate_sha256"`
-	LockDevice          uint64            `json:"lock_device"`
-	LockInode           uint64            `json:"lock_inode"`
+	StateDirectoryDevice uint64            `json:"state_directory_device,omitempty"`
+	StateDirectoryInode  uint64            `json:"state_directory_inode,omitempty"`
+	StateDirectoryMode   uint32            `json:"state_directory_mode,omitempty"`
+	HandoffSHA256        string            `json:"handoff_sha256,omitempty"`
+	CommittedHeadSHA256  string            `json:"committed_head_sha256,omitempty"`
+	Request              SelfUpdateRequest `json:"request"`
+	Unit                 string            `json:"unit"`
+	UnitSHA256           string            `json:"unit_sha256"`
+	ManagerSHA256        string            `json:"manager_sha256"`
+	Updater              Identity          `json:"updater"`
+	UpdaterBinary        string            `json:"updater_binary"`
+	Child                Identity          `json:"child"`
+	ConfigFile           string            `json:"config_file"`
+	ConfigSHA256         string            `json:"config_sha256"`
+	Candidate            string            `json:"candidate"`
+	CandidateSHA256      string            `json:"candidate_sha256"`
+	LockDevice           uint64            `json:"lock_device"`
+	LockInode            uint64            `json:"lock_inode"`
 	// Standalone bootstrap cannot assert modern shutdown behavior. It supplies
 	// reviewed evidence bound to the actual old artifact instead.
 	PreparedBy         Identity `json:"prepared_by"`
@@ -60,10 +63,16 @@ type SelfUpdateStatus struct {
 	Error       string                          `json:"error,omitempty"`
 }
 
-func selfPath(cfg Config) string { return filepath.Join(cfg.StateDir, "self-update.json") }
+func selfPath(cfg Config) string { return filepath.Join(cfg.StateDir, "self-update", "journal.json") }
+
+// SelfUpdateJournalPath names the private journal shared with the installer.
+func SelfUpdateJournalPath(cfg Config) string { return selfPath(cfg) }
 func readSelf(cfg Config) (SelfUpdateJournal, error) {
 	var j SelfUpdateJournal
 	raw, err := privateFile(selfPath(cfg))
+	if missingSelf(err) {
+		raw, err = privateFile(filepath.Join(cfg.StateDir, "self-update.json"))
+	}
 	if err != nil {
 		return j, err
 	}
@@ -171,7 +180,11 @@ func advanceSelf(ctx context.Context, j *SelfUpdateJournal, save func() error, a
 	return nil
 }
 func archiveSelf(cfg Config, j SelfUpdateJournal) error {
-	if j.Phase != "verified" || j.Receipt == nil {
+	terminal, err := terminalSelf(cfg, j)
+	if err != nil {
+		return err
+	}
+	if !terminal {
 		return ErrUnknown
 	}
 	path := filepath.Join(cfg.StateDir, "self-update-"+bytesDigest([]byte(j.Plan.Request.Target.RequestID))+".json")

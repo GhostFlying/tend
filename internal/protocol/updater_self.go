@@ -5,6 +5,7 @@ package protocol
 const CapabilityUpdaterSelfUpdate = "updater-self-update-v1"
 
 type UpdaterSelfTarget struct {
+	Authorized      bool   `json:"authorized,omitempty"`
 	RequestID       string `json:"request_id"`
 	ExpiresAtMillis int64  `json:"expires_at_millis"`
 }
@@ -20,7 +21,7 @@ type UpdaterSelfReceipt struct {
 	CompletedAtMillis int64            `json:"completed_at_millis"`
 }
 
-// UpdaterSelfRejection proves preparation ended before any installer dispatch.
+// UpdaterSelfRejection proves preparation ended before any updater stop or replacement.
 // A lost or uncertain dispatch never produces this receipt.
 type UpdaterSelfRejection struct {
 	RequestID        string `json:"request_id"`

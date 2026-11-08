@@ -17589,6 +17589,9 @@
     "UpdaterSelfTarget": {
       "additionalProperties": false,
       "properties": {
+        "authorized": {
+          "type": "boolean"
+        },
         "expires_at_millis": {
           "type": "integer"
         },

@@ -1432,3 +1432,5 @@ D200 补充：已验证 updater 的 normal 确认间隔仍按原逐台规则等�
 D200 补充：准备阶段在任何 installer 派发之前确定失败，可写独立 immutable rejection 回执；按原请求查询恢复，不冒充成功安装或进程停止。获准但未知的派发仍待对账，持久拒绝才允许取消并另开批次。
 
 D200 补充：Web 与 CLI 分别展示监督器交接证明和服务升级阶段，区分缺证、拒绝与成功；历史观测不冒充当前实时进程。展示复用原 owner 事件流和查询，无新增刷新循环。
+
+D200 补充：runner 在完整包下载校验后通过原 heartbeat 报告 updater_ready，app 以新控制 revision 明确派发准入；没有准入不能调用自身更新。legacy 停止前以可恢复的 updater 状态写围栏和新鲜 service-operation 事实排除并发安装，交接 journal 独立子目录保持可写，业务数据不受该围栏影响。
