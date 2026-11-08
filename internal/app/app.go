@@ -129,6 +129,7 @@ type App struct {
 	notifier                   Notifier
 	usageWake                  chan struct{}
 	changes                    *Broadcast
+	scheduling                 *Broadcast
 	logs                       *Broadcast
 	leaseTTL                   time.Duration
 	waitPer                    float64
@@ -145,7 +146,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), logs: NewBroadcast()}
+	a := &App{agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), scheduling: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}
@@ -370,7 +371,11 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		a.notifier.Notify()
 	}
 	if applied {
-		a.notifyChange()
+		if projectionOnlyOperation(cmd.Operation()) && !queued {
+			a.changes.Notify()
+		} else {
+			a.notifyChange()
+		}
 	}
 	return op, nil
 }
@@ -608,4 +613,15 @@ func duplicateEffect(message string, details map[string]any) error {
 		pe.Details = b
 	}
 	return pe
+}
+
+// projectionOnlyOperation identifies high-frequency writes that carry no new
+// scheduling facts. An actual followup overrides this classification.
+func projectionOnlyOperation(operation string) bool {
+	switch operation {
+	case "conversation.record_agent_message", protocol.OpRunnerUsageRegister, protocol.OpRunnerUsageUpload:
+		return true
+	default:
+		return false
+	}
 }

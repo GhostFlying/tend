@@ -706,7 +706,7 @@ func (a *App) runConcurrency(ctx context.Context, log *slog.Logger, wait func(co
 	}
 	failedDelay := time.Duration(0)
 	for ctx.Err() == nil {
-		wake := a.Changes().Wait()
+		wake := a.SchedulingChanges().Wait()
 		if ticked != nil {
 			ticked()
 		}
@@ -722,15 +722,20 @@ func (a *App) runConcurrency(ctx context.Context, log *slog.Logger, wait func(co
 			failedDelay = 0
 		}
 		// Facts are applied by their own transactions. Coalesce notifications
-		// inside an active sampling interval without doing another database read.
-		due := a.now().Add(delay)
+		// within a sampling interval, including idle groups. Without a wake an
+		// idle group still has no periodic timer; actual earlier deadlines win.
+		interval := domain.ConcurrencySamplePeriod
+		if delay > 0 && delay < interval {
+			interval = delay
+		}
+		due := a.now().Add(interval)
 		remaining := delay
 		for {
 			if !wait(ctx, wake, remaining) {
 				return
 			}
-			wake = a.Changes().Wait()
-			if failedDelay > 0 || delay <= 0 || delay > domain.ConcurrencySamplePeriod || !a.now().Before(due) {
+			wake = a.SchedulingChanges().Wait()
+			if failedDelay > 0 || !a.now().Before(due) {
 				break
 			}
 			remaining = due.Sub(a.now())

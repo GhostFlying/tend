@@ -51,7 +51,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 		wait = waitBackground
 	}
 	for ctx.Err() == nil {
-		changed, finished := p.App.Changes().Wait(), completed.Wait()
+		changed, finished := p.App.SchedulingChanges().Wait(), completed.Wait()
 		scannedAt := p.App.BackgroundNow()
 		failed := false
 		if pending, err := p.App.ReceiptRecoveryStartupPending(ctx); err != nil || pending {
