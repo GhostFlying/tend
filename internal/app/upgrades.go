@@ -233,6 +233,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			ctl.Mode = protocol.RunnerMaintenance
 			ctl.UpgradeID = r.View.UpgradeID
 			ctl.ReleaseID = r.View.ReleaseID
+			ctl.Upgrade = nil
 			ctl.Authorization = nil
 			ctl.CancelledUpgradeID = ""
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, x.Now.UnixMilli()); err != nil {
@@ -652,6 +653,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			ctl.Revision++
 			ctl.Mode = protocol.RunnerMaintenance
 			ctl.UpgradeID = r.View.UpgradeID
+			ctl.Upgrade = nil
 			if ctl.CancelledUpgradeID != r.View.UpgradeID {
 				ctl.CancelledUpgradeID = ""
 			}

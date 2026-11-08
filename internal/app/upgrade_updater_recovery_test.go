@@ -78,3 +78,44 @@ func TestSelfUpdaterOnlyRenewsNextHostPhase(t *testing.T) {
 		t.Fatalf("first host finished in time but next host inherited its expired phase deadline: %+v", v)
 	}
 }
+
+func TestSelfCancelledBatchClearsCompletedObservationTarget(t *testing.T) {
+	h, c, o := selfUpdaterOnlyReady(t)
+	grantSelfRunner(t, h, "linux-1", o)
+	selfRuntimeProof(t, h, "linux-1", protocol.RunnerReady)
+	upgradeTick(h, o)
+	upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	upgradeAck(h, "linux-2", protocol.RunnerNormal)
+	upgradeTick(h, o)
+	upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	ctl := upgradeCtl(h, "linux-1")
+	if ctl.UpgradeID != "" || ctl.Upgrade == nil {
+		t.Fatal("fixture did not retain completed-host observation target", ctl)
+	}
+	v := upgradeRead(h).View
+	op := h.exec(owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: v.UpgradeID}, protocol.UpgradeControlPayload{Action: "cancel"}, rev(v.Revision)), ControlUpgrade{})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	if ctl = upgradeCtl(h, "linux-1"); ctl.Upgrade != nil {
+		t.Fatal("cancelled batch retained its completed supervisor target", ctl)
+	}
+	upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	upgradeAck(h, "linux-2", protocol.RunnerNormal)
+	if op := startTestUpgrade(h, "second-batch", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	row := upgradeRead(h)
+	o.Updater = selfUpgradeObservation(row, "server", o.ProcessInstanceID, o.BinarySHA256)
+	upgradeTick(h, o)
+	upgradeTick(h, o)
+	upgradeTick(h, o)
+	if ctl = upgradeCtl(h, "linux-1"); ctl.UpgradeID != row.View.UpgradeID || ctl.Upgrade != nil {
+		t.Fatal("new drain inherited an old batch's download target", ctl)
+	}
+	upgradeAck(h, "linux-1", protocol.RunnerReady)
+	upgradeTick(h, o)
+	if ctl = upgradeCtl(h, "linux-1"); ctl.Upgrade == nil || ctl.Upgrade.Updater.RequestID != row.StartRequestID {
+		t.Fatal("new batch did not select its own original request", ctl)
+	}
+}

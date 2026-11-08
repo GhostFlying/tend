@@ -379,6 +379,9 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 					// unchanged host while its local supervisor remains staged.
 					ctl.Revision++
 					ctl.CancelledUpgradeID = r.View.UpgradeID
+					if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil && ctl.Upgrade.Updater.RequestID == r.StartRequestID {
+						ctl.Upgrade = nil
+					}
 					if err := tx.PutHostControl(ctx, h.HostID, ctl, x.Now.UnixMilli()); err != nil {
 						return Outcome{}, err
 					}

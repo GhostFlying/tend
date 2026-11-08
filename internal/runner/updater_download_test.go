@@ -263,3 +263,36 @@ func TestNewMaintenanceAttemptClearsErrorsAndIgnoresOldDownloadFailure(t *testin
 		})
 	}
 }
+
+func TestRetainedSelfTargetRetryConsumesOldErrorAtControlAcknowledgment(t *testing.T) {
+	r := controlRunner(t)
+	c := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{Updater: &protocol.UpdaterSelfTarget{RequestID: "original-request", ExpiresAtMillis: r.cfg.Now().Add(time.Minute).UnixMilli(), Authorized: true}}}
+	if err := r.applyControl(t.Context(), &c, r.cfg.Now(), true); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.upgradePhase, r.upgradeError = "download_failed", "old failure"
+	r.mu.Unlock()
+	next := c
+	next.Revision++
+	if err := r.applyControl(t.Context(), &next, r.cfg.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	view, err := r.runtimeObservation(t.Context())
+	if err != nil || view.AppliedControlRevision != next.Revision || view.UpgradeError != "" || view.UpgradePhase != "" {
+		t.Fatal("retry acknowledgment replayed the previous error", view, err)
+	}
+	if r.control.Upgrade.Updater.RequestID != c.Upgrade.Updater.RequestID || r.control.Upgrade.Updater.ExpiresAtMillis != c.Upgrade.Updater.ExpiresAtMillis {
+		t.Fatal("retry replaced the original handoff identity", r.control)
+	}
+	if r.updateUpgradeAttempt(c, func() { r.upgradeError = "late old failure" }) {
+		t.Fatal("previous control revision poisoned retry")
+	}
+	if !r.updateUpgradeAttempt(next, func() { r.upgradeError = "new failure" }) {
+		t.Fatal("retry suppressed a new failure")
+	}
+	view, err = r.runtimeObservation(t.Context())
+	if err != nil || view.UpgradeError != "new failure" {
+		t.Fatal("new failure was hidden", view, err)
+	}
+}
