@@ -343,7 +343,9 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 		return fmt.Errorf("persist runner control: %w", err)
 	}
 	modeChanged := r.control.Mode != stored.Mode || r.control.UpgradeID != stored.UpgradeID
-	attemptChanged := modeChanged || next.Mode == protocol.RunnerMaintenance && next.Revision > r.control.Revision && next.Upgrade == nil
+	// Retained self-update targets keep their original request and journal.
+	// Their new control revision consumes the previous local error observation.
+	attemptChanged := modeChanged || next.Mode == protocol.RunnerMaintenance && next.Revision > r.control.Revision && (next.Upgrade == nil || next.Upgrade.Updater != nil)
 	cancelledBootstrap := next.Mode == protocol.RunnerNormal && next.UpgradeID == "" && r.control.UpgradeID == r.cfg.UpgradeID && r.cfg.UpgradeID != "" && next.Revision > r.control.Revision
 	releasedBootstrap := false
 	if q := r.boundedRecovery; q != nil && q.AdmissionRelease != nil && next.Mode == protocol.RunnerNormal {
