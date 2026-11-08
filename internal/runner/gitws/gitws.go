@@ -839,3 +839,11 @@ func (w *Workspaces) Finish(ctx context.Context, as protocol.Assignment) error {
 	}
 	return nil
 }
+
+// RunStateDirectory locates private metadata without preparing a workspace.
+func (w *Workspaces) RunStateDirectory(run string) (string, error) {
+	if run == "" || run == "." || run == ".." || filepath.IsAbs(run) || filepath.Base(run) != run {
+		return "", errors.New("invalid original run identity")
+	}
+	return filepath.Join(w.cfg.Home, "runs", run), nil
+}

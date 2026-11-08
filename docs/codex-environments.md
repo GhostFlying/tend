@@ -91,7 +91,7 @@ watch 使用用户 systemd 服务；enable/disable 管理它自己的 revision�
 
 用户服务保存启用时的工具 PATH，确保非交互进程也能找到本机 Codex 和 bubblewrap。`rollback` 设置 sync_held，避免下一轮自动同步立即撤销人工回退；显式 sync 或环境 update 解除该暂停。禁用 watch 保留环境和当前快照，即使 bubblewrap 已不可用也可以停止该服务。
 
-`latest` 表示已发布版本，`adoptions` 表示执行实际固定的版本，两者可能不同；pending_generation / pending_reason 说明保留 run 引用、等待空闲、启动失败或待对账等采用限制。worker 和 runner 托管 manager 在首次 run 启动时持久化引用，同一 run 的恢复沿用该引用；后续新 run 使用最新快照。首次启动前还在 run 自己的固定状态目录保存环境目录和 ID；之后更换或移除 runtime 映射不会重定向原执行。功能启用前已有的未隔离线程继续使用其原路径。本机长期主会话只在 delivery、turn、维护和未确定回执均已结束，且原生 thread 确认为 idle 后重建 app-server，恢复原 thread，不生成业务输入。新进程握手成功仍保留旧引用，原生 thread 加载成功后才确认采用；加载失败且确认关闭后记录被阻止的版本并恢复旧引用，退出不明时保留 unknown。工具 schema 升级继续使用既有隔离与索引交接流程。
+`latest` 表示已发布版本，`adoptions` 表示执行实际固定的版本，两者可能不同；pending_generation / pending_reason 说明保留 run 引用、等待空闲、启动失败或待对账等采用限制。worker 和 runner 托管 manager 在首次 run 启动时持久化引用，同一 run 的恢复沿用该引用；后续新 run 使用最新快照。首次启动前还在 run 自己的固定状态目录保存环境目录和 ID；之后更换或移除 runtime 映射不会重定向原执行。功能启用前已有的未隔离线程继续使用其原路径。问题回答产生的新 run 若继续原线程，则从前序 run 的本机状态继承环境身份，并保存自己的引用。本机长期主会话只在 delivery、turn、维护和未确定回执均已结束，且原生 thread 确认为 idle 后重建 app-server，恢复原 thread，不生成业务输入。新进程握手成功仍保留旧引用，原生 thread 加载成功后才确认采用；加载失败且确认关闭后记录被阻止的版本并恢复旧引用，退出不明时保留 unknown。工具 schema 升级继续使用既有隔离与索引交接流程。
 
 `AGENTS.md` 的 independent 模式读取运行 home 自己的文件；sync 模式从 `agents.source` 整文件单向同步，默认来源为 source home 的 AGENTS.md。两种模式都通过新快照采用，项目 AGENTS 保持正常规则。账号凭据不进入快照：运行 home 的 auth.json 显式链接 `auth_source`，默认指向 source home 的 auth.json；其他 connector 凭据需要独立配置。
 

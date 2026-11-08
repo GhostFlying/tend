@@ -102,3 +102,26 @@ func TestDisabledProfileCanRestoreDeletedEnvironment(t *testing.T) {
 		t.Fatal(restored, err)
 	}
 }
+
+func TestQuestionContinuationInheritsOriginalEnvironmentAcrossRuns(t *testing.T) {
+	previous, state := t.TempDir(), t.TempDir()
+	original := &Binding{Directory: t.TempDir(), ID: "original"}
+	if _, err := BindExecution(t.Context(), previous, "run:before", original, false); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := InheritExecution(t.Context(), state, "run:after", previous, "run:before")
+	if err != nil || restored == nil || *restored != *original {
+		t.Fatal(restored, err)
+	}
+	if err = os.RemoveAll(previous); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := InheritExecution(t.Context(), state, "run:after", previous, "run:before")
+	if err != nil || pinned == nil || *pinned != *original {
+		t.Fatal("continuation lost its own saved identity", pinned, err)
+	}
+	legacy, err := InheritExecution(t.Context(), t.TempDir(), "run:legacy-after", t.TempDir(), "run:legacy-before")
+	if err != nil || legacy != nil {
+		t.Fatal("legacy continuation acquired isolation", legacy, err)
+	}
+}
