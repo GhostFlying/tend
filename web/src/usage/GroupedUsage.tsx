@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useState, type CSSProperties } from "react";
 import type {
   TokenUsageTotals,
   TokenUsageView,
@@ -82,42 +82,25 @@ export function CompactTokens({ totals: t }: { totals: TokenUsageTotals }) {
   );
 }
 function useUsage(key: string | null, retry: number) {
-  const { client } = useServices();
-  const [result, setResult] = useState<{ key: string; data: TokenUsageView } | null>(null);
-  const [status, setStatus] = useState<{ key: string; failed: boolean; loading: boolean } | null>(
-    null,
-  );
-  const generation = useRef(0);
+  const { live } = useServices();
+  const [result, setResult] = useState<{
+    key: string;
+    value: TokenUsageView | null;
+    loading: boolean;
+    error?: string | undefined;
+  } | null>(null);
   useEffect(() => {
     if (key === null) return;
-    const abort = new AbortController();
-    const current = ++generation.current;
-    let timer: ReturnType<typeof setTimeout>;
-    const load = async () => {
-      setStatus((old) => ({ key, failed: old?.key === key && old.failed, loading: true }));
-      try {
-        const data = await client.get<TokenUsageView>(`/api/v1/token-usage?${key}`, abort.signal);
-        if (abort.signal.aborted || current !== generation.current) return;
-        setResult((old) =>
-          old?.key === key && old.data.revision > data.revision ? old : { key, data },
-        );
-        setStatus({ key, failed: false, loading: false });
-      } catch {
-        if (abort.signal.aborted || current !== generation.current) return;
-        setStatus({ key, failed: true, loading: false });
-      }
-      if (!abort.signal.aborted) timer = setTimeout(() => void load(), 10_000);
-    };
-    void load();
-    return () => {
-      abort.abort();
-      clearTimeout(timer);
-    };
-  }, [client, key, retry]);
+    return live.usage.watch(key, (state) => setResult({ key, ...state }));
+  }, [live, key]);
+  useEffect(() => {
+    if (key !== null && retry > 0) live.usage.refresh(key);
+  }, [live, key, retry]);
+  const current = result?.key === key ? result : null;
   return {
-    data: result?.key === key ? result.data : null,
-    failed: status?.key === key && status.failed,
-    loading: status?.key !== key || status.loading,
+    data: current?.value ?? null,
+    failed: !!current?.error,
+    loading: current?.loading ?? true,
   };
 }
 

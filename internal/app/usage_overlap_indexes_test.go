@@ -102,7 +102,7 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := New(db, nil, clock.Now).RefreshUsageProjection(ctx); err != nil {
+			if err := New(db, testkit.NewIDGen(clock, 83), clock.Now).RefreshUsageProjection(ctx); err != nil {
 				t.Fatal(err)
 			}
 			before := usageIndexView(t, db, clock.Now())

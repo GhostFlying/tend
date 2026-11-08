@@ -271,7 +271,7 @@ func TestUsageProjectionMigrationBackfillAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := New(db, nil, h.clock.Now)
+	a := New(db, h.ids, h.clock.Now)
 	if err := a.RecordTokenUsage(t.Context(), "main", s); err != nil {
 		t.Fatal(err)
 	}
