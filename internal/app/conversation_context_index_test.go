@@ -40,6 +40,9 @@ func TestConversationIndexPagesReferencesWithoutProseOrReviewWrites(t *testing.T
 				t.Fatal("unbounded original body", section)
 			}
 			for _, ref := range v.Items {
+				if section == "facts" && (ref.Seq <= 0 || ref.ConversationID != "main") {
+					t.Fatal("fact cannot locate its exact original", ref)
+				}
 				if seen[ref.ID] {
 					t.Fatal("repeated reference", ref.ID)
 				}
