@@ -14,45 +14,11 @@ import (
 )
 
 func materialIssueIDs(ctx context.Context, q store.Querier, issue string) ([]string, error) {
-	var out []string
-	for id := issue; id != ""; {
-		if slices.Contains(out, id) {
-			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "Issue ancestry contains a cycle")
-		}
-		out = append(out, id)
-		current, err := store.GetCanonicalIssue(ctx, q, id)
-		if errors.Is(err, store.ErrNotFound) {
-			if _, err := store.GetIssue(ctx, q, id); err != nil {
-				return nil, err
-			}
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		id = current.ParentIssueID
-	}
-	return out, nil
+	return views.MaterialIssueIDs(ctx, q, issue)
 }
 
 func selectMaterialIssue(ctx context.Context, q store.Querier, scope store.MaterialScope, id string) (store.MaterialScope, error) {
-	if id == "" || id == scope.IssueIDs[0] {
-		return scope, nil
-	}
-	item, err := store.GetIssue(ctx, q, id)
-	if err != nil {
-		return scope, errNotFound(err, "Issue does not exist")
-	}
-	if !slices.Contains(scope.IssueIDs, id) && (scope.Project == "" || scope.Project != item.Project) {
-		return scope, protocol.Errorf(protocol.CodeForbidden, "Issue is outside this context")
-	}
-	ids, err := materialIssueIDs(ctx, q, id)
-	if err != nil {
-		return scope, err
-	}
-	selected, err := views.MaterialScope(ctx, q, ids)
-	selected.ReaderIssueID, selected.Project = scope.ReaderIssueID, scope.Project
-	return selected, err
+	return views.SelectMaterialIssue(ctx, q, scope, id)
 }
 
 func runMaterialScope(ctx context.Context, q store.Querier, p protocol.Principal) (store.RunRow, store.MaterialScope, error) {

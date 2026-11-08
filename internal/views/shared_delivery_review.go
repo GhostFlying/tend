@@ -2,7 +2,6 @@ package views
 
 import (
 	"context"
-	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -54,25 +53,13 @@ func SharedDeliveryReviews(ctx context.Context, q store.Querier, issueID, delive
 		if len(scopes) > 0 {
 			scope = scopes[0]
 		} else {
-			scope, err = MaterialScope(ctx, q, []string{issueID})
+			ids, err := MaterialIssueIDs(ctx, q, issueID)
 			if err != nil {
 				return out, err
 			}
-		}
-		// Both ordinary materials and direct review reads use the same existing
-		// same-project context. A supplied reader scope must retain its explicit
-		// shares/revocations without hiding another linked Issue in that project.
-		scope.IssueIDs = append([]string(nil), scope.IssueIDs...)
-		for _, link := range r.Links {
-			if slices.Contains(scope.IssueIDs, link.IssueID) {
-				continue
-			}
-			linked, err := store.GetIssue(ctx, q, link.IssueID)
+			scope, err = MaterialScope(ctx, q, ids)
 			if err != nil {
 				return out, err
-			}
-			if scope.Project != "" && linked.Project == scope.Project {
-				scope.IssueIDs = append(scope.IssueIDs, link.IssueID)
 			}
 		}
 		evidence, err := SharedReviewExistingEvidence(ctx, q, r, scope)
