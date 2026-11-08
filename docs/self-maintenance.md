@@ -105,8 +105,26 @@ tend maintenance upgrade-apply --upgrade-id "$PLANNED_UPGRADE_ID" --json
 候选提交后再次被进程监督器重启时，使用原终态收据、提交证明和当前进程身份
 核对安装结果，不要求当前监督操作仍是原安装操作。
 
-业务 server 使用现有 `tend upgrade` 受控入口。普通 updater 自更新使用其独立工作
-提供的受支持交接接口（[PR #280](https://github.com/GhostFlying/tend/pull/280)）；
-其固定角色准入还需要覆盖 `maintainer`，并联合验证保留子进程、独占锁及收据。
-在该能力可用并验证之前，不用强制恢复或手动覆盖代替。
-升级顺序为 updater、业务服务、维护器，分别保留不可变产物和实际进程收据。
+业务 server 使用现有 `tend upgrade` 受控入口，完整发布自动按 updater → 服务顺序
+推进。维护器的固定 updater 使用同一个 D200 独立交接接口；角色准入包含
+`maintainer`，保留原维护器进程和原监督锁。普通业务发布集与独立维护组件分别加载。
+维护器 updater 的 seed 固定主发布目录、发布集 hash、原 request ID、有效期及
+本机 unit/config，格式见[普通 updater 交接](operations/controlled-upgrades.md)。
+
+```sh
+tend updater self-update plan --installer "$NEW_UPDATER" \
+  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$MAINTENANCE_UPDATER_CONFIG" \
+  --plan "$SELF_UPDATE_PLAN" --json
+tend updater self-update apply --installer "$NEW_UPDATER" \
+  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$MAINTENANCE_UPDATER_CONFIG" \
+  --plan "$SELF_UPDATE_PLAN" --json
+tend updater self-update status --installer "$NEW_UPDATER" \
+  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$MAINTENANCE_UPDATER_CONFIG" \
+  --plan "$SELF_UPDATE_PLAN" --json
+```
+
+只有原交接收据与实际新 updater、原服务及独占锁匹配后才继续维护组件更新。
+未知结果沿原请求读取状态；既有独立交接不会暂停 Tend 全局业务。先更新各自
+updater 和业务服务，维护组件最后更新；各步保留不可变产物和实际进程收据。
+启用新维护服务前先停止旧外挂调度，并确认旧维护会话已结束或完成明确中止交接，
+避免两套独立控制器并行；本批仍不启用生产单元。

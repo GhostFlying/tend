@@ -59,7 +59,7 @@ func selfPlanStatic(cfg Config, p SelfUpdatePlan, now time.Time, checkExpiry boo
 	if checkExpiry && now.UnixMilli() >= p.Request.Target.ExpiresAtMillis {
 		return errors.New("updater: self-update authority expired")
 	}
-	if cfg.Role != "server" && cfg.Role != "runner" || !filepath.IsAbs(p.ConfigFile) || !filepath.IsAbs(p.UpdaterBinary) || !strings.HasSuffix(p.Unit, ".service") || strings.ContainsAny(p.Unit, "/ \t\n") || strings.HasPrefix(p.Unit, "-") || !validIdentity(p.Child) || p.Updater.PID <= 1 || p.Updater.StartTicks == 0 || !release.ValidSHA(p.Updater.SHA256) || !release.ValidSHA(p.ConfigSHA256) || !release.ValidSHA(p.ManagerSHA256) || !release.ValidSHA(p.UnitSHA256) || p.LockInode == 0 || p.LockDevice == 0 {
+	if cfg.Role != "server" && cfg.Role != "runner" && cfg.Role != "maintainer" || !filepath.IsAbs(p.ConfigFile) || !filepath.IsAbs(p.UpdaterBinary) || !strings.HasSuffix(p.Unit, ".service") || strings.ContainsAny(p.Unit, "/ \t\n") || strings.HasPrefix(p.Unit, "-") || !validIdentity(p.Child) || p.Updater.PID <= 1 || p.Updater.StartTicks == 0 || !release.ValidSHA(p.Updater.SHA256) || !release.ValidSHA(p.ConfigSHA256) || !release.ValidSHA(p.ManagerSHA256) || !release.ValidSHA(p.UnitSHA256) || p.LockInode == 0 || p.LockDevice == 0 {
 		return errors.New("updater: incomplete self-update plan")
 	}
 	raw, err := privateFile(p.ConfigFile)
