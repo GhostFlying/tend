@@ -6471,6 +6471,89 @@
       "title": "IssueClosureKind",
       "type": "string"
     },
+    "IssueContextChange": {
+      "additionalProperties": false,
+      "properties": {
+        "attention": {
+          "$ref": "#/definitions/AttentionView"
+        },
+        "delivery": {
+          "$ref": "#/definitions/IssueContextDelivery"
+        },
+        "event_seq": {
+          "type": "integer"
+        },
+        "fact": {
+          "$ref": "#/definitions/IssueMaterialFact"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "observation": {
+          "$ref": "#/definitions/IssueDeliveryView"
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "review": {
+          "$ref": "#/definitions/IssueContextReviewRef"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/definitions/IssueContextSource"
+        },
+        "state": {
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/definitions/IssueTaskSummary"
+        },
+        "working": {
+          "$ref": "#/definitions/IssueContextWorking"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "IssueContextChange",
+      "type": "object"
+    },
+    "IssueContextDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate": {
+          "$ref": "#/definitions/IssueDeliveryCandidate"
+        },
+        "duty_id": {
+          "type": "string"
+        },
+        "execution_task_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "source_task_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "duty_id",
+        "revision",
+        "status"
+      ],
+      "title": "IssueContextDelivery",
+      "type": "object"
+    },
     "IssueContextFact": {
       "additionalProperties": false,
       "properties": {
@@ -6515,6 +6598,86 @@
         "needs_review"
       ],
       "title": "IssueContextFact",
+      "type": "object"
+    },
+    "IssueContextIncremental": {
+      "additionalProperties": false,
+      "properties": {
+        "content_id": {
+          "type": "string"
+        },
+        "context_revision": {
+          "type": "integer"
+        },
+        "from": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueContextChange"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "through": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "issue_id",
+        "context_revision",
+        "kind",
+        "from",
+        "through",
+        "items",
+        "more",
+        "next_cursor",
+        "content_id"
+      ],
+      "title": "IssueContextIncremental",
+      "type": "object"
+    },
+    "IssueContextQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "after_source": {
+          "type": "integer"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "title": "IssueContextQuery",
       "type": "object"
     },
     "IssueContextReview": {
@@ -6564,9 +6727,99 @@
       "title": "IssueContextReview",
       "type": "object"
     },
+    "IssueContextReviewRef": {
+      "additionalProperties": false,
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "review_id",
+        "revision",
+        "status"
+      ],
+      "title": "IssueContextReviewRef",
+      "type": "object"
+    },
+    "IssueContextSource": {
+      "additionalProperties": false,
+      "properties": {
+        "admitted": {
+          "type": "boolean"
+        },
+        "association_revision": {
+          "type": "integer"
+        },
+        "attachments": {
+          "items": {
+            "$ref": "#/definitions/ConversationAttachment"
+          },
+          "type": "array"
+        },
+        "author": {
+          "type": "string"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "disposition": {
+          "type": "string"
+        },
+        "images": {
+          "items": {
+            "$ref": "#/definitions/ConversationImage"
+          },
+          "type": "array"
+        },
+        "linked": {
+          "type": "boolean"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "needs_review": {
+          "type": "boolean"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/MessageState"
+        },
+        "withdrawn": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "needs_review",
+        "admitted",
+        "seq",
+        "author",
+        "content_revision",
+        "association_revision",
+        "linked",
+        "withdrawn"
+      ],
+      "title": "IssueContextSource",
+      "type": "object"
+    },
     "IssueContextView": {
       "additionalProperties": false,
       "properties": {
+        "applied_after": {
+          "type": "integer"
+        },
+        "content_id": {
+          "type": "string"
+        },
         "coordination_state": {
           "type": "string"
         },
@@ -6641,6 +6894,8 @@
         }
       },
       "required": [
+        "applied_after",
+        "content_id",
         "issue_id",
         "revision",
         "prepared",
@@ -6656,6 +6911,22 @@
         "more"
       ],
       "title": "IssueContextView",
+      "type": "object"
+    },
+    "IssueContextWorking": {
+      "additionalProperties": false,
+      "properties": {
+        "issue": {
+          "$ref": "#/definitions/Issue"
+        },
+        "progress": {
+          "$ref": "#/definitions/IssueProgress"
+        }
+      },
+      "required": [
+        "issue"
+      ],
+      "title": "IssueContextWorking",
       "type": "object"
     },
     "IssueControlPayload": {
@@ -8255,6 +8526,9 @@
         },
         "seq": {
           "type": "integer"
+        },
+        "shared_reviews": {
+          "$ref": "#/definitions/SharedDeliveryReviewPage"
         },
         "sources": {
           "items": {
@@ -14546,6 +14820,12 @@
     "SharedDeliveryReviewPage": {
       "additionalProperties": false,
       "properties": {
+        "existing_evidence": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewExistingEvidence"
+          },
+          "type": "array"
+        },
         "items": {
           "anyOf": [
             {
@@ -14705,6 +14985,87 @@
       "title": "SharedReviewBudgetAuthorization",
       "type": "object"
     },
+    "SharedReviewContributionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "availability": {
+          "type": "string"
+        },
+        "candidate_relation": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/ArtifactFile"
+          },
+          "type": "array"
+        },
+        "files_more": {
+          "type": "boolean"
+        },
+        "history_query": {
+          "$ref": "#/definitions/IssueMaterialsQuery"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "missing_structured_fields": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mounts": {
+          "items": {
+            "$ref": "#/definitions/ArtifactMount"
+          },
+          "type": "array"
+        },
+        "mounts_more": {
+          "type": "boolean"
+        },
+        "read_query": {
+          "$ref": "#/definitions/IssueMaterialsQuery"
+        },
+        "ref_sha256": {
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/definitions/SharedReviewReportReference"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "task_id",
+        "availability",
+        "candidate_relation",
+        "missing_structured_fields"
+      ],
+      "title": "SharedReviewContributionEvidence",
+      "type": "object"
+    },
     "SharedReviewCorrection": {
       "additionalProperties": false,
       "properties": {
@@ -14853,6 +15214,48 @@
       "title": "SharedReviewExecutionRequirements",
       "type": "object"
     },
+    "SharedReviewExistingEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "contributions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SharedReviewContributionEvidence"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contributions_more": {
+          "type": "boolean"
+        },
+        "contributor_count": {
+          "type": "integer"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "review_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "review_id",
+        "head_sha",
+        "base_sha",
+        "contributions",
+        "contributor_count"
+      ],
+      "title": "SharedReviewExistingEvidence",
+      "type": "object"
+    },
     "SharedReviewFinding": {
       "additionalProperties": false,
       "properties": {
@@ -14872,6 +15275,31 @@
         "body"
       ],
       "title": "SharedReviewFinding",
+      "type": "object"
+    },
+    "SharedReviewReportReference": {
+      "additionalProperties": false,
+      "properties": {
+        "body_bytes": {
+          "type": "integer"
+        },
+        "body_sha256": {
+          "type": "string"
+        },
+        "evidence_count": {
+          "type": "integer"
+        },
+        "uncertainty_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "body_bytes",
+        "body_sha256",
+        "evidence_count",
+        "uncertainty_count"
+      ],
+      "title": "SharedReviewReportReference",
       "type": "object"
     },
     "SharedReviewResult": {
@@ -18370,6 +18798,12 @@
     },
     "IssueBlocker": {
       "$ref": "#/definitions/IssueBlocker"
+    },
+    "IssueContextIncremental": {
+      "$ref": "#/definitions/IssueContextIncremental"
+    },
+    "IssueContextQuery": {
+      "$ref": "#/definitions/IssueContextQuery"
     },
     "IssueContextReview": {
       "$ref": "#/definitions/IssueContextReview"

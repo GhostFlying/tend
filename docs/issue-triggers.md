@@ -1,12 +1,16 @@
 # Issue 调度、Webhook 与诊断
 
-所有调度在 server 判定。Runner 领取交付查询、执行只读观察并上报；等待不占模型或执行 slot。Webhook 与定时触发均进入既有 Issue 的来源、后台批次和负责人消费路径，不扩大业务授权。
+所有调度在 server 判定。PR 与 CI 由显式配置的 server 观察服务统一读取并合并通知；旧 runner 查询的迟到事实按原身份保留（D185）。等待不占模型或执行 slot。Webhook 与定时触发均进入既有 Issue 的来源、后台批次和负责人消费路径，不扩大业务授权。
 
 ## CLI
 
 `tend issue` 默认显示未关闭 Issue 摘要；`issue show <id>` 先展示目标、当前评估、下一步与执行概况，`--json` 读取完整对象。创建、编辑、暂停、恢复、取消、关闭、重开、子项、依赖、负责人交接、任务合同、来源与完成核对继续使用现有命令。Issue 的选择与人类行动通过 `tend attention` 管理。
 
 `tend issue context <id> --after-source <sequence>`（托管工具 `issues_context_read`）读取本项已准入来源的更正义务、有效事实复核、本项原生执行的未决回执及冻结任务合同差异。`prepared` 如实表示历史 baseline 是否存在；canonical Issue 可以同时 `prepared=false`、`sync_status=synced`、`dispatch_ready=true`。`coordination_state` 按本项执行身份聚合，不能因全局处理回合同时接触其他 Issue 就将其消息分类或 recovering 状态归给本项。旧代次和 repair chain 的真实未决回执仍保留。
+
+日常 owner 协调使用 `tend issue context <id> --view incremental --limit 50 --json`：无游标返回当前快照，随后使用返回的 `next_cursor` 读取变化。`more=true` 时继续翻页，包括当前页为空的情况；区间完成后保留游标供下一次读取。每页默认 50 项，最多 100 项，事实、来源、Task、交付、review 和待决问题分别分页，不附带全部旧报告。`through` 固定事件范围，条目是读取时的当前版本；较新的变化仍进入后续区间，不能把它当作历史时点快照。范围或事件历史失效时重新取得无游标快照，原件通过 Issue 材料入口按需读取。正常工作保留同一会话，读取不等于来源审阅、授权或执行确认。Refs: D194。
+
+owner API 使用 `GET /api/v1/issues/{id}/context?view=incremental&limit=50`，后续追加 `cursor`；工具使用 `issues_context_read` 的同名字段。旧来源分页仍可用：CLI 的 `--after`、API/tool 的 `after` 数值字符串与 `after_source` 表达相同位置，同时提供时必须一致；增量模式只使用 `cursor`。旧响应通过 `applied_after`、`next`、`more` 与 `content_id` 说明实际页面，不能忽略返回位置反复请求同一页。
 
 `dispatch_ready` 与 `dispatch_blockers` 是上下文诊断，不是 `issues_create_task` / `tend issue create-task <id>` 的准入结果，也不证明 worker 已启动或资源可用。正式创建使用当前 Issue revision、assignment epoch、真实已准入 source 的 content revision 和完整任务合同，由服务器核对权限、责任与执行条件；不能只看这个投影就断言任务已被拒绝。不要为 canonical task 补造历史全局 baseline、结清其他 Issue 来源或重开已完成请求。原请求重试仍沿用同一 request ID、原版本与完全相同的输入；读取不消解任何账本义务。
 
@@ -16,6 +20,8 @@ tend issue show "$ISSUE_ID" --json
 tend issue activity "$ISSUE_ID"
 tend issue results "$ISSUE_ID"
 tend issue context "$ISSUE_ID"
+tend issue context "$ISSUE_ID" --view incremental --limit 50 --json
+tend issue context "$ISSUE_ID" --view incremental --cursor "$CONTEXT_CURSOR" --json
 tend issue schedules "$ISSUE_ID" --json
 tend issue events "$ISSUE_ID" --json
 tend issue webhooks "$ISSUE_ID" --json

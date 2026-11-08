@@ -156,6 +156,16 @@ func IssueMaterials(ctx context.Context, q store.Querier, scope store.MaterialSc
 		}
 		return out, nil
 	}
+	if out.Kind == "reviews" {
+		page, err := SharedDeliveryReviews(ctx, q, scope.IssueIDs[0], query.ID, query.After, query.Limit, scope)
+		if err != nil {
+			return out, err
+		}
+		out.SharedReviews = &page
+		out.More = page.More
+		out.Next = page.Next
+		return out, nil
+	}
 	if out.Kind == "deliveries" {
 		if query.ID != "" || query.After != "" {
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "delivery context does not take object selectors")

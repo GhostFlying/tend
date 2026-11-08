@@ -29,12 +29,18 @@ func reviewAppliedOwnerChoice(ctx context.Context, x *Exec, tx *store.Tx, d stor
 		return err
 	}
 	for _, item := range associations.Items {
-		if _, err := tx.Exec(ctx, `INSERT INTO work_item_context_facts(fact_id,work_item_id,scope,kind,body,source_message_id,attribution,created_at) VALUES(?,?,'work_item','authorization',?,?,'owner',?)`, x.IDs.New(protocol.Prefix("fact")), item.WorkItemID, string(body), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
+		factID := x.IDs.New(protocol.Prefix("fact"))
+		if _, err := tx.Exec(ctx, `INSERT INTO work_item_context_facts(fact_id,work_item_id,scope,kind,body,source_message_id,attribution,created_at) VALUES(?,?,'work_item','authorization',?,?,'owner',?)`, factID, item.WorkItemID, string(body), p.SourceMessageID, x.Now.UnixMilli()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE work_item_contexts SET revision=revision+1 WHERE work_item_id=?`, item.WorkItemID); err != nil {
 			return err
 		}
+		detail, _ := json.Marshal(map[string]any{"changed_fact_ids": []string{factID}, "changed_source_ids": []string{p.SourceMessageID}})
+		if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "work_item", ObjectID: item.WorkItemID, Kind: "work_item.context_changed", BodyJSON: string(detail), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+			return err
+		}
+
 	}
 	disposition := "unassigned"
 	if len(associations.Items) > 0 {

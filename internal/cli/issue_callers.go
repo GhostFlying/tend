@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -34,6 +35,9 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 	reason := fs.String("reason", "", "reason for changing this rule")
 	dry := fs.Bool("dry-run", false, "print the exact Envelope without sending")
 	after := fs.String("after", "", "followup cursor")
+	view := fs.String("view", "", "incremental for snapshot and event deltas; omitted preserves legacy sources")
+	cursor := fs.String("cursor", "", "opaque next_cursor from incremental context")
+	limit := fs.Int("limit", 0, "incremental page size, default 50, maximum 100")
 	afterSource := fs.Int64("after-source", 0, "source message sequence cursor")
 	afterRevision := fs.Int64("after-revision", 0, "history revision cursor")
 	afterOccurrence := fs.String("after-occurrence", "", "occurrence history cursor")
@@ -58,9 +62,35 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 	var value any
 	switch action {
 	case "context":
-		query.Set("after", strconv.FormatInt(*afterSource, 10))
+		if *view != "" {
+			query.Set("view", *view)
+		}
+		if *cursor != "" {
+			query.Set("cursor", *cursor)
+		}
+		if *limit != 0 {
+			query.Set("limit", strconv.Itoa(*limit))
+		}
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "limit" {
+				query.Set("limit", strconv.Itoa(*limit))
+			}
+			if f.Name == "after-source" {
+				query.Set("after_source", strconv.FormatInt(*afterSource, 10))
+			}
+			if f.Name == "after" {
+				query.Set("after", *after)
+			}
+		})
+		if _, err := protocol.ParseIssueContextQuery(query); err != nil {
+			return usagef("%s", err)
+		}
 		path = base + "/context"
-		value = &protocol.IssueContextView{}
+		if *view == "incremental" {
+			value = &protocol.IssueContextIncremental{}
+		} else {
+			value = &protocol.IssueContextView{}
+		}
 	case "followups":
 		query.Set("after", *after)
 		path = base + "/followups"

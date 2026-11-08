@@ -25,7 +25,7 @@ func CanonicalIssueContext(ctx context.Context, q store.Querier, id string, afte
 	if err != nil {
 		return out, err
 	}
-	out = protocol.IssueContextView{IssueID: id, Revision: v.Revision, Prepared: v.Prepared, Coverage: v.Coverage, Gaps: v.Gaps, DispatchReady: v.DispatchReady, CoordinationState: v.CoordinationState, DispatchBlockers: v.DispatchBlockers, SyncStatus: v.SyncStatus, Watermark: v.Watermark, Facts: []protocol.IssueContextFact{}, Sources: sources, More: v.More, Next: v.Next}
+	out = protocol.IssueContextView{AppliedAfter: after, IssueID: id, Revision: v.Revision, Prepared: v.Prepared, Coverage: v.Coverage, Gaps: v.Gaps, DispatchReady: v.DispatchReady, CoordinationState: v.CoordinationState, DispatchBlockers: v.DispatchBlockers, SyncStatus: v.SyncStatus, Watermark: v.Watermark, Facts: []protocol.IssueContextFact{}, Sources: sources, More: v.More, Next: v.Next}
 	if err := canonicalContextStatus(ctx, q, &out); err != nil {
 		return protocol.IssueContextView{}, err
 	}
@@ -36,6 +36,7 @@ func CanonicalIssueContext(ctx context.Context, q store.Querier, id string, afte
 		}
 		out.Facts = append(out.Facts, protocol.IssueContextFact{ID: f.ID, IssueID: f.WorkItemID, Scope: scope, Project: f.Project, Kind: f.Kind, Body: f.Body, SourceMessageID: f.SourceMessageID, Attribution: f.Attribution, Supersedes: f.Supersedes, NeedsReview: f.NeedsReview})
 	}
+	out.ContentID = contextDigest(out)
 	return out, nil
 }
 

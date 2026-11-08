@@ -12,11 +12,11 @@ import (
 
 func (s *Server) issueContext(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		after, err := intParam(r.URL.Query().Get("after"))
+		query, err := protocol.ParseIssueContextQuery(r.URL.Query())
 		if err != nil {
-			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid source cursor")
+			return nil, err
 		}
-		return views.CanonicalIssueContext(r.Context(), q, r.PathValue("id"), after)
+		return views.ReadCanonicalIssueContext(r.Context(), q, r.PathValue("id"), query)
 	})
 }
 

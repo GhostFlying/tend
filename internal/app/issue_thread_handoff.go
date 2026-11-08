@@ -43,7 +43,7 @@ func (a *App) IssueThreadHandoffFacts(ctx context.Context, conversation, issue s
 			if err != nil {
 				return err
 			}
-			context, err := views.CanonicalIssueContext(ctx, q, current.IssueID, 0)
+			context, err := views.CanonicalIssueContextIncremental(ctx, q, current.IssueID, protocol.IssueContextQuery{View: "incremental"})
 			if err != nil {
 				return err
 			}

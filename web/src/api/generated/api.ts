@@ -324,6 +324,8 @@ export interface TendAPI {
   IssueAgentConversationPage?: IssueAgentConversationPage;
   IssueAssignmentPayload?: IssueAssignmentPayload;
   IssueBlocker?: IssueBlocker;
+  IssueContextIncremental?: IssueContextIncremental;
+  IssueContextQuery?: IssueContextQuery;
   IssueContextReview?: IssueContextReview;
   IssueContextView?: IssueContextView;
   IssueControlPayload?: IssueControlPayload;
@@ -3465,6 +3467,183 @@ export interface IssueBlocker {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextIncremental".
+ */
+export interface IssueContextIncremental {
+  content_id: string;
+  context_revision: number;
+  from: number;
+  issue_id: string;
+  items: IssueContextChange[] | null;
+  kind: string;
+  more: boolean;
+  next_cursor: string;
+  through: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextChange".
+ */
+export interface IssueContextChange {
+  attention?: AttentionView;
+  delivery?: IssueContextDelivery;
+  event_seq?: number;
+  fact?: IssueMaterialFact;
+  id: string;
+  kind: string;
+  observation?: IssueDeliveryView;
+  removed?: boolean;
+  review?: IssueContextReviewRef;
+  revision?: number;
+  source?: IssueContextSource;
+  state?: string;
+  task?: IssueTaskSummary;
+  working?: IssueContextWorking;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextDelivery".
+ */
+export interface IssueContextDelivery {
+  candidate?: IssueDeliveryCandidate;
+  duty_id: string;
+  execution_task_id?: string;
+  revision: number;
+  source_task_id?: string;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueMaterialFact".
+ */
+export interface IssueMaterialFact {
+  attribution: string;
+  body: string;
+  created_at: number;
+  fact_id: string;
+  issue_id?: string;
+  kind: string;
+  needs_review: boolean;
+  project?: string;
+  scope: string;
+  source_message_id: string;
+  superseded: boolean;
+  supersedes?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryView".
+ */
+export interface IssueDeliveryView {
+  delivery: IssueDelivery;
+  observation: IssueDeliveryObservation;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryObservation".
+ */
+export interface IssueDeliveryObservation {
+  attempted_at?: number;
+  base_sha?: string;
+  baseline_upgrade_id?: string;
+  baseline_upgrade_revision?: number;
+  checked_at?: number;
+  ci?: DeliveryCI;
+  closed_at?: string;
+  closed_by?: DeliveryActor;
+  delivery_id: string;
+  error_kind?: string;
+  error_message?: string;
+  generation: number;
+  head_sha?: string;
+  issue_id: string;
+  lineage_error_kind?: string;
+  merge_sha?: string;
+  mergeability?: string;
+  merged_at?: string;
+  merged_by?: DeliveryActor;
+  observer?: string;
+  provider_updated_at?: string;
+  refresh_pending?: boolean;
+  retry_at?: number;
+  retry_count?: number;
+  state: string;
+  target_contains_merge?: boolean;
+  target_sha?: string;
+  url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextReviewRef".
+ */
+export interface IssueContextReviewRef {
+  review_id: string;
+  revision: number;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextSource".
+ */
+export interface IssueContextSource {
+  admitted: boolean;
+  association_revision: number;
+  attachments?: ConversationAttachment[];
+  author: string;
+  content_revision: number;
+  disposition?: string;
+  images?: ConversationImage[];
+  linked: boolean;
+  message_id: string;
+  needs_review: boolean;
+  seq: number;
+  state?: MessageState;
+  withdrawn: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextWorking".
+ */
+export interface IssueContextWorking {
+  issue: Issue;
+  progress?: IssueProgress;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "Issue".
+ */
+export interface Issue {
+  acceptance_policy?: IssueAcceptancePolicy;
+  assignee: IssueAssignee;
+  assignment_epoch: number;
+  assignment_state: string;
+  closure?: IssueClosure;
+  created_at: number;
+  depends_on: string[] | null;
+  issue_id: string;
+  parent_issue_id?: string;
+  pending_assignee?: IssueAssignee;
+  pending_handoff_id?: string;
+  plan: IssuePlan;
+  revision: number;
+  state: IssueState;
+  updated_at: number;
+  work_status?: IssueWorkStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueContextQuery".
+ */
+export interface IssueContextQuery {
+  after?: string;
+  after_source?: number;
+  cursor?: string;
+  issue_id?: string;
+  limit?: number;
+  view?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueContextReview".
  */
 export interface IssueContextReview {
@@ -3489,6 +3668,8 @@ export interface LogicalTurnReview {
  * via the `definition` "IssueContextView".
  */
 export interface IssueContextView {
+  applied_after: number;
+  content_id: string;
   coordination_state: string;
   coverage: string;
   dispatch_blockers: ContextBlocker[] | null;
@@ -3580,48 +3761,6 @@ export interface IssueConversationQueueEntry {
 export interface IssueDeliveryPage {
   issue_id: string;
   items: IssueDeliveryView[] | null;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueDeliveryView".
- */
-export interface IssueDeliveryView {
-  delivery: IssueDelivery;
-  observation: IssueDeliveryObservation;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueDeliveryObservation".
- */
-export interface IssueDeliveryObservation {
-  attempted_at?: number;
-  base_sha?: string;
-  baseline_upgrade_id?: string;
-  baseline_upgrade_revision?: number;
-  checked_at?: number;
-  ci?: DeliveryCI;
-  closed_at?: string;
-  closed_by?: DeliveryActor;
-  delivery_id: string;
-  error_kind?: string;
-  error_message?: string;
-  generation: number;
-  head_sha?: string;
-  issue_id: string;
-  lineage_error_kind?: string;
-  merge_sha?: string;
-  mergeability?: string;
-  merged_at?: string;
-  merged_by?: DeliveryActor;
-  observer?: string;
-  provider_updated_at?: string;
-  refresh_pending?: boolean;
-  retry_at?: number;
-  retry_count?: number;
-  state: string;
-  target_contains_merge?: boolean;
-  target_sha?: string;
-  url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3825,6 +3964,7 @@ export interface IssueMaterials {
   observed_at: number;
   questions?: DecisionView[];
   seq: number;
+  shared_reviews?: SharedDeliveryReviewPage;
   sources?: IssueConversationItem[];
   task_capabilities?: TaskCapabilityExplanation;
   tasks?: TaskDetail[];
@@ -4178,24 +4318,6 @@ export interface ObservedRunner {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueMaterialFact".
- */
-export interface IssueMaterialFact {
-  attribution: string;
-  body: string;
-  created_at: number;
-  fact_id: string;
-  issue_id?: string;
-  kind: string;
-  needs_review: boolean;
-  project?: string;
-  scope: string;
-  source_message_id: string;
-  superseded: boolean;
-  supersedes?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "WorkItem".
  */
 export interface WorkItem {
@@ -4216,6 +4338,166 @@ export interface WorkItem {
   title: string;
   updated_at: number;
   work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedDeliveryReviewPage".
+ */
+export interface SharedDeliveryReviewPage {
+  existing_evidence?: SharedReviewExistingEvidence[];
+  items: SharedDeliveryReview[] | null;
+  more: boolean;
+  next?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewExistingEvidence".
+ */
+export interface SharedReviewExistingEvidence {
+  base_sha: string;
+  contributions: SharedReviewContributionEvidence[] | null;
+  contributions_more?: boolean;
+  contributor_count: number;
+  head_sha: string;
+  review_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewContributionEvidence".
+ */
+export interface SharedReviewContributionEvidence {
+  artifact_id?: string;
+  availability: string;
+  candidate_relation: string;
+  created_at?: number;
+  files?: ArtifactFile[];
+  files_more?: boolean;
+  history_query?: IssueMaterialsQuery;
+  issue_id: string;
+  missing_structured_fields: string[] | null;
+  mounts?: ArtifactMount[];
+  mounts_more?: boolean;
+  read_query?: IssueMaterialsQuery;
+  ref_sha256?: string;
+  report?: SharedReviewReportReference;
+  run_id?: string;
+  spec_version?: number;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueMaterialsQuery".
+ */
+export interface IssueMaterialsQuery {
+  after?: string;
+  id?: string;
+  issue_id?: string;
+  kind?: string;
+  limit?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewReportReference".
+ */
+export interface SharedReviewReportReference {
+  body_bytes: number;
+  body_sha256: string;
+  evidence_count: number;
+  uncertainty_count: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedDeliveryReview".
+ */
+export interface SharedDeliveryReview {
+  assessed_requirements_digest?: string;
+  assessment_reason?: string;
+  base_sha: string;
+  budget_authorizations?: SharedReviewBudgetAuthorization[];
+  dispositions?: SharedReviewDisposition[];
+  escalation_issue_id?: string;
+  head_sha: string;
+  invalid_reason?: string;
+  links: SharedDeliveryReviewLink[] | null;
+  number: number;
+  provider: IssueDeliveryProvider;
+  reason?: string;
+  repository: string;
+  requirements_digest: string;
+  review_id: string;
+  reviewer?: string;
+  revision: number;
+  rounds: SharedDeliveryReviewRound[] | null;
+  status: string;
+  valid: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewBudgetAuthorization".
+ */
+export interface SharedReviewBudgetAuthorization {
+  reason: string;
+  request_id: string;
+  round: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewDisposition".
+ */
+export interface SharedReviewDisposition {
+  action: string;
+  finding_id: string;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedDeliveryReviewLink".
+ */
+export interface SharedDeliveryReviewLink {
+  delivery_id: string;
+  issue_id: string;
+  task_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedDeliveryReviewRound".
+ */
+export interface SharedDeliveryReviewRound {
+  acceptance_id?: string;
+  acceptance_verdict?: Verdict;
+  artifact_id?: string;
+  base_sha: string;
+  corrections?: SharedReviewCorrection[];
+  execution_requirements?: SharedReviewExecutionRequirements;
+  head_sha: string;
+  number: number;
+  requirements_digest: string;
+  result?: SharedReviewResult;
+  reviewer?: string;
+  reviewer_profile?: ExecutionProfile;
+  reviewer_role?: RunRole;
+  run_id?: string;
+  spec_version: number;
+  supplement_artifact_id?: string;
+  supplement_run_id?: string;
+  supplement_spec_version?: number;
+  supplement_task_id?: string;
+  task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewCorrection".
+ */
+export interface SharedReviewCorrection {
+  artifact_id: string;
+  created_at: number;
+  profile: ExecutionProfile;
+  reason: string;
+  request_id: string;
+  result: SharedReviewResult;
+  run_id: string;
+  spec_version: number;
+  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4329,17 +4611,6 @@ export interface MountView {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueMaterialsQuery".
- */
-export interface IssueMaterialsQuery {
-  after?: string;
-  id?: string;
-  issue_id?: string;
-  kind?: string;
-  limit?: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueNotificationSettings".
  */
 export interface IssueNotificationSettings {
@@ -4441,28 +4712,6 @@ export interface IssueReuseResult {
   original_request_id: string;
   reused: boolean;
   source: MessageAssociations;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "Issue".
- */
-export interface Issue {
-  acceptance_policy?: IssueAcceptancePolicy;
-  assignee: IssueAssignee;
-  assignment_epoch: number;
-  assignment_state: string;
-  closure?: IssueClosure;
-  created_at: number;
-  depends_on: string[] | null;
-  issue_id: string;
-  parent_issue_id?: string;
-  pending_assignee?: IssueAssignee;
-  pending_handoff_id?: string;
-  plan: IssuePlan;
-  revision: number;
-  state: IssueState;
-  updated_at: number;
-  work_status?: IssueWorkStatus;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5508,109 +5757,6 @@ export interface SetIssueNotificationSettingsPayload {
 export interface SetIssueStatusPayload {
   expected_assignment_epoch: number;
   status: IssueWorkStatus;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedDeliveryReviewPage".
- */
-export interface SharedDeliveryReviewPage {
-  items: SharedDeliveryReview[] | null;
-  more: boolean;
-  next?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedDeliveryReview".
- */
-export interface SharedDeliveryReview {
-  assessed_requirements_digest?: string;
-  assessment_reason?: string;
-  base_sha: string;
-  budget_authorizations?: SharedReviewBudgetAuthorization[];
-  dispositions?: SharedReviewDisposition[];
-  escalation_issue_id?: string;
-  head_sha: string;
-  invalid_reason?: string;
-  links: SharedDeliveryReviewLink[] | null;
-  number: number;
-  provider: IssueDeliveryProvider;
-  reason?: string;
-  repository: string;
-  requirements_digest: string;
-  review_id: string;
-  reviewer?: string;
-  revision: number;
-  rounds: SharedDeliveryReviewRound[] | null;
-  status: string;
-  valid: boolean;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedReviewBudgetAuthorization".
- */
-export interface SharedReviewBudgetAuthorization {
-  reason: string;
-  request_id: string;
-  round: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedReviewDisposition".
- */
-export interface SharedReviewDisposition {
-  action: string;
-  finding_id: string;
-  reason: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedDeliveryReviewLink".
- */
-export interface SharedDeliveryReviewLink {
-  delivery_id: string;
-  issue_id: string;
-  task_id?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedDeliveryReviewRound".
- */
-export interface SharedDeliveryReviewRound {
-  acceptance_id?: string;
-  acceptance_verdict?: Verdict;
-  artifact_id?: string;
-  base_sha: string;
-  corrections?: SharedReviewCorrection[];
-  execution_requirements?: SharedReviewExecutionRequirements;
-  head_sha: string;
-  number: number;
-  requirements_digest: string;
-  result?: SharedReviewResult;
-  reviewer?: string;
-  reviewer_profile?: ExecutionProfile;
-  reviewer_role?: RunRole;
-  run_id?: string;
-  spec_version: number;
-  supplement_artifact_id?: string;
-  supplement_run_id?: string;
-  supplement_spec_version?: number;
-  supplement_task_id?: string;
-  task_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "SharedReviewCorrection".
- */
-export interface SharedReviewCorrection {
-  artifact_id: string;
-  created_at: number;
-  profile: ExecutionProfile;
-  reason: string;
-  request_id: string;
-  result: SharedReviewResult;
-  run_id: string;
-  spec_version: number;
-  task_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

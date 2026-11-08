@@ -62,7 +62,7 @@ Definition 的稳定身份是执行环境 ID 加本机 local Agent ID，runtime 
 
 主聊天保持默认。会话有显式类型及绑定：main、issue manager、精确 active run、独立 named-agent consultation；界面选中状态不能决定实际收件人。Owner 原文和附件持久化真实作者、来源、版本与目标。
 
-Issue 直接聊天由本 issue manager 处理；范围内新指令经来源审核后可更新授权和合同，跨 issue 冲突才通知主 Agent。Manager 对话、调查 worker 原生历史和验收上下文分离，不向独立验收泄露实现设计、自评或偏好。
+Issue 直接聊天由本 issue manager 处理；范围内新指令经来源审核后可更新授权和合同，跨 issue 冲突才通知主 Agent。Manager 对话、调查 worker 原生历史和验收会话分离。验收可读取实现报告、检查结果和原文件，按候选身份、可信度和覆盖自主判断是否复用或复跑；不把实现者的自评当作通过结论。共享 PR reviewer 通过有界贡献证据索引发现这些原件，不默认重复所有已通过检查。Refs: D194。
 
 Active worker 消息复用 D116 的 run-scoped supplement，绑定 task/run/action/spec/generation/control revision 和原始 owner 消息。Owner 可直接发送，无需主 Agent 转述；queued、accepted、unknown 与实际消费分别表达。补充不能修改冻结合同；目标/范围变化由 issue manager 正式处理。Finished run 只读，后续执行使用新 task/action，不能自动 reopen、把补充迁移到下一 run 或重发 unknown。
 

@@ -66,7 +66,13 @@ func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution stor
 		}
 		var p hostedIssueResourceArgs
 		var reviews hostedSharedReviewReadArgs
-		if c.Tool == "issues_delivery_reviews_read" {
+		var contextQuery protocol.IssueContextQuery
+		if c.Tool == "issues_context_read" {
+			if err := decode(c.Arguments, &contextQuery); err != nil {
+				return err
+			}
+			p.IssueID = contextQuery.IssueID
+		} else if c.Tool == "issues_delivery_reviews_read" {
 			if err := decode(c.Arguments, &reviews); err != nil {
 				return err
 			}
@@ -92,7 +98,7 @@ func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution stor
 		var err error
 		switch c.Tool {
 		case "issues_context_read":
-			value, err = views.CanonicalIssueContext(ctx, tx.Q(), p.IssueID, p.AfterSource)
+			value, err = views.ReadCanonicalIssueContext(ctx, tx.Q(), p.IssueID, contextQuery)
 		case "issues_followups_list":
 			value, err = views.CanonicalIssueFollowups(ctx, tx.Q(), p.IssueID, p.After, s.app.FollowupsEnabled())
 		case "issues_followups_history":

@@ -213,6 +213,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, err
 			}
 			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")
+			contextDeliveryEventDetails(&out, p.TaskID)
 			out.Result = d
 			out.Events = append(out.Events, events...)
 			out.Events = append(out.Events, policyEvents...)
@@ -245,6 +246,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, err
 			}
 			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")
+			contextDeliveryEventDetails(&out, p.TaskID)
 			out.Result = d
 			out.Events = append(out.Events, events...)
 			return out, err
@@ -437,6 +439,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
+	contextDeliveryEventDetails(&out, p.TaskID)
 	out.Result = d
 	out.Events = append(out.Events, events...)
 	return out, nil
@@ -640,4 +643,18 @@ func recordDeliveryCandidateExpiry(ctx context.Context, x *Exec, tx *store.Tx, i
 		return err
 	}
 	return appendBackgroundSource(ctx, x, tx, "work_item:"+issue, issue, message, event, "issue.delivery_candidate_expired", nil)
+}
+
+// Context readers can address only the changed duty without loading every
+// candidate when another object in the Issue changes.
+func contextDeliveryEventDetails(out *Outcome, sourceTask string) {
+	for i := range out.Events {
+		e := &out.Events[i]
+		if e.Kind == "issue.delivery_updated" {
+			if e.Body == nil {
+				e.Body = map[string]any{}
+			}
+			e.Body["source_task_id"] = sourceTask
+		}
+	}
 }
