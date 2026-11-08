@@ -50,6 +50,7 @@ type IssueMaterialFact struct {
 }
 
 type IssueMaterials struct {
+	SharedReviews          *SharedDeliveryReviewPage    `json:"shared_reviews,omitempty"`
 	DeliveryAuthorization  *DeliveryExecutionAuthority  `json:"delivery_authorization,omitempty"`
 	LegacyContexts         []WorkItem                   `json:"legacy_contexts,omitempty"`
 	Sources                []IssueConversationItem      `json:"sources,omitempty"`
@@ -87,7 +88,7 @@ func NormalizeIssueMaterialsQuery(q IssueMaterialsQuery) (IssueMaterialsQuery, e
 	if q.Kind == "" {
 		q.Kind = "overview"
 	}
-	if !slices.Contains([]string{"overview", "issues", "sources", "facts", "messages", "tasks", "artifacts", "acceptances", "questions", "files", "deliveries", "delivery_authorization", "deployment", "capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, q.Kind) {
+	if !slices.Contains([]string{"overview", "issues", "sources", "facts", "messages", "tasks", "artifacts", "acceptances", "questions", "files", "deliveries", "delivery_authorization", "reviews", "deployment", "capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, q.Kind) {
 		return q, Errorf(CodeInvalidRequest, "invalid material kind")
 	}
 	if q.Limit == 0 {

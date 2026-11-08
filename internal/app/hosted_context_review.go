@@ -120,7 +120,7 @@ func (ReviewHostedIssueContext) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		}
 		// A bounded batch is durable progress. Remaining shares still prevent
 		// turn commitment; do not manufacture a complete context review.
-		return Outcome{Result: map[string]any{"work_item_id": issueID, "revision": revision, "complete": false}, Events: []Event{{ObjectType: "issue", ObjectID: issueID, Kind: "issue.context_review_progress", Body: map[string]any{"summary": p.Summary, "context_revision": revision, "sources": p.Sources}}}}, nil
+		return Outcome{Result: map[string]any{"work_item_id": issueID, "revision": revision, "complete": false}, Events: []Event{{ObjectType: "issue", ObjectID: issueID, Kind: "issue.context_review_progress", Body: map[string]any{"summary": p.Summary, "context_revision": revision, "sources": p.Sources, "changed_fact_ids": append(append([]string{}, p.ConfirmedFactIDs...), p.RetiredFactIDs...)}}}}, nil
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM logical_turn_contexts WHERE logical_turn_id=? AND work_item_id<>?`, x.coordinationLogicalID, issueID); err != nil {
 		return Outcome{}, err
@@ -128,7 +128,7 @@ func (ReviewHostedIssueContext) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_context_reviews(logical_turn_id,work_item_id,revision) VALUES(?,?,?) ON CONFLICT(logical_turn_id,work_item_id) DO UPDATE SET revision=excluded.revision`, x.coordinationLogicalID, issueID, revision); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Result: map[string]any{"work_item_id": issueID, "revision": revision, "complete": true}, Events: []Event{{ObjectType: "issue", ObjectID: issueID, Kind: "issue.context_reviewed", Body: map[string]any{"summary": p.Summary, "context_revision": revision, "sources": p.Sources}}}}, nil
+	return Outcome{Result: map[string]any{"work_item_id": issueID, "revision": revision, "complete": true}, Events: []Event{{ObjectType: "issue", ObjectID: issueID, Kind: "issue.context_reviewed", Body: map[string]any{"summary": p.Summary, "context_revision": revision, "sources": p.Sources, "changed_fact_ids": append(append([]string{}, p.ConfirmedFactIDs...), p.RetiredFactIDs...)}}}}, nil
 }
 
 // A planner acknowledges delegated responsibility, not the manager's technical

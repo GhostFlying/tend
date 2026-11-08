@@ -15,6 +15,8 @@ type IssueContextFact struct {
 }
 
 type IssueContextView struct {
+	AppliedAfter      int64                   `json:"applied_after"`
+	ContentID         string                  `json:"content_id"`
 	IssueID           string                  `json:"issue_id"`
 	Revision          int64                   `json:"revision"`
 	Prepared          bool                    `json:"prepared"`

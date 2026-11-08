@@ -2,12 +2,13 @@ package views
 
 import (
 	"context"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func SharedDeliveryReviews(ctx context.Context, q store.Querier, issueID, deliveryID, after string, limit int) (protocol.SharedDeliveryReviewPage, error) {
+func SharedDeliveryReviews(ctx context.Context, q store.Querier, issueID, deliveryID, after string, limit int, scopes ...store.MaterialScope) (protocol.SharedDeliveryReviewPage, error) {
 	out := protocol.SharedDeliveryReviewPage{Items: []protocol.SharedDeliveryReview{}}
 	if limit < 1 {
 		limit = 50
@@ -49,7 +50,33 @@ func SharedDeliveryReviews(ctx context.Context, q store.Querier, issueID, delive
 		if err := store.SharedDeliveryReviewCurrent(ctx, q, &r); err != nil {
 			return out, err
 		}
+		var scope store.MaterialScope
+		if len(scopes) > 0 {
+			scope = scopes[0]
+		} else {
+			scope, err = MaterialScope(ctx, q, []string{issueID})
+			if err != nil {
+				return out, err
+			}
+			for _, link := range r.Links {
+				if slices.Contains(scope.IssueIDs, link.IssueID) {
+					continue
+				}
+				linked, err := store.GetIssue(ctx, q, link.IssueID)
+				if err != nil {
+					return out, err
+				}
+				if scope.Project != "" && linked.Project == scope.Project {
+					scope.IssueIDs = append(scope.IssueIDs, link.IssueID)
+				}
+			}
+		}
+		evidence, err := SharedReviewExistingEvidence(ctx, q, r, scope)
+		if err != nil {
+			return out, err
+		}
 		out.Items = append(out.Items, r)
+		out.ExistingEvidence = append(out.ExistingEvidence, evidence)
 		out.Next = t.id
 	}
 	if !out.More {

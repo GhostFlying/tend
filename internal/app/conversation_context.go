@@ -169,6 +169,7 @@ func (c ContextCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) e
 func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	id := x.Env.Target.ID
 	scoped := x.coordinationExecution != nil && x.coordinationExecution.IssueID == id && c.Action == "fact"
+	changedFactIDs := []string{}
 	if !scoped {
 		if err := store.RejectCanonicalLegacyIssueWrite(ctx, tx.Q(), id); err != nil {
 			return Outcome{}, err
@@ -239,6 +240,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 					return Outcome{}, err
 				}
 				changed = true
+				changedFactIDs = append(changedFactIDs, fact)
 				if _, err := tx.Exec(ctx, `UPDATE work_item_context_facts SET superseded=?,needs_review=0 WHERE fact_id=?`, group.retire, fact); err != nil {
 					return Outcome{}, err
 				}
@@ -361,7 +363,11 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if err := attachContextReviewSource(ctx, x, tx, p.SourceMessageID); err != nil {
 			return Outcome{}, err
 		}
+		if p.Supersedes != "" {
+			changedFactIDs = append(changedFactIDs, p.Supersedes)
+		}
 		p.ID = x.IDs.New(protocol.Prefix("fact"))
+		changedFactIDs = append(changedFactIDs, p.ID)
 		if _, err := tx.Exec(ctx, `INSERT INTO work_item_context_facts(fact_id,work_item_id,project,scope,kind,body,source_message_id,attribution,supersedes,created_at) VALUES(?,NULLIF(?,''),?,?,?,?,?,?,NULLIF(?,''),?)`, p.ID, p.WorkItemID, p.Project, p.Scope, p.Kind, p.Body, p.SourceMessageID, p.Attribution, p.Supersedes, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
@@ -371,7 +377,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	} else {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown context operation")
 	}
-	return Outcome{Notify: true, Result: map[string]any{"work_item_id": id}, Events: []Event{{ObjectType: "work_item", ObjectID: id, Kind: "work_item.context_changed"}}}, nil
+	return Outcome{Notify: true, Result: map[string]any{"work_item_id": id}, Events: []Event{{ObjectType: "work_item", ObjectID: id, Kind: "work_item.context_changed", Body: map[string]any{"changed_fact_ids": changedFactIDs}}}}, nil
 }
 
 func queueCoordinationNotice(ctx context.Context, x *Exec, tx *store.Tx, body, source, conversation string) error {
@@ -437,8 +443,20 @@ func initializeWorkItemContext(ctx context.Context, x *Exec, tx *store.Tx, id st
 			return err
 		}
 		child.Env.Payload = body
-		if _, err := (ContextCommand{Action: "fact"}).Apply(ctx, &child, tx); err != nil {
+		out, err := (ContextCommand{Action: "fact"}).Apply(ctx, &child, tx)
+		if err != nil {
 			return err
+		}
+		// Nested initialization has no separate Execute envelope. Preserve its
+		// exact fact changes in this same outer request's event interval.
+		for _, event := range out.Events {
+			detail, err := json.Marshal(event.Body)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: event.ObjectType, ObjectID: event.ObjectID, Kind: event.Kind, BodyJSON: string(detail), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+				return err
+			}
 		}
 	}
 	_, err := tx.Exec(ctx, `UPDATE work_item_contexts SET coverage=?,gaps=?,baseline_revision=revision+1,revision=revision+1,prepared_by=? WHERE work_item_id=?`, p.Coverage, p.Gaps, x.Principal.Thread, id)

@@ -167,6 +167,20 @@ type briefSpec struct {
 	Delivery     string               `json:"delivery"`
 }
 
+func reviewerEvidenceGuidance(spec WorkerSpec) string {
+	guidance := "Before choosing checks, read the candidate-matching implementation report, original file references and existing check evidence. " +
+		"Check the head/tree/base, commands and terminal outcomes, relevant environment, logs, skipped checks and uncovered requirements. " +
+		"Judge whether that evidence is trustworthy and sufficient, then choose reuse, targeted reproduction or a full rerun as needed. " +
+		"Independent review requires your own judgment of the code and evidence; it does not automatically require repeating every check already passed on the same candidate. " +
+		"Missing fields are evidence not provided, not a format violation or an automatic prohibition on review. Do not invent missing results or treat an implementer's local checks as CI. " +
+		"Explain why you rerun checks in your report or verdict evidence; that explanation does not require approval and is not a prerequisite for using test tools. " +
+		"Preserve explicit human requirements, the frozen task agreement and repository final-candidate check, review and CI rules."
+	if spec.ReadContext != nil {
+		guidance += " Use read_context kind=reviews to discover the bounded index of linked contributor evidence, then read needed original artifacts and file references. The index is not the complete report or all check logs."
+	}
+	return guidance
+}
+
 // VerdictReminder is the turn input for an acceptance worker that ended
 // its turn without a verdict tend received.
 const VerdictReminder = "tend did not receive a verdict from you. Call " + VerdictTool + " now with your verdict and evidence, " +
@@ -304,6 +318,7 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 			"When a required check ran and failed, report changes_required with the unmet requirement and the necessary diagnosis or repair, even if its precise cause is unknown. Do not infer a product defect from an exit code alone. " +
 			"Use blocked only when evidence establishes an external prerequisite that prevents checking; name that prerequisite and the next action. " +
 			"Use inconclusive when the evidence cannot establish whether a requirement holds; state the uncertainty and the next investigation. Unknown cause alone does not turn an observed unmet quality gate into an environment failure."
+		instructions += " " + reviewerEvidenceGuidance(spec)
 		instructions += " When the task requests whole-PR shared review, use read_observation shared_reviews to read genuine pending bindings or your frozen Task/spec/artifact round, candidate, requirement digest and round budget. You are the acceptance role: submit_verdict evidence.delivery_review with provider, repository, number, head_sha, base_sha, requirements_digest, repository_check and concrete findings [{id, priority, body}] when changes are required. Do the real whole-PR review before claiming passed. Do not call submit_result or fabricate report.shared_review, a review ID, digest, prior round or reviewer identity. If genuine binding or scope is unavailable, ask the existing owner path rather than inventing it. A pending binding with no round is legitimate for the existing actual-acceptance then import route. blocked and inconclusive preserve the real prerequisite or uncertainty and do not claim approval."
 		if spec.AcceptanceEvidenceFiles {
 			instructions += " Acceptance scratch is temporary and deleted after acknowledged final submission. Preserve evidence by explicitly selecting ordinary files with submit_verdict files: [{path, name}], for any verdict including blocked. Tend seals those bytes and confirms durable file references before acknowledging the verdict. Paths mentioned only in evidence JSON do not preserve files. Do not resubmit changed bytes or a different selection while an original submission is awaiting reconciliation."
@@ -315,7 +330,10 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		"Change the files in the working trees so the goal is met and the acceptance checks pass; run them yourself. " +
 		"Whether and how to commit is yours to decide, as the task and each repository's own rules ask; tend does not commit for you, " +
 		"and records each repository's HEAD and working tree as you leave them. " +
-		"An independent reviewer will check your work. For report or file delivery, call submit_result with the requested report and explicitly selected files before ending your turn. Report-only work does not require Git changes. State evidence and uncertainties honestly."
+		"Follow the frozen acceptance policy and explicit human review requirements; ordinary PR preparation and intermediate reports do not automatically require another independent reviewer. " +
+		"For report or file delivery, call submit_result with the requested report and explicitly selected files before ending your turn. Report-only work does not require Git changes. " +
+		"Report applicable check commands and outcomes, exact tested candidate identities, relevant environment, skips and uncovered work when available; preserve original log file references and state missing evidence honestly. " +
+		"For an assigned whole-PR reviewer report: " + reviewerEvidenceGuidance(spec)
 	input = "Implement this task.\n\n" + b.String()
 	if spec.Feedback != nil {
 		input += "\nThe last review asked for changes:\n" + string(spec.Feedback.Issues) + "\n"

@@ -150,10 +150,55 @@ type SharedDeliveryReview struct {
 	Reason                     string                            `json:"reason,omitempty"`
 }
 
+// SharedReviewReportReference locates an original report without repeating its
+// body in every review index. Its text remains evidence, not parsed check results.
+type SharedReviewReportReference struct {
+	BodyBytes        int    `json:"body_bytes"`
+	BodySHA256       string `json:"body_sha256"`
+	EvidenceCount    int    `json:"evidence_count"`
+	UncertaintyCount int    `json:"uncertainty_count"`
+}
+
+// SharedReviewContributionEvidence is a read-only index of a linked Task's
+// current immutable artifact. HistoryQuery exposes older candidate evidence.
+type SharedReviewContributionEvidence struct {
+	IssueID      string                       `json:"issue_id"`
+	TaskID       string                       `json:"task_id"`
+	SpecVersion  int64                        `json:"spec_version,omitempty"`
+	ArtifactID   string                       `json:"artifact_id,omitempty"`
+	RunID        string                       `json:"run_id,omitempty"`
+	RefSHA256    string                       `json:"ref_sha256,omitempty"`
+	CreatedAt    int64                        `json:"created_at,omitempty"`
+	Mounts       []ArtifactMount              `json:"mounts,omitempty"`
+	MountsMore   bool                         `json:"mounts_more,omitempty"`
+	Report       *SharedReviewReportReference `json:"report,omitempty"`
+	Files        []ArtifactFile               `json:"files,omitempty"`
+	FilesMore    bool                         `json:"files_more,omitempty"`
+	Availability string                       `json:"availability"`
+	// CandidateRelation compares the reviewed head with the effective mount heads;
+	// it does not assert check success or whole-PR coverage.
+	CandidateRelation       string               `json:"candidate_relation"`
+	MissingStructuredFields []string             `json:"missing_structured_fields"`
+	ReadQuery               *IssueMaterialsQuery `json:"read_query,omitempty"`
+	HistoryQuery            *IssueMaterialsQuery `json:"history_query,omitempty"`
+}
+
+// SharedReviewExistingEvidence is derived from original artifacts on read. It
+// grants no authority and is not part of the persisted shared review report.
+type SharedReviewExistingEvidence struct {
+	ReviewID          string                             `json:"review_id"`
+	HeadSHA           string                             `json:"head_sha"`
+	BaseSHA           string                             `json:"base_sha"`
+	Contributions     []SharedReviewContributionEvidence `json:"contributions"`
+	ContributorCount  int                                `json:"contributor_count"`
+	ContributionsMore bool                               `json:"contributions_more,omitempty"`
+}
+
 type SharedDeliveryReviewPage struct {
-	Items []SharedDeliveryReview `json:"items"`
-	More  bool                   `json:"more"`
-	Next  string                 `json:"next,omitempty"`
+	ExistingEvidence []SharedReviewExistingEvidence `json:"existing_evidence,omitempty"`
+	Items            []SharedDeliveryReview         `json:"items"`
+	More             bool                           `json:"more"`
+	Next             string                         `json:"next,omitempty"`
 }
 
 // UpdateSharedDeliveryReviewPayload coordinates a single review of an entire PR.
