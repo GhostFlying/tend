@@ -162,7 +162,7 @@ func selfManager(ctx context.Context, p SelfUpdatePlan, active, outside bool) er
 	return nil
 }
 
-func selfExitEvidence(cfg Config, p SelfUpdatePlan) error {
+func selfExitEvidence(ctx context.Context, cfg Config, p SelfUpdatePlan) error {
 	// Only a durable journal prepared by the exact currently locked modern
 	// supervisor can attest its own child-retaining shutdown implementation.
 	if p.PreparedBy == p.Updater {
@@ -170,8 +170,7 @@ func selfExitEvidence(cfg Config, p SelfUpdatePlan) error {
 		if err != nil {
 			return err
 		}
-		owner, known := flockOwner(p.LockDevice, p.LockInode)
-		if digest(j.Plan) != digest(p) || !known || owner != p.Updater.PID {
+		if digest(j.Plan) != digest(p) || !selfOwnsFlock(ctx, p.Updater, p.LockDevice, p.LockInode) {
 			return ErrUnknown
 		}
 		return nil
@@ -303,7 +302,7 @@ func prepareSelf(ctx context.Context, cfg Config, p SelfUpdatePlan, modern bool)
 			}
 			p.ExitEvidenceSHA256 = bytesDigest(raw)
 		}
-		if err = selfExitEvidence(cfg, p); err != nil {
+		if err = selfExitEvidence(ctx, cfg, p); err != nil {
 			return p, err
 		}
 	}
@@ -329,7 +328,7 @@ func (a systemSelfActions) Check(ctx context.Context, p SelfUpdatePlan, phase st
 		if _, err := selfServiceState(a.cfg, p); err != nil {
 			return err
 		}
-		return selfExitEvidence(a.cfg, p)
+		return selfExitEvidence(ctx, a.cfg, p)
 	}
 	return nil
 }
@@ -581,8 +580,7 @@ func AdoptSelfUpdate(ctx context.Context, s *Supervisor) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	owner, known := flockOwner(p.LockDevice, p.LockInode)
-	if policy != p.ManagerSHA256 || unit != p.UnitSHA256 || m["MainPID"] != strconv.Itoa(os.Getpid()) || !known || owner != os.Getpid() {
+	if policy != p.ManagerSHA256 || unit != p.UnitSHA256 || m["MainPID"] != strconv.Itoa(os.Getpid()) || !selfOwnsFlock(ctx, current, p.LockDevice, p.LockInode) {
 		return true, ErrUnknown
 	}
 	if err = verifyUpdaterCommand(os.Getpid(), HandoffPlan{UpdaterBinary: p.UpdaterBinary, ConfigFile: p.ConfigFile}); err != nil {
@@ -727,8 +725,7 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 	if p.Updater.SHA256 == p.CandidateSHA256 {
 		// Runtime equality, current lock ownership and child identity were verified
 		// above. A shared path alone never reaches this branch.
-		owner, known := flockOwner(p.LockDevice, p.LockInode)
-		if !known || owner != os.Getpid() {
+		if !selfOwnsFlock(ctx, p.Updater, p.LockDevice, p.LockInode) {
 			s.mu.Unlock()
 			return SelfUpdateStatus{}, ErrUnknown
 		}
