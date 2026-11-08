@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/bridge"
 	"github.com/GhostFlying/tend/internal/harness/orca"
@@ -48,8 +49,9 @@ func (p profile) gitws() gitws.Profile {
 
 // config is the runner's configuration file.
 type config struct {
-	Agents           *agentcontrol.Config   `json:"agents,omitempty"`
-	DeliveryObserver deliveryObserverConfig `json:"delivery_observer"`
+	CodexEnvironments *codexenv.Bindings     `json:"codex_environments,omitempty"`
+	Agents            *agentcontrol.Config   `json:"agents,omitempty"`
+	DeliveryObserver  deliveryObserverConfig `json:"delivery_observer"`
 	// ServerURL is tend's address, such as http://tend on the tailnet.
 	ServerURL            string `json:"server_url"`
 	HostID               string `json:"host_id"`
@@ -273,20 +275,8 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		profiles[pn] = p.gitws()
 	}
 	ids := protocol.NewULIDGen(time.Now, nil)
-	if cfg.RolloutRoots == nil {
-		for _, cli := range []struct{ env, fallback string }{{"TRAE_HOME", "~/.trae/cli"}, {"CODEX_HOME", "~/.codex"}} {
-			root := os.Getenv(cli.env)
-			if root == "" {
-				root = cli.fallback
-			}
-			cfg.RolloutRoots = append(cfg.RolloutRoots, filepath.Join(root, "sessions"))
-		}
-	}
-	for i, root := range cfg.RolloutRoots {
-		cfg.RolloutRoots[i], err = cfgfile.Path(root)
-		if err != nil {
-			return err
-		}
+	if err = resolveRolloutRoots(&cfg); err != nil {
+		return err
 	}
 	wsCfg := gitws.Config{ProtectPath: j.ProtectRollouts, Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
 	var (
@@ -399,4 +389,30 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	}
 	log.Info("tend-runner running", "host", cfg.HostID, "home", home)
 	return r.Run(ctx)
+}
+
+func resolveRolloutRoots(cfg *config) error {
+	if cfg.RolloutRoots == nil {
+		mappedRoots, err := cfg.CodexEnvironments.SessionRoots()
+		if err != nil {
+			return err
+		}
+		cfg.RolloutRoots = append(cfg.RolloutRoots, mappedRoots...)
+		for _, cli := range []struct{ env, fallback string }{{"TRAE_HOME", "~/.trae/cli"}, {"CODEX_HOME", "~/.codex"}} {
+			root := os.Getenv(cli.env)
+			if root == "" {
+				root = cli.fallback
+			}
+			cfg.RolloutRoots = append(cfg.RolloutRoots, filepath.Join(root, "sessions"))
+		}
+	}
+	for i, root := range cfg.RolloutRoots {
+		resolved, err := cfgfile.Path(root)
+		if err != nil {
+			return err
+		}
+		cfg.RolloutRoots[i] = resolved
+	}
+
+	return nil
 }

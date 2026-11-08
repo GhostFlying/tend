@@ -192,6 +192,11 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 	for _, entry := range CapabilityBindings() {
 		t.Run(entry.Capability+"/"+entry.Command, func(t *testing.T) {
 			env := newTestEnv(t, remote.URL)
+			if strings.HasPrefix(entry.Capability, "local EXEC codex-env ") {
+				env.Env.CodexEnvironment = func(_ context.Context, q protocol.LocalCodexEnvironmentRequest) (json.RawMessage, error) {
+					return json.Marshal(map[string]string{"executed": "local EXEC codex-env " + q.Action})
+				}
+			}
 			output := filepath.Join(dir, "output.bin")
 			requestID := env.IDs.New(protocol.PrefixRequest)
 			recoveryJSON, _ := json.Marshal(protocol.ForwardRecoveryPlan{RecoveryID: "forward", RequestID: requestID, Original: protocol.UpgradeBinding{UpgradeID: "original"}})
@@ -214,6 +219,9 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			seen := append([]recorded(nil), calls...)
 			mu.Unlock()
 			matched := entry.Capability == protocol.LocalServerCapabilities && strings.Contains(env.out.String(), "manager-upgrade-park-v1")
+			if strings.HasPrefix(entry.Capability, "local EXEC codex-env ") {
+				matched = strings.Contains(env.out.String(), entry.Capability)
+			}
 			if strings.HasPrefix(entry.Capability, "local EXEC updater handoff ") {
 				action := strings.TrimPrefix(entry.Capability, "local EXEC updater handoff ")
 				matched = strings.Contains(env.out.String(), "handoff\n"+action+"\n--config\n")

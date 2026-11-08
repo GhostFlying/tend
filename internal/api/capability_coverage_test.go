@@ -62,6 +62,9 @@ func TestPublicCapabilityCoverageRejectsMissingAndNewEntries(t *testing.T) {
 // Updater authorization/health callbacks are executor-only, not operator commands.
 func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	expected := map[string]bool{protocol.LocalServerCapabilities: true}
+	for _, action := range protocol.CodexEnvironmentActions() {
+		expected["local EXEC codex-env "+action] = true
+	}
 	for _, action := range protocol.UpdaterHandoffActions() {
 		expected["local EXEC updater handoff "+action] = true
 	}

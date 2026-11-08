@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -21,6 +22,36 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/gitws"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
+
+func TestMappedRecoveryDoesNotRequireNewExecutionReadiness(t *testing.T) {
+	f := newSource(t)
+	f.config.FormatVersion = 2
+	f.config.Runtimes[0].CLI = "codex"
+	f.config.Agents[0].OwnerRuntimeID = "native"
+	f.reload(t)
+	unavailable := func(context.Context, agentexec.BuildInput) error { return errors.New("latest environment disabled") }
+	p, err := agentexec.New(agentexec.Options{Source: f.control, BackendID: "git", Workspaces: gitws.New(gitws.Config{Home: t.TempDir()}), Probe: unavailable, ProbeOwner: unavailable,
+		Environments: &codexenv.Bindings{Directory: t.TempDir(), Runtimes: map[string]string{"native": "retained"}},
+		Build:        func(agentexec.BuildInput) (harness.Workers, error) { return &testkit.Workers{}, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Refresh(t.Context()); err == nil {
+		t.Fatal("failed availability probe was hidden")
+	}
+	observations, err := p.Observe(t.Context())
+	if err != nil || len(observations) != 2 || observations[0].Available || observations[1].Available {
+		t.Fatal("unready environment advertised new work", observations, err)
+	}
+	if _, err = p.Resolve(t.Context(), observations[0].Pin); err != nil {
+		t.Fatal("retained worker could not resolve its original factory", err)
+	}
+	manager, err := p.ResolveManager(t.Context(), observations[1].Pin)
+	if err != nil || manager.OpenRun == nil {
+		t.Fatal("retained manager could not open by original run identity", err)
+	}
+}
 
 func TestManagerReadinessRetriesWithoutDisablingHealthyWorker(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -357,5 +388,32 @@ func TestRetainedNativeRefusalWithdrawsSelection(t *testing.T) {
 	}
 	if len(retained) != 1 || retained[0].Available {
 		t.Fatalf("native-rejected pin remains selectable for retained owner work: %+v", retained)
+	}
+}
+
+func TestCodexRecoveryAfterRemovingEnvironmentMappingSkipsDefaultHomeProbe(t *testing.T) {
+	f := newSource(t)
+	f.config.FormatVersion = 2
+	f.config.Runtimes[0].CLI = "codex"
+	f.config.Agents[0].OwnerRuntimeID = "native"
+	f.reload(t)
+	unavailable := func(context.Context, agentexec.BuildInput) error {
+		return errors.New("default home cannot admit new execution")
+	}
+	pool, err := agentexec.New(agentexec.Options{Source: f.control, BackendID: "git", Workspaces: gitws.New(gitws.Config{Home: t.TempDir()}), Probe: unavailable, ProbeOwner: unavailable, Build: func(agentexec.BuildInput) (harness.Workers, error) { return &testkit.Workers{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pool.Refresh(t.Context())
+	rows, err := pool.Observe(t.Context())
+	if err != nil || len(rows) != 2 || rows[0].Available || rows[1].Available {
+		t.Fatal(rows, err)
+	}
+	if _, err = pool.Resolve(t.Context(), rows[0].Pin); err != nil {
+		t.Fatal("default-home readiness blocked original binding recovery", err)
+	}
+	manager, err := pool.ResolveManagerRun(t.Context(), rows[1].Pin)
+	if err != nil || manager.OpenRun == nil {
+		t.Fatal("default-home readiness blocked manager recovery", err)
 	}
 }

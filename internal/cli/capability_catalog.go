@@ -24,6 +24,16 @@ func binding(capability, command string, args ...string) CapabilityBinding {
 // The API contract checker compares this to the server's actual registrations.
 func CapabilityBindings() []CapabilityBinding {
 	var out []CapabilityBinding
+	for _, action := range protocol.CodexEnvironmentActions() {
+		args := []string{"--id", "sample"}
+		if action == "list" || strings.HasPrefix(action, "watch ") {
+			args = nil
+		}
+		if action == "reconcile" {
+			args = append(args, "--request-id", "original")
+		}
+		out = append(out, binding("local EXEC codex-env "+action, "codex-env "+action, args...))
+	}
 	out = append(out, binding(protocol.LocalServerCapabilities, "upgrade capabilities", "--binary", "{server-binary}", "--sha256", "{server-sha256}", "--json"))
 	for _, action := range protocol.UpdaterHandoffActions() {
 		out = append(out, binding("local EXEC updater handoff "+action, "updater handoff "+action, "--installer", "{installer}", "--installer-sha256", "{installer-sha256}", "--config", "{config}", "--plan", "{handoff}", "--json"))

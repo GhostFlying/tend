@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/procx"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -20,6 +21,9 @@ import (
 
 // Options start an app-server.
 type Options struct {
+	Environment          *codexenv.Binding
+	EnvironmentExecution string
+	environmentReference *codexenv.Reference
 	// HostedCoordination restricts this process to Tend coordination and owner material presentation.
 	// Worker sessions leave this false.
 	HostedCoordination bool
@@ -46,10 +50,15 @@ type Options struct {
 
 // Session is a running app-server. It implements harness.Session.
 type Session struct {
-	codex bool // Confirmed Codex CLI; forked CLIs also return codexHome.
-	conn  *conn
-	log   *slog.Logger
-	stop  func() error
+	environmentReference *codexenv.Reference
+	lastEnvironmentCheck time.Time
+	environmentFinal     bool
+	environmentAttached  bool
+	toolCallbacks        int
+	codex                bool // Confirmed Codex CLI; forked CLIs also return codexHome.
+	conn                 *conn
+	log                  *slog.Logger
+	stop                 func() error
 
 	mu      sync.Mutex
 	threads map[string]*thread
@@ -76,7 +85,44 @@ const maxOrphans = 1000
 var _ harness.Session = (*Session)(nil)
 
 // Start launches `traex app-server` and completes the handshake.
-func Start(ctx context.Context, opts Options) (*Session, error) {
+func Start(ctx context.Context, opts Options) (opened *Session, resultErr error) {
+	defer func() {
+		if opts.environmentReference != nil {
+			state := "initialized"
+			if resultErr != nil {
+				state = "startup_failed"
+			}
+			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			err := opts.environmentReference.Record(recordCtx, state)
+			if err != nil && resultErr == nil {
+				if opened != nil {
+					_ = opened.Close()
+				}
+				opened = nil
+				resultErr = err
+			}
+			if resultErr == nil && opened != nil {
+				opened.environmentFinal = true
+			}
+		}
+	}()
+	if opts.Environment != nil {
+		ref, err := opts.Environment.Pin(ctx, opts.EnvironmentExecution)
+		if err != nil {
+			return nil, err
+		}
+		opts.environmentReference = ref
+		versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		versionCommand := exec.CommandContext(versionCtx, opts.Bin, "--version")
+		procx.Contain(versionCommand)
+		version, err := versionCommand.Output()
+		procx.KillGroup(versionCommand)
+		cancel()
+		if err != nil || !strings.HasPrefix(strings.TrimSpace(string(version)), "codex-cli ") {
+			return nil, fmt.Errorf("strict environment requires the selected native Codex executable")
+		}
+	}
 	if opts.HostedCoordination {
 		return startHostedCoordinator(ctx, opts)
 	}
@@ -93,6 +139,21 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	cmd := exec.CommandContext(procCtx, bin, args...)
 	cmd.Dir = opts.Dir
 	cmd.Env = appServerEnv(os.Environ(), opts.Env)
+	cleanup := func() {}
+	if opts.environmentReference != nil {
+		var err error
+		cmd, cleanup, err = opts.environmentReference.Command(procCtx, bin, args, opts.Dir, cmd.Env)
+		if err != nil {
+			kill()
+			return nil, err
+		}
+	}
+	started := false
+	defer func() {
+		if !started {
+			cleanup()
+		}
+	}()
 	cmd.Stderr = opts.Stderr
 	procx.Contain(cmd)
 	if opts.HostedCoordination || opts.KillWithParent {
@@ -120,8 +181,18 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 			return nil, fmt.Errorf("traex: persist app-server ownership: %w", err)
 		}
 	}
+	if opts.environmentReference != nil {
+		if err := opts.environmentReference.Record(ctx, "running"); err != nil {
+			kill()
+			_ = cmd.Wait()
+			procx.KillGroup(cmd)
+			return nil, err
+		}
+	}
 	s := newSession(stdout, stdin, opts.Log)
+	s.environmentReference = opts.environmentReference
 	s.stop = func() error {
+		defer cleanup()
 		var ownershipErr error
 		if opts.onBeforeCloseProcess != nil {
 			ownershipErr = opts.onBeforeCloseProcess()
@@ -143,11 +214,33 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 		if ownershipErr == nil && opts.onClosedProcess != nil {
 			ownershipErr = opts.onClosedProcess()
 		}
+		if opts.environmentReference != nil {
+			state := "retained"
+			if ownershipErr != nil {
+				state = "unknown"
+			} else {
+				s.mu.Lock()
+				unattached := s.environmentFinal && !s.environmentAttached
+				s.mu.Unlock()
+				if unattached {
+					state = "startup_failed"
+				}
+			}
+			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			ownershipErr = errors.Join(ownershipErr, opts.environmentReference.Record(recordCtx, state))
+			cancel()
+		}
 		return errors.Join(err, ownershipErr)
 	}
 	s.ownedProcess = true
+	started = true
 	if err := s.initialize(ctx, opts.Version); err != nil {
 		_ = s.Close()
+		if opts.environmentReference != nil {
+			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			_ = opts.environmentReference.Record(recordCtx, "startup_failed")
+			cancel()
+		}
 		return nil, err
 	}
 	if s.codex {
@@ -210,6 +303,9 @@ func (s *Session) initialize(ctx context.Context, version string) error {
 		Capabilities: &InitializeCapabilities{ExperimentalAPI: true},
 	}, &initialized)
 	if err != nil {
+		return err
+	}
+	if err := s.environmentReference.VerifyHome(initialized.CodexHome); err != nil {
 		return err
 	}
 	s.codex = initialized.CodexHome != ""
@@ -280,6 +376,9 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	t.mu.Lock()
 	t.nativeSessionID = res.Thread.SessionID
 	t.mu.Unlock()
+	if err := s.environmentThreadAttached(ctx); err != nil {
+		return nil, err
+	}
 	return t, nil
 }
 
@@ -329,6 +428,9 @@ func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness
 		t.fork = true
 	}
 	t.mu.Unlock()
+	if err := s.environmentThreadAttached(ctx); err != nil {
+		return nil, err
+	}
 	return t, nil
 }
 
@@ -396,7 +498,13 @@ func (s *Session) prepareServerRequest(method string, params json.RawMessage) fu
 	if p.Namespace != nil {
 		call.Namespace = *p.Namespace
 	}
-	return func(ctx context.Context) (any, error) { return toolResponse(handler(ctx, call)), nil }
+	s.mu.Lock()
+	s.toolCallbacks++
+	s.mu.Unlock()
+	return func(ctx context.Context) (any, error) {
+		defer func() { s.mu.Lock(); s.toolCallbacks--; s.mu.Unlock() }()
+		return toolResponse(handler(ctx, call)), nil
+	}
 }
 
 func toolResponse(r harness.ToolResult) DynamicToolCallResponse {

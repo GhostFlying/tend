@@ -22,6 +22,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/archive"
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/dispatch"
 	"github.com/GhostFlying/tend/internal/harness"
@@ -110,6 +111,7 @@ type TelegramConfig struct {
 // MainAgentConfig configures the hosted main agent (D68). Every field is
 // optional.
 type MainAgentConfig struct {
+	CodexEnvironments     *codexenv.Bindings          `json:"codex_environments,omitempty"`
 	Named                 *hostedconfig.Configuration `json:"named,omitempty"`
 	Recovery              *AgentRecoveryConfig        `json:"recovery"`
 	ConversationID        string                      `json:"-"`
@@ -714,6 +716,9 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 				return open(ctx, SessionSpec{Config: cfg, Selection: &selected, Cwd: cwd, Env: env})
 			}
 			if selected.RunnerManaged {
+				if cfg.CodexEnvironments.Resolve(selected.Runtime.ID) != nil {
+					return nil, errors.New("runner-managed Codex environments must be configured on the executing runner")
+				}
 				if selected.RunnerRunID == "" {
 					return nil, errors.New("manager awaits its runner claim")
 				}
@@ -723,7 +728,7 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 			if err != nil {
 				return nil, err
 			}
-			return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true})
+			return traex.Start(ctx, traex.Options{Bin: bin, Env: env, Dir: cwd, Version: "tend", Log: log, HostedCoordination: true, Environment: cfg.CodexEnvironments.Resolve(selected.Runtime.ID), EnvironmentExecution: "coordinator:" + cfg.Instance + ":" + cfg.ConversationID})
 		},
 		Open: func(ctx context.Context) (harness.Session, error) {
 			if open != nil {

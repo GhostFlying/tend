@@ -584,6 +584,11 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
 				return fmt.Errorf("mainthread: flush replies: %w", err)
 			}
+			if restart, err := m.environmentRestart(ctx, s, th); err != nil {
+				m.cfg.Log.WarnContext(ctx, "environment adoption pending", "err", err)
+			} else if restart {
+				return nil
+			}
 		case ev, ok := <-th.Events():
 			if !ok {
 				return errors.New("mainthread: the harness ended the thread")
@@ -778,7 +783,10 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThre
 		return s.ResumeThread(ctx, id, m.threadConfig())
 	}
 
-	if m.cfg.MaintenanceEnabled || selected != nil && selected.Purpose == agentconfig.IssueManager && !selected.ReceiptOnly {
+	if environmentResumeOnly(s) && selected != nil && selected.Purpose == agentconfig.Consultation {
+		return m.resumeConsultationEnvironment(ctx, s)
+	}
+	if m.cfg.MaintenanceEnabled || environmentResumeOnly(s) || selected != nil && selected.Purpose == agentconfig.IssueManager && !selected.ReceiptOnly {
 		return m.openManagedThread(ctx, s)
 	}
 	id, ok, err := m.app.MainThread(ctx, m.bindingInstance())

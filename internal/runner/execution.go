@@ -35,6 +35,7 @@ type ResolvedExecution struct {
 
 // ManagerExecution opens the exact accepted local app-server configuration.
 type ManagerExecution struct {
+	OpenRun      func(context.Context, string, string, string, bool, bool) (harness.Session, error)
 	OpenNative   func(context.Context, string) (harness.Session, error)
 	Open         func(context.Context, string) (harness.Session, error)
 	Instructions string
@@ -42,6 +43,12 @@ type ManagerExecution struct {
 }
 type ManagerExecutionResolver interface {
 	ResolveManager(context.Context, protocol.RunExecutionPin) (ManagerExecution, error)
+}
+
+// ManagerRunExecutionResolver restores locally persisted run environment bindings
+// before testing native readiness against current defaults.
+type ManagerRunExecutionResolver interface {
+	ResolveManagerRun(context.Context, protocol.RunExecutionPin) (ManagerExecution, error)
 }
 
 // NativeOwnerExecutionResolver advertises the optional device-default adapter.
@@ -66,6 +73,9 @@ func (r *Runner) resolveManagerExecution(ctx context.Context, as protocol.Assign
 			return ManagerExecution{}, errors.New("runner: original manager receipt resolver is unavailable")
 		}
 		return resolver.ResolveManagerReceipt(ctx, *as.Execution)
+	}
+	if resolver, ok := r.cfg.Executions.(ManagerRunExecutionResolver); ok {
+		return resolver.ResolveManagerRun(ctx, *as.Execution)
 	}
 	resolver, ok := r.cfg.Executions.(ManagerExecutionResolver)
 	if !ok {

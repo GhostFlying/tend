@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
+	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/harness/remote"
@@ -32,6 +33,7 @@ type BuildInput struct {
 }
 
 type Options struct {
+	Environments *codexenv.Bindings
 	CentralOrca  *orca.Client
 	ProbeCentral func(context.Context) error
 
@@ -51,11 +53,12 @@ type Options struct {
 }
 
 type entry struct {
-	input        BuildInput
-	ownerInput   *BuildInput
-	workers      harness.Workers
-	reason       string
-	managerReady bool
+	input                  BuildInput
+	ownerInput             *BuildInput
+	workers                harness.Workers
+	reason                 string
+	managerReady           bool
+	environmentUnavailable bool
 }
 type Pool struct {
 	retainedMu       sync.Mutex
@@ -154,7 +157,11 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 		}
 		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
 		if slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun) {
-			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.reason == "" && e.workers != nil, Reason: e.reason})
+			reason := e.reason
+			if e.environmentUnavailable && (reason == "" || canProbe(reason)) {
+				reason = "environment_unavailable"
+			}
+			out = append(out, protocol.AgentExecutor{Pin: pin, Available: reason == "" && e.workers != nil, Reason: reason})
 		}
 		if managerPurpose(e) {
 			pin.Purpose = "issue_manager"
@@ -198,7 +205,17 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 	}
 	e := entries[pin.Identity.LocalID]
 	if e != nil && (canProbe(e.reason)) {
-		p.initialize(ctx, e)
+		if p.options.Environments.Resolve(e.input.Runtime.ID) != nil || e.input.Runtime.Kind == agentconfig.AppServerWorker && e.input.Runtime.CLI == "codex" {
+			// Availability probes use current mappings. Native Codex recovery
+			// restores the saved run binding at startup even after its mapping
+			// was removed, so it must not depend on probing the new default home.
+			e.workers, err = p.options.Build(e.input)
+			if err != nil {
+				return runner.ResolvedExecution{}, err
+			}
+		} else {
+			p.initialize(ctx, e)
+		}
 	}
 	// A native refusal removes future availability, but original sessions still
 	// need this exact factory for stop and recovery.
@@ -228,6 +245,9 @@ func (p *Pool) Reject(pin protocol.RunExecutionPin, reason string) {
 	}
 }
 func (p *Pool) probe(ctx context.Context, input BuildInput) error {
+	if p.options.Environments.Resolve(input.Runtime.ID) != nil && (input.Runtime.Kind != agentconfig.AppServerWorker || input.Runtime.CLI != "codex") {
+		return errors.New("strict environment binding requires a native Codex app-server runtime")
+	}
 	if _, err := exec.LookPath(input.Runtime.ExecutableRef); err != nil {
 		return err
 	}
@@ -252,13 +272,16 @@ func (p *Pool) probe(ctx context.Context, input BuildInput) error {
 		}
 		return nil
 	}
-	session, err := traex.Start(ctx, traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log})
+	session, err := traex.Start(ctx, traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.options.Environments.Resolve(input.Runtime.ID)})
 	if err != nil {
 		return err
 	}
 	return session.Close()
 }
 func (p *Pool) build(input BuildInput) (harness.Workers, error) {
+	if p.options.Environments.Resolve(input.Runtime.ID) != nil && (input.Runtime.Kind != agentconfig.AppServerWorker || input.Runtime.CLI != "codex") {
+		return nil, errors.New("strict environment binding requires a native Codex app-server runtime")
+	}
 	switch input.Runtime.Kind {
 	case agentconfig.CentralWorker:
 		if p.options.CentralOrca == nil {
@@ -266,7 +289,7 @@ func (p *Pool) build(input BuildInput) (harness.Workers, error) {
 		}
 		return remote.NewWorkers(remote.WorkerOptions{Bin: input.Runtime.ExecutableRef, Helper: p.options.BridgeCommand, Orca: p.options.CentralOrca, Model: input.Agent.Model, Effort: input.Agent.Effort, Log: p.options.Log}), nil
 	case agentconfig.AppServerWorker:
-		return traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log}, Model: input.Agent.Model, Effort: input.Agent.Effort, StrictResume: true}), nil
+		return traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: input.Runtime.ExecutableRef, Log: p.options.Log, Environment: p.options.Environments.Resolve(input.Runtime.ID)}, Model: input.Agent.Model, Effort: input.Agent.Effort, StrictResume: true}), nil
 	case agentconfig.OrcaWorker:
 		agent := protocol.AgentCodex
 		if input.Runtime.CLI == "traex" {
@@ -313,12 +336,25 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 	var retry error
 	for _, e := range entries {
-		if managerPurpose(e) && !e.managerReady {
+		ownerReady := true
+		if e.ownerInput != nil {
+			if err := p.environmentReady(ctx, e.ownerInput.Runtime.ID); err != nil {
+				e.managerReady, ownerReady = false, false
+				retry = errors.Join(retry, err)
+			}
+		}
+		if managerPurpose(e) && ownerReady && !e.managerReady {
 			e.managerReady = p.probeManager(ctx, e)
 			if !e.managerReady {
 				retry = errors.Join(retry, errors.New("owner native isolation is not verified"))
 			}
 		}
+		if err := p.environmentReady(ctx, e.input.Runtime.ID); err != nil {
+			e.environmentUnavailable = true
+			retry = errors.Join(retry, err)
+			continue
+		}
+		e.environmentUnavailable = false
 		if canProbe(e.reason) {
 			retry = errors.Join(retry, p.initialize(ctx, e))
 		}
@@ -328,6 +364,14 @@ func (p *Pool) Refresh(ctx context.Context) error {
 
 func canProbe(reason string) bool {
 	return reason == "adapter_not_loaded" || reason == "adapter_unavailable" || reason == "orca_trae_model_selection_not_supported"
+}
+
+func (p *Pool) environmentReady(ctx context.Context, runtime string) error {
+	if binding := p.options.Environments.Resolve(runtime); binding != nil {
+		_, err := binding.Pin(ctx, "")
+		return err
+	}
+	return nil
 }
 
 // Close stops only the factories owned by this process, including held loops.
