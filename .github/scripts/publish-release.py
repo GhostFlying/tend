@@ -18,7 +18,7 @@ def lookup_release(repo, tag):
     query = """query($owner:String!,$name:String!,$tag:String!) {
       repository(owner:$owner,name:$name) {
         release(tagName:$tag) {
-          isDraft targetCommitish releaseAssets(first:100) { nodes { name } }
+          isDraft tagCommit { oid } releaseAssets(first:100) { nodes { name } }
         }
       }
     }"""
@@ -76,7 +76,7 @@ def publish(root, commit, repo):
            "--draft", "--prerelease", "--title", tag,
            "--notes", f"Complete Linux distributions built and checked from {commit}.")
         release = lookup_release(repo, tag)
-    if release is None or release["targetCommitish"] != commit:
+    if release is None or (release["tagCommit"] or {}).get("oid") != commit:
         raise ValueError("release source differs from checked commit")
     assets = {a["name"] for a in release["releaseAssets"]["nodes"]}
     if assets - expected:
