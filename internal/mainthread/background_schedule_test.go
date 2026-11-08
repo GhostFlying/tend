@@ -2,6 +2,7 @@ package mainthread
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -51,7 +52,7 @@ func TestBackgroundPoolSleepsAcrossIdleMinuteAndWakesForChange(t *testing.T) {
 				t.Fatal("idle history attached a process")
 			default:
 			}
-			a.Changes().Notify()
+			a.SchedulingChanges().Notify()
 			return waitBackground(ctx, changed, completed, delay)
 		}
 		return false
@@ -87,5 +88,42 @@ func TestBackgroundAttachmentFailureBackoffAndCapacityWake(t *testing.T) {
 	p.finishAttachment("original", false)
 	if len(p.retries) != 0 || len(p.active) != 0 {
 		t.Fatal("successful attachment retained failed retry or occupied capacity")
+	}
+}
+
+func TestBackgroundPoolIgnoresMinuteOfUnrelatedReplyUpdates(t *testing.T) {
+	clock := testkit.NewClock()
+	s, err := mainFixtureTemplate.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ids := testkit.NewIDGen(clock, 7)
+	a := app.New(s, ids, clock.Now)
+	scans, waits := 0, 0
+	p := &BackgroundPool{App: a, scanned: func() { scans++ }}
+	p.wait = func(ctx context.Context, changed, completed <-chan struct{}, delay time.Duration) bool {
+		waits++
+		if waits > 1 {
+			return false
+		}
+		for range 100 {
+			clock.Advance(600 * time.Millisecond)
+			op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem, Thread: "foreground"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "conversation.record_agent_message", Target: protocol.Target{Type: "message"}, Payload: json.RawMessage(`{"body":"streamed text"}`)}, app.RecordAgentMessage{})
+			if err != nil || op.Error != nil {
+				t.Fatal(op, err)
+			}
+			select {
+			case <-changed:
+				t.Fatal("reply text woke background eligibility scan")
+			default:
+			}
+		}
+		a.SchedulingChanges().Notify()
+		return waitBackground(ctx, changed, completed, delay)
+	}
+	p.Run(t.Context())
+	if scans != 2 || waits != 2 {
+		t.Fatal("expected startup and eligibility change only", scans, waits)
 	}
 }

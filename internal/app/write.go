@@ -10,7 +10,7 @@ import (
 
 // write is the common app transaction boundary, including internal maintenance.
 func (a *App) write(ctx context.Context, fn func(*store.Tx) error) error {
-	changed := false
+	changed, scheduling := false, false
 	err := a.store.Write(ctx, func(tx *store.Tx) error {
 		if err := fn(tx); err != nil {
 			return err
@@ -24,11 +24,15 @@ func (a *App) write(ctx context.Context, fn func(*store.Tx) error) error {
 			}
 			changed = true
 		}
-		changed = changed || tx.Changed("concurrency")
+		scheduling = tx.Changed("concurrency")
+		changed = changed || scheduling
 		return nil
 	})
 	if err == nil && changed {
-		a.notifyChange()
+		a.changes.Notify()
+		if scheduling {
+			a.scheduling.Notify()
+		}
 	}
 	return err
 }

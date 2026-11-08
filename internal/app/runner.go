@@ -43,7 +43,14 @@ func (a *App) LeaseTTL() time.Duration { return a.leaseTTL }
 // example so that waiting runner claims look for work again.
 func (a *App) Changes() *Broadcast { return a.changes }
 
-func (a *App) notifyChange() { a.changes.Notify() }
+// SchedulingChanges excludes projection-only updates such as streamed reply
+// text and usage. Business transitions conservatively wake both subscribers.
+func (a *App) SchedulingChanges() *Broadcast { return a.scheduling }
+
+func (a *App) notifyChange() {
+	a.changes.Notify()
+	a.scheduling.Notify()
+}
 
 // RunLogs is notified after run logs are recorded. Logs are not events,
 // so Changes does not cover them.

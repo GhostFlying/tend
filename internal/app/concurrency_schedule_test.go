@@ -28,7 +28,7 @@ func TestConcurrencyIdleMinuteWaitsForFactsAndRetainsMissingProof(t *testing.T) 
 				t.Fatal("idle sample generated another change")
 			default:
 			}
-			h.app.Changes().Notify()
+			h.app.SchedulingChanges().Notify()
 			return waitConcurrency(ctx, wake, delay)
 		}
 		return false
@@ -102,7 +102,30 @@ func TestConcurrencyActiveNotificationsCoalesceToThirtySeconds(t *testing.T) {
 			t.Fatal("notification accelerated samples", ticks, waits, delay)
 		}
 		h.clock.Advance(time.Second)
-		h.app.Changes().Notify()
+		h.app.SchedulingChanges().Notify()
+		<-wake
+		return true
+	}
+	h.app.runConcurrency(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)), wait, func() { ticks++ })
+	if ticks != 2 {
+		t.Fatal("sample count", ticks)
+	}
+}
+
+func TestConcurrencyIdleSchedulingNotificationsCoalesceToThirtySeconds(t *testing.T) {
+	h := newHarness(t)
+	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 2, Max: 4})
+	ticks, waits := 0, 0
+	wait := func(_ context.Context, wake <-chan struct{}, delay time.Duration) bool {
+		waits++
+		if waits > 30 {
+			return false
+		}
+		if ticks != 1 || waits == 1 && delay <= time.Minute || waits > 1 && delay != time.Duration(31-waits)*time.Second {
+			t.Fatal("idle notification accelerated sampling", ticks, waits, delay)
+		}
+		h.clock.Advance(time.Second)
+		h.app.SchedulingChanges().Notify()
 		<-wake
 		return true
 	}
@@ -152,5 +175,42 @@ func TestConcurrencyIdleReadExpiresWindowWithoutSamplingOrWriting(t *testing.T) 
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConcurrencyIdleIgnoresMinuteOfUnrelatedReplyUpdates(t *testing.T) {
+	h := newHarness(t)
+	concurrencyConfigure(t, h, "create", "shared", 0, protocol.ConfigureConcurrencyPayload{Name: "Shared", Min: 1, Initial: 2, Max: 4})
+	ticks, waits := 0, 0
+	wait := func(ctx context.Context, wake <-chan struct{}, delay time.Duration) bool {
+		waits++
+		if waits > 1 {
+			return false
+		}
+		for range 100 {
+			h.clock.Advance(600 * time.Millisecond)
+			visible := h.app.Changes().Wait()
+			op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem, Thread: "foreground"}, h.env("conversation.record_agent_message", protocol.Target{Type: "message"}, map[string]any{"body": "streamed text"}, nil), RecordAgentMessage{})
+			if op.Error != nil {
+				t.Fatal(op.Error)
+			}
+			select {
+			case <-visible:
+			default:
+				t.Fatal("reply update did not notify readers")
+			}
+			select {
+			case <-wake:
+				t.Fatal("reply text woke idle concurrency sampling")
+			default:
+			}
+		}
+		// A real configuration change must still wake the idle group.
+		concurrencyConfigure(t, h, "update", "shared", 1, protocol.ConfigureConcurrencyPayload{Name: "Changed", Min: 1, Initial: 2, Max: 5})
+		return waitConcurrency(ctx, wake, delay)
+	}
+	h.app.runConcurrency(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)), wait, func() { ticks++ })
+	if ticks != 2 || waits != 2 {
+		t.Fatal("expected startup and configuration change only", ticks, waits)
 	}
 }
