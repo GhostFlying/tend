@@ -43,29 +43,11 @@ func ParseUsagePrices(raw []byte) (UsagePrices, error) {
 	return c, err
 }
 
-// EstimateUsagePrice requires an exact catalog ID or one unique native slug.
+// EstimateUsagePrice prefers an exact catalog ID, then a unique case-insensitive
+// catalog ID or native slug. Original model metadata remains unchanged.
 // Unknown cache counters or unsupported quote conditions remain unpriced.
 func (c UsagePrices) EstimateUsagePrice(s protocol.TokenUsageSample) (string, string, bool) {
-	var chosen *UsagePriceModel
-	for i := range c.Data {
-		m := &c.Data[i]
-		if m.ID == s.Model {
-			chosen = m
-			break
-		}
-	}
-	if chosen == nil && s.Model != "" {
-		for i := range c.Data {
-			m := &c.Data[i]
-			_, slug, ok := strings.Cut(m.ID, "/")
-			if ok && slug == s.Model {
-				if chosen != nil {
-					return "", "", false
-				}
-				chosen = m
-			}
-		}
-	}
+	chosen := c.model(s.Model)
 	if chosen == nil || s.Input == nil || s.Output == nil || s.CacheRead == nil || s.CacheWrite == nil {
 		return "", "", false
 	}
@@ -113,6 +95,39 @@ func (c UsagePrices) EstimateUsagePrice(s protocol.TokenUsageSample) (string, st
 	// Decimal rates are exact. Keep sub-cent precision until display formatting.
 	value := exactUsagePrice(total)
 	return value, chosen.ID, value != ""
+}
+
+func (c UsagePrices) model(model string) *UsagePriceModel {
+	if model == "" {
+		return nil
+	}
+	for i := range c.Data {
+		if c.Data[i].ID == model {
+			return &c.Data[i]
+		}
+	}
+	var chosen *UsagePriceModel
+	for i := range c.Data {
+		if strings.EqualFold(c.Data[i].ID, model) {
+			if chosen != nil {
+				return nil
+			}
+			chosen = &c.Data[i]
+		}
+	}
+	if chosen != nil {
+		return chosen
+	}
+	for i := range c.Data {
+		_, slug, ok := strings.Cut(c.Data[i].ID, "/")
+		if ok && strings.EqualFold(slug, model) {
+			if chosen != nil {
+				return nil
+			}
+			chosen = &c.Data[i]
+		}
+	}
+	return chosen
 }
 
 func AddUsagePrice(left, right string) string {
