@@ -630,6 +630,9 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		if err := decode(c.Arguments, &p); err != nil {
 			return fail(err)
 		}
+		if p == nil {
+			return fail(protocol.Errorf(protocol.CodeInvalidRequest, "tool arguments must be an object"))
+		}
 		if id, ok := p["conversation_id"]; ok && id != "" && id != execution.ConversationID {
 			return fail(protocol.Errorf(protocol.CodeForbidden, "conversation is outside this responsibility"))
 		}

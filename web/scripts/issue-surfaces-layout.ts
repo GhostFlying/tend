@@ -1642,7 +1642,7 @@ async function captureS4() {
             .first()
             .waitFor();
         if (name === "repos") await page.getByText("已读取登记。", { exact: true }).waitFor();
-        if (name === "settings") await page.getByLabel("空闲分钟", { exact: true }).waitFor();
+        if (name === "settings") await page.getByText("索引交接已启用", { exact: true }).waitFor();
         if (name === "agents") await page.getByRole("button", { name: /青竹/ }).waitFor();
         // Wait for actual fixture content rather than a title-only loading commit.
         if (name!.startsWith("issue-"))
@@ -2340,7 +2340,7 @@ try {
       "forward preserves deferral",
     );
     await navigate(page, "/settings");
-    await page.getByLabel("空闲分钟", { exact: true }).waitFor();
+    await page.getByText("索引交接已启用", { exact: true }).waitFor();
     await page.goBack();
     await page.waitForURL((url) => url.pathname === "/inbox");
     await inboxList.getByRole("button", { name: /发布进度已更新/ }).waitFor();

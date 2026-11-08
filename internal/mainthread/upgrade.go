@@ -6,7 +6,7 @@ import (
 )
 
 // UpgradeDrainStatus is called after the durable gate is established. Holding
-// workMu proves no delivery or tool callback is still executing; a private
+// workMu proves no delivery or tool callback is still executing.
 // Unconfirmed native operations must settle before process replacement.
 func (m *Manager) UpgradeDrainStatus(ctx context.Context) (bool, error) {
 	if _, err := m.app.UpgradePausesMain(ctx); err != nil {

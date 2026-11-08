@@ -3816,6 +3816,9 @@
     "ConversationContextReference": {
       "additionalProperties": false,
       "properties": {
+        "association_removed": {
+          "type": "boolean"
+        },
         "association_revision": {
           "type": "integer"
         },

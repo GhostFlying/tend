@@ -133,3 +133,36 @@ func TestContextIndexCorrectionsAndWithdrawalsKeepExactSourceIdentity(t *testing
 		t.Fatal("index contains source text")
 	}
 }
+
+func TestContextIndexRetainsRemovedAssociationUntilItsReviewCompletes(t *testing.T) {
+	h := hostedManagerHarness(t)
+	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	seedIncrementalContext(t, h, issue, 1, 1)
+	id := fmt.Sprintf("context-source-%s-000", issue.IssueID)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE message_work_items SET active=0 WHERE message_id=? AND work_item_id=?`, id, issue.IssueID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := h.app.ConversationContextIndex(t.Context(), "issue:"+issue.IssueID, protocol.ConversationContextQuery{Section: "sources"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range page.Items {
+		if r.ID == id {
+			found = true
+			if !r.NeedsReview || !r.AssociationRemoved {
+				t.Fatal("correction lost original review status", r)
+			}
+		}
+	}
+	if !found || !page.ReviewRequired || page.SourceCount == 0 {
+		t.Fatal("pending correction disappeared", page)
+	}
+	materials, err := h.app.ReadScopedIssueMaterials(t.Context(), issue.IssueID, issue.IssueID, protocol.IssueMaterialsQuery{Kind: "sources", ID: id})
+	if err != nil || len(materials.Sources) != 1 || materials.Sources[0].MessageID != id {
+		t.Fatal("correction original is not recoverable", materials, err)
+	}
+}

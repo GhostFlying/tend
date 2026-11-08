@@ -2726,6 +2726,7 @@ export interface ConversationContextIndex {
  * via the `definition` "ConversationContextReference".
  */
 export interface ConversationContextReference {
+  association_removed?: boolean;
   association_revision?: number;
   content_revision?: number;
   conversation_id?: string;

@@ -3,7 +3,7 @@ import { Link } from "../app/router.ts";
 import { SegmentedControl } from "../ui/Choices.tsx";
 import { theme, themeLabels, setTheme } from "../theme/theme.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
-// Independent owner preferences for idle preparation; model settings stay separate.
+// Read-only index handoff status; model settings stay separate.
 import { useEffect } from "react";
 import type { Connection } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";

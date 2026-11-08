@@ -381,10 +381,10 @@ try {
     await unobscured(settings);
     await settings.click();
     const panel = page.getByRole("region", { name: "设置", exact: true });
-    await panel.getByLabel("空闲分钟").fill("60");
-    await panel.getByRole("button", { name: "保存", exact: true }).click();
-    await panel.getByText("空闲 60 分钟后自动准备。", { exact: false }).waitFor();
-    assert.equal(writes.at(-1)?.operation, "conversation.set_handoff_settings");
+    await panel.getByText("索引交接已启用", { exact: true }).waitFor();
+    await panel.getByText(/新会话通过索引按需读取当前状态和原始历史/).waitFor();
+    assert.equal(await panel.getByLabel("空闲分钟").count(), 0);
+    assert(!writes.some((write) => write.operation === "conversation.set_handoff_settings"));
     await page.screenshot({
       path: join(output, `settings-${viewport.width}x${viewport.height}.png`),
     });
