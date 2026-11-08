@@ -110,7 +110,10 @@ func (s *Service) Execute(ctx context.Context, q Request) (Result, error) {
 		}
 		defer release()
 	}
-	unlock, err := lock(ctx, dir)
+	// Package staging and native catalog validation must not hold the lock
+	// needed to persist a confirmed native close. Control requests retain their
+	// own serialization; retirement also excludes newly pinned executions.
+	unlock, err := lock(ctx, filepath.Join(dir, ".control"))
 	if err != nil {
 		return Result{}, err
 	}
@@ -135,6 +138,13 @@ func (s *Service) Execute(ctx context.Context, q Request) (Result, error) {
 			return prior.Result, nil
 		}
 		q = prior.Request
+	}
+	if q.Action == "delete" {
+		release, err := lock(ctx, dir)
+		if err != nil {
+			return Result{}, err
+		}
+		defer release()
 	}
 	raw, _ := json.Marshal(q)
 	hash := digest(raw)

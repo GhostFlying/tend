@@ -395,7 +395,7 @@ func resolveRolloutRoots(cfg *config, home string) error {
 	if cfg.RolloutRoots == nil {
 		mappedRoots, err := cfg.CodexEnvironments.SessionRoots()
 		if err != nil {
-			return err
+			slog.Warn("current Codex environment roots unavailable; executor readiness will report the mapping", "err", err)
 		}
 		retainedRoots, err := codexenv.RecordedSessionRoots(filepath.Join(home, "codex-rollout-roots"))
 		if err != nil {

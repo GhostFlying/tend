@@ -107,3 +107,49 @@ func TestAdoptionReaderDoesNotBlockNativeStatePersistence(t *testing.T) {
 		t.Fatal(mode, err)
 	}
 }
+
+func TestNativeCompletionDoesNotWaitForSnapshotValidation(t *testing.T) {
+	s, p := fixture(t)
+	source := skill(t, t.TempDir(), "selected", "v1")
+	p.Skills = Selection{Mode: "projection", Allow: []Item{{ID: "selected", Path: source}}}
+	status := create(t, s, p)
+	ref, err := (&Binding{Directory: s.Root, ID: p.ID}).Pin(t.Context(), "run:finishing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(source, "resource"), []byte("changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	validating, release := make(chan struct{}), make(chan struct{})
+	s.Validate = func(ctx context.Context, _ Profile, _ string) error {
+		close(validating)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Execute(t.Context(), Request{Action: "sync", ID: p.ID, RequestID: "sync", ExpectedRevision: status.Revision})
+		done <- err
+	}()
+	select {
+	case <-validating:
+	case err := <-done:
+		t.Fatal("sync did not reach validation", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	err = ref.Record(ctx, "retained")
+	cancel()
+	close(release)
+	syncErr := <-done
+	if err != nil || syncErr != nil {
+		t.Fatal("background validation blocked confirmed completion", err, syncErr)
+	}
+	updated, err := s.Read(p.ID)
+	if err != nil || updated.Latest == ref.Generation || updated.Adoptions[ref.Execution].State != "retained" {
+		t.Fatal(updated, err)
+	}
+}
