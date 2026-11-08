@@ -52,7 +52,10 @@ type IssueDeliveryDuty struct {
 type UpdateIssueDeliveryPayload struct {
 	IssueControlPayload
 	TaskID string `json:"task_id"`
-	// prepare, resume, report, end, complete. End requires a real owner disposition.
+	// bind uses the current Task directly; it never creates or revives a Task.
+	ExecutionTaskID             string `json:"execution_task_id,omitempty"`
+	ExpectedTaskControlRevision *int64 `json:"expected_task_control_revision,omitempty"`
+	// prepare, resume, bind, report, end, complete. End retains owner disposition.
 	Action    string                  `json:"action"`
 	Candidate *IssueDeliveryCandidate `json:"candidate,omitempty"`
 	UpgradeID string                  `json:"upgrade_id,omitempty"`

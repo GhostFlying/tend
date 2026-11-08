@@ -8,7 +8,7 @@ import { Chevron, More } from "../shell/icons.tsx";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
-import type { IssueAgentConversation, IssueView } from "../api/generated/api.ts";
+import type { AttentionView, IssueAgentConversation, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Sheet } from "../ui/Modal.tsx";
@@ -70,6 +70,7 @@ export function IssueDetails({
   const { client, live } = useServices();
   const reads = useMemo(() => new Issues(client), [client]);
   const state = useStore(reads.detail.state);
+  const attentionState = useStore(reads.attentions.read.state);
   const results = useStore(reads.results.state);
   const deliveries = useStore(reads.deliveries.state);
   const activityState = useStore(reads.activity.state);
@@ -89,6 +90,7 @@ export function IssueDetails({
   const conversationState = useStore(conversationRead.state);
   useEffect(() => {
     void reads.open(id);
+    void reads.attentions.open(id);
     reads.children(id, reading.childCursor(), true);
     void reads.openResults(id);
     void reads.openDeliveries(id);
@@ -176,7 +178,10 @@ export function IssueDetails({
       ?.querySelector("[data-activity-end]")
       ?.scrollIntoView({ block: "end", behavior: "smooth" });
   };
-  const actionable = issue?.attentions?.items?.filter(isHumanAction) ?? [];
+  const actionable = (attentionState.value?.items ?? issue?.attentions?.items ?? []).filter(
+    (item) => item.status === "open" && ["action", "decision"].includes(item.kind),
+  );
+  const selectedAttention = actionable.find((item) => item.attention_id === attention);
   const execution = executionSummary(issue);
   const ended = !!issue && ["closed", "cancelled"].includes(issue.state);
   const statusLabel =
@@ -500,9 +505,7 @@ export function IssueDetails({
                 {actionable[0] && (
                   <section className={styles.attention}>
                     <div>
-                      <small>
-                        {actionable[0].kind === "decision" ? "需要你决定" : "需要你处理"}
-                      </small>
+                      <small>{attentionResponsibilityLabel(actionable[0])}</small>
                       <h2>{actionable[0].title}</h2>
                       {actionable.length > 1 && (
                         <details>
@@ -513,7 +516,7 @@ export function IssueDetails({
                               key={item.attention_id}
                               onClick={() => setAttention(item.attention_id)}
                             >
-                              {item.title}
+                              {attentionResponsibilityLabel(item)} · {item.title}
                             </Button>
                           ))}
                         </details>
@@ -523,9 +526,28 @@ export function IssueDetails({
                       variant="primary"
                       onClick={() => setAttention(actionable[0]!.attention_id)}
                     >
-                      {actionable[0].kind === "decision" ? "查看并决定" : "查看并处理"}
+                      {isHumanAction(actionable[0])
+                        ? actionable[0].kind === "decision"
+                          ? "查看并决定"
+                          : "查看并处理"
+                        : "查看当前待办"}
                     </Button>
                   </section>
+                )}
+                {attentionState.error && (
+                  <ReadError
+                    label="当前责任待办读取失败"
+                    retry={() => void reads.attentions.read.refresh()}
+                  />
+                )}
+                {attentionState.value?.more && (
+                  <Button
+                    variant="link"
+                    disabled={attentionState.loading}
+                    onClick={() => void reads.attentions.more()}
+                  >
+                    {attentionState.loading ? "正在读取待办…" : "加载更多当前责任待办"}
+                  </Button>
                 )}
                 <section
                   data-issue-progress
@@ -724,7 +746,37 @@ export function IssueDetails({
       )}
       {attention && (
         <Sheet open title="Issue 待处理事项" onClose={() => setAttention("")}>
-          <AttentionDetails id={attention} onIssue={onSelect} onBack={() => setAttention("")} />
+          {selectedAttention && !isHumanAction(selectedAttention) ? (
+            <section className={styles.panel}>
+              <p>{attentionResponsibilityLabel(selectedAttention)}</p>
+              <h2>{selectedAttention.title}</h2>
+              <Markdown
+                text={
+                  selectedAttention.decision?.question ??
+                  selectedAttention.choice?.question ??
+                  selectedAttention.title
+                }
+              />
+              {selectedAttention.issue_id && (
+                <Button variant="link" onClick={() => onSelect(selectedAttention.issue_id!)}>
+                  原始 Issue · {selectedAttention.issue_title || selectedAttention.issue_id}
+                </Button>
+              )}
+              {selectedAttention.task_id && (
+                <Button variant="link" onClick={() => onTask(selectedAttention.task_id!)}>
+                  查看相关任务 · {selectedAttention.task_title || selectedAttention.task_id}
+                </Button>
+              )}
+              <Button
+                variant="link"
+                onClick={() => navigate({ page: "attention", id: selectedAttention.attention_id })}
+              >
+                打开原始事项记录 →
+              </Button>
+            </section>
+          ) : (
+            <AttentionDetails id={attention} onIssue={onSelect} onBack={() => setAttention("")} />
+          )}
         </Sheet>
       )}
       {issue && panel && (
@@ -796,6 +848,13 @@ function conversationReason(issue: IssueView): string {
     )[issue.conversation?.reason ?? "unavailable"] || "正在读取负责人对话…"
   );
 }
+function attentionResponsibilityLabel(item: AttentionView): string {
+  if (isHumanAction(item)) return item.kind === "decision" ? "需要你决定" : "需要你处理";
+  return item.responsibility?.recipient_kind === "main"
+    ? "等待上级负责人处理"
+    : "等待本 Issue 负责人处理";
+}
+
 function executionSummary(issue: IssueView | null): string {
   const counts = new Map<string, number>();
   for (const task of issue?.tasks ?? []) {

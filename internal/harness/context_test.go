@@ -21,8 +21,8 @@ func TestReadContextIsOrdinaryForImplementAcceptAndSuccessor(t *testing.T) {
 				return protocol.RunContext{RunID: "current_run", TaskID: "original_task", Role: role, Materials: protocol.IssueMaterials{Kind: "files", ObservedAt: 17, Seq: 23, More: true, Next: "next-page", Files: []protocol.IssueMaterialFile{{ArtifactFile: protocol.ArtifactFile{FileID: "file_saved", SHA256: "original-hash"}, Sources: []protocol.IssueMaterialSource{{Kind: "background", Status: "withdrawn", ContentRevision: 4}}}}}}, nil
 			}
 			r := Results{Spec: spec}
-			got := r.Handle(t.Context(), ToolCall{Tool: "read_context", Arguments: json.RawMessage(`{"kind":"files","id":"file_saved","after":"opaque-cursor","limit":7}`)})
-			want := protocol.IssueMaterialsQuery{Kind: "files", ID: "file_saved", After: "opaque-cursor", Limit: 7}
+			got := r.Handle(t.Context(), ToolCall{Tool: "read_context", Arguments: json.RawMessage(`{"issue_id":"issue_related","kind":"files","id":"file_saved","after":"opaque-cursor","limit":7}`)})
+			want := protocol.IssueMaterialsQuery{IssueID: "issue_related", Kind: "files", ID: "file_saved", After: "opaque-cursor", Limit: 7}
 			var decoded protocol.RunContext
 			if !got.Success || !reflect.DeepEqual(received, want) || json.Unmarshal([]byte(got.Text), &decoded) != nil || decoded.Materials.Next != "next-page" || !decoded.Materials.More || decoded.Materials.Files[0].Sources[0].Status != "withdrawn" {
 				t.Fatal("ordinary context or retained provenance was lost", role, attempt, got, received)

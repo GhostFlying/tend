@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -19,11 +20,9 @@ func GetArtifactShare(ctx context.Context, q Querier, id string) (protocol.Artif
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return result, fmt.Errorf("store: decode artifact share: %w", err)
 	}
-	var applicable bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=? AND assignment_epoch=? AND assignment_state='active')`, result.IssueID, result.AssignmentEpoch).Scan(&applicable); err != nil {
-		return result, err
-	}
-	result.Applicable = result.Status == "active" && applicable
+	// Assignment changes transfer responsibility, not erase already shared
+	// knowledge. Revocation remains the explicit end of this reference.
+	result.Applicable = result.Status == "active"
 	return result, nil
 }
 
@@ -98,10 +97,14 @@ func ListArtifactShares(ctx context.Context, q Querier, issue, after, status str
 	return page, nil
 }
 
-// ArtifactShareReadable never widens permission to the source task or siblings.
-func ArtifactShareReadable(ctx context.Context, q Querier, issue, artifact string, epoch int64) (bool, error) {
+// ArtifactShareReadable includes ordinary same-project knowledge and exact
+// cross-project shares. A target's explicit revocation remains an exception.
+func ArtifactShareReadable(ctx context.Context, q Querier, issue, artifact string, _ int64) (bool, error) {
 	var allowed bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifact_shares s JOIN issue_controls c ON c.issue_id=s.issue_id JOIN artifacts a ON a.artifact_id=s.artifact_id WHERE s.issue_id=? AND s.artifact_id=? AND s.status='active' AND c.assignment_state='active' AND c.assignment_epoch=s.assignment_epoch AND s.assignment_epoch=? AND a.ref_json=s.ref_json)`, issue, artifact, epoch).Scan(&allowed)
+	err := q.QueryRowContext(ctx, `SELECT (
+ EXISTS(SELECT 1 FROM artifacts a JOIN task_work_item_owners o ON o.task_id=a.task_id JOIN work_items source ON source.work_item_id=o.work_item_id JOIN work_items target ON target.work_item_id=? WHERE a.artifact_id=? AND source.project<>'' AND source.project=target.project)
+ OR EXISTS(SELECT 1 FROM artifact_shares s JOIN artifacts a ON a.artifact_id=s.artifact_id WHERE s.issue_id=? AND s.artifact_id=? AND s.status='active' AND a.ref_json=s.ref_json))
+ AND NOT EXISTS(SELECT 1 FROM artifact_shares s WHERE s.issue_id=? AND s.artifact_id=? AND s.status='revoked' AND NOT EXISTS(SELECT 1 FROM artifact_shares active WHERE active.issue_id=s.issue_id AND active.artifact_id=s.artifact_id AND active.status='active'))`, issue, artifact, issue, artifact, issue, artifact).Scan(&allowed)
 	return allowed, err
 }
 
@@ -110,16 +113,18 @@ func ArtifactRefSHA256(ref string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ArtifactFileSharedWithIssue resolves only a file actually frozen in a live
-// exact artifact share. It does not expose other uploads from the source run.
-func ArtifactFileSharedWithIssue(ctx context.Context, q Querier, issue string, epoch int64, file protocol.ArtifactFile) (bool, error) {
-	var allowed bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(
- SELECT 1 FROM artifact_shares s JOIN issue_controls c ON c.issue_id=s.issue_id
- JOIN artifacts a ON a.artifact_id=s.artifact_id, json_each(s.ref_json,'$.files') f
- WHERE s.issue_id=? AND s.assignment_epoch=? AND c.assignment_epoch=s.assignment_epoch
- AND c.assignment_state='active' AND s.status='active' AND a.ref_json=s.ref_json
- AND json_extract(f.value,'$.file_id')=? AND json_extract(f.value,'$.name')=?
- AND json_extract(f.value,'$.size')=? AND json_extract(f.value,'$.sha256')=?)`, issue, epoch, file.FileID, file.Name, file.Size, file.SHA256).Scan(&allowed)
-	return allowed, err
+// ArtifactFileSharedWithIssue resolves a file actually submitted in readable
+// project knowledge or an exact share. It never exposes an unsubmitted upload.
+func ArtifactFileSharedWithIssue(ctx context.Context, q Querier, issue string, _ int64, file protocol.ArtifactFile) (bool, error) {
+	frozen, artifact, err := GetFinalizedDeliverableFile(ctx, q, file.FileID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if frozen.ArtifactFile != file {
+		return false, nil
+	}
+	return ArtifactShareReadable(ctx, q, issue, artifact, 0)
 }

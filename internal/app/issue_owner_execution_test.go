@@ -157,15 +157,24 @@ func TestIssueOwnerExecutesWithSameIdentityAndReviewChild(t *testing.T) {
 	}
 }
 
-func TestIssueOwnerCannotDispatchAnotherAgentWithoutChild(t *testing.T) {
-	h, _, issue := issueOwnerHarness(t)
-	beforeTasks, beforeIssues := h.count("tasks"), h.count("work_items")
+func TestIssueOwnerSelectsOrdinaryCollaboratorWithoutChild(t *testing.T) {
+	h, runtime, issue := issueOwnerHarness(t)
+	beforeIssues := h.count("work_items")
 	op := createOwnerExecution(t, h, issue, "reviewer")
-	if op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeForbidden {
-		t.Fatal("cross-Agent work bypassed child Issue", op)
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal("ordinary same-Issue collaboration was rejected", op)
 	}
-	if h.count("tasks") != beforeTasks || h.count("work_items") != beforeIssues {
-		t.Fatal("rejected delegation left partial work")
+	var result taskResult
+	if err := json.Unmarshal(op.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	as := ownerWorkerClaim(t, h, runtime, protocol.RoleImplement)
+	if as.TaskID != result.TaskID || as.Execution == nil || as.Execution.Identity.LocalID != "beta" {
+		t.Fatal("selected collaborator did not execute", as)
+	}
+	current := canonicalTaskIssue(t, h, issue.IssueID)
+	if current.Assignee != issue.Assignee || h.count("work_items") != beforeIssues {
+		t.Fatal("collaboration changed responsibility", current)
 	}
 }
 

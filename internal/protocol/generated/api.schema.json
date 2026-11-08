@@ -4322,6 +4322,9 @@
         "expected_source_revision": {
           "type": "integer"
         },
+        "independent_acceptance": {
+          "$ref": "#/definitions/IndependentAcceptanceRequest"
+        },
         "rating": {
           "$ref": "#/definitions/Rating"
         },
@@ -4802,6 +4805,9 @@
         "run_id": {
           "type": "string"
         },
+        "settlement": {
+          "$ref": "#/definitions/DeliverySettlementAuthority"
+        },
         "shared_review": {
           "$ref": "#/definitions/ObservedDeliveryReview"
         },
@@ -4982,6 +4988,45 @@
         "timeout_ms"
       ],
       "title": "DeliveryObserverStatus",
+      "type": "object"
+    },
+    "DeliverySettlementAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "current_duty_revision": {
+          "type": "integer"
+        },
+        "duty_revision": {
+          "type": "integer"
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "invalid_reason": {
+          "type": "string"
+        },
+        "target_sha": {
+          "type": "string"
+        },
+        "upgrade": {
+          "$ref": "#/definitions/UpgradeEvidence"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "eligible",
+        "duty_revision",
+        "current_duty_revision"
+      ],
+      "title": "DeliverySettlementAuthority",
       "type": "object"
     },
     "DownloadURLResponse": {
@@ -6289,8 +6334,14 @@
         "notification_due_at": {
           "type": "integer"
         },
+        "owner_attention_count": {
+          "type": "integer"
+        },
         "pending_manager_category_id": {
           "type": "string"
+        },
+        "progress": {
+          "$ref": "#/definitions/IssueProgress"
         },
         "stage_title": {
           "type": "string"
@@ -7852,6 +7903,9 @@
         "issue_id": {
           "type": "string"
         },
+        "native_owner_tools": {
+          "type": "boolean"
+        },
         "receipt_only": {
           "type": "boolean"
         },
@@ -8132,6 +8186,9 @@
           },
           "type": "array"
         },
+        "delivery_authorization": {
+          "$ref": "#/definitions/DeliveryExecutionAuthority"
+        },
         "deployment": {
           "$ref": "#/definitions/ObservedDeployment"
         },
@@ -8232,6 +8289,9 @@
           "type": "string"
         },
         "id": {
+          "type": "string"
+        },
+        "issue_id": {
           "type": "string"
         },
         "kind": {
@@ -10954,6 +11014,9 @@
         "status": {
           "type": "string"
         },
+        "suggested_rounds": {
+          "type": "integer"
+        },
         "valid": {
           "type": "boolean"
         }
@@ -10985,6 +11048,9 @@
         },
         "base_sha": {
           "type": "string"
+        },
+        "correction": {
+          "$ref": "#/definitions/ObservedReviewCorrection"
         },
         "execution_requirements": {
           "$ref": "#/definitions/SharedReviewExecutionRequirements"
@@ -11315,6 +11381,43 @@
         "missing"
       ],
       "title": "ObservedDeploymentPreparation",
+      "type": "object"
+    },
+    "ObservedReviewCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "profile": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "task_id",
+        "spec_version",
+        "run_id",
+        "artifact_id",
+        "profile",
+        "created_at"
+      ],
+      "title": "ObservedReviewCorrection",
       "type": "object"
     },
     "ObservedRunner": {
@@ -14485,6 +14588,12 @@
         "base_sha": {
           "type": "string"
         },
+        "corrections": {
+          "items": {
+            "$ref": "#/definitions/SharedReviewCorrection"
+          },
+          "type": "array"
+        },
         "execution_requirements": {
           "$ref": "#/definitions/SharedReviewExecutionRequirements"
         },
@@ -14594,6 +14703,51 @@
         "reason"
       ],
       "title": "SharedReviewBudgetAuthorization",
+      "type": "object"
+    },
+    "SharedReviewCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "integer"
+        },
+        "profile": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/definitions/SharedReviewResult"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "task_id",
+        "spec_version",
+        "run_id",
+        "artifact_id",
+        "profile",
+        "result",
+        "reason",
+        "created_at"
+      ],
+      "title": "SharedReviewCorrection",
       "type": "object"
     },
     "SharedReviewDisposition": {
@@ -16491,10 +16645,16 @@
         "candidate": {
           "$ref": "#/definitions/IssueDeliveryCandidate"
         },
+        "execution_task_id": {
+          "type": "string"
+        },
         "expected_assignment_epoch": {
           "type": "integer"
         },
         "expected_source_revision": {
+          "type": "integer"
+        },
+        "expected_task_control_revision": {
           "type": "integer"
         },
         "reason": {

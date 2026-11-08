@@ -92,15 +92,15 @@ func TestPanelChoiceAnswerRequiresOriginalContextReview(t *testing.T) {
 	}
 }
 
-func TestOrdinaryDecisionAnswerBlocksNewWorkUntilReviewed(t *testing.T) {
+func TestOrdinaryDecisionAnswerKeepsReviewDutyWithoutNewExecutionPermission(t *testing.T) {
 	h := newHarness(t)
-	_, d := h.failImplementation()
+	task, d := h.failImplementation()
 	op := h.exec(owner, h.env("decisions.respond", protocol.Target{Type: "decision", ID: d.DecisionID}, protocol.AnswerDecisionPayload{Version: d.Version, Option: "retry the implementation", Text: "Keep the existing constraints"}, nil), AnswerDecision{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("unreviewed owner answer released new work")
+	if view := h.executionTask(task); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued {
+		t.Fatal("known owner retry required another source-review permission", view)
 	}
 	reviewDecisionAnswer(t, h, d.DecisionID)
 	if _, ok, _ := h.claim("linux-1"); !ok {
@@ -181,7 +181,7 @@ func TestStructuredOwnerEffectReviewIsNarrowAndIdempotent(t *testing.T) {
 				t.Fatal("replay duplicated program review", again)
 			}
 			_, claimed, _ := h.claim("linux-1")
-			if claimed != (mode == "structured") {
+			if !claimed {
 				t.Fatalf("claim=%v for %s", claimed, mode)
 			}
 		})

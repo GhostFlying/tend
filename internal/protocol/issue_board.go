@@ -32,6 +32,7 @@ func (c IssueControl) BoardStatus() IssueWorkStatus {
 }
 
 type IssueBoardCard struct {
+	Progress                 *IssueProgress      `json:"progress,omitempty"`
 	Children                 *IssueChildProgress `json:"children,omitempty"`
 	PendingManagerCategoryID string              `json:"pending_manager_category_id,omitempty"`
 	Status                   IssueWorkStatus     `json:"status"`
@@ -40,6 +41,7 @@ type IssueBoardCard struct {
 	StagesDone               int                 `json:"stages_done"`
 	Execution                ExecutionCounts     `json:"execution"`
 	AttentionCount           int                 `json:"attention_count"`
+	OwnerAttentionCount      int                 `json:"owner_attention_count,omitempty"`
 	NotificationDueAt        int64               `json:"notification_due_at,omitempty"`
 }
 

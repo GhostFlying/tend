@@ -297,13 +297,11 @@ func (a *App) admitAgentRecovery(ctx context.Context, request, thread string, co
 			} else if uncertain {
 				return a.endAgentRecovery(ctx, tx, r, "unknown", "An accepted owner input requires reconciliation before continuation.", now)
 			}
-			var uncertain bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_tool_uses WHERE thread_id=? AND turn_id=? AND status IN ('running','unknown','interrupted'))`, r.ThreadID, r.LastTurnID).Scan(&uncertain); err != nil {
-				return err
-			}
-			if uncertain {
-				return a.endAgentRecovery(ctx, tx, r, "unknown", "A recorded tool operation is still running or unknown; reconcile before continuing.", now)
-			}
+			// Tool-use rows are presentation events, not execution receipts.
+			// The native reader verifies the predecessor's terminal state and
+			// ContinuationSafe before admission; actual Tend effects retain their
+			// original request/outbox identity and operation-specific fences.
+			// Missing display completion must not make the whole session unknown.
 		}
 		invalid := r.ThreadID != thread
 		var stopped bool

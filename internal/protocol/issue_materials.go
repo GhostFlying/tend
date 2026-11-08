@@ -9,10 +9,11 @@ import (
 // IssueMaterialsQuery selects a page or one object from the Issue's retained
 // context. It never supplies execution authority or a filesystem location.
 type IssueMaterialsQuery struct {
-	Kind  string `json:"kind,omitempty"`
-	ID    string `json:"id,omitempty"`
-	After string `json:"after,omitempty"`
-	Limit int    `json:"limit,omitempty"`
+	IssueID string `json:"issue_id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	ID      string `json:"id,omitempty"`
+	After   string `json:"after,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
 }
 
 type IssueMaterialSource struct {
@@ -49,6 +50,7 @@ type IssueMaterialFact struct {
 }
 
 type IssueMaterials struct {
+	DeliveryAuthorization  *DeliveryExecutionAuthority  `json:"delivery_authorization,omitempty"`
 	LegacyContexts         []WorkItem                   `json:"legacy_contexts,omitempty"`
 	Sources                []IssueConversationItem      `json:"sources,omitempty"`
 	Facts                  []IssueMaterialFact          `json:"facts,omitempty"`
@@ -85,7 +87,7 @@ func NormalizeIssueMaterialsQuery(q IssueMaterialsQuery) (IssueMaterialsQuery, e
 	if q.Kind == "" {
 		q.Kind = "overview"
 	}
-	if !slices.Contains([]string{"overview", "sources", "facts", "messages", "tasks", "artifacts", "acceptances", "questions", "files", "deliveries", "deployment", "capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, q.Kind) {
+	if !slices.Contains([]string{"overview", "issues", "sources", "facts", "messages", "tasks", "artifacts", "acceptances", "questions", "files", "deliveries", "delivery_authorization", "deployment", "capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, q.Kind) {
 		return q, Errorf(CodeInvalidRequest, "invalid material kind")
 	}
 	if q.Limit == 0 {
@@ -94,16 +96,20 @@ func NormalizeIssueMaterialsQuery(q IssueMaterialsQuery) (IssueMaterialsQuery, e
 	if q.Limit < 1 || q.Limit > 100 {
 		return q, Errorf(CodeInvalidRequest, "limit must be between 1 and 100")
 	}
+	if q.IssueID != "" && !ValidID(PrefixWorkItem, q.IssueID) {
+		return q, Errorf(CodeInvalidRequest, "invalid Issue selector")
+	}
 	return q, nil
 }
 func ParseIssueMaterialsQuery(values url.Values) (IssueMaterialsQuery, error) {
 	var q IssueMaterialsQuery
 	for key, v := range values {
-		if !slices.Contains([]string{"kind", "id", "after", "limit"}, key) || len(v) != 1 {
-			return q, Errorf(CodeInvalidRequest, "context accepts only kind, id, after and limit")
+		if !slices.Contains([]string{"issue_id", "kind", "id", "after", "limit"}, key) || len(v) != 1 {
+			return q, Errorf(CodeInvalidRequest, "context accepts only issue_id, kind, id, after and limit")
 		}
 	}
 	q.Kind, q.ID, q.After = values.Get("kind"), values.Get("id"), values.Get("after")
+	q.IssueID = values.Get("issue_id")
 	if raw, ok := values["limit"]; ok {
 		value, err := strconv.Atoi(raw[0])
 		if err != nil || value < 1 || value > 100 {

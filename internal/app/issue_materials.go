@@ -35,6 +35,26 @@ func materialIssueIDs(ctx context.Context, q store.Querier, issue string) ([]str
 	return out, nil
 }
 
+func selectMaterialIssue(ctx context.Context, q store.Querier, scope store.MaterialScope, id string) (store.MaterialScope, error) {
+	if id == "" || id == scope.IssueIDs[0] {
+		return scope, nil
+	}
+	item, err := store.GetIssue(ctx, q, id)
+	if err != nil {
+		return scope, errNotFound(err, "Issue does not exist")
+	}
+	if !slices.Contains(scope.IssueIDs, id) && (scope.Project == "" || scope.Project != item.Project) {
+		return scope, protocol.Errorf(protocol.CodeForbidden, "Issue is outside this context")
+	}
+	ids, err := materialIssueIDs(ctx, q, id)
+	if err != nil {
+		return scope, err
+	}
+	selected, err := views.MaterialScope(ctx, q, ids)
+	selected.ReaderIssueID, selected.Project = scope.ReaderIssueID, scope.Project
+	return selected, err
+}
+
 func runMaterialScope(ctx context.Context, q store.Querier, p protocol.Principal) (store.RunRow, store.MaterialScope, error) {
 	var r store.RunRow
 	var scope store.MaterialScope
@@ -118,7 +138,11 @@ func runMaterialScope(ctx context.Context, q store.Querier, p protocol.Principal
 func (a *App) ReadRunContext(ctx context.Context, p protocol.Principal, query protocol.IssueMaterialsQuery) (protocol.RunContext, error) {
 	var result protocol.RunContext
 	var scope store.MaterialScope
-	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+	query, err := protocol.NormalizeIssueMaterialsQuery(query)
+	if err != nil {
+		return result, err
+	}
+	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
 		r, s, err := runMaterialScope(ctx, tx.Q(), p)
 		if err != nil {
 			return err
@@ -129,17 +153,13 @@ func (a *App) ReadRunContext(ctx context.Context, p protocol.Principal, query pr
 			return err
 		}
 		result.SpecVersion = action.TargetSpecVersion
-		scope = s
-		return nil
+		scope, err = selectMaterialIssue(ctx, tx.Q(), s, query.IssueID)
+		return err
 	})
 	if err != nil {
 		return result, err
 	}
-	query, err = protocol.NormalizeIssueMaterialsQuery(query)
-	if err != nil {
-		return result, err
-	}
-	if query.Kind == "task_capabilities" && query.ID == "" {
+	if (query.Kind == "task_capabilities" || query.Kind == "delivery_authorization") && query.ID == "" {
 		query.ID = result.TaskID
 	}
 	result.Materials, err = a.readMaterials(ctx, scope, query, result.Role)
@@ -170,15 +190,30 @@ func (a *App) ReadIssueMaterials(ctx context.Context, issueID string, query prot
 }
 func (a *App) ReadScopedIssueMaterials(ctx context.Context, rootIssueID, issueID string, query protocol.IssueMaterialsQuery) (protocol.IssueMaterials, error) {
 	var scope store.MaterialScope
+	if query.IssueID != "" && query.IssueID != issueID {
+		return protocol.IssueMaterials{}, protocol.Errorf(protocol.CodeInvalidRequest, "Issue selector must match the route target")
+	}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		ids, err := materialIssueIDs(ctx, tx.Q(), issueID)
 		if err != nil {
 			return errNotFound(err, "Issue does not exist")
 		}
-		if rootIssueID != "" && !slices.Contains(ids, rootIssueID) {
-			return protocol.Errorf(protocol.CodeForbidden, "Issue is outside this responsibility")
-		}
 		scope, err = views.MaterialScope(ctx, tx.Q(), ids)
+		if err == nil && rootIssueID != "" {
+			rootIDs, e := materialIssueIDs(ctx, tx.Q(), rootIssueID)
+			if e != nil {
+				return e
+			}
+			root, e := views.MaterialScope(ctx, tx.Q(), rootIDs)
+			if e != nil {
+				return e
+			}
+			if !slices.Contains(ids, rootIssueID) && !slices.Contains(rootIDs, issueID) && (root.Project == "" || root.Project != scope.Project) {
+				return protocol.Errorf(protocol.CodeForbidden, "Issue is outside this responsibility")
+			}
+			scope.ReaderIssueID = rootIssueID
+			scope.Project = root.Project
+		}
 		return err
 	})
 	if err != nil {
@@ -218,7 +253,23 @@ func (a *App) OpenIssueMaterialFile(ctx context.Context, issueID, id string) (pr
 func (a *App) readMaterials(ctx context.Context, scope store.MaterialScope, query protocol.IssueMaterialsQuery, role protocol.RunRole) (protocol.IssueMaterials, error) {
 	var result protocol.IssueMaterials
 	var err error
-	if slices.Contains([]string{"capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, query.Kind) {
+	if query.Kind == "delivery_authorization" {
+		result = protocol.IssueMaterials{Kind: query.Kind, IssueIDs: scope.IssueIDs}
+		if query.ID == "" || query.After != "" {
+			return result, protocol.Errorf(protocol.CodeInvalidRequest, "delivery authorization requires a Task ID and does not take a cursor")
+		}
+		err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+			ids, _, _, err := store.MaterialIDs(ctx, tx.Q(), scope, "tasks", query.ID, "", 1)
+			if err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				return protocol.Errorf(protocol.CodeForbidden, "Task is outside this Issue context")
+			}
+			result.DeliveryAuthorization, err = views.DeliveryExecutionAuthority(ctx, tx.Q(), query.ID)
+			return err
+		})
+	} else if slices.Contains([]string{"capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, query.Kind) {
 		result = protocol.IssueMaterials{Kind: query.Kind, IssueIDs: scope.IssueIDs}
 		switch query.Kind {
 		case "capabilities":

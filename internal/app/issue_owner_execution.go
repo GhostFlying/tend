@@ -12,15 +12,15 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// prepareOwnerExecution freezes self-execution. Delegating to a different
-// identity requires publishing that identity's child Issue first.
+// prepareOwnerExecution freezes self-execution when selected. Ordinary scoped
+// collaboration may select another configured executor without a child Issue.
 func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, spec *domain.Spec) (*protocol.AgentInventoryDefinition, error) {
 	enabled, err := store.IssueUsesOwnerExecution(ctx, q, issue.IssueID)
 	if err != nil || !enabled {
 		return nil, err
 	}
 	if issue.Assignee.Kind != protocol.IssueAssigneeAgent || spec.AgentSelection == nil {
-		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "owner execution requires an assigned Agent and explicit implementation/acceptance categories")
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "owner execution requires an assigned Agent and an implementation category")
 	}
 	parts := strings.Split(issue.Assignee.Ref, "/")
 	if len(parts) != 2 {
@@ -35,11 +35,11 @@ func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue 
 			continue
 		}
 		implementation := spec.AgentSelection.Implementation
-		if !a.Enabled || !slices.Contains(a.Purposes, "worker_run") {
-			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "this Agent has no execution adapter; delegate a child Issue to an execution-capable Agent")
-		}
 		if implementation.AgentID != "" && implementation.AgentID != issue.Assignee.Ref || !slices.Contains(a.Categories, implementation.CategoryID) || implementation.RuntimeID != "" && implementation.RuntimeID != a.Binding.RuntimeID || !implementation.MatchesProfile(protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}) || spec.Requirements.HostID != "" && spec.Requirements.HostID != parts[0] {
-			return nil, protocol.Errorf(protocol.CodeForbidden, "another Agent must own a child Issue before executing this work")
+			return nil, nil
+		}
+		if !a.Enabled || !slices.Contains(a.Purposes, "worker_run") {
+			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "this Agent has no execution adapter; select an execution-capable Agent")
 		}
 		if x.coordinationExecution != nil && (x.coordinationExecution.Selection.Identity != a.Identity || x.coordinationExecution.Selection.Definition.Revision != a.Revision || x.coordinationExecution.Selection.Definition.Model != a.RequestedModel || x.coordinationExecution.Selection.Definition.Effort != a.RequestedEffort) {
 			return nil, protocol.Errorf(protocol.CodeStaleRevision, "owner definition changed; reconcile responsibility before scheduling a new execution")
@@ -162,6 +162,27 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 func claimOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, pin *protocol.RunExecutionPin) ([]Event, error) {
 	contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), run.TaskID)
 	if errors.Is(err, store.ErrNotFound) {
+		origin, err := store.TaskIssueResponsibilityOrigin(ctx, tx.Q(), run.TaskID)
+		if err == nil {
+			current, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), run.TaskID)
+			if err != nil {
+				return nil, err
+			}
+			if !current {
+				return nil, protocol.Errorf(protocol.CodeStaleRevision, "the collaboration's Issue responsibility was handed over")
+			}
+			started, err := markIssueWorkStarted(ctx, x, tx, origin.IssueID)
+			if err != nil {
+				return nil, err
+			}
+			// The publishing owner is the control fence. The independently
+			// selected collaborator remains in run_agent_executions.
+			_, err = tx.Exec(ctx, `INSERT INTO run_issue_responsibilities(run_id,issue_id,assignment_epoch,issue_revision,agent_ref,created_at) VALUES(?,?,?,?,?,?)`, run.RunID, origin.IssueID, origin.AssignmentEpoch, origin.IssueRevision, origin.AgentRef, x.Now.UnixMilli())
+			return started, err
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
 		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT c.issue_id FROM issue_controls c JOIN task_work_item_owners o ON o.work_item_id=c.issue_id WHERE o.task_id=?`, run.TaskID)
 		if err != nil || len(ids) == 0 {
 			return nil, err

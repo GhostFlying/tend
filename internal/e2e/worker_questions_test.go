@@ -24,7 +24,6 @@ func TestEndToEnd_LegacyWorkerQuestionsKeepRunAndLease(t *testing.T) {
 	clock := testkit.NewClock()
 	const ttl = time.Minute
 	srv := newServer(t, ttl, clock.Now)
-	srv.startHistoricalMainThread(testkit.NewHarness())
 	web := srv.webLogin(srv.startWeb().URL)
 	answers := make(chan protocol.WorkerQuestion, 2)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
@@ -416,7 +415,7 @@ func TestFault_QuestionHandoffResumesAfterRestartAndLostReceipts(t *testing.T) {
 	if err := json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Question handoff", Spec: protocol.OwnerTaskSpec{Goal: "fix it", Acceptance: []string{"tests pass"}, Delivery: domain.DeliveryCommit, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}})
+	payload, err := json.Marshal(protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Question handoff", Spec: protocol.OwnerTaskSpec{Goal: "fix it", Acceptance: []string{"tests pass"}, Delivery: domain.DeliveryCommit, Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Verify durable question handoff and lost receipts independently in both execution roles"}})
 	if err != nil {
 		t.Fatal(err)
 	}

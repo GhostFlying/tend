@@ -38,12 +38,6 @@ func IssueContext(ctx context.Context, q store.Querier, id string, after int64) 
 	if err != nil {
 		return v, err
 	}
-	bindings, err := store.TaskContextBlockers(ctx, q, id)
-	if err != nil {
-		return v, err
-	}
-	v.DispatchBlockers = append(v.DispatchBlockers, bindings...)
-	v.DispatchReady = v.DispatchReady && len(bindings) == 0
 	v.CoordinationState = "idle"
 	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT l.status FROM logical_turns l JOIN logical_turn_contexts lc USING(logical_turn_id) WHERE lc.work_item_id=? AND l.status<>'completed' ORDER BY l.updated_at DESC LIMIT 1),'idle')`, id).Scan(&v.CoordinationState); err != nil {
 		return v, err

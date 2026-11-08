@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
-	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
@@ -32,13 +31,13 @@ func (p *Pool) probeManager(ctx context.Context, e *entry) bool {
 		return false
 	}
 	defer os.RemoveAll(dir)
-	s, err := traex.Start(ctx, traex.Options{Bin: e.ownerInput.Runtime.ExecutableRef, Dir: dir, HostedCoordination: true, Log: p.options.Log})
+	s, err := traex.Start(ctx, traex.Options{Bin: e.ownerInput.Runtime.ExecutableRef, Dir: dir, Log: p.options.Log})
 	if err != nil {
 		return false
 	}
 	defer s.Close()
 	model := e.input.Agent.Model
-	config := coordination.Isolation()
+	config := map[string]any{}
 	models, err := s.Models(ctx)
 	if err != nil {
 		return false
@@ -55,21 +54,15 @@ func (p *Pool) probeManager(ctx context.Context, e *entry) bool {
 	if e.input.Agent.Effort != "" {
 		config["model_reasoning_effort"] = e.input.Agent.Effort
 	}
-	thread, err := s.StartThread(ctx, harness.ThreadConfig{Cwd: dir, Model: model, Sandbox: "read-only", ApprovalPolicy: "never", Ephemeral: true, Config: config})
-	if err != nil {
-		return false
-	}
-	permissions, ok := thread.(harness.PermissionedThread)
-	if !ok {
-		return false
-	}
-	effective := permissions.PermissionDefaults()
-	return effective.Sandbox == "read-only" && effective.ApprovalPolicy == "never"
+	_, err = s.StartThread(ctx, harness.ThreadConfig{Cwd: dir, Model: model, Ephemeral: true, Config: config})
+	return err == nil
 }
 
 func (p *Pool) ResolveManager(ctx context.Context, pin protocol.RunExecutionPin) (runner.ManagerExecution, error) {
 	return p.resolveManager(ctx, pin, false)
 }
+
+func (p *Pool) SupportsNativeOwnerTools() bool { return true }
 
 // ResolveManagerReceipt restores the original accepted configuration without
 // requiring readiness to create a new native thread or business turn.
@@ -102,6 +95,8 @@ func (p *Pool) resolveManager(ctx context.Context, pin protocol.RunExecutionPin,
 	bin := e.ownerInput.Runtime.ExecutableRef
 	return runner.ManagerExecution{Instructions: e.input.Agent.Instructions, Profile: pin.Profile, Open: func(ctx context.Context, dir string) (harness.Session, error) {
 		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, HostedCoordination: true, Log: p.options.Log})
+	}, OpenNative: func(ctx context.Context, dir string) (harness.Session, error) {
+		return traex.Start(ctx, traex.Options{Bin: bin, Dir: dir, KillWithParent: true, Log: p.options.Log})
 	}}, nil
 }
 

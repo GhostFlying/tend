@@ -3,19 +3,19 @@ package views
 import (
 	"context"
 	"errors"
-	"regexp"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-var materialFileID = regexp.MustCompile(`file_[0-9A-HJKMNP-TV-Z]{26}`)
-
-// MaterialScope reuses canonical inheritance and explicit context references.
-// It never traverses sibling Issues or treats a native session as source data.
+// MaterialScope resolves the caller's project and explicit context references.
+// Assignment epochs and native sessions do not erase retained knowledge.
 func MaterialScope(ctx context.Context, q store.Querier, issueIDs []string) (store.MaterialScope, error) {
-	scope := store.MaterialScope{IssueIDs: []string{}, BackgroundFiles: map[string][]protocol.IssueMaterialSource{}}
+	scope := store.MaterialScope{IssueIDs: []string{}}
+	if len(issueIDs) > 0 {
+		scope.ReaderIssueID = issueIDs[0]
+	}
 	for _, id := range issueIDs {
 		if slices.Contains(scope.IssueIDs, id) {
 			continue
@@ -25,28 +25,11 @@ func MaterialScope(ctx context.Context, q store.Querier, issueIDs []string) (sto
 			return scope, err
 		}
 		scope.IssueIDs = append(scope.IssueIDs, id)
-		AddMaterialFacts(&scope, protocol.IssueMaterialSource{Kind: "background", IssueID: id, Status: "retained"}, issue.Background)
-	}
-	err := store.WalkMaterialTaskContexts(ctx, q, scope, func(task string, version int64, item protocol.TaskWorkContext) {
-		AddMaterialFacts(&scope, protocol.IssueMaterialSource{Kind: "task_context", IssueID: item.WorkItemID, TaskID: task, ContentRevision: version, Status: "frozen"}, item.Facts)
-	})
-	return scope, err
-}
-
-// AddMaterialFacts retains references from both current and frozen Issue facts.
-// The caller derives the source from an actual Issue or persisted Task spec.
-func AddMaterialFacts(scope *store.MaterialScope, source protocol.IssueMaterialSource, facts []protocol.SharedFact) {
-	for _, fact := range facts {
-		for _, file := range materialFileID.FindAllString(fact.Source+" "+fact.Text, -1) {
-			if !protocol.ValidID(protocol.PrefixFile, file) {
-				continue
-			}
-			source.Locator = fact.Source
-			if !slices.Contains(scope.BackgroundFiles[file], source) {
-				scope.BackgroundFiles[file] = append(scope.BackgroundFiles[file], source)
-			}
+		if id == scope.ReaderIssueID {
+			scope.Project = issue.Project
 		}
 	}
+	return scope, nil
 }
 
 func IssueMaterialFile(ctx context.Context, q store.Querier, scope store.MaterialScope, id string) (protocol.IssueMaterialFile, error) {
@@ -54,6 +37,14 @@ func IssueMaterialFile(ctx context.Context, q store.Querier, scope store.Materia
 	if !protocol.ValidID(protocol.PrefixFile, id) {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "exact file_id required")
 	}
+	// Exact originals can be resolved directly in the same project; this does
+	// not load every project's Issue definition or retained Task context.
+	var err error
+	scope, err = store.ExactMaterialFileScope(ctx, q, scope, id)
+	if err != nil {
+		return out, err
+	}
+	out.SourcesMore = scope.SourcesMore
 	found, _, _, err := store.MaterialIDs(ctx, q, scope, "files", id, "", 1)
 	if err != nil {
 		return out, err
@@ -104,7 +95,6 @@ func IssueMaterialFile(ctx context.Context, q store.Querier, scope store.Materia
 			out.Sources = append(out.Sources, ref)
 		}
 	}
-	out.Sources = append(out.Sources, scope.BackgroundFiles[id]...)
 	if len(out.Sources) > 100 {
 		out.Sources = out.Sources[:100]
 		out.SourcesMore = true
@@ -128,11 +118,19 @@ func IssueMaterials(ctx context.Context, q store.Querier, scope store.MaterialSc
 	if err != nil {
 		return out, err
 	}
-	if out.Kind == "overview" {
-		if query.ID != "" || query.After != "" {
+	if out.Kind == "overview" || out.Kind == "issues" {
+		if out.Kind == "overview" && query.ID != "" {
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "overview does not take object selectors")
 		}
-		for _, id := range scope.IssueIDs {
+		ids, more, next, err := store.MaterialIssuePage(ctx, q, scope, out.Kind == "issues", query.ID, query.After, query.Limit)
+		if err != nil {
+			return out, err
+		}
+		out.More, out.Next = more, next
+		if query.ID != "" && len(ids) == 0 {
+			return out, protocol.Errorf(protocol.CodeNotFound, "Issue is outside this context")
+		}
+		for _, id := range ids {
 			canonical, err := ownerCanonicalIdentity(ctx, q, id)
 			if err != nil {
 				return out, err
@@ -145,7 +143,12 @@ func IssueMaterials(ctx context.Context, q store.Querier, scope store.MaterialSc
 				out.LegacyContexts = append(out.LegacyContexts, item)
 				continue
 			}
-			item, err := CanonicalIssue(ctx, q, id, 0)
+			var item protocol.IssueView
+			if out.Kind == "issues" {
+				item.Issue, err = store.GetCanonicalIssue(ctx, q, id)
+			} else {
+				item, err = CanonicalIssue(ctx, q, id, 0)
+			}
 			if err != nil {
 				return out, err
 			}
@@ -179,6 +182,12 @@ func IssueMaterials(ctx context.Context, q store.Querier, scope store.MaterialSc
 		}
 		return out, nil
 	}
+	if out.Kind == "files" && query.ID != "" {
+		scope, err = store.ExactMaterialFileScope(ctx, q, scope, query.ID)
+		if err != nil {
+			return out, err
+		}
+	}
 	ids, more, next, err := store.MaterialIDs(ctx, q, scope, out.Kind, query.ID, query.After, query.Limit)
 	if err != nil {
 		return out, err
@@ -211,6 +220,11 @@ func IssueMaterials(ctx context.Context, q store.Querier, scope store.MaterialSc
 			if err != nil {
 				return out, err
 			}
+			denied, err := store.MaterialDeniedTaskArtifacts(ctx, q, scope, id)
+			if err != nil {
+				return out, err
+			}
+			item.Artifacts = slices.DeleteFunc(item.Artifacts, func(a protocol.ArtifactView) bool { return slices.Contains(denied, a.ArtifactID) })
 			out.Tasks = append(out.Tasks, item)
 		case "artifacts":
 			item, err := Artifact(ctx, q, id)

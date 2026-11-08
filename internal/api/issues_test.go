@@ -150,7 +150,7 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	if status != http.StatusOK || rejectedResponse.Operation == nil || rejectedResponse.Operation.Error == nil || rejectedResponse.Operation.Error.Code != protocol.CodeInvalidRequest || e.count(`SELECT count(*) FROM tasks`) != 0 {
 		t.Fatalf("stored spec input was accepted: %d %+v", status, rejectedResponse)
 	}
-	create := e.envelope("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Owner worker task", Spec: spec, Rating: protocol.RatingP1})
+	create := e.envelope("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Owner worker task", Spec: spec, Rating: protocol.RatingP1, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Verify contract recovery through an independent acceptance"}})
 	status, created := e.op(token, create)
 	if status != http.StatusOK || created.Operation == nil || created.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("create task %d %+v", status, created)

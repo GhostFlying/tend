@@ -27,30 +27,45 @@ type RunObservation struct {
 // approval or a record of provider mutations. Its candidate remains frozen even
 // when current policy, owner sources or provider facts invalidate execution.
 type DeliveryExecutionAuthority struct {
-	Source                 string                    `json:"source"`
-	ObservedAt             int64                     `json:"observed_at,omitempty"`
-	TaskID                 string                    `json:"task_id"`
-	SourceTaskID           string                    `json:"source_task_id"`
-	IssueID                string                    `json:"issue_id"`
-	AssignmentEpoch        int64                     `json:"assignment_epoch"`
-	CurrentAssignmentEpoch int64                     `json:"current_assignment_epoch"`
-	DutyRevision           int64                     `json:"duty_revision"`
-	CurrentDutyRevision    int64                     `json:"current_duty_revision"`
-	DutyStatus             string                    `json:"duty_status"`
-	ControlRevision        int64                     `json:"control_revision"`
-	SpecVersion            int64                     `json:"spec_version"`
-	RunID                  string                    `json:"run_id,omitempty"`
-	LeaseID                string                    `json:"lease_id,omitempty"`
-	Role                   RunRole                   `json:"role,omitempty"`
-	Candidate              IssueDeliveryCandidate    `json:"candidate"`
-	Grant                  *IssueDeliveryGrant       `json:"grant,omitempty"`
-	Policy                 *ObservedDeliveryPolicy   `json:"policy,omitempty"`
-	Approval               *ObservedDeliveryApproval `json:"approval,omitempty"`
-	Provider               *ObservedDeliveryProvider `json:"provider,omitempty"`
-	SharedReview           *ObservedDeliveryReview   `json:"shared_review,omitempty"`
-	UpgradeID              string                    `json:"upgrade_id,omitempty"`
-	Valid                  bool                      `json:"valid"`
-	InvalidReason          string                    `json:"invalid_reason,omitempty"`
+	Settlement             *DeliverySettlementAuthority `json:"settlement,omitempty"`
+	Source                 string                       `json:"source"`
+	ObservedAt             int64                        `json:"observed_at,omitempty"`
+	TaskID                 string                       `json:"task_id"`
+	SourceTaskID           string                       `json:"source_task_id"`
+	IssueID                string                       `json:"issue_id"`
+	AssignmentEpoch        int64                        `json:"assignment_epoch"`
+	CurrentAssignmentEpoch int64                        `json:"current_assignment_epoch"`
+	DutyRevision           int64                        `json:"duty_revision"`
+	CurrentDutyRevision    int64                        `json:"current_duty_revision"`
+	DutyStatus             string                       `json:"duty_status"`
+	ControlRevision        int64                        `json:"control_revision"`
+	SpecVersion            int64                        `json:"spec_version"`
+	RunID                  string                       `json:"run_id,omitempty"`
+	LeaseID                string                       `json:"lease_id,omitempty"`
+	Role                   RunRole                      `json:"role,omitempty"`
+	Candidate              IssueDeliveryCandidate       `json:"candidate"`
+	Grant                  *IssueDeliveryGrant          `json:"grant,omitempty"`
+	Policy                 *ObservedDeliveryPolicy      `json:"policy,omitempty"`
+	Approval               *ObservedDeliveryApproval    `json:"approval,omitempty"`
+	Provider               *ObservedDeliveryProvider    `json:"provider,omitempty"`
+	SharedReview           *ObservedDeliveryReview      `json:"shared_review,omitempty"`
+	UpgradeID              string                       `json:"upgrade_id,omitempty"`
+	Valid                  bool                         `json:"valid"`
+	InvalidReason          string                       `json:"invalid_reason,omitempty"`
+}
+
+// DeliverySettlementAuthority reports whether an already completed deployment
+// can settle its original responsibility. It never grants another execution.
+type DeliverySettlementAuthority struct {
+	Eligible            bool             `json:"eligible"`
+	InvalidReason       string           `json:"invalid_reason,omitempty"`
+	DutyRevision        int64            `json:"duty_revision"`
+	CurrentDutyRevision int64            `json:"current_duty_revision"`
+	ArtifactID          string           `json:"artifact_id,omitempty"`
+	AcceptanceID        string           `json:"acceptance_id,omitempty"`
+	UpgradeID           string           `json:"upgrade_id,omitempty"`
+	TargetSHA           string           `json:"target_sha,omitempty"`
+	Upgrade             *UpgradeEvidence `json:"upgrade,omitempty"`
 }
 
 type ObservedDeliveryPolicy struct {
@@ -100,6 +115,7 @@ type ObservedDeliveryProvider struct {
 // ObservedDeliveryReview omits unrelated Issue links and finding bodies. Its
 // optional round preserves the actual formal result's immutable provenance.
 type ObservedDeliveryReview struct {
+	SuggestedRounds            int                          `json:"suggested_rounds,omitempty"`
 	RoundLimit                 int                          `json:"round_limit,omitempty"`
 	RoundsUsed                 int                          `json:"rounds_used,omitempty"`
 	Provider                   IssueDeliveryProvider        `json:"provider,omitempty"`
@@ -119,7 +135,20 @@ type ObservedDeliveryReview struct {
 	Round                      *ObservedDeliveryReviewRound `json:"round,omitempty"`
 }
 
+// ObservedReviewCorrection identifies the actual source of the latest appended
+// report while retaining the original round's Task, Run and acceptance fields.
+type ObservedReviewCorrection struct {
+	RequestID   string           `json:"request_id"`
+	TaskID      string           `json:"task_id"`
+	SpecVersion int64            `json:"spec_version"`
+	RunID       string           `json:"run_id"`
+	ArtifactID  string           `json:"artifact_id"`
+	Profile     ExecutionProfile `json:"profile"`
+	CreatedAt   int64            `json:"created_at"`
+}
+
 type ObservedDeliveryReviewRound struct {
+	Correction            *ObservedReviewCorrection          `json:"correction,omitempty"`
 	ReviewerRole          RunRole                            `json:"reviewer_role,omitempty"`
 	ReviewerProfile       *ExecutionProfile                  `json:"reviewer_profile,omitempty"`
 	ExecutionRequirements *SharedReviewExecutionRequirements `json:"execution_requirements,omitempty"`

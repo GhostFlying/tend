@@ -38,6 +38,49 @@ func issueAcceptanceWasDefault(ctx context.Context, q store.Querier, issue proto
 	return original.IndependentAcceptance == nil, nil
 }
 
+// taskAcceptancePolicy records the responsible Agent's choice for new work.
+// Frozen Tasks are not rewritten, and explicit human requirements remain.
+func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, spec domain.Spec, input *protocol.IndependentAcceptanceRequest) (*protocol.IssueAcceptancePolicy, error) {
+	defaulted, err := issueAcceptanceWasDefault(ctx, q, issue)
+	if err != nil {
+		return nil, err
+	}
+	standing := issue.AcceptancePolicy
+	humanRequired := standing != nil && standing.Required && !defaulted && (standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
+	if humanRequired && input == nil {
+		policy := *standing
+		return &policy, nil
+	}
+	required := humanRequired || spec.AgentSelection != nil && spec.AgentSelection.Acceptance.CategoryID != ""
+	if standing != nil && !standing.Required {
+		required = false
+	}
+	reason := "Issue owner chose self-check for this work; no explicit human independent-acceptance requirement"
+	if required {
+		reason = "Retain the explicit independent-acceptance requirement for this work"
+	}
+	if input != nil {
+		if _, err := newIssueAcceptancePolicy(x, input); err != nil {
+			return nil, err
+		}
+		if humanRequired && !input.Required {
+			return nil, protocol.Errorf(protocol.CodeForbidden, "this Issue has an explicit human independent-acceptance requirement")
+		}
+		required, reason = input.Required, input.Reason
+	}
+	p := &protocol.IssueAcceptancePolicy{Required: required, Reason: reason, RequestID: x.Env.RequestID, IssueRevision: issue.Revision}
+	if standing != nil {
+		p.Creator, p.DecidedBy = standing.Creator, standing.DecidedBy
+	}
+	if x.coordinationExecution != nil {
+		identity := x.coordinationExecution.Selection.Identity
+		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "agent", Agent: &identity, SourceIssueID: issue.IssueID}
+	} else if x.Principal.Kind == protocol.PrincipalOwner {
+		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "owner", OwnerSubject: x.Principal.Subject}
+	}
+	return p, nil
+}
+
 func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequest) (*protocol.IssueAcceptancePolicy, error) {
 	creator := protocol.AcceptancePolicyCreator{}
 	if x.coordinationExecution != nil {

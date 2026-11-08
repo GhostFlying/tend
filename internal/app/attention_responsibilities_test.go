@@ -123,7 +123,7 @@ func TestResponsibilityOwnerResolvesBudgetWithoutHumanAuthorization(t *testing.T
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	spec := testSpec
 	spec.MaxImplementAttempts = 1
-	p := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Collect investigation evidence", Spec: spec}
+	p := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Collect investigation evidence", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise the owner recovery decision after actual review findings"}}
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

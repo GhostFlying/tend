@@ -16,6 +16,12 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 	fmt.Fprintln(w, "ISSUE\tTITLE\tSTATE\tOWNER")
 	for _, v := range p.Items {
 		fmt.Fprintf(w, "%s\t%s\t%s / %s\t%s\n", v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
+		if v.Board != nil {
+			fmt.Fprintf(w, "  Current responsibility: %d open actions; %d need the human owner\n", v.Board.AttentionCount, v.Board.OwnerAttentionCount)
+			if v.Board.Progress != nil && v.Board.Progress.NextStep != "" {
+				fmt.Fprintf(w, "  Next step (assessment at revision %d): %s\n", v.Board.Progress.IssueRevision, v.Board.Progress.NextStep)
+			}
+		}
 		if v.Board != nil && v.Board.Children != nil {
 			printIssueChildren(w, v.IssueID, v.Board.Children)
 		}
@@ -52,6 +58,19 @@ func printIssueView(e *Env, v protocol.IssueView) error {
 	fmt.Fprintf(out, "\nTasks: %d; deliveries: %d; follow-on responsibilities: %d; pending completion reviews: %d\n", len(v.Tasks), len(v.Plan.Deliveries), len(v.Plan.FollowOns), len(v.PendingReviews))
 	for _, task := range v.Tasks {
 		fmt.Fprintf(out, "  task %s  %s\n", task.TaskID, task.Title)
+	}
+	if v.Attentions != nil {
+		fmt.Fprintln(out, "\nCurrent responsibility actions:")
+		for _, a := range v.Attentions.Items {
+			recipient := "owner"
+			if a.Responsibility != nil {
+				recipient = a.Responsibility.RecipientKind
+			}
+			fmt.Fprintf(out, "  %s  %s  [%s; origin: %s]\n", a.AttentionID, a.Title, recipient, a.IssueID)
+		}
+		if v.Attentions.More {
+			fmt.Fprintf(out, "  More: tend attention list --responsible-issue %s --recipient all --status open --actionable-only --all --after %s\n", v.IssueID, v.Attentions.Next)
+		}
 	}
 	fmt.Fprintln(out, "\nUse --json for the full plan, evidence, history links and execution facts.")
 	return nil

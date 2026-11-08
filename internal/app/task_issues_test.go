@@ -142,7 +142,7 @@ func TestTaskWorkItemDefaultWorkspaceReusesRealResource(t *testing.T) {
 	}
 }
 
-func TestTaskWorkItemAncestorChangesRequireDispositionAndGateClaims(t *testing.T) {
+func TestTaskWorkItemAncestorDependenciesApplyWithoutTaskApplicabilityPermission(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
 	plan.Stages = []protocol.IssueStage{{StageID: "before", Title: "Prerequisite", Status: "planned"}, {StageID: "group", Title: "Group", Status: "planned"}, {StageID: "child", Title: "Child", ParentID: "group", Status: "planned"}}
@@ -154,7 +154,10 @@ func TestTaskWorkItemAncestorChangesRequireDispositionAndGateClaims(t *testing.T
 	w = h.work(w.WorkItemID)
 	w.Stages[1].DependsOn = []string{"before"}
 	p := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
-	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{}), protocol.CodeInvalidRequest)
+	if op := h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
+		t.Fatal("definition edit required a Task applicability permission", op)
+	}
+	w = h.work(w.WorkItemID)
 	p.TaskDispositions = []protocol.IssueTaskDisposition{{TaskID: task.TaskID, SpecVersion: 1, Action: "continue_existing", Reason: "Keep the task agreement after the prerequisite is ready"}}
 	op = h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), p, rev(w.Revision)), UpdateIssue{})
 	if op.Status != protocol.OpSucceeded {

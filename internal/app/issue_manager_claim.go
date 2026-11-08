@@ -82,6 +82,23 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 	if err != nil {
 		return Outcome{}, err
 	}
+	if !c.Manager.ReceiptOnly {
+		nativeTools, err := runnerSupportsOwnerNativeTools(ctx, tx.Q(), r.HostID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		owner, err := store.IssueUsesOwnerExecution(ctx, tx.Q(), m.IssueID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		mode := "false"
+		if nativeTools && owner {
+			mode = "true"
+		}
+		if _, err := tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=json_set(trigger_json,'$.native_owner_tools',json(?)) WHERE action_id=?`, mode, r.ActionID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	as, err := buildManagerAssignment(ctx, tx.Q(), r, l, x.LeaseTTL)
 	if err != nil {
 		return Outcome{}, err
@@ -111,9 +128,14 @@ func buildManagerAssignment(ctx context.Context, q store.Querier, r store.RunRow
 		return protocol.Assignment{}, err
 	}
 	var receipt struct {
-		ReceiptOnly     bool   `json:"receipt_only"`
-		ReaderRequestID string `json:"receipt_reader_request_id"`
+		NativeOwnerTools bool   `json:"native_owner_tools"`
+		ReceiptOnly      bool   `json:"receipt_only"`
+		ReaderRequestID  string `json:"receipt_reader_request_id"`
 	}
 	_ = json.Unmarshal([]byte(a.TriggerJSON), &receipt)
-	return protocol.Assignment{Manager: &protocol.IssueManagerAssignment{ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}, nil
+	nativeTools, err := runnerSupportsOwnerNativeTools(ctx, q, r.HostID)
+	if err != nil {
+		return protocol.Assignment{}, err
+	}
+	return protocol.Assignment{Manager: &protocol.IssueManagerAssignment{NativeOwnerTools: receipt.NativeOwnerTools && nativeTools && !receipt.ReceiptOnly && receipt.ReaderRequestID == "", ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}, nil
 }

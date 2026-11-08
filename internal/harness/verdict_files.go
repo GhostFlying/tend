@@ -443,12 +443,20 @@ type ownedSessionCloseReceipt struct {
 // locally owned process session. Its caller must have observed that close;
 // disconnecting a remote transport or releasing a reference does not qualify.
 // This receipt says nothing about external native effects or escaped children.
-func (v *Verdicts) RecordOwnedSessionClose() error {
+// Independent process recovery supplies expectedThread to bind the recorded
+// verdict to the exact original process-owned native thread before writing.
+func (v *Verdicts) RecordOwnedSessionClose(expectedThread ...string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	scope, err := v.ownedSessionCloseScope()
 	if err != nil {
 		return err
+	}
+	if len(expectedThread) != 0 {
+		var native struct{ ThreadID, TurnID string }
+		if expectedThread[0] == "" || json.Unmarshal([]byte(scope.NativeBinding), &native) != nil || native.ThreadID != expectedThread[0] || native.TurnID == "" {
+			return errors.New("original acceptance native thread differs from the stopped process")
+		}
 	}
 	body, err := json.Marshal(scope)
 	if err != nil {

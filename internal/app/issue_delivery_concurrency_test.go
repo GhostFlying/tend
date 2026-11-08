@@ -18,7 +18,7 @@ type deliveryCase struct {
 	duty              protocol.IssueDeliveryDuty
 }
 
-func twoDeliveryCases(t *testing.T) (*harness, StartUpgrade, [2]deliveryCase) {
+func twoDeliveryCases(t *testing.T, liveSecond ...bool) (*harness, StartUpgrade, [2]deliveryCase) {
 	t.Helper()
 	h, upgrade := upgradeHarness(t)
 	var cases [2]deliveryCase
@@ -41,6 +41,11 @@ func twoDeliveryCases(t *testing.T) (*harness, StartUpgrade, [2]deliveryCase) {
 		observeDeliveryForTest(t, h, i.IssueID, c, "open", "")
 		d := prepareDeliveryForTest(t, h, i.IssueID, source, c)
 		answerDeliveryForTest(t, h, d, "approve", "")
+		if n == 1 && len(liveSecond) > 0 && liveSecond[0] {
+			live := createCanonicalTaskForTest(t, h, canonicalTaskIssue(t, h, i.IssueID))
+			cases[n] = deliveryCase{i, source, live, c, d}
+			continue
+		}
 		op := createDeliveryExecutionForTest(t, h, i.IssueID, d)
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
@@ -282,8 +287,8 @@ func TestDeliveryTargetRejectsProviderQueryIssuedBeforeAnotherInstallation(t *te
 		t.Fatal(o)
 	}
 	expired := deliveryDutyForTest(t, h, i.IssueID, source)
-	if expired.Status != "preparing" || expired.Revision <= duty.Revision {
-		t.Fatal("unchanged provider hid expired deployment baseline", expired)
+	if expired.Status != duty.Status || expired.Revision != duty.Revision || expired.AttentionID != duty.AttentionID {
+		t.Fatal("baseline observation disposed of the owner's responsibility", expired)
 	}
 	current := canonicalTaskIssue(t, h, i.IssueID)
 	var authErr error
@@ -300,7 +305,7 @@ func TestDeliveryTargetRejectsProviderQueryIssuedBeforeAnotherInstallation(t *te
 	if fresh.AttentionID == duty.AttentionID || fresh.Candidate.Deployment.BaselineUpgradeID != "other-installation" {
 		t.Fatal(fresh)
 	}
-	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, fresh), protocol.CodeForbidden)
+	expectWorkCode(t, createDeliveryExecutionForTest(t, h, i.IssueID, fresh), historicalOrPolicyReadinessCode(fresh))
 }
 
 func TestDeliveryLegacyMaintenanceDoesNotAttributeModifiedBuildToExactCommit(t *testing.T) {

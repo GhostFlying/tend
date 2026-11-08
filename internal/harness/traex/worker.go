@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -122,7 +124,24 @@ func (w *worker) Wait() (harness.WorkerResult, error) {
 // close receipt. Native session creation and turn execution are excluded.
 func (ws *Workers) ReconcileAcceptanceVerdict(ctx context.Context, spec harness.WorkerSpec) (harness.WorkerResult, error) {
 	verdicts := harness.Verdicts{Spec: spec}
-	if err := verdicts.RestoreOwnedSessionContext(ctx, spec.Thread); err != nil {
+	err := verdicts.RestoreOwnedSessionContext(ctx, spec.Thread)
+	if err != nil && !errors.Is(err, harness.ErrNoAcceptanceVerdict) && ws.SupportsOwnedWorkerStop() {
+		// A runner crash can lose Wait before the existing close receipt is
+		// recorded. Only an independently bound owned process can fill that
+		// factual gap; an absent legacy identity or an altered receipt cannot.
+		_, closeErr := os.Stat(filepath.Join(spec.StateDir, "owned-session-close.json"))
+		_, processErr := os.Stat(filepath.Join(spec.StateDir, ownedProcessFile))
+		if errors.Is(closeErr, os.ErrNotExist) && processErr == nil {
+			if stopErr := ws.StopOwnedWorker(ctx, spec); stopErr != nil {
+				return harness.WorkerResult{}, fmt.Errorf("%w: %w", harness.ErrRetainedResumePending, stopErr)
+			}
+			if closeErr := verdicts.RecordOwnedSessionClose(spec.Thread); closeErr != nil {
+				return harness.WorkerResult{}, fmt.Errorf("%w: record independently confirmed original close: %w", harness.ErrRetainedResumePending, closeErr)
+			}
+			err = verdicts.RestoreOwnedSessionContext(ctx, spec.Thread)
+		}
+	}
+	if err != nil {
 		return harness.WorkerResult{}, err
 	}
 	return harness.WorkerResult{Verdict: verdicts.Verdict()}, nil
@@ -149,12 +168,15 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
 	opts.Dir = spec.Dir
+	owned, err := ws.recordOwnedWorkerProcess(spec, &opts)
+	if err != nil {
+		return nil, err
+	}
 	// The worker may inherit the owner's tend hooks and MCP server from
 	// the user-level configuration; it is not the owner's agent (D45).
 	opts.Env = append(append([]string(nil), opts.Env...), "TEND_SCRATCH="+spec.ScratchDir, protocol.AddonEnv+"=off")
 	var s *Session
 	var release func(error)
-	var err error
 	if ws.opts.Acquire != nil {
 		s, release, err = ws.opts.Acquire(startupCtx, spec)
 	} else {
@@ -205,6 +227,13 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if err != nil {
 		release(err)
 		return nil, err
+	}
+	if owned != nil && owned.Process != (ownedProcessIdentity{}) {
+		owned.ThreadID = th.ID()
+		if err := saveOwnedWorkerProcess(spec, *owned); err != nil {
+			release(err)
+			return nil, err
+		}
 	}
 	if spec.OnUsageSource != nil {
 		if native, ok := th.(harness.NativeUsageThread); ok {

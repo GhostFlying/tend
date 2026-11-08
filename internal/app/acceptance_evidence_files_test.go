@@ -262,31 +262,58 @@ func TestAcceptanceEvidenceFilesInterruptedStreamHasNoFinalizedReference(t *test
 
 func TestAcceptanceEvidenceFilesNewInputRequiresExactCurrentIssueAuthority(t *testing.T) {
 	h, _, accept, _ := acceptanceEvidenceFixture(t)
-	file, _ := h.uploadResultFile(accept, "evidence.log", []byte("original proof"))
+	original := []byte("original proof")
+	file, _ := h.uploadResultFile(accept, "evidence.log", original)
 	if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictBlocked, Files: []protocol.ArtifactFile{file}}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	other := createCanonicalOwnerTestIssue(t, h)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		for _, test := range []struct {
-			name  string
-			epoch int64
-			code  protocol.Code
-		}{
-			{"stale epoch", other.AssignmentEpoch + 1, protocol.CodeStaleRevision},
-			{"cross Issue", other.AssignmentEpoch, protocol.CodeInvalidRequest},
-		} {
-			spec := temporaryReportSpec()
-			spec.Inputs = []protocol.TaskInput{{FileID: file.FileID}}
-			x := &Exec{coordinationExecution: &store.HostedExecution{IssueID: other.IssueID, AssignmentEpoch: test.epoch}}
-			if err := freezeTaskInputs(t.Context(), x, tx.Q(), &spec, nil); protocol.CodeOf(err) != test.code {
-				t.Fatalf("%s admitted acceptance input: %v", test.name, err)
-			}
+		stale := temporaryReportSpec()
+		stale.Inputs = []protocol.TaskInput{{FileID: file.FileID}}
+		x := &Exec{coordinationExecution: &store.HostedExecution{IssueID: other.IssueID, AssignmentEpoch: other.AssignmentEpoch + 1}}
+		if err := freezeTaskInputs(t.Context(), x, tx.Q(), &stale, nil); protocol.CodeOf(err) != protocol.CodeStaleRevision {
+			t.Fatal("new Task write used a former responsibility", err)
+		}
+		selected := temporaryReportSpec()
+		selected.Inputs = []protocol.TaskInput{{FileID: file.FileID}}
+		x.coordinationExecution.AssignmentEpoch = other.AssignmentEpoch
+		if err := freezeTaskInputs(t.Context(), x, tx.Q(), &selected, nil); err != nil {
+			return err
+		}
+		_, source, err := store.GetFinalizedAcceptanceFile(t.Context(), tx.Q(), file.FileID)
+		if err != nil {
+			return err
+		}
+		if len(selected.Inputs) != 1 || selected.Inputs[0].SHA256 != file.SHA256 || selected.Inputs[0].Size != file.Size || selected.Inputs[0].SourceAcceptanceID != source.AcceptanceID || selected.Inputs[0].SourceTaskID != accept.TaskID {
+			t.Fatal("shared evidence lost its immutable acceptance source", selected)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
+	metadata, body, err := h.app.OpenIssueMaterialFile(t.Context(), other.IssueID, file.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := io.ReadAll(body)
+	body.Close()
+	if err != nil || metadata.SHA256 != file.SHA256 || !bytes.Equal(actual, original) {
+		t.Fatal("index/source reuse changed the original", metadata, err)
+	}
+	materialProjectForTest(t, h, other.IssueID, "isolated-acceptance-consumer")
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		selected := temporaryReportSpec()
+		selected.Inputs = []protocol.TaskInput{{FileID: file.FileID}}
+		x := &Exec{coordinationExecution: &store.HostedExecution{IssueID: other.IssueID, AssignmentEpoch: other.AssignmentEpoch}}
+		if err := freezeTaskInputs(t.Context(), x, tx.Q(), &selected, nil); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+			t.Fatal("cross-project unshared source became a new input", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertAcceptanceFileBytes(t, h, runPrincipal(accept.RunID, accept.Role), file, original)
 }
 
 func TestAcceptanceEvidenceFilesFreezeWholeFeedbackAcrossLaterVerdict(t *testing.T) {

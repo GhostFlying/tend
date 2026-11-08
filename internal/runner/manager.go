@@ -152,14 +152,21 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	if _, err = r.cfg.Journal.NextAttempt(ctx, as.RunID); err != nil {
 		return err
 	}
-	session, err := resolved.Open(ctx, dir)
+	open := resolved.Open
+	if as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly && !as.Manager.RequireReceiptReader {
+		if resolved.OpenNative == nil {
+			return errors.New("native owner executor is unavailable")
+		}
+		open = resolved.OpenNative
+	}
+	session, err := open(ctx, dir)
 	if err != nil {
 		return err
 	}
 	opened = true
 	nativeClosed := false
 	var emitMu sync.Mutex
-	driver := coordination.Driver{RequireReceiptReader: as.Manager.RequireReceiptReader, OnUsageStopped: func(stopCtx context.Context, thread string) error {
+	driver := coordination.Driver{RequireReceiptReader: as.Manager.RequireReceiptReader, NativeOwnerTools: as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly, OnUsageStopped: func(stopCtx context.Context, thread string) error {
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
 	}, LegacyRawUsage: !r.supportsNativeUsage(), OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 		return r.registerUsage(sourceCtx, as, source)

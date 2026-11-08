@@ -52,18 +52,6 @@ func recordIssueChangeEvent(ctx context.Context, x *Exec, tx *store.Tx, event Ev
 		return err
 	}
 	kind := event.Kind
-	if kind == "issue.context_reviewed" {
-		blockers, err := store.TaskContextBlockers(ctx, tx.Q(), issue.IssueID)
-		if err != nil {
-			return err
-		}
-		if len(blockers) > 0 {
-			// A repair-only turn may finish source bookkeeping but cannot decide
-			// task applicability. Deliver that duty in a normal coordination batch.
-			self = false
-			kind = "issue.task_agreement_review_required"
-		}
-	}
 	if self {
 		return nil
 	}
@@ -120,7 +108,7 @@ func flushIssueChangeNotice(ctx context.Context, x *Exec, tx *store.Tx, id strin
 		return err
 	}
 	message := x.IDs.New(protocol.PrefixMessage)
-	body := fmt.Sprintf("Issue「%s」已有合并后的变更通知（事件 %d–%d，最新 %s，记录版本 %d / 责任代次 %d）。读取当前 Issue、来源和任务，判断这是状态/进度变化还是实际任务约定变化。原 spec 仍适用时可用 issues_update 的 task_dispositions=continue_existing，携带 expected_context_revision 和该任务的 expected_control_revision 明确确认；确需改变任务时正式修订，或保留明确暂停原因。通知不授予新权限，不修改已有 spec，也不授权重发 unknown 操作。", issue.Plan.Title, first, last, kind, revision, epoch)
+	body := fmt.Sprintf("Issue「%s」已有合并后的变更通知（事件 %d–%d，最新 %s，记录版本 %d / 责任代次 %d）。读取当前 Issue、来源和任务，判断这是状态/进度变化还是实际任务约定变化。现有任务默认沿原 spec 继续，不需要逐 Task 重新确认适用性；负责人判断确需改变任务时正式修订或明确暂停，保留实际理由。通知不授予新权限，不修改已有 spec，也不授权重发 unknown 操作。", issue.Plan.Title, first, last, kind, revision, epoch)
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: message, Author: "system", Body: body, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return err

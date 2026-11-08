@@ -257,6 +257,7 @@ func TestIssueMaterialsFilesScopeAndMissingReferences(t *testing.T) {
 	h := newDeliverableHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	other := createCanonicalOwnerTestIssue(t, h)
+	materialProjectForTest(t, h, other.IssueID, "unrelated-project")
 	file := uploadChatFile(t, h, "own.json", "application/json", []byte("owner bytes"))
 	missing := h.ids.New(protocol.PrefixFile)
 	issue.Plan.Background = []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: "Saved " + file.FileID + "; historical unavailable reference " + missing, Source: file.FileID}}

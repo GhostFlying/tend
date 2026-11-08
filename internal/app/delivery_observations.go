@@ -254,10 +254,6 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := tx.PutDeliveryObservation(ctx, row); err != nil {
 		return Outcome{}, err
 	}
-	candidateEvents, err := invalidateIssueDeliveryCandidates(ctx, x, tx, row.Observation)
-	if err != nil {
-		return Outcome{}, err
-	}
 	status, reason := "completed", "observation changed"
 	if p.ErrorKind != "" {
 		status, reason = "failed", p.ErrorKind
@@ -283,7 +279,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		event.Kind = "work_item.delivery_checked"
 		events = append(events, event)
 	}
-	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: append(events, candidateEvents...)}, nil
+	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: events}, nil
 }
 func findDelivery(item protocol.WorkItem, id string) (protocol.IssueDelivery, bool) {
 	for _, d := range item.Deliveries {

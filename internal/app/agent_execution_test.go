@@ -240,7 +240,7 @@ func TestNamedFirstAllocationUsesCurrentOwnerTaskSpec(t *testing.T) {
 			}
 			// A changed selection creates a new spec, not a qualification inherited
 			// from either a legacy run or an earlier named agreement.
-			selection.Implementation.Model = "requested-model"
+			selection.Implementation.Model = "unavailable-current-model"
 			spec.AgentSelection = selection
 			issue = canonicalTaskIssue(t, h, issue.IssueID)
 			current := h.task(task.TaskID)
@@ -290,15 +290,18 @@ func TestNamedFirstAllocationUsesCurrentOwnerTaskSpec(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			r.AgentExecutors[1].Available = true
-			r.AgentExecutors[1].Reason = ""
-			r.Sequence++
-			if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
-				t.Fatal(op)
+			// Correct the actual current-role requirement. Future review capacity
+			// remains unavailable and cannot qualify or block implementation.
+			selection.Implementation.Model = projection.Agents[0].RequestedModel
+			issue = canonicalTaskIssue(t, h, issue.IssueID)
+			current = h.task(task.TaskID)
+			updated = h.exec(owner, h.env("issues.update_task", taskTarget(task.TaskID), protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec}, rev(current.ControlRevision)), CanonicalOwnerTaskUpdate{})
+			if updated.Status != protocol.OpSucceeded {
+				t.Fatal(updated)
 			}
 			next, ok := h.claimInputRun(r)
-			if !ok || next.Execution == nil || next.SpecVersion != 2 {
-				t.Fatalf("matching pair failed current spec: %+v", next)
+			if !ok || next.Execution == nil || next.SpecVersion != 3 || next.Execution.Profile.Model != projection.Agents[0].RequestedModel || next.Workspace.BackendID != "git" {
+				t.Fatalf("matching current role failed the revised spec: %+v", next)
 			}
 		})
 	}
@@ -347,7 +350,7 @@ func TestOwnerNamedAcceptanceRejectsContradictoryLegacyProfile(t *testing.T) {
 	}
 }
 
-func TestNamedOwnerStartOverChecksBothRolesOnReplacementHost(t *testing.T) {
+func TestNamedOwnerStartOverChecksCurrentRoleOnReplacementHost(t *testing.T) {
 	h, firstRuntime, firstProjection, _ := inventorySetup(t)
 	h.withHosts("linux-1", "linux-2")
 	register := func(host string, runtime *protocol.RunnerRuntime, projection protocol.AgentInventoryProjection, reviewAvailable bool) {
@@ -449,17 +452,23 @@ func TestNamedOwnerStartOverChecksBothRolesOnReplacementHost(t *testing.T) {
 	claim := func() (protocol.Assignment, bool) {
 		return h.claimWith("linux-2", h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-2"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: nextRuntime}, nil))
 	}
-	if replacement, ok := claim(); ok {
-		t.Fatalf("replacement host only has implementation capability: %+v", replacement)
+	nextRuntime.AgentExecutors[0].Available = false
+	nextRuntime.AgentExecutors[0].Reason = "test_implementation_unavailable"
+	nextRuntime.Sequence++
+	if op := h.versionedHello("linux-2", nextRuntime); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
 	}
-	nextRuntime.AgentExecutors[1].Available = true
-	nextRuntime.AgentExecutors[1].Reason = ""
+	if replacement, ok := claim(); ok {
+		t.Fatalf("unavailable current implementer qualified replacement work: %+v", replacement)
+	}
+	nextRuntime.AgentExecutors[0].Available = true
+	nextRuntime.AgentExecutors[0].Reason = ""
 	nextRuntime.Sequence++
 	if op := h.versionedHello("linux-2", nextRuntime); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	replacement, ok := claim()
-	if !ok || replacement.Execution == nil || replacement.Execution.Identity.ExecutionEnvironmentID != "linux-2" || replacement.Generation != old.Generation+1 || replacement.SpecVersion != old.SpecVersion {
-		t.Fatalf("matching replacement pair did not claim: %+v", replacement)
+	if !ok || replacement.Execution == nil || replacement.Execution.Identity.ExecutionEnvironmentID != "linux-2" || replacement.Generation != old.Generation+1 || replacement.SpecVersion != old.SpecVersion || replacement.Workspace.BackendID != "git" {
+		t.Fatalf("matching current replacement role did not claim: %+v", replacement)
 	}
 }

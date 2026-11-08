@@ -23,6 +23,9 @@ type Options struct {
 	// HostedCoordination restricts this process to Tend coordination and owner material presentation.
 	// Worker sessions leave this false.
 	HostedCoordination bool
+	// KillWithParent binds the native process to its launcher's lifetime on
+	// Linux, independently of native tool or permission configuration.
+	KillWithParent bool
 	// Bin is the traex binary; empty means "traex" on PATH.
 	Bin string
 	// Env is added to the inherited environment, for example TRAE_HOME
@@ -35,6 +38,10 @@ type Options struct {
 	// Version is reported as the client version.
 	Version string
 	Log     *slog.Logger
+	// onStartProcess persists local ownership before any native request.
+	onStartProcess       func(*exec.Cmd) error
+	onBeforeCloseProcess func() error
+	onClosedProcess      func() error
 }
 
 // Session is a running app-server. It implements harness.Session.
@@ -88,7 +95,7 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	cmd.Env = appServerEnv(os.Environ(), opts.Env)
 	cmd.Stderr = opts.Stderr
 	procx.Contain(cmd)
-	if opts.HostedCoordination {
+	if opts.HostedCoordination || opts.KillWithParent {
 		procx.DieWithParent(cmd)
 	}
 	stdin, err := cmd.StdinPipe()
@@ -103,10 +110,22 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	}
 	if err := cmd.Start(); err != nil {
 		kill()
-		return nil, fmt.Errorf("traex: start app-server: %w", err)
+		return nil, fmt.Errorf("%w: traex: start app-server: %w", harness.ErrWorkerNotStarted, err)
+	}
+	if opts.onStartProcess != nil {
+		if err := opts.onStartProcess(cmd); err != nil {
+			kill()
+			_ = cmd.Wait()
+			procx.KillGroup(cmd)
+			return nil, fmt.Errorf("traex: persist app-server ownership: %w", err)
+		}
 	}
 	s := newSession(stdout, stdin, opts.Log)
 	s.stop = func() error {
+		var ownershipErr error
+		if opts.onBeforeCloseProcess != nil {
+			ownershipErr = opts.onBeforeCloseProcess()
+		}
 		_ = stdin.Close()
 		exited := make(chan error, 1)
 		go func() { exited <- cmd.Wait() }()
@@ -121,7 +140,10 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 		// background command of a worker, must not outlive the session.
 		procx.KillGroup(cmd)
 		kill()
-		return err
+		if ownershipErr == nil && opts.onClosedProcess != nil {
+			ownershipErr = opts.onClosedProcess()
+		}
+		return errors.Join(err, ownershipErr)
 	}
 	s.ownedProcess = true
 	if err := s.initialize(ctx, opts.Version); err != nil {

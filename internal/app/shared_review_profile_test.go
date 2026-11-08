@@ -27,7 +27,7 @@ func sharedProfileReviewAction(t *testing.T, h *harness, issue string, p protoco
 func sharedProfileSourceTask(t *testing.T, h *harness, issue protocol.Issue, required protocol.AgentRequirement) string {
 	t.Helper()
 	spec := protocol.OwnerTaskSpec{Goal: "Contribute a result with an explicit formal review profile", Acceptance: []string{"The complete PR satisfies the formal review requirements"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", AgentID: "linux-1/alpha"}, Acceptance: required}}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Contributing source", Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "This source report is covered by the explicit whole-PR formal reviewer and profile below"}, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Contributing source", Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

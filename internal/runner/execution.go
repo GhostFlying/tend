@@ -35,12 +35,19 @@ type ResolvedExecution struct {
 
 // ManagerExecution opens the exact accepted local app-server configuration.
 type ManagerExecution struct {
+	OpenNative   func(context.Context, string) (harness.Session, error)
 	Open         func(context.Context, string) (harness.Session, error)
 	Instructions string
 	Profile      protocol.ExecutionProfile
 }
 type ManagerExecutionResolver interface {
 	ResolveManager(context.Context, protocol.RunExecutionPin) (ManagerExecution, error)
+}
+
+// NativeOwnerExecutionResolver advertises the optional device-default adapter.
+// Legacy manager resolvers retain their read-only native boundary.
+type NativeOwnerExecutionResolver interface {
+	SupportsNativeOwnerTools() bool
 }
 
 // ManagerReceiptExecutionResolver retains original configuration without probing

@@ -65,16 +65,12 @@ func appendAgreementSource(t *testing.T, h *harness, issue string) int64 {
 func assertAgreementAdmission(t *testing.T, h *harness, issue, task string, pending bool) {
 	t.Helper()
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		blockers, err := store.TaskContextBlockers(t.Context(), tx.Q(), issue)
-		if err != nil {
-			return err
-		}
 		candidates := []scheduler.Candidate{{TaskID: task, SpecVersion: 2, Kind: protocol.ActionImplement, DependenciesDone: true}}
 		if err := views.ApplyIssueDependencies(t.Context(), tx.Q(), candidates); err != nil {
 			return err
 		}
-		if (len(blockers) > 0) != pending || candidates[0].ContextPending != pending {
-			t.Fatalf("diagnostic/scheduler disagree: blockers=%+v candidate=%+v want pending=%v", blockers, candidates[0], pending)
+		if candidates[0].ContextPending != pending {
+			t.Fatalf("ordinary source unexpectedly gated execution: candidate=%+v want pending=%v", candidates[0], pending)
 		}
 		return nil
 	}); err != nil {
@@ -82,12 +78,12 @@ func assertAgreementAdmission(t *testing.T, h *harness, issue, task string, pend
 	}
 }
 
-func TestTaskAgreementAssessmentContinuesOriginalSpecAndExpiresOnNewSources(t *testing.T) {
+func TestTaskAgreementAssessmentRecordsJudgementWithoutGatingNewSources(t *testing.T) {
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	task, original := agreementFixture(t, h, issue)
 	revision := appendAgreementSource(t, h, issue.IssueID)
-	assertAgreementAdmission(t, h, issue.IssueID, task, true)
+	assertAgreementAdmission(t, h, issue.IssueID, task, false)
 	payload := protocol.UpdateIssuePayload{Plan: issue.Plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch, ExpectedContextRevision: rev(revision), TaskDispositions: []protocol.IssueTaskDisposition{{TaskID: task, SpecVersion: 2, ExpectedControlRevision: rev(1), Action: protocol.WorkItemTaskContinueExisting, Reason: "The repair permits the original agreement; no requirement changed"}}}
 	env := h.env("issues.update", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision))
 	op := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "update"})
@@ -119,12 +115,12 @@ func TestTaskAgreementAssessmentContinuesOriginalSpecAndExpiresOnNewSources(t *t
 		t.Fatal(err)
 	}
 	appendAgreementSource(t, h, issue.IssueID)
-	assertAgreementAdmission(t, h, issue.IssueID, task, true)
+	assertAgreementAdmission(t, h, issue.IssueID, task, false)
 	replay := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "update"})
 	if !bytes.Equal(replay.Result, op.Result) || h.count("task_agreement_assessments") != 1 {
 		t.Fatal("replay refreshed an old judgement", replay)
 	}
-	assertAgreementAdmission(t, h, issue.IssueID, task, true)
+	assertAgreementAdmission(t, h, issue.IssueID, task, false)
 }
 
 func TestTaskAgreementAssessmentRejectsStaleAndForeignResponsibility(t *testing.T) {
@@ -218,16 +214,12 @@ func TestTaskAgreementAssessmentRequiresInheritedVersionsAndCurrentOwner(t *test
 	check := func(want bool) {
 		t.Helper()
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			blockers, err := store.TaskContextBlockers(t.Context(), tx.Q(), parent.IssueID)
-			if err != nil {
-				return err
-			}
 			candidates := []scheduler.Candidate{{TaskID: task, SpecVersion: 2, Kind: protocol.ActionImplement, DependenciesDone: true}}
 			if err := views.ApplyIssueDependencies(t.Context(), tx.Q(), candidates); err != nil {
 				return err
 			}
-			if (len(blockers) > 0) != want || candidates[0].ContextPending != want {
-				t.Fatal("inherited diagnostic and dispatch disagree", blockers, candidates)
+			if candidates[0].ContextPending != want {
+				t.Fatal("inherited facts unexpectedly gated dispatch", candidates)
 			}
 			return nil
 		}); err != nil {
@@ -251,7 +243,7 @@ func TestTaskAgreementAssessmentRequiresInheritedVersionsAndCurrentOwner(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
-	check(true)
+	check(false)
 }
 
 func TestTaskAgreementAssessmentPausedDispositionKeepsExecutionStopped(t *testing.T) {
@@ -280,7 +272,7 @@ func TestTaskAgreementAssessmentPausedDispositionKeepsExecutionStopped(t *testin
 	if op := h.exec(owner, h.env("control.set_mode", taskTarget(task), protocol.SetControlModePayload{Mode: protocol.ControlManaged}, rev(h.task(task).ControlRevision)), SetControlMode{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	assertAgreementAdmission(t, h, issue.IssueID, task, true)
+	assertAgreementAdmission(t, h, issue.IssueID, task, false)
 }
 
 func TestHostedOwnerAssessesOriginalSpecThroughNormalCoordination(t *testing.T) {

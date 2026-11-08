@@ -69,7 +69,7 @@ func serveAcceptanceCloseTransport(input io.Reader, output io.Writer) error {
 }
 
 func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) {
-	for _, scenario := range []string{"confirmed", "upload unknown", "close error", "missing receipt", "changed sealed identity", "changed native binding", "changed manifest", "other run"} {
+	for _, scenario := range []string{"confirmed", "upload unknown", "close error", "missing receipt", "process recovery", "changed sealed identity", "changed native binding", "changed manifest", "other run"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
@@ -132,6 +132,15 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 				if err := os.Remove(receipt); err != nil {
 					t.Fatal(err)
 				}
+				// Historical runs without independent process ownership still
+				// cannot infer closure from missing native receipts.
+				if err := os.Remove(filepath.Join(dir, ownedProcessFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
+			case "process recovery":
+				if err := os.Remove(receipt); err != nil {
+					t.Fatal(err)
+				}
 			case "changed sealed identity":
 				spec.VerdictFilesIdentity = func(context.Context, string, json.RawMessage) (string, error) { return strings.Repeat("c", 64), nil }
 				raw, err := os.ReadFile(filepath.Join(dir, "verdict.json"))
@@ -172,7 +181,8 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 				return []protocol.ArtifactFile{manifest}, nil
 			}
 			reconciled, reconcileErr := reopened.ReconcileAcceptanceVerdict(ctx, spec)
-			if scenario != "confirmed" && scenario != "upload unknown" {
+			recoverable := scenario == "confirmed" || scenario == "upload unknown" || ownedProcessSupported() && (scenario == "process recovery" || scenario == "close error")
+			if !recoverable {
 				if !errors.Is(reconcileErr, harness.ErrRetainedResumePending) || reconciled.Verdict != nil || reconciledUploads != 0 {
 					t.Fatalf("result-only recovery bypassed original close before upload: result=%+v error=%v uploads=%d", reconciled, reconcileErr, reconciledUploads)
 				}
@@ -180,7 +190,7 @@ func TestOwnedAcceptanceSessionCloseAllowsOriginalVerdictRecovery(t *testing.T) 
 				t.Fatalf("result-only recovery lost original evidence: %+v %v", reconciled, reconcileErr)
 			}
 			w, err = reopened.Start(ctx, spec)
-			if scenario != "confirmed" && scenario != "upload unknown" {
+			if !recoverable {
 				if w != nil || !errors.Is(err, harness.ErrRetainedResumePending) {
 					t.Fatalf("unproven close was adopted: worker=%t err=%v", w != nil, err)
 				}

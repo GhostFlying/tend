@@ -166,11 +166,9 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 		v.Reasons = append(v.Reasons, "no_current_schedulable_action; historical requirements remain frozen")
 		return v, nil
 	}
-	// Before first allocation, acceptance is a prerequisite of the pending
-	// implementation action. Evaluate that real action and its reviewer pair;
-	// an acceptance artifact does not exist yet and must not be fabricated.
-	acceptancePrerequisite := role == protocol.RoleAccept && scheduler.RequiresAcceptancePrerequisite(c)
-	if role == protocol.RoleAccept && !acceptancePrerequisite {
+	// Explain the requested role without making future review capacity a
+	// prerequisite of the current implementation action.
+	if role == protocol.RoleAccept {
 		c.Kind = protocol.ActionAccept
 	} else {
 		c.Kind = protocol.ActionImplement
@@ -239,11 +237,7 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 			}
 			m := scheduler.ExecutorCapabilityMatch(executor, refs)
 			trial := c
-			if acceptancePrerequisite {
-				trial.ReviewExecutionFilter = &p
-			} else {
-				trial.ExecutionFilter = &p
-			}
+			trial.ExecutionFilter = &p
 			schedulingReason := scheduler.SkipReason(host.Host, trial)
 			if host.ConcurrencyBlocked[p.Runtime.RuntimeID] {
 				schedulingReason = &protocol.QueueWaitReason{Code: protocol.QueueHostCapacity, Message: "runtime concurrency capacity unavailable", HostID: host.ID}

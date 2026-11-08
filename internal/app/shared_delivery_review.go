@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 
@@ -39,8 +38,8 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if i.Revision != expected || i.AssignmentEpoch != p.ExpectedAssignmentEpoch || i.AssignmentState != "active" {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue responsibility changed")
 	}
-	if i.State != protocol.IssueActive || strings.TrimSpace(p.Reason) == "" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "an active Issue and explicit review reason are required")
+	if i.State != protocol.IssueActive && p.Action != "correct" || strings.TrimSpace(p.Reason) == "" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "an active Issue or an immutable report correction and explicit review reason are required")
 	}
 	var ref protocol.IssueDelivery
 	for _, d := range i.Plan.Deliveries {
@@ -122,24 +121,12 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if r.Status == "reviewing" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "the delivery already has an active reviewer")
 			}
-			if len(r.Rounds) >= sharedReviewRoundLimit(r) {
-				if p.Action == "recheck" && r.Status == "passed" {
-					// Its actual passed result is retained above. A changed
-					// candidate cannot spend an exhausted budget, so expose the
-					// same explicit escalation and external recovery path.
-					if err := escalateSharedDeliveryReview(ctx, x, tx, i, &r); err != nil {
-						return Outcome{}, err
-					}
-					break
-				}
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "review budget exhausted; escalate and request external user authorize_recheck with the current review revision before another review")
-			}
-			eligible := r.Status == "passed" || r.Status == "waiting" || r.Status == "changes_requested" && reviewFindingsResolved(r)
+			eligible := r.Status == "passed" || r.Status == "waiting" || (r.Status == "changes_requested" || r.Status == "escalated") && reviewFindingsResolved(r)
 			if p.Action == "recheck" && (len(r.Rounds) == 0 || !eligible) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "one consolidated finding disposition is required before the original reviewer's recheck")
 			}
 			if p.Action == "start" && len(r.Rounds) > 0 {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "retain the original reviewer and use the single focused recheck")
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "retain the original reviewer and use a focused recheck")
 			}
 			o, err := store.GetDeliveryObservation(ctx, tx.Q(), i.IssueID, ref.DeliveryID)
 			if err != nil {
@@ -237,11 +224,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if result.Verdict == "blocked" || result.Verdict == "inconclusive" {
 				r.Status = "waiting"
 			}
-			if (r.Status == "changes_requested" || r.Status == "waiting") && len(r.Rounds) >= sharedReviewRoundLimit(r) {
-				if err := escalateSharedDeliveryReview(ctx, x, tx, i, &r); err != nil {
-					return Outcome{}, err
-				}
-			}
+
 		case "authorize_recheck":
 			if x.Principal.Kind != protocol.PrincipalOwner || x.coordinationExecution != nil {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only an independent authenticated external user may authorize an additional review round")
@@ -257,6 +240,85 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			r.BudgetAuthorizations = append(r.BudgetAuthorizations, protocol.SharedReviewBudgetAuthorization{RequestID: x.Env.RequestID, Round: len(r.Rounds) + 1, Reason: p.Reason})
 			r.Status = "changes_requested"
+		case "correct":
+			if p.ExpectedReviewRevision == nil {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "expected_review_revision is required for a report correction")
+			}
+			if *p.ExpectedReviewRevision != r.Revision {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the original shared review changed before its report correction")
+			}
+			if len(r.Rounds) == 0 {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no original review report to correct")
+			}
+			last := &r.Rounds[len(r.Rounds)-1]
+			original, err := store.GetTask(ctx, tx.Q(), last.TaskID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if !original.Lifecycle.Terminal() {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "retain the original review until its actual report settles")
+			}
+			if last.AcceptanceID == "" {
+				originalArtifact := last.ArtifactID
+				if originalArtifact == "" {
+					originalArtifact = original.CurrentArtifactID
+				}
+				if originalArtifact == "" {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no immutable original report to correct")
+				}
+				artifact, err := store.GetArtifact(ctx, tx.Q(), originalArtifact)
+				if err != nil {
+					return Outcome{}, err
+				}
+				var originalReport protocol.ArtifactPayload
+				if err := json.Unmarshal([]byte(artifact.RefJSON), &originalReport); err != nil {
+					return Outcome{}, err
+				}
+				pin, err := store.GetRunExecution(ctx, tx.Q(), artifact.RunID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				originalRun, err := store.GetRun(ctx, tx.Q(), artifact.RunID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				action, err := store.GetAction(ctx, tx.Q(), originalRun.ActionID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if artifact.TaskID != last.TaskID || action.TargetSpecVersion != last.SpecVersion || originalReport.Report == nil || pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID != r.Reviewer {
+					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "retain the original reviewer's actual immutable report")
+				}
+				last.RunID, last.ArtifactID = artifact.RunID, artifact.ArtifactID
+			}
+			correction, err := bindSharedReviewTask(ctx, tx.Q(), r, p.ReviewerTaskID, "", last.ExecutionRequirements)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if correction.Reviewer != r.Reviewer {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "a report correction must come from the original reviewer")
+			}
+			correction.HeadSHA, correction.BaseSHA, correction.Requirements = last.HeadSHA, last.BaseSHA, last.Requirements
+			result, run, artifact, err := readSharedReviewResult(ctx, tx.Q(), r, correction)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if run == last.RunID || artifact == last.ArtifactID || slices.ContainsFunc(last.Corrections, func(c protocol.SharedReviewCorrection) bool { return c.RunID == run || c.ArtifactID == artifact }) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "the report is already recorded; preserve its original receipt")
+			}
+			pin, err := store.GetRunExecution(ctx, tx.Q(), run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			last.Corrections = append(last.Corrections, protocol.SharedReviewCorrection{RequestID: x.Env.RequestID, TaskID: correction.TaskID, SpecVersion: correction.SpecVersion, RunID: run, ArtifactID: artifact, Profile: pin.Profile, Result: *result, Reason: p.Reason, CreatedAt: x.Now.UnixMilli()})
+			last.Result = result
+			r.Status = "changes_requested"
+			if result.Verdict == "passed" {
+				r.Status = "passed"
+			}
+			if result.Verdict == "blocked" || result.Verdict == "inconclusive" {
+				r.Status = "waiting"
+			}
 		case "supplement":
 			if r.Status != "reviewing" || len(r.Rounds) == 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only an unresolved original acceptance import can receive focused evidence")
@@ -293,7 +355,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			r.AssessedRequirementsDigest, r.AssessmentReason = digest, p.Reason
 		case "resolve":
-			if r.Status != "changes_requested" {
+			if r.Status != "changes_requested" && r.Status != "escalated" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only pending review findings accept dispositions")
 			}
 			if err := validateReviewDispositions(r, p.Dispositions); err != nil {
@@ -301,7 +363,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			r.Dispositions = slices.Clone(p.Dispositions)
 		default:
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review action must be link, unlink, start, record, supplement, resolve, assess, recheck or authorize_recheck")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review action must be link, unlink, start, record, correct, supplement, resolve, assess, recheck or authorize_recheck")
 		}
 	}
 	if len(r.Rounds) == 0 {
@@ -344,23 +406,6 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 
 func sharedReviewRoundLimit(r protocol.SharedDeliveryReview) int {
 	return 2 + len(r.BudgetAuthorizations)
-}
-
-func escalateSharedDeliveryReview(ctx context.Context, x *Exec, tx *store.Tx, i protocol.Issue, r *protocol.SharedDeliveryReview) error {
-	r.Status, r.EscalationIssueID = "escalated", i.ParentIssueID
-	message := x.IDs.New(protocol.PrefixMessage)
-	conversation := "main"
-	if i.ParentIssueID != "" {
-		conversation = "issue:" + i.ParentIssueID
-	}
-	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: conversation, Author: "system", Body: fmt.Sprintf("Shared PR review %s for %s #%d exhausted its authorized budget after %d actual rounds. The original review and findings remain. The parent responsibility must decide scope, remediation or further escalation. If a further focused review is required, an external authenticated user can authorize_recheck with the current Issue and review revisions and an explicit reason, granting exactly one additional round. Do not self-authorize another review or treat escalation as approval.", r.ReviewID, r.Repository, r.Number, len(r.Rounds)), CreatedAt: x.Now.UnixMilli()}); err != nil {
-		return err
-	}
-	event := x.IDs.New(protocol.PrefixEvent)
-	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: event, Source: "app", ObjectType: "message", ObjectID: message, Kind: "conversation.message", BodyJSON: `{"author":"system"}`, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
-		return err
-	}
-	return appendBackgroundSource(ctx, x, tx, "review_escalation:"+r.ReviewID, i.ParentIssueID, message, event, "delivery.review_escalated", nil)
 }
 
 func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, task, acceptance string, frozenRequirements ...*protocol.SharedReviewExecutionRequirements) (protocol.SharedDeliveryReviewRound, error) {
@@ -509,7 +554,7 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 }
 
 func validateSharedReviewResult(result *protocol.SharedReviewResult, r protocol.SharedDeliveryReview, round protocol.SharedDeliveryReviewRound) error {
-	if result == nil || result.ReviewID != r.ReviewID || result.HeadSHA != round.HeadSHA || result.BaseSHA != round.BaseSHA || result.RequirementsDigest != round.Requirements || strings.TrimSpace(result.RepositoryCheck) == "" || (result.Verdict != "passed" && result.Verdict != "changes_requested") || (result.Verdict == "passed" && len(result.Findings) > 0) || (result.Verdict == "changes_requested" && len(result.Findings) == 0) {
+	if result == nil || result.ReviewID != r.ReviewID || result.HeadSHA != round.HeadSHA || result.BaseSHA != round.BaseSHA || result.RequirementsDigest != round.Requirements || strings.TrimSpace(result.RepositoryCheck) == "" || (result.Verdict != "passed" && result.Verdict != "changes_requested" && result.Verdict != "blocked" && result.Verdict != "inconclusive") || (result.Verdict == "passed" && len(result.Findings) > 0) || (result.Verdict == "changes_requested" && len(result.Findings) == 0) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "review report must bind the complete candidate, requirement digest, repository check and actual verdict")
 	}
 	seen := map[string]bool{}

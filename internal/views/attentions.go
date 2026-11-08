@@ -15,6 +15,11 @@ type AttentionFilter struct {
 	Limit                         int
 }
 
+// Current handling follows the independently versioned route. Only legacy
+// records without a route fall back to their immutable origin Issue.
+const responsibleAttentionIDsSQL = `SELECT r.attention_id FROM attention_responsibilities r WHERE r.recipient_kind IN ('owner','agent','main') AND r.issue_id=?
+ UNION ALL SELECT a.attention_id FROM attentions a WHERE a.issue_id=? AND NOT EXISTS(SELECT 1 FROM attention_responsibilities r WHERE r.attention_id=a.attention_id)`
+
 func Attention(ctx context.Context, q store.Querier, id string) (protocol.AttentionView, error) {
 	return (&attentionReader{}).read(ctx, q, id)
 }
@@ -111,23 +116,26 @@ func Attentions(ctx context.Context, q store.Querier, f AttentionFilter) (protoc
 	if f.Limit < 1 || f.Limit > 100 {
 		f.Limit = 50
 	}
-	rows, err := q.QueryContext(ctx, `SELECT body_json FROM attentions WHERE (?='' OR issue_id=?) AND (?='' OR kind=?) AND (?='' OR status=?) AND attention_id>? AND (? OR COALESCE(json_extract(body_json,'$.archived_at'),0)=0) AND (NOT ? OR kind IN ('decision','action')) AND (?='' OR ?='all' OR COALESCE((SELECT recipient_kind FROM attention_responsibilities r WHERE r.attention_id=attentions.attention_id),'owner')=?) AND (?='' OR EXISTS(SELECT 1 FROM attention_responsibilities r WHERE r.attention_id=attentions.attention_id AND r.issue_id=?)) ORDER BY attention_id LIMIT ?`, f.IssueID, f.IssueID, f.Kind, f.Kind, f.Status, f.Status, f.After, f.IncludeArchived, f.ActionableOnly, f.Recipient, f.Recipient, f.Recipient, f.ResponsibleIssueID, f.ResponsibleIssueID, f.Limit+1)
+	query := `SELECT attention_id FROM attentions WHERE (?='' OR issue_id=?) AND (?='' OR kind=?) AND (?='' OR status=?) AND attention_id>? AND (? OR COALESCE(json_extract(body_json,'$.archived_at'),0)=0) AND (NOT ? OR kind IN ('decision','action')) AND (?='' OR ?='all' OR COALESCE((SELECT recipient_kind FROM attention_responsibilities r WHERE r.attention_id=attentions.attention_id),'owner')=?)`
+	args := []any{f.IssueID, f.IssueID, f.Kind, f.Kind, f.Status, f.Status, f.After, f.IncludeArchived, f.ActionableOnly, f.Recipient, f.Recipient, f.Recipient}
+	if f.ResponsibleIssueID != "" {
+		query += ` AND attention_id IN (` + responsibleAttentionIDsSQL + `)`
+		args = append(args, f.ResponsibleIssueID, f.ResponsibleIssueID)
+	}
+	query += ` ORDER BY attention_id LIMIT ?`
+	args = append(args, f.Limit+1)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return protocol.AttentionPage{}, err
 	}
 	var ids []string
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return protocol.AttentionPage{}, err
 		}
-		var a protocol.Attention
-		if err := json.Unmarshal([]byte(raw), &a); err != nil {
-			rows.Close()
-			return protocol.AttentionPage{}, err
-		}
-		ids = append(ids, a.AttentionID)
+		ids = append(ids, id)
 	}
 	err = rows.Err()
 	rows.Close()

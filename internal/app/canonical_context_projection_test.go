@@ -252,7 +252,7 @@ func TestCanonicalContextProjectionKeepsEffectiveFactsAndAncestorTaskBindings(t 
 			agreement = true
 		}
 	}
-	if got.DispatchReady || got.SyncStatus != "needs_review" || facts != 2 || !agreement {
-		t.Fatalf("effective or descendant frozen ancestor contract lost: %+v", got)
+	if got.DispatchReady || got.SyncStatus != "needs_review" || facts != 2 || agreement {
+		t.Fatalf("source facts should remain visible without a new Task permission: %+v", got)
 	}
 }

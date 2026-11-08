@@ -34,7 +34,7 @@ func TestPrivatePersistentSummaryKeepsOwningThreadUsable(t *testing.T) {
 	}
 	session := &summarySession{permissionSession: permissionSession{native.(*testkit.FakeSession)}}
 	stopped := ""
-	driver := &Driver{Session: session, Profile: protocol.ExecutionProfile{Model: "model"}, Emit: func(context.Context, Event) error { return nil }, OnUsageStopped: func(_ context.Context, id string) error { stopped = id; return nil }}
+	driver := &Driver{NativeOwnerTools: true, Session: session, Profile: protocol.ExecutionProfile{Model: "model"}, Emit: func(context.Context, Event) error { return nil }, OnUsageStopped: func(_ context.Context, id string) error { stopped = id; return nil }}
 	defer func() {
 		cancel()
 		_, _ = driver.Handle(context.Background(), "close", json.RawMessage(`{}`))
@@ -43,7 +43,7 @@ func TestPrivatePersistentSummaryKeepsOwningThreadUsable(t *testing.T) {
 		raw, _ := json.Marshal(request)
 		return driver.Handle(ctx, method, raw)
 	}
-	cfg := harness.ThreadConfig{Model: "model", Sandbox: "read-only", ApprovalPolicy: "never"}
+	cfg := harness.ThreadConfig{Purpose: NativeOwnerPurpose, Model: "model", Sandbox: "read-only", ApprovalPolicy: "never"}
 	root, err := call("start", Request{Config: cfg})
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +57,17 @@ func TestPrivatePersistentSummaryKeepsOwningThreadUsable(t *testing.T) {
 	forkID := fork.(ThreadInfo).ID
 	if session.forkConfig.Ephemeral || session.forkConfig.LegacyRawUsage || forkID == rootID {
 		t.Fatal("summary did not use a separate durable native thread", session.forkConfig)
+	}
+	if session.forkConfig.Sandbox != "read-only" || session.forkConfig.ApprovalPolicy != "never" || session.forkConfig.Config["features.shell_tool"] != false || len(session.forkConfig.Tools) != 0 {
+		t.Fatal("private fork inherited ordinary owner native tools", session.forkConfig)
+	}
+	stage, err := call("start", Request{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageConfig := driver.threads[stage.(ThreadInfo).ID].(permissionThread).Config
+	if stageConfig.Sandbox != "read-only" || stageConfig.ApprovalPolicy != "never" || stageConfig.Config["features.shell_tool"] != false || len(stageConfig.Tools) != 0 || stageConfig.Model != "model" {
+		t.Fatal("private summary stage inherited ordinary owner native tools", stageConfig)
 	}
 	if _, err = call("release", Request{ThreadID: rootID}); err == nil {
 		t.Fatal("released owning thread as a private summary")

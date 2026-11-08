@@ -378,8 +378,12 @@ func TestManagerFileAccessUsesPersistedIssueAndRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := runPrincipal(result.Assignment.RunID, protocol.RoleIssueManager)
+	if metadata, err := h.app.ManagerFile(t.Context(), principal, file.FileID); err != nil || metadata.SHA256 != file.SHA256 {
+		t.Fatal("same-project knowledge required an extra share", metadata, err)
+	}
+	materialProjectForTest(t, h, other.IssueID, "isolated-file-source")
 	if _, err := h.app.ManagerFile(t.Context(), principal, file.FileID); protocol.CodeOf(err) != protocol.CodeForbidden {
-		t.Fatal("cross-issue attachment admitted", err)
+		t.Fatal("isolated attachment admitted without a real context relationship", err)
 	}
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO message_work_items(message_id,work_item_id,source,updated_at) VALUES(?,?,'owner',?)`, source, issue.IssueID, h.clock.Now().UnixMilli())

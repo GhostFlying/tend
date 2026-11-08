@@ -6,15 +6,16 @@ import "encoding/json"
 type TaskKind string
 
 const (
-	TaskKindExecution              TaskKind = "execution"
-	TaskKindIssueManager           TaskKind = "issue_manager"
-	DefaultIssueManagerCategory             = "issue-manager"
-	CapabilityIssueManager                  = "runner-issue-manager-v1"
-	CapabilityIssueOwner                    = "runner-issue-owner-v1"
-	CapabilityManagerReceiptReader          = "runner-manager-receipt-reader-v1"
-	OpIssueRequestManager                   = "issues.request_manager"
-	OpIssueRequestOwner                     = "issues.request_owner"
-	IssueOwnerPolicy                        = "issue-owner-v1"
+	TaskKindExecution               TaskKind = "execution"
+	TaskKindIssueManager            TaskKind = "issue_manager"
+	DefaultIssueManagerCategory              = "issue-manager"
+	CapabilityIssueManager                   = "runner-issue-manager-v1"
+	CapabilityIssueOwner                     = "runner-issue-owner-v1"
+	CapabilityIssueOwnerNativeTools          = "runner-issue-owner-native-tools-v1"
+	CapabilityManagerReceiptReader           = "runner-manager-receipt-reader-v1"
+	OpIssueRequestManager                    = "issues.request_manager"
+	OpIssueRequestOwner                      = "issues.request_owner"
+	IssueOwnerPolicy                         = "issue-owner-v1"
 )
 
 // RequestIssueManagerPayload selects a capability category and optional Agent
@@ -45,6 +46,7 @@ type IssueManagerSpec struct {
 
 // IssueManagerAssignment binds a turn to a continuing responsibility.
 type IssueManagerAssignment struct {
+	NativeOwnerTools bool `json:"native_owner_tools,omitempty"`
 	// RequireReceiptReader selects the negotiated strict history reader.
 	// Its absence retains historical receipt-only behavior.
 	RequireReceiptReader bool   `json:"require_receipt_reader,omitempty"`

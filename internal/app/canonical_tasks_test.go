@@ -12,7 +12,7 @@ import (
 
 func createCanonicalTaskForTest(t *testing.T, h *harness, issue protocol.Issue) string {
 	t.Helper()
-	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Investigate the vague goal", Spec: testSpec, Rating: protocol.RatingP1}
+	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Investigate the vague goal", Spec: testSpec, Rating: protocol.RatingP1, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise the independent acceptance lifecycle"}}
 	payload.Spec.ImplementationContext = "PRIVATE_OWNER_IMPLEMENTATION_REASONING"
 	cmd := CanonicalOwnerTaskCreate{}
 	op := h.exec(owner, h.env(cmd.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), cmd)
@@ -489,8 +489,8 @@ func TestCanonicalTaskSourceCorrectionPreservesFrozenAcceptance(t *testing.T) {
 	if current := h.task(task); current.Lifecycle != protocol.TaskCompleted || current.SpecVersion != 1 || current.CurrentArtifactID != oldArtifact {
 		t.Fatal("original artifact did not complete independently", current)
 	}
-	if _, ok, _ := h.claim("linux-1"); ok || h.task(waitingTask).Lifecycle != protocol.TaskQueued {
-		t.Fatal("the same source correction failed to fence unstarted implementation")
+	if next, ok, _ := h.claim("linux-1"); !ok || next.TaskID != waitingTask || next.SpecVersion != 1 || next.Role != protocol.RoleImplement {
+		t.Fatal("ordinary source correction became a new execution permission", next)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var needsReview bool
@@ -675,7 +675,7 @@ func TestCanonicalTaskSecondaryLegacyLinkGetsEvidenceNotCompletionResponsibility
 	}
 }
 
-func TestCanonicalTaskReparentRequiresExplicitInheritedContextRefreshForNewClaim(t *testing.T) {
+func TestCanonicalTaskReparentKeepsOldSnapshotAndAllowsExplicitRefresh(t *testing.T) {
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	parent := createCanonicalOwnerTestIssue(t, h)
@@ -689,8 +689,8 @@ func TestCanonicalTaskReparentRequiresExplicitInheritedContextRefreshForNewClaim
 		ParentIssueID string `json:"parent_issue_id"`
 	}{canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, parent.IssueID}
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "reparent", payload))
-	if _, ok, _ := h.claim("linux-1"); ok {
-		t.Fatal("new inherited context silently skipped the frozen task agreement")
+	if view := h.executionTask(task); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued || view.SpecVersion != 1 {
+		t.Fatal("new ancestry became a separate execution permission", view)
 	}
 	spec := testSpec
 	current := h.task(task)
@@ -703,12 +703,12 @@ func TestCanonicalTaskReparentRequiresExplicitInheritedContextRefreshForNewClaim
 	}
 }
 
-func TestCanonicalTaskOwnerRequiresFormalAcceptanceCapabilityBeforeImplementation(t *testing.T) {
+func TestCanonicalTaskOwnerRequiresFormalAcceptanceCapabilityForAcceptance(t *testing.T) {
 	h := newDeliverableHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	spec := testSpec
 	spec.AcceptanceExecution = &protocol.ExecutionProfile{Model: "formal-review-model", Effort: "xhigh"}
-	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Owner full delivery", Spec: spec, Rating: protocol.RatingP1}
+	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Owner full delivery", Spec: spec, Rating: protocol.RatingP1, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Require the exact formal acceptance execution profile"}}
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -717,10 +717,6 @@ func TestCanonicalTaskOwnerRequiresFormalAcceptanceCapabilityBeforeImplementatio
 	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if _, ok := h.claimInputRun(runtime); ok {
-		t.Fatal("implementation host cannot honor the formal acceptance profile")
-	}
-	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityAcceptanceExecution)
 	run, ok := h.claimInputRun(runtime)
 	if !ok || run.Role != protocol.RoleImplement || run.AcceptanceExecution != nil {
 		t.Fatal(run)
@@ -729,6 +725,10 @@ func TestCanonicalTaskOwnerRequiresFormalAcceptanceCapabilityBeforeImplementatio
 	if op := h.runAs(run, protocol.OpRunsSubmitArtifact, testArtifact(h.task(run.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	if accept, ok := h.claimInputRun(runtime); ok {
+		t.Fatal("actual formal acceptance ignored its missing profile capability", accept)
+	}
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityAcceptanceExecution)
 	accept, ok := h.claimInputRun(runtime)
 	if !ok || accept.Role != protocol.RoleAccept || accept.AcceptanceExecution == nil || *accept.AcceptanceExecution != *spec.AcceptanceExecution {
 		t.Fatalf("formal acceptance=%+v", accept)
@@ -779,7 +779,7 @@ func TestCanonicalTaskCannotAttachNewWorkToCompletedStage(t *testing.T) {
 	}
 }
 
-func TestCanonicalTaskAncestorEditsFenceImplementationNotFrozenAcceptance(t *testing.T) {
+func TestCanonicalTaskAncestorEditsPreserveExecutionUntilOwnerRefreshes(t *testing.T) {
 	for _, kind := range []string{"title", "intent", "background", "scope", "completion_criteria", "active_intent", "active_background", "active_scope", "active_completion_criteria"} {
 		t.Run(kind, func(t *testing.T) {
 			h := newHarness(t)
@@ -818,7 +818,11 @@ func TestCanonicalTaskAncestorEditsFenceImplementationNotFrozenAcceptance(t *tes
 					t.Fatal("ancestor edit rewrote active contract", current)
 				}
 			}
-			run, ok, _ := h.claim("linux-1")
+			var run protocol.Assignment
+			ok := false
+			if strings.HasPrefix(kind, "active_") || kind == "title" {
+				run, ok, _ = h.claim("linux-1")
+			}
 			if strings.HasPrefix(kind, "active_") {
 				artifact := h.task(task).CurrentArtifactID
 				if !ok || run.TaskID != task || run.SpecVersion != 1 || run.Role != protocol.RoleAccept || strings.Contains(string(run.Spec), "NEW_PARENT_") {
@@ -841,8 +845,8 @@ func TestCanonicalTaskAncestorEditsFenceImplementationNotFrozenAcceptance(t *tes
 				}
 				return
 			}
-			if ok {
-				t.Fatalf("changed ancestor %s admitted stale inherited contract: %+v", kind, run)
+			if view := h.executionTask(task); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued || view.SpecVersion != 1 {
+				t.Fatalf("ordinary ancestor %s blocked the retained agreement: %+v", kind, view)
 			}
 			next := testSpec
 			current := h.task(task)

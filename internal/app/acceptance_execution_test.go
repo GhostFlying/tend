@@ -16,25 +16,32 @@ func TestAcceptanceExecutionCapabilityAndAssignment(t *testing.T) {
 	if op := h.versionedHello("linux-1", rt); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if as, ok := h.claimInputRun(rt); ok {
-		t.Fatalf("old runner claimed selected model: %+v", as)
-	}
-	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityAcceptanceExecution)
 	as, ok := h.claimInputRun(rt)
-	if !ok || as.TaskID != task.TaskID || as.AcceptanceExecution != nil {
+	if !ok || as.TaskID != task.TaskID || as.Role != protocol.RoleImplement || as.AcceptanceExecution != nil {
 		t.Fatalf("implementation selection: %+v", as)
 	}
+	workspace := as.Workspace
 	var wire map[string]any
 	_ = json.Unmarshal(as.Spec, &wire)
 	if _, exists := wire["acceptance_execution"]; exists {
 		t.Fatal("selection leaked into legacy spec")
 	}
-	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
 	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	runs := h.count("runs")
+	if assignment, ok := h.claimInputRun(rt); ok {
+		t.Fatalf("runner without acceptance capability claimed the actual review: %+v", assignment)
+	}
+	if h.count("runs") != runs || h.task(task.TaskID).Lifecycle != protocol.TaskAwaitingAcceptance {
+		t.Fatal("unsupported acceptance consumed or rewrote the pending review", h.task(task.TaskID))
+	}
+	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityAcceptanceExecution)
 	as, ok = h.claimInputRun(rt)
-	if !ok || as.Role != protocol.RoleAccept || as.AcceptanceExecution == nil || *as.AcceptanceExecution != *spec.AcceptanceExecution {
+	if !ok || as.TaskID != task.TaskID || as.Role != protocol.RoleAccept || as.AcceptanceExecution == nil || *as.AcceptanceExecution != *spec.AcceptanceExecution || as.Workspace.ID != workspace.ID || as.Workspace.Kind != workspace.Kind || as.Workspace.BackendID != workspace.BackendID {
 		t.Fatalf("acceptance selection: %+v", as)
 	}
 	old := testRuntime("older-runner")

@@ -12,16 +12,16 @@ import (
 
 // The explicit owner task command authorizes this frozen agreement. Source
 // review duties remain Issue responsibilities, not a global execution baseline.
-func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *scheduler.Candidate, primary string, frozen []protocol.TaskWorkContext) error {
+func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *scheduler.Candidate, primary string) error {
+	current, err := store.TaskOwnerContractCurrent(ctx, q, c.TaskID)
+	if err != nil {
+		return err
+	}
+	if !current {
+		c.OwnerResponsibilityChanged = true
+	}
 	contract, err := store.GetTaskOwnerContract(ctx, q, c.TaskID)
 	if err == nil {
-		current, err := store.TaskOwnerContractCurrent(ctx, q, c.TaskID)
-		if err != nil {
-			return err
-		}
-		if !current {
-			c.OwnerResponsibilityChanged = true
-		}
 		c.OwnerPin = contract.Execution
 		c.OwnerAgentRevision, c.OwnerRuntimeRevision = uint64(contract.AgentRevision), uint64(contract.RuntimeRevision)
 		if contract.ReviewIssueID != "" && (c.Kind == protocol.ActionAccept || c.OwnerPin != nil) {
@@ -96,31 +96,7 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 	if err := applyStageDependencies(ctx, q, c, protocol.WorkItem{WorkItemID: issue.IssueID, IssuePlan: issue.Plan}); err != nil {
 		return err
 	}
-	frozenItems := map[string]bool{}
-	for _, binding := range frozen {
-		frozenItems[binding.WorkItemID] = true
-		if _, current := controls[binding.WorkItemID]; !current {
-			c.ContextPending = true
-		}
-		if c.Kind == protocol.ActionAccept {
-			// Independent acceptance judges the current artifact against its frozen
-			// spec. Later semantic inputs belong to continuing Issue responsibility;
-			// they neither replace that contract nor settle through its verdict.
-			// Keep the current ownership, lifecycle and ancestry checks above/below.
-			continue
-		}
-		current, err := store.TaskContextBindingCurrent(ctx, q, c.TaskID, c.SpecVersion, binding)
-		if err != nil {
-			return err
-		}
-		if !current {
-			c.ContextPending = true
-		}
-	}
-	for id := range controls {
-		if !frozenItems[id] {
-			c.ContextPending = true
-		}
-	}
+	// Frozen context records what the Agent received. Later source, definition
+	// and ancestry facts notify the owner; they are not another Task permission.
 	return nil
 }
