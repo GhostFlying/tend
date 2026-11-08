@@ -24,16 +24,13 @@ func TestIntegrationCodexEnvironmentAdoptionPreservesNativeThreadAndRollout(t *t
 	if err != nil {
 		t.Skip("native Codex unavailable")
 	}
-	if _, err = exec.LookPath("bwrap"); err != nil {
-		t.Skip("bubblewrap unavailable")
-	}
 	root := t.TempDir()
 	user, _ := os.UserHomeDir()
 	disabled := false
 	svc := codexenv.Service{Root: filepath.Join(root, "store")}
 	profile := codexenv.Profile{ID: "coordinator", Home: filepath.Join(root, "home"), UserHome: user, Enabled: true, BundledSkills: &disabled}
-	// A thread without any turn has no durable rollout to resume. Materialize a
-	// real native history using a deterministic loopback model without auth.
+	// Exercise both metadata-only persistence and a real native history from
+	// the deterministic loopback model, without account authentication.
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, event := range []any{
@@ -65,14 +62,18 @@ func TestIntegrationCodexEnvironmentAdoptionPreservesNativeThreadAndRollout(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idle, err := session.EnvironmentQuiescent(t.Context(), original.ID()); err != nil || idle {
-		t.Fatal("thread without durable input was allowed to restart", err)
+	if idle, err := session.EnvironmentQuiescent(t.Context(), original.ID()); err != nil || !idle {
+		t.Fatal("metadata-only thread could not reach a durable idle boundary", err)
 	}
 	if output, status := turn(t, original, "Reply IDENTITY_OK without tools."); status != "completed" || output != "IDENTITY_OK" {
 		t.Fatal("loopback model did not materialize completed native history", status)
 	}
 	path := original.(harness.ThreadLocation).RolloutPath()
-	if !strings.HasPrefix(path, filepath.Join(profile.Home, "sessions")+string(filepath.Separator)) {
+	physicalPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(physicalPath, filepath.Join(profile.Home, "sessions")+string(filepath.Separator)) {
 		t.Fatal("native rollout escaped the fixed usage collector root")
 	}
 	profile.BundledSkills = nil
@@ -95,8 +96,11 @@ func TestIntegrationCodexEnvironmentAdoptionPreservesNativeThreadAndRollout(t *t
 	}
 	defer replacement.Close()
 	resumed, err := replacement.ResumeThread(t.Context(), original.ID(), cfg)
-	if err != nil || resumed.ID() != original.ID() || resumed.(harness.ThreadLocation).RolloutPath() != path {
-		t.Fatal("snapshot adoption changed native identity or usage path", err)
+	if err != nil {
+		t.Fatal("resume failed", err)
+	}
+	if resumed.ID() != original.ID() || resumed.(harness.ThreadLocation).RolloutPath() != path {
+		t.Fatalf("snapshot adoption changed native identity or usage path: before=%s %s after=%s %s", original.ID(), path, resumed.ID(), resumed.(harness.ThreadLocation).RolloutPath())
 	}
 }
 
@@ -104,9 +108,6 @@ func TestIntegrationCodexEnvironmentResumeFailureRestoresSnapshot(t *testing.T) 
 	bin, err := exec.LookPath("codex")
 	if err != nil {
 		t.Skip("native Codex unavailable")
-	}
-	if _, err = exec.LookPath("bwrap"); err != nil {
-		t.Skip("bubblewrap unavailable")
 	}
 	root := t.TempDir()
 	user, _ := os.UserHomeDir()
@@ -150,9 +151,6 @@ func TestIntegrationCodexEnvironmentPreservesCoordinatorBoundary(t *testing.T) {
 	bin, err := exec.LookPath("codex")
 	if err != nil {
 		t.Skip("native Codex unavailable")
-	}
-	if _, err = exec.LookPath("bwrap"); err != nil {
-		t.Skip("bubblewrap unavailable")
 	}
 	root := t.TempDir()
 	user, err := os.UserHomeDir()

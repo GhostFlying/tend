@@ -1,6 +1,10 @@
 package traex
 
-import "testing"
+import (
+	"github.com/GhostFlying/tend/internal/codexenv"
+	"path/filepath"
+	"testing"
+)
 
 func TestNativeMCPDiagnosticsDoNotInferConnectionFromCachedTools(t *testing.T) {
 	for _, test := range []struct {
@@ -21,5 +25,26 @@ func TestNativeMCPDiagnosticsDoNotInferConnectionFromCachedTools(t *testing.T) {
 		if got := nativeMCPState(test.runtime, test.auth, test.toolsError, test.tools); got != test.want {
 			t.Fatalf("runtime=%s auth=%s: got %s want %s", test.runtime, test.auth, got, test.want)
 		}
+	}
+}
+
+func TestManagedRolloutAliasesExposeOneFixedUsagePath(t *testing.T) {
+	root := t.TempDir()
+	runtime := filepath.Join(root, "state")
+	process := filepath.Join(runtime, ".tend-processes", "execution")
+	s := &Session{environmentReference: &codexenv.Reference{Profile: codexenv.Profile{Home: runtime}, ProcessHome: process}}
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		alias := filepath.Join(process, name, "date", "rollout.jsonl")
+		fixed := filepath.Join(runtime, name, "date", "rollout.jsonl")
+		if got := s.environmentRolloutPath(alias); got != fixed {
+			t.Fatal("private alias escaped into usage identity", got)
+		}
+		if got := s.environmentRolloutPath(fixed); got != fixed {
+			t.Fatal("canonical usage path changed", got)
+		}
+	}
+	outside := filepath.Join(process, "sessions-other", "rollout.jsonl")
+	if got := s.environmentRolloutPath(outside); got != outside {
+		t.Fatal("unrelated native path was rewritten", got)
 	}
 }

@@ -1,12 +1,15 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -315,5 +318,41 @@ func TestRepositoryObservationsRequireServerNegotiation(t *testing.T) {
 	after, err := r.runtimeObservation(t.Context())
 	if err != nil || len(after.Repositories) != 1 {
 		t.Fatal("negotiated bindings missing", after, err)
+	}
+}
+
+func TestManagedExtensionMetadataRequiresServerNegotiation(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.Extensions = &extensions.Agent{Consumer: &extensions.Consumer{Config: extensions.Configuration{Directory: t.TempDir(), Runtimes: map[string]extensions.Runtime{"native": {Home: t.TempDir()}}}}}
+	before, err := r.runtimeObservation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := reflect.TypeFor[protocol.RunnerRuntime]()
+	fields := []reflect.StructField{}
+	for i := range legacy.NumField() {
+		field := legacy.Field(i)
+		if field.Name != "Extensions" {
+			fields = append(fields, field)
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(reflect.New(reflect.StructOf(fields)).Interface()); err != nil {
+		t.Fatal("initial hello cannot be decoded by the previous server schema", err)
+	}
+	if before.Extensions != nil || !slices.Contains(before.Capabilities, protocol.CapabilityManagedExtensions) {
+		t.Fatal("initial capability offer was not metadata-free")
+	}
+	r.controlMu.Lock()
+	r.managedExtensionsSupported = true
+	r.controlMu.Unlock()
+	after, err := r.runtimeObservation(t.Context())
+	if err != nil || after.Extensions == nil {
+		t.Fatal("acknowledged server did not receive metadata", err)
 	}
 }

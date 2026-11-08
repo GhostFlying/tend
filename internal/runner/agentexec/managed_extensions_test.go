@@ -245,9 +245,11 @@ func TestManagedRecoveryRestoresReceiptsAfterLocalCredentialDisappears(t *testin
 	if len(rows) != 2 {
 		t.Fatal("worker/owner inventory missing", rows)
 	}
+	retained := []protocol.RunExecutionPin{}
 	for _, row := range rows {
 		pin := row.Pin
 		pin.Extensions = combo.Pin
+		retained = append(retained, pin)
 		if pin.Purpose == "issue_manager" {
 			resolved, err := p.ResolveManagerReceipt(t.Context(), pin)
 			if err != nil || resolved.OpenRun == nil {
@@ -259,4 +261,19 @@ func TestManagedRecoveryRestoresReceiptsAfterLocalCredentialDisappears(t *testin
 			}
 		}
 	}
+	p.SetRetained(retained)
+	f.config.Agents[0].Revision++
+	f.config.Agents[0].Model = "new-current-model"
+	f.reload(t)
+	_ = p.Refresh(t.Context())
+	restored, err := p.ObserveRetained(t.Context())
+	if err != nil || len(restored) != 2 {
+		t.Fatal("retained readiness missing after snapshot replacement", restored, err)
+	}
+	for _, row := range restored {
+		if !row.Available {
+			t.Fatal("resolved managed factory was marked unavailable", row)
+		}
+	}
+
 }

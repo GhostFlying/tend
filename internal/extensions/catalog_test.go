@@ -234,3 +234,28 @@ func TestConsumerBuildsManagedMCPAndOrderedInstructions(t *testing.T) {
 type fmtError string
 
 func (e fmtError) Error() string { return string(e) }
+
+func TestResourceVersionKeysCannotAliasValidTuples(t *testing.T) {
+	one := fixturePackage(t).Resource
+	one.ID = "a:b"
+	one.Version = "c"
+	two := one
+	two.ID = "a"
+	two.Version = "b:c"
+	two.ContentSHA256 = Hash([]byte("different"))
+	catalog := protocol.ExtensionCatalog{Resources: []protocol.ExtensionResource{one}, Categories: []protocol.ExtensionBinding{{CategoryID: "implementer", Choices: []protocol.ExtensionChoice{{Kind: "skill", ID: "a", Version: "b:c"}}}}}
+	release := protocol.ExtensionRelease{Catalog: catalog}
+	identity := protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "worker"}
+	if _, err := Resolve(release, "implementer", identity); err == nil {
+		t.Fatal("selected an uninstalled resource through a tuple collision")
+	}
+	catalog.Resources = append(catalog.Resources, two)
+	release, _, err := NewRelease(catalog)
+	if err != nil {
+		t.Fatal("distinct valid resource tuples rejected", err)
+	}
+	combo, err := Resolve(release, "implementer", identity)
+	if err != nil || len(combo.Resources) != 1 || combo.Resources[0].Resource != two {
+		t.Fatal("resolved the wrong resource tuple", combo, err)
+	}
+}

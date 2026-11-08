@@ -148,8 +148,9 @@ func (s *Session) AdoptEnvironment(ctx context.Context) error {
 func (s *Session) EnvironmentQuiescent(ctx context.Context, id string) (bool, error) {
 	var response struct {
 		Thread struct {
-			Preview string `json:"preview"`
-			Path    string `json:"path"`
+			Preview string  `json:"preview"`
+			Name    *string `json:"name"`
+			Path    string  `json:"path"`
 			Status  struct {
 				Type string `json:"type"`
 			} `json:"status"`
@@ -166,12 +167,32 @@ func (s *Session) EnvironmentQuiescent(ctx context.Context, id string) (bool, er
 		return false, nil
 	}
 	if s.environmentReference != nil {
-		// Native threads without a first persisted input are not resumable
-		// after process exit. Leave their update pending until history exists.
-		if response.Thread.Preview == "" || response.Thread.Path == "" {
+		if response.Thread.Path == "" {
 			return false, nil
 		}
 		info, err := os.Stat(response.Thread.Path)
+		if (os.IsNotExist(err) || err == nil && info.Mode().IsRegular() && info.Size() == 0) && response.Thread.Preview == "" {
+			// Codex stages empty threads until their first persistent metadata write.
+			// Naming a still-idle thread persists its original identity without a
+			// model turn, synthetic user input or replacing it during adoption.
+			s.mu.Lock()
+			callbacks := s.toolCallbacks
+			s.mu.Unlock()
+			s.conn.mu.Lock()
+			pending := len(s.conn.pending)
+			s.conn.mu.Unlock()
+			if callbacks != 0 || pending != 0 {
+				return false, nil
+			}
+			name := "Tend managed session"
+			if response.Thread.Name != nil && *response.Thread.Name != "" {
+				name = *response.Thread.Name
+			}
+			if err := s.conn.call(ctx, "thread/name/set", map[string]any{"threadId": id, "name": name}, nil); err != nil {
+				return false, err
+			}
+			info, err = os.Stat(response.Thread.Path)
+		}
 		if os.IsNotExist(err) {
 			return false, nil
 		}
@@ -182,6 +203,7 @@ func (s *Session) EnvironmentQuiescent(ctx context.Context, id string) (bool, er
 			return false, nil
 		}
 	}
+
 	s.mu.Lock()
 	callbacks := s.toolCallbacks
 	s.mu.Unlock()
@@ -196,4 +218,23 @@ func (s *Session) EnvironmentPin() protocol.ExtensionExecutionPin {
 		return protocol.ExtensionExecutionPin{}
 	}
 	return s.environmentReference.Extensions
+}
+
+// Native creation may return the private CODEX_HOME alias while resume returns
+// its canonical location. Tend exposes the fixed collector path in both cases.
+func (s *Session) environmentRolloutPath(path string) string {
+	if s == nil {
+		return path
+	}
+	ref := s.environmentReference
+	if ref == nil || ref.ProcessHome == "" || !filepath.IsAbs(path) {
+		return path
+	}
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		relative, err := filepath.Rel(filepath.Join(ref.ProcessHome, name), path)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return filepath.Join(ref.Profile.Home, name, relative)
+		}
+	}
+	return path
 }

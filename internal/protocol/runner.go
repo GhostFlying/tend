@@ -75,6 +75,7 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
+	ManagedExtensions  bool              `json:"managed_extensions,omitempty"`
 	NativeUsage        bool              `json:"native_usage,omitempty"`
 	RolloutPreview     bool              `json:"rollout_preview,omitempty"`
 	DeploymentID       string            `json:"deployment_id,omitempty"`
