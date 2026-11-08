@@ -15,6 +15,18 @@ import (
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
+// An ordinary service operation can be staged, but this fixture never grants
+// permission to execute it. This permits testing bootstrap ownership races.
+type deniedAuthority struct{}
+
+func (deniedAuthority) Authorize(context.Context, updater.Binding) (updater.Grant, error) {
+	return updater.Grant{}, nil
+}
+
+func (deniedAuthority) Health(context.Context, updater.Binding) (updater.Health, error) {
+	return updater.Health{}, nil
+}
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer cancel()
@@ -32,7 +44,7 @@ func main() {
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		panic(err)
 	}
-	supervisor, err := updater.Open(cfg, updater.Options{})
+	supervisor, err := updater.Open(cfg, updater.Options{Authority: deniedAuthority{}})
 	if err != nil {
 		panic(err)
 	}
