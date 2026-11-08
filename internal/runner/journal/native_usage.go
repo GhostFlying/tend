@@ -62,7 +62,7 @@ func (j *Journal) usageSources(ctx context.Context, pending bool) ([]UsageSource
 // QueueUsage saves the upload and the advanced cursor in a single transaction.
 // A crash after this commit replays the original envelope, never skips records.
 func (j *Journal) QueueUsage(ctx context.Context, s UsageSource, env *protocol.Envelope) error {
-	return j.tx(ctx, func(tx *sql.Tx) error {
+	err := j.tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(state_json,'$.registration_queued'),0) FROM native_usage_sources WHERE source_id=?`, s.ID).Scan(&s.RegistrationQueued); err != nil {
 			return err
 		}
@@ -78,6 +78,10 @@ func (j *Journal) QueueUsage(ctx context.Context, s UsageSource, env *protocol.E
 		_, err = tx.ExecContext(ctx, `UPDATE native_usage_sources SET state_json=? WHERE source_id=? AND state_json<>?`, string(body), s.ID, string(body))
 		return err
 	})
+	if err == nil && env != nil {
+		j.WakeUsage()
+	}
+	return err
 }
 
 func (j *Journal) HasUsageSource(ctx context.Context, id string) (bool, error) {

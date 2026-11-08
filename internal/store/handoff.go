@@ -108,9 +108,10 @@ func GetHandoffSnapshot(ctx context.Context, q Querier, instance string) (Handof
 		return v, err
 	}
 	v.ConversationVersion = v.Version
+	// Accounting notifications do not change the content being summarized.
 	// Both watermarks are monotonic. Their sum retains the existing unique
 	// source-version key while recording each coverage boundary explicitly.
-	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events WHERE object_type<>'message' AND kind NOT LIKE 'conversation.%'`).Scan(&v.LedgerVersion); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events WHERE object_type NOT IN ('message','token_usage') AND kind NOT LIKE 'conversation.%'`).Scan(&v.LedgerVersion); err != nil {
 		return v, err
 	}
 	v.Version += v.LedgerVersion

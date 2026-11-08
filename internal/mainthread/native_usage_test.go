@@ -1,11 +1,13 @@
 package mainthread
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -152,4 +154,35 @@ func TestUsageFinalIdlePassDiscoversNewChild(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("idle collector disarmed before discovering child: facts=%d delay=%v", count, delay)
 	}
+}
+
+func TestBufferedCompletionWakePreservesSettlingDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, _, db, _, path := idleUsageManager(t)
+		m.cfg.Now = time.Now
+		wake := make(chan struct{}, 1)
+		m.usageWake = wake
+		// Both the completion flag and its notification predate the collector.
+		m.wakeNativeUsage()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); m.nativeUsageLoop(ctx, wake) }()
+		synctest.Wait()
+		time.Sleep(100 * time.Millisecond)
+		child := `{"type":"session_meta","payload":{"id":"late-child","session_id":"root"}}` + "\n" + `{"type":"token_usage_record","ordinal":1,"payload":{"thread_id":"late-child","session_id":"root","turn_id":"turn","response_id":"late-response","usage":{"total_tokens":12}}}` + "\n"
+		if err := os.WriteFile(filepath.Join(filepath.Dir(path), "late-child.jsonl"), []byte(child), 0600); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		var count int
+		if err := db.Read(t.Context(), func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage_facts`).Scan(&count)
+		}); err != nil || count != 1 {
+			t.Fatal("completion wake consumed delayed final obligation", count, err)
+		}
+		cancel()
+		<-done
+	})
 }
