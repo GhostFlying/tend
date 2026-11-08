@@ -53,6 +53,13 @@ func (s *ConcurrencyState) Sample(now, occupied, running, waiting int64, healthy
 	}
 	s.LastSample, s.LastRunning, s.LastHealthy = now, running, healthy
 	g.Occupied, g.Running, g.Waiting, g.FeedbackHealthy = occupied, running, waiting, healthy
+	s.RefreshWindow(now)
+}
+
+// RefreshWindow projects only already observed evidence at the read clock.
+// It never integrates time beyond the last confirmed sample.
+func (s *ConcurrencyState) RefreshWindow(now int64) {
+	g := &s.Group
 	cutoff := max(g.ObservationSince, now-ConcurrencyWindow.Milliseconds())
 	g.ObservationSince = cutoff
 	kept := s.Intervals[:0]

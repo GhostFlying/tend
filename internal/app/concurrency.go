@@ -339,6 +339,7 @@ func (a *App) ConcurrencyGroups(ctx context.Context, query protocol.ConcurrencyQ
 				page.Next = page.Items[len(page.Items)-1].ID
 				break
 			}
+			s.RefreshWindow(a.now().UnixMilli())
 			page.Items = append(page.Items, s.Group)
 		}
 		return nil
@@ -352,6 +353,7 @@ func (a *App) ConcurrencyGroup(ctx context.Context, id string) (protocol.Concurr
 		if err != nil {
 			return err
 		}
+		s.RefreshWindow(a.now().UnixMilli())
 		g = s.Group
 		g.Bindings, err = concurrencyBindings(ctx, tx.Q(), id)
 		return err
