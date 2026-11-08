@@ -49,7 +49,7 @@ func (s *Server) releaseFile(w http.ResponseWriter, r *http.Request) {
 	relative := "manifest.json"
 	if sha := r.PathValue("sha"); sha != "" {
 		relative = ""
-		for _, a := range bundle.Manifest.Artifacts {
+		for _, a := range bundle.Artifacts() {
 			if a.SHA256 == sha {
 				relative = a.Path
 				break
