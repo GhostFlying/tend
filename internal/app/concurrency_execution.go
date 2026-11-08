@@ -438,6 +438,9 @@ func (a *App) noteConcurrencyWait(ctx context.Context, m store.MainTurn) error {
 	}
 	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO concurrency_waiters(request_id,environment_id,runtime_id,last_seen) VALUES(?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET last_seen=excluded.last_seen`, m.RequestID, m.Hosted.Identity.ExecutionEnvironmentID, m.Hosted.Runtime.ID, a.now().UnixMilli())
+		if err == nil {
+			tx.MarkChanged("concurrency")
+		}
 		return err
 	})
 }

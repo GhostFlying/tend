@@ -64,9 +64,16 @@ func (p *BackgroundPool) startDatabaseReplyReplay(ctx context.Context, id string
 	}
 	p.database[id] = true
 	wg.Go(func() {
-		defer func() { p.mu.Lock(); delete(p.active, id); delete(p.remote, id); delete(p.database, id); p.mu.Unlock() }()
-		defer func() { m.mu.Lock(); m.archiveStarting = false; m.mu.Unlock() }()
-		if err := m.replayDatabaseReplies(ctx, replay); err != nil {
+		failed := true
+		defer func() {
+			m.mu.Lock()
+			m.archiveStarting = false
+			m.mu.Unlock()
+			p.finishAttachment(id, failed)
+		}()
+		err := m.replayDatabaseReplies(ctx, replay)
+		failed = err != nil
+		if err != nil {
 			m.cfg.Log.WarnContext(ctx, "manager database reply replay requires reconciliation", "run_id", replay.RunID, "thread_id", replay.ThreadID, "err", err)
 		}
 	})
