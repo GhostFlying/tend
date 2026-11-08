@@ -2,6 +2,8 @@
 
 ## D197：本机 Codex 能力环境
 
+环境映射属于实际执行节点。server 本机 named 会话才使用 server 的 runtime 映射与环境绑定；runner 托管的协调会话沿已领取的 `RunnerRunID` 建立 `RunnerSession`，由执行 runner 校验并采用自己的本机环境。两个节点可使用相同 runtime ID，server 的同名映射不构成远端连接冲突；未领取的选择仍不能建立远端会话。不改变本机绑定隔离、线上协议或角色权限。
+
 server 本机协调会话以已有 named binding identity 保存并恢复环境目录与 ID，旧线程不会因新增映射而改变 home；runner 当前映射不可用只降低相应执行器的就绪状态，保留目录与原 run 仍可恢复。配置请求串行锁与执行引用锁分离，包复制和原生校验不阻止执行收尾；环境退役在检查引用到提交期间继续排斥新执行 pin。
 
 `codexenv` 管理固定运行 home、clean/projection 扩展、AGENTS 整文件同步和不可变能力快照。Linux 使用 bubblewrap 用户 mount namespace 隔离用户技能入口与插件工作缓存；保留 HOME、项目配置和管理员要求。只共享显式 auth 文件链接，不继承主 home 的完整配置，不调用账号级插件安装或卸载。配置与管理请求以本机原子记录去重和版本校验，不访问业务账本。
