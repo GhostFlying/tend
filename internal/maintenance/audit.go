@@ -65,10 +65,14 @@ func Audit(ctx context.Context, cfg Config, opts Options) error {
 	if _, err := c.Command(ctx, "audit", protocol.MaintenanceRequest{RequestID: opts.ID(), ExpectedRevision: c.Status().Revision}); err != nil {
 		return err
 	}
-	for range 3 {
+	for {
+		before := c.Status()
 		if err := c.Step(ctx); err != nil {
 			return err
 		}
+		after := c.Status()
+		if after.Revision == before.Revision || after.Active != nil && after.Active.InputID != "" {
+			return nil
+		}
 	}
-	return nil
 }

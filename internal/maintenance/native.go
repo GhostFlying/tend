@@ -180,11 +180,16 @@ func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBack
 	return NativeThread{ID: result.Thread.ID, Path: result.Thread.Path, Sandbox: result.Sandbox}, err
 }
 
-func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode) (NativeState, error) {
+func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode) (state NativeState, err error) {
 	n.mu.Lock()
 	r := n.unstarted[id]
 	n.mu.Unlock()
 	unstarted := r != nil
+	defer func() {
+		if err != nil && unstarted {
+			n.ForgetUnstarted(id)
+		}
+	}()
 	if r == nil {
 		var err error
 		r, err = connectNative(ctx, b)
