@@ -25,6 +25,8 @@ func (a *App) LapsedManagerReplyReplay(ctx context.Context, conversation string)
 // ClosingManagerReplyReplay also consumes internal repair prefixes from an
 // active lease whose original native process is already being closed. It
 // never opens that process or treats prefix consumption as a business result.
+// An empty prefix still reserves this database-only path until the original
+// close/receipt commits; attachment completion is not permission to reopen it.
 func (a *App) ClosingManagerReplyReplay(ctx context.Context, conversation string) (*ManagerReplyReplay, error) {
 	return a.managerReplyReplay(ctx, conversation, true)
 }
@@ -43,7 +45,6 @@ func (a *App) managerReplyReplay(ctx context.Context, conversation string, inclu
      WHERE original.conversation_id=m.conversation_id AND json_extract(original.private_snapshot,'$.runner_run_id')=r.run_id)))
  AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')
  AND EXISTS(SELECT 1 FROM manager_native_requests n WHERE n.run_id=r.run_id AND n.method='close' AND n.status IN ('pending','started','unknown'))
- AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
  ORDER BY r.run_id`, conversation, includeActive)
 		if err != nil || len(ids) == 0 {
 			return err

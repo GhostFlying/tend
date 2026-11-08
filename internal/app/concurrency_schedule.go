@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// concurrencyDelay keeps one-second sampling while load is being observed.
+// concurrencyDelay keeps thirty-second sampling while load is being observed.
 // Empty groups have no saturation proof to integrate and wait for facts or an
 // actual cooldown/retention deadline. Reactivation still resets missing proof.
 func (a *App) concurrencyDelay(ctx context.Context) (time.Duration, error) {
@@ -30,7 +31,7 @@ UNION ALL SELECT MIN(at)+?+1 FROM concurrency_changes
 	}
 	var delay time.Duration
 	if active {
-		delay = time.Second
+		delay = domain.ConcurrencySamplePeriod
 	}
 	if next.Valid {
 		until := time.Duration(max(1, next.Int64-now)) * time.Millisecond

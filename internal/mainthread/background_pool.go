@@ -52,6 +52,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 	}
 	for ctx.Err() == nil {
 		changed, finished := p.App.Changes().Wait(), completed.Wait()
+		scannedAt := p.App.BackgroundNow()
 		failed := false
 		if pending, err := p.App.ReceiptRecoveryStartupPending(ctx); err != nil || pending {
 			delay := time.Duration(0)
@@ -148,7 +149,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 				})
 			}
 		}
-		delay, err := p.App.BackgroundDelay(ctx)
+		delay, err := p.App.BackgroundDelay(ctx, scannedAt)
 		p.mu.Lock()
 		for _, retry := range p.retries {
 			if retry.at.IsZero() {
