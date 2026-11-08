@@ -27,8 +27,14 @@ func ValidHash(s string) bool {
 	return err == nil && len(b) == sha256.Size && strings.ToLower(s) == s
 }
 
-func key(kind, id string) string                      { return kind + ":" + id }
-func resourceKey(r protocol.ExtensionResource) string { return key(r.Kind, r.ID) + ":" + r.Version }
+func key(kind, id string) string { return kind + ":" + id }
+
+// ResourceKey is also the opaque inventory cursor. JSON tuples preserve valid
+// separators inside resource identities and version labels.
+func ResourceKey(r protocol.ExtensionResource) string {
+	raw, _ := json.Marshal([3]string{r.Kind, r.ID, r.Version})
+	return string(raw)
+}
 
 func ValidateResource(r protocol.ExtensionResource) error {
 	if !slices.Contains([]string{"skill", "plugin", "mcp"}, r.Kind) || !resourceID.MatchString(r.ID) || !resourceID.MatchString(r.Version) {
@@ -161,13 +167,13 @@ func CanonicalCatalog(in protocol.ExtensionCatalog) (protocol.ExtensionCatalog, 
 		if err = ValidateResource(r); err != nil {
 			return c, err
 		}
-		k := resourceKey(r)
+		k := ResourceKey(r)
 		if seen[k] {
 			return c, fmt.Errorf("duplicate resource version")
 		}
 		seen[k] = true
 	}
-	slices.SortFunc(c.Resources, func(a, b protocol.ExtensionResource) int { return strings.Compare(resourceKey(a), resourceKey(b)) })
+	slices.SortFunc(c.Resources, func(a, b protocol.ExtensionResource) int { return strings.Compare(ResourceKey(a), ResourceKey(b)) })
 	seen = map[string]bool{}
 	for scope, bs := range [][]protocol.ExtensionBinding{c.Categories, c.Agents} {
 		for i := range bs {
@@ -267,7 +273,7 @@ func Resolve(r protocol.ExtensionRelease, category string, agent protocol.AgentI
 	out.AgentsMD = strings.Join(texts, "\n\n")
 	resources := map[string]protocol.ExtensionResource{}
 	for _, res := range r.Catalog.Resources {
-		resources[resourceKey(res)] = res
+		resources[ResourceKey(res)] = res
 	}
 	keys := make([]string, 0, len(chosen))
 	for k := range chosen {
@@ -280,7 +286,7 @@ func Resolve(r protocol.ExtensionRelease, category string, agent protocol.AgentI
 			out.Disabled = append(out.Disabled, v)
 			continue
 		}
-		res, ok := resources[k+":"+v.Version]
+		res, ok := resources[ResourceKey(protocol.ExtensionResource{Kind: v.Kind, ID: v.ID, Version: v.Version})]
 		if !ok {
 			return out, fmt.Errorf("selected resource is not installed: %s@%s", k, v.Version)
 		}

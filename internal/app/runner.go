@@ -632,6 +632,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if slices.Contains(p.Runtime.Capabilities, protocol.CapabilityProtocolNegotiation) {
 			res.ProtocolMax = protocol.CurrentRunnerProtocol
 		}
+		res.ManagedExtensions = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityManagedExtensions)
 		res.RepositoryBindings = slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRepositoryBindings)
 		res.AgentContinuation = runtimeSupportsAgentContinuation(p.Runtime)
 		if res.AgentContinuation {

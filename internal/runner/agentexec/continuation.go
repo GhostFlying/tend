@@ -63,7 +63,8 @@ func (p *Pool) refreshRetained(ctx context.Context) error {
 		if pin.Purpose == "issue_manager" {
 			_, err = p.ResolveManagerRun(ctx, pin)
 		} else {
-			_, err = p.Resolve(ctx, pin)
+			resolved, resolveErr := p.Resolve(ctx, pin)
+			err = resolveErr
 			if err == nil {
 				p.mu.Lock()
 				e := p.snapshots[pin.SnapshotID][pin.Identity.LocalID]
@@ -74,7 +75,8 @@ func (p *Pool) refreshRetained(ctx context.Context) error {
 						err = p.initialize(ctx, e)
 					}
 				}
-				if e == nil || e.workers == nil || e.reason != "" && !(nativeCodex(e) && canProbe(e.reason)) || e.environmentUnavailable && !nativeCodex(e) {
+				factoryMissing := e == nil || (pin.Extensions == (protocol.ExtensionExecutionPin{}) && e.workers == nil) || (pin.Extensions != (protocol.ExtensionExecutionPin{}) && resolved.Workers == nil)
+				if factoryMissing || e.reason != "" && !(nativeCodex(e) && canProbe(e.reason)) || e.environmentUnavailable && !nativeCodex(e) {
 					err = errors.New("original worker is unavailable")
 				}
 				p.mu.Unlock()

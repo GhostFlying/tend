@@ -110,7 +110,7 @@ func (t *thread) setRolloutPath(path *string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if path != nil {
-		t.rolloutPath = *path
+		t.rolloutPath = t.s.environmentRolloutPath(*path)
 	}
 }
 

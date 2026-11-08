@@ -65,7 +65,7 @@ func (s *Server) extensionView(w http.ResponseWriter, r *http.Request) {
 				if query.Get("kind") != "" && res.Kind != query.Get("kind") || query.Get("id") != "" && res.ID != query.Get("id") || query.Get("version") != "" && res.Version != query.Get("version") {
 					continue
 				}
-				cursor := res.Kind + ":" + res.ID + ":" + res.Version
+				cursor := extensions.ResourceKey(res)
 				if cursor <= after {
 					continue
 				}

@@ -17,6 +17,10 @@ import (
 // commands, credentials or the current base config needed for new work. The
 // run's persisted BindExecution record remains authoritative at native startup.
 func (c *Consumer) RetainedBinding(ctx context.Context, pin protocol.ExtensionExecutionPin, runtime string) (*codexenv.Binding, error) {
+	return c.RetainedScopedBinding(ctx, pin, runtime, "")
+}
+
+func (c *Consumer) RetainedScopedBinding(ctx context.Context, pin protocol.ExtensionExecutionPin, runtime, scope string) (*codexenv.Binding, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	release, err := c.Release(pin.ReleaseID)
@@ -26,12 +30,16 @@ func (c *Consumer) RetainedBinding(ctx context.Context, pin protocol.ExtensionEx
 	if _, err = VerifyCombination(release, pin); err != nil {
 		return nil, err
 	}
+	category := pin.CategoryID
+	if scope != "" {
+		category = ""
+	}
 	key, _ := json.Marshal(struct {
 		Scope    string
 		Category string
 		Agent    protocol.AgentIdentity
 		Runtime  string
-	}{"", pin.CategoryID, pin.Agent, runtime})
+	}{scope, category, pin.Agent, runtime})
 	root := filepath.Join(c.Config.Directory, "views", Hash(key), "inputs")
 	entries, err := os.ReadDir(root)
 	if err != nil {

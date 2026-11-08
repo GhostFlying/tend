@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/domain"
+	"github.com/GhostFlying/tend/internal/extensions"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -107,6 +108,17 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 		if err != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "original owner execution snapshot is unavailable")
 		}
+		if pin.Extensions != (protocol.ExtensionExecutionPin{}) {
+			release, _, err := store.GetExtensionRelease(ctx, tx.Q(), pin.Extensions.ReleaseID)
+			if err != nil {
+				return nil, err
+			}
+			combination, err := extensions.Resolve(release, spec.AgentSelection.Implementation.CategoryID, pin.Identity)
+			if err != nil {
+				return nil, err
+			}
+			pin.Extensions = combination.Pin
+		}
 		execution = &pin
 	} else {
 		runtime, err := store.GetHostRuntime(ctx, tx.Q(), agent.Identity.ExecutionEnvironmentID)
@@ -114,7 +126,7 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 			return nil, err
 		}
 		for _, e := range runtime.Runtime.AgentExecutors {
-			if e.Pin.Purpose == "" && e.Pin.Identity == agent.Identity && e.Pin.AgentRevision == agent.Revision && e.Pin.Runtime == agent.Binding && e.Pin.SnapshotID == inventory.Receipt.SnapshotID && e.Pin.PublicSHA256 == inventory.Receipt.PublicSHA256 {
+			if (e.Pin.Extensions == (protocol.ExtensionExecutionPin{}) || e.Pin.Extensions.CategoryID == spec.AgentSelection.Implementation.CategoryID) && e.Pin.Purpose == "" && e.Pin.Identity == agent.Identity && e.Pin.AgentRevision == agent.Revision && e.Pin.Runtime == agent.Binding && e.Pin.SnapshotID == inventory.Receipt.SnapshotID && e.Pin.PublicSHA256 == inventory.Receipt.PublicSHA256 {
 				pin := e.Pin
 				execution = &pin
 				break

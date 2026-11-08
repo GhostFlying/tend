@@ -809,7 +809,11 @@ func hostedCodexEnvironment(ctx context.Context, a *app.App, cfg MainAgentConfig
 		if err = cfg.extensionConsumer.Receive(ctx, release, a.ExtensionSource()); err != nil {
 			return nil, "", err
 		}
-		current, _, err = cfg.extensionConsumer.PrepareScoped(ctx, selected.Extensions, selected.Runtime.ID, instance)
+		if resumed {
+			current, err = cfg.extensionConsumer.RetainedScopedBinding(ctx, selected.Extensions, selected.Runtime.ID, instance)
+		} else {
+			current, _, err = cfg.extensionConsumer.PrepareScoped(ctx, selected.Extensions, selected.Runtime.ID, instance)
+		}
 		if err != nil {
 			return nil, "", err
 		}

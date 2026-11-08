@@ -191,6 +191,7 @@ type Runner struct {
 	usageDiscovery                  *nativeusage.Discovery
 	nativeUsageSupported            bool
 	agentExecutionSupported         bool
+	managedExtensionsSupported      bool
 	retainedExecutions              []protocol.RunExecutionPin
 	agentContinuationSupported      bool
 	agentInventorySupported         bool
@@ -572,6 +573,11 @@ func (r *Runner) hello(ctx context.Context) error {
 }
 
 func (r *Runner) helloLocked(ctx context.Context) error {
+	// Every hello may reach a restarted or downgraded server. Offer the new
+	// capability again without assuming the previous peer's metadata schema.
+	r.controlMu.Lock()
+	r.managedExtensionsSupported = false
+	r.controlMu.Unlock()
 	// Global admission release does not settle the predecessor's original
 	// requests. Keep that bounded factual path reachable through the existing
 	// reconciler, without holding controlMu or the heartbeat/claim loops.
@@ -630,6 +636,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	case r.previewWake <- struct{}{}:
 	default:
 	}
+	r.managedExtensionsSupported = res.ManagedExtensions
 	r.repositoryBindingsSupported = res.RepositoryBindings
 	r.agentInventorySupported = res.AgentInventory && r.cfg.AgentInventory != nil
 	r.capabilityDeclarationsSupported = res.CapabilityDeclarations

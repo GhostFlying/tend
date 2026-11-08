@@ -2,6 +2,7 @@ package serverkit
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -37,6 +38,7 @@ func prepareHostedExtensions(ctx context.Context, a *app.App, cfg MainAgentConfi
 	if err != nil {
 		return err
 	}
+	var pending error
 	for _, id := range conversations {
 		selected, named, err := a.NamedHostedSelection(ctx, id)
 		if err != nil || !named || selected.RunnerManaged || !cfg.extensionConsumer.Enabled(selected.Runtime.ID) {
@@ -52,8 +54,8 @@ func prepareHostedExtensions(ctx context.Context, a *app.App, cfg MainAgentConfi
 			err = binding.QueueAdoption(ctx, "coordinator:"+scope)
 		}
 		if err != nil {
-			return err
+			pending = errors.Join(pending, err)
 		}
 	}
-	return nil
+	return pending
 }

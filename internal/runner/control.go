@@ -250,8 +250,14 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	var extensionStatus *protocol.ExtensionHostStatus
 	if r.cfg.Extensions != nil {
 		capabilities = append(capabilities, protocol.CapabilityManagedExtensions)
-		status := r.cfg.Extensions.Status()
-		extensionStatus = &status
+		if r.managedExtensionsSupported {
+			status := r.cfg.Extensions.Status()
+			extensionStatus = &status
+		}
+	}
+	if !r.managedExtensionsSupported {
+		executors = slices.DeleteFunc(executors, func(e protocol.AgentExecutor) bool { return e.Pin.Extensions != (protocol.ExtensionExecutionPin{}) })
+		continuations = slices.DeleteFunc(continuations, func(e protocol.AgentExecutor) bool { return e.Pin.Extensions != (protocol.ExtensionExecutionPin{}) })
 	}
 	r.sequence++
 	return &protocol.RunnerRuntime{Updater: updaterObservation, Extensions: extensionStatus, BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: int64(len(requests)+len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
