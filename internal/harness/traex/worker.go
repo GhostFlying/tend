@@ -171,28 +171,27 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
-	var err error
-	if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && spec.PredecessorStateDir != "" {
-		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+spec.QuestionContinuation.RunID)
-	} else {
-		if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && opts.Environment != nil {
-			return nil, fmt.Errorf("isolated continuation needs original execution state")
-		}
-		opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err = codexenv.RecordSessionHome(startupCtx, ws.opts.EnvironmentHomes, opts.Environment); err != nil {
-		return nil, err
-	}
-	if opts.Environment != nil {
-		opts.EnvironmentExecution = "run:" + spec.RunID
-	}
 	opts.Dir = spec.Dir
 	owned, err := ws.recordOwnedWorkerProcess(spec, &opts)
 	if err != nil {
 		return nil, err
+	}
+	if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && spec.PredecessorStateDir != "" {
+		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+spec.QuestionContinuation.RunID)
+	} else {
+		if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && opts.Environment != nil {
+			return nil, fmt.Errorf("%w: isolated continuation needs original execution state", harness.ErrWorkerNotStarted)
+		}
+		opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: environment setup: %w", harness.ErrWorkerNotStarted, err)
+	}
+	if err = codexenv.RecordSessionHome(startupCtx, ws.opts.EnvironmentHomes, opts.Environment); err != nil {
+		return nil, fmt.Errorf("%w: environment setup: %w", harness.ErrWorkerNotStarted, err)
+	}
+	if opts.Environment != nil {
+		opts.EnvironmentExecution = "run:" + spec.RunID
 	}
 	// The worker may inherit the owner's tend hooks and MCP server from
 	// the user-level configuration; it is not the owner's agent (D45).

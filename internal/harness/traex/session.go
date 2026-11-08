@@ -110,7 +110,7 @@ func Start(ctx context.Context, opts Options) (opened *Session, resultErr error)
 	if opts.Environment != nil {
 		ref, err := opts.Environment.Pin(ctx, opts.EnvironmentExecution)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: environment preflight: %w", harness.ErrWorkerNotStarted, err)
 		}
 		opts.environmentReference = ref
 		versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -120,7 +120,7 @@ func Start(ctx context.Context, opts Options) (opened *Session, resultErr error)
 		procx.KillGroup(versionCommand)
 		cancel()
 		if err != nil || !strings.HasPrefix(strings.TrimSpace(string(version)), "codex-cli ") {
-			return nil, fmt.Errorf("strict environment requires the selected native Codex executable")
+			return nil, fmt.Errorf("%w: strict environment requires the selected native Codex executable", harness.ErrWorkerNotStarted)
 		}
 	}
 	if opts.HostedCoordination {
@@ -145,7 +145,7 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 		cmd, cleanup, err = opts.environmentReference.Command(procCtx, bin, args, opts.Dir, cmd.Env)
 		if err != nil {
 			kill()
-			return nil, err
+			return nil, fmt.Errorf("%w: environment launch view: %w", harness.ErrWorkerNotStarted, err)
 		}
 	}
 	started := false
@@ -162,12 +162,12 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		kill()
-		return nil, fmt.Errorf("traex: stdin: %w", err)
+		return nil, fmt.Errorf("%w: traex: stdin: %w", harness.ErrWorkerNotStarted, err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		kill()
-		return nil, fmt.Errorf("traex: stdout: %w", err)
+		return nil, fmt.Errorf("%w: traex: stdout: %w", harness.ErrWorkerNotStarted, err)
 	}
 	if err := cmd.Start(); err != nil {
 		kill()
@@ -179,14 +179,6 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 			_ = cmd.Wait()
 			procx.KillGroup(cmd)
 			return nil, fmt.Errorf("traex: persist app-server ownership: %w", err)
-		}
-	}
-	if opts.environmentReference != nil {
-		if err := opts.environmentReference.Record(ctx, "running"); err != nil {
-			kill()
-			_ = cmd.Wait()
-			procx.KillGroup(cmd)
-			return nil, err
 		}
 	}
 	s := newSession(stdout, stdin, opts.Log)
@@ -234,6 +226,11 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 	}
 	s.ownedProcess = true
 	started = true
+	if opts.environmentReference != nil {
+		if err := opts.environmentReference.Record(ctx, "running"); err != nil {
+			return nil, errors.Join(err, s.Close())
+		}
+	}
 	if err := s.initialize(ctx, opts.Version); err != nil {
 		_ = s.Close()
 		if opts.environmentReference != nil {
