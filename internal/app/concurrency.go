@@ -37,7 +37,7 @@ func saveConcurrency(ctx context.Context, tx *store.Tx, s domain.ConcurrencyStat
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO concurrency_groups(group_id,revision,state_json) VALUES(?,?,?) ON CONFLICT(group_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json`, s.Group.ID, s.Group.Revision, string(raw))
+	_, err = tx.Exec(ctx, `INSERT INTO concurrency_groups(group_id,revision,state_json) VALUES(?,?,?) ON CONFLICT(group_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json WHERE concurrency_groups.revision<>excluded.revision OR concurrency_groups.state_json<>excluded.state_json`, s.Group.ID, s.Group.Revision, string(raw))
 	return err
 }
 func concurrencyIDs(ctx context.Context, q store.Querier) ([]string, error) {
@@ -546,6 +546,9 @@ func putConcurrencyExecutionSampled(ctx context.Context, tx *store.Tx, source pr
 	if err != nil {
 		return err
 	}
+	if !sameFacts {
+		tx.MarkChanged("concurrency")
+	}
 	if samples != nil && !sameLoad {
 		clear(samples.seen)
 	}
@@ -640,6 +643,7 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 	if err != nil || n == 0 {
 		return err
 	}
+	tx.MarkChanged("concurrency")
 	s, err := concurrencyState(ctx, tx.Q(), id)
 	if protocol.CodeOf(err) == protocol.CodeNotFound {
 		return nil
@@ -674,6 +678,10 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 }
 
 func (a *App) RunConcurrency(ctx context.Context, log *slog.Logger) {
+	a.runConcurrency(ctx, log, waitConcurrency, nil)
+}
+
+func (a *App) runConcurrency(ctx context.Context, log *slog.Logger, wait func(context.Context, <-chan struct{}, time.Duration) bool, ticked func()) {
 	if err := a.write(ctx, func(tx *store.Tx) error {
 		ids, err := concurrencyIDs(ctx, tx.Q())
 		if err != nil {
@@ -694,20 +702,35 @@ func (a *App) RunConcurrency(ctx context.Context, log *slog.Logger) {
 	}); err != nil {
 		log.ErrorContext(ctx, "reset concurrency observation", "err", err)
 	}
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
+	failedDelay := time.Duration(0)
+	for ctx.Err() == nil {
+		wake := a.Changes().Wait()
+		if ticked != nil {
+			ticked()
+		}
+		tickErr := a.tickConcurrency(ctx)
+		if tickErr != nil {
+			log.ErrorContext(ctx, "update concurrency budgets", "err", tickErr)
+		}
+		delay, err := a.concurrencyDelay(ctx)
+		if tickErr != nil || err != nil {
+			failedDelay = min(30*time.Second, max(2*time.Second, failedDelay*2))
+			delay = failedDelay
+		} else {
+			failedDelay = 0
+		}
+		if !wait(ctx, wake, delay) {
 			return
-		case <-ticker.C:
-			if err := a.tickConcurrency(ctx); err != nil {
-				log.ErrorContext(ctx, "update concurrency budgets", "err", err)
-			}
 		}
 	}
 }
 func (a *App) tickConcurrency(ctx context.Context) error {
+	var groups bool
+	if err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM concurrency_groups)`).Scan(&groups)
+	}); err != nil || !groups {
+		return err
+	}
 	now := a.now().UnixMilli()
 	notify := false
 	err := a.write(ctx, func(tx *store.Tx) error {

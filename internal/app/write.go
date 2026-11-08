@@ -24,6 +24,7 @@ func (a *App) write(ctx context.Context, fn func(*store.Tx) error) error {
 			}
 			changed = true
 		}
+		changed = changed || tx.Changed("concurrency")
 		return nil
 	})
 	if err == nil && changed {

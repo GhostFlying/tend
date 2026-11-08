@@ -150,13 +150,24 @@ func sessionID(r protocol.TokenUsageRecord) string {
 	return "legacy:" + r.Subject
 }
 
-func addSession(groups map[string]*protocol.UsageSession, a UsageAggregate) {
+type usageMeasurementKey struct {
+	execution           int
+	model, cli, version string
+}
+
+type usageSessionIndex struct {
+	executions   map[string]int
+	measurements map[usageMeasurementKey]int
+}
+
+func addSession(groups map[string]*protocol.UsageSession, a UsageAggregate, key string, indexes map[*protocol.UsageSession]*usageSessionIndex) {
 	r := a.Record
 	id := sessionID(r)
 	s := groups[id]
 	if s == nil {
 		s = &protocol.UsageSession{ID: id, ParentSessionID: r.ParentSessionID, Models: []string{}, Attributions: []protocol.UsageAttribution{}}
 		groups[id] = s
+		indexes[s] = &usageSessionIndex{executions: map[string]int{}, measurements: map[usageMeasurementKey]int{}}
 	}
 	MergeUsageTotals(&s.Totals, a.Totals)
 	if a.FirstAt != nil && (s.FirstAt == nil || *a.FirstAt < *s.FirstAt) {
@@ -179,36 +190,24 @@ func addSession(groups map[string]*protocol.UsageSession, a UsageAggregate) {
 			sort.Strings(s.Models)
 		}
 	}
-	key, _ := json.Marshal(r.Attribution)
-	found := false
-	for _, a := range s.Attributions {
-		b, _ := json.Marshal(a)
-		found = found || string(key) == string(b)
-	}
+	index := indexes[s]
+	i, found := index.executions[key]
 	if !found {
+		i = len(s.Executions)
+		index.executions[key] = i
 		s.Attributions = append(s.Attributions, r.Attribution)
 		s.Executions = append(s.Executions, protocol.UsageExecution{Attribution: r.Attribution, Measurements: []protocol.UsageMeasurement{}})
 	}
-	for i := range s.Executions {
-		b, _ := json.Marshal(s.Executions[i].Attribution)
-		if string(b) == string(key) {
-			execution := &s.Executions[i]
-			MergeUsageTotals(&execution.Totals, a.Totals)
-			measurement := -1
-			for j, m := range execution.Measurements {
-				if m.Model == r.Model && m.CLI == r.Provider && m.CLIVersion == r.NativeVersion {
-					measurement = j
-					break
-				}
-			}
-			if measurement < 0 {
-				execution.Measurements = append(execution.Measurements, protocol.UsageMeasurement{Model: r.Model, CLI: r.Provider, CLIVersion: r.NativeVersion})
-				measurement = len(execution.Measurements) - 1
-			}
-			MergeUsageTotals(&execution.Measurements[measurement].Totals, a.Totals)
-			break
-		}
+	execution := &s.Executions[i]
+	MergeUsageTotals(&execution.Totals, a.Totals)
+	measurementKey := usageMeasurementKey{i, r.Model, r.Provider, r.NativeVersion}
+	measurement, found := index.measurements[measurementKey]
+	if !found {
+		measurement = len(execution.Measurements)
+		index.measurements[measurementKey] = measurement
+		execution.Measurements = append(execution.Measurements, protocol.UsageMeasurement{Model: r.Model, CLI: r.Provider, CLIVersion: r.NativeVersion})
 	}
+	MergeUsageTotals(&execution.Measurements[measurement].Totals, a.Totals)
 }
 
 func sessions(groups map[string]*protocol.UsageSession) []protocol.UsageSession {
@@ -236,10 +235,11 @@ type usageGrouping struct {
 	sessions      map[string]*protocol.UsageSession
 	issues        map[string]*protocol.UsageIssue
 	issueSessions map[string]map[string]*protocol.UsageSession
+	sessionIndex  map[*protocol.UsageSession]*usageSessionIndex
 }
 
 func newUsageGrouping() *usageGrouping {
-	return &usageGrouping{sessions: map[string]*protocol.UsageSession{}, issues: map[string]*protocol.UsageIssue{}, issueSessions: map[string]map[string]*protocol.UsageSession{}}
+	return &usageGrouping{sessions: map[string]*protocol.UsageSession{}, issues: map[string]*protocol.UsageIssue{}, issueSessions: map[string]map[string]*protocol.UsageSession{}, sessionIndex: map[*protocol.UsageSession]*usageSessionIndex{}}
 }
 func (g *usageGrouping) add(r protocol.TokenUsageRecord) {
 	g.addAggregate(UsageAggregate{Record: r, Totals: UsageRecordTotals(r), FirstAt: r.OccurredAt, LastAt: r.OccurredAt})
@@ -247,7 +247,8 @@ func (g *usageGrouping) add(r protocol.TokenUsageRecord) {
 
 func (g *usageGrouping) addAggregate(a UsageAggregate) {
 	r := a.Record
-	addSession(g.sessions, a)
+	key, _ := json.Marshal(r.Attribution)
+	addSession(g.sessions, a, string(key), g.sessionIndex)
 	path := r.Attribution.IssuePath
 	if len(path) == 0 {
 		path = []protocol.UsageIssueRef{{ID: "", Title: "主会话与未归属用量"}}
@@ -280,7 +281,7 @@ func (g *usageGrouping) addAggregate(a UsageAggregate) {
 		}
 		if i == len(path)-1 {
 			MergeUsageTotals(&issue.Direct, a.Totals)
-			addSession(g.issueSessions[ref.ID], a)
+			addSession(g.issueSessions[ref.ID], a, string(key), g.sessionIndex)
 		}
 	}
 }

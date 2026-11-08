@@ -19,6 +19,15 @@ type BackgroundPool struct {
 	active   map[string]*Manager
 	remote   map[string]bool
 	database map[string]bool
+	wait     func(context.Context, <-chan struct{}, <-chan struct{}, time.Duration) bool
+	scanned  func()
+	finished *app.Broadcast
+	retries  map[string]backgroundRetry
+}
+
+type backgroundRetry struct {
+	at    time.Time
+	delay time.Duration
 }
 
 func (p *BackgroundPool) Run(ctx context.Context) {
@@ -30,32 +39,71 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 	p.active = map[string]*Manager{}
 	p.remote = map[string]bool{}
 	p.database = map[string]bool{}
+	p.finished = app.NewBroadcast()
+	p.retries = map[string]backgroundRetry{}
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	completed := p.finished
+	failedDelay := time.Duration(0)
+	wait := p.wait
+	if wait == nil {
+		wait = waitBackground
+	}
 	for ctx.Err() == nil {
+		changed, finished := p.App.Changes().Wait(), completed.Wait()
+		failed := false
 		if pending, err := p.App.ReceiptRecoveryStartupPending(ctx); err != nil || pending {
-			select {
-			case <-ctx.Done():
+			delay := time.Duration(0)
+			if err != nil {
+				delay = 2 * time.Second
+			}
+			if !wait(ctx, changed, finished, delay) {
 				return
-			case <-ticker.C:
 			}
 			continue
 		}
+		if p.scanned != nil {
+			p.scanned()
+		}
 		ids, err := p.App.PendingAgentConversations(ctx)
+		failed = err != nil
 		if err == nil {
+			retained := make(map[string]bool, len(ids))
 			for _, id := range ids {
+				retained[id] = true
+			}
+			p.mu.Lock()
+			for id := range p.retries {
+				if !retained[id] && p.active[id] == nil {
+					delete(p.retries, id)
+				}
+			}
+			p.mu.Unlock()
+			for _, id := range ids {
+				p.mu.Lock()
+				retry, exists := p.retries[id]
+				deferred := p.App.BackgroundNow().Before(retry.at)
+				if exists && !deferred {
+					retry.at = time.Time{}
+					p.retries[id] = retry
+				}
+				p.mu.Unlock()
+				if deferred {
+					continue
+				}
 				if handled, err := p.startDatabaseReplyReplay(ctx, id, &wg); err != nil || handled {
+					failed = failed || err != nil
 					continue
 				}
 				claimed, err := p.App.AgentConversationClaimed(ctx, id)
 				if err != nil || !claimed {
+					failed = failed || err != nil
 					continue
 				}
 				selected, named, err := p.App.HostedRuntimeSelection(ctx, id)
 				if err != nil || !named {
+					failed = failed || err != nil
 					continue
 				}
 				remote := named && selected.RunnerManaged
@@ -67,6 +115,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 				}
 				paused, err := p.App.UpgradePausesMain(ctx)
 				if err != nil {
+					p.deferRetryLocked(id)
 					p.mu.Unlock()
 					break
 				}
@@ -85,6 +134,7 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 				}
 				m, err := p.New(id)
 				if err != nil {
+					p.deferRetryLocked(id)
 					p.mu.Unlock()
 					continue
 				}
@@ -94,22 +144,81 @@ func (p *BackgroundPool) Run(ctx context.Context) {
 				}
 				p.mu.Unlock()
 				wg.Go(func() {
-					defer func() { p.mu.Lock(); delete(p.active, id); delete(p.remote, id); p.mu.Unlock() }()
-					p.drain(ctx, id, m)
+					p.finishAttachment(id, p.drain(ctx, id, m))
 				})
 			}
 		}
-		select {
-		case <-ctx.Done():
+		delay, err := p.App.BackgroundDelay(ctx)
+		p.mu.Lock()
+		for _, retry := range p.retries {
+			if retry.at.IsZero() {
+				continue
+			}
+			if remaining := max(time.Millisecond, retry.at.Sub(p.App.BackgroundNow())); delay == 0 || remaining < delay {
+				delay = remaining
+			}
+		}
+		p.mu.Unlock()
+		failed = failed || err != nil
+		if failed {
+			failedDelay = min(30*time.Second, max(2*time.Second, failedDelay*2))
+			if delay == 0 || failedDelay < delay {
+				delay = failedDelay
+			}
+		} else {
+			failedDelay = 0
+		}
+		if !wait(ctx, changed, finished, delay) {
 			return
-		case <-ticker.C:
 		}
 	}
 }
-func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
+
+func (p *BackgroundPool) deferRetryLocked(id string) {
+	if p.retries == nil {
+		p.retries = map[string]backgroundRetry{}
+	}
+	delay := min(30*time.Second, max(2*time.Second, p.retries[id].delay*2))
+	p.retries[id] = backgroundRetry{at: p.App.BackgroundNow().Add(delay), delay: delay}
+}
+
+func (p *BackgroundPool) finishAttachment(id string, failed bool) {
+	p.mu.Lock()
+	delete(p.active, id)
+	delete(p.remote, id)
+	delete(p.database, id)
+	if failed {
+		p.deferRetryLocked(id)
+	} else {
+		delete(p.retries, id)
+	}
+	wake := p.finished
+	p.mu.Unlock()
+	if wake != nil {
+		wake.Notify()
+	}
+}
+
+func waitBackground(ctx context.Context, changed, completed <-chan struct{}, delay time.Duration) bool {
+	var tick <-chan time.Time
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		tick = timer.C
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-changed:
+	case <-completed:
+	case <-tick:
+	}
+	return true
+}
+func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) (failed bool) {
 	receiptRead, err := p.App.DeferAgentReceiptRead(ctx, id)
 	if err != nil {
-		return
+		return true
 	}
 	run, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -119,6 +228,7 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 	var request string
 	var outcome any
 	defer func() {
+		failed = poolErr != nil || outcome == app.Unknown || outcome == app.Retry
 		m.cfg.Log.InfoContext(run, "manager pool attachment ending", "instance", m.cfg.Instance,
 			"conversation_id", id, "pool_exit_phase", phase, "pool_error", poolErr,
 			"delivery_request_id", request, "delivery_outcome", outcome, "context_cause", context.Cause(run))
@@ -210,6 +320,7 @@ func (p *BackgroundPool) drain(ctx context.Context, id string, m *Manager) {
 			return
 		}
 	}
+	return
 }
 
 // Deliver routes stop requests by the persisted message identity, never selection state.

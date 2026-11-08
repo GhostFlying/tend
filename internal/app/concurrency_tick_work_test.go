@@ -140,8 +140,12 @@ CREATE TEMP TRIGGER count_heartbeat_execution AFTER UPDATE ON concurrency_execut
 				return err
 			}
 			t.Logf("active=4 history=2 heartbeat=%t sync=%s group_updates=%d execution_updates=%d", heartbeat, elapsed, groups, executions)
-			if groups != 1 || stale != 0 {
-				t.Errorf("heartbeat=%t resampled unchanged load: group_updates=%d want1 stale_liveness=%d want0", heartbeat, groups, stale)
+			wantGroups := 0
+			if heartbeat {
+				wantGroups = 1
+			}
+			if groups != wantGroups || stale != 0 {
+				t.Errorf("heartbeat=%t resampled unchanged load: group_updates=%d want%d stale_liveness=%d want0", heartbeat, groups, wantGroups, stale)
 			}
 			return nil
 		}); err != nil {
