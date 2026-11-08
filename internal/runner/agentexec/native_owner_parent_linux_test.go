@@ -203,7 +203,7 @@ func TestNativeOwnerProcessDiesWithRunnerCrash(t *testing.T) {
 	deadline.Reset(2 * time.Second)
 	for {
 		current, running, err := nativeOwnerProcessState(pid)
-		if errors.Is(err, os.ErrNotExist) || err == nil && (current != start || !running) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) || err == nil && (current != start || !running) {
 			pid = 0
 			return
 		}
