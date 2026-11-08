@@ -322,7 +322,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if r.ServerGrantDeadline > 0 && r.View.Phase != "runners" && r.ServerGrantDeadline <= x.Now.UnixMilli() {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "expired server authorization requires reconciliation")
 		}
-		if r.ServerProcess == "" && r.View.Phase != "runners" {
+		if r.ServerProcess == "" && r.View.Phase != "runners" && r.View.Phase != "server_updater" {
 			r.View.Phase = "server_draining"
 		}
 		if r.View.Phase == "runners" {

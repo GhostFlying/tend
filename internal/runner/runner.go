@@ -167,11 +167,10 @@ type active struct {
 
 // Runner pulls and executes runs for one host.
 type Runner struct {
-	selfUpdateSupportKnown bool
-	selfUpdateSupported    bool
-	previewSupported       bool
-	previewDeployment      string
-	previewWake            chan struct{}
+	selfUpdateSupported bool
+	previewSupported    bool
+	previewDeployment   string
+	previewWake         chan struct{}
 
 	runnerProtocol int64
 	cfg            Config

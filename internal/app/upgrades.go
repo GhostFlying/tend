@@ -152,6 +152,10 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration maintenance must retain installed versions")
 		}
 		r.View.Phase = "runners"
+		if needsSelfUpdate(r) {
+			r.SupervisorThenRunners = true
+			r.View.Phase = "server_updater"
+		}
 	}
 	totalBytes := c.ManifestSize
 	artifacts := c.Manifest.Artifacts
@@ -396,6 +400,9 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 				if selfUpdateMatches(r, r.ServerHash, c.Observation.Updater) && c.Observation.Updater.InstanceID == r.ServerInstance && c.Observation.Updater.SupervisedProcess.SHA256 == c.Observation.BinarySHA256 && c.Observation.Updater.SupervisedProcess.LaunchID == c.Observation.ProcessInstanceID {
 					r.View.ServerUpdater = c.Observation.Updater
 					r.View.Phase = "server_draining"
+					if r.SupervisorThenRunners {
+						r.View.Phase = "runners"
+					}
 					r.Deadline = capUpgradeDeadline(&r, now+r.DrainMillis)
 				}
 			case "server_draining":
@@ -528,7 +535,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			continue
 		}
 		if v.Status == "skipped" {
-			if needsSelfUpdate(*r) {
+			if hostNeedsSelfUpdate(*r, *h) {
 				rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 				if err != nil {
 					return err

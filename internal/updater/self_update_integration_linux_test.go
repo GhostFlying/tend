@@ -186,4 +186,39 @@ func TestSelfUpdateSystemdRetainsServiceAndAdoptsSharedBinary(t *testing.T) {
 	if strings.Contains(string(history), "force") {
 		t.Fatal("ordinary bootstrap borrowed force authority")
 	}
+	nextDir := os.Getenv("TEND_TEST_SELF_NEXT_BUNDLE")
+	if nextDir == "" {
+		return
+	}
+	nextBundle, e := release.Load(nextDir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	nextArtifact, e := nextBundle.SetArtifact("updater", "linux", runtime.GOARCH)
+	if e != nil || nextArtifact.SHA256 == candidate.SHA256 {
+		t.Fatal("distinct automatic handoff candidate required", e)
+	}
+	for n, i := range instances {
+		previous, e := SelfUpdateCall(ctx, SocketPath(i.cfg), nil)
+		if e != nil {
+			t.Fatal(e)
+		}
+		requestID := "req_01M6F01JSS6Q9BFV6DJNSSBHEZ"
+		if n == 1 {
+			requestID = "req_01M6F01JSS6Q9BFV6DJNSSBHF0"
+		}
+		request := SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: requestID, ExpiresAtMillis: time.Now().Add(time.Minute).UnixMilli()}, UpgradeID: "fixture-automatic", Release: nextBundle.Dir, ReleaseSetSHA256: nextBundle.SetSHA256}
+		adopted, e := EnsureSelfUpdate(ctx, SocketPath(i.cfg), request)
+		if e != nil {
+			t.Fatal("automatic independent installer", e)
+		}
+		if adopted.Process == previous.Observation.Process || adopted.Process.SHA256 != nextArtifact.SHA256 || adopted.SupervisedProcess != i.child || adopted.Receipt.Previous != previous.Observation.Process {
+			t.Fatal("automatic handoff skipped actual process replacement", adopted)
+		}
+		owner, known := flockOwner(i.plan.LockDevice, i.plan.LockInode)
+		if !known || owner != adopted.Process.PID {
+			t.Fatal("automatic handoff lost original lock", owner, known)
+		}
+		t.Logf("%s automatic installer replaced its own process, retained child and original lock; shared-file proof is per instance", i.cfg.Role)
+	}
 }

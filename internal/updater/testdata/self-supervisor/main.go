@@ -39,7 +39,7 @@ func main() {
 	defer supervisor.Close()
 	if supervisor.Status().Current.Binary == "" {
 		child := exec.Command(cfg.InitialBinary, cfg.Args...)
-		child.Env = append(os.Environ(), "TEND_UPDATER_PROCESS_INSTANCE_ID="+cfg.InstanceID+"-retained")
+		child.Env = append(os.Environ(), "TEND_UPDATER_PROCESS_INSTANCE_ID="+cfg.InstanceID+"-retained", "TEND_UPDATER_LAUNCH_ID="+cfg.InstanceID+"-retained")
 		if err = child.Start(); err != nil {
 			panic(err)
 		}

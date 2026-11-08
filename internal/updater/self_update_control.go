@@ -85,19 +85,32 @@ func SelfUpdateCall(ctx context.Context, socket string, request *SelfUpdateReque
 // SelfUpdateSupported uses the legacy read-only status route. Old supervisors
 // need not parse any new request fields or recognize a new control operation.
 func SelfUpdateSupported(ctx context.Context, socket string) (bool, error) {
+	_, supported, err := ObserveStatus(ctx, socket)
+	return supported, err
+}
+
+// ObserveStatus adds a response-header capability observation to the unchanged
+// legacy body, allowing the runner to reuse its existing receipt read.
+func ObserveStatus(ctx context.Context, socket string) (State, bool, error) {
 	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	defer tr.CloseIdleConnections()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/status", nil)
 	if err != nil {
-		return false, err
+		return State{}, false, err
 	}
 	response, err := (&http.Client{Transport: tr, Timeout: 5 * time.Second}).Do(request)
 	if err != nil {
-		return false, err
+		return State{}, false, err
 	}
 	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<20))
-	return response.StatusCode == http.StatusOK && response.Header.Get("Tend-Updater-Capabilities") == protocol.CapabilityUpdaterSelfUpdate, nil
+	var decoded ControlResponse
+	if err = json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&decoded); err != nil {
+		return State{}, false, err
+	}
+	if response.StatusCode != http.StatusOK || decoded.Error != "" {
+		return decoded.State, false, errors.New("updater: status unavailable")
+	}
+	return decoded.State, response.Header.Get("Tend-Updater-Capabilities") == protocol.CapabilityUpdaterSelfUpdate, nil
 }

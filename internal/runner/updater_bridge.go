@@ -198,11 +198,12 @@ func (r *Runner) updaterProcessReceipt(ctx context.Context) *protocol.UpdaterRec
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	state, err := updater.CallSocket(ctx, r.cfg.UpdaterControlSocket, "status", updater.ControlRequest{})
+	state, supportedSelf, err := updater.ObserveStatus(ctx, r.cfg.UpdaterControlSocket)
 	if err != nil {
 		return nil
 	}
 	r.controlMu.Lock()
+	r.selfUpdateSupported = supportedSelf && state.InstanceID == r.cfg.UpdaterInstanceID
 	instance := r.instanceID
 	upgradeID, cancelledID := r.control.UpgradeID, r.control.CancelledUpgradeID
 	r.controlMu.Unlock()

@@ -20,6 +20,7 @@ type UpgradeManagerPark struct {
 // UpgradeRow keeps transition inputs and receipts alongside the public view.
 // Restoration receipts use phase rolled_back or cancelled (replacement never started).
 type UpgradeRow struct {
+	SupervisorThenRunners     bool                     `json:"supervisor_then_runners,omitempty"`
 	ReleaseSet                *release.Set             `json:"release_set,omitempty"`
 	ReleaseSetSHA256          string                   `json:"release_set_sha256,omitempty"`
 	ReleaseSetSize            int64                    `json:"release_set_size,omitempty"`
