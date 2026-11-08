@@ -83,7 +83,7 @@ func (s *Service) recordFailure(ctx context.Context, id string, cause error) {
 	if err != nil {
 		return
 	}
-	unlock, err := lock(ctx, dir)
+	unlock, err := lock(ctx, filepath.Join(dir, ".control"))
 	if err != nil {
 		return
 	}

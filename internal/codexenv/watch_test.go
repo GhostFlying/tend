@@ -159,3 +159,51 @@ func TestWatchPreflightFailureDoesNotBlockDisable(t *testing.T) {
 		t.Fatal(disabled, err, calls)
 	}
 }
+
+func TestWatchFailureSharesManualControlSerialization(t *testing.T) {
+	s, p := fixture(t)
+	status := create(t, s, p)
+	profile := status.Profile
+	profile.Agents = Agents{Mode: "sync", Source: filepath.Join(t.TempDir(), "AGENTS.md")}
+	if err := os.WriteFile(profile.Agents.Source, []byte("updated instructions"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	validating, release := make(chan struct{}), make(chan struct{})
+	s.Validate = func(ctx context.Context, _ Profile, _ string) error {
+		close(validating)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Execute(t.Context(), Request{Action: "update", ID: p.ID, RequestID: "manual", ExpectedRevision: status.Revision, Profile: &profile})
+		done <- err
+	}()
+	select {
+	case <-validating:
+	case err := <-done:
+		t.Fatal("manual request did not reach validation", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	s.recordFailure(ctx, p.ID, errors.New("source missing"))
+	cancel()
+	before, readErr := s.Read(p.ID)
+	close(release)
+	updateErr := <-done
+	if readErr != nil || updateErr != nil || before.LastError != "" {
+		t.Fatal("diagnostic writer bypassed manual serialization", before.LastError, readErr, updateErr)
+	}
+	s.recordFailure(t.Context(), p.ID, errors.New("source still missing"))
+	after, err := s.Read(p.ID)
+	if err != nil || after.Revision != status.Revision+1 || after.Profile.Agents.Mode != "sync" || after.LastError != "source still missing" {
+		t.Fatal(after, err)
+	}
+	replay, err := s.Execute(t.Context(), Request{Action: "reconcile", ID: p.ID, RequestID: "manual"})
+	if err != nil || replay.RequestState != "completed" || replay.Status.Revision != after.Revision {
+		t.Fatal("failure record overwrote original receipt", replay, err)
+	}
+}
