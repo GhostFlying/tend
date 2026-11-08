@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -43,6 +44,12 @@ func SharedReviewExistingEvidence(ctx context.Context, q store.Querier, review p
 		readIssue := scope.ReaderIssueID
 		if len(scope.IssueIDs) > 0 {
 			readIssue = scope.IssueIDs[0]
+		}
+		if slices.Contains(scope.IssueIDs, link.IssueID) {
+			// Select the contributor Issue on demand so the ordinary materials
+			// route rebuilds the same context; an exact cross-project artifact
+			// share instead stays under the reader's own Issue.
+			readIssue = link.IssueID
 		}
 		taskIDs, _, _, err := store.MaterialIDs(ctx, q, scope, "tasks", id, "", 1)
 		if err != nil {
