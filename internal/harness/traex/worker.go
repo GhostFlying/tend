@@ -204,7 +204,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 		s, err = ws.start(startupCtx, opts)
 		release = func(error) {
 			if s != nil {
-				_ = s.Close()
+				if err := s.Close(); err != nil {
+					s.log.Warn("owned worker session close failed", "run_id", spec.RunID, "err", err)
+				}
 			}
 		}
 	}
@@ -332,8 +334,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 				}
 				return
 			}
-			if err := verdicts.RecordOwnedSessionClose(); err != nil && verdicts.Verdict() != nil {
-				w.err = fmt.Errorf("%w: record original owned acceptance session close: %w", harness.ErrRetainedResumePending, err)
+			if err := verdicts.RecordOwnedSessionClose(); err != nil {
+				s.log.Warn("owned acceptance session close receipt failed", "run_id", spec.RunID, "err", err)
+				if verdicts.Verdict() != nil {
+					w.err = fmt.Errorf("%w: record original owned acceptance session close: %w", harness.ErrRetainedResumePending, err)
+				}
 			}
 		}()
 		var summary string
