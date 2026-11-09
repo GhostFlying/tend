@@ -116,14 +116,18 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	}
 	var bundle *release.Bundle
 	var err error
+	input, err := json.Marshal(r)
+	if err != nil {
+		return protocol.UpgradeView{}, err
+	}
+	requestDir := filepath.Join(c.cfg.ReleaseDir, ".requests", r.RequestID)
+	if err := release.PinUpgradeInput(requestDir, string(input)); err != nil {
+		return protocol.UpgradeView{}, err
+	}
 	if r.Release == "" || release.OfficialTag(r.Release) {
 		// Pin the whole original request before download; a retry never chooses
 		// another source commit as main advances.
-		input, marshalErr := json.Marshal(r)
-		if marshalErr != nil {
-			return protocol.UpgradeView{}, marshalErr
-		}
-		bundle, err = release.FetchOfficial(ctx, c.cfg.ReleaseHTTP, filepath.Join(c.cfg.ReleaseDir, ".requests", r.RequestID), r.Release, string(input))
+		bundle, err = release.FetchOfficial(ctx, c.cfg.ReleaseHTTP, requestDir, r.Release, string(input))
 	} else if filepath.IsAbs(r.Release) {
 		bundle, err = release.Load(r.Release)
 	} else {

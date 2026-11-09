@@ -69,28 +69,48 @@ func officialFixture(t *testing.T) (officialRelease, []byte) {
 	return r, buf.Bytes()
 }
 
+func officialFixtureResponse(r officialRelease, archive []byte, req *http.Request) *http.Response {
+	raw := archive
+	if req.URL.String() == officialFeed {
+		raw = []byte(`<feed xmlns="http://www.w3.org/2005/Atom">`)
+		if !r.Draft {
+			raw = append(raw, []byte(`<entry><updated>`+r.Published.Format(time.RFC3339)+`</updated><link href="https://github.com/GhostFlying/tend/releases/tag/`+r.Tag+`"/></entry>`)...)
+		}
+		raw = append(raw, []byte(`</feed>`)...)
+	} else if strings.HasSuffix(req.URL.Path, "/SHA256SUMS") {
+		raw = nil
+		for _, a := range r.Assets {
+			raw = append(raw, []byte(strings.TrimPrefix(a.Digest, "sha256:")+"  "+a.Name+"\n")...)
+		}
+	}
+	size := int64(len(raw))
+	if req.Method == http.MethodHead && len(r.Assets) > 0 {
+		size = r.Assets[0].Size
+		raw = nil
+	}
+	return &http.Response{StatusCode: 200, Header: http.Header{}, ContentLength: size, Body: io.NopCloser(bytes.NewReader(raw))}
+}
+
 func TestOfficialDownloadPinsOriginalSelectionAcrossFailureAndRestart(t *testing.T) {
 	r, body := officialFixture(t)
-	var apiCalls, downloads int
+	var discoveries, downloads int
 	client := &http.Client{Transport: officialTransport(func(req *http.Request) (*http.Response, error) {
 		if req.Header.Get("Authorization") != "" {
 			t.Fatal("service credentials leaked")
 		}
-		var raw []byte
-		if strings.HasPrefix(req.URL.String(), officialAPI) {
-			apiCalls++
-			if apiCalls > 1 {
+		if req.URL.String() == officialFeed {
+			discoveries++
+			if discoveries > 1 {
 				t.Fatal("original request reselected a release")
 			}
-			raw, _ = json.Marshal([]officialRelease{r})
-		} else {
+		}
+		if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, ".tar.gz") {
 			downloads++
 			if downloads == 1 {
 				return nil, errors.New("network unavailable")
 			}
-			raw = body
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+		return officialFixtureResponse(r, body, req), nil
 	})}
 	dir := filepath.Join(t.TempDir(), "request")
 	if _, err := FetchOfficial(t.Context(), client, dir, "", "original-input"); err == nil {
@@ -109,22 +129,18 @@ func TestOfficialDownloadPinsOriginalSelectionAcrossFailureAndRestart(t *testing
 	if _, err := FetchOfficial(t.Context(), client, dir, "", "original-input"); err != nil {
 		t.Fatal(err)
 	}
-	if apiCalls != 1 || downloads != 2 {
-		t.Fatal(apiCalls, downloads)
+	if discoveries != 1 || downloads != 2 {
+		t.Fatal(discoveries, downloads)
 	}
 }
 
 func TestOfficialCommitAndConcurrentRequestsKeepOneCompleteIdentity(t *testing.T) {
 	r, body := officialFixture(t)
 	client := &http.Client{Transport: officialTransport(func(req *http.Request) (*http.Response, error) {
-		raw := body
-		if strings.HasPrefix(req.URL.String(), officialAPI) {
-			if req.URL.String() != officialAPI+"/tags/"+r.Tag {
-				return nil, errors.New("commit was not pinned")
-			}
-			raw, _ = json.Marshal(r)
+		if req.URL.String() == officialFeed || !strings.Contains(req.URL.Path, "/"+r.Tag+"/") {
+			return nil, errors.New("commit was not pinned")
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+		return officialFixtureResponse(r, body, req), nil
 	})}
 	dir := filepath.Join(t.TempDir(), "original-request")
 	var wg sync.WaitGroup
@@ -143,8 +159,38 @@ func TestOfficialCommitAndConcurrentRequestsKeepOneCompleteIdentity(t *testing.T
 	wg.Wait()
 }
 
-func TestOfficialSelectionRejectsDraftMissingOrForeignAssetsAndCorruption(t *testing.T) {
-	for _, kind := range []string{"draft", "service-only", "foreign", "corrupt", "wrong-commit"} {
+func TestOfficialMetadataFailureRetainsDiscoveredTag(t *testing.T) {
+	for _, phase := range []string{"checksums", "head"} {
+		t.Run(phase, func(t *testing.T) {
+			r, body := officialFixture(t)
+			discoveries, failures := 0, 0
+			client := &http.Client{Transport: officialTransport(func(req *http.Request) (*http.Response, error) {
+				if req.URL.String() == officialFeed {
+					discoveries++
+					if discoveries > 1 {
+						return nil, errors.New("must not rediscover after metadata failure")
+					}
+				}
+				if failures == 0 && (phase == "checksums" && strings.HasSuffix(req.URL.Path, "/SHA256SUMS") || phase == "head" && req.Method == http.MethodHead) {
+					failures++
+					return nil, errors.New("metadata unavailable")
+				}
+				return officialFixtureResponse(r, body, req), nil
+			})}
+			dir := filepath.Join(t.TempDir(), "original")
+			if _, err := FetchOfficial(t.Context(), client, dir, "", "original"); err == nil {
+				t.Fatal("failure accepted")
+			}
+			b, err := FetchOfficial(t.Context(), client, dir, "", "original")
+			if err != nil || b.Set.Commit != r.Tag[5:] || discoveries != 1 {
+				t.Fatal(b, err, discoveries)
+			}
+		})
+	}
+}
+
+func TestOfficialSelectionRejectsDraftMissingOrConflictingAssetsAndCorruption(t *testing.T) {
+	for _, kind := range []string{"draft", "service-only", "duplicate-checksum", "corrupt", "wrong-commit"} {
 		t.Run(kind, func(t *testing.T) {
 			r, body := officialFixture(t)
 			switch kind {
@@ -152,20 +198,14 @@ func TestOfficialSelectionRejectsDraftMissingOrForeignAssetsAndCorruption(t *tes
 				r.Draft = true
 			case "service-only":
 				r.Assets = nil
-			case "foreign":
-				r.Assets[0].URL = "https://example.invalid/archive"
+			case "duplicate-checksum":
+				r.Assets = append(r.Assets, r.Assets[0])
 			case "corrupt":
 				body = []byte("corrupt")
 			case "wrong-commit":
 				r.Tag = "main-" + strings.Repeat("b", 40)
 			}
-			client := &http.Client{Transport: officialTransport(func(req *http.Request) (*http.Response, error) {
-				raw := body
-				if strings.HasPrefix(req.URL.String(), officialAPI) {
-					raw, _ = json.Marshal([]officialRelease{r})
-				}
-				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
-			})}
+			client := &http.Client{Transport: officialTransport(func(req *http.Request) (*http.Response, error) { return officialFixtureResponse(r, body, req), nil })}
 			dir := filepath.Join(t.TempDir(), "request")
 			if _, err := FetchOfficial(t.Context(), client, dir, "", "original"); err == nil {
 				t.Fatal("invalid release accepted")
