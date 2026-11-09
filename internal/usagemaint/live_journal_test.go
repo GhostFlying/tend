@@ -3,6 +3,7 @@ package usagemaint
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,9 +21,10 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 	if err := os.MkdirAll(filepath.Join(home, "sessions"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"type":"session_meta","payload":{"id":"registered","session_id":"session","cli_version":"test"}}
-{"type":"token_usage_record","ordinal":1,"timestamp":"2026-01-01T00:00:00Z","payload":{"thread_id":"registered","session_id":"session","turn_id":"turn","response_id":"response","usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}
-`
+	data := `{"type":"session_meta","payload":{"id":"registered","session_id":"session","cli_version":"test"}}` + "\n"
+	for i := range 600 {
+		data += fmt.Sprintf(`{"type":"token_usage_record","ordinal":%d,"timestamp":"2026-01-01T00:00:00Z","payload":{"thread_id":"registered","session_id":"session","turn_id":"turn","response_id":"response-%d","usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}`+"\n", i+1, i)
+	}
 	if err := os.WriteFile(filepath.Join(home, "sessions", "rollout-registered.jsonl"), []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -57,17 +59,25 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 			if err := j.RegisterUsageSource(r.Context(), source); err != nil {
 				t.Error(err)
 			}
-		case "/runner/v1/usage/queue":
-			var input struct {
-				Source   journal.UsageSource `json:"source"`
-				Envelope *protocol.Envelope  `json:"envelope"`
+			snapshot, err := j.UsageSourceSnapshot(r.Context(), source.RunID, source.Source.Provider, source.Source.ThreadID)
+			if err != nil {
+				t.Error(err)
 			}
+			_ = json.NewEncoder(w).Encode(snapshot)
+		case "/runner/v1/usage/queue":
+			var input journal.UsageQueueRequest
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
+			input.Source.ExpectedRevision = input.ExpectedRevision
 			if err := j.QueueUsage(r.Context(), input.Source, input.Envelope); err != nil {
 				t.Error(err)
 			}
+			snapshot, err := j.UsageSourceSnapshot(r.Context(), input.Source.RunID, input.Source.Source.Provider, input.Source.Source.ThreadID)
+			if err != nil {
+				t.Error(err)
+			}
+			_ = json.NewEncoder(w).Encode(snapshot)
 		case "/runner/v1/rpc":
 			var env protocol.Envelope
 			if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
@@ -107,6 +117,17 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 	fail = false
 	if err := Run(t.Context(), config, &output); err != nil {
 		t.Fatal("live maintenance tried to acquire a second journal writer", err)
+	}
+	var records int
+	for _, uploaded := range uploads[2:] {
+		var input protocol.UsageUpload
+		if err := json.Unmarshal(uploaded.Payload, &input); err != nil {
+			t.Fatal(err)
+		}
+		records += len(input.Samples)
+	}
+	if records != 600 {
+		t.Fatal("foreground pagination lost records", records)
 	}
 	if len(uploads) < 3 || !reflect.DeepEqual(uploads[0], original) || !reflect.DeepEqual(uploads[1], original) {
 		t.Fatal("original pending request was replaced or silently skipped", uploads)

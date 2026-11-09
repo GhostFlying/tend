@@ -46,6 +46,12 @@ type ThreadLocation interface {
 // Remote proxies deliberately do not expose an executor path to the server.
 type NativeUsageThread interface{ UsageSource() nativeusage.Source }
 
+// NativeUsageWriterObserver independently verifies a retained writer's exit.
+// A new process or resumed thread alone does not prove the old writer stopped.
+type NativeUsageWriterObserver interface {
+	ConfirmUsageWriterStopped(context.Context, string) error
+}
+
 // Model is a selectable entry from a harness's live model catalog.
 type Model struct {
 	ID, Name, Label, Provider string

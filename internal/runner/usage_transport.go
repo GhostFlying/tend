@@ -98,6 +98,7 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, q.Body, 16<<20))
 	decoder.DisallowUnknownFields()
 	var err error
+	var result journal.UsageSourceSnapshot
 	if q.URL.Path == "/runner/v1/usage/source" {
 		var source journal.UsageSource
 		if err = decoder.Decode(&source); err == nil {
@@ -106,18 +107,22 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 				return
 			}
 			err = r.cfg.Journal.RegisterUsageSource(q.Context(), source)
+			if err == nil {
+				result, err = r.cfg.Journal.UsageSourceSnapshot(q.Context(), source.RunID, source.Source.Provider, source.Source.ThreadID)
+			}
 		}
 	} else {
-		var input struct {
-			Source   journal.UsageSource `json:"source"`
-			Envelope *protocol.Envelope  `json:"envelope"`
-		}
+		var input journal.UsageQueueRequest
 		if err = decoder.Decode(&input); err == nil {
 			if input.Source.ID == "" || input.Envelope != nil && (input.Envelope.RequestID == "" || input.Envelope.Operation != protocol.OpRunnerUsageUpload || input.Envelope.Target.Type != "host" || input.Envelope.Target.ID != r.cfg.HostID) {
 				http.Error(w, "invalid usage upload binding", http.StatusBadRequest)
 				return
 			}
+			input.Source.ExpectedRevision = input.ExpectedRevision
 			err = r.cfg.Journal.QueueUsage(q.Context(), input.Source, input.Envelope)
+			if err == nil {
+				result, err = r.cfg.Journal.UsageSourceSnapshot(q.Context(), input.Source.RunID, input.Source.Source.Provider, input.Source.Source.ThreadID)
+			}
 		}
 	}
 	if err != nil {
@@ -125,5 +130,5 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct{}{})
+	_ = json.NewEncoder(w).Encode(result)
 }

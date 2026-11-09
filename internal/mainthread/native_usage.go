@@ -64,7 +64,29 @@ func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, pu
 	}
 	hash := sha256.Sum256([]byte(store.ConversationID(m.cfg.ConversationID) + "\x00" + src.Provider + "\x00" + src.Path))
 	body, _ := json.Marshal(src)
-	if err := m.app.RegisterLocalUsage(ctx, app.LocalUsageSource{ID: hex.EncodeToString(hash[:]), ConversationID: store.ConversationID(m.cfg.ConversationID), Source: body}); err != nil {
+	registration := app.LocalUsageSource{ID: hex.EncodeToString(hash[:]), ConversationID: store.ConversationID(m.cfg.ConversationID), Source: body}
+	err := m.app.RegisterLocalUsage(ctx, registration)
+	if protocol.CodeOf(err) == protocol.CodeStaleRevision {
+		if observer, ok := th.(harness.NativeUsageWriterObserver); ok {
+			retained, readErr := m.app.LocalUsageThreadSources(ctx, m.cfg.ConversationID, src.Provider, src.ThreadID)
+			if readErr != nil {
+				return readErr
+			}
+			for _, old := range retained {
+				if old.WriterStopped || old.Collection.WriterID == "" || old.Collection.WriterID == src.WriterID {
+					continue
+				}
+				if observer.ConfirmUsageWriterStopped(ctx, old.Collection.WriterID) != nil {
+					continue
+				}
+				if stopErr := m.app.StopLocalUsage(ctx, m.cfg.ConversationID, src.ThreadID, old.Collection.WriterID); stopErr != nil {
+					return stopErr
+				}
+			}
+			err = m.app.RegisterLocalUsage(ctx, registration)
+		}
+	}
+	if err != nil {
 		m.cfg.Log.WarnContext(ctx, "native usage source registration pending", "err", err)
 		return err
 	}

@@ -166,16 +166,24 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 }
 
 func (a *App) LocalUsageSources(ctx context.Context, conversation string) ([]LocalUsageSource, error) {
-	return a.localUsageSources(ctx, conversation, false)
+	return a.localUsageSources(ctx, conversation, false, "", "")
 }
-func (a *App) localUsageSources(ctx context.Context, conversation string, pending bool) ([]LocalUsageSource, error) {
+func (a *App) LocalUsageThreadSources(ctx context.Context, conversation, provider, thread string) ([]LocalUsageSource, error) {
+	return a.localUsageSources(ctx, store.ConversationID(conversation), false, provider, thread)
+}
+func (a *App) localUsageSources(ctx context.Context, conversation string, pending bool, provider, thread string) ([]LocalUsageSource, error) {
 	var out []LocalUsageSource
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		query := `SELECT source_key,run_id,conversation_id,source_json,cursors_json,coverage,writer_stopped,collection_json FROM token_usage_local_sources WHERE (?='' OR conversation_id=?)`
+		args := []any{conversation, conversation}
 		if pending {
 			query += ` AND collection_state IN ('active','settling')`
 		}
-		rows, err := tx.Q().QueryContext(ctx, query+` ORDER BY source_key`, conversation, conversation)
+		if provider != "" && thread != "" {
+			query += ` AND run_id='' AND conversation_id=? AND json_extract(source_json,'$.provider')=? AND json_extract(source_json,'$.thread_id')=?`
+			args = append(args, conversation, provider, thread)
+		}
+		rows, err := tx.Q().QueryContext(ctx, query+` ORDER BY source_key`, args...)
 		if err != nil {
 			return err
 		}
@@ -292,7 +300,7 @@ func (a *App) wakeLocalUsage() {
 
 // PendingLocalUsageSources excludes settled history before decoding its cursors.
 func (a *App) PendingLocalUsageSources(ctx context.Context, conversation string) ([]LocalUsageSource, error) {
-	return a.localUsageSources(ctx, conversation, true)
+	return a.localUsageSources(ctx, conversation, true, "", "")
 }
 
 func usageCollectionChanged(tx *store.Tx, result sql.Result, err error) error {

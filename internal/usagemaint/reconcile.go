@@ -131,20 +131,28 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		}
 		return j.DeleteRequest(ctx, request)
 	}
-	registerSource := func(ctx context.Context, source journal.UsageSource) error {
+	registerSource := func(ctx context.Context, source journal.UsageSource) (journal.UsageSourceSnapshot, error) {
 		if c.LiveJournal {
-			return call(ctx, "POST", "/runner/v1/usage/source", source, nil)
+			var snapshot journal.UsageSourceSnapshot
+			err := call(ctx, "POST", "/runner/v1/usage/source", source, &snapshot)
+			return snapshot, err
 		}
-		return j.RegisterUsageSource(ctx, source)
+		if err := j.RegisterUsageSource(ctx, source); err != nil {
+			return journal.UsageSourceSnapshot{}, err
+		}
+		return j.UsageSourceSnapshot(ctx, source.RunID, source.Source.Provider, source.Source.ThreadID)
 	}
-	queueUsage := func(ctx context.Context, source journal.UsageSource, env *protocol.Envelope) error {
+	queueUsage := func(ctx context.Context, source journal.UsageSource, env *protocol.Envelope) (journal.UsageSourceSnapshot, error) {
 		if c.LiveJournal {
-			return call(ctx, "POST", "/runner/v1/usage/queue", struct {
-				Source   journal.UsageSource `json:"source"`
-				Envelope *protocol.Envelope  `json:"envelope"`
-			}{source, env}, nil)
+			var snapshot journal.UsageSourceSnapshot
+			input := journal.UsageQueueRequest{UsageSourceSnapshot: journal.UsageSourceSnapshot{Source: source, ExpectedRevision: source.ExpectedRevision}, Envelope: env}
+			err := call(ctx, "POST", "/runner/v1/usage/queue", input, &snapshot)
+			return snapshot, err
 		}
-		return j.QueueUsage(ctx, source, env)
+		if err := j.QueueUsage(ctx, source, env); err != nil {
+			return journal.UsageSourceSnapshot{}, err
+		}
+		return j.UsageSourceSnapshot(ctx, source.RunID, source.Source.Provider, source.Source.ThreadID)
 	}
 	if c.Apply {
 		var err error
@@ -260,16 +268,32 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		if c.Apply {
 			hash := sha256.Sum256([]byte(target.RunID + "\x00" + src.Provider + "\x00" + src.Path))
 			state := journal.UsageSource{ID: hex.EncodeToString(hash[:]), RunID: target.RunID, ConversationID: target.ConversationID, Source: src, Cursors: map[string]nativeusage.Cursor{}, Files: files, DiscoveredAt: c.Now().UnixMilli(), WriterStopped: target.Stopped}
-			if err = registerSource(ctx, state); err != nil {
+			snapshot, err := registerSource(ctx, state)
+			if err != nil {
 				return err
 			}
+			state = snapshot.Source
+			state.ExpectedRevision = snapshot.ExpectedRevision
+			if state.Cursors == nil {
+				state.Cursors = map[string]nativeusage.Cursor{}
+			}
 			for i, batch := range batches {
-				state.Cursors[batch.path] = batch.cursor
+				if previous := state.Cursors[batch.path]; previous.FileID != batch.cursor.FileID || previous.Offset <= batch.cursor.Offset {
+					state.Cursors[batch.path] = batch.cursor
+				}
 				coverage := "syncing"
-				if i == len(batches)-1 && complete && target.Stopped {
+				if i == len(batches)-1 && complete && state.WriterStopped {
 					coverage = "caught_up"
 				}
 				state.Coverage = coverage
+				final := i == len(batches)-1 && complete
+				state.Collection.ReadSucceeded(c.Now().UnixMilli(), len(batch.samples) > 0, final, state.WriterStopped, final)
+				if len(batch.samples) > 0 {
+					state.Collection.Evidence = protocol.UsageObserved
+				}
+				if i == len(batches)-1 && !complete {
+					state.Collection.Failed(c.Now().UnixMilli(), state.WriterStopped, "incomplete_record")
+				}
 				input := protocol.UsageUpload{RunID: target.RunID, ConversationID: target.ConversationID, RootThreadID: target.ThreadID, SessionID: src.SessionID, Samples: batch.samples, Coverage: coverage}
 				operation := protocol.OpRunnerUsageUpload
 				value := any(input)
@@ -281,9 +305,12 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 				}
 				raw, _ := json.Marshal(value)
 				env := protocol.Envelope{RequestID: c.IDs.New(protocol.PrefixRequest), Operation: operation, Target: destination, Payload: raw}
-				if err = queueUsage(ctx, state, &env); err != nil {
+				snapshot, err = queueUsage(ctx, state, &env)
+				if err != nil {
 					return err
 				}
+				state = snapshot.Source
+				state.ExpectedRevision = snapshot.ExpectedRevision
 				if c.HostID != "" {
 					err = rpc(ctx, env, nil)
 				} else {

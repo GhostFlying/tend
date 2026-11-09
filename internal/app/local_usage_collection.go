@@ -174,7 +174,8 @@ func (a *App) activateUsage(ctx context.Context, conversation, run, thread, requ
 // SettleLocalUsage wakes only the current reusable source for a real completion
 // notification. Retired sources and never-dispatched metadata remain excluded.
 func (a *App) SettleLocalUsage(ctx context.Context, conversation, thread string) error {
-	return a.write(ctx, func(tx *store.Tx) error {
+	changed := false
+	err := a.write(ctx, func(tx *store.Tx) error {
 		rows, err := tx.Q().QueryContext(ctx, `SELECT source_key FROM token_usage_local_sources WHERE conversation_id=? AND writer_stopped=0 AND collection_state='dormant' AND json_extract(collection_json,'$.execution_evidence')<>'no_dispatch_proven' AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, store.ConversationID(conversation), thread, thread)
 		if err != nil {
 			return err
@@ -194,6 +195,7 @@ func (a *App) SettleLocalUsage(ctx context.Context, conversation, thread string)
 			return err
 		}
 		for _, id := range ids {
+			changed = true
 			s, err := localUsageSource(ctx, tx.Q(), id)
 			if err != nil {
 				return err
@@ -205,6 +207,10 @@ func (a *App) SettleLocalUsage(ctx context.Context, conversation, thread string)
 		}
 		return nil
 	})
+	if err == nil && changed {
+		a.wakeLocalUsage()
+	}
+	return err
 }
 
 // FailLocalUsage persists the finite reading budget without advancing cursors.

@@ -1,6 +1,22 @@
 package traex
 
-import "github.com/GhostFlying/tend/internal/harness/nativeusage"
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
+)
+
+func (*thread) ConfirmUsageWriterStopped(ctx context.Context, writer string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var original ownedProcessIdentity
+	if err := json.Unmarshal([]byte(writer), &original); err != nil {
+		return err
+	}
+	return confirmOwnedProcessStopped(original)
+}
 
 func (t *thread) UsageSource() nativeusage.Source {
 	t.mu.Lock()

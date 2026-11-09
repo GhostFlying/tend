@@ -9,7 +9,30 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func getUsageSource(ctx context.Context, tx *sql.Tx, id string) (UsageSource, error) {
+type usageSourceReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type UsageSourceSnapshot struct {
+	Source           UsageSource `json:"source"`
+	ExpectedRevision int64       `json:"expected_revision"`
+}
+
+type UsageQueueRequest struct {
+	UsageSourceSnapshot
+	Envelope *protocol.Envelope `json:"envelope"`
+}
+
+func (j *Journal) UsageSourceSnapshot(ctx context.Context, run, provider, thread string) (UsageSourceSnapshot, error) {
+	id, err := j.UsageSourceID(ctx, run, provider, thread)
+	if err != nil {
+		return UsageSourceSnapshot{}, err
+	}
+	s, err := getUsageSource(ctx, j.db, id)
+	return UsageSourceSnapshot{Source: s, ExpectedRevision: s.ExpectedRevision}, err
+}
+
+func getUsageSource(ctx context.Context, tx usageSourceReader, id string) (UsageSource, error) {
 	var s UsageSource
 	var raw string
 	var stopped bool
