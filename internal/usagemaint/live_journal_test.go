@@ -12,11 +12,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
 func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testing.T) {
+	for _, stopped := range []bool{true, false} {
+		t.Run(fmt.Sprint(stopped), func(t *testing.T) { testLiveUsageApply(t, stopped, false) })
+	}
+	t.Run("append-stop-between-pages", func(t *testing.T) { testLiveUsageApply(t, false, true) })
+}
+
+func testLiveUsageApply(t *testing.T, stopped, interrupt bool) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, "sessions"), 0700); err != nil {
 		t.Fatal(err)
@@ -41,7 +49,20 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 			t.Fatal(err)
 		}
 	}
+	if !stopped {
+		src, err := nativeusage.Locate(t.Context(), home, "traex", "registered")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := j.RegisterUsageSource(t.Context(), journal.UsageSource{ID: "active-source", RunID: "original", RegistrationQueued: true, Source: src}); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.ActivateUsageSource(t.Context(), "active-source", "ongoing-turn"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fail := true
+	lateStopped := false
 	var uploads []protocol.Envelope
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -56,13 +77,11 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 			if err := json.NewDecoder(r.Body).Decode(&source); err != nil {
 				t.Error(err)
 			}
-			if err := j.RegisterUsageSource(r.Context(), source); err != nil {
-				t.Error(err)
-			}
-			snapshot, err := j.UsageSourceSnapshot(r.Context(), source.RunID, source.Source.Provider, source.Source.ThreadID)
+			snapshot, err := j.RegisterUsageMaintenanceSource(r.Context(), source)
 			if err != nil {
 				t.Error(err)
 			}
+
 			_ = json.NewEncoder(w).Encode(snapshot)
 		case "/runner/v1/usage/queue":
 			var input journal.UsageQueueRequest
@@ -70,13 +89,28 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 				t.Error(err)
 			}
 			input.Source.ExpectedRevision = input.ExpectedRevision
-			if err := j.QueueUsage(r.Context(), input.Source, input.Envelope); err != nil {
-				t.Error(err)
-			}
-			snapshot, err := j.UsageSourceSnapshot(r.Context(), input.Source.RunID, input.Source.Source.Provider, input.Source.Source.ThreadID)
+			snapshot, err := j.QueueUsageSnapshot(r.Context(), input.Source, input.Envelope)
 			if err != nil {
-				t.Error(err)
+				http.Error(w, "stale snapshot", http.StatusConflict)
+				return
 			}
+			if interrupt && !lateStopped {
+				lateStopped = true
+				f, err := os.OpenFile(filepath.Join(home, "sessions", "rollout-registered.jsonl"), os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_, err = f.WriteString(`{"type":"token_usage_record","ordinal":601,"timestamp":"2026-01-01T00:00:01Z","payload":{"thread_id":"registered","session_id":"session","turn_id":"turn","response_id":"late-response","usage":{"total_tokens":12}}}` + "\n")
+				_ = f.Close()
+				if err != nil {
+					t.Error(err)
+				}
+				if err := j.StopUsageSource(r.Context(), "original", "registered"); err != nil {
+					t.Error(err)
+				}
+			}
+
 			_ = json.NewEncoder(w).Encode(snapshot)
 		case "/runner/v1/rpc":
 			var env protocol.Envelope
@@ -86,7 +120,7 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 			var result any
 			switch env.Operation {
 			case protocol.OpRunnerUsageSources:
-				result = []protocol.UsageTarget{{RunID: "original", ThreadID: "registered", Provider: "traex", Stopped: true}}
+				result = []protocol.UsageTarget{{RunID: "original", ThreadID: "registered", Provider: "traex", Stopped: stopped || lateStopped}}
 			case protocol.OpRunnerUsagePreview:
 				result = protocol.UsagePreview{}
 			case protocol.OpRunnerUsageUpload:
@@ -115,18 +149,35 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 		t.Fatal("lost reply was treated as committed")
 	}
 	fail = false
-	if err := Run(t.Context(), config, &output); err != nil {
-		t.Fatal("live maintenance tried to acquire a second journal writer", err)
+	err = Run(t.Context(), config, &output)
+	if interrupt {
+		if err == nil {
+			t.Fatal("buffered pre-stop EOF was committed as complete")
+		}
+		pendingSources, e := j.PendingUsageSources(t.Context())
+		if e != nil || len(pendingSources) != 1 || !pendingSources[0].WriterStopped || pendingSources[0].Coverage == "caught_up" {
+			t.Fatal("late usage lost its final read", pendingSources, e)
+		}
+		output.Reset()
+		err = Run(t.Context(), config, &output)
 	}
+	if err != nil {
+		t.Fatal("live maintenance failed", err)
+	}
+
 	var records int
+	unique := map[string]bool{}
 	for _, uploaded := range uploads[2:] {
 		var input protocol.UsageUpload
 		if err := json.Unmarshal(uploaded.Payload, &input); err != nil {
 			t.Fatal(err)
 		}
 		records += len(input.Samples)
+		for _, sample := range input.Samples {
+			unique[sample.RecordID] = true
+		}
 	}
-	if records != 600 {
+	if (!interrupt && records != 600) || (interrupt && len(unique) != 601) {
 		t.Fatal("foreground pagination lost records", records)
 	}
 	if len(uploads) < 3 || !reflect.DeepEqual(uploads[0], original) || !reflect.DeepEqual(uploads[1], original) {
@@ -137,7 +188,7 @@ func TestLiveUsageApplyUsesOriginalWriterAndReplaysExactPendingEnvelope(t *testi
 		t.Fatal("usage reconciliation changed unrelated uncertainty", pending, err)
 	}
 	sources, err := j.UsageSources(t.Context())
-	if err != nil || len(sources) != 1 || len(sources[0].Cursors) == 0 || sources[0].Coverage != "caught_up" {
+	if err != nil || len(sources) != 1 || len(sources[0].Cursors) == 0 || ((stopped || lateStopped) && sources[0].Coverage != "caught_up") || (!stopped && !lateStopped && sources[0].Collection.State != protocol.UsageActive) {
 		t.Fatal("cursor and usage receipt did not commit in the original writer", sources, err)
 	}
 }
