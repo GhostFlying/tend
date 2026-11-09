@@ -324,11 +324,7 @@ func (c *Consumer) PrepareScoped(ctx context.Context, pin protocol.ExtensionExec
 			return nil, status, err
 		}
 		packageDir := filepath.Join(inputs, res.ContentSHA256)
-		if _, err = os.Stat(packageDir); os.IsNotExist(err) {
-			if err = ExtractPackage(ctx, raw, packageDir); err != nil {
-				return nil, status, err
-			}
-		} else if err != nil {
+		if err = materializePackage(ctx, raw, packageDir); err != nil {
 			return nil, status, err
 		}
 		item := codexenv.Item{ID: res.ID, Path: packageDir}
@@ -347,6 +343,20 @@ func (c *Consumer) PrepareScoped(ctx context.Context, pin protocol.ExtensionExec
 	}
 	if err = atomicFile(p.Agents.Source, []byte(combo.AgentsMD)); err != nil {
 		return nil, status, err
+	}
+	// Interrupted requests retain their original payload and identity. Settle
+	// those before assigning the revision for a different composition.
+	for _, requestID := range current.PendingRequestIDs {
+		result, err := s.Execute(ctx, codexenv.Request{Action: "reconcile", ID: p.ID, RequestID: requestID})
+		if err != nil && result.RequestState != "failed" {
+			return nil, status, err
+		}
+	}
+	if len(current.PendingRequestIDs) > 0 {
+		current, readErr = s.Read(p.ID)
+		if readErr != nil {
+			return nil, status, readErr
+		}
 	}
 	q := codexenv.Request{Action: "create", ID: p.ID, RequestID: "prepare-" + pin.EffectiveSHA256, Profile: &p}
 	if readErr == nil {

@@ -40,7 +40,7 @@ func prepareHostedExtensions(ctx context.Context, a *app.App, cfg MainAgentConfi
 	}
 	var pending error
 	for _, id := range conversations {
-		selected, named, err := a.NamedHostedSelection(ctx, id)
+		selected, named, _, err := a.HostedRuntimeStartupSelection(ctx, id)
 		if err != nil || !named || selected.RunnerManaged || !cfg.extensionConsumer.Enabled(selected.Runtime.ID) {
 			continue
 		}

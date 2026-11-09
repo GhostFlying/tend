@@ -108,8 +108,20 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 		if err != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "original owner execution snapshot is unavailable")
 		}
-		if pin.Extensions != (protocol.ExtensionExecutionPin{}) {
-			release, _, err := store.GetExtensionRelease(ctx, tx.Q(), pin.Extensions.ReleaseID)
+		runtime, err := store.GetHostRuntime(ctx, tx.Q(), pin.Identity.ExecutionEnvironmentID)
+		if err != nil {
+			return nil, err
+		}
+		pin.Extensions = protocol.ExtensionExecutionPin{}
+		if status := runtime.Runtime.Extensions; status != nil && status.Enabled && slices.Contains(status.Runtimes, pin.Runtime.RuntimeID) && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityManagedExtensions) {
+			state, err := store.GetExtensionState(ctx, tx.Q())
+			if err != nil {
+				return nil, err
+			}
+			if state.Published == nil {
+				return nil, protocol.Errorf(protocol.CodeInvalidTransition, "worker managed extension baseline has not been published")
+			}
+			release, _, err := store.GetExtensionRelease(ctx, tx.Q(), state.Published.ID)
 			if err != nil {
 				return nil, err
 			}

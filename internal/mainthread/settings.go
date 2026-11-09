@@ -107,13 +107,16 @@ func (m *Manager) turnModel(ctx context.Context, th harness.Thread, request stri
 		m.mu.Lock()
 		session := m.session
 		m.mu.Unlock()
+		if current := m.namedSelection(); current != nil && current.Extensions != selected.Extensions {
+			if err := m.restartFrozenEnvironment(ctx, session, th, request); err != nil {
+				return harness.ModelSelection{}, 0, err
+			}
+			return harness.ModelSelection{}, 0, protocol.Errorf(protocol.CodeInvalidTransition, "restoring the frozen extension combination at a confirmed idle boundary")
+		}
 		if observed, ok := session.(interface {
 			EnvironmentPin() protocol.ExtensionExecutionPin
 		}); ok && observed.EnvironmentPin() != selected.Extensions {
 			return harness.ModelSelection{}, 0, protocol.Errorf(protocol.CodeInvalidTransition, "native process has not adopted the selected extension combination")
-		}
-		if current := m.namedSelection(); current != nil && current.Extensions != selected.Extensions {
-			return harness.ModelSelection{}, 0, protocol.Errorf(protocol.CodeInvalidTransition, "managed extensions await a confirmed idle boundary")
 		}
 		if current := m.namedSelection(); current != nil && !sameNamedBinding(*current, selected) {
 			m.mu.Lock()

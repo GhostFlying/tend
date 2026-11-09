@@ -12,11 +12,28 @@ import (
 )
 
 func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
+	for _, tc := range []struct {
+		name                               string
+		split, ownerManaged, workerManaged bool
+	}{{"shared", false, true, true}, {"split", true, true, true}, {"owner_only", true, true, false}, {"worker_only", true, false, true}} {
+		t.Run(tc.name, func(t *testing.T) { testOwnerExtensionRuntime(t, tc.split, tc.ownerManaged, tc.workerManaged) })
+	}
+}
+
+func testOwnerExtensionRuntime(t *testing.T, split, ownerManaged, workerManaged bool) {
 	h, r, p, _ := inventorySetup(t)
 	p.FormatVersion = 2
 	p.Runtimes[0].CLI = "codex"
 	p.Agents[0].Categories = []string{"implementer", "reviewer"}
 	p.Agents[1].Categories = []string{"reviewer"}
+	ownerRuntime := p.Runtimes[0]
+	if split {
+		ownerRuntime.RuntimeID = "owner"
+		p.Runtimes = append(p.Runtimes, ownerRuntime)
+		for i := range p.Agents {
+			p.Agents[i].OwnerBinding = &protocol.AgentRuntimeReference{RuntimeID: ownerRuntime.RuntimeID, Revision: ownerRuntime.Revision}
+		}
+	}
 	_, hash, err := protocol.CanonicalAgentInventory(p)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +65,13 @@ func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
 	r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager, protocol.CapabilityIssueOwner, protocol.CapabilityAgentContinuation, protocol.CapabilityManagedExtensions)
 	r.JournalVersion = 19
 	r.ContinuationBackend = "git"
-	r.Extensions = &protocol.ExtensionHostStatus{Enabled: true, Runtimes: []string{"worker"}}
+	r.Extensions = &protocol.ExtensionHostStatus{Enabled: true}
+	if workerManaged {
+		r.Extensions.Runtimes = append(r.Extensions.Runtimes, "worker")
+	}
+	if ownerManaged && split {
+		r.Extensions.Runtimes = append(r.Extensions.Runtimes, "owner")
+	}
 	r.AgentExecutors = nil
 	for _, agent := range p.Agents {
 		for _, category := range agent.Categories {
@@ -57,7 +80,15 @@ func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			pin := protocol.RunExecutionPin{Extensions: combo.Pin, Identity: agent.Identity, AgentRevision: agent.Revision, Runtime: agent.Binding, InventoryRevision: 1, SnapshotID: "scoped-owner", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: agent.RequestedModel, Effort: agent.RequestedEffort}, Worker: protocol.WorkerAppServer, BackendID: "git"}
+			if !workerManaged {
+				pin.Extensions = protocol.ExtensionExecutionPin{}
+			}
 			r.AgentExecutors = append(r.AgentExecutors, protocol.AgentExecutor{Available: true, Pin: pin})
+			pin.Runtime = protocol.AgentRuntimeReference{RuntimeID: ownerRuntime.RuntimeID, Revision: ownerRuntime.Revision}
+			pin.Extensions = protocol.ExtensionExecutionPin{}
+			if ownerManaged {
+				pin.Extensions = combo.Pin
+			}
 			pin.Purpose = "issue_manager"
 			pin.BackendID = ""
 			r.AgentExecutors = append(r.AgentExecutors, protocol.AgentExecutor{Available: true, Pin: pin})
@@ -73,7 +104,7 @@ func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
 		t.Fatal(op)
 	}
 	assignment := ownerClaim(t, h, r)
-	if assignment.Execution == nil || assignment.Execution.Extensions.CategoryID != "implementer" {
+	if assignment.Execution == nil || ownerManaged && assignment.Execution.Extensions.CategoryID != "implementer" || !ownerManaged && assignment.Execution.Extensions != (protocol.ExtensionExecutionPin{}) {
 		t.Fatal("owner category not frozen", assignment)
 	}
 	stopOwnerClaim(t, h, assignment)
@@ -91,6 +122,9 @@ func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
 			return err
 		}
 		expected, _ := extensions.Resolve(release, "reviewer", p.Agents[0].Identity)
+		if !workerManaged {
+			expected.Pin = protocol.ExtensionExecutionPin{}
+		}
 		if contract.Execution == nil || contract.Execution.Extensions != expected.Pin {
 			t.Fatal("self-execution inherited the owner's unrelated category", contract.Execution)
 		}
@@ -125,7 +159,7 @@ func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
 				}
 			}
 		}
-		if !found {
+		if workerManaged && !found {
 			t.Fatal("task's retained reviewer combination is missing")
 		}
 		return nil

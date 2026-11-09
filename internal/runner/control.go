@@ -281,8 +281,12 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	} // Legacy servers cannot authorize maintenance.
 	copy := *next
 	if r.cfg.Extensions != nil {
+		previous := r.cfg.Extensions.Status().DesiredRelease
 		if err := r.cfg.Extensions.SetTarget(copy.Extensions); err != nil {
 			return err
+		}
+		if r.cfg.Extensions.Status().DesiredRelease != previous {
+			r.requestReconcile()
 		}
 	}
 	copy.Extensions = nil

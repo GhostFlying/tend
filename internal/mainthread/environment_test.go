@@ -3,12 +3,16 @@ package mainthread
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -153,5 +157,81 @@ func TestEnvironmentUpdateWaitsForConfirmedIdleAndClosesAdmission(t *testing.T) 
 	e.m.mu.Unlock()
 	if !detached {
 		t.Fatal("new delivery can still enter old native session")
+	}
+}
+
+type frozenEnvironmentSession struct {
+	*environmentTestSession
+	closed int
+	pin    protocol.ExtensionExecutionPin
+}
+
+func (s *frozenEnvironmentSession) EnvironmentPin() protocol.ExtensionExecutionPin { return s.pin }
+
+func (s *frozenEnvironmentSession) Close() error { s.closed++; return nil }
+
+func TestFrozenEnvironmentRestorationWaitsForIdleBeforeReopening(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	th, err := e.m.waitThread(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.stop()
+	zero := int64(0)
+	category, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "categories.put", Target: protocol.Target{Type: "category", ID: "planner"}, ExpectedControlRevision: &zero, Payload: []byte(`{"title":"Planner","state":"active"}`)}, app.PutAgentCategory{})
+	if err != nil || category.Status != protocol.OpSucceeded {
+		t.Fatal(category, err)
+	}
+	prepared, err := hostedconfig.Prepare(hostedconfig.Configuration{Revision: 1, EnvironmentID: "hosted", MainAgentID: "planner", Definitions: agentconfig.Config{FormatVersion: 1, Runtimes: []agentconfig.RuntimeBinding{{ID: "native", Revision: 1, Kind: agentconfig.HostedManager, ExecutableRef: "fixture", DeclaredPurposes: []agentconfig.Purpose{agentconfig.Main}, Enabled: true}}, Agents: []agentconfig.AgentDefinition{{LocalID: "planner", Revision: 1, DisplayName: "Planner", RuntimeID: "native", Categories: []string{"planner"}, Purposes: []agentconfig.Purpose{agentconfig.Main}, Model: "fixture", Enabled: true}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := e.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "hosted.configure", Target: protocol.Target{Type: "hosted_configuration"}, ExpectedControlRevision: &zero, Payload: []byte(fmt.Sprintf(`{"revision":1,"hash":%q}`, prepared.Hash()))}, app.AcceptHostedConfiguration{Prepared: prepared})
+	if err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal(op, err)
+	}
+	frozen, err := prepared.Select("planner", agentconfig.Main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen.AppliedModel = "original-model"
+	frozen.Extensions = protocol.ExtensionExecutionPin{ReleaseID: "original"}
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		return tx.InsertHostedExecution(ctx, store.HostedExecution{ID: "original-repair", ConversationID: "main", Selection: frozen})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	current := frozen
+	current.Extensions.ReleaseID = "latest"
+	e.m.named = &current
+	s := &frozenEnvironmentSession{environmentTestSession: &environmentTestSession{idle: true}, pin: current.Extensions}
+	e.m.mu.Lock()
+	e.m.session, e.m.thread = s, th
+	e.m.archiveStarting, e.m.archiveTeardown = false, false
+	e.m.active = &turn{}
+	e.m.mu.Unlock()
+	e.m.workMu.Lock()
+	defer e.m.workMu.Unlock()
+	if _, _, err := e.m.turnModel(ctx, th, "original-repair"); protocol.CodeOf(err) != protocol.CodeInvalidTransition || s.closed != 0 {
+		t.Fatal(err)
+	}
+	e.m.active = nil
+	e.m.maintenanceBlocked = true
+	if _, _, err := e.m.turnModel(ctx, th, "original-repair"); protocol.CodeOf(err) != protocol.CodeInvalidTransition || s.closed != 0 {
+		t.Fatal(err)
+	}
+	e.m.maintenanceBlocked = false
+	s.idle = false
+	if _, _, err := e.m.turnModel(ctx, th, "original-repair"); protocol.CodeOf(err) != protocol.CodeInvalidTransition || s.closed != 0 {
+		t.Fatal(err)
+	}
+	s.idle = true
+	if _, _, err := e.m.turnModel(ctx, th, "original-repair"); protocol.CodeOf(err) != protocol.CodeInvalidTransition || s.closed != 1 {
+		t.Fatal(err, s.closed)
+	}
+	if e.m.session != nil || e.m.thread != nil {
+		t.Fatal("old process still admits input")
 	}
 }
