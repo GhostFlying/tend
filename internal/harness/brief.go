@@ -175,6 +175,7 @@ func reviewerEvidenceGuidance(spec WorkerSpec) string {
 		"Missing fields are evidence not provided, not a format violation or an automatic prohibition on review. Do not invent missing results or treat an implementer's local checks as CI. " +
 		"Explain why you rerun checks in your report or verdict evidence; that explanation does not require approval and is not a prerequisite for using test tools. " +
 		"Preserve explicit human requirements, the frozen task agreement and repository final-candidate check, review and CI rules."
+	guidance += " " + ReportReviewGuidance
 	if spec.ReadContext != nil {
 		guidance += " Use read_context kind=reviews to discover the bounded index of linked contributor evidence, then read needed original artifacts and file references. The index is not the complete report or all check logs."
 	}
@@ -332,7 +333,8 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		"and records each repository's HEAD and working tree as you leave them. " +
 		"Follow the frozen acceptance policy and explicit human review requirements; ordinary PR preparation and intermediate reports do not automatically require another independent reviewer. " +
 		"For report or file delivery, call submit_result with the requested report and explicitly selected files before ending your turn. Report-only work does not require Git changes. " +
-		"Report applicable check commands and outcomes, exact tested candidate identities, relevant environment, skips and uncovered work when available; preserve original log file references and state missing evidence honestly. " +
+		FinalReportGuidance + " " +
+		"Preserve applicable check commands and outcomes, exact tested candidate identities, relevant environment, skips and uncovered work in supporting evidence when available; retain original log file references and state missing evidence honestly. " +
 		"For an assigned whole-PR reviewer report: " + reviewerEvidenceGuidance(spec)
 	input = "Implement this task.\n\n" + b.String()
 	if spec.Feedback != nil {

@@ -290,8 +290,13 @@ const AgentItem = memo(function AgentItem({
       ) : (
         <>
           <div className={proseClassName}>
-            <Markdown text={item.body ?? ""} />
+            <Markdown
+              text={item.body ?? ""}
+              files={item.attachments ?? []}
+              fileScope="conversation/attachments"
+            />
           </div>
+          {!!item.attachments?.length && <MessageAttachments attachments={item.attachments} />}
           <MessageTags item={item} currentIssueId={currentIssueId} />
           {status && status !== "completed" && status !== "streaming" && (
             <div className={styles.assistantState} data-state={status} role="status">

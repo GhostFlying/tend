@@ -336,7 +336,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				_ = q.QueryRowContext(ctx, `SELECT task_id FROM tasks WHERE task_id=? UNION ALL SELECT task_id FROM runs WHERE run_id=? LIMIT 1`, r.id, r.id).Scan(&entry.TaskID)
 			}
 			if r.kind == "artifact.submitted" {
-				entry.Title = "实施已交付"
+				entry.Title = "已交付成果"
 				if entry.ArtifactID == "" {
 					entry.ArtifactID = r.id
 				}

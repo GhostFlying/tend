@@ -2605,7 +2605,7 @@ try {
     const resultCard = page.locator('[data-artifact="artifact-waived"]').last();
     await resultCard.getByText("已完成 · 本轮不要求独立验收", { exact: true }).waitFor();
     assert.equal(await resultCard.getByText("待独立验收", { exact: true }).count(), 0);
-    await resultCard.getByRole("button", { name: "打开完整交付 →", exact: true }).click();
+    await resultCard.getByRole("button", { name: "阅读完整报告 →", exact: true }).click();
     await resultCard.getByText("已保存按原策略完成的调查报告", { exact: true }).first().waitFor();
     await page.screenshot({ path: join(output, `creator-policy-result-${viewport.width}.png`) });
     await openIssueAux(page, "编辑定义");

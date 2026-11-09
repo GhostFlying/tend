@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -275,7 +276,12 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 		if e != nil {
 			return Outcome{}, e
 		}
-		if issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled {
+		// The original admitted owner can still report a delivery anomaly to
+		// its supervisor. This records a receipt without reopening execution or
+		// creating a new decision or a close-blocking obligation.
+		execution := x.coordinationExecution
+		closedReceipt := issue.State == protocol.IssueClosed && execution != nil && execution.Selection.Purpose == agentconfig.IssueManager && execution.IssueID == issue.IssueID && !p.BlocksClose && oneOf(p.Kind, "action", "information")
+		if (issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled) && !closedReceipt {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "terminal Issue cannot raise a new obligation")
 		}
 	}

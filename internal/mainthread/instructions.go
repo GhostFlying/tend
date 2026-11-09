@@ -1,5 +1,7 @@
 package mainthread
 
+import "github.com/GhostFlying/tend/internal/harness"
+
 // Instructions are the main agent's standing developer instructions. They
 // sit in the thread's configuration, which the harness restores after a
 // compaction, so they are never injected as context packets (D17).
@@ -49,7 +51,7 @@ Ground rules:
 - After a deterministic validation failure, keep the full intended plan and correct only the rejected fields using the schema and error details. Do not guess status synonyms or remove background, stages, dependencies, commitments or task associations just to make a call succeed. A corrected planning write uses a fresh request identity and commit_seq where applicable; replay the original identity only to recover the same request. For an unknown outcome, read the request/current state before another write.
 - Shared background is only the goal, user constraints and decisions, original evidence references, and sourced facts. Do not put detailed designs, author self-assessment, implementation hypotheses or a preferred solution in shared background, task scope or acceptance checks. Put implementation design in spec.implementation_context, which the server excludes from independent acceptance. Required report deliverables remain review objects, not proof of correctness.
 - Link every newly planned task to its work item and stages. Linking an existing shared task does not inject new background or expand its agreement; verify its spec already covers each concern, or explicitly update the spec before relying on it. Use new worktrees for independent repository tasks, including read-only investigation. Reuse requires both the task and resource to belong to the same primary work item and a need to continue that resource's actual work state; the same repository, a follow-up relation or an additional work-item link is insufficient. Read the default source task before choosing reuse; a default is a candidate, not a requirement. Same-item parallel work may use independent resources; one resource remains exclusive. Transfer cross-item results through explicit commit, report or file references, not shared working directories. Explicitly reconcile running tasks before changing their requirements. Keep task specifications and immutable acceptance evidence separate from the editable plan. Use execution views and queue reasons to distinguish waiting from actual running; a plan stage marked active is not evidence that a worker is executing. Queueing is an execution marker, not a new plan stage.
-`
+` + "\n\n" + harness.FinalReportGuidance
 
 // NamedMainInstructions describe only tools and responsibilities available to
 // the named personal planner. Legacy instructions remain for old conversations.
@@ -112,4 +114,4 @@ Publish every user-facing reply with conversation_reply: specify the exact admit
 
 Declare disposition linked with work_item_ids and exact contexts (work_item_id, revision), or unassigned with empty work_item_ids and contexts. Supply all seven reviewed_kinds: goal, constraint, authorization, refusal, commitment, question, suggestion, including absent kinds. A manager must use its own single Issue and current context revision; register new facts with issues_context_fact before publishing and pass an empty facts array. Main delegates technical fact management to the Issue manager. Consultation replies must be unassigned with empty contexts, facts and work_item_ids and grant no Issue authority.
 
-Use conversation_input_read only to recover exact admitted source content when missing; returning its content records witnessed reading. Use conversation_notify for a sourced proactive notice without a direct input to reply to; supply source_message_ids, purpose and a business reason. Tend selects its notification endpoints. Keep silent when there is no meaningful change or required user action.`
+Use conversation_input_read only to recover exact admitted source content when missing; returning its content records witnessed reading. Use conversation_notify for a sourced proactive notice without a direct input to reply to; supply source_message_ids, purpose and a business reason. Tend selects its notification endpoints. Keep silent when there is no meaningful change or required user action.` + "\n\n" + harness.FinalReportGuidance

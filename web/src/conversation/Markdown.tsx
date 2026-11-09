@@ -48,10 +48,12 @@ const tags = new Set([
 export const Markdown = memo(function Markdown({
   text,
   files,
+  fileScope = "files",
   demoteHeadings = false,
 }: {
   text: string;
   files?: readonly PreviewFile[];
+  fileScope?: "files" | "conversation/attachments";
   demoteHeadings?: boolean;
 }) {
   const nodes = useMemo(() => {
@@ -60,8 +62,8 @@ export const Markdown = memo(function Markdown({
       for (const token of tokens) {
         if (token.type === "heading_open" || token.type === "heading_close") token.tag = "h4";
       }
-    return render(tokens, { next: 0 }, files);
-  }, [text, files, demoteHeadings]);
+    return render(tokens, { next: 0 }, files, fileScope);
+  }, [text, files, demoteHeadings, fileScope]);
   return <div className={styles.md}>{nodes}</div>;
 });
 
@@ -70,7 +72,12 @@ interface Keys {
   next: number;
 }
 
-function render(tokens: readonly Token[], keys: Keys, files?: readonly PreviewFile[]): ReactNode[] {
+function render(
+  tokens: readonly Token[],
+  keys: Keys,
+  files: readonly PreviewFile[] | undefined,
+  fileScope: "files" | "conversation/attachments",
+): ReactNode[] {
   const root: ReactNode[] = [];
   const stack: { token: Token; children: ReactNode[]; previewLink?: boolean }[] = [];
   const add = (...nodes: ReactNode[]) => (stack.at(-1)?.children ?? root).push(...nodes);
@@ -83,11 +90,25 @@ function render(tokens: readonly Token[], keys: Keys, files?: readonly PreviewFi
     if (token.nesting === -1) {
       const open = stack.pop();
       if (open) {
+        const file =
+          open.token.tag === "a"
+            ? resolveFile(String(open.token.attrGet("href") ?? ""), files ?? [])
+            : undefined;
         // A linked image becomes an authenticated preview, not nested buttons
         // inside an external anchor that also navigates when the preview opens.
         add(
           open.previewLink ? (
             <Fragment key={keys.next++}>{open.children}</Fragment>
+          ) : file ? (
+            <FilePreview
+              key={keys.next++}
+              file={file}
+              scope={fileScope}
+              relatedFiles={files ?? []}
+              label={open.children}
+              row
+              compact
+            />
           ) : (
             element(open.token, open.children, keys.next++)
           ),
@@ -97,7 +118,7 @@ function render(tokens: readonly Token[], keys: Keys, files?: readonly PreviewFi
     }
     switch (token.type) {
       case "inline":
-        add(...render(token.children ?? [], keys, files));
+        add(...render(token.children ?? [], keys, files, fileScope));
         break;
       case "text":
         add(...withTaskRefs(token.content, keys));
@@ -125,7 +146,13 @@ function render(tokens: readonly Token[], keys: Keys, files?: readonly PreviewFi
         }
         add(
           file ? (
-            <FilePreview key={`${keys.next++}:${file.file_id}`} file={file} compact />
+            <FilePreview
+              key={`${keys.next++}:${file.file_id}`}
+              file={file}
+              scope={fileScope}
+              relatedFiles={files ?? []}
+              compact
+            />
           ) : (
             token.content || token.attrGet("alt") || ""
           ),

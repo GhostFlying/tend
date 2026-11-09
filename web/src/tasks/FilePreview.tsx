@@ -1,26 +1,39 @@
 import { useOverlayState } from "../ui/focus.ts";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import type { DownloadURLResponse } from "../api/generated/api.ts";
 import { ApiError } from "../api/client.ts";
 import { useServices } from "../app/services.tsx";
 import { ImageTile } from "../conversation/Images.tsx";
 import { FileDownload } from "./FileDownload.tsx";
-import { isImage, type PreviewFile } from "./files.ts";
+import { isImage, textFileFormat, type PreviewFile } from "./files.ts";
 import { Button } from "../ui/Button.tsx";
 import styles from "./FilePreview.module.css";
 
 type Scope = "files" | "conversation/attachments";
+const TextPreview = lazy(() => import("./TextPreview.tsx"));
 export function FilePreview({
   file,
   scope = "files",
   compact = false,
   row = false,
+  relatedFiles,
+  label,
 }: {
   file: PreviewFile;
   scope?: Scope;
   compact?: boolean;
   row?: boolean;
+  relatedFiles?: readonly PreviewFile[];
+  label?: ReactNode;
 }) {
   const { client } = useServices();
   const tile = useRef<HTMLSpanElement>(null);
@@ -29,6 +42,7 @@ export function FilePreview({
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [html, setHtml] = useOverlayState(false);
+  const [text, setText] = useOverlayState(false);
   const image = isImage(file);
   const path = `/api/v1/${scope}/${encodeURIComponent(file.file_id)}/download-url?inline=1`;
   useEffect(() => {
@@ -87,9 +101,14 @@ export function FilePreview({
             )}
           </span>
         ))}
-      <strong>{file.name}</strong>
+      <strong>{label ?? file.name}</strong>
       {!compact && <span className={styles.caption}>{file.size.toLocaleString()} 字节</span>}
       <span className={styles.actions}>
+        {textFileFormat(file) && (
+          <Button variant="link" onClick={() => setText(true)} aria-label={`阅读 ${file.name}`}>
+            阅读原文
+          </Button>
+        )}
         {scope === "files" && /\.html?$/i.test(file.name) && (
           <Button variant="link" onClick={() => setHtml(true)}>
             预览设计稿
@@ -98,6 +117,17 @@ export function FilePreview({
         <FileDownload fileId={file.file_id} name={file.name} scope={scope} />
       </span>
       {html && <HTMLPreview name={file.name} path={path} onClose={() => setHtml(false)} />}
+      {text && (
+        <Suspense fallback={<span role="status">正在打开原文…</span>}>
+          <TextPreview
+            key={`${scope}:${file.file_id}`}
+            file={file}
+            scope={scope}
+            files={relatedFiles ?? []}
+            onClose={() => setText(false)}
+          />
+        </Suspense>
+      )}
     </span>
   );
 }

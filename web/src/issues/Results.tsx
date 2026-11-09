@@ -20,6 +20,13 @@ export function IssueResultCard({
   const { client } = useServices();
   const read = useMemo(() => new WorkItemRead<ArtifactDetail>(client), [client]);
   const state = useStore(read.state);
+  const full =
+    state.value?.artifact.artifact_id === result.artifact.artifact_id ? state.value : null;
+  const hasReport =
+    result.artifact.ref !== null &&
+    typeof result.artifact.ref === "object" &&
+    !!(result.artifact.ref as Record<string, unknown>).report;
+  const noun = hasReport ? "报告" : "成果";
   const [expanded, setExpanded] = useEntryState(`artifact:${result.artifact.artifact_id}`, false);
   useEffect(() => {
     if (expanded)
@@ -43,27 +50,31 @@ export function IssueResultCard({
       </div>
       <div className={styles.deliveryFull}>
         <ArtifactDelivery
-          compact={!expanded}
-          value={
-            expanded ? (state.value?.artifact.ref ?? result.artifact.ref) : result.artifact.ref
-          }
+          compact={!expanded || !full}
+          value={expanded && full ? full.artifact.ref : result.artifact.ref}
         />
       </div>
-      {expanded && state.loading && !state.value && <p role="status">正在读取完整交付…</p>}
-      {expanded && state.value && <ArtifactRef value={state.value.artifact.ref} />}
-      {state.error && (
+      {expanded && state.loading && !full && <p role="status">正在读取完整{noun}…</p>}
+      {expanded && full && <ArtifactRef value={full.artifact.ref} />}
+      {expanded && state.error && (
         <p role="status">
-          完整交付读取失败。<button onClick={open}>重试</button>
+          {full ? `完整${noun}暂时无法刷新。` : `完整${noun}读取失败，当前仍为摘要。`}
+          <button onClick={open}>重试</button>
         </p>
       )}
       <div className={styles.deliveryActions}>
         {!expanded && (
           <button className={styles.textLink} onClick={open}>
-            打开完整交付 →
+            阅读完整{noun} →
+          </button>
+        )}
+        {expanded && full && (
+          <button className={styles.textLink} onClick={() => setExpanded(false)}>
+            收起{noun}
           </button>
         )}
         <button className={styles.textLink} onClick={() => onTask(result.task_id)}>
-          {result.acceptance_policy?.required === false ? "查看任务与结果 →" : "查看任务与验收 →"}
+          {result.acceptance_policy?.required === false ? "任务与结果记录 →" : "任务与验收记录 →"}
         </button>
       </div>
     </article>
@@ -148,7 +159,7 @@ export function HistoricalResultCard({
   return (
     <div ref={ref}>
       {state.value ? (
-        <IssueResultCard result={{ ...state.value, title: "执行交付" }} onTask={onTask} />
+        <IssueResultCard result={{ ...state.value, title: "交付成果" }} onTask={onTask} />
       ) : (
         <p role="status">
           {state.error ? (

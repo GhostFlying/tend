@@ -213,13 +213,17 @@ export class ApiClient {
   }
 
   /** Reads an immutable delivery file through owner authorization. */
-  async file(fileId: string, signal?: AbortSignal): Promise<Blob> {
+  async file(
+    fileId: string,
+    signal?: AbortSignal,
+    scope: "files" | "conversation/attachments" = "files",
+  ): Promise<Blob> {
     const bounded = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
       : AbortSignal.timeout(this.timeoutMs);
     const response = await this.authorized(
       "GET",
-      `/api/v1/files/${encodeURIComponent(fileId)}`,
+      `/api/v1/${scope}/${encodeURIComponent(fileId)}`,
       undefined,
       bounded,
       "application/octet-stream",

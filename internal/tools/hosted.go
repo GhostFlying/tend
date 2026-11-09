@@ -107,7 +107,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_deadline_put", "Record a sourced deadline or estimate, with known/unknown time and default 24h/due reminders; never silently change a user commitment.", "deadline", protocol.PutIssueDeadlinePayload{}, app.IssueDeadlineCommand{}, true},
 	{"issues_deadline_cancel", "Cancel a deadline with an explicit reason, preserving already claimed/unknown reminder facts.", "deadline", protocol.CancelIssueDeadlinePayload{}, app.IssueDeadlineCommand{Cancel: true}, true},
 	{"planner_entry_put", "Record a user_action or issue_priority. Omit target_id when creating; on update provide target_id and expected_control_revision. The server assigns identity, revision and timestamps. This does not schedule an agent retry; task execution priority remains tasks_rate.", "planner_entry", protocol.PutPlannerEntryInput{}, app.PutPlannerEntry{}, true},
-	{"attentions_create", "Submit a distinct question/action to your supervisor, or record nonblocking information. Agent-owned Issue questions follow the responsibility chain; only human-targeted problems enter user Inbox. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
+	{"attentions_create", "Submit a distinct question/action to your supervisor, or record nonblocking information. Use kind=decision for a question, action when a supervisor must act, or information for a record; problem is not a kind. After closing your Issue, the original valid responsibility may still record a nonblocking action/information about its final communication. Agent-owned Issue questions follow the responsibility chain; only human-targeted problems enter user Inbox. Optional latest_action_at gives its true deadline with 24h/due reminders to main, even without an Issue. Assignment stays unchanged.", "attention", protocol.CreateAttentionPayload{}, app.AttentionCommand{Action: "create"}, true},
 	{"attentions_update", "Revise this stable attention without replacing or answering its original decision. Omit latest_action_at to retain it, set 0 to clear; timezone only changes display.", "attention", protocol.UpdateAttentionPayload{}, app.AttentionCommand{Action: "update"}, true},
 	{"attentions_respond", "Relay the owner's actual message to the original decision/version, including its typed worker-handoff continuation when supplied. Omission preserves the legacy automatic handoff once answered and physically stopped under the current contract; use explicit continuation.mode=wait with a reason to hold continuation. Free text never supplies typed continuation readiness. Never answer on the owner's behalf.", "attention", protocol.RespondAttentionPayload{}, app.AttentionCommand{Action: "respond", FromMessage: true}, true},
 	{"attentions_confirm", "Relay an actual owner's confirmation of a human action; agent narration is insufficient.", "attention", protocol.ConfirmAttentionPayload{}, app.AttentionCommand{Action: "confirm", FromMessage: true}, true},
@@ -316,15 +316,26 @@ func hostedAnswer(value any, err error) harness.ToolResult {
 	}
 	return harness.ToolResult{Success: out.OK, Text: string(b)}
 }
+
+func (s *Service) answerHosted(ctx context.Context, c Call, value any, err error) harness.ToolResult {
+	if err != nil {
+		var typed *protocol.Error
+		if !errors.As(err, &typed) {
+			s.log.ErrorContext(ctx, "hosted tool failed", "tool", c.Tool, "request_id", c.RequestID, "execution_id", c.executionRequest(), "thread", c.Principal.Thread, "native", c.Native, "err", err)
+		}
+	}
+	return hostedAnswer(value, err)
+}
+
 func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult, bool) {
 	execution, found, err := s.app.HostedExecution(ctx, c.executionRequest())
 	if err != nil {
-		return hostedAnswer(nil, err), true
+		return s.answerHosted(ctx, c, nil, err), true
 	}
 	if !found {
 		return harness.ToolResult{}, false
 	}
-	fail := func(err error) (harness.ToolResult, bool) { return hostedAnswer(nil, err), true }
+	fail := func(err error) (harness.ToolResult, bool) { return s.answerHosted(ctx, c, nil, err), true }
 	if execution.Selection.RunnerManaged {
 		if err := s.app.AuthorizeRunnerCoordination(ctx, c.Principal, execution); err != nil {
 			return fail(err)
@@ -357,7 +368,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		}
 		c.ExecutionRequestID = execution.ID
 		value, err := s.startHostedUpgrade(ctx, c, native.Status == store.TurnStarting || native.Status == store.TurnStarted)
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	if c.Tool == "decision_continuation_read" {
 		var args decisionContinuationReadArgs
@@ -365,7 +376,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return fail(err)
 		}
 		value, err := s.readDecisionContinuation(ctx, execution, args.DecisionID)
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	if c.Tool == "runs_maintenance_reconciliation" {
 		if execution.Selection.Purpose != agentconfig.Main && execution.Selection.Purpose != agentconfig.IssueManager {
@@ -398,14 +409,14 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 		if err != nil {
 			return fail(err)
 		}
-		return hostedAnswer(value, nil), true
+		return s.answerHosted(ctx, c, value, nil), true
 	}
 	if c.Tool == "tasks_manager_reconciliation" {
 		if execution.Selection.Purpose != agentconfig.Main {
 			return fail(protocol.Errorf(protocol.CodeForbidden, "only the main coordinator can inspect global manager reconciliation"))
 		}
 		value, err := s.tasksManagerReconciliation(ctx, c)
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	if c.Tool == "conversation_input_read" {
 		var args struct {
@@ -415,7 +426,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return fail(err)
 		}
 		value, err := s.app.ReadCommunicationInput(ctx, execution.ID, args.MessageID)
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	for _, m := range hostedMutations {
 		if c.Tool != m.name {
@@ -463,6 +474,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 				return fail(err)
 			}
 		}
+		c.RequestID = request
 		env := &protocol.Envelope{RequestID: request, Operation: command.Operation(), Target: protocol.Target{Type: m.target, ID: args.TargetID}, ExpectedControlRevision: args.ExpectedControlRevision, Reason: args.Reason, Payload: args.Payload}
 		result, err := s.app.Execute(ctx, c.Principal, env, cmd)
 		receipt := map[string]any{"request_id": request}
@@ -473,13 +485,13 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			receipt["status"] = result.Status
 		}
 		if err != nil {
-			return hostedAnswer(receipt, err), true
+			return s.answerHosted(ctx, c, receipt, err), true
 		}
 		receipt["outcome"] = result.Result
 		if result.Error != nil {
-			return hostedAnswer(receipt, result.Error), true
+			return s.answerHosted(ctx, c, receipt, result.Error), true
 		}
-		return hostedAnswer(receipt, nil), true
+		return s.answerHosted(ctx, c, receipt, nil), true
 	}
 	if c.Tool == "download_file" && execution.Selection.RunnerManaged {
 		var args struct {
@@ -489,7 +501,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return fail(err)
 		}
 		file, err := s.app.ManagerFile(ctx, c.Principal, args.FileID)
-		return hostedAnswer(file, err), true
+		return s.answerHosted(ctx, c, file, err), true
 	}
 	if c.Tool == "attentions_list" || c.Tool == "planner_read" || c.Tool == "deadlines_list" {
 		if execution.Selection.Purpose == agentconfig.Consultation {
@@ -518,7 +530,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			}
 			return err
 		})
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	if c.Tool == "attentions_read" {
 		if execution.Selection.Purpose == agentconfig.Consultation {
@@ -539,7 +551,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			}
 			return err
 		})
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	if result, handled := s.hostedCapabilities(ctx, c, execution); handled {
 		return result, true
@@ -554,7 +566,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 				return fail(err)
 			}
 			v, err := s.app.AgentCategories(ctx, p.State, p.After, p.Limit)
-			return hostedAnswer(v, err), true
+			return s.answerHosted(ctx, c, v, err), true
 		}
 		var p hostedRunnerReadArgs
 		if err := decode(c.Arguments, &p); err != nil {
@@ -564,7 +576,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			return fail(protocol.Errorf(protocol.CodeInvalidRequest, "host_id is required"))
 		}
 		v, err := s.app.RunnerAgentCatalog(ctx, p.HostID)
-		return hostedAnswer(v, err), true
+		return s.answerHosted(ctx, c, v, err), true
 	}
 	if result, handled := s.hostedArtifactShares(ctx, c, execution); handled {
 		return result, true
@@ -574,11 +586,11 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 	}
 	if c.Tool == "agents_hosted_list" {
 		v, e := s.app.HostedAgentInventory(ctx)
-		return hostedAnswer(v, e), true
+		return s.answerHosted(ctx, c, v, e), true
 	}
 	if c.Tool == "issues_turn_read" && execution.IssueID != "" {
 		v, e := s.app.LogicalTurn(ctx, execution.ID)
-		return hostedAnswer(v, e), true
+		return s.answerHosted(ctx, c, v, e), true
 	}
 	if c.Tool == "issues_read" {
 		var p hostedReadArgs
@@ -623,7 +635,7 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			value = issue
 			return nil
 		})
-		return hostedAnswer(value, err), true
+		return s.answerHosted(ctx, c, value, err), true
 	}
 	if (execution.Selection.Purpose == agentconfig.Consultation || execution.IssueID != "") && (c.Tool == "conversation_context_index" || c.Tool == "agent_rollout_read") {
 		var p map[string]any
