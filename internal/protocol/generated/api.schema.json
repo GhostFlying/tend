@@ -4724,6 +4724,9 @@
         "continuation_action_id": {
           "type": "string"
         },
+        "current_assignment_epoch": {
+          "type": "integer"
+        },
         "decision_id": {
           "type": "string"
         },
@@ -4732,6 +4735,9 @@
         },
         "policy": {
           "$ref": "#/definitions/DecisionContinuationPolicy"
+        },
+        "responsibility_adoption_required": {
+          "type": "boolean"
         },
         "resume_condition": {
           "type": "string"
@@ -14288,8 +14294,14 @@
     "ResumeDecisionContinuationPayload": {
       "additionalProperties": false,
       "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
         "expected_revision": {
           "type": "integer"
+        },
+        "reason": {
+          "type": "string"
         },
         "source_message_id": {
           "type": "string"

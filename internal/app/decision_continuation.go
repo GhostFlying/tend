@@ -100,6 +100,9 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if c.Reconcile && p.ExpectedAssignmentEpoch != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "dependency reconciliation does not adopt execution responsibility; use explicit resume")
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(x.Env.Payload, &fields); err != nil || len(fields["expected_revision"]) == 0 || bytes.Equal(bytes.TrimSpace(fields["expected_revision"]), []byte("null")) || p.ExpectedRevision < 0 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "explicit nonnegative expected_revision is required")
@@ -115,25 +118,30 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 	if expected != v.TaskControlRevision || p.ExpectedRevision != v.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "continuation or task control revision changed")
 	}
+	d, err := store.GetDecision(ctx, tx.Q(), v.DecisionID)
+	if err != nil {
+		return Outcome{}, err
+	}
 	if x.Principal.Kind != protocol.PrincipalOwner {
 		if x.coordinationExecution == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "admitted coordination execution is required")
 		}
 		if !c.Reconcile {
 			if p.SourceMessageID == "" {
-				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "explicit resume requires an actual owner source")
-			}
-			if err := validateAttentionOwnerRelay(ctx, tx.Q(), x, x.coordinationExecution.IssueID, p.SourceMessageID); err != nil {
+				allowed, err := agentTechnicalWaitScope(ctx, tx.Q(), *x.coordinationExecution, d)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if !allowed {
+					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "explicit resume requires an actual owner source")
+				}
+			} else if err := validateAttentionOwnerRelay(ctx, tx.Q(), x, x.coordinationExecution.IssueID, p.SourceMessageID); err != nil {
 				return Outcome{}, err
 			}
 		}
 	}
 	if v.State == "continued" {
 		return Outcome{Result: v, NoEffect: true}, nil
-	}
-	d, err := store.GetDecision(ctx, tx.Q(), v.DecisionID)
-	if err != nil {
-		return Outcome{}, err
 	}
 	if d.Status != store.DecisionAnswered {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "record an answer before continuing its handoff")
@@ -142,8 +150,20 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 	if err != nil {
 		return Outcome{}, err
 	}
+	if p.ExpectedAssignmentEpoch != nil && (*p.ExpectedAssignmentEpoch != v.CurrentAssignmentEpoch || strings.TrimSpace(p.Reason) == "") {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "current assignment epoch and explicit continuation reason are required")
+	}
 	if !valid {
-		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "original handoff agreement or responsibility changed")
+		if err := admitStoppedResponsibilityAdoption(ctx, x, tx, v, p); err != nil {
+			return Outcome{}, err
+		}
+		valid, err = store.QuestionHandoffCurrent(ctx, tx.Q(), v.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !valid {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "original handoff agreement or responsibility changed")
+		}
 	}
 	if c.Reconcile && (v.Policy == nil || v.Policy.Mode != protocol.DecisionDependency) {
 		return Outcome{}, continuationBlocked(v, "this wait requires explicit resume, not readiness reconciliation")

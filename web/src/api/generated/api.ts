@@ -721,9 +721,11 @@ export interface DecisionContinuationView {
   answer_request_id?: string;
   blocked_reason?: string;
   continuation_action_id?: string;
+  current_assignment_epoch?: number;
   decision_id: string;
   decision_version: number;
   policy?: DecisionContinuationPolicy;
+  responsibility_adoption_required?: boolean;
   resume_condition: string;
   resume_request_id?: string;
   revision: number;
@@ -5896,7 +5898,9 @@ export interface RespondInteraction {
  * via the `definition` "ResumeDecisionContinuationPayload".
  */
 export interface ResumeDecisionContinuationPayload {
+  expected_assignment_epoch?: number;
   expected_revision: number;
+  reason?: string;
   source_message_id?: string;
 }
 /**

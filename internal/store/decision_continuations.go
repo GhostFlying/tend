@@ -97,6 +97,32 @@ func ReadDecisionContinuation(ctx context.Context, q Querier, id string) (protoc
 		return v, err
 	}
 	v.TaskControlRevision = task.ControlRevision
+	primary, err := GetTaskIssueOwner(ctx, q, v.TaskID)
+	if err != nil {
+		return v, err
+	}
+	if primary != "" {
+		issue, err := GetCanonicalIssue(ctx, q, primary)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return v, err
+		}
+		if err == nil {
+			v.CurrentAssignmentEpoch = issue.AssignmentEpoch
+			current, err := TaskOwnerContractCurrent(ctx, q, v.TaskID)
+			if err != nil {
+				return v, err
+			}
+			owned, err := RunIssueResponsibilityCurrent(ctx, q, v.RunID)
+			if err != nil {
+				return v, err
+			}
+			adopted, err := AdoptedQuestionResponsibilityCurrent(ctx, q, v.RunID)
+			if err != nil {
+				return v, err
+			}
+			v.ResponsibilityAdoptionRequired = !current || (!owned && !adopted)
+		}
+	}
 	row, err := GetDecisionContinuation(ctx, q, id)
 	if err != nil {
 		return v, err

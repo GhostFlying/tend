@@ -260,6 +260,21 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 		return Outcome{}, err
 	}
 	delegationSources := []string{hostedPayloadSource(x.Env.Payload)}
+	// Releasing a proved Agent-authored technical wait is a scoped scheduling
+	// judgement, not a relay of a new owner instruction.
+	if c.Operation() == protocol.OpResumeDecisionContinuation && hostedPayloadSource(x.Env.Payload) == "" {
+		d, err := store.GetDecision(ctx, tx.Q(), x.Env.Target.ID)
+		if err != nil {
+			return Outcome{}, errNotFound(err, "question continuation does not exist")
+		}
+		technical, err := agentTechnicalWaitScope(ctx, tx.Q(), execution, d)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if technical {
+			delegationSources = nil
+		}
+	}
 	if c.Operation() == "issues.create" {
 		var create protocol.CreateIssuePayload
 		if err := decodePayload(x.Env, &create); err != nil {

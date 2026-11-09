@@ -58,8 +58,14 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 			if err != nil {
 				return err
 			}
-			// Matching the same Agent identity cannot revive an answer from an
-			// earlier assignment epoch, including independent review ownership.
+			if !current {
+				current, err = store.AdoptedQuestionResponsibilityCurrent(ctx, q, h.RunID)
+				if err != nil {
+					return err
+				}
+			}
+			// Only the exact stopped predecessor's explicit adoption can bridge
+			// an epoch; matching the same Agent identity alone grants nothing.
 			c.OwnerResponsibilityChanged = !current
 			pin, err := store.GetRunExecution(ctx, q, h.RunID)
 			if err == nil {
