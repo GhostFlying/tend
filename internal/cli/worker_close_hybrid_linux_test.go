@@ -5,6 +5,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +88,19 @@ func TestWorkerCloseHybridRejectsChangedBoundary(t *testing.T) {
 			}
 			f.write(filepath.Join(f.path, "cgroup.procs"), "")
 		}},
+		{"unit_renamed_without_replacement", func(f workerCloseFixture) {
+			if err := os.Rename(f.path, f.path+".renamed"); err != nil {
+				f.t.Fatal(err)
+			}
+			f.write(filepath.Join(f.path+".renamed", "nested/cgroup.procs"), "999\n")
+		}},
+		{"ancestor_renamed_without_replacement", func(f workerCloseFixture) {
+			parent := filepath.Dir(f.path)
+			if err := os.Rename(parent, parent+".renamed"); err != nil {
+				f.t.Fatal(err)
+			}
+			f.write(filepath.Join(parent+".renamed", filepath.Base(f.path), "nested/cgroup.procs"), "999\n")
+		}},
 		{"mountpoint_changed", func(f workerCloseFixture) {
 			f.write(filepath.Join(f.host.procRoot, "self/mountinfo"), "30 29 0:26 / /other/systemd rw - cgroup cgroup rw,name=systemd\n")
 		}},
@@ -155,5 +170,52 @@ func TestWorkerClosePrefersNamedUnifiedV2AndReadsLegacyIntent(t *testing.T) {
 	}
 	if err := old.Validate(); err != nil {
 		t.Fatal("legacy v2 proof no longer readable", err)
+	}
+}
+
+func TestWorkerCloseV1RemovalMetadataLookupRemainsBoundedAndUnknownOnError(t *testing.T) {
+	for _, name := range []string{"directory_limit", "cancelled", "read_error", "cross_device"} {
+		t.Run(name, func(t *testing.T) {
+			f := newWorkerCloseHybridFixture(t)
+			prepared, err := executeWorkerClose(context.Background(), f.q, f.host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			boundary := prepared.Intent.Boundary
+			ctx := context.Background()
+			root := boundary.FilesystemRoot
+			var expected error
+			switch name {
+			case "directory_limit":
+				// Populate the tree while the original inode is still allocated;
+				// otherwise mkdir could reuse it and correctly stop the lookup
+				// before the directory-limit branch we intend to exercise.
+				for i := 0; i < 4096; i++ {
+					if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("lookup-%04d", i)), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "cancelled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+				expected = context.Canceled
+			case "read_error":
+				root = filepath.Join(root, "missing-root")
+				expected = os.ErrNotExist
+			case "cross_device":
+				boundary.RootDevice++
+			}
+			if err := os.RemoveAll(f.path); err != nil {
+				t.Fatal(err)
+			}
+			err = confirmWorkerCloseV1InodeRemoved(ctx, root, boundary)
+			if err == nil || expected != nil && !errors.Is(err, expected) {
+				t.Fatalf("uncertain lookup accepted or lost its cause: %v", err)
+			}
+			if name == "directory_limit" && !strings.Contains(err.Error(), "4096 directories") {
+				t.Fatalf("wrong directory bound: %v", err)
+			}
+		})
 	}
 }

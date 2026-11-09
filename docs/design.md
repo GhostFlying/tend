@@ -1457,7 +1457,9 @@ runner 停机不覆盖已观察到的原生终态；生命周期取消、暂停�
 独立保存 `external_execution_boundary` 来源的关闭证明，供原结果续收；原 Close
 历史事实保持。统一层只提供根路径的混合 cgroup 布局，可绑定实际 mountinfo 中
 name=systemd 的 v1 原 unit 层级；v1 只接受原 kernel 目录移除的证明，不以
-tasks/procs 目录快照推断递归为空。v2 仍使用递归 populated 观察或原目录移除。
+tasks/procs 目录快照推断递归为空。原路径缺失时须有界核对原 inode 已不在
+所绑定的 cgroup filesystem 中，目录或祖先改名不能被当作对象移除。v2 仍使用
+递归 populated 观察或原目录移除。
 实施见
 `docs/plans/completed-result-recovery.md` 与 `docs/plans/owned-close-reconciliation.md`。
 

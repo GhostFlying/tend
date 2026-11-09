@@ -46,6 +46,11 @@ tend worker-close confirm \
 缺失观察或身份冲突均返回错误，不写关闭证明。丢失的历史 PGID
 不再被猜成成员 PID，而由已事先绑定的整个执行边界覆盖。
 
+v1 允许目录及其祖先改名，因此原路径消失后还会在已绑定的 filesystem root 内
+有界查找原 device/inode。最多检查 4096 个目录，只读目录元数据，不读取 tasks
+或进程内容；找到改名后的原目录、读取错误、超时、跨 device 或超过上限都保持
+未确认。完整查找未发现原 inode 后，才允许该次 `kernel_removed` 观察。
+
 成功 JSON 包含 `phase=confirmed`、`intent_path`、`intent_sha256`、`proof_path`、
 `proof_sha256` 及完整 intent/proof。文件在原 StateDir 独占发布并 fsync：intent
 以 request ID 的 SHA 命名；证明为 `owned-external-close-<原 owned SHA>.json`。
