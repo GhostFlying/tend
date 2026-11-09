@@ -34,6 +34,13 @@ func TestCollectionPathMoveKeepsSourceIDAndCursor(t *testing.T) {
 	if all[0].Collection.RequestID != "turn" || all[0].Collection.State != protocol.UsageActive {
 		t.Fatal(all)
 	}
+	previous := all[0]
+	if err := j.ActivateUsageSource(t.Context(), id, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.QueueUsage(t.Context(), previous, nil); protocol.CodeOf(err) != protocol.CodeStaleRevision {
+		t.Fatal("old turn collection survived a new dispatch", err)
+	}
 }
 
 func TestCollectionControlSurvivesRestartWithoutRepeatingEpoch(t *testing.T) {

@@ -73,9 +73,9 @@ func (j *Journal) ActivateUsageSource(ctx context.Context, id, request string) e
 		if s.WriterStopped {
 			return protocol.Errorf(protocol.CodeStaleRevision, "native writer is stopped")
 		}
-		if s.Collection.State == protocol.UsageActive && s.Collection.RequestID == request {
-			return nil
-		}
+		// A retained manager can dispatch several native turns under one run
+		// reference. Every dispatch fences earlier collection work, even when
+		// the enclosing business request has not changed.
 		s.Collection.Activate(request, s.Source.WriterID)
 		// An activation deliberately advances the epoch under the same transaction.
 		return replaceUsageCollection(ctx, tx, s, j.now().UnixMilli())
