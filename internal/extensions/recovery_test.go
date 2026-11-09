@@ -230,6 +230,10 @@ func TestRetainedPreparationDoesNotReplaceDamagedReceipt(t *testing.T) {
 	if err != nil || len(matches) != 1 {
 		t.Fatal(matches, err)
 	}
+	validReceipt, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(matches[0], []byte("incomplete"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -239,5 +243,18 @@ func TestRetainedPreparationDoesNotReplaceDamagedReceipt(t *testing.T) {
 	}
 	if validations != 1 {
 		t.Fatal("damaged receipt caused automatic regeneration", validations)
+	}
+	other := filepath.Join(filepath.Dir(filepath.Dir(matches[0])), combo.Pin.EffectiveSHA256+"-ffffffffffffffff", "prepared.json")
+	if err := os.MkdirAll(filepath.Dir(other), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, validReceipt, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PrepareRetained(t.Context(), combo.Pin, "native"); err != nil {
+		t.Fatal("damaged earlier variant blocked an intact receipt", err)
+	}
+	if validations != 1 {
+		t.Fatal("intact retained variant triggered new-work preparation", validations)
 	}
 }
