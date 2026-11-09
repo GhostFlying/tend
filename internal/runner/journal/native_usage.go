@@ -26,8 +26,26 @@ type UsageSource struct {
 }
 
 func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error {
+	_, err := j.registerUsageSource(ctx, s, false)
+	return err
+}
+
+// RegisterUsageMaintenanceSource preserves an existing writer lifecycle. Merely
+// locating a history file is not a new writer attachment or stop confirmation.
+func (j *Journal) RegisterUsageMaintenanceSource(ctx context.Context, s UsageSource) (UsageSourceSnapshot, error) {
+	return j.registerUsageSource(ctx, s, true)
+}
+
+func (j *Journal) registerUsageSource(ctx context.Context, s UsageSource, maintenance bool) (UsageSourceSnapshot, error) {
 	defer j.WakeUsage()
-	return j.tx(ctx, func(tx *sql.Tx) error {
+	var snapshot UsageSourceSnapshot
+	err := j.tx(ctx, func(tx *sql.Tx) (err error) {
+		defer func() {
+			if err == nil {
+				snapshot.Source, err = getUsageSource(ctx, tx, s.ID)
+				snapshot.ExpectedRevision = snapshot.Source.ExpectedRevision
+			}
+		}()
 		previous, err := getUsageSource(ctx, tx, s.ID)
 		if errors.Is(err, sql.ErrNoRows) && s.Source.ThreadID != "" && s.Source.Provider != "" {
 			var id string
@@ -48,6 +66,10 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 			}
 			if previous.Source.SessionID != "" && s.Source.SessionID != "" && previous.Source.SessionID != s.Source.SessionID {
 				return protocol.Errorf(protocol.CodeForbidden, "usage source session changed")
+			}
+			if maintenance {
+				s.WriterStopped = previous.WriterStopped
+				s.Source.WriterID = previous.Source.WriterID
 			}
 			if (!previous.WriterStopped || s.WriterStopped) && (s.Source.WriterID == "" || s.Source.WriterID == previous.Collection.WriterID) {
 				stopped := s.WriterStopped && !previous.WriterStopped
@@ -109,6 +131,7 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 		_, err = tx.ExecContext(ctx, `INSERT INTO native_usage_sources(source_id,run_id,state_json,writer_stopped,collection_state,collection_report_pending,registration_queued) VALUES(?,?,?,?,?,1,?)`, s.ID, s.RunID, string(body), s.WriterStopped, s.Collection.State, s.RegistrationQueued)
 		return err
 	})
+	return snapshot, err
 }
 
 func (j *Journal) UsageSources(ctx context.Context) ([]UsageSource, error) {
@@ -145,11 +168,26 @@ func (j *Journal) usageSources(ctx context.Context, pending bool) ([]UsageSource
 // QueueUsage saves the upload and the advanced cursor in a single transaction.
 // A crash after this commit replays the original envelope, never skips records.
 func (j *Journal) QueueUsage(ctx context.Context, s UsageSource, env *protocol.Envelope) error {
-	err := j.tx(ctx, func(tx *sql.Tx) error { return saveUsageSource(ctx, tx, s, env, j.now().UnixMilli()) })
+	_, err := j.QueueUsageSnapshot(ctx, s, env)
+	return err
+}
+
+// QueueUsageSnapshot returns the snapshot committed by this transaction, never
+// a later reader/writer lifecycle that could authorize stale buffered records.
+func (j *Journal) QueueUsageSnapshot(ctx context.Context, s UsageSource, env *protocol.Envelope) (UsageSourceSnapshot, error) {
+	var snapshot UsageSourceSnapshot
+	err := j.tx(ctx, func(tx *sql.Tx) error {
+		if err := saveUsageSource(ctx, tx, s, env, j.now().UnixMilli()); err != nil {
+			return err
+		}
+		current, err := getUsageSource(ctx, tx, s.ID)
+		snapshot = UsageSourceSnapshot{Source: current, ExpectedRevision: current.ExpectedRevision}
+		return err
+	})
 	if err == nil && env != nil {
 		j.WakeUsage()
 	}
-	return err
+	return snapshot, err
 }
 
 func (j *Journal) HasUsageSource(ctx context.Context, id string) (bool, error) {

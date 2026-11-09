@@ -137,10 +137,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 			err := call(ctx, "POST", "/runner/v1/usage/source", source, &snapshot)
 			return snapshot, err
 		}
-		if err := j.RegisterUsageSource(ctx, source); err != nil {
-			return journal.UsageSourceSnapshot{}, err
-		}
-		return j.UsageSourceSnapshot(ctx, source.RunID, source.Source.Provider, source.Source.ThreadID)
+		return j.RegisterUsageMaintenanceSource(ctx, source)
 	}
 	queueUsage := func(ctx context.Context, source journal.UsageSource, env *protocol.Envelope) (journal.UsageSourceSnapshot, error) {
 		if c.LiveJournal {
@@ -149,10 +146,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 			err := call(ctx, "POST", "/runner/v1/usage/queue", input, &snapshot)
 			return snapshot, err
 		}
-		if err := j.QueueUsage(ctx, source, env); err != nil {
-			return journal.UsageSourceSnapshot{}, err
-		}
-		return j.UsageSourceSnapshot(ctx, source.RunID, source.Source.Provider, source.Source.ThreadID)
+		return j.QueueUsageSnapshot(ctx, source, env)
 	}
 	if c.Apply {
 		var err error
@@ -204,6 +198,20 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		}
 		src.Purpose = target.Purpose
 		src.ParentSessionID = target.ParentSessionID
+		var state journal.UsageSource
+		if c.Apply {
+			hash := sha256.Sum256([]byte(target.RunID + "\x00" + src.Provider + "\x00" + src.Path))
+			candidate := journal.UsageSource{ID: hex.EncodeToString(hash[:]), RunID: target.RunID, ConversationID: target.ConversationID, Source: src, Cursors: map[string]nativeusage.Cursor{}, WriterStopped: target.Stopped}
+			snapshot, err := registerSource(ctx, candidate)
+			if err != nil {
+				return err
+			}
+			state = snapshot.Source
+			state.ExpectedRevision = snapshot.ExpectedRevision
+			if state.Cursors == nil {
+				state.Cursors = map[string]nativeusage.Cursor{}
+			}
+		}
 		files, err := discovery.Discover(ctx, src, false)
 		if err != nil {
 			result.Missing = append(result.Missing, target)
@@ -266,17 +274,6 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 			addPreview(&result.Preview, p)
 		}
 		if c.Apply {
-			hash := sha256.Sum256([]byte(target.RunID + "\x00" + src.Provider + "\x00" + src.Path))
-			state := journal.UsageSource{ID: hex.EncodeToString(hash[:]), RunID: target.RunID, ConversationID: target.ConversationID, Source: src, Cursors: map[string]nativeusage.Cursor{}, Files: files, DiscoveredAt: c.Now().UnixMilli(), WriterStopped: target.Stopped}
-			snapshot, err := registerSource(ctx, state)
-			if err != nil {
-				return err
-			}
-			state = snapshot.Source
-			state.ExpectedRevision = snapshot.ExpectedRevision
-			if state.Cursors == nil {
-				state.Cursors = map[string]nativeusage.Cursor{}
-			}
 			for i, batch := range batches {
 				if previous := state.Cursors[batch.path]; previous.FileID != batch.cursor.FileID || previous.Offset <= batch.cursor.Offset {
 					state.Cursors[batch.path] = batch.cursor
@@ -287,7 +284,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 				}
 				state.Coverage = coverage
 				final := i == len(batches)-1 && complete
-				state.Collection.ReadSucceeded(c.Now().UnixMilli(), len(batch.samples) > 0, final, state.WriterStopped, final)
+				state.Collection.ReadSucceeded(c.Now().UnixMilli(), len(batch.samples) > 0, final, state.WriterStopped, final && state.Collection.State != protocol.UsageActive)
 				if len(batch.samples) > 0 {
 					state.Collection.Evidence = protocol.UsageObserved
 				}
@@ -305,7 +302,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 				}
 				raw, _ := json.Marshal(value)
 				env := protocol.Envelope{RequestID: c.IDs.New(protocol.PrefixRequest), Operation: operation, Target: destination, Payload: raw}
-				snapshot, err = queueUsage(ctx, state, &env)
+				snapshot, err := queueUsage(ctx, state, &env)
 				if err != nil {
 					return err
 				}
