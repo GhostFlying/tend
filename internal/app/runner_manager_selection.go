@@ -48,7 +48,13 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if p.Extensions != (protocol.ExtensionExecutionPin{}) {
 		category = m.CategoryID
 	}
-	return hostedconfig.Selection{CategoryID: category, Extensions: p.Extensions, NativeOwnerTools: owner && nativeMode && nativeTools && !strict && !closing && !parked, OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
+	// The accepted mode identifies the original thread. Temporary fencing is
+	// expressed by the receipt flags, not by replacing that binding identity.
+	nativeOwnerMode := owner && nativeMode
+	if !strict && !closing && !parked {
+		nativeOwnerMode = nativeOwnerMode && nativeTools
+	}
+	return hostedconfig.Selection{CategoryID: category, Extensions: p.Extensions, NativeOwnerTools: nativeOwnerMode, OwnershipPolicy: policy, RequireReceiptReader: strict, ReceiptOnly: closing || parked, RunnerManaged: true, RunnerRunID: run, IssueID: m.IssueID, AssignmentEpoch: m.AssignmentEpoch, ConfigurationHash: p.PublicSHA256, Identity: p.Identity, Purpose: agentconfig.IssueManager, Definition: agentconfig.AgentDefinition{LocalID: p.Identity.LocalID, Revision: p.AgentRevision, RuntimeID: p.Runtime.RuntimeID, Categories: []string{m.CategoryID}, Purposes: []agentconfig.Purpose{agentconfig.IssueManager}, Model: p.Profile.Model, Effort: p.Profile.Effort, Enabled: true}, Runtime: agentconfig.RuntimeBinding{ID: p.Runtime.RuntimeID, Revision: p.Runtime.Revision, Kind: agentconfig.AppServerWorker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.IssueManager}, Enabled: true}}, true, nil
 }
 
 // AgentConversationClaimed prevents the hosted pool from starting an Issue
@@ -156,7 +162,9 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 	if err != nil {
 		return err
 	}
-	selected.NativeOwnerTools = receipt.NativeOwnerTools && nativeTools && selected.OwnershipPolicy == protocol.IssueOwnerPolicy && !selected.ReceiptOnly && !selected.RequireReceiptReader
+	if !selected.ReceiptOnly && !selected.RequireReceiptReader {
+		selected.NativeOwnerTools = receipt.NativeOwnerTools && nativeTools && selected.OwnershipPolicy == protocol.IssueOwnerPolicy
+	}
 	return nil
 }
 
