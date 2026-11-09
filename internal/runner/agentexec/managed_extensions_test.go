@@ -276,4 +276,44 @@ func TestManagedRecoveryRestoresReceiptsAfterLocalCredentialDisappears(t *testin
 		}
 	}
 
+	// A retained owner may create new work after its current definition is
+	// disabled. Its new release/category pin has not been prepared before.
+	f.config.Agents[0].Enabled = false
+	f.reload(t)
+	catalog := release.Catalog
+	catalog.Categories[0].AgentsMD = "newly published instructions"
+	next, _, err := extensions.NewRelease(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Receive(t.Context(), next, nil); err != nil {
+		t.Fatal(err)
+	}
+	combination, err := extensions.Resolve(next, "implementer", combo.Pin.Agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newWork protocol.RunExecutionPin
+	for _, pin := range retained {
+		if pin.Purpose == "" {
+			newWork = pin
+			newWork.Extensions = combination.Pin
+		}
+	}
+	p.SetRetained([]protocol.RunExecutionPin{newWork})
+	_ = p.Refresh(t.Context())
+	waiting, err := p.ObserveRetained(t.Context())
+	if err != nil || len(waiting) != 1 || waiting[0].Available {
+		t.Fatal("new work skipped missing credential validation", waiting, err)
+	}
+	t.Setenv("TEND_TEST_AGENTEXEC_MCP_TOKEN", "fixture")
+	_ = p.Refresh(t.Context())
+	ready, err := p.ObserveRetained(t.Context())
+	if err != nil || len(ready) != 1 || !ready[0].Available || ready[0].Pin != newWork {
+		t.Fatal("new composition on retained inventory never prepared", ready, err)
+	}
+	if _, err := c.RetainedBinding(t.Context(), combination.Pin, "native"); err != nil {
+		t.Fatal(err)
+	}
+
 }

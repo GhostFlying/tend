@@ -3,6 +3,7 @@ package extensions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -277,4 +278,15 @@ func (a *Agent) RefreshAdoptions(ctx context.Context) {
 	a.status.Adoptions = status.Adoptions
 	a.status.AdoptionsMore = status.AdoptionsMore
 	a.status.SkillExclusions = status.SkillExclusions
+}
+
+// PrepareRetained runs in the background executor reconciler. Existing receipts
+// are recovered without checking new-work configuration or credentials; a newly
+// frozen task on an older accepted Agent snapshot may need its first preparation.
+func (a *Agent) PrepareRetained(ctx context.Context, pin protocol.ExtensionExecutionPin, runtime string) error {
+	if _, err := a.Consumer.RetainedBinding(ctx, pin, runtime); !errors.Is(err, ErrNotPrepared) {
+		return err
+	}
+	_, _, err := a.Consumer.Prepare(ctx, pin, runtime)
+	return err
 }
