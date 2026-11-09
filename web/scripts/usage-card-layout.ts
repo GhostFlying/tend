@@ -56,6 +56,16 @@ const sessions = [
   { id: "session_unassigned", attributions: [] },
 ].map((session) => ({
   ...session,
+  attributions: session.attributions.map((attribution) => ({
+    agent: "Fixture agent",
+    agent_id: "fixture/agent",
+    categories: [],
+    run_id: "",
+    task_id: "",
+    task_title: "",
+    issue_path: [],
+    ...attribution,
+  })),
   parent_session_id: "",
   models: ["gpt-6.1-sol"],
   first_at: 1793066400000,
