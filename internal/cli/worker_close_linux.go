@@ -57,20 +57,78 @@ func (h workerCloseHost) process(ctx context.Context, pid int, boot string) (pro
 	return identity, fields[0] != "Z" && fields[0] != "X", nil
 }
 
-func (h workerCloseHost) cgroup(ctx context.Context, pid int) (string, error) {
+func (h workerCloseHost) cgroup(ctx context.Context, pid int, hierarchy string) (string, error) {
 	body, err := readWorkerCloseKernel(ctx, filepath.Join(h.procRoot, strconv.Itoa(pid), "cgroup"))
 	if err != nil {
 		return "", err
 	}
 	for _, line := range strings.Split(string(body), "\n") {
-		if strings.HasPrefix(line, "0::") {
-			path := strings.TrimPrefix(line, "0::")
+		fields := strings.SplitN(line, ":", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		matches := hierarchy == "" && fields[0] == "0" && fields[1] == ""
+		if hierarchy == protocol.WorkerCloseSystemdV1 {
+			for _, controller := range strings.Split(fields[1], ",") {
+				matches = matches || controller == "name=systemd"
+			}
+		}
+		if matches {
+			path := fields[2]
 			if filepath.IsAbs(path) && filepath.Clean(path) == path {
 				return path, nil
 			}
 		}
 	}
-	return "", errors.New("process cgroup v2 identity unavailable")
+	return "", errors.New("process cgroup hierarchy identity unavailable")
+}
+
+func (h workerCloseHost) systemdCgroupMount(ctx context.Context) (string, error) {
+	body, err := readWorkerCloseKernel(ctx, filepath.Join(h.procRoot, "self/mountinfo"))
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		before, after, ok := strings.Cut(line, " - ")
+		left, right := strings.Fields(before), strings.Fields(after)
+		if !ok || len(left) < 6 || len(right) < 3 || right[0] != "cgroup" {
+			continue
+		}
+		systemd := false
+		for _, option := range strings.Split(right[2], ",") {
+			systemd = systemd || option == "name=systemd"
+		}
+		if !systemd {
+			continue
+		}
+		unescape := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+		root, mount := unescape.Replace(left[3]), unescape.Replace(left[4])
+		if root != "/" || !filepath.IsAbs(mount) || filepath.Clean(mount) != mount {
+			return "", errors.New("systemd cgroup mount must expose its actual filesystem root")
+		}
+		return mount, nil
+	}
+	return "", errors.New("named systemd cgroup filesystem mount is unavailable")
+}
+
+func (h workerCloseHost) executionBoundary(ctx context.Context, pid int, unit string) (protocol.WorkerCloseBoundary, error) {
+	path, err := h.cgroup(ctx, pid, "")
+	boundary := protocol.WorkerCloseBoundary{Unit: unit, CgroupPath: path}
+	if err == nil && path != "/" && filepath.Base(path) == unit {
+		return boundary, nil
+	}
+	path, err = h.cgroup(ctx, pid, protocol.WorkerCloseSystemdV1)
+	if err != nil {
+		return boundary, err
+	}
+	if path == "/" || filepath.Base(path) != unit {
+		return boundary, errors.New("runner must occupy the exact named unit cgroup boundary")
+	}
+	mount, err := h.systemdCgroupMount(ctx)
+	if err != nil {
+		return boundary, err
+	}
+	return protocol.WorkerCloseBoundary{Unit: unit, CgroupPath: path, Hierarchy: protocol.WorkerCloseSystemdV1, FilesystemRoot: mount}, nil
 }
 
 func workerCloseDirectoryIdentity(path string) (uint64, uint64, error) {
@@ -115,22 +173,26 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 	if !active || runner.StartTicks != q.RunnerStart || runner.BootID != q.RunnerBoot {
 		return in, errors.New("original runner is not the exact live process")
 	}
-	path, err := h.cgroup(ctx, q.RunnerPID)
+	boundary, err := h.executionBoundary(ctx, q.RunnerPID, q.Unit)
 	if err != nil {
 		return in, err
 	}
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" || filepath.Base(path) != q.Unit {
-		return in, errors.New("runner must occupy the exact named cgroup v2 unit boundary")
+	filesystemRoot := h.cgroupRoot
+	if boundary.FilesystemRoot != "" {
+		filesystemRoot = boundary.FilesystemRoot
 	}
-	boundaryPath := filepath.Join(h.cgroupRoot, path)
+	path := boundary.CgroupPath
+	boundaryPath := filepath.Join(filesystemRoot, path)
 	device, inode, err := workerCloseDirectoryIdentity(boundaryPath)
 	if err != nil {
 		return in, err
 	}
-	if _, err := readWorkerCloseKernel(ctx, filepath.Join(boundaryPath, "cgroup.events")); err != nil {
-		return in, err
+	if boundary.Hierarchy == "" {
+		if _, err := readWorkerCloseKernel(ctx, filepath.Join(boundaryPath, "cgroup.events")); err != nil {
+			return in, err
+		}
 	}
-	rootDevice, rootInode, err := workerCloseDirectoryIdentity(h.cgroupRoot)
+	rootDevice, rootInode, err := workerCloseDirectoryIdentity(filesystemRoot)
 	if err != nil {
 		return in, err
 	}
@@ -138,9 +200,11 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 		Version: 1, RequestID: q.RequestID, RunID: q.RunID, ThreadID: q.ThreadID,
 		StateDirectory: q.StateDirectory, Directory: owned.Dir, OwnedRecordSHA256: q.OwnedSHA256,
 		Runner: runner, Processes: append([]protocol.WorkerCloseProcess{owned.Process}, owned.Detached...),
-		Boundary:    protocol.WorkerCloseBoundary{Unit: q.Unit, CgroupPath: path, Device: device, Inode: inode, RootDevice: rootDevice, RootInode: rootInode},
+		Boundary:    boundary,
 		OperatorUID: h.uid, UnitAcknowledged: q.AcknowledgeUnit, PreparedAt: h.now().UTC().Format(time.RFC3339Nano),
 	}
+	in.Boundary.Device, in.Boundary.Inode = device, inode
+	in.Boundary.RootDevice, in.Boundary.RootInode = rootDevice, rootInode
 	if err := in.Validate(); err != nil {
 		return in, err
 	}
@@ -155,7 +219,7 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 		if current != original {
 			return in, fmt.Errorf("original execution PID %d was reused during prepare", original.PID)
 		}
-		processCgroup, err := h.cgroup(ctx, original.PID)
+		processCgroup, err := h.cgroup(ctx, original.PID, boundary.Hierarchy)
 		if err != nil {
 			return in, err
 		}
@@ -175,7 +239,7 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 	if !active || again != runner || protocol.WorkerCloseSHA256(current) != q.OwnedSHA256 {
 		return in, errors.New("original ownership or runner changed during prepare")
 	}
-	againCgroup, err := h.cgroup(ctx, runner.PID)
+	againBoundary, err := h.executionBoundary(ctx, runner.PID, q.Unit)
 	if err != nil {
 		return in, err
 	}
@@ -183,7 +247,7 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 	if err != nil {
 		return in, err
 	}
-	if againCgroup != path || againDevice != device || againInode != inode {
+	if againBoundary != boundary || againDevice != device || againInode != inode {
 		return in, errors.New("original runner cgroup changed during prepare")
 	}
 	return in, nil
@@ -231,14 +295,27 @@ func confirmWorkerClose(ctx context.Context, in protocol.WorkerCloseIntent, inte
 }
 
 func observeWorkerCloseBoundary(ctx context.Context, boundary protocol.WorkerCloseBoundary, h workerCloseHost) (string, error) {
-	rootDevice, rootInode, err := workerCloseDirectoryIdentity(h.cgroupRoot)
+	filesystemRoot := h.cgroupRoot
+	if boundary.FilesystemRoot != "" {
+		filesystemRoot = boundary.FilesystemRoot
+	}
+	if boundary.Hierarchy == protocol.WorkerCloseSystemdV1 {
+		mount, err := h.systemdCgroupMount(ctx)
+		if err != nil {
+			return "", err
+		}
+		if mount != filesystemRoot {
+			return "", errors.New("original systemd cgroup mount changed")
+		}
+	}
+	rootDevice, rootInode, err := workerCloseDirectoryIdentity(filesystemRoot)
 	if err != nil {
 		return "", err
 	}
 	if rootDevice != boundary.RootDevice || rootInode != boundary.RootInode {
 		return "", errors.New("original cgroup filesystem root was replaced or unmounted")
 	}
-	path := filepath.Join(h.cgroupRoot, boundary.CgroupPath)
+	path := filepath.Join(filesystemRoot, boundary.CgroupPath)
 	device, inode, err := workerCloseDirectoryIdentity(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return "kernel_removed", nil
@@ -248,6 +325,9 @@ func observeWorkerCloseBoundary(ctx context.Context, boundary protocol.WorkerClo
 	}
 	if device != boundary.Device || inode != boundary.Inode {
 		return "", errors.New("original cgroup directory was replaced")
+	}
+	if boundary.Hierarchy == protocol.WorkerCloseSystemdV1 {
+		return "", errors.New("original systemd v1 cgroup still exists; wait for kernel directory removal before confirmation")
 	}
 	events, err := readWorkerCloseKernel(ctx, filepath.Join(path, "cgroup.events"))
 	if err != nil {

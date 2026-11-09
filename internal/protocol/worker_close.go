@@ -13,6 +13,8 @@ import (
 // receipts. The operator binds the original execution boundary before stopping it.
 const ExternalExecutionBoundary = "external_execution_boundary"
 
+const WorkerCloseSystemdV1 = "systemd_v1"
+
 func WorkerCloseActions() []string { return []string{"prepare", "confirm", "show"} }
 
 type WorkerCloseProcess struct {
@@ -28,6 +30,9 @@ type WorkerCloseBoundary struct {
 	Inode      uint64 `json:"inode"`
 	RootDevice uint64 `json:"root_device"`
 	RootInode  uint64 `json:"root_inode"`
+	// Empty hierarchy retains the original unified-v2 local format and hash.
+	Hierarchy      string `json:"hierarchy,omitempty"`
+	FilesystemRoot string `json:"filesystem_root,omitempty"`
 }
 
 type WorkerCloseIntent struct {
@@ -105,6 +110,12 @@ func (in WorkerCloseIntent) Validate() error {
 	if !in.UnitAcknowledged || in.Boundary.Unit == "" || !filepath.IsAbs(in.Boundary.CgroupPath) || in.Boundary.CgroupPath == "/" || in.Boundary.Device == 0 || in.Boundary.Inode == 0 || in.Boundary.RootDevice == 0 || in.Boundary.RootInode == 0 || len(in.Processes) == 0 {
 		return errors.New("worker-close: incomplete execution boundary")
 	}
+	if in.Boundary.Hierarchy != "" && in.Boundary.Hierarchy != WorkerCloseSystemdV1 {
+		return errors.New("worker-close: unsupported execution boundary hierarchy")
+	}
+	if in.Boundary.Hierarchy == WorkerCloseSystemdV1 && in.Boundary.FilesystemRoot == "" || in.Boundary.FilesystemRoot != "" && !filepath.IsAbs(in.Boundary.FilesystemRoot) {
+		return errors.New("worker-close: execution boundary filesystem root is unavailable")
+	}
 	for _, p := range in.Processes {
 		if err := p.Validate(); err != nil {
 			return err
@@ -130,6 +141,9 @@ func (p WorkerCloseProof) Validate() error {
 	for _, observation := range p.Observations {
 		if observation.ObservedAt == "" || observation.State != "empty" && observation.State != "kernel_removed" {
 			return fmt.Errorf("worker-close: invalid boundary observation %q", observation.State)
+		}
+		if p.Intent.Boundary.Hierarchy == WorkerCloseSystemdV1 && observation.State != "kernel_removed" {
+			return errors.New("worker-close: systemd v1 closure requires original kernel directory removal")
 		}
 	}
 	return nil

@@ -135,3 +135,20 @@ func TestExternalOwnedCloseProofPreservesMalformedAndChangedRecords(t *testing.T
 		t.Fatalf("changed source=%v %v", ok, err)
 	}
 }
+
+func TestExternalOwnedCloseSystemdV1RequiresKernelRemoval(t *testing.T) {
+	spec, record, original := externalOwnedCloseFixture(t)
+	in := original.Intent
+	in.Boundary.Hierarchy = protocol.WorkerCloseSystemdV1
+	in.Boundary.FilesystemRoot = "/sys/fs/cgroup/systemd"
+	proof := externalOwnedCloseProof(t, in)
+	saveExternalOwnedCloseProof(t, spec, in.OwnedRecordSHA256, proof)
+	if ok, err := verifyExternalOwnedClose(context.Background(), spec, record); ok || err == nil {
+		t.Fatalf("v1 accepted an empty observation: %t %v", ok, err)
+	}
+	proof.Observations[0].State = "kernel_removed"
+	saveExternalOwnedCloseProof(t, spec, in.OwnedRecordSHA256, proof)
+	if ok, err := verifyExternalOwnedClose(context.Background(), spec, record); !ok || err != nil {
+		t.Fatalf("exact original v1 removed proof rejected: %t %v", ok, err)
+	}
+}

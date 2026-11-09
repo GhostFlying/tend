@@ -65,7 +65,7 @@ func runWorkerCloseOnHost(ctx context.Context, e *Env, args []string, host worke
 		fs.IntVar(&q.RunnerPID, "runner-pid", 0, "original live runner PID")
 		fs.StringVar(&q.RunnerStart, "runner-start-ticks", "", "original runner /proc start ticks")
 		fs.StringVar(&q.RunnerBoot, "runner-boot-id", "", "original runner kernel boot ID")
-		fs.StringVar(&q.Unit, "unit", "", "original systemd unit containing the execution boundary")
+		fs.StringVar(&q.Unit, "unit", "", "original systemd unit containing the execution boundary (unified v2 or named systemd v1)")
 		fs.BoolVar(&q.AcknowledgeUnit, "acknowledge-unit-execution", false, "operator confirms this unit contains the original execution, including descendants")
 	}
 	dry := fs.Bool("dry-run", false, "print exact local input without reading or writing execution state")
