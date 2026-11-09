@@ -54,9 +54,15 @@ func reopenOutcomeJournal(t *testing.T, r *Runner, path string) {
 	r.cfg.Journal = j
 }
 
-func TestImplementationOutcomeSurvivesAcknowledgedEventsAndCloseFailure(t *testing.T) {
-	for _, status := range []string{"completed", "failed"} {
-		t.Run(status, func(t *testing.T) {
+func TestImplementationOutcomeSurvivesAcknowledgedEventsCloseFailureAndRunnerShutdown(t *testing.T) {
+	for _, scenario := range []struct {
+		status   string
+		shutdown bool
+	}{
+		{"completed", false}, {"failed", false}, {"completed", true}, {"failed", true},
+	} {
+		t.Run(fmt.Sprintf("%s/runner_shutdown=%t", scenario.status, scenario.shutdown), func(t *testing.T) {
+			status := scenario.status
 			r, as, recovery, spaces, path := implementationReconcileFixture(t)
 			firstImplementationAttempt(t, r, as, spaces, path)
 			workers := &normalResultWorkers{result: submittedImplementationResult(),
@@ -89,18 +95,43 @@ func TestImplementationOutcomeSurvivesAcknowledgedEventsAndCloseFailure(t *testi
 			}))
 			defer server.Close()
 			r.c.base, r.c.http = server.URL, server.Client()
+			lifetime, stopRunner := context.WithCancel(t.Context())
+			defer stopRunner()
+			runCtx, stopRun := context.WithCancelCause(lifetime)
+			defer stopRun(nil)
 			// Flush while Wait is returning, before the failed process-close path.
 			workers.onWait = func() {
 				if err := r.flushEvents(t.Context(), as); err != nil {
 					t.Fatal(err)
 				}
+				if scenario.shutdown {
+					stopRunner()
+				}
 			}
 			workers.onStop = func() error { return errors.New("owned process closure is unknown") }
-			err := r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun})
+			activeRun := &active{as: as, desired: protocol.DesiredRun}
+			var err error
+			if scenario.shutdown {
+				// Exercise execute's real inherited runner-lifetime cancellation,
+				// including its exit without turning that cancellation into a control.
+				err = r.execute(lifetime, runCtx, as.RunID, activeRun)
+				if err != nil || !errors.Is(context.Cause(runCtx), context.Canceled) {
+					t.Fatal("runner shutdown did not propagate", err)
+				}
+			} else {
+				err = r.work(lifetime, runCtx, as, activeRun)
+				if !isCompletionPending(err) {
+					t.Fatal("close failure was not retained", err)
+				}
+			}
 			saved, readErr := r.cfg.Journal.Run(t.Context(), as.RunID)
 			pending, pendingErr := r.cfg.Journal.PendingEvents(t.Context(), as.RunID, 10)
-			if !isCompletionPending(err) || readErr != nil || pendingErr != nil || saved.Phase != journal.PhaseStarted || len(saved.WorkerResult) != 0 || saved.StoppedConfirmed || len(pending) != 0 || eventUploads != 1 || len(finals) != 0 {
+			if readErr != nil || pendingErr != nil || saved.Phase != journal.PhaseStarted || len(saved.WorkerResult) != 0 || saved.StoppedConfirmed || len(pending) != 0 || eventUploads != 1 || len(finals) != 0 {
 				t.Fatal("close failure lost the original unresolved attempt", saved, pending, err, readErr, pendingErr, finals)
+			}
+			observed, observedErr := readWorkerOutcome(spaces.prepared.StateDir, as.RunID, "owned-thread", 1)
+			if observedErr != nil || observed == nil || observed.Source != "native_terminal" || observed.Status != status {
+				t.Fatal("runner shutdown overwrote the native terminal", observed, observedErr)
 			}
 			reopenOutcomeJournal(t, r, path)
 			// The original file-backed result and successful close are now available,
@@ -108,6 +139,10 @@ func TestImplementationOutcomeSurvivesAcknowledgedEventsAndCloseFailure(t *testi
 			r.cfg.Workers = recovery
 			if err := r.execute(t.Context(), t.Context(), as.RunID, &active{as: as, desired: protocol.DesiredRun}); err != nil {
 				t.Fatal(err)
+			}
+			history, historyErr := r.cfg.Journal.HistoricalRun(t.Context(), as.RunID)
+			if historyErr != nil || history.Attempts != 1 || history.Thread != "owned-thread" {
+				t.Fatal("recovery replayed an original native attempt", history, historyErr)
 			}
 			if len(finals) != 1 || recovery.starts != 0 || len(recovery.seen) != 1 || workers.starts != 1 || spaces.mutations != 1 {
 				t.Fatal("recovery duplicated work or publication", finals, recovery, workers, spaces)
@@ -231,6 +266,11 @@ func TestWorkerOutcomeKeepsLatestTurnAndOriginalFailure(t *testing.T) {
 	if err != nil || saved.TurnID != "repair-turn" || saved.Status != "completed" {
 		t.Fatal("close error replaced actual native success", saved, err)
 	}
+	wait.Status, wait.Source, wait.Error = "interrupted", "run_control", "paused after terminal"
+	saved, err = saveWorkerOutcome(t.Context(), dir, wait)
+	if err != nil || saved.TurnID != "repair-turn" || saved.Status != "completed" {
+		t.Fatal("later control erased the actual native terminal", saved, err)
+	}
 	outcome.Status = "failed"
 	if _, err := saveWorkerOutcome(t.Context(), dir, outcome); err == nil {
 		t.Fatal("contradictory status for the same terminal turn was accepted")
@@ -239,9 +279,27 @@ func TestWorkerOutcomeKeepsLatestTurnAndOriginalFailure(t *testing.T) {
 	if _, err := saveWorkerOutcome(t.Context(), dir, outcome); err != nil {
 		t.Fatal(err)
 	}
-	wait.Status, wait.Error = "completed", ""
+	wait.Status, wait.Source, wait.Error = "completed", "worker_wait", ""
 	saved, err = saveWorkerOutcome(t.Context(), dir, wait)
 	if err != nil || saved.Status != "failed" || saved.TurnID != "later-turn" {
 		t.Fatal("Wait nil erased terminal failure", saved, err)
+	}
+}
+
+func TestImplementationOwnedRecoveryEndsBoundedPass(t *testing.T) {
+	r, as, workers, spaces, _ := implementationReconcileFixture(t)
+	workers.recoveryErr = fmt.Errorf("%w: original process ownership is unconfirmed", harness.ErrOwnedWorkerUnconfirmed)
+	r.cfg.RetryDelay = time.Hour
+	before, requests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	err := r.execute(ctx, ctx, as.RunID, &active{as: as, desired: protocol.DesiredRun})
+	after, afterRequests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
+	if !isOwnedRecoveryUncertain(err) || ctx.Err() != nil || !after.Fenced || after.StoppedConfirmed || after.Phase != journal.PhaseStarted || len(after.WorkerResult) != 0 || len(workers.seen) != 1 || workers.starts != 0 || spaces.mutations != 0 || !reflect.DeepEqual(requests, afterRequests) {
+		t.Fatal("uncertain ownership looped, published, or discarded the attempt", before, after, err, ctx.Err(), workers)
+	}
+	before.Fenced = true
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("bounded ownership recovery changed more than its fence", before, after)
 	}
 }

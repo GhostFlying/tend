@@ -33,10 +33,10 @@ func (ws *Workers) ReconcileImplementationResult(ctx context.Context, spec harne
 	}
 	original, err := ws.ownedWorkerProcess(spec)
 	if err != nil {
-		return harness.WorkerResult{}, fmt.Errorf("%w: original result ownership: %w", harness.ErrRetainedResumePending, err)
+		return harness.WorkerResult{}, fmt.Errorf("%w: original result ownership: %w: %w", harness.ErrRetainedResumePending, harness.ErrOwnedWorkerUnconfirmed, err)
 	}
 	if original.ThreadID == "" {
-		return harness.WorkerResult{}, fmt.Errorf("%w: original submitted result has no native thread binding", harness.ErrRetainedResumePending)
+		return harness.WorkerResult{}, fmt.Errorf("%w: original submitted result has no native thread binding: %w", harness.ErrRetainedResumePending, harness.ErrOwnedWorkerUnconfirmed)
 	}
 	results := harness.Results{Spec: spec}
 	if err := results.Restore(); err != nil {
