@@ -309,20 +309,20 @@ func TestReconcileImplementationResultDetachedWorkRemainsPending(t *testing.T) {
 	}
 }
 
-func TestReconcileImplementationResultLostCloseProofRemainsPending(t *testing.T) {
-	ws, spec, cmd, _, original := submittedImplementationFixture(t)
+func TestReconcileImplementationResultAfterOriginalProcessSetExit(t *testing.T) {
+	ws, spec, cmd, want, original := submittedImplementationFixture(t)
 	procx.KillGroup(cmd)
 	_ = cmd.Wait()
 	got, err := ws.ReconcileImplementationResult(t.Context(), spec)
-	if !errors.Is(err, harness.ErrRetainedResumePending) || !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) || got.Result != nil {
-		t.Fatalf("exited native work without close proof became a result: %+v %v", got, err)
+	if err != nil || !reflect.DeepEqual(got, harness.WorkerResult{Result: &want}) {
+		t.Fatalf("original result did not recover after its process set exited: %+v %v", got, err)
 	}
 	record, err := ws.ownedWorkerProcess(spec)
-	if err != nil || record.CloseObserved {
-		t.Fatal("result existence manufactured historical close proof", record, err)
+	if err != nil || record.CloseObserved || record.ReconciledCloseScope != knownOwnedProcessSet {
+		t.Fatal("process reconciliation changed historical close or lost its scope", record, err)
 	}
 	body, err := os.ReadFile(filepath.Join(spec.StateDir, "result.json"))
 	if err != nil || !bytes.Equal(body, original) {
-		t.Fatal("missing close proof changed original result bytes", err)
+		t.Fatal("process reconciliation changed original result bytes", err)
 	}
 }

@@ -25,6 +25,9 @@ func confirmDetachedProcessesStopped([]ownedProcessIdentity) error {
 func confirmOwnedProcessStopped(ownedProcessIdentity) error {
 	return errors.New("traex: independent native process recovery is unavailable on this platform")
 }
+func confirmKnownOwnedProcessSetStopped(context.Context, ownedProcessIdentity, []ownedProcessIdentity) error {
+	return errors.New("traex: independent native process recovery is unavailable on this platform")
+}
 func awaitOwnedProcessStopped(context.Context, ownedProcessIdentity) error {
 	return errors.New("traex: independent native process recovery is unavailable on this platform")
 }

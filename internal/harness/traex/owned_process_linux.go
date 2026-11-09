@@ -120,7 +120,7 @@ func stopOwnedProcess(ctx context.Context, original ownedProcessIdentity, checkD
 		return err
 	}
 	if err != nil || !active {
-		return errors.New("traex: original app-server exited without an independent session close receipt; detached work remains unknown")
+		return errOwnedProcessExited
 	}
 	if err == nil {
 		// Pin the leader while checking and signalling its group. os.Process
@@ -317,6 +317,60 @@ func confirmDetachedProcessesStopped(processes []ownedProcessIdentity) error {
 		}
 	}
 	return nil
+}
+
+// confirmKnownOwnedProcessSetStopped checks the original group and every
+// recorded detached identity, including members left in that identity's group
+// after its leader exits. It observes only; it never signals a recycled PID.
+func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProcessIdentity, detached []ownedProcessIdentity) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := confirmOwnedProcessStopped(original); err != nil {
+		return err
+	}
+	for _, process := range detached {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if process.BootID != original.BootID {
+			return errors.New("traex: original detached process boot identity changed")
+		}
+		if err := validOwnedProcessIdentity(process); err != nil {
+			return err
+		}
+		current, group, active, err := readOwnedProcess(process.PID)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil && current != process {
+			return errors.New("traex: original detached process PID was reused")
+		}
+		if active {
+			return errors.New("traex: original detached native execution remains active")
+		}
+		groups := []int{process.PID}
+		if err == nil && group != process.PID {
+			// A recorded descendant need not be its group's leader. A zombie
+			// still supplies that group's identity without being live work.
+			groups = append(groups, group)
+		}
+		for _, group := range groups {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			active, err := ownedGroupActive(group)
+			if err != nil {
+				return err
+			}
+			if active {
+				return errors.New("traex: original detached process group remains active")
+			}
+		}
+	}
+	return ctx.Err()
 }
 
 func validOwnedProcessIdentity(original ownedProcessIdentity) error {
