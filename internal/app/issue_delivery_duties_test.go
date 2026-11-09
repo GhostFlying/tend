@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +16,35 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
 )
+
+// putDeliveryObservationForTest records a provider result and the separate
+// per-Issue query cursor. Production producers use the two explicit APIs at
+// their respective ownership boundaries.
+func putDeliveryObservationForTest(tx *store.Tx, ctx context.Context, row store.DeliveryObservationRow) error {
+	issue, err := store.GetIssue(ctx, tx.Q(), row.Observation.WorkItemID)
+	if err != nil {
+		return err
+	}
+	ref, ok := findDelivery(issue, row.Observation.DeliveryID)
+	if !ok {
+		return fmt.Errorf("test observation has no registered PR reference: %s", row.Observation.DeliveryID)
+	}
+	fact, err := tx.PutDeliveryObservationFact(ctx, ref, row.Observation)
+	if err != nil {
+		return err
+	}
+	row.QueryBaselineUpgradeID = row.Observation.BaselineUpgradeID
+	row.QueryBaselineUpgradeRevision = row.Observation.BaselineUpgradeRevision
+	row.ObservedRevision = fact.FactRevision
+	// A completed fixture read starts after the refreshes already queued here.
+	// Keep in-flight fixtures pending and retain the production ordering rule.
+	if row.Nonce == "" && !row.RefreshRequested {
+		if _, err := tx.Exec(ctx, `UPDATE server_delivery_jobs SET observed_refresh_revision=refresh_revision WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number); err != nil {
+			return err
+		}
+	}
+	return tx.PutDeliveryObservationQuery(ctx, row)
+}
 
 func deliveryDutyForTest(t *testing.T, h *harness, issue, task string) protocol.IssueDeliveryDuty {
 	t.Helper()
@@ -97,7 +128,7 @@ func observeDeliveryForTest(t *testing.T, h *harness, issue string, c protocol.I
 		if err != nil {
 			return err
 		}
-		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{BaselineUpgradeID: baseline.View.UpgradeID, BaselineUpgradeRevision: baseline.View.Revision, WorkItemID: issue, DeliveryID: c.DeliveryID, CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{URL: c.URL, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, TargetSHA: c.TargetSHA, TargetContainsMerge: state == "merged", State: state, MergeSHA: merge}}})
+		return putDeliveryObservationForTest(tx, t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{BaselineUpgradeID: baseline.View.UpgradeID, BaselineUpgradeRevision: baseline.View.Revision, WorkItemID: issue, DeliveryID: c.DeliveryID, CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{URL: c.URL, HeadSHA: c.HeadSHA, BaseSHA: c.BaseSHA, TargetSHA: c.TargetSHA, TargetContainsMerge: state == "merged", State: state, MergeSHA: merge}}})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +333,7 @@ func TestDeliveryCandidateChangeAndOwnerTextCannotReuseApproval(t *testing.T) {
 						return err
 					}
 					row.Observation.ErrorKind = "timeout"
-					return tx.PutDeliveryObservation(t.Context(), row)
+					return putDeliveryObservationForTest(tx, t.Context(), row)
 				}); err != nil {
 					t.Fatal(err)
 				}

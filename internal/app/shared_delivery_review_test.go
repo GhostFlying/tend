@@ -109,7 +109,7 @@ func sharedReviewFixture(t *testing.T, evidenceOverride ...json.RawMessage) (*ha
 			return err
 		}
 		o.Observation.CI = &protocol.DeliveryCI{HeadSHA: c.HeadSHA, State: "success", Checks: []protocol.DeliveryCheck{{Name: "required", State: "completed", Conclusion: "success"}, {Name: "conditional", State: "completed", Conclusion: "skipped"}}}
-		return tx.PutDeliveryObservation(t.Context(), o)
+		return putDeliveryObservationForTest(tx, t.Context(), o)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestSharedDeliveryAutomaticMergeCompletesFromServerObservationWithoutAnothe
 		}
 		older := serverObservation
 		older.Observation.Observer = "runner"
-		return tx.PutDeliveryObservation(t.Context(), older)
+		return putDeliveryObservationForTest(tx, t.Context(), older)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ func TestSharedDeliveryAutomaticMergeCompletesFromServerObservationWithoutAnothe
 		t.Fatal("unverified provider receipt settled execution", duty)
 	}
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		return tx.PutDeliveryObservation(t.Context(), serverObservation)
+		return putDeliveryObservationForTest(tx, t.Context(), serverObservation)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestSharedDeliveryCIRequiresActualSuccessForReviewedHead(t *testing.T) {
 				default:
 					ci.State = state
 				}
-				return tx.PutDeliveryObservation(t.Context(), o)
+				return putDeliveryObservationForTest(tx, t.Context(), o)
 			}); err != nil {
 				t.Fatal(err)
 			}

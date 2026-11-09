@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -30,6 +31,21 @@ type historicalHostedDelivery struct {
 	execution string
 	original  protocol.IssueDeliveryDuty
 	batch     store.UpgradeRow
+}
+
+func (f *historicalHostedDelivery) putObservation(tx *store.Tx, ctx context.Context, row store.DeliveryObservationRow) error {
+	fact, err := tx.PutDeliveryObservationFact(ctx, f.issue.Plan.Deliveries[0], row.Observation)
+	if err != nil {
+		return err
+	}
+	row.QueryBaselineUpgradeID = row.Observation.BaselineUpgradeID
+	row.QueryBaselineUpgradeRevision = row.Observation.BaselineUpgradeRevision
+	row.ObservedRevision = fact.FactRevision
+	ref := f.issue.Plan.Deliveries[0]
+	if _, err := tx.Exec(ctx, `UPDATE server_delivery_jobs SET observed_refresh_revision=refresh_revision WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number); err != nil {
+		return err
+	}
+	return tx.PutDeliveryObservationQuery(ctx, row)
 }
 
 func (f *historicalHostedDelivery) execute(t *testing.T, who protocol.Principal, command app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
@@ -177,7 +193,7 @@ func newHistoricalHostedDelivery(t *testing.T) *historicalHostedDelivery {
 		if err := tx.PutIssueDeliveryDuty(t.Context(), f.issue.IssueID, duty); err != nil {
 			return err
 		}
-		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: f.issue.IssueID, DeliveryID: "pr", CheckedAt: f.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA, MergeSHA: candidate.MergeSHA, TargetSHA: candidate.TargetSHA, TargetContainsMerge: true, URL: candidate.URL}}})
+		return f.putObservation(tx, t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: f.issue.IssueID, DeliveryID: "pr", CheckedAt: f.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA, MergeSHA: candidate.MergeSHA, TargetSHA: candidate.TargetSHA, TargetContainsMerge: true, URL: candidate.URL}}})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +217,7 @@ func newHistoricalHostedDelivery(t *testing.T) *historicalHostedDelivery {
 		if err := tx.PutIssueDeliveryDuty(t.Context(), f.issue.IssueID, duty); err != nil {
 			return err
 		}
-		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: f.issue.IssueID, DeliveryID: "pr", CheckedAt: f.clock.Now().UnixMilli(), Observer: "server", BaselineUpgradeID: maintenance.View.UpgradeID, BaselineUpgradeRevision: maintenance.View.Revision, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA, MergeSHA: candidate.MergeSHA, TargetSHA: maintenance.View.SourceCommit, TargetContainsMerge: true, URL: candidate.URL}}})
+		return f.putObservation(tx, t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: f.issue.IssueID, DeliveryID: "pr", CheckedAt: f.clock.Now().UnixMilli(), Observer: "server", BaselineUpgradeID: maintenance.View.UpgradeID, BaselineUpgradeRevision: maintenance.View.Revision, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA, MergeSHA: candidate.MergeSHA, TargetSHA: maintenance.View.SourceCommit, TargetContainsMerge: true, URL: candidate.URL}}})
 	}); err != nil {
 		t.Fatal(err)
 	}

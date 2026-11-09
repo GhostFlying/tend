@@ -161,7 +161,7 @@ func TestDeploymentPreparationCanonicalDeliveriesStayWithinAllowedIssue(t *testi
 	sibling.Plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "private-pr", Provider: "github", Repository: "PRIVATE_SIBLING_REPO", Number: 99, URL: "https://example.invalid/private/pull/99"}}
 	canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.update", protocol.Target{Type: "issue", ID: sibling.IssueID}, canonicalOwnerIssueUpdate{Plan: sibling.Plan, ExpectedAssignmentEpoch: sibling.AssignmentEpoch}, rev(sibling.Revision)), CanonicalOwnerIssueCommand{Action: "update"}))
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		return tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: issue.IssueID, DeliveryID: "own-pr", Generation: 13, Observer: "server", CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), TargetSHA: strings.Repeat("c", 40), MergeSHA: strings.Repeat("d", 40), TargetContainsMerge: true}}})
+		return putDeliveryObservationForTest(tx, t.Context(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: issue.IssueID, DeliveryID: "own-pr", Generation: 13, Observer: "server", CheckedAt: h.clock.Now().UnixMilli(), DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), TargetSHA: strings.Repeat("c", 40), MergeSHA: strings.Repeat("d", 40), TargetContainsMerge: true}}})
 	}); err != nil {
 		t.Fatal(err)
 	}

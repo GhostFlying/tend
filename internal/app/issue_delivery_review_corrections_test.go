@@ -164,7 +164,7 @@ func TestDeliveryMergeOnlyCompletionRechecksPersistedFactsAndAuthorization(t *te
 				case "lineage":
 					row.Observation.TargetContainsMerge = false
 				}
-				return tx.PutDeliveryObservation(t.Context(), row)
+				return putDeliveryObservationForTest(tx, t.Context(), row)
 			}); err != nil {
 				t.Fatal(err)
 			}

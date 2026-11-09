@@ -93,12 +93,12 @@ func TestHistoricalDeliverySettlementDoesNotInventMissingSuccessfulSnapshot(t *t
 		}
 		row.Observation.DeliverySnapshot = protocol.DeliverySnapshot{}
 		row.Observation.CheckedAt = 0
-		return tx.PutDeliveryObservation(t.Context(), row)
+		return putDeliveryObservationForTest(tx, t.Context(), row)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	failed := recordHistoricalSettlementPoll(t, h, issue.IssueID, nil, "timeout")
-	if failed.CheckedAt != 0 || failed.State != "" || failed.ErrorKind != "timeout" {
+	if failed.CheckedAt != 0 || failed.State != "unknown" || failed.ErrorKind != "timeout" {
 		t.Fatal("failed first read invented provider facts", failed)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {

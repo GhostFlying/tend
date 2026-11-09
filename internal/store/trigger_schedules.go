@@ -14,9 +14,10 @@ const scheduleProjection = `WITH schedules AS (
  FROM followup_rules f JOIN work_items w ON w.work_item_id=f.work_item_id
  UNION ALL
  SELECT 'observation:'||w.work_item_id||':'||json_extract(d.value,'$.delivery_id'),w.work_item_id,json_extract(w.body_json,'$.title'),json_extract(d.value,'$.repository')||' #'||json_extract(d.value,'$.number'),'observation','observation',
- CASE WHEN w.status='closed' OR json_extract(o.observation_json,'$.state') IN ('closed','merged') THEN 'finished' WHEN j.status='claimed' THEN 'processing' WHEN j.status='pending' THEN 'pending' ELSE 'active' END,
- COALESCE(json_extract(o.observation_json,'$.error_kind'),''),COALESCE(o.next_check_at,0),COALESCE(j.updated_at,0),COALESCE(o.generation,0),''
- FROM work_items w JOIN json_each(w.body_json,'$.deliveries') d LEFT JOIN delivery_observations o ON o.work_item_id=w.work_item_id AND o.delivery_id=json_extract(d.value,'$.delivery_id') LEFT JOIN observation_jobs j ON j.issue_id=w.work_item_id AND j.delivery_id=json_extract(d.value,'$.delivery_id')
+	 CASE WHEN w.status='closed' OR json_extract(p.observation_json,'$.state') IN ('closed','merged') THEN 'finished' WHEN j.status='claimed' THEN 'processing' WHEN j.status='pending' THEN 'pending' ELSE 'active' END,
+	 COALESCE(json_extract(p.observation_json,'$.error_kind'),''),COALESCE(o.next_check_at,0),COALESCE(j.updated_at,0),COALESCE(o.generation,0),''
+	 FROM work_items w JOIN json_each(w.body_json,'$.deliveries') d LEFT JOIN delivery_observations o ON o.work_item_id=w.work_item_id AND o.delivery_id=json_extract(d.value,'$.delivery_id') LEFT JOIN observation_jobs j ON j.issue_id=w.work_item_id AND j.delivery_id=json_extract(d.value,'$.delivery_id')
+	 LEFT JOIN server_delivery_references r ON r.issue_id=w.work_item_id AND r.delivery_id=json_extract(d.value,'$.delivery_id') LEFT JOIN server_delivery_jobs p USING(provider,repository,number)
  UNION ALL
  SELECT s.id,s.issue_id,json_extract(w.body_json,'$.title'),json_extract(s.body_json,'$.title'),'webhook','webhook',CASE WHEN w.status='closed' THEN 'cancelled' ELSE s.status END,'',0,s.updated_at,s.revision,'' FROM webhook_subscriptions s JOIN work_items w ON w.work_item_id=s.issue_id
 ) `
