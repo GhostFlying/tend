@@ -228,6 +228,9 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			seen := append([]recorded(nil), calls...)
 			mu.Unlock()
 			matched := entry.Capability == protocol.LocalServerCapabilities && strings.Contains(env.out.String(), "manager-upgrade-park-v1")
+			if strings.HasPrefix(entry.Capability, "local EXEC worker-close ") {
+				matched = strings.Contains(env.out.String(), entry.Capability)
+			}
 			if strings.HasPrefix(entry.Capability, "local EXEC codex-env ") {
 				matched = strings.Contains(env.out.String(), entry.Capability)
 			}

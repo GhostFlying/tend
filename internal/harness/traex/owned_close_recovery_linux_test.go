@@ -101,10 +101,11 @@ func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { procx.KillGroup(child); _ = child.Wait() })
-	identity, _, active, err := readOwnedProcess(child.Process.Pid)
+	identity, group, active, err := readOwnedProcess(child.Process.Pid)
 	if err != nil || !active {
 		t.Fatalf("detached fixture did not start: active=%t error=%v", active, err)
 	}
+	identity.Group = group
 	ws := NewWorkers(WorkerOptions{})
 	spec := harness.WorkerSpec{RunID: "original-run", Dir: t.TempDir(), StateDir: t.TempDir(), Thread: "original-thread"}
 	opts := Options{Bin: bin, Dir: spec.Dir, Env: []string{envAcceptanceCloseServer + "=1"}}
@@ -142,13 +143,25 @@ func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 		t.Fatalf("live detached process became completed execution: %v", err)
 	}
 	current, _, active, err := readOwnedProcess(identity.PID)
-	if err != nil || current != identity || !active {
+	if err != nil || !sameOwnedProcessIdentity(current, identity) || !active {
 		t.Fatal("reconciliation changed the detached fixture", current, active, err)
 	}
 	if err := child.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
 	_ = child.Wait()
+	legacy := saved
+	legacy.Detached = []ownedProcessIdentity{identity}
+	legacy.Detached[0].Group = 0
+	if err := saveOwnedWorkerProcess(spec, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
+		t.Fatal("legacy record without a PGID guessed its original process group", err)
+	}
+	if err := saveOwnedWorkerProcess(spec, saved); err != nil {
+		t.Fatal(err)
+	}
 	if err := ws.StopOwnedWorker(ctx, spec); err != nil {
 		t.Fatal("original known process set could not reconcile after exit", err)
 	}
@@ -158,6 +171,66 @@ func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 	}
 	if err := NewWorkers(WorkerOptions{Session: Options{Bin: "must-not-launch"}}).StopOwnedWorker(ctx, spec); err != nil {
 		t.Fatal("original process reconciliation did not survive client restart", err)
+	}
+}
+
+func TestOwnedCloseReapedDetachedMemberRetainsItsOriginalGroup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	ws, spec, root, record := ownedProcessFixture(t)
+	leader := exec.CommandContext(ctx, "sleep", "60")
+	procx.Contain(leader)
+	if err := leader.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { procx.KillGroup(leader); _ = leader.Wait() })
+	dir := t.TempDir()
+	member := exec.CommandContext(ctx, "sh", "-c", `echo ready > "$1/ready"; while [ ! -f "$1/go" ]; do sleep 0.01; done; sleep 60 </dev/null >/dev/null 2>&1 & echo $! > "$1/child"`, "fixture", dir)
+	member.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: leader.Process.Pid}
+	if err := member.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = member.Process.Kill(); _ = member.Wait() })
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "ready")); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	identity, group, active, err := readOwnedProcess(member.Process.Pid)
+	if err != nil || !active || group != leader.Process.Pid {
+		t.Fatal("detached nonleader did not join its group", identity, group, active, err)
+	}
+	identity.Group = group
+	record.Detached = []ownedProcessIdentity{identity}
+	if err := saveOwnedWorkerProcess(spec, record); err != nil {
+		t.Fatal(err)
+	}
+	procx.KillGroup(root)
+	_ = root.Wait()
+	if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := member.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = leader.Wait()
+	if active, err := ownedGroupActive(group); err != nil || !active {
+		t.Fatal("late child did not retain the observed group", active, err)
+	}
+	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
+		t.Fatal("reaped member hid its live original process group", err)
+	}
+	saved, err := ws.ownedWorkerProcess(spec)
+	if err != nil || saved.closed() {
+		t.Fatal("active original group became a closed execution", saved, err)
 	}
 }
 

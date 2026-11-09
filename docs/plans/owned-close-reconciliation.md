@@ -30,6 +30,8 @@ completed 事实。关闭前发现脱离原进程组的后代后，Session 仍�
   不把这个事实写成原 Close 曾成功，也不要求证明任意未观察历史后代不存在。
 - 保留已复现的晚生后代边界：已登记 detached leader 退出后，它的原进程组仍有
   活跃成员，仍必须拒绝。未观察的假设不成为无限阻塞理由。
+- 独立 review 的真实进程树复现补充：detached 可以是外组的普通成员；必须在
+  观察时保存真实 PGID，成员被回收后仍检查该组，不能猜 PGID 等于成员 PID。
 - 只操作本执行已证明归属的进程；PID 复用、仍活跃后代、观察或持久化失败保持
   未确认。每次关闭与对账有明确期限，不启动新的模型或业务执行。
 - 新鲜对账沿原 `StopOwnedWorker` 与 worker_done 接点自动处理本次既有 Run；
@@ -37,6 +39,13 @@ completed 事实。关闭前发现脱离原进程组的后代后，Session 仍�
   校验，进程集合退出不证明业务成功。实际仍活跃或观察失败的集合继续隔离。
 - 关闭范围为本机已有身份所界定的受管执行，不声称覆盖未登记的任意外部副作用。
   这是对当前无限后代反证要求的明确简化，与 agent 自主执行的约定一致。
+- 旧记录没有 PGID 时保留未确认，提供正式本机两阶段外部对账：先绑定原 Run、
+  thread、原记录 hash、runner 进程代次及其 kernel cgroup；受控停止后，在新执行
+  启动前独立核验该边界为空或已移除，保存 `external_execution_boundary` 证明。
+  该路径不修改业务库、不伪装原 Close 成功，命令、帮助、请求恢复及 CLI 能力
+  登记与实现一起提供。
+  边界观察依据 [Linux cgroup v2 的递归 populated 语义](https://docs.kernel.org/admin-guide/cgroup-v2.html#un-populated-notification)，
+  同时固定原目录身份，不能用复用后的同名目录代替原边界。
 
 ## C3：交付与原结果恢复
 

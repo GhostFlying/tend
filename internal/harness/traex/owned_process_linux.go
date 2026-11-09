@@ -18,6 +18,11 @@ type ownedProcessIdentity struct {
 	PID        int    `json:"pid"`
 	StartTicks string `json:"start_ticks"`
 	BootID     string `json:"boot_id"`
+	Group      int    `json:"process_group,omitempty"`
+}
+
+func sameOwnedProcessIdentity(a, b ownedProcessIdentity) bool {
+	return a.PID == b.PID && a.StartTicks == b.StartTicks && a.BootID == b.BootID
 }
 
 func ownedProcessSupported() bool { return true }
@@ -297,6 +302,7 @@ func ownedDetachedDescendants(original ownedProcessIdentity) ([]ownedProcessIden
 	var detached []ownedProcessIdentity
 	for _, process := range processes {
 		if descendants[process.identity.PID] && process.group != original.PID && process.active {
+			process.identity.Group = process.group
 			detached = append(detached, process.identity)
 		}
 	}
@@ -312,7 +318,7 @@ func confirmDetachedProcessesStopped(processes []ownedProcessIdentity) error {
 		if err != nil {
 			return err
 		}
-		if current == original && active {
+		if sameOwnedProcessIdentity(current, original) && active {
 			return errors.New("traex: observed detached native execution remains active; original workspace must stay isolated")
 		}
 	}
@@ -341,18 +347,24 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 		if err := validOwnedProcessIdentity(process); err != nil {
 			return err
 		}
+		if process.Group <= 1 {
+			return errors.New("traex: original detached process group was not recorded; independent external closure is required")
+		}
 		current, group, active, err := readOwnedProcess(process.PID)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if err == nil && current != process {
+		if err == nil && !sameOwnedProcessIdentity(current, process) {
 			return errors.New("traex: original detached process PID was reused")
 		}
 		if active {
 			return errors.New("traex: original detached native execution remains active")
 		}
-		groups := []int{process.PID}
-		if err == nil && group != process.PID {
+		groups := []int{process.Group}
+		if process.PID != process.Group {
+			groups = append(groups, process.PID)
+		}
+		if err == nil && group != process.PID && group != process.Group {
 			// A recorded descendant need not be its group's leader. A zombie
 			// still supplies that group's identity without being live work.
 			groups = append(groups, group)

@@ -29,11 +29,12 @@ type ownedWorkerProcess struct {
 const ownedProcessFile = "owned-appserver-process.json"
 
 const knownOwnedProcessSet = "known_owned_process_set"
+const externalExecutionBoundary = "external_execution_boundary"
 
 var errOwnedProcessExited = errors.New("traex: original app-server exited without an independent session close receipt")
 
 func (r ownedWorkerProcess) closed() bool {
-	return r.CloseObserved || r.ReconciledCloseScope == knownOwnedProcessSet
+	return r.CloseObserved || r.ReconciledCloseScope == knownOwnedProcessSet || r.ReconciledCloseScope == externalExecutionBoundary
 }
 
 func (ws *Workers) SupportsOwnedWorkerStop() bool {
@@ -53,13 +54,19 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 	if err != nil {
 		return err
 	}
-	if err := confirmDetachedProcessesStopped(record.Detached); err != nil {
-		return err
-	}
 	if record.closed() {
 		// A recorded close is a historical fact. An unrelated later process
 		// reusing the PID must neither invalidate it nor receive a signal.
 		return nil
+	}
+	if closed, err := verifyExternalOwnedClose(ctx, spec, record); err != nil {
+		return err
+	} else if closed {
+		record.ReconciledCloseScope = externalExecutionBoundary
+		return saveOwnedWorkerProcess(spec, record)
+	}
+	if err := confirmDetachedProcessesStopped(record.Detached); err != nil {
+		return err
 	}
 	checkDetached := func() error {
 		detached, err := ownedDetachedDescendants(record.Process)
@@ -107,7 +114,7 @@ func (ws *Workers) ownedWorkerProcess(spec harness.WorkerSpec) (ownedWorkerProce
 	if record.Version != 1 || record.RunID != spec.RunID || filepath.Clean(record.Dir) != filepath.Clean(spec.Dir) || spec.Thread != "" && record.ThreadID != "" && record.ThreadID != spec.Thread {
 		return record, errors.New("traex: original app-server run or thread identity changed")
 	}
-	if record.ReconciledCloseScope != "" && record.ReconciledCloseScope != knownOwnedProcessSet {
+	if record.ReconciledCloseScope != "" && record.ReconciledCloseScope != knownOwnedProcessSet && record.ReconciledCloseScope != externalExecutionBoundary {
 		return record, errors.New("traex: original app-server close reconciliation scope is unsupported")
 	}
 	return record, nil

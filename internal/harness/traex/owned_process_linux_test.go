@@ -174,6 +174,7 @@ func TestOwnedRecoveryAcceptsInactiveDetachedGroupMember(t *testing.T) {
 		}
 		if !active {
 			identity = current
+			identity.Group = group
 			break
 		}
 		select {
@@ -253,7 +254,7 @@ func TestOwnedAppServerDetachedNativeExecutionStaysUnknownAndIsolated(t *testing
 	}
 	for _, process := range detached {
 		current, _, active, err := readOwnedProcess(process.PID)
-		if err != nil || current != process || !active {
+		if err != nil || !sameOwnedProcessIdentity(current, process) || !active {
 			t.Fatal("recovery signalled an independently running session", process, err)
 		}
 	}
