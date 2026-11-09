@@ -148,10 +148,10 @@ func TestImplementationResultRecoveryPreservesUncertaintyAndMissingFallback(t *t
 				}
 			}
 			before, requests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
-			if scenario == "held" {
+			if scenario == "held" || scenario == "retained authority" {
 				recovered, err := r.reconcileImplementationResult(t.Context(), as)
 				if recovered || err != nil || len(workers.seen) != 0 || spaces.reads != 0 {
-					t.Fatal("held worker entered result recovery", recovered, err)
+					t.Fatal("held or explicitly authorized continuation entered result recovery", recovered, err)
 				}
 				return
 			}

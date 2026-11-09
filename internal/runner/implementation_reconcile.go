@@ -33,7 +33,9 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 		return true, err
 	}
 	if strictResume != nil {
-		return true, harness.ErrRetainedResumePending
+		// This optional shortcut does not replace an explicitly authorized
+		// retained continuation and its existing recovery/control checks.
+		return false, nil
 	}
 	execution, err := r.resolveExecution(ctx, as)
 	if err != nil {
@@ -70,17 +72,18 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if err != nil {
 		return true, err
 	}
-	if outcome == nil || outcome.Status == "unknown" || outcome.Status == "interrupted" && outcome.Source != "run_control" {
+	if outcome != nil && outcome.Status == "interrupted" {
+		// Keep the original stop proof authoritative. A previously confirmed
+		// pause can resume; an unconfirmed interruption must first pass the
+		// ordinary interrupted-attempt recovery, which cannot replay work.
+		return false, nil
+	}
+	if outcome == nil || outcome.Status == "unknown" {
 		return true, fmt.Errorf("%w: original implementation terminal outcome is unknown", harness.ErrRetainedResumePending)
 	}
 	if outcome.Status != "completed" {
 		if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
 			return true, err
-		}
-		if outcome.Source == "run_control" {
-			// An explicitly paused or held attempt retains its existing resume
-			// path; its result file does not turn interruption into completion.
-			return false, nil
 		}
 		message := outcome.Error
 		if message == "" {

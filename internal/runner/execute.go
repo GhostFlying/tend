@@ -564,7 +564,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		outcome := workerOutcome{Version: 1, RunID: as.RunID, ThreadID: run.Thread, Attempt: attempt, Status: "completed", Source: "worker_wait"}
 		if cause := context.Cause(runCtx); cause != nil {
 			outcome.Status, outcome.Error = "unknown", cause.Error()
-			if errors.Is(cause, errPaused) || errors.Is(cause, errHeld) || errors.Is(cause, errStopped) {
+			if errors.Is(cause, errPaused) || errors.Is(cause, errHeld) || errors.Is(cause, errStopped) || isQuestionYield(cause) {
 				outcome.Status, outcome.Source = "interrupted", "run_control"
 			}
 		} else if werr != nil {
@@ -577,9 +577,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		if err != nil {
 			return &completionPending{err}
 		}
-		if observed.Status == "failed" {
+		if observed.Status == "failed" || observed.Status == "interrupted" {
 			werr = errors.Join(fmt.Errorf("the original native turn ended %s", observed.Status), werr)
-		} else if observed.Status != "completed" && observed.Source != "run_control" {
+		} else if observed.Status != "completed" && observed.Source != "run_control" && context.Cause(runCtx) == nil {
 			return &completionPending{fmt.Errorf("%w: original native turn ended %s", harness.ErrRetainedResumePending, observed.Status)}
 		}
 	}
