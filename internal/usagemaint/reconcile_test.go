@@ -28,6 +28,7 @@ func TestReconcilePreviewAndDurableFailedReceipt(t *testing.T) {
 	}
 	var requests []string
 	fail := true
+	stopped := false
 	applied := map[string]bool{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test" {
@@ -35,7 +36,7 @@ func TestReconcilePreviewAndDurableFailedReceipt(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/v1/token-usage/sources":
-			_ = json.NewEncoder(w).Encode([]protocol.UsageTarget{{ConversationID: "main", ThreadID: "registered"}})
+			_ = json.NewEncoder(w).Encode([]protocol.UsageTarget{{ConversationID: "main", ThreadID: "registered", Stopped: stopped}})
 		case "/api/v1/token-usage/preview":
 			var upload protocol.UsageUpload
 			if err := json.NewDecoder(r.Body).Decode(&upload); err != nil {
@@ -125,5 +126,19 @@ func TestReconcilePreviewAndDurableFailedReceipt(t *testing.T) {
 	}
 	if result.Preview.New != 0 || result.Preview.TokenDelta != 0 || result.Preview.Existing != 1 {
 		t.Fatal(result)
+	}
+	stopped = true
+	output.Reset()
+	if err = Run(t.Context(), config, &output); err != nil {
+		t.Fatal(err)
+	}
+	j, err = journal.Open(t.Context(), config.Journal, config.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	sources, err := j.UsageSources(t.Context())
+	if err != nil || len(sources) != 1 || !sources[0].WriterStopped || sources[0].Coverage != "caught_up" || sources[0].Collection.RetirementReason != "complete" {
+		t.Fatal("standalone journal discarded the newly confirmed stop", sources, err)
 	}
 }

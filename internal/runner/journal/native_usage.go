@@ -26,17 +26,19 @@ type UsageSource struct {
 }
 
 func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error {
-	_, err := j.registerUsageSource(ctx, s, false)
+	_, err := j.registerUsageSource(ctx, s, false, false)
 	return err
 }
 
 // RegisterUsageMaintenanceSource preserves an existing writer lifecycle. Merely
-// locating a history file is not a new writer attachment or stop confirmation.
-func (j *Journal) RegisterUsageMaintenanceSource(ctx context.Context, s UsageSource) (UsageSourceSnapshot, error) {
-	return j.registerUsageSource(ctx, s, true)
+// locating a history file is not a new writer attachment. Only a standalone
+// reconciliation journal may incorporate fresh stop facts from the owner API;
+// a live runner retains its independently recorded writer lifecycle.
+func (j *Journal) RegisterUsageMaintenanceSource(ctx context.Context, s UsageSource, refreshStop bool) (UsageSourceSnapshot, error) {
+	return j.registerUsageSource(ctx, s, true, refreshStop)
 }
 
-func (j *Journal) registerUsageSource(ctx context.Context, s UsageSource, maintenance bool) (UsageSourceSnapshot, error) {
+func (j *Journal) registerUsageSource(ctx context.Context, s UsageSource, maintenance, refreshStop bool) (UsageSourceSnapshot, error) {
 	defer j.WakeUsage()
 	var snapshot UsageSourceSnapshot
 	err := j.tx(ctx, func(tx *sql.Tx) (err error) {
@@ -68,7 +70,7 @@ func (j *Journal) registerUsageSource(ctx context.Context, s UsageSource, mainte
 				return protocol.Errorf(protocol.CodeForbidden, "usage source session changed")
 			}
 			if maintenance {
-				s.WriterStopped = previous.WriterStopped
+				s.WriterStopped = previous.WriterStopped || (refreshStop && s.WriterStopped)
 				s.Source.WriterID = previous.Source.WriterID
 			}
 			if (!previous.WriterStopped || s.WriterStopped) && (s.Source.WriterID == "" || s.Source.WriterID == previous.Collection.WriterID) {

@@ -106,7 +106,7 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 				http.Error(w, "invalid usage source", http.StatusBadRequest)
 				return
 			}
-			result, err = r.cfg.Journal.RegisterUsageMaintenanceSource(q.Context(), source)
+			result, err = r.cfg.Journal.RegisterUsageMaintenanceSource(q.Context(), source, false)
 		}
 	} else {
 		var input journal.UsageQueueRequest

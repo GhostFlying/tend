@@ -77,7 +77,7 @@ func testLiveUsageApply(t *testing.T, stopped, interrupt bool) {
 			if err := json.NewDecoder(r.Body).Decode(&source); err != nil {
 				t.Error(err)
 			}
-			snapshot, err := j.RegisterUsageMaintenanceSource(r.Context(), source)
+			snapshot, err := j.RegisterUsageMaintenanceSource(r.Context(), source, false)
 			if err != nil {
 				t.Error(err)
 			}
