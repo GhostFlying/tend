@@ -51,9 +51,9 @@ func (s *receiptHistorySession) Close() error {
 
 type receiptHistoryThread struct {
 	harness.Thread
-	events           chan harness.Event
-	business, status string
-	reads            atomic.Int64
+	events                 chan harness.Event
+	business, status, turn string
+	reads                  atomic.Int64
 }
 
 func (t *receiptHistoryThread) ID() string                   { return "original-native" }
@@ -65,11 +65,11 @@ func (t *receiptHistoryThread) ModelDefaults() harness.ModelSelection {
 	return harness.ModelSelection{Model: "frozen-model"}
 }
 func (t *receiptHistoryThread) FindTurn(_ context.Context, identity, turn string) (harness.TurnReceipt, bool, error) {
-	if identity != t.business || turn != "original-turn" {
+	if identity != t.business || turn != t.turn {
 		return harness.TurnReceipt{}, false, errors.New("receipt reader changed original repair execution")
 	}
 	t.reads.Add(1)
-	return harness.TurnReceipt{ID: turn, Status: t.status, Items: []harness.Event{}, Raw: json.RawMessage(fmt.Sprintf(`{"id":"original-turn","status":%q,"items":[]}`, t.status))}, true, nil
+	return harness.TurnReceipt{ID: turn, Status: t.status, Items: []harness.Event{}, Raw: json.RawMessage(fmt.Sprintf(`{"id":%q,"status":%q,"items":[]}`, t.turn, t.status))}, true, nil
 }
 
 // Exercise App admission, a real runner transport and BackgroundPool against a
@@ -99,108 +99,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 			if reader.TaskID != old.TaskID || reader.RunID == old.RunID || reader.Manager == nil || !reader.Manager.ReceiptOnly || !reader.Manager.RequireReceiptReader {
 				t.Fatal("new transport is not the original responsibility's read-only reader", reader)
 			}
-			native := &receiptHistorySession{thread: &receiptHistoryThread{events: make(chan harness.Event), business: f.business, status: status}, done: make(chan struct{})}
-			run, cancel := context.WithCancel(ctx)
-			defer cancel()
-			var wg sync.WaitGroup
-			var logs bytes.Buffer
-			log := slog.New(slog.NewTextHandler(&logs, nil))
-			var sequence atomic.Int64
-			var forbidden atomic.Int64
-			principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: reader.RunID, Role: reader.Role}
-			report := func(op string, p any) error {
-				raw, _ := json.Marshal(p)
-				res, err := s.app.Execute(run, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: protocol.Target{Type: "run", ID: reader.RunID}, Payload: raw}, app.ManagerNativeCommand{OperationName: op})
-				if err != nil {
-					return err
-				}
-				if res.Error != nil {
-					return res.Error
-				}
-				return nil
-			}
-			driver := &coordination.Driver{Session: native, Profile: reader.Execution.Profile, RequireReceiptReader: reader.Manager.RequireReceiptReader, Emit: func(_ context.Context, e coordination.Event) error {
-				raw, _ := json.Marshal(e)
-				return report(protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence.Add(1), Body: raw})
-			}}
-			wg.Go(func() {
-				for run.Err() == nil {
-					raw, _ := json.Marshal(map[string]any{})
-					op, err := s.app.Execute(run, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeClaim, Target: protocol.Target{Type: "run", ID: reader.RunID}, Payload: raw}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
-					if err != nil || op.Error != nil {
-						if run.Err() == nil {
-							t.Error("native reader claim", op, err)
-						}
-						return
-					}
-					var request protocol.ManagerNativeRequest
-					if err := json.Unmarshal(op.Result, &request); err != nil {
-						t.Error(err)
-						return
-					}
-					if request.ID == "" {
-						select {
-						case <-run.Done():
-							return
-						case <-time.After(5 * time.Millisecond):
-						}
-						continue
-					}
-					if request.Method != "resume" && request.Method != "find" && request.Method != "usage" && request.Method != "close" {
-						forbidden.Add(1)
-					}
-					value, handleErr := driver.Handle(run, request.Method, request.Payload)
-					reply := protocol.ManagerNativeReply{ID: request.ID, LastSequence: sequence.Load()}
-					if handleErr != nil {
-						reply.Error = handleErr.Error()
-						reply.Rejected = errors.Is(handleErr, harness.ErrRejected)
-					} else {
-						reply.Result, _ = json.Marshal(value)
-					}
-					if err := report(protocol.OpManagerNativeReply, reply); err != nil {
-						if run.Err() == nil {
-							t.Error(err)
-						}
-						return
-					}
-					if request.Method == "close" {
-						return
-					}
-				}
-			})
-			cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
-			pool := &mainthread.BackgroundPool{App: s.app, New: func(id string) (*mainthread.Manager, error) {
-				if id != old.Manager.ConversationID {
-					return nil, errors.New("unrelated receipt reader")
-				}
-				return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, log), mainthread.Config{Instance: f.instance, ConversationID: id, Log: log, RestartDelay: time.Millisecond, OpenNamed: func(c context.Context, selection hostedconfig.Selection) (harness.Session, error) {
-					if !selection.ReceiptOnly || !selection.RequireReceiptReader || selection.RunnerRunID != reader.RunID {
-						return nil, errors.New("wrong receipt-only transport")
-					}
-					return mainthread.RunnerSession(c, s.app, reader.RunID), nil
-				}}), nil
-			}}
-			wg.Go(func() { pool.Run(run) })
-			defer func() {
-				cancel()
-				wg.Wait()
-				if t.Failed() {
-					t.Logf("reader resumes=%d reads=%d forbidden=%d logs:\n%s", native.resumes.Load(), native.thread.reads.Load(), forbidden.Load(), logs.String())
-				}
-			}()
-			eventually(t, "original history was read", func() bool { return native.thread.reads.Load() > 0 })
-			if status == "completed" {
-				eventually(t, "actual terminal receipt clears original pending", func() bool {
-					return s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, f.business) == 0
-				})
-			} else if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, f.business) != 1 {
-				t.Fatal("nonterminal history was fabricated into a business terminal")
-			}
-			cancel()
-			wg.Wait()
-			if forbidden.Load() != 0 || native.resumes.Load() != 1 {
-				t.Fatal("receipt reader started new work or changed original thread", forbidden.Load(), native.resumes.Load())
-			}
+			driveManagerReceiptHistory(t, s, old, reader, f.business, f.instance, "original-turn", status)
 			if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, old.RunID) != 19 || s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 {
 				t.Fatal("receipt reading changed the old cursor or published repair output")
 			}
@@ -221,5 +120,112 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.Assignment, business, instance, turn, status string) {
+	t.Helper()
+	ctx := t.Context()
+	native := &receiptHistorySession{thread: &receiptHistoryThread{events: make(chan harness.Event), business: business, status: status, turn: turn}, done: make(chan struct{})}
+	run, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var wg sync.WaitGroup
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	var sequence atomic.Int64
+	var forbidden atomic.Int64
+	principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: reader.RunID, Role: reader.Role}
+	report := func(op string, p any) error {
+		raw, _ := json.Marshal(p)
+		res, err := s.app.Execute(run, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: protocol.Target{Type: "run", ID: reader.RunID}, Payload: raw}, app.ManagerNativeCommand{OperationName: op})
+		if err != nil {
+			return err
+		}
+		if res.Error != nil {
+			return res.Error
+		}
+		return nil
+	}
+	driver := &coordination.Driver{Session: native, Profile: reader.Execution.Profile, RequireReceiptReader: reader.Manager.RequireReceiptReader, Emit: func(_ context.Context, e coordination.Event) error {
+		raw, _ := json.Marshal(e)
+		return report(protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence.Add(1), Body: raw})
+	}}
+	wg.Go(func() {
+		for run.Err() == nil {
+			raw, _ := json.Marshal(map[string]any{})
+			op, err := s.app.Execute(run, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeClaim, Target: protocol.Target{Type: "run", ID: reader.RunID}, Payload: raw}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
+			if err != nil || op.Error != nil {
+				if run.Err() == nil {
+					t.Error("native reader claim", op, err)
+				}
+				return
+			}
+			var request protocol.ManagerNativeRequest
+			if err := json.Unmarshal(op.Result, &request); err != nil {
+				t.Error(err)
+				return
+			}
+			if request.ID == "" {
+				select {
+				case <-run.Done():
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+				continue
+			}
+			if request.Method != "resume" && request.Method != "find" && request.Method != "usage" && request.Method != "close" {
+				forbidden.Add(1)
+			}
+			value, handleErr := driver.Handle(run, request.Method, request.Payload)
+			reply := protocol.ManagerNativeReply{ID: request.ID, LastSequence: sequence.Load()}
+			if handleErr != nil {
+				reply.Error = handleErr.Error()
+				reply.Rejected = errors.Is(handleErr, harness.ErrRejected)
+			} else {
+				reply.Result, _ = json.Marshal(value)
+			}
+			if err := report(protocol.OpManagerNativeReply, reply); err != nil {
+				if run.Err() == nil {
+					t.Error(err)
+				}
+				return
+			}
+			if request.Method == "close" {
+				return
+			}
+		}
+	})
+	cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
+	pool := &mainthread.BackgroundPool{App: s.app, New: func(id string) (*mainthread.Manager, error) {
+		if id != old.Manager.ConversationID {
+			return nil, errors.New("unrelated receipt reader")
+		}
+		return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, log), mainthread.Config{Instance: instance, ConversationID: id, Log: log, RestartDelay: time.Millisecond, OpenNamed: func(c context.Context, selection hostedconfig.Selection) (harness.Session, error) {
+			if !selection.ReceiptOnly || selection.RequireReceiptReader != reader.Manager.RequireReceiptReader || selection.RunnerRunID != reader.RunID {
+				return nil, errors.New("wrong receipt-only transport")
+			}
+			return mainthread.RunnerSession(c, s.app, reader.RunID), nil
+		}}), nil
+	}}
+	wg.Go(func() { pool.Run(run) })
+	defer func() {
+		cancel()
+		wg.Wait()
+		if t.Failed() {
+			t.Logf("reader resumes=%d reads=%d forbidden=%d logs:\n%s", native.resumes.Load(), native.thread.reads.Load(), forbidden.Load(), logs.String())
+		}
+	}()
+	eventually(t, "original history was read", func() bool { return native.thread.reads.Load() > 0 })
+	if status == "completed" {
+		eventually(t, "actual terminal receipt clears original pending", func() bool {
+			return s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) == 0
+		})
+	} else if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 {
+		t.Fatal("nonterminal history was fabricated into a business terminal")
+	}
+	cancel()
+	wg.Wait()
+	if forbidden.Load() != 0 || native.resumes.Load() != 1 {
+		t.Fatal("receipt reader started new work or changed original thread", forbidden.Load(), native.resumes.Load())
 	}
 }
