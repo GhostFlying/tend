@@ -14,12 +14,17 @@ import (
 func stoppedOwnerContinuation(t *testing.T) (continuationFixture, protocol.Issue) {
 	t.Helper()
 	h, runtime, issue := issueOwnerHarness(t)
+	return stoppedOwnerContinuationOn(t, h, runtime, issue, "implementer")
+}
+
+func stoppedOwnerContinuationOn(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, issue protocol.Issue, category string) (continuationFixture, protocol.Issue) {
+	t.Helper()
 	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilitySupervisorQuestions)
 	runtime.Sequence++
 	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	op := createOwnerExecution(t, h, issue, "implementer")
+	op := createOwnerExecution(t, h, issue, category)
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -161,8 +166,36 @@ func TestAgentTechnicalWaitResumesThroughNamedHostedTransport(t *testing.T) {
 func TestStoppedResponsibilityAdoptionRejectsUnprovedTransfers(t *testing.T) {
 	for _, scenario := range []string{"missing_epoch", "missing_reason", "wrong_epoch", "stale_control", "unconfirmed_stop", "unknown_run", "active_lease", "different_pin", "different_agent", "dependency_reconcile", "another_live_run"} {
 		t.Run(scenario, func(t *testing.T) {
-			f, issue := stoppedOwnerContinuation(t)
+			var f continuationFixture
+			var issue protocol.Issue
+			if scenario == "different_pin" {
+				h, r, current, _, _ := ownerExtensionHarness(t, false, true, true)
+				f, issue = stoppedOwnerContinuationOn(t, h, r, current, "reviewer")
+			} else {
+				f, issue = stoppedOwnerContinuation(t)
+			}
 			issue = replaceContinuationManager(t, f, issue, scenario == "different_agent")
+			if scenario == "different_pin" {
+				// Change the actual Task worker's published scope, not its manager
+				// transport profile; the old frozen worker must not inherit it.
+				state := extensionState(t, f.h)
+				binding := protocol.ExtensionBinding{}
+				for _, old := range state.Catalog.Categories {
+					if old.CategoryID == "reviewer" {
+						binding = old
+					}
+				}
+				if binding.CategoryID == "" {
+					t.Fatal("worker category disappeared from fixture")
+				}
+				binding.AgentsMD = "changed actual worker instructions"
+				if op := extensionEdit(t, f.h, "binding_set", protocol.ExtensionEditPayload{Binding: &binding}, state.Revision); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				if op := extensionPublish(t, f.h); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
 			v := f.view(t)
 			if !v.ResponsibilityAdoptionRequired || v.CurrentAssignmentEpoch != issue.AssignmentEpoch {
 				t.Fatal("missing explicit adoption projection", v)
@@ -191,9 +224,6 @@ func TestStoppedResponsibilityAdoptionRejectsUnprovedTransfers(t *testing.T) {
 						return tx.UpdateRunObserved(t.Context(), f.as.RunID, protocol.RunUnknown, f.h.clock.Now().UnixMilli())
 					case "active_lease":
 						_, err := tx.Exec(t.Context(), `UPDATE leases SET status='active' WHERE run_id=?`, f.as.RunID)
-						return err
-					case "different_pin":
-						_, err := tx.Exec(t.Context(), `UPDATE issue_manager_tasks SET pin_json=json_set(pin_json,'$.profile.effort','low') WHERE issue_id=? AND state='assigned'`, issue.IssueID)
 						return err
 					case "another_live_run":
 						r := f.h.run(f.as.RunID)

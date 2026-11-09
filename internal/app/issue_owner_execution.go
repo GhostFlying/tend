@@ -97,6 +97,40 @@ func validateRetainedReviewer(ctx context.Context, q store.Querier, contract sto
 	return nil
 }
 
+// ownerTaskWorkerPin derives the execution identity used by Task creation and
+// explicit stopped continuation. The manager transport and category are not the
+// Task's runtime or managed-extension scope.
+func ownerTaskWorkerPin(ctx context.Context, q store.Querier, manager protocol.RunExecutionPin, category string) (protocol.RunExecutionPin, error) {
+	pin, err := store.WorkerPinForManager(ctx, q, manager)
+	if err != nil {
+		return protocol.RunExecutionPin{}, protocol.Errorf(protocol.CodeInvalidTransition, "original owner execution snapshot is unavailable")
+	}
+	runtime, err := store.GetHostRuntime(ctx, q, pin.Identity.ExecutionEnvironmentID)
+	if err != nil {
+		return protocol.RunExecutionPin{}, err
+	}
+	pin.Extensions = protocol.ExtensionExecutionPin{}
+	if status := runtime.Runtime.Extensions; status != nil && status.Enabled && slices.Contains(status.Runtimes, pin.Runtime.RuntimeID) && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityManagedExtensions) {
+		state, err := store.GetExtensionState(ctx, q)
+		if err != nil {
+			return protocol.RunExecutionPin{}, err
+		}
+		if state.Published == nil {
+			return protocol.RunExecutionPin{}, protocol.Errorf(protocol.CodeInvalidTransition, "worker managed extension baseline has not been published")
+		}
+		release, _, err := store.GetExtensionRelease(ctx, q, state.Published.ID)
+		if err != nil {
+			return protocol.RunExecutionPin{}, err
+		}
+		combination, err := extensions.Resolve(release, category, pin.Identity)
+		if err != nil {
+			return protocol.RunExecutionPin{}, err
+		}
+		pin.Extensions = combination.Pin
+	}
+	return pin, nil
+}
+
 func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue, task string, agent protocol.AgentInventoryDefinition, spec domain.Spec) ([]Event, error) {
 	inventory, manager, err := store.RetainedOwnerInventory(ctx, tx.Q(), issue)
 	if err != nil {
@@ -104,32 +138,9 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 	}
 	var execution *protocol.RunExecutionPin
 	if manager != nil {
-		pin, err := store.WorkerPinForManager(ctx, tx.Q(), *manager)
-		if err != nil {
-			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "original owner execution snapshot is unavailable")
-		}
-		runtime, err := store.GetHostRuntime(ctx, tx.Q(), pin.Identity.ExecutionEnvironmentID)
+		pin, err := ownerTaskWorkerPin(ctx, tx.Q(), *manager, spec.AgentSelection.Implementation.CategoryID)
 		if err != nil {
 			return nil, err
-		}
-		pin.Extensions = protocol.ExtensionExecutionPin{}
-		if status := runtime.Runtime.Extensions; status != nil && status.Enabled && slices.Contains(status.Runtimes, pin.Runtime.RuntimeID) && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityManagedExtensions) {
-			state, err := store.GetExtensionState(ctx, tx.Q())
-			if err != nil {
-				return nil, err
-			}
-			if state.Published == nil {
-				return nil, protocol.Errorf(protocol.CodeInvalidTransition, "worker managed extension baseline has not been published")
-			}
-			release, _, err := store.GetExtensionRelease(ctx, tx.Q(), state.Published.ID)
-			if err != nil {
-				return nil, err
-			}
-			combination, err := extensions.Resolve(release, spec.AgentSelection.Implementation.CategoryID, pin.Identity)
-			if err != nil {
-				return nil, err
-			}
-			pin.Extensions = combination.Pin
 		}
 		execution = &pin
 	} else {

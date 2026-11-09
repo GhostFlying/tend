@@ -1592,6 +1592,9 @@ caught_up。按来源退避仍为二至三十秒，读取失败的无进展预�
 理由，事务内追加该 Task/decision/原 Run 的承接事实。当前责任投影统一供任务
 准入、执行身份保留和后继 claim 使用；后继写入当前 epoch，旧运行责任不改写，
 只对精确已停止前驱识别本项承接，不使其他旧 live worker 重新获得权限。
+已排队但未领取的原续行动作可在承接后继续，保留 action 身份；已有实际后继
+Run 的动作不能据此重放。完整执行 pin 复用 Task 创建时的 worker 派生与 Task
+类别扩展解析，管理会话的传输 runtime 不作为实际业务 worker runtime 比较。
 
 不根据同名 Agent 自动承接，不重建 Task/spec/generation，不改写历史合同或
 原生回执。原请求去重、两项 CAS、唯一后继以及真实 owner 等待均保留。新增

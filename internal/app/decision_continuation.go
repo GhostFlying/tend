@@ -140,7 +140,7 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 			}
 		}
 	}
-	if v.State == "continued" {
+	if v.State == "continued" && !v.ResponsibilityAdoptionRequired {
 		return Outcome{Result: v, NoEffect: true}, nil
 	}
 	if d.Status != store.DecisionAnswered {
@@ -189,6 +189,9 @@ func (c ResumeDecisionContinuation) Apply(ctx context.Context, x *Exec, tx *stor
 	}
 	row.Revision++
 	row.State, row.ResumeRequestID, row.UpdatedAt = "ready", x.Env.RequestID, x.Now.UnixMilli()
+	if v.ContinuationActionID != "" {
+		row.State = "continued"
+	}
 	if err := tx.PutDecisionContinuation(ctx, *row); err != nil {
 		return Outcome{}, err
 	}
