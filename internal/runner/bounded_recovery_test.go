@@ -148,7 +148,7 @@ func TestBoundedRecoveryReplaysOriginalFactsWithoutNativeOrCleanup(t *testing.T)
 	for len(received) > 0 {
 		seen = append(seen, <-received)
 	}
-	if len(seen) != 3 || seen[0].RequestID != "original-event" || seen[1].RequestID != "original-close" || seen[2].RequestID != "original-stop" {
+	if len(seen) != 3 || seen[0].RequestID != "original-event" || seen[1].RequestID != "original-stop" || seen[2].RequestID != "original-close" {
 		t.Fatalf("fact replay changed identities/order or invoked another operation: %+v", seen)
 	}
 	for _, env := range seen {
