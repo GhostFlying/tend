@@ -210,3 +210,34 @@ func TestPrepareReplacesInterruptedPackageBeforeNativeValidation(t *testing.T) {
 		t.Fatal(status, err)
 	}
 }
+
+func TestRetainedPreparationDoesNotReplaceDamagedReceipt(t *testing.T) {
+	root := t.TempDir()
+	validations := 0
+	c := Consumer{UserHome: t.TempDir(), Config: Configuration{Directory: filepath.Join(root, "cache"), Runtimes: map[string]Runtime{"native": {Home: filepath.Join(root, "home")}}}, Validate: func(context.Context, codexenv.Profile, string) error { validations++; return nil }}
+	r, _, err := NewRelease(protocol.ExtensionCatalog{Categories: []protocol.ExtensionBinding{{CategoryID: "implementer"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Receive(t.Context(), r, nil); err != nil {
+		t.Fatal(err)
+	}
+	combo, _ := Resolve(r, "implementer", protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "worker"})
+	if _, _, err := c.Prepare(t.Context(), combo.Pin, "native"); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(c.Config.Directory, "views", "*", "inputs", "*", "prepared.json"))
+	if err != nil || len(matches) != 1 {
+		t.Fatal(matches, err)
+	}
+	if err := os.WriteFile(matches[0], []byte("incomplete"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := Agent{Consumer: &c}
+	if err := a.PrepareRetained(t.Context(), combo.Pin, "native"); err == nil || errors.Is(err, ErrNotPrepared) {
+		t.Fatal("damaged historical receipt treated as new work", err)
+	}
+	if validations != 1 {
+		t.Fatal("damaged receipt caused automatic regeneration", validations)
+	}
+}

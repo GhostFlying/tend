@@ -60,9 +60,12 @@ func (p *Pool) refreshRetained(ctx context.Context) error {
 	var retry error
 	for _, pin := range pins {
 		var err error
-		if pin.Purpose == "issue_manager" {
+		if pin.Extensions != (protocol.ExtensionExecutionPin{}) && p.options.Extensions != nil {
+			err = p.options.Extensions.PrepareRetained(ctx, pin.Extensions, pin.Runtime.RuntimeID)
+		}
+		if err == nil && pin.Purpose == "issue_manager" {
 			_, err = p.ResolveManagerRun(ctx, pin)
-		} else {
+		} else if err == nil {
 			resolved, resolveErr := p.Resolve(ctx, pin)
 			err = resolveErr
 			if err == nil {

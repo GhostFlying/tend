@@ -3,7 +3,7 @@ package extensions
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +12,9 @@ import (
 	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+// ErrNotPrepared distinguishes a never-prepared combination from damaged receipts.
+var ErrNotPrepared = errors.New("managed extension combination is not prepared locally")
 
 // RetainedBinding restores an already validated local snapshot without checking
 // commands, credentials or the current base config needed for new work. The
@@ -42,6 +45,9 @@ func (c *Consumer) RetainedScopedBinding(ctx context.Context, pin protocol.Exten
 	}{scope, category, pin.Agent, runtime})
 	root := filepath.Join(c.Config.Directory, "views", Hash(key), "inputs")
 	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil, ErrNotPrepared
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +67,7 @@ func (c *Consumer) RetainedScopedBinding(ctx context.Context, pin protocol.Exten
 		}
 		var binding codexenv.Binding
 		if json.Unmarshal(raw, &binding) != nil || binding.Extensions != pin || !filepath.IsAbs(binding.Directory) || !ValidHash(binding.Generation) {
-			continue
+			return nil, errors.New("retained managed extension receipt is invalid")
 		}
 		status, err := (&codexenv.Service{Root: binding.Directory}).Read(binding.ID)
 		if err != nil {
@@ -70,6 +76,7 @@ func (c *Consumer) RetainedScopedBinding(ctx context.Context, pin protocol.Exten
 		if status.Profile.ManagedRuntimeID == runtime && slices.ContainsFunc(status.Snapshots, func(s codexenv.Snapshot) bool { return s.ID == binding.Generation }) {
 			return &binding, nil
 		}
+		return nil, errors.New("retained managed extension snapshot is unavailable")
 	}
-	return nil, fmt.Errorf("original managed extension snapshot is not prepared locally")
+	return nil, ErrNotPrepared
 }
