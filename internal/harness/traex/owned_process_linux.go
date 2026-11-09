@@ -100,6 +100,24 @@ func ownedGroupActive(group int) (bool, error) {
 	return false, nil
 }
 
+// A /proc directory snapshot can miss a descendant born after ReadDir while
+// its parent exits before inspection. Observation-only recovery therefore uses
+// the kernel group lookup. A zombie-only group still needs an external empty
+// execution-boundary proof; it is not evidence of live work or Close success.
+func ownedGroupPresent(group int) (bool, error) {
+	if group <= 1 {
+		return false, errors.New("traex: original process group identity is unavailable")
+	}
+	err := syscall.Kill(-group, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return false, nil
+	}
+	if err == nil || errors.Is(err, syscall.EPERM) {
+		return true, nil
+	}
+	return false, err
+}
+
 func stopOwnedProcess(ctx context.Context, original ownedProcessIdentity, checkDetached func() error) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -337,6 +355,11 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 	if err := confirmOwnedProcessStopped(original); err != nil {
 		return err
 	}
+	if present, err := ownedGroupPresent(original.PID); err != nil {
+		return err
+	} else if present {
+		return errors.New("traex: original app-server group still exists; independent external closure may be required")
+	}
 	for _, process := range detached {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -373,12 +396,12 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			active, err := ownedGroupActive(group)
+			present, err := ownedGroupPresent(group)
 			if err != nil {
 				return err
 			}
-			if active {
-				return errors.New("traex: original detached process group remains active")
+			if present {
+				return errors.New("traex: original detached process group still exists; independent external closure may be required")
 			}
 		}
 	}

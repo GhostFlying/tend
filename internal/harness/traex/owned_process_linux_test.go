@@ -150,7 +150,7 @@ func TestOwnedAppServerRecoveryRejectsChangedIdentityWithoutSignalling(t *testin
 	}
 }
 
-func TestOwnedRecoveryAcceptsInactiveDetachedGroupMember(t *testing.T) {
+func TestOwnedRecoveryDoesNotInferGroupExitFromInactiveDetachedMember(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	ws, spec, root, record := ownedProcessFixture(t)
@@ -191,14 +191,15 @@ func TestOwnedRecoveryAcceptsInactiveDetachedGroupMember(t *testing.T) {
 	_ = root.Wait()
 	procx.KillGroup(leader)
 	_ = leader.Wait()
-	// The unreaped member is inactive but still has group != PID. This is
-	// neither a reused identity nor evidence of an active native execution.
-	if err := ws.StopOwnedWorker(ctx, spec); err != nil {
-		t.Fatal("inactive detached member blocked original process reconciliation", err)
+	// The unreaped member is inactive but still has group != PID. The kernel
+	// group exists: a PID snapshot alone cannot prove that no child was born
+	// between listing and inspection. External boundary proof remains usable.
+	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
+		t.Fatal("snapshot of inactive member was promoted to group closure", err)
 	}
 	saved, err := ws.ownedWorkerProcess(spec)
-	if err != nil || saved.CloseObserved || saved.ReconciledCloseScope != knownOwnedProcessSet {
-		t.Fatal("inactive member lost the explicit reconciliation scope", saved, err)
+	if err != nil || saved.closed() {
+		t.Fatal("unconfirmed kernel group became a successful close", saved, err)
 	}
 }
 
