@@ -135,14 +135,21 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	// Stop cancels new native execution, not recovery of a completed close.
 	receiptCtx, cancelReceipts := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
 	closed, err := r.replayManagerClose(receiptCtx, as)
+	var run journal.Run
+	if !closed && err == nil {
+		run, err = r.cfg.Journal.Run(receiptCtx, as.RunID)
+	}
 	cancelReceipts()
 	if closed || err != nil {
 		return err
 	}
 	opened := false
 	defer func() {
-		if !opened {
-			_ = r.cfg.Journal.ConfirmStopped(context.WithoutCancel(lifetime), as.RunID)
+		// Not opening this attempt says nothing about an earlier process.
+		if !opened && run.Attempts == 0 {
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
+			defer cancel()
+			_ = r.cfg.Journal.ConfirmStopped(stopCtx, as.RunID)
 		}
 	}()
 	if ctx.Err() != nil {
@@ -155,10 +162,6 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	key := sha256.Sum256([]byte(as.Manager.ConversationID))
 	dir := filepath.Join(r.cfg.Journal.Directory(), "manager-sessions", hex.EncodeToString(key[:]))
 	if err = os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	run, err := r.cfg.Journal.Run(ctx, as.RunID)
-	if err != nil {
 		return err
 	}
 	if _, err = r.cfg.Journal.NextAttempt(ctx, as.RunID); err != nil {

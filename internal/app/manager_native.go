@@ -213,6 +213,15 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {
 				return Outcome{}, err
 			}
+			r, err := store.GetRun(ctx, tx.Q(), run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			// A stopped receipt may already have released this transport. Keep
+			// the validated original close without transitioning it a second time.
+			if r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
+				return Outcome{Result: p}, nil
+			}
 			preserved, err := preserveMaintenancePhysicalStop(ctx, x, tx, run, p.LastSequence)
 			if err != nil {
 				return Outcome{}, err

@@ -19,6 +19,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
 	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 type stoppedManagerNoNative struct {
@@ -45,6 +46,7 @@ type stoppedManagerRecoveryHTTP struct {
 	as             protocol.Assignment
 	close, stopped protocol.Envelope
 	business       string
+	settled        bool
 	mu             sync.Mutex
 	seen           []protocol.Envelope
 }
@@ -79,14 +81,18 @@ func (n *stoppedManagerRecoveryHTTP) RoundTrip(q *http.Request) (*http.Response,
 		if n.s.count(`SELECT COUNT(*) FROM runs r JOIN leases l USING(run_id) WHERE r.run_id=? AND r.observed_state='failed' AND l.status='released'`, n.as.RunID) != 1 {
 			n.t.Error("physical stop did not release the original server run")
 		}
-		if n.s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, n.business) != 1 {
+		wantPending := 1
+		if n.settled {
+			wantPending = 0
+		}
+		if n.s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, n.business) != wantPending {
 			n.t.Error("physical stop fabricated a business completion")
 		}
 	}
 	return response, err
 }
 
-func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as protocol.Assignment, runtime *protocol.RunnerRuntime, closeEnvelope, stopped protocol.Envelope, business, turn string) {
+func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as protocol.Assignment, runtime *protocol.RunnerRuntime, closeEnvelope, stopped protocol.Envelope, business, turn string, options closedManagerRecoveryOptions) {
 	t.Helper()
 	ctx := t.Context()
 	selection, named, err := s.app.HostedRuntimeSelection(ctx, as.Manager.ConversationID)
@@ -106,6 +112,20 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 	if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) < 2 {
 		t.Fatal("fixture lacks original unapplied repair events")
 	}
+	if options.settled {
+		var original store.MainTurn
+		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			var err error
+			original, err = store.GetMainTurn(ctx, tx.Q(), business)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		original.NativeReconciled = true
+		if err := s.app.PutMainTurn(ctx, original); err != nil {
+			t.Fatal(err)
+		}
+	}
 	revision := s.task(as.TaskID).ControlRevision
 	raw := mustClosedFactsJSON(t, map[string]any{})
 	op, err := s.app.Execute(ctx, owner, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: "tasks.cancel", Target: protocol.Target{Type: "task", ID: as.TaskID}, ExpectedControlRevision: &revision, Payload: raw}, app.CancelTask{})
@@ -115,7 +135,17 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 	if _, err := j.NextProcessGeneration(ctx); err != nil {
 		t.Fatal(err)
 	}
-	transport := &stoppedManagerRecoveryHTTP{t: t, s: s, as: as, close: closeEnvelope, stopped: stopped, business: business}
+	if options.bounded {
+		data, err := j.BoundedDataIdentity(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		authority := protocol.BoundedMaintenanceAuthorization{RequestID: "original-bounded-recovery", Role: "runner", DataIdentity: &data, Target: protocol.UpgradeBinding{ProcessInstanceID: "replacement-facts-only"}}
+		if err := j.QuarantineBoundedRecovery(ctx, authority); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transport := &stoppedManagerRecoveryHTTP{t: t, s: s, as: as, close: closeEnvelope, stopped: stopped, business: business, settled: options.settled}
 	executions := &stoppedManagerNoNative{pin: *as.Execution}
 	// Maintenance only prevents unrelated claims. The real Hello still admits
 	// recovery of the exact stopped manager through the normal executor path.
@@ -154,8 +184,15 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND run_id=? AND status='completed' AND json_extract(result_json,'$.last_sequence')=3 AND COALESCE(json_extract(result_json,'$.error'),'')=''`, closeResultID(t, closeEnvelope), as.RunID) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) != 0 {
 		t.Fatal("terminal run rejected its original close or lost original event application")
 	}
-	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM runs`) != 1 {
+	wantPending := 1
+	if options.settled {
+		wantPending = 0
+	}
+	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != wantPending || s.count(`SELECT COUNT(*) FROM runs`) != 1 {
 		t.Fatal("transport recovery completed unknown business or created another run")
+	}
+	if options.settled {
+		return
 	}
 	// Claim only the original manager Task's automatically derived receipt-only
 	// action. Its fake native history can read the original turn, never run it.

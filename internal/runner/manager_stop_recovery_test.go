@@ -219,3 +219,41 @@ func TestFault_ManagerStopACKRetainsOriginalUnknownClose(t *testing.T) {
 		t.Fatal("acknowledged original close did not settle", err)
 	}
 }
+
+func TestFault_ManagerStopCannotProvePriorAttemptClosed(t *testing.T) {
+	for _, closeFailed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing-close", true: "failed-close"}[closeFailed], func(t *testing.T) {
+			r, as, _, _ := retainedRunnerFixture(t, protocol.RoleIssueManager)
+			if _, err := r.cfg.Journal.NextAttempt(t.Context(), as.RunID); err != nil {
+				t.Fatal(err)
+			}
+			if closeFailed {
+				command := protocol.ManagerNativeRequest{ID: "unknown-original-close", Method: "close", Payload: json.RawMessage(`{}`)}
+				if _, _, err := r.cfg.Journal.ManagerOperation(t.Context(), as.RunID, command); err != nil {
+					t.Fatal(err)
+				}
+				if err := r.cfg.Journal.CompleteManagerOperation(t.Context(), protocol.ManagerNativeReply{ID: command.ID, Error: "original process exit is unconfirmed"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var sends atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+				var env protocol.Envelope
+				_ = json.NewDecoder(q.Body).Decode(&env)
+				sends.Add(1)
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
+			}))
+			defer server.Close()
+			r.c.base, r.c.http = server.URL, server.Client()
+			attempt, stop := context.WithCancelCause(t.Context())
+			stop(errStopped)
+			if err := r.executeManager(t.Context(), attempt, &active{as: as, desired: protocol.DesiredStopped}); err != nil {
+				t.Fatal(err)
+			}
+			run, err := r.cfg.Journal.Run(t.Context(), as.RunID)
+			if err != nil || run.StoppedConfirmed || !run.Fenced || run.Attempts != 1 || run.Phase != journal.PhaseStarted || sends.Load() != 0 {
+				t.Fatal("canceling a new attempt fabricated the original process exit", run, sends.Load(), err)
+			}
+		})
+	}
+}

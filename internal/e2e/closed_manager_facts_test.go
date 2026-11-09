@@ -26,14 +26,28 @@ import (
 // not evidence that an OS process exited. The real App and RPC authenticate and
 // reconcile their original envelopes; no native executor is installed here.
 func TestFault_ClosedRepairToolFactsReconcileOriginalHTTPReceipts(t *testing.T) {
-	closedRepairToolFacts(t, false)
+	closedRepairToolFacts(t, closedManagerRecoveryOptions{})
 }
 
 func TestFault_ManagerStoppedHTTPRecoveryReleasesOriginalReceiptReader(t *testing.T) {
-	closedRepairToolFacts(t, true)
+	closedRepairToolFacts(t, closedManagerRecoveryOptions{runner: true})
 }
 
-func closedRepairToolFacts(t *testing.T, recoverWithRunner bool) {
+func TestFault_ManagerStoppedSettledCloseHTTPRecovery(t *testing.T) {
+	for _, bounded := range []bool{false, true} {
+		name := "normal"
+		if bounded {
+			name = "bounded"
+		}
+		t.Run(name, func(t *testing.T) {
+			closedRepairToolFacts(t, closedManagerRecoveryOptions{runner: true, settled: true, bounded: bounded})
+		})
+	}
+}
+
+type closedManagerRecoveryOptions struct{ runner, settled, bounded bool }
+
+func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	t.Helper()
 	ctx := t.Context()
 	s := newServer(t, time.Hour)
@@ -240,8 +254,8 @@ func closedRepairToolFacts(t *testing.T, recoverWithRunner bool) {
 	if err := j.Finish(ctx, as.RunID, journal.PhaseReleasing, journal.Request{RunID: as.RunID, Envelope: stopped}); err != nil {
 		t.Fatal(err)
 	}
-	if recoverWithRunner {
-		recoverStoppedManagerHTTP(t, s, j, as, runtime, closeEnvelope, stopped, business, turn)
+	if options.runner {
+		recoverStoppedManagerHTTP(t, s, j, as, runtime, closeEnvelope, stopped, business, turn, options)
 		return
 	}
 	if _, err := j.NextProcessGeneration(ctx); err != nil {

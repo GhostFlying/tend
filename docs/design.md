@@ -1613,6 +1613,9 @@ runner 已持久化成功的原 native close 后，即使 owner 后来停止该 
 进程仍运行，也不能被物理停止改成成功。普通恢复和受控更新的事实重放均先传原
 事件，再传真实 stopped，最后续传原 close reply，避免业务应用等待挡住资源释放。
 每项 ACK 只消费自身；正式 Stop 的既有本地归档保留原未 ACK 的请求与字节。
+没有成功 close 的既有 attempt 仍保留未知，不能因本次未打开 session 就确认先前
+进程退出。stop 已使原 Run 进入终态时，迟到 close 按原身份、游标与事件校验入账，
+保留原 Run/lease/action 终态，不再次完成或替换该运行；reader 先结清业务也不改变此规则。
 retained 期间不自行结清，正式 Stop 后
 只恢复原关闭事实，不重新附着或调用 provider。没有成功 close 的原执行继续原有
 核验路径。不改变 wire/API/schema；见[实施计划](plans/manager-close-recovery.md)。
