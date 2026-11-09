@@ -10,9 +10,9 @@ import (
 )
 
 func prepareWorkerClose(context.Context, workerCloseOptions, workerCloseHost) (protocol.WorkerCloseIntent, error) {
-	return protocol.WorkerCloseIntent{}, errors.New("worker-close execution boundary observation requires Linux cgroup v2")
+	return protocol.WorkerCloseIntent{}, errors.New("worker-close execution boundary observation requires Linux cgroups")
 }
 
 func confirmWorkerClose(context.Context, protocol.WorkerCloseIntent, string, workerCloseHost) (protocol.WorkerCloseProof, error) {
-	return protocol.WorkerCloseProof{}, errors.New("worker-close execution boundary observation requires Linux cgroup v2")
+	return protocol.WorkerCloseProof{}, errors.New("worker-close execution boundary observation requires Linux cgroups")
 }

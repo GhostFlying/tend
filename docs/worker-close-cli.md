@@ -1,6 +1,6 @@
 # 本机原执行关闭对账
 
-`tend worker-close` 用于既有关闭范围已遗失的 Linux cgroup v2 执行。它记录独立的
+`tend worker-close` 用于既有关闭范围已遗失的 Linux cgroup 执行。它记录独立的
 `external_execution_boundary` 事实，不声称原生 Close 曾成功，也不停止服务、修改
 业务数据库、发消息或重跑模型。普通执行仍沿既有自动关闭路径。
 
@@ -21,8 +21,15 @@ tend worker-close prepare \
 
 命令读取原 `owned-appserver-process.json`，校验原 Run/thread/记录 SHA，绑定实际
 存活 runner 的身份、cgroup 路径及 kernel 目录 device/inode，保存不可变 intent。
-原 runner 必须位于所选 unit 本级 cgroup；不接受根 cgroup 或从名称猜测其他边界。
+优先使用所选 unit 的非根 unified v2 cgroup。混合布局若统一层只有根路径，则读取
+原 runner 的 `name=systemd` 层级，并从 `/proc/self/mountinfo` 定位其实际 cgroup
+挂载；不从 unit 名称猜内核路径。原 runner 必须位于所选 unit 本级 cgroup。
 该 intent 还保存原执行进程列表、操作员 UID 与明确的 unit 范围确认。
+
+旧 v2 原件没有新增字段，canonical 字节与哈希不变。v1 的 boundary 新增
+`hierarchy=systemd_v1` 和 `filesystem_root`，后者是实际挂载路径，mountinfo 的
+root 须为 `/`；`root_device/root_inode` 绑定该挂载目录，原 `cgroup_path` 仍是
+内核层级中的完整原路径。这些只是本机维护原件，不改变线上协议。
 
 通过既有受控维护路径停止原 unit，在启动任何后继 runner **之前**确认：
 
@@ -32,9 +39,11 @@ tend worker-close confirm \
 ```
 
 确认阶段自行进行两次有界内核观察：原 boot 和 cgroup filesystem 仍一致，原 runner、
-原 root 及已登记 PID 不活跃且无身份复用；原 cgroup 的递归 `populated=0` 且
-`cgroup.procs` 为空，或先前绑定的原 kernel 目录确已移除。目录身份替换、仍活跃
-的子 cgroup、缺失观察或身份冲突均返回错误，不写关闭证明。丢失的历史 PGID
+原 root 及已登记 PID 不活跃且无身份复用。v2 要求原 cgroup 的递归 `populated=0`
+且 `cgroup.procs` 为空，或原 kernel 目录确已移除。v1 **只接受原 kernel 目录移除**：
+目录仍存在就保持未确认，不依据 `tasks` 或 `cgroup.procs` 快照猜测递归为空；
+类型校验也拒绝 v1 的 `empty` 证明。目录身份替换、挂载变化、仍活跃的子 cgroup、
+缺失观察或身份冲突均返回错误，不写关闭证明。丢失的历史 PGID
 不再被猜成成员 PID，而由已事先绑定的整个执行边界覆盖。
 
 成功 JSON 包含 `phase=confirmed`、`intent_path`、`intent_sha256`、`proof_path`、
