@@ -22,6 +22,7 @@
     "test:decision-layout": "node scripts/layout-fixture.ts scripts/decision-layout-investigation.ts",
     "test:repos-layout": "node scripts/layout-fixture.ts scripts/repo-layout.ts",
     "test:usage": "node scripts/layout-fixture.ts scripts/usage-rollout-layout.ts",
+    "test:usage-cards": "node scripts/layout-fixture.ts scripts/usage-card-layout.ts",
     "test:agents": "node scripts/layout-fixture.ts scripts/agent-conversations-layout.ts",
     "test:work-items-layout": "node scripts/layout-fixture.ts scripts/work-items-layout.ts",
     "test:delivery-refresh": "node scripts/layout-fixture.ts scripts/delivery-refresh-layout.ts",
