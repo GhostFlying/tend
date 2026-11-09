@@ -272,7 +272,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			if _, terminalFailure := errors.AsType[*stepError](recoveryErr); terminalFailure {
 				return recoveryErr
 			}
-			return &completionPending{recoveryErr}
+			return &ownedRecoveryUncertain{&completionPending{recoveryErr}}
 		}
 		return nil
 	}
