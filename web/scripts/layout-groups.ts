@@ -17,6 +17,7 @@ export const layoutGroups: Record<string, string[]> = {
   "2": [
     "test:issue-detail-layout",
     "test:usage",
+    "test:usage-cards",
     "test:layout",
     "test:repos-layout",
     "test:agents",
