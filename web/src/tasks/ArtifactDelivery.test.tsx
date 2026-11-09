@@ -9,7 +9,6 @@ vi.mock("./FilePreview.tsx", () => ({
 test("the explicit report leads, with supporting files and checks available on demand", () => {
   const output = renderToStaticMarkup(
     <ArtifactDelivery
-      compact
       value={{
         report: {
           body: "调查结论正文，不用文件名猜测替换。",
@@ -24,4 +23,20 @@ test("the explicit report leads, with supporting files and checks available on d
   expect(output).toContain("<summary>原件与证据");
   expect(output).toContain("截图瞬间状态仍未知。");
   expect(output).not.toContain("<details open");
+});
+
+test("compact reports use a bounded Unicode summary rather than hiding full content with CSS", () => {
+  const value = {
+    report: { body: "段😀".repeat(700) + "全文末尾", uncertainties: ["具体未知项"] },
+  };
+  const preview = renderToStaticMarkup(<ArtifactDelivery compact value={value} />);
+  expect(preview).toContain("报告摘要");
+  expect(preview).toContain("段😀".repeat(600));
+  expect(preview).toContain("…");
+  expect(preview).not.toContain("全文末尾");
+  expect(preview).not.toContain("具体未知项");
+  const full = renderToStaticMarkup(<ArtifactDelivery value={value} />);
+  expect(full).toContain("报告正文");
+  expect(full).toContain("全文末尾");
+  expect(full).toContain("具体未知项");
 });

@@ -21,6 +21,11 @@ export function ArtifactDelivery({
       ? (payload.report as Partial<ResultReport>)
       : null;
   const files = artifactFiles(payload.files);
+  const body = typeof report?.body === "string" ? report.body : null;
+  // Match the server's result summaries even when a historical card received a full artifact.
+  const characters = compact && body ? Array.from(body) : null;
+  const text =
+    characters && characters.length > 1200 ? characters.slice(0, 1200).join("") + "\n\n…" : body;
   return (
     <>
       {report && (
@@ -29,10 +34,8 @@ export function ArtifactDelivery({
           aria-label="交付报告"
         >
           <h3>{compact ? "报告摘要" : "报告正文"}</h3>
-          {typeof report.body === "string" && (
-            <Markdown text={report.body} files={files} demoteHeadings={compact} />
-          )}
-          {Array.isArray(report.uncertainties) && report.uncertainties.length > 0 && (
+          {text !== null && <Markdown text={text} files={files} demoteHeadings={compact} />}
+          {!compact && Array.isArray(report.uncertainties) && report.uncertainties.length > 0 && (
             <>
               <h4>仍未知的部分</h4>
               <ReportNotes notes={report.uncertainties} />
