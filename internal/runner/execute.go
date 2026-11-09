@@ -267,6 +267,12 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 		return nil
 	}
+	if recovered, recoveryErr := r.reconcileImplementationResult(runCtx, as); recovered {
+		if recoveryErr != nil {
+			return &completionPending{recoveryErr}
+		}
+		return nil
+	}
 	if recovered, err := r.recoverAppServerAttempt(runCtx, as); recovered {
 		if err != nil {
 			return &ownedRecoveryUncertain{&completionPending{err}}
@@ -555,6 +561,17 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return &completionPending{werr}
 		}
 	}
+	if context.Cause(runCtx) == nil && appendErr == nil && werr == nil {
+		body, err := json.Marshal(res)
+		if err != nil {
+			return err
+		}
+		// A failed close must not discard an already observed successful result.
+		// Completion still verifies physical exit and current control below.
+		if err := r.cfg.Journal.WorkerDone(ctx, as.RunID, body); err != nil {
+			return &completionPending{err}
+		}
+	}
 	if err := r.recordClosedSession(context.WithoutCancel(ctx), as); err != nil {
 		return &completionPending{err}
 	}
@@ -576,11 +593,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if werr != nil {
 		return failed("worker_failed", werr)
 	}
-	body, err := json.Marshal(res)
-	if err != nil {
-		return err
-	}
-	return r.cfg.Journal.WorkerDone(ctx, as.RunID, body)
+	return nil
 }
 
 // completeWork resumes a known outcome after the owner returns control.

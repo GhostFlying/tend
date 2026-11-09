@@ -27,6 +27,10 @@ type ownedWorkerProcess struct {
 
 const ownedProcessFile = "owned-appserver-process.json"
 
+// A complete descendant observation can find work outside the owned group.
+// Keep that uncertainty separate from failure to observe the process tree.
+var errDetachedNativeActive = errors.New("traex: detached native execution prevents confirmed owned session closure")
+
 func (ws *Workers) SupportsOwnedWorkerStop() bool {
 	return ownedProcessSupported() && ws.opts.Acquire == nil
 }
@@ -164,7 +168,7 @@ func (ws *Workers) recordOwnedWorkerProcess(spec harness.WorkerSpec, opts *Optio
 			if err := saveOwnedWorkerProcess(spec, *record); err != nil {
 				return err
 			}
-			return errors.New("traex: detached native execution prevents confirmed owned session closure")
+			return errDetachedNativeActive
 		}
 		return nil
 	}
