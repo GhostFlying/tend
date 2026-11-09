@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -35,6 +37,48 @@ func GetDeliveryObservation(ctx context.Context, q Querier, item, id string) (De
 	row.Observation.RefreshPending = row.RefreshRequested || row.Nonce != ""
 	return row, nil
 }
+
+// GetCurrentDeliveryObservation reads the PR's shared provider fact without
+// requiring historical Issue copies to catch up. Before the server owns a read,
+// the original runner observation and its request identity remain authoritative.
+func GetCurrentDeliveryObservation(ctx context.Context, q Querier, issue string, ref protocol.IssueDelivery) (DeliveryObservationRow, error) {
+	row, shared, err := currentServerDeliveryObservation(ctx, q, ref)
+	if err != nil {
+		return row, err
+	}
+	if !shared {
+		return GetDeliveryObservation(ctx, q, issue, ref.DeliveryID)
+	}
+	row.Observation.WorkItemID = issue
+	row.Observation.DeliveryID = ref.DeliveryID
+	return row, nil
+}
+
+// currentServerDeliveryObservation distinguishes an empty migration placeholder
+// from a real server read, including its initial pending or failed observation.
+func currentServerDeliveryObservation(ctx context.Context, q Querier, ref protocol.IssueDelivery) (DeliveryObservationRow, bool, error) {
+	var row DeliveryObservationRow
+	var raw string
+	var observedRefresh int64
+	err := q.QueryRowContext(ctx, `SELECT nonce,query_until,refresh_revision,observed_refresh_revision,observation_json FROM server_delivery_jobs WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number).Scan(&row.Nonce, &row.QueryUntil, &row.ServerRefreshRevision, &observedRefresh, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return row, false, nil
+	}
+	if err != nil {
+		return row, false, fmt.Errorf("store: read shared delivery observation: %w", err)
+	}
+	if err := json.Unmarshal([]byte(raw), &row.Observation); err != nil {
+		return row, false, fmt.Errorf("store: decode shared delivery observation: %w", err)
+	}
+	if row.Nonce == "" && row.QueryUntil == 0 && row.ServerRefreshRevision == 0 && observedRefresh == 0 && reflect.DeepEqual(row.Observation, protocol.DeliveryObservation{}) {
+		return row, false, nil
+	}
+	row.HostID, row.InstanceID = "server", "server"
+	row.RefreshRequested = row.ServerRefreshRevision > observedRefresh
+	row.Observation.RefreshPending = row.Observation.RefreshPending || row.Nonce != "" || row.RefreshRequested
+	return row, true, nil
+}
+
 func (t *Tx) PutDeliveryObservation(ctx context.Context, row DeliveryObservationRow) error {
 	o := row.Observation
 	raw, err := json.Marshal(o)

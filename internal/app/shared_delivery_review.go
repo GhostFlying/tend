@@ -128,7 +128,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if p.Action == "start" && len(r.Rounds) > 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "retain the original reviewer and use a focused recheck")
 			}
-			o, err := store.GetDeliveryObservation(ctx, tx.Q(), i.IssueID, ref.DeliveryID)
+			o, err := store.GetCurrentDeliveryObservation(ctx, tx.Q(), i.IssueID, ref)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -342,7 +342,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if r.Status != "passed" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only a passed review can be confirmed applicable")
 			}
-			observation, err := store.GetDeliveryObservation(ctx, tx.Q(), i.IssueID, p.DeliveryID)
+			observation, err := store.GetCurrentDeliveryObservation(ctx, tx.Q(), i.IssueID, ref)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -373,7 +373,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err != nil {
 			return Outcome{}, err
 		}
-		o, err := store.GetDeliveryObservation(ctx, tx.Q(), i.IssueID, ref.DeliveryID)
+		o, err := store.GetCurrentDeliveryObservation(ctx, tx.Q(), i.IssueID, ref)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return Outcome{}, err
 		}
