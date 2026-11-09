@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -318,6 +319,11 @@ func observeWorkerCloseBoundary(ctx context.Context, boundary protocol.WorkerClo
 	path := filepath.Join(filesystemRoot, boundary.CgroupPath)
 	device, inode, err := workerCloseDirectoryIdentity(path)
 	if errors.Is(err, os.ErrNotExist) {
+		if boundary.Hierarchy == protocol.WorkerCloseSystemdV1 {
+			if err := confirmWorkerCloseV1InodeRemoved(ctx, filesystemRoot, boundary); err != nil {
+				return "", err
+			}
+		}
 		return "kernel_removed", nil
 	}
 	if err != nil {
@@ -361,4 +367,42 @@ func observeWorkerCloseBoundary(ctx context.Context, boundary protocol.WorkerClo
 		return "", errors.New("original cgroup changed during observation")
 	}
 	return "empty", nil
+}
+
+// V1 permits same-parent renames, including an ancestor of the bound unit.
+// Missing the old pathname therefore needs one complete, bounded metadata
+// lookup before it can mean that the original cgroup inode was removed.
+func confirmWorkerCloseV1InodeRemoved(ctx context.Context, root string, boundary protocol.WorkerCloseBoundary) error {
+	const directoryLimit = 4096
+	directories := 0
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			return fmt.Errorf("read original systemd cgroup removal metadata: %w", walkErr)
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		directories++
+		if directories > directoryLimit {
+			return fmt.Errorf("original systemd cgroup removal lookup exceeded %d directories; inode absence remains unconfirmed", directoryLimit)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("inspect original systemd cgroup removal metadata: %w", err)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			return errors.New("systemd cgroup directory identity unavailable during removal lookup")
+		}
+		if uint64(stat.Dev) != boundary.RootDevice {
+			return errors.New("systemd cgroup removal lookup crossed a filesystem device; inode absence remains unconfirmed")
+		}
+		if uint64(stat.Dev) == boundary.Device && stat.Ino == boundary.Inode {
+			return errors.New("original systemd v1 cgroup inode still exists at a renamed path; kernel removal remains unconfirmed")
+		}
+		return nil
+	})
 }
