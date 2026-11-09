@@ -73,6 +73,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 		case journal.PhaseStarted:
 			err = r.work(ctx, runCtx, as, a)
 		case journal.PhaseWorkerDone:
+			r.flushFinalEvents(ctx, as)
 			if r.stopRequested(runCtx, a) {
 				// The saved outcome remains available for reconciliation, but
 				// cancellation must not restart work or collect a stale spec.
@@ -562,6 +563,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	<-messagesDone
 	stopUploader()
 	<-uploaded
+	r.flushFinalEvents(ctx, as)
 	if p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer && appendErr == nil {
 		outcome := workerOutcome{Version: 1, RunID: as.RunID, ThreadID: run.Thread, Attempt: attempt, Status: "completed", Source: "worker_wait"}
 		if cause := context.Cause(runCtx); cause != nil {
@@ -615,11 +617,6 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		// from this attempt. What the worker said as it stopped, such as
 		// that the owner took over, would otherwise wait for the run's
 		// next attempt or its report.
-		if ctx.Err() == nil && appendErr == nil {
-			flushCtx, cancel := context.WithTimeout(ctx, stopFlush)
-			_ = r.flushEvents(flushCtx, as)
-			cancel()
-		}
 		return cause
 	}
 	if appendErr != nil {
@@ -1051,6 +1048,17 @@ func (r *Runner) requireRunWorker(ctx context.Context, runID string) error {
 // stopFlush bounds the upload of a run's last events when its attempt
 // stops; whatever it misses goes with the next attempt or the report.
 const stopFlush = 5 * time.Second
+
+// flushFinalEvents sends already journaled facts independently of physical
+// closure. A shutdown may cancel execution, but cannot erase received facts;
+// failed uploads retain the original event identities for the next recovery.
+func (r *Runner) flushFinalEvents(ctx context.Context, as protocol.Assignment) {
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopFlush)
+	defer cancel()
+	if err := r.flushEvents(flushCtx, as); err != nil {
+		r.cfg.Log.WarnContext(flushCtx, "final run events remain pending", "run_id", as.RunID, "err", err)
+	}
+}
 
 // uploadEvents uploads a run's events every EventFlush until ctx ends.
 func (r *Runner) uploadEvents(ctx context.Context, as protocol.Assignment) {

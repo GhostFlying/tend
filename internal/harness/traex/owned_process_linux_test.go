@@ -109,7 +109,7 @@ func TestOwnedAppServerRecoveryAfterClientRestartStopsExactProcessGroup(t *testi
 }
 
 func TestOwnedAppServerRecoveryRejectsChangedIdentityWithoutSignalling(t *testing.T) {
-	for _, changed := range []string{"run", "thread", "pid generation", "malformed record", "missing record"} {
+	for _, changed := range []string{"run", "thread", "pid generation", "reconciled scope", "malformed record", "missing record"} {
 		t.Run(changed, func(t *testing.T) {
 			ws, spec, cmd, record := ownedProcessFixture(t)
 			switch changed {
@@ -119,6 +119,8 @@ func TestOwnedAppServerRecoveryRejectsChangedIdentityWithoutSignalling(t *testin
 				record.ThreadID = "another-thread"
 			case "pid generation":
 				record.Process.StartTicks += "1"
+			case "reconciled scope":
+				record.ReconciledCloseScope = "unsupported"
 			}
 			if err := saveOwnedWorkerProcess(spec, record); err != nil {
 				t.Fatal(err)
@@ -145,6 +147,57 @@ func TestOwnedAppServerRecoveryRejectsChangedIdentityWithoutSignalling(t *testin
 				t.Fatal("identity mismatch changed the process", err)
 			}
 		})
+	}
+}
+
+func TestOwnedRecoveryAcceptsInactiveDetachedGroupMember(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	ws, spec, root, record := ownedProcessFixture(t)
+	leader := exec.CommandContext(ctx, "sleep", "60")
+	procx.Contain(leader)
+	if err := leader.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { procx.KillGroup(leader); _ = leader.Wait() })
+	member := exec.CommandContext(ctx, "sh", "-c", "exit 0")
+	member.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: leader.Process.Pid}
+	if err := member.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = member.Wait() })
+	var identity ownedProcessIdentity
+	for {
+		current, group, active, err := readOwnedProcess(member.Process.Pid)
+		if err != nil || group != leader.Process.Pid {
+			t.Fatal("detached member lost its original group", current, group, err)
+		}
+		if !active {
+			identity = current
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	record.Detached = []ownedProcessIdentity{identity}
+	if err := saveOwnedWorkerProcess(spec, record); err != nil {
+		t.Fatal(err)
+	}
+	procx.KillGroup(root)
+	_ = root.Wait()
+	procx.KillGroup(leader)
+	_ = leader.Wait()
+	// The unreaped member is inactive but still has group != PID. This is
+	// neither a reused identity nor evidence of an active native execution.
+	if err := ws.StopOwnedWorker(ctx, spec); err != nil {
+		t.Fatal("inactive detached member blocked original process reconciliation", err)
+	}
+	saved, err := ws.ownedWorkerProcess(spec)
+	if err != nil || saved.CloseObserved || saved.ReconciledCloseScope != knownOwnedProcessSet {
+		t.Fatal("inactive member lost the explicit reconciliation scope", saved, err)
 	}
 }
 

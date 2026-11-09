@@ -88,7 +88,7 @@ func TestOwnedCloseLateDetachedForkRemainsUnconfirmed(t *testing.T) {
 	}
 }
 
-func TestOwnedCloseDetachedExitRequiresIndependentClosureProof(t *testing.T) {
+func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	bin, err := os.Executable()
@@ -149,18 +149,15 @@ func TestOwnedCloseDetachedExitRequiresIndependentClosureProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = child.Wait()
-	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
-		t.Fatalf("recorded detached PID exit became complete closure: %v", err)
-	}
-	// This fixture independently controls the entire execution: the original
-	// app-server has exited and the only detached child has been reaped. An
-	// external close attestation retains every original identity and snapshot.
-	saved.CloseObserved = true
-	if err := saveOwnedWorkerProcess(spec, saved); err != nil {
-		t.Fatal(err)
-	}
 	if err := ws.StopOwnedWorker(ctx, spec); err != nil {
-		t.Fatal("independently confirmed original close could not reconcile", err)
+		t.Fatal("original known process set could not reconcile after exit", err)
+	}
+	saved, err = ws.ownedWorkerProcess(spec)
+	if err != nil || saved.CloseObserved || saved.ReconciledCloseScope != knownOwnedProcessSet || saved.Process != record.Process || len(saved.Detached) != 1 || saved.Detached[0] != identity {
+		t.Fatalf("reconciliation changed the original close or identities: %+v error=%v", saved, err)
+	}
+	if err := NewWorkers(WorkerOptions{Session: Options{Bin: "must-not-launch"}}).StopOwnedWorker(ctx, spec); err != nil {
+		t.Fatal("original process reconciliation did not survive client restart", err)
 	}
 }
 

@@ -16,16 +16,25 @@ import (
 // This is local recovery evidence, not a native start receipt or permission to
 // repeat input. Old runs without it retain their existing reconciliation path.
 type ownedWorkerProcess struct {
-	Version       int                    `json:"version"`
-	RunID         string                 `json:"run_id"`
-	Dir           string                 `json:"directory"`
-	ThreadID      string                 `json:"thread_id,omitempty"`
-	Process       ownedProcessIdentity   `json:"process"`
-	CloseObserved bool                   `json:"close_observed,omitempty"`
-	Detached      []ownedProcessIdentity `json:"detached_processes,omitempty"`
+	Version              int                    `json:"version"`
+	RunID                string                 `json:"run_id"`
+	Dir                  string                 `json:"directory"`
+	ThreadID             string                 `json:"thread_id,omitempty"`
+	Process              ownedProcessIdentity   `json:"process"`
+	CloseObserved        bool                   `json:"close_observed,omitempty"`
+	Detached             []ownedProcessIdentity `json:"detached_processes,omitempty"`
+	ReconciledCloseScope string                 `json:"reconciled_close_scope,omitempty"`
 }
 
 const ownedProcessFile = "owned-appserver-process.json"
+
+const knownOwnedProcessSet = "known_owned_process_set"
+
+var errOwnedProcessExited = errors.New("traex: original app-server exited without an independent session close receipt")
+
+func (r ownedWorkerProcess) closed() bool {
+	return r.CloseObserved || r.ReconciledCloseScope == knownOwnedProcessSet
+}
 
 func (ws *Workers) SupportsOwnedWorkerStop() bool {
 	return ownedProcessSupported() && ws.opts.Acquire == nil
@@ -47,7 +56,7 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 	if err := confirmDetachedProcessesStopped(record.Detached); err != nil {
 		return err
 	}
-	if record.CloseObserved {
+	if record.closed() {
 		// A recorded close is a historical fact. An unrelated later process
 		// reusing the PID must neither invalidate it nor receive a signal.
 		return nil
@@ -67,7 +76,17 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 		return nil
 	}
 	if err := stopOwnedProcess(ctx, record.Process, checkDetached); err != nil {
-		return err
+		if !errors.Is(err, errOwnedProcessExited) {
+			return err
+		}
+		// Close can reject a detached child, then reap the original leader.
+		// Reconcile the original known process set instead of requiring that
+		// already-exited leader to supply another historical Close receipt.
+		if err := confirmKnownOwnedProcessSetStopped(ctx, record.Process, record.Detached); err != nil {
+			return err
+		}
+		record.ReconciledCloseScope = knownOwnedProcessSet
+		return saveOwnedWorkerProcess(spec, record)
 	}
 	record.CloseObserved = true
 	return saveOwnedWorkerProcess(spec, record)
@@ -87,6 +106,9 @@ func (ws *Workers) ownedWorkerProcess(spec harness.WorkerSpec) (ownedWorkerProce
 	}
 	if record.Version != 1 || record.RunID != spec.RunID || filepath.Clean(record.Dir) != filepath.Clean(spec.Dir) || spec.Thread != "" && record.ThreadID != "" && record.ThreadID != spec.Thread {
 		return record, errors.New("traex: original app-server run or thread identity changed")
+	}
+	if record.ReconciledCloseScope != "" && record.ReconciledCloseScope != knownOwnedProcessSet {
+		return record, errors.New("traex: original app-server close reconciliation scope is unsupported")
 	}
 	return record, nil
 }
@@ -133,7 +155,7 @@ func (ws *Workers) recordOwnedWorkerProcess(spec harness.WorkerSpec, opts *Optio
 	if _, err := os.Stat(filepath.Join(spec.StateDir, ownedProcessFile)); err == nil {
 		original, err := ws.ownedWorkerProcess(spec)
 		if err == nil {
-			if !original.CloseObserved {
+			if !original.closed() {
 				err = errors.New("traex: original native close has not been independently recorded")
 			} else {
 				err = confirmDetachedProcessesStopped(original.Detached)
