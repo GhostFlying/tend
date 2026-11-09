@@ -137,7 +137,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 			err := call(ctx, "POST", "/runner/v1/usage/source", source, &snapshot)
 			return snapshot, err
 		}
-		return j.RegisterUsageMaintenanceSource(ctx, source)
+		return j.RegisterUsageMaintenanceSource(ctx, source, true)
 	}
 	queueUsage := func(ctx context.Context, source journal.UsageSource, env *protocol.Envelope) (journal.UsageSourceSnapshot, error) {
 		if c.LiveJournal {
