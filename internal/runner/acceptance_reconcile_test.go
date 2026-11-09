@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -26,6 +27,7 @@ const acceptanceRunnerServer = "TEND_TEST_RUNNER_ACCEPTANCE_SERVER"
 func TestMain(m *testing.M) {
 	if path := os.Getenv(acceptanceRunnerServer); path != "" {
 		if err := serveAcceptanceRunner(path); err != nil {
+			fmt.Fprintln(os.Stderr, "acceptance native fixture:", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -392,12 +394,33 @@ func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *tes
 		t.Fatal(err)
 	}
 	nativeLog := filepath.Join(t.TempDir(), "native-methods")
-	workers := &acceptanceReconcileWorkers{inner: traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: bin, Env: []string{acceptanceRunnerServer + "=" + nativeLog}}})}
+	diagnosticPath := filepath.Join(t.TempDir(), "native-close.log")
+	diagnostics, err := os.Create(diagnosticPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = diagnostics.Close() })
+	log := slog.New(slog.NewTextHandler(diagnostics, nil))
+	var originalWorkErr error
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		t.Logf("original canceled-upload work error: %v", originalWorkErr)
+		body, err := os.ReadFile(diagnosticPath)
+		t.Logf("fake native stderr and owned-close diagnostics: %s (read error: %v)", body, err)
+		for _, name := range []string{"owned-appserver-process.json", "pending-verdict.json"} {
+			body, err := os.ReadFile(filepath.Join(e.prepared.StateDir, name))
+			t.Logf("original %s: %s (read error: %v)", name, body, err)
+		}
+	})
+	workers := &acceptanceReconcileWorkers{inner: traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: bin, Env: []string{acceptanceRunnerServer + "=" + nativeLog}, Log: log, Stderr: diagnostics}})}
 	spaces := &acceptanceReconcileSpaces{p: e.prepared}
 	cfg.Journal, cfg.Worker, cfg.Workers, cfg.Workspaces = j, protocol.WorkerAppServer, workers, spaces
-	cfg.Log = slog.New(slog.DiscardHandler)
+	cfg.Log = log
 	a := &active{as: as, desired: protocol.DesiredRun}
-	if err := New(cfg).work(ctx, originalCtx, as, a); err == nil {
+	originalWorkErr = New(cfg).work(ctx, originalCtx, as, a)
+	if originalWorkErr == nil {
 		t.Fatal("canceled upload acknowledged the verdict")
 	}
 	closePath := filepath.Join(e.prepared.StateDir, "owned-session-close.json")
