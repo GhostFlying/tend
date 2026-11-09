@@ -83,9 +83,15 @@ func TestCollectionControlSurvivesRestartWithoutRepeatingEpoch(t *testing.T) {
 }
 
 func TestCollectionUnknownWriterRegistrationAfterConfirmedStop(t *testing.T) {
+	for _, writer := range []string{"", "original-writer"} {
+		t.Run(writer, func(t *testing.T) { testCollectionUnknownWriter(t, writer) })
+	}
+}
+
+func testCollectionUnknownWriter(t *testing.T, writer string) {
 	j := open(t, filepath.Join(t.TempDir(), "journal.db"))
 	defer j.Close()
-	s := UsageSource{ID: "source", RunID: "run", RegistrationQueued: true, Source: nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: "history"}}
+	s := UsageSource{ID: "source", RunID: "run", RegistrationQueued: true, Source: nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: "history", WriterID: writer}}
 	if err := j.RegisterUsageSource(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +99,7 @@ func TestCollectionUnknownWriterRegistrationAfterConfirmedStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	old, _ := j.UsageSources(t.Context())
+	s.Source.WriterID = ""
 	if err := j.RegisterUsageSource(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +107,7 @@ func TestCollectionUnknownWriterRegistrationAfterConfirmedStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	all, _ := j.UsageSources(t.Context())
-	if all[0].WriterStopped || all[0].Collection.StopProof != "" || all[0].Collection.Epoch <= old[0].Collection.Epoch {
+	if all[0].WriterStopped || all[0].Collection.WriterID != "" || all[0].Collection.StopProof != "" || all[0].Collection.Epoch <= old[0].Collection.Epoch {
 		t.Fatal(all)
 	}
 	if err := j.QueueUsage(t.Context(), old[0], nil); protocol.CodeOf(err) != protocol.CodeStaleRevision {

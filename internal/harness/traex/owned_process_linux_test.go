@@ -4,6 +4,7 @@ package traex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -302,5 +303,30 @@ func TestOwnedRecoveryReconcilesEnvironmentOnlyAfterConfirmedClose(t *testing.T)
 	}
 	if _, err = svc.Execute(t.Context(), codexenv.Request{Action: "delete", ID: profile.ID, RequestID: "delete", ExpectedRevision: created.Status.Revision}); err != nil {
 		t.Fatal("closed execution blocked deletion", err)
+	}
+}
+
+func TestUsageWriterObservationRequiresOriginalProcessExit(t *testing.T) {
+	_, _, cmd, record := ownedProcessFixture(t)
+	raw, _ := json.Marshal(record.Process)
+	th := &thread{}
+	if err := th.ConfirmUsageWriterStopped(t.Context(), string(raw)); err == nil {
+		t.Fatal("live writer declared stopped")
+	}
+	procx.KillGroup(cmd)
+	_ = cmd.Wait()
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := th.ConfirmUsageWriterStopped(t.Context(), string(raw))
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := th.ConfirmUsageWriterStopped(t.Context(), `{"pid":1}`); err == nil {
+		t.Fatal("incomplete identity declared stopped")
 	}
 }

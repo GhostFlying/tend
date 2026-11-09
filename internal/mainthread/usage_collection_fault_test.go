@@ -3,7 +3,10 @@ package mainthread
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
@@ -14,8 +17,44 @@ import (
 
 type collectionFaultThread struct {
 	*handoffTestThread
-	source   nativeusage.Source
-	compacts int
+	source         nativeusage.Source
+	compacts       int
+	previousWriter string
+	stopError      error
+}
+
+func (t *collectionFaultThread) ConfirmUsageWriterStopped(_ context.Context, writer string) error {
+	if writer != t.previousWriter {
+		return errors.New("unexpected writer identity")
+	}
+	return t.stopError
+}
+
+func TestUsageRegistrationReconcilesOnlyProvenPreviousWriter(t *testing.T) {
+	f := newHandoffFixture(t)
+	th := collectionFaultFixtureThread(f)
+	oldSource := th.source
+	oldSource.WriterID = "original-writer"
+	raw, _ := json.Marshal(oldSource)
+	if err := f.e.app.RegisterLocalUsage(t.Context(), app.LocalUsageSource{ID: "original", Source: raw}); err != nil {
+		t.Fatal(err)
+	}
+	th.source.WriterID, th.previousWriter, th.stopError = "new-writer", oldSource.WriterID, errors.New("stop is unknown")
+	if err := f.e.m.beginNativeUsage(t.Context(), th, "input"); protocol.CodeOf(err) != protocol.CodeStaleRevision {
+		t.Fatal("unproved writer exit was accepted", err)
+	}
+	all, _ := f.e.app.LocalUsageSources(t.Context(), "main")
+	if all[0].WriterStopped || all[0].Collection.WriterID != oldSource.WriterID {
+		t.Fatal(all)
+	}
+	th.stopError = nil
+	if err := f.e.m.beginNativeUsage(t.Context(), th, "input"); err != nil {
+		t.Fatal(err)
+	}
+	all, _ = f.e.app.LocalUsageSources(t.Context(), "main")
+	if all[0].WriterStopped || all[0].Collection.StopProof != "" || all[0].Collection.WriterID != th.source.WriterID || all[0].Collection.State != protocol.UsageActive {
+		t.Fatal(all)
+	}
 }
 
 func (t *collectionFaultThread) UsageSource() nativeusage.Source { return t.source }
@@ -88,5 +127,59 @@ func TestUnsentCompactUsageFailureRemainsRetryable(t *testing.T) {
 	state, _ := e.app.CompactState(t.Context(), p.ID)
 	if second.Outcome == app.Unknown && th.compacts == 0 {
 		t.Fatalf("never-sent compact became irreconcilable: first=%+v second=%+v state=%s native calls=%d", first, second, state, th.compacts)
+	}
+}
+
+func TestCompletionAfterExplicitResumeWakesCollection(t *testing.T) {
+	m, a, db, clock, path := idleUsageManager(t)
+	all, _ := a.LocalUsageSources(t.Context(), "main")
+	s := all[0]
+	rev := s.Collection.Revision
+	env := &protocol.Envelope{RequestID: "req_01KDVDNA0048R1ZE6R55WDNW0Y", Operation: protocol.OpResumeUsageCollection, Target: protocol.Target{Type: "usage_source", ID: s.ID}, ExpectedControlRevision: &rev, Payload: json.RawMessage(`{}`)}
+	op, err := a.Execute(t.Context(), owner, env, app.ControlUsageCollection{Resume: true})
+	if err != nil || op.Error != nil {
+		t.Fatal(op, err)
+	}
+	all, _ = a.LocalUsageSources(t.Context(), "main")
+	s = all[0]
+	// The central collector reaches current EOF while the writer remains alive.
+	s.Collection.ReadSucceeded(clock.Now().UnixMilli(), false, true, false, true)
+	if err := a.CommitLocalUsage(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Its wake has been consumed and the central collector is now parked.
+	for {
+		select {
+		case <-a.LocalUsageWake():
+		default:
+			goto drained
+		}
+	}
+drained:
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"type":"token_usage_record","ordinal":1,"payload":{"thread_id":"root","session_id":"root","turn_id":"turn","response_id":"late-response","usage":{"total_tokens":12}}}` + "\n")
+	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.wakeNativeUsage()
+	m.syncNativeUsageState(t.Context(), false)
+	clock.Advance(2 * time.Second)
+	m.syncNativeUsageState(t.Context(), false)
+	var count int
+	if err := db.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage_facts`).Scan(&count)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count == 0 {
+		select {
+		case <-a.LocalUsageWake():
+		default:
+			t.Fatal("late usage was neither read by its manager nor scheduled for the central collector")
+		}
 	}
 }

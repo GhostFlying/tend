@@ -50,7 +50,15 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 				return protocol.Errorf(protocol.CodeForbidden, "usage source session changed")
 			}
 			if (!previous.WriterStopped || s.WriterStopped) && (s.Source.WriterID == "" || s.Source.WriterID == previous.Collection.WriterID) {
+				stopped := s.WriterStopped && !previous.WriterStopped
+				if stopped {
+					previous.WriterStopped = true
+					previous.Collection.Stopped(j.now().UnixMilli(), "registered-run-writer-stop", len(previous.Cursors) == 0)
+				}
 				if previous.Source.Path == s.Source.Path {
+					if stopped {
+						return saveUsageSource(ctx, tx, previous, nil, j.now().UnixMilli())
+					}
 					return nil
 				}
 				if s.Source.SessionID == "" {
@@ -73,6 +81,7 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 				return protocol.Errorf(protocol.CodeStaleRevision, "original usage writer has not stopped")
 			}
 			previous.Collection.Activate("", s.Source.WriterID)
+			previous.Collection.WriterID = s.Source.WriterID
 			previous.Collection.StopProof = ""
 			if s.Source.SessionID == "" {
 				s.Source.SessionID = previous.Source.SessionID

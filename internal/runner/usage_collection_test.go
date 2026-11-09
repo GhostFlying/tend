@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,42 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
+
+func TestLocalUsageJournalCarriesSnapshotCASAcrossJSON(t *testing.T) {
+	r := controlRunner(t)
+	r.nativeUsageSupported = true
+	r.cfg.HostID = "host"
+	post := func(path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		r.localUsageJournal(w, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw)))
+		return w
+	}
+	source := journal.UsageSource{ID: "source", RunID: "run", WriterStopped: true, Source: nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: "history"}}
+	w := post("/runner/v1/usage/source", source)
+	var snapshot journal.UsageSourceSnapshot
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &snapshot) != nil || snapshot.ExpectedRevision < 1 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	input := journal.UsageQueueRequest{UsageSourceSnapshot: snapshot, Envelope: &protocol.Envelope{RequestID: "original", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}, Payload: json.RawMessage(`{"run_id":"run","samples":[]}`)}}
+	input.Source.Coverage = "caught_up"
+	input.Source.Collection.ReadSucceeded(r.cfg.Now().UnixMilli(), false, true, true, true)
+	w = post("/runner/v1/usage/queue", input)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = post("/runner/v1/usage/queue", input); w.Code != http.StatusConflict {
+		t.Fatal("old snapshot accepted", w.Code, w.Body.String())
+	}
+	pending, err := r.cfg.Journal.Requests(t.Context())
+	if err != nil || len(pending) != 1 || pending[0].Envelope.RequestID != "original" {
+		t.Fatal(pending, err)
+	}
+}
 
 func TestCollectionRetirementStillReplaysOriginalUnconfirmedReport(t *testing.T) {
 	r := controlRunner(t)
