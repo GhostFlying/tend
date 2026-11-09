@@ -269,6 +269,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	if recovered, recoveryErr := r.reconcileImplementationResult(runCtx, as); recovered {
 		if recoveryErr != nil {
+			if _, terminalFailure := errors.AsType[*stepError](recoveryErr); terminalFailure {
+				return recoveryErr
+			}
 			return &completionPending{recoveryErr}
 		}
 		return nil
@@ -534,6 +537,13 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}()
 	for ev := range w.Events() {
+		if appendErr == nil && p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
+			var outcome *workerOutcome
+			outcome, appendErr = nativeWorkerOutcome(as.RunID, run.Thread, attempt, ev)
+			if appendErr == nil && outcome != nil {
+				_, appendErr = saveWorkerOutcome(ctx, p.StateDir, *outcome)
+			}
+		}
 		if appendErr == nil {
 			ev, appendErr = concurrencyWorkerEvent(ev, r.cfg.Now().UnixMilli(), attempt)
 		}
@@ -550,6 +560,26 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	<-messagesDone
 	stopUploader()
 	<-uploaded
+	if p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer && appendErr == nil {
+		outcome := workerOutcome{Version: 1, RunID: as.RunID, ThreadID: run.Thread, Attempt: attempt, Status: "completed", Source: "worker_wait"}
+		if cause := context.Cause(runCtx); cause != nil {
+			outcome.Status, outcome.Source, outcome.Error = "interrupted", "run_control", cause.Error()
+		} else if werr != nil {
+			outcome.Status, outcome.Error = "failed", werr.Error()
+			if errors.Is(werr, harness.ErrRetainedResumePending) {
+				outcome.Status = "unknown"
+			}
+		}
+		observed, err := saveWorkerOutcome(context.WithoutCancel(ctx), p.StateDir, outcome)
+		if err != nil {
+			return &completionPending{err}
+		}
+		if observed.Status == "failed" {
+			werr = errors.Join(fmt.Errorf("the original native turn ended %s", observed.Status), werr)
+		} else if observed.Status != "completed" && observed.Source != "run_control" {
+			return &completionPending{fmt.Errorf("%w: original native turn ended %s", harness.ErrRetainedResumePending, observed.Status)}
+		}
+	}
 	if errors.Is(werr, harness.ErrRetainedResumePending) {
 		return &completionPending{werr}
 	}

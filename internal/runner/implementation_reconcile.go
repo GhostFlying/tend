@@ -66,6 +66,28 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if result.Result == nil {
 		return true, errors.New("runner: original implementation result is unconfirmed")
 	}
+	outcome, err := r.restoreWorkerOutcome(ctx, as, run, p)
+	if err != nil {
+		return true, err
+	}
+	if outcome == nil || outcome.Status == "unknown" || outcome.Status == "interrupted" && outcome.Source != "run_control" {
+		return true, fmt.Errorf("%w: original implementation terminal outcome is unknown", harness.ErrRetainedResumePending)
+	}
+	if outcome.Status != "completed" {
+		if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
+			return true, err
+		}
+		if outcome.Source == "run_control" {
+			// An explicitly paused or held attempt retains its existing resume
+			// path; its result file does not turn interruption into completion.
+			return false, nil
+		}
+		message := outcome.Error
+		if message == "" {
+			message = "the original native turn ended " + outcome.Status
+		}
+		return true, failed("worker_failed", errors.New(message))
+	}
 	body, err := json.Marshal(result)
 	if err != nil {
 		return true, err

@@ -16,6 +16,9 @@ var _ harness.FileResultReconciler = (*Workers)(nil)
 // attaching a native session or repeating any upload. The submitted result and
 // independently confirmed process closure remain separate facts.
 func (ws *Workers) ReconcileImplementationResult(ctx context.Context, spec harness.WorkerSpec) (harness.WorkerResult, error) {
+	if !ws.SupportsOwnedWorkerStop() {
+		return harness.WorkerResult{}, harness.ErrNoImplementationResult
+	}
 	if err := ctx.Err(); err != nil {
 		return harness.WorkerResult{}, fmt.Errorf("%w: result recovery cancelled: %w", harness.ErrRetainedResumePending, err)
 	}

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -63,7 +64,7 @@ func implementationReconcileFixture(t *testing.T) (*Runner, protocol.Assignment,
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = j.Close() })
-	as := protocol.Assignment{RunID: "original-result-run", LeaseID: "original-result-lease", TaskID: "original-result-task", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, Spec: json.RawMessage(`{"deliverables":["report","files"]}`)}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "original-result-run", LeaseID: "original-result-lease", TaskID: "original-result-task", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, Spec: json.RawMessage(`{"deliverables":["report","files"]}`)}
 	if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +79,9 @@ func implementationReconcileFixture(t *testing.T) (*Runner, protocol.Assignment,
 	}
 	workers := &implementationReconcileWorkers{result: submittedImplementationResult()}
 	spaces := &implementationReconcileSpaces{ownedRecoveryWorkspace: ownedRecoveryWorkspace{prepared: Prepared{Dir: t.TempDir(), StateDir: t.TempDir()}}}
+	if _, err := saveWorkerOutcome(t.Context(), spaces.prepared.StateDir, workerOutcome{Version: 1, RunID: as.RunID, ThreadID: "original-result-thread", TurnID: "original-result-turn", Attempt: 1, Status: "completed", Source: "native_terminal"}); err != nil {
+		t.Fatal(err)
+	}
 	r := New(Config{Journal: j, Worker: protocol.WorkerAppServer, Workers: workers, Workspaces: spaces, Now: clock.Now, IDs: testkit.NewIDGen(clock, 9), Log: slog.New(slog.DiscardHandler), RetryDelay: time.Millisecond})
 	return r, as, workers, spaces, path
 }
@@ -88,8 +92,7 @@ func TestImplementationResultRecoverySubmitsOriginalFilesWithoutNativeWork(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	// There are no pending native events: successful acknowledgements must not
-	// turn an explicitly submitted result into another model execution.
+	// The durable native outcome remains even after all events were acknowledged.
 	err = r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun})
 	saved, readErr := r.cfg.Journal.Run(t.Context(), as.RunID)
 	var result harness.WorkerResult
@@ -271,6 +274,9 @@ func TestNormalWorkerCheckpointsSuccessfulResultBeforeClose(t *testing.T) {
 			if _, err := db.ExecContext(t.Context(), `UPDATE runs SET attempts=0,thread_id='' WHERE run_id=?`, as.RunID); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.Remove(workerOutcomePath(spaces.prepared.StateDir, 1)); err != nil {
+				t.Fatal(err)
+			}
 			workers := &normalResultWorkers{result: submittedImplementationResult()}
 			r.cfg.Workers = workers
 			runCtx, cancel := context.WithCancelCause(t.Context())
@@ -291,6 +297,20 @@ func TestNormalWorkerCheckpointsSuccessfulResultBeforeClose(t *testing.T) {
 			closed := false
 			workers.onStop = func() error {
 				closed = true
+				if outcome != "event append failed" {
+					observed, err := readWorkerOutcome(spaces.prepared.StateDir, as.RunID, "owned-thread", 1)
+					if err != nil || observed == nil {
+						t.Fatal("close preceded durable worker outcome", observed, err)
+					}
+					if outcome == "worker failed" && (observed.Status != "failed" || observed.Error != "original turn failed") {
+						t.Fatal("Wait failure was not retained before closure", observed)
+					}
+					if outcome == "paused" || outcome == "held" || outcome == "cancelled" {
+						if observed.Source != "run_control" || observed.Status != "interrupted" {
+							t.Fatal("control interruption was saved as completion", observed)
+						}
+					}
+				}
 				saved, err := r.cfg.Journal.Run(t.Context(), as.RunID)
 				if err != nil {
 					t.Fatal(err)

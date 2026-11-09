@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,6 +23,12 @@ const envAcceptanceCloseServer = "TEND_TRAEX_TEST_ACCEPTANCE_CLOSE_SERVER"
 // This reexecuted test binary owns an actual app-server process. It does not
 // simulate Close with a socket disconnect or an in-process stop callback.
 func serveAcceptanceCloseProbe() error {
+	if dir := os.Getenv("TEND_TRAEX_TEST_LATE_DETACHED_DIR"); dir != "" {
+		cmd := exec.Command("setsid", "sh", "-c", `echo $$ > "$1/parent"; while [ ! -e "$1/launch" ]; do sleep 0.01; done; sleep 60 </dev/null >/dev/null 2>&1 & echo $! > "$1/grandchild"`, "fixture", dir)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+	}
 	return serveAcceptanceCloseTransport(os.Stdin, os.Stdout)
 }
 

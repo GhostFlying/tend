@@ -203,11 +203,8 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 		// background command of a worker, must not outlive the session.
 		procx.KillGroup(cmd)
 		kill()
-		if (ownershipErr == nil || errors.Is(ownershipErr, errDetachedNativeActive)) && opts.onClosedProcess != nil {
-			// The original group has exited even when an observed detached
-			// child remains alive. Save that group fact; StopOwnedWorker still
-			// requires every recorded detached identity to have stopped.
-			ownershipErr = errors.Join(ownershipErr, opts.onClosedProcess())
+		if ownershipErr == nil && opts.onClosedProcess != nil {
+			ownershipErr = opts.onClosedProcess()
 		}
 		if opts.environmentReference != nil {
 			state := "retained"
