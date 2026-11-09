@@ -267,7 +267,7 @@ func observerQueue(t *testing.T, h *harness, count int) protocol.WorkItem {
 	item := observerItem(t, h)
 	item.Revision++
 	for i := 2; i <= count; i++ {
-		item.Deliveries = append(item.Deliveries, protocol.IssueDelivery{DeliveryID: fmt.Sprintf("delivery-%d", i), Provider: "github", Repository: "example/project", Number: int64(i)})
+		item.Deliveries = append(item.Deliveries, protocol.IssueDelivery{DeliveryID: fmt.Sprintf("delivery-%d", i), Provider: "github", Repository: "example/project", Number: int64(i) + 100})
 	}
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveIssue(t.Context(), item, 1, map[string]any{}) }); err != nil {
 		t.Fatal(err)

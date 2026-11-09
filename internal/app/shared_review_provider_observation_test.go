@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -13,12 +12,12 @@ func sharedProviderFactForTest(t *testing.T, h *harness, ref protocol.IssueDeliv
 	t.Helper()
 	observation.Observer = "server"
 	observation.AttemptedAt = h.clock.Now().UnixMilli()
-	raw, err := json.Marshal(observation)
-	if err != nil {
-		t.Fatal(err)
-	}
+	observation.CheckedAt = h.clock.Now().UnixMilli()
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE server_delivery_jobs SET observation_json=?,nonce=?,refresh_revision=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=?`, string(raw), nonce, refresh, observed, ref.Provider, ref.Repository, ref.Number)
+		if _, err := tx.PutDeliveryObservationFact(t.Context(), ref, observation); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE server_delivery_jobs SET nonce=?,refresh_revision=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=?`, nonce, refresh, observed, ref.Provider, ref.Repository, ref.Number)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -54,7 +53,7 @@ func TestSharedReviewHistoricalIssueObservationDoesNotOverrideCurrentPR(t *testi
 	sharedReviewResult(t, sharedReviewAction(t, h, old.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: ref.DeliveryID}))
 	old = canonicalTaskIssue(t, h, old.IssueID)
 	canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, old, "close", canonicalLifecycleClosure(old, protocol.WorkItemClosureCompleted)))
-	sharedProviderFactForTest(t, h, ref, protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA, CI: &protocol.DeliveryCI{HeadSHA: candidate.HeadSHA, State: "success", Checks: []protocol.DeliveryCheck{{Name: "required", State: "completed", Conclusion: "success"}}}}}, "", 0, 0)
+	sharedProviderFactForTest(t, h, ref, protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{URL: candidate.URL, State: "open", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA, TargetSHA: candidate.TargetSHA, CI: &protocol.DeliveryCI{HeadSHA: candidate.HeadSHA, State: "success", Checks: []protocol.DeliveryCheck{{Name: "required", State: "completed", Conclusion: "success"}}}}}, "", 0, 0)
 	assessed := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "assess", DeliveryID: ref.DeliveryID, IssueControlPayload: protocol.IssueControlPayload{Reason: "The passed whole-PR result covers the linked completed responsibility"}}))
 	if !assessed.Valid || len(assessed.Rounds) != 1 || len(assessed.Links) != 2 {
 		t.Fatal("a historical Issue copy overrode the actual shared provider fact", assessed)
@@ -64,11 +63,21 @@ func TestSharedReviewHistoricalIssueObservationDoesNotOverrideCurrentPR(t *testi
 		t.Fatal("an unchanged shared candidate consumed another review", next)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		copy, err := store.GetDeliveryObservation(t.Context(), tx.Q(), old.IssueID, ref.DeliveryID)
-		if err == nil && copy.Observation.HeadSHA != prior.HeadSHA {
-			t.Fatal("historical provider evidence was rewritten", copy)
+		current, err := store.GetDeliveryObservation(t.Context(), tx.Q(), old.IssueID, ref.DeliveryID)
+		if err != nil {
+			return err
 		}
-		return err
+		if current.Observation.HeadSHA != candidate.HeadSHA || current.Observation.BaseSHA != candidate.BaseSHA {
+			t.Fatal("a closed responsibility did not read the PR's current fact", current)
+		}
+		var query string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT query_json FROM delivery_observations WHERE work_item_id=? AND delivery_id=?`, old.IssueID, ref.DeliveryID).Scan(&query); err != nil {
+			return err
+		}
+		if strings.Contains(query, candidate.HeadSHA) || strings.Contains(query, prior.HeadSHA) || strings.Contains(query, "head_sha") {
+			t.Fatal("an Issue query still stored a provider candidate", query)
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -104,18 +113,22 @@ func TestSharedReviewCurrentProviderUncertaintyRetainsPassedRound(t *testing.T) 
 			ref := issue.Plan.Deliveries[0]
 			fact := protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA}}
 			nonce := ""
-			var refresh int64
 			switch state {
 			case "error":
 				fact.ErrorKind = "timeout"
 			case "reading":
 				nonce = "provider-read-in-progress"
-			case "refresh":
-				refresh = 1
 			case "missing-head":
 				fact.HeadSHA = ""
 			}
-			sharedProviderFactForTest(t, h, ref, fact, nonce, refresh, 0)
+			sharedProviderFactForTest(t, h, ref, fact, nonce, 0, 0)
+			if state == "refresh" {
+				current := canonicalTaskIssue(t, h, issue.IssueID)
+				op := h.exec(owner, h.env(protocol.OpRefreshDelivery, workTarget(issue.IssueID), protocol.RefreshDeliveryPayload{DeliveryID: ref.DeliveryID}, rev(current.Revision)), RefreshDelivery{})
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
 			current := sharedReviewViewForTest(t, h, ref)
 			if current.Valid || current.Status != "passed" || !strings.Contains(current.InvalidReason, "unavailable") || len(current.Rounds) != 1 {
 				t.Fatal("current uncertainty was hidden by an old successful Issue copy", current)

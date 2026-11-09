@@ -21,133 +21,64 @@ func currentDeliveryFixture(t *testing.T) (*Store, protocol.Issue, protocol.Issu
 	closed.Plan.Deliveries = []protocol.IssueDelivery{ref}
 	closed.State = protocol.IssueClosed
 	saveCanonicalFixture(t, s, closed, 0)
-	for _, issue := range []protocol.Issue{current, closed} {
-		row := DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: issue.IssueID, DeliveryID: ref.DeliveryID, Generation: 3, Observer: "runner", DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40)}, AttemptedAt: 10, CheckedAt: 10}}
-		if err := s.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservation(t.Context(), row) }); err != nil {
-			t.Fatal(err)
-		}
-	}
 	return s, current, closed, ref
 }
 
-func putCurrentServerObservation(t *testing.T, s *Store, ref protocol.IssueDelivery, observation protocol.DeliveryObservation, nonce string, refresh, observed int64) {
+func currentFact(t *testing.T, s *Store, ref protocol.IssueDelivery, o protocol.DeliveryObservation) DeliveryObservationFactRow {
 	t.Helper()
-	raw, err := json.Marshal(observation)
-	if err != nil {
+	var fact DeliveryObservationFactRow
+	if err := s.Write(t.Context(), func(tx *Tx) (err error) { fact, err = tx.PutDeliveryObservationFact(t.Context(), ref, o); return err }); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, s, `UPDATE server_delivery_jobs SET observation_json=?,nonce=?,refresh_revision=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=?`, string(raw), nonce, refresh, observed, ref.Provider, ref.Repository, ref.Number)
+	return fact
 }
 
-func TestSharedReviewUsesSharedProviderCandidate(t *testing.T) {
-	s, current, closed, ref := currentDeliveryFixture(t)
-	canonical := protocol.DeliveryObservation{Observer: "server", AttemptedAt: 20, CheckedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: strings.Repeat("c", 40), BaseSHA: strings.Repeat("d", 40), CI: &protocol.DeliveryCI{HeadSHA: strings.Repeat("c", 40), State: "success", Checks: []protocol.DeliveryCheck{{Name: "check", Conclusion: "success"}}}}}
-	putCurrentServerObservation(t, s, ref, canonical, "", 0, 0)
-	review := protocol.SharedDeliveryReview{Provider: ref.Provider, Repository: ref.Repository, Number: ref.Number, Status: "passed", HeadSHA: canonical.HeadSHA, BaseSHA: canonical.BaseSHA, Links: []protocol.SharedDeliveryReviewLink{{IssueID: current.IssueID, DeliveryID: ref.DeliveryID}, {IssueID: closed.IssueID, DeliveryID: ref.DeliveryID}}}
-	if err := s.Read(t.Context(), func(tx *ReadTx) error {
-		var err error
-		review.RequirementsDigest, err = SharedReviewRequirements(t.Context(), tx.Q(), review)
-		if err != nil {
-			return err
-		}
-		changed, err := SharedDeliveryReviewChanged(t.Context(), tx.Q(), &review)
-		if err != nil {
-			return err
-		}
-		if changed || !review.Valid {
-			t.Fatalf("old Issue copies overrode the exact shared provider fact: changed=%v review=%+v", changed, review)
-		}
-		if err := RequireDeliveryChecks(t.Context(), tx.Q(), closed, protocol.IssueDeliveryCandidate{DeliveryID: ref.DeliveryID, HeadSHA: canonical.HeadSHA}); err != nil {
-			t.Fatalf("checks disagreed with the shared provider candidate: %v", err)
-		}
-		old, err := GetDeliveryObservation(t.Context(), tx.Q(), closed.IssueID, ref.DeliveryID)
-		if err == nil && (old.Observation.HeadSHA != strings.Repeat("a", 40) || old.Observation.CheckedAt != 10 || old.Observation.Generation != 3) {
-			t.Fatal("historical observation was rewritten", old)
-		}
+func readCurrentObservation(t *testing.T, s *Store, issue, id string) DeliveryObservationRow {
+	t.Helper()
+	var row DeliveryObservationRow
+	if err := s.Read(t.Context(), func(tx *ReadTx) (err error) {
+		row, err = GetDeliveryObservation(t.Context(), tx.Q(), issue, id)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return row
 }
 
-func TestCurrentDeliveryObservationPreservesLatestProviderState(t *testing.T) {
-	for _, name := range []string{"empty migration", "missing job", "current success", "failed read", "pending read", "uncovered refresh", "covered refresh", "first pending read", "first refresh", "foreign PR", "corrupt cache"} {
-		t.Run(name, func(t *testing.T) {
-			s, current, _, ref := currentDeliveryFixture(t)
-			canonical := protocol.DeliveryObservation{Observer: "server", AttemptedAt: 20, CheckedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: strings.Repeat("c", 40), BaseSHA: strings.Repeat("d", 40)}}
-			nonce := ""
-			var refresh, observed int64
-			wantHead, wantError, wantPending := canonical.HeadSHA, "", false
-			legacy, corrupt := false, false
-			switch name {
-			case "empty migration":
-				legacy = true
-			case "missing job":
-				mustExec(t, s, `DELETE FROM server_delivery_jobs WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
-				legacy = true
-			case "failed read":
-				canonical.ErrorKind = "rate_limited"
-				wantError = canonical.ErrorKind
-			case "pending read":
-				nonce, wantPending = "original-provider-read", true
-			case "uncovered refresh":
-				refresh, observed, wantPending = 2, 1, true
-			case "covered refresh":
-				refresh, observed = 2, 2
-			case "first pending read":
-				canonical = protocol.DeliveryObservation{}
-				nonce, wantHead, wantPending = "first-provider-read", "", true
-			case "first refresh":
-				canonical = protocol.DeliveryObservation{}
-				refresh, wantHead, wantPending = 1, "", true
-			case "foreign PR":
-				foreign := ref
-				foreign.Number++
-				mustExec(t, s, `INSERT INTO server_delivery_jobs(provider,repository,number) VALUES(?,?,?)`, foreign.Provider, foreign.Repository, foreign.Number)
-				putCurrentServerObservation(t, s, foreign, canonical, "", 0, 0)
-				legacy = true
-			case "corrupt cache":
-				mustExec(t, s, `UPDATE server_delivery_jobs SET observation_json='{bad' WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
-				corrupt = true
-			}
-			if !legacy && !corrupt {
-				putCurrentServerObservation(t, s, ref, canonical, nonce, refresh, observed)
-			}
-			if legacy {
-				wantHead = strings.Repeat("a", 40)
-			}
-			if err := s.Read(t.Context(), func(tx *ReadTx) error {
-				got, err := GetCurrentDeliveryObservation(t.Context(), tx.Q(), current.IssueID, ref)
-				if corrupt {
-					if err == nil || !strings.Contains(err.Error(), "decode shared delivery observation") {
-						t.Fatalf("corrupt current cache fell back to old success: %+v, %v", got, err)
-					}
-					return nil
-				}
-				if err != nil {
-					return err
-				}
-				if got.Observation.HeadSHA != wantHead || got.Observation.ErrorKind != wantError || got.Observation.RefreshPending != wantPending || got.Observation.WorkItemID != current.IssueID || got.Observation.DeliveryID != ref.DeliveryID {
-					t.Fatalf("current provider selection lost its provenance or state: %+v", got)
-				}
-				if legacy && (got.Observation.Generation != 3 || got.Observation.Observer != "runner") {
-					t.Fatal("legacy runner observation identity changed", got)
-				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-		})
+func TestDeliveryObservationReferencesShareFactsWithoutQueryCopies(t *testing.T) {
+	s, current, closed, ref := currentDeliveryFixture(t)
+	observation := protocol.DeliveryObservation{Observer: "server", CheckedAt: 20, AttemptedAt: 20, BaselineUpgradeID: "original-query", BaselineUpgradeRevision: 2, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: strings.Repeat("c", 40), BaseSHA: strings.Repeat("d", 40)}}
+	fact := currentFact(t, s, ref, observation)
+	foreign := ref
+	foreign.Number++
+	currentFact(t, s, foreign, protocol.DeliveryObservation{CheckedAt: 30, AttemptedAt: 30, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: "foreign-newer-head"}})
+	for _, id := range []string{current.IssueID, closed.IssueID} {
+		row := readCurrentObservation(t, s, id, ref.DeliveryID)
+		if row.Observation.HeadSHA != observation.HeadSHA || row.Observation.Generation != 0 || row.FactRevision != fact.FactRevision {
+			t.Fatal("reference without query did not see current PR", row)
+		}
 	}
-}
-
-func TestCurrentDeliveryObservationReturnsReadErrors(t *testing.T) {
-	s, current, _, ref := currentDeliveryFixture(t)
+	query := DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: closed.IssueID, DeliveryID: ref.DeliveryID, Generation: 7, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: "not-provider-evidence"}}, HostID: "server", Nonce: "historical-server-query", QueryBaselineUpgradeID: "later-query", QueryBaselineUpgradeRevision: 3, ObservedRevision: fact.FactRevision}
+	if err := s.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservationQuery(t.Context(), query) }); err != nil {
+		t.Fatal(err)
+	}
+	got := readCurrentObservation(t, s, closed.IssueID, ref.DeliveryID)
+	if got.Observation.HeadSHA != observation.HeadSHA || got.Observation.BaselineUpgradeID != "original-query" || got.QueryBaselineUpgradeID != "later-query" || got.Observation.Generation != 7 {
+		t.Fatal("query metadata replaced provider facts or baseline", got)
+	}
 	if err := s.Read(t.Context(), func(tx *ReadTx) error {
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		if _, err := GetCurrentDeliveryObservation(ctx, tx.Q(), current.IssueID, ref); !errors.Is(err, context.Canceled) {
-			t.Fatalf("current read failure was hidden by a legacy success: %v", err)
+		var raw string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT query_json FROM delivery_observations WHERE work_item_id=? AND delivery_id=?`, closed.IssueID, ref.DeliveryID).Scan(&raw); err != nil {
+			return err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			return err
+		}
+		for key := range fields {
+			if key != "baseline_upgrade_id" && key != "baseline_upgrade_revision" && key != "observed_revision" {
+				t.Fatalf("query persisted provider field %q: %s", key, raw)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -155,19 +86,67 @@ func TestCurrentDeliveryObservationReturnsReadErrors(t *testing.T) {
 	}
 }
 
-func TestSharedReviewPreservesLegacyLinkedCandidateChecks(t *testing.T) {
-	s, current, closed, ref := currentDeliveryFixture(t)
-	if err := s.Write(t.Context(), func(tx *Tx) error {
-		old, err := GetDeliveryObservation(t.Context(), tx.Q(), closed.IssueID, ref.DeliveryID)
-		if err != nil {
+func TestDeliveryObservationFactRevisionsCaptureSameClockChanges(t *testing.T) {
+	s, current, _, ref := currentDeliveryFixture(t)
+	o := protocol.DeliveryObservation{WorkItemID: current.IssueID, DeliveryID: ref.DeliveryID, Generation: 99, RefreshPending: true, Observer: "server", CheckedAt: 20, AttemptedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "one", BaseSHA: "base"}}
+	first := currentFact(t, s, ref, o)
+	if first.FactRevision != 1 || first.ChangedRevision != 1 {
+		t.Fatal(first)
+	}
+	same := currentFact(t, s, ref, o)
+	if same.FactRevision != 2 || same.ChangedRevision != 1 {
+		t.Fatal("unchanged fact caused another change notice", same)
+	}
+	o.HeadSHA = "two"
+	moved := currentFact(t, s, ref, o)
+	if moved.FactRevision != 3 || moved.ChangedRevision != 3 {
+		t.Fatal("same-clock candidate move disappeared", moved)
+	}
+	o.ErrorKind = "timeout"
+	failed := currentFact(t, s, ref, o)
+	if failed.FactRevision != 4 || failed.ChangedRevision != 4 {
+		t.Fatal(failed)
+	}
+	o.RetryAt = 50
+	retry := currentFact(t, s, ref, o)
+	if retry.FactRevision != 5 || retry.ChangedRevision != 4 {
+		t.Fatal("retry interval invented a provider change", retry)
+	}
+	o.RetryAt = 0
+	recovered := currentFact(t, s, ref, o)
+	if recovered.FactRevision != 6 || recovered.ChangedRevision != 6 {
+		t.Fatal("retry recovery did not invalidate observers", recovered)
+	}
+	o.CheckedAt, o.AttemptedAt, o.Observer = 21, 21, "runner"
+	checked := currentFact(t, s, ref, o)
+	if checked.FactRevision != 7 || checked.ChangedRevision != 6 {
+		t.Fatal("clock or observer change invented a provider change", checked)
+	}
+	if err := s.Read(t.Context(), func(tx *ReadTx) error {
+		var raw string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT observation_json FROM server_delivery_jobs WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number).Scan(&raw); err != nil {
 			return err
 		}
-		old.Observation.HeadSHA = strings.Repeat("c", 40)
-		return tx.PutDeliveryObservation(t.Context(), old)
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			return err
+		}
+		for _, key := range []string{"work_item_id", "delivery_id", "generation", "refresh_pending"} {
+			if _, ok := fields[key]; ok {
+				t.Fatalf("fact belongs to one Issue via %q", key)
+			}
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	review := protocol.SharedDeliveryReview{Provider: ref.Provider, Repository: ref.Repository, Number: ref.Number, Status: "passed", HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), Links: []protocol.SharedDeliveryReviewLink{{IssueID: current.IssueID, DeliveryID: ref.DeliveryID}, {IssueID: closed.IssueID, DeliveryID: ref.DeliveryID}}}
+}
+
+func TestSharedReviewUsesOnlyNormalizedProviderCandidate(t *testing.T) {
+	s, current, closed, ref := currentDeliveryFixture(t)
+	o := protocol.DeliveryObservation{Observer: "runner", CheckedAt: 20, AttemptedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: strings.Repeat("c", 40), BaseSHA: strings.Repeat("d", 40), CI: &protocol.DeliveryCI{HeadSHA: strings.Repeat("c", 40), State: "success", Checks: []protocol.DeliveryCheck{{Name: "check", Conclusion: "success"}}}}}
+	currentFact(t, s, ref, o)
+	review := protocol.SharedDeliveryReview{Provider: ref.Provider, Repository: ref.Repository, Number: ref.Number, Status: "passed", HeadSHA: o.HeadSHA, BaseSHA: o.BaseSHA, Links: []protocol.SharedDeliveryReviewLink{{IssueID: current.IssueID, DeliveryID: ref.DeliveryID}, {IssueID: closed.IssueID, DeliveryID: ref.DeliveryID}}}
 	if err := s.Read(t.Context(), func(tx *ReadTx) error {
 		var err error
 		review.RequirementsDigest, err = SharedReviewRequirements(t.Context(), tx.Q(), review)
@@ -175,11 +154,199 @@ func TestSharedReviewPreservesLegacyLinkedCandidateChecks(t *testing.T) {
 			return err
 		}
 		changed, err := SharedDeliveryReviewChanged(t.Context(), tx.Q(), &review)
+		if err == nil && (changed || !review.Valid) {
+			t.Fatal("registered closed responsibility overrode unique PR fact", review)
+		}
+		if err != nil {
+			return err
+		}
+		return RequireDeliveryChecks(t.Context(), tx.Q(), closed, protocol.IssueDeliveryCandidate{DeliveryID: ref.DeliveryID, HeadSHA: o.HeadSHA})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	o.HeadSHA = strings.Repeat("e", 40)
+	currentFact(t, s, ref, o)
+	if err := s.Read(t.Context(), func(tx *ReadTx) error {
+		changed, err := SharedDeliveryReviewChanged(t.Context(), tx.Q(), &review)
 		if err == nil && (!changed || review.Valid || review.InvalidReason != "provider candidate changed") {
-			t.Fatal("one legacy Issue's snapshot replaced another original runner candidate", review)
+			t.Fatal("actual provider change did not invalidate review", review)
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeliveryObservationUnknownAndReadErrors(t *testing.T) {
+	s, current, _, ref := currentDeliveryFixture(t)
+	mustExec(t, s, `INSERT INTO retained_delivery_observations(work_item_id,delivery_id,generation,nonce,host_id,instance_id,query_until,next_check_at,refresh_requested,server_refresh_revision,observation_json) VALUES(?,?,3,'original','original-host','original-instance',90,100,0,0,'{"state":"merged","head_sha":"historical-only","checked_at":10}')`, current.IssueID, ref.DeliveryID)
+	unknown := readCurrentObservation(t, s, current.IssueID, ref.DeliveryID)
+	if unknown.Observation.State != "unknown" || unknown.FactRevision != 0 {
+		t.Fatal(unknown)
+	}
+	if err := s.Read(t.Context(), func(tx *ReadTx) error {
+		if _, err := GetDeliveryObservation(t.Context(), tx.Q(), current.IssueID, "removed"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("missing reference: %v", err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := GetDeliveryObservationFact(ctx, tx.Q(), ref); !errors.Is(err, context.Canceled) {
+			t.Fatalf("read error hidden: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s, `UPDATE server_delivery_jobs SET observation_json='{bad' WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
+	if err := s.Read(t.Context(), func(tx *ReadTx) error {
+		if _, err := GetDeliveryObservation(t.Context(), tx.Q(), current.IssueID, ref.DeliveryID); err == nil {
+			t.Fatal("corrupt target became old successful snapshot")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeliveryObservationPendingFollowsCurrentTargetQueries(t *testing.T) {
+	for _, name := range []string{"old server member", "current runner", "retired runner", "handed-off runner", "undated runner", "handoff before deadline", "server query", "uncovered refresh", "covered refresh", "canceled refresh counter", "legacy refresh"} {
+		t.Run(name, func(t *testing.T) {
+			s, current, closed, ref := currentDeliveryFixture(t)
+			currentFact(t, s, ref, protocol.DeliveryObservation{Observer: "runner", CheckedAt: 20, AttemptedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "current", BaseSHA: "base"}})
+			query := DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: current.IssueID, DeliveryID: ref.DeliveryID, Generation: 7}, Nonce: "original-query", HostID: "server", InstanceID: "original-instance", QueryUntil: 90}
+			pending := false
+			switch name {
+			case "current runner", "retired runner", "handed-off runner", "undated runner", "handoff before deadline":
+				query.HostID = "original-runner"
+				pending = name != "retired runner" && name != "handed-off runner"
+				if name == "undated runner" {
+					query.QueryUntil = 0
+				}
+			case "server query":
+				mustExec(t, s, `UPDATE server_delivery_jobs SET nonce='actual-server-query',query_until=90 WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
+				pending = true
+			case "uncovered refresh", "covered refresh":
+				query.RefreshRequested, query.ServerRefreshRevision = true, 2
+				observed := 2
+				if name == "uncovered refresh" {
+					observed, pending = 1, true
+				}
+				mustExec(t, s, `UPDATE server_delivery_jobs SET refresh_revision=2,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=?`, observed, ref.Provider, ref.Repository, ref.Number)
+			case "old server member":
+				query.RefreshRequested, query.ServerRefreshRevision = true, 1
+				mustExec(t, s, `UPDATE server_delivery_jobs SET refresh_revision=1,observed_refresh_revision=1 WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
+			case "canceled refresh counter":
+				mustExec(t, s, `UPDATE server_delivery_jobs SET refresh_revision=2,observed_refresh_revision=1 WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
+			case "legacy refresh":
+				query.RefreshRequested, pending = true, true
+			}
+			if err := s.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservationQuery(t.Context(), query) }); err != nil {
+				t.Fatal(err)
+			}
+			if name == "retired runner" {
+				mustExec(t, s, `INSERT INTO retired_runner_delivery_queries(nonce,issue_id,delivery_id,generation,host_id,instance_id,query_until,retired_at) VALUES(?,?,?,7,?,?,90,100)`, query.Nonce, current.IssueID, ref.DeliveryID, query.HostID, query.InstanceID)
+			}
+			if name == "handed-off runner" || name == "undated runner" || name == "handoff before deadline" {
+				started := 100
+				if name == "handoff before deadline" {
+					started = 89
+				}
+				mustExec(t, s, `INSERT INTO server_delivery_queries(query_id,provider,repository,number,status,started_at) VALUES('handoff-query',?,?,?,'completed',?)`, ref.Provider, ref.Repository, ref.Number, started)
+			}
+			for _, issue := range []protocol.Issue{current, closed} {
+				row := readCurrentObservation(t, s, issue.IssueID, ref.DeliveryID)
+				if row.Observation.RefreshPending != pending || row.Observation.HeadSHA != "current" {
+					t.Fatal("Issue metadata masked the unique current fact or query responsibility", row)
+				}
+				if issue.IssueID == current.IssueID && (row.Nonce != query.Nonce || row.Observation.Generation != 7) {
+					t.Fatal("unknown or retired identity was erased instead of retained", row)
+				}
+			}
+		})
+	}
+}
+
+func TestDeliveryObservationRefreshPendingUsesRemainingRequests(t *testing.T) {
+	s, current, other, ref := currentDeliveryFixture(t)
+	currentFact(t, s, ref, protocol.DeliveryObservation{Observer: "server", CheckedAt: 20, AttemptedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "current", BaseSHA: "base"}})
+	requests := []DeliveryObservationRow{
+		{Observation: protocol.DeliveryObservation{WorkItemID: current.IssueID, DeliveryID: ref.DeliveryID, Generation: 3}, RefreshRequested: true, ServerRefreshRevision: 1},
+		{Observation: protocol.DeliveryObservation{WorkItemID: other.IssueID, DeliveryID: ref.DeliveryID, Generation: 4}, RefreshRequested: true, ServerRefreshRevision: 2},
+	}
+	for _, request := range requests {
+		if err := s.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservationQuery(t.Context(), request) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustExec(t, s, `UPDATE server_delivery_jobs SET refresh_revision=2,observed_refresh_revision=0 WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number)
+	assertPending := func(want bool) {
+		t.Helper()
+		for _, issue := range []protocol.Issue{current, other} {
+			row := readCurrentObservation(t, s, issue.IssueID, ref.DeliveryID)
+			if row.Observation.RefreshPending != want || row.Observation.HeadSHA != "current" {
+				t.Fatal("remaining refresh ownership disagreed across references", row)
+			}
+		}
+	}
+	assertPending(true)
+	for index := range requests {
+		requests[index].RefreshRequested = false
+		requests[index].Observation.Generation++
+		if err := s.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservationQuery(t.Context(), requests[index]) }); err != nil {
+			t.Fatal(err)
+		}
+		assertPending(index == 0)
+	}
+	// Cancellation does not fabricate a completed read or erase request ordering.
+	if err := s.Read(t.Context(), func(tx *ReadTx) error {
+		var refresh, observed int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT refresh_revision,observed_refresh_revision FROM server_delivery_jobs WHERE provider=? AND repository=? AND number=?`, ref.Provider, ref.Repository, ref.Number).Scan(&refresh, &observed); err != nil {
+			return err
+		}
+		if refresh != 2 || observed != 0 {
+			t.Fatal("cancellation rewrote provider completion history", refresh, observed)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeliveryObservationTransitionSurvivesCheckedResultsAndReopen(t *testing.T) {
+	s, _, _, ref := currentDeliveryFixture(t)
+	o := protocol.DeliveryObservation{Observer: "runner", CheckedAt: 20, AttemptedAt: 20, ErrorKind: "timeout", DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "head", BaseSHA: "base"}}
+	currentFact(t, s, ref, o)
+	o.State, o.ErrorKind, o.MergeSHA = "merged", "", "merge"
+	merged := currentFact(t, s, ref, o)
+	if merged.ChangedRevision != 2 || merged.PreviousState != "open" || merged.PreviousErrorKind != "timeout" {
+		t.Fatal("merge lost its real transition", merged)
+	}
+	o.Observer, o.CheckedAt, o.AttemptedAt = "server", 21, 21
+	checked := currentFact(t, s, ref, o)
+	if checked.FactRevision != 3 || checked.ChangedRevision != 2 || checked.PreviousState != "open" || checked.PreviousErrorKind != "timeout" {
+		t.Fatal("checked-only result erased the unconsumed merge transition", checked)
+	}
+	path, now := s.path, s.now
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(t.Context(), path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	if err := reopened.Read(t.Context(), func(tx *ReadTx) error {
+		stored, err := GetDeliveryObservationFact(t.Context(), tx.Q(), ref)
+		if err == nil && (stored.FactRevision != 3 || stored.ChangedRevision != 2 || stored.PreviousState != "open" || stored.PreviousErrorKind != "timeout") {
+			t.Fatal("cached continuation reconstructed its own state as its predecessor", stored)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	o.HeadSHA = "next-head"
+	next := currentFact(t, reopened, ref, o)
+	if next.ChangedRevision != 4 || next.PreviousState != "merged" || next.PreviousErrorKind != "" {
+		t.Fatal("new semantic change kept an unrelated transition", next)
 	}
 }

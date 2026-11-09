@@ -127,7 +127,7 @@ func TestDeliveryObservationInvalidatesCurrentAuthorityWithoutChangingCandidate(
 						} else {
 							row.Observation.ErrorKind = "timeout"
 						}
-						err = tx.PutDeliveryObservation(t.Context(), row)
+						err = putDeliveryObservationForTest(tx, t.Context(), row)
 					}
 				case "epoch":
 					var issue protocol.Issue
@@ -220,7 +220,7 @@ func TestDeliveryObservationPreservesAuthorityAfterExactApprovedMerge(t *testing
 			return err
 		}
 		row.Observation.TargetContainsMerge = false
-		return tx.PutDeliveryObservation(t.Context(), row)
+		return putDeliveryObservationForTest(tx, t.Context(), row)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestDeliveryObservationPreservesFailedAndUnknownChecks(t *testing.T) {
 					return err
 				}
 				row.Observation.CI, row.Observation.Mergeability = ci, "unknown"
-				return tx.PutDeliveryObservation(t.Context(), row)
+				return putDeliveryObservationForTest(tx, t.Context(), row)
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -397,7 +397,7 @@ func TestDeliveryObservationPreservesFailedAndUnknownChecks(t *testing.T) {
 		row.Observation.State, row.Observation.MergeSHA = "merged", strings.Repeat("c", 40)
 		row.Observation.TargetSHA, row.Observation.TargetContainsMerge = row.Observation.MergeSHA, true
 		row.Observation.CI = nil
-		return tx.PutDeliveryObservation(t.Context(), row)
+		return putDeliveryObservationForTest(tx, t.Context(), row)
 	}); err != nil {
 		t.Fatal(err)
 	}

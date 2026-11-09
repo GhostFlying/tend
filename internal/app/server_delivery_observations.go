@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"reflect"
 	"slices"
 	"time"
 
@@ -18,7 +17,7 @@ const serverDeliveryLease = 90 * time.Second
 
 // Terminal merges are eligible only while an existing bounded failed read has
 // a retry scheduled. Successful or exhausted terminal facts never poll forever.
-const serverDeliveryAutomaticMember = `(r.active=1 AND (COALESCE(json_extract(o.observation_json,'$.state'),'') NOT IN ('merged','closed') OR (json_extract(o.observation_json,'$.state')='merged' AND COALESCE(json_extract(o.observation_json,'$.error_kind'),'')<>'' AND COALESCE(json_extract(o.observation_json,'$.retry_at'),0)>0)))`
+const serverDeliveryAutomaticMember = `(r.active=1 AND (COALESCE(json_extract(o.query_json,'$.observed_revision'),0)<j.fact_revision OR COALESCE(json_extract(j.observation_json,'$.state'),'') NOT IN ('merged','closed') OR (json_extract(j.observation_json,'$.state')='merged' AND COALESCE(json_extract(j.observation_json,'$.error_kind'),'')<>'' AND COALESCE(json_extract(j.observation_json,'$.retry_at'),0)>0)))`
 
 // WithServerDeliveryObservations transfers new read ownership explicitly. The
 // legacy runner request formats remain valid; old in-flight reads are fenced by
@@ -81,9 +80,9 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	var q ServerDeliveryQuery
 	var nonce, cache string
 	var attempts int
-	var refreshRevision, observedRefreshRevision int64
+	var refreshRevision, observedRefreshRevision, factRevision int64
 	now := x.Now.UnixMilli()
-	err := tx.Q().QueryRowContext(ctx, `SELECT provider,repository,number,nonce,attempts,observation_json,refresh_revision,observed_refresh_revision FROM server_delivery_jobs WHERE next_at<=? AND (nonce='' OR query_until<=?) ORDER BY next_at,provider,repository,number LIMIT 1`, now, now).Scan(&q.Provider, &q.Repository, &q.Number, &nonce, &attempts, &cache, &refreshRevision, &observedRefreshRevision)
+	err := tx.Q().QueryRowContext(ctx, `SELECT provider,repository,number,nonce,attempts,observation_json,refresh_revision,observed_refresh_revision,fact_revision FROM server_delivery_jobs WHERE next_at<=? AND (nonce='' OR query_until<=?) ORDER BY next_at,provider,repository,number LIMIT 1`, now, now).Scan(&q.Provider, &q.Repository, &q.Number, &nonce, &attempts, &cache, &refreshRevision, &observedRefreshRevision, &factRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Outcome{NoEffect: true}, nil
 	}
@@ -104,20 +103,20 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		_, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET next_at=? WHERE provider=? AND repository=? AND number=?`, oldUntil, q.Provider, q.Repository, q.Number)
 		return Outcome{}, err
 	}
-	rows, err := tx.Q().QueryContext(ctx, `SELECT r.issue_id,r.delivery_id,COALESCE(json_extract(o.observation_json,'$.attempted_at'),0),COALESCE(o.refresh_requested,0),COALESCE(o.server_refresh_revision,0) FROM server_delivery_references r LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR `+serverDeliveryAutomaticMember+`) ORDER BY COALESCE(o.refresh_requested,0) DESC,COALESCE(json_extract(o.observation_json,'$.attempted_at'),0),r.issue_id,r.delivery_id LIMIT 100`, q.Provider, q.Repository, q.Number)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT r.issue_id,r.delivery_id,COALESCE(json_extract(o.query_json,'$.observed_revision'),0),COALESCE(o.refresh_requested,0),COALESCE(o.server_refresh_revision,0) FROM server_delivery_references r JOIN server_delivery_jobs j ON j.provider=r.provider AND j.repository=r.repository AND j.number=r.number LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR `+serverDeliveryAutomaticMember+`) ORDER BY COALESCE(o.refresh_requested,0) DESC,COALESCE(json_extract(o.query_json,'$.observed_revision'),0),r.issue_id,r.delivery_id LIMIT 100`, q.Provider, q.Repository, q.Number)
 	if err != nil {
 		return Outcome{}, err
 	}
 	type member struct {
 		issue, delivery  string
-		attempted        int64
+		observed         int64
 		manual           bool
 		requiredRevision int64
 	}
 	members := []member{}
 	for rows.Next() {
 		var m member
-		if err = rows.Scan(&m.issue, &m.delivery, &m.attempted, &m.manual, &m.requiredRevision); err != nil {
+		if err = rows.Scan(&m.issue, &m.delivery, &m.observed, &m.manual, &m.requiredRevision); err != nil {
 			break
 		}
 		members = append(members, m)
@@ -136,11 +135,11 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	}
 	unseen, explicit := false, false
 	for _, m := range members {
-		unseen = unseen || m.attempted < priorCache.AttemptedAt
+		unseen = unseen || m.observed < factRevision
 		explicit = explicit || (m.manual && m.requiredRevision > observedRefreshRevision)
 	}
 	if unseen && !explicit && priorCache.AttemptedAt > now-(5*time.Minute).Milliseconds() {
-		members = slices.DeleteFunc(members, func(m member) bool { return !m.manual && m.attempted >= priorCache.AttemptedAt })
+		members = slices.DeleteFunc(members, func(m member) bool { return !m.manual && m.observed >= factRevision })
 	}
 	if len(members) == 0 {
 		_, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET next_at=? WHERE provider=? AND repository=? AND number=?`, int64(9223372036854775807), q.Provider, q.Repository, q.Number)
@@ -151,11 +150,11 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{}, err
 	}
 	q.ID = x.IDs.New(protocol.PrefixRequest)
-	if _, err = tx.Exec(ctx, `INSERT INTO server_delivery_queries(query_id,provider,repository,number,status,started_at,refresh_revision) VALUES(?,?,?,?,'reading',?,?)`, q.ID, q.Provider, q.Repository, q.Number, now, refreshRevision); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO server_delivery_queries(query_id,provider,repository,number,status,started_at,refresh_revision,baseline_upgrade_id,baseline_upgrade_revision) VALUES(?,?,?,?,'reading',?,?,?,?)`, q.ID, q.Provider, q.Repository, q.Number, now, refreshRevision, baseline.View.UpgradeID, baseline.View.Revision); err != nil {
 		return Outcome{}, err
 	}
 	manual, coveredRefresh := false, false
-	var latestMemberAttempt int64
+	var earliestObserved int64 = factRevision
 	for _, m := range members {
 		row, err := observationRow(ctx, tx.Q(), m.issue, m.delivery)
 		if err != nil {
@@ -166,17 +165,16 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		manual = manual || (row.RefreshRequested && row.ServerRefreshRevision > observedRefreshRevision)
 		coveredRefresh = coveredRefresh || row.RefreshRequested
-		latestMemberAttempt = max(latestMemberAttempt, row.Observation.AttemptedAt)
+		earliestObserved = min(earliestObserved, row.ObservedRevision)
 		row.Observation.Generation++
-		row.Observation.Observer = "server"
-		row.Observation.BaselineUpgradeID = baseline.View.UpgradeID
-		row.Observation.BaselineUpgradeRevision = baseline.View.Revision
+		row.QueryBaselineUpgradeID = baseline.View.UpgradeID
+		row.QueryBaselineUpgradeRevision = baseline.View.Revision
 		row.Nonce = q.ID
 		row.HostID = "server"
 		row.InstanceID = "server"
 		row.QueryUntil = now + serverDeliveryLease.Milliseconds()
 		row.Observation.RefreshPending = true
-		if err = tx.PutDeliveryObservation(ctx, row); err != nil {
+		if err = tx.PutDeliveryObservationQuery(ctx, row); err != nil {
 			return Outcome{}, err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO server_delivery_members(query_id,issue_id,delivery_id,generation) VALUES(?,?,?,?)`, q.ID, m.issue, m.delivery, row.Observation.Generation); err != nil {
@@ -205,7 +203,7 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	// Fresh shared facts also serve newly associated Issues, without a second
 	// external query. Refreshes queued before that read share its result;
 	// requests queued after it began require another bounded external read.
-	if !manual && (coveredRefresh || latestMemberAttempt < prior.AttemptedAt) && prior.AttemptedAt > now-(5*time.Minute).Milliseconds() && prior.AttemptedAt > 0 && prior.BaselineUpgradeID == baseline.View.UpgradeID && prior.BaselineUpgradeRevision == baseline.View.Revision {
+	if !manual && (coveredRefresh || earliestObserved < factRevision) && prior.AttemptedAt > now-(5*time.Minute).Milliseconds() && prior.AttemptedAt > 0 && prior.BaselineUpgradeID == baseline.View.UpgradeID && prior.BaselineUpgradeRevision == baseline.View.Revision {
 		var snapshot *protocol.DeliverySnapshot
 		if prior.ErrorKind == "" || (prior.State == "merged" && prior.LineageErrorKind != "") {
 			snapshot = &prior.DeliverySnapshot
@@ -262,6 +260,10 @@ func (c reportServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 }
 
 func retireRunnerDeliveryQuery(ctx context.Context, x *Exec, tx *store.Tx, row *store.DeliveryObservationRow) error {
+	return retireRunnerDeliveryQueryDisposition(ctx, x, tx, row, false)
+}
+
+func retireRunnerDeliveryQueryDisposition(ctx context.Context, x *Exec, tx *store.Tx, row *store.DeliveryObservationRow, acceptLate bool) error {
 	if row.Nonce == "" || row.HostID == "server" {
 		return nil
 	}
@@ -270,35 +272,65 @@ func retireRunnerDeliveryQuery(ctx context.Context, x *Exec, tx *store.Tx, row *
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO retired_runner_delivery_queries(nonce,issue_id,delivery_id,generation,host_id,instance_id,query_until,retired_at,event_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(nonce) DO NOTHING`, row.Nonce, row.Observation.WorkItemID, row.Observation.DeliveryID, row.Observation.Generation, row.HostID, row.InstanceID, row.QueryUntil, x.Now.UnixMilli(), event)
+	_, err = tx.Exec(ctx, `INSERT INTO retired_runner_delivery_queries(nonce,issue_id,delivery_id,generation,host_id,instance_id,query_until,retired_at,event_id,accept_late_report) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(nonce) DO NOTHING`, row.Nonce, row.Observation.WorkItemID, row.Observation.DeliveryID, row.Observation.Generation, row.HostID, row.InstanceID, row.QueryUntil, x.Now.UnixMilli(), event, acceptLate)
 	if err != nil {
 		return err
 	}
 	if event != "" {
-		return tx.FinishTrigger(ctx, event, "failed", "Runner read retired after its bounded handoff; original result remains unknown until its original report arrives", x.Now.UnixMilli())
+		reason := "Runner read retired after its bounded handoff; original result remains unknown until its original report arrives"
+		if acceptLate {
+			reason = "Another read owns the current shared PR fact; this original runner report remains accepted as history"
+		}
+		return tx.FinishTrigger(ctx, event, "failed", reason, x.Now.UnixMilli())
 	}
 	return nil
 }
-func retainRetiredDeliveryReport(ctx context.Context, x *Exec, tx *store.Tx, p protocol.DeliveryReportPayload) (bool, error) {
-	var found bool
-	err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM retired_runner_delivery_queries WHERE nonce=? AND issue_id=? AND delivery_id=? AND generation=? AND host_id=? AND instance_id=?)`, p.Nonce, p.WorkItemID, p.DeliveryID, p.Generation, x.Principal.Subject, p.InstanceID).Scan(&found)
-	if err != nil || !found {
-		return found, err
+func retainRetiredDeliveryReport(ctx context.Context, x *Exec, tx *store.Tx, p protocol.DeliveryReportPayload) (bool, bool, error) {
+	var acceptLate bool
+	err := tx.Q().QueryRowContext(ctx, `SELECT accept_late_report FROM retired_runner_delivery_queries WHERE nonce=? AND issue_id=? AND delivery_id=? AND generation=? AND host_id=? AND instance_id=?`, p.Nonce, p.WorkItemID, p.DeliveryID, p.Generation, x.Principal.Subject, p.InstanceID).Scan(&acceptLate)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if acceptLate {
+		// Cross-reference superseding changes current-fact ownership, not the
+		// existing runner report contract. Keep the original admission checks.
+		rt, err := deliveryRuntime(ctx, x, tx.Q(), p.InstanceID)
+		if err != nil {
+			return false, false, err
+		}
+		item, err := store.GetIssue(ctx, tx.Q(), p.WorkItemID)
+		if err != nil {
+			return false, false, err
+		}
+		delivery, ok := findDelivery(item, p.DeliveryID)
+		if !ok {
+			return true, false, nil
+		}
+		if err := validateDeliveryReport(p); err != nil {
+			return false, false, err
+		}
+		if !slices.Contains(rt.Capabilities, deliveryCapability(delivery.Provider)) {
+			return false, false, protocol.Errorf(protocol.CodeForbidden, "observer capability is not available")
+		}
 	}
 	raw, err := json.Marshal(p)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	_, err = tx.Exec(ctx, `UPDATE retired_runner_delivery_queries SET late_report_json=? WHERE nonce=? AND late_report_json=''`, string(raw), p.Nonce)
-	return true, err
+	return true, acceptLate, err
 }
 
 func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string, snapshot *protocol.DeliverySnapshot, kind string, cached *protocol.DeliveryObservation) (Outcome, error) {
 	var provider, repo, nonce, cache string
 	var number int64
 	var attempts int
-	var refreshRevision int64
-	err := tx.Q().QueryRowContext(ctx, `SELECT j.provider,j.repository,j.number,j.nonce,j.attempts,j.observation_json,q.refresh_revision FROM server_delivery_jobs j JOIN server_delivery_queries q ON q.provider=j.provider AND q.repository=j.repository AND q.number=j.number WHERE q.query_id=?`, id).Scan(&provider, &repo, &number, &nonce, &attempts, &cache, &refreshRevision)
+	var refreshRevision, baselineRevision int64
+	var baselineID string
+	err := tx.Q().QueryRowContext(ctx, `SELECT j.provider,j.repository,j.number,j.nonce,j.attempts,j.observation_json,q.refresh_revision,q.baseline_upgrade_id,q.baseline_upgrade_revision FROM server_delivery_jobs j JOIN server_delivery_queries q ON q.provider=j.provider AND q.repository=j.repository AND q.number=j.number WHERE q.query_id=?`, id).Scan(&provider, &repo, &number, &nonce, &attempts, &cache, &refreshRevision, &baselineID, &baselineRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Outcome{NoEffect: true}, nil
 	}
@@ -351,6 +383,8 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		shared.ErrorMessage += " The retry budget is exhausted; repair the provider and explicitly refresh to retry."
 	}
 	shared.Observer = "server"
+	shared.BaselineUpgradeID = baselineID
+	shared.BaselineUpgradeRevision = baselineRevision
 	shared.RetryCount = max(0, attempts-1)
 	shared.RetryAt = retryAt
 	if snapshot != nil {
@@ -364,6 +398,17 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 			next = cached.RetryAt
 		}
 	}
+	ref := protocol.IssueDelivery{Provider: protocol.IssueDeliveryProvider(provider), Repository: repo, Number: number}
+	var fact store.DeliveryObservationFactRow
+	if cached == nil {
+		fact, err = tx.PutDeliveryObservationFact(ctx, ref, shared)
+	} else {
+		fact, err = store.GetDeliveryObservationFact(ctx, tx.Q(), ref)
+	}
+	if err != nil {
+		return Outcome{}, err
+	}
+	shared = fact.Observation
 	rows, err := tx.Q().QueryContext(ctx, `SELECT issue_id,delivery_id,generation FROM server_delivery_members WHERE query_id=? ORDER BY issue_id,delivery_id`, id)
 	if err != nil {
 		return Outcome{}, err
@@ -404,27 +449,19 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		if d, ok := findDelivery(item, m.delivery); !ok || string(d.Provider) != provider || d.Repository != repo || d.Number != number {
 			continue
 		}
-		previous := row.Observation
 		manual := row.RefreshRequested
-		baselineID, baselineRev := row.Observation.BaselineUpgradeID, row.Observation.BaselineUpgradeRevision
+		changed := row.ObservedRevision < fact.ChangedRevision
 		row.Observation = shared
-		if snapshot == nil {
-			row.Observation.DeliverySnapshot = previous.DeliverySnapshot
-			row.Observation.CheckedAt = previous.CheckedAt
-		}
 		row.Observation.WorkItemID = m.issue
 		row.Observation.DeliveryID = m.delivery
 		row.Observation.Generation = m.generation
-		row.Observation.BaselineUpgradeID = baselineID
-		row.Observation.BaselineUpgradeRevision = baselineRev
-		shared.BaselineUpgradeID = baselineID
-		shared.BaselineUpgradeRevision = baselineRev
+		row.ObservedRevision = fact.FactRevision
 		row.Nonce = ""
 		row.QueryUntil = 0
 		row.RefreshRequested = false
 		row.Observation.RefreshPending = false
 		row.NextCheckAt = next
-		if err = tx.PutDeliveryObservation(ctx, row); err != nil {
+		if err = tx.PutDeliveryObservationQuery(ctx, row); err != nil {
 			return Outcome{}, err
 		}
 		var trigger string
@@ -434,7 +471,7 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		status, reason := "completed", "server observation changed"
 		if kind != "" {
 			status, reason = "failed", kind
-		} else if reflect.DeepEqual(previous.DeliverySnapshot, row.Observation.DeliverySnapshot) {
+		} else if !changed {
 			status, reason = "not_dispatched", "observation unchanged"
 		}
 		if err = tx.FinishTrigger(ctx, trigger, status, reason, now); err != nil {
@@ -444,16 +481,20 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 			return Outcome{}, err
 		}
 		event := deliveryChanged(item, row.Observation)
-		event.Body["previous_state"] = previous.State
-		event.Body["previous_error_kind"] = previous.ErrorKind
-		if !manual && !(previous.RetryAt > 0 && row.Observation.RetryAt == 0) && reflect.DeepEqual(previous.DeliverySnapshot, row.Observation.DeliverySnapshot) && previous.ErrorKind == kind {
+		event.Body["previous_state"] = fact.PreviousState
+		event.Body["previous_error_kind"] = fact.PreviousErrorKind
+		if !changed {
+			event.Body["previous_state"] = shared.State
+			event.Body["previous_error_kind"] = shared.ErrorKind
+		}
+		if !manual && !changed {
 			event.Kind = "work_item.delivery_checked"
 		}
 		events = append(events, event)
 	}
 	// A bounded fanout can continue from the same shared cache for larger groups.
 	var more bool
-	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_delivery_references r LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR (`+serverDeliveryAutomaticMember+` AND COALESCE(json_extract(o.observation_json,'$.attempted_at'),0)<?)))`, provider, repo, number, shared.AttemptedAt).Scan(&more); err != nil {
+	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_delivery_references r JOIN server_delivery_jobs j ON j.provider=r.provider AND j.repository=r.repository AND j.number=r.number LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE r.provider=? AND r.repository=? AND r.number=? AND (o.refresh_requested=1 OR (`+serverDeliveryAutomaticMember+` AND COALESCE(json_extract(o.query_json,'$.observed_revision'),0)<?)))`, provider, repo, number, fact.FactRevision).Scan(&more); err != nil {
 		return Outcome{}, err
 	}
 	if shared.State == "merged" && shared.RetryAt == 0 {
@@ -465,11 +506,7 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	if kind == "" {
 		attempts = 0
 	}
-	encoded, err := json.Marshal(shared)
-	if err != nil {
-		return Outcome{}, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET nonce='',query_until=0,next_at=?,attempts=?,observation_json=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=? AND nonce=?`, next, attempts, string(encoded), refreshRevision, provider, repo, number, id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE server_delivery_jobs SET nonce='',query_until=0,next_at=?,attempts=?,observed_refresh_revision=? WHERE provider=? AND repository=? AND number=? AND nonce=?`, next, attempts, refreshRevision, provider, repo, number, id); err != nil {
 		return Outcome{}, err
 	}
 	status := "completed"

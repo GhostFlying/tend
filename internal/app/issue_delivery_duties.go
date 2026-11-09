@@ -373,7 +373,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil && !errors.Is(err, store.ErrNotFound) {
 				return Outcome{}, err
 			}
-			if err == nil && observation.Observation.ErrorKind == "" && !observation.Observation.RefreshPending {
+			if err == nil && observation.Observation.CheckedAt > 0 && oneOf(observation.Observation.State, "open", "merged", "closed") && observation.Observation.ErrorKind == "" && !observation.Observation.RefreshPending {
 				evidence = append(evidence, protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceDelivery, Reference: d.Candidate.DeliveryID, Summary: "Recorded provider facts; the bound upgrade proves the original installed source", Observation: &observation.Observation})
 			}
 			if d.Candidate.Reconciliation != nil {

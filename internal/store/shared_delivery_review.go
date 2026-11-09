@@ -201,29 +201,14 @@ func SharedDeliveryReviewChanged(ctx context.Context, q Querier, r *protocol.Sha
 			return true, nil
 		}
 	}
-	observations := []protocol.DeliveryObservation{}
 	if len(r.Links) > 0 {
-		shared, found, err := currentServerDeliveryObservation(ctx, q, protocol.IssueDelivery{Provider: r.Provider, Repository: r.Repository, Number: r.Number})
+		fact, err := GetDeliveryObservationFact(ctx, q, protocol.IssueDelivery{Provider: r.Provider, Repository: r.Repository, Number: r.Number})
 		if err != nil {
 			return false, err
 		}
-		if found {
-			observations = append(observations, shared.Observation)
-		} else {
-			// Legacy runner reads retain their existing per-Issue identities;
-			// one matching copy cannot stand in for another linked candidate.
-			for _, link := range r.Links {
-				o, err := GetDeliveryObservation(ctx, q, link.IssueID, link.DeliveryID)
-				if err != nil {
-					return false, err
-				}
-				observations = append(observations, o.Observation)
-			}
-		}
-	}
-	for _, observation := range observations {
+		observation := fact.Observation
 		if observation.ErrorKind != "" || observation.RefreshPending || observation.HeadSHA == "" || observation.BaseSHA == "" {
-			r.InvalidReason = "current provider candidate is unavailable; await the bounded server observation"
+			r.InvalidReason = "current provider candidate is unavailable; await the bounded provider observation"
 			return false, nil
 		}
 		if observation.HeadSHA != r.HeadSHA || observation.BaseSHA != r.BaseSHA {
@@ -294,13 +279,7 @@ func RequireDeliveryDutyReview(ctx context.Context, q Querier, i protocol.Issue,
 // RequireDeliveryChecks is a current provider fact, never candidate prose.
 // Skipped checks remain visible but cannot establish a successful check.
 func RequireDeliveryChecks(ctx context.Context, q Querier, i protocol.Issue, c protocol.IssueDeliveryCandidate) error {
-	ref := protocol.IssueDelivery{DeliveryID: c.DeliveryID}
-	for _, delivery := range i.Plan.Deliveries {
-		if delivery.DeliveryID == c.DeliveryID {
-			ref = delivery
-		}
-	}
-	o, err := GetCurrentDeliveryObservation(ctx, q, i.IssueID, ref)
+	o, err := GetDeliveryObservation(ctx, q, i.IssueID, c.DeliveryID)
 	if err != nil {
 		return err
 	}

@@ -143,7 +143,7 @@ func TestServerDeliveryMissingProviderEndsPendingAndPreservesFacts(t *testing.T)
 		t.Fatal(err)
 	}
 	o := readObservations(t, h, item.WorkItemID)[0]
-	if o.RefreshPending || o.RetryAt != 0 || o.ErrorKind != "provider_not_configured" || o.State != "" || o.ErrorMessage == "" {
+	if o.RefreshPending || o.RetryAt != 0 || o.ErrorKind != "provider_not_configured" || o.State != "unknown" || o.ErrorMessage == "" {
 		t.Fatal(o)
 	}
 	projected := protocol.CanonicalDeliveryObservation(o)
@@ -252,6 +252,12 @@ func TestServerDeliveryLargeAssociationGroupHasBoundedCachedFanout(t *testing.T)
 	}
 	if q, err = h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
 		t.Fatal("fanout repeated external query", q, err)
+	}
+	if fact := normalizedDeliveryFact(t, h); fact.FactRevision != 1 {
+		t.Fatal("cached fanout rewrote actual provider fact", fact)
+	}
+	if got := h.count("delivery_observations WHERE json_extract(query_json,'$.observed_revision')=1"); got != len(items) {
+		t.Fatal("bounded fanout did not consume each member revision", got)
 	}
 	for _, item := range items {
 		got := readObservations(t, h, item.WorkItemID)

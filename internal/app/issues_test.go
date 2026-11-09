@@ -325,7 +325,7 @@ func TestWorkItemsDeliveryEvidenceAndPlanUpdatesPreserveObservations(t *testing.
 	payload := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
 	expectWorkCode(t, h.exec(owner, h.env("work_items.update", workTarget(w.WorkItemID), payload, rev(1)), UpdateIssue{}), protocol.CodeInvalidRequest)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
-		return tx.PutDeliveryObservation(context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 3, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged"}, CheckedAt: h.clock.Now().UnixMilli()}})
+		return putDeliveryObservationForTest(tx, context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 3, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged"}, CheckedAt: h.clock.Now().UnixMilli()}})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestWorkItemsDeliveryEvidenceFreezesVerifiedSnapshot(t *testing.T) {
 	put := func(generation int64, state, head string) {
 		t.Helper()
 		if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
-			return tx.PutDeliveryObservation(context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: state, HeadSHA: head}, WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: generation, CheckedAt: h.clock.Now().UnixMilli() + generation}})
+			return putDeliveryObservationForTest(tx, context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: state, HeadSHA: head}, WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: generation, CheckedAt: h.clock.Now().UnixMilli() + generation}})
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -501,7 +501,7 @@ func TestWorkItemsOwnerExternalCloseUsesExistingOwnerEvidence(t *testing.T) {
 	plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "review", Provider: "github", Repository: "example/repo", Number: 1}}
 	w := h.createWork(plan)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
-		return tx.PutDeliveryObservation(context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: "closed", ClosedAt: "2026-01-02T03:04:05Z", ClosedBy: &protocol.DeliveryActor{ID: "42", Login: "release-owner"}}, WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 1, CheckedAt: h.clock.Now().UnixMilli()}})
+		return putDeliveryObservationForTest(tx, context.Background(), store.DeliveryObservationRow{Observation: protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{State: "closed", ClosedAt: "2026-01-02T03:04:05Z", ClosedBy: &protocol.DeliveryActor{ID: "42", Login: "release-owner"}}, WorkItemID: w.WorkItemID, DeliveryID: "review", Generation: 1, CheckedAt: h.clock.Now().UnixMilli()}})
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -84,7 +84,7 @@ func advanceHistoricalDeploymentFacts(t *testing.T, h *harness, issue, source st
 		if err := tx.PutUpgrade(t.Context(), maintenance); err != nil {
 			return err
 		}
-		if err := tx.PutDeliveryObservation(t.Context(), store.DeliveryObservationRow{Observation: observation}); err != nil {
+		if err := putDeliveryObservationForTest(tx, t.Context(), store.DeliveryObservationRow{Observation: observation}); err != nil {
 			return err
 		}
 		if legacyExpiry {
@@ -285,7 +285,7 @@ func TestHistoricalDeliverySettlementCanBeFinishedByCurrentResponsibility(t *tes
 func TestHistoricalDeliverySettlementRetainsTypedMergeAndDeploySource(t *testing.T) {
 	h, issue, source, execution, batch := historicalDeploymentStateFixture(t, "open")
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM delivery_observations WHERE work_item_id=?`, issue.IssueID)
+		_, err := tx.Exec(t.Context(), `DELETE FROM server_delivery_jobs WHERE EXISTS(SELECT 1 FROM server_delivery_references r WHERE r.issue_id=? AND r.provider=server_delivery_jobs.provider AND r.repository=server_delivery_jobs.repository AND r.number=server_delivery_jobs.number)`, issue.IssueID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -310,20 +310,26 @@ func TestHistoricalDeliverySettlementKeepsRecordedProofAcrossProviderRefresh(t *
 		t.Run(change, func(t *testing.T) {
 			h, issue, source, execution, batch := historicalDeploymentFixture(t)
 			advanceHistoricalDeployment(t, h, issue.IssueID, source, batch)
+			if change == "refresh_pending" {
+				current := canonicalTaskIssue(t, h, issue.IssueID)
+				op := h.exec(owner, h.env(protocol.OpRefreshDelivery, workTarget(issue.IssueID), protocol.RefreshDeliveryPayload{DeliveryID: "pr"}, rev(current.Revision)), RefreshDelivery{})
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
 			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 				switch change {
 				case "refresh_pending":
-					_, err := tx.Exec(t.Context(), `UPDATE delivery_observations SET refresh_requested=1 WHERE work_item_id=?`, issue.IssueID)
-					return err
+					return nil
 				case "read_error":
 					row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, "pr")
 					if err != nil {
 						return err
 					}
 					row.Observation.ErrorKind = "timeout"
-					return tx.PutDeliveryObservation(t.Context(), row)
+					return putDeliveryObservationForTest(tx, t.Context(), row)
 				default:
-					_, err := tx.Exec(t.Context(), `DELETE FROM delivery_observations WHERE work_item_id=?`, issue.IssueID)
+					_, err := tx.Exec(t.Context(), `DELETE FROM server_delivery_jobs WHERE EXISTS(SELECT 1 FROM server_delivery_references r WHERE r.issue_id=? AND r.provider=server_delivery_jobs.provider AND r.repository=server_delivery_jobs.repository AND r.number=server_delivery_jobs.number)`, issue.IssueID)
 					return err
 				}
 			}); err != nil {
@@ -408,7 +414,7 @@ func TestHistoricalDeliverySettlementRejectsUnprovedOrReplacedFacts(t *testing.T
 					case "provider_state":
 						row.Observation.State = "open"
 					}
-					return tx.PutDeliveryObservation(t.Context(), row)
+					return putDeliveryObservationForTest(tx, t.Context(), row)
 				case "upgrade_running":
 					batch.View.Status = "running"
 				case "upgrade_unknown":

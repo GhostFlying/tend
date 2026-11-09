@@ -75,7 +75,7 @@ func TestIssueDeliveryEfficiencyKeepsOneReviewExecutionAndHistoricalInstallation
 		// the fake provider records its merged result.
 		observation.Observation.State, observation.Observation.MergeSHA = "merged", candidate.MergeSHA
 		observation.Observation.TargetSHA, observation.Observation.TargetContainsMerge = candidate.TargetSHA, true
-		return tx.PutDeliveryObservation(t.Context(), observation)
+		return putDeliveryObservationForTest(tx, t.Context(), observation)
 	}); err != nil {
 		t.Fatal(err)
 	}
