@@ -236,6 +236,8 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 			}
 			if e != nil {
 				failures = append(failures, e)
+			} else {
+				r.wakeNativeUsage()
 			}
 			continue
 		}

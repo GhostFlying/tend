@@ -114,6 +114,22 @@ func TestLocalUsageBudgetIsDurableAndRetirementPreservesCoverage(t *testing.T) {
 	}
 }
 
+func TestRegisteredWriterStopPreservesPositiveEmptyEvidence(t *testing.T) {
+	h := newHarness(t)
+	s := LocalUsageSource{ID: "unused", Source: []byte(`{"thread_id":"unused","writer_id":"writer","no_dispatch_proven":true}`)}
+	if err := h.app.RegisterLocalUsage(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	s.WriterStopped = true
+	if err := h.app.RegisterLocalUsage(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := h.app.LocalUsageSources(t.Context(), "")
+	if !all[0].WriterStopped || all[0].Collection.RetirementReason != "empty" {
+		t.Fatal(all)
+	}
+}
+
 func TestEmptyUsageRequiresPositiveDispatchEvidenceAndFencesOldEpoch(t *testing.T) {
 	h := newHarness(t)
 	s := LocalUsageSource{ID: "empty", Source: []byte(`{"thread_id":"thread","no_dispatch_proven":true,"writer_id":"writer"}`)}

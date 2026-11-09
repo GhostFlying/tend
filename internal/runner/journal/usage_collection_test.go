@@ -81,3 +81,29 @@ func TestCollectionControlSurvivesRestartWithoutRepeatingEpoch(t *testing.T) {
 		t.Fatal(result, err)
 	}
 }
+
+func TestCollectionUnknownWriterRegistrationAfterConfirmedStop(t *testing.T) {
+	j := open(t, filepath.Join(t.TempDir(), "journal.db"))
+	defer j.Close()
+	s := UsageSource{ID: "source", RunID: "run", RegistrationQueued: true, Source: nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: "history"}}
+	if err := j.RegisterUsageSource(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.StopUsageSource(t.Context(), "run", "thread"); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := j.UsageSources(t.Context())
+	if err := j.RegisterUsageSource(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.ActivateUsageSource(t.Context(), "source", "next"); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := j.UsageSources(t.Context())
+	if all[0].WriterStopped || all[0].Collection.StopProof != "" || all[0].Collection.Epoch <= old[0].Collection.Epoch {
+		t.Fatal(all)
+	}
+	if err := j.QueueUsage(t.Context(), old[0], nil); protocol.CodeOf(err) != protocol.CodeStaleRevision {
+		t.Fatal("old writer collection committed", err)
+	}
+}

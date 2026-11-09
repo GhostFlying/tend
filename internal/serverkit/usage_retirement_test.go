@@ -85,6 +85,12 @@ func TestUnavailableHistoryRetiresAcrossRestartAndSleepsForAnHour(t *testing.T) 
 }
 
 func TestUsageCommitRetryDoesNotReopenHistoryOrLoseReadSamples(t *testing.T) {
+	for _, count := range []int{1, 600} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) { testUsageCommitRetry(t, count) })
+	}
+}
+
+func testUsageCommitRetry(t *testing.T, count int) {
 	clock := testkit.NewClock()
 	s, err := nativeUsageFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
@@ -93,7 +99,10 @@ func TestUsageCommitRetryDoesNotReopenHistoryOrLoseReadSamples(t *testing.T) {
 	defer s.Close()
 	a := app.New(s, testkit.NewIDGen(clock, 62), clock.Now)
 	path := filepath.Join(t.TempDir(), "history.jsonl")
-	body := `{"type":"session_meta","payload":{"id":"thread","session_id":"thread"}}` + "\n" + `{"type":"token_usage_record","ordinal":1,"payload":{"thread_id":"thread","session_id":"thread","turn_id":"turn","response_id":"request","usage":{"total_tokens":12}}}` + "\n"
+	body := `{"type":"session_meta","payload":{"id":"thread","session_id":"thread"}}` + "\n"
+	for i := range count {
+		body += fmt.Sprintf(`{"type":"token_usage_record","ordinal":%d,"payload":{"thread_id":"thread","session_id":"thread","turn_id":"turn","response_id":"request-%d","usage":{"total_tokens":12}}}`+"\n", i+1, i)
+	}
 	if err = os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +128,12 @@ func TestUsageCommitRetryDoesNotReopenHistoryOrLoseReadSamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Second)
-	if _, err = c.syncWork(t.Context()); err != nil {
+	delay, err := c.syncWork(t.Context())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if count > 256 && delay == 0 {
+		t.Fatal("commit retry parked with unread pages")
 	}
 	if c.discovery.Stats() != stats {
 		t.Fatal("commit retry reopened a removed history", stats, c.discovery.Stats())
@@ -128,12 +141,28 @@ func TestUsageCommitRetryDoesNotReopenHistoryOrLoseReadSamples(t *testing.T) {
 	if err = s.Read(t.Context(), func(tx *store.ReadTx) error {
 		var facts int
 		err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage_facts`).Scan(&facts)
-		if facts != 1 {
+		if facts != min(count, 256) {
 			t.Fatal("read samples were lost", facts)
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if count > 256 {
+		if err = os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		c.drain(t.Context())
+		if err = s.Read(t.Context(), func(tx *store.ReadTx) error {
+			var facts int
+			err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM token_usage_facts`).Scan(&facts)
+			if facts != count {
+				t.Fatal("pagination lost or duplicated usage", facts, count)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	all, _ := a.LocalUsageSources(t.Context(), "")
 	if all[0].Collection.State != protocol.UsageRetired || all[0].Coverage != "caught_up" {

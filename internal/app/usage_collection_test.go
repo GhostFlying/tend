@@ -52,7 +52,7 @@ func TestUsageCollectionControlRetiresWithoutClaimingCompleteAndReplaysOriginal(
 
 func TestRunnerCollectionObservationIsNegotiatedMonotonicAndIndependentOfCoverage(t *testing.T) {
 	h, as := messageRun(t)
-	registration := protocol.NativeUsageRegistration{RunID: as.RunID, ThreadID: "native-thread", SessionID: "native-session", Provider: "codex"}
+	registration := protocol.NativeUsageRegistration{RunID: as.RunID, ThreadID: "native-thread", SessionID: "native-session", Provider: "traex"}
 	reg := h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageRegister, protocol.Target{Type: "host", ID: "linux-1"}, registration, nil), RegisterNativeUsage{})
 	if reg.Status != protocol.OpSucceeded {
 		t.Fatal(reg)
@@ -100,6 +100,21 @@ func TestRunnerCollectionObservationIsNegotiatedMonotonicAndIndependentOfCoverag
 	_ = json.Unmarshal(late.Result, &result)
 	if !result["superseded"] {
 		t.Fatal(late)
+	}
+	upload := protocol.UsageUpload{RunID: as.RunID, RootThreadID: registration.ThreadID, SessionID: registration.SessionID, Samples: []protocol.TokenUsageSample{nativeSample(h.clock.Now().UnixMilli())}, Coverage: "syncing"}
+	if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageUpload, protocol.Target{Type: "host", ID: "linux-1"}, upload, nil), UploadNativeUsage{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	old.Collection.RetirementReason, old.Collection.Evidence = "empty", protocol.UsageNoDispatch
+	late = h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageCollection, protocol.Target{Type: "host", ID: "linux-1"}, old, nil), ObserveUsageCollection{})
+	if late.Status != protocol.OpSucceeded {
+		t.Fatal("superseded empty report could not close after later execution", late)
+	}
+	old.Sequence = p.Sequence + 1
+	old.Collection.Epoch, old.Collection.Revision = p.Collection.Epoch, p.Collection.Revision
+	late = h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageCollection, protocol.Target{Type: "host", ID: "linux-1"}, old, nil), ObserveUsageCollection{})
+	if late.Status != protocol.OpSucceeded {
+		t.Fatal("later upload did not supersede empty conclusion", late)
 	}
 	read()
 	if page.Sources[0].Collection.State != protocol.UsageSettling {

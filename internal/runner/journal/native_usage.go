@@ -49,7 +49,7 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 			if previous.Source.SessionID != "" && s.Source.SessionID != "" && previous.Source.SessionID != s.Source.SessionID {
 				return protocol.Errorf(protocol.CodeForbidden, "usage source session changed")
 			}
-			if s.Source.WriterID == "" || s.Source.WriterID == previous.Collection.WriterID {
+			if (!previous.WriterStopped || s.WriterStopped) && (s.Source.WriterID == "" || s.Source.WriterID == previous.Collection.WriterID) {
 				if previous.Source.Path == s.Source.Path {
 					return nil
 				}
@@ -73,6 +73,7 @@ func (j *Journal) RegisterUsageSource(ctx context.Context, s UsageSource) error 
 				return protocol.Errorf(protocol.CodeStaleRevision, "original usage writer has not stopped")
 			}
 			previous.Collection.Activate("", s.Source.WriterID)
+			previous.Collection.StopProof = ""
 			if s.Source.SessionID == "" {
 				s.Source.SessionID = previous.Source.SessionID
 			}
