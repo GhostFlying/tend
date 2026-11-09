@@ -54,7 +54,7 @@ runner journal 在调用原生 steer 或返回新工具消息前保存一次投�
 
 ## 隔离复现与上线
 
-默认单元测试不联网、不调用模型。真实复现需当前主机允许的执行器及原有配置；不读取或复制 owner 凭据，不修改生产 server、runner、配置或既有 worker。`TMPDIR` 指向任务 scratch，保留独立 ledger、journal 与 evidence.json。使用：
+默认单元测试不联网、不调用模型。真实复现需当前主机允许的执行器及原有配置；不读取或复制 owner 凭据，不修改生产 server、runner、配置或既有 worker。工具与测试可使用自行创建并清理的私有系统临时目录；需要短路径时将 `TMPDIR` 指向真实目录，避免符号链接别名。需保留的独立 ledger、journal 与 evidence.json 另存任务 scratch 并显式提交。使用：
 
 ```sh
 TEND_RUN_MESSAGES_REAL=1 make it PKGS=./internal/e2e
@@ -76,6 +76,6 @@ TEND_RUN_MESSAGES_REAL=1 make it PKGS=./internal/e2e
 
 ## 隔离验证入口
 
-`TestIntegration_RunMessages`（`integration` 标签）创建独立账本、journal、workspace 与原生执行器，发送时用命令进程身份验证 agent 正在执行，核对同一 run/session 的后续响应及消息回执，并清理它创建的 provider 资源。设置 `TEND_RUN_MESSAGES_REAL=1` 后运行该测试；通过 `TMPDIR` 将证据与临时文件放在任务自身 scratch 中。当前 Orca 的 TraeX TUI 不接受 launch-time `--model`，可显式设置 `TEND_ORCA_MODEL=""` 省略该参数，使用其已有配置；app-server 仍使用 `TEND_TRAEX_MODEL`。
+`TestIntegration_RunMessages`（`integration` 标签）创建独立账本、journal、workspace 与原生执行器，发送时用命令进程身份验证 agent 正在执行，核对同一 run/session 的后续响应及消息回执，并清理它创建的 provider 资源。设置 `TEND_RUN_MESSAGES_REAL=1` 后运行该测试；运行时 `TMPDIR` 与证据保留位置按 D205 分开选择，不强制所有临时文件进入 scratch。当前 Orca 的 TraeX TUI 不接受 launch-time `--model`，可显式设置 `TEND_ORCA_MODEL=""` 省略该参数，使用其已有配置；app-server 仍使用 `TEND_TRAEX_MODEL`。
 
 启动测试前，必须在测试子进程环境中移除全部 `key.upper().startswith("ORCA_")` 的项；不修改外层 Orca 的环境，不修改模型 home 或鉴权配置。保留的 `evidence.json` 包含发送时命令身份、原 thread/turn 或 terminal/session、消息来源与历史、原 worker 的补充响应和启动次数。仅操作本次隔离测试创建的资源，不能向已有 worker 注入测试信息。

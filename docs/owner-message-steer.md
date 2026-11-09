@@ -43,17 +43,20 @@ Steer 元数据随 owner 消息返回，含 thread/turn、原生 item ID、状�
 
 ## 隔离验证
 
-临时目录设为任务自己的 scratch，所有原生会话由测试创建并在退出时关闭；无需查找或复制 owner 凭据。D107 的 app-server 启动会在合并环境覆盖后清除大小写不敏感的全部 ORCA_ 项；外层 TUI 设置、模型 home 与鉴权不变。独立模型测试还应在测试启动脚本的子进程环境清除这些项，避免其他启动路径继承外层身份。检查旧代码必须从外部构造干净环境，不修改冻结验收对象。使用已有允许的原生模型环境：
+测试可以使用自行创建并清理的私有系统临时目录；报告和需要提交的证据保存在任务 scratch。所有原生会话由测试创建并在退出时关闭；无需查找或复制 owner 凭据。D107 的 app-server 启动会在合并环境覆盖后清除大小写不敏感的全部 ORCA_ 项；外层 TUI 设置、模型 home 与鉴权不变。独立模型测试还应在测试启动脚本的子进程环境清除这些项，避免其他启动路径继承外层身份。检查旧代码必须从外部构造干净环境，不修改冻结验收对象。使用已有允许的原生模型环境：
 
 ```sh
-TMPDIR="$TASK_SCRATCH" go test -tags integration ./internal/mainthread \
+test_tmp=$(mktemp -d)
+test_tmp=$(cd "$test_tmp" && pwd -P)
+trap 'rm -rf -- "$test_tmp"' EXIT
+TMPDIR="$test_tmp" go test -tags integration ./internal/mainthread \
   -run TestIntegrationHostedOwnerSteerRealModel -v -count=1
-TMPDIR="$TASK_SCRATCH" go test -tags integration ./internal/harness/traex \
+TMPDIR="$test_tmp" go test -tags integration ./internal/harness/traex \
   -run TestIntegrationNativeSteerBoundary -v -count=1
 go test -race ./internal/mainthread ./internal/app -run 'TestSteer|TestFault_Steer|TestMainSteer'
 make check
 ```
 
-若任务 scratch 的绝对路径很长，现有 Unix socket 测试可能因路径长度限制失败。可为该 scratch 创建足够短且独占的临时目录别名，把测试 `TMPDIR` 指向别名；实际数据仍落在原 scratch，检查退出时移除本任务自己的别名。交付的 `check-run.py` 接受验证者自己的 scratch 路径作为参数并负责清理，不修改 socket 测试或生产配置。本机完整 race 测试较慢时，使用 `TEST_TIMEOUT=30m` 运行同一个 `make check`，不减少任何检查。
+若系统默认临时目录或任务 scratch 的绝对路径很长，Unix socket 测试可能因路径长度限制失败。选择足够短的真实系统临时目录作为上述 `test_tmp`，通过 `TMPDIR` 传给需要的命令；不要用指向长 scratch 的符号链接别名，部分测试要求数据目录无符号链接。运行时临时字节不必落回 scratch，需保留的日志和证据另存 scratch 并显式提交。仅清理本次自行创建的目录，不修改 socket 测试、生产配置或检查门槛。见 D205。交付的 `check-run.py` 接受验证者自己的 scratch 路径作为参数并负责清理。本机完整 race 测试较慢时，使用 `TEST_TIMEOUT=30m` 运行同一个 `make check`，不减少任何检查。
 
 真实模型验证默认 `TEND_TRAEX_MODEL=GPT-5.6-Sol`，使用隔离 Tend 账本、实际 Manager/dispatcher/tool 服务和真实 app-server。测试只延迟第一次只读工具返回，检验原生接受发生于工具未完成、消费发生于安全边界、同一 thread/turn 最终保留原目标并响应补充要求；还检查会话空闲后在同一 thread 开始下一 turn。确定性本机模型端点验证生成中、临近 final、连续输入顺序、模型实际请求正文、已结束 turn 的明确拒绝及未消费输入的原生进程恢复；它不能替代真实模型验证。故障单元验证覆盖拒绝/未知与恢复、withdraw/claim 互斥、工具重放、foreign-turn 回执、回复来源、回调先于事件循环及 accepted-without-consumption。

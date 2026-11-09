@@ -303,10 +303,14 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		fmt.Fprintf(&b, "\nSubmitted artifact (report and file references included):\n%s\n", string(spec.Artifact))
 	}
 	common := "You work in " + spec.Dir + ". Its AGENTS.md describes the workspace: one sub-directory per repository. " +
-		"Read each repository's own AGENTS.md before working in it. Keep temporary files in " + spec.ScratchDir + ". "
+		"Read each repository's own AGENTS.md before working in it. "
 	if spec.Guide != "" {
-		common = "You work in " + spec.Dir + ".\n\n" + spec.Guide + "\nKeep temporary files in " + spec.ScratchDir + ". "
+		common = "You work in " + spec.Dir + ".\n\n" + spec.Guide + "\n"
 	}
+	common += "Keep downloaded inputs, reports, evidence for submission and temporary experiment copies in " + spec.ScratchDir + ", outside the repositories. " +
+		"Tools, builds and tests may use private OS temporary directories you create and clean up. " +
+		"Choose a short real TMPDIR when tools or Unix socket path limits require it, rather than a symbolic-link alias; runtime temporary files need not stay in scratch. " +
+		"Keep the evidence you need to submit in scratch and preserve it through the required file submission. "
 	if spec.Execution != nil {
 		fmt.Fprintf(&b, "\nRequested acceptance execution: model=%s, effort=%s (empty means native model default). This is requested configuration, not independent proof of the running model.\n", spec.Execution.Model, spec.Execution.Effort)
 	}
