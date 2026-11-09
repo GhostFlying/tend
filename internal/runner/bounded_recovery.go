@@ -87,13 +87,15 @@ func (r *Runner) replayBoundedFacts(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	// Physical stop must reach the server before a business close reply that
+	// may await event application, just as in ordinary manager recovery.
 	rank := func(operation string) int {
 		switch operation {
 		case protocol.OpManagerNativeEvent:
 			return 0
-		case protocol.OpManagerNativeReply:
-			return 1
 		case protocol.OpManagerNativeStopped:
+			return 1
+		case protocol.OpManagerNativeReply:
 			return 2
 		default:
 			return 3

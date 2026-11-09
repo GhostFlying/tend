@@ -26,6 +26,15 @@ import (
 // not evidence that an OS process exited. The real App and RPC authenticate and
 // reconcile their original envelopes; no native executor is installed here.
 func TestFault_ClosedRepairToolFactsReconcileOriginalHTTPReceipts(t *testing.T) {
+	closedRepairToolFacts(t, false)
+}
+
+func TestFault_ManagerStoppedHTTPRecoveryReleasesOriginalReceiptReader(t *testing.T) {
+	closedRepairToolFacts(t, true)
+}
+
+func closedRepairToolFacts(t *testing.T, recoverWithRunner bool) {
+	t.Helper()
 	ctx := t.Context()
 	s := newServer(t, time.Hour)
 	execute := func(principal protocol.Principal, operation string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
@@ -230,6 +239,10 @@ func TestFault_ClosedRepairToolFactsReconcileOriginalHTTPReceipts(t *testing.T) 
 	stopped := protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeStopped, Target: target, Payload: mustClosedFactsJSON(t, protocol.ManagerStoppedPayload{Reason: "Controlled original process stopped fact", LastSequence: 3})}
 	if err := j.Finish(ctx, as.RunID, journal.PhaseReleasing, journal.Request{RunID: as.RunID, Envelope: stopped}); err != nil {
 		t.Fatal(err)
+	}
+	if recoverWithRunner {
+		recoverStoppedManagerHTTP(t, s, j, as, runtime, closeEnvelope, stopped, business, turn)
+		return
 	}
 	if _, err := j.NextProcessGeneration(ctx); err != nil {
 		t.Fatal(err)

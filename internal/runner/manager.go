@@ -29,7 +29,9 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 		}
 	}()
 	as := a.as
-	run, err := r.cfg.Journal.Run(lifetime, as.RunID)
+	readCtx, cancelRead := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
+	run, err := r.cfg.Journal.Run(readCtx, as.RunID)
+	cancelRead()
 	if errors.Is(err, journal.ErrNotFound) {
 		return nil
 	}
@@ -63,7 +65,9 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	}
 	// Only a confirmed local process exit permits releasing its slot. Native
 	// business receipts remain unknown until the coordinator reconciles them.
-	run, readErr := r.cfg.Journal.Run(lifetime, as.RunID)
+	receiptCtx, cancelReceipts := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
+	defer cancelReceipts()
+	run, readErr := r.cfg.Journal.Run(receiptCtx, as.RunID)
 	if errors.Is(readErr, journal.ErrNotFound) {
 		return nil
 	}
@@ -74,16 +78,16 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	retained := a.retained
 	r.mu.Unlock()
 	if retained {
-		return r.markExecutorFenced(lifetime, a)
+		return r.markExecutorFenced(receiptCtx, a)
 	}
 	if !run.StoppedConfirmed {
-		if err := r.markExecutorFenced(lifetime, a); err != nil {
+		if err := r.markExecutorFenced(receiptCtx, a); err != nil {
 			return err
 		}
 		r.requestReconcile()
 		return nil
 	}
-	last, readErr := r.cfg.Journal.LastManagerEvent(lifetime, as.RunID)
+	last, readErr := r.cfg.Journal.LastManagerEvent(receiptCtx, as.RunID)
 	if readErr != nil {
 		return readErr
 	}
@@ -91,13 +95,15 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	if readErr != nil {
 		return readErr
 	}
-	if readErr = r.cfg.Journal.Finish(lifetime, as.RunID, journal.PhaseReleasing, journal.Request{RunID: as.RunID, Envelope: *env}); readErr != nil {
+	if readErr = r.cfg.Journal.Finish(receiptCtx, as.RunID, journal.PhaseReleasing, journal.Request{RunID: as.RunID, Envelope: *env}); readErr != nil {
 		return readErr
 	}
-	return r.reportManagerStopped(lifetime, as)
+	return r.reportManagerStopped(receiptCtx, as)
 }
 
 func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignment) error {
+	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
+	defer cancel()
 	pending, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return err
@@ -105,8 +111,10 @@ func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignmen
 	if err = r.flushManagerEvents(ctx, as); err != nil {
 		return err
 	}
-	// Events precede stop even if the final request sorts earlier by ID.
-	for _, op := range []string{protocol.OpManagerNativeReply, protocol.OpManagerNativeStopped} {
+	// Physical exit is independent of business receipt application. Report it
+	// after the original events, before a close reply that may await their
+	// application. Both original envelopes remain until their own ACK arrives.
+	for _, op := range []string{protocol.OpManagerNativeStopped, protocol.OpManagerNativeReply} {
 		for _, p := range pending {
 			if p.RunID != as.RunID || p.Envelope.Operation != op {
 				continue
@@ -124,7 +132,11 @@ func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignmen
 }
 
 func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assignment) error {
-	if closed, err := r.replayManagerClose(ctx, as); closed || err != nil {
+	// Stop cancels new native execution, not recovery of a completed close.
+	receiptCtx, cancelReceipts := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
+	closed, err := r.replayManagerClose(receiptCtx, as)
+	cancelReceipts()
+	if closed || err != nil {
 		return err
 	}
 	opened := false

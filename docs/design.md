@@ -210,6 +210,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D207 | 用量来源的自动采集状态独立于计账覆盖；metadata 登记不启动采集，有限失败预算后按证据退役或转待对账，保留原请求、未知用量与显式恢复。补充 D195。 | 已实现 |
 | D208 | Manager 已接受的原生工具模式属于线程 binding 身份，关闭、park 和回执恢复只改变当前许可，不改写该模式或历史绑定；新执行仍按协商能力准入。 | 已实现 |
 | D209 | 当前负责协调者可显式解除 Agent 自己设置的技术等待；管理换代后的原已停止 handoff 可在当前 epoch 下显式承接相同命名执行责任，保留原合同、原 Run 及 owner 等待边界。 | 已实现 |
+| D210 | 已关闭 manager 在停止后以 runner lifetime 有界恢复原回执，物理停止与业务回执独立结算；不重复原生工作。 | 已实现 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1600,3 +1601,18 @@ Run 的动作不能据此重放。完整执行 pin 复用 Task 创建时的 work
 原生回执。原请求去重、两项 CAS、唯一后继以及真实 owner 等待均保留。新增
 owner payload/view 字段为可选，旧请求语义不变；追加存储迁移，不改变现有
 runner 通信或 journal 格式。见[实施计划](plans/technical-wait-continuation.md)。
+
+
+## D210：停止后的 manager 关闭事实恢复
+
+runner 已持久化成功的原 native close 后，即使 owner 后来停止该 manager，也必须
+能在有界 runner lifetime 中续传原事实。attempt 的取消禁止新 native 工作，不应
+取消原完成记录的读取和回执恢复。原事件顺序、close 游标、请求身份和错误继续保留。
+
+真实物理退出与业务回执分别记录和结算；未应用业务事件或未知工具回执不代表
+进程仍运行，也不能被物理停止改成成功。普通恢复和受控更新的事实重放均先传原
+事件，再传真实 stopped，最后续传原 close reply，避免业务应用等待挡住资源释放。
+每项 ACK 只消费自身；正式 Stop 的既有本地归档保留原未 ACK 的请求与字节。
+retained 期间不自行结清，正式 Stop 后
+只恢复原关闭事实，不重新附着或调用 provider。没有成功 close 的原执行继续原有
+核验路径。不改变 wire/API/schema；见[实施计划](plans/manager-close-recovery.md)。
