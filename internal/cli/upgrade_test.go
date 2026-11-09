@@ -68,6 +68,13 @@ func TestUpgradeDefaultAndCommitSelectionPreserveRequestIdentity(t *testing.T) {
 
 func TestUpgradeCommitRejectsAmbiguousOrInvalidSelectors(t *testing.T) {
 	for _, args := range [][]string{
+		{"start", "--commit", ""},
+		{"start", "--release", ""},
+		{"start", "--request-id", ""},
+		{"start", "--upgrade-id", ""},
+		{"start", "--socket", ""},
+		{"start", "--delivery-task", ""},
+		{"start", "--runner-configurations", ""},
 		{"start", "--commit", "abc"},
 		{"start", "--commit", strings.Repeat("A", 40)},
 		{"start", "--commit", strings.Repeat("g", 40)},

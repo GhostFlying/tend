@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -48,6 +49,17 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
+	}
+	// Omission selects defaults. An explicitly empty shell variable must not
+	// discard a pinned source, request identity, control socket or task scope.
+	emptyFlag := ""
+	fs.Visit(func(f *flag.Flag) {
+		if emptyFlag == "" && f.Value.String() == "" {
+			emptyFlag = f.Name
+		}
+	})
+	if emptyFlag != "" {
+		return usagef("upgrade --%s must not be explicitly empty", emptyFlag)
 	}
 	if (*configPlan != "" || *deliveryTask != "" || *park || *commit != "") && action != "start" {
 		return usagef("runner-configurations and delivery-task are only valid for start")
