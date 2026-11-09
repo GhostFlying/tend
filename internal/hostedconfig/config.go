@@ -95,6 +95,8 @@ func Prepare(c Configuration) (*Prepared, error) {
 
 // Selection is a private execution snapshot, not a public inventory type.
 // Definition uses the sole P2/P3 model instead of copying its fields.
+// NativeOwnerTools retains the accepted mode used by the binding; receipt-only
+// flags separately fence the current native execution permission.
 type Selection struct {
 	CategoryID            string                         `json:"category_id,omitempty"`
 	Extensions            protocol.ExtensionExecutionPin `json:"extensions,omitzero"`
