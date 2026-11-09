@@ -189,6 +189,25 @@ func TestOfficialMetadataFailureRetainsDiscoveredTag(t *testing.T) {
 	}
 }
 
+func TestOfficialFeedSelectsNewestPublishedMainRatherThanFirstEntry(t *testing.T) {
+	r, body := officialFixture(t)
+	older := "main-" + strings.Repeat("b", 40)
+	feed := `<feed><entry><updated>2026-01-01T00:00:00Z</updated><link href="https://github.com/GhostFlying/tend/releases/tag/` + older + `"/></entry><entry><updated>2026-01-02T00:00:00Z</updated><link href="https://github.com/GhostFlying/tend/releases/tag/` + r.Tag + `"/></entry><entry><updated>2026-01-03T00:00:00Z</updated><link href="https://github.com/GhostFlying/tend/releases/tag/unrelated-component"/></entry></feed>`
+	client := &http.Client{Transport: officialTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() == officialFeed {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(feed))}, nil
+		}
+		if !strings.Contains(req.URL.Path, "/"+r.Tag+"/") {
+			return nil, errors.New("older or unrelated target selected")
+		}
+		return officialFixtureResponse(r, body, req), nil
+	})}
+	b, err := FetchOfficial(t.Context(), client, filepath.Join(t.TempDir(), "request"), "", "original")
+	if err != nil || b.Set.ReleaseID != r.Tag {
+		t.Fatal(b, err)
+	}
+}
+
 func TestOfficialSelectionRejectsDraftMissingOrConflictingAssetsAndCorruption(t *testing.T) {
 	for _, kind := range []string{"draft", "service-only", "duplicate-checksum", "corrupt", "wrong-commit"} {
 		t.Run(kind, func(t *testing.T) {

@@ -271,18 +271,15 @@ func selectOfficial(ctx context.Context, client *http.Client, directory, selecto
 		if err := errors.Join(err, closeErr); err != nil {
 			return chosen, err
 		}
-		// The public release feed contains published releases, including prereleases,
-		// in publication order. No authenticated API quota or host credential is used.
+		// Feed order is not publication order. Compare every eligible entry before
+		// pinning a target; editing or assembling the feed can reorder entries.
 		for _, entry := range feed.Entries {
 			for _, link := range entry.Links {
 				tag, ok := strings.CutPrefix(link.Href, "https://github.com/GhostFlying/tend/releases/tag/")
-				if ok && OfficialTag(tag) && !entry.Updated.IsZero() {
+				if ok && OfficialTag(tag) && entry.Updated.After(chosen.Published) {
 					chosen.Tag, chosen.Published = tag, entry.Updated
 					break
 				}
-			}
-			if chosen.Tag != "" {
-				break
 			}
 		}
 		if chosen.Tag == "" {
