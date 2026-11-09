@@ -13,6 +13,7 @@ import { currentWork } from "../tasks/facts.ts";
 import { TaskExecution } from "../tasks/Execution.tsx";
 import { WorkspaceFacts } from "../tasks/WorkspaceFacts.tsx";
 import { ArtifactDelivery } from "../tasks/ArtifactDelivery.tsx";
+import { FilePreview } from "../tasks/FilePreview.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { useStore } from "../state/store.ts";
 import {
@@ -527,6 +528,16 @@ function Artifacts({
                 <pre key={i} className={styles.fact}>
                   {text(v.evidence)}
                 </pre>
+              ))}
+            {verdicts
+              .filter((v) => v.artifact_id === artifact.artifact_id && v.files?.length)
+              .map((v) => (
+                <section key={v.acceptance_id} aria-label="验收原件">
+                  <h4>验收原件</h4>
+                  {v.files!.map((file) => (
+                    <FilePreview key={file.file_id} file={file} row />
+                  ))}
+                </section>
               ))}
           </details>
         </div>

@@ -3,6 +3,12 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.section > summary {
+  cursor: pointer;
+  padding: var(--space-2) 0;
+  color: var(--label-2);
+  font-size: var(--text-label);
+}
 .section h2,
 .section h3,
 .report h3,
@@ -75,8 +81,6 @@
 }
 
 .compactReport {
-  max-height: 160px;
-  overflow: hidden;
   font-size: var(--text-body);
 }
 .compactReport h3,

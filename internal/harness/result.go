@@ -24,7 +24,7 @@ var ResultToolSpec = ToolSpec{
     "report":{
       "type":"object",
       "properties":{
-        "body":{"type":"string"},
+        "body":{"type":"string","description":"The readable final report, including enough original background and questions to understand the conclusions, impact, remaining uncertainty and next action without the old chat. Supporting files and evidence may provide technical detail."},
         "evidence":{"type":"array","items":{"type":"string"}},
         "uncertainties":{"type":"array","items":{"type":"string"}},
         "shared_review":{

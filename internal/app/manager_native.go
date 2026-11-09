@@ -654,7 +654,7 @@ func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.
 // identity; no new admission, task, delegation or lifecycle mutation is allowed.
 func closedIssueReceiptOperation(operation string) bool {
 	switch operation {
-	case "issues.review_context", "conversation.reply", "conversation.publish", "conversation.notify", "conversation.commit_turn":
+	case "issues.review_context", "conversation.reply", "conversation.publish", "conversation.notify", "conversation.commit_turn", "attentions.create":
 		return true
 	}
 	return false

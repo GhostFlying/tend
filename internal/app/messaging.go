@@ -543,8 +543,22 @@ func (c PublishCommunication) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 
 func communicationReplyInput(ctx context.Context, q store.Querier, id string) error {
 	var direction string
-	if err := q.QueryRowContext(ctx, `SELECT direction FROM messaging_messages WHERE message_id=?`, id).Scan(&direction); err != nil {
-		return errNotFound(err, "reply input is unavailable")
+	err := q.QueryRowContext(ctx, `SELECT direction FROM messaging_messages WHERE message_id=?`, id).Scan(&direction)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A business batch is a real admitted trigger without an external
+		// communication endpoint. Its reply uses the existing Web fallback;
+		// communicationSourceAllowed still checks the exact execution/scope.
+		var batch bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM background_batches b JOIN conversation_messages m USING(message_id) WHERE b.message_id=? AND m.author='system')`, id).Scan(&batch); err != nil {
+			return err
+		}
+		if batch {
+			return nil
+		}
+		return protocol.Errorf(protocol.CodeNotFound, "reply input is unavailable")
+	}
+	if err != nil {
+		return err
 	}
 	if direction != "input" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "reply_to must identify an incoming communication; use conversation_notify for proactive output")

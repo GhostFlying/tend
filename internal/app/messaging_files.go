@@ -19,6 +19,11 @@ func communicationAttachment(ctx context.Context, x *Exec, tx *store.Tx, file, c
 	attachment, err := store.GetConversationAttachment(ctx, tx.Q(), file)
 	if errors.Is(err, store.ErrNotFound) {
 		result, _, err := store.GetFinalizedDeliverableFile(ctx, tx.Q(), file)
+		if errors.Is(err, store.ErrNotFound) {
+			// An independent verdict owns its original evidence just as an
+			// artifact owns its result files; an upload alone authorizes neither.
+			result, _, err = store.GetFinalizedAcceptanceFile(ctx, tx.Q(), file)
+		}
 		if err != nil {
 			return errNotFound(err, "finalized attachment unavailable")
 		}

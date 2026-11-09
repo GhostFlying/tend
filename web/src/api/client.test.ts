@@ -347,6 +347,14 @@ describe("delivery file authorization", () => {
     await client.file("../external?token=ignored");
     expect(tend.calls.at(-1)?.path).toBe("/api/v1/files/..%2Fexternal%3Ftoken%3Dignored");
   });
+  test("reads an original conversation attachment through the same owner byte reader", async () => {
+    tend.handle = () => new Response("# Original report\n\nA real finding.");
+    expect(
+      await (await client.file("file_report", undefined, "conversation/attachments")).text(),
+    ).toBe("# Original report\n\nA real finding.");
+    expect(tend.calls.at(-1)?.path).toBe("/api/v1/conversation/attachments/file_report");
+    expect(tend.calls.at(-1)?.auth).toBe("Bearer token-1");
+  });
 });
 
 test("attachment upload sends the original Blob with caller cancellation and no JSON timeout", async () => {

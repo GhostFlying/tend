@@ -23,6 +23,18 @@ export function isImage(file: PreviewFile): boolean {
     ? /^image\/(png|jpeg|gif|webp)$/.test(file.media_type)
     : /\.(png|jpe?g|gif|webp)$/i.test(file.name);
 }
+/** Presentation format only; filenames never select or replace the main report. */
+export function textFileFormat(file: PreviewFile): "markdown" | "text" | null {
+  if (
+    /\.(md|markdown)$/i.test(file.name) ||
+    /^text\/(x-)?markdown(?:;|$)/i.test(file.media_type ?? "")
+  )
+    return "markdown";
+  return /^text\//i.test(file.media_type ?? "") ||
+    /\.(txt|text|log|csv|json|ya?ml|toml|xml|diff|patch)$/i.test(file.name)
+    ? "text"
+    : null;
+}
 /** Resolve only exact immutable identities or unique manifest-relative names. */
 export function resolveFile(
   source: string,

@@ -3,6 +3,8 @@ import type { ConversationAttachment, DownloadURLResponse } from "../api/generat
 import { useServices } from "../app/services.tsx";
 import type { OutgoingAttachment } from "../queue/outbox.ts";
 import { FileDownload } from "../tasks/FileDownload.tsx";
+import { FilePreview } from "../tasks/FilePreview.tsx";
+import { textFileFormat } from "../tasks/files.ts";
 import { ImageTile } from "./Images.tsx";
 import styles from "./Attachments.module.css";
 
@@ -59,9 +61,20 @@ export function OutgoingAttachments({ uploads }: { uploads: OutgoingAttachment[]
 export function MessageAttachments({ attachments }: { attachments: ConversationAttachment[] }) {
   return (
     <div className={styles.list} aria-label="消息附件">
-      {attachments.map((file) => (
-        <StoredAttachment key={file.file_id} file={file} />
-      ))}
+      {attachments.map((file) =>
+        textFileFormat(file) ? (
+          <div key={file.file_id} className={styles.card}>
+            <FilePreview
+              file={file}
+              scope="conversation/attachments"
+              relatedFiles={attachments}
+              compact
+            />
+          </div>
+        ) : (
+          <StoredAttachment key={file.file_id} file={file} />
+        ),
+      )}
     </div>
   );
 }

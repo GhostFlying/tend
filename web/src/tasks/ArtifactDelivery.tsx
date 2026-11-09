@@ -23,49 +23,45 @@ export function ArtifactDelivery({
   const files = artifactFiles(payload.files);
   return (
     <>
-      {showFiles && files.length > 0 && (
-        <section
-          className={compact ? `${styles.section} ${styles.compactFiles}` : styles.section}
-          aria-label="交付文件"
-        >
-          {!compact && <h3>文件</h3>}
-          <ul className={styles.files}>
-            {files.map((file) => (
-              <li key={file.file_id}>
-                <FilePreview file={file} row={compact} />
-                {!compact && (
-                  <details>
-                    <summary>文件校验</summary>
-                    <code>SHA-256 {file.sha256}</code>
-                  </details>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
       {report && (
         <section
           className={compact ? `${styles.report} ${styles.compactReport}` : styles.report}
           aria-label="交付报告"
         >
-          {!compact && <h3>报告</h3>}
+          <h3>{compact ? "报告摘要" : "报告正文"}</h3>
           {typeof report.body === "string" && (
             <Markdown text={report.body} files={files} demoteHeadings={compact} />
           )}
-          {Array.isArray(report.evidence) && report.evidence.length > 0 && (
-            <>
-              <h4>证据</h4>
-              <ReportNotes notes={report.evidence} />
-            </>
-          )}
           {Array.isArray(report.uncertainties) && report.uncertainties.length > 0 && (
             <>
-              <h4>不确定项</h4>
+              <h4>仍未知的部分</h4>
               <ReportNotes notes={report.uncertainties} />
             </>
           )}
         </section>
+      )}
+      {((showFiles && files.length > 0) || !!report?.evidence?.length) && (
+        <details className={styles.section}>
+          <summary>原件与证据{files.length > 0 ? `（${files.length} 个文件）` : ""}</summary>
+          {showFiles && files.length > 0 && (
+            <section className={compact ? styles.compactFiles : undefined} aria-label="交付文件">
+              <ul className={styles.files}>
+                {files.map((file) => (
+                  <li key={file.file_id}>
+                    <FilePreview file={file} relatedFiles={files} row={compact} />
+                    <details>
+                      <summary>文件校验</summary>
+                      <code>SHA-256 {file.sha256}</code>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {Array.isArray(report?.evidence) && report.evidence.length > 0 && (
+            <ReportNotes notes={report.evidence} />
+          )}
+        </details>
       )}
     </>
   );
