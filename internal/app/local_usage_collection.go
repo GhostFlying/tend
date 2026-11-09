@@ -77,17 +77,9 @@ func stopLocalUsage(ctx context.Context, tx *store.Tx, conversation, thread, run
 			return err
 		}
 		s.WriterStopped = true
-		empty := string(s.Cursors) == "{}" && s.Collection.Evidence == protocol.UsageNoDispatch
-		if empty {
-			var thread string
-			if err = tx.Q().QueryRowContext(ctx, `SELECT json_extract(source_json,'$.thread_id') FROM token_usage_local_sources WHERE source_key=?`, s.ID).Scan(&thread); err != nil {
-				return err
-			}
-			var facts bool
-			if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE json_extract(payload_json,'$.thread_id')=?)`, thread).Scan(&facts); err != nil {
-				return err
-			}
-			empty = !facts
+		empty, err := localUsageEmpty(ctx, tx.Q(), s)
+		if err != nil {
+			return err
 		}
 		s.Collection.Stopped(now, "owned-writer-closed:"+s.Collection.WriterID, empty)
 		if s.Collection.RetirementReason != "empty" {
@@ -98,6 +90,30 @@ func stopLocalUsage(ctx context.Context, tx *store.Tx, conversation, thread, run
 		}
 	}
 	return nil
+}
+
+func localUsageEmpty(ctx context.Context, q store.Querier, s LocalUsageSource) (bool, error) {
+	if s.Collection.Evidence != protocol.UsageNoDispatch {
+		return false, nil
+	}
+	var cursors map[string]json.RawMessage
+	if len(s.Cursors) > 0 {
+		if err := json.Unmarshal(s.Cursors, &cursors); err != nil {
+			return false, err
+		}
+	}
+	if len(cursors) > 0 {
+		return false, nil
+	}
+	var source struct {
+		ThreadID string `json:"thread_id"`
+	}
+	if err := json.Unmarshal(s.Source, &source); err != nil {
+		return false, err
+	}
+	var facts bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE json_extract(payload_json,'$.thread_id')=?)`, source.ThreadID).Scan(&facts)
+	return !facts, err
 }
 
 // ActivateLocalUsage commits dispatch evidence before the caller sends any

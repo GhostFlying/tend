@@ -135,14 +135,22 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 			previous.Source = s.Source
 			previous.Coverage = "pending"
 			if s.WriterStopped {
-				previous.Collection.Stopped(a.now().UnixMilli(), "registered-stopped-writer", false)
+				empty, err := localUsageEmpty(ctx, tx.Q(), previous)
+				if err != nil {
+					return err
+				}
+				previous.Collection.Stopped(a.now().UnixMilli(), "registered-stopped-writer", empty)
 			}
 			return saveLocalUsage(ctx, tx, previous, a.now().UnixMilli())
 		}
 		s.Collection = protocol.NewUsageCollection(metadata.NoDispatchProven, s.WriterStopped)
 		s.Collection.WriterID = metadata.WriterID
 		if s.WriterStopped {
-			s.Collection.Stopped(a.now().UnixMilli(), "registered-stopped-writer", metadata.NoDispatchProven)
+			empty, err := localUsageEmpty(ctx, tx.Q(), s)
+			if err != nil {
+				return err
+			}
+			s.Collection.Stopped(a.now().UnixMilli(), "registered-stopped-writer", empty)
 		}
 		raw, err := json.Marshal(s.Collection)
 		if err != nil {

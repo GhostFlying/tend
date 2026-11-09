@@ -81,6 +81,7 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 				c.retries.Failed(source.ID, now)
 			} else {
 				c.retries.Succeeded(source.ID)
+				paging = true
 			}
 			continue
 		}

@@ -100,6 +100,9 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 		}
 		return retry(err)
 	}
+	if err := m.beginNativeUsage(ctx, th, d.RequestID); err != nil {
+		return retry(err)
+	}
 	admitted, err := m.app.AdmitAgentRecovery(ctx, d.RequestID, th.ID(), revision)
 	if err != nil {
 		return retry(err)
@@ -194,9 +197,6 @@ func (m *Manager) deliverRecovery(ctx context.Context, d app.Delivery) app.Deliv
 		return app.DeliveryResult{Outcome: app.Delivered}
 	}
 	// Empty input lets the harness continue its retained history and tool outputs.
-	if err := m.beginNativeUsage(ctx, th, d.RequestID); err != nil {
-		return retry(err)
-	}
 	id, err := th.StartTurn(ctx, harness.TurnInput{Continue: true, Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {
 		if errors.Is(err, harness.ErrRejected) {

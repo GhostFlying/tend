@@ -222,15 +222,7 @@ func (ObserveUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if session != "" && p.SessionID != "" && session != p.SessionID {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "collection session changed")
 	}
-	if c.RetirementReason == "empty" {
-		var facts bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE json_extract(payload_json,'$.thread_id')=?)`, p.ThreadID).Scan(&facts); err != nil {
-			return Outcome{}, err
-		}
-		if facts || c.Evidence != protocol.UsageNoDispatch || len(p.PendingRequestIDs) != 0 {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "empty retirement conflicts with execution evidence")
-		}
-	}
+
 	// A control receipt is independent of whether its accompanying observation is
 	// superseded; a delayed old request can be closed without overwriting a new epoch.
 	if p.ControlRequestID != "" {
@@ -259,6 +251,21 @@ func (ObserveUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if sequence >= p.Sequence || old.Epoch > c.Epoch || old.Epoch == c.Epoch && old.Revision > c.Revision {
 			return Outcome{Result: map[string]bool{"superseded": true}}, nil
+		}
+	}
+	if c.RetirementReason == "empty" {
+		var facts bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE json_extract(payload_json,'$.thread_id')=?)`, p.ThreadID).Scan(&facts); err != nil {
+			return Outcome{}, err
+		}
+		if facts {
+			// An old empty snapshot can arrive after a later execution's upload,
+			// even before its collection snapshot. Acknowledge the old request
+			// without publishing its superseded empty conclusion.
+			return Outcome{Result: map[string]bool{"superseded": true}}, nil
+		}
+		if c.Evidence != protocol.UsageNoDispatch || len(p.PendingRequestIDs) != 0 {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "empty retirement conflicts with execution evidence")
 		}
 	}
 	raw, err := json.Marshal(c)

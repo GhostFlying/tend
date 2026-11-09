@@ -33,16 +33,16 @@ func (m *Manager) wakeNativeUsage() {
 	}
 }
 
-func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, purpose string) {
+func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, purpose string) error {
 	m.usageMu.Lock()
 	defer m.usageMu.Unlock()
 	native, ok := th.(harness.NativeUsageThread)
 	if !ok {
-		return
+		return nil
 	}
 	src := native.UsageSource()
 	if src.Path == "" {
-		return
+		return nil
 	}
 	if selected := m.namedSelection(); selected != nil {
 		src.ActorName = selected.Definition.DisplayName
@@ -66,7 +66,9 @@ func (m *Manager) registerNativeUsage(ctx context.Context, th harness.Thread, pu
 	body, _ := json.Marshal(src)
 	if err := m.app.RegisterLocalUsage(ctx, app.LocalUsageSource{ID: hex.EncodeToString(hash[:]), ConversationID: store.ConversationID(m.cfg.ConversationID), Source: body}); err != nil {
 		m.cfg.Log.WarnContext(ctx, "native usage source registration pending", "err", err)
+		return err
 	}
+	return nil
 }
 
 func (m *Manager) syncNativeUsage(ctx context.Context) { m.syncNativeUsageState(ctx, false) }
@@ -134,6 +136,7 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 				m.usageRetries.Failed(s.ID, now)
 			} else {
 				m.usageRetries.Succeeded(s.ID)
+				paging = true
 			}
 			continue
 		}
@@ -310,6 +313,9 @@ func (m *Manager) beginNativeUsage(ctx context.Context, th harness.Thread, reque
 	native, ok := th.(harness.NativeUsageThread)
 	if !ok || native.UsageSource().Path == "" {
 		return nil
+	}
+	if err := m.registerNativeUsage(ctx, th, ""); err != nil {
+		return err
 	}
 	return m.app.ActivateLocalUsage(ctx, m.cfg.ConversationID, th.ID(), request)
 }
