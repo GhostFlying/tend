@@ -313,21 +313,44 @@ func TestWorkerOutcomeKeepsLatestTurnAndOriginalFailure(t *testing.T) {
 	}
 }
 
+type resultRecoveryReadFailure struct{ *implementationReconcileSpaces }
+
+func (w resultRecoveryReadFailure) ReattachRecovery(context.Context, protocol.Assignment) (Prepared, error) {
+	w.reads++
+	return Prepared{}, errors.New("original workspace is temporarily unreadable")
+}
+
 func TestImplementationOwnedRecoveryEndsBoundedPass(t *testing.T) {
-	r, as, workers, spaces, _ := implementationReconcileFixture(t)
-	workers.recoveryErr = fmt.Errorf("%w: original process ownership is unconfirmed", harness.ErrOwnedWorkerUnconfirmed)
-	r.cfg.RetryDelay = time.Hour
-	before, requests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	err := r.execute(ctx, ctx, as.RunID, &active{as: as, desired: protocol.DesiredRun})
-	after, afterRequests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
-	if !isOwnedRecoveryUncertain(err) || ctx.Err() != nil || !after.Fenced || after.StoppedConfirmed || after.Phase != journal.PhaseStarted || len(after.WorkerResult) != 0 || len(workers.seen) != 1 || workers.starts != 0 || spaces.mutations != 0 || !reflect.DeepEqual(requests, afterRequests) {
-		t.Fatal("uncertain ownership looped, published, or discarded the attempt", before, after, err, ctx.Err(), workers)
-	}
-	before.Fenced = true
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("bounded ownership recovery changed more than its fence", before, after)
+	for _, scenario := range []string{"ownership", "workspace read", "malformed result", "unknown outcome"} {
+		t.Run(scenario, func(t *testing.T) {
+			r, as, workers, spaces, _ := implementationReconcileFixture(t)
+			expectedReconcileReads := 1
+			switch scenario {
+			case "ownership":
+				workers.recoveryErr = fmt.Errorf("%w: original process ownership is unconfirmed", harness.ErrOwnedWorkerUnconfirmed)
+			case "workspace read":
+				r.cfg.Workspaces = resultRecoveryReadFailure{spaces}
+				expectedReconcileReads = 0
+			case "malformed result":
+				workers.recoveryErr = errors.New("original submitted result cannot be decoded")
+			case "unknown outcome":
+				if err := os.Remove(workerOutcomePath(spaces.prepared.StateDir, 1)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, requests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			err := r.execute(ctx, ctx, as.RunID, &active{as: as, desired: protocol.DesiredRun})
+			after, afterRequests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
+			if !isOwnedRecoveryUncertain(err) || ctx.Err() != nil || !after.Fenced || after.StoppedConfirmed || after.Phase != journal.PhaseStarted || len(after.WorkerResult) != 0 || len(workers.seen) != expectedReconcileReads || spaces.reads != 1 || workers.starts != 0 || spaces.mutations != 0 || !reflect.DeepEqual(requests, afterRequests) {
+				t.Fatalf("uncertain recovery: before=%+v after=%+v err=%v ctx=%v reconciliations=%d reads=%d starts=%d mutations=%d", before, after, err, ctx.Err(), len(workers.seen), spaces.reads, workers.starts, spaces.mutations)
+			}
+			before.Fenced = true
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("bounded recovery changed more than its fence", before, after)
+			}
+		})
 	}
 }
 
