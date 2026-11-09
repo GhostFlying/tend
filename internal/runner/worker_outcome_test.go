@@ -54,19 +54,39 @@ func reopenOutcomeJournal(t *testing.T, r *Runner, path string) {
 	r.cfg.Journal = j
 }
 
+type shutdownBeforeEventsWorkers struct {
+	*normalResultWorkers
+	stop context.CancelFunc
+}
+
+func (w shutdownBeforeEventsWorkers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.Worker, error) {
+	worker, err := w.normalResultWorkers.Start(ctx, spec)
+	if err == nil {
+		w.stop()
+	}
+	return worker, err
+}
+
 func TestImplementationOutcomeSurvivesAcknowledgedEventsCloseFailureAndRunnerShutdown(t *testing.T) {
 	for _, scenario := range []struct {
-		status   string
-		shutdown bool
+		status        string
+		shutdown      bool
+		beforeEvents  bool
+		ordinaryFirst bool
 	}{
-		{"completed", false}, {"failed", false}, {"completed", true}, {"failed", true},
+		{"completed", false, false, false}, {"failed", false, false, false},
+		{"completed", true, false, false}, {"failed", true, false, false},
+		{"completed", true, true, false}, {"failed", true, true, false},
+		{"completed", true, true, true}, {"failed", true, true, true},
 	} {
-		t.Run(fmt.Sprintf("%s/runner_shutdown=%t", scenario.status, scenario.shutdown), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s/runner_shutdown=%t/before_events=%t/ordinary_first=%t", scenario.status, scenario.shutdown, scenario.beforeEvents, scenario.ordinaryFirst), func(t *testing.T) {
 			status := scenario.status
 			r, as, recovery, spaces, path := implementationReconcileFixture(t)
 			firstImplementationAttempt(t, r, as, spaces, path)
-			workers := &normalResultWorkers{result: submittedImplementationResult(),
-				events: []harness.WorkerEvent{workerTerminalEvent("owned-thread", "original-turn", status)}}
+			workers := &normalResultWorkers{result: submittedImplementationResult(), events: []harness.WorkerEvent{workerTerminalEvent("owned-thread", "original-turn", status)}}
+			if scenario.ordinaryFirst {
+				workers.events = append([]harness.WorkerEvent{{Kind: "item.completed", Body: json.RawMessage(`{"type":"agentMessage","text":"original summary"}`)}}, workers.events...)
+			}
 			if status == "completed" {
 				// The native turn succeeded; only its deferred process close is unknown.
 				workers.err = fmt.Errorf("%w: process close is unknown", harness.ErrRetainedResumePending)
@@ -99,6 +119,11 @@ func TestImplementationOutcomeSurvivesAcknowledgedEventsCloseFailureAndRunnerShu
 			defer stopRunner()
 			runCtx, stopRun := context.WithCancelCause(lifetime)
 			defer stopRun(nil)
+			if scenario.beforeEvents {
+				// The notification is already queued when runner shutdown
+				// cancels its lifetime, before the event loop consumes it.
+				r.cfg.Workers = shutdownBeforeEventsWorkers{normalResultWorkers: workers, stop: stopRunner}
+			}
 			// Flush while Wait is returning, before the failed process-close path.
 			workers.onWait = func() {
 				if err := r.flushEvents(t.Context(), as); err != nil {
@@ -126,7 +151,11 @@ func TestImplementationOutcomeSurvivesAcknowledgedEventsCloseFailureAndRunnerShu
 			}
 			saved, readErr := r.cfg.Journal.Run(t.Context(), as.RunID)
 			pending, pendingErr := r.cfg.Journal.PendingEvents(t.Context(), as.RunID, 10)
-			if readErr != nil || pendingErr != nil || saved.Phase != journal.PhaseStarted || len(saved.WorkerResult) != 0 || saved.StoppedConfirmed || len(pending) != 0 || eventUploads != 1 || len(finals) != 0 {
+			expectedUploads := 1
+			if scenario.beforeEvents {
+				expectedUploads = 0
+			}
+			if readErr != nil || pendingErr != nil || saved.Phase != journal.PhaseStarted || len(saved.WorkerResult) != 0 || saved.StoppedConfirmed || len(pending) != 0 || eventUploads != expectedUploads || len(finals) != 0 {
 				t.Fatal("close failure lost the original unresolved attempt", saved, pending, err, readErr, pendingErr, finals)
 			}
 			observed, observedErr := readWorkerOutcome(spaces.prepared.StateDir, as.RunID, "owned-thread", 1)
