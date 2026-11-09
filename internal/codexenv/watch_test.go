@@ -112,18 +112,46 @@ func TestWatchRunsOnlyEnabledEnvironmentsAndStopsWithContext(t *testing.T) {
 	p.Skills = Selection{Mode: "projection", Allow: []Item{{ID: "selected", Path: source}}}
 	old := create(t, s, p)
 	skill(t, filepath.Dir(source), "selected", "v2")
-	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
-	defer cancel()
-	if err := s.Watch(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal(err)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	var watchErr error
+	go func() {
+		defer close(done)
+		watchErr = s.Watch(ctx)
+	}()
+	defer func(stop context.CancelFunc) { stop(); <-done }(cancel)
+	// Synchronization is an observable state transition, not a 150ms disk
+	// latency promise. Cancellation is tested after that transition completes.
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	var now Status
+	for {
+		var err error
+		now, err = s.Read(p.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if now.Latest != old.Latest {
+			break
+		}
+		select {
+		case <-done:
+			t.Fatal("watch exited before synchronizing selected source", watchErr)
+		case <-deadline.C:
+			t.Fatal("watch did not synchronize selected source")
+		case <-ticker.C:
+		}
 	}
-	now, err := s.Read(p.ID)
-	if err != nil || now.Latest == old.Latest {
-		t.Fatal("watch did not synchronize selected source", err)
+	cancel()
+	<-done
+	if !errors.Is(watchErr, context.Canceled) {
+		t.Fatal(watchErr)
 	}
 	before := now.Latest
 	now.Profile.Enabled = false
-	if _, err = s.Execute(t.Context(), Request{Action: "update", ID: p.ID, RequestID: "disable-profile", ExpectedRevision: now.Revision, Profile: &now.Profile}); err != nil {
+	if _, err := s.Execute(t.Context(), Request{Action: "update", ID: p.ID, RequestID: "disable-profile", ExpectedRevision: now.Revision, Profile: &now.Profile}); err != nil {
 		t.Fatal(err)
 	}
 	skill(t, filepath.Dir(source), "selected", "v3")
