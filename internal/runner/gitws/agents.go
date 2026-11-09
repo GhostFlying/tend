@@ -68,7 +68,8 @@ func writeRules(b *strings.Builder, as protocol.Assignment) {
 	} else {
 		b.WriteString("- Make your changes in the working trees. Whether and how to commit is yours to decide, as the task and the repository's own rules ask; tend does not commit for you. When the run ends, tend records each mount's HEAD and working tree as they are, and acceptance and the next implementation start from there.\n")
 	}
-	b.WriteString("- Keep temporary copies and experiments out of the repositories; use the scratch directory you were given.\n")
+	b.WriteString("- Keep downloaded inputs, reports, evidence for submission and temporary experiment copies out of the repositories; use the scratch directory you were given.\n")
+	b.WriteString("- Tools, builds and tests may use private OS temporary directories you create and clean up. Choose a short real TMPDIR when needed, rather than a symbolic-link alias; runtime temporary files need not stay in scratch. Preserve retained evidence through the required file submission.\n")
 }
 
 // baseOrigin says where a base commit came from, given how ResolveBase

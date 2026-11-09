@@ -31,6 +31,25 @@ func TestBrief(t *testing.T) {
 	}
 }
 
+func TestBriefSeparatesSubmittedEvidenceFromRuntimeTemporaryFiles(t *testing.T) {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+		for _, guide := range []string{"", "Retain the original workspace."} {
+			instructions, _ := Brief(WorkerSpec{Role: role, Dir: "/workspace", ScratchDir: "/scratch/evidence", Guide: guide})
+			for _, want := range []string{"evidence for submission", "/scratch/evidence", "private OS temporary directories", "short real TMPDIR", "runtime temporary files need not stay in scratch", "required file submission"} {
+				if !strings.Contains(instructions, want) {
+					t.Errorf("%s guide=%q lacks %q: %s", role, guide, want, instructions)
+				}
+			}
+			if strings.Contains(instructions, "Keep temporary files in") {
+				t.Errorf("%s guide=%q still confines runtime files to scratch", role, guide)
+			}
+			if role == protocol.RoleAccept && !strings.Contains(instructions, "do not edit code") {
+				t.Error("temporary directories must not relax review's workspace restrictions")
+			}
+		}
+	}
+}
+
 func TestBriefCarriesTaskRelationsWithoutWorkspaceInheritance(t *testing.T) {
 	_, input := Brief(WorkerSpec{Relations: []protocol.TaskRelationView{{Kind: protocol.RelationFollowUp, Direction: protocol.RelationOutgoing, Task: protocol.TaskSummary{TaskID: "task_original", Title: "original delivery", SpecVersion: 3, Lifecycle: protocol.TaskCompleted}}}})
 	for _, want := range []string{"follow_up outgoing", "task_original", "spec 3", "completed", "configured workspace base"} {
