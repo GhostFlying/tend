@@ -51,6 +51,7 @@ func (c *Consumer) RetainedScopedBinding(ctx context.Context, pin protocol.Exten
 	if err != nil {
 		return nil, err
 	}
+	var receiptErr error
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -63,20 +64,26 @@ func (c *Consumer) RetainedScopedBinding(ctx context.Context, pin protocol.Exten
 			continue
 		}
 		if err != nil {
-			return nil, err
+			receiptErr = err
+			continue
 		}
 		var binding codexenv.Binding
 		if json.Unmarshal(raw, &binding) != nil || binding.Extensions != pin || !filepath.IsAbs(binding.Directory) || !ValidHash(binding.Generation) {
-			return nil, errors.New("retained managed extension receipt is invalid")
+			receiptErr = errors.New("retained managed extension receipt is invalid")
+			continue
 		}
 		status, err := (&codexenv.Service{Root: binding.Directory}).Read(binding.ID)
 		if err != nil {
-			return nil, err
+			receiptErr = err
+			continue
 		}
 		if status.Profile.ManagedRuntimeID == runtime && slices.ContainsFunc(status.Snapshots, func(s codexenv.Snapshot) bool { return s.ID == binding.Generation }) {
 			return &binding, nil
 		}
-		return nil, errors.New("retained managed extension snapshot is unavailable")
+		receiptErr = errors.New("retained managed extension snapshot is unavailable")
+	}
+	if receiptErr != nil {
+		return nil, receiptErr
 	}
 	return nil, ErrNotPrepared
 }
