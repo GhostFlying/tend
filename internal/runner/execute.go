@@ -537,11 +537,13 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 	}()
 	for ev := range w.Events() {
-		if appendErr == nil && p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
-			var outcome *workerOutcome
-			outcome, appendErr = nativeWorkerOutcome(as.RunID, run.Thread, attempt, ev)
-			if appendErr == nil && outcome != nil {
-				_, appendErr = saveWorkerOutcome(ctx, p.StateDir, *outcome)
+		if p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
+			outcome, outcomeErr := nativeWorkerOutcome(as.RunID, run.Thread, attempt, ev)
+			if outcomeErr == nil && outcome != nil {
+				_, outcomeErr = saveWorkerOutcome(context.WithoutCancel(ctx), p.StateDir, *outcome)
+			}
+			if outcomeErr != nil {
+				appendErr = errors.Join(appendErr, outcomeErr)
 			}
 		}
 		if appendErr == nil {
