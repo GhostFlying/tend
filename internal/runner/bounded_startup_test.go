@@ -168,7 +168,17 @@ func TestBoundedStartupStartsFactLoopsOnceAcrossAdmissionRelease(t *testing.T) {
 			}
 			assertStartupFactLoopCount(t, 0)
 			sources, err := r.cfg.Journal.UsageSources(t.Context())
-			if err != nil || len(sources) != 1 || !reflect.DeepEqual(sources[0], source) || uploads.Load() != 1 {
+			if err != nil || len(sources) != 1 {
+				t.Fatal(sources, err)
+			}
+			retained := sources[0]
+			if retained.Collection.Evidence != protocol.UsageUnknown || retained.Collection.State != protocol.UsageSettling {
+				t.Fatal("startup changed unknown execution evidence", retained.Collection)
+			}
+			// Reading retries now persist their own lifecycle metadata. They
+			// cannot reset the original source, cursor, coverage or upload.
+			retained.Collection, retained.ExpectedRevision = protocol.UsageCollection{}, 0
+			if !reflect.DeepEqual(retained, source) || uploads.Load() != 1 {
 				t.Fatal("startup duplicated upload or changed unresolved source/cursor facts", sources, uploads.Load(), err)
 			}
 		})
