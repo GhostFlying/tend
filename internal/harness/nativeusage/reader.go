@@ -24,15 +24,17 @@ import (
 // Source is an explicitly registered native history location. Paths remain on
 // the executor; no owner-supplied path is accepted by the server upload API.
 type Source struct {
-	ActorName       string   `json:"actor_name,omitempty"`
-	ActorID         string   `json:"actor_id,omitempty"`
-	ActorCategories []string `json:"actor_categories,omitempty"`
-	Path            string   `json:"path"`
-	Provider        string   `json:"provider"`
-	ThreadID        string   `json:"thread_id"`
-	SessionID       string   `json:"session_id"`
-	Purpose         string   `json:"purpose,omitempty"`
-	ParentSessionID string   `json:"parent_session_id,omitempty"`
+	NoDispatchProven bool     `json:"no_dispatch_proven,omitempty"`
+	WriterID         string   `json:"writer_id,omitempty"`
+	ActorName        string   `json:"actor_name,omitempty"`
+	ActorID          string   `json:"actor_id,omitempty"`
+	ActorCategories  []string `json:"actor_categories,omitempty"`
+	Path             string   `json:"path"`
+	Provider         string   `json:"provider"`
+	ThreadID         string   `json:"thread_id"`
+	SessionID        string   `json:"session_id"`
+	Purpose          string   `json:"purpose,omitempty"`
+	ParentSessionID  string   `json:"parent_session_id,omitempty"`
 }
 
 type Cursor struct {
@@ -96,6 +98,9 @@ func read(ctx context.Context, src Source, cursor Cursor, limit int, index *Disc
 	if src.Provider != "codex" && src.Provider != "traex" {
 		return p, errors.New("native usage: unsupported provider")
 	}
+	if index != nil {
+		index.opens.Add(1)
+	}
 	f, err := os.Open(src.Path)
 	if err != nil {
 		return p, fmt.Errorf("native usage: open history: %w", err)
@@ -112,10 +117,10 @@ func read(ctx context.Context, src Source, cursor Cursor, limit int, index *Disc
 		return p, err
 	}
 	if src.ThreadID != "" && meta.ID != src.ThreadID && (src.SessionID == "" || src.SessionID != meta.SessionID) {
-		return p, errors.New("native usage: history identity mismatch")
+		return p, ErrIdentity
 	}
 	if src.SessionID != "" && src.SessionID != meta.SessionID {
-		return p, errors.New("native usage: session identity mismatch")
+		return p, ErrIdentity
 	}
 	p.SessionID = meta.SessionID
 	st, err := f.Stat()
@@ -132,7 +137,7 @@ func read(ctx context.Context, src Source, cursor Cursor, limit int, index *Disc
 			return p, err
 		}
 		if (src.ThreadID != "" && meta.ID != src.ThreadID && (src.SessionID == "" || src.SessionID != meta.SessionID)) || (src.SessionID != "" && src.SessionID != meta.SessionID) {
-			return p, errors.New("native usage: history identity mismatch")
+			return p, ErrIdentity
 		}
 		p.SessionID = meta.SessionID
 	}
@@ -222,7 +227,7 @@ func sample(r row, meta metadata, src Source, models map[string]string, lastMode
 		v.Session = meta.SessionID
 	}
 	if v.Session != meta.SessionID {
-		return protocol.TokenUsageSample{}, errors.New("native usage: record belongs to another session")
+		return protocol.TokenUsageSample{}, ErrIdentity
 	}
 	key := strings.Join([]string{src.Provider, v.Thread, v.Turn, v.Response, r.Timestamp}, "\x00")
 	if r.Ordinal != nil {
@@ -289,6 +294,7 @@ func Discover(ctx context.Context, src Source) ([]Source, error) {
 func (c *DiscoveryCycle) Discover(ctx context.Context, src Source, force bool) ([]Source, error) {
 	var meta metadata
 	anchorExists := false
+	c.index.opens.Add(1)
 	f, err := os.Open(src.Path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) || src.ThreadID == "" || src.SessionID == "" {
@@ -304,7 +310,7 @@ func (c *DiscoveryCycle) Discover(ctx context.Context, src Source, force bool) (
 		}
 	}
 	if src.ThreadID != "" && src.ThreadID != meta.ID && src.SessionID != meta.SessionID {
-		return nil, errors.New("native usage: source identity mismatch")
+		return nil, ErrIdentity
 	}
 	src.SessionID = meta.SessionID
 	root := filepath.Dir(src.Path)
@@ -378,7 +384,7 @@ func (c *DiscoveryCycle) Discover(ctx context.Context, src Source, force bool) (
 		sources = owned
 	}
 	if len(sources) == 0 {
-		return nil, errors.New("native usage: registered history is unavailable")
+		return nil, ErrHistoryUnavailable
 	}
 	return sources, nil
 }

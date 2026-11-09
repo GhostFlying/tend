@@ -183,6 +183,7 @@ func TestUsageProjectionAttributionUpdatesAndRollback(t *testing.T) {
 	if err := h.app.RegisterLocalUsage(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
+	refreshLocalUsageFixture(t, h.app, &source)
 	if err := h.app.CommitLocalUsage(t.Context(), source, []protocol.TokenUsageSample{nativeSample(h.clock.Now().UnixMilli())}); err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +253,7 @@ func TestUsageProjectionIssueHierarchyAndActorCorrections(t *testing.T) {
 	if err := h.app.RegisterLocalUsage(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
+	refreshLocalUsageFixture(t, h.app, &source)
 	if err := h.app.CommitLocalUsage(t.Context(), source, []protocol.TokenUsageSample{nativeSample(h.clock.Now().UnixMilli())}); err != nil {
 		t.Fatal(err)
 	}
@@ -260,6 +262,7 @@ func TestUsageProjectionIssueHierarchyAndActorCorrections(t *testing.T) {
 		t.Fatal("actor fixture was not attributed", v)
 	}
 	source.Source = json.RawMessage(strings.ReplaceAll(string(source.Source), "old actor", "corrected actor"))
+	refreshLocalUsageFixture(t, h.app, &source)
 	if err := h.app.CommitLocalUsage(t.Context(), source, nil); err != nil {
 		t.Fatal(err)
 	}

@@ -9,5 +9,5 @@ func (t *thread) UsageSource() nativeusage.Source {
 	if t.s.codex {
 		provider = "codex"
 	}
-	return nativeusage.Source{Path: t.rolloutPath, Provider: provider, ThreadID: t.id, SessionID: t.nativeSessionID}
+	return nativeusage.Source{NoDispatchProven: t.newlyCreated && !t.started, WriterID: t.s.usageWriterID, Path: t.rolloutPath, Provider: provider, ThreadID: t.id, SessionID: t.nativeSessionID}
 }

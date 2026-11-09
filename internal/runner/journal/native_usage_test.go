@@ -38,6 +38,7 @@ func TestUsageRegistrationAndCursorAreAtomicAndSurviveRunCompletion(t *testing.T
 		}
 	}
 	source.Cursors["history"] = nativeusage.Cursor{Offset: 200}
+	refreshUsageFixture(t, j, &source)
 	if err := j.QueueUsage(t.Context(), source, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +69,7 @@ func TestNativeUsageCursorAndUploadSurviveRestartTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := protocol.Envelope{RequestID: "request", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}}
+	refreshUsageFixture(t, j, &s)
 	if err := j.QueueUsage(t.Context(), s, &env); err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +107,7 @@ func TestQueuedUploadWakesCollectorAfterHistoryHasSettled(t *testing.T) {
 	default:
 	}
 	env := protocol.Envelope{RequestID: "original-upload", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}}
+	refreshUsageFixture(t, j, &src)
 	if err := j.QueueUsage(t.Context(), src, &env); err != nil {
 		t.Fatal(err)
 	}
@@ -117,4 +120,20 @@ func TestQueuedUploadWakesCollectorAfterHistoryHasSettled(t *testing.T) {
 	if err != nil || len(pending) != 1 || pending[0].Envelope.RequestID != env.RequestID {
 		t.Fatal(pending, err)
 	}
+}
+
+func refreshUsageFixture(t *testing.T, j *Journal, s *UsageSource) {
+	t.Helper()
+	all, err := j.UsageSources(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, current := range all {
+		if current.ID == s.ID {
+			s.Collection = current.Collection
+			s.ExpectedRevision = current.ExpectedRevision
+			return
+		}
+	}
+	t.Fatal("usage source not found")
 }

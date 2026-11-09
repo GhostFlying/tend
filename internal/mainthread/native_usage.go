@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -15,6 +16,7 @@ import (
 )
 
 type usageDiscovery struct {
+	epoch int64
 	at    int64
 	files []nativeusage.Source
 }
@@ -80,16 +82,30 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 	if m.usageRetries == nil {
 		m.usageRetries = nativeusage.Retries{}
 	}
+	if m.usageCommits == nil {
+		m.usageCommits = nativeusage.CommitQueue{}
+	}
 	now := m.cfg.Now().UnixMilli()
 	pending := false
 	paging := false
 	defer m.usageMu.Unlock()
 	if complete {
-		if err := m.app.StopLocalUsage(ctx, store.ConversationID(m.cfg.ConversationID), ""); err != nil {
+		if err := m.app.StopLocalUsage(ctx, store.ConversationID(m.cfg.ConversationID), "", m.usageWriterID); err != nil {
 			m.cfg.Log.WarnContext(ctx, "native writer stop pending", "err", err)
 			return 2 * time.Second
 		}
 		return 0
+	}
+	if final {
+		m.mu.Lock()
+		thread := ""
+		if m.thread != nil {
+			thread = m.thread.ID()
+		}
+		m.mu.Unlock()
+		if err := m.app.SettleLocalUsage(ctx, m.cfg.ConversationID, thread); err != nil {
+			return 2 * time.Second
+		}
 	}
 	sources, err := m.app.PendingLocalUsageSources(ctx, store.ConversationID(m.cfg.ConversationID))
 	if err != nil {
@@ -106,16 +122,40 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 		}
 	}
 	m.usageRetries.Retain(keys)
+	m.usageCommits.Retain(keys)
 	discovery := m.usageIndex.Cycle(m.cfg.Now().UnixMilli())
 	for _, s := range sources {
-		if s.WriterStopped || !m.usageRetries.Due(s.ID, now) {
+		if _, pending := m.usageCommits[s.ID]; pending {
+			if !m.usageRetries.Due(s.ID, now) {
+				continue
+			}
+			_, e := m.usageCommits.Retry(ctx, s.ID)
+			if e != nil {
+				m.usageRetries.Failed(s.ID, now)
+			} else {
+				m.usageRetries.Succeeded(s.ID)
+			}
+			continue
+		}
+		m.usageRetries.Collection(s.ID, s.Collection)
+		if s.WriterStopped || strings.HasPrefix(s.Collection.RequestID, "reconcile/") || !s.Collection.Due(now) {
+			continue
+		}
+		if s.Collection.RetryDeadlineAt != 0 && now >= s.Collection.RetryDeadlineAt {
+			if e := m.failUsageSource(ctx, &s, s.Collection.ErrorCode); e != nil {
+				return 2 * time.Second
+			}
+			m.usageRetries.Collection(s.ID, s.Collection)
 			continue
 		}
 		beforeSource, beforeCursors, beforeCoverage := string(s.Source), string(s.Cursors), s.Coverage
 		var root nativeusage.Source
 		var cursors map[string]nativeusage.Cursor
 		if json.Unmarshal(s.Source, &root) != nil || json.Unmarshal(s.Cursors, &cursors) != nil {
-			m.usageRetries.Failed(s.ID, now)
+			if e := m.failUsageSource(ctx, &s, nativeusage.CollectionError(err)); e != nil {
+				return 2 * time.Second
+			}
+			m.usageRetries.Collection(s.ID, s.Collection)
 			continue
 		}
 		if cursors == nil {
@@ -127,15 +167,18 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 		err = nil
 		cached := m.usageFiles[s.ID]
 		files := cached.files
-		if final || len(files) == 0 || m.cfg.Now().UnixMilli()-cached.at >= 30000 {
-			files, err = discovery.Discover(ctx, root, final)
+		if final || cached.epoch != s.Collection.Epoch || len(files) == 0 || m.cfg.Now().UnixMilli()-cached.at >= 30000 {
+			files, err = discovery.Discover(ctx, root, final || cached.epoch != s.Collection.Epoch)
 			if err == nil {
-				m.usageFiles[s.ID] = usageDiscovery{at: m.cfg.Now().UnixMilli(), files: files}
+				m.usageFiles[s.ID] = usageDiscovery{epoch: s.Collection.Epoch, at: m.cfg.Now().UnixMilli(), files: files}
 			}
 		}
 		if err != nil {
-			m.cfg.Log.WarnContext(ctx, "native usage history unavailable", "err", err)
-			m.usageRetries.Failed(s.ID, now)
+			m.cfg.Log.WarnContext(ctx, "native usage history unavailable", "source_id", s.ID, "collection_epoch", s.Collection.Epoch, "err", err)
+			if e := m.failUsageSource(ctx, &s, nativeusage.CollectionError(err)); e != nil {
+				return 2 * time.Second
+			}
+			m.usageRetries.Collection(s.ID, s.Collection)
 			continue
 		}
 		if root.SessionID == "" && len(files) > 0 {
@@ -145,11 +188,13 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 		samples := []protocol.TokenUsageSample{}
 		caughtUp := true
 		failed := false
+		var failure error
 		for _, src := range files {
 			page, readErr := m.usageIndex.Read(ctx, src, cursors[src.Path], 256-len(samples), final)
 			if readErr != nil {
-				m.cfg.Log.WarnContext(ctx, "native usage history read pending", "err", readErr)
+				m.cfg.Log.WarnContext(ctx, "native usage history read pending", "source_id", s.ID, "collection_epoch", s.Collection.Epoch, "err", readErr)
 				failed = true
+				failure = readErr
 				break
 			}
 			cursors[src.Path] = page.Cursor
@@ -161,7 +206,10 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 			}
 		}
 		if failed {
-			m.usageRetries.Failed(s.ID, now)
+			if e := m.failUsageSource(ctx, &s, nativeusage.CollectionError(failure)); e != nil {
+				return 2 * time.Second
+			}
+			m.usageRetries.Collection(s.ID, s.Collection)
 			continue
 		}
 		s.Coverage = "syncing"
@@ -171,20 +219,25 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 		s.Cursors, _ = json.Marshal(cursors)
 		pending = pending || !caughtUp
 		paging = paging || len(samples) >= 256
-		if len(samples) == 0 && beforeSource == string(s.Source) && beforeCursors == string(s.Cursors) && beforeCoverage == s.Coverage {
-			if !caughtUp {
-				m.usageRetries.Failed(s.ID, now)
-			} else {
-				m.usageRetries.Succeeded(s.ID)
-			}
+		m.mu.Lock()
+		idle := (m.active == nil || m.active.finished) && (m.usageSettleUntil.IsZero() || !m.cfg.Now().Before(m.usageSettleUntil))
+		m.mu.Unlock()
+		s.Collection.ReadSucceeded(now, len(samples) > 0 || beforeCursors != string(s.Cursors), caughtUp, false, idle)
+		if len(samples) > 0 {
+			s.Collection.Evidence = protocol.UsageObserved
+		}
+		if !caughtUp && len(samples) < 256 {
+			s.Collection.Failed(now, false, "incomplete_record")
+		}
+		if len(samples) == 0 && beforeSource == string(s.Source) && beforeCursors == string(s.Cursors) && beforeCoverage == s.Coverage && s.Collection.Revision == s.ExpectedRevision {
+			m.usageRetries.Collection(s.ID, s.Collection)
 			continue
 		}
-		if err = m.app.CommitLocalUsage(ctx, s, samples); err != nil {
+		if err = m.usageCommits.Commit(ctx, s.ID, func(commitCtx context.Context) error { return m.app.CommitLocalUsage(commitCtx, s, samples) }); err != nil {
 			m.usageRetries.Failed(s.ID, now)
-			m.cfg.Log.WarnContext(ctx, "native usage commit pending", "err", err)
-		} else {
-			m.usageRetries.Succeeded(s.ID)
+			return m.usageRetries.Delay(now, false)
 		}
+		m.usageRetries.Collection(s.ID, s.Collection)
 
 	}
 	if paging {
@@ -197,6 +250,9 @@ func (m *Manager) syncNativeUsagePass(ctx context.Context, complete, final bool)
 // The durable source/cursor remains available after a failed flush or restart.
 func (m *Manager) startNativeUsage(ctx context.Context, th harness.Thread) func() {
 	m.registerNativeUsage(ctx, th, "")
+	if native, ok := th.(harness.NativeUsageThread); ok {
+		m.usageWriterID = native.UsageSource().WriterID
+	}
 	wake := make(chan struct{}, 1)
 	m.mu.Lock()
 	m.usageWake = wake
@@ -248,4 +304,27 @@ func (m *Manager) nativeUsageLoop(ctx context.Context, wake <-chan struct{}) {
 			return
 		}
 	}
+}
+
+func (m *Manager) beginNativeUsage(ctx context.Context, th harness.Thread, request string) error {
+	native, ok := th.(harness.NativeUsageThread)
+	if !ok || native.UsageSource().Path == "" {
+		return nil
+	}
+	return m.app.ActivateLocalUsage(ctx, m.cfg.ConversationID, th.ID(), request)
+}
+
+func (m *Manager) failUsageSource(ctx context.Context, s *app.LocalUsageSource, code string) error {
+	next := *s
+	next.Collection.Failed(m.cfg.Now().UnixMilli(), next.WriterStopped, code)
+	if code == "identity_mismatch" {
+		next.Collection.RetireUnavailable(m.cfg.Now().UnixMilli(), next.WriterStopped)
+	}
+	err := m.usageCommits.Commit(ctx, s.ID, func(commitCtx context.Context) error { return m.app.CommitLocalUsage(commitCtx, next, nil) })
+	if err == nil {
+		*s = next
+	} else {
+		m.usageRetries.Failed(s.ID, m.cfg.Now().UnixMilli())
+	}
+	return err
 }

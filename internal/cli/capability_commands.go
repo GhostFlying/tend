@@ -96,6 +96,10 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "image show", Route: "/api/v1/conversation/images/{id}"},
 	{Name: "image url", Route: "/api/v1/conversation/images/{id}/download-url", Queries: "inline"},
 	{Name: "image download", Route: "/api/v1/conversation/images/{id}/content", Download: true},
+	{Name: "usage collection list", Route: "/api/v1/token-usage/collections", Queries: "host run conversation thread state reason after limit", JSONDefault: true},
+	{Name: "usage collection show", Route: "/api/v1/token-usage/collections/{id}", JSONDefault: true},
+	{Name: "usage collection retire", Operation: protocol.OpRetireUsageCollection, Target: "usage_source", RevisionRoute: "-", JSONDefault: true},
+	{Name: "usage collection resume", Operation: protocol.OpResumeUsageCollection, Target: "usage_source", RevisionRoute: "-", JSONDefault: true},
 	{Name: "usage", Route: "/api/v1/token-usage", Queries: "window offset model subject before group-by=group_by agent role issue session sort details"},
 	{Name: "usage sources", Route: "/api/v1/token-usage/sources"},
 	{Name: "usage preview", Route: "/api/v1/token-usage/preview", Post: true},
@@ -215,7 +219,10 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	request := fs.String("request-id", "", "original request identity for an identical retry")
 	revision := fs.Int64("revision", -1, "original expected control revision; first requests may read it")
 	dry := fs.Bool("dry-run", false, "print the exact original Envelope without sending")
-	reason := fs.String("reason", "", "reason retained in the request record")
+	reason := qstrings["reason"]
+	if reason == nil {
+		reason = fs.String("reason", "", "reason retained in the request record")
+	}
 	conversation := new(string)
 	if cmd.Name == "conversation settings set" {
 		conversation = fs.String("conversation", "", "exact conversation; default main")
@@ -223,6 +230,17 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
+	}
+	if cmd.Operation == protocol.OpRetireUsageCollection || cmd.Operation == protocol.OpResumeUsageCollection {
+		empty := ""
+		fs.Visit(func(f *flag.Flag) {
+			if f.Value.String() == "" {
+				empty = f.Name
+			}
+		})
+		if empty != "" {
+			return usagef("explicit --%s must not be empty", empty)
+		}
 	}
 	if *revision < -1 {
 		return usagef("revision must be nonnegative")
@@ -257,7 +275,7 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		return printCapabilityValue(e, value, *asJSON)
 	}
 	if cmd.Operation == "" {
-		if *data != "" || *file != "" || *request != "" || *revision != -1 || *dry || *reason != "" {
+		if *data != "" || *file != "" || *request != "" || *revision != -1 || *dry || (*reason != "" && qstrings["reason"] == nil) {
 			return usagef("read commands take no mutation input")
 		}
 		if *out != "" && !cmd.Download {
@@ -355,6 +373,25 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return usagef("payload must be a JSON object")
+	}
+	if cmd.Operation == protocol.OpRetireUsageCollection {
+		if *reason != "" {
+			if raw, ok := fields["reason"]; ok {
+				var previous string
+				if json.Unmarshal(raw, &previous) != nil || previous != *reason {
+					return usagef("reason differs from original payload")
+				}
+			}
+			fields["reason"], _ = json.Marshal(*reason)
+		}
+		var original string
+		_ = json.Unmarshal(fields["reason"], &original)
+		if original != "unavailable" {
+			return usagef("retirement requires --reason unavailable")
+		}
+	}
+	if cmd.Operation == protocol.OpResumeUsageCollection && *reason != "" {
+		return usagef("resume does not accept a retirement reason")
 	}
 	if cmd.Operation == protocol.OpAnswerDecisionContinuation {
 		var payload protocol.AnswerDecisionPayload

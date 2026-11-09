@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		UsageCollectionObservation{}, UsageCollectionPage{}, UsageCollectionSource{}, UsageCollectionCommand{}, UsageCollectionControl{},
 		MaintenanceOverview{},
 		ExtensionImport{}, ExtensionPackage{}, ExtensionStageRequest{}, ExtensionState{}, ExtensionPlan{}, ExtensionCombination{}, ExtensionPublishPayload{}, ExtensionEditPayload{}, ExtensionResourcePage{}, ExtensionBindingPage{}, ExtensionReleasePage{}, ExtensionStatus{}, ExtensionHostStatus{}, ExtensionTarget{},
 		ObservedDeployment{}, IssueMaterialsQuery{}, IssueMaterialFile{}, IssueMaterials{}, RunContext{},

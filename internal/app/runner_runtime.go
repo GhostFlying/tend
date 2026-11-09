@@ -93,6 +93,10 @@ func runnerControl(ctx context.Context, q store.Querier, host string, now int64)
 	if c.Authorization != nil {
 		c.Authorization.RemainingMillis = max(0, c.Authorization.DeadlineMillis-now)
 	}
+	c.UsageCollectionCommands, err = usageCollectionCommands(ctx, q, host)
+	if err != nil {
+		return c, err
+	}
 	c.Extensions, err = extensionTarget(ctx, q, host)
 	if err != nil {
 		return c, err

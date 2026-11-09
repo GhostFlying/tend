@@ -293,6 +293,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 			return nil, err
 		}
 	}
+	if spec.BeforeUsageDispatch != nil {
+		if native, ok := th.(harness.NativeUsageThread); ok {
+			if err := spec.BeforeUsageDispatch(startupCtx, native.UsageSource()); err != nil {
+				release(err)
+				return nil, err
+			}
+		}
+	}
 	turnID, err := th.StartTurn(startupCtx, harness.TurnInput{Text: input, Model: profile.Model, Effort: profile.Effort})
 	if err != nil {
 		release(err)

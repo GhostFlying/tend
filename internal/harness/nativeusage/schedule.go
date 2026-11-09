@@ -3,6 +3,8 @@ package nativeusage
 import (
 	"context"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // Wait blocks indefinitely when there is no active work. A lifecycle notification
@@ -46,6 +48,16 @@ func (r Retries) Failed(key string, now int64) {
 	r[key] = retryEntry{at: now + d.Milliseconds(), delay: d}
 }
 func (r Retries) Succeeded(key string) { delete(r, key) }
+
+// Collection restores the durable reading deadline after restart. Terminal
+// sources cannot leave an expired in-memory retry keeping a collector awake.
+func (r Retries) Collection(key string, c protocol.UsageCollection) {
+	if !c.Reading() || c.NextRetryAt == 0 {
+		delete(r, key)
+		return
+	}
+	r[key] = retryEntry{at: c.NextRetryAt, delay: time.Duration(c.RetryDelayMillis) * time.Millisecond}
+}
 func (r Retries) Delay(now int64, active bool) time.Duration {
 	var delay time.Duration
 	if active {

@@ -502,6 +502,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			}
 		}
 		nativeConfig.UsageSource = nativeUsage.register
+		nativeConfig.BeforeUsageDispatch = a.ActivateRunUsage
 		nativeConfig.RegisteredUsageRuns = a.RegisteredNativeUsageRuns
 		nativeConfig.QuestionPredecessor = a.NativeQuestionPredecessor
 		native = remote.NewBroker(ctx, nativeConfig, log)

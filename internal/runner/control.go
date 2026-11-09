@@ -184,7 +184,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	if r.bootstrapMaintenance {
 		upgradeID = r.cfg.UpgradeID
 	}
-	capabilities := []string{protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityRetainedReconciliation, protocol.CapabilityStrictRetainedResume, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
+	capabilities := []string{protocol.CapabilityUsageCollection, protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityRetainedReconciliation, protocol.CapabilityStrictRetainedResume, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
 	capabilities = append(capabilities, protocol.CapabilityRunMessages)
 	capabilities = append(capabilities, protocol.CapabilityBoundedRunnerRecovery)
 	capabilities = append(capabilities, protocol.CapabilityAcceptanceEvidenceFiles)
@@ -280,6 +280,20 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 		return nil
 	} // Legacy servers cannot authorize maintenance.
 	copy := *next
+	if len(copy.UsageCollectionCommands) > 0 {
+		r.controlMu.Lock()
+		supported := r.usageCollectionSupported
+		r.controlMu.Unlock()
+		if !supported {
+			return errors.New("usage collection control was not negotiated")
+		}
+		for _, command := range copy.UsageCollectionCommands {
+			if err := r.cfg.Journal.ApplyUsageCollectionControl(ctx, command); err != nil {
+				return err
+			}
+		}
+	}
+	copy.UsageCollectionCommands = nil
 	if r.cfg.Extensions != nil {
 		previous := r.cfg.Extensions.Status().DesiredRelease
 		if err := r.cfg.Extensions.SetTarget(copy.Extensions); err != nil {

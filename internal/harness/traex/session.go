@@ -50,6 +50,7 @@ type Options struct {
 
 // Session is a running app-server. It implements harness.Session.
 type Session struct {
+	usageWriterID        string
 	environmentReference *codexenv.Reference
 	lastEnvironmentCheck time.Time
 	environmentFinal     bool
@@ -182,6 +183,10 @@ func startProcess(ctx context.Context, opts Options, overrides []string) (*Sessi
 		}
 	}
 	s := newSession(stdout, stdin, opts.Log)
+	if identity, e := inspectOwnedProcess(cmd.Process.Pid); e == nil {
+		raw, _ := json.Marshal(identity)
+		s.usageWriterID = string(raw)
+	}
 	s.environmentReference = opts.environmentReference
 	s.stop = func() error {
 		defer cleanup()
@@ -372,6 +377,7 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 	t.setRolloutPath(res.Thread.Path)
 	t.mu.Lock()
 	t.nativeSessionID = res.Thread.SessionID
+	t.newlyCreated = true
 	t.mu.Unlock()
 	if err := s.environmentThreadAttached(ctx, res.Thread.ID); err != nil {
 		return nil, err
@@ -705,6 +711,7 @@ type thread struct {
 	permissions                      harness.PermissionSettings
 	networkPolicy                    map[string]any
 	defaults                         harness.ModelSelection
+	newlyCreated                     bool
 	nativeSessionID                  string
 	rolloutPath                      string
 	fork                             bool

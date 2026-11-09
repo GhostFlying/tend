@@ -189,7 +189,9 @@ type Runner struct {
 
 	inventoryMu                     sync.Mutex
 	usageDiscovery                  *nativeusage.Discovery
+	usageCommits                    nativeusage.CommitQueue
 	nativeUsageSupported            bool
+	usageCollectionSupported        bool
 	agentExecutionSupported         bool
 	managedExtensionsSupported      bool
 	retainedExecutions              []protocol.RunExecutionPin
@@ -629,6 +631,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		return r.helloLocked(ctx)
 	}
 	r.nativeUsageSupported = res.NativeUsage
+	r.usageCollectionSupported = res.UsageCollection
 	r.wakeNativeUsage()
 	r.previewSupported = res.RolloutPreview && res.DeploymentID != "" && len(r.cfg.RolloutRoots) > 0
 	r.previewDeployment = res.DeploymentID

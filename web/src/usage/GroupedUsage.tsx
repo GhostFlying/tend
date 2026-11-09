@@ -361,6 +361,12 @@ export function GroupedUsage({ subject }: { subject: string }) {
               {main.data.collection?.pending
                 ? ` · ${number.format(main.data.collection.pending)} 个来源待对账`
                 : ""}
+              {(main.data.collection?.retired_incomplete ?? 0) > 0
+                ? ` · ${number.format(main.data.collection.retired_incomplete ?? 0)} 个来源已停止采集，用量不完整`
+                : ""}
+              {(main.data.collection?.empty ?? 0) > 0
+                ? ` · ${number.format(main.data.collection.empty ?? 0)} 个来源未执行`
+                : ""}
               {main.data.unattributed.requests > 0
                 ? ` · ${number.format(main.data.unattributed.requests)} 个请求时间未知`
                 : ""}
@@ -667,9 +673,13 @@ function ExecutionDetail({
           ·{" "}
           {session.metering_status === "caught_up"
             ? "计量已对账"
-            : session.metering_status === "syncing"
-              ? "计量待对账"
-              : "计量覆盖未确认"}
+            : session.metering_status === "unavailable"
+              ? "采集已结束，用量不完整"
+              : session.metering_status === "needs_reconcile"
+                ? "采集已暂停，需对账"
+                : session.metering_status === "syncing"
+                  ? "计量待对账"
+                  : "计量覆盖未确认"}
         </dd>
         <dt>完成记录时间</dt>
         <dd>

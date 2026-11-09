@@ -78,11 +78,13 @@ func TestUsageCoverageOnlyChangeNotifiesReaders(t *testing.T) {
 	if err := h.app.RegisterLocalUsage(t.Context(), src); err != nil {
 		t.Fatal(err)
 	}
+	refreshLocalUsageFixture(t, h.app, &src)
 	if err := h.app.CommitLocalUsage(t.Context(), src, nil); err != nil {
 		t.Fatal(err)
 	}
 	before := usageNotifications(t, h)
 	src.Coverage = "caught_up"
+	refreshLocalUsageFixture(t, h.app, &src)
 	if err := h.app.CommitLocalUsage(t.Context(), src, nil); err != nil {
 		t.Fatal(err)
 	}

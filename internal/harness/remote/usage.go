@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -141,4 +142,25 @@ func (b *Broker) flushUsage() {
 		}
 		b.mu.Unlock()
 	}
+}
+
+func (b *Broker) recordUsageDispatch(ctx context.Context, run, thread, request string) error {
+	b.usageMu.Lock()
+	raw, err := os.ReadFile(b.bindingPath(run))
+	var binding nativeBinding
+	if err == nil {
+		err = json.Unmarshal(raw, &binding)
+	}
+	if err == nil && (binding.Thread != thread || binding.Usage == nil) {
+		err = errors.New("native usage dispatch binding is unavailable")
+	}
+	if err == nil {
+		binding.Usage.NoDispatchProven = false
+		err = b.saveBinding(run, binding)
+	}
+	b.usageMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return b.cfg.BeforeUsageDispatch(ctx, run, thread, request)
 }

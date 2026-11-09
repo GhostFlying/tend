@@ -349,21 +349,22 @@ type Driver struct {
 	NativeOwnerTools     bool
 	OnSource             func(context.Context, protocol.RolloutPreviewSource) error
 	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
-	LegacyRawUsage bool
-	OnUsageSource  func(context.Context, nativeusage.Source) error
-	OnUsageStopped func(context.Context, string) error
-	Session        harness.Session
-	Directory      string
-	Instructions   string
-	Profile        protocol.ExecutionProfile
-	Emit           func(context.Context, Event) error
-	Download       func(context.Context, protocol.ArtifactFile) (string, error)
-	mu             sync.Mutex
-	threads        map[string]harness.Thread
-	private        map[string]bool
-	tools          map[string]chan harness.ToolResult
-	wg             sync.WaitGroup
-	closing        bool
+	LegacyRawUsage      bool
+	OnUsageSource       func(context.Context, nativeusage.Source) error
+	BeforeUsageDispatch func(context.Context, nativeusage.Source) error
+	OnUsageStopped      func(context.Context, string) error
+	Session             harness.Session
+	Directory           string
+	Instructions        string
+	Profile             protocol.ExecutionProfile
+	Emit                func(context.Context, Event) error
+	Download            func(context.Context, protocol.ArtifactFile) (string, error)
+	mu                  sync.Mutex
+	threads             map[string]harness.Thread
+	private             map[string]bool
+	tools               map[string]chan harness.ToolResult
+	wg                  sync.WaitGroup
+	closing             bool
 }
 
 func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage) (any, error) {
@@ -564,6 +565,13 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 	case "inject":
 		return nil, t.InjectDeveloper(ctx, r.Texts...)
 	case "turn":
+		if d.BeforeUsageDispatch != nil {
+			if native, ok := t.(harness.NativeUsageThread); ok {
+				if err := d.BeforeUsageDispatch(ctx, native.UsageSource()); err != nil {
+					return nil, err
+				}
+			}
+		}
 		return t.StartTurn(ctx, r.Input)
 	case "interrupt":
 		return nil, t.Interrupt(ctx, r.TurnID)
@@ -576,6 +584,13 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			return s.ContextUsage(ctx)
 		}
 	case "compact":
+		if d.BeforeUsageDispatch != nil {
+			if native, ok := t.(harness.NativeUsageThread); ok {
+				if err := d.BeforeUsageDispatch(ctx, native.UsageSource()); err != nil {
+					return nil, err
+				}
+			}
+		}
 		if s, ok := t.(harness.ContextManager); ok {
 			return nil, s.Compact(ctx)
 		}

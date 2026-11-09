@@ -618,6 +618,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	res := protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
+	res.UsageCollection = p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityUsageCollection)
 	res.NativeUsage = p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityNativeUsage)
 	changed, err := observeRuntime(ctx, tx, host.HostID, p.Runtime, now, true)
 	if err != nil {

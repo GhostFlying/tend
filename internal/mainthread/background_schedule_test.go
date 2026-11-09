@@ -25,7 +25,7 @@ func TestBackgroundPoolSleepsAcrossIdleMinuteAndWakesForChange(t *testing.T) {
 	a := app.New(s, ids, clock.Now)
 	if err := s.Write(t.Context(), func(tx *store.Tx) error {
 		for i := range 1000 {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO token_usage_local_sources(source_key,conversation_id,source_json,coverage,writer_stopped,updated_at) VALUES(?,'main','{}','caught_up',1,?)`, fmt.Sprint("historical-", i), clock.Now().UnixMilli()); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO token_usage_local_sources(source_key,conversation_id,source_json,coverage,writer_stopped,updated_at,collection_state,collection_json) VALUES(?,'main','{}','caught_up',1,?,'retired','{"state":"retired","epoch":1,"revision":1,"execution_evidence":"unknown"}')`, fmt.Sprint("historical-", i), clock.Now().UnixMilli()); err != nil {
 				return err
 			}
 			if err := tx.InsertOutbox(t.Context(), store.OutboxRow{OutboxID: ids.New(protocol.PrefixOutbox), RequestID: ids.New(protocol.PrefixRequest), Destination: fmt.Sprint("background_thread:retired-", i), Operation: app.OpHandleEvent, PayloadJSON: `{}`, CreatedAt: clock.Now().UnixMilli()}); err != nil {

@@ -118,6 +118,9 @@ func CapabilityBindings() []CapabilityBinding {
 			capability = "POST " + cmd.Route
 			args = append(args, "--data", `{"conversation_id":"sample","root_thread_id":"native-root","samples":[]}`)
 		}
+		if cmd.Operation == protocol.OpRetireUsageCollection {
+			args = append(args, "--reason", "unavailable")
+		}
 		if cmd.Operation != "" {
 			capability = cmd.Operation
 			if cmd.Operation == protocol.OpContinueRetainedRun {

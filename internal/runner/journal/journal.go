@@ -27,7 +27,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 19
+const CurrentVersion int64 = 20
 
 // Run phases.
 const (
@@ -230,11 +230,34 @@ func putRequest(ctx context.Context, tx *sql.Tx, r Request, now time.Time) error
 
 // DeleteRequest forgets a request once it is acknowledged.
 func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
-	_, err := j.db.ExecContext(ctx, `DELETE FROM requests WHERE request_id = ?`, requestID)
-	if err != nil {
-		return fmt.Errorf("journal: delete request: %w", err)
-	}
-	return nil
+	return j.tx(ctx, func(tx *sql.Tx) error {
+		var operation, payload string
+		err := tx.QueryRowContext(ctx, `SELECT operation,payload_json FROM requests WHERE request_id=?`, requestID).Scan(&operation, &payload)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if operation == protocol.OpRunnerUsageRegister || operation == protocol.OpRunnerUsageUpload {
+			var scope protocol.UsageUpload
+			if err = json.Unmarshal([]byte(payload), &scope); err != nil {
+				return err
+			}
+			if operation == protocol.OpRunnerUsageRegister {
+				var reg protocol.NativeUsageRegistration
+				if err = json.Unmarshal([]byte(payload), &reg); err != nil {
+					return err
+				}
+				scope.RootThreadID = reg.ThreadID
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE native_usage_sources SET collection_report_pending=1 WHERE run_id=? AND json_extract(state_json,'$.source.thread_id')=?`, scope.RunID, scope.RootThreadID); err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id=?`, requestID)
+		return err
+	})
 }
 
 // Requests returns the journaled requests, oldest first.

@@ -99,6 +99,7 @@ func TestDefaultMainLocalSourceUsesCanonicalConversation(t *testing.T) {
 	if err := h.app.RegisterLocalUsage(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
+	refreshLocalUsageFixture(t, h.app, &source)
 	if err := h.app.CommitLocalUsage(t.Context(), source, []protocol.TokenUsageSample{nativeSample(h.clock.Now().UnixMilli())}); err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +165,7 @@ func TestServerLocalRunUsageConservesGlobalAndRunTotalsAcrossRestart(t *testing.
 	}
 	sample := nativeSample(h.clock.Now().UnixMilli())
 	for range 2 {
+		refreshLocalUsageFixture(t, h.app, &source)
 		if err := h.app.CommitLocalUsage(t.Context(), source, []protocol.TokenUsageSample{sample}); err != nil {
 			t.Fatal(err)
 		}

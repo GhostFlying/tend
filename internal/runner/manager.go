@@ -175,6 +175,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	var emitMu sync.Mutex
 	driver := coordination.Driver{RequireReceiptReader: as.Manager.RequireReceiptReader, NativeOwnerTools: as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly, OnUsageStopped: func(stopCtx context.Context, thread string) error {
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
+	}, BeforeUsageDispatch: func(sourceCtx context.Context, source nativeusage.Source) error {
+		return r.activateUsage(sourceCtx, as, source)
 	}, LegacyRawUsage: !r.supportsNativeUsage(), OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 		return r.registerUsage(sourceCtx, as, source)
 	}, OnSource: func(sourceCtx context.Context, source protocol.RolloutPreviewSource) error {

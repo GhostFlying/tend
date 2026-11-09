@@ -15459,6 +15459,12 @@
         },
         "upgrade_id": {
           "type": "string"
+        },
+        "usage_collection_commands": {
+          "items": {
+            "$ref": "#/definitions/UsageCollectionCommand"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -18953,9 +18959,340 @@
       "title": "UsageAttribution",
       "type": "object"
     },
+    "UsageCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "epoch": {
+          "type": "integer"
+        },
+        "error_code": {
+          "type": "string"
+        },
+        "execution_evidence": {
+          "type": "string"
+        },
+        "execution_request_id": {
+          "type": "string"
+        },
+        "first_failure_at": {
+          "type": "integer"
+        },
+        "last_progress_at": {
+          "type": "integer"
+        },
+        "next_retry_at": {
+          "type": "integer"
+        },
+        "policy_version": {
+          "type": "integer"
+        },
+        "retired_at": {
+          "type": "integer"
+        },
+        "retirement_reason": {
+          "type": "string"
+        },
+        "retry_deadline_at": {
+          "type": "integer"
+        },
+        "retry_delay_ms": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "stop_proof": {
+          "type": "string"
+        },
+        "writer_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "epoch",
+        "revision",
+        "policy_version",
+        "execution_evidence"
+      ],
+      "title": "UsageCollection",
+      "type": "object"
+    },
+    "UsageCollectionCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "expected_epoch": {
+          "type": "integer"
+        },
+        "expected_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "source_id",
+        "run_id",
+        "action",
+        "expected_epoch",
+        "expected_revision"
+      ],
+      "title": "UsageCollectionCommand",
+      "type": "object"
+    },
+    "UsageCollectionCommandStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "expected_epoch": {
+          "type": "integer"
+        },
+        "expected_revision": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "source_id",
+        "run_id",
+        "action",
+        "expected_epoch",
+        "expected_revision",
+        "status"
+      ],
+      "title": "UsageCollectionCommandStatus",
+      "type": "object"
+    },
+    "UsageCollectionControl": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "title": "UsageCollectionControl",
+      "type": "object"
+    },
+    "UsageCollectionObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "collection": {
+          "$ref": "#/definitions/UsageCollection"
+        },
+        "control_request_id": {
+          "type": "string"
+        },
+        "control_status": {
+          "type": "string"
+        },
+        "cursor_files": {
+          "type": "integer"
+        },
+        "cursor_offset": {
+          "type": "integer"
+        },
+        "local_source_id": {
+          "type": "string"
+        },
+        "pending_request_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "writer_stopped": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cursor_files",
+        "cursor_offset",
+        "sequence",
+        "local_source_id",
+        "run_id",
+        "thread_id",
+        "session_id",
+        "writer_stopped",
+        "collection"
+      ],
+      "title": "UsageCollectionObservation",
+      "type": "object"
+    },
+    "UsageCollectionPage": {
+      "additionalProperties": false,
+      "properties": {
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageCollectionSource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sources",
+        "next",
+        "more"
+      ],
+      "title": "UsageCollectionPage",
+      "type": "object"
+    },
+    "UsageCollectionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "collection": {
+          "$ref": "#/definitions/UsageCollection"
+        },
+        "commands": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/UsageCollectionCommandStatus"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "control_revision": {
+          "type": "integer"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "cursor_files": {
+          "type": "integer"
+        },
+        "cursor_offset": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "pending_request_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "writer_stopped": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cursor_files",
+        "cursor_offset",
+        "id",
+        "thread_id",
+        "session_id",
+        "provider",
+        "coverage",
+        "writer_stopped",
+        "collection",
+        "control_revision",
+        "commands",
+        "pending_request_ids"
+      ],
+      "title": "UsageCollectionSource",
+      "type": "object"
+    },
     "UsageCoverage": {
       "additionalProperties": false,
       "properties": {
+        "active": {
+          "type": "integer"
+        },
+        "dormant": {
+          "type": "integer"
+        },
+        "empty": {
+          "type": "integer"
+        },
         "last_synced_at": {
           "anyOf": [
             {
@@ -18969,10 +19306,19 @@
         "legacy_requests": {
           "type": "integer"
         },
+        "needs_reconcile": {
+          "type": "integer"
+        },
         "pending": {
           "type": "integer"
         },
+        "retired_incomplete": {
+          "type": "integer"
+        },
         "sources": {
+          "type": "integer"
+        },
+        "unobserved": {
           "type": "integer"
         }
       },
@@ -20548,6 +20894,21 @@
     },
     "UpgradeControlPayload": {
       "$ref": "#/definitions/UpgradeControlPayload"
+    },
+    "UsageCollectionCommand": {
+      "$ref": "#/definitions/UsageCollectionCommand"
+    },
+    "UsageCollectionControl": {
+      "$ref": "#/definitions/UsageCollectionControl"
+    },
+    "UsageCollectionObservation": {
+      "$ref": "#/definitions/UsageCollectionObservation"
+    },
+    "UsageCollectionPage": {
+      "$ref": "#/definitions/UsageCollectionPage"
+    },
+    "UsageCollectionSource": {
+      "$ref": "#/definitions/UsageCollectionSource"
     },
     "UsagePreview": {
       "$ref": "#/definitions/UsagePreview"
