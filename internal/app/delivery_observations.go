@@ -36,7 +36,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if rt.Mode != protocol.RunnerNormal {
 		return Outcome{Result: result, NoEffect: true}, nil
 	}
-	events, err := fanoutRunnerDeliveryFacts(ctx, x, tx, nil, 100)
+	events, progressed, err := fanoutDeliveryFacts(ctx, x, tx, nil, 100, false)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -92,7 +92,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 	}
 	if selected == nil {
-		return Outcome{Result: result, Events: events, NoEffect: len(events) == 0}, nil
+		return Outcome{Result: result, Events: events, NoEffect: !progressed}, nil
 	}
 	plannedAt := selected.NextCheckAt
 	baseline, err := deliveryBaseline(ctx, tx.Q())
@@ -329,6 +329,14 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	row.Observation.RefreshPending = fact.Observation.RefreshPending
 	if !row.Observation.RefreshPending {
 		row.ObservedRevision = fact.FactRevision
+		row.NotificationPending = false
+		if err := tx.PutDeliveryObservationQuery(ctx, row); err != nil {
+			return Outcome{}, err
+		}
+	} else if manualRefresh && changed {
+		// Retain this explicit recipient even when its Issue is already
+		// closed. This is notification responsibility, not another read.
+		row.NotificationPending = true
 		if err := tx.PutDeliveryObservationQuery(ctx, row); err != nil {
 			return Outcome{}, err
 		}
@@ -362,7 +370,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		event.Kind = "work_item.delivery_checked"
 		events = append(events, event)
 	}
-	sharedEvents, err := fanoutRunnerDeliveryFacts(ctx, x, tx, &delivery, 99)
+	sharedEvents, _, err := fanoutDeliveryFacts(ctx, x, tx, &delivery, 99, false)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -420,26 +428,53 @@ func retireSharedRunnerQueries(ctx context.Context, x *Exec, tx *store.Tx, ref p
 	return nil
 }
 
-// A terminal shared fact stops provider polling, but every active reference must
-// still consume its revision. Continuing batches run during ordinary runner
-// polls and never issue another provider read or copy a provider snapshot.
-func fanoutRunnerDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *protocol.IssueDelivery, limit int) ([]Event, error) {
+// deliveryNotificationCandidates keeps suppressed recipients outside the batch,
+// unless their covered refresh or stale notice flag can make metadata progress.
+func deliveryNotificationCandidates(ref *protocol.IssueDelivery, notificationOnly bool) (string, []any) {
 	filter := ""
 	args := []any{}
 	if ref != nil {
 		filter = " AND r.provider=? AND r.repository=? AND r.number=?"
 		args = append(args, ref.Provider, ref.Repository, ref.Number)
 	}
-	args = append(args, limit)
-	rows, err := tx.Q().QueryContext(ctx, `SELECT r.issue_id,r.delivery_id FROM server_delivery_references r JOIN server_delivery_jobs j ON j.provider=r.provider AND j.repository=r.repository AND j.number=r.number LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id WHERE (r.active=1 OR o.refresh_requested=1) AND COALESCE(json_extract(o.query_json,'$.observed_revision'),0)<j.fact_revision AND (COALESCE(o.refresh_requested,0)=0 OR (o.server_refresh_revision>0 AND o.server_refresh_revision<=j.observed_refresh_revision))`+filter+` ORDER BY COALESCE(json_extract(o.query_json,'$.observed_revision'),0),r.issue_id,r.delivery_id LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
+	if notificationOnly {
+		filter += " AND COALESCE(json_extract(o.query_json,'$.notification_pending'),0)=1"
 	}
-	type member struct{ issue, delivery string }
+	return `WITH fanout AS (
+ SELECT r.issue_id,r.delivery_id,
+ COALESCE(json_extract(o.query_json,'$.observed_revision'),0) AS observed,
+ (o.refresh_requested=1 AND o.server_refresh_revision>0 AND o.server_refresh_revision<=j.observed_refresh_revision) AS covered,
+ (COALESCE(json_extract(o.query_json,'$.notification_pending'),0)=1 AND COALESCE(json_extract(o.query_json,'$.observed_revision'),0)>=j.changed_revision) AS settled_notice,
+ ` + store.DeliveryObservationPendingSQL + ` AS pending
+ FROM server_delivery_references r JOIN server_delivery_jobs j ON j.provider=r.provider AND j.repository=r.repository AND j.number=r.number
+ LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id
+ WHERE (r.active=1 OR o.refresh_requested=1 OR COALESCE(json_extract(o.query_json,'$.notification_pending'),0)=1)
+ AND (COALESCE(json_extract(o.query_json,'$.observed_revision'),0)<j.fact_revision OR
+ (COALESCE(json_extract(o.query_json,'$.notification_pending'),0)=1 AND COALESCE(json_extract(o.query_json,'$.observed_revision'),0)>=j.changed_revision))` + filter + `)`, args
+}
+
+const deliveryNotificationCanProgressSQL = `NOT pending OR covered OR settled_notice`
+
+// A terminal shared fact stops provider polling, but every active or explicitly
+// deferred reference still consumes its revision in bounded notification batches.
+// notificationOnly preserves the server observer's existing cached-query audit.
+func fanoutDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *protocol.IssueDelivery, limit int, notificationOnly bool) ([]Event, bool, error) {
+	query, args := deliveryNotificationCandidates(ref, notificationOnly)
+	args = append(args, limit)
+	rows, err := tx.Q().QueryContext(ctx, query+`
+ SELECT issue_id,delivery_id,COALESCE(covered,0) FROM fanout WHERE `+deliveryNotificationCanProgressSQL+`
+ ORDER BY pending,observed,issue_id,delivery_id LIMIT ?`, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	type member struct {
+		issue, delivery string
+		covered         bool
+	}
 	members := []member{}
 	for rows.Next() {
 		var m member
-		if err = rows.Scan(&m.issue, &m.delivery); err != nil {
+		if err = rows.Scan(&m.issue, &m.delivery, &m.covered); err != nil {
 			break
 		}
 		members = append(members, m)
@@ -447,16 +482,17 @@ func fanoutRunnerDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *
 	readErr := rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if readErr != nil {
-		return nil, readErr
+		return nil, false, readErr
 	}
 	events := []Event{}
+	progressed := false
 	for _, m := range members {
 		item, err := store.GetIssue(ctx, tx.Q(), m.issue)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		delivery, ok := findDelivery(item, m.delivery)
 		if !ok {
@@ -464,28 +500,41 @@ func fanoutRunnerDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *
 		}
 		row, err := store.GetDeliveryObservation(ctx, tx.Q(), m.issue, m.delivery)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		fact, err := store.GetDeliveryObservationFact(ctx, tx.Q(), delivery)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		if row.RefreshRequested {
+		dirty := false
+		changed := row.ObservedRevision < fact.ChangedRevision
+		if row.NotificationPending && !changed {
+			row.NotificationPending = false
+			dirty = true
+		}
+		if m.covered {
 			// Selection proved that this actual result covers the member's
 			// request. Settle its queued responsibility without claiming a read.
-			row.RefreshRequested = false
-			if err := tx.PutDeliveryObservationQuery(ctx, row); err != nil {
-				return nil, err
+			if changed && fact.Observation.RefreshPending && item.Status == "closed" {
+				row.NotificationPending = true
 			}
+			row.RefreshRequested = false
+			dirty = true
 			if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='finished',updated_at=? WHERE issue_id=? AND delivery_id=? AND status='pending'`, x.Now.UnixMilli(), m.issue, m.delivery); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		}
-		if fact.Observation.RefreshPending {
+		if fact.Observation.RefreshPending || row.ObservedRevision >= fact.FactRevision {
+			if dirty {
+				if err := tx.PutDeliveryObservationQuery(ctx, row); err != nil {
+					return nil, false, err
+				}
+				progressed = true
+			}
 			continue
 		}
-		changed := row.ObservedRevision < fact.ChangedRevision
 		row.ObservedRevision = fact.FactRevision
+		row.NotificationPending = false
 		if row.Nonce == "" && !row.RefreshRequested {
 			interval := 5 * time.Minute
 			if item.Status == "snoozed" {
@@ -494,8 +543,9 @@ func fanoutRunnerDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *
 			row.NextCheckAt = max(row.NextCheckAt, fact.Observation.AttemptedAt+interval.Milliseconds())
 		}
 		if err := tx.PutDeliveryObservationQuery(ctx, row); err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		progressed = true
 		event := deliveryChanged(item, row.Observation)
 		event.Body["previous_state"] = fact.PreviousState
 		event.Body["previous_error_kind"] = fact.PreviousErrorKind
@@ -504,7 +554,7 @@ func fanoutRunnerDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *
 		}
 		events = append(events, event)
 	}
-	return events, nil
+	return events, progressed, nil
 }
 func findDelivery(item protocol.WorkItem, id string) (protocol.IssueDelivery, bool) {
 	for _, d := range item.Deliveries {

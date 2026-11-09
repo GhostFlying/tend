@@ -49,7 +49,9 @@ func (a *App) ClaimServerDelivery(ctx context.Context) (*ServerDeliveryQuery, er
 		if paused, err := upgradePausesMain(ctx, tx.Q()); err != nil || paused {
 			return err
 		}
-		return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_delivery_jobs WHERE next_at<=? AND (nonce='' OR query_until<=?))`, a.now().UnixMilli(), a.now().UnixMilli()).Scan(&due)
+		query, args := deliveryNotificationCandidates(nil, true)
+		args = append(args, a.now().UnixMilli(), a.now().UnixMilli())
+		return tx.Q().QueryRowContext(ctx, query+` SELECT EXISTS(SELECT 1 FROM fanout WHERE `+deliveryNotificationCanProgressSQL+`) OR EXISTS(SELECT 1 FROM server_delivery_jobs WHERE next_at<=? AND (nonce='' OR query_until<=?))`, args...).Scan(&due)
 	})
 	if err != nil || !due {
 		return nil, err
@@ -77,12 +79,22 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	} else if paused {
 		return Outcome{NoEffect: true}, nil
 	}
+	// Runner reads can leave explicit recipients after provider work is done.
+	// Consume only these deferred notices without creating another native read
+	// or changing the ordinary server cached-query history.
+	events, progressed, err := fanoutDeliveryFacts(ctx, x, tx, nil, 100, true)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if progressed {
+		return Outcome{Events: events}, nil
+	}
 	var q ServerDeliveryQuery
 	var nonce, cache string
 	var attempts int
 	var refreshRevision, observedRefreshRevision, factRevision int64
 	now := x.Now.UnixMilli()
-	err := tx.Q().QueryRowContext(ctx, `SELECT provider,repository,number,nonce,attempts,observation_json,refresh_revision,observed_refresh_revision,fact_revision FROM server_delivery_jobs WHERE next_at<=? AND (nonce='' OR query_until<=?) ORDER BY next_at,provider,repository,number LIMIT 1`, now, now).Scan(&q.Provider, &q.Repository, &q.Number, &nonce, &attempts, &cache, &refreshRevision, &observedRefreshRevision, &factRevision)
+	err = tx.Q().QueryRowContext(ctx, `SELECT provider,repository,number,nonce,attempts,observation_json,refresh_revision,observed_refresh_revision,fact_revision FROM server_delivery_jobs WHERE next_at<=? AND (nonce='' OR query_until<=?) ORDER BY next_at,provider,repository,number LIMIT 1`, now, now).Scan(&q.Provider, &q.Repository, &q.Number, &nonce, &attempts, &cache, &refreshRevision, &observedRefreshRevision, &factRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Outcome{NoEffect: true}, nil
 	}
@@ -456,6 +468,7 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		row.Observation.DeliveryID = m.delivery
 		row.Observation.Generation = m.generation
 		row.ObservedRevision = fact.FactRevision
+		row.NotificationPending = false
 		row.Nonce = ""
 		row.QueryUntil = 0
 		row.RefreshRequested = false

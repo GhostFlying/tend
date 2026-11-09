@@ -22,6 +22,7 @@ type DeliveryObservationRow struct {
 	QueryBaselineUpgradeID        string
 	QueryBaselineUpgradeRevision  int64
 	ObservedRevision              int64
+	NotificationPending           bool
 	FactRevision, ChangedRevision int64
 }
 
@@ -46,6 +47,7 @@ type deliveryObservationQuery struct {
 	BaselineUpgradeID       string `json:"baseline_upgrade_id,omitempty"`
 	BaselineUpgradeRevision int64  `json:"baseline_upgrade_revision,omitempty"`
 	ObservedRevision        int64  `json:"observed_revision,omitempty"`
+	NotificationPending     bool   `json:"notification_pending,omitempty"`
 }
 
 func deliveryObservationReference(ctx context.Context, q Querier, issue, id string) (protocol.IssueDelivery, error) {
@@ -76,6 +78,7 @@ func GetDeliveryObservation(ctx context.Context, q Querier, issue, id string) (D
 			return row, fmt.Errorf("store: decode delivery query: %w", err)
 		}
 		row.QueryBaselineUpgradeID, row.QueryBaselineUpgradeRevision, row.ObservedRevision = query.BaselineUpgradeID, query.BaselineUpgradeRevision, query.ObservedRevision
+		row.NotificationPending = query.NotificationPending
 	}
 	fact, err := GetDeliveryObservationFact(ctx, q, ref)
 	if err != nil {
@@ -87,21 +90,26 @@ func GetDeliveryObservation(ctx context.Context, q Querier, issue, id string) (D
 	return row, nil
 }
 
-// GetDeliveryObservationFact never falls back to a historical Issue snapshot.
-func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.IssueDelivery) (DeliveryObservationFactRow, error) {
-	var fact DeliveryObservationFactRow
-	var raw, nonce string
-	var refreshPending, runnerPending bool
-	err := q.QueryRowContext(ctx, `SELECT j.observation_json,j.fact_revision,j.changed_revision,j.nonce,
+// DeliveryObservationPendingSQL is the current provider-read predicate shared
+// by projections and bounded notification selection. It requires the current
+// server_delivery_jobs row to have alias j and has no bound parameters.
+const DeliveryObservationPendingSQL = `(j.nonce<>'' OR
  EXISTS(SELECT 1 FROM server_delivery_references r JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id
  WHERE r.provider=j.provider AND r.repository=j.repository AND r.number=j.number AND o.refresh_requested=1
- AND (o.server_refresh_revision=0 OR o.server_refresh_revision>j.observed_refresh_revision)),
+ AND (o.server_refresh_revision=0 OR o.server_refresh_revision>j.observed_refresh_revision)) OR
  EXISTS(SELECT 1 FROM server_delivery_references r JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id
  WHERE r.provider=j.provider AND r.repository=j.repository AND r.number=j.number AND o.host_id<>'server' AND o.nonce<>''
  AND NOT EXISTS(SELECT 1 FROM retired_runner_delivery_queries retired WHERE retired.nonce=o.nonce)
  AND NOT(o.query_until>0 AND EXISTS(SELECT 1 FROM server_delivery_queries handed
- WHERE handed.provider=j.provider AND handed.repository=j.repository AND handed.number=j.number AND handed.started_at>=o.query_until)))
- FROM server_delivery_jobs j WHERE j.provider=? AND j.repository=? AND j.number=?`, ref.Provider, ref.Repository, ref.Number).Scan(&raw, &fact.FactRevision, &fact.ChangedRevision, &nonce, &refreshPending, &runnerPending)
+ WHERE handed.provider=j.provider AND handed.repository=j.repository AND handed.number=j.number AND handed.started_at>=o.query_until))))`
+
+// GetDeliveryObservationFact never falls back to a historical Issue snapshot.
+func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.IssueDelivery) (DeliveryObservationFactRow, error) {
+	var fact DeliveryObservationFactRow
+	var raw string
+	var pending bool
+	err := q.QueryRowContext(ctx, `SELECT j.observation_json,j.fact_revision,j.changed_revision,`+DeliveryObservationPendingSQL+`
+ FROM server_delivery_jobs j WHERE j.provider=? AND j.repository=? AND j.number=?`, ref.Provider, ref.Repository, ref.Number).Scan(&raw, &fact.FactRevision, &fact.ChangedRevision, &pending)
 	if errors.Is(err, sql.ErrNoRows) {
 		fact.Observation.State = "unknown"
 		return fact, nil
@@ -116,7 +124,7 @@ func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.Iss
 	fact.Observation = stored.DeliveryObservation
 	fact.PreviousState, fact.PreviousErrorKind = stored.PreviousState, stored.PreviousErrorKind
 	fact.Observation.WorkItemID, fact.Observation.DeliveryID, fact.Observation.Generation = "", "", 0
-	fact.Observation.RefreshPending = nonce != "" || refreshPending || runnerPending
+	fact.Observation.RefreshPending = pending
 	if fact.Observation.State == "" {
 		fact.Observation.State = "unknown"
 	}
@@ -127,7 +135,7 @@ func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.Iss
 // notification cursor. Its baseline belongs to the original query, not the
 // current fact projected into Observation.
 func (t *Tx) PutDeliveryObservationQuery(ctx context.Context, row DeliveryObservationRow) error {
-	query := deliveryObservationQuery{BaselineUpgradeID: row.QueryBaselineUpgradeID, BaselineUpgradeRevision: row.QueryBaselineUpgradeRevision, ObservedRevision: row.ObservedRevision}
+	query := deliveryObservationQuery{BaselineUpgradeID: row.QueryBaselineUpgradeID, BaselineUpgradeRevision: row.QueryBaselineUpgradeRevision, ObservedRevision: row.ObservedRevision, NotificationPending: row.NotificationPending}
 	raw, err := json.Marshal(query)
 	if err != nil {
 		return err
