@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,11 +18,17 @@ import (
 
 func TestBoundedManagerOriginalCloseAndStoppedFactsSettleWithoutNative(t *testing.T) {
 	for _, releaseBefore := range []bool{false, true} {
-		t.Run(strconv.FormatBool(releaseBefore), func(t *testing.T) { boundedManagerFinalScenario(t, releaseBefore) })
+		t.Run(strconv.FormatBool(releaseBefore), func(t *testing.T) { boundedManagerFinalScenario(t, releaseBefore, false) })
 	}
 }
 
-func boundedManagerFinalScenario(t *testing.T, releaseBefore bool) {
+func TestFault_BoundedManagerStopPreservesUnacknowledgedClose(t *testing.T) {
+	for _, releaseBefore := range []bool{false, true} {
+		t.Run(strconv.FormatBool(releaseBefore), func(t *testing.T) { boundedManagerFinalScenario(t, releaseBefore, true) })
+	}
+}
+
+func boundedManagerFinalScenario(t *testing.T, releaseBefore, closePending bool) {
 	t.Helper()
 	r, unknown, path := retainedStrictFixture(t)
 	r.cfg.InstanceID, r.cfg.UpgradeID, r.cfg.HostID = "replacement-runner", "original-upgrade", "original-host"
@@ -98,12 +105,21 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore bool) {
 	}
 	var mu sync.Mutex
 	var received []protocol.Envelope
+	stoppedReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		var env protocol.Envelope
 		_ = json.NewDecoder(q.Body).Decode(&env)
 		mu.Lock()
+		defer mu.Unlock()
 		received = append(received, env)
-		mu.Unlock()
+		if env.Operation == protocol.OpManagerNativeStopped {
+			stoppedReceived = true
+		}
+		if env.Operation == protocol.OpManagerNativeReply && (!stoppedReceived || closePending) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(rpcResponse{Error: protocol.Errorf(protocol.CodeUnknownOutcome, "original business receipt remains unknown")})
+			return
+		}
 		var body json.RawMessage = json.RawMessage(`{}`)
 		if env.Operation == protocol.OpRunnerHello {
 			body, _ = json.Marshal(protocol.HelloResult{Runs: []protocol.RunVerdict{{RunID: as.RunID, Verdict: protocol.VerdictStop, Desired: protocol.DesiredStopped}}})
@@ -152,7 +168,11 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore bool) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(received) != 7 {
+	wantReceived := 7
+	if closePending && !releaseBefore {
+		wantReceived++ // A restart retries the still-unacknowledged close.
+	}
+	if len(received) != wantReceived {
 		t.Fatal("manager recovery created a new request or native call", received)
 	}
 	for i := range events {
@@ -160,8 +180,45 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore bool) {
 			t.Fatal("manager event prefix changed", events[i], received[i])
 		}
 	}
-	if !reflect.DeepEqual(received[4], closeEnvelope) || received[5].Operation != protocol.OpManagerNativeStopped || received[6].Operation != protocol.OpRunnerHello {
+	if received[4].Operation != protocol.OpManagerNativeStopped || !reflect.DeepEqual(received[5], closeEnvelope) || received[len(received)-1].Operation != protocol.OpRunnerHello {
 		t.Fatal("manager receipt identities or order changed", received)
+	}
+	if wantReceived == 8 && !reflect.DeepEqual(received[6], closeEnvelope) {
+		t.Fatal("restart changed the original pending close", received[6])
+	}
+	if closePending {
+		db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var raw string
+		if err := db.QueryRowContext(t.Context(), `SELECT authority_json FROM retained_run_resumes WHERE run_id=?`, as.RunID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var history struct {
+			Ack struct {
+				Envelope protocol.Envelope  `json:"envelope"`
+				Close    *protocol.Envelope `json:"manager_close_envelope"`
+			} `json:"bounded_final_ack"`
+			StopHistory struct {
+				Requests []struct {
+					ID        string `json:"request_id"`
+					Operation string `json:"operation"`
+					Payload   string `json:"payload_json"`
+				} `json:"requests"`
+			} `json:"stop_history"`
+		}
+		if err := json.Unmarshal([]byte(raw), &history); err != nil {
+			t.Fatal(err)
+		}
+		if history.Ack.Envelope.Operation != protocol.OpManagerNativeStopped || history.Ack.Close != nil || len(history.StopHistory.Requests) != 1 {
+			t.Fatal("physical Stop forged a close ACK or lost its pending history", raw)
+		}
+		p := history.StopHistory.Requests[0]
+		if p.ID != closeEnvelope.RequestID || p.Operation != closeEnvelope.Operation || p.Payload != string(closeEnvelope.Payload) {
+			t.Fatal("independent Stop changed the original unacknowledged close", raw)
+		}
 	}
 	if probe := cfg.Workspaces.(*retainedStrictWorkspaceProbe); probe.finishes.Load() != 0 || probe.prepares.Load() != 0 || probe.reattaches.Load() != 0 {
 		t.Fatal("manager settlement invoked a workspace or native continuation")

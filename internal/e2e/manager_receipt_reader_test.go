@@ -24,16 +24,20 @@ import (
 )
 
 type receiptHistorySession struct {
-	thread  *receiptHistoryThread
-	done    chan struct{}
-	once    sync.Once
-	resumes atomic.Int64
+	thread       *receiptHistoryThread
+	done         chan struct{}
+	once         sync.Once
+	resumes      atomic.Int64
+	allowCatalog bool
 }
 
 func (s *receiptHistorySession) StartThread(context.Context, harness.ThreadConfig) (harness.Thread, error) {
 	return nil, errors.New("receipt reader cannot create a thread")
 }
 func (s *receiptHistorySession) Models(context.Context) ([]harness.Model, error) {
+	if s.allowCatalog {
+		return []harness.Model{{ID: "frozen-model", Name: "frozen-model"}}, nil
+	}
 	return nil, errors.New("current catalog must not be consulted for original receipts")
 }
 func (s *receiptHistorySession) ResumeThread(_ context.Context, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
@@ -126,7 +130,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.Assignment, business, instance, turn, status string) {
 	t.Helper()
 	ctx := t.Context()
-	native := &receiptHistorySession{thread: &receiptHistoryThread{events: make(chan harness.Event), business: business, status: status, turn: turn}, done: make(chan struct{})}
+	native := &receiptHistorySession{thread: &receiptHistoryThread{events: make(chan harness.Event), business: business, status: status, turn: turn}, done: make(chan struct{}), allowCatalog: !reader.Manager.RequireReceiptReader}
 	run, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -173,7 +177,7 @@ func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.A
 				}
 				continue
 			}
-			if request.Method != "resume" && request.Method != "find" && request.Method != "usage" && request.Method != "close" {
+			if request.Method != "resume" && request.Method != "find" && request.Method != "usage" && request.Method != "close" && !(request.Method == "models" && !reader.Manager.RequireReceiptReader) {
 				forbidden.Add(1)
 			}
 			value, handleErr := driver.Handle(run, request.Method, request.Payload)
