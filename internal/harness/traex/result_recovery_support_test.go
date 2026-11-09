@@ -33,7 +33,7 @@ func TestReconcileImplementationResultUnsupportedUsesOriginalPath(t *testing.T) 
 				t.Fatal(err)
 			}
 			got, err := ws.ReconcileImplementationResult(t.Context(), spec)
-			if !errors.Is(err, harness.ErrNoImplementationResult) || errors.Is(err, harness.ErrRetainedResumePending) || got.Result != nil {
+			if !errors.Is(err, harness.ErrNoImplementationResult) || errors.Is(err, harness.ErrRetainedResumePending) || errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) || got.Result != nil {
 				t.Fatalf("unsupported optional recovery intercepted the original resume path: %+v %v", got, err)
 			}
 			body, err := os.ReadFile(path)

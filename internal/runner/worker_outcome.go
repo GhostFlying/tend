@@ -86,9 +86,9 @@ func saveWorkerOutcome(ctx context.Context, dir string, outcome workerOutcome) (
 			}
 			// Events are consumed serially. A later turn in the same attempt
 			// replaces the earlier turn's outcome, including a repair turn.
-		} else if outcome.Source != "run_control" {
-			// A Wait error can come solely from process closure. It cannot
-			// replace the native turn's already observed terminal status.
+		} else {
+			// Wait or later control cancellation cannot replace an already
+			// observed native terminal. Current control is checked separately.
 			return prior, nil
 		}
 	}

@@ -563,7 +563,10 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer && appendErr == nil {
 		outcome := workerOutcome{Version: 1, RunID: as.RunID, ThreadID: run.Thread, Attempt: attempt, Status: "completed", Source: "worker_wait"}
 		if cause := context.Cause(runCtx); cause != nil {
-			outcome.Status, outcome.Source, outcome.Error = "interrupted", "run_control", cause.Error()
+			outcome.Status, outcome.Error = "unknown", cause.Error()
+			if errors.Is(cause, errPaused) || errors.Is(cause, errHeld) || errors.Is(cause, errStopped) {
+				outcome.Status, outcome.Source = "interrupted", "run_control"
+			}
 		} else if werr != nil {
 			outcome.Status, outcome.Error = "failed", werr.Error()
 			if errors.Is(werr, harness.ErrRetainedResumePending) {

@@ -180,7 +180,7 @@ func TestReconcileImplementationResultMissingDoesNotStopWorker(t *testing.T) {
 		candidate := spec
 		candidate.StateDir = stateDir
 		got, err := ws.ReconcileImplementationResult(t.Context(), candidate)
-		if !errors.Is(err, harness.ErrNoImplementationResult) || got.Result != nil {
+		if !errors.Is(err, harness.ErrNoImplementationResult) || errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) || got.Result != nil {
 			t.Fatalf("absent result did not leave ordinary recovery in charge: %+v %v", got, err)
 		}
 	}
@@ -214,7 +214,7 @@ func TestReconcileImplementationResultInvalidRemainsPending(t *testing.T) {
 				}
 			}
 			got, err := ws.ReconcileImplementationResult(t.Context(), spec)
-			if !errors.Is(err, harness.ErrRetainedResumePending) || errors.Is(err, harness.ErrNoImplementationResult) || got.Result != nil {
+			if !errors.Is(err, harness.ErrRetainedResumePending) || errors.Is(err, harness.ErrNoImplementationResult) || errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) || got.Result != nil {
 				t.Fatalf("invalid result became absent or completed: %+v %v", got, err)
 			}
 			if scenario == "read error" {
@@ -231,7 +231,7 @@ func TestReconcileImplementationResultInvalidRemainsPending(t *testing.T) {
 }
 
 func TestReconcileImplementationResultIdentityMismatchRemainsPending(t *testing.T) {
-	for _, scenario := range []string{"run", "directory", "thread", "missing thread", "missing ownership", "pid generation"} {
+	for _, scenario := range []string{"run", "directory", "thread", "missing thread", "missing ownership", "corrupt ownership", "pid generation"} {
 		t.Run(scenario, func(t *testing.T) {
 			ws, spec, cmd, _, original := submittedImplementationFixture(t)
 			record, err := ws.ownedWorkerProcess(spec)
@@ -258,9 +258,23 @@ func TestReconcileImplementationResultIdentityMismatchRemainsPending(t *testing.
 					t.Fatal(err)
 				}
 			}
+			if scenario == "corrupt ownership" {
+				if err := os.WriteFile(filepath.Join(spec.StateDir, ownedProcessFile), []byte(`{`), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			got, err := ws.ReconcileImplementationResult(t.Context(), spec)
-			if !errors.Is(err, harness.ErrRetainedResumePending) || errors.Is(err, harness.ErrNoImplementationResult) || got.Result != nil {
-				t.Fatalf("unbound result became completed or absent: %+v %v", got, err)
+			if !errors.Is(err, harness.ErrRetainedResumePending) || !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) || errors.Is(err, harness.ErrNoImplementationResult) || got.Result != nil {
+				t.Fatalf("unbound result escaped bounded owned recovery: %+v %v", got, err)
+			}
+			if scenario == "missing ownership" && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("missing original ownership IO error was lost", err)
+			}
+			if scenario == "corrupt ownership" {
+				var syntaxErr *json.SyntaxError
+				if !errors.As(err, &syntaxErr) {
+					t.Fatal("corrupt original ownership error was lost", err)
+				}
 			}
 			if _, _, active, err := readOwnedProcess(cmd.Process.Pid); err != nil || !active {
 				t.Fatal("changed identity signalled original work", err)
