@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +37,8 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	dry := fs.Bool("dry-run", false, "print the local control request without executing it")
 	configPlan := fs.String("runner-configurations", "", "private JSON metadata for a single runner configuration maintenance")
 	park := fs.Bool("park-idle-managers", false, "park idle managers through confirmed native close; preserve logical responsibility for a new run after this window")
-	bundle := fs.String("release", "", "verified local release directory")
+	bundle := fs.String("release", "", "local format 2 complete release directory (default: latest official main fleet)")
+	commit := fs.String("commit", "", "full source commit of an official main fleet release; exclusive with --release")
 	upgradeID := fs.String("upgrade-id", "", "stable upgrade batch ID")
 	requestID := fs.String("request-id", "", "reuse this ID only when retrying the identical request")
 	deliveryTask := fs.String("delivery-task", "", "approved delivery execution task; binds candidate, target and source")
@@ -47,7 +49,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	if (*configPlan != "" || *deliveryTask != "" || *park) && action != "start" {
+	if (*configPlan != "" || *deliveryTask != "" || *park || *commit != "") && action != "start" {
 		return usagef("runner-configurations and delivery-task are only valid for start")
 	}
 	if len(positional) > 0 {
@@ -64,12 +66,24 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	path := "/upgrades/" + action
 	switch action {
 	case "start":
-		if *bundle == "" || *revision != 0 {
-			return usagef("upgrade start requires --release and takes no --revision")
+		if *revision != 0 || (*bundle != "" && *commit != "") {
+			return usagef("upgrade start takes either --release or --commit and no --revision")
 		}
-		absolute, err := filepath.Abs(*bundle)
-		if err != nil {
-			return err
+		selected := ""
+		if *bundle != "" {
+			absolute, err := filepath.Abs(*bundle)
+			if err != nil {
+				return err
+			}
+			selected = absolute
+		} else if *commit != "" {
+			if len(*commit) != 40 || strings.ToLower(*commit) != *commit {
+				return usagef("upgrade --commit requires the full lowercase source SHA")
+			}
+			if _, err := hex.DecodeString(*commit); err != nil {
+				return usagef("upgrade --commit requires the full lowercase source SHA")
+			}
+			selected = "main-" + *commit
 		}
 		if *requestID == "" {
 			*requestID = e.IDs.New(protocol.PrefixRequest)
@@ -92,7 +106,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 				return usagef("configuration metadata must select exactly one host")
 			}
 		}
-		input = protocol.UpgradeStartRequest{ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: absolute, RunnerConfigurations: configurations}
+		input = protocol.UpgradeStartRequest{ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: selected, RunnerConfigurations: configurations}
 	case "status":
 		if *bundle != "" || *upgradeID != "" || *requestID != "" || *revision != 0 {
 			return usagef("upgrade status takes no release, ID or revision")
@@ -178,7 +192,11 @@ func localUpgradeRequest(ctx context.Context, socket, method, path string, input
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 60 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+	timeout := time.Minute
+	if path == "/upgrades/start" {
+		timeout = 5 * time.Minute
+	}
+	client := &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errors.New("upgrade control redirects are forbidden")
 	}}
 	request, err := http.NewRequestWithContext(ctx, method, "http://localhost"+path, body)
