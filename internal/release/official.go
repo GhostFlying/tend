@@ -7,18 +7,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
 
-const officialAPI = "https://api.github.com/repos/GhostFlying/tend/releases"
+const officialFeed = "https://github.com/GhostFlying/tend/releases.atom"
 
 type officialAsset struct {
 	Name   string `json:"name"`
@@ -58,6 +58,9 @@ func FetchOfficial(ctx context.Context, client *http.Client, directory, selector
 	if client == nil {
 		client = &http.Client{Timeout: 4 * time.Minute}
 	}
+	if err := PinUpgradeInput(directory, input); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -76,7 +79,7 @@ func FetchOfficial(ctx context.Context, client *http.Client, directory, selector
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	} else {
-		chosen, err := selectOfficial(ctx, client, selector)
+		chosen, err := selectOfficial(ctx, client, directory, selector)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +187,7 @@ func FetchOfficial(ctx context.Context, client *http.Client, directory, selector
 }
 
 func validateOfficial(s officialSelection, selector, input string) error {
-	if s.Input != input || !OfficialTag(s.Release.Tag) || s.Release.Draft || s.Release.Published.IsZero() || selector != "" && s.Release.Tag != selector {
+	if s.Input != input || !OfficialTag(s.Release.Tag) || s.Release.Draft || selector == "" && s.Release.Published.IsZero() || selector != "" && s.Release.Tag != selector {
 		return errors.New("release: original official selection conflicts with this request")
 	}
 	a := s.Archive
@@ -195,42 +198,183 @@ func validateOfficial(s officialSelection, selector, input string) error {
 	return nil
 }
 
-func selectOfficial(ctx context.Context, client *http.Client, selector string) (officialRelease, error) {
-	url := officialAPI + "?per_page=100"
-	if selector != "" {
-		url = officialAPI + "/tags/" + selector
+// PinUpgradeInput binds every new local or official upgrade to its exact
+// original input, including before a release has finished downloading.
+func PinUpgradeInput(directory, input string) error {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
 	}
-	r, err := officialGET(ctx, client, url)
+	info, err := os.Lstat(directory)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+		return errors.New("release: upgrade request directory must be private")
+	}
+	raw, err := json.Marshal(struct {
+		Input string `json:"input"`
+	}{input})
 	if err != nil {
-		return officialRelease{}, err
+		return err
 	}
-	defer r.Body.Close()
-	d := json.NewDecoder(io.LimitReader(r.Body, 8<<20))
-	var candidates []officialRelease
-	if selector != "" {
-		var single officialRelease
-		if err := d.Decode(&single); err != nil {
-			return single, err
+	temp, err := os.CreateTemp(directory, ".input-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	_, writeErr := temp.Write(raw)
+	if err := errors.Join(writeErr, temp.Sync(), temp.Close()); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, "input.json")
+	if err := os.Link(temp.Name(), path); err != nil && !os.IsExist(err) {
+		return err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if string(existing) != string(raw) {
+		return errors.New("release: original upgrade input conflicts with this request")
+	}
+	for _, path := range []string{directory, filepath.Dir(directory), filepath.Dir(filepath.Dir(directory))} {
+		if err := syncOfficialDir(path); err != nil {
+			return err
 		}
-		candidates = append(candidates, single)
-	} else if err := d.Decode(&candidates); err != nil {
-		return officialRelease{}, err
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Published.After(candidates[j].Published) })
-	for _, c := range candidates {
-		if OfficialTag(c.Tag) && !c.Draft && !c.Published.IsZero() {
-			return c, nil
+	return nil
+}
+
+func selectOfficial(ctx context.Context, client *http.Client, directory, selector string) (officialRelease, error) {
+	chosen := officialRelease{Tag: selector}
+	tagPath := filepath.Join(directory, "tag.json")
+	tagRaw, tagErr := os.ReadFile(tagPath)
+	if tagErr == nil {
+		if err := json.Unmarshal(tagRaw, &chosen); err != nil {
+			return chosen, err
+		}
+	} else if !os.IsNotExist(tagErr) {
+		return chosen, tagErr
+	}
+	if os.IsNotExist(tagErr) && selector == "" {
+		response, err := officialGET(ctx, client, officialFeed)
+		if err != nil {
+			return chosen, err
+		}
+		var feed struct {
+			Entries []struct {
+				Updated time.Time `xml:"updated"`
+				Links   []struct {
+					Href string `xml:"href,attr"`
+				} `xml:"link"`
+			} `xml:"entry"`
+		}
+		err = xml.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&feed)
+		closeErr := response.Body.Close()
+		if err := errors.Join(err, closeErr); err != nil {
+			return chosen, err
+		}
+		// The public release feed contains published releases, including prereleases,
+		// in publication order. No authenticated API quota or host credential is used.
+		for _, entry := range feed.Entries {
+			for _, link := range entry.Links {
+				tag, ok := strings.CutPrefix(link.Href, "https://github.com/GhostFlying/tend/releases/tag/")
+				if ok && OfficialTag(tag) && !entry.Updated.IsZero() {
+					chosen.Tag, chosen.Published = tag, entry.Updated
+					break
+				}
+			}
+			if chosen.Tag != "" {
+				break
+			}
+		}
+		if chosen.Tag == "" {
+			return chosen, errors.New("release: no published main release; provide --commit or --release")
 		}
 	}
-	return officialRelease{}, errors.New("release: no published complete main release; provide --commit or --release")
+	if os.IsNotExist(tagErr) {
+		raw, err := json.Marshal(chosen)
+		if err != nil {
+			return chosen, err
+		}
+		tmp, err := os.CreateTemp(directory, ".tag-")
+		if err != nil {
+			return chosen, err
+		}
+		defer os.Remove(tmp.Name())
+		_, writeErr := tmp.Write(raw)
+		if err := errors.Join(writeErr, tmp.Sync(), tmp.Close()); err != nil {
+			return chosen, err
+		}
+		if err := os.Link(tmp.Name(), tagPath); err != nil && !os.IsExist(err) {
+			return chosen, err
+		}
+		raw, err = os.ReadFile(tagPath)
+		if err != nil {
+			return chosen, err
+		}
+		if err := json.Unmarshal(raw, &chosen); err != nil {
+			return chosen, err
+		}
+	}
+	if !OfficialTag(chosen.Tag) || selector != "" && chosen.Tag != selector || selector == "" && chosen.Published.IsZero() {
+		return chosen, errors.New("release: original official tag conflicts with this request")
+	}
+	if err := syncOfficialDir(directory); err != nil {
+		return chosen, err
+	}
+	base := "https://github.com/GhostFlying/tend/releases/download/" + chosen.Tag + "/"
+	response, err := officialGET(ctx, client, base+"SHA256SUMS")
+	if err != nil {
+		return chosen, err
+	}
+	sums, readErr := io.ReadAll(io.LimitReader(response.Body, MaxManifestBytes+1))
+	closeErr := response.Body.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		return chosen, err
+	}
+	if len(sums) > MaxManifestBytes {
+		return chosen, errors.New("release: official checksums are oversized")
+	}
+	name := "tend-" + chosen.Tag + "-linux-fleet.tar.gz"
+	asset := officialAsset{Name: name, URL: base + name}
+	for _, line := range strings.Split(string(sums), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) != 2 || parts[1] != name {
+			continue
+		}
+		if asset.Digest != "" || !ValidSHA(parts[0]) {
+			return chosen, errors.New("release: conflicting official fleet checksum")
+		}
+		asset.Digest = "sha256:" + parts[0]
+	}
+	if asset.Digest == "" {
+		return chosen, errors.New("release: official complete fleet checksum is missing")
+	}
+	// Public checksum assets of a draft are not downloadable. An exact --commit
+	// can therefore select an older published tag without traversing old releases.
+	head, err := officialRequest(ctx, client, http.MethodHead, asset.URL)
+	if err != nil {
+		return chosen, err
+	}
+	asset.Size = head.ContentLength
+	if err := head.Body.Close(); err != nil {
+		return chosen, err
+	}
+	if asset.Size <= 0 || asset.Size > MaxArtifactBytes {
+		return chosen, errors.New("release: official fleet size is unavailable or exceeds the limit")
+	}
+	chosen.Assets = []officialAsset{asset}
+	return chosen, nil
 }
 
 func officialGET(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	return officialRequest(ctx, client, http.MethodGet, url)
+}
+
+func officialRequest(ctx context.Context, client *http.Client, method, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Accept", "*/*")
 	req.Header.Set("User-Agent", "tend-release")
 	r, err := client.Do(req)
 	if err != nil {

@@ -109,6 +109,9 @@ func testController(t *testing.T) (*Controller, *fakeBackend) {
 }
 func testBundle(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("complete business release sets target Linux")
+	}
 	dir := t.TempDir()
 	m := release.Manifest{Format: 1, ReleaseID: "release-2", Protocol: release.Range{Min: 1, Max: 2}, Storage: release.Storage{ServerSchema: release.Range{Min: 26, Max: 28}, RunnerJournal: release.Range{Min: 8, Max: 10}}}
 	for _, role := range []string{"server", "runner"} {
@@ -382,6 +385,7 @@ func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *t
 	// Use a separate batch: immutable staging from the rejected request remains
 	// evidence and is not overwritten by another release under its old identity.
 	request.UpgradeID = "verifiable-batch"
+	request.RequestID = c.ids.New(protocol.PrefixRequest)
 	var manifest release.Manifest
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
@@ -490,6 +494,7 @@ func TestUpgradeManagerParkRejectsOldCandidateBeforeAdmission(t *testing.T) {
 	}
 	// The exact same old bundle still follows its original non-opt-in path.
 	req.ParkIdleManagers = false
+	req.RequestID = c.ids.New(protocol.PrefixRequest)
 	if _, err := c.Start(t.Context(), req); err != nil || len(f.commands) != 1 || called != 1 {
 		t.Fatal("legacy start changed", len(f.commands), called, err)
 	}

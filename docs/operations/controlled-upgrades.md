@@ -92,7 +92,7 @@ tend upgrade start --socket "$SERVER_CONTROL_SOCKET" \
   --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID" --json
 ```
 
-`--commit` 与 `--release` 互斥。CLI 先输出 request ID；server 在私有发布目录按该 ID 固定原始输入、标签、fleet 资产大小和 SHA-256，然后才下载。重试使用原 request ID、upgrade ID 及全部原参数，不能因 main 前进选择新包；改变选包、配置或交付参数会被拒绝。原子暂存完成前不会创建业务批次。下载最多四分钟，初始本机 HTTP 往返最多五分钟，不改变升级准入后的任何维护、停止或健康期限。默认发现读取最近一百条 release；无有效 main 发布时明确失败，可用 `--commit` 精确选择。
+`--commit` 与 `--release` 互斥。CLI 先输出 request ID；server 在私有发布目录按该 ID 先固定原始输入和公开标签，再读取官方 SHA256SUMS、查询 fleet 大小并固定摘要，然后才下载。重试使用原 request ID、upgrade ID 及全部原参数，不能因 main 前进选择新包；改变选包、配置或交付参数会被拒绝。原子暂存完成前不会创建业务批次。下载最多四分钟，初始本机 HTTP 往返最多五分钟，不改变升级准入后的任何维护、停止或健康期限。默认发现读取官方公开 release feed；无有效 main 发布时明确失败，可用 `--commit` 精确选择。发现与校验使用公开 feed 和校验文件，不依赖 GitHub 匿名 API 配额或新增主机凭据。
 
 也可用 server updater 的 `upgrade --config "$UPDATER_CONFIG" --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID"`，它同样进入受 format 2 约束的 server 批次协调接口。CLI 会先输出 request ID；不确定回执先读状态，不要换 ID 重发。相同请求重试必须保留批次、发布和 request ID。`--dry-run` 只展示请求，缺省选包仍显示空 release，既不访问 GitHub，也不启动下载或升级。
 

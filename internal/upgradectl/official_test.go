@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
@@ -104,23 +103,37 @@ func TestDefaultOfficialUpgradeAndOriginalRequestReplay(t *testing.T) {
 	hash = sha256.Sum256(archive.Bytes())
 	tag := s.ReleaseID
 	name := "tend-" + tag + "-linux-fleet.tar.gz"
-	apiCalls, downloads := 0, 0
+	discoveries, downloads := 0, 0
 	c.cfg.ReleaseHTTP = &http.Client{Transport: officialTestTransport(func(req *http.Request) (*http.Response, error) {
 		body := archive.Bytes()
-		if req.URL.Host == "api.github.com" {
-			apiCalls++
-			body, _ = json.Marshal([]any{map[string]any{"tag_name": tag, "draft": false, "published_at": time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), "assets": []any{map[string]any{"name": name, "size": archive.Len(), "digest": "sha256:" + hex.EncodeToString(hash[:]), "browser_download_url": "https://github.com/GhostFlying/tend/releases/download/" + tag + "/" + name}}}})
-		} else {
+		size := int64(len(body))
+		if req.URL.Path == "/GhostFlying/tend/releases.atom" {
+			discoveries++
+			body = []byte(`<feed><entry><updated>2026-01-02T00:00:00Z</updated><link href="https://github.com/GhostFlying/tend/releases/tag/` + tag + `"/></entry></feed>`)
+		} else if strings.HasSuffix(req.URL.Path, "/SHA256SUMS") {
+			body = []byte(hex.EncodeToString(hash[:]) + "  " + name + "\n")
+		} else if req.Method == http.MethodGet {
 			downloads++
+			if downloads == 1 {
+				return nil, errors.New("archive download failed")
+			}
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))}, nil
+		return &http.Response{StatusCode: 200, Header: http.Header{}, ContentLength: size, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	})}
 	r := protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "official-default"}
+	if _, err := c.Start(t.Context(), r); err == nil || len(backend.commands) != 0 {
+		t.Fatal("failed download admitted a batch", err)
+	}
+	r.Release = dir
+	if _, err := c.Start(t.Context(), r); err == nil || !strings.Contains(err.Error(), "conflicts") || len(backend.commands) != 0 {
+		t.Fatal("local path bypassed pinned official input", err)
+	}
+	r.Release = ""
 	if _, err := c.Start(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(backend.commands) != 1 || apiCalls != 1 || downloads != 1 {
-		t.Fatal(len(backend.commands), apiCalls, downloads)
+	if len(backend.commands) != 1 || discoveries != 1 || downloads != 2 {
+		t.Fatal(len(backend.commands), discoveries, downloads)
 	}
 	staged, err := release.Load(filepath.Join(c.cfg.ReleaseDir, r.UpgradeID))
 	if err != nil || staged.Set == nil || staged.Set.Format != 2 || staged.Set.Commit != s.Commit {
@@ -132,8 +145,8 @@ func TestDefaultOfficialUpgradeAndOriginalRequestReplay(t *testing.T) {
 		return updater.SelfUpdateStatus{}, errors.New("socket temporarily unavailable")
 	}
 	view, err := c.Start(t.Context(), r)
-	if err != nil || view.UpgradeID != r.UpgradeID || len(backend.commands) != 1 || apiCalls != 1 || downloads != 1 {
-		t.Fatal(view, err, len(backend.commands), apiCalls, downloads)
+	if err != nil || view.UpgradeID != r.UpgradeID || len(backend.commands) != 1 || discoveries != 1 || downloads != 2 {
+		t.Fatal(view, err, len(backend.commands), discoveries, downloads)
 	}
 	r.ParkIdleManagers = true
 	if _, err := c.Start(t.Context(), r); err == nil || !strings.Contains(err.Error(), "conflicts") {
