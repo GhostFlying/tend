@@ -82,3 +82,36 @@ func (m *Manager) environmentRestart(ctx context.Context, s harness.Session, th 
 	m.ready = make(chan struct{})
 	return true, nil
 }
+
+// restartFrozenEnvironment is called with delivery admission held. Startup
+// restores the serviceable request's retained composition, never a new input.
+func (m *Manager) restartFrozenEnvironment(ctx context.Context, s harness.Session, th harness.Thread, request string) error {
+	env, ok := s.(capabilityEnvironmentSession)
+	if !ok {
+		return nil
+	}
+	m.mu.Lock()
+	blocked := m.active != nil || m.maintenanceBlocked || m.archiveStarting || m.archiveTeardown || m.compactRecovery || m.session != s
+	m.mu.Unlock()
+	if blocked {
+		return nil
+	}
+	pending, err := m.app.UncertainNativeTurns(ctx, th.ID())
+	if err != nil || len(pending) > 0 {
+		return err
+	}
+	if blocked, err := m.app.AgentRecoveryUncertain(ctx, m.cfg.ConversationID); err != nil || blocked {
+		return err
+	}
+	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil || blocked {
+		return err
+	}
+	idle, err := env.EnvironmentQuiescent(ctx, th.ID())
+	if err != nil || !idle {
+		return err
+	}
+	if detached := m.detach(th); detached != nil {
+		return m.closeSession(ctx, detached, request, "restore_frozen_environment")
+	}
+	return nil
+}

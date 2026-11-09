@@ -245,3 +245,30 @@ func ResourceFromPackage(ctx context.Context, in protocol.ExtensionImport, raw [
 	}
 	return r, ValidatePackage(ctx, r.Kind, raw)
 }
+
+// materializePackage publishes only complete directories. A completion receipt
+// also distinguishes old interrupted extractions from reusable package inputs.
+func materializePackage(ctx context.Context, raw []byte, destination string) error {
+	marker := destination + ".complete"
+	if complete, err := os.ReadFile(marker); err == nil && string(complete) == Hash(raw) {
+		if info, err := os.Stat(destination); err == nil && info.IsDir() {
+			return nil
+		}
+	}
+	staging, err := os.MkdirTemp(filepath.Dir(destination), ".package-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	packageDir := filepath.Join(staging, "content")
+	if err = ExtractPackage(ctx, raw, packageDir); err != nil {
+		return err
+	}
+	if err = os.RemoveAll(destination); err != nil {
+		return err
+	}
+	if err = os.Rename(packageDir, destination); err != nil {
+		return err
+	}
+	return atomicFile(marker, []byte(Hash(raw)))
+}

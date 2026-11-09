@@ -28,7 +28,7 @@ func WorkerPinForManager(ctx context.Context, q Querier, manager protocol.RunExe
 		p.Profile = protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}
 		for _, r := range inv.Projection.Runtimes {
 			if r.RuntimeID == a.Binding.RuntimeID && r.Revision == a.Binding.Revision && r.Enabled {
-				if r.CLI != "codex" {
+				if r.CLI != "codex" || p.Runtime != manager.Runtime {
 					p.Extensions = protocol.ExtensionExecutionPin{}
 				}
 				if r.Kind == "orca-worker" || r.Kind == "central-traex-worker" {

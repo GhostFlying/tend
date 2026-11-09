@@ -1,9 +1,12 @@
 package extensions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -128,5 +131,82 @@ func TestHeartbeatAdoptionsAreBoundedAndHistoryRemainsPaged(t *testing.T) {
 	result, err := (&codexenv.Service{Root: binding.Directory}).Execute(t.Context(), codexenv.Request{Action: "show", ID: binding.ID, Limit: 10})
 	if err != nil || len(result.Status.Adoptions) != 10 || !result.Status.AdoptionsMore || result.Status.Adoptions["run:000"].State != "closed" {
 		t.Fatal("bounded telemetry erased historical diagnostics", err)
+	}
+}
+
+func TestPrepareReconcilesInterruptedOriginalBeforeNewRelease(t *testing.T) {
+	root := t.TempDir()
+	c := Consumer{UserHome: t.TempDir(), Config: Configuration{Directory: filepath.Join(root, "cache"), Runtimes: map[string]Runtime{"native": {Home: filepath.Join(root, "home")}}}, Validate: func(context.Context, codexenv.Profile, string) error { return context.Canceled }}
+	first, _, err := NewRelease(protocol.ExtensionCatalog{Categories: []protocol.ExtensionBinding{{CategoryID: "implementer", AgentsMD: "first"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Receive(t.Context(), first, nil); err != nil {
+		t.Fatal(err)
+	}
+	identity := protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "worker"}
+	one, _ := Resolve(first, "implementer", identity)
+	if _, _, err := c.Prepare(t.Context(), one.Pin, "native"); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	c.Validate = func(context.Context, codexenv.Profile, string) error { return nil }
+	catalog := first.Catalog
+	catalog.Categories[0].AgentsMD = "second"
+	second, _, err := NewRelease(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Receive(t.Context(), second, nil); err != nil {
+		t.Fatal(err)
+	}
+	two, _ := Resolve(second, "implementer", identity)
+	binding, status, err := c.Prepare(t.Context(), two.Pin, "native")
+	if err != nil || !status.Ready {
+		t.Fatal("new release stayed blocked on the older original request", status, err)
+	}
+	view, err := (&codexenv.Service{Root: binding.Directory}).Read(binding.ID)
+	if err != nil || len(view.PendingRequestIDs) != 0 || view.Revision != 2 || view.Profile.ExtensionPin != two.Pin {
+		t.Fatal(view, err)
+	}
+}
+
+func TestPrepareReplacesInterruptedPackageBeforeNativeValidation(t *testing.T) {
+	p := fixturePackage(t)
+	root := t.TempDir()
+	c := Consumer{UserHome: t.TempDir(), Config: Configuration{Directory: filepath.Join(root, "cache"), Runtimes: map[string]Runtime{"native": {Home: filepath.Join(root, "home")}}}}
+	r, _, err := NewRelease(protocol.ExtensionCatalog{Resources: []protocol.ExtensionResource{p.Resource}, Categories: []protocol.ExtensionBinding{{CategoryID: "implementer", Choices: []protocol.ExtensionChoice{{Kind: "skill", ID: p.Resource.ID, Version: p.Resource.Version}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Receive(t.Context(), r, func(context.Context, protocol.ExtensionResource) (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(p.Content)), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	combo, _ := Resolve(r, "implementer", protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "worker"})
+	c.Validate = func(_ context.Context, profile codexenv.Profile, _ string) error { return context.Canceled }
+	if _, _, err := c.Prepare(t.Context(), combo.Pin, "native"); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(c.Config.Directory, "views", "*", "inputs", "*", p.Resource.ContentSHA256))
+	if err != nil || len(matches) != 1 {
+		t.Fatal(matches, err)
+	}
+	packageDir := matches[0]
+	if err := os.Remove(packageDir + ".complete"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(packageDir, "scripts")); err != nil {
+		t.Fatal(err)
+	}
+	c.Validate = func(_ context.Context, profile codexenv.Profile, _ string) error {
+		data, err := os.ReadFile(filepath.Join(profile.Skills.Installed[0].Path, "scripts", "run.sh"))
+		if err != nil || len(data) == 0 {
+			return fmt.Errorf("incomplete package reached native validation: %w", err)
+		}
+		return nil
+	}
+	if _, status, err := c.Prepare(t.Context(), combo.Pin, "native"); err != nil || !status.Ready {
+		t.Fatal(status, err)
 	}
 }

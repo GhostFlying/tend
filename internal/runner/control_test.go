@@ -356,3 +356,29 @@ func TestManagedExtensionMetadataRequiresServerNegotiation(t *testing.T) {
 		t.Fatal("acknowledged server did not receive metadata", err)
 	}
 }
+
+func TestManagedPublicationWakesIdleReadinessWithoutControlRevisionChange(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.Extensions = &extensions.Agent{Consumer: &extensions.Consumer{Config: extensions.Configuration{Directory: t.TempDir()}}}
+	for i := range 2 {
+		id := strings.Repeat(string(rune('a'+i)), 64)
+		target := &protocol.ExtensionTarget{Release: protocol.ExtensionReleaseRef{ID: "ext-" + id, ManifestSHA256: id, ManifestSize: 1}, ManifestPath: "/runner/v1/extensions/ext-" + id + "/manifest", ContentBasePath: "/runner/v1/extensions/ext-" + id + "/content"}
+		next := &protocol.RunnerControl{Mode: protocol.RunnerNormal, Extensions: target}
+		if err := r.applyControl(t.Context(), next, r.cfg.Now(), false); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-r.reconcile:
+		default:
+			t.Fatal("publication left an idle runner asleep")
+		}
+		if err := r.applyControl(t.Context(), next, r.cfg.Now(), false); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-r.reconcile:
+			t.Fatal("unchanged publication caused a reconciliation loop")
+		default:
+		}
+	}
+}
