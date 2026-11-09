@@ -350,3 +350,57 @@ func TestDeliveryObservationTransitionSurvivesCheckedResultsAndReopen(t *testing
 		t.Fatal("new semantic change kept an unrelated transition", next)
 	}
 }
+
+func TestDeliveryObservationNotificationPendingPersistsWithoutRefresh(t *testing.T) {
+	s, _, closed, ref := currentDeliveryFixture(t)
+	fact := currentFact(t, s, ref, protocol.DeliveryObservation{Observer: "server", CheckedAt: 20, AttemptedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "merged", HeadSHA: "head", BaseSHA: "base", MergeSHA: "merge"}})
+	row := readCurrentObservation(t, s, closed.IssueID, ref.DeliveryID)
+	if row.NotificationPending {
+		t.Fatal("old query metadata invented an unconsumed notification", row)
+	}
+	row.Observation.Generation = 7
+	row.QueryBaselineUpgradeID, row.QueryBaselineUpgradeRevision = "original-query", 3
+	row.NotificationPending = true
+	if err := s.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservationQuery(t.Context(), row) }); err != nil {
+		t.Fatal(err)
+	}
+	path, now := s.path, s.now
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(t.Context(), path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	owed := readCurrentObservation(t, reopened, closed.IssueID, ref.DeliveryID)
+	if !owed.NotificationPending || owed.RefreshRequested || owed.Observation.RefreshPending || owed.Observation.Generation != 7 || owed.QueryBaselineUpgradeID != "original-query" || owed.QueryBaselineUpgradeRevision != 3 || owed.FactRevision != fact.FactRevision || owed.ObservedRevision != 0 {
+		t.Fatal("deferred notification became a refresh or lost its original metadata", owed)
+	}
+	owed.NotificationPending, owed.ObservedRevision = false, fact.FactRevision
+	if err := reopened.Write(t.Context(), func(tx *Tx) error { return tx.PutDeliveryObservationQuery(t.Context(), owed) }); err != nil {
+		t.Fatal(err)
+	}
+	consumed := readCurrentObservation(t, reopened, closed.IssueID, ref.DeliveryID)
+	if consumed.NotificationPending || consumed.RefreshRequested || consumed.Observation.RefreshPending || consumed.ObservedRevision != fact.FactRevision || consumed.Observation.HeadSHA != "head" {
+		t.Fatal("notification consumption changed the PR or restarted a query", consumed)
+	}
+	if err := reopened.Read(t.Context(), func(tx *ReadTx) error {
+		var raw string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT query_json FROM delivery_observations WHERE work_item_id=? AND delivery_id=?`, closed.IssueID, ref.DeliveryID).Scan(&raw); err != nil {
+			return err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			return err
+		}
+		for _, field := range []string{"notification_pending", "head_sha", "state", "ci"} {
+			if _, ok := fields[field]; ok {
+				t.Fatal("consumed metadata retained a notification or provider snapshot", field, raw)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

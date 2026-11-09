@@ -612,3 +612,252 @@ func TestRunnerSharedCoveredRefreshSettlesWithoutAnotherProviderRead(t *testing.
 	}
 	assertSharedDeliveryNotices(t, h, items, 1)
 }
+
+func TestIncrementalPendingFanoutDoesNotStarveOtherPR(t *testing.T) {
+	h := newHarness(t)
+	makeItem := func(group string, number int64, host string) protocol.WorkItem {
+		item := protocol.WorkItem{WorkItemID: h.ids.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: h.clock.Now().UnixMilli(), UpdatedAt: h.clock.Now().UnixMilli(), IssuePlan: protocol.IssuePlan{Title: "observe", Project: DefaultProject, Intent: "track publication", Deliveries: []protocol.IssueDelivery{{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: number, HostID: host}}}}
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.SaveIssue(t.Context(), item, 0, map[string]any{}) }); err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	makeItem("a", 7, "linux-1")
+	pending := makeItem("a", 7, "linux-2")
+	for range 99 {
+		makeItem("a", 7, "linux-2")
+	}
+	observerHello(t, h, "linux-1", "first")
+	first := pollDelivery(t, h, "linux-1", "first")
+	if len(first) != 1 {
+		t.Fatal(first)
+	}
+	serverRefreshDelivery(t, h, pending)
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", first[0], "merged", "")) {
+		t.Fatal("first result rejected")
+	}
+	unrelated := make([]protocol.WorkItem, 101)
+	for i := range unrelated {
+		unrelated[i] = makeItem("z", 8, "")
+	}
+	next := pollDelivery(t, h, "linux-1", "first")
+	if len(next) != 1 || next[0].Delivery.Number != 8 {
+		t.Fatal(next)
+	}
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", next[0], "merged", "")) {
+		t.Fatal("unrelated result rejected")
+	}
+	for range 3 {
+		if next := pollDelivery(t, h, "linux-1", "first"); len(next) != 0 {
+			t.Fatal("unexpected read", next)
+		}
+	}
+	assertSharedDeliveryNotices(t, h, unrelated, 1)
+}
+
+func TestIncrementalClosedRefreshRetainsDeferredMergeNotice(t *testing.T) {
+	h := newHarness(t)
+	closed := observerItem(t, h)
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.IssueEvidence{h.ownerEvidence()}}}
+	if op := h.exec(owner, h.env("work_items.close", workTarget(closed.WorkItemID), closure, rev(closed.Revision)), CloseIssue{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	closed = h.work(closed.WorkItemID)
+	serverRefreshDelivery(t, h, closed)
+	observerHello(t, h, "linux-1", "first")
+	first := pollDelivery(t, h, "linux-1", "first")
+	if len(first) != 1 || first[0].WorkItemID != closed.WorkItemID {
+		t.Fatal(first)
+	}
+	later := observerItem(t, h)
+	serverRefreshDelivery(t, h, later)
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", first[0], "merged", "")) {
+		t.Fatal("original result rejected")
+	}
+	next := pollDelivery(t, h, "linux-1", "first")
+	if len(next) != 1 || next[0].WorkItemID != later.WorkItemID {
+		t.Fatal(next)
+	}
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", next[0], "merged", "")) {
+		t.Fatal("fresh result rejected")
+	}
+	for range 2 {
+		if next := pollDelivery(t, h, "linux-1", "first"); len(next) != 0 {
+			t.Fatal(next)
+		}
+	}
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 2)
+}
+
+func closeObserverItem(t *testing.T, h *harness, item protocol.WorkItem) protocol.WorkItem {
+	t.Helper()
+	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.IssueEvidence{h.ownerEvidence()}}}
+	if op := h.exec(owner, h.env("work_items.close", workTarget(item.WorkItemID), closure, rev(item.Revision)), CloseIssue{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	return h.work(item.WorkItemID)
+}
+
+func TestRunnerClosedCoveredRefreshRetainsDeferredNotification(t *testing.T) {
+	h := newHarness(t)
+	first := closeObserverItem(t, h, observerItem(t, h))
+	second := closeObserverItem(t, h, observerItem(t, h))
+	serverRefreshDelivery(t, h, first)
+	serverRefreshDelivery(t, h, second)
+	observerHello(t, h, "linux-1", "first")
+	assignments := pollDelivery(t, h, "linux-1", "first")
+	if len(assignments) != 1 {
+		t.Fatal(assignments)
+	}
+	later := observerItem(t, h)
+	serverRefreshDelivery(t, h, later)
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", assignments[0], "merged", "")) {
+		t.Fatal("original result rejected")
+	}
+	next := pollDelivery(t, h, "linux-1", "first")
+	if len(next) != 1 || next[0].WorkItemID != later.WorkItemID {
+		t.Fatal("covered closed request was physically repeated", next)
+	}
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", next[0], "merged", "")) {
+		t.Fatal("later result rejected")
+	}
+	for range 2 {
+		if next := pollDelivery(t, h, "linux-1", "first"); len(next) != 0 {
+			t.Fatal("deferred closed notice restarted a provider read", next)
+		}
+	}
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{first, second}, 2)
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{later}, 1)
+}
+
+func TestServerConsumesRunnerDeferredClosedNotificationWithoutProviderRead(t *testing.T) {
+	h := newHarness(t)
+	// These active references fill the server's ordinary 100-member read batch
+	// together with the later refresh, leaving the closed recipient outside it.
+	for range 99 {
+		item := observerItem(t, h)
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), item.WorkItemID, "delivery-1")
+			if err != nil {
+				return err
+			}
+			row.NextCheckAt = h.clock.Now().Add(time.Hour).UnixMilli()
+			return tx.PutDeliveryObservationQuery(t.Context(), row)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	closed := closeObserverItem(t, h, observerItem(t, h))
+	serverRefreshDelivery(t, h, closed)
+	observerHello(t, h, "linux-1", "first")
+	assignments := pollDelivery(t, h, "linux-1", "first")
+	if len(assignments) != 1 || assignments[0].WorkItemID != closed.WorkItemID {
+		t.Fatal(assignments)
+	}
+	later := observerItem(t, h)
+	serverRefreshDelivery(t, h, later)
+	if !accepted(t, reportDelivery(t, h, "linux-1", "first", assignments[0], "merged", "")) {
+		t.Fatal("original runner result rejected")
+	}
+	h.app.serverDeliveryObservations = true
+	q, err := h.app.ClaimServerDelivery(t.Context())
+	if err != nil || q == nil {
+		t.Fatal("later refresh did not reach the server observer", q, err)
+	}
+	if err := h.app.RecordServerDelivery(t.Context(), q.ID, &protocol.DeliverySnapshot{State: "merged", HeadSHA: "head"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 1)
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var next int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT next_at FROM server_delivery_jobs WHERE provider='github' AND repository='example/project' AND number=7`).Scan(&next); err != nil {
+			return err
+		}
+		if next != int64(9223372036854775807) {
+			t.Errorf("fixture did not exercise an otherwise terminal server schedule: %d", next)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if q, err = h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
+		t.Fatal("deferred notification required another provider read", q, err)
+	}
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 2)
+	if fact := normalizedDeliveryFact(t, h); fact.FactRevision != 2 || fact.Observation.RefreshPending {
+		t.Fatal("notification changed provider facts or started another query", fact)
+	}
+	if n := h.count("server_delivery_queries"); n != 1 {
+		t.Fatal("deferred notice created another provider query record", n)
+	}
+	// A later independent provider failure cannot notify this closed historical
+	// reference after its one explicit notification responsibility is consumed.
+	serverRefreshDelivery(t, h, later)
+	q, err = h.app.ClaimServerDelivery(t.Context())
+	if err != nil || q == nil {
+		t.Fatal(q, err)
+	}
+	if err := h.app.RecordServerDelivery(t.Context(), q.ID, nil, "authentication_required"); err != nil {
+		t.Fatal(err)
+	}
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 2)
+}
+
+func TestNotificationMetadataOnlyProgressCommitsWithoutQuery(t *testing.T) {
+	for _, server := range []bool{false, true} {
+		t.Run(map[bool]string{false: "runner", true: "server"}[server], func(t *testing.T) {
+			h := newHarness(t)
+			h.app.serverDeliveryObservations = server
+			item := closeObserverItem(t, h, observerItem(t, h))
+			serverRefreshDelivery(t, h, item)
+			if server {
+				q, err := h.app.ClaimServerDelivery(t.Context())
+				if err != nil || q == nil {
+					t.Fatal(q, err)
+				}
+				if err := h.app.RecordServerDelivery(t.Context(), q.ID, &protocol.DeliverySnapshot{State: "merged", HeadSHA: "head"}, ""); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				observerHello(t, h, "linux-1", "first")
+				assignments := pollDelivery(t, h, "linux-1", "first")
+				if len(assignments) != 1 || !accepted(t, reportDelivery(t, h, "linux-1", "first", assignments[0], "merged", "")) {
+					t.Fatal(assignments)
+				}
+			}
+			// Recover an already-consumed responsibility flag. The next real
+			// Execute has metadata work, but no notice or native query to emit.
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), item.WorkItemID, "delivery-1")
+				if err != nil {
+					return err
+				}
+				row.NotificationPending = true
+				return tx.PutDeliveryObservationQuery(t.Context(), row)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := h.count("events WHERE kind IN ('work_item.delivery_changed','work_item.delivery_checked')")
+			if server {
+				if q, err := h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
+					t.Fatal(q, err)
+				}
+			} else if assignments := pollDelivery(t, h, "linux-1", "first"); len(assignments) != 0 {
+				t.Fatal(assignments)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), item.WorkItemID, "delivery-1")
+				if err == nil && (row.NotificationPending || row.FactRevision != 1 || row.Observation.RefreshPending) {
+					t.Errorf("metadata-only Execute did not persist its actual progress: %+v", row)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if n := h.count("events WHERE kind IN ('work_item.delivery_changed','work_item.delivery_checked')"); n != before {
+				t.Fatal("metadata cleanup manufactured a provider event", before, n)
+			}
+			assertSharedDeliveryNotices(t, h, []protocol.WorkItem{item}, 2)
+		})
+	}
+}
