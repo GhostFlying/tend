@@ -295,7 +295,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("local POST /recovery/plan", "upgrade recover plan", "--socket", "{socket}", "--plan", "{recovery}", "--request-id", "{request}", "--upgrade-id", "original", "--recovery-id", "forward", "--json"),
 		binding("local POST /recovery/apply", "upgrade recover apply", "--socket", "{socket}", "--plan", "{recovery}", "--request-id", "{request}", "--upgrade-id", "original", "--recovery-id", "forward", "--expected-generation", "2", "--json"),
 		binding("local GET /upgrades/status", "upgrade status", "--socket", "{socket}", "--json"),
-		binding("local POST /upgrades/start", "upgrade start", "--socket", "{socket}", "--release", "{release}", "--park-idle-managers", "--json"),
+		binding("local POST /upgrades/start", "upgrade start", "--socket", "{socket}", "--park-idle-managers", "--json"),
 		binding("local POST /upgrades/retry", "upgrade retry", "--socket", "{socket}", "--upgrade-id", "sample", "--revision", "2", "--json"),
 		binding("local POST /upgrades/cancel", "upgrade cancel", "--socket", "{socket}", "--upgrade-id", "sample", "--revision", "2", "--json"),
 	}

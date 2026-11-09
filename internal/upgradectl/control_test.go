@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,6 +99,12 @@ func testController(t *testing.T) (*Controller, *fakeBackend) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.cfg.InspectExecutableSource = func(string) (release.SourceIdentity, error) {
+		return release.SourceIdentity{Commit: strings.Repeat("a", 40)}, nil
+	}
+	c.cfg.ObserveUpdater = func(context.Context, string) (updater.SelfUpdateStatus, error) {
+		return updater.SelfUpdateStatus{Supported: true, Observation: protocol.UpdaterSelfObservation{InstanceID: "server"}}, nil
+	}
 	return c, f
 }
 func testBundle(t *testing.T) string {
@@ -115,7 +123,36 @@ func testBundle(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	writeTestCompleteSet(t, dir, m)
 	return dir
+}
+
+func writeTestCompleteSet(t *testing.T, dir string, m release.Manifest) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(raw)
+	s := release.Set{Format: 2, ReleaseID: m.ReleaseID, Commit: strings.Repeat("a", 40), OS: "linux", Arch: runtime.GOARCH, ManifestSHA256: hex.EncodeToString(h[:]), Artifacts: append([]release.Artifact(nil), m.Artifacts...)}
+	for _, role := range []string{"updater", "cli"} {
+		body, err := os.ReadFile(filepath.Join(dir, m.Artifacts[0].Path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256(body)
+		if err := os.WriteFile(filepath.Join(dir, role), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s.Artifacts = append(s.Artifacts, release.Artifact{Role: role, OS: "linux", Arch: runtime.GOARCH, Path: role, Size: int64(len(body)), SHA256: hex.EncodeToString(h[:])})
+	}
+	raw, err = json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release-set.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 func TestStartPinsCompleteBundleBeforeApplicationAdmission(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -156,6 +193,56 @@ func TestCorruptReleaseNeverStartsApplicationBatch(t *testing.T) {
 	}
 	if len(f.commands) > 0 {
 		t.Fatal("corrupt release reached app")
+	}
+}
+
+func TestNewUpgradeRequiresCompleteFormatTwoBeforeAdmission(t *testing.T) {
+	for _, kind := range []string{"service-only", "format-one", "missing-updater", "modified-source", "wrong-source", "old-updater"} {
+		t.Run(kind, func(t *testing.T) {
+			c, f := testController(t)
+			dir := testBundle(t)
+			switch kind {
+			case "service-only":
+				if err := os.Remove(filepath.Join(dir, "release-set.json")); err != nil {
+					t.Fatal(err)
+				}
+			case "format-one":
+				path := filepath.Join(dir, "release-set.json")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var set release.Set
+				if err := json.Unmarshal(raw, &set); err != nil {
+					t.Fatal(err)
+				}
+				set.Format = 1
+				raw, _ = json.Marshal(set)
+				if err := os.WriteFile(path, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-updater":
+				if err := os.Remove(filepath.Join(dir, "updater")); err != nil {
+					t.Fatal(err)
+				}
+			case "modified-source":
+				c.cfg.InspectExecutableSource = func(string) (release.SourceIdentity, error) {
+					return release.SourceIdentity{Commit: strings.Repeat("a", 40), Modified: true}, nil
+				}
+			case "wrong-source":
+				c.cfg.InspectExecutableSource = func(string) (release.SourceIdentity, error) {
+					return release.SourceIdentity{Commit: strings.Repeat("b", 40)}, nil
+				}
+			case "old-updater":
+				c.cfg.ObserveUpdater = func(context.Context, string) (updater.SelfUpdateStatus, error) {
+					return updater.SelfUpdateStatus{}, errors.New("capability missing")
+				}
+			}
+			_, err := c.Start(t.Context(), protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "rejected", Release: dir})
+			if err == nil || len(f.commands) != 0 {
+				t.Fatal("unsupported release reached business admission", err, len(f.commands))
+			}
+		})
 	}
 }
 func TestOldServerCannotReportCandidateHealth(t *testing.T) {
@@ -266,6 +353,7 @@ func TestServerReadinessCannotBeReplacedByHistoricalHealth(t *testing.T) {
 
 func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *testing.T) {
 	c, f := testController(t)
+	c.cfg.InspectExecutableSource = release.ExecutableSource
 	dir := testBundle(t)
 	request := protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "batch", Release: dir, DeliveryTaskID: "approved-delivery"}
 	if _, err := c.Start(t.Context(), request); err == nil {
@@ -286,6 +374,9 @@ func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	source.Commit = strings.Repeat("a", 40)
+	source.Modified = false
+	c.cfg.InspectExecutableSource = func(string) (release.SourceIdentity, error) { return source, nil }
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
 	// Use a separate batch: immutable staging from the rejected request remains
@@ -314,6 +405,7 @@ func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *t
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
+	writeTestCompleteSet(t, dir, manifest)
 	if _, err := c.Start(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +425,7 @@ func TestDeliveryStartReadsOnlyPinnedExecutableSourceAndRetainsTaskIdentity(t *t
 	}
 }
 
-func TestUpgradeManagerParkPreservesLegacyAdmissionHash(t *testing.T) {
+func TestUpgradeManagerParkPreservesCompleteAdmissionHash(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("local bundle copy")
 	}
@@ -344,10 +436,11 @@ func TestUpgradeManagerParkPreservesLegacyAdmissionHash(t *testing.T) {
 	}
 	first := f.envelopes[0]
 	var payload struct {
-		DeliveryTaskID string                                  `json:"delivery_task_id,omitempty"`
-		ReleaseID      string                                  `json:"release_id"`
-		ManifestSHA256 string                                  `json:"manifest_sha256"`
-		Configurations map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
+		ReleaseSetSHA256 string                                  `json:"release_set_sha256,omitempty"`
+		DeliveryTaskID   string                                  `json:"delivery_task_id,omitempty"`
+		ReleaseID        string                                  `json:"release_id"`
+		ManifestSHA256   string                                  `json:"manifest_sha256"`
+		Configurations   map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
 	}
 	if err := json.Unmarshal(first.Payload, &payload); err != nil {
 		t.Fatal(err)

@@ -33,6 +33,9 @@ type Backend interface {
 	ServerUpgradeHealth(context.Context, protocol.UpgradeBinding) (protocol.UpgradeHealth, error)
 }
 type Config struct {
+	ReleaseHTTP               *http.Client
+	InspectExecutableSource   func(string) (release.SourceIdentity, error)
+	ObserveUpdater            func(context.Context, string) (updater.SelfUpdateStatus, error)
 	InspectServerCapabilities func(context.Context, string, string) (release.ServerCapabilities, error)
 	RecoveryReady             func(context.Context) error
 	Now                       func() time.Time
@@ -78,6 +81,14 @@ func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context
 	if cfg.InspectServerCapabilities == nil {
 		cfg.InspectServerCapabilities = release.ProbeServerCapabilities
 	}
+	if cfg.InspectExecutableSource == nil {
+		cfg.InspectExecutableSource = release.ExecutableSource
+	}
+	if cfg.ObserveUpdater == nil {
+		cfg.ObserveUpdater = func(ctx context.Context, socket string) (updater.SelfUpdateStatus, error) {
+			return updater.SelfUpdateCall(ctx, socket, nil)
+		}
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -100,12 +111,29 @@ func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context
 	return &Controller{cfg: cfg, app: a, ids: ids, observe: observe, log: log}, nil
 }
 func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) (protocol.UpgradeView, error) {
-	if !protocol.ValidID(protocol.PrefixRequest, r.RequestID) || !release.ValidID(r.UpgradeID) || !filepath.IsAbs(r.Release) {
+	if !protocol.ValidID(protocol.PrefixRequest, r.RequestID) || !release.ValidID(r.UpgradeID) {
 		return protocol.UpgradeView{}, errors.New("upgradectl: invalid local release request")
 	}
-	bundle, err := release.Load(r.Release)
+	var bundle *release.Bundle
+	var err error
+	if r.Release == "" || release.OfficialTag(r.Release) {
+		// Pin the whole original request before download; a retry never chooses
+		// another source commit as main advances.
+		input, marshalErr := json.Marshal(r)
+		if marshalErr != nil {
+			return protocol.UpgradeView{}, marshalErr
+		}
+		bundle, err = release.FetchOfficial(ctx, c.cfg.ReleaseHTTP, filepath.Join(c.cfg.ReleaseDir, ".requests", r.RequestID), r.Release, string(input))
+	} else if filepath.IsAbs(r.Release) {
+		bundle, err = release.Load(r.Release)
+	} else {
+		return protocol.UpgradeView{}, errors.New("upgradectl: release must be an absolute complete bundle path or main commit tag")
+	}
 	if err != nil {
 		return protocol.UpgradeView{}, err
+	}
+	if bundle.Set == nil || bundle.Set.Format != 2 {
+		return protocol.UpgradeView{}, errors.New("upgradectl: new upgrades require a format 2 complete release set; service-only and format 1 packages cannot start an upgrade")
 	}
 	server, err := bundle.Artifact("server", runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -121,7 +149,7 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		if err != nil {
 			return protocol.UpgradeView{}, err
 		}
-		source, err := release.ExecutableSource(path)
+		source, err := c.cfg.InspectExecutableSource(path)
 		if bundle.Set != nil && (err != nil || source.Modified || source.Commit != bundle.Set.Commit) {
 			return protocol.UpgradeView{}, errors.New("upgradectl: complete release executable source differs")
 		}
@@ -146,27 +174,23 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
 	command := app.StartUpgrade{ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
 	command.ReleaseSet, command.ReleaseSetSHA256, command.ReleaseSetSize = bundle.Set, bundle.SetSHA256, int64(len(bundle.SetBytes))
-	if bundle.Set != nil && bundle.Set.Format >= 2 {
-		status, err := updater.SelfUpdateCall(ctx, c.cfg.UpdaterSocket, nil)
-		if err != nil || !status.Supported || status.Observation.InstanceID != c.cfg.Instance {
-			return protocol.UpgradeView{}, errors.New("upgradectl: standalone updater bootstrap required before a complete upgrade")
-		}
-		command.ServerUpdaterSupported = true
+	recorded, err := c.app.CheckUpgradeStart(ctx, env, command)
+	if err != nil {
+		return protocol.UpgradeView{}, err
 	}
-	if r.ParkIdleManagers || r.ExecutionRequestID != "" {
-		recorded, err := c.app.CheckUpgradeStart(ctx, env, command)
-		if err != nil {
-			return protocol.UpgradeView{}, err
+	if recorded != nil {
+		if recorded.Error != nil {
+			return protocol.UpgradeView{}, recorded.Error
 		}
-		if recorded != nil {
-			if recorded.Error != nil {
-				return protocol.UpgradeView{}, recorded.Error
-			}
-			var view protocol.UpgradeView
-			err = json.Unmarshal(recorded.Result, &view)
-			return view, err
-		}
+		var view protocol.UpgradeView
+		err = json.Unmarshal(recorded.Result, &view)
+		return view, err
 	}
+	status, err := c.cfg.ObserveUpdater(ctx, c.cfg.UpdaterSocket)
+	if err != nil || !status.Supported || status.Observation.InstanceID != c.cfg.Instance {
+		return protocol.UpgradeView{}, errors.New("upgradectl: standalone updater bootstrap required before a complete upgrade")
+	}
+	command.ServerUpdaterSupported = true
 	var capabilities release.ServerCapabilities
 	if r.ParkIdleManagers {
 		path, err := release.RegularPath(bundle.Dir, server.Path)
@@ -323,6 +347,8 @@ func (c *Controller) Handler() http.Handler {
 		} else if r.Method == http.MethodPost {
 			switch r.URL.Path {
 			case "/upgrades/start":
+				// Download time does not extend admitted installation grants.
+				_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5 * time.Minute))
 				var request protocol.UpgradeStartRequest
 				if err = decode(r, &request); err == nil {
 					value, err = c.Start(r.Context(), request)

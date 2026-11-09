@@ -114,6 +114,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 
 18. **CLI 能力全集**：Tend CLI 必须覆盖全部用户业务、管理和诊断能力；Web、Telegram 等交互端按场景提供其子集。新增或修改用户能力时，必须在同一 PR 中同步完成 CLI 入口、完整有效输入与输出、适用的筛选与分页、帮助文档、请求恢复语义、能力目录及验证。仅提供通用 HTTP/RPC 调用或声明映射不算完成 CLI 支持。执行器内部协议保留其身份、角色和租约边界。能力覆盖检查必须纳入 `make check`；公共路由、owner operation 和本机管理入口必须登记对应命令及入口用例。Refs: D142。
 
+19. **普通升级统一完整发布集**：新升级必须使用 format 2 `release-set.json`，包含 server、runner、updater 和 CLI；service manifest 自身仍为 format 1。默认在 server 本机运行 `tend upgrade start --socket "$SERVER_CONTROL_SOCKET"` 选择官方最新已发布 main fleet 包；有固定交付提交时传 `--commit <完整 SHA>`。离线或自建发布只能通过 `--release <完整包目录>`，同样校验 format 2、全部组件及源码身份。不手工拼 service-only 包、不提供旧格式绕过选项。下载失败或回执未知时保留原 request ID、upgrade ID 和输入，先读状态再对账，不重新选择版本。原批次恢复和审计不因此授予新升级权限。部署仍需明确授权。Refs: D200；操作见 `docs/operations/controlled-upgrades.md`。
+
 ## 3. 代码风格
 
 - Go：遵循 [Google Go Style Guide](https://google.github.io/styleguide/go/)，使用 gofmt / goimports；`go vet` 和 `staticcheck` 必须无告警。

@@ -37,6 +37,51 @@ func TestUpgradeTextSeparatesUpdaterProofFromServiceState(t *testing.T) {
 	}
 }
 
+func TestUpgradeDefaultAndCommitSelectionPreserveRequestIdentity(t *testing.T) {
+	for _, commit := range []string{"", strings.Repeat("a", 40)} {
+		t.Run("commit-"+commit, func(t *testing.T) {
+			te := newTestEnv(t, "")
+			request := te.IDs.New(protocol.PrefixRequest)
+			args := []string{"upgrade", "start", "--dry-run", "--request-id", request, "--upgrade-id", "original-batch"}
+			if commit != "" {
+				args = append(args, "--commit", commit)
+			}
+			if code := te.main(args...); code != exitOK {
+				t.Fatal(code, te.errOut)
+			}
+			var output struct {
+				Request protocol.UpgradeStartRequest `json:"request"`
+			}
+			if err := json.Unmarshal(te.out.Bytes(), &output); err != nil {
+				t.Fatal(err)
+			}
+			want := ""
+			if commit != "" {
+				want = "main-" + commit
+			}
+			if output.Request.Release != want || output.Request.RequestID != request || output.Request.UpgradeID != "original-batch" {
+				t.Fatal(output)
+			}
+		})
+	}
+}
+
+func TestUpgradeCommitRejectsAmbiguousOrInvalidSelectors(t *testing.T) {
+	for _, args := range [][]string{
+		{"start", "--commit", "abc"},
+		{"start", "--commit", strings.Repeat("A", 40)},
+		{"start", "--commit", strings.Repeat("g", 40)},
+		{"start", "--commit", strings.Repeat("a", 40), "--release", "local"},
+		{"status", "--commit", strings.Repeat("a", 40)},
+		{"retry", "--commit", strings.Repeat("a", 40)},
+	} {
+		te := newTestEnv(t, "")
+		if code := te.main(append([]string{"upgrade"}, args...)...); code != exitUsage {
+			t.Fatal(args, code, te.errOut)
+		}
+	}
+}
+
 func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix local operator control")

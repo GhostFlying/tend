@@ -33,7 +33,7 @@ runner 配置同时增加 `updater_socket`（自己的 authority socket）、`up
 
 ## 发布与执行
 
-发布目录包含 `manifest.json` 和其中列出的 server/runner 二进制。manifest 固定 `format: 1`、`release_id`、`protocol: {min,max}`、`storage.server_schema`、`storage.runner_journal` 以及 `artifacts`；每项产物有 `role`、`os`、`arch`、相对 `path`、`size` 和小写 `sha256`。
+普通升级必须使用 format 2 完整发布集，不提供旧包升级入口。完整目录包含 `release-set.json`、`manifest.json` 及全部平台组件。service manifest 固定 `format: 1`、`release_id`、`protocol: {min,max}`、`storage.server_schema`、`storage.runner_journal` 以及 server/runner `artifacts`；每项产物有 `role`、`os`、`arch`、相对 `path`、`size` 和小写 `sha256`。两个 format 字段属于不同清单。
 
 main 的完整 CI 通过后，Actions 以 `main-<完整 commit SHA>` 发布不可变 prerelease。
 Linux amd64、arm64 各有完整压缩包及发布集清单，并提供 `SHA256SUMS`。
@@ -56,7 +56,8 @@ go run ./internal/release/packagecmd --arch amd64 --commit "$(git rev-parse HEAD
 二进制 Go VCS 身份不符；压缩包使用提交时间和固定文件属性，避免重跑改变资产。
 组合包由这两个已验证平台包生成，要求相同源码及协议/存储兼容范围，并再次验证
 所有二进制身份；不能把不同提交的包拼接成一个发布。
-现有只含 service manifest 的历史包与 format 1 发布集保持原语义。新构建使用
+线上不再存在须兼容的历史部署。service-only 与 format 1 发布集不能用于新建升级；
+账本及运行中的原请求仍可读取和对账，不提供绕过格式门槛的开关。新构建使用
 format 2 发布集，明确要求 updater 先交接，不能静默退回只更新服务。开始前
 校验本机 updater 和所有 runner 的协商能力；缺能力时先按下面的独立 installer
 流程 bootstrap。server updater → server 完成后，逐台执行 runner updater → runner。
@@ -71,14 +72,29 @@ format 2 发布集，明确要求 updater 先交接，不能静默退回只更�
 tend-updater verify --release "$RELEASE_DIR"
 ```
 
-再从 server 本机启动单个批次：
+默认从 server 本机选择官方最新已发布 main fleet 包（包含 prerelease，排除 draft），
+校验完整包后启动单个批次：
+
+```sh
+tend upgrade start --socket "$SERVER_CONTROL_SOCKET" --json
+```
+
+已授权交付绑定明确提交时使用完整源码 SHA：
+
+```sh
+tend upgrade start --socket "$SERVER_CONTROL_SOCKET" --commit "$SOURCE_COMMIT" --json
+```
+
+离线或本地构建使用完整目录，同样强制 format 2：
 
 ```sh
 tend upgrade start --socket "$SERVER_CONTROL_SOCKET" \
   --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID" --json
 ```
 
-也可用 server updater 的 `upgrade --config "$UPDATER_CONFIG" --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID"`，它同样进入 server 的批次协调接口。CLI 会先输出 request ID；不确定回执先读状态，不要换 ID 重发。相同请求重试必须保留批次、发布和 request ID。
+`--commit` 与 `--release` 互斥。CLI 先输出 request ID；server 在私有发布目录按该 ID 固定原始输入、标签、fleet 资产大小和 SHA-256，然后才下载。重试使用原 request ID、upgrade ID 及全部原参数，不能因 main 前进选择新包；改变选包、配置或交付参数会被拒绝。原子暂存完成前不会创建业务批次。下载最多四分钟，初始本机 HTTP 往返最多五分钟，不改变升级准入后的任何维护、停止或健康期限。默认发现读取最近一百条 release；无有效 main 发布时明确失败，可用 `--commit` 精确选择。
+
+也可用 server updater 的 `upgrade --config "$UPDATER_CONFIG" --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID"`，它同样进入受 format 2 约束的 server 批次协调接口。CLI 会先输出 request ID；不确定回执先读状态，不要换 ID 重发。相同请求重试必须保留批次、发布和 request ID。`--dry-run` 只展示请求，缺省选包仍显示空 release，既不访问 GitHub，也不启动下载或升级。
 
 准入拒绝未结束批次、离线或不兼容主机、无 updater 能力、无法读取的存储以及仍依赖退役协议的 run。server 等当前主会话结束；期间 owner 消息继续持久入队。随后固定本轮现有 run 的维护授权并等待 runner 确认，确认剩余覆盖足够才允许停 server。普通心跳不延长这次固定授权。runner 用完整请求往返耗时和本地保守折扣确认覆盖期限；停止授权的截止时间再扣除整个 server 重启预算。获取授权后暂停过久的 updater 不得停止服务。
 
