@@ -209,6 +209,15 @@ type FileVerdictReconciler interface {
 
 var ErrNoAcceptanceVerdict = errors.New("no frozen acceptance verdict is available")
 
+// FileResultReconciler restores an explicitly submitted implementation result
+// after independently confirming the original execution has closed. It never
+// starts native work, increments an attempt, or repeats result uploads.
+type FileResultReconciler interface {
+	ReconcileImplementationResult(context.Context, WorkerSpec) (WorkerResult, error)
+}
+
+var ErrNoImplementationResult = errors.New("no submitted implementation result is available")
+
 // ErrVerdictSelectionRejected is returned only when the sealing owner proves
 // this call created no intent, upload request or external effect. An ordinary
 // error, an absent cache, or a failed upload cannot establish this fact.
