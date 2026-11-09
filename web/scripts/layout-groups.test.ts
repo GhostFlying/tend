@@ -10,7 +10,7 @@ test("CI groups cover every mandatory browser regression exactly once", () => {
     (name) => name.startsWith("test:") && name !== "test:copy-layout",
   );
   const actual = Object.values(layoutGroups).flat();
-  expect(actual).toHaveLength(15);
+  expect(actual).toHaveLength(16);
   expect(new Set(actual).size).toBe(actual.length);
   expect(actual.toSorted()).toEqual(expected.toSorted());
 });
