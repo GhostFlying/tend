@@ -625,7 +625,9 @@ try {
         (_, index) =>
           `### 证据段 ${index + 1}\n\n保留实际观察、原始问题和未知，读者无需从聊天拼接结论。\n\n`,
       ).join("") +
-      "报告末尾：本次只调查，没有修改业务代码。";
+      "报告末尾：本次只调查，没有修改业务代码。\n\n" +
+      `[查看关联任务](/tasks/${results.items![0]!.task_id}?from=${issue.issue_id})\n\n` +
+      `[查看关联问题](/issues/${child.issue_id})`;
     const file = {
       file_id: "file-readable-report",
       name: "report.md",
@@ -685,12 +687,81 @@ try {
       await page.keyboard.press("Escape");
       await reader.waitFor({ state: "hidden" });
       assert(await open.evaluate((node) => node === document.activeElement));
+      for (const target of [
+        { label: "查看关联任务", path: `/tasks/${results.items![0]!.task_id}` },
+        { label: "查看关联问题", path: `/issues/${child.issue_id}` },
+      ]) {
+        await open.click();
+        await reader.getByRole("link", { name: target.label, exact: true }).click();
+        await page.waitForURL((url) => url.pathname === target.path);
+        if (target.path.startsWith("/tasks/"))
+          await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
+        else await page.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
+        await page.goBack();
+        await page.waitForURL((url) => url.pathname === `/issues/${issue.issue_id}`);
+        await open.waitFor();
+        await page.waitForFunction(
+          () => document.activeElement?.getAttribute("aria-label") === "阅读 report.md",
+        );
+        assert(await open.evaluate((node) => node === document.activeElement));
+        assert.equal(await page.locator("dialog[open]").count(), 0);
+      }
       assert.equal(writes.length, beforeWrites);
       assert.deepEqual(errors, []);
       console.log(`PASS ${width}: Issue activity → full report → original Markdown and download`);
     } finally {
       await context.close();
       reportDownload = undefined;
+    }
+  }
+  // Historical activity loads a full artifact, so its collapsed preview must be bounded too.
+  for (const width of [1440, 390]) {
+    const context = await browser.newContext({
+      viewport: { width, height: width > 760 ? 1000 : 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    const body =
+      "# 历史调查报告\n\n" +
+      Array.from(
+        { length: 100 },
+        (_, index) => `## 历史章节 ${index}\n\n保留完整分析与观察。\n\n`,
+      ).join("") +
+      "历史报告的全文末尾。";
+    await page.route(`**/api/v1/issues/${issue.issue_id}/results`, (route) =>
+      route.fulfill({ json: { items: [], more: false } }),
+    );
+    await page.route("**/api/v1/artifacts/artifact-one", (route) =>
+      route.fulfill({
+        json: {
+          ...results.items![0],
+          artifact: { ...results.items![0]!.artifact, ref: { report: { body } } },
+        },
+      }),
+    );
+    try {
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      await page.locator('[data-scroll-id="result:artifact-one"]').scrollIntoViewIfNeeded();
+      const card = page.locator('[data-artifact="artifact-one"]').first();
+      await card.getByRole("heading", { name: "报告摘要", exact: true }).waitFor();
+      assert.equal(await card.getByText("历史报告的全文末尾。", { exact: true }).count(), 0);
+      const summary = card.getByRole("region", { name: "交付报告", exact: true });
+      assert((await summary.textContent())!.length < 1250, "summary contained the full artifact");
+      await card.getByRole("button", { name: "阅读完整报告 →", exact: true }).click();
+      await card.getByRole("heading", { name: "报告正文", exact: true }).waitFor();
+      await card.getByText("历史报告的全文末尾。", { exact: true }).waitFor();
+      await card.getByRole("button", { name: "收起报告", exact: true }).click();
+      await card.getByRole("heading", { name: "报告摘要", exact: true }).waitFor();
+      assert.equal(await card.getByText("历史报告的全文末尾。", { exact: true }).count(), 0);
+      assert((await summary.textContent())!.length < 1250);
+      assert(await summary.evaluate((node) => node.scrollHeight <= node.clientHeight + 1));
+      await page.screenshot({ path: join(output, `historical-report-collapsed-${width}.png`) });
+      console.log(
+        `PASS ${width}: full historical artifact has an explicit bounded preview before and after expansion`,
+      );
+    } finally {
+      await context.close();
     }
   }
   // D186: policy editing preserves the agreement; shared review is candidate-bound.

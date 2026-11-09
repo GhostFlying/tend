@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useServices } from "../app/services.tsx";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { Button } from "../ui/Button.tsx";
+import { rememberOpener } from "../ui/focus.ts";
 import { FileDownload } from "./FileDownload.tsx";
 import { textFileFormat, type PreviewFile } from "./files.ts";
 import styles from "./TextPreview.module.css";
@@ -28,6 +29,7 @@ export default function TextPreview({
   useLayoutEffect(() => {
     const dialog = panel.current;
     const opener = document.activeElement;
+    if (dialog) rememberOpener(dialog, opener);
     dialog?.showModal();
     heading.current?.focus();
     return () => {
