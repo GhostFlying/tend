@@ -299,7 +299,7 @@ func TestReconcileImplementationResultDetachedWorkRemainsPending(t *testing.T) {
 	}
 	for _, detached := range record.Detached {
 		current, _, active, err := readOwnedProcess(detached.PID)
-		if err != nil || current != detached || !active {
+		if err != nil || !sameOwnedProcessIdentity(current, detached) || !active {
 			t.Fatal("result recovery signalled independently running work", detached, err)
 		}
 	}

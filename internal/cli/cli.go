@@ -137,6 +137,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runArchive(ctx, e, rest))
 	case "updater":
 		return report(e, runUpdaterHandoff(ctx, e, rest))
+	case "worker-close":
+		return report(e, runWorkerClose(ctx, e, rest))
 	case "upgrade":
 		return report(e, runUpgrade(ctx, e, rest))
 	case "attachment":

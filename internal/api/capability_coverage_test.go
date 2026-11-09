@@ -68,6 +68,9 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	for _, action := range protocol.CodexEnvironmentActions() {
 		expected["local EXEC codex-env "+action] = true
 	}
+	for _, action := range protocol.WorkerCloseActions() {
+		expected["local EXEC worker-close "+action] = true
+	}
 	for _, action := range protocol.UpdaterSelfUpdateActions() {
 		expected["local EXEC updater self-update "+action] = true
 	}
