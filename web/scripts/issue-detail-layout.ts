@@ -742,8 +742,16 @@ try {
     );
     try {
       await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
-      await page.locator('[data-scroll-id="result:artifact-one"]').scrollIntoViewIfNeeded();
-      const card = page.locator('[data-artifact="artifact-one"]').first();
+      // The historical card loads on intersection; its activity row can be replaced during startup.
+      await page.waitForFunction(() => {
+        const row = document.querySelector<HTMLElement>('[data-scroll-id="result:artifact-one"]');
+        if (!row?.isConnected) return false;
+        row.scrollIntoView({ block: "center" });
+        return !!row.querySelector('[data-artifact="artifact-one"]');
+      });
+      const card = page.locator(
+        '[data-scroll-id="result:artifact-one"] [data-artifact="artifact-one"]',
+      );
       await card.getByRole("heading", { name: "报告摘要", exact: true }).waitFor();
       assert.equal(await card.getByText("历史报告的全文末尾。", { exact: true }).count(), 0);
       const summary = card.getByRole("region", { name: "交付报告", exact: true });
