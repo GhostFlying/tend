@@ -39,6 +39,7 @@ type WorkerSpec struct {
 	// LegacyRawUsage preserves the existing event path for servers without ledger capability.
 	LegacyRawUsage       bool
 	OnUsageSource        func(context.Context, nativeusage.Source) error
+	BeforeUsageDispatch  func(context.Context, nativeusage.Source) error
 	FrozenExecution      *protocol.ExecutionProfile
 	RoleInstructions     string
 	Execution            *protocol.ExecutionProfile

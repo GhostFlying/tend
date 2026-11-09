@@ -63,6 +63,9 @@ func TestUsageIdleReadSleepsAndResumesWithoutRewritingCursor(t *testing.T) {
 	if err := os.WriteFile(path, []byte(header+sample), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := a.ActivateLocalUsage(t.Context(), "main", "thread", "resume"); err != nil {
+		t.Fatal(err)
+	}
 	if delay := m.syncNativeUsageState(t.Context(), false); delay != 0 {
 		t.Fatal(delay)
 	}
@@ -120,6 +123,7 @@ func TestUsageSuccessfulRetryDisarmsIdleCollector(t *testing.T) {
 	if err := os.Rename(path, path+".away"); err != nil {
 		t.Fatal(err)
 	}
+	m.wakeNativeUsage()
 	if delay := m.syncNativeUsageState(t.Context(), false); delay != 2*time.Second {
 		t.Fatal(delay)
 	}

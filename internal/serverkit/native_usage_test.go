@@ -74,10 +74,21 @@ func TestCentralCollectorExcludesSettledHistoryAndDisarmsTimer(t *testing.T) {
 	defer s.Close()
 	a := app.New(s, testkit.NewIDGen(clock, 42), clock.Now)
 	for i := range 170 {
-		src := app.LocalUsageSource{ID: fmt.Sprint(i), WriterStopped: true, Source: json.RawMessage(`{"path":"missing-history.jsonl","provider":"traex","thread_id":"old"}`), Cursors: json.RawMessage(`{}`), Coverage: "caught_up"}
+		src := app.LocalUsageSource{ID: fmt.Sprint(i), WriterStopped: true, Source: json.RawMessage(fmt.Sprintf(`{"path":"missing-history.jsonl","provider":"traex","thread_id":"old-%d"}`, i)), Cursors: json.RawMessage(`{}`), Coverage: "caught_up"}
 		if err := a.RegisterLocalUsage(t.Context(), src); err != nil {
 			t.Fatal(err)
 		}
+		all, err := a.LocalUsageSources(t.Context(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, current := range all {
+			if current.ID == src.ID {
+				src.Collection = current.Collection
+				src.ExpectedRevision = current.ExpectedRevision
+			}
+		}
+		src.Collection.ReadSucceeded(clock.Now().UnixMilli(), false, true, true, true)
 		if err := a.CommitLocalUsage(t.Context(), src, nil); err != nil {
 			t.Fatal(err)
 		}

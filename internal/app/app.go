@@ -379,6 +379,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		a.notifier.Notify()
 	}
 	if applied {
+		if env.Operation == protocol.OpRetireUsageCollection || env.Operation == protocol.OpResumeUsageCollection {
+			a.wakeLocalUsage()
+		}
 		if projectionOnly && !queued {
 			a.changes.Notify()
 		} else {
@@ -627,7 +630,7 @@ func duplicateEffect(message string, details map[string]any) error {
 // scheduling facts. An actual followup overrides this classification.
 func projectionOnlyOperation(operation string) bool {
 	switch operation {
-	case "conversation.record_agent_message", protocol.OpRunnerUsageRegister, protocol.OpRunnerUsageUpload:
+	case "conversation.record_agent_message", protocol.OpRunnerUsageRegister, protocol.OpRunnerUsageUpload, protocol.OpRunnerUsageCollection, protocol.OpRetireUsageCollection, protocol.OpResumeUsageCollection:
 		return true
 	default:
 		return false

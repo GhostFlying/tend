@@ -446,6 +446,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
 		FrozenExecution: execution.Profile, RoleInstructions: execution.Instructions,
+		BeforeUsageDispatch: func(sourceCtx context.Context, source nativeusage.Source) error {
+			return r.activateUsage(sourceCtx, as, source)
+		},
 		OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 			return r.registerUsage(sourceCtx, as, source)
 		},

@@ -77,6 +77,9 @@ func (m *Manager) deliverCompact(ctx context.Context, d app.Delivery) app.Delive
 	if err = m.app.SetCompactState(ctx, p.ID, th.ID(), "starting", m.namedSelection()); err != nil {
 		return retry(err)
 	}
+	if err = m.beginNativeUsage(ctx, th, p.ID); err != nil {
+		return retry(err)
+	}
 	request, cancel := context.WithTimeout(ctx, 30*time.Second)
 	err = native.Compact(request)
 	cancel()

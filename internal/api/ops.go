@@ -15,6 +15,7 @@ import (
 // is created and planned by the agent the owner works in; the owner's own
 // writes answer it, retry after a decision and steer tasks.
 var ownerCommands = commandMap(
+	app.ControlUsageCollection{}, app.ControlUsageCollection{Resume: true},
 	app.EditExtensions{Action: "resource_put"}, app.EditExtensions{Action: "resource_remove"}, app.EditExtensions{Action: "binding_set"}, app.PublishExtensions{}, app.PublishExtensions{Rollback: true},
 	app.ArtifactShareCommand{}, app.ArtifactShareCommand{Revoke: true},
 	app.FeishuCommand{}, app.FeishuCommand{Unbind: true},

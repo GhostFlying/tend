@@ -88,6 +88,8 @@ type Manager struct {
 	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
 	usageIndex         *nativeusage.Discovery
 	usageRetries       nativeusage.Retries
+	usageCommits       nativeusage.CommitQueue
+	usageWriterID      string
 	usageSettling      bool
 	usageSettleUntil   time.Time
 	usageMu            sync.Mutex
@@ -1367,6 +1369,9 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 		m.active.inputText = text
 	}
 	m.mu.Unlock()
+	if err := m.beginNativeUsage(ctx, th, d.RequestID); err != nil {
+		return unsent(err)
+	}
 	turnID, err := th.StartTurn(ctx, harness.TurnInput{Repair: repair, Text: text, ImageURLs: imageURLs, UserMessageID: inputIdentity,
 		Model: selection.Model, ModelProvider: selection.Provider, Effort: selection.Effort})
 	if err != nil {

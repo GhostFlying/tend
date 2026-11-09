@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type historyHeader struct {
@@ -21,10 +22,20 @@ type historyIndex struct {
 // Discovery shares metadata scans across sources in the same native store.
 // It retains no conversation content and never supplies usage facts itself.
 type Discovery struct {
+	scans    atomic.Int64
+	opens    atomic.Int64
+	parses   atomic.Int64
+	reads    atomic.Int64
 	mu       sync.Mutex
 	stores   map[string]historyIndex
 	headerMu sync.Mutex
 	headers  map[string]cachedHeader
+}
+
+type IOStats struct{ DirectoryScans, FileOpens, HeaderParses, Reads int64 }
+
+func (d *Discovery) Stats() IOStats {
+	return IOStats{d.scans.Load(), d.opens.Load(), d.parses.Load(), d.reads.Load()}
 }
 
 func NewDiscovery() *Discovery {
@@ -50,6 +61,7 @@ func (c *DiscoveryCycle) entries(ctx context.Context, key string, roots []string
 	}
 	var headers []historyHeader
 	for _, root := range roots {
+		c.index.scans.Add(1)
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -60,6 +72,7 @@ func (c *DiscoveryCycle) entries(ctx context.Context, key string, roots []string
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 				return nil
 			}
+			c.index.opens.Add(1)
 			f, err := os.Open(path)
 			if err != nil {
 				return err
@@ -103,6 +116,7 @@ func (d *Discovery) fileHeader(path string, f *os.File, force bool) (metadata, s
 	if !force && change != "" && ok && os.SameFile(old.info, info) && old.info.Size() == info.Size() && old.info.ModTime() == info.ModTime() && old.change == change {
 		return old.meta, old.prefix, nil
 	}
+	d.parses.Add(1)
 	meta, prefix, err := header(f)
 	if err == nil {
 		d.headers[path] = cachedHeader{info: info, change: change, meta: meta, prefix: prefix}
@@ -110,5 +124,6 @@ func (d *Discovery) fileHeader(path string, f *os.File, force bool) (metadata, s
 	return meta, prefix, err
 }
 func (d *Discovery) Read(ctx context.Context, src Source, cursor Cursor, limit int, final bool) (Page, error) {
+	d.reads.Add(1)
 	return read(ctx, src, cursor, limit, d, final)
 }

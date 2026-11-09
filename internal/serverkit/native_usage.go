@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -19,6 +20,8 @@ type centralUsage struct {
 	log       *slog.Logger
 	discovery *nativeusage.Discovery
 	retries   nativeusage.Retries
+	commits   nativeusage.CommitQueue
+	sources   func(context.Context) ([]app.LocalUsageSource, error)
 }
 
 func (c *centralUsage) register(ctx context.Context, run string, src nativeusage.Source, stopped bool) error {
@@ -31,7 +34,7 @@ func (c *centralUsage) register(ctx context.Context, run string, src nativeusage
 		return err
 	}
 	if stopped {
-		return c.app.StopRunUsage(ctx, run)
+		return c.app.StopRunUsage(ctx, run, src.WriterID)
 	}
 	return nil
 }
@@ -41,25 +44,55 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 	if c.retries == nil {
 		c.retries = nativeusage.Retries{}
 	}
-	active := false
+	if c.commits == nil {
+		c.commits = nativeusage.CommitQueue{}
+	}
+	active, paging := false, false
 	now := c.now().UnixMilli()
-	sources, err := c.app.PendingLocalUsageSources(ctx, "")
+	load := c.sources
+	if load == nil {
+		load = func(ctx context.Context) ([]app.LocalUsageSource, error) {
+			return c.app.PendingLocalUsageSources(ctx, "")
+		}
+	}
+	sources, err := load(ctx)
 	if err != nil {
 		return 2 * time.Second, err
 	}
 	keys := map[string]bool{}
 	for _, source := range sources {
-		if source.RunID != "" || source.WriterStopped {
+		if source.RunID != "" || source.WriterStopped || strings.HasPrefix(source.Collection.RequestID, "reconcile/") {
 			keys[source.ID] = true
 		}
 	}
 	c.retries.Retain(keys)
+	c.commits.Retain(keys)
 	cycle := c.discovery.Cycle(c.now().UnixMilli())
 	for _, source := range sources {
-		if source.RunID == "" && !source.WriterStopped {
+		if source.RunID == "" && !source.WriterStopped && !strings.HasPrefix(source.Collection.RequestID, "reconcile/") {
 			continue
 		}
-		if !c.retries.Due(source.ID, now) {
+		if _, pending := c.commits[source.ID]; pending {
+			if !c.retries.Due(source.ID, now) {
+				continue
+			}
+			_, e := c.commits.Retry(ctx, source.ID)
+			if e != nil {
+				c.retries.Failed(source.ID, now)
+			} else {
+				c.retries.Succeeded(source.ID)
+			}
+			continue
+		}
+		c.retries.Collection(source.ID, source.Collection)
+		if !source.Collection.Due(now) {
+			continue
+		}
+		if source.Collection.RetryDeadlineAt != 0 && now >= source.Collection.RetryDeadlineAt {
+			if err := c.failSource(ctx, &source, source.Collection.ErrorCode); err != nil {
+				return 2 * time.Second, err
+			}
+			c.retries.Collection(source.ID, source.Collection)
 			continue
 		}
 		var root nativeusage.Source
@@ -72,8 +105,11 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 		}
 		files, err := cycle.Discover(ctx, root, source.WriterStopped && source.Coverage != "caught_up")
 		if err != nil {
-			c.retries.Failed(source.ID, now)
-			c.log.WarnContext(ctx, "central native history pending", "run_id", source.RunID, "err", err)
+			if e := c.failSource(ctx, &source, nativeusage.CollectionError(err)); e != nil {
+				return 2 * time.Second, e
+			}
+			c.retries.Collection(source.ID, source.Collection)
+			c.log.WarnContext(ctx, "central native history pending", "run_id", source.RunID, "source_id", source.ID, "collection_epoch", source.Collection.Epoch, "err", err)
 			continue
 		}
 		if cursors == nil {
@@ -81,11 +117,13 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 		}
 		var samples []protocol.TokenUsageSample
 		complete, failed := true, false
+		var failure error
 		for _, file := range files {
 			page, err := c.discovery.Read(ctx, file, cursors[file.Path], 256-len(samples), source.WriterStopped)
 			if err != nil {
-				c.log.WarnContext(ctx, "central native read pending", "run_id", source.RunID, "err", err)
+				c.log.WarnContext(ctx, "central native read pending", "run_id", source.RunID, "source_id", source.ID, "collection_epoch", source.Collection.Epoch, "err", err)
 				failed = true
+				failure = err
 				break
 			}
 			cursors[file.Path] = page.Cursor
@@ -100,7 +138,10 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 			}
 		}
 		if failed {
-			c.retries.Failed(source.ID, now)
+			if e := c.failSource(ctx, &source, nativeusage.CollectionError(failure)); e != nil {
+				return 2 * time.Second, e
+			}
+			c.retries.Collection(source.ID, source.Collection)
 			continue
 		}
 		beforeSource, beforeCursors, beforeCoverage := string(source.Source), string(source.Cursors), source.Coverage
@@ -110,22 +151,29 @@ func (c *centralUsage) syncWork(ctx context.Context) (time.Duration, error) {
 		}
 		source.Source, _ = json.Marshal(root)
 		source.Cursors, _ = json.Marshal(cursors)
-		if len(samples) == 0 && beforeSource == string(source.Source) && beforeCursors == string(source.Cursors) && beforeCoverage == source.Coverage {
-			if !complete {
-				c.retries.Failed(source.ID, now)
-			} else {
-				active = active || !source.WriterStopped
-				c.retries.Succeeded(source.ID)
-			}
+		source.Collection.ReadSucceeded(now, len(samples) > 0 || beforeCursors != string(source.Cursors), complete, source.WriterStopped, strings.HasPrefix(source.Collection.RequestID, "reconcile/"))
+		if len(samples) > 0 {
+			source.Collection.Evidence = protocol.UsageObserved
+		}
+		if !complete && len(samples) < 256 {
+			source.Collection.Failed(now, source.WriterStopped, "incomplete_record")
+		}
+		if len(samples) == 0 && beforeSource == string(source.Source) && beforeCursors == string(source.Cursors) && beforeCoverage == source.Coverage && source.Collection.Revision == source.ExpectedRevision {
+			active = active || !source.WriterStopped
+			c.retries.Collection(source.ID, source.Collection)
 			continue
 		}
-		if err := c.app.CommitLocalUsage(ctx, source, samples); err != nil {
+		if err := c.commits.Commit(ctx, source.ID, func(commitCtx context.Context) error { return c.app.CommitLocalUsage(commitCtx, source, samples) }); err != nil {
 			c.retries.Failed(source.ID, now)
-			c.log.WarnContext(ctx, "central native commit pending", "run_id", source.RunID, "err", err)
-		} else {
-			c.retries.Succeeded(source.ID)
-			active = active || !source.WriterStopped || !complete
+			return c.retries.Delay(now, false), err
 		}
+		c.retries.Collection(source.ID, source.Collection)
+		active = active || (source.Collection.Reading() && source.Collection.NextRetryAt == 0)
+		paging = paging || len(samples) >= 256
+
+	}
+	if paging {
+		return time.Millisecond, nil
 	}
 	return c.retries.Delay(now, active), nil
 }
@@ -163,4 +211,22 @@ func (c *centralUsage) drain(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (c *centralUsage) failSource(ctx context.Context, s *app.LocalUsageSource, code string) error {
+	next := *s
+	next.Collection.Failed(c.now().UnixMilli(), next.WriterStopped, code)
+	if code == "identity_mismatch" {
+		next.Collection.RetireUnavailable(c.now().UnixMilli(), next.WriterStopped)
+	}
+	err := c.commits.Commit(ctx, s.ID, func(commitCtx context.Context) error { return c.app.CommitLocalUsage(commitCtx, next, nil) })
+	if err == nil {
+		*s = next
+		if !next.Collection.Reading() {
+			c.log.WarnContext(ctx, "native usage collection stopped", "source_id", s.ID, "collection_epoch", s.Collection.Epoch, "state", s.Collection.State, "reason", s.Collection.RetirementReason, "error_code", s.Collection.ErrorCode)
+		}
+	} else {
+		c.retries.Failed(s.ID, c.now().UnixMilli())
+	}
+	return err
 }

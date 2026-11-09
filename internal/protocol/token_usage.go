@@ -124,10 +124,16 @@ type UsageExecution struct {
 }
 
 type UsageCoverage struct {
-	Sources        int64  `json:"sources"`
-	Pending        int64  `json:"pending"`
-	LegacyRequests int64  `json:"legacy_requests"`
-	LastSyncedAt   *int64 `json:"last_synced_at"`
+	RetiredIncomplete int64  `json:"retired_incomplete,omitempty"`
+	Empty             int64  `json:"empty,omitempty"`
+	NeedsReconcile    int64  `json:"needs_reconcile,omitempty"`
+	Unobserved        int64  `json:"unobserved,omitempty"`
+	Dormant           int64  `json:"dormant,omitempty"`
+	Active            int64  `json:"active,omitempty"`
+	Sources           int64  `json:"sources"`
+	Pending           int64  `json:"pending"`
+	LegacyRequests    int64  `json:"legacy_requests"`
+	LastSyncedAt      *int64 `json:"last_synced_at"`
 }
 
 type UsageIssue struct {

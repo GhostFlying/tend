@@ -80,13 +80,14 @@ type MaintenanceAuthorization struct {
 
 // RunnerControl is the durable, revisioned host control sent by the server.
 type RunnerControl struct {
-	Extensions             *ExtensionTarget               `json:"extensions,omitempty"`
-	BoundedRecoveryRelease *BoundedRunnerAdmissionRelease `json:"bounded_recovery_release,omitempty"`
-	CancelledUpgradeID     string                         `json:"cancelled_upgrade_id,omitempty"`
-	Upgrade                *RunnerUpgradeTarget           `json:"upgrade,omitempty"`
-	Revision               int64                          `json:"revision"`
-	Mode                   string                         `json:"mode"`
-	UpgradeID              string                         `json:"upgrade_id,omitempty"`
-	ReleaseID              string                         `json:"release_id,omitempty"`
-	Authorization          *MaintenanceAuthorization      `json:"authorization,omitempty"`
+	UsageCollectionCommands []UsageCollectionCommand       `json:"usage_collection_commands,omitempty"`
+	Extensions              *ExtensionTarget               `json:"extensions,omitempty"`
+	BoundedRecoveryRelease  *BoundedRunnerAdmissionRelease `json:"bounded_recovery_release,omitempty"`
+	CancelledUpgradeID      string                         `json:"cancelled_upgrade_id,omitempty"`
+	Upgrade                 *RunnerUpgradeTarget           `json:"upgrade,omitempty"`
+	Revision                int64                          `json:"revision"`
+	Mode                    string                         `json:"mode"`
+	UpgradeID               string                         `json:"upgrade_id,omitempty"`
+	ReleaseID               string                         `json:"release_id,omitempty"`
+	Authorization           *MaintenanceAuthorization      `json:"authorization,omitempty"`
 }

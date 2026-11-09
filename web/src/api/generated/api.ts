@@ -462,6 +462,11 @@ export interface TendAPI {
   UpdateSharedDeliveryReviewPayload?: UpdateSharedDeliveryReviewPayload;
   UpdateWorkItemChoicePayload?: UpdateWorkItemChoicePayload;
   UpgradeControlPayload?: UpgradeControlPayload;
+  UsageCollectionCommand?: UsageCollectionCommand;
+  UsageCollectionControl?: UsageCollectionControl;
+  UsageCollectionObservation?: UsageCollectionObservation;
+  UsageCollectionPage?: UsageCollectionPage;
+  UsageCollectionSource?: UsageCollectionSource;
   UsagePreview?: UsagePreview;
   UsageReconcile?: UsageReconcile;
   UsageTarget?: UsageTarget;
@@ -1868,6 +1873,7 @@ export interface RunnerControl {
   revision: number;
   upgrade?: RunnerUpgradeTarget;
   upgrade_id?: string;
+  usage_collection_commands?: UsageCollectionCommand[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1961,6 +1967,19 @@ export interface UpdaterSelfTarget {
   authorized?: boolean;
   expires_at_millis: number;
   request_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollectionCommand".
+ */
+export interface UsageCollectionCommand {
+  action: string;
+  expected_epoch: number;
+  expected_revision: number;
+  reason?: string;
+  request_id: string;
+  run_id: string;
+  source_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6437,10 +6456,16 @@ export interface TokenUsageView {
  * via the `definition` "UsageCoverage".
  */
 export interface UsageCoverage {
+  active?: number;
+  dormant?: number;
+  empty?: number;
   last_synced_at: number | null;
   legacy_requests: number;
+  needs_reconcile?: number;
   pending: number;
+  retired_incomplete?: number;
   sources: number;
+  unobserved?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6854,6 +6879,97 @@ export interface CreateWorkItemChoicePayload {
  */
 export interface UpgradeControlPayload {
   action: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollectionControl".
+ */
+export interface UsageCollectionControl {
+  reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollectionObservation".
+ */
+export interface UsageCollectionObservation {
+  collection: UsageCollection;
+  control_request_id?: string;
+  control_status?: string;
+  cursor_files: number;
+  cursor_offset: number;
+  local_source_id: string;
+  pending_request_ids?: string[];
+  run_id: string;
+  sequence: number;
+  session_id: string;
+  thread_id: string;
+  writer_stopped: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollection".
+ */
+export interface UsageCollection {
+  epoch: number;
+  error_code?: string;
+  execution_evidence: string;
+  execution_request_id?: string;
+  first_failure_at?: number;
+  last_progress_at?: number;
+  next_retry_at?: number;
+  policy_version: number;
+  retired_at?: number;
+  retirement_reason?: string;
+  retry_deadline_at?: number;
+  retry_delay_ms?: number;
+  revision: number;
+  state: string;
+  stop_proof?: string;
+  writer_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollectionPage".
+ */
+export interface UsageCollectionPage {
+  more: boolean;
+  next: string;
+  sources: UsageCollectionSource[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollectionSource".
+ */
+export interface UsageCollectionSource {
+  collection: UsageCollection;
+  commands: UsageCollectionCommandStatus[] | null;
+  control_revision: number;
+  conversation_id?: string;
+  coverage: string;
+  cursor_files: number;
+  cursor_offset: number;
+  host_id?: string;
+  id: string;
+  pending_request_ids: string[] | null;
+  provider: string;
+  run_id?: string;
+  session_id: string;
+  thread_id: string;
+  writer_stopped: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UsageCollectionCommandStatus".
+ */
+export interface UsageCollectionCommandStatus {
+  action: string;
+  expected_epoch: number;
+  expected_revision: number;
+  reason?: string;
+  request_id: string;
+  run_id: string;
+  source_id: string;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

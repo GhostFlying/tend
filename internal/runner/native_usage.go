@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
@@ -31,18 +32,37 @@ func (r *Runner) registerUsage(ctx context.Context, as protocol.Assignment, src 
 		}
 	}
 	h := sha256.Sum256([]byte(as.RunID + "\x00" + src.Provider + "\x00" + src.Path))
-	source := journal.UsageSource{ID: hex.EncodeToString(h[:]), RunID: as.RunID, Source: src, Cursors: map[string]nativeusage.Cursor{}}
+	source := journal.UsageSource{Collection: protocol.NewUsageCollection(src.NoDispatchProven, false), ID: hex.EncodeToString(h[:]), RunID: as.RunID, Source: src, Cursors: map[string]nativeusage.Cursor{}}
 	if as.Manager != nil {
 		source.ConversationID = as.Manager.ConversationID
 	}
+	if err := r.cfg.Journal.RegisterUsageSource(ctx, source); err != nil {
+		return err
+	}
+	id, err := r.cfg.Journal.UsageSourceID(ctx, as.RunID, src.Provider, src.ThreadID)
+	if err != nil {
+		return err
+	}
+	source.ID = id
 	if !r.supportsNativeUsage() {
-		return r.cfg.Journal.RegisterUsageSource(ctx, source)
+		return nil
 	}
 	if err := r.queueUsageRegistration(ctx, source); err != nil {
 		return err
 	}
 	r.wakeNativeUsage()
 	return nil
+}
+
+func (r *Runner) activateUsage(ctx context.Context, as protocol.Assignment, src nativeusage.Source) error {
+	if src.Path == "" || src.ThreadID == "" {
+		return nil
+	}
+	id, err := r.cfg.Journal.UsageSourceID(ctx, as.RunID, src.Provider, src.ThreadID)
+	if err != nil {
+		return err
+	}
+	return r.cfg.Journal.ActivateUsageSource(ctx, id, as.RunID+"/"+src.ThreadID)
 }
 
 func (r *Runner) queueUsageRegistration(ctx context.Context, source journal.UsageSource) error {
@@ -80,9 +100,13 @@ func (r *Runner) syncNativeUsage(ctx context.Context) error {
 func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeusage.Retries, active *bool) error {
 	r.controlMu.Lock()
 	supported := r.nativeUsageSupported
+	collectionSupported := r.usageCollectionSupported
 	r.controlMu.Unlock()
 	if !supported {
 		return nil
+	}
+	if r.usageCommits == nil {
+		r.usageCommits = nativeusage.CommitQueue{}
 	}
 	sources, err := r.cfg.Journal.PendingUsageSources(ctx)
 	if err != nil {
@@ -113,14 +137,24 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 	var failures []error
 	blocked := map[string]bool{}
 	for _, p := range requests {
-		if p.Envelope.Operation != protocol.OpRunnerUsageUpload && p.Envelope.Operation != protocol.OpRunnerUsageRegister {
+		if p.Envelope.Operation != protocol.OpRunnerUsageUpload && p.Envelope.Operation != protocol.OpRunnerUsageRegister && p.Envelope.Operation != protocol.OpRunnerUsageCollection {
+			continue
+		}
+		if p.Envelope.Operation == protocol.OpRunnerUsageCollection && !collectionSupported {
+			continue
+		}
+		var scope protocol.UsageUpload
+		_ = json.Unmarshal(p.Envelope.Payload, &scope)
+		if blocked[scope.RunID] {
 			continue
 		}
 		key := "request/" + p.Envelope.RequestID
 		if retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli()) {
 			var input protocol.UsageUpload
 			_ = json.Unmarshal(p.Envelope.Payload, &input)
-			blocked[input.RunID] = true
+			if p.Envelope.Operation != protocol.OpRunnerUsageCollection {
+				blocked[input.RunID] = true
+			}
 			continue
 		}
 		op, err := r.c.do(ctx, r.c.host(), &p.Envelope)
@@ -131,7 +165,9 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 			failures = append(failures, err)
 			var input protocol.UsageUpload
 			if json.Unmarshal(p.Envelope.Payload, &input) == nil {
-				blocked[input.RunID] = true
+				if p.Envelope.Operation != protocol.OpRunnerUsageCollection {
+					blocked[input.RunID] = true
+				}
 			}
 			continue
 		}
@@ -142,7 +178,9 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 			failures = append(failures, op.Error)
 			var input protocol.UsageUpload
 			if json.Unmarshal(p.Envelope.Payload, &input) == nil {
-				blocked[input.RunID] = true
+				if p.Envelope.Operation != protocol.OpRunnerUsageCollection {
+					blocked[input.RunID] = true
+				}
 			}
 			continue
 		}
@@ -153,7 +191,9 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 			failures = append(failures, errors.New("native usage: upload receipt is not a matching committed result"))
 			var input protocol.UsageUpload
 			if json.Unmarshal(p.Envelope.Payload, &input) == nil {
-				blocked[input.RunID] = true
+				if p.Envelope.Operation != protocol.OpRunnerUsageCollection {
+					blocked[input.RunID] = true
+				}
 			}
 			continue
 		}
@@ -182,17 +222,78 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 			}
 			continue
 		}
-		if retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli()) {
+		if _, pending := r.usageCommits[s.ID]; pending {
+			if retries != nil && !retries.Due(key, r.cfg.Now().UnixMilli()) {
+				continue
+			}
+			_, e := r.usageCommits.Retry(ctx, s.ID)
+			if retries != nil {
+				if e != nil {
+					retries.Failed(key, r.cfg.Now().UnixMilli())
+				} else {
+					retries.Succeeded(key)
+				}
+			}
+			if e != nil {
+				failures = append(failures, e)
+			}
+			continue
+		}
+		if retries != nil {
+			retries.Collection(key, s.Collection)
+		}
+		if !s.Collection.Due(r.cfg.Now().UnixMilli()) {
 			continue
 		}
 		if err := r.syncUsageSource(ctx, s, discovery); err != nil {
+			if _, pending := r.usageCommits[s.ID]; pending {
+				if retries != nil {
+					retries.Failed(key, r.cfg.Now().UnixMilli())
+				}
+				failures = append(failures, err)
+				continue
+			}
+			if protocol.CodeOf(err) == protocol.CodeStaleRevision {
+				continue
+			}
+			s.Collection.Failed(r.cfg.Now().UnixMilli(), s.WriterStopped, nativeusage.CollectionError(err))
+			if nativeusage.CollectionError(err) == "identity_mismatch" {
+				s.Collection.RetireUnavailable(r.cfg.Now().UnixMilli(), s.WriterStopped)
+			}
+			if e := r.commitUsage(ctx, s, nil); e != nil {
+				return e
+			}
 			if retries != nil {
-				retries.Failed(key, r.cfg.Now().UnixMilli())
+				retries.Collection(key, s.Collection)
 			}
 			failures = append(failures, err)
 		} else {
 			if retries != nil {
 				retries.Succeeded(key)
+			}
+			if active != nil && s.Collection.Reading() {
+				*active = true
+			}
+		}
+	}
+	if collectionSupported {
+		reports, err := r.cfg.Journal.PendingCollectionReports(ctx)
+		if err != nil {
+			return err
+		}
+		for _, p := range reports {
+			if p.Collection.RetirementReason == "empty" && len(p.PendingRequestIDs) > 0 {
+				continue
+			}
+			env, err := r.newEnvelope(protocol.OpRunnerUsageCollection, protocol.Target{Type: "host", ID: r.cfg.HostID}, p)
+			if err != nil {
+				return err
+			}
+			if err = r.cfg.Journal.QueueCollectionReport(ctx, p, *env); err != nil {
+				if protocol.CodeOf(err) == protocol.CodeStaleRevision {
+					continue
+				}
+				return err
 			}
 			if active != nil {
 				*active = true
@@ -206,10 +307,27 @@ func (r *Runner) syncUsageSource(ctx context.Context, s journal.UsageSource, dis
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if s.WriterStopped && s.Collection.StopProof == "" {
+		s.Collection.Stopped(r.cfg.Now().UnixMilli(), "confirmed-run-writer-stop", s.Collection.Evidence == protocol.UsageNoDispatch && len(s.Cursors) == 0)
+		if err := r.commitUsage(ctx, s, nil); err != nil {
+			return err
+		}
+		return nil
+	}
+	if s.Collection.RetryDeadlineAt != 0 && r.cfg.Now().UnixMilli() >= s.Collection.RetryDeadlineAt {
+		s.Collection.Failed(r.cfg.Now().UnixMilli(), s.WriterStopped, s.Collection.ErrorCode)
+		return r.commitUsage(ctx, s, nil)
+	}
+	cloned := make(map[string]nativeusage.Cursor, len(s.Cursors))
+	for path, cur := range s.Cursors {
+		cur.Models = maps.Clone(cur.Models)
+		cloned[path] = cur
+	}
+	s.Cursors = cloned
 	before, _ := json.Marshal(s)
 	stopped := s.WriterStopped
 	if len(s.Files) == 0 || r.cfg.Now().UnixMilli()-s.DiscoveredAt >= 30000 || (stopped && s.Coverage != "caught_up") {
-		files, err := discovery.Discover(ctx, s.Source, stopped && s.Coverage != "caught_up")
+		files, err := discovery.Discover(ctx, s.Source, len(s.Files) == 0 || stopped && s.Coverage != "caught_up")
 		if err != nil {
 			return err
 		}
@@ -250,6 +368,22 @@ func (r *Runner) syncUsageSource(ctx context.Context, s journal.UsageSource, dis
 		}
 	}
 	s.Coverage = coverage
+	progress := false
+	for p, cur := range s.Cursors {
+		var previous journal.UsageSource
+		_ = json.Unmarshal(before, &previous)
+		if cur.Offset > previous.Cursors[p].Offset || cur.FileID != previous.Cursors[p].FileID {
+			progress = true
+			break
+		}
+	}
+	s.Collection.ReadSucceeded(r.cfg.Now().UnixMilli(), len(samples) > 0 || progress, caughtUp, stopped, false)
+	if len(samples) > 0 {
+		s.Collection.Evidence = protocol.UsageObserved
+	}
+	if !caughtUp && len(samples) < 256 {
+		s.Collection.Failed(r.cfg.Now().UnixMilli(), stopped, "incomplete_record")
+	}
 	after, _ := json.Marshal(s)
 	if env == nil && string(before) == string(after) {
 		if !caughtUp {
@@ -257,8 +391,15 @@ func (r *Runner) syncUsageSource(ctx context.Context, s journal.UsageSource, dis
 		}
 		return nil
 	}
-	if err := r.cfg.Journal.QueueUsage(ctx, s, env); err != nil {
+	if err := r.commitUsage(ctx, s, env); err != nil {
 		return fmt.Errorf("runner: persist native usage batch: %w", err)
 	}
 	return nil
+}
+
+func (r *Runner) commitUsage(ctx context.Context, s journal.UsageSource, env *protocol.Envelope) error {
+	if r.usageCommits == nil {
+		r.usageCommits = nativeusage.CommitQueue{}
+	}
+	return r.usageCommits.Commit(ctx, s.ID, func(commitCtx context.Context) error { return r.cfg.Journal.QueueUsage(commitCtx, s, env) })
 }

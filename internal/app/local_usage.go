@@ -11,13 +11,15 @@ import (
 )
 
 type LocalUsageSource struct {
-	RunID          string
-	WriterStopped  bool
-	Coverage       string
-	ID             string
-	ConversationID string
-	Source         json.RawMessage
-	Cursors        json.RawMessage
+	Collection       protocol.UsageCollection
+	ExpectedRevision int64
+	RunID            string
+	WriterStopped    bool
+	Coverage         string
+	ID               string
+	ConversationID   string
+	Source           json.RawMessage
+	Cursors          json.RawMessage
 }
 
 // RegisteredNativeUsageRuns supplies only ledger-backed identities to central
@@ -44,7 +46,109 @@ func (a *App) RegisterLocalUsage(ctx context.Context, s LocalUsageSource) error 
 		} else if _, err := store.AgentConversation(ctx, tx.Q(), s.ConversationID); err != nil {
 			return err
 		}
-		result, err := tx.Exec(ctx, `INSERT INTO token_usage_local_sources(source_key,run_id,conversation_id,source_json,writer_stopped,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET writer_stopped=excluded.writer_stopped,coverage=CASE WHEN token_usage_local_sources.writer_stopped<>excluded.writer_stopped THEN 'pending' ELSE token_usage_local_sources.coverage END WHERE token_usage_local_sources.writer_stopped<>excluded.writer_stopped`, s.ID, s.RunID, s.ConversationID, string(s.Source), s.WriterStopped, a.now().UnixMilli())
+		var metadata struct {
+			NoDispatchProven bool   `json:"no_dispatch_proven"`
+			WriterID         string `json:"writer_id"`
+			Path             string `json:"path"`
+			Provider         string `json:"provider"`
+			ThreadID         string `json:"thread_id"`
+			SessionID        string `json:"session_id"`
+		}
+		if err := json.Unmarshal(s.Source, &metadata); err != nil {
+			return err
+		}
+		previous, err := localUsageSource(ctx, tx.Q(), s.ID)
+		if err == sql.ErrNoRows && metadata.ThreadID != "" && metadata.Provider != "" {
+			var known string
+			e := tx.Q().QueryRowContext(ctx, `SELECT source_key FROM token_usage_local_sources WHERE run_id=? AND (?<>'' OR conversation_id=?) AND json_extract(source_json,'$.provider')=? AND json_extract(source_json,'$.thread_id')=? ORDER BY writer_stopped,source_key LIMIT 1`, s.RunID, s.RunID, s.ConversationID, metadata.Provider, metadata.ThreadID).Scan(&known)
+			if e == nil {
+				s.ID = known
+				previous, err = localUsageSource(ctx, tx.Q(), known)
+			} else if e != sql.ErrNoRows {
+				return e
+			}
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			if previous.RunID != s.RunID || previous.ConversationID != s.ConversationID {
+				return protocol.Errorf(protocol.CodeForbidden, "usage source ownership changed")
+			}
+			var prior struct{ Path, SessionID string }
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(previous.Source, &fields); err != nil {
+				return err
+			}
+			_ = json.Unmarshal(fields["path"], &prior.Path)
+			_ = json.Unmarshal(fields["session_id"], &prior.SessionID)
+			if prior.SessionID != "" && metadata.SessionID != "" && prior.SessionID != metadata.SessionID {
+				return protocol.Errorf(protocol.CodeForbidden, "usage source session changed")
+			}
+			if previous.WriterStopped == s.WriterStopped && (metadata.WriterID == "" || metadata.WriterID == previous.Collection.WriterID) {
+				if prior.Path == metadata.Path {
+					return nil
+				}
+				var current map[string]json.RawMessage
+				if err := json.Unmarshal(s.Source, &current); err != nil {
+					return err
+				}
+				if metadata.SessionID == "" && prior.SessionID != "" {
+					current["session_id"], _ = json.Marshal(prior.SessionID)
+				}
+				if metadata.WriterID == "" && previous.Collection.WriterID != "" {
+					current["writer_id"], _ = json.Marshal(previous.Collection.WriterID)
+				}
+				previous.Source, _ = json.Marshal(current)
+				var cursors map[string]json.RawMessage
+				if err := json.Unmarshal(previous.Cursors, &cursors); err != nil {
+					return err
+				}
+				if cursor, ok := cursors[prior.Path]; ok {
+					if _, exists := cursors[metadata.Path]; !exists {
+						cursors[metadata.Path] = cursor
+						previous.Cursors, _ = json.Marshal(cursors)
+					}
+				}
+				return saveLocalUsage(ctx, tx, previous, a.now().UnixMilli())
+			}
+			if s.WriterStopped && previous.Collection.WriterID != "" && metadata.WriterID != previous.Collection.WriterID {
+				return protocol.Errorf(protocol.CodeStaleRevision, "stopped usage writer changed")
+			}
+			if !s.WriterStopped && !previous.WriterStopped && previous.Collection.WriterID != "" && metadata.WriterID != previous.Collection.WriterID {
+				return protocol.Errorf(protocol.CodeStaleRevision, "original usage writer has not stopped")
+			}
+			if !s.WriterStopped {
+				previous.Collection.Activate("", metadata.WriterID)
+				previous.Collection.WriterID = metadata.WriterID
+				previous.Collection.StopProof = ""
+			}
+			previous.WriterStopped = s.WriterStopped
+			if metadata.SessionID == "" && prior.SessionID != "" {
+				var current map[string]json.RawMessage
+				if err := json.Unmarshal(s.Source, &current); err != nil {
+					return err
+				}
+				current["session_id"], _ = json.Marshal(prior.SessionID)
+				s.Source, _ = json.Marshal(current)
+			}
+			previous.Source = s.Source
+			previous.Coverage = "pending"
+			if s.WriterStopped {
+				previous.Collection.Stopped(a.now().UnixMilli(), "registered-stopped-writer", false)
+			}
+			return saveLocalUsage(ctx, tx, previous, a.now().UnixMilli())
+		}
+		s.Collection = protocol.NewUsageCollection(metadata.NoDispatchProven, s.WriterStopped)
+		s.Collection.WriterID = metadata.WriterID
+		if s.WriterStopped {
+			s.Collection.Stopped(a.now().UnixMilli(), "registered-stopped-writer", metadata.NoDispatchProven)
+		}
+		raw, err := json.Marshal(s.Collection)
+		if err != nil {
+			return err
+		}
+		result, err := tx.Exec(ctx, `INSERT INTO token_usage_local_sources(source_key,run_id,conversation_id,source_json,writer_stopped,collection_json,collection_state,updated_at) VALUES(?,?,?,?,?,?,?,?)`, s.ID, s.RunID, s.ConversationID, string(s.Source), s.WriterStopped, string(raw), s.Collection.State, a.now().UnixMilli())
 		return usageCollectionChanged(tx, result, err)
 	})
 	if err == nil {
@@ -59,17 +163,25 @@ func (a *App) LocalUsageSources(ctx context.Context, conversation string) ([]Loc
 func (a *App) localUsageSources(ctx context.Context, conversation string, pending bool) ([]LocalUsageSource, error) {
 	var out []LocalUsageSource
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT source_key,run_id,conversation_id,source_json,cursors_json,coverage,writer_stopped FROM token_usage_local_sources WHERE (?='' OR conversation_id=?) AND (?=0 OR NOT(writer_stopped=1 AND coverage='caught_up')) ORDER BY source_key`, conversation, conversation, pending)
+		query := `SELECT source_key,run_id,conversation_id,source_json,cursors_json,coverage,writer_stopped,collection_json FROM token_usage_local_sources WHERE (?='' OR conversation_id=?)`
+		if pending {
+			query += ` AND collection_state IN ('active','settling')`
+		}
+		rows, err := tx.Q().QueryContext(ctx, query+` ORDER BY source_key`, conversation, conversation)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var s LocalUsageSource
-			var source, cursors string
-			if err = rows.Scan(&s.ID, &s.RunID, &s.ConversationID, &source, &cursors, &s.Coverage, &s.WriterStopped); err != nil {
+			var source, cursors, collection string
+			if err = rows.Scan(&s.ID, &s.RunID, &s.ConversationID, &source, &cursors, &s.Coverage, &s.WriterStopped, &collection); err != nil {
 				return err
 			}
+			if err = json.Unmarshal([]byte(collection), &s.Collection); err != nil {
+				return err
+			}
+			s.ExpectedRevision = s.Collection.Revision
 			s.Source = json.RawMessage(source)
 			s.Cursors = json.RawMessage(cursors)
 			out = append(out, s)
@@ -84,17 +196,18 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 		s.ConversationID = store.ConversationID(s.ConversationID)
 	}
 	return a.write(ctx, func(tx *store.Tx) error {
-		var registered, registeredRun string
-		var stopped bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id,run_id,writer_stopped FROM token_usage_local_sources WHERE source_key=?`, s.ID).Scan(&registered, &registeredRun, &stopped); err != nil {
+		current, err := localUsageSource(ctx, tx.Q(), s.ID)
+		if err != nil {
 			return err
 		}
-		if stopped != s.WriterStopped {
+		if current.WriterStopped != s.WriterStopped || current.Collection.Epoch != s.Collection.Epoch || current.Collection.Revision != s.ExpectedRevision {
 			return protocol.Errorf(protocol.CodeStaleRevision, "usage source lifecycle changed")
 		}
+		registered, registeredRun := current.ConversationID, current.RunID
 		if registered != s.ConversationID || registeredRun != s.RunID {
 			return protocol.Errorf(protocol.CodeForbidden, "usage source ownership changed")
 		}
+
 		role := "main"
 		if registered != "main" {
 			role = "consultation"
@@ -125,18 +238,20 @@ func (a *App) CommitLocalUsage(ctx context.Context, s LocalUsageSource, samples 
 				return err
 			}
 		}
-		result, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET source_json=?,cursors_json=?,coverage=?,updated_at=? WHERE source_key=? AND writer_stopped=? AND (source_json<>? OR cursors_json<>? OR coverage<>?)`, string(s.Source), string(s.Cursors), s.Coverage, a.now().UnixMilli(), s.ID, s.WriterStopped, string(s.Source), string(s.Cursors), s.Coverage)
-		return usageCollectionChanged(tx, result, err)
+		return saveLocalUsage(ctx, tx, s, a.now().UnixMilli())
 	})
 }
 
 // StopLocalUsage records a native writer boundary without deleting its history.
 // Empty thread closes every local source of the stopped owning harness.
-func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string) error {
+func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string, writerIDs ...string) error {
+	writer := ""
+	if len(writerIDs) > 0 {
+		writer = writerIDs[0]
+	}
 	conversation = store.ConversationID(conversation)
 	err := a.write(ctx, func(tx *store.Tx) error {
-		result, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND conversation_id=? AND (?='' OR json_extract(source_json,'$.thread_id')=?)`, conversation, thread, thread)
-		return usageCollectionChanged(tx, result, err)
+		return stopLocalUsage(ctx, tx, conversation, thread, "", writer, a.now().UnixMilli())
 	})
 	if err == nil {
 		a.wakeLocalUsage()
@@ -144,10 +259,13 @@ func (a *App) StopLocalUsage(ctx context.Context, conversation, thread string) e
 	return err
 }
 
-func (a *App) StopRunUsage(ctx context.Context, run string) error {
+func (a *App) StopRunUsage(ctx context.Context, run string, writerIDs ...string) error {
+	writer := ""
+	if len(writerIDs) > 0 {
+		writer = writerIDs[0]
+	}
 	err := a.write(ctx, func(tx *store.Tx) error {
-		result, err := tx.Exec(ctx, `UPDATE token_usage_local_sources SET writer_stopped=1,coverage='pending' WHERE writer_stopped=0 AND run_id=?`, run)
-		return usageCollectionChanged(tx, result, err)
+		return stopLocalUsage(ctx, tx, "", "", run, writer, a.now().UnixMilli())
 	})
 	if err == nil {
 		a.wakeLocalUsage()

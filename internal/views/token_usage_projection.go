@@ -271,7 +271,7 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 		sort.SliceStable(v.Sessions, func(i, j int) bool { return v.Sessions[i].Totals.Total > v.Sessions[j].Totals.Total })
 		sort.SliceStable(v.Issues, func(i, j int) bool { return v.Issues[i].Totals.Total > v.Issues[j].Totals.Total })
 	}
-	if err = q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(coverage<>'caught_up'),0),MAX(updated_at) FROM (SELECT coverage,updated_at FROM token_usage_sources UNION ALL SELECT coverage,updated_at FROM token_usage_local_sources)`).Scan(&v.Collection.Sources, &v.Collection.Pending, &v.Collection.LastSyncedAt); err != nil {
+	if err = usageCollectionTotals(ctx, q, &v.Collection); err != nil {
 		return v, err
 	}
 	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(legacy_requests),0) FROM token_usage_summaries`).Scan(&v.Collection.LegacyRequests)

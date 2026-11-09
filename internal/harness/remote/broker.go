@@ -22,6 +22,7 @@ import (
 
 // BrokerConfig enables center-side native processes, using the center user's home.
 type BrokerConfig struct {
+	BeforeUsageDispatch func(context.Context, string, string, string) error           `json:"-"`
 	QuestionPredecessor func(context.Context, string) (string, error)                 `json:"-"`
 	RegisteredUsageRuns func(context.Context) ([]string, error)                       `json:"-"`
 	UsageSource         func(context.Context, string, nativeusage.Source, bool) error `json:"-"`
@@ -47,6 +48,7 @@ type Broker struct {
 	wg           sync.WaitGroup
 }
 type nativeRun struct {
+	writerID        string
 	ctx             context.Context
 	cancel          context.CancelFunc
 	ready           chan struct{}
@@ -205,7 +207,10 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 					}
 					run.mu.Unlock()
 					if channel == "control" && result.Thread.Path != nil {
-						b.trackUsage(runID, nativeusage.Source{Path: *result.Thread.Path, Provider: "traex", ThreadID: result.Thread.ID, SessionID: result.Thread.SessionID}, false)
+						run.mu.Lock()
+						writerID, fresh := run.writerID, string(frame.ID) == run.startID
+						run.mu.Unlock()
+						b.trackUsage(runID, nativeusage.Source{NoDispatchProven: fresh && writerID != "", WriterID: writerID, Path: *result.Thread.Path, Provider: "traex", ThreadID: result.Thread.ID, SessionID: result.Thread.SessionID}, false)
 					}
 				}
 			}
@@ -257,6 +262,17 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 				continue
 			}
 			if !forward {
+				continue
+			}
+		}
+		var dispatch nativeFrame
+		if json.Unmarshal(data, &dispatch) == nil && (dispatch.Method == "turn/start" || dispatch.Method == "turn/steer" || dispatch.Method == "thread/compact/start") && b.cfg.BeforeUsageDispatch != nil {
+			var params struct {
+				ThreadID string `json:"threadId"`
+			}
+			_ = json.Unmarshal(dispatch.Params, &params)
+			if err := b.recordUsageDispatch(bridgeCtx, runID, params.ThreadID, "native/"+runID+"/"+string(dispatch.ID)); err != nil {
+				_ = writeFrame(bridgeCtx, client, map[string]any{"id": dispatch.ID, "error": map[string]any{"code": -32603, "message": "native usage dispatch evidence is unavailable"}})
 				continue
 			}
 		}
@@ -426,6 +442,9 @@ func (b *Broker) serveExec(w http.ResponseWriter, r *http.Request, runID string,
 		b.log.WarnContext(ctx, "central native process unavailable", "run_id", runID)
 		return
 	}
+	run.mu.Lock()
+	run.writerID = nativeusage.WriterIdentity(cmd.Process.Pid)
+	run.mu.Unlock()
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait(); cancel() }()
 	defer func() { cancel(); procx.KillGroup(cmd); <-exited; b.stopUsage(runID) }()

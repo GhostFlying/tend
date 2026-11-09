@@ -26,7 +26,41 @@ func (j *Journal) HistoricalRun(ctx context.Context, id string) (Run, error) {
 
 func (j *Journal) ConfirmStopped(ctx context.Context, id string) error {
 	defer j.WakeUsage()
-	return j.exec(ctx, `UPDATE runs SET stopped_confirmed=1 WHERE run_id=?`, id)
+	return j.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET stopped_confirmed=1 WHERE run_id=?`, id); err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT source_id FROM native_usage_sources WHERE run_id=? AND writer_stopped=0`, id)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var key string
+			if err = rows.Scan(&key); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			ids = append(ids, key)
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return err
+		}
+		for _, key := range ids {
+			s, err := getUsageSource(ctx, tx, key)
+			if err != nil {
+				return err
+			}
+			s.WriterStopped = true
+			s.Collection.Stopped(j.now().UnixMilli(), "confirmed-owned-run-close:"+id, len(s.Cursors) == 0)
+			if err = saveUsageSource(ctx, tx, s, nil, j.now().UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (j *Journal) QueueWorkspaceRelease(ctx context.Context, p protocol.WorkspaceRelease) error {

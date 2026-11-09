@@ -331,6 +331,8 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			return protocol.Operation{}, err
 		}
 		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, value)
+	case protocol.OpRunnerUsageCollection:
+		return s.app.Execute(ctx, p, env, app.ObserveUsageCollection{})
 	case protocol.OpRunnerUsageRegister:
 		return s.app.Execute(ctx, p, env, app.RegisterNativeUsage{})
 	case protocol.OpRunnerUsageUpload:
