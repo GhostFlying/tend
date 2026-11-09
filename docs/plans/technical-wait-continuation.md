@@ -20,7 +20,10 @@ epoch 拒绝。仅放开 resume 入口仍会在后继 claim 时失败。
    未停止原运行以及真实执行者/配置变化继续拒绝，不以新 Task/spec 绕行。
 4. 当前业务责任投影供 Task 准入、pin 保留及后继 claim 共用。旧 Run 责任和
    原持久合同不改写；只有该精确 stopped predecessor 可据承接事实续行，旧
-   live worker 的 epoch 校验保持严格。后继 Run 写入当前责任，仍唯一生成。
+   live worker 的 epoch 校验保持严格。已排队但未领取的原续行动作也可承接，
+   保持原 action 身份；实际已产生后继 Run 的动作不能据此重新执行。后继
+   Run 写入当前责任，仍唯一生成。执行 pin 按业务 Task 类别解析扩展与 worker
+   runtime，不把管理会话的传输身份当作实际 worker 身份。
 5. 同步 named tool schema/说明、owner CLI 帮助与能力覆盖、查询投影、生成
    schema/types 及 D209。无新 runner 请求或必填字段，无 wire/journal 升级；
    追加存储迁移，旧有效 resume 和 owner 等待语义保持。
@@ -30,7 +33,9 @@ epoch 拒绝。仅放开 resume 入口仍会在后继 claim 时失败。
 - 先复现同 Agent 管理恢复后原 stopped handoff 的 owner resume/claim 失败。
 - 覆盖正式持久承接、唯一后继、最终真实结果与原 Task/spec/history 保留；覆盖
   actor/source 分界、当前协调作用域、CAS、错误/缺失 epoch、pin 变化、原运行
-  未停、unknown 和旧 live Run 仍被拒绝。保留原 owner pause 的严格语义。
+  未停、unknown 和旧 live Run 仍被拒绝；覆盖已排队未领取的原续行动作、管理
+  与 worker runtime 不同、Task 类别扩展不同的有效配置。保留原 owner pause
+  的严格语义。
 - 运行受影响定向与 race 检查、最终候选完整 make check、规定的独立 review
   和 CI；从最新 main 线性合入。完整发布集受控部署后，以正式入口恢复原
   decision，核验同一业务 Task 实际执行，再按真实证据结算原 Action。

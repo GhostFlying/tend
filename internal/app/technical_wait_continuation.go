@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -91,6 +92,19 @@ func admitStoppedResponsibilityAdoption(ctx context.Context, x *Exec, tx *store.
 	if !agreement || handoff == nil || !handoff.Stopped || handoff.DecisionID != v.DecisionID || run.ObservedState != protocol.RunFinished || run.Role != protocol.RoleImplement || lease.Status != store.LeaseReleased {
 		return protocol.Errorf(protocol.CodeUnknownOutcome, "original execution must be a proved stopped implementation handoff")
 	}
+	if v.ContinuationActionID != "" {
+		action, err := store.GetAction(ctx, tx.Q(), v.ContinuationActionID)
+		if err != nil {
+			return err
+		}
+		var claimed bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE action_id=?)`, action.ActionID).Scan(&claimed); err != nil {
+			return err
+		}
+		if action.Status != protocol.ActionPending || claimed {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "existing continuation must be an unclaimed pending action")
+		}
+	}
 	var active bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=? AND observed_state NOT IN ('finished','failed'))`, v.TaskID).Scan(&active); err != nil {
 		return err
@@ -109,16 +123,27 @@ func admitStoppedResponsibilityAdoption(ctx context.Context, x *Exec, tx *store.
 	if manager.State != "assigned" || manager.AssignmentEpoch != issue.AssignmentEpoch || manager.Pin == nil {
 		return protocol.Errorf(protocol.CodeStaleRevision, "current manager responsibility changed")
 	}
-	current, err := store.WorkerPinForManager(ctx, tx.Q(), *manager.Pin)
-	if err != nil {
-		return err
-	}
-	if contract.Execution == nil || original == nil || *contract.Execution != *original || *original != current || manager.Pin.Profile != original.Profile || manager.Pin.Runtime != original.Runtime {
-		return protocol.Errorf(protocol.CodeStaleRevision, "stopped continuation requires the same complete named execution pin")
-	}
 	task, err := store.GetTask(ctx, tx.Q(), v.TaskID)
 	if err != nil {
 		return err
+	}
+	rawSpec, err := store.GetSpec(ctx, tx.Q(), task.TaskID, task.SpecVersion)
+	if err != nil {
+		return err
+	}
+	var spec domain.Spec
+	if err := json.Unmarshal([]byte(rawSpec), &spec); err != nil {
+		return err
+	}
+	if spec.AgentSelection == nil {
+		return protocol.Errorf(protocol.CodeStaleRevision, "stopped continuation has no frozen Task Agent selection")
+	}
+	current, err := ownerTaskWorkerPin(ctx, tx.Q(), *manager.Pin, spec.AgentSelection.Implementation.CategoryID)
+	if err != nil {
+		return err
+	}
+	if contract.Execution == nil || original == nil || *contract.Execution != *original || *original != current {
+		return protocol.Errorf(protocol.CodeStaleRevision, "stopped continuation requires the same complete named execution pin")
 	}
 	return tx.InsertResponsibilityAdoption(ctx, store.ResponsibilityAdoption{RequestDomain: x.Principal.DedupDomain(), RequestID: x.Env.RequestID, TaskID: v.TaskID, SpecVersion: task.SpecVersion, TaskControlRevision: task.ControlRevision, DecisionID: v.DecisionID, ContinuationRevision: v.Revision, SourceRunID: v.RunID, IssueID: issue.IssueID, FromAssignmentEpoch: contract.AssignmentEpoch, AssignmentEpoch: issue.AssignmentEpoch, AgentRef: contract.AgentRef, Execution: *original, Reason: strings.TrimSpace(p.Reason), CreatedAt: x.Now.UnixMilli()})
 }

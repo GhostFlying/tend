@@ -20,7 +20,7 @@ func TestOwnerSelfExecutionResolvesTaskCategoryAndRetainedScope(t *testing.T) {
 	}
 }
 
-func testOwnerExtensionRuntime(t *testing.T, split, ownerManaged, workerManaged bool) {
+func ownerExtensionHarness(t *testing.T, split, ownerManaged, workerManaged bool) (*harness, *protocol.RunnerRuntime, protocol.Issue, protocol.ExtensionRelease, protocol.AgentInventoryProjection) {
 	h, r, p, _ := inventorySetup(t)
 	p.FormatVersion = 2
 	p.Runtimes[0].CLI = "codex"
@@ -108,7 +108,12 @@ func testOwnerExtensionRuntime(t *testing.T, split, ownerManaged, workerManaged 
 		t.Fatal("owner category not frozen", assignment)
 	}
 	stopOwnerClaim(t, h, assignment)
-	op = createOwnerExecution(t, h, canonicalTaskIssue(t, h, issue.IssueID), "reviewer")
+	return h, r, canonicalTaskIssue(t, h, issue.IssueID), release, p
+}
+
+func testOwnerExtensionRuntime(t *testing.T, split, ownerManaged, workerManaged bool) {
+	h, r, issue, release, p := ownerExtensionHarness(t, split, ownerManaged, workerManaged)
+	op := createOwnerExecution(t, h, canonicalTaskIssue(t, h, issue.IssueID), "reviewer")
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
