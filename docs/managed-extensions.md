@@ -1,6 +1,6 @@
 # 按 Category / Agent 管理扩展
 
-Refs: D200。[实施计划](plans/managed-extensions.md)与 [本机环境](codex-environments.md)分别说明发布合同和本机状态。当前未配置 `managed_extensions` 的 runtime 保持旧行为；程序升级不会自动迁移环境或选择资源。
+Refs: D202。[实施计划](plans/managed-extensions.md)与 [本机环境](codex-environments.md)分别说明发布合同和本机状态。当前未配置 `managed_extensions` 的 runtime 保持旧行为；程序升级不会自动迁移环境或选择资源。
 
 ## 编辑和发布
 

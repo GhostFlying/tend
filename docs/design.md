@@ -1,6 +1,6 @@
 # tend：系统设计 v0.2（相对 v0.1 的调整）
 
-## D200：按 Category / Agent 托管用户级扩展
+## D202：按 Category / Agent 托管用户级扩展
 
 server 托管 skills、完整 plugins、MCP 定义与用户级 AGENTS.md，草稿编辑与发布分开。包获取和本机视图由独立 extensions/codexenv 模块负责；app/store 只保存可移植资源、组合 revision、发布引用与执行 pin，发布写入遵守去重、CAS、事务和事件边界。包内容先不可变暂存，引用提交后才生效。CLI 经组装注入获取包，不直接依赖 runner/server；serverkit、runner、harness 可依赖 extensions，extensions 依赖 protocol、blobstore、codexenv/procx，不依赖 app/store。app 在事务内仅调用纯组合/校验函数，文件暂存与注入的原生加载探针在事务外执行。
 
@@ -203,7 +203,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D194 | Issue 上下文提供可选快照及增量读取，固定事件区间、分页原件索引并保留稳定会话；共享 PR reviewer 可发现对应实现检查证据，自主判断复用或复跑，整批维护统一验证和交付。 | 实现中 |
 | D196 | 托管会话交接与正常自动上下文各只注入至多 2 KiB 索引；原文按需读取，索引不确认审阅。移除自动摘要与摘要交接，保留独立 compact、历史审计及原生未知请求对账。替代 D81 的摘要流程，调整 D17/D18 的托管注入语义。 | 实现中 |
 | D197 | 本机 Codex 使用固定独立 home、clean/projection 能力快照、严格 Linux 文件视图与可对账的本机管理；运行和恢复引用控制采用边界，不改变角色权限与线上协议。 | 已实现 |
-| D200 | server 全托管用户级扩展与指令，按执行 category + Agent 合成，显式发布并自动分发，保留项目规则、角色权限及历史执行引用。 | 实施中 |
+| D202 | server 全托管用户级扩展与指令，按执行 category + Agent 合成，显式发布并自动分发，保留项目规则、角色权限及历史执行引用。 | 实施中 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
