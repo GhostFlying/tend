@@ -30,24 +30,46 @@ import (
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
 const (
+	maintenanceAssemblyFixtureTimeout  = 2 * time.Minute
 	maintenanceAssemblySetupTimeout    = 25 * time.Second
 	maintenanceAssemblyScenarioTimeout = 25 * time.Second
 	maintenanceAssemblyProcessTimeout  = maintenanceAssemblySetupTimeout + maintenanceAssemblyScenarioTimeout + 5*time.Second
 )
+
+var maintenanceAssemblyFixture storefixture.Template
+
+func prepareMaintenanceAssemblyLedger(t *testing.T) string {
+	t.Helper()
+	// Schema construction is test data preparation, not the successor's startup
+	// budget. Each child receives a private closed ledger, never a live writer.
+	ctx, cancel := context.WithTimeout(t.Context(), maintenanceAssemblyFixtureTimeout)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "tend.db")
+	db, err := maintenanceAssemblyFixture.Open(ctx, path, time.Now)
+	if err != nil {
+		t.Fatalf("prepare current-schema assembly fixture: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 // This test runs the actual production assembly, mainthread managers and local
 // control handler. Only the updater transport and external session opener are
 // replaced; hosted draining and startup readiness are never stubbed true.
 func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 	if os.Getenv("TEND_MAINTENANCE_ASSEMBLY_TEST") != "1" {
+		ledger := prepareMaintenanceAssemblyLedger(t)
 		ctx, cancel := context.WithTimeout(t.Context(), maintenanceAssemblyProcessTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCommittedMaintenanceProductionAssembly$", "-test.v")
-		cmd.Env = append(os.Environ(), "TEND_MAINTENANCE_ASSEMBLY_TEST=1", "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
+		cmd.Env = append(os.Environ(), "TEND_MAINTENANCE_ASSEMBLY_TEST=1", "TEND_MAINTENANCE_ASSEMBLY_LEDGER="+ledger, "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("production assembly subprocess: %v\n%s", err, raw)
@@ -60,10 +82,11 @@ func TestCommittedMaintenanceProductionAssembly(t *testing.T) {
 
 func TestReceiptRecoveryStartupProductionAssembly(t *testing.T) {
 	if os.Getenv("TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST") != "1" {
+		ledger := prepareMaintenanceAssemblyLedger(t)
 		ctx, cancel := context.WithTimeout(t.Context(), maintenanceAssemblyProcessTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestReceiptRecoveryStartupProductionAssembly$", "-test.v")
-		cmd.Env = append(os.Environ(), "TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST=1", "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
+		cmd.Env = append(os.Environ(), "TEND_RECEIPT_RECOVERY_ASSEMBLY_TEST=1", "TEND_MAINTENANCE_ASSEMBLY_LEDGER="+ledger, "TEND_UPDATER_LAUNCH_ID=maintenance-assembly-process", "TEND_UPDATER_PROCESS_INSTANCE_ID=maintenance-assembly-process", "TEND_FORWARD_RECOVERY_ID=", "TEND_FORWARD_RECOVERY_SOCKET=")
 		raw, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("receipt recovery assembly subprocess: %v\n%s", err, raw)
@@ -81,8 +104,8 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 	mark := func(next string) { phase = next; t.Logf("assembly phase=%s elapsed=%s", phase, time.Since(started)) }
 	defer func() { t.Logf("assembly last_phase=%s elapsed=%s", phase, time.Since(started)) }()
 	mark("seed-open")
-	// Fresh migrations construct the retained ledger. The production scenario
-	// below reopens that ledger and has its own bounded recovery budget.
+	// The parent prepared and closed a private current-schema ledger. Seeding
+	// retained facts and the real production reopen keep their separate budgets.
 	setupCtx, setupCancel := context.WithTimeout(t.Context(), maintenanceAssemblySetupTimeout)
 	defer setupCancel()
 	root, err := os.MkdirTemp("", "tend-ma-")
@@ -90,12 +113,13 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	data := filepath.Join(root, "data")
-	if err := os.Mkdir(data, 0o700); err != nil {
-		t.Fatal(err)
+	ledger := os.Getenv("TEND_MAINTENANCE_ASSEMBLY_LEDGER")
+	if ledger == "" {
+		t.Fatal("assembly child has no prepared ledger")
 	}
+	data := filepath.Dir(ledger)
 	ids := protocol.NewULIDGen(time.Now, nil)
-	db, err := store.Open(setupCtx, filepath.Join(data, "tend.db"), time.Now)
+	db, err := store.Open(setupCtx, ledger, time.Now)
 	if err != nil {
 		t.Fatalf("prepare maintenance assembly ledger: %v", err)
 	}
