@@ -32,26 +32,30 @@ type DecisionContinuationPolicy struct {
 // ResumeDecisionContinuationPayload addresses the independently versioned
 // continuation, in addition to the task control revision in the envelope.
 type ResumeDecisionContinuationPayload struct {
-	ExpectedRevision int64  `json:"expected_revision"`
-	SourceMessageID  string `json:"source_message_id,omitempty"`
+	ExpectedRevision        int64  `json:"expected_revision"`
+	SourceMessageID         string `json:"source_message_id,omitempty"`
+	ExpectedAssignmentEpoch *int64 `json:"expected_assignment_epoch,omitempty"`
+	Reason                  string `json:"reason,omitempty"`
 }
 
 // DecisionContinuationView distinguishes recorded intent, physical readiness,
 // and an already committed successor. Legacy has no recorded policy; a ready
 // typed intent can still have a blocker.
 type DecisionContinuationView struct {
-	DecisionID           string                      `json:"decision_id"`
-	RunID                string                      `json:"run_id"`
-	TaskID               string                      `json:"task_id"`
-	Revision             int64                       `json:"revision"`
-	DecisionVersion      int64                       `json:"decision_version"`
-	TaskControlRevision  int64                       `json:"task_control_revision"`
-	Policy               *DecisionContinuationPolicy `json:"policy,omitempty"`
-	State                string                      `json:"state"`
-	ResumeCondition      string                      `json:"resume_condition"`
-	BlockedReason        string                      `json:"blocked_reason,omitempty"`
-	ContinuationActionID string                      `json:"continuation_action_id,omitempty"`
-	SuccessorRunID       string                      `json:"successor_run_id,omitempty"`
-	AnswerRequestID      string                      `json:"answer_request_id,omitempty"`
-	ResumeRequestID      string                      `json:"resume_request_id,omitempty"`
+	DecisionID                     string                      `json:"decision_id"`
+	RunID                          string                      `json:"run_id"`
+	TaskID                         string                      `json:"task_id"`
+	Revision                       int64                       `json:"revision"`
+	DecisionVersion                int64                       `json:"decision_version"`
+	TaskControlRevision            int64                       `json:"task_control_revision"`
+	Policy                         *DecisionContinuationPolicy `json:"policy,omitempty"`
+	State                          string                      `json:"state"`
+	ResumeCondition                string                      `json:"resume_condition"`
+	BlockedReason                  string                      `json:"blocked_reason,omitempty"`
+	ContinuationActionID           string                      `json:"continuation_action_id,omitempty"`
+	SuccessorRunID                 string                      `json:"successor_run_id,omitempty"`
+	AnswerRequestID                string                      `json:"answer_request_id,omitempty"`
+	ResumeRequestID                string                      `json:"resume_request_id,omitempty"`
+	CurrentAssignmentEpoch         int64                       `json:"current_assignment_epoch,omitempty"`
+	ResponsibilityAdoptionRequired bool                        `json:"responsibility_adoption_required,omitempty"`
 }

@@ -46,7 +46,7 @@ func TestDecisionContinuationNamedToolsExposeBothCASAndAdmittedSource(t *testing
 			if spec.Name == "decision_continuation_answer" {
 				fields = []string{"version", "continuation"}
 			}
-			if spec.Name == "decision_continuation_resume" || spec.Name == "decision_continuation_answer" {
+			if spec.Name == "decision_continuation_answer" {
 				fields = append(fields, "source_message_id")
 			}
 			for _, field := range fields {
@@ -56,6 +56,14 @@ func TestDecisionContinuationNamedToolsExposeBothCASAndAdmittedSource(t *testing
 			}
 			if spec.Name == "decision_continuation_reconcile" && slices.Contains(payload["required"].([]any), any("source_message_id")) {
 				t.Fatal("machine reconciliation manufactures a new owner-source requirement")
+			}
+			if spec.Name == "decision_continuation_resume" {
+				if slices.Contains(payload["required"].([]any), any("source_message_id")) || slices.Contains(payload["required"].([]any), any("expected_assignment_epoch")) {
+					t.Fatal("technical resume requires a fresh owner message or implicit adoption")
+				}
+				if planningSchemaAt(t, root, "payload", "expected_assignment_epoch")["minimum"] != float64(1) {
+					t.Fatal("explicit responsibility adoption omitted its current epoch")
+				}
 			}
 			if payload["properties"].(map[string]any)["ready"] != nil {
 				t.Fatal("caller readiness claim became a public input")

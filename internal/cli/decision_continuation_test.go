@@ -21,7 +21,7 @@ func TestDecisionContinuationCLICompleteRead(t *testing.T) {
 	e := newTestEnv(t, f.srv.URL)
 	want := protocol.DecisionContinuationView{DecisionID: "question", RunID: "original-run", TaskID: "original-task", Revision: 3, DecisionVersion: 2, TaskControlRevision: 7,
 		Policy: &protocol.DecisionContinuationPolicy{Mode: protocol.DecisionDependency, Reason: "Await exact dependency", Dependency: &protocol.DecisionContinuationDependency{TaskID: "dependency-task", SpecVersion: 4}},
-		State:  "waiting", ResumeCondition: "task_completed_at_spec", BlockedReason: "dependency_not_completed", AnswerRequestID: "original-answer"}
+		State:  "waiting", ResumeCondition: "task_completed_at_spec", BlockedReason: "dependency_not_completed", AnswerRequestID: "original-answer", CurrentAssignmentEpoch: 4, ResponsibilityAdoptionRequired: true}
 	f.answer("GET /api/v1/decisions/question/continuation", want)
 	if code := e.main("decision-continuation", "show", "question", "--json"); code != exitOK {
 		t.Fatal(code, e.errOut.String())
@@ -45,6 +45,8 @@ func TestDecisionContinuationCLIDataFileDryRunAndOriginalReplay(t *testing.T) {
 			if action == "answer" {
 				payload = `{"version":2,"text":"Wait","continuation":{"mode":"wait","reason":"Await independent resume"}}`
 				operation = protocol.OpAnswerDecisionContinuation
+			} else if action == "resume" {
+				payload = `{"expected_revision":3,"expected_assignment_epoch":4,"reason":"Continue the stopped original task under the restored owner"}`
 			}
 			args := []string{"decision-continuation", action, "question", "--revision", "7", "--request-id", continuationCLIRequest, "--data", payload, "--json"}
 			if code := e.main(append(slices.Clone(args), "--dry-run")...); code != exitOK {
@@ -181,7 +183,7 @@ func TestDecideCLICompleteTypedPayloadAndContinuationHelp(t *testing.T) {
 		if code := e.main(command...); code != exitOK {
 			t.Fatal(command, code, e.errOut.String())
 		}
-		for _, text := range []string{"Legacy", "decision-continuation answer", "continue_now", "wait", "dependency", "expected_revision", "request replay"} {
+		for _, text := range []string{"Legacy", "decision-continuation answer", "continue_now", "wait", "dependency", "expected_revision", "expected_assignment_epoch", "Agent-recorded", "request replay"} {
 			if !strings.Contains(e.out.String()+e.errOut.String(), text) {
 				t.Fatal("help omitted contract", command, text)
 			}
