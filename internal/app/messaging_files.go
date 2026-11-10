@@ -27,7 +27,7 @@ func communicationAttachment(ctx context.Context, x *Exec, tx *store.Tx, file, c
 		if err != nil {
 			return errNotFound(err, "finalized attachment unavailable")
 		}
-		if execution != "" && conversation != "main" {
+		if execution != "" && x.Principal.Kind != protocol.PrincipalOwner && conversation != "main" {
 			var issue string
 			if x.coordinationExecution != nil {
 				issue = x.coordinationExecution.IssueID
@@ -49,7 +49,7 @@ func communicationAttachment(ctx context.Context, x *Exec, tx *store.Tx, file, c
 	if err != nil {
 		return err
 	}
-	if execution == "" {
+	if execution == "" || x.Principal.Kind == protocol.PrincipalOwner {
 		return nil
 	}
 	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT a.message_id FROM conversation_message_attachments a WHERE a.file_id=?`, attachment.FileID)
