@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/protocol/schema"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // OwnerTools is injected by assembly; tools does not import the API layer.
@@ -47,7 +49,7 @@ func (s *Service) NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 					continue
 				}
 				for _, spec := range specs {
-					if spec.Capability == m.command.Operation() {
+					if spec.Capability == ownerMutationOperation(m) {
 						out[i].InputSchema = hostedMutationSchema(m.payload)
 						out[i].Description = "Use the owner's " + spec.Capability + " capability with the same domain validation. Source references preserve provenance when supplied; they are not an extra main-Agent permission grant."
 					}
@@ -63,6 +65,36 @@ func (s *Service) NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bool) {
 	if s.owner == nil {
 		return harness.ToolResult{}, false
+	}
+	// Retained typed-answer receipts were recorded under the source-resolving
+	// operation. Let the original handler replay that immutable envelope.
+	if c.Tool == "decision_continuation_answer" {
+		request := c.RequestID
+		if request == "" && c.Native != "" {
+			var err error
+			request, err = s.app.NativeRequestID(ctx, "harness:"+c.Principal.Subject, c.Native)
+			if err != nil {
+				return s.answerHosted(ctx, c, nil, err), true
+			}
+		}
+		old := false
+		err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			record, err := store.GetRequest(ctx, tx.Q(), c.Principal.DedupDomain(), request)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			old = record.Operation == protocol.OpResolveDecisionContinuation
+			return nil
+		})
+		if err != nil {
+			return s.answerHosted(ctx, c, nil, err), true
+		}
+		if old {
+			return harness.ToolResult{}, false
+		}
 	}
 	name := c.Tool
 	arguments := c.Arguments
@@ -102,7 +134,7 @@ func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bo
 		if mutation == nil {
 			return harness.ToolResult{}, false
 		}
-		capability := mutation.command.Operation()
+		capability := ownerMutationOperation(*mutation)
 		name = ""
 		for _, spec := range s.owner.Specs() {
 			if spec.Capability == capability {
@@ -256,4 +288,13 @@ func (s *Service) ownerCatalog(args ownerCatalogArgs) (any, error) {
 		next = items[len(items)-1].Capability
 	}
 	return map[string]any{"items": items, "next": next, "more": more}, nil
+}
+
+// ownerMutationOperation maps named input conveniences to their canonical owner
+// operation. Existing recorded envelopes retain their original operation on replay.
+func ownerMutationOperation(m hostedMutation) string {
+	if m.name == "decision_continuation_answer" {
+		return protocol.OpAnswerDecisionContinuation
+	}
+	return m.command.Operation()
 }
