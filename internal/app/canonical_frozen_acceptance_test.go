@@ -56,8 +56,11 @@ func TestFault_CanonicalAcceptanceRetainsOriginalActionAndNewObligations(t *test
 	if accept.TaskID != task.TaskID || accept.ActionID != action || accept.SpecVersion != 1 || accept.Generation != 1 || accept.Execution.Identity.LocalID != "beta" {
 		t.Fatal("acceptance replaced its action, contract or independent reviewer", accept)
 	}
-	if strings.Contains(string(accept.Spec), "NEW_UNACCEPTED_SCOPE") || strings.Contains(string(accept.Spec), "NEW_ANCESTOR_SCOPE") || strings.Contains(string(accept.Spec), "PRIVATE_OWNER_IMPLEMENTATION_DESIGN") {
-		t.Fatal("acceptance received new scope or private implementation context")
+	if strings.Contains(string(accept.Spec), "NEW_UNACCEPTED_SCOPE") || strings.Contains(string(accept.Spec), "NEW_ANCESTOR_SCOPE") {
+		t.Fatal("acceptance received scope outside its frozen agreement")
+	}
+	if !strings.Contains(string(accept.Spec), "PRIVATE_OWNER_IMPLEMENTATION_DESIGN") || !strings.Contains(string(accept.Spec), "Author-supplied design and investigation input") || !strings.Contains(string(accept.Spec), "not independently verified facts or approval") {
+		t.Fatal("acceptance lost original author design or its evidence distinction")
 	}
 	if !reflect.DeepEqual(frozen, h.storedSpec(task.TaskID, 1)) {
 		t.Fatal("acceptance rewrote the frozen spec")

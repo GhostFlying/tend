@@ -123,8 +123,8 @@ func TestCanonicalTaskOwnerExecutionAcceptanceReviewAndClosure(t *testing.T) {
 	if !ok || acceptance.TaskID != task || acceptance.Role != protocol.RoleAccept || acceptance.RunID == implementation.RunID {
 		t.Fatalf("independent acceptance=%+v op=%+v task=%+v", acceptance, claimOp, h.task(task))
 	}
-	if strings.Contains(string(acceptance.Spec), "PRIVATE_OWNER_IMPLEMENTATION_REASONING") {
-		t.Fatal("implementation rationale leaked to independent acceptance")
+	if !strings.Contains(string(acceptance.Spec), "PRIVATE_OWNER_IMPLEMENTATION_REASONING") || !strings.Contains(string(acceptance.Spec), "Author-supplied design and investigation input") || !strings.Contains(string(acceptance.Spec), "not independently verified facts or approval") {
+		t.Fatal("independent acceptance lost retained author rationale or its evidence distinction")
 	}
 	if op := h.runAs(acceptance, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
