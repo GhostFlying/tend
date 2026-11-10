@@ -19,7 +19,7 @@ func WorkerPinForManager(ctx context.Context, q Querier, manager protocol.RunExe
 		return protocol.RunExecutionPin{}, err
 	}
 	for _, a := range inv.Projection.Agents {
-		if a.Identity != manager.Identity || a.Revision != manager.AgentRevision || !a.Enabled || !slices.Contains(a.Purposes, "worker_run") {
+		if a.Identity != manager.Identity || a.Revision != manager.AgentRevision || !a.Enabled {
 			continue
 		}
 		p := manager

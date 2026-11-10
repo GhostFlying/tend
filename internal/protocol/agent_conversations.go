@@ -169,16 +169,26 @@ type LogicalContextReview struct {
 	WorkItemID string `json:"work_item_id"`
 	Revision   int64  `json:"revision"`
 }
+
+// MessageProcessingReceipt records system delivery/processing, not semantic review.
+type MessageProcessingReceipt struct {
+	MessageID           string `json:"message_id"`
+	ContentRevision     int64  `json:"content_revision"`
+	AssociationRevision int64  `json:"association_revision"`
+	ProcessedAtMillis   int64  `json:"processed_at_ms"`
+}
+
 type LogicalTurnState struct {
-	CoordinationExecutionID string                 `json:"coordination_execution_id,omitempty"`
-	NextEffectSeq           int64                  `json:"next_effect_seq,omitempty"`
-	Awaiting                []PendingClarification `json:"awaiting"`
-	ID                      string                 `json:"logical_turn_id"`
-	Status                  string                 `json:"status"`
-	Reason                  string                 `json:"reason"`
-	RepairAttempts          int                    `json:"repair_attempts"`
-	Messages                []MessageAssociations  `json:"messages"`
-	Contexts                []LogicalContextReview `json:"contexts"`
+	Processing              []MessageProcessingReceipt `json:"processing,omitempty"`
+	CoordinationExecutionID string                     `json:"coordination_execution_id,omitempty"`
+	NextEffectSeq           int64                      `json:"next_effect_seq,omitempty"`
+	Awaiting                []PendingClarification     `json:"awaiting"`
+	ID                      string                     `json:"logical_turn_id"`
+	Status                  string                     `json:"status"`
+	Reason                  string                     `json:"reason"`
+	RepairAttempts          int                        `json:"repair_attempts"`
+	Messages                []MessageAssociations      `json:"messages"`
+	Contexts                []LogicalContextReview     `json:"contexts"`
 }
 
 type TurnClarification struct {

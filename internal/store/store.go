@@ -119,7 +119,8 @@ type Tx struct {
 
 // ReadTx is a read-only transaction.
 type ReadTx struct {
-	tx *sql.Tx
+	tx    *sql.Tx
+	files *blobstore.Store
 }
 
 // Querier is the subset of query methods shared by Tx and ReadTx.
@@ -129,7 +130,7 @@ type Querier interface {
 }
 
 // Q returns the transaction's query interface.
-func (t *Tx) Q() Querier { return t.tx }
+func (t *Tx) Q() Querier { return fileQuerier{Querier: t.tx, files: t.files} }
 
 // Exec runs a statement inside the transaction.
 func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -137,7 +138,7 @@ func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 }
 
 // Q returns the transaction's query interface.
-func (t *ReadTx) Q() Querier { return t.tx }
+func (t *ReadTx) Q() Querier { return fileQuerier{Querier: t.tx, files: t.files} }
 
 // Write runs fn in a write transaction that begins immediately. The
 // transaction commits when fn returns nil and rolls back otherwise.
@@ -206,7 +207,7 @@ func (s *Store) Read(ctx context.Context, fn func(*ReadTx) error) error {
 	// A read-only transaction has nothing to keep; its rollback error is
 	// irrelevant.
 	defer func() { _ = tx.Rollback() }()
-	return fn(&ReadTx{tx: tx})
+	return fn(&ReadTx{tx: tx, files: s.files})
 }
 
 type migration struct {

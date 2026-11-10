@@ -26,6 +26,7 @@ const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?1,'$.i
  AND NOT EXISTS(SELECT 1 FROM artifact_shares active WHERE active.issue_id=s.issue_id AND active.artifact_id=s.artifact_id AND active.status='active')),
  tasks_scope(id) AS (
  SELECT task_id FROM task_work_item_owners WHERE work_item_id IN (SELECT id FROM scope)
+	UNION SELECT task_id FROM issue_manager_tasks WHERE issue_id IN (SELECT id FROM scope)
  UNION SELECT l.task_id FROM work_item_task_links l WHERE l.work_item_id IN (SELECT id FROM scope) AND NOT EXISTS(SELECT 1 FROM issue_controls c WHERE c.issue_id=l.work_item_id)),
  messages_scope(id) AS (
  SELECT message_id FROM message_work_items WHERE work_item_id IN (SELECT id FROM scope) AND active=1
@@ -88,6 +89,7 @@ func ExactMaterialFileScope(ctx context.Context, q Querier, scope MaterialScope,
  OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN work_item_context_facts r ON r.source_message_id=f.message_id WHERE f.file_id=?2 AND r.work_item_id=scope.id)
  OR EXISTS(SELECT 1 FROM conversation_message_attachments f JOIN background_sources s USING(message_id) JOIN background_batches b USING(batch_id) WHERE f.file_id=?2 AND b.work_item_id=scope.id)
  OR EXISTS(SELECT 1 FROM deliverable_files f JOIN task_work_item_owners o USING(task_id) WHERE f.file_id=?2 AND o.work_item_id=scope.id)
+	OR EXISTS(SELECT 1 FROM deliverable_files f JOIN issue_manager_tasks o USING(task_id) WHERE f.file_id=?2 AND o.issue_id=scope.id)
  OR EXISTS(SELECT 1 FROM deliverable_files f JOIN work_item_task_links o USING(task_id) WHERE f.file_id=?2 AND o.work_item_id=scope.id)
  OR EXISTS(SELECT 1 FROM deliverable_files f JOIN artifacts a ON a.task_id=f.task_id AND a.run_id=f.run_id JOIN artifact_shares s ON s.artifact_id=a.artifact_id AND s.ref_json=a.ref_json WHERE f.file_id=?2 AND s.issue_id=scope.id AND s.status='active')
  ORDER BY id LIMIT 101`, ids, file)

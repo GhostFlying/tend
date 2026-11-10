@@ -54,12 +54,31 @@ func GetRequest(ctx context.Context, q Querier, domain, requestID string) (Reque
 	}
 	r.ParentRequestID, r.ResultJSON, r.ErrorCode, r.ErrorMessage, r.ErrorDetails = parent.String, result.String, code.String, msg.String, details.String
 	r.Reason = reason.String
+	r.ResultJSON, err = ResolveJSON(ctx, q, r.ResultJSON)
+	if err != nil {
+		return RequestRecord{}, err
+	}
+	r.ResultJSON, err = restoreCommandReceipt(ctx, q, r.ResultJSON)
+	if err != nil {
+		return RequestRecord{}, err
+	}
 	return r, nil
 }
 
 // InsertRequest stores a new request record.
 func (t *Tx) InsertRequest(ctx context.Context, r RequestRecord) error {
-	_, err := t.Exec(ctx, `INSERT INTO request_records (domain, request_id, operation, payload_hash, principal_json,
+	result, err := compactCommandReceipt(ctx, t, r)
+	if err != nil {
+		return err
+	}
+	r.ResultJSON = result
+	if r.Operation == "manager.native_reply" {
+		r.ResultJSON, err = t.RetainJSON(ctx, r.ResultJSON)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = t.Exec(ctx, `INSERT INTO request_records (domain, request_id, operation, payload_hash, principal_json,
 		parent_request_id, trace_id, status, result_json, error_code, error_message, error_details, reason, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Domain, r.RequestID, r.Operation, r.PayloadHash, r.PrincipalJSON, nullString(r.ParentRequestID), r.TraceID,
@@ -73,18 +92,19 @@ func (t *Tx) InsertRequest(ctx context.Context, r RequestRecord) error {
 
 // TaskRow is the stored task projection.
 type TaskRow struct {
-	Kind                protocol.TaskKind
-	TaskID              string
-	Title               string
-	Project             string
-	Lifecycle           protocol.TaskLifecycle
-	ControlMode         protocol.ControlMode
-	ControlRevision     int64
-	SpecVersion         int64
-	Rating              protocol.Rating
-	BlockReason         protocol.BlockReason
-	ImplementGeneration int64
-	CurrentArtifactID   string
+	Kind                   protocol.TaskKind
+	TaskID                 string
+	Title                  string
+	Project                string
+	Lifecycle              protocol.TaskLifecycle
+	ControlMode            protocol.ControlMode
+	ControlRevision        int64
+	SpecVersion            int64
+	Rating                 protocol.Rating
+	BlockReason            protocol.BlockReason
+	ImplementGeneration    int64
+	ImplementContinuations int64
+	CurrentArtifactID      string
 	// WorkspaceName is reserved at creation and never changes.
 	WorkspaceName string
 	// WorkspaceAssigned reports that the workspace exists on a host. It is
@@ -101,11 +121,11 @@ func GetTask(ctx context.Context, q Querier, taskID string) (TaskRow, error) {
 	r := TaskRow{TaskID: taskID}
 	var artifact, workspace sql.NullString
 	err := q.QueryRowContext(ctx, `SELECT kind, title, project, lifecycle, control_mode, control_revision, spec_version, rating,
-		block_reason, implement_generation, current_artifact_id, workspace_name,
+		block_reason, implement_generation, current_artifact_id, workspace_name, implement_continuations,
 		EXISTS (SELECT 1 FROM task_workspace_bindings w WHERE w.task_id = tasks.task_id), created_at, updated_at, `+taskCompletedAtSQL+`
 		FROM tasks WHERE task_id = ?`, taskID).
 		Scan(&r.Kind, &r.Title, &r.Project, &r.Lifecycle, &r.ControlMode, &r.ControlRevision, &r.SpecVersion, &r.Rating, &r.BlockReason,
-			&r.ImplementGeneration, &artifact, &workspace, &r.WorkspaceAssigned, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt)
+			&r.ImplementGeneration, &artifact, &workspace, &r.ImplementContinuations, &r.WorkspaceAssigned, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt)
 	if err != nil {
 		return TaskRow{}, notFound(err, "task "+taskID)
 	}
@@ -132,9 +152,9 @@ func (t *Tx) InsertTask(ctx context.Context, r TaskRow) error {
 // UpdateTask overwrites the mutable fields of a task.
 func (t *Tx) UpdateTask(ctx context.Context, r TaskRow) error {
 	res, err := t.Exec(ctx, `UPDATE tasks SET project = ?, lifecycle = ?, control_mode = ?, control_revision = ?, spec_version = ?,
-		rating = ?, block_reason = ?, implement_generation = ?, current_artifact_id = ?, updated_at = ? WHERE task_id = ?`,
+		rating = ?, block_reason = ?, implement_generation = ?, current_artifact_id = ?, implement_continuations = ?, updated_at = ? WHERE task_id = ?`,
 		r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision, r.SpecVersion, r.Rating, r.BlockReason, r.ImplementGeneration,
-		nullString(r.CurrentArtifactID), r.UpdatedAt, r.TaskID)
+		nullString(r.CurrentArtifactID), r.ImplementContinuations, r.UpdatedAt, r.TaskID)
 	if err != nil {
 		return fmt.Errorf("store: update task: %w", err)
 	}

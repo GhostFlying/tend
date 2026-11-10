@@ -148,6 +148,23 @@ func TestSharedDeliveryMigrationPreservesOriginalApprovalAndExecution(t *testing
 		`SELECT * FROM host_runtime ORDER BY host_id`,
 		`SELECT * FROM schema_migrations WHERE version<=97 ORDER BY version`,
 	}
+	// Pin every comparison to the columns present in the original schema.
+	// Later migrations may append fields, but must preserve every old value.
+	for index, query := range queries {
+		rows, err := db.QueryContext(ctx, query+" LIMIT 0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n, column := range columns {
+			columns[n] = `"` + strings.ReplaceAll(column, `"`, `""`) + `"`
+		}
+		queries[index] = strings.Replace(query, "SELECT *", "SELECT "+strings.Join(columns, ","), 1)
+	}
 	before := sharedDeliveryMigrationSnapshot(t, ctx, db, queries)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)

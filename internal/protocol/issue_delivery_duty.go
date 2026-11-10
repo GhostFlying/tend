@@ -51,13 +51,21 @@ type IssueDeliveryDuty struct {
 
 type UpdateIssueDeliveryPayload struct {
 	IssueControlPayload
-	TaskID string `json:"task_id"`
+	TaskID string `json:"task_id,omitempty"`
+	// submit_result records the actual Issue owner's output without a worker
+	// Task. A hosted callback derives RunID from its execution, never the model.
+	Result                *ArtifactPayload              `json:"result,omitempty"`
+	RunID                 string                        `json:"run_id,omitempty"`
+	AcceptanceID          string                        `json:"acceptance_id,omitempty"`
+	ReviewerArtifactID    string                        `json:"reviewer_artifact_id,omitempty"`
+	IndependentAcceptance *IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
 	// bind uses the current Task directly; it never creates or revives a Task.
 	// complete may reference an already settled execution for an accepted,
 	// unbound contribution to the same PR and Issue; this grants no execution.
 	ExecutionTaskID             string `json:"execution_task_id,omitempty"`
+	ExecutionRunID              string `json:"execution_run_id,omitempty"`
 	ExpectedTaskControlRevision *int64 `json:"expected_task_control_revision,omitempty"`
-	// prepare, resume, bind, report, end, complete. End retains owner disposition.
+	// submit_result, prepare, resume, bind, report, end, complete.
 	Action    string                  `json:"action"`
 	Candidate *IssueDeliveryCandidate `json:"candidate,omitempty"`
 	UpgradeID string                  `json:"upgrade_id,omitempty"`

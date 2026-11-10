@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -44,6 +45,53 @@ type CandidateRow struct {
 
 // ListClaimCandidates returns every pending implement or accept action.
 func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error) {
+	return listClaimCandidates(ctx, q, nil, nil)
+}
+
+// ClaimActionIDsForHost performs the cheap indexed prefilter before decoding
+// retained specifications. Actual allocation always revalidates current facts.
+func ClaimActionIDsForHost(ctx context.Context, q Querier, host string) ([]string, error) {
+	return FollowupIDs(ctx, q, `SELECT a.action_id FROM plan_actions a
+	 JOIN tasks t USING(task_id)
+	 JOIN task_specs s ON s.task_id=t.task_id AND s.spec_version=t.spec_version
+	 LEFT JOIN task_workspace_bindings b ON b.task_id=t.task_id
+	 LEFT JOIN workspaces w USING(workspace_id)
+	 WHERE a.status='pending' AND a.kind IN ('implement','accept')
+	 AND t.lifecycle NOT IN ('draft','completed','cancelled') AND t.control_mode='managed' AND t.block_reason='none'
+	 AND a.target_spec_version=t.spec_version
+	 AND (a.kind<>'implement' OR a.generation=t.implement_generation)
+	 AND (a.kind<>'accept' OR (t.lifecycle='awaiting_acceptance' AND a.target_artifact_id=t.current_artifact_id))
+	 AND (w.host_id IS NULL OR w.host_id='' OR w.host_id=?)
+	 AND (COALESCE(json_extract(s.body_json,'$.requirements.host_id'),'') IN ('',?))
+	 ORDER BY a.action_id`, host, host)
+}
+
+// ListHostClaimCandidates keeps unrelated hosts and nonrunnable history outside
+// the claim writer's expensive projection. The view path still lists all facts.
+func ListHostClaimCandidates(ctx context.Context, q Querier, host string, observe func(WritePhase) func()) ([]CandidateRow, error) {
+	ids, err := ClaimActionIDsForHost(ctx, q, host)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	return listClaimCandidates(ctx, q, ids, observe)
+}
+
+func listClaimCandidates(ctx context.Context, q Querier, ids []string, observe func(WritePhase) func()) ([]CandidateRow, error) {
+	end := func() {}
+	if observe != nil {
+		end = observe(WriteClaimCandidateQuery)
+	}
+	defer func() { end() }()
+	var args []any
+	filter := ""
+	if ids != nil {
+		raw, err := json.Marshal(ids)
+		if err != nil {
+			return nil, err
+		}
+		filter = ` AND a.action_id IN (SELECT value FROM json_each(?))`
+		args = append(args, string(raw))
+	}
 	rows, err := q.QueryContext(ctx, `SELECT a.action_id, a.task_id, a.kind, a.effect_key, a.trigger_json,
 		a.target_spec_version, a.target_artifact_id, a.authorization_json, a.generation, a.status, a.plan_commit_ref,
 		a.created_request_id, a.created_at,
@@ -80,9 +128,13 @@ func ListClaimCandidates(ctx context.Context, q Querier) ([]CandidateRow, error)
 		FROM plan_actions a
 		JOIN tasks t ON t.task_id = a.task_id
 		JOIN task_specs s ON s.task_id = t.task_id AND s.spec_version = t.spec_version
-		WHERE a.status = 'pending' AND a.kind IN ('implement', 'accept')`)
+		WHERE a.status = 'pending' AND a.kind IN ('implement', 'accept')`+filter, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list claim candidates: %w", err)
+	}
+	end()
+	if observe != nil {
+		end = observe(WriteClaimCandidateScan)
 	}
 	defer rows.Close()
 	var out []CandidateRow
@@ -366,7 +418,11 @@ func (t *Tx) InsertRunLog(ctx context.Context, runID string, e protocol.RunEvent
 	if body == "" {
 		body = "{}"
 	}
-	_, err := t.Exec(ctx, `INSERT INTO run_logs (run_id, seq, native_id, kind, body_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+	body, err := t.RetainJSON(ctx, body)
+	if err != nil {
+		return err
+	}
+	_, err = t.Exec(ctx, `INSERT INTO run_logs (run_id, seq, native_id, kind, body_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		runID, e.Seq, nullString(e.NativeID), e.Kind, body, now)
 	if err != nil {
 		return fmt.Errorf("store: insert run log: %w", err)

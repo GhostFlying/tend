@@ -84,7 +84,7 @@ func DeliveryDeploymentSettlement(ctx context.Context, q Querier, taskID string,
 		return v, err
 	}
 	v.ArtifactID = task.CurrentArtifactID
-	if task.Lifecycle != protocol.TaskCompleted {
+	if task.Lifecycle != protocol.TaskCompleted && task.Kind != protocol.TaskKindIssueManager {
 		return fail("execution_not_completed", protocol.CodeInvalidTransition, "the original deployment execution must finish independent acceptance")
 	}
 	basis, err := CompletedTaskEvidence(ctx, q, taskID, "Original completed delivery result")

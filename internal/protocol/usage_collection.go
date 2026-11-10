@@ -54,6 +54,7 @@ type UsageCollectionObservation struct {
 }
 
 type UsageCollectionCommand struct {
+	Rescan           bool   `json:"rescan,omitempty"`
 	RequestID        string `json:"request_id"`
 	SourceID         string `json:"source_id"`
 	RunID            string `json:"run_id"`
@@ -64,6 +65,7 @@ type UsageCollectionCommand struct {
 }
 
 type UsageCollectionControl struct {
+	Rescan bool   `json:"rescan,omitempty"`
 	Reason string `json:"reason,omitempty"`
 }
 

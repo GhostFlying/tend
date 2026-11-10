@@ -24,14 +24,18 @@ func AgentRollout(ctx context.Context, q Querier, id, turn string, after int64, 
 		return v, err
 	}
 	v.Threads = threads
-	rows, err := q.QueryContext(ctx, `SELECT seq,thread_id,turn_id,item_id,kind,substr(data_json,1,16000),length(data_json),created_at FROM agent_rollout_events WHERE conversation_id=? AND (?='' OR turn_id=?) AND seq>? AND (?='' OR thread_id=?) ORDER BY seq LIMIT 31`, id, turn, turn, after, threadID, threadID)
+	rows, err := q.QueryContext(ctx, `SELECT seq,thread_id,turn_id,item_id,kind,data_json,created_at FROM agent_rollout_events WHERE conversation_id=? AND (?='' OR turn_id=?) AND seq>? AND (?='' OR thread_id=?) ORDER BY seq LIMIT 31`, id, turn, turn, after, threadID, threadID)
 	if err != nil {
 		return v, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var r protocol.AgentRolloutRecord
-		if err = rows.Scan(&r.Seq, &r.ThreadID, &r.TurnID, &r.ItemID, &r.Kind, &r.Data, &r.Characters, &r.CreatedAt); err != nil {
+		if err = rows.Scan(&r.Seq, &r.ThreadID, &r.TurnID, &r.ItemID, &r.Kind, &r.Data, &r.CreatedAt); err != nil {
+			return v, err
+		}
+		r.Data, r.Characters, err = JSONTextWindow(ctx, q, r.Data, 0, 16000)
+		if err != nil {
 			return v, err
 		}
 		r.Truncated = r.Characters > 16000
@@ -52,9 +56,13 @@ func AgentRolloutWindow(ctx context.Context, q Querier, id string, seq, offset i
 		return v, protocol.Errorf(protocol.CodeInvalidRequest, "invalid rollout window")
 	}
 	var length int64
-	err := q.QueryRowContext(ctx, `SELECT substr(data_json,?,16000),length(data_json) FROM agent_rollout_events WHERE conversation_id=? AND seq=?`, offset+1, ConversationID(id), seq).Scan(&v.Text, &length)
+	err := q.QueryRowContext(ctx, `SELECT data_json FROM agent_rollout_events WHERE conversation_id=? AND seq=?`, ConversationID(id), seq).Scan(&v.Text)
 	if err != nil {
 		return v, notFound(err, "rollout record")
+	}
+	v.Text, length, err = JSONTextWindow(ctx, q, v.Text, offset, 16000)
+	if err != nil {
+		return v, err
 	}
 	v.Next = min(offset+int64(len([]rune(v.Text))), length)
 	v.More = v.Next < length

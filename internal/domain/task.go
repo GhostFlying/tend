@@ -18,6 +18,8 @@ const DefaultMaxImplementAttempts = 3
 
 // Spec is the content of one immutable task spec version.
 type Spec struct {
+	ReviewArtifactID    string                       `json:"review_artifact_id,omitempty"`
+	ReviewDeliveryID    string                       `json:"review_delivery_id,omitempty"`
 	AgentSelection      *protocol.TaskAgentSelection `json:"agent_selection,omitempty"`
 	AcceptanceExecution *protocol.ExecutionProfile   `json:"acceptance_execution,omitempty"`
 	Observation         *protocol.ObservationScope   `json:"observation,omitempty"`
@@ -146,6 +148,12 @@ func (s Spec) ValidateForAcceptance(required bool) error {
 	if s.RequiresDelivery(DeliveryCommit) && len(s.Workspace.Mounts) == 0 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "commit delivery requires at least one mount")
 	}
+	if s.ReviewArtifactID != "" && !protocol.ValidID(protocol.PrefixArtifact, s.ReviewArtifactID) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "review_artifact_id must identify an immutable artifact")
+	}
+	if (s.ReviewArtifactID != "" || s.ReviewDeliveryID != "") && !s.RequiresDelivery(DeliveryReport) {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "an explicit review Task must deliver its actual report")
+	}
 	for _, l := range s.Requirements.Labels {
 		if !NamePattern.MatchString(l) {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "label %q is malformed", l)
@@ -171,7 +179,7 @@ func (s Spec) Budget() int64 {
 
 // Equal reports whether two specs ask for the same thing.
 func (s Spec) Equal(o Spec) bool {
-	return agentSelectionEqual(s.AgentSelection, o.AgentSelection) && executionEqual(s.AcceptanceExecution, o.AcceptanceExecution) && observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
+	return s.ReviewArtifactID == o.ReviewArtifactID && s.ReviewDeliveryID == o.ReviewDeliveryID && agentSelectionEqual(s.AgentSelection, o.AgentSelection) && executionEqual(s.AcceptanceExecution, o.AcceptanceExecution) && observationEqual(s.Observation, o.Observation) && s.Goal == o.Goal && s.Scope == o.Scope && slices.Equal(s.RequiredDeliverables(), o.RequiredDeliverables()) &&
 		s.Budget() == o.Budget() && slices.Equal(s.Constraints, o.Constraints) && slices.Equal(s.Acceptance, o.Acceptance) &&
 		s.Workspace.Normalize().Equal(o.Workspace.Normalize()) && s.Requirements.Equal(o.Requirements) && slices.Equal(s.Inputs, o.Inputs) &&
 		s.ImplementationContext == o.ImplementationContext && equalSharedContext(s.SharedContext, o.SharedContext)
@@ -199,6 +207,9 @@ type Task struct {
 	// ImplementGeneration is the generation of the latest implement action
 	// for the current spec version.
 	ImplementGeneration int64
+	// ImplementContinuations counts ordinary same-goal continuations. These
+	// generations retain independent Run identities without consuming retries.
+	ImplementContinuations int64
 	// CurrentArtifactID is the artifact under acceptance for the current
 	// spec version, if any.
 	CurrentArtifactID string
@@ -398,6 +409,7 @@ func UpdateSpecWithAcceptance(t Task, spec Spec, current Spec, expectedRevision 
 		}
 	}
 	t.SpecVersion++
+	t.ImplementContinuations = 0
 	t.ControlRevision++
 	t.Budget = spec.Budget()
 	t.CurrentArtifactID = ""
@@ -536,6 +548,28 @@ func RequestImplement(t Task, generation int64, expectedRevision int64) (Decisio
 		Actions: []ActionDraft{implementAction(t)},
 		Events:  []EventDraft{{Kind: "task.implement_requested", Body: map[string]any{"generation": generation}}},
 	}, nil
+}
+
+// ContinueTask resumes a completed collaboration goal under its unchanged
+// agreement. Earlier artifacts and acceptance facts remain immutable history;
+// the current artifact remains readable until the next result replaces it.
+func ContinueTask(t Task, expectedRevision int64, reason string) (Decision, error) {
+	if err := checkRevision(t, expectedRevision); err != nil {
+		return Decision{}, err
+	}
+	if t.Lifecycle != protocol.TaskCompleted {
+		return Decision{}, errTransition(t, "continue")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return Decision{}, protocol.Errorf(protocol.CodeInvalidRequest, "continuation requires the same-goal next step")
+	}
+	t.Lifecycle = protocol.TaskQueued
+	t.Block = protocol.BlockNone
+	t.ControlRevision++
+	t.ImplementGeneration++
+	t.ImplementContinuations++
+	t.Budget++
+	return Decision{Task: t, Actions: []ActionDraft{implementAction(t)}, Events: []EventDraft{{Kind: "task.continued", Body: map[string]any{"reason": reason, "generation": t.ImplementGeneration, "spec_version": t.SpecVersion, "previous_artifact_id": t.CurrentArtifactID}}}}, nil
 }
 
 // RequestAcceptance asks for another acceptance of the artifact under

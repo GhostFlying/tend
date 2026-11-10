@@ -77,11 +77,12 @@ type IssueMaterials struct {
 }
 
 type RunContext struct {
-	SpecVersion int64          `json:"spec_version"`
-	RunID       string         `json:"run_id"`
-	TaskID      string         `json:"task_id"`
-	Role        RunRole        `json:"role"`
-	Materials   IssueMaterials `json:"materials"`
+	ExecutionContext *TaskExecutionContext `json:"execution_context,omitempty"`
+	SpecVersion      int64                 `json:"spec_version"`
+	RunID            string                `json:"run_id"`
+	TaskID           string                `json:"task_id"`
+	Role             RunRole               `json:"role"`
+	Materials        IssueMaterials        `json:"materials"`
 }
 
 func NormalizeIssueMaterialsQuery(q IssueMaterialsQuery) (IssueMaterialsQuery, error) {

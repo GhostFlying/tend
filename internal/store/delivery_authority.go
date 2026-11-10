@@ -96,7 +96,7 @@ func DeliveryOwnerOption(ctx context.Context, q Querier, d protocol.IssueDeliver
 }
 
 // DeliveryGrantValid is the common read-only authority check for workers,
-// admission and completion. Automatic merge authority never permits deployment.
+// admission and completion. Deployment requires its own explicit target scope.
 func DeliveryGrantValid(ctx context.Context, q Querier, issue protocol.Issue, d protocol.IssueDeliveryDuty) error {
 	if d.Authorization == nil || d.Authorization.Mode == "manual" {
 		option, err := DeliveryOwnerOption(ctx, q, d)
@@ -109,14 +109,14 @@ func DeliveryGrantValid(ctx context.Context, q Querier, issue protocol.Issue, d 
 		return nil
 	}
 	g := d.Authorization
-	if g.Mode != "auto" || d.Candidate == nil || d.Candidate.Deploy {
-		return protocol.Errorf(protocol.CodeForbidden, "automatic integration does not authorize deployment")
+	if g.Mode != "auto" || d.Candidate == nil {
+		return protocol.Errorf(protocol.CodeForbidden, "delivery has no valid frozen authorization")
 	}
 	owner, p, err := EffectiveIssuePRPolicy(ctx, q, issue)
 	if err != nil {
 		return err
 	}
-	if p == nil || p.Mode != "auto" || p.Authority == nil || owner.IssueID != g.PolicyIssueID || IssuePRPolicyDigest(p) != g.PolicyDigest || p.Authority.RequestID != g.RequestID || IssuePRScopeDigest(owner.Plan) != p.Authority.ScopeDigest {
+	if p == nil || p.Mode != "auto" || p.Authority == nil || owner.IssueID != g.PolicyIssueID || IssuePRPolicyDigest(p) != g.PolicyDigest || p.Authority.RequestID != g.RequestID {
 		return protocol.Errorf(protocol.CodeForbidden, "Issue integration authority changed or was withdrawn")
 	}
 	var found bool
@@ -125,6 +125,9 @@ func DeliveryGrantValid(ctx context.Context, q Querier, issue protocol.Issue, d 
 	}
 	if !found {
 		return protocol.Errorf(protocol.CodeForbidden, "delivery repository is outside the Issue integration grant")
+	}
+	if !IssuePolicyAuthorizesDeployment(p, d.Candidate) {
+		return protocol.Errorf(protocol.CodeForbidden, "deployment target is outside the explicit Issue delivery scope")
 	}
 	var valid bool
 	if p.Authority.SourceMessageID != "" {
@@ -142,4 +145,24 @@ func DeliveryGrantValid(ctx context.Context, q Querier, issue protocol.Issue, d 
 		return protocol.Errorf(protocol.CodeForbidden, "Issue integration grant has no repository")
 	}
 	return nil
+}
+
+// IssuePolicyAuthorizesDeployment compares real deployment identities, never
+// candidate SHAs or transient installation baselines. Missing scope grants none.
+func IssuePolicyAuthorizesDeployment(p *protocol.IssuePRPolicy, c *protocol.IssueDeliveryCandidate) bool {
+	if c == nil {
+		return false
+	}
+	if !c.Deploy {
+		return true
+	}
+	if p == nil || p.Deployment == nil || c.Deployment == nil || p.Deployment.ServerInstance != c.Deployment.ServerInstance {
+		return false
+	}
+	for _, host := range c.Deployment.HostIDs {
+		if !slices.Contains(p.Deployment.HostIDs, host) {
+			return false
+		}
+	}
+	return true
 }

@@ -64,6 +64,7 @@ const (
 
 // RunVerdict tells the runner what to do with a run it reported.
 type RunVerdict struct {
+	ExternalWait   *ExternalWait      `json:"external_wait,omitempty"`
 	PauseHandoff   *PauseHandoff      `json:"pause_handoff,omitempty"`
 	RetainedResume *RetainedRunResume `json:"retained_resume,omitempty"`
 	RunID          string             `json:"run_id"`
@@ -98,10 +99,14 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	PauseHandoffs     bool                  `json:"pause_handoffs,omitempty"`
-	PauseHandoff      *PauseHandoff         `json:"pause_handoff,omitempty"`
-	PauseContinuation *PauseContinuation    `json:"pause_continuation,omitempty"`
-	CapabilityBinding *RunCapabilityBinding `json:"capability_binding,omitempty"`
+	SessionContinuation      *SessionContinuation  `json:"session_continuation,omitempty"`
+	ExternalWaits            bool                  `json:"external_waits,omitempty"`
+	ExternalWait             *ExternalWait         `json:"external_wait,omitempty"`
+	ExternalWaitContinuation *ExternalWait         `json:"external_wait_continuation,omitempty"`
+	PauseHandoffs            bool                  `json:"pause_handoffs,omitempty"`
+	PauseHandoff             *PauseHandoff         `json:"pause_handoff,omitempty"`
+	PauseContinuation        *PauseContinuation    `json:"pause_continuation,omitempty"`
+	CapabilityBinding        *RunCapabilityBinding `json:"capability_binding,omitempty"`
 	// AcceptanceEvidenceFiles enables explicitly selected durable verdict files.
 	// An absent flag retains the original verdict-only wire contract.
 	AcceptanceEvidenceFiles bool `json:"acceptance_evidence_files,omitempty"`
@@ -216,6 +221,7 @@ type HeartbeatResult struct {
 // longer active is not renewed; the runner must fence itself and reconcile
 // through hello.
 type LeaseState struct {
+	ExternalWait *ExternalWait `json:"external_wait,omitempty"`
 	PauseHandoff *PauseHandoff `json:"pause_handoff,omitempty"`
 	RunID        string        `json:"run_id"`
 	Renewed      bool          `json:"renewed"`
@@ -325,10 +331,12 @@ type ReleasePayload struct {
 
 // ResultReport is a durable Markdown investigation or operation report.
 type ResultReport struct {
-	SharedReview  *SharedReviewResult `json:"shared_review,omitempty"`
-	Body          string              `json:"body"`
-	Evidence      []string            `json:"evidence,omitempty"`
-	Uncertainties []string            `json:"uncertainties,omitempty"`
+	ReviewedArtifactID string              `json:"reviewed_artifact_id,omitempty"`
+	Verdict            Verdict             `json:"verdict,omitempty"`
+	SharedReview       *SharedReviewResult `json:"shared_review,omitempty"`
+	Body               string              `json:"body"`
+	Evidence           []string            `json:"evidence,omitempty"`
+	Uncertainties      []string            `json:"uncertainties,omitempty"`
 }
 
 // ArtifactFile identifies a durable immutable uploaded file.
