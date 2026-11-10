@@ -386,7 +386,13 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		}
 	}()
 	lastConcurrencyActivity := int64(0)
-	processEvent := func(ctx context.Context, ev harness.Event) error {
+	processEvent := func(ctx context.Context, ev harness.Event) (eventErr error) {
+		ctx = diagnostics.eventContext(ctx, ev)
+		defer func() {
+			if eventErr != nil {
+				diagnostics.eventError(ctx, ev, eventErr)
+			}
+		}()
 		ack := func() error {
 			if acknowledger, ok := th.(harness.EventAcknowledger); ok {
 				durable, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -770,7 +776,7 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThre
 		return th, err
 	}
 
-	if p.Prepared || parkRead || receiptRead {
+	if p.Prepared || parkRead || receiptRead || selected != nil && selected.ReceiptOnly {
 		id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 		if err != nil {
 			return nil, err

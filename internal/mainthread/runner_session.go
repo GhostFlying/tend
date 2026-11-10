@@ -122,6 +122,7 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) ([]coordination.E
 				t.sequence++
 				item.Sequence = t.sequence
 				item.SourceRunID = e.RunID
+				item.SourceSequence = e.Sequence
 				item.Historical = e.RunID != t.run
 				t.rowCursor = e.Cursor
 				t.mu.Lock()

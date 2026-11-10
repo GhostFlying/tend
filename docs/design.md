@@ -212,6 +212,8 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D209 | 当前负责协调者可显式解除 Agent 自己设置的技术等待；管理换代后的原已停止 handoff 可在当前 epoch 下显式承接相同命名执行责任，保留原合同、原 Run 及 owner 等待边界。 | 已实现 |
 | D210 | 已关闭 manager 在停止后以 runner lifetime 有界恢复原回执，物理停止与业务回执独立结算；不重复原生工作。 | 已实现 |
 | D211 | Manager 原生回执投递使用既有 RequestTimeout 的单次总预算，到期保留原事实并退出到真实停止与回执恢复，不限制模型执行。 | 已实现 |
+| D212 | 写连接超时保留原事件/请求归属、有界内部调用链及失败时刻的单 Store 活跃写入快照，区分排队与事务阶段，不改变写入或确认语义。 | 已实现 |
+| D213 | 自动只读回执 Run 继承已接受的原线程工具模式；包括已有缺字段 action 的恢复，只读取原线程，不以新建、分叉或工具集迁移兜底。 | 已实现 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1631,3 +1633,43 @@ retained 期间不自行结清，正式 Stop 后
 与物理退出确认仍按原条件收尾，然后分别传原事件、stopped 与迟到原 reply；只读
 传输按真实原历史结算业务。没有真实退出证明的原执行仍保持未知与 fencing。
 不新增配置、协议、迁移或权限；见[实施计划](plans/manager-receipt-deadline.md)。
+
+## D212：写连接超时的可归因诊断
+
+写入诊断保留原 request/trace，并为内部 manager 事件处理和 applied ACK 标注固定
+操作名、原 Run/原事件序号，另列当前 attachment Run/协调合成序号；两组身份在本地
+transport 中传递（不进入 wire），没有原身份时明确未知，不将合成游标冒作原事件。
+事件作用域独立于嵌套请求元数据，不由正文或当前游标推测。日志不保存业务 payload、SQL、环境、凭据或本地源码路径。
+
+单个 Store 为诊断写入分配局部编号，记录开始、结束、原 context deadline、池状态
+与有界函数调用链；编号和活跃写入记录仅供诊断，不参与业务身份、授权或调度。
+连接获取失败时采样当刻已观察到的 writer、阶段和连接占有时长；它不是整个等待
+窗口的阻塞者证明。连接等待、BEGIN、callback、commit、rollback 分列，连接占有
+wall time 也不等同 CPU 时间或 SQLite 锁时间；累计池排队统计不是单次持有时间。
+
+Claim 的 manager refresh、候选收集、选择准备使用固定 inclusive 阶段计时，作为
+apply 的子集；attention 仍是 persist_outcome 子集，不能重复相加。没有工作时原有
+NoEffect 回滚仍可能显示通用 error，诊断不改变其业务结果或请求恢复语义。
+
+活跃诊断同步不包住数据库、业务 callback 或日志 callback。观察回调仍在事务和
+连接释放后运行；只保留一条活跃记录，不新增后台查询或全量快写日志。不变更
+wire/schema/超时/事件应用顺序，见[实施计划](plans/write-timeout-diagnostics.md)。
+
+## D213：自动只读回执 Run 的原线程恢复
+
+补全 D208 在自动派生 generic receipt-only Run 上的身份继承：原已接受的
+native_owner_tools 模式属于 native thread binding，和本次传输是否只读分别表达。
+自动生成 reader action 时携带该原模式；已有 action 缺少该字段时，从同一管理
+责任可核对的原 action/冻结执行事实恢复，不覆写历史，不按当前配置或可用性猜测。
+旧 action 未保存该位时，可使用原 Run 已接受的 hosted selection，保留其原 false
+缺省语义，核对相同责任与完整执行 pin。缺失证据只在该 manager 的附着处保留
+unknown，不将其提升为所有 runner 的 Claim 失败；真实数据库错误仍如实返回。
+
+所有 receipt-only 启动均读取并恢复原线程；不得通过 StartThread、ForkThread 或
+工具集迁移寻找替代会话。缺少可信原身份或原绑定时保留明确不确定性。严格
+RequireReceiptReader 的原证明要求保持，generic reader 继续使用其原有事实边界，
+不被追加严格 reader 专用的不可得前置条件。
+
+读传输的恢复不解除原业务 fence，不创建或重放业务输入，不改变 Task/spec、
+执行 pin、模型配置、原请求、事件和审阅历史。没有 wire、schema 或新配置变更；
+见[实施计划](plans/receipt-reader-bootstrap.md)。

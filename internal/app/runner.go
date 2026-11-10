@@ -341,10 +341,15 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := refreshManagerTasks(ctx, x, tx); err != nil {
-		return Outcome{}, err
+	endClaimRefresh := tx.ObservePhase(store.WriteClaimRefresh)
+	refreshErr := refreshManagerTasks(ctx, x, tx)
+	endClaimRefresh()
+	if refreshErr != nil {
+		return Outcome{}, refreshErr
 	}
 	x.managersRefreshed = true
+	endClaimCandidates := tx.ObservePhase(store.WriteClaimCandidates)
+	defer endClaimCandidates()
 	rows, err := store.ListClaimCandidates(ctx, q)
 	if err != nil {
 		return Outcome{}, err
@@ -367,6 +372,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	endClaimCandidates()
+	endClaimSelection := tx.ObservePhase(store.WriteClaimSelection)
+	defer endClaimSelection()
 	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return Outcome{}, err
 	}
@@ -403,6 +411,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	pick, ok := scheduler.Pick(schedulingHost, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
+	endClaimSelection()
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 	}

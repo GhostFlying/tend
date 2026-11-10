@@ -12,6 +12,7 @@ import (
 // text is already durable. A successful no-op recording an older terminal item
 // is insufficient evidence to discard a newly consumed prefix.
 func (a *App) AcknowledgeManagerReplyPrefix(ctx context.Context, run string, sequence int64, thread, turn, item, body string, consumed []int64) error {
+	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, run, sequence), "manager.event.ack_reply_prefix")
 	err := a.write(ctx, func(tx *store.Tx) error {
 		covered := map[int64]bool{}
 		for _, delta := range consumed {

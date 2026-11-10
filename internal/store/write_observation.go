@@ -5,14 +5,19 @@ import (
 	"database/sql"
 	"errors"
 	"runtime"
+	"sync"
 	"time"
 )
 
 // WriteSource identifies a write without retaining its payload or SQL.
 type WriteSource struct {
-	Operation string
-	RequestID string
-	TraceID   string
+	Operation           string `json:"operation"`
+	RequestID           string `json:"request_id"`
+	TraceID             string `json:"trace_id"`
+	RunID               string `json:"run_id,omitempty"`
+	EventSequence       int64  `json:"event_sequence,omitempty"`
+	AttachmentRunID     string `json:"attachment_run_id,omitempty"`
+	CoordinatorSequence int64  `json:"coordinator_sequence,omitempty"`
 }
 
 type writeSourceKey struct{}
@@ -20,6 +25,38 @@ type writeSourceKey struct{}
 // WithWriteSource attaches validated request metadata to a write.
 func WithWriteSource(ctx context.Context, source WriteSource) context.Context {
 	return context.WithValue(ctx, writeSourceKey{}, source)
+}
+
+type writeEventKey struct{}
+type writeEvent struct {
+	run         string
+	sequence    int64
+	attachment  string
+	coordinator int64
+}
+
+// WithWriteEvent carries ledger identity through nested request metadata. It is
+// diagnostic context only and never supplies authorization or an applied cursor.
+func WithWriteEvent(ctx context.Context, run string, sequence int64) context.Context {
+	event, _ := ctx.Value(writeEventKey{}).(writeEvent)
+	event.run, event.sequence = run, sequence
+	return context.WithValue(ctx, writeEventKey{}, event)
+}
+
+// WithWriteAttachment distinguishes a reader's synthetic event cursor from
+// the retained source Run/sequence, which may be unknown on other transports.
+func WithWriteAttachment(ctx context.Context, run string, sequence int64) context.Context {
+	event, _ := ctx.Value(writeEventKey{}).(writeEvent)
+	event.attachment, event.coordinator = run, sequence
+	return context.WithValue(ctx, writeEventKey{}, event)
+}
+
+// WithWriteOperation names an internal boundary without replacing an enclosing
+// request or trace. Callers supply a fixed operation name, never input content.
+func WithWriteOperation(ctx context.Context, operation string) context.Context {
+	source, _ := ctx.Value(writeSourceKey{}).(WriteSource)
+	source.Operation = operation
+	return WithWriteSource(ctx, source)
 }
 
 // WritePhase is a fixed diagnostic stage. Durations are inclusive: nested
@@ -35,6 +72,9 @@ const (
 	WriteManagerRefresh  WritePhase = "manager_refresh"
 	WriteMaintenance     WritePhase = "maintenance_settlement"
 	WriteRequestInsert   WritePhase = "request_insert"
+	WriteClaimRefresh    WritePhase = "claim_manager_refresh"
+	WriteClaimCandidates WritePhase = "claim_candidates"
+	WriteClaimSelection  WritePhase = "claim_selection"
 )
 
 // WritePhaseDuration records an inclusive duration, not exclusive CPU time.
@@ -46,10 +86,19 @@ type WritePhaseDuration struct {
 // WriteObservation is emitted only after the transaction and connection end.
 // Outcome is a safe category; raw errors and business data are never included.
 type WriteObservation struct {
-	Source  WriteSource
-	Caller  string
-	Stage   string
-	Outcome string
+	ID          uint64
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	DeadlineAt  time.Time
+	Source      WriteSource
+	Caller      string
+	CallerStack []string
+	Stage       string
+	Outcome     string
+	// ActiveWriter is sampled when connection acquisition fails. It does not
+	// identify all writers that occupied the connection during this wait.
+	ActiveWriter         *ActiveWriteSnapshot
+	WaitFailureSampledAt time.Time
 	// ContextState is captured at an ErrTxDone failure boundary. It describes
 	// cancellation state without replacing the returned error or claiming cause.
 	ContextState          string
@@ -61,7 +110,42 @@ type WriteObservation struct {
 	Rollback              time.Duration
 	PoolWaitCountTotal    int64
 	PoolWaitDurationTotal time.Duration
+	PoolOpenConnections   int
+	PoolInUse             int
+	PoolIdle              int
 	Phases                []WritePhaseDuration
+}
+
+// ActiveWriteSnapshot describes one observed owner of this Store's connection
+// at SampledAt. HeldFor is elapsed connection ownership, not SQLite lock or CPU
+// time, and not the duration for which it blocked the failed waiter.
+type ActiveWriteSnapshot struct {
+	ID          uint64        `json:"write_id"`
+	Source      WriteSource   `json:"source"`
+	CallerStack []string      `json:"caller_stack"`
+	AcquiredAt  time.Time     `json:"acquired_at"`
+	SampledAt   time.Time     `json:"sampled_at"`
+	HeldFor     time.Duration `json:"held_ns"`
+	Stage       string        `json:"stage"`
+}
+
+const writeCallerLimit = 8
+
+// writeDiagnostics belongs to one Store. Its IDs and active snapshot have no
+// business meaning. Never hold mu across database, callback, or logging calls.
+type writeDiagnostics struct {
+	mu     sync.Mutex
+	next   uint64
+	active activeWrite
+}
+
+type activeWrite struct {
+	id       uint64
+	source   WriteSource
+	acquired time.Time
+	stage    string
+	pcs      [writeCallerLimit]uintptr
+	pcCount  int
 }
 
 type writeObserver struct {
@@ -75,7 +159,9 @@ type writeCall struct {
 	observation  WriteObservation
 	started      time.Time
 	stageStarted time.Time
-	callerPC     uintptr
+	diagnostics  *writeDiagnostics
+	pcs          [writeCallerLimit]uintptr
+	pcCount      int
 }
 
 func (s *Store) startWriteObservation(ctx context.Context) *writeCall {
@@ -84,14 +170,70 @@ func (s *Store) startWriteObservation(ctx context.Context) *writeCall {
 	}
 	started := s.observer.now()
 	source, _ := ctx.Value(writeSourceKey{}).(WriteSource)
-	c := &writeCall{observer: s.observer, observation: WriteObservation{Source: source, Stage: "connection_wait"}, started: started, stageStarted: started}
-	if source.Operation == "" {
-		var pcs [1]uintptr
-		if runtime.Callers(3, pcs[:]) != 0 {
-			c.callerPC = pcs[0]
+	if event, ok := ctx.Value(writeEventKey{}).(writeEvent); ok {
+		source.RunID, source.EventSequence = event.run, event.sequence
+		source.AttachmentRunID, source.CoordinatorSequence = event.attachment, event.coordinator
+	}
+	s.writeDiagnostics.mu.Lock()
+	s.writeDiagnostics.next++
+	id := s.writeDiagnostics.next
+	s.writeDiagnostics.mu.Unlock()
+	deadline, _ := ctx.Deadline()
+	c := &writeCall{observer: s.observer, observation: WriteObservation{ID: id, StartedAt: started, DeadlineAt: deadline, Source: source, Stage: "connection_wait"}, started: started, stageStarted: started, diagnostics: &s.writeDiagnostics}
+	c.pcCount = runtime.Callers(3, c.pcs[:])
+	return c
+}
+
+func (s *Store) acquiredWrite(c *writeCall) {
+	if c == nil {
+		return
+	}
+	d := c.diagnostics
+	d.mu.Lock()
+	d.active = activeWrite{id: c.observation.ID, source: c.observation.Source, acquired: c.stageStarted, stage: c.observation.Stage, pcs: c.pcs, pcCount: c.pcCount}
+	d.mu.Unlock()
+}
+
+func (s *Store) releasedWrite(c *writeCall) {
+	if c == nil {
+		return
+	}
+	d := c.diagnostics
+	d.mu.Lock()
+	// Another writer may already have acquired the returned connection.
+	if d.active.id == c.observation.ID {
+		d.active = activeWrite{}
+	}
+	d.mu.Unlock()
+}
+
+func (s *Store) failedWriteWait(c *writeCall) {
+	if c == nil {
+		return
+	}
+	sampled := c.observer.now()
+	c.observation.WaitFailureSampledAt = sampled
+	d := c.diagnostics
+	d.mu.Lock()
+	active := d.active
+	d.mu.Unlock()
+	if active.id != 0 && !active.acquired.After(sampled) {
+		c.observation.ActiveWriter = &ActiveWriteSnapshot{ID: active.id, Source: active.source, CallerStack: writeCallers(active.pcs[:active.pcCount]), AcquiredAt: active.acquired, SampledAt: sampled, HeldFor: sampled.Sub(active.acquired), Stage: active.stage}
+	}
+}
+
+func writeCallers(pcs []uintptr) []string {
+	var names []string
+	frames := runtime.CallersFrames(pcs)
+	for {
+		frame, more := frames.Next()
+		if frame.Function != "" {
+			names = append(names, frame.Function)
+		}
+		if !more || len(names) == writeCallerLimit {
+			return names
 		}
 	}
-	return c
 }
 
 func (c *writeCall) endStage(next string) {
@@ -114,6 +256,11 @@ func (c *writeCall) endStage(next string) {
 	if next != "" {
 		c.observation.Stage = next
 	}
+	c.diagnostics.mu.Lock()
+	if c.diagnostics.active.id == c.observation.ID {
+		c.diagnostics.active.stage = c.observation.Stage
+	}
+	c.diagnostics.mu.Unlock()
 }
 
 func (c *writeCall) failedContext(ctx context.Context, err error) {
@@ -134,7 +281,8 @@ func (s *Store) finishWriteObservation(c *writeCall, err error) {
 		return
 	}
 	o := c.observation
-	o.Total = c.observer.now().Sub(c.started)
+	o.FinishedAt = c.observer.now()
+	o.Total = o.FinishedAt.Sub(c.started)
 	switch {
 	case errors.Is(err, context.Canceled):
 		o.Outcome = "cancelled"
@@ -150,13 +298,13 @@ func (s *Store) finishWriteObservation(c *writeCall, err error) {
 	if o.Total < c.observer.slow && o.Outcome != "cancelled" && o.Outcome != "deadline_exceeded" && o.ContextState == "" {
 		return
 	}
-	if c.callerPC != 0 {
-		frames := runtime.CallersFrames([]uintptr{c.callerPC})
-		frame, _ := frames.Next()
-		o.Caller = frame.Function
+	o.CallerStack = writeCallers(c.pcs[:c.pcCount])
+	if len(o.CallerStack) > 0 {
+		o.Caller = o.CallerStack[0]
 	}
 	stats := s.write.Stats()
 	o.PoolWaitCountTotal, o.PoolWaitDurationTotal = stats.WaitCount, stats.WaitDuration
+	o.PoolOpenConnections, o.PoolInUse, o.PoolIdle = stats.OpenConnections, stats.InUse, stats.Idle
 	c.observer.observe(o)
 }
 
@@ -182,7 +330,7 @@ func (t *Tx) ObservePhase(phase WritePhase) func() {
 		return func() {}
 	}
 	switch phase {
-	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert:
+	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection:
 	default:
 		return func() {}
 	}

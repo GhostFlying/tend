@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -215,5 +217,35 @@ func TestManagerSessionLogsPoolExitBeforeCancellation(t *testing.T) {
 				t.Fatal("pool release was logged only after cancelling its session", output)
 			}
 		})
+	}
+}
+
+func TestManagerEventDiagnosticsPreserveOriginalSequence(t *testing.T) {
+	logs := &lifecycleLog{}
+	m := &Manager{cfg: Config{Log: slog.New(slog.NewJSONHandler(logs, nil))}}
+	d := m.sessionDiagnostics(&hostedconfig.Selection{IssueID: "issue", RunnerRunID: "reader-run"})
+	s, err := mainFixtureTemplate.Open(t.Context(), filepath.Join(t.TempDir(), "events.db"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var observed store.WriteObservation
+	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) { observed = o })(s)
+	ev := harness.Event{CoordinatorSequence: 2, OriginRunID: "original-run", OriginSequence: 14, Kind: harness.EventItemCompleted, Text: "private event body"}
+	ctx := store.WithWriteSource(t.Context(), store.WriteSource{RequestID: "original-request", TraceID: "original-trace"})
+	ctx = d.eventContext(ctx, ev)
+	// A nested command may replace request metadata; its original event scope
+	// must survive independently of that command's operation name.
+	ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: "nested.command", RequestID: "nested-request", TraceID: "original-trace"})
+	if err := s.Write(ctx, func(*store.Tx) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if observed.Source.RunID != "original-run" || observed.Source.EventSequence != 14 || observed.Source.AttachmentRunID != "reader-run" || observed.Source.CoordinatorSequence != 2 || observed.Source.Operation != "nested.command" || observed.Source.RequestID != "nested-request" || observed.Source.TraceID != "original-trace" {
+		t.Fatalf("event attribution = %+v", observed)
+	}
+	d.eventError(ctx, ev, context.DeadlineExceeded)
+	text := logs.text()
+	if !strings.Contains(text, `"event_sequence":14`) || !strings.Contains(text, `"source_run_id":"original-run"`) || strings.Contains(text, ev.Text) {
+		t.Fatalf("unsafe or incomplete event failure: %s", text)
 	}
 }

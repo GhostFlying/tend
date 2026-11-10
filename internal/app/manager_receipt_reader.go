@@ -38,7 +38,21 @@ func managerReceiptReaderTrigger(ctx context.Context, q store.Querier, task stri
 	var raw string
 	err := q.QueryRowContext(ctx, `SELECT a.trigger_json FROM plan_actions a WHERE a.task_id=? AND COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'' AND EXISTS(SELECT 1 FROM json_each(a.trigger_json,'$.receipt_reader_pending_request_ids') source JOIN native_turn_receipts_pending pending ON pending.request_id=source.value) ORDER BY a.generation DESC LIMIT 1`, task).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
-		return `{"receipt_only":true}`, nil
+		m, err := store.GetIssueManagerTask(ctx, q, task)
+		if err != nil {
+			return "", err
+		}
+		mode, err := retainedManagerNativeOwnerMode(ctx, q, m)
+		if protocol.CodeOf(err) == protocol.CodeUnknownOutcome {
+			// This manager's missing binding is reconciled by its attachment;
+			// it must not prevent unrelated runners from claiming work.
+			return `{"receipt_only":true}`, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		trigger, err := json.Marshal(map[string]any{"receipt_only": true, "native_owner_tools": mode})
+		return string(trigger), err
 	}
 	return raw, err
 }

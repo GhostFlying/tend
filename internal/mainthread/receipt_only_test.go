@@ -383,9 +383,9 @@ func TestReceiptOnlyReconcilesPersistedCompactCompletion(t *testing.T) {
 	}
 }
 
-func TestLegacyReceiptOnlyRetainsOriginalResumeAndFallback(t *testing.T) {
+func TestLegacyReceiptOnlyRetainsOriginalResumeWithoutFallback(t *testing.T) {
 	for _, rejected := range []bool{false, true} {
-		t.Run(map[bool]string{false: "missing_applied_model", true: "rejected_resume_falls_back"}[rejected], func(t *testing.T) {
+		t.Run(map[bool]string{false: "missing_applied_model", true: "rejected_resume_retains_original"}[rejected], func(t *testing.T) {
 			e := newEnv(t, testkit.NewHarness())
 			e.stop()
 			e.m.named = receiptOnlySelection()
@@ -402,11 +402,10 @@ func TestLegacyReceiptOnlyRetainsOriginalResumeAndFallback(t *testing.T) {
 			if !rejected && (err != nil || thread != session.thread) {
 				t.Fatal("legacy receipt-only resume acquired the new strict model requirement", thread, err)
 			}
-			wantStarts := 0
-			if rejected {
-				wantStarts = 1 // This session records and rejects the old fallback.
+			if rejected && !errors.Is(err, harness.ErrRejected) {
+				t.Fatal("original rejected resume was not preserved", err)
 			}
-			if session.resumes != 1 || session.starts != wantStarts {
+			if session.resumes != 1 || session.starts != 0 {
 				t.Fatal("legacy receipt-only lifecycle changed", session.resumes, session.starts, err)
 			}
 		})
