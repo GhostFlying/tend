@@ -15,7 +15,7 @@ func TestCentralRuntimeIsExplicitAndCoexistsWithLocal(t *testing.T) {
 	if !strings.Contains(string(raw), "central-traex-worker") || !strings.Contains(string(raw), "appserver-worker") {
 		t.Fatal("local and central definitions were not retained")
 	}
-	for _, change := range []func(*Config){func(c *Config) { c.FormatVersion = 1 }, func(c *Config) { c.Runtimes[0].CLI = "codex" }, func(c *Config) { c.Runtimes[0].DeclaredPurposes = []Purpose{IssueManager} }} {
+	for _, change := range []func(*Config){func(c *Config) { c.FormatVersion = 1 }, func(c *Config) { c.Runtimes[0].CLI = "codex" }} {
 		bad := fixture()
 		bad.FormatVersion = 2
 		bad.Runtimes[0].Kind = CentralWorker
@@ -25,4 +25,7 @@ func TestCentralRuntimeIsExplicitAndCoexistsWithLocal(t *testing.T) {
 			t.Fatal("unsupported central contract accepted")
 		}
 	}
+	cfg.Runtimes[0].DeclaredPurposes = []Purpose{IssueManager}
+	cfg.Agents[0].Purposes = []Purpose{Main, Consultation}
+	requireValid(t, "runner", cfg)
 }
