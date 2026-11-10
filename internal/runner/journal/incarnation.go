@@ -25,7 +25,7 @@ func (j *Journal) NextProcessGeneration(ctx context.Context) (int64, error) {
 	q := url.Values{}
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(FULL)")
-	db, err := sql.Open("sqlite", "file:"+j.path+".incarnation?"+q.Encode())
+	db, err := sql.Open("sqlite", sqliteFileURI(j.path+".incarnation", q))
 	if err != nil {
 		return 0, fmt.Errorf("journal: open process generations: %w", err)
 	}

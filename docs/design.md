@@ -216,6 +216,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D213 | 自动只读回执 Run 继承已接受的原线程工具模式；包括已有缺字段 action 的恢复，只读取原线程，不以新建、分叉或工具集迁移兜底。 | 已实现 |
 | D214 | 具体交付批准与结束在准入和执行授权间使用一致的纯选项语义，延期可保留说明；不可执行的历史答复允许显式准备原候选的新问题，原答案和来源不可改写。 | 已实现 |
 | D215 | 已接受的同 PR 历史贡献可引用同 Issue 已结清执行完成责任结算，保留原接受与冻结交付证据，不新增执行或授权。 | 已实现 |
+| D216 | SQLite 文件路径经标准 URI 编码，journal/独立进程代次库与 Store 读写池不误解字面特殊字符，保持真实文件及原锁/连接选项。 | 已实现 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1718,3 +1719,18 @@ Issue revision、assignment epoch、原请求去重、单事务事件与 outbox 
 不能借结算接受尚未完成/验收、无关 PR、跨 Issue 或未结清执行。现有首次
 complete 路径不变，无 schema、wire 或新操作；CLI 使用原完整输入和请求恢复。
 见[实施计划](plans/contribution-delivery-settlement.md)。
+
+
+## D216：SQLite 文件路径与 URI 身份一致
+
+Journal 的主库、独立进程代次库及 Store 读写池以标准库编码 file URI：字面 `#`、`?`、`%`
+属于路径，不成为 fragment、query 或预解码后的另一个文件。原 pragma 和事务
+选项独立放在 RawQuery，相对路径仍相对当前工作目录，绝对路径仍指向原文件；
+不能把相对路径的首段当 URI host。真实主库文件必须与 acquireWriter 持有的
+设备/inode 相同，进程代次仍在原独立文件中单调递增。
+
+Store 保持原 WAL/foreign_keys、busy_timeout/synchronous、writer immediate 与
+reader query_only，不改变池或写事务边界。原版本/迁移检查、writer 锁、
+请求去重和未知事实保持，不删除错误路径产生的
+历史文件、不改测试名称规避，也不自动合并另一文件中的状态。无 wire、迁移、
+配置或 owner 操作变化。见[实施计划](plans/journal-sqlite-uri-paths.md)。
