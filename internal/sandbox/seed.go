@@ -55,10 +55,12 @@ func (s seeder) execute(ctx context.Context, key string, target protocol.Target,
 }
 
 // admit explicitly records selection and backlog -> todo for scripted demo work.
+// Static samples wait for a coordinator; interactive requests select a real
+// runner category themselves. Worker tasks retain their actual execution.
 // It uses stable receipts just like an owner's consecutive requests.
 func (s seeder) admit(ctx context.Context, key string, issue *protocol.Issue) error {
 	if issue.OwnerSelection == nil {
-		if err := s.execute(ctx, key+"-selection", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Select scripted demo execution"}, app.RequestIssueManager{}, issue); err != nil {
+		if err := s.execute(ctx, key+"-selection", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.RequestIssueManagerPayload{CategoryID: "sandbox-planner", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Retain static demo coordination until a matching runner is available"}, app.RequestIssueManager{}, issue); err != nil {
 			return err
 		}
 	}
