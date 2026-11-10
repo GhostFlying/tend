@@ -90,24 +90,14 @@ func QuestionContinuationForRun(ctx context.Context, q Querier, run string) (*pr
 		return nil, nil, err
 	}
 	continuation := &protocol.QuestionContinuation{RunID: parent, ThreadID: h.ThreadID}
-	var questions []protocol.WorkerQuestion
-	for parent != "" {
-		h, err := GetQuestionHandoff(ctx, q, parent)
-		if err != nil {
-			return nil, nil, err
-		}
-		question, err := WorkerQuestion(ctx, q, h.DecisionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		questions = append([]protocol.WorkerQuestion{question}, questions...)
-		err = q.QueryRowContext(ctx, `SELECT run_id FROM run_question_handoffs WHERE successor_run_id=?`, parent).Scan(&parent)
-		if errors.Is(err, sql.ErrNoRows) {
-			break
-		}
-		if err != nil {
-			return nil, nil, err
-		}
+	_, questions, err := QuestionContinuationForRun(ctx, q, parent)
+	if err != nil {
+		return nil, nil, err
 	}
+	question, err := WorkerQuestion(ctx, q, h.DecisionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	questions = append(questions, question)
 	return continuation, questions, nil
 }

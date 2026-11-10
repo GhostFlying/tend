@@ -405,6 +405,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 	}
 	schedulingHost := scheduler.Host{
+		PauseHandoffs:    p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
 		QuestionHandoffs: p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 		IssueOwners:      p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
 		IssueManagers:    p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),

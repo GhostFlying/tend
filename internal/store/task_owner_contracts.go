@@ -139,10 +139,10 @@ func ReviewAdmissionCurrent(ctx context.Context, q Querier, contract TaskOwnerCo
 	return string(before) == string(after), err
 }
 
-// IssueHasFrozenReview derives selection from an existing execution contract.
+// IssueHasRetainedExecution derives selection from existing unfinished work.
 // It does not create a manager or introduce another execution queue.
-func IssueHasFrozenReview(ctx context.Context, q Querier, issue string) (bool, error) {
+func IssueHasRetainedExecution(ctx context.Context, q Querier, issue string) (bool, error) {
 	var found bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_execution_contracts WHERE review_issue_id=?)`, issue).Scan(&found)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_execution_contracts c JOIN tasks t USING(task_id) WHERE c.review_issue_id=? AND t.lifecycle NOT IN ('completed','cancelled')) OR EXISTS(SELECT 1 FROM task_work_item_owners o JOIN tasks t USING(task_id) WHERE o.work_item_id=? AND t.kind<>'issue_manager' AND t.lifecycle NOT IN ('completed','cancelled','draft'))`, issue, issue).Scan(&found)
 	return found, err
 }

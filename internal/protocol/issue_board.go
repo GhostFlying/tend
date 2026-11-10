@@ -40,7 +40,7 @@ type IssuePauseProgress struct {
 }
 
 type IssueBoardCard struct {
-	FrozenReviewExecution    bool                `json:"frozen_review_execution,omitempty"`
+	RetainedExecution        bool                `json:"retained_execution,omitempty"`
 	QueueReason              *QueueWaitReason    `json:"queue_reason,omitempty"`
 	Pause                    *IssuePauseProgress `json:"pause,omitempty"`
 	Progress                 *IssueProgress      `json:"progress,omitempty"`

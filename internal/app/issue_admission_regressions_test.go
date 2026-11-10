@@ -245,3 +245,96 @@ func TestIssueAdmissionRegressionCancelAfterPauseHandoffClaimsSettlement(t *test
 		t.Fatal(err)
 	}
 }
+
+func TestIssueAdmissionRegressionQuestionHistoryAcrossPause(t *testing.T) {
+	h := newHarness(t)
+	inventoryCategory(t, h, "pause-test-execution", 0, "active")
+	r := testRuntime("mixed-handoff-runner")
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityPauseHandoffs)
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	i := createCanonicalOwnerTestIssue(t, h)
+	createCanonicalTaskForTest(t, h, i)
+	as, ok := h.claimInputRun(r)
+	if !ok {
+		t.Fatal("no first run")
+	}
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	q1 := askQuestion(t, h, as, scopeQuestion)
+	if op := h.runAs(as, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: q1.DecisionID}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := answerQuestion(t, h, q1, scopeQuestion.Options[0], ""); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	second, ok := h.claimInputRun(r)
+	if !ok {
+		t.Fatal("no second run")
+	}
+	h.runAs(second, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	i = issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
+	paused := h.run(second.RunID)
+	if op := h.runAs(second, protocol.OpRunsYieldPause, protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff}, YieldPause{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	i = issueAdmissionStatus(t, h, i, protocol.IssueTodo, nil)
+	third, ok := h.claimInputRun(r)
+	if !ok {
+		t.Fatal("no paused successor")
+	}
+	if len(third.Questions) != 1 {
+		t.Fatal("pause itself lost questions", third.Questions)
+	}
+	h.runAs(third, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	p2 := scopeQuestion
+	p2.QuestionKey = "second-blocker"
+	p2.Question = "Which evidence source?"
+	q2 := askQuestion(t, h, third, p2)
+	if op := h.runAs(third, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: q2.DecisionID}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := answerQuestion(t, h, q2, p2.Options[0], ""); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	fourth, ok := h.claimInputRun(r)
+	if !ok {
+		t.Fatal("no final successor")
+	}
+	if len(fourth.Questions) != 2 {
+		t.Fatalf("mixed pause/question chain lost original answer %s: got %+v", q1.DecisionID, fourth.Questions)
+	}
+}
+
+func TestIssueAdmissionRegressionPauseContinuationRequiresNegotiation(t *testing.T) {
+	h := newHarness(t)
+	inventoryCategory(t, h, "pause-test-execution", 0, "active")
+	r := testRuntime("pause-capable-runner")
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityPauseHandoffs)
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	i := createCanonicalOwnerTestIssue(t, h)
+	createCanonicalTaskForTest(t, h, i)
+	as, ok := h.claimInputRun(r)
+	if !ok || !as.PauseHandoffs {
+		t.Fatal(as)
+	}
+	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	i = issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
+	paused := h.run(as.RunID)
+	if op := h.runAs(as, protocol.OpRunsYieldPause, protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff, ThreadID: "original-thread"}, YieldPause{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	i = issueAdmissionStatus(t, h, i, protocol.IssueTodo, nil)
+	r.Capabilities = r.Capabilities[:len(r.Capabilities)-1]
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Log("downgrade rejected", op)
+		return
+	}
+	next, ok := h.claimInputRun(r)
+	if ok {
+		t.Fatalf("unnegotiated runner claimed pause successor: handoffs=%v continuation=%+v", next.PauseHandoffs, next.PauseContinuation)
+	}
+}

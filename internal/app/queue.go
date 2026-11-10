@@ -98,6 +98,7 @@ func schedulingHosts(ctx context.Context, q store.Querier, now int64) ([]schedul
 		out = append(out, scheduler.Host{
 			IssueManagers:          runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
 			IssueOwners:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
+			PauseHandoffs:          slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
 			QuestionHandoffs:       slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 			ContinuationsSupported: runtimeSupportsAgentContinuation(&runtime.Runtime), Continuations: continuations, Executors: executors,
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,

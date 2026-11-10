@@ -77,6 +77,7 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 		if previous, err := store.PendingPausePredecessor(ctx, q, c.ActionID); err != nil {
 			return err
 		} else if previous != "" {
+			c.PauseContinuation = true
 			r, err := store.GetRun(ctx, q, previous)
 			if err != nil {
 				return err
