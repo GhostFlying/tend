@@ -98,3 +98,50 @@ func TestIssueLiveDeliveryBindReplayKeepsBothControlRevisions(t *testing.T) {
 		t.Fatal("binding replay performed implicit control reads", code, e.errOut.String())
 	}
 }
+
+func TestIssueContributionDeliverySettlementCLIPreservesOriginalRequest(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	want := protocol.UpdateIssueDeliveryPayload{
+		IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: 3, Reason: "Settle the accepted contribution using the completed whole PR execution"},
+		TaskID:              "accepted-contribution", ExecutionTaskID: "settled-execution", Action: "complete", UpgradeID: "original-upgrade",
+	}
+	payload, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := e.main("issue", "update-delivery", "original-issue", "--revision", "7", "--epoch", "3", "--data", string(payload), "--dry-run", "--json"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var env protocol.Envelope
+	var got protocol.UpdateIssueDeliveryPayload
+	if err := json.Unmarshal(e.out.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(env.Payload, &got); err != nil || !reflect.DeepEqual(got, want) || env.Operation != "issues.update_delivery" || env.Target.ID != "original-issue" || env.ExpectedControlRevision == nil || *env.ExpectedControlRevision != 7 {
+		t.Fatal("historical settlement lost its original execution or Issue controls", env, got, err)
+	}
+	if len(f.requests) != 0 {
+		t.Fatal("dry-run performed HTTP IO")
+	}
+	file := filepath.Join(t.TempDir(), "original-settlement.json")
+	if err := os.WriteFile(file, e.out.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.on("POST /api/v1/ops", func(w http.ResponseWriter, _ *http.Request, body []byte) {
+		var replay protocol.Envelope
+		if err := json.Unmarshal(body, &replay); err != nil {
+			t.Fatal(err)
+		}
+		oldHash, oldErr := protocol.PayloadHash(&env)
+		newHash, newErr := protocol.PayloadHash(&replay)
+		if oldErr != nil || newErr != nil || oldHash != newHash || replay.RequestID != env.RequestID || replay.Operation != env.Operation || replay.Target != env.Target || replay.ExpectedControlRevision == nil || *replay.ExpectedControlRevision != 7 {
+			t.Error("replay replaced original settlement input", replay, oldErr, newErr)
+		}
+		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
+	})
+	e.out.Reset()
+	if code := e.main("issue", "replay", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
+		t.Fatal("settlement replay performed implicit lookup or binding", code, e.errOut.String())
+	}
+}
