@@ -11,6 +11,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/journal"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type externalWaitYield struct{ wait protocol.ExternalWait }
@@ -228,7 +229,7 @@ func (r *Runner) recoverExternalWait(ctx context.Context, as protocol.Assignment
 }
 
 func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) error {
-	if as.Protocol < 3 {
+	if as.Protocol < 3 || !as.SessionStopReports {
 		return nil
 	}
 	saved, err := r.cfg.Journal.Run(ctx, as.RunID)
@@ -239,7 +240,7 @@ func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) 
 		return nil
 	}
 	if !saved.StoppedConfirmed {
-		return errors.New("session close awaits physical stop proof")
+		return &completionPending{errors.New("session close awaits physical stop proof")}
 	}
 	env, err := r.cfg.Journal.SessionStopReport(ctx, as.RunID)
 	if err != nil {
@@ -258,6 +259,18 @@ func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) 
 			return err
 		}
 	}
-	_, err = r.send(ctx, runCredential(as), env)
+	// Reuse metadata must not hold the final business receipt or an independent
+	// host Stop behind transport retries. Preserve its exact envelope separately
+	// from pending business operations; a fresh session remains a normal path.
+	attempt, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if a := r.lookup(as.RunID); a != nil && a.ctx != nil && a.ctx.Err() == nil {
+		stop := context.AfterFunc(a.ctx, cancel)
+		defer stop()
+	}
+	_, err = r.sendOnce(attempt, runCredential(as), env)
+	if err != nil {
+		r.cfg.Log.WarnContext(ctx, "optional session stop report remains uncertain", "run_id", as.RunID, "request_id", env.RequestID, "operation", env.Operation, "err", err)
+	}
 	return err
 }

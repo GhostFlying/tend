@@ -21,7 +21,7 @@ type managerStopProof struct {
 }
 
 func supportsManagerReceiptReader(runtime *protocol.RunnerRuntime) bool {
-	return runtime != nil && runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(runtime.Capabilities, protocol.CapabilityManagerReceiptReader)
+	return runtime != nil && protocol.RunnerProtocolSupported(runtime.Protocol) && slices.Contains(runtime.Capabilities, protocol.CapabilityManagerReceiptReader)
 }
 
 // Only the newly negotiated reader mode requires this capability. Historical

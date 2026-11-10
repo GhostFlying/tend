@@ -182,24 +182,45 @@ func TestDeliveryValidChoicesKeepSameQuestion(t *testing.T) {
 	}
 }
 
-func TestDeliveryManualAnswerRecoveryCannotBecomeAutomaticGrant(t *testing.T) {
-	for _, answer := range []string{"text-only", "historical-mixed"} {
-		t.Run(answer, func(t *testing.T) {
+func TestDeliveryManualAnswerRecoveryDoesNotMintAuthority(t *testing.T) {
+	for _, scenario := range []struct{ answer, policy string }{
+		{"text-only", "manual"}, {"historical-mixed", "manual"},
+		{"text-only", "auto"}, {"historical-mixed", "auto"},
+	} {
+		t.Run(scenario.answer+"/"+scenario.policy, func(t *testing.T) {
 			h, _, i, impl, c := liveReviewedDeliveryFixture(t)
 			setPRPolicyForTest(t, h, i.IssueID, "manual")
 			duty := prepareLiveDeliveryForTest(t, h, i.IssueID, impl.TaskID, c)
-			setPRPolicyForTest(t, h, i.IssueID, "auto")
-			if answer == "text-only" {
+			var policy *protocol.IssuePRPolicy
+			if scenario.policy == "auto" {
+				// This is an independently authenticated owner grant, not a
+				// classification or interpretation of the subsequent answer.
+				i = setPRPolicyForTest(t, h, i.IssueID, "auto")
+				policy = i.Plan.PRPolicy
+			}
+			if scenario.answer == "text-only" {
 				answerDeliveryForTest(t, h, duty, "", "Wait for another verification")
 			} else {
 				retainLegacyDeliveryAnswer(t, h, duty, "approve", "Wait for another verification")
 			}
 			old := deliveryDecisionForTest(t, h, duty)
 			next := prepareLiveDeliveryForTest(t, h, i.IssueID, impl.TaskID, c)
+			p := protocol.UpdateIssueDeliveryPayload{Action: "bind", TaskID: impl.TaskID, ExecutionTaskID: impl.TaskID, ExpectedTaskControlRevision: rev(h.task(impl.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "Use only actual Issue authority, never an ambiguous answer"}}
+			if policy != nil {
+				if next.Status != "authorized" || next.AttentionID != "" || next.Authorization == nil || next.Authorization.Mode != "auto" || next.Authorization.RequestID != policy.Authority.RequestID || next.Authorization.PolicyDigest != store.IssuePRPolicyDigest(policy) {
+					t.Fatal("recovery lost the independent owner scope grant or changed its provenance", next)
+				}
+				if !reflect.DeepEqual(deliveryDecisionForTest(t, h, duty), old) {
+					t.Fatal("scope grant rewrote the historical answer")
+				}
+				if op := updateDeliveryForTest(t, h, i.IssueID, p); op.Status != protocol.OpSucceeded {
+					t.Fatal("explicit owner policy still required a duplicated candidate approval", op)
+				}
+				return
+			}
 			if next.Status != "awaiting_owner" || next.AttentionID == "" || next.AttentionID == duty.AttentionID || next.Authorization == nil || next.Authorization.Mode != "manual" {
 				t.Fatal("conditional answer became automatic execution authority", next)
 			}
-			p := protocol.UpdateIssueDeliveryPayload{Action: "bind", TaskID: impl.TaskID, ExecutionTaskID: impl.TaskID, ExpectedTaskControlRevision: rev(h.task(impl.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "Conditional answer still requires its concrete confirmation"}}
 			assertLiveDeliveryBindCode(t, h, i.IssueID, p, protocol.CodeForbidden)
 			if !reflect.DeepEqual(deliveryDecisionForTest(t, h, duty), old) {
 				t.Fatal("historical answer changed")

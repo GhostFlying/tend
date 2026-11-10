@@ -228,8 +228,8 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 						return Outcome{Result: d}, nil
 					}
 				}
-				// Recover the original concrete confirmation, not an automatic
-				// grant introduced by a later policy change.
+				// An ambiguous answer grants nothing. An independently authorized
+				// Issue policy can still cover this delivery without transcription.
 				recoverManualQuestion = !policyCovers
 				if d.AcceptanceID == "" && d.ArtifactID == "" {
 					if _, err := currentLiveDeliveryTask(ctx, tx.Q(), issue.IssueID, d.TaskID, p.ExpectedTaskControlRevision); err != nil {

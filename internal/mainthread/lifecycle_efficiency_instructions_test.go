@@ -58,3 +58,34 @@ func TestNamedResponsibilitiesPreserveTheSelectedRuntimeCapabilities(t *testing.
 		}
 	}
 }
+
+func TestFallbackInstructionsUseActualCapabilitiesAndSameGoalContinuation(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		selection *hostedconfig.Selection
+	}{
+		{"default-main", nil},
+		{"named-main", &hostedconfig.Selection{Purpose: agentconfig.Main}},
+		{"named-consultation", &hostedconfig.Selection{Purpose: agentconfig.Consultation}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			base := ThreadConfig(t.TempDir(), "configured-model")
+			base.Config = map[string]any{"features.shell_tool": true, "features.apply_patch_freeform": true, "features.image_generation": false}
+			cfg := (&Manager{cfg: Config{Thread: base}, named: tt.selection}).threadConfig()
+			if cfg.Config["features.shell_tool"] != true || cfg.Config["features.apply_patch_freeform"] != true || cfg.Config["features.image_generation"] != false {
+				t.Fatal("fallback changed explicit runtime capability configuration", cfg)
+			}
+			for _, obsolete := range []string{"Technical diagnosis belongs to the worker", "Use only the person-facing planning tools", "Do not reopen a completed Task; use follow_up"} {
+				if strings.Contains(cfg.DeveloperInstructions, obsolete) {
+					t.Fatalf("fallback retained role-based capability/continuation prohibition %q", obsolete)
+				}
+			}
+			if !strings.Contains(cfg.DeveloperInstructions, "category/capabilities") || !strings.Contains(cfg.DeveloperInstructions, "runtime tools") || !strings.Contains(cfg.DeveloperInstructions, "authority") {
+				t.Fatal("fallback lost configured capability and real authority boundaries", cfg.DeveloperInstructions)
+			}
+			if tt.selection == nil && !strings.Contains(cfg.DeveloperInstructions, "tasks_continue") {
+				t.Fatal("fallback split same-goal completed Tasks")
+			}
+		})
+	}
+}

@@ -59,6 +59,7 @@ func prepareHostedAdmissionRepair(t *testing.T, h *harness, issue protocol.Issue
 	t.Helper()
 	turn, _ := startHostedIssueReview(t, h, issue)
 	finishHostedReview(t, h, turn)
+	retainedLogicalRepairFixture(t, h, turn)
 	h.clock.Advance(11 * time.Minute)
 	return turn
 }

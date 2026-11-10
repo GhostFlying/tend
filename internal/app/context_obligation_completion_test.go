@@ -7,7 +7,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestPartialCommitSchedulesRepairForRetainedSourceObligation(t *testing.T) {
+func TestPartialCommitRetainsSourceWithoutAnotherModelTurn(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
 	h.prepareAgent(w.WorkItemID)
@@ -68,29 +68,21 @@ func TestPartialCommitSchedulesRepairForRetainedSourceObligation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if state.Status != "recovering" || state.RepairAttempts != 1 || ready || pending != 1 {
-		t.Fatalf("missing source did not retain exactly one repair: %+v ready=%v pending=%d", state, ready, pending)
+	if state.Status != "completed" || state.RepairAttempts != 0 || !ready || pending != 1 {
+		t.Fatalf("source interpretation became a completion gate or was erased: %+v ready=%v pending=%d", state, ready, pending)
 	}
-	var repair string
+	var repairs int
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM logical_turn_executions WHERE logical_turn_id=? AND repair=1`, state.ID).Scan(&repair)
-	}); err != nil {
-		t.Fatal(err)
+		return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM logical_turn_executions WHERE logical_turn_id=? AND repair=1`, state.ID).Scan(&repairs)
+	}); err != nil || repairs != 0 {
+		t.Fatalf("bookkeeping created another execution: %d %v", repairs, err)
 	}
-	commitFixtureTurn(t, h, repair)
-	recovered := store.MainTurn{RequestID: repair, MessageID: current, ThreadID: mainAgent.Thread, TurnID: "native-repair", Status: store.TurnCompleted}
-	if err := h.app.PutMainTurn(t.Context(), recovered); err != nil {
-		t.Fatal(err)
+	if len(state.Processing) != 2 {
+		t.Fatalf("exact admitted source positions were lost: %+v", state.Processing)
 	}
-	state, err = h.app.LogicalTurn(t.Context(), second.RequestID)
-	if err != nil || state.Status != "completed" {
-		t.Fatalf("repair failed to complete: %+v %v", state, err)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var err error
-		ready, err = store.WorkItemContextReady(t.Context(), tx.Q(), w.WorkItemID)
-		return err
-	}); err != nil || !ready {
-		t.Fatalf("context remained blocked: %v", err)
+	for _, receipt := range state.Processing {
+		if receipt.ProcessedAtMillis == 0 {
+			t.Fatalf("terminal native execution has no processing receipt: %+v", receipt)
+		}
 	}
 }

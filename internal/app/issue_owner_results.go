@@ -61,6 +61,38 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if err != nil {
 		return Outcome{}, err
 	}
+	duty, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, task.TaskID)
+	if errors.Is(err, store.ErrNotFound) {
+		duty = protocol.IssueDeliveryDuty{TaskID: task.TaskID, Revision: 1, Status: "preparing", AssignmentEpoch: issue.AssignmentEpoch}
+	} else if err != nil {
+		return Outcome{}, err
+	} else if duty.Status == "complete" || duty.Status == "report" || duty.Status == "ended" {
+		if duty.ExecutionTaskID != "" {
+			execution, err := store.GetTask(ctx, tx.Q(), duty.ExecutionTaskID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if execution.TaskID != task.TaskID {
+				var busy bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r LEFT JOIN leases l USING(run_id) WHERE r.task_id=? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR l.status<>'released')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, execution.TaskID, execution.TaskID).Scan(&busy); err != nil {
+					return Outcome{}, err
+				}
+				if busy {
+					return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original delivery execution before replacing its settled responsibility")
+				}
+			}
+			if err := archiveTaskDeliveryForContinuation(ctx, x, tx, execution); err != nil {
+				return Outcome{}, err
+			}
+		}
+		// The owner may continue within its still-active real Run. Preserve the
+		// previous settlement and monotonically increasing duty revision, not its
+		// ended candidate or authority as the new result's current responsibility.
+		duty = protocol.IssueDeliveryDuty{TaskID: task.TaskID, Revision: duty.Revision + 1, Status: "preparing", AssignmentEpoch: issue.AssignmentEpoch}
+	} else if duty.Candidate == nil {
+		duty.Revision++
+		duty.Status = "preparing"
+	}
 	if err := bindDeliveryUpgradeArtifact(ctx, tx, task, *p.Result); err != nil {
 		return Outcome{}, err
 	}
@@ -93,14 +125,8 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: event, Source: "app", ObjectType: "artifact", ObjectID: artifact, Kind: "issue.result_submitted", BodyJSON: string(body), ActorJSON: string(actor), RequestID: x.Env.RequestID, TraceID: x.TraceID, CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return Outcome{}, err
 	}
-	duty, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, task.TaskID)
-	if errors.Is(err, store.ErrNotFound) {
-		duty = protocol.IssueDeliveryDuty{TaskID: task.TaskID, EventID: event, Revision: 1, Status: "preparing", AssignmentEpoch: issue.AssignmentEpoch}
-	} else if err != nil {
-		return Outcome{}, err
-	} else if duty.Candidate == nil {
-		duty.Revision++
-		duty.Status = "preparing"
+	if duty.EventID == "" {
+		duty.EventID = event
 	}
 	// The result is a new immutable fact from the same real producer. It does
 	// not change or expire an already frozen candidate/execution authorization.
@@ -109,7 +135,7 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,artifact_id,revision,status,body_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(issue_id,task_id) DO UPDATE SET artifact_id=excluded.artifact_id,revision=excluded.revision,status=excluded.status,body_json=excluded.body_json`, issue.IssueID, task.TaskID, duty.EventID, artifact, duty.Revision, duty.Status, string(dutyRaw)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,artifact_id,revision,status,body_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(issue_id,task_id) DO UPDATE SET event_id=excluded.event_id,artifact_id=excluded.artifact_id,revision=excluded.revision,status=excluded.status,body_json=excluded.body_json`, issue.IssueID, task.TaskID, duty.EventID, artifact, duty.Revision, duty.Status, string(dutyRaw)); err != nil {
 		return Outcome{}, err
 	}
 	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")

@@ -62,6 +62,14 @@ func TestNamedOwnerSchemasCarryWorkspaceRecoveryInstructions(t *testing.T) {
 			continue
 		}
 		found++
+		if spec.Name == "issues_update_task" {
+			if !strings.Contains(spec.Description, "tasks_continue") || !strings.Contains(spec.Description, "independent goal") || strings.Contains(spec.Description, "use follow_up for genuine remaining work") {
+				t.Fatal("completed Task guidance splits a sustained goal", spec.Description)
+			}
+			if !strings.Contains(spec.Description, "current revision and Issue epoch") || !strings.Contains(spec.Description, "active runs retain their frozen contracts") {
+				t.Fatal("continuation guidance lost actual revision and active execution boundaries", spec.Description)
+			}
+		}
 		var root map[string]any
 		if err := json.Unmarshal(spec.InputSchema, &root); err != nil {
 			t.Fatal(err)

@@ -74,42 +74,50 @@ func TestHostedContextReviewPersistsBoundedSourceBatches(t *testing.T) {
 	}
 }
 
-func TestHostedBackgroundRepairDefiniteFailureRemainsBounded(t *testing.T) {
+func TestHostedRetainedRepairDefiniteFailureDoesNotStartAnotherModelTurn(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
-	turn, _ := startHostedIssueReview(t, h, issue)
+	conversation := "issue:" + issue.IssueID
+	initial, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
+	if err != nil || !ok {
+		t.Fatal(initial, ok, err)
+	}
+	turn := startHostedReview(t, h, conversation, initial)
 	finishHostedReview(t, h, turn)
-	for attempt := 0; attempt < 5; attempt++ {
-		h.clock.Advance(11 * time.Minute)
-		d, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID)
-		for ok && err == nil && d.Operation != "conversation.repair_turn" {
-			if err = h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
-				t.Fatal(err)
-			}
-			d, _, ok, err = h.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID)
-		}
-		if err != nil || !ok || d.Operation != "conversation.repair_turn" {
-			t.Fatal("repair stranded", attempt, d, ok, err)
-		}
-		selection, named, err := h.app.HostedSelectionForAdmission(t.Context(), d.RequestID, "issue:"+issue.IssueID)
-		if err != nil || !named {
-			t.Fatal(selection, named, err)
-		}
-		repair := store.MainTurn{RequestID: d.RequestID, MessageID: turn.MessageID, ThreadID: turn.ThreadID, Status: store.TurnStarting, Hosted: &selection, Model: selection.Definition.Model, Effort: selection.Definition.Effort}
-		if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
-			t.Fatal(err)
-		}
-		repair.Status = store.TurnRejected
-		if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Failed}); err != nil {
-			t.Fatal(err)
-		}
+	retained := retainedLogicalRepairFixture(t, h, turn)
+	d, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
+	if err != nil || !ok || d.Operation != "conversation.repair_turn" || d.RequestID != retained {
+		t.Fatal("retained historical repair was not serviceable", d, ok, err)
+	}
+	selection, named, err := h.app.HostedSelectionForAdmission(t.Context(), d.RequestID, "issue:"+issue.IssueID)
+	if err != nil || !named {
+		t.Fatal(selection, named, err)
+	}
+	repair := store.MainTurn{RequestID: d.RequestID, MessageID: turn.MessageID, ThreadID: turn.ThreadID, Status: store.TurnStarting, Hosted: &selection, Model: selection.Definition.Model, Effort: selection.Definition.Effort}
+	if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
+		t.Fatal(err)
+	}
+	repair.Status = store.TurnRejected
+	if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Failed}); err != nil {
+		t.Fatal(err)
 	}
 	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil || state.Status != "needs_review" || state.RepairAttempts != 5 {
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 1 {
 		t.Fatal(state, err)
+	}
+	h.clock.Advance(time.Hour)
+	if next, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID); err != nil || ok && next.Operation == "conversation.repair_turn" {
+		t.Fatal("definite historical failure started another metadata model round", next, ok, err)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM outbox WHERE operation='conversation.repair_turn'`) != 1 || h.countWhere(`SELECT COUNT(*) FROM outbox WHERE operation='conversation.repair_turn' AND status='failed'`) != 1 {
+		t.Fatal("historical failed delivery was replaced or retried")
+	}
+	actual, found, err := h.app.MainTurn(t.Context(), repair.RequestID)
+	if err != nil || !found || actual.Status != store.TurnRejected || actual.TurnID != "" {
+		t.Fatal("logical bookkeeping fabricated a successful native execution", actual, found, err)
 	}
 }
 

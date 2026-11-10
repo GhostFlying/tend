@@ -12,7 +12,7 @@ func TestNamedMainReplyClassificationDoesNotGenerateNewOwnerInput(t *testing.T) 
 	for _, repair := range []bool{false, true} {
 		name := "original"
 		if repair {
-			name = "repair"
+			name = "retained repair"
 		}
 		t.Run(name, func(t *testing.T) { testNamedMainReplyClassificationWake(t, repair, false) })
 	}
@@ -99,6 +99,9 @@ func testNamedMainReplyClassificationWake(t *testing.T, repair, delegated bool) 
 		if err := h.app.FinishDelivery(t.Context(), delivery, DeliveryResult{Outcome: Delivered}); err != nil {
 			t.Fatal(err)
 		}
+		// This is a retained pre-upgrade delivery, not a model round generated
+		// by normal completion under the current lifecycle.
+		request := retainedLogicalRepairFixture(t, h, original)
 		resumed, next, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
 		if err != nil {
 			t.Fatal(err)
@@ -107,8 +110,8 @@ func testNamedMainReplyClassificationWake(t *testing.T, repair, delegated bool) 
 			h.clock.Advance(next.Sub(h.clock.Now()))
 			resumed, _, ok, err = h.app.NextDelivery(t.Context(), MainThreadDestination)
 		}
-		if err != nil || !ok || resumed.Operation != "conversation.repair_turn" {
-			t.Fatal("missing actual repair", resumed, ok, err)
+		if err != nil || !ok || resumed.Operation != "conversation.repair_turn" || resumed.RequestID != request {
+			t.Fatal("retained repair lost its original delivery", resumed, ok, err)
 		}
 		main = startHostedReview(t, h, "main", resumed)
 		var repairLogical, originalLogical string

@@ -125,7 +125,8 @@ func TestAgentStartupNamedSharedSourceReceiptKeepsExecutionConversation(t *testi
 func TestReviewStartupBudgetTracksServiceableFrozenRepair(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
-	prepareHostedAdmissionRepair(t, h, issue)
+	original := prepareHostedAdmissionRepair(t, h, issue)
+	retainedLogicalRepairFixture(t, h, original)
 	conversation := "issue:" + issue.IssueID
 	submitHostedAdmissionInput(t, h, conversation)
 	reloadHostedAdmissionConfig(t, h, true)

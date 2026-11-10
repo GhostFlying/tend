@@ -207,7 +207,7 @@ func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
 	}
 }
 
-func TestLegacyUnclassifiedTextPreservesReviewDutyWithoutBlockingTask(t *testing.T) {
+func TestLegacyUnclassifiedTextDoesNotCreateReviewGate(t *testing.T) {
 	h := newHarness(t)
 	source, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -232,23 +232,11 @@ func TestLegacyUnclassifiedTextPreservesReviewDutyWithoutBlockingTask(t *testing
 	if view := h.executionTask(identity.TaskID); view.Execution == nil || view.Execution.State != protocol.ExecutionQueued {
 		t.Fatal("unclassified text became an execution permission", view)
 	}
-	if c := h.agentContext(w.WorkItemID); c.SyncStatus != "synced" || c.DispatchReady {
-		t.Fatal("lifecycle and semantic state conflated", c)
+	if c := h.agentContext(w.WorkItemID); c.SyncStatus != "available" || !c.DispatchReady {
+		t.Fatal("unclassified progress created a source-review dispatch gate", c)
 	}
-	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, msg := range state.Messages {
-		if msg.Disposition == "pending" {
-			if op := h.associate(mainAgent, msg.MessageID); op.Status != protocol.OpSucceeded {
-				t.Fatal(op)
-			}
-		}
-	}
-	commitFixtureTurn(t, h, turn.RequestID)
 	if _, ok, _ := h.claim("linux-1"); !ok {
-		t.Fatal("reviewed legacy text stayed blocked")
+		t.Fatal("ordinary progress blocked the queued Task without a review ceremony")
 	}
 }
 
@@ -1271,8 +1259,8 @@ func TestTasklessBackgroundFormalReplyIsPublishedOnceAndCannotBecomeSilent(t *te
 			if err := json.Unmarshal(out.Result, &pub); err != nil || pub.MessageID == "" {
 				t.Fatal(string(out.Result), err)
 			}
-			if !h.associations(pub.MessageID).FactsReviewed {
-				t.Fatal("formal background message has an unreviewed body")
+			if h.associations(pub.MessageID).FactsReviewed {
+				t.Fatal("formal publication fabricated semantic review")
 			}
 			if batch := h.backgroundPage(turn.MessageID, 0).Batch; batch.Checkin != nil {
 				t.Fatal("explicit publication retained old silence")

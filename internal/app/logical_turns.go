@@ -398,8 +398,17 @@ func (a *App) recoverLateTurnMessages(ctx context.Context, tx *store.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE logical_turns SET repair_attempts=0 WHERE logical_turn_id=?`, id); err != nil {
 			return err
 		}
-		if _, err := a.settleLogicalTurn(ctx, tx, rec, a.now().UnixMilli()); err != nil {
+		incomplete, err := a.settleLogicalTurn(ctx, tx, rec, a.now().UnixMilli())
+		if err != nil {
 			return err
+		}
+		if !incomplete {
+			// The late input belongs to this original native execution. Once
+			// its real terminal receipt settles processing, settle the same
+			// witnessed steer without a metadata-only model round.
+			if err := a.settleReviewedMainSteers(ctx, tx, request, rec.Status, a.now().UnixMilli()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

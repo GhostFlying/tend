@@ -99,7 +99,10 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
-	SessionContinuation      *SessionContinuation  `json:"session_continuation,omitempty"`
+	SessionContinuation *SessionContinuation `json:"session_continuation,omitempty"`
+	// SessionStopReports negotiates optional, protocol-3 session reuse metadata.
+	// Its absence preserves the original terminal reporting sequence.
+	SessionStopReports       bool                  `json:"session_stop_reports,omitempty"`
 	ExternalWaits            bool                  `json:"external_waits,omitempty"`
 	ExternalWait             *ExternalWait         `json:"external_wait,omitempty"`
 	ExternalWaitContinuation *ExternalWait         `json:"external_wait_continuation,omitempty"`

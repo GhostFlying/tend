@@ -77,14 +77,13 @@ func TestHostedMainFrozenRepairSurvivesUnavailableCurrentConfiguration(t *testin
 }
 func testHostedMainUnavailableRepair(t *testing.T, pendingReceipt bool) {
 	h := hostedManagerHarness(t)
-	_, delivery := h.say("Original owner goal must finish its metadata")
+	_, delivery := h.say("Original owner goal has a retained historical continuation")
 	original := startHostedReview(t, h, "main", delivery)
 	selected, named, err := h.app.NamedHostedSelection(t.Context(), "main")
 	if err != nil || !named {
 		t.Fatal(named, err)
 	}
 	finishHostedReview(t, h, original)
-	// Use the same existing bounded repair delay; a later owner input is queued.
 	h.clock.Advance(11 * time.Minute)
 	var ordinary store.MainTurn
 	if pendingReceipt {
@@ -101,6 +100,7 @@ func testHostedMainUnavailableRepair(t *testing.T, pendingReceipt bool) {
 		}
 	}
 	queued := queueMessage(t, h, "New goal waits for available current configuration")
+	retainedRequest := retainedLogicalRepairFixture(t, h, original)
 	h.app = New(h.store, h.ids, h.clock.Now)
 	runtime, named, err := h.app.HostedRuntimeSelection(t.Context(), "main")
 	if err != nil || !named || runtime.ConfigurationRevision != selected.ConfigurationRevision {
@@ -117,7 +117,7 @@ func testHostedMainUnavailableRepair(t *testing.T, pendingReceipt bool) {
 		}
 	}
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-	if err != nil || !ok || d.Operation != "conversation.repair_turn" {
+	if err != nil || !ok || d.Operation != "conversation.repair_turn" || d.RequestID != retainedRequest {
 		t.Fatal("claim disagreed with serviceable frozen runtime", d, ok, err)
 	}
 	if pin, named, err := h.app.HostedSelectionForAdmission(t.Context(), d.RequestID, "main"); err != nil || !named || pin.ConfigurationRevision != selected.ConfigurationRevision {

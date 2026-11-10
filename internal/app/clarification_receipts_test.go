@@ -119,7 +119,7 @@ func TestClarificationAdoptionRequiresReconciledNativeHistory(t *testing.T) {
 }
 
 func TestAncestorReceiptPreservesSuccessorResponsibility(t *testing.T) {
-	for _, status := range []string{"recovering", "awaiting_clarification", "stopped"} {
+	for _, status := range []string{"completed", "awaiting_clarification", "stopped"} {
 		t.Run(status, func(t *testing.T) {
 			h := newHarness(t)
 			source, first := startReviewTurn(t, h)
@@ -152,7 +152,7 @@ func TestAncestorReceiptPreservesSuccessorResponsibility(t *testing.T) {
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			if status != "recovering" {
+			if status != "completed" {
 				h.associate(mainAgent, source)
 				h.associate(mainAgent, current)
 				commitFixtureTurn(t, h, second.RequestID)
@@ -179,9 +179,6 @@ func TestAncestorReceiptPreservesSuccessorResponsibility(t *testing.T) {
 			}
 			state, err = h.app.LogicalTurn(t.Context(), second.RequestID)
 			wantAttempts := 0
-			if status == "recovering" {
-				wantAttempts = 1
-			}
 			if err != nil || state.Status != status || state.RepairAttempts != wantAttempts {
 				t.Fatalf("receipt changed successor responsibility: %+v %v", state, err)
 			}

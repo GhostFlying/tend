@@ -62,7 +62,9 @@ func TestCanonicalIssueCallerHTTPAndCLILifecycle(t *testing.T) {
 	if json.Unmarshal(run("context", issue.IssueID), &context) != nil || context.IssueID != issue.IssueID || context.Revision < 1 {
 		t.Fatal(context)
 	}
-	if context.Prepared || !context.DispatchReady || context.SyncStatus != "synced" || context.CoordinationState != "idle" || len(context.DispatchBlockers) != 0 {
+	// Prepared retains the historical baseline fact; its absence does not make
+	// the current context unavailable or add a source-review admission step.
+	if context.Prepared || !context.DispatchReady || context.SyncStatus != "available" || context.CoordinationState != "idle" || len(context.DispatchBlockers) != 0 {
 		t.Fatalf("CLI exposed legacy baseline as canonical admission: %+v", context)
 	}
 	at := e.clock.Now().Add(time.Hour).UnixMilli()
