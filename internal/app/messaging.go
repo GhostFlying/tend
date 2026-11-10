@@ -52,7 +52,11 @@ func (c MessagingCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 		if p.ContentRevision < 1 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "content_revision is required")
 		}
-		if err := recordCommunicationRead(ctx, x, tx, x.Env.Target.ID, p.ContentRevision, "owner", "web", "explicit_owner_read", ""); err != nil {
+		reader, endpoint, evidence, execution := "owner", "web", "explicit_owner_read", ""
+		if x.ActualPrincipal().Kind != protocol.PrincipalOwner {
+			reader, endpoint, evidence, execution = "agent", "agent", "source_read_tool", x.ownerExecutionID
+		}
+		if err := recordCommunicationRead(ctx, x, tx, x.Env.Target.ID, p.ContentRevision, reader, endpoint, evidence, execution); err != nil {
 			return Outcome{}, err
 		}
 		return Outcome{Result: map[string]any{"message_id": x.Env.Target.ID}, Notify: true}, nil

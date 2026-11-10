@@ -197,6 +197,15 @@ func (c ownerExecutionCommand) prepare(ctx context.Context, x *Exec, tx *store.T
 	if _, err := tx.Exec(ctx, `INSERT INTO main_owner_authorities(execution_id,owner_subject,created_at) VALUES(?,?,?) ON CONFLICT(execution_id) DO NOTHING`, stable, c.owner, x.Now.UnixMilli()); err != nil {
 		return err
 	}
+	var originalEffect int64
+	var originalRequest string
+	err = tx.Q().QueryRowContext(ctx, `SELECT effect_seq,request_id FROM main_owner_effects WHERE execution_id=? AND call_id=? ORDER BY step LIMIT 1`, stable, c.call.CallID).Scan(&originalEffect, &originalRequest)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && originalEffect != c.call.EffectSeq {
+		return duplicateEffect("native callback already identifies another effect", map[string]any{"original_request_id": originalRequest, "effect_seq": originalEffect})
+	}
 	var priorCall string
 	var priorRequest string
 	err = tx.Q().QueryRowContext(ctx, `SELECT call_id,request_id FROM main_owner_effects WHERE execution_id=? AND effect_seq=? LIMIT 1`, stable, c.call.EffectSeq).Scan(&priorCall, &priorRequest)
