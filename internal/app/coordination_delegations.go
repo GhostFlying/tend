@@ -80,7 +80,7 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 		return false, err
 	}
 	body, _ := json.Marshal(map[string]any{"logical_turn_id": logical, "source_message_id": source, "operation": c.Operation(), "succeeded": failure == nil, "error": failure, "corrects_request_id": correction})
-	actor, _ := json.Marshal(x.Principal)
+	actor, _ := json.Marshal(x.ActualPrincipal())
 	turn, err := store.GetMainTurn(ctx, tx.Q(), c.ExecutionID)
 	if err != nil {
 		return false, err

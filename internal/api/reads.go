@@ -204,7 +204,11 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 // request reads the outcome of one of the owner's requests.
 func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
-		return views.Request(r.Context(), q, p.DedupDomain(), r.PathValue("id"))
+		record, err := store.GetOwnerRequest(r.Context(), q, r.PathValue("id"))
+		if err != nil {
+			return nil, err
+		}
+		return views.Request(r.Context(), q, record.Domain, r.PathValue("id"))
 	})
 }
 

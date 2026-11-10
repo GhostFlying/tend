@@ -131,7 +131,7 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 	}
 	before, _ := json.Marshal(old.Items)
 	after, _ := json.Marshal(p.WorkItemIDs)
-	actor, _ := json.Marshal(x.Principal)
+	actor, _ := json.Marshal(x.ActualPrincipal())
 	if _, err := tx.Exec(ctx, `INSERT INTO message_association_history(message_id,revision,actor,before_json,after_json,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, updated.Revision, string(actor), string(before), string(after), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}

@@ -378,7 +378,11 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 	// request receipt must describe that same aggregate, regardless of input order.
 	next.DependsOn = slices.Clone(next.DependsOn)
 	slices.Sort(next.DependsOn)
-	if err := tx.SaveCanonicalIssue(ctx, next, expected, store.IssueRevisionProvenance{Actor: x.Principal, RequestID: x.Env.RequestID, SourceMessageID: source.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: reason}); err != nil {
+	actor := x.Principal
+	if x.Actor != nil {
+		actor = *x.Actor
+	}
+	if err := tx.SaveCanonicalIssue(ctx, next, expected, store.IssueRevisionProvenance{Actor: actor, RequestID: x.Env.RequestID, SourceMessageID: source.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: reason}); err != nil {
 		return Outcome{}, err
 	}
 	if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {

@@ -92,6 +92,9 @@ func (s *Server) expires(v token) time.Time {
 // tailnet login if that is an owner, or the owner a configured node
 // belongs to.
 func (s *Server) ownerLogin(r *http.Request) (string, error) {
+	if owner, ok := r.Context().Value(mainOwnerRequestKey{}).(protocol.Principal); ok {
+		return owner.Subject, nil
+	}
 	id, err := s.whois.WhoIs(r.Context(), r.RemoteAddr)
 	if err == nil && id.User != "" && slices.Contains(s.cfg.Owners, id.User) {
 		return id.User, nil
@@ -110,6 +113,9 @@ func (s *Server) ownerLogin(r *http.Request) (string, error) {
 // authenticate checks a request's tailnet identity and bearer token and
 // returns the token's content. The token must belong to the same owner.
 func (s *Server) authenticate(r *http.Request) (token, error) {
+	if owner, ok := r.Context().Value(mainOwnerRequestKey{}).(protocol.Principal); ok {
+		return token{Login: owner.Subject, ClientID: owner.Client, Scope: protocol.ScopeOwner, Issued: s.cfg.Now().UnixMilli()}, nil
+	}
 	login, err := s.ownerLogin(r)
 	if err != nil {
 		return token{}, err
@@ -127,6 +133,9 @@ func (s *Server) authenticate(r *http.Request) (token, error) {
 
 // owner authenticates a request that only an owner-scoped token may make.
 func (s *Server) owner(r *http.Request) (protocol.Principal, error) {
+	if owner, ok := r.Context().Value(mainOwnerRequestKey{}).(protocol.Principal); ok {
+		return owner, nil
+	}
 	v, err := s.authenticate(r)
 	if err != nil {
 		return protocol.Principal{}, err

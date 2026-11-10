@@ -275,7 +275,7 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		value.Continuation = &policy
 	}
 	if c.Responsible {
-		actor := x.Principal
+		actor := x.ActualPrincipal()
 		value.Actor = &actor
 	}
 	answer, err := json.Marshal(value)

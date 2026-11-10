@@ -215,7 +215,7 @@ func (a *App) MigrateManager(ctx context.Context, p protocol.Principal, env *pro
 	if payload.Phase == "switch" {
 		recorded := false
 		err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			_, err := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), env.RequestID)
+			_, err := store.GetRequest(ctx, tx.Q(), ownerRequestPrincipal(ctx, p).DedupDomain(), env.RequestID)
 			if err == nil {
 				recorded = true
 				return nil
@@ -238,7 +238,7 @@ func (a *App) MigrateManager(ctx context.Context, p protocol.Principal, env *pro
 			input := payload
 			input.Phase = "preflight"
 			probe.Payload, _ = json.Marshal(input)
-			preflight, err := a.Execute(ctx, p, &probe, command)
+			preflight, err := a.Execute(context.WithValue(ctx, ownerPreparationKey{}, true), p, &probe, command)
 			if err != nil {
 				return preflight, err
 			}

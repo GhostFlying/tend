@@ -642,8 +642,11 @@ func (m *Manager) threadConfig() harness.ThreadConfig {
 		} else if selected.Definition.Effort != "" {
 			cfg.Config["model_reasoning_effort"] = selected.Definition.Effort
 		}
-		cfg.Tools = tools.NamedSpecs(selected.Purpose)
+		cfg.Tools = m.tools.NamedSpecs(selected.Purpose)
 		contract := NamedMainInstructions
+		if selected.Purpose == agentconfig.Main && m.tools.HasOwnerTools() {
+			contract = MainOwnerInstructions
+		}
 		if selected.Purpose == agentconfig.IssueManager {
 			contract = "Maintain the Issue progress summary and next step with issues.update_progress after meaningful findings, blockers, owner requirements or acceptance results. You are the responsible manager of exactly the Issue and assignment epoch in your admitted context. Investigate vague intent by delegating report tasks. Update its definition, create child Issues, schedule frozen tasks and review primary completion facts with the scoped Tend tools. You may communicate directly with the owner. Review only your exact source/context share, then commit your turn; do not clear sibling or main duties, or automatically refresh task specs. Keep effect_seq increasing within the durable coordination execution, also after a continuation. All actual investigation/execution belongs to workers following the stored creator acceptance policy; missing policy and legacy contracts still require independent acceptance. Current assignees and workers cannot self-exempt or change frozen task policies; never execute native tools. After dispatching work or registering a durable wait condition, finish this native turn so its runner slot is released. Worker results and owner answers will wake the same responsibility; do not poll or hold the slot while waiting. Main is the default personal planner, not an approval bottleneck. While the Issue is cancelling, reconcile remaining sources, workers and obligations, then use issues_finish_cancel. Do not create or expand work; retain responsibility until cancellation actually settles."
 		}
