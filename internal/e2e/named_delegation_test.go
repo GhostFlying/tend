@@ -137,7 +137,6 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 			if !invoke("issues_review_completions", map[string]any{"effect_seq": seq, "expected_control_revision": item.Revision, "payload": reviews}, nil) {
 				return "failed"
 			}
-			seq++
 			if !invoke("issues_read", map[string]any{}, &item) {
 				return "failed"
 			}
