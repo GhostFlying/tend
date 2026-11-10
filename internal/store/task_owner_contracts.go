@@ -114,3 +114,35 @@ func RunIssueResponsibilityCurrent(ctx context.Context, q Querier, run string) (
 	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM run_issue_responsibilities r JOIN issue_controls i USING(issue_id) WHERE r.run_id=? AND (i.assignment_epoch<>r.assignment_epoch OR i.assignee_ref<>r.agent_ref OR i.assignment_state<>'active' OR i.state NOT IN ('active','paused')))`, run).Scan(&current)
 	return current, err
 }
+
+// ReviewAdmissionCurrent permits execution admission changes without rewriting
+// the frozen review contract. Owner edits and transfers still require a new
+// responsibility; technical initialization is not an owner edit.
+func ReviewAdmissionCurrent(ctx context.Context, q Querier, contract TaskOwnerContract, issue protocol.Issue) (bool, error) {
+	if issue.AssignmentEpoch != 1 || issue.Assignee.Ref != contract.AgentRef || issue.AssignmentState != "active" || issue.Revision < contract.ReviewAdmissionRevision {
+		return false, nil
+	}
+	var current bool
+	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM issue_control_revisions v WHERE v.issue_id=? AND v.revision>? AND v.revision<=? AND NOT EXISTS(SELECT 1 FROM request_records r WHERE r.domain=v.request_domain AND r.request_id=v.request_id AND r.operation IN ('system.initialize_issue_admission','issues.set_status','issues.pause','issues.resume')))`, issue.IssueID, contract.ReviewAdmissionRevision, issue.Revision).Scan(&current)
+	if err != nil || !current {
+		return current, err
+	}
+	origin, err := GetCanonicalIssueRevision(ctx, q, issue.IssueID, contract.ReviewAdmissionRevision)
+	if err != nil {
+		return false, err
+	}
+	before, err := json.Marshal(origin.OwnerSelection)
+	if err != nil {
+		return false, err
+	}
+	after, err := json.Marshal(issue.OwnerSelection)
+	return string(before) == string(after), err
+}
+
+// IssueHasFrozenReview derives selection from an existing execution contract.
+// It does not create a manager or introduce another execution queue.
+func IssueHasFrozenReview(ctx context.Context, q Querier, issue string) (bool, error) {
+	var found bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_execution_contracts WHERE review_issue_id=?)`, issue).Scan(&found)
+	return found, err
+}

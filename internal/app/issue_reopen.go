@@ -70,7 +70,11 @@ func restoreReopenedIssueManager(ctx context.Context, x *Exec, tx *store.Tx, iss
 	env.ExpectedControlRevision = &issue.Revision
 	env.Payload, _ = json.Marshal(p)
 	inner.Env = &env
-	out, err := (RequestIssueManager{}).Apply(ctx, &inner, tx)
+	policy := ""
+	if issue.OwnerSelection != nil {
+		policy = issue.OwnerSelection.OwnershipPolicy
+	}
+	out, err := selectIssueOwner(ctx, &inner, tx, *p, policy)
 	if err != nil {
 		return Outcome{}, err
 	}

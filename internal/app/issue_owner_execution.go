@@ -266,7 +266,11 @@ func claimOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, run store.R
 			return nil, protocol.Errorf(protocol.CodeStaleRevision, "review execution must retain its child Issue owner")
 		}
 		if !claimed {
-			if issue.AssignmentEpoch != 1 || issue.Assignee.Ref != contract.AgentRef || issue.Revision != contract.ReviewAdmissionRevision {
+			current, err := store.ReviewAdmissionCurrent(ctx, tx.Q(), contract, issue)
+			if err != nil {
+				return nil, err
+			}
+			if !current {
 				return nil, protocol.Errorf(protocol.CodeStaleRevision, "the pending review responsibility was changed by its owner")
 			}
 			previous := issue.Revision
@@ -393,8 +397,9 @@ func settleCancelledOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task
 		return nil, err
 	}
 	if count == 0 {
-		if issue.Revision != contract.ReviewAdmissionRevision || issue.Assignee.Ref != contract.AgentRef {
-			return nil, nil
+		current, err := store.ReviewAdmissionCurrent(ctx, tx.Q(), contract, issue)
+		if err != nil || !current {
+			return nil, err
 		}
 	} else {
 		var current bool

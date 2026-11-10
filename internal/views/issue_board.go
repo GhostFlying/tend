@@ -152,6 +152,10 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 		}
 	}
 	var err error
+	card.FrozenReviewExecution, err = store.IssueHasFrozenReview(ctx, q, issue.IssueID)
+	if err != nil {
+		return card, err
+	}
 	card.Progress, err = store.IssueProgress(ctx, q, issue.IssueID, issue.Revision)
 	if err != nil {
 		return card, err

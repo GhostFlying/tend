@@ -5168,6 +5168,7 @@ export interface IssueBoardCard {
   attention_count: number;
   children?: IssueChildProgress;
   execution: ExecutionCounts;
+  frozen_review_execution?: boolean;
   notification_due_at?: number;
   owner_attention_count?: number;
   pause?: IssuePauseProgress;

@@ -7446,6 +7446,9 @@
         "execution": {
           "$ref": "#/definitions/ExecutionCounts"
         },
+        "frozen_review_execution": {
+          "type": "boolean"
+        },
         "notification_due_at": {
           "type": "integer"
         },

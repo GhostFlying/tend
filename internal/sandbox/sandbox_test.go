@@ -347,7 +347,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	}
 	// The seed's waiting worker also uses the real decision path and resumes.
 	waitFor(t, ctx, "worker question appears", func() bool {
-		c.call(http.MethodGet, "/api/v1/inbox", nil, &inbox)
+		c.call(http.MethodGet, "/api/v1/inbox?recipient=all", nil, &inbox)
 		for _, item := range inbox.Items {
 			if item.TaskID == demo.Tasks[2] && item.Kind == "decision" && item.Decision != nil {
 				c.operation("test-worker-answer", "attentions.respond", protocol.Target{Type: "attention", ID: item.AttentionID}, &item.Revision, protocol.RespondAttentionPayload{Version: item.Decision.Version, Option: "手机"})
@@ -689,11 +689,13 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 				}
 				var issue protocol.IssueView
 				c.call(http.MethodGet, "/api/v1/issues/"+item.IssueID, nil, &issue)
-				if len(issue.Tasks) > 0 {
-					taskID = issue.Tasks[0].TaskID
+				for _, ref := range issue.Tasks {
 					var task protocol.TaskDetail
-					c.call(http.MethodGet, "/api/v1/tasks/"+taskID, nil, &task)
-					return task.Lifecycle == protocol.TaskCompleted
+					c.call(http.MethodGet, "/api/v1/tasks/"+ref.TaskID, nil, &task)
+					if task.Title == title {
+						taskID = task.TaskID
+						return task.Lifecycle == protocol.TaskCompleted
+					}
 				}
 			}
 			return false
@@ -707,7 +709,7 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 	var pending protocol.AttentionView
 	waitFor(t, ctx, "a real worker question remains in flight at shutdown", func() bool {
 		var inbox protocol.AttentionPage
-		client.call(http.MethodGet, "/api/v1/inbox", nil, &inbox)
+		client.call(http.MethodGet, "/api/v1/inbox?recipient=all", nil, &inbox)
 		for _, item := range inbox.Items {
 			if item.TaskID == demo.Tasks[2] && item.Kind == "decision" && item.Decision != nil {
 				pending = item

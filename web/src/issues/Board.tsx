@@ -108,7 +108,7 @@ export function IssueBoard({
   }, [mobileColumn]);
   const actions = useBoardActions();
   const move = (item: IssueSummary, status: IssueWorkStatus) => {
-    if (status === "todo" && !item.owner_selection) {
+    if (status === "todo" && !item.owner_selection && !item.board?.frozen_review_execution) {
       setStartItem(item);
       setStartCategory("");
       void live.agents.openCategories();
