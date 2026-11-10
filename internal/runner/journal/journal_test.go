@@ -78,3 +78,25 @@ func TestJournalSurvivesReopen(t *testing.T) {
 		t.Error("done run kept its request")
 	}
 }
+
+func TestJournalURIKeepsHashAndQueryInPhysicalPath(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"journal#first.db", "journal#second.db", "journal?query.db"} {
+		path := filepath.Join(root, name)
+		j := open(t, path)
+		if err := j.PutRequest(t.Context(), Request{Envelope: protocol.Envelope{RequestID: "original", Operation: name, Target: protocol.Target{Type: "host", ID: "fixture"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.Close(); err != nil {
+			t.Fatal(err)
+		}
+		j = open(t, path)
+		requests, err := j.Requests(t.Context())
+		if err != nil || len(requests) != 1 || requests[0].Envelope.Operation != name {
+			t.Fatal(name, requests, err)
+		}
+		if err := j.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
