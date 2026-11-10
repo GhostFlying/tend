@@ -46,6 +46,11 @@ func (w *ownerToolResponse) Flush() {
 }
 func (w *ownerToolResponse) Write(data []byte) (int, error) {
 	w.Flush()
+	// JSON includes immutable operation receipts and may exceed the binary
+	// preview limit. Keep it complete so callers can reconcile the original request.
+	if strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
+		return w.body.Write(data)
+	}
 	remaining := ownerToolResponseLimit - w.body.Len()
 	if len(data) > remaining {
 		w.truncated = true

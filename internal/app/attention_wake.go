@@ -33,7 +33,7 @@ func routeQuestionAttention(ctx context.Context, x *Exec, tx *store.Tx, e Event,
 		return false, err
 	}
 	if e.Kind == "decision.opened" {
-		if x.Principal.Kind == protocol.PrincipalMainAgent {
+		if x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
 			return true, nil
 		}
 		return true, appendBackgroundSource(ctx, x, tx, "attention:"+e.ObjectID, "", message, event, e.Kind, answer)
@@ -45,7 +45,7 @@ func routeQuestionAttention(ctx context.Context, x *Exec, tx *store.Tx, e Event,
 	if current.Assignee.Kind == protocol.IssueAssigneeAgent {
 		return true, appendBackgroundSource(ctx, x, tx, "work_item:"+issue, issue, message, event, e.Kind, answer)
 	}
-	if x.Principal.Kind == protocol.PrincipalMainAgent {
+	if x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
 		return true, nil
 	}
 	return true, appendBackgroundSource(ctx, x, tx, "attention:"+e.ObjectID, "", message, event, e.Kind, answer)
@@ -83,7 +83,7 @@ func recordAttentionNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, 
 		return err
 	}
 	if a.Status == "open" || a.IssueID == "" || a.Kind == "decision" && a.Status == "withdrawn" {
-		if x.Principal.Kind == protocol.PrincipalMainAgent {
+		if x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
 			return nil
 		}
 		return appendBackgroundSource(ctx, x, tx, "attention:"+a.AttentionID, "", message, eventID, e.Kind, nil)
@@ -95,7 +95,7 @@ func recordAttentionNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, 
 	if current.Assignee.Kind == protocol.IssueAssigneeAgent {
 		return appendBackgroundSource(ctx, x, tx, "work_item:"+a.IssueID, a.IssueID, message, eventID, e.Kind, nil)
 	}
-	if x.Principal.Kind == protocol.PrincipalMainAgent {
+	if x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
 		return nil
 	}
 	return appendBackgroundSource(ctx, x, tx, "attention:"+a.AttentionID, "", message, eventID, e.Kind, nil)
