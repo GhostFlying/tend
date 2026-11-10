@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
@@ -336,5 +337,40 @@ func TestIssueAdmissionRegressionPauseContinuationRequiresNegotiation(t *testing
 	next, ok := h.claimInputRun(r)
 	if ok {
 		t.Fatalf("unnegotiated runner claimed pause successor: handoffs=%v continuation=%+v", next.PauseHandoffs, next.PauseContinuation)
+	}
+}
+
+func TestIssueAdmissionRegressionInitializerRetainsWithdrawnAuthorization(t *testing.T) {
+	h, r := managerClaimHarness(t)
+	i := createCanonicalOwnerTestIssue(t, h)
+	source := queueMessage(t, h, "Delegate by this source only")
+	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "exact original authorization"}, rev(i.Revision)), retainedManagerCommand{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var m store.IssueManagerTask
+	if e := json.Unmarshal(op.Result, &m); e != nil {
+		t.Fatal(e)
+	}
+	withdrawOwnerSource(t, h, source)
+	if h.task(m.TaskID).Lifecycle != protocol.TaskCancelled {
+		t.Fatal("fixture not withdrawn")
+	}
+	if e := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, e := tx.Exec(t.Context(), `UPDATE issue_controls SET admission_initialized=0 WHERE issue_id=?`, i.IssueID)
+		return e
+	}); e != nil {
+		t.Fatal(e)
+	}
+	if e := h.app.InitializeIssueAdmission(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	if as := admissionClaim(t, h, r); as != nil {
+		t.Fatalf("withdrawn manager restarted: %+v", as)
+	}
+	i = admissionCurrent(t, h, i.IssueID)
+	i = canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Explicitly admit a new responsibility after withdrawal"}, rev(i.Revision)), RequestIssueManager{}))
+	if next := admissionClaim(t, h, r); next == nil || next.TaskID == m.TaskID {
+		t.Fatal("explicit reauthorization did not admit a fresh responsibility", i, next)
 	}
 }
