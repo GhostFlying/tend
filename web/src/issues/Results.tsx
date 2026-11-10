@@ -20,8 +20,17 @@ export function IssueResultCard({
   const { client } = useServices();
   const read = useMemo(() => new WorkItemRead<ArtifactDetail>(client), [client]);
   const state = useStore(read.state);
+  const reviewRead = useMemo(() => new WorkItemRead<ArtifactDetail>(client), [client]);
+  const reviewState = useStore(reviewRead.state);
+  const [reviewExpanded, setReviewExpanded] = useState(false);
   const full =
     state.value?.artifact.artifact_id === result.artifact.artifact_id ? state.value : null;
+  const reviewerArtifact = full?.reviewer_artifact_id ?? result.reviewer_artifact_id;
+  useEffect(() => {
+    if (reviewExpanded && reviewerArtifact)
+      void reviewRead.open(`/api/v1/artifacts/${encodeURIComponent(reviewerArtifact)}`);
+    return () => reviewRead.close();
+  }, [reviewRead, reviewExpanded, reviewerArtifact]);
   const hasReport =
     result.artifact.ref !== null &&
     typeof result.artifact.ref === "object" &&
@@ -46,7 +55,9 @@ export function IssueResultCard({
     >
       <div className={styles.sectionHead}>
         <strong>{result.title}</strong>
-        <small data-verdict={result.acceptances?.at(-1)?.verdict}>{resultStatus(result)}</small>
+        <small data-verdict={result.acceptances?.at(-1)?.verdict}>
+          {resultStatus(full ? { ...result, ...full } : result)}
+        </small>
       </div>
       <div className={styles.deliveryFull}>
         <ArtifactDelivery
@@ -62,7 +73,37 @@ export function IssueResultCard({
           <button onClick={open}>重试</button>
         </p>
       )}
+      {reviewExpanded && reviewState.loading && !reviewState.value && (
+        <p role="status">正在读取原审阅报告…</p>
+      )}
+      {reviewExpanded &&
+        reviewState.value &&
+        reviewState.value.artifact.artifact_id === reviewerArtifact && (
+          <section aria-label="原独立审阅报告">
+            <strong>独立审阅报告</strong>
+            <ArtifactDelivery value={reviewState.value.artifact.ref} />
+            <ArtifactRef value={reviewState.value.artifact.ref} />
+          </section>
+        )}
+      {reviewExpanded && reviewState.error && (
+        <p role="status">
+          原审阅报告读取失败。
+          <button
+            onClick={() => {
+              if (reviewerArtifact)
+                void reviewRead.open(`/api/v1/artifacts/${encodeURIComponent(reviewerArtifact)}`);
+            }}
+          >
+            重试
+          </button>
+        </p>
+      )}
       <div className={styles.deliveryActions}>
+        {reviewerArtifact && (
+          <button className={styles.textLink} onClick={() => setReviewExpanded(!reviewExpanded)}>
+            {reviewExpanded ? "收起审阅报告" : "阅读独立审阅报告 →"}
+          </button>
+        )}
         {!expanded && (
           <button className={styles.textLink} onClick={open}>
             阅读完整{noun} →
@@ -74,7 +115,11 @@ export function IssueResultCard({
           </button>
         )}
         <button className={styles.textLink} onClick={() => onTask(result.task_id)}>
-          {result.acceptance_policy?.required === false ? "任务与结果记录 →" : "任务与验收记录 →"}
+          {reviewerArtifact
+            ? "任务与审阅记录 →"
+            : result.acceptance_policy?.required === false
+              ? "任务与结果记录 →"
+              : "任务与验收记录 →"}
         </button>
       </div>
     </article>

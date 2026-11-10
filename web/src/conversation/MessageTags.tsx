@@ -5,6 +5,7 @@ import type {
   IssueMessageAssociations as MessageAssociations,
   IssuePage as WorkItemPage,
   SetIssueMessageAssociationsPayload,
+  MessageProcessingState,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
@@ -14,9 +15,11 @@ import styles from "./Agents.module.css";
 export function MessageTags({
   item,
   currentIssueId,
+  processing: groupProcessing,
 }: {
   item: ConversationItem;
   currentIssueId?: string | undefined;
+  processing?: MessageProcessingState | null | undefined;
 }) {
   const { client, live, openIssue, selectConversation } = useServices();
   const [savedValue, setValue] = useState(item.associations);
@@ -113,56 +116,53 @@ export function MessageTags({
     }
   };
   const links = (value?.items ?? []).filter((link) => link.issue_id !== currentIssueId);
+  const processing = groupProcessing === undefined ? value?.processing : groupProcessing;
   return (
     <>
       <div className={styles.tags} data-issue-context={!!currentIssueId}>
-        {value?.processing &&
-          value.processing.status !== "completed" &&
-          value.processing.status !== "processing" && (
-            <span className={styles.tag} title={value.processing.reason}>
-              {(
-                {
-                  recovering: "正在自动补齐",
-                  stopped: "处理已停止",
-                  needs_review: "需要继续处理",
-                  unknown: "正在核对执行结果",
-                  awaiting_clarification: "等待澄清",
-                } as Record<string, string>
-              )[value.processing.status] ?? "关联处理中"}
-              {["stopped", "needs_review", "awaiting_clarification"].includes(
-                value.processing.status,
-              ) && (
-                <button
-                  disabled={recovery.busy || !!recovery.storageError}
-                  onClick={() => {
-                    void recovery
-                      .execute(
-                        recovery.pending
-                          ? undefined
-                          : {
-                              operation: "conversation.resume_processing",
-                              target: {
-                                type: "logical_turn",
-                                id: value.processing!.logical_turn_id,
-                              },
-                              expected_control_revision: value.processing!.revision,
-                              payload: {},
+        {processing && processing.status !== "completed" && processing.status !== "processing" && (
+          <span className={styles.tag} title={processing.reason}>
+            {(
+              {
+                recovering: "正在恢复处理进度",
+                stopped: "处理已停止",
+                needs_review: "需要继续处理",
+                unknown: "正在核对执行结果",
+                awaiting_clarification: "等待澄清",
+              } as Record<string, string>
+            )[processing.status] ?? "关联处理中"}
+            {["stopped", "needs_review", "awaiting_clarification"].includes(processing.status) && (
+              <button
+                disabled={recovery.busy || !!recovery.storageError}
+                onClick={() => {
+                  void recovery
+                    .execute(
+                      recovery.pending
+                        ? undefined
+                        : {
+                            operation: "conversation.resume_processing",
+                            target: {
+                              type: "logical_turn",
+                              id: processing.logical_turn_id,
                             },
-                      )
-                      .then((r) => {
-                        if (r.kind !== "done") setError(r.message);
-                        void live.reload();
-                      });
-                  }}
-                >
-                  {recovery.pending ? "核对继续处理" : "继续处理"}
-                </button>
-              )}
-            </span>
-          )}
+                            expected_control_revision: processing.revision,
+                            payload: {},
+                          },
+                    )
+                    .then((r) => {
+                      if (r.kind !== "done") setError(r.message);
+                      void live.reload();
+                    });
+                }}
+              >
+                {recovery.pending ? "核对继续处理" : "继续处理"}
+              </button>
+            )}
+          </span>
+        )}
         {value?.disposition === "unassigned" && <span className={styles.tag}>无 Issue</span>}
         {(!value || value.disposition === "pending") &&
-          (item.author === "owner" || !!value?.processing) && (
+          (item.author === "owner" || !!processing) && (
             <span className={styles.tag}>关联处理中</span>
           )}
         {value?.disposition === "linked" && !value.items?.length && (

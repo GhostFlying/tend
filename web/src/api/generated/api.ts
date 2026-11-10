@@ -292,6 +292,7 @@ export interface TendAPI {
   ConfigureConcurrencyPayload?: ConfigureConcurrencyPayload;
   ConfirmAttentionPayload?: ConfirmAttentionPayload;
   ContinueRetainedRunPayload?: ContinueRetainedRunPayload;
+  ContinueTaskPayload?: ContinueTaskPayload;
   ConversationAttachment?: ConversationAttachment;
   ConversationContextIndex?: ConversationContextIndex;
   ConversationContextQuery?: ConversationContextQuery;
@@ -324,6 +325,7 @@ export interface TendAPI {
   ExtensionState?: ExtensionState;
   ExtensionStatus?: ExtensionStatus;
   ExtensionTarget?: ExtensionTarget;
+  ExternalWait?: ExternalWait;
   FeishuBindingView?: FeishuBindingView;
   FeishuInputPage?: FeishuInputPage;
   FinishIssueAssignmentPayload?: FinishIssueAssignmentPayload;
@@ -372,10 +374,12 @@ export interface TendAPI {
   LedgerEvent?: LedgerEvent;
   LocalRepositoryBinding?: LocalRepositoryBinding;
   LocalRepositoryStatus?: LocalRepositoryStatus;
+  LogicalTurnState?: LogicalTurnState;
   MaintenanceOverview?: MaintenanceOverview;
   ManagerMigrationPayload?: ManagerMigrationPayload;
   ManagerRunReconciliation?: ManagerRunReconciliation;
   ManualSource?: ManualSource;
+  MessageProcessingReceipt?: MessageProcessingReceipt;
   MessagingChannel?: MessagingChannel;
   MessagingDelivery?: MessagingDelivery;
   MessagingEvent?: MessagingEvent;
@@ -389,9 +393,17 @@ export interface TendAPI {
   MessagingReceipts?: MessagingReceipts;
   MessagingTrace?: MessagingTrace;
   NativeEntry?: NativeEntry;
+  NativeRolloutArchiveReceipt?: NativeRolloutArchiveReceipt;
+  NativeRolloutChunk?: NativeRolloutChunk;
   NativeUsageRegistration?: NativeUsageRegistration;
   NextActionPage?: NextActionPage;
   ObservedDeployment?: ObservedDeployment;
+  OriginalImport?: OriginalImport;
+  OriginalImportResult?: OriginalImportResult;
+  OriginalMigration?: OriginalMigration;
+  OriginalMigrationResult?: OriginalMigrationResult;
+  OriginalStorageStatus?: OriginalStorageStatus;
+  OriginalVerification?: OriginalVerification;
   PlannerEntry?: PlannerEntry;
   PresentAttentionPayload?: PresentAttentionPayload;
   PromoteConsultationPayload?: PromoteConsultationPayload;
@@ -412,6 +424,7 @@ export interface TendAPI {
   RespondAttentionPayload?: RespondAttentionPayload;
   RespondInteraction?: RespondInteraction;
   ResumeDecisionContinuationPayload?: ResumeDecisionContinuationPayload;
+  ResumeExternalWaitPayload?: ResumeExternalWaitPayload;
   RetainedRunReconciliation?: RetainedRunReconciliation;
   ReuseIssuePayload?: ReuseIssuePayload;
   ReviewIssueCompletionsPayload?: ReviewIssueCompletionsPayload;
@@ -429,7 +442,9 @@ export interface TendAPI {
   RunnerBoundedMaintenancePlan?: RunnerBoundedMaintenancePlan;
   RunnerRepository?: RunnerRepository;
   SendRunMessagePayload?: SendRunMessagePayload;
+  SessionContinuation?: SessionContinuation;
   SessionRequest?: SessionRequest;
+  SessionStopPayload?: SessionStopPayload;
   SessionView?: SessionView;
   SetControlModePayload?: SetControlModePayload;
   SetConversationHandoffSettingsPayload?: SetConversationHandoffSettingsPayload;
@@ -447,7 +462,10 @@ export interface TendAPI {
   TaskAgentSelection?: TaskAgentSelection;
   TaskCapabilityExplanation?: TaskCapabilityExplanation;
   TaskDetail?: TaskDetail;
+  TaskExecutionContext?: TaskExecutionContext;
   TaskPage?: TaskPage;
+  TaskResultReference?: TaskResultReference;
+  TaskReviewTarget?: TaskReviewTarget;
   TokenUsageSample?: TokenUsageSample;
   TokenUsageView?: TokenUsageView;
   ToolSpec?: ToolSpec;
@@ -471,6 +489,7 @@ export interface TendAPI {
   UsageReconcile?: UsageReconcile;
   UsageTarget?: UsageTarget;
   UsageUpload?: UsageUpload;
+  WaitExternalPayload?: WaitExternalPayload;
   WebhookReceipt?: WebhookReceipt;
   WebhookSubscription?: WebhookSubscription;
   WebhookSubscriptionPage?: WebhookSubscriptionPage;
@@ -478,6 +497,7 @@ export interface TendAPI {
   WithdrawMessagePayload?: WithdrawMessagePayload;
   WithdrawMessageResult?: WithdrawMessageResult;
   WorkItemChoice?: WorkItemChoice;
+  YieldExternalWaitPayload?: YieldExternalWaitPayload;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1367,6 +1387,7 @@ export interface IssueFollowOn {
  */
 export interface IssuePRPolicy {
   authority?: IssuePRPolicyAuthority;
+  deployment?: IssueDeploymentScope;
   mode: string;
   reason: string;
   repository: string;
@@ -1380,6 +1401,14 @@ export interface IssuePRPolicyAuthority {
   scope_digest: string;
   source_message_id?: string;
   source_revision?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeploymentScope".
+ */
+export interface IssueDeploymentScope {
+  host_ids: string[] | null;
+  server_instance: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2006,6 +2035,7 @@ export interface UsageCollectionCommand {
   expected_revision: number;
   reason?: string;
   request_id: string;
+  rescan?: boolean;
   run_id: string;
   source_id: string;
 }
@@ -2278,7 +2308,10 @@ export interface ArtifactDetail {
   acceptances: AcceptanceView[] | null;
   artifact: ArtifactView;
   current_completion?: boolean;
+  independent_acceptance_id?: string;
   ref_sha256?: string;
+  result_complete?: boolean;
+  reviewer_artifact_id?: string;
   task_id: string;
 }
 /**
@@ -2342,8 +2375,10 @@ export interface ArtifactMount {
 export interface ResultReport {
   body: string;
   evidence?: string[];
+  reviewed_artifact_id?: string;
   shared_review?: SharedReviewResult;
   uncertainties?: string[];
+  verdict?: Verdict;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2900,6 +2935,14 @@ export interface RetainedRunProtection {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ContinueTaskPayload".
+ */
+export interface ContinueTaskPayload {
+  expected_assignment_epoch?: number;
+  reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ConversationAttachment".
  */
 export interface ConversationAttachment {
@@ -3216,6 +3259,8 @@ export interface OwnerTaskSpec {
   max_implement_attempts?: number;
   observation?: ObservationScope;
   requirements?: OwnerTaskRequirements;
+  review_artifact_id?: string;
+  review_delivery_id?: string;
   scope?: string;
   workspace: OwnerTaskWorkspace;
 }
@@ -3534,6 +3579,34 @@ export interface ExtensionHostView {
   online: boolean;
   state: string;
   status?: ExtensionHostStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExternalWait".
+ */
+export interface ExternalWait {
+  created_at_ms: number;
+  deadline_at_ms?: number;
+  input_event_watermark?: number;
+  issue_id?: string;
+  kind: string;
+  next_reminder_at_ms: number;
+  observed_head?: string;
+  observed_revision?: number;
+  observed_state?: string;
+  reason: string;
+  recovery: string;
+  resume_reason?: string;
+  run_id: string;
+  status: string;
+  stopped: boolean;
+  successor_run_id?: string;
+  target_id: string;
+  task_id: string;
+  thread_id?: string;
+  wait_id: string;
+  wait_key: string;
+  wake_reason?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4505,6 +4578,9 @@ export interface DeliveryExecutionAuthority {
   duty_revision: number;
   duty_status: string;
   grant?: IssueDeliveryGrant;
+  historical?: boolean;
+  history?: DeliveryExecutionReference[];
+  history_more?: boolean;
   invalid_reason?: string;
   issue_id: string;
   lease_id?: string;
@@ -4541,9 +4617,20 @@ export interface ObservedDeliveryApproval {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DeliveryExecutionReference".
+ */
+export interface DeliveryExecutionReference {
+  duty_revision: number;
+  generation: number;
+  run_id: string;
+  upgrade_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "ObservedDeliveryPolicy".
  */
 export interface ObservedDeliveryPolicy {
+  deployment?: IssueDeploymentScope;
   digest: string;
   issue_id: string;
   issue_revision: number;
@@ -4739,6 +4826,7 @@ export interface ObservedDeploymentPreparation {
   complete: boolean;
   deliveries: IssueDeliveryPage[] | null;
   delivery_target_available?: boolean;
+  execution_entry?: DeploymentExecutionEntry;
   host_ids: string[] | null;
   hosts: ObservedDeploymentHost[] | null;
   issue_ids: string[] | null;
@@ -4765,6 +4853,17 @@ export interface ObservedDeploymentBlocker {
   revision?: number;
   source: string;
   status?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DeploymentExecutionEntry".
+ */
+export interface DeploymentExecutionEntry {
+  cli_path: string;
+  control_socket: string;
+  target?: string;
+  transport: string;
+  user?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4976,6 +5075,7 @@ export interface SharedDeliveryReviewRound {
   corrections?: SharedReviewCorrection[];
   execution_requirements?: SharedReviewExecutionRequirements;
   head_sha: string;
+  implement_generation?: number;
   number: number;
   requirements_digest: string;
   result?: SharedReviewResult;
@@ -4985,6 +5085,7 @@ export interface SharedDeliveryReviewRound {
   run_id?: string;
   spec_version: number;
   supplement_artifact_id?: string;
+  supplement_generation?: number;
   supplement_run_id?: string;
   supplement_spec_version?: number;
   supplement_task_id?: string;
@@ -5208,7 +5309,10 @@ export interface IssueResult {
   created_at: number;
   current_completion?: boolean;
   generation: number;
+  independent_acceptance_id?: string;
   ref_sha256?: string;
+  result_complete?: boolean;
+  reviewer_artifact_id?: string;
   run_id: string;
   spec_version: number;
   task_id: string;
@@ -5321,6 +5425,50 @@ export interface LocalRepositoryStatus {
   control_revision: number;
   error?: string;
   repositories: RunnerRepository[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LogicalTurnState".
+ */
+export interface LogicalTurnState {
+  awaiting: PendingClarification[] | null;
+  contexts: LogicalContextReview[] | null;
+  coordination_execution_id?: string;
+  logical_turn_id: string;
+  messages: MessageAssociations[] | null;
+  next_effect_seq?: number;
+  processing?: MessageProcessingReceipt[];
+  reason: string;
+  repair_attempts: number;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PendingClarification".
+ */
+export interface PendingClarification {
+  logical_turn_id: string;
+  message_id: string;
+  question: string;
+  revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LogicalContextReview".
+ */
+export interface LogicalContextReview {
+  revision: number;
+  work_item_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessageProcessingReceipt".
+ */
+export interface MessageProcessingReceipt {
+  association_revision: number;
+  content_revision: number;
+  message_id: string;
+  processed_at_ms: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5634,6 +5782,29 @@ export interface NativeIdentity {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "NativeRolloutArchiveReceipt".
+ */
+export interface NativeRolloutArchiveReceipt {
+  indexed_offset: number;
+  next_offset: number;
+  offset: number;
+  sha256: string;
+  source_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "NativeRolloutChunk".
+ */
+export interface NativeRolloutChunk {
+  data: string | null;
+  offset: number;
+  run_id: string;
+  sha256: string;
+  source_id: string;
+  thread_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "NativeUsageRegistration".
  */
 export interface NativeUsageRegistration {
@@ -5672,6 +5843,72 @@ export interface PlannerEntry {
   status: string;
   title: string;
   updated_at: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalImport".
+ */
+export interface OriginalImport {
+  after?: number;
+  file_id: string;
+  limit: number;
+  source_key: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalImportResult".
+ */
+export interface OriginalImportResult {
+  file_id: string;
+  indexed_bodies: number;
+  indexed_records: number;
+  more: boolean;
+  next: number;
+  source_key: string;
+  status: OriginalStorageStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalStorageStatus".
+ */
+export interface OriginalStorageStatus {
+  bodies: number;
+  migrated_bytes: number;
+  migrated_rows: number;
+  original_files: number;
+  original_prefix_bytes: number;
+  pending_rows: number;
+  referenced_bytes: number;
+  revision: number;
+  unmatched_rows: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalMigration".
+ */
+export interface OriginalMigration {
+  limit: number;
+  rescan?: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalMigrationResult".
+ */
+export interface OriginalMigrationResult {
+  migrated_bytes: number;
+  migrated_rows: number;
+  more: boolean;
+  status: OriginalStorageStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalVerification".
+ */
+export interface OriginalVerification {
+  bytes: number;
+  checked: number;
+  more: boolean;
+  next?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5940,6 +6177,14 @@ export interface ResumeDecisionContinuationPayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ResumeExternalWaitPayload".
+ */
+export interface ResumeExternalWaitPayload {
+  reason: string;
+  wait_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RetainedRunReconciliation".
  */
 export interface RetainedRunReconciliation {
@@ -6091,11 +6336,52 @@ export interface RunLogView {
  * via the `definition` "RunContext".
  */
 export interface RunContext {
+  execution_context?: TaskExecutionContext;
   materials: IssueMaterials;
   role: RunRole;
   run_id: string;
   spec_version: number;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskExecutionContext".
+ */
+export interface TaskExecutionContext {
+  artifacts: TaskResultReference[] | null;
+  generation: number;
+  more: boolean;
+  next_step?: string;
+  previous_artifact_id?: string;
+  reviews: TaskReviewTarget[] | null;
+  runs: RunView[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskResultReference".
+ */
+export interface TaskResultReference {
+  artifact_id: string;
+  generation: number;
+  run_id: string;
+  sha256: string;
+  spec_version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskReviewTarget".
+ */
+export interface TaskReviewTarget {
+  base_sha: string;
+  head_sha: string;
+  number: number;
+  provider: IssueDeliveryProvider;
+  repository: string;
+  requirements_digest: string;
+  review_id: string;
+  reviewer: string;
+  revision: number;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6206,11 +6492,26 @@ export interface SendRunMessagePayload {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SessionContinuation".
+ */
+export interface SessionContinuation {
+  run_id: string;
+  thread_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "SessionRequest".
  */
 export interface SessionRequest {
   client_id: string;
   scope: TokenScope;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SessionStopPayload".
+ */
+export interface SessionStopPayload {
+  thread_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6813,15 +7114,21 @@ export interface UpdateAttentionPayload {
  * via the `definition` "UpdateIssueDeliveryPayload".
  */
 export interface UpdateIssueDeliveryPayload {
+  acceptance_id?: string;
   action: string;
   candidate?: IssueDeliveryCandidate;
+  execution_run_id?: string;
   execution_task_id?: string;
   expected_assignment_epoch: number;
   expected_source_revision?: number;
   expected_task_control_revision?: number;
+  independent_acceptance?: IndependentAcceptanceRequest;
   reason?: string;
+  result?: ArtifactPayload;
+  reviewer_artifact_id?: string;
+  run_id?: string;
   source_message_id?: string;
-  task_id: string;
+  task_id?: string;
   upgrade_id?: string;
 }
 /**
@@ -6847,14 +7154,6 @@ export interface IssueTaskDisposition {
   reason: string;
   spec_version: number;
   task_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "LogicalContextReview".
- */
-export interface LogicalContextReview {
-  revision: number;
-  work_item_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6927,6 +7226,7 @@ export interface UpgradeControlPayload {
  */
 export interface UsageCollectionControl {
   reason?: string;
+  rescan?: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -7008,6 +7308,7 @@ export interface UsageCollectionCommandStatus {
   expected_revision: number;
   reason?: string;
   request_id: string;
+  rescan?: boolean;
   run_id: string;
   source_id: string;
   status: string;
@@ -7060,6 +7361,19 @@ export interface UsageUpload {
   run_id: string;
   samples: TokenUsageSample[] | null;
   session_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WaitExternalPayload".
+ */
+export interface WaitExternalPayload {
+  deadline_at_ms?: number;
+  issue_id?: string;
+  kind: string;
+  reason: string;
+  recovery: string;
+  target_id: string;
+  wait_key: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -7118,4 +7432,12 @@ export interface WithdrawMessagePayload {}
 export interface WithdrawMessageResult {
   control: MessageControl;
   message_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "YieldExternalWaitPayload".
+ */
+export interface YieldExternalWaitPayload {
+  thread_id?: string;
+  wait_id: string;
 }
