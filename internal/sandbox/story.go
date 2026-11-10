@@ -58,7 +58,7 @@ func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) erro
 			issue, err = views.CanonicalIssue(ctx, tx.Q(), id, 0)
 			return err
 		})
-		return err == nil && issue.Conversation != nil && issue.Conversation.CanSend && issue.Progress != nil, err
+		return err == nil && issue.Conversation != nil && issue.Conversation.CanSend && issue.Manager != nil && issue.Manager.HostID != "", err
 	}); err != nil {
 		return err
 	}
