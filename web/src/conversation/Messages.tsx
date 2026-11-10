@@ -8,6 +8,7 @@ import { noticeTitle } from "../upgrades/status.ts";
 import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AssistantState,
+  MessageProcessingState,
   IssueConversationItem as ConversationItem,
 } from "../api/generated/api.ts";
 import type { OutgoingMessage } from "../queue/outbox.ts";
@@ -26,6 +27,7 @@ import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
 import { outgoingImages } from "./images.ts";
 import { recoveryNotice } from "./recovery.ts";
 import { steerNotice } from "./steer.ts";
+import { groupedProcessing } from "./processing.ts";
 
 export function Divider({ at }: { at: number }) {
   return <div className={styles.divider}>{dayLabel(at)}</div>;
@@ -152,6 +154,7 @@ export function AgentTurn({
       : null,
   );
   const tools = entry.items.filter((item) => item.tool);
+  const processing = groupedProcessing(entry.items);
   const [traceOpen, setTraceOpen] = useState(false);
   const wasActive = useRef(status.active);
   useLayoutEffect(() => {
@@ -222,6 +225,7 @@ export function AgentTurn({
             key={item.message_id}
             item={item}
             currentIssueId={currentIssueId}
+            processing={processing.get(item.message_id) ?? null}
             proseClassName={proseClassName}
             hidden={false}
             id={`${prefix}-item-${item.message_id}`}
@@ -252,10 +256,12 @@ const AgentItem = memo(function AgentItem({
   hideChoices = false,
   proseClassName,
   currentIssueId,
+  processing,
 }: {
   item: ConversationItem;
   hidden: boolean;
   currentIssueId?: string | undefined;
+  processing?: MessageProcessingState | null | undefined;
   hideChoices?: boolean;
   proseClassName?: string | undefined;
   id: string;
@@ -297,7 +303,7 @@ const AgentItem = memo(function AgentItem({
             />
           </div>
           {!!item.attachments?.length && <MessageAttachments attachments={item.attachments} />}
-          <MessageTags item={item} currentIssueId={currentIssueId} />
+          <MessageTags item={item} currentIssueId={currentIssueId} processing={processing} />
           {status && status !== "completed" && status !== "streaming" && (
             <div className={styles.assistantState} data-state={status} role="status">
               {assistantLabels[status]}
@@ -335,7 +341,8 @@ export function SystemMessage({
         <summary>
           {presentation === "chat" && backgroundIcon}
           <span>
-            后台核对来源 <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
+            负责人收到后台变化{" "}
+            <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
           </span>
           {presentation === "issue" && backgroundIcon}
         </summary>

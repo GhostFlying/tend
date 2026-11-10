@@ -54,3 +54,26 @@ test("unspecified or required policy retains pending review and real verdicts re
     ).toBe(expected);
   }
 });
+
+test("one bound real reviewer report settles its result without finishing the owner Task", () => {
+  expect(
+    resultStatus({
+      ...result,
+      acceptance_policy: { ...policy, required: true },
+      reviewer_artifact_id: "art_independent_review",
+      result_complete: true,
+      current_completion: false,
+    }),
+  ).toBe("独立审阅通过");
+  expect(
+    resultStatus({
+      ...result,
+      acceptance_policy: policy,
+      result_complete: true,
+      current_completion: false,
+    }),
+  ).toBe("已完成 · 本轮不要求独立验收");
+  expect(
+    resultStatus({ ...result, reviewer_artifact_id: "art_unconfirmed", result_complete: false }),
+  ).toBe("待独立验收");
+});
