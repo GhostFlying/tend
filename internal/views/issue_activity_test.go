@@ -18,12 +18,16 @@ func TestIssueActivityAuthor(t *testing.T) {
 		`CREATE TABLE main_turns(request_id TEXT,thread_id TEXT)`,
 		`CREATE TABLE agent_conversations(conversation_id TEXT,work_item_id TEXT)`,
 		`CREATE TABLE run_agent_executions(run_id TEXT,pin_json TEXT)`,
-		`CREATE TABLE agent_inventory_versions(host_id TEXT,server_revision INTEGER,projection_json TEXT)`,
+		`CREATE TABLE runs(run_id TEXT,task_id TEXT,role TEXT)`,
+		`CREATE TABLE issue_manager_tasks(task_id TEXT,pin_json TEXT)`,
+		`INSERT INTO runs VALUES('manager-run','manager-task','issue_manager')`,
+		`INSERT INTO issue_manager_tasks VALUES('manager-task','{"identity":{"execution_environment_id":"host","local_id":"review"},"inventory_revision":7}')`,
+		`CREATE TABLE agent_inventory_versions(host_id TEXT,server_revision INTEGER,local_revision INTEGER,projection_json TEXT)`,
 		`INSERT INTO agent_conversations VALUES('other-issue','other')`,
 		`INSERT INTO hosted_executions VALUES('old','other-issue','{"definition":{"display_name":"体验负责人"}}',10),('new','other-issue','{"definition":{"display_name":"新负责人"}}',30)`,
 		`INSERT INTO main_turns VALUES('old','original-thread'),('new','new-thread')`,
-		`INSERT INTO run_agent_executions VALUES('run','{"identity":{"execution_environment_id":"host","local_id":"review"},"inventory_revision":1}')`,
-		`INSERT INTO agent_inventory_versions VALUES('host',1,'{"agents":[{"identity":{"local_id":"review"},"display_name":"独立验收员"}]}'),('host',2,'{"agents":[{"identity":{"local_id":"review"},"display_name":"后续改名"}]}')`,
+		`INSERT INTO run_agent_executions VALUES('run','{"identity":{"execution_environment_id":"host","local_id":"review"},"inventory_revision":7}')`,
+		`INSERT INTO agent_inventory_versions VALUES('host',1,7,'{"agents":[{"identity":{"local_id":"review"},"display_name":"独立验收员"}]}'),('host',2,8,'{"agents":[{"identity":{"local_id":"review"},"display_name":"后续改名"}]}')`,
 	} {
 		if _, err := db.ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
@@ -37,6 +41,7 @@ func TestIssueActivityAuthor(t *testing.T) {
 		{"other Issue manager", `{"kind":"background_agent","conversation_id":"other-issue","thread":"original-thread"}`, "体验负责人"},
 		{"unknown manager", `{"kind":"background_agent","conversation_id":"missing"}`, "负责人 Agent"},
 		{"named run", `{"kind":"run","subject":"run"}`, "独立验收员"},
+		{"manager frozen inventory", `{"kind":"run","subject":"manager-run","role":"issue_manager"}`, "独立验收员"},
 		{"legacy run", `{"kind":"run","subject":"missing"}`, "执行 Agent"},
 		{"runner", `{"kind":"runner","subject":"host"}`, "执行主机"},
 	} {

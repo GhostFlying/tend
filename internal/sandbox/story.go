@@ -93,8 +93,13 @@ func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) erro
 	if err := storyWait(ctx, "story task", func() (bool, error) {
 		err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
 			current, err := views.CanonicalIssue(ctx, tx.Q(), issue.IssueID, 0)
-			if err == nil && len(current.Tasks) > 0 {
-				task = current.Tasks[0].TaskID
+			if err == nil {
+				for _, ref := range current.Tasks {
+					if ref.Title == "派发 首次失败后重试：检查手机布局并交付可下载报告" {
+						task = ref.TaskID
+						break
+					}
+				}
 			}
 			return err
 		})
