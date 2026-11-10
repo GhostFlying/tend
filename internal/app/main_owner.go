@@ -243,3 +243,20 @@ func (c ownerExecutionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	}
 	return out, err
 }
+
+func ownerRequestRecord(ctx context.Context, q store.Querier, p protocol.Principal, id string) (store.RequestRecord, error) {
+	if _, delegated := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); !delegated && p.Kind == protocol.PrincipalOwner {
+		return store.GetOwnerRequest(ctx, q, id)
+	}
+	return store.GetRequest(ctx, q, ownerRequestDomain(ctx, p), id)
+}
+
+func (a *App) OwnerMessageAuthority(ctx context.Context, id string) (bool, error) {
+	var allowed bool
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		var err error
+		allowed, err = store.HasOwnerMessageAuthority(ctx, tx.Q(), id)
+		return err
+	})
+	return allowed, err
+}
