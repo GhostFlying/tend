@@ -10,8 +10,9 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// Archive only a settled execution before a same-goal Task continuation. This
-// does not settle or retry the old candidate, and cannot clear unknown effects.
+// Archive only a settled execution before a same-goal Task continuation or a
+// continuing owner's new result. The owner may still be using its real Run;
+// this does not settle or retry the old candidate, or clear unknown effects.
 func archiveTaskDeliveryForContinuation(ctx context.Context, x *Exec, tx *store.Tx, task store.TaskRow) error {
 	var issue, source, candidate, upgrade string
 	var revision int64

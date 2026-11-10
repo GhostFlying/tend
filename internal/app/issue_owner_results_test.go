@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -186,7 +187,8 @@ func TestIssueOwnerResultUsesOneActualIndependentReviewerReport(t *testing.T) {
 	}
 }
 
-func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {
+func ownerBoundDeliveryFixture(t *testing.T, deploy bool) (*harness, protocol.Issue, protocol.Assignment, protocol.IssueDeliveryCandidate, func(string)) {
+	t.Helper()
 	h, runtime, issue, producer, _ := reviewManagerAssignment(t)
 	enableOwnerResultReviewer(t, h, runtime)
 	issue.Plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "pr", Provider: "github", Repository: "example/repo", Number: 17, URL: "https://example.invalid/repo/pull/17"}}
@@ -200,6 +202,11 @@ func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {
 	}
 	register("The owner implemented and checked the original bounded change")
 	candidate := protocol.IssueDeliveryCandidate{DeliveryID: "pr", URL: issue.Plan.Deliveries[0].URL, HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40), TargetSHA: strings.Repeat("b", 40), ProviderState: "open", Validation: "Original independent repository evidence", DeploymentScope: "Merge the reviewed PR only"}
+	if deploy {
+		candidate.Deploy = true
+		candidate.DeploymentScope = "Deploy the authorized result to its original server"
+		candidate.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{}}
+	}
 	observeDeliveryForTest(t, h, issue.IssueID, candidate, "open", "")
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		observation, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, "pr")
@@ -236,6 +243,11 @@ func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {
 	if op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "bind", ExecutionTaskID: producer.TaskID, ExpectedTaskControlRevision: rev(h.task(producer.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "The actual current owner performs this authorized delivery itself"}}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	return h, issue, producer, candidate, register
+}
+
+func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {
+	h, issue, producer, candidate, register := ownerBoundDeliveryFixture(t, false)
 	frozen := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
 	register("The authorized candidate has been merged and the real outcome has been checked")
 	if current := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID); current.Revision != frozen.Revision || current.ExecutionTaskID != producer.TaskID || current.Status != "executing" || current.ArtifactID == frozen.ArtifactID {
@@ -243,12 +255,113 @@ func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {
 	}
 	merged := candidate
 	merged.TargetSHA = strings.Repeat("c", 40)
+	var checks *protocol.DeliveryCI
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		observation, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, candidate.DeliveryID)
+		checks = observation.Observation.CI
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	observeDeliveryForTest(t, h, issue.IssueID, merged, "merged", merged.TargetSHA)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		observation, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, candidate.DeliveryID)
+		if err != nil {
+			return err
+		}
+		observation.Observation.CI = checks // Same actual head, original check evidence.
+		return putDeliveryObservationForTest(tx, t.Context(), observation)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Settle the actual merge with its original authority and final owner result"}}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	if h.count("tasks") != 2 || h.count("runs") != 2 || h.count("acceptances") != 0 {
 		t.Fatal("direct owner delivery invented a worker Task or verdict")
+	}
+	settled := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
+	oldArtifact := h.task(producer.TaskID).CurrentArtifactID
+	register("The same owner continues the unchanged Issue goal with another bounded result")
+	current := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
+	if current.Status != "preparing" || current.Revision <= settled.Revision || current.Candidate != nil || current.Authorization != nil || current.ExecutionTaskID != "" || current.ArtifactID == oldArtifact {
+		t.Fatal("new result inherited the settled candidate or authority", current)
+	}
+	if h.count("issue_delivery_execution_history") != 1 || h.count("issue_delivery_executions") != 0 {
+		t.Fatal("settled binding was not archived before recording the new result")
+	}
+	read, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: producer.RunID})
+	if err != nil || read.DeliveryAuthorization == nil || !read.DeliveryAuthorization.Historical || read.DeliveryAuthorization.Valid || read.DeliveryAuthorization.Settlement.ArtifactID != oldArtifact || read.DeliveryAuthorization.RunID != producer.RunID {
+		t.Fatal("old actual Run result lost its historical identity or became new authority", read, err)
+	}
+	// The provider is now merged. Use its current facts, not the old open-PR
+	// snapshot used by the original probe, which correctly fails freshness.
+	merged.ProviderState, merged.MergeSHA = "merged", merged.TargetSHA
+	merged.Deploy = true
+	merged.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{}}
+	merged.DeploymentScope = "Prepare a separately authorized installation of the already merged result"
+	if op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "prepare", Candidate: &merged, ExpectedTaskControlRevision: rev(h.task(producer.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "Continue this Issue's delivery under its existing responsibility"}}); op.Status != protocol.OpSucceeded {
+		t.Fatal("settled owner delivery permanently blocked its next result", op)
+	}
+	next := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
+	if next.Status != "awaiting_owner" || next.AttentionID == settled.AttentionID {
+		t.Fatal("new manual candidate borrowed a historical approval", next)
+	}
+	bind := protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "bind", ExecutionTaskID: producer.TaskID, ExpectedTaskControlRevision: rev(h.task(producer.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "Continue only with current actual authority"}}
+	assertLiveDeliveryBindCode(t, h, issue.IssueID, bind, protocol.CodeForbidden)
+	answerDeliveryForTest(t, h, next, "approve", "")
+	if op := updateDeliveryForTest(t, h, issue.IssueID, bind); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	// No deployment was started. An explicit owner disposition ends that
+	// optional scope without inventing installation evidence.
+	endDeliveryForTest(t, h, issue.IssueID, producer.TaskID)
+	register("A third immutable result in the same real owner Run")
+	if h.count("issue_delivery_execution_history") != 2 || h.count("tasks") != 2 || h.count("runs") != 2 {
+		t.Fatal("repeated same-Run settlements collided or manufactured execution")
+	}
+}
+
+func TestIssueOwnerNewResultCannotEraseUnknownOriginalUpgrade(t *testing.T) {
+	h, issue, producer, _, _ := ownerBoundDeliveryFixture(t, true)
+	// The updater owns these external observations. An ended logical duty does
+	// not turn an unresolved server receipt into a completed installation.
+	batch := store.UpgradeRow{DeliveryTaskID: producer.TaskID, ServerInstance: "server", View: protocol.UpgradeView{UpgradeID: "owner-original-install", ReleaseID: "owner-release", Revision: 1, Status: "attention", Phase: "server_reconcile", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now(), Hosts: []protocol.UpgradeHostView{}}}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
+		t.Fatal(err)
+	}
+	frozen := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
+	currentResult := protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, RunID: producer.RunID, Action: "submit_result", Result: &protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "The original installation is still being reconciled; do not repeat it.", Evidence: []string{"upgrade:" + batch.View.UpgradeID}}}, IssueControlPayload: protocol.IssueControlPayload{Reason: "Record a real progress result without replacing the active frozen execution"}}
+	if op := updateDeliveryForTest(t, h, issue.IssueID, currentResult); op.Status != protocol.OpSucceeded {
+		t.Fatal("original reconciliation progress could not be recorded", op)
+	}
+	active := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
+	if active.Revision != frozen.Revision || active.Status != "executing" || active.ExecutionTaskID != frozen.ExecutionTaskID || !reflect.DeepEqual(active.Candidate, frozen.Candidate) || !reflect.DeepEqual(active.Authorization, frozen.Authorization) || h.count("issue_delivery_execution_history") != 0 {
+		t.Fatal("progress replaced the active frozen candidate or authority", active)
+	}
+	endDeliveryForTest(t, h, issue.IssueID, producer.TaskID)
+	ended := deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)
+	previousArtifact, artifacts := h.task(producer.TaskID).CurrentArtifactID, h.count("artifacts")
+	p := protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, RunID: producer.RunID, Action: "submit_result", Result: &protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Continue the original Issue with the next bounded result."}}, IssueControlPayload: protocol.IssueControlPayload{Reason: "Continue only after the original external operation has settled"}}
+	current := canonicalTaskIssue(t, h, issue.IssueID)
+	p.ExpectedAssignmentEpoch = current.AssignmentEpoch
+	op, err := h.app.Execute(t.Context(), owner, h.env("issues.update_delivery", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(current.Revision)), UpdateIssueDelivery{})
+	if err == nil {
+		err = op.Error
+	}
+	if protocol.CodeOf(err) != protocol.CodeUnknownOutcome || h.count("artifacts") != artifacts || h.task(producer.TaskID).CurrentArtifactID != previousArtifact || h.count("issue_delivery_execution_history") != 0 || !reflect.DeepEqual(ended, deliveryDutyForTest(t, h, issue.IssueID, producer.TaskID)) {
+		t.Fatal("new result erased the unknown original installation or committed partial facts", op, err)
+	}
+	batch.View.Status, batch.View.Phase = "completed", "completed"
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), batch) }); err != nil {
+		t.Fatal(err)
+	}
+	if op := updateDeliveryForTest(t, h, issue.IssueID, p); op.Status != protocol.OpSucceeded {
+		t.Fatal("settled external operation still blocked the real owner's next result", op)
+	}
+	read, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: producer.RunID})
+	if err != nil || read.DeliveryAuthorization == nil || !read.DeliveryAuthorization.Historical || read.DeliveryAuthorization.Valid || read.DeliveryAuthorization.DutyStatus != "ended" || read.DeliveryAuthorization.UpgradeID != batch.View.UpgradeID || read.DeliveryAuthorization.Settlement.ArtifactID != previousArtifact || read.DeliveryAuthorization.Settlement.Eligible {
+		t.Fatal("original ended installation lost its identity or became completion/execution authority", read, err)
 	}
 }
 

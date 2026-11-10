@@ -152,19 +152,50 @@ func TestIssueBoardAgentStatusPreservesEarlierExternalWake(t *testing.T) {
 	}
 }
 
-func TestIssueBoardActiveManagerBlocksBothEndpoints(t *testing.T) {
-	h := hostedManagerHarness(t)
-	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
-	startHostedIssueReview(t, h, issue)
+func TestIssueBoardOwnerEndpointPreservesActiveNativeTurn(t *testing.T) {
 	for _, status := range []protocol.IssueWorkStatus{protocol.IssueDone, protocol.IssueWorkCancelled} {
-		op := canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status})
-		expectWorkCode(t, op, protocol.CodeInvalidTransition)
-		if len(op.Error.Details) == 0 {
-			t.Fatal("blocked endpoint omitted actionable facts")
-		}
+		t.Run(string(status), func(t *testing.T) {
+			h := hostedManagerHarness(t)
+			issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+			turn, _ := startHostedIssueReview(t, h, issue)
+			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}))
+			if issue.BoardStatus() != status {
+				t.Fatal("explicit owner endpoint required a separate source review", issue)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				actual, err := store.GetMainTurn(t.Context(), tx.Q(), turn.RequestID)
+				if err == nil && (actual.Status != store.TurnStarted || actual.ThreadID != turn.ThreadID || actual.TurnID != turn.TurnID) {
+					t.Fatal("Issue endpoint rewrote the actual native execution", actual)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			logical, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
+			if err != nil || logical.Status == "completed" {
+				t.Fatal("Issue endpoint invented native completion", logical, err)
+			}
+		})
 	}
-	if _, ok := statusNotice(t, h, issue.IssueID); ok {
-		t.Fatal("failed endpoint started notification")
+}
+
+func TestIssueBoardOwnerEndpointKeepsRunnerResourcesUntilStopped(t *testing.T) {
+	for _, status := range []protocol.IssueWorkStatus{protocol.IssueDone, protocol.IssueWorkCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			h, _, issue, as, _ := reviewManagerAssignment(t)
+			before := h.run(as.RunID)
+			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}))
+			if actual := h.run(as.RunID); actual.ObservedState != before.ObservedState || actual.ObservedState == protocol.RunFinished {
+				t.Fatal("Issue endpoint released a running owner", actual)
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='active'`, as.RunID) != 1 {
+				t.Fatal("Issue endpoint released the physical execution lease")
+			}
+			stopOwnerClaim(t, h, as)
+			if h.countWhere(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='released'`, as.RunID) != 1 || h.run(as.RunID).ObservedState != protocol.RunFailed {
+				t.Fatal("original stopped receipt did not release the owner execution")
+			}
+		})
 	}
 }
 

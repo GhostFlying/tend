@@ -417,7 +417,7 @@ func TestMainSteerSettlesAcrossRepeatedClarificationAdoption(t *testing.T) {
 	steerStatusFixture(t, h, supplement, "completed")
 }
 
-func TestSharedSteerSettlesWhenIndependentLogicalReviewsComplete(t *testing.T) {
+func TestSharedSteerSettlesWhenIndependentNativeExecutionsEnd(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		order     []int
@@ -444,51 +444,18 @@ func TestSharedSteerSettlesWhenIndependentLogicalReviewsComplete(t *testing.T) {
 				t.Fatal(op)
 			}
 			turns := []store.MainTurn{original, other}
-			for i := range turns {
-				turns[i].Status = store.TurnCompleted
-				if err := h.app.PutMainTurn(t.Context(), turns[i]); err != nil {
-					t.Fatal(err)
-				}
-			}
-
 			for step, index := range tc.order {
 				root := turns[index]
 				if tc.stopOther && index == 1 {
 					op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: root.MessageID}, nil), InterruptReply{})
-					if op.Status != protocol.OpSucceeded {
-						t.Fatal(op)
+					if op.Status != protocol.OpAccepted {
+						t.Fatal("active native stop was treated as a metadata-only action", op)
 					}
-					want := "consumed"
-					if step == 1 {
-						want = "interrupted"
-					}
-					steerStatusFixture(t, h, supplement, want)
-					continue
+					root.Status = store.TurnInterrupted
+				} else {
+					root.Status = store.TurnCompleted
 				}
-				var repairRequest string
-				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-					return tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM logical_turn_executions WHERE logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND repair=1 ORDER BY rowid DESC LIMIT 1`, root.RequestID).Scan(&repairRequest)
-				}); err != nil {
-					t.Fatal(err)
-				}
-				repair := store.MainTurn{RequestID: repairRequest, MessageID: root.MessageID, ThreadID: root.ThreadID, TurnID: "repair-" + repairRequest, Status: store.TurnStarted}
-				if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
-					t.Fatal(err)
-				}
-				state, err := h.app.LogicalTurn(t.Context(), repairRequest)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, message := range state.Messages {
-					if message.Disposition == "pending" {
-						if op := h.associate(mainAgent, message.MessageID); op.Status != protocol.OpSucceeded {
-							t.Fatal(op)
-						}
-					}
-				}
-				commitFixtureTurn(t, h, repairRequest)
-				repair.Status = store.TurnCompleted
-				if err := h.app.PutMainTurn(t.Context(), repair); err != nil {
+				if err := h.app.PutMainTurn(t.Context(), root); err != nil {
 					t.Fatal(err)
 				}
 				want := "consumed"
@@ -499,6 +466,13 @@ func TestSharedSteerSettlesWhenIndependentLogicalReviewsComplete(t *testing.T) {
 					}
 				}
 				steerStatusFixture(t, h, supplement, want)
+				actual, found, err := h.app.MainTurn(t.Context(), root.RequestID)
+				if err != nil || !found || actual.Status != root.Status || actual.TurnID != root.TurnID {
+					t.Fatal("shared-source settlement rewrote native history", actual, found, err)
+				}
+			}
+			if h.count("outbox WHERE operation='conversation.repair_turn'") != 0 {
+				t.Fatal("settling real native executions generated metadata model rounds")
 			}
 			for _, root := range turns {
 				state, err := h.app.LogicalTurn(t.Context(), root.RequestID)
@@ -573,7 +547,7 @@ func TestOwnerStopRemainsTerminalWhenNativeCompletionWins(t *testing.T) {
 	}
 }
 
-func TestLateMainSteerConsumptionReopensOnlyCompletedReview(t *testing.T) {
+func TestLateMainSteerConsumptionSettlesWithoutMetadataRoundAndRetainsStops(t *testing.T) {
 	for _, prior := range []string{"completed", "stopped", "awaiting_clarification"} {
 		t.Run(prior, func(t *testing.T) {
 			h, active := activeSteerEnv(t)
@@ -646,12 +620,20 @@ func TestLateMainSteerConsumptionReopensOnlyCompletedReview(t *testing.T) {
 			if got := h.associations(supplement); got.Disposition != "pending" || got.FactsReviewed {
 				t.Fatal(got)
 			}
-			repair, _, claimed, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-			if err != nil || claimed != (prior == "completed") {
-				t.Fatal(repair, claimed, err)
+			delivery, _, claimed, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
+			if err != nil || claimed {
+				t.Fatal("late native consumption generated another metadata model round", delivery, claimed, err)
 			}
-			if claimed && repair.Operation != "conversation.repair_turn" {
-				t.Fatal(repair)
+			settled, err := h.app.LogicalTurn(t.Context(), active.RequestID)
+			if err != nil || settled.Status != prior {
+				t.Fatal("late receipt changed an explicit stop or clarification", settled, err)
+			}
+			if prior == "completed" {
+				steerStatusFixture(t, h, supplement, "completed")
+			}
+			actual, found, err := h.app.MainTurn(t.Context(), active.RequestID)
+			if err != nil || !found || actual.Status != store.TurnCompleted || actual.TurnID != original.TurnID {
+				t.Fatal("late input receipt rewrote the original native result", actual, found, err)
 			}
 			if _, ok, err := h.app.ConsumeMainSteer(t.Context(), "native", "turn", steer.InputText, "late-user"); err != nil || ok {
 				t.Fatal("receipt replay admitted twice", ok, err)
@@ -721,6 +703,7 @@ func TestMainSteerSkipsPendingRepairButRetainsControlBarriers(t *testing.T) {
 			if err := h.app.FinishDelivery(t.Context(), previous, DeliveryResult{Outcome: Delivered}); err != nil {
 				t.Fatal(err)
 			}
+			retainedLogicalRepairFixture(t, h, original)
 			if h.count("outbox WHERE operation='conversation.repair_turn' AND status='pending'") != 1 {
 				t.Fatal("missing older pending repair")
 			}

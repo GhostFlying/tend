@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -11,6 +12,25 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func TestManagerReceiptReaderRetainsSupportedProtocol2AndRejectsRetired1(t *testing.T) {
+	for _, version := range []int64{1, protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol, protocol.CurrentRunnerProtocol + 1} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			runtime := &protocol.RunnerRuntime{Protocol: version, Capabilities: []string{protocol.CapabilityManagerReceiptReader}}
+			want := version == protocol.PreviousRunnerProtocol || version == protocol.CurrentRunnerProtocol
+			if got := supportsManagerReceiptReader(runtime); got != want {
+				t.Fatalf("receipt-reader protocol %d eligible=%v, want %v", version, got, want)
+			}
+			runtime.Capabilities = nil
+			if supportsManagerReceiptReader(runtime) {
+				t.Fatal("supported transport invented native reader capability")
+			}
+		})
+	}
+	if supportsManagerReceiptReader(nil) {
+		t.Fatal("missing transport advertised a receipt reader")
+	}
+}
 
 func receiptReaderPayload(t *testing.T, h *harness, as protocol.Assignment) map[string]any {
 	t.Helper()

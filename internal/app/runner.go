@@ -210,6 +210,7 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		return protocol.Assignment{}, err
 	}
 	as.ExternalWaits = run.Protocol >= 3
+	as.SessionStopReports = run.Protocol >= 3
 	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
 		return protocol.Assignment{}, err
 	}
@@ -427,7 +428,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		PauseHandoffs:    p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
 		QuestionHandoffs: p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 		IssueOwners:      p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
-		IssueManagers:    p.Runtime != nil && p.Runtime.Protocol >= protocol.CurrentRunnerProtocol && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
+		IssueManagers:    p.Runtime != nil && protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
 		ID:               host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),

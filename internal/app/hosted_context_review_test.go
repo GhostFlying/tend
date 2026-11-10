@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -369,14 +368,9 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 		t.Fatal("independent acceptance was not isolated", acceptance, ok)
 	}
 	if unavailable {
-		config := hostedConfigurationFixture()
-		config.Revision = 2
-		config.Definitions.Agents[0].Revision = 2
-		config.Definitions.Agents[0].Purposes = []agentconfig.Purpose{agentconfig.Main}
-		config.Definitions.Runtimes[0].Revision = 2
-		config.Definitions.Runtimes[0].DeclaredPurposes = []agentconfig.Purpose{agentconfig.Main}
-		_, prepared := acceptHostedFixture(t, h, config, 1)
-		h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(prepared))
+		// Removing a historical role label no longer removes adapter capability.
+		// Keep this regression about an actually disabled current definition.
+		reloadHostedAdmissionConfig(t, h, true)
 	}
 	if op := h.runAs(acceptance, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -697,9 +691,10 @@ func TestHostedAssignmentKeepsSendingAndUnknownRepairBlocked(t *testing.T) {
 	if err := h.app.FinishDelivery(t.Context(), delivery, DeliveryResult{Outcome: Delivered}); err != nil {
 		t.Fatal(err)
 	}
+	retainedRequest := retainedLogicalRepairFixture(t, h, turn)
 	repair, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
-	if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
-		t.Fatal("fixture did not claim real repair delivery", repair, ok, err)
+	if err != nil || !ok || repair.Operation != "conversation.repair_turn" || repair.RequestID != retainedRequest {
+		t.Fatal("fixture did not claim its retained historical repair delivery", repair, ok, err)
 	}
 	next := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Reason: "Fence old manager while its repair delivery is reconciled"}, rev(issue.Revision)), HostedIssueAssignment{}))
 	finish := protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: next.AssignmentEpoch, HandoffID: next.PendingHandoffID, Reason: "Owner must not assume a sending repair did not execute"}

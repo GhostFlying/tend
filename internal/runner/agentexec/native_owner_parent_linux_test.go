@@ -83,7 +83,7 @@ func runNativeOwnerRunnerParentProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := observed(t, p).Pin
+	pin := observedManager(t, p).Pin
 	manager, err := p.ResolveManager(t.Context(), pin)
 	if err != nil {
 		t.Fatal(err)

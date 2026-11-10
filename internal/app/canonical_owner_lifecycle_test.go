@@ -485,7 +485,7 @@ func TestCanonicalLifecycleParentEndpointSerializesWithChildActivation(t *testin
 	}
 }
 
-func TestCanonicalLifecycleParentRetainsLateTerminalChildSourceDuty(t *testing.T) {
+func TestCanonicalLifecycleParentRetainsLateChildMaterialWithoutReviewGate(t *testing.T) {
 	h := newHarness(t)
 	parent := createCanonicalOwnerTestIssue(t, h)
 	cp := canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
@@ -515,26 +515,32 @@ func TestCanonicalLifecycleParentRetainsLateTerminalChildSourceDuty(t *testing.T
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	before := canonicalGuardBusinessSnapshot(t, h)
-	blocked := canonicalLifecycleControl(t, h, parent, "close", canonicalLifecycleClosure(parent, protocol.WorkItemClosureCompleted))
-	expectWorkCode(t, blocked, protocol.CodeInvalidTransition)
-	if !bytes.Contains(blocked.Error.Details, []byte("child_source_review")) || !bytes.Contains(blocked.Error.Details, []byte(child.IssueID)) {
-		t.Fatal("missing concrete child source blocker", blocked)
-	}
-	if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
-		t.Fatal("parent endpoint discarded late child duty")
-	}
-	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}))
-	child = admitExistingIssueFixture(t, h, child)
-	endpoint = canonicalLifecycleSourceEndpoint(t, h, child, source.MessageID)
-	endpoint.Closure = canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted).Closure
-	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", endpoint))
-	if child.State != protocol.IssueClosed {
-		t.Fatal(child)
-	}
+	terminal := child
 	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "close", canonicalLifecycleClosure(parent, protocol.WorkItemClosureCompleted)))
 	if parent.State != protocol.IssueClosed {
-		t.Fatal(parent)
+		t.Fatal("late child material required a review ceremony", parent)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var pending bool
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT needs_review FROM message_context_obligations WHERE work_item_id=? AND message_id=?`, child.IssueID, source.MessageID).Scan(&pending); err != nil {
+			return err
+		}
+		actual, err := store.GetConversationItem(t.Context(), tx.Q(), source.MessageID)
+		if err == nil && (!pending || actual.Body != report.Body) {
+			t.Fatal("closing parent discarded or fabricated interpretation of late material", actual, pending)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := canonicalGuardBusinessSnapshot(t, h)
+	expectWorkCode(t, canonicalLifecycleControl(t, h, child, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}), protocol.CodeInvalidTransition)
+	if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
+		t.Fatal("child activation escaped its closed parent")
+	}
+	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "review_sources", canonicalLifecycleSourceEndpoint(t, h, child, source.MessageID)))
+	if child.State != terminal.State || child.Revision != terminal.Revision+1 || child.Closure.Reason != terminal.Closure.Reason {
+		t.Fatal("optional source disposition changed original completion", terminal, child)
 	}
 }
 
@@ -581,14 +587,15 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 			}
 			parentFinish := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Owner finishes parent cancellation"}}
 			before := canonicalGuardBusinessSnapshot(t, h)
-			blocked := canonicalLifecycleControl(t, h, parent, "finish_cancel", parentFinish)
-			expectWorkCode(t, blocked, protocol.CodeInvalidTransition)
-			if !bytes.Contains(blocked.Error.Details, []byte("child_source_review")) {
-				t.Fatal("missing child source blocker", blocked)
-			}
 			expectWorkCode(t, canonicalLifecycleControl(t, h, child, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}), protocol.CodeInvalidTransition)
 			if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
-				t.Fatal("rejected parent finish/reopen changed responsibility")
+				t.Fatal("rejected child reopen changed responsibility")
+			}
+			// Late source interpretation is ordinary owner judgment, not a
+			// cancellation gate. Preserve the child history for optional review.
+			parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", parentFinish))
+			if parent.State != protocol.IssueCancelled {
+				t.Fatal("late child narration required a source-review ceremony", parent)
 			}
 			reviewPayload := canonicalLifecycleSourceEndpoint(t, h, child, source.MessageID)
 			reviewEnv := h.env("issues.review_sources", protocol.Target{Type: "issue", ID: child.IssueID}, reviewPayload, rev(child.Revision))
@@ -633,9 +640,9 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 			if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, reviewed.Result) {
 				t.Fatal("source review lost exact receipt", replay)
 			}
-			parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", parentFinish))
-			if parent.State != protocol.IssueCancelled {
-				t.Fatal(parent)
+			ended := canonicalTaskIssue(t, h, parent.IssueID)
+			if ended.State != protocol.IssueCancelled || ended.Revision != parent.Revision {
+				t.Fatal("optional child source review reopened its ended parent", ended)
 			}
 		})
 	}
@@ -689,8 +696,11 @@ func TestCanonicalLifecycleTerminalSourceReviewCanSettleNamedBatches(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	finish := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Finish parent after child sources"}}
-	expectWorkCode(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", finish), protocol.CodeInvalidTransition)
+	finish := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Finish parent without a source-review ceremony"}}
+	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", finish))
+	if parent.State != protocol.IssueCancelled {
+		t.Fatal("partial source interpretation became a cancellation gate", parent)
+	}
 	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "review_sources", canonicalLifecycleSourceEndpoint(t, h, child, second.MessageID)))
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var pending int
@@ -719,8 +729,8 @@ func TestCanonicalLifecycleTerminalSourceReviewCanSettleNamedBatches(t *testing.
 	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, reviewed.Result) {
 		t.Fatal("source batch replay lost its older receipt", replay)
 	}
-	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", finish))
-	if parent.State != protocol.IssueCancelled || child.State != protocol.IssueClosed {
-		t.Fatal(parent, child)
+	ended := canonicalTaskIssue(t, h, parent.IssueID)
+	if ended.State != protocol.IssueCancelled || ended.Revision != parent.Revision || child.State != protocol.IssueClosed {
+		t.Fatal("optional source batches changed terminal responsibility", ended, child)
 	}
 }

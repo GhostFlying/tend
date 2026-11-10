@@ -956,7 +956,23 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 		return &completionPending{errors.New("runner: strict final report is unavailable")}
 	}
 	if err := r.reportSessionStop(ctx, as); err != nil {
-		return &completionPending{err}
+		if isCompletionPending(err) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	if strictResume != nil {
+		// Stop may arrive during the optional metadata request. It independently
+		// ends local ownership without resending the outstanding business result.
+		stop, err := r.cfg.Journal.RetainedStop(ctx, as.RunID)
+		if err != nil {
+			return &completionPending{err}
+		}
+		if stop != nil {
+			return r.cleanupReportedRunWithStop(ctx, as, stop)
+		}
 	}
 	// execute has confirmed the process stopped before entering reporting.
 	if ok {

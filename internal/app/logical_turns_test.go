@@ -151,7 +151,7 @@ func TestClassificationRejectsChangedStreamingContent(t *testing.T) {
 	expectWorkCode(t, stale, protocol.CodeStaleRevision)
 }
 
-func TestRemovedAssociationRemainsFencedUntilFinalContextVersion(t *testing.T) {
+func TestRemovedAssociationRetainsContextWithoutMetadataFence(t *testing.T) {
 	h := newHarness(t)
 	id, turn := startReviewTurn(t, h)
 	w := h.createWork(workPlan())
@@ -169,7 +169,7 @@ func TestRemovedAssociationRemainsFencedUntilFinalContextVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A real concurrent plan edit after commit must invalidate the final fence.
+	// A context change stays readable without invalidating an ended execution.
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE work_item_contexts SET revision=revision+1 WHERE work_item_id=?`, w.WorkItemID)
 		return err
@@ -181,7 +181,7 @@ func TestRemovedAssociationRemainsFencedUntilFinalContextVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil || state.Status != "recovering" || len(state.Contexts) != 1 {
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 0 || len(state.Contexts) != 1 {
 		t.Fatal(state, err)
 	}
 }

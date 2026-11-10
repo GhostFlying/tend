@@ -84,9 +84,11 @@ func TestMetadataRepairDoesNotEraseBusinessFailure(t *testing.T) {
 					}
 				}
 			}
+			// Reconstruct a retained pre-upgrade repair; ordinary failure must not create one.
+			retained := retainedLogicalRepairFixture(t, h, original)
 			repair, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-			if err != nil || !ok {
-				t.Fatal(ok, err)
+			if err != nil || !ok || repair.RequestID != retained {
+				t.Fatal(repair, ok, err)
 			}
 			running := store.MainTurn{RequestID: repair.RequestID, MessageID: source, ThreadID: mainAgent.Thread, TurnID: "repair", Status: store.TurnStarted}
 			if err := h.app.PutMainTurn(t.Context(), running); err != nil {

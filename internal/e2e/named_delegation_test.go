@@ -29,8 +29,8 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 	h := testkit.NewHarness()
 	h.Models = []harness.Model{{ID: "fixture-model", Name: "fixture-native", SupportedEfforts: []string{"high"}, DefaultEffort: "high"}}
 	failures := make(chan string, 16)
-	managerReviewed := make(chan struct{})
-	var reviewedOnce sync.Once
+	managerPlanned := make(chan struct{})
+	var plannedOnce sync.Once
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		call := 0
 		invoke := func(name string, args any, out any) bool {
@@ -87,12 +87,16 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 				return "failed"
 			}
 		}
+		if th.Config.Sandbox != "workspace-write" || th.Config.ApprovalPolicy != "never" || th.Config.Config["features.shell_tool"] != true || th.Config.Config["features.apply_patch_freeform"] != true || th.Config.Config["features.image_generation"] != false {
+			failures <- "named responsibility changed the configured runtime capabilities"
+			return "failed"
+		}
 		if !manager {
 			var state protocol.LogicalTurnState
 			if !invoke("conversation_turn_read", map[string]any{}, &state) {
 				return "failed"
 			}
-			// Ledger continuations and repairs only reconcile their original responsibility.
+			// Only an admitted owner message creates a new business responsibility.
 			if !in.Repair && len(state.Messages) > 0 && func() bool {
 				message, err := srv.app.Message(context.Background(), in.UserMessageID)
 				return err == nil && message.Author == "owner"
@@ -104,43 +108,11 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 					return "failed"
 				}
 				th.Say(turn, "delegated", "The Issue manager owns the build investigation and task.")
-				eventually(t, "native reply persisted before metadata review", func() bool {
+				eventually(t, "native reply persisted before completion", func() bool {
 					return srv.count(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=? AND body=?`, source.MessageID, "The Issue manager owns the build investigation and task.") == 1
 				})
 			}
-			if !invoke("conversation_turn_read", map[string]any{}, &state) {
-				return "failed"
-			}
-			for _, message := range state.Messages {
-				if message.Disposition == "pending" {
-					ids := []string{}
-					for _, item := range message.Items {
-						ids = append(ids, item.WorkItemID)
-					}
-					disposition := "unassigned"
-					if len(ids) > 0 {
-						disposition = "linked"
-					}
-					if !invoke("conversation_associate_issues", map[string]any{"effect_seq": 100 + call, "target_id": message.MessageID, "expected_control_revision": message.Revision, "payload": protocol.SetIssueMessageAssociationsPayload{ContentRevision: message.ContentRevision, Disposition: disposition, IssueIDs: ids}}, nil) {
-						return "failed"
-					}
-				}
-			}
-			if !invoke("conversation_turn_read", map[string]any{}, &state) {
-				return "failed"
-			}
-			commit := protocol.LogicalTurnCommit{Contexts: state.Contexts}
-			for _, message := range state.Messages {
-				commit.Messages = append(commit.Messages, protocol.LogicalTurnReview{MessageID: message.MessageID, ContentRevision: message.ContentRevision, AssociationRevision: message.Revision})
-			}
-			if !invoke("conversation_turn_commit", commit, nil) {
-				return "failed"
-			}
 			return "completed"
-		}
-		if th.Config.Sandbox != "read-only" || th.Config.Config["features.shell_tool"] != false {
-			failures <- "manager retained native execution"
-			return "failed"
 		}
 		var item protocol.IssueView
 		if !invoke("issues_read", map[string]any{}, &item) {
@@ -170,26 +142,7 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 				return "failed"
 			}
 		}
-		review := protocol.IssueContextReview{ExpectedAssignmentEpoch: item.AssignmentEpoch, ContextRevision: item.ContextRevision, Summary: "Reviewed the exact source and current task/acceptance facts"}
-		for _, source := range item.SourceReviews {
-			review.Sources = append(review.Sources, protocol.LogicalTurnReview{MessageID: source.MessageID, ContentRevision: source.ContentRevision, AssociationRevision: source.AssociationRevision})
-		}
-		if !invoke("issues_context_review", map[string]any{"effect_seq": seq, "payload": review}, nil) {
-			return "failed"
-		}
-		seq++
-		var state protocol.LogicalTurnState
-		if !invoke("issues_turn_read", map[string]any{}, &state) {
-			return "failed"
-		}
-		commit := protocol.LogicalTurnCommit{Contexts: state.Contexts}
-		for _, message := range state.Messages {
-			commit.Messages = append(commit.Messages, protocol.LogicalTurnReview{MessageID: message.MessageID, ContentRevision: message.ContentRevision, AssociationRevision: message.Revision})
-		}
-		if !invoke("issues_turn_commit", map[string]any{"effect_seq": seq, "payload": commit}, nil) {
-			return "failed"
-		}
-		reviewedOnce.Do(func() { close(managerReviewed) })
+		plannedOnce.Do(func() { close(managerPlanned) })
 		return "completed"
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -198,7 +151,10 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 	cb := contextbuilder.New(srv.app, srv.store, srv.ids, contextbuilder.Config{})
 	service := tools.New(srv.app, srv.store, cb, quiet())
 	makeManager := func(conversation string) *mainthread.Manager {
-		return mainthread.New(srv.app, cb, service, mainthread.Config{Instance: "fixture/" + conversation, ConversationID: conversation, Thread: mainthread.ThreadConfig(t.TempDir(), "unused"), OpenNamed: func(ctx context.Context, selection hostedconfig.Selection) (harness.Session, error) {
+		thread := mainthread.ThreadConfig(t.TempDir(), "unused")
+		thread.Sandbox, thread.ApprovalPolicy = "workspace-write", "never"
+		thread.Config = map[string]any{"features.shell_tool": true, "features.apply_patch_freeform": true, "features.image_generation": false}
+		return mainthread.New(srv.app, cb, service, mainthread.Config{Instance: "fixture/" + conversation, ConversationID: conversation, Thread: thread, OpenNamed: func(ctx context.Context, selection hostedconfig.Selection) (harness.Session, error) {
 			if selection.Runtime.ExecutableRef != "FIXTURE_NATIVE" {
 				return nil, fmt.Errorf("wrong runtime")
 			}
@@ -224,14 +180,14 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 		return testkit.WorkerScript{Result: harness.WorkerResult{Verdict: &protocol.VerdictPayload{Verdict: v, Evidence: json.RawMessage(`{}`)}}}
 	})
 	srv.say("The build is broken, please fix it.")
-	eventually(t, "initial manager context commits before workers run", func() bool {
+	eventually(t, "named manager plans the Task and its native turn settles before workers run", func() bool {
 		select {
 		case failure := <-failures:
 			t.Fatal(failure)
 		default:
 		}
 		select {
-		case <-managerReviewed:
+		case <-managerPlanned:
 			return srv.count(`SELECT COUNT(*) FROM logical_turns WHERE status<>'completed'`) == 0
 		default:
 			return false

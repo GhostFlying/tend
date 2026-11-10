@@ -249,6 +249,7 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 	}
 	type row struct {
 		seq     int64
+		stored  string
 		raw     string
 		applied bool
 		e       closedManagerEvent
@@ -256,11 +257,11 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 	var all []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.seq, &r.raw, &r.applied); err != nil {
+		if err := rows.Scan(&r.seq, &r.stored, &r.applied); err != nil {
 			rows.Close()
 			return err
 		}
-		r.raw, err = store.ResolveJSON(ctx, tx.Q(), r.raw)
+		r.raw, err = store.ResolveJSON(ctx, tx.Q(), r.stored)
 		if err != nil {
 			rows.Close()
 			return err
@@ -316,8 +317,18 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 		}
 		for _, fact := range append([]row{r}, items...) {
 			proof.Facts = append(proof.Facts, closedManagerFact{Sequence: fact.seq, SHA256: closedFactHash([]byte(fact.raw))})
-			if _, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=? AND body_json=?`, run, fact.seq, fact.raw); err != nil {
+			// Original bytes establish the proof; the unchanged stored reference
+			// identifies the row being consumed, whether inline or retained.
+			result, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=? AND body_json=?`, run, fact.seq, fact.stored)
+			if err != nil {
 				return err
+			}
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if changed != 1 {
+				return protocol.Errorf(protocol.CodeUnknownOutcome, "native close fact changed before consumption")
 			}
 		}
 		audits = append(audits, *proof)

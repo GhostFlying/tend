@@ -22,3 +22,13 @@ func TestRunnerHTTPRejectsRetiredProtocolZeroAndUnversionedHello(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerHTTPRejectsRetiredProtocolOneHello(t *testing.T) {
+	e := newEnv(t, 10*time.Millisecond)
+	payload := json.RawMessage(`{"workspace_protocol":1,"runtime":{"instance_id":"retired","generation":1,"sequence":1,"protocol":1,"protocol_min":1,"protocol_max":1,"mode":"normal","build":{},"capabilities":[]}}`)
+	env := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunnerHello, Target: protocol.Target{Type: "host", ID: "linux-1"}, Payload: payload}
+	status, result := e.call(asHost(), env)
+	if status != http.StatusBadRequest || result.Error == nil || result.Error.Code != protocol.CodeInvalidRequest {
+		t.Fatal("retired protocol 1 was admitted by the supported manager compatibility path", status, result)
+	}
+}
