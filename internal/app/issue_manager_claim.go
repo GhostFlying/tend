@@ -72,7 +72,7 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		if err != nil {
 			return Outcome{}, err
 		}
-		if err = appendBackgroundSource(ctx, x, tx, "work_item:"+i.IssueID, i.IssueID, "", "", "issue.manager_claimed", nil); err != nil {
+		if err = appendBackgroundSource(ctx, x, tx, "work_item:"+i.IssueID, i.IssueID, m.SourceMessageID, "", "issue.manager_claimed", nil); err != nil {
 			return Outcome{}, err
 		}
 	}

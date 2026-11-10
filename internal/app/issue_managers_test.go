@@ -436,6 +436,19 @@ func TestMainAgentCreatesCategoryManagerBeforeAnyRunnerIdentityIsSelected(t *tes
 	if err := json.Unmarshal(claimed.Result, &assignment); err != nil || assignment.Assignment.Manager == nil || assignment.Assignment.TaskID != published.TaskID {
 		t.Fatal("main's category task was not claimable", claimed, err)
 	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var count int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.work_item_id=? AND s.kind='issue.manager_claimed' AND s.message_id=?`, issue.IssueID, source).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatal("initial claim lost the original delegated request", count)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func TestManagerPendingMessagesSurviveOwnerReturnAndClaim(t *testing.T) {
