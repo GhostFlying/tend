@@ -93,6 +93,8 @@ type ReviewIssueCompletionsPayload struct {
 // server supplies shared context and validates these fields through domain.Spec.
 // Existing runner and stored-spec representations remain unchanged.
 type OwnerTaskSpec struct {
+	ReviewArtifactID      string                `json:"review_artifact_id,omitempty"`
+	ReviewDeliveryID      string                `json:"review_delivery_id,omitempty"`
 	AgentSelection        *TaskAgentSelection   `json:"agent_selection,omitempty"`
 	AcceptanceExecution   *ExecutionProfile     `json:"acceptance_execution,omitempty"`
 	Observation           *ObservationScope     `json:"observation,omitempty"`

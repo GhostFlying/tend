@@ -1705,7 +1705,16 @@
         "current_completion": {
           "type": "boolean"
         },
+        "independent_acceptance_id": {
+          "type": "string"
+        },
         "ref_sha256": {
+          "type": "string"
+        },
+        "result_complete": {
+          "type": "boolean"
+        },
+        "reviewer_artifact_id": {
           "type": "string"
         },
         "task_id": {
@@ -3657,6 +3666,22 @@
       "title": "ContinueRetainedRunPayload",
       "type": "object"
     },
+    "ContinueTaskPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignment_epoch": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ContinueTaskPayload",
+      "type": "object"
+    },
     "ControlMode": {
       "enum": [
         "managed",
@@ -4983,6 +5008,18 @@
         "grant": {
           "$ref": "#/definitions/IssueDeliveryGrant"
         },
+        "historical": {
+          "type": "boolean"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/definitions/DeliveryExecutionReference"
+          },
+          "type": "array"
+        },
+        "history_more": {
+          "type": "boolean"
+        },
         "invalid_reason": {
           "type": "string"
         },
@@ -5048,6 +5085,30 @@
         "valid"
       ],
       "title": "DeliveryExecutionAuthority",
+      "type": "object"
+    },
+    "DeliveryExecutionReference": {
+      "additionalProperties": false,
+      "properties": {
+        "duty_revision": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "upgrade_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "generation",
+        "duty_revision"
+      ],
+      "title": "DeliveryExecutionReference",
       "type": "object"
     },
     "DeliveryObservation": {
@@ -5229,6 +5290,33 @@
         "current_duty_revision"
       ],
       "title": "DeliverySettlementAuthority",
+      "type": "object"
+    },
+    "DeploymentExecutionEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "cli_path": {
+          "type": "string"
+        },
+        "control_socket": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "transport",
+        "cli_path",
+        "control_socket"
+      ],
+      "title": "DeploymentExecutionEntry",
       "type": "object"
     },
     "DownloadURLResponse": {
@@ -6433,6 +6521,93 @@
         "content_base_path"
       ],
       "title": "ExtensionTarget",
+      "type": "object"
+    },
+    "ExternalWait": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at_ms": {
+          "type": "integer"
+        },
+        "deadline_at_ms": {
+          "type": "integer"
+        },
+        "input_event_watermark": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "next_reminder_at_ms": {
+          "type": "integer"
+        },
+        "observed_head": {
+          "type": "string"
+        },
+        "observed_revision": {
+          "type": "integer"
+        },
+        "observed_state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "resume_reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "successor_run_id": {
+          "type": "string"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "wait_id": {
+          "type": "string"
+        },
+        "wait_key": {
+          "type": "string"
+        },
+        "wake_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_key",
+        "kind",
+        "target_id",
+        "reason",
+        "recovery",
+        "wait_id",
+        "run_id",
+        "task_id",
+        "status",
+        "stopped",
+        "created_at_ms",
+        "next_reminder_at_ms"
+      ],
+      "title": "ExternalWait",
       "type": "object"
     },
     "FeishuBindingView": {
@@ -8767,6 +8942,33 @@
       "title": "IssueDeliveryView",
       "type": "object"
     },
+    "IssueDeploymentScope": {
+      "additionalProperties": false,
+      "properties": {
+        "host_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server_instance": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_instance",
+        "host_ids"
+      ],
+      "title": "IssueDeploymentScope",
+      "type": "object"
+    },
     "IssueEndpointPayload": {
       "additionalProperties": false,
       "properties": {
@@ -9839,6 +10041,9 @@
         "authority": {
           "$ref": "#/definitions/IssuePRPolicyAuthority"
         },
+        "deployment": {
+          "$ref": "#/definitions/IssueDeploymentScope"
+        },
         "mode": {
           "type": "string"
         },
@@ -10099,7 +10304,16 @@
         "generation": {
           "type": "integer"
         },
+        "independent_acceptance_id": {
+          "type": "string"
+        },
         "ref_sha256": {
+          "type": "string"
+        },
+        "result_complete": {
+          "type": "boolean"
+        },
+        "reviewer_artifact_id": {
           "type": "string"
         },
         "run_id": {
@@ -10870,6 +11084,85 @@
       "title": "LogicalTurnReview",
       "type": "object"
     },
+    "LogicalTurnState": {
+      "additionalProperties": false,
+      "properties": {
+        "awaiting": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/PendingClarification"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contexts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/LogicalContextReview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coordination_execution_id": {
+          "type": "string"
+        },
+        "logical_turn_id": {
+          "type": "string"
+        },
+        "messages": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MessageAssociations"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_effect_seq": {
+          "type": "integer"
+        },
+        "processing": {
+          "items": {
+            "$ref": "#/definitions/MessageProcessingReceipt"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "repair_attempts": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "awaiting",
+        "logical_turn_id",
+        "status",
+        "reason",
+        "repair_attempts",
+        "messages",
+        "contexts"
+      ],
+      "title": "LogicalTurnState",
+      "type": "object"
+    },
     "MainSteerView": {
       "additionalProperties": false,
       "properties": {
@@ -11359,6 +11652,31 @@
         "revision"
       ],
       "title": "MessageControl",
+      "type": "object"
+    },
+    "MessageProcessingReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "association_revision": {
+          "type": "integer"
+        },
+        "content_revision": {
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "processed_at_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "content_revision",
+        "association_revision",
+        "processed_at_ms"
+      ],
+      "title": "MessageProcessingReceipt",
       "type": "object"
     },
     "MessageProcessingState": {
@@ -12222,6 +12540,76 @@
       "title": "NativeIdentity",
       "type": "object"
     },
+    "NativeRolloutArchiveReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "indexed_offset": {
+          "type": "integer"
+        },
+        "next_offset": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "offset",
+        "next_offset",
+        "sha256",
+        "indexed_offset"
+      ],
+      "title": "NativeRolloutArchiveReceipt",
+      "type": "object"
+    },
+    "NativeRolloutChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "contentEncoding": "base64",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "source_id",
+        "thread_id",
+        "offset",
+        "data",
+        "sha256"
+      ],
+      "title": "NativeRolloutChunk",
+      "type": "object"
+    },
     "NativeUsageRegistration": {
       "additionalProperties": false,
       "properties": {
@@ -12393,6 +12781,9 @@
     "ObservedDeliveryPolicy": {
       "additionalProperties": false,
       "properties": {
+        "deployment": {
+          "$ref": "#/definitions/IssueDeploymentScope"
+        },
         "digest": {
           "type": "string"
         },
@@ -12802,6 +13193,9 @@
         "delivery_target_available": {
           "type": "boolean"
         },
+        "execution_entry": {
+          "$ref": "#/definitions/DeploymentExecutionEntry"
+        },
         "host_ids": {
           "anyOf": [
             {
@@ -13193,6 +13587,177 @@
       "title": "Operation",
       "type": "object"
     },
+    "OriginalImport": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "integer"
+        },
+        "file_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "source_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_id",
+        "source_key",
+        "limit"
+      ],
+      "title": "OriginalImport",
+      "type": "object"
+    },
+    "OriginalImportResult": {
+      "additionalProperties": false,
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "indexed_bodies": {
+          "type": "integer"
+        },
+        "indexed_records": {
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "source_key": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/OriginalStorageStatus"
+        }
+      },
+      "required": [
+        "status",
+        "file_id",
+        "source_key",
+        "indexed_records",
+        "indexed_bodies",
+        "next",
+        "more"
+      ],
+      "title": "OriginalImportResult",
+      "type": "object"
+    },
+    "OriginalMigration": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "rescan": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "title": "OriginalMigration",
+      "type": "object"
+    },
+    "OriginalMigrationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "migrated_bytes": {
+          "type": "integer"
+        },
+        "migrated_rows": {
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/definitions/OriginalStorageStatus"
+        }
+      },
+      "required": [
+        "status",
+        "migrated_rows",
+        "migrated_bytes",
+        "more"
+      ],
+      "title": "OriginalMigrationResult",
+      "type": "object"
+    },
+    "OriginalStorageStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "bodies": {
+          "type": "integer"
+        },
+        "migrated_bytes": {
+          "type": "integer"
+        },
+        "migrated_rows": {
+          "type": "integer"
+        },
+        "original_files": {
+          "type": "integer"
+        },
+        "original_prefix_bytes": {
+          "type": "integer"
+        },
+        "pending_rows": {
+          "type": "integer"
+        },
+        "referenced_bytes": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "unmatched_rows": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revision",
+        "migrated_rows",
+        "migrated_bytes",
+        "bodies",
+        "referenced_bytes",
+        "original_files",
+        "original_prefix_bytes",
+        "pending_rows",
+        "unmatched_rows"
+      ],
+      "title": "OriginalStorageStatus",
+      "type": "object"
+    },
+    "OriginalVerification": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "checked": {
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checked",
+        "bytes",
+        "more"
+      ],
+      "title": "OriginalVerification",
+      "type": "object"
+    },
     "OwnerTaskBase": {
       "additionalProperties": false,
       "properties": {
@@ -13318,6 +13883,12 @@
         "requirements": {
           "$ref": "#/definitions/OwnerTaskRequirements"
         },
+        "review_artifact_id": {
+          "type": "string"
+        },
+        "review_delivery_id": {
+          "type": "string"
+        },
         "scope": {
           "type": "string"
         },
@@ -13369,6 +13940,31 @@
         "mounts"
       ],
       "title": "OwnerTaskWorkspace",
+      "type": "object"
+    },
+    "PendingClarification": {
+      "additionalProperties": false,
+      "properties": {
+        "logical_turn_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "logical_turn_id",
+        "message_id",
+        "revision",
+        "question"
+      ],
+      "title": "PendingClarification",
       "type": "object"
     },
     "PlannerEntry": {
@@ -14369,6 +14965,9 @@
           },
           "type": "array"
         },
+        "reviewed_artifact_id": {
+          "type": "string"
+        },
         "shared_review": {
           "$ref": "#/definitions/SharedReviewResult"
         },
@@ -14377,6 +14976,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "verdict": {
+          "$ref": "#/definitions/Verdict"
         }
       },
       "required": [
@@ -14405,6 +15007,23 @@
         "expected_revision"
       ],
       "title": "ResumeDecisionContinuationPayload",
+      "type": "object"
+    },
+    "ResumeExternalWaitPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "wait_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_id",
+        "reason"
+      ],
+      "title": "ResumeExternalWaitPayload",
       "type": "object"
     },
     "RetainedAgentDefinition": {
@@ -14909,6 +15528,9 @@
     "RunContext": {
       "additionalProperties": false,
       "properties": {
+        "execution_context": {
+          "$ref": "#/definitions/TaskExecutionContext"
+        },
         "materials": {
           "$ref": "#/definitions/IssueMaterials"
         },
@@ -15795,6 +16417,23 @@
       "title": "SendRunMessagePayload",
       "type": "object"
     },
+    "SessionContinuation": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "thread_id"
+      ],
+      "title": "SessionContinuation",
+      "type": "object"
+    },
     "SessionRequest": {
       "additionalProperties": false,
       "properties": {
@@ -15810,6 +16449,19 @@
         "scope"
       ],
       "title": "SessionRequest",
+      "type": "object"
+    },
+    "SessionStopPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "SessionStopPayload",
       "type": "object"
     },
     "SessionView": {
@@ -16208,6 +16860,9 @@
         "head_sha": {
           "type": "string"
         },
+        "implement_generation": {
+          "type": "integer"
+        },
         "number": {
           "type": "integer"
         },
@@ -16234,6 +16889,9 @@
         },
         "supplement_artifact_id": {
           "type": "string"
+        },
+        "supplement_generation": {
+          "type": "integer"
         },
         "supplement_run_id": {
           "type": "string"
@@ -17111,6 +17769,71 @@
       "title": "TaskDetail",
       "type": "object"
     },
+    "TaskExecutionContext": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TaskResultReference"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "previous_artifact_id": {
+          "type": "string"
+        },
+        "reviews": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/TaskReviewTarget"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RunView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "generation",
+        "runs",
+        "artifacts",
+        "reviews",
+        "more"
+      ],
+      "title": "TaskExecutionContext",
+      "type": "object"
+    },
     "TaskExecutionView": {
       "additionalProperties": false,
       "properties": {
@@ -17268,6 +17991,84 @@
         "task"
       ],
       "title": "TaskRelationView",
+      "type": "object"
+    },
+    "TaskResultReference": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "spec_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "run_id",
+        "spec_version",
+        "generation",
+        "sha256"
+      ],
+      "title": "TaskResultReference",
+      "type": "object"
+    },
+    "TaskReviewTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "review_id": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "review_id",
+        "provider",
+        "repository",
+        "number",
+        "revision",
+        "status",
+        "head_sha",
+        "base_sha",
+        "requirements_digest",
+        "reviewer"
+      ],
+      "title": "TaskReviewTarget",
       "type": "object"
     },
     "TaskSummary": {
@@ -18395,11 +19196,17 @@
     "UpdateIssueDeliveryPayload": {
       "additionalProperties": false,
       "properties": {
+        "acceptance_id": {
+          "type": "string"
+        },
         "action": {
           "type": "string"
         },
         "candidate": {
           "$ref": "#/definitions/IssueDeliveryCandidate"
+        },
+        "execution_run_id": {
+          "type": "string"
         },
         "execution_task_id": {
           "type": "string"
@@ -18413,7 +19220,19 @@
         "expected_task_control_revision": {
           "type": "integer"
         },
+        "independent_acceptance": {
+          "$ref": "#/definitions/IndependentAcceptanceRequest"
+        },
         "reason": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/definitions/ArtifactPayload"
+        },
+        "reviewer_artifact_id": {
+          "type": "string"
+        },
+        "run_id": {
           "type": "string"
         },
         "source_message_id": {
@@ -18428,7 +19247,6 @@
       },
       "required": [
         "expected_assignment_epoch",
-        "task_id",
         "action"
       ],
       "title": "UpdateIssueDeliveryPayload",
@@ -19148,6 +19966,9 @@
         "request_id": {
           "type": "string"
         },
+        "rescan": {
+          "type": "boolean"
+        },
         "run_id": {
           "type": "string"
         },
@@ -19184,6 +20005,9 @@
         "request_id": {
           "type": "string"
         },
+        "rescan": {
+          "type": "boolean"
+        },
         "run_id": {
           "type": "string"
         },
@@ -19211,6 +20035,9 @@
       "properties": {
         "reason": {
           "type": "string"
+        },
+        "rescan": {
+          "type": "boolean"
         }
       },
       "title": "UsageCollectionControl",
@@ -19877,6 +20704,41 @@
       "title": "Verdict",
       "type": "string"
     },
+    "WaitExternalPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "deadline_at_ms": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "wait_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_key",
+        "kind",
+        "target_id",
+        "reason",
+        "recovery"
+      ],
+      "title": "WaitExternalPayload",
+      "type": "object"
+    },
     "WebhookReceipt": {
       "additionalProperties": false,
       "properties": {
@@ -20347,6 +21209,22 @@
       ],
       "title": "WorkspaceView",
       "type": "object"
+    },
+    "YieldExternalWaitPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "wait_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_id"
+      ],
+      "title": "YieldExternalWaitPayload",
+      "type": "object"
     }
   },
   "properties": {
@@ -20494,6 +21372,9 @@
     "ContinueRetainedRunPayload": {
       "$ref": "#/definitions/ContinueRetainedRunPayload"
     },
+    "ContinueTaskPayload": {
+      "$ref": "#/definitions/ContinueTaskPayload"
+    },
     "ConversationAttachment": {
       "$ref": "#/definitions/ConversationAttachment"
     },
@@ -20589,6 +21470,9 @@
     },
     "ExtensionTarget": {
       "$ref": "#/definitions/ExtensionTarget"
+    },
+    "ExternalWait": {
+      "$ref": "#/definitions/ExternalWait"
     },
     "FeishuBindingView": {
       "$ref": "#/definitions/FeishuBindingView"
@@ -20734,6 +21618,9 @@
     "LocalRepositoryStatus": {
       "$ref": "#/definitions/LocalRepositoryStatus"
     },
+    "LogicalTurnState": {
+      "$ref": "#/definitions/LogicalTurnState"
+    },
     "MaintenanceOverview": {
       "$ref": "#/definitions/MaintenanceOverview"
     },
@@ -20745,6 +21632,9 @@
     },
     "ManualSource": {
       "$ref": "#/definitions/ManualSource"
+    },
+    "MessageProcessingReceipt": {
+      "$ref": "#/definitions/MessageProcessingReceipt"
     },
     "MessagingChannel": {
       "$ref": "#/definitions/MessagingChannel"
@@ -20785,6 +21675,12 @@
     "NativeEntry": {
       "$ref": "#/definitions/NativeEntry"
     },
+    "NativeRolloutArchiveReceipt": {
+      "$ref": "#/definitions/NativeRolloutArchiveReceipt"
+    },
+    "NativeRolloutChunk": {
+      "$ref": "#/definitions/NativeRolloutChunk"
+    },
     "NativeUsageRegistration": {
       "$ref": "#/definitions/NativeUsageRegistration"
     },
@@ -20793,6 +21689,24 @@
     },
     "ObservedDeployment": {
       "$ref": "#/definitions/ObservedDeployment"
+    },
+    "OriginalImport": {
+      "$ref": "#/definitions/OriginalImport"
+    },
+    "OriginalImportResult": {
+      "$ref": "#/definitions/OriginalImportResult"
+    },
+    "OriginalMigration": {
+      "$ref": "#/definitions/OriginalMigration"
+    },
+    "OriginalMigrationResult": {
+      "$ref": "#/definitions/OriginalMigrationResult"
+    },
+    "OriginalStorageStatus": {
+      "$ref": "#/definitions/OriginalStorageStatus"
+    },
+    "OriginalVerification": {
+      "$ref": "#/definitions/OriginalVerification"
     },
     "PlannerEntry": {
       "$ref": "#/definitions/PlannerEntry"
@@ -20854,6 +21768,9 @@
     "ResumeDecisionContinuationPayload": {
       "$ref": "#/definitions/ResumeDecisionContinuationPayload"
     },
+    "ResumeExternalWaitPayload": {
+      "$ref": "#/definitions/ResumeExternalWaitPayload"
+    },
     "RetainedRunReconciliation": {
       "$ref": "#/definitions/RetainedRunReconciliation"
     },
@@ -20905,8 +21822,14 @@
     "SendRunMessagePayload": {
       "$ref": "#/definitions/SendRunMessagePayload"
     },
+    "SessionContinuation": {
+      "$ref": "#/definitions/SessionContinuation"
+    },
     "SessionRequest": {
       "$ref": "#/definitions/SessionRequest"
+    },
+    "SessionStopPayload": {
+      "$ref": "#/definitions/SessionStopPayload"
     },
     "SessionView": {
       "$ref": "#/definitions/SessionView"
@@ -20959,8 +21882,17 @@
     "TaskDetail": {
       "$ref": "#/definitions/TaskDetail"
     },
+    "TaskExecutionContext": {
+      "$ref": "#/definitions/TaskExecutionContext"
+    },
     "TaskPage": {
       "$ref": "#/definitions/TaskPage"
+    },
+    "TaskResultReference": {
+      "$ref": "#/definitions/TaskResultReference"
+    },
+    "TaskReviewTarget": {
+      "$ref": "#/definitions/TaskReviewTarget"
     },
     "TokenUsageSample": {
       "$ref": "#/definitions/TokenUsageSample"
@@ -21031,6 +21963,9 @@
     "UsageUpload": {
       "$ref": "#/definitions/UsageUpload"
     },
+    "WaitExternalPayload": {
+      "$ref": "#/definitions/WaitExternalPayload"
+    },
     "WebhookReceipt": {
       "$ref": "#/definitions/WebhookReceipt"
     },
@@ -21051,6 +21986,9 @@
     },
     "WorkItemChoice": {
       "$ref": "#/definitions/WorkItemChoice"
+    },
+    "YieldExternalWaitPayload": {
+      "$ref": "#/definitions/YieldExternalWaitPayload"
     }
   },
   "title": "TendAPI",

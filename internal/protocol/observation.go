@@ -27,6 +27,9 @@ type RunObservation struct {
 // approval or a record of provider mutations. Its candidate remains frozen even
 // when current policy, owner sources or provider facts invalidate execution.
 type DeliveryExecutionAuthority struct {
+	Historical             bool                         `json:"historical,omitempty"`
+	History                []DeliveryExecutionReference `json:"history,omitempty"`
+	HistoryMore            bool                         `json:"history_more,omitempty"`
 	Settlement             *DeliverySettlementAuthority `json:"settlement,omitempty"`
 	Source                 string                       `json:"source"`
 	ObservedAt             int64                        `json:"observed_at,omitempty"`
@@ -54,6 +57,13 @@ type DeliveryExecutionAuthority struct {
 	InvalidReason          string                       `json:"invalid_reason,omitempty"`
 }
 
+type DeliveryExecutionReference struct {
+	RunID        string `json:"run_id"`
+	Generation   int64  `json:"generation"`
+	DutyRevision int64  `json:"duty_revision"`
+	UpgradeID    string `json:"upgrade_id,omitempty"`
+}
+
 // DeliverySettlementAuthority reports whether an already completed deployment
 // can settle its original responsibility. It never grants another execution.
 type DeliverySettlementAuthority struct {
@@ -69,14 +79,15 @@ type DeliverySettlementAuthority struct {
 }
 
 type ObservedDeliveryPolicy struct {
-	IssueID         string `json:"issue_id"`
-	IssueRevision   int64  `json:"issue_revision"`
-	Mode            string `json:"mode"`
-	Repository      string `json:"repository"`
-	Digest          string `json:"digest"`
-	RequestID       string `json:"request_id,omitempty"`
-	SourceMessageID string `json:"source_message_id,omitempty"`
-	SourceRevision  int64  `json:"source_revision,omitempty"`
+	Deployment      *IssueDeploymentScope `json:"deployment,omitempty"`
+	IssueID         string                `json:"issue_id"`
+	IssueRevision   int64                 `json:"issue_revision"`
+	Mode            string                `json:"mode"`
+	Repository      string                `json:"repository"`
+	Digest          string                `json:"digest"`
+	RequestID       string                `json:"request_id,omitempty"`
+	SourceMessageID string                `json:"source_message_id,omitempty"`
+	SourceRevision  int64                 `json:"source_revision,omitempty"`
 }
 
 type ObservedDeliveryApproval struct {
@@ -220,6 +231,7 @@ type ObservedDeployment struct {
 // an installation grant. Complete describes available facts, not readiness to
 // deploy: known pending work and unknown physical outcomes remain explicit.
 type ObservedDeploymentPreparation struct {
+	ExecutionEntry          *DeploymentExecutionEntry   `json:"execution_entry,omitempty"`
 	Source                  string                      `json:"source"`
 	ObservedAt              int64                       `json:"observed_at"`
 	Seq                     int64                       `json:"seq"`
@@ -236,6 +248,16 @@ type ObservedDeploymentPreparation struct {
 	Blockers                []ObservedDeploymentBlocker `json:"blockers"`
 	Complete                bool                        `json:"complete"`
 	Missing                 []string                    `json:"missing"`
+}
+
+// DeploymentExecutionEntry is a configured operator entry, not an inferred SSH
+// alias and not an authorization. No credentials or updater private paths enter it.
+type DeploymentExecutionEntry struct {
+	Transport     string `json:"transport"`
+	Target        string `json:"target,omitempty"`
+	User          string `json:"user,omitempty"`
+	CLIPath       string `json:"cli_path"`
+	ControlSocket string `json:"control_socket"`
 }
 
 // ObservedDeploymentHost keeps heartbeat assertions separate from supervisor

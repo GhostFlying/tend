@@ -13,6 +13,9 @@ func CompletedTaskEvidence(ctx context.Context, q Querier, taskID, summary strin
 	if err != nil {
 		return protocol.IssueEvidence{}, err
 	}
+	if task.Kind == protocol.TaskKindIssueManager {
+		return ownerTaskResultEvidence(ctx, q, task, summary)
+	}
 	if task.Lifecycle != protocol.TaskCompleted {
 		return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "a current completed result is required")
 	}

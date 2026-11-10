@@ -99,6 +99,68 @@ func (s *Store) BackupManagers(ctx context.Context, id string) (ManagerBackupRec
 			return receipt, errors.New("snapshot object differs from ledger")
 		}
 	}
+
+	archiveRows, err := snapshot.QueryContext(ctx, `SELECT archive_id,MAX(bytes) FROM (SELECT archive_id,byte_offset+byte_length bytes FROM retained_original_bodies WHERE archive_id NOT LIKE 'object:%' UNION ALL SELECT archive_id,next_offset bytes FROM retained_native_sources) GROUP BY archive_id ORDER BY archive_id`)
+	if err != nil {
+		return receipt, err
+	}
+	type prefix struct {
+		id   string
+		size int64
+	}
+	var prefixes []prefix
+	for archiveRows.Next() {
+		var p prefix
+		if err = archiveRows.Scan(&p.id, &p.size); err != nil {
+			archiveRows.Close()
+			return receipt, err
+		}
+		prefixes = append(prefixes, p)
+	}
+	if err = errors.Join(archiveRows.Err(), archiveRows.Close()); err != nil {
+		return receipt, err
+	}
+	for _, p := range prefixes {
+		if err = s.files.CopyOriginalPrefix(ctx, files, p.id, p.size); err != nil {
+			return receipt, err
+		}
+	}
+	windows, err := snapshot.QueryContext(ctx, `SELECT sha256,archive_id,byte_offset,byte_length FROM retained_original_bodies`)
+	if err != nil {
+		return receipt, err
+	}
+	for windows.Next() {
+		var w blobstore.Window
+		if err = windows.Scan(&w.SHA256, &w.Archive, &w.Offset, &w.Length); err != nil {
+			windows.Close()
+			return receipt, err
+		}
+		if _, err = files.ReadWindow(ctx, w); err != nil {
+			windows.Close()
+			return receipt, fmt.Errorf("snapshot original verification: %w", err)
+		}
+	}
+	if err = errors.Join(windows.Err(), windows.Close()); err != nil {
+		return receipt, err
+	}
+	nativeChunks, err := snapshot.QueryContext(ctx, `SELECT c.sha256,s.archive_id,c.byte_offset,c.byte_length FROM retained_native_chunks c JOIN retained_native_sources s USING(host_id,source_id)`)
+	if err != nil {
+		return receipt, err
+	}
+	for nativeChunks.Next() {
+		var w blobstore.Window
+		if err = nativeChunks.Scan(&w.SHA256, &w.Archive, &w.Offset, &w.Length); err != nil {
+			nativeChunks.Close()
+			return receipt, err
+		}
+		if _, err = files.ReadWindow(ctx, w); err != nil {
+			nativeChunks.Close()
+			return receipt, err
+		}
+	}
+	if err = errors.Join(nativeChunks.Err(), nativeChunks.Close()); err != nil {
+		return receipt, err
+	}
 	f, err := os.OpenFile(ledger, os.O_RDWR, 0600)
 	if err != nil {
 		return receipt, err
@@ -112,7 +174,7 @@ func (s *Store) BackupManagers(ctx context.Context, id string) (ManagerBackupRec
 	if err != nil {
 		return receipt, err
 	}
-	receipt = ManagerBackupReceipt{ID: id, LedgerSHA256: hex.EncodeToString(digest.Sum(nil)), Objects: len(hashes)}
+	receipt = ManagerBackupReceipt{ID: id, LedgerSHA256: hex.EncodeToString(digest.Sum(nil)), Objects: len(hashes) + len(prefixes)}
 	raw, err := json.Marshal(receipt)
 	if err != nil {
 		return receipt, err

@@ -1,12 +1,21 @@
 package protocol
 
-// IssuePRPolicy grants integration of the Issue's code, independently of deployment.
+// IssuePRPolicy records the Issue's explicitly authorized delivery scope.
 // Authority is frozen by the server from the authenticated request/source.
 type IssuePRPolicy struct {
 	Mode       string                  `json:"mode"`
 	Repository string                  `json:"repository"`
 	Reason     string                  `json:"reason"`
 	Authority  *IssuePRPolicyAuthority `json:"authority,omitempty"`
+	// An absent deployment scope preserves merge-only authority.
+	Deployment *IssueDeploymentScope `json:"deployment,omitempty"`
+}
+
+// IssueDeploymentScope identifies the configured deployment target. It carries
+// no transient candidate, upgrade baseline, credential or execution permission.
+type IssueDeploymentScope struct {
+	ServerInstance string   `json:"server_instance"`
+	HostIDs        []string `json:"host_ids"`
 }
 
 type IssuePRPolicyAuthority struct {
@@ -96,6 +105,9 @@ type SharedReviewCorrection struct {
 }
 
 type SharedDeliveryReviewRound struct {
+	// ImplementGeneration binds a report execution on a sustained Task. Zero
+	// identifies historical rounds that predate explicit generation binding.
+	ImplementGeneration   int64                              `json:"implement_generation,omitempty"`
 	Corrections           []SharedReviewCorrection           `json:"corrections,omitempty"`
 	ReviewerRole          RunRole                            `json:"reviewer_role,omitempty"`
 	ReviewerProfile       *ExecutionProfile                  `json:"reviewer_profile,omitempty"`
@@ -103,6 +115,7 @@ type SharedDeliveryReviewRound struct {
 	ExecutionRequirements *SharedReviewExecutionRequirements `json:"execution_requirements,omitempty"`
 	SupplementTaskID      string                             `json:"supplement_task_id,omitempty"`
 	SupplementSpecVersion int64                              `json:"supplement_spec_version,omitempty"`
+	SupplementGeneration  int64                              `json:"supplement_generation,omitempty"`
 	SupplementRunID       string                             `json:"supplement_run_id,omitempty"`
 	SupplementArtifactID  string                             `json:"supplement_artifact_id,omitempty"`
 	SpecVersion           int64                              `json:"spec_version"`

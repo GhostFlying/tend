@@ -151,6 +151,11 @@ type DecisionView struct {
 
 // ArtifactDetail is an artifact with every verdict on it.
 type ArtifactDetail struct {
+	ReviewerArtifactID      string `json:"reviewer_artifact_id,omitempty"`
+	IndependentAcceptanceID string `json:"independent_acceptance_id,omitempty"`
+	// ResultComplete concerns this exact owner result, not the lifecycle of its
+	// continuing coordination Task. It never fabricates Task completion.
+	ResultComplete   bool                   `json:"result_complete,omitempty"`
 	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
 	// CurrentCompletion binds completion to this artifact and current task spec.
 	CurrentCompletion bool             `json:"current_completion,omitempty"`

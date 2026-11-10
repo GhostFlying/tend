@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Object identifies completed durable content; names are ledger metadata only.
@@ -20,7 +21,10 @@ type Object struct {
 }
 
 // Store is a content-addressed directory. Publication never overwrites a file.
-type Store struct{ root string }
+type Store struct {
+	root      string
+	archiveMu sync.Mutex
+}
 
 // New creates a private store at root.
 func New(root string) (*Store, error) {

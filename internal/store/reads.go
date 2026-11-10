@@ -359,6 +359,10 @@ func ListRunLogs(ctx context.Context, q Querier, runID string, after int64, limi
 		if err := rows.Scan(&l.Seq, &native, &l.Kind, &l.BodyJSON, &l.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan run log: %w", err)
 		}
+		l.BodyJSON, err = ResolveJSON(ctx, q, l.BodyJSON)
+		if err != nil {
+			return nil, err
+		}
 		l.NativeID = native.String
 		out = append(out, l)
 	}

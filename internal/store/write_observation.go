@@ -64,17 +64,23 @@ func WithWriteOperation(ctx context.Context, operation string) context.Context {
 type WritePhase string
 
 const (
-	WriteReviewedContext WritePhase = "reviewed_context"
-	WriteApply           WritePhase = "apply"
-	WritePersistOutcome  WritePhase = "persist_outcome"
-	WriteAttention       WritePhase = "attention_reconcile"
-	WriteFollowup        WritePhase = "followup"
-	WriteManagerRefresh  WritePhase = "manager_refresh"
-	WriteMaintenance     WritePhase = "maintenance_settlement"
-	WriteRequestInsert   WritePhase = "request_insert"
-	WriteClaimRefresh    WritePhase = "claim_manager_refresh"
-	WriteClaimCandidates WritePhase = "claim_candidates"
-	WriteClaimSelection  WritePhase = "claim_selection"
+	WriteReviewedContext      WritePhase = "reviewed_context"
+	WriteApply                WritePhase = "apply"
+	WritePersistOutcome       WritePhase = "persist_outcome"
+	WriteAttention            WritePhase = "attention_reconcile"
+	WriteFollowup             WritePhase = "followup"
+	WriteManagerRefresh       WritePhase = "manager_refresh"
+	WriteMaintenance          WritePhase = "maintenance_settlement"
+	WriteRequestInsert        WritePhase = "request_insert"
+	WriteClaimRefresh         WritePhase = "claim_manager_refresh"
+	WriteClaimCandidates      WritePhase = "claim_candidates"
+	WriteClaimSelection       WritePhase = "claim_selection"
+	WriteClaimCandidateQuery  WritePhase = "claim_candidate_query"
+	WriteClaimCandidateScan   WritePhase = "claim_candidate_scan"
+	WriteClaimCandidateDecode WritePhase = "claim_candidate_decode"
+	WriteClaimManagerQuery    WritePhase = "claim_manager_query"
+	WriteClaimManagerScan     WritePhase = "claim_manager_scan"
+	WriteClaimManagerBuild    WritePhase = "claim_manager_build"
 )
 
 // WritePhaseDuration records an inclusive duration, not exclusive CPU time.
@@ -339,7 +345,7 @@ func (t *Tx) ObservePhase(phase WritePhase) func() {
 		return func() {}
 	}
 	switch phase {
-	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection:
+	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan, WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
 	default:
 		return func() {}
 	}

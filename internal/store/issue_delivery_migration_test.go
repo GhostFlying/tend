@@ -51,8 +51,9 @@ func TestIssueDeliveryMigrationPreservesClosedAcceptedHistoryWithoutApprovals(t 
 		if err := tx.InsertAcceptance(ctx, "acc_old", task.TaskID, "run_old", 1, "art_old", protocol.VerdictPassed, `[]`, `[]`, 1); err != nil {
 			return err
 		}
-		task.CurrentArtifactID = "art_old"
-		if err := tx.UpdateTask(ctx, task); err != nil {
+		// Seed the original schema directly: current Task writers may include
+		// columns that did not exist when this accepted history was recorded.
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET current_artifact_id=? WHERE task_id=?`, "art_old", task.TaskID); err != nil {
 			return err
 		}
 		_, err := tx.InsertEvent(ctx, EventRow{EventID: "evt_old", Source: "app", ObjectType: "task", ObjectID: task.TaskID, Kind: "task.completed", BodyJSON: `{}`, ActorJSON: `{}`, CreatedAt: 1})
@@ -73,11 +74,13 @@ func TestIssueDeliveryMigrationPreservesClosedAcceptedHistoryWithoutApprovals(t 
 		if err != nil {
 			return err
 		}
-		task, err := GetTask(ctx, tx.Q(), "task_old")
-		if err != nil {
+		// This test intentionally stops at schema 77, so verify the retained
+		// original fields without invoking the current-schema Task reader.
+		var task TaskRow
+		if err := tx.Q().QueryRowContext(ctx, `SELECT lifecycle,spec_version,control_revision,current_artifact_id FROM tasks WHERE task_id=?`, "task_old").Scan(&task.Lifecycle, &task.SpecVersion, &task.ControlRevision, &task.CurrentArtifactID); err != nil {
 			return err
 		}
-		if saved.State != protocol.IssueClosed || saved.Closure.Reason != i.Closure.Reason || task.Lifecycle != protocol.TaskCompleted || d.Status != "preparing" || d.Candidate != nil || d.AttentionID != "" || d.AcceptanceID != "acc_old" {
+		if saved.State != protocol.IssueClosed || saved.Closure.Reason != i.Closure.Reason || task.Lifecycle != protocol.TaskCompleted || task.SpecVersion != 1 || task.ControlRevision != 1 || task.CurrentArtifactID != "art_old" || d.Status != "preparing" || d.Candidate != nil || d.AttentionID != "" || d.AcceptanceID != "acc_old" {
 			t.Fatal(saved, task, d)
 		}
 		for _, table := range []string{"attentions", "decisions", "issue_delivery_executions", "issue_delivery_answers"} {
