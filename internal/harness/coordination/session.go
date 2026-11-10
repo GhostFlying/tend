@@ -31,13 +31,14 @@ type ReplyPrefixAcknowledger interface {
 }
 
 type Event struct {
-	Historical   bool              `json:"-"`
-	SourceRunID  string            `json:"-"`
-	Sequence     int64             `json:"sequence"`
-	Disconnected bool              `json:"disconnected,omitempty"`
-	ThreadID     string            `json:"thread_id"`
-	Native       *harness.Event    `json:"native,omitempty"`
-	Call         *harness.ToolCall `json:"call,omitempty"`
+	Historical     bool              `json:"-"`
+	SourceRunID    string            `json:"-"`
+	SourceSequence int64             `json:"-"`
+	Sequence       int64             `json:"sequence"`
+	Disconnected   bool              `json:"disconnected,omitempty"`
+	ThreadID       string            `json:"thread_id"`
+	Native         *harness.Event    `json:"native,omitempty"`
+	Call           *harness.ToolCall `json:"call,omitempty"`
 }
 
 type RetainedToolResults interface {
@@ -250,6 +251,7 @@ func coordinatorNativeEvent(e Event) *harness.Event {
 	}
 	copy := *e.Native
 	copy.CoordinatorSequence = e.Sequence
+	copy.OriginRunID, copy.OriginSequence = e.SourceRunID, e.SourceSequence
 	return &copy
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // sessionDiagnostics freezes only the attachment's known ledger identity.
@@ -14,6 +15,7 @@ import (
 // can join the immutable run to those facts without guessing from cached state.
 type sessionDiagnostics struct {
 	log     *slog.Logger
+	runID   string
 	exiting sync.Once
 }
 
@@ -23,7 +25,22 @@ func (m *Manager) sessionDiagnostics(selected *hostedconfig.Selection) *sessionD
 		log = log.With("issue_id", selected.IssueID, "run_id", selected.RunnerRunID,
 			"assignment_epoch", selected.AssignmentEpoch)
 	}
-	return &sessionDiagnostics{log: log}
+	d := &sessionDiagnostics{log: log}
+	if selected != nil {
+		d.runID = selected.RunnerRunID
+	}
+	return d
+}
+
+func (d *sessionDiagnostics) eventContext(ctx context.Context, ev harness.Event) context.Context {
+	ctx = store.WithWriteAttachment(ctx, d.runID, ev.CoordinatorSequence)
+	return store.WithWriteOperation(store.WithWriteEvent(ctx, ev.OriginRunID, ev.OriginSequence), "manager.event.apply")
+}
+
+func (d *sessionDiagnostics) eventError(ctx context.Context, ev harness.Event, err error) {
+	d.log.WarnContext(ctx, "manager event processing failed", "attachment_run_id", d.runID, "coordinator_sequence", ev.CoordinatorSequence,
+		"source_run_id", ev.OriginRunID, "event_sequence", ev.OriginSequence,
+		"event_kind", ev.Kind, "event_error", err, "context_cause", context.Cause(ctx))
 }
 
 func (d *sessionDiagnostics) exit(ctx context.Context, cause error) {

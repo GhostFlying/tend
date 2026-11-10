@@ -218,11 +218,14 @@ type EventAcknowledger interface {
 
 type Event struct {
 	CoordinatorSequence int64 `json:"-"`
-	RequestUsage        *protocol.TokenUsageSample
-	Failure             *protocol.AgentFailure
-	ContextUsage        *protocol.AgentContextUsage
-	Kind                EventKind
-	TurnID              string
+	// Origin identity is local coordinator metadata, never native wire input.
+	OriginRunID    string `json:"-"`
+	OriginSequence int64  `json:"-"`
+	RequestUsage   *protocol.TokenUsageSample
+	Failure        *protocol.AgentFailure
+	ContextUsage   *protocol.AgentContextUsage
+	Kind           EventKind
+	TurnID         string
 	// ItemID and ItemType describe the item of item events.
 	ItemID   string
 	ItemType string

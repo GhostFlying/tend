@@ -242,7 +242,11 @@ func TestFault_ManagerReceiptReaderKeepsNegotiationAcrossNonterminalReads(t *tes
 	resolveRetainedBusinessReceipt(t, h, pending)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		trigger, err := managerReceiptReaderTrigger(t.Context(), tx.Q(), original.TaskID)
-		if err == nil && trigger != `{"receipt_only":true}` {
+		var fields map[string]json.RawMessage
+		if err == nil {
+			err = json.Unmarshal([]byte(trigger), &fields)
+		}
+		if err == nil && (string(fields["receipt_only"]) != "true" || len(fields["receipt_reader_request_id"]) != 0) {
 			t.Fatal("an unrelated future receipt inherited the completed reader requirement", trigger)
 		}
 		return err

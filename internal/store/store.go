@@ -35,12 +35,13 @@ const readIdleConnections = 8
 // connection with BEGIN IMMEDIATE avoids lock upgrade deadlocks and makes
 // concurrent writers queue in order.
 type Store struct {
-	path     string
-	files    *blobstore.Store
-	write    *sql.DB
-	read     *sql.DB
-	now      func() time.Time
-	observer *writeObserver
+	path             string
+	files            *blobstore.Store
+	write            *sql.DB
+	read             *sql.DB
+	now              func() time.Time
+	observer         *writeObserver
+	writeDiagnostics writeDiagnostics
 }
 
 // Open opens or creates the database at path and applies pending
@@ -144,10 +145,15 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 	conn, err := s.write.Conn(ctx)
 	if err != nil {
 		observation.endStage("")
+		s.failedWriteWait(observation)
 		return fmt.Errorf("store: begin write: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		conn.Close()
+		s.releasedWrite(observation)
+	}()
 	observation.endStage("begin_immediate")
+	s.acquiredWrite(observation)
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		observation.endStage("")

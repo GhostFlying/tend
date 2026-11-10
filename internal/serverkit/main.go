@@ -858,10 +858,15 @@ func syncConfig(ctx context.Context, a *app.App, ids protocol.IDGen, cfg Config)
 
 func logWriteObservation(log *slog.Logger, o store.WriteObservation) {
 	log.Warn("slow or cancelled store write",
+		"write_id", o.ID, "write_started_at", o.StartedAt, "write_finished_at", o.FinishedAt, "write_deadline_at", o.DeadlineAt,
 		"operation", o.Source.Operation, "request_id", o.Source.RequestID, "trace_id", o.Source.TraceID,
+		"run_id", o.Source.RunID, "event_sequence", o.Source.EventSequence,
+		"attachment_run_id", o.Source.AttachmentRunID, "coordinator_sequence", o.Source.CoordinatorSequence,
 		"caller", o.Caller, "stage", o.Stage, "outcome", o.Outcome, "context_state_at_failure", o.ContextState,
+		"caller_stack", o.CallerStack, "wait_failure_sampled_at", o.WaitFailureSampledAt, "active_writer_at_wait_failure", o.ActiveWriter,
 		"total", o.Total, "connection_wait", o.ConnectionWait, "begin_immediate", o.Begin,
 		"callback_inclusive", o.Callback, "commit", o.Commit, "rollback", o.Rollback,
 		"phases_inclusive", o.Phases,
-		"pool_wait_count_total", o.PoolWaitCountTotal, "pool_wait_duration_total", o.PoolWaitDurationTotal)
+		"pool_wait_count_total", o.PoolWaitCountTotal, "pool_wait_duration_total", o.PoolWaitDurationTotal,
+		"pool_open_connections", o.PoolOpenConnections, "pool_in_use", o.PoolInUse, "pool_idle", o.PoolIdle)
 }
