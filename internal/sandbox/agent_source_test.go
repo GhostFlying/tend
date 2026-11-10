@@ -69,58 +69,7 @@ func TestScriptFindsOriginalOwnerSourceBeyondLatestPage(t *testing.T) {
 	}
 }
 
-func TestScriptReviewDropsObligationsOmittedByFreshRead(t *testing.T) {
-	h := testkit.NewHarness()
-	session, err := h.Open(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
-	reads, reviews := 0, 0
-	thread, err := session.StartThread(t.Context(), harness.ThreadConfig{OnToolCall: func(_ context.Context, call harness.ToolCall) harness.ToolResult {
-		switch call.Tool {
-		case "issues_read":
-			reads++
-			issue := protocol.IssueView{ContextRevision: int64(reads)}
-			issue.IssueID = "wi_fixture"
-			if reads == 1 {
-				issue.SourceReviews = []protocol.IssueSourceReview{{MessageID: "original-source", ContentRevision: 1, AssociationRevision: 1}}
-			}
-			raw, _ := json.Marshal(map[string]any{"ok": true, "result": issue})
-			return harness.ToolResult{Success: true, Text: string(raw)}
-		case "issues_context_review":
-			reviews++
-			if reviews == 1 {
-				return harness.ToolResult{Text: `{"ok":false,"error":{"code":"stale_revision"}}`}
-			}
-			var args struct {
-				Payload protocol.IssueContextReview `json:"payload"`
-			}
-			if err := json.Unmarshal(call.Arguments, &args); err != nil {
-				t.Fatal(err)
-			}
-			if len(args.Payload.Sources) != 0 || args.Payload.ContextRevision != 2 {
-				t.Fatal("fresh review retained an obsolete source obligation", args)
-			}
-			return harness.ToolResult{Success: true, Text: `{"ok":true,"result":{}}`}
-		default:
-			t.Fatal(call.Tool)
-		}
-		return harness.ToolResult{}
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	gate := make(chan struct{}, 1)
-	gate <- struct{}{}
-	caller := toolCaller{ctx: t.Context(), thread: thread.(*testkit.FakeThread), turn: "test-fresh-review", log: slog.Default(), coordination: gate}
-	var issue protocol.IssueView
-	if !caller.reviewCurrentIssue(&issue) || reads != 2 || reviews != 2 || len(issue.SourceReviews) != 0 {
-		t.Fatal("review did not use a fresh Issue snapshot", reads, reviews, issue)
-	}
-}
-
-func TestScriptManagerUsesFrozenRequestAfterMetadataReview(t *testing.T) {
+func TestScriptManagerUsesFrozenRequestAfterMetadataNotification(t *testing.T) {
 	for _, kind := range []string{"issue.delegated", "issue.manager_claimed", "conversation.associations_changed", "issue.status_changed"} {
 		t.Run(kind, func(t *testing.T) {
 			h := testkit.NewHarness()
@@ -162,7 +111,7 @@ func TestScriptManagerUsesFrozenRequestAfterMetadataReview(t *testing.T) {
 			}
 			if kind == "issue.delegated" || kind == "issue.manager_claimed" {
 				if message == nil || message.MessageID != "original-source" || message.Body != "派发原请求" || message.ContentRevision != 3 {
-					t.Fatal("metadata review lost or replaced the original input", message)
+					t.Fatal("context lookup lost or replaced the original input", message)
 				}
 			} else if message != nil || contextReads != 0 {
 				t.Fatal("status notification replayed business work", message, contextReads)

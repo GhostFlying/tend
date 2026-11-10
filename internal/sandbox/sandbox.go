@@ -102,10 +102,9 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 	} else if !os.IsNotExist(readErr) {
 		return readErr
 	}
-	h.RolloutPath = historyPath
 	h.Models = []harness.Model{{ID: model, Name: model, Label: "沙盒脚本", Default: true}}
 	h.Defaults = harness.ModelSelection{Model: model}
-	sessions := &scriptedSessions{harness: h, ctx: runCtx}
+	sessions := &scriptedSessions{harness: h, ctx: runCtx, nativeRoot: filepath.Join(root, "native", "sessions")}
 	var assembled *serverkit.Runtime
 	var seeding atomic.Bool
 	seeding.Store(true)
