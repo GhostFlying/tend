@@ -280,8 +280,8 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 			t.Fatalf("starts=%d", len(observedStarts))
 		}
 		review := observedStarts[2]
-		if review.Role != protocol.RoleAccept || review.RunID == first.RunID || review.Thread != "" || review.FrozenExecution.Model != "review-new" || review.RoleInstructions != "REVIEW_CHANGED_ROLE" || strings.Contains(string(review.Spec), "AUTHOR_RATIONALE_PRIVATE") {
-			t.Fatalf("acceptance inherited implementation or missed its new run selection: %+v", review)
+		if review.Role != protocol.RoleAccept || review.RunID == first.RunID || review.Thread != "" || review.FrozenExecution.Model != "review-new" || review.RoleInstructions != "REVIEW_CHANGED_ROLE" || !strings.Contains(string(review.Spec), "AUTHOR_RATIONALE_PRIVATE") || !strings.Contains(string(review.Spec), "Author-supplied design and investigation input") || !strings.Contains(string(review.Spec), "not independently verified facts or approval") {
+			t.Fatalf("acceptance lost its independent run selection or complete, attributed background: %+v", review)
 		}
 		if reviewKind == agentconfig.OrcaWorker {
 			releases := 0

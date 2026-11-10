@@ -186,8 +186,8 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	issueWorkerCommand(t, e, principal, target, nil, app.ReportRunStarted{})
 	issueWorkerCommand(t, e, principal, target, issueArtifact(implement), app.SubmitArtifact{})
 	accept := issueClaimWorker(t, e)
-	if accept.Role != protocol.RoleAccept || accept.RunID == implement.RunID || accept.SpecVersion != 2 || strings.Contains(string(accept.Spec), "PRIVATE_IMPLEMENTATION_PLAN") {
-		t.Fatal("independent acceptance", accept)
+	if accept.Role != protocol.RoleAccept || accept.RunID == implement.RunID || accept.SpecVersion != 2 || !strings.Contains(string(accept.Spec), "PRIVATE_IMPLEMENTATION_PLAN") || !strings.Contains(string(accept.Spec), "Author-supplied design and investigation input") || !strings.Contains(string(accept.Spec), "not independently verified facts or approval") {
+		t.Fatal("independent acceptance lost its frozen contract or complete, attributed background", accept)
 	}
 	issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRun, Subject: accept.RunID, Role: accept.Role}, protocol.Target{Type: "run", ID: accept.RunID}, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, app.SubmitAcceptance{})
 	issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}, protocol.Target{Type: "workspace", ID: accept.Workspace.ID}, protocol.WorkspaceRelease{WorkspaceID: accept.Workspace.ID, TaskID: task.TaskID}, app.ReleaseWorkspace{})
