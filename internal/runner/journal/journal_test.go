@@ -3,7 +3,11 @@ package journal
 import (
 	"context"
 	"encoding/json"
+	"net/url"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -82,6 +86,9 @@ func TestJournalSurvivesReopen(t *testing.T) {
 func TestJournalURIKeepsHashAndQueryInPhysicalPath(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"journal#first.db", "journal#second.db", "journal?query.db"} {
+		if runtime.GOOS == "windows" && strings.Contains(name, "?") {
+			continue
+		}
 		path := filepath.Join(root, name)
 		j := open(t, path)
 		if err := j.PutRequest(t.Context(), Request{Envelope: protocol.Envelope{RequestID: "original", Operation: name, Target: protocol.Target{Type: "host", ID: "fixture"}}}); err != nil {
@@ -98,5 +105,34 @@ func TestJournalURIKeepsHashAndQueryInPhysicalPath(t *testing.T) {
 		if err := j.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestJournalURINormalizesRelativeAndWindowsPaths(t *testing.T) {
+	for _, path := range []string{"/tmp/journal#one.db", "C:/work/journal#one.db", "//server/share/journal?one.db"} {
+		uri := sqliteFileURI(path, nil)
+		parsed, err := url.Parse(uri)
+		if err != nil || parsed.Host != "" || parsed.Fragment != "" || !strings.HasSuffix(parsed.Path, strings.TrimPrefix(path, "/")) {
+			t.Fatal(path, uri, parsed, err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "relative#journal.db")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(cwd, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := open(t, relative)
+	if _, err := j.NextProcessGeneration(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("relative URI did not create intended file", err)
 	}
 }
