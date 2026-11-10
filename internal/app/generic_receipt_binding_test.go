@@ -84,12 +84,7 @@ func TestFault_GenericReceiptReaderPreservesOriginalNativeOwnerBinding(t *testin
 				t.Fatal(op)
 			}
 			if tc.existing {
-				if err := h.store.Write(ctx, func(tx *store.Tx) error {
-					_, err := tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=json_remove(trigger_json,'$.native_owner_tools') WHERE task_id=? AND status='pending' AND json_extract(trigger_json,'$.receipt_only')=1`, original.TaskID)
-					return err
-				}); err != nil {
-					t.Fatal(err)
-				}
+				reopenArchiveCombinationHarness(t, h)
 			}
 			var reader protocol.Assignment
 			for range 6 {
@@ -104,6 +99,9 @@ func TestFault_GenericReceiptReaderPreservesOriginalNativeOwnerBinding(t *testin
 			}
 			if reader.TaskID != original.TaskID || reader.Manager == nil || !reader.Manager.ReceiptOnly || reader.Manager.RequireReceiptReader || *reader.Execution != pin {
 				t.Fatal("generic reader changed original responsibility", reader)
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM plan_actions WHERE action_id=? AND json_type(trigger_json,'$.native_owner_tools') IS NULL AND json_extract(trigger_json,'$.receipt_only')=1`, reader.ActionID) != 1 {
+				t.Fatal("generic reader generation depended on historical binding enrichment")
 			}
 			if tc.unavailable != "" {
 				if _, _, err := h.app.HostedRuntimeSelection(ctx, reader.Manager.ConversationID); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
