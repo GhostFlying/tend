@@ -54,7 +54,11 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 	if pause == nil {
 		return errors.New("runner: original pause receipt unavailable")
 	}
-	if as.Manager == nil {
+	if as.Manager != nil {
+		if err := r.flushManagerEvents(ctx, as); err != nil {
+			return &completionPending{err}
+		}
+	} else {
 		if err := r.flushEvents(ctx, as); err != nil {
 			return &completionPending{err}
 		}
@@ -64,9 +68,6 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 		return &completionPending{errors.Join(err, errors.New("runner: pause receipt awaits settlement"))}
 	}
 	if as.Manager != nil {
-		if err := r.flushManagerEvents(ctx, as); err != nil {
-			return &completionPending{err}
-		}
 		for _, p := range requests {
 			if p.RunID != as.RunID || p.Envelope.Operation != protocol.OpManagerNativeReply {
 				continue
