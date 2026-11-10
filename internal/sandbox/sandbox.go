@@ -18,6 +18,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
+	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
@@ -127,6 +128,9 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 		Listeners: []net.Listener{listener, runnerListener},
 		WhoIs:     netx.Static{Identity: &netx.Identity{Node: "local", User: localOwner, Tags: []string{"tag:local"}}},
 		OpenSession: func(ctx context.Context, spec serverkit.SessionSpec) (harness.Session, error) {
+			if spec.Selection != nil && spec.Selection.RunnerManaged {
+				return mainthread.RunnerSession(ctx, assembled.App, spec.Selection.RunnerRunID, runCtx), nil
+			}
 			return sessions.open(ctx)
 		},
 		Configure:  seedCategories,
