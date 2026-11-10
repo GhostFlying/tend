@@ -129,6 +129,12 @@ func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx) error
 			return err
 		}
 		if issue.State == protocol.IssueCancelling {
+			// Physical stop was already confirmed before cancellation. Retire
+			// its old action so normal cancellation settlement can be claimed;
+			// no business pause continuation is published.
+			if err := tx.SetActionStatus(ctx, a.ActionID, protocol.ActionDone, x.Now.UnixMilli()); err != nil {
+				return err
+			}
 			continue
 		}
 
