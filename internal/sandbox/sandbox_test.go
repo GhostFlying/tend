@@ -185,6 +185,16 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		}
 		return false
 	})
+	// Finish this independent workflow through the real pause path before the
+	// main-conversation scenario. Its retained coordinators must not keep
+	// consuming slots or processing notices while unrelated work is exercised.
+	var pausedOwner protocol.IssueView
+	c.call(http.MethodGet, "/api/v1/issues/"+managed.IssueID, nil, &pausedOwner)
+	c.operation("test-owner-pause", "issues.set_status", protocol.Target{Type: "issue", ID: managed.IssueID}, &pausedOwner.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: pausedOwner.AssignmentEpoch, Status: protocol.IssueBacklog})
+	waitFor(t, ctx, "owner subtree pause is physically complete", func() bool {
+		c.call(http.MethodGet, "/api/v1/issues/"+managed.IssueID, nil, &pausedOwner)
+		return pausedOwner.WorkStatus == protocol.IssueBacklog && pausedOwner.Pause != nil && pausedOwner.Pause.Pending == 0 && pausedOwner.Pause.Unsupported == 0
+	})
 	var board protocol.IssuePage
 	c.call(http.MethodGet, "/api/v1/issues?board=true&include_closed=true&limit=100", nil, &board)
 	ownerAssigned := 0
