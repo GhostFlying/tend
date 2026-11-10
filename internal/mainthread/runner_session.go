@@ -16,10 +16,16 @@ import (
 
 // RunnerSession reuses the coordinator and its source/authorization semantics;
 // only the native harness lifecycle crosses the leased runner transport.
-func RunnerSession(ctx context.Context, a *app.App, run string) harness.Session {
+// An optional shutdown context is the lifetime of an in-process runner, never
+// the attachment or delivery context, which can end before native close.
+func RunnerSession(ctx context.Context, a *app.App, run string, shutdown ...context.Context) harness.Session {
+	var lifetime context.Context
+	if len(shutdown) > 0 {
+		lifetime = shutdown[0]
+	}
 	// Close owns cancellation; this attachment can also consume retained
 	// unacknowledged facts from earlier runs of the same responsibility.
-	return coordination.New(context.WithoutCancel(ctx), &runnerTransport{app: a, run: run, origins: map[int64]managerEventOrigin{}})
+	return coordination.New(context.WithoutCancel(ctx), &runnerTransport{attachment: lifetime, app: a, run: run, origins: map[int64]managerEventOrigin{}})
 }
 
 type managerEventOrigin struct {
@@ -28,15 +34,26 @@ type managerEventOrigin struct {
 }
 
 type runnerTransport struct {
-	mu        sync.Mutex
-	rowCursor int64
-	sequence  int64
-	origins   map[int64]managerEventOrigin
-	app       *app.App
-	run       string
+	attachment context.Context
+	mu         sync.Mutex
+	rowCursor  int64
+	sequence   int64
+	origins    map[int64]managerEventOrigin
+	app        *app.App
+	run        string
 }
 
 func (t *runnerTransport) Call(ctx context.Context, method string, input, output any) error {
+	// A stopped attachment cannot deliver a native close. Leave any original
+	// queued request unresolved for reconciliation; do not infer physical stop.
+	var attachmentStopped <-chan struct{}
+	if method == "close" && t.attachment != nil {
+		if err := t.attachment.Err(); err != nil {
+			return err
+		}
+		attachmentStopped = t.attachment.Done()
+	}
+
 	if method == "models" || method == "resume" {
 		var thread string
 		if request, ok := input.(coordination.Request); ok {
@@ -101,6 +118,8 @@ func (t *runnerTransport) Call(ctx context.Context, method string, input, output
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-attachmentStopped:
+			return t.attachment.Err()
 		case <-wake:
 		}
 	}

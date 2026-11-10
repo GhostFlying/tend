@@ -20,9 +20,10 @@ type scriptedSessions struct {
 
 type scriptedSession struct {
 	*testkit.FakeSession
-	owner   *scriptedSessions
-	mu      sync.Mutex
-	threads []*scriptedThread
+	owner    *scriptedSessions
+	resumeMu sync.Mutex
+	mu       sync.Mutex
+	threads  []*scriptedThread
 }
 
 type scriptedThread struct {
@@ -54,12 +55,16 @@ func (s *scriptedSessions) open(ctx context.Context) (harness.Session, error) {
 }
 
 func (s *scriptedSession) wrap(native harness.Thread) harness.Thread {
-	thread := &scriptedThread{FakeThread: native.(*testkit.FakeThread), ctx: s.owner.ctx, turns: map[string]*scriptedTurnLifetime{}}
 	s.owner.mu.Lock()
 	if s.owner.threads == nil {
 		s.owner.threads = map[*testkit.FakeThread]*scriptedThread{}
 	}
-	s.owner.threads[thread.FakeThread] = thread
+	fake := native.(*testkit.FakeThread)
+	thread := s.owner.threads[fake]
+	if thread == nil {
+		thread = &scriptedThread{FakeThread: fake, ctx: s.owner.ctx, turns: map[string]*scriptedTurnLifetime{}}
+		s.owner.threads[fake] = thread
+	}
 	s.owner.mu.Unlock()
 	s.mu.Lock()
 	s.threads = append(s.threads, thread)
@@ -76,6 +81,20 @@ func (s *scriptedSession) StartThread(ctx context.Context, config harness.Thread
 }
 
 func (s *scriptedSession) ResumeThread(ctx context.Context, id string, config harness.ThreadConfig) (harness.Thread, error) {
+	s.resumeMu.Lock()
+	defer s.resumeMu.Unlock()
+	// A native thread has one event pump within this session. The generic
+	// fake allocates another pump on every resume and replaces its map entry,
+	// which would orphan the prior pump when retained attachments resume twice.
+	s.mu.Lock()
+	for _, thread := range s.threads {
+		if thread.ID() == id {
+			s.mu.Unlock()
+			return thread, nil
+		}
+	}
+	s.mu.Unlock()
+
 	native, err := s.FakeSession.ResumeThread(ctx, id, config)
 	if err != nil {
 		return nil, err
@@ -96,7 +115,12 @@ func (t *scriptedThread) lifetime(id string) *scriptedTurnLifetime {
 }
 
 func (t *scriptedThread) Interrupt(ctx context.Context, id string) error {
-	turn := t.lifetime(id)
+	t.mu.Lock()
+	turn := t.turns[id]
+	t.mu.Unlock()
+	if turn == nil {
+		return t.FakeThread.Interrupt(ctx, id)
+	}
 	turn.completion.Lock()
 	turn.cancel()
 	turn.completion.Unlock()
@@ -144,4 +168,10 @@ func (s *scriptedSessions) play(native *testkit.FakeThread, id string, input har
 	turn.completion.Unlock()
 	// Completion belongs to this adapter, not FakeThread's post-callback emit.
 	return ""
+}
+
+// PermissionDefaults reports the permission configuration actually accepted by
+// the scripted thread, as required by the real runner coordination transport.
+func (t *scriptedThread) PermissionDefaults() harness.PermissionSettings {
+	return harness.PermissionSettings{Sandbox: t.Config.Sandbox, ApprovalPolicy: t.Config.ApprovalPolicy}
 }
