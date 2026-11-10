@@ -992,7 +992,7 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	case p.Status != protocol.ToolRunning && p.Status != protocol.ToolCompleted && p.Status != protocol.ToolFailed:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
 	}
-	p.Input, p.Output = clipText(p.Input), clipText(p.Output)
+	p.Input, p.Output = clipText(protocol.RedactOwnerToolInput(p.Tool, p.Input)), clipText(p.Output)
 	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p); handled || err != nil {
 		return out, err
 	}
