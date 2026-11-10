@@ -16,7 +16,7 @@ import (
 
 func delegationCommand(cmd Command) (HostedCoordinationCommand, bool) {
 	c, ok := cmd.(HostedCoordinationCommand)
-	if owner, delegated := cmd.(ownerExecutionCommand); delegated && owner.correction != "" && !owner.preparation {
+	if owner, delegated := cmd.(ownerExecutionCommand); delegated && !owner.preparation {
 		c = HostedCoordinationCommand{Command: owner.Command, ExecutionID: owner.call.ExecutionID, EffectSeq: owner.call.EffectSeq}
 		ok = true
 	}
@@ -39,6 +39,9 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 	}
 	var logical string
 	if err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, c.ExecutionID).Scan(&logical); err != nil {
+		if _, owner := cmd.(ownerExecutionCommand); owner && errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, err
 	}
 	source := hostedPayloadSource(x.Env.Payload)

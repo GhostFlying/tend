@@ -281,39 +281,55 @@ func TestMainOwnerReuseAcceptsDelegatedSource(t *testing.T) {
 }
 
 func TestMainOwnerCorrectsRetainedDelegationFailure(t *testing.T) {
-	h := hostedManagerHarness(t)
-	source, delivery := h.say("Repair the PWA")
-	turn := startHostedReview(t, h, "main", delivery)
-	p := delegationPayload(source)
-	p.ExpectedSourceRevision = rev(1)
-	p.Plan.Title = ""
-	cmd := CanonicalOwnerIssueCommand{Action: "create"}
-	failed := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd)
-	expectWorkCode(t, failed, protocol.CodeInvalidRequest)
-	h.app.mainOwner = owner.Subject
-	var execution store.HostedExecution
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var err error
-		execution, err = store.GetHostedExecution(t.Context(), tx.Q(), turn.RequestID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	p.Plan.Title = "Repair the PWA"
-	p.CorrectsRequestID = failed.RequestID
-	env := h.env(cmd.Operation(), protocol.Target{Type: "issue"}, p, nil)
-	ctx := WithOwnerExecution(t.Context(), &OwnerExecution{Actor: mainAgent, Agent: execution.Selection.Identity, ExecutionID: turn.RequestID, CallID: env.RequestID, EffectSeq: 2})
-	op, err := h.app.Execute(ctx, owner, env, cmd)
-	if err != nil || op.Status != protocol.OpSucceeded {
-		t.Fatal(op, err)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		reason, err := delegationBlockReason(t.Context(), tx.Q(), turn.RequestID)
-		if reason != "" {
-			t.Fatal("corrected responsibility remains blocked", reason)
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	for _, ownerInitial := range []bool{false, true} {
+		t.Run(map[bool]string{false: "hosted_initial", true: "owner_initial"}[ownerInitial], func(t *testing.T) {
+			h := hostedManagerHarness(t)
+			source, delivery := h.say("Repair the PWA")
+			turn := startHostedReview(t, h, "main", delivery)
+			h.app.mainOwner = owner.Subject
+			var execution store.HostedExecution
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				execution, err = store.GetHostedExecution(t.Context(), tx.Q(), turn.RequestID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ownerEffect := func(seq int64, payload protocol.CreateIssuePayload) protocol.Operation {
+				cmd := CanonicalOwnerIssueCommand{Action: "create"}
+				env := h.env(cmd.Operation(), protocol.Target{Type: "issue"}, payload, nil)
+				ctx := WithOwnerExecution(t.Context(), &OwnerExecution{Actor: mainAgent, Agent: execution.Selection.Identity, ExecutionID: turn.RequestID, CallID: env.RequestID, EffectSeq: seq})
+				op, err := h.app.Execute(ctx, owner, env, cmd)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return op
+			}
+			p := delegationPayload(source)
+			p.ExpectedSourceRevision = rev(1)
+			p.Plan.Title = ""
+			var failed protocol.Operation
+			if ownerInitial {
+				failed = ownerEffect(1, p)
+			} else {
+				failed = hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
+			}
+			expectWorkCode(t, failed, protocol.CodeInvalidRequest)
+			p.Plan.Title = "Repair the PWA"
+			p.CorrectsRequestID = failed.RequestID
+			op := ownerEffect(2, p)
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				reason, err := delegationBlockReason(t.Context(), tx.Q(), turn.RequestID)
+				if reason != "" {
+					t.Fatal("corrected responsibility remains blocked", reason)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
