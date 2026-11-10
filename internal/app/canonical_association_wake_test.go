@@ -14,10 +14,10 @@ func TestNamedMainReplyClassificationDoesNotGenerateNewOwnerInput(t *testing.T) 
 		if repair {
 			name = "repair"
 		}
-		t.Run(name, func(t *testing.T) { testNamedMainReplyClassificationWake(t, repair) })
+		t.Run(name, func(t *testing.T) { testNamedMainReplyClassificationWake(t, repair, false) })
 	}
 }
-func testNamedMainReplyClassificationWake(t *testing.T, repair bool) {
+func testNamedMainReplyClassificationWake(t *testing.T, repair, delegated bool) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	source, delivery := h.say("Route my new material to the responsibility I own")
@@ -38,7 +38,14 @@ func testNamedMainReplyClassificationWake(t *testing.T, repair bool) {
 		if actor.Kind == protocol.PrincipalMainAgent {
 			command = HostedCoordinationCommand{Command: command, ExecutionID: main.RequestID, EffectSeq: seq}
 		}
-		op, err := h.app.Execute(t.Context(), actor, h.env(command.Operation(), protocol.Target{Type: "message", ID: message}, payload, rev(a.Revision)), command)
+		ctx := t.Context()
+		if delegated && actor.Kind == protocol.PrincipalMainAgent {
+			h.app.mainOwner = owner.Subject
+			command = SetIssueMessageAssociations{}
+			ctx = WithOwnerExecution(ctx, &OwnerExecution{Actor: actor, ExecutionID: main.RequestID, CallID: h.ids.New(protocol.PrefixRequest), EffectSeq: seq})
+			actor = owner
+		}
+		op, err := h.app.Execute(ctx, actor, h.env(command.Operation(), protocol.Target{Type: "message", ID: message}, payload, rev(a.Revision)), command)
 		if err != nil || op.Status != protocol.OpSucceeded {
 			t.Fatal(op, err)
 		}
@@ -147,5 +154,11 @@ func testNamedMainReplyClassificationWake(t *testing.T, repair bool) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMainOwnerNarrationAssociationKeepsDisplayOnlyRouting(t *testing.T) {
+	for _, repair := range []bool{false, true} {
+		t.Run(map[bool]string{false: "original", true: "repair"}[repair], func(t *testing.T) { testNamedMainReplyClassificationWake(t, repair, true) })
 	}
 }

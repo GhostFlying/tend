@@ -190,7 +190,7 @@ func submitCommunicationInput(ctx context.Context, x *Exec, tx *store.Tx, p prot
 
 	if externalEvidence {
 		id := out.Result.(map[string]any)["message_id"].(string)
-		source := protocol.ManualSource{MessageID: id, ConversationID: conversation, SuppliedBy: x.Principal}
+		source := protocol.ManualSource{MessageID: id, ConversationID: conversation, SuppliedBy: x.ActualPrincipal()}
 		raw, _ := json.Marshal(source)
 		if _, err := tx.Exec(ctx, `INSERT INTO manual_message_sources(message_id,metadata_json) VALUES(?,?)`, id, string(raw)); err != nil {
 			return Outcome{}, err

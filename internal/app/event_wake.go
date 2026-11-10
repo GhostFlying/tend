@@ -192,7 +192,7 @@ func recordDecisionWake(ctx context.Context, x *Exec, tx *store.Tx, e Event, eve
 	}
 	// Publishing the owner's decision notice is independent of waking a model.
 	// Main's own new question must not enqueue another main turn.
-	if !wakesMain(x.Principal, e.Kind) {
+	if !wakesMain(x.ActualPrincipal(), e.Kind) {
 		return nil
 	}
 	return queueEventTurn(ctx, x, tx, id, eventID, e.Kind, recordedAnswer)

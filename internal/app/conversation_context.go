@@ -142,7 +142,7 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 		return Outcome{}, err
 	}
 	out := Outcome{Result: map[string]any{"revision": updated.Revision}, Events: []Event{{ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed"}}}
-	if owner {
+	if owner && x.ActualPrincipal().Kind != protocol.PrincipalMainAgent {
 		if err := queueCoordinationNotice(ctx, x, tx, "Message associations were corrected by the owner. Re-read this message and reconcile derived facts; this does not undo prior execution.", old.MessageID, "main"); err != nil {
 			return Outcome{}, err
 		}

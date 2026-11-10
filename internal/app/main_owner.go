@@ -168,6 +168,8 @@ func (c ownerExecutionCommand) adapted(x *Exec) *Exec {
 	next.Principal = protocol.Principal{Kind: protocol.PrincipalOwner, Subject: c.owner, Client: "main-owner"}
 	next.Actor = &c.call.Actor
 	next.actorAgent = &c.call.Agent
+	next.ownerExecutionID = c.call.ExecutionID
+	next.executionRequest = c.call.ExecutionID
 	return &next
 }
 

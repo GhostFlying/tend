@@ -49,6 +49,7 @@ type Exec struct {
 	coordinationEffectSeq         int64
 	coordinationID                string
 	coordinationLogicalID         string
+	ownerExecutionID              string
 	validatedDelegationCorrection string
 	hostedConfiguration           *hostedconfig.Prepared
 	// planningSource is the turn's initial delivery, supplied by the host.
@@ -553,7 +554,7 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				return err
 			}
 		}
-		if e.Kind != "task.completed" && (e.Kind == "decision.opened" || wakesMain(x.Principal, e.Kind) || questionIssue != "" && (e.Kind == "decision.answered" || e.Kind == "work_item_choice.answered")) {
+		if e.Kind != "task.completed" && (e.Kind == "decision.opened" || wakesMain(x.ActualPrincipal(), e.Kind) || questionIssue != "" && (e.Kind == "decision.answered" || e.Kind == "work_item_choice.answered")) {
 			if e.Kind == "task.context_changed" || e.Kind == "task.preparation_blocked" {
 				if err := recordTaskContextWake(ctx, x, tx, e, eventID); err != nil {
 					return err
