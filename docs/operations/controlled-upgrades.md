@@ -16,6 +16,10 @@
 
 server 配置增加 `upgrades`，包含 `instance`（逻辑服务名，默认 `server`）、`control_socket`、`updater_socket`、`release_dir`；可配置 `drain_timeout`（默认 `6m`）、`restart_budget`（默认 `120s`）、`grant_duration`（默认 `300s`）。新批次另持久保存二十分钟整体截止；阶段与 grant 均不能超过整体剩余预算，retry 不续期，到期后只对账或取消再另开批次。历史批次没有整体字段时仍按原分段期限对账。这些是本机私有路径，配置不提交仓库。
 
+远端执行者需要的正式操作入口放在 `upgrades.execution_entry`：`transport` 为 `local`、`ssh` 或 `tailscale_ssh`；远端通道显式填写 `target` 和 `user`，并填写指向当前受控 CLI 的绝对 `cli_path`。`control_socket` 来自前述实际升级配置，不能另指一个 socket。Issue 和 worker 的部署准备投影会提供这些字段；未配置时不把逻辑 instance 或 runner ID 当作 SSH 别名，也不猜测 PATH 中的 CLI。该投影不包含凭据、不表示网络连通证明，且不授予安装权限。更换受控 CLI 入口时同步配置稳定入口或实际当前路径。
+
+Issue 的 `pr_policy` 默认只控制合入。已有明确范围内部署授权时，由真实 owner 来源记录 `deployment: {server_instance, host_ids}`，或使用 `tend issue pr-policy set ... --mode auto --deploy-server-instance <instance> --deploy-hosts <hosts>`；空 host 列表表示仅 server。候选和基线变化继续复核真实审阅、检查与安装身份，不因 SHA 改变重复索要授权；实际目标或授权范围扩大仍由负责人确认并请求新的权限。连接入口与这份授权分别记录。
+
 runner 配置同时增加 `updater_socket`（自己的 authority socket）、`updater_control_socket`（对应 updater 的 control socket）、`updater_bundle_dir`（私有下载目录）。逻辑 updater instance 必须与 host ID 一致。保留现有 worker、gateway、槽位和数据目录配置。
 
 每个受管进程配置一个 updater：

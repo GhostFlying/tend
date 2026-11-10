@@ -26,7 +26,7 @@ import (
 
 // Uses the actual hosted adapter, a deterministic local provider, and empty
 // temporary homes. No model service, owner configuration, or ledger is used.
-func TestIntegrationHostedNativeBoundary(t *testing.T) {
+func TestIntegrationConfiguredReadOnlyNativeBoundary(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("hosted role adapter is currently supported on Linux only")
 	}
@@ -112,6 +112,8 @@ func TestIntegrationHostedNativeBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg := ThreadConfig(cwd, "probe-model")
+			cfg.Sandbox, cfg.ApprovalPolicy = "read-only", "never"
+			cfg.Config = maps.Clone(Isolation)
 			cfg.Config = maps.Clone(cfg.Config)
 			cfg.Config["harness_mode"] = "codex"
 			cfg.Config["model_harness"] = map[string]string{cfg.Model: "codex"}

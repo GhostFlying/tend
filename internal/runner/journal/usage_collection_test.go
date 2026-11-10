@@ -82,6 +82,50 @@ func TestCollectionControlSurvivesRestartWithoutRepeatingEpoch(t *testing.T) {
 	}
 }
 
+func TestCollectionResumeRescansPrefixAndPreservesPendingUpload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.db")
+	j := open(t, path)
+	s := UsageSource{ID: "source", RunID: "run", RegistrationQueued: true, Coverage: "caught_up", WriterStopped: true,
+		Source:  nativeusage.Source{Provider: "codex", ThreadID: "thread", Path: "history"},
+		Cursors: map[string]nativeusage.Cursor{"history": {Offset: 900, Prefix: "old"}}}
+	if err := j.RegisterUsageSource(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	all, err := j.UsageSources(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = all[0]
+	upload := protocol.Envelope{RequestID: "original-upload", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}, Payload: []byte(`{"run_id":"run"}`)}
+	if err := j.PutRequest(t.Context(), Request{Envelope: upload}); err != nil {
+		t.Fatal(err)
+	}
+	command := protocol.UsageCollectionCommand{RequestID: "rescan", Rescan: true, SourceID: s.ID, RunID: s.RunID, Action: "resume", ExpectedEpoch: s.Collection.Epoch, ExpectedRevision: s.Collection.Revision}
+	if err := j.ApplyUsageCollectionControl(t.Context(), command); err != nil {
+		t.Fatal(err)
+	}
+	all, _ = j.UsageSources(t.Context())
+	if len(all[0].Cursors) != 0 || all[0].Coverage != "pending" || !all[0].WriterStopped || all[0].Collection.State != protocol.UsageSettling {
+		t.Fatal(all)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j = open(t, path)
+	defer j.Close()
+	if err := j.ApplyUsageCollectionControl(t.Context(), command); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := j.UsageSources(t.Context())
+	if after[0].Collection != all[0].Collection {
+		t.Fatal("rescan replay changed its epoch", after)
+	}
+	pending, err := j.Requests(t.Context())
+	if err != nil || len(pending) != 1 || pending[0].Envelope.RequestID != upload.RequestID || string(pending[0].Envelope.Payload) != string(upload.Payload) {
+		t.Fatal("rescan replaced original upload", pending, err)
+	}
+}
+
 func TestCollectionUnknownWriterRegistrationAfterConfirmedStop(t *testing.T) {
 	for _, writer := range []string{"", "original-writer"} {
 		t.Run(writer, func(t *testing.T) { testCollectionUnknownWriter(t, writer) })

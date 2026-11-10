@@ -39,6 +39,11 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 		return err
 	}
 	if run.Phase == journal.PhaseReleasing {
+		if ready, e := r.externalWaitReceiptReady(lifetime, run); e != nil {
+			return e
+		} else if ready {
+			return r.reportExternalWait(lifetime, as)
+		}
 		if ready, e := r.pauseReceiptReady(lifetime, run); e != nil {
 			return e
 		} else if ready {
@@ -91,6 +96,11 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 		}
 		r.requestReconcile()
 		return nil
+	}
+	if v, e := r.cfg.Journal.ExternalWait(receiptCtx, as.RunID); e != nil {
+		return e
+	} else if v != nil {
+		return r.finishExternalWait(receiptCtx, as)
 	}
 	if p, e := r.cfg.Journal.Pause(receiptCtx, as.RunID); e != nil {
 		return e
@@ -207,6 +217,10 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	}, OnSource: func(sourceCtx context.Context, source protocol.RolloutPreviewSource) error {
 		return r.registerRollout(sourceCtx, as.RunID, source)
 	}, Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
+	uploadKey := sha256.Sum256([]byte(as.RunID))
+	driver.Upload = func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
+		return r.uploadFile(ctx, as, Prepared{Dir: dir, StateDir: filepath.Join(r.cfg.Journal.Directory(), "manager-uploads", hex.EncodeToString(uploadKey[:]))}, path, name)
+	}
 	driver.Download = func(ctx context.Context, file protocol.ArtifactFile) (string, error) {
 		return r.downloadRetainedFile(ctx, as, filepath.Join(dir, "attachments"), file)
 	}
@@ -542,6 +556,9 @@ func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment,
 }
 
 func (r *Runner) flushManagerEvents(ctx context.Context, as protocol.Assignment) error {
+	if err := r.syncRolloutArchive(ctx, as); err != nil {
+		return err
+	}
 	pending, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return err

@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// CoordinationReply publishes and reviews one formal message in one transaction.
+// CoordinationReply publishes a formal message with optional explicit facts.
 type CoordinationReply struct{}
 
 func (CoordinationReply) Operation() string { return "conversation.reply" }
@@ -23,25 +22,23 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if x.coordinationExecution != nil && p.ReplyTo == "" {
+	issuePublication := x.coordinationExecution != nil && x.coordinationExecution.IssueID != ""
+	if x.coordinationExecution != nil && p.ReplyTo == "" && !issuePublication {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reply_to is required for a named communication reply")
 	}
-	if p.ReplyTo != "" {
+	if p.ReplyTo != "" && !issuePublication {
 		if err := communicationReplyInput(ctx, tx.Q(), p.ReplyTo); err != nil {
 			return Outcome{}, err
 		}
 	}
 	if x.coordinationExecution != nil && x.coordinationExecution.ConversationID != "main" {
-		if err := checkFactKinds(p.ReviewedKinds); err != nil {
-			return Outcome{}, err
-		}
 		issue := x.coordinationExecution.IssueID
-		if issue == "" && (p.Disposition != "unassigned" || len(p.WorkItemIDs) > 0 || len(p.Facts) > 0 || len(p.Contexts) > 0) {
+		if issue == "" && (p.Disposition != "" && p.Disposition != "unassigned" || len(p.WorkItemIDs) > 0 || len(p.Facts) > 0 || len(p.Contexts) > 0) {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "consultation publication grants no Issue authority")
 		}
 		if issue != "" {
-			if p.Disposition != "linked" || len(p.WorkItemIDs) != 1 || len(p.Contexts) != 1 {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "Issue reply requires its exact linked context revision")
+			if p.Disposition != "" && p.Disposition != "linked" {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "Issue publication belongs to its current responsibility")
 			}
 			for _, id := range p.WorkItemIDs {
 				if id != issue {
@@ -49,15 +46,8 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 				}
 			}
 			for _, review := range p.Contexts {
-				var current int64
 				if review.WorkItemID != issue {
 					return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "context outside this Issue")
-				}
-				if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, issue).Scan(&current); err != nil {
-					return Outcome{}, err
-				}
-				if current != review.Revision {
-					return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "publication context changed")
 				}
 			}
 			if len(p.Facts) > 0 {
@@ -73,11 +63,8 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if p.Purpose != "progress" && p.Purpose != "final" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "purpose must be progress or final")
 	}
-	if len(p.WorkItemIDs) > 50 || len(p.Facts) > 100 || len(p.Contexts) != len(p.WorkItemIDs) {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "declare each linked context version")
-	}
-	if err := checkFactKinds(p.ReviewedKinds); err != nil {
-		return Outcome{}, err
+	if len(p.WorkItemIDs) > 50 || len(p.Facts) > 100 || len(p.Contexts) > 50 {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "too many linked Issues or facts")
 	}
 	execution, err := x.reviewExecution(ctx, tx.Q())
 	if err != nil {
@@ -97,19 +84,25 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if repair {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "repair cannot publish business replies")
 	}
-	expected := map[string]int64{}
+	linkedIDs := map[string]bool{}
+	for _, id := range p.WorkItemIDs {
+		if linkedIDs[id] {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "linked Issues must be distinct")
+		}
+		linkedIDs[id] = true
+	}
+	contexts := map[string]bool{}
 	for _, c := range p.Contexts {
-		if _, ok := expected[c.WorkItemID]; ok || !slices.Contains(p.WorkItemIDs, c.WorkItemID) {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "declare distinct linked context versions")
+		if contexts[c.WorkItemID] || !linkedIDs[c.WorkItemID] {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "context references must identify distinct linked Issues")
 		}
-		var revision int64
-		if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, c.WorkItemID).Scan(&revision); err != nil {
-			return Outcome{}, err
+		contexts[c.WorkItemID] = true
+	}
+	if p.Disposition == "" {
+		p.Disposition = "unassigned"
+		if len(p.WorkItemIDs) > 0 {
+			p.Disposition = "linked"
 		}
-		if revision != c.Revision {
-			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "reply context changed")
-		}
-		expected[c.WorkItemID] = revision
 	}
 	child := *x
 	env := *x.Env
@@ -164,7 +157,7 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	}
 	out.Events = append(out.Events, linked.Events...)
 	for _, fact := range p.Facts {
-		if _, ok := expected[fact.WorkItemID]; !ok || fact.Scope != "work_item" || (fact.SourceMessageID != "" && fact.SourceMessageID != id) {
+		if !linkedIDs[fact.WorkItemID] || fact.Scope != "work_item" || (fact.SourceMessageID != "" && fact.SourceMessageID != id) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reply facts must name a linked work item and this message")
 		}
 		fact.SourceMessageID = id
@@ -181,23 +174,6 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		}
 		out.Events = append(out.Events, added.Events...)
 	}
-	assoc, err = store.MessageAssociations(ctx, tx.Q(), id)
-	if err != nil {
-		return Outcome{}, err
-	}
-	review := protocol.LogicalTurnCommit{Messages: []protocol.LogicalTurnReview{{MessageID: id, ContentRevision: assoc.ContentRevision, AssociationRevision: assoc.Revision}}}
-	for _, c := range p.Contexts {
-		if err := tx.Q().QueryRowContext(ctx, `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, c.WorkItemID).Scan(&c.Revision); err != nil {
-			return Outcome{}, err
-		}
-		review.Contexts = append(review.Contexts, c)
-	}
-	env.Payload, _ = json.Marshal(review)
-	checked, err := (CommitLogicalTurn{RequestID: turn.RequestID}).Apply(ctx, &child, tx)
-	if err != nil {
-		return Outcome{}, err
-	}
-	out.Events = append(out.Events, checked.Events...)
 	batch, batchErr := store.BackgroundByMessage(ctx, tx.Q(), turn.MessageID)
 	if batchErr != nil && !errors.Is(batchErr, store.ErrNotFound) {
 		return Outcome{}, batchErr
@@ -216,13 +192,4 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	out.Notify = true
 	result["purpose"] = p.Purpose
 	return out, nil
-}
-
-func checkFactKinds(kinds []string) error {
-	for _, kind := range []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"} {
-		if !slices.Contains(kinds, kind) {
-			return protocol.Errorf(protocol.CodeInvalidRequest, "reviewed_kinds must include all seven kinds; missing %s", kind)
-		}
-	}
-	return nil
 }

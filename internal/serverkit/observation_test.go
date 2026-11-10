@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,36 @@ func TestObservedDeploymentProofRequiresActualProcess(t *testing.T) {
 	state.CommittedProof = nil
 	if v := observedDeploymentProof(actual, state); v.ProofStatus != "unconfirmed" || v.CommittedProof != nil {
 		t.Fatal(v)
+	}
+}
+
+func TestDeploymentExecutionEntryUsesOnlyConfiguredRemoteRoute(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("controlled local upgrade configuration requires Linux")
+	}
+	root := t.TempDir()
+	cfg := &UpgradeConfig{Instance: "logical-server-identity", UpdaterSocket: filepath.Join(root, "updater.sock"), ExecutionEntry: &protocol.DeploymentExecutionEntry{Transport: "tailscale_ssh", Target: "service.example.invalid", User: "operator", CLIPath: filepath.Join(root, "controlled-cli")}}
+	if err := prepareUpgradeConfig(cfg, root); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExecutionEntry.ControlSocket != cfg.ControlSocket || cfg.ExecutionEntry.Target == cfg.Instance {
+		t.Fatal("operator entry inferred the logical host or a separate control socket", cfg)
+	}
+	if strings.Contains(cfg.ExecutionEntry.CLIPath, cfg.UpdaterSocket) {
+		t.Fatal("operator CLI exposed updater-private state")
+	}
+	for _, entry := range []protocol.DeploymentExecutionEntry{
+		{Transport: "tailscale_ssh", CLIPath: cfg.ExecutionEntry.CLIPath},
+		{Transport: "ssh", Target: "service.example.invalid", CLIPath: cfg.ExecutionEntry.CLIPath},
+		{Transport: "guess", Target: cfg.Instance, User: "operator", CLIPath: cfg.ExecutionEntry.CLIPath},
+		{Transport: "local", CLIPath: ""},
+		{Transport: "local", Target: cfg.Instance, CLIPath: cfg.ExecutionEntry.CLIPath},
+	} {
+		invalid := *cfg
+		invalid.ExecutionEntry = &entry
+		if err := prepareUpgradeConfig(&invalid, root); err == nil {
+			t.Fatal("ambiguous execution entry was accepted", entry)
+		}
 	}
 }
 

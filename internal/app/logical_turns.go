@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -212,8 +210,8 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 	if conversation != "main" && scope == "" {
 		return false, nil
 	}
-	var settled, registered bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions WHERE request_id=?), COALESCE((SELECT settled FROM logical_turn_executions WHERE request_id=?),0)`, m.RequestID, m.RequestID).Scan(&registered, &settled); err != nil {
+	var registered bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions WHERE request_id=?)`, m.RequestID).Scan(&registered); err != nil {
 		return false, err
 	}
 	if !registered {
@@ -266,46 +264,6 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 		_, err := tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',reason='An adopted native execution must be reconciled before completion.',updated_at=? WHERE logical_turn_id=? AND status NOT IN ('stopped','awaiting_clarification')`, now, v.ID)
 		return true, err
 	}
-	if settled {
-		var incomplete bool
-		err := tx.Q().QueryRowContext(ctx, `SELECT status<>'completed' FROM logical_turns WHERE logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)`, m.RequestID).Scan(&incomplete)
-		return incomplete, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE logical_turn_executions SET settled=1 WHERE request_id=?`, m.RequestID); err != nil {
-		return false, err
-	}
-	var missing int
-	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM logical_turn_messages lm LEFT JOIN message_dispositions d ON d.message_id=lm.message_id WHERE lm.logical_turn_id=? AND (d.message_id IS NULL OR d.disposition='pending' OR d.classified_revision<>d.content_revision OR d.facts_revision<>d.content_revision)`, v.ID).Scan(&missing); err != nil {
-		return false, err
-	}
-	if scope != "" {
-		if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c WHERE c.work_item_id=? AND (NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews r WHERE r.logical_turn_id=? AND r.work_item_id=c.work_item_id AND r.revision=c.revision))`, scope, v.ID).Scan(&missing); err != nil {
-			return false, err
-		}
-	}
-	if scope != "" {
-		pending, e := hostedIssueContextPending(ctx, tx.Q(), scope)
-		if e != nil {
-			return false, e
-		}
-		if pending {
-			missing++
-		}
-	}
-	var planner bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions h JOIN logical_turn_executions e ON e.request_id=h.execution_id WHERE e.logical_turn_id=? AND h.role='main')`, v.ID).Scan(&planner); err != nil {
-		return false, err
-	}
-	var unready int
-	if err = tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM work_item_contexts c
- WHERE c.work_item_id IN (SELECT work_item_id FROM logical_turn_contexts WHERE logical_turn_id=?)
- AND (?='' OR c.work_item_id=?)
- AND (NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews cr WHERE cr.logical_turn_id=? AND cr.work_item_id=c.work_item_id AND cr.revision=c.revision)
- OR (c.baseline_revision=0 AND NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=c.work_item_id AND (ci.state IN ('closed','cancelled') OR (? AND ci.assignment_state='active') OR (?<>'' AND ci.assignee_kind='agent'))))
- OR (NOT EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=c.work_item_id AND ci.assignment_state='active' AND ?) AND EXISTS(SELECT 1 FROM message_context_obligations o JOIN logical_turn_messages lm ON lm.message_id=o.message_id WHERE lm.logical_turn_id=? AND o.work_item_id=c.work_item_id AND o.needs_review=1)))`, v.ID, scope, scope, v.ID, planner, scope, planner, v.ID).Scan(&unready); err != nil {
-		return false, err
-	}
-
 	if v.Status == "stopped" || v.Status == "awaiting_clarification" {
 		return true, nil
 	}
@@ -317,57 +275,21 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 		if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='needs_review',reason=?,updated_at=? WHERE logical_turn_id=?`, blocked, now, v.ID); err != nil {
 			return false, err
 		}
-		body, _ := json.Marshal(map[string]any{"logical_turn_id": v.ID, "reason": blocked})
-		_, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: m.MessageID, Kind: "conversation.processing_blocked", BodyJSON: string(body), RequestID: m.RequestID, CreatedAt: now})
-		return true, err
+		return true, nil
 	}
-	if missing == 0 && unready == 0 {
-		_, err = tx.Exec(ctx, `UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id=?`, now, v.ID)
-		if err != nil {
-			return false, err
-		}
-		_, err = tx.Exec(ctx, `WITH RECURSIVE children(id) AS (SELECT logical_turn_id FROM logical_turns WHERE resumed_by=? UNION ALL SELECT l.logical_turn_id FROM logical_turns l JOIN children c ON l.resumed_by=c.id) UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id IN (SELECT id FROM children)`, v.ID, now)
+	// Native settlement is the processing receipt. Source interpretation belongs
+	// to ordinary work, not another model turn proving review bookkeeping.
+	if _, err := tx.Exec(ctx, `UPDATE logical_turn_executions SET settled=1 WHERE request_id=?`, m.RequestID); err != nil {
 		return false, err
 	}
-	reason := fmt.Sprintf("%d messages require classification or fact review; %d contexts require initialization", missing, unready)
-	status := "recovering"
-	if v.RepairAttempts >= 5 {
-		status = "needs_review"
+	if _, err := tx.Exec(ctx, `UPDATE logical_turn_processing SET processed_at=? WHERE logical_turn_id=? AND processed_at=0`, now, v.ID); err != nil {
+		return false, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE logical_turns SET status=?,reason=?,updated_at=? WHERE logical_turn_id=?`, status, reason, now, v.ID); err != nil {
-		return true, err
+	if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id=?`, now, v.ID); err != nil {
+		return false, err
 	}
-	if status != "recovering" {
-		return true, nil
-	}
-	// The stable child identity and insertion are atomic with native settlement.
-	attempt := v.RepairAttempts + 1
-	request := a.ids.New(protocol.PrefixRequest)
-	var exists bool
-	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions WHERE request_id=?)`, request).Scan(&exists); err != nil {
-		return true, err
-	}
-	if exists {
-		return true, nil
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO logical_turn_executions(request_id,logical_turn_id,repair) VALUES(?,?,1)`, request, v.ID); err != nil {
-		return true, err
-	}
-	payload, _ := json.Marshal(HandleMessage{MessageID: m.MessageID})
-	outbox := a.ids.New(protocol.PrefixOutbox)
-	destination := MainThreadDestination
-	if scope != "" {
-		destination = "background_thread:" + conversation
-	}
-	if err = tx.InsertOutbox(ctx, store.OutboxRow{OutboxID: outbox, RequestID: request, ParentRequestID: m.RequestID, Destination: destination, Operation: "conversation.repair_turn", PayloadJSON: string(payload), CreatedAt: now}); err != nil {
-		return true, err
-	}
-	delay := []int64{0, 0, 30000, 120000, 600000}[attempt-1]
-	if _, err = tx.Exec(ctx, `UPDATE outbox SET next_attempt_at=? WHERE outbox_id=?`, now+delay, outbox); err != nil {
-		return true, err
-	}
-	_, err = tx.Exec(ctx, `UPDATE logical_turns SET repair_attempts=? WHERE logical_turn_id=?`, attempt, v.ID)
-	return true, err
+	_, err = tx.Exec(ctx, `WITH RECURSIVE children(id) AS (SELECT logical_turn_id FROM logical_turns WHERE resumed_by=? UNION ALL SELECT l.logical_turn_id FROM logical_turns l JOIN children c ON l.resumed_by=c.id) UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id IN (SELECT id FROM children)`, v.ID, now)
+	return false, err
 }
 
 // ResumeLogicalTurn resumes only classification/context responsibility. It never

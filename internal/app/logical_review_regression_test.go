@@ -117,7 +117,7 @@ func TestLogicalReviewGlobalFactSourceGrowthInvalidatesInheritedContext(t *testi
 	}
 }
 
-func TestLogicalReviewRepairStartFailureLeavesRecoveryStranded(t *testing.T) {
+func TestLogicalReviewCompletionDoesNotRequireAnotherModelAdmission(t *testing.T) {
 	h := newHarness(t)
 	_, turn := startReviewTurn(t, h)
 	turn.Status = store.TurnCompleted
@@ -131,24 +131,12 @@ func TestLogicalReviewRepairStartFailureLeavesRecoveryStranded(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-	if err != nil || !ok || d.Operation != "conversation.repair_turn" {
-		t.Fatal(d, ok, err)
-	}
-	// Deliver returns this before creating the repair's MainTurn if turnModel
-	// reports that the selected model or effort is no longer available.
-	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Failed, Reason: "the selected model is no longer available; update conversation settings"}); err != nil {
-		t.Fatal(err)
+	if err != nil || ok {
+		t.Fatal("metadata-only model turn was admitted", d, ok, err)
 	}
 	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Status != "recovering" || state.RepairAttempts != 2 {
-		t.Fatalf("failed admission did not retain recovery: %+v", state)
-	}
-	next, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-	if err != nil || !ok || next.Operation != "conversation.repair_turn" || next.RequestID == d.RequestID {
-		t.Fatal(next, ok, err)
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 0 {
+		t.Fatal(state, err)
 	}
 }
 
@@ -182,8 +170,8 @@ func TestBackgroundFactSourceGrowthInvalidatesInheritedContext(t *testing.T) {
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		ready, err := store.WorkItemContextReady(t.Context(), tx.Q(), inheritedWork.WorkItemID)
-		if ready {
-			t.Error("inherited source change did not fence dispatch")
+		if !ready {
+			t.Error("source revision became a mechanical dispatch fence")
 		}
 		return err
 	}); err != nil {
@@ -191,38 +179,25 @@ func TestBackgroundFactSourceGrowthInvalidatesInheritedContext(t *testing.T) {
 	}
 }
 
-func TestLogicalReviewClaimedRepairStartsAfterOwnerStop(t *testing.T) {
+func TestLogicalReviewOwnerStopRemainsEffectiveWithoutReviewCeremony(t *testing.T) {
 	h := newHarness(t)
 	id, turn := startReviewTurn(t, h)
-	turn.Status = store.TurnCompleted
-	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='delivered' WHERE request_id=?`, turn.RequestID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-	if err != nil || !ok || d.Operation != "conversation.repair_turn" {
-		t.Fatal(d, ok, err)
-	}
 	op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: id}, nil), InterruptReply{})
 	if op.Status == protocol.OpFailed {
 		t.Fatal(op)
 	}
-	state, _ := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if state.Status != "stopped" {
-		t.Fatal(state)
+	turn.Status = store.TurnInterrupted
+	turn.NativeReconciled = true
+	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+		t.Fatal(err)
 	}
-	err = h.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: d.RequestID, MessageID: id, ThreadID: mainAgent.Thread, Status: store.TurnStarting})
-	if err == nil {
-		t.Fatal("already-claimed repair admitted a new native execution after owner stop")
+	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
+	if err != nil || state.Status != "stopped" || state.RepairAttempts != 0 {
+		t.Fatal(state, err)
 	}
 }
 
-func TestLogicalReviewHandoffSnapshotOmitsLogicalRepair(t *testing.T) {
+func TestLogicalReviewCompletedTurnLeavesHandoffIdle(t *testing.T) {
 	h := newHarness(t)
 	_, turn := startReviewTurn(t, h)
 	if err := h.app.SetMainThread(t.Context(), "main", mainAgent.Thread); err != nil {
@@ -239,31 +214,21 @@ func TestLogicalReviewHandoffSnapshotOmitsLogicalRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, _ := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if state.Status != "recovering" {
+	if state.Status != "completed" {
 		t.Fatal(state)
 	}
 	snap, err := h.app.HandoffSnapshot(t.Context(), "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !snap.Pending && !snap.Active {
-		t.Fatal("handoff snapshot declares idle with an unfinished logical turn and queued repair")
+	if snap.Pending || snap.Active {
+		t.Fatal("completed processing retains a synthetic handoff blocker")
 	}
 }
 
-func TestLogicalReviewStoppedRepairPublishesMessageState(t *testing.T) {
+func TestLogicalReviewStoppingActiveTurnPublishesMessageState(t *testing.T) {
 	h := newHarness(t)
-	id, turn := startReviewTurn(t, h)
-	turn.Status = store.TurnCompleted
-	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='delivered' WHERE request_id=?`, turn.RequestID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	id, _ := startReviewTurn(t, h)
 	before := h.count("events")
 	op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: id}, nil), InterruptReply{})
 	if op.Status == protocol.OpFailed {

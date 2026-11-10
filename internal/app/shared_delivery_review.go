@@ -69,6 +69,12 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		if p.TaskID != "" {
 			primary, err := store.GetTaskIssueOwner(ctx, tx.Q(), p.TaskID)
+			if errors.Is(err, store.ErrNotFound) {
+				manager, managerErr := store.GetIssueManagerTask(ctx, tx.Q(), p.TaskID)
+				if managerErr == nil {
+					primary, err = manager.IssueID, nil
+				}
+			}
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -163,8 +169,30 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			for _, previous := range r.Rounds {
 				sameTask := previous.TaskID == round.TaskID || previous.SupplementTaskID != "" && previous.SupplementTaskID == round.TaskID
 				accept := round.ReviewerRole == protocol.RoleAccept
-				if sameTask && (!accept || previous.ArtifactID == round.ArtifactID && !waitingEvidence) || round.RunID != "" && previous.RunID == round.RunID || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
-					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "a focused acceptance review requires a new real artifact/run; earlier tasks, runs or acceptances cannot be recounted")
+				previousGeneration := previous.ImplementGeneration
+				if previous.SupplementTaskID == round.TaskID {
+					previousGeneration = previous.SupplementGeneration
+				}
+				if sameTask && !accept && previousGeneration == 0 {
+					previousRun := previous.RunID
+					if previous.SupplementTaskID == round.TaskID {
+						previousRun = previous.SupplementRunID
+					}
+					if previousRun != "" {
+						oldRun, err := store.GetRun(ctx, tx.Q(), previousRun)
+						if err != nil {
+							return Outcome{}, err
+						}
+						oldAction, err := store.GetAction(ctx, tx.Q(), oldRun.ActionID)
+						if err != nil {
+							return Outcome{}, err
+						}
+						previousGeneration = oldAction.Generation
+					}
+				}
+				sameReport := sameTask && !accept && (previousGeneration == 0 || previousGeneration == round.ImplementGeneration)
+				if sameReport || sameTask && accept && previous.ArtifactID == round.ArtifactID && !waitingEvidence || round.RunID != "" && previous.RunID == round.RunID || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "a focused review requires a new real run/result on the sustained Task; earlier runs or acceptances cannot be recounted")
 				}
 			}
 			if r.Reviewer != "" && r.Reviewer != round.Reviewer {
@@ -187,6 +215,8 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if last.SupplementTaskID != "" {
 				inputRound.TaskID = last.SupplementTaskID
 				inputRound.SpecVersion = last.SupplementSpecVersion
+				inputRound.ImplementGeneration = last.SupplementGeneration
+				inputRound.RunID, inputRound.ArtifactID = last.SupplementRunID, last.SupplementArtifactID
 				inputRound.AcceptanceID = ""
 				inputRound.ReviewerRole = ""
 			}
@@ -327,9 +357,6 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if last.AcceptanceID == "" || last.Result != nil || last.SupplementTaskID != "" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "preserve the original result and review budget; one original-reviewer evidence supplement is allowed")
 			}
-			if p.ReviewerTaskID == last.TaskID {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "supplement requires a distinct immutable evidence task")
-			}
 			bound, err := bindSharedReviewTask(ctx, tx.Q(), r, p.ReviewerTaskID, "", last.ExecutionRequirements)
 			if err != nil {
 				return Outcome{}, err
@@ -337,7 +364,11 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if bound.Reviewer != r.Reviewer {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only the original formal reviewer may supplement its evidence")
 			}
+			if bound.TaskID == last.TaskID && bound.ImplementGeneration <= last.ImplementGeneration {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "continue the original reviewer Task to produce new supplement evidence")
+			}
 			last.SupplementTaskID, last.SupplementSpecVersion = bound.TaskID, bound.SpecVersion
+			last.SupplementGeneration = bound.ImplementGeneration
 		case "assess":
 			if r.Status != "passed" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only a passed review can be confirmed applicable")
@@ -415,6 +446,7 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 		return out, err
 	}
 	out.SpecVersion = t.SpecVersion
+	out.ImplementGeneration = t.ImplementGeneration
 	if acceptance != "" {
 		rows, err := store.ListAcceptances(ctx, q, task, t.CurrentArtifactID)
 		if err != nil {
@@ -441,6 +473,13 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 		out.Reviewer = spec.AgentSelection.Implementation.AgentID
 		if !spec.RequiresDelivery("report") {
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "reviewer must submit an immutable report artifact")
+		}
+		if t.Lifecycle == protocol.TaskCompleted && t.CurrentArtifactID != "" {
+			artifact, err := store.GetArtifact(ctx, q, t.CurrentArtifactID)
+			if err != nil {
+				return out, err
+			}
+			out.RunID, out.ArtifactID = artifact.RunID, artifact.ArtifactID
 		}
 	}
 	requirements, err := store.SharedReviewExecutionRequirements(ctx, q, r)
@@ -471,7 +510,7 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 		if link.TaskID == "" {
 			continue
 		}
-		rows, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM runs WHERE task_id=? AND role='implement'`, link.TaskID)
+		rows, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM runs WHERE task_id=? AND role IN ('implement','issue_manager')`, link.TaskID)
 		if err != nil {
 			return out, err
 		}
@@ -496,12 +535,27 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 	if err != nil {
 		return nil, "", "", err
 	}
-	if t.SpecVersion != round.SpecVersion || t.Lifecycle != protocol.TaskCompleted || t.CurrentArtifactID == "" {
+	artifactID := round.ArtifactID
+	if artifactID == "" && (t.SpecVersion != round.SpecVersion || t.Lifecycle != protocol.TaskCompleted || t.CurrentArtifactID == "") {
 		return nil, "", "", protocol.Errorf(protocol.CodeInvalidTransition, "the bound review task has not completed under its frozen agreement")
 	}
-	a, err := store.GetArtifact(ctx, q, t.CurrentArtifactID)
+	if artifactID == "" {
+		artifactID = t.CurrentArtifactID
+	}
+	a, err := store.GetArtifact(ctx, q, artifactID)
 	if err != nil {
 		return nil, "", "", err
+	}
+	runRow, err := store.GetRun(ctx, q, a.RunID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	action, err := store.GetAction(ctx, q, runRow.ActionID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if a.TaskID != round.TaskID || action.TargetSpecVersion != round.SpecVersion || round.ImplementGeneration > 0 && action.Generation != round.ImplementGeneration || round.RunID != "" && round.RunID != a.RunID && round.AcceptanceID == "" {
+		return nil, "", "", protocol.Errorf(protocol.CodeInvalidTransition, "the report must come from this round's frozen Task execution")
 	}
 	var artifact protocol.ArtifactPayload
 	if err := json.Unmarshal([]byte(a.RefJSON), &artifact); err != nil {
@@ -518,7 +572,7 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 			if v.AcceptanceID == round.AcceptanceID && v.SpecVersion == round.SpecVersion && v.Verdict == protocol.VerdictPassed {
 				matched := false
 				for _, m := range artifact.Mounts {
-					matched = matched || m.CommitSHA == r.HeadSHA && m.SnapshotSHA == ""
+					matched = matched || m.CommitSHA == round.HeadSHA && m.SnapshotSHA == ""
 				}
 				if !matched || v.EvidenceJSON == "" || v.EvidenceJSON == "null" || v.EvidenceJSON == "{}" {
 					return nil, "", "", protocol.Errorf(protocol.CodeInvalidRequest, "reuse requires a real candidate-matching acceptance with repository review evidence")

@@ -133,6 +133,9 @@ var tools = []tool{
 func Specs() []harness.ToolSpec {
 	out := make([]harness.ToolSpec, 0, len(tools))
 	for _, t := range tools {
+		if t.name == "conversation_turn_commit" {
+			continue // Historical callbacks remain replayable; no normal review ceremony.
+		}
 		out = append(out, harness.ToolSpec{Name: t.name, Description: t.description, InputSchema: exportSchema(json.RawMessage(schemas[t.name]))})
 	}
 	return out

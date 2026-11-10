@@ -5,31 +5,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestHostedFrozenRepairWaitsForOrdinaryNativeReceipt(t *testing.T) {
+func TestHostedOrdinaryContinuationWaitsForNativeReceipt(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
-	// First settle the original assignment batch through its real manager
-	// metadata path; it otherwise correctly retains priority over repairs.
 	conversation := "issue:" + issue.IssueID
 	batch, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	initial := startHostedReview(t, h, conversation, batch)
-	manager := protocol.Principal{Kind: protocol.PrincipalBackgroundAgent, Subject: "manager", Thread: initial.ThreadID, ConversationID: conversation}
-	if op := hostedEffect(t, h, manager, initial, 1, protocol.Target{Type: "issue", ID: issue.IssueID}, nil, hostedReviewPayload(t, h, issue), ReviewHostedIssueContext{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	if op := commitHostedReview(t, h, manager, initial, 2); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	finishHostedReview(t, h, initial)
-	original := prepareHostedAdmissionRepair(t, h, issue)
-	// A foreground ordinary turn is selected ahead of the older metadata repair.
+	finishHostedReview(t, h, startHostedReview(t, h, conversation, batch))
 	ordinary, _ := startHostedIssueReview(t, h, issue)
 	if err := h.app.AwaitNativeReceipts(t.Context(), ordinary.ThreadID); err != nil {
 		t.Fatal(err)
@@ -51,20 +38,16 @@ func TestHostedFrozenRepairWaitsForOrdinaryNativeReceipt(t *testing.T) {
 	if h.count("agent_recoveries") != 0 {
 		t.Fatal("fixture is recovery rather than ordinary native uncertainty")
 	}
+	submitHostedAdmissionInput(t, h, conversation)
 	if ids, err := h.app.PendingAgentConversations(t.Context()); err != nil || !hasConversation(ids, conversation) {
 		t.Fatal("receipt-only discovery lost", ids, err)
 	}
 	if d, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation); err != nil || ok {
-		t.Fatal("frozen repair bypassed ordinary receipt fence", d, ok, err)
+		t.Fatal("new input bypassed ordinary receipt fence", d, ok, err)
 	}
-	var repair string
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(t.Context(), `SELECT e.request_id FROM logical_turn_executions e JOIN outbox o ON o.request_id=e.request_id WHERE e.logical_turn_id=(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?) AND e.repair=1 ORDER BY o.seq LIMIT 1`, original.RequestID).Scan(&repair)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.app.AgentContext(t.Context(), conversation, repair); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
-		t.Fatal("repair context bypassed receipt fence", err)
+	state, err := h.app.LogicalTurn(t.Context(), ordinary.RequestID)
+	if err != nil || state.Status != "unknown" {
+		t.Fatal("disconnect fabricated a terminal processing result", state, err)
 	}
 	ordinary.Status = store.TurnInterrupted
 	ordinary.NativeReconciled = true
@@ -72,11 +55,18 @@ func TestHostedFrozenRepairWaitsForOrdinaryNativeReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
-	if err != nil || !ok || d.RequestID != repair {
-		t.Fatal("reconciled original repair did not progress", d, ok, err)
+	if err != nil || !ok || d.Operation != OpHandleMessage || d.RequestID == ordinary.RequestID {
+		t.Fatal("reconciled native receipt did not release the new input", d, ok, err)
 	}
 	if _, err := h.app.AgentContext(t.Context(), conversation, d.RequestID); err != nil {
 		t.Fatal(err)
+	}
+	actual, found, err := h.app.MainTurn(t.Context(), ordinary.RequestID)
+	if err != nil || !found || actual.Status != store.TurnInterrupted || actual.TurnID != ordinary.TurnID {
+		t.Fatal("new admission rewrote the interrupted native fact", actual, found, err)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM outbox WHERE operation='conversation.repair_turn'`) != 0 {
+		t.Fatal("ordinary receipt recovery created a metadata-only model round")
 	}
 }
 

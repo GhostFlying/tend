@@ -59,7 +59,7 @@ func (UploadFile) Authorize(ctx context.Context, x *Exec, q store.Querier) error
 // Upload permission is frozen by the original claim. A later capable runner
 // must not grant new file-producing authority to an older acceptance.
 func authorizeFileUpload(ctx context.Context, q store.Querier, p protocol.Principal, runID string) error {
-	if p.Kind != protocol.PrincipalRun || p.Subject != runID || p.Role != protocol.RoleImplement && p.Role != protocol.RoleAccept {
+	if p.Kind != protocol.PrincipalRun || p.Subject != runID || p.Role != protocol.RoleImplement && p.Role != protocol.RoleAccept && p.Role != protocol.RoleIssueManager {
 		return protocol.Errorf(protocol.CodeForbidden, "only the producing run may upload files")
 	}
 	run, err := store.GetRun(ctx, q, runID)
@@ -68,6 +68,19 @@ func authorizeFileUpload(ctx context.Context, q store.Querier, p protocol.Princi
 	}
 	if p.Role != run.Role {
 		return protocol.Errorf(protocol.CodeForbidden, "upload role does not match the run")
+	}
+	if run.Role == protocol.RoleIssueManager {
+		allowed, err := managerNativeBusinessAllowed(ctx, q, run)
+		if err != nil {
+			return err
+		}
+		lease, err := store.GetLeaseByRun(ctx, q, runID)
+		if err != nil {
+			return err
+		}
+		if !allowed || lease.Status != store.LeaseActive {
+			return protocol.Errorf(protocol.CodeForbidden, "only the active Issue owner may upload its result")
+		}
 	}
 	if run.Role == protocol.RoleAccept {
 		contract, err := runAcceptanceEvidenceContract(ctx, q, runID)

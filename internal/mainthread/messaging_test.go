@@ -41,26 +41,19 @@ func TestMessagingNativeReadIsVisibleBeforeTurnCompletion(t *testing.T) {
 	once.Do(func() { close(release) })
 }
 
-func TestMessagingRepairPromptDoesNotProveOriginalRead(t *testing.T) {
+func TestMessagingCompletionWithoutWitnessDoesNotFabricateReadOrRepair(t *testing.T) {
 	h := testkit.NewHarness()
-	h.BeforeAnswer = func(th *testkit.FakeThread, turn string) {
-		starts := h.Starts()
-		if len(starts) == 0 {
-			return
-		}
-		in := starts[len(starts)-1]
-		if in.Repair {
-			th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: turn, ItemID: "repair-user", ItemType: harness.ItemUserMessage, Text: in.Text})
-		}
-	}
 	e := newEnv(t, h)
 	id := e.say("An original whose consumption was not witnessed")
-	eventually(t, "metadata repair finished", func() bool {
-		return e.count(`SELECT count(*) FROM logical_turn_executions WHERE repair=1 AND settled=1`) > 0
+	eventually(t, "original native turn completed", func() bool {
+		return e.count(`SELECT count(*) FROM main_turns WHERE message_id=? AND status='completed'`, id) == 1
 	})
 	receipts, err := e.app.MessagingReceipts(t.Context(), id)
 	if err != nil || len(receipts.Reads) != 0 {
-		t.Fatal("repair prompt fabricated original read", receipts, err)
+		t.Fatal("completion fabricated witnessed reading", receipts, err)
+	}
+	if e.count(`SELECT count(*) FROM logical_turn_executions WHERE repair=1`) != 0 || len(h.Starts()) != 1 {
+		t.Fatal("completion launched a bookkeeping-only model turn")
 	}
 }
 

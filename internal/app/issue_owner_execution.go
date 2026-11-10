@@ -39,7 +39,10 @@ func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue 
 		if implementation.AgentID != "" && implementation.AgentID != issue.Assignee.Ref || !slices.Contains(a.Categories, implementation.CategoryID) || implementation.RuntimeID != "" && implementation.RuntimeID != a.Binding.RuntimeID || !implementation.MatchesProfile(protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}) || spec.Requirements.HostID != "" && spec.Requirements.HostID != parts[0] {
 			return nil, nil
 		}
-		if !a.Enabled || !slices.Contains(a.Purposes, "worker_run") {
+		workerConfigured := slices.ContainsFunc(inventory.Projection.Runtimes, func(r protocol.AgentInventoryRuntime) bool {
+			return r.RuntimeID == a.Binding.RuntimeID && r.Revision == a.Binding.Revision && r.Enabled && (r.Kind == "appserver-worker" || r.Kind == "orca-worker" || r.Kind == "central-traex-worker")
+		})
+		if !a.Enabled || !workerConfigured {
 			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "this Agent has no execution adapter; select an execution-capable Agent")
 		}
 		if x.coordinationExecution != nil && (x.coordinationExecution.Selection.Identity != a.Identity || x.coordinationExecution.Selection.Definition.Revision != a.Revision || x.coordinationExecution.Selection.Definition.Model != a.RequestedModel || x.coordinationExecution.Selection.Definition.Effort != a.RequestedEffort) {

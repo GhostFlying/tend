@@ -30,12 +30,7 @@ func TestLateOrdinaryReplyDuringRepairAdmission(t *testing.T) {
 	if err = e.app.PutMainTurn(t.Context(), rec); err != nil {
 		t.Fatal(err)
 	}
-	var repair string
-	if err = e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM logical_turn_executions WHERE logical_turn_id=? AND repair=1`, req).Scan(&repair)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	repair := retainHistoricalRepairForTest(t, e, req)
 	e.m.mu.Lock()
 	e.m.active = &turn{requestID: repair, messageID: source}
 	e.m.mu.Unlock()
@@ -46,4 +41,18 @@ func TestLateOrdinaryReplyDuringRepairAdmission(t *testing.T) {
 	if n := e.count(`SELECT COUNT(*) FROM conversation_messages WHERE body=?`, ev.Text); n != 1 {
 		t.Fatalf("late original reply lost during repair admission: rows=%d", n)
 	}
+}
+
+// retainHistoricalRepairForTest seeds immutable pre-upgrade history. It is not
+// an assertion that current completion should schedule a metadata-only model.
+func retainHistoricalRepairForTest(t *testing.T, e *env, logical string) string {
+	t.Helper()
+	repair := e.ids.New(protocol.PrefixRequest)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO logical_turn_executions(request_id,logical_turn_id,repair,settled) VALUES(?,?,1,0)`, repair, logical)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return repair
 }

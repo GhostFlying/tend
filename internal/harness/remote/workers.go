@@ -124,7 +124,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 		var e error
 		spec.Thread, e = rebindQuestionThread(spec)
 		if e != nil {
-			return nil, e
+			if spec.RetainedResume == nil && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil) {
+				spec.Thread = ""
+			} else {
+				return nil, e
+			}
 		}
 	}
 	ws.mu.Lock()
@@ -436,14 +440,34 @@ func (ws *Workers) open(ctx context.Context, spec harness.WorkerSpec) (*executio
 		_ = local.CloseNow()
 		return nil, err
 	}
-	hello, _ := json.Marshal(Hello{Cwd: spec.Dir, ThreadID: state.Thread})
+	optional := spec.RetainedResume == nil && state.Thread != "" && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil)
+	hello, _ := json.Marshal(Hello{Cwd: spec.Dir, ThreadID: state.Thread, OptionalContinuation: optional})
 	if _, err = tunnel.Write(append(hello, '\n')); err != nil {
 		_ = tunnel.Close()
 		_ = local.CloseNow()
 		return nil, err
 	}
-	stopHandshake := context.AfterFunc(ctx, func() { _ = tunnel.Close() })
+	handshakeCtx, cancelHandshake := context.WithTimeout(ctx, 15*time.Second)
+	stopHandshake := context.AfterFunc(handshakeCtx, func() { _ = tunnel.Close() })
+	defer cancelHandshake()
 	reader := bufio.NewReader(tunnel)
+	if optional {
+		raw, err := reader.ReadBytes('\n')
+		var ack continuationHelloAck
+		if err != nil || json.Unmarshal(raw, &ack) != nil || ack.Type != "tend_continuation" || (ack.ThreadID != "" && ack.ThreadID != state.Thread) {
+			_ = tunnel.Close()
+			_ = local.CloseNow()
+			return nil, errors.New("optional continuation binding was not confirmed")
+		}
+		if ack.ThreadID == "" {
+			state.Thread = ""
+			state.BriefRecorded = false
+			state.BriefPending = false
+			state.ExecutorStopped = false
+			ex.state = state
+		}
+	}
+
 	line, err := reader.ReadBytes('\n')
 	var ready struct {
 		Ready bool `json:"ready"`
@@ -454,6 +478,7 @@ func (ws *Workers) open(ctx context.Context, spec harness.WorkerSpec) (*executio
 		return nil, errors.New("central native execution unavailable")
 	}
 	stopHandshake()
+	cancelHandshake()
 	// Both directions are owned by this execution, including while held.
 	go func() {
 		defer stop()

@@ -89,11 +89,20 @@ func (a *App) ReadRolloutPreview(ctx context.Context, p protocol.Principal, runI
 				if err = rows.Scan(&payload, &reply); err != nil {
 					return err
 				}
+				payload, err = store.ResolveJSON(ctx, tx.Q(), payload)
+				if err != nil {
+					return err
+				}
 				var request struct {
 					Thread string `json:"thread_id"`
 				}
 				var turn string
 				var response protocol.ManagerNativeReply
+				reply, err = store.ResolveJSON(ctx, tx.Q(), reply)
+				if err != nil {
+					rows.Close()
+					return err
+				}
 				if json.Unmarshal([]byte(payload), &request) == nil && json.Unmarshal([]byte(reply), &response) == nil && response.Error == "" && !response.Rejected && json.Unmarshal(response.Result, &turn) == nil && request.Thread != "" && turn != "" {
 					sources = append(sources, protocol.RolloutPreviewSource{SessionID: request.Thread, TurnID: turn})
 				}
@@ -109,6 +118,10 @@ func (a *App) ReadRolloutPreview(ctx context.Context, p protocol.Principal, runI
 		for rows.Next() {
 			var kind, raw string
 			if err = rows.Scan(&kind, &raw); err != nil {
+				return err
+			}
+			raw, err = store.ResolveJSON(ctx, tx.Q(), raw)
+			if err != nil {
 				return err
 			}
 			var identity struct {

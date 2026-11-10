@@ -268,6 +268,10 @@ func startupFailureNotice(ctx context.Context, x *Exec, q store.Querier, taskID 
 	if kind != "worker.startup_failed" {
 		return "", nil
 	}
+	raw, err = store.ResolveJSON(ctx, q, raw)
+	if err != nil {
+		return "", err
+	}
 	var fact struct {
 		Attempts   int `json:"attempts"`
 		Diagnostic struct {

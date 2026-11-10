@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,7 +22,9 @@ func runIssuePRPolicy(ctx context.Context, e *Env, args []string) error {
 	action := args[0]
 	fs := newFlags(e, "issue pr-policy "+action)
 	fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", "pr-policy", action})); fs.PrintDefaults() }
-	mode := fs.String("mode", "", "auto or manual integration; deployment is separately authorized")
+	mode := fs.String("mode", "", "auto or manual delivery; deployment requires explicit target scope")
+	deployServer := fs.String("deploy-server-instance", "", "explicit configured server instance covered by automatic deployment authority")
+	deployHosts := fs.String("deploy-hosts", "", "comma-separated runner identities covered by deployment authority; empty means server only")
 	repository := fs.String("repository", "", "exact repository covered by the integration policy")
 	reason := fs.String("reason", "", "reason for setting or revoking this integration policy")
 	revision := fs.Int64("revision", -1, "Issue version to read and compare; defaults to the current Issue")
@@ -41,6 +45,27 @@ func runIssuePRPolicy(ctx context.Context, e *Env, args []string) error {
 	}
 	if action == "clear" && strings.TrimSpace(*reason) == "" {
 		return usagef("clear requires --reason")
+	}
+	if (*deployServer != "" || *deployHosts != "") && (action != "set" || *mode != "auto" || strings.TrimSpace(*deployServer) == "") {
+		return usagef("deployment scope requires set --mode auto --deploy-server-instance; --deploy-hosts alone grants nothing")
+	}
+	var deployment *protocol.IssueDeploymentScope
+	if *deployServer != "" {
+		if *deployServer != strings.TrimSpace(*deployServer) {
+			return usagef("--deploy-server-instance requires an exact configured identity")
+		}
+		hosts := []string{}
+		if *deployHosts != "" {
+			for _, host := range strings.Split(*deployHosts, ",") {
+				if strings.TrimSpace(host) == "" {
+					return usagef("--deploy-hosts must contain nonempty runner identities")
+				}
+				hosts = append(hosts, strings.TrimSpace(host))
+			}
+		}
+		slices.Sort(hosts)
+		hosts = slices.Compact(hosts)
+		deployment = &protocol.IssueDeploymentScope{ServerInstance: *deployServer, HostIDs: hosts}
 	}
 	if *sourceRevision != -1 && (*source == "" || *sourceRevision < 1) || *source != "" && *sourceRevision < 1 {
 		return usagef("--source-message and a positive --source-revision must be supplied together")
@@ -73,8 +98,8 @@ func runIssuePRPolicy(ctx context.Context, e *Env, args []string) error {
 	plan := issue.Plan
 	plan.PRPolicy = nil
 	if action == "set" {
-		plan.PRPolicy = &protocol.IssuePRPolicy{Mode: *mode, Repository: *repository, Reason: *reason}
-		if previous := issue.Plan.PRPolicy; previous != nil && previous.Mode == *mode && previous.Repository == *repository && previous.Reason == *reason {
+		plan.PRPolicy = &protocol.IssuePRPolicy{Mode: *mode, Repository: *repository, Reason: *reason, Deployment: deployment}
+		if previous := issue.Plan.PRPolicy; previous != nil && previous.Mode == *mode && previous.Repository == *repository && previous.Reason == *reason && reflect.DeepEqual(previous.Deployment, plan.PRPolicy.Deployment) {
 			plan.PRPolicy.Authority = previous.Authority
 		}
 	}

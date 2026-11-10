@@ -86,7 +86,7 @@ func TestArchiveLocalCLIUsesPersistentGateHostCASAndExplicitCancellation(t *test
 	if !p.Prepared {
 		t.Fatal("host partial failure reopened gate")
 	}
-	rt := &protocol.RunnerRuntime{InstanceID: "current", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
+	rt := &protocol.RunnerRuntime{InstanceID: "current", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
 	runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "runner-a"}
 	runOp(runner, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "runner-a"}, protocol.HelloPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: rt}, app.Hello{})
 	if code := command("host", "--host", "runner-a"); code != 0 {

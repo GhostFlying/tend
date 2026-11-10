@@ -195,6 +195,10 @@ func unresolvedManagerParkClose(ctx context.Context, q store.Querier, run string
 	var raw string
 	err = q.QueryRowContext(ctx, `SELECT request_id,payload_json FROM manager_native_requests WHERE run_id=? AND method='close' AND (status IN ('pending','started','unknown') OR (COALESCE(json_extract(result_json,'$.error'),'')<>'' AND COALESCE(json_extract(result_json,'$.rejected'),0)=0)) ORDER BY created_at DESC,request_id DESC LIMIT 1`, run).Scan(&prior.ID, &raw)
 	if err == nil {
+		raw, err = store.ResolveJSON(ctx, q, raw)
+		if err != nil {
+			return nil, err
+		}
 		prior.Method = "close"
 		prior.Payload = []byte(raw)
 		return &prior, nil

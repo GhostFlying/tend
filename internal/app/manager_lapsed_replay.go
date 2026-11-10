@@ -148,6 +148,10 @@ func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run 
 		if err := rows.Scan(&event.Cursor, &event.Sequence, &raw); err != nil {
 			return nil, err
 		}
+		raw, err = store.ResolveJSON(ctx, q, raw)
+		if err != nil {
+			return nil, err
+		}
 		event.RunID, event.Body = run, json.RawMessage(raw)
 		var original struct {
 			Disconnected bool

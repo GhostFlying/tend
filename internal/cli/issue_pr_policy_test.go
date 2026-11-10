@@ -66,6 +66,8 @@ func TestIssuePRPolicyRejectsUnclearGrantBeforeIO(t *testing.T) {
 		{"set", "issue", "--mode", "auto", "--repository", "example/project"},
 		{"clear", "issue"},
 		{"show", "issue", "--source-message", "source"},
+		{"set", "issue", "--mode", "auto", "--repository", "example/project", "--reason", "Grant", "--deploy-hosts", "runner-one"},
+		{"set", "issue", "--mode", "manual", "--repository", "example/project", "--reason", "Grant", "--deploy-server-instance", "service"},
 	} {
 		if code := e.main(append([]string{"issue", "pr-policy"}, args...)...); code != exitUsage {
 			t.Fatal(args, code, e.errOut.String())
@@ -73,6 +75,28 @@ func TestIssuePRPolicyRejectsUnclearGrantBeforeIO(t *testing.T) {
 	}
 	if len(f.requests) != 0 {
 		t.Fatal("invalid policy performed network IO")
+	}
+}
+
+func TestIssuePRPolicyFreezesExplicitDeploymentTargets(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	issue := protocol.IssueView{Issue: protocol.Issue{IssueControl: protocol.IssueControl{IssueID: "issue", AssignmentEpoch: 3}, Revision: 7, Plan: protocol.IssuePlan{Title: "Same work", Intent: "Deliver this existing scope"}}}
+	f.answer("GET /api/v1/issues/issue", issue)
+	if code := e.main("issue", "pr-policy", "set", "issue", "--mode", "auto", "--repository", "example/project", "--reason", "Deploy this Issue within its existing target", "--deploy-server-instance", "service", "--deploy-hosts", "runner-one,runner-two", "--dry-run"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var envelope protocol.Envelope
+	var payload protocol.UpdateIssuePayload
+	if err := json.Unmarshal(e.out.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	want := &protocol.IssueDeploymentScope{ServerInstance: "service", HostIDs: []string{"runner-one", "runner-two"}}
+	if payload.Plan.PRPolicy == nil || !reflect.DeepEqual(payload.Plan.PRPolicy.Deployment, want) || payload.Plan.PRPolicy.Authority != nil {
+		t.Fatal("scope or real owner provenance was lost", payload)
 	}
 }
 

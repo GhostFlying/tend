@@ -1,6 +1,7 @@
 package traex
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -66,5 +67,27 @@ func TestDirectWorkerRecordsNativeIdentityWithoutShorteningExecution(t *testing.
 	}
 	if _, err := worker.Wait(); err != nil {
 		t.Fatal("startup deadline ended a healthy running worker", err)
+	}
+}
+
+func TestStoppedTaskSessionMissingStartsFreshWithRebuiltContext(t *testing.T) {
+	ws, servers := fakeWorkers(t)
+	ws.opts.StrictResume = true
+	w, err := ws.Start(t.Context(), harness.WorkerSpec{RunID: "new", Role: protocol.RoleImplement, Thread: "original", Spec: json.RawMessage(`{"goal":"original issue","scope":"CURRENT_RECONSTRUCTED_CONTEXT"}`), SessionContinuation: &protocol.SessionContinuation{RunID: "stopped", ThreadID: "original"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := <-servers
+	if f.params(methodThreadResume) == nil || f.params(methodThreadStart) == nil || f.params(methodTurnStart) == nil {
+		t.Fatal("missing optional history did not start fresh")
+	}
+	if !bytes.Contains(f.params(methodTurnStart), []byte("CURRENT_RECONSTRUCTED_CONTEXT")) {
+		t.Fatal("fresh thread lacks rebuilt context")
+	}
+	f.send(map[string]any{"method": notifyTurnCompleted, "params": map[string]any{"threadId": "th_w", "turn": map[string]string{"id": "tu_w", "status": "completed"}}})
+	for range w.Events() {
+	}
+	if _, err := w.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }

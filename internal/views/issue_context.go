@@ -18,18 +18,9 @@ func IssueContext(ctx context.Context, q store.Querier, id string, after int64) 
 	if err := q.QueryRowContext(ctx, `SELECT revision,baseline_revision,coverage,gaps FROM work_item_contexts WHERE work_item_id=?`, id).Scan(&v.Revision, &baseline, &v.Coverage, &v.Gaps); err != nil {
 		return v, err
 	}
+	// A stored context is available independently of optional historical review.
 	v.Prepared = baseline > 0
-	v.SyncStatus = "synced"
-	if baseline == 0 {
-		v.SyncStatus = "initializing"
-	}
-	ready, err := store.WorkItemContextReviewed(ctx, q, id)
-	if err != nil {
-		return v, err
-	}
-	if baseline > 0 && !ready {
-		v.SyncStatus = "needs_review"
-	}
+	v.SyncStatus = "available"
 	v.DispatchReady, err = store.WorkItemContextReady(ctx, q, id)
 	if err != nil {
 		return v, err
@@ -49,8 +40,18 @@ func IssueContext(ctx context.Context, q store.Querier, id string, after int64) 
 	if recovering {
 		v.CoordinationState = "recovering"
 	}
-	// A later reviewed message cannot hide an earlier unreviewed source.
-	if err := q.QueryRowContext(ctx, `WITH sources AS (SELECT DISTINCT m.seq,d.content_revision,d.facts_revision,d.disposition FROM conversation_messages m JOIN (SELECT message_id FROM message_work_items WHERE work_item_id=? AND active=1 UNION SELECT message_id FROM message_context_obligations WHERE work_item_id=? AND needs_review=1) a ON a.message_id=m.message_id LEFT JOIN message_dispositions d ON d.message_id=m.message_id WHERE m.kind='message') SELECT COALESCE(MAX(seq),0) FROM sources WHERE seq<COALESCE((SELECT MIN(seq) FROM sources WHERE disposition IS NULL OR disposition='pending' OR facts_revision<>content_revision),9223372036854775807)`, id, id).Scan(&v.Watermark); err != nil {
+	// The watermark follows exact current source versions with system processing
+	// receipts. It is not a certificate of understanding or authorization.
+	if err := q.QueryRowContext(ctx, `WITH sources AS (
+  SELECT DISTINCT m.seq,m.message_id,COALESCE(d.content_revision,1) revision
+  FROM conversation_messages m JOIN (
+   SELECT message_id FROM message_work_items WHERE work_item_id=? AND active=1
+   UNION SELECT message_id FROM message_context_obligations WHERE work_item_id=?
+  ) a ON a.message_id=m.message_id LEFT JOIN message_dispositions d ON d.message_id=m.message_id
+  WHERE m.kind='message')
+ SELECT COALESCE(MAX(seq),0) FROM sources WHERE seq<COALESCE((SELECT MIN(seq) FROM sources s
+ WHERE NOT EXISTS(SELECT 1 FROM logical_turn_processing p WHERE p.message_id=s.message_id
+ AND p.content_revision=s.revision AND p.processed_at>0)),9223372036854775807)`, id, id).Scan(&v.Watermark); err != nil {
 		return v, err
 	}
 

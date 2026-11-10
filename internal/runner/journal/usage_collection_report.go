@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -123,7 +124,7 @@ func (j *Journal) ApplyUsageCollectionControl(ctx context.Context, command proto
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if command.RequestID == "" || command.RunID == "" || command.SourceID == "" || command.Action != "retire" && command.Action != "resume" || command.Action == "retire" && command.Reason != "unavailable" || command.Action == "resume" && command.Reason != "" {
+		if command.RequestID == "" || command.RunID == "" || command.SourceID == "" || command.Action != "retire" && command.Action != "resume" || command.Action == "retire" && (command.Reason != "unavailable" || command.Rescan) || command.Action == "resume" && command.Reason != "" {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "invalid collection control")
 		}
 		s, err := getUsageSource(ctx, tx, command.SourceID)
@@ -138,6 +139,12 @@ func (j *Journal) ApplyUsageCollectionControl(ctx context.Context, command proto
 			if command.Action == "resume" {
 				s.Collection.Reopen("reconcile/" + command.RequestID)
 				s.Collection.State = protocol.UsageSettling
+				if command.Rescan {
+					s.Cursors = map[string]nativeusage.Cursor{}
+					s.Files = nil
+					s.DiscoveredAt = 0
+				}
+				s.Coverage = "pending"
 			} else {
 				s.Collection.RetireUnavailable(j.now().UnixMilli(), s.WriterStopped)
 			}

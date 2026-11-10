@@ -46,6 +46,12 @@ func UsageCollections(ctx context.Context, q store.Querier, f protocol.UsageColl
 			_ = rows.Close()
 			return out, err
 		}
+		if s.Collection.State == "unobserved" && s.Coverage == "caught_up" {
+			s.Coverage = "unobserved"
+		}
+		if len(s.PendingRequestIDs) > 0 {
+			s.Coverage = "pending"
+		}
 		s.Commands = []protocol.UsageCollectionCommandStatus{}
 		if s.PendingRequestIDs == nil {
 			s.PendingRequestIDs = []string{}
@@ -125,7 +131,7 @@ func (c ControlUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err = decodePayload(x.Env, &input); err != nil {
 		return Outcome{}, err
 	}
-	if !c.Resume && input.Reason != "unavailable" || c.Resume && input.Reason != "" {
+	if !c.Resume && (input.Reason != "unavailable" || input.Rescan) || c.Resume && input.Reason != "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only unavailable can be explicitly retired")
 	}
 	page, err := UsageCollections(ctx, tx.Q(), protocol.UsageCollectionQuery{}, x.Env.Target.ID)
@@ -143,6 +149,10 @@ func (c ControlUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		}
 		if c.Resume {
 			s.Collection.Reopen("reconcile/" + x.Env.RequestID)
+			if input.Rescan {
+				s.Cursors = json.RawMessage(`{}`)
+			}
+			s.Coverage = "pending"
 		} else {
 			s.Collection.RetireUnavailable(x.Now.UnixMilli(), s.WriterStopped)
 		}
@@ -153,6 +163,15 @@ func (c ControlUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	if !usageCollectionEnabled(ctx, tx.Q(), source.HostID) || source.Collection.Epoch == 0 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host collection capability and observation required")
+	}
+	if c.Resume && input.Rescan {
+		runtime, err := store.GetHostRuntime(ctx, tx.Q(), source.HostID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if runtime.Runtime.Protocol < 3 {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "full usage rescan requires runner protocol 3; legacy resume retains the saved cursor")
+		}
 	}
 	var pending bool
 	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_collection_commands WHERE source_key=? AND status='pending')`, source.ID).Scan(&pending); err != nil {
@@ -165,7 +184,7 @@ func (c ControlUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err = tx.Q().QueryRowContext(ctx, `SELECT local_source_id FROM token_usage_remote_collection WHERE source_key=?`, source.ID).Scan(&localID); err != nil {
 		return Outcome{}, err
 	}
-	command := protocol.UsageCollectionCommand{RequestID: x.Env.RequestID, SourceID: localID, RunID: source.RunID, Action: "retire", Reason: input.Reason, ExpectedEpoch: source.Collection.Epoch, ExpectedRevision: source.Collection.Revision}
+	command := protocol.UsageCollectionCommand{RequestID: x.Env.RequestID, SourceID: localID, RunID: source.RunID, Action: "retire", Reason: input.Reason, Rescan: input.Rescan, ExpectedEpoch: source.Collection.Epoch, ExpectedRevision: source.Collection.Revision}
 	if c.Resume {
 		command.Action = "resume"
 	}

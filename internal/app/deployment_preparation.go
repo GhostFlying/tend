@@ -138,6 +138,7 @@ func readDeploymentLedger(ctx context.Context, q store.Querier, d *protocol.Obse
 	p := &protocol.ObservedDeploymentPreparation{Source: "server.fixed_deployment/ledger", ObservedAt: now, Seq: seq, IssueIDs: append([]string{}, issueIDs...), TargetSource: "server.upgrade_configuration/active_hosts", HostIDs: []string{}, Hosts: []protocol.ObservedDeploymentHost{}, UnsettledUpgrades: []protocol.ObservedUpgrade{}, Deliveries: []protocol.IssueDeliveryPage{}, Blockers: []protocol.ObservedDeploymentBlocker{}, Missing: []string{}, Complete: true}
 	if d.Preparation != nil {
 		p.ServerInstance = d.Preparation.ServerInstance
+		p.ExecutionEntry = d.Preparation.ExecutionEntry
 	}
 	d.Preparation = p
 	missing := func(reason string) { p.Complete = false; p.Missing = append(p.Missing, reason) }

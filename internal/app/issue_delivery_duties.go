@@ -89,6 +89,19 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if strings.TrimSpace(p.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery reason is required")
 	}
+	if p.Action == "submit_result" {
+		return submitIssueOwnerResult(ctx, x, tx, issue, p)
+	}
+	if p.AcceptanceID != "" {
+		if err := bindIssueOwnerResultAcceptance(ctx, x, tx, issue, p); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if p.ReviewerArtifactID != "" {
+		if err := bindIssueOwnerResultReview(ctx, tx, issue, p); err != nil {
+			return Outcome{}, err
+		}
+	}
 	d, err := loadOrPrepareLiveDeliveryDuty(ctx, tx, issue, p)
 	if err != nil {
 		return Outcome{}, err
@@ -187,6 +200,11 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			d.ExecutionTaskID = ""
 		}
+		policyIssue, policy, err := store.EffectiveIssuePRPolicy(ctx, tx.Q(), issue)
+		if err != nil {
+			return Outcome{}, err
+		}
+		policyCovers := policy != nil && policy.Mode == "auto" && store.IssuePolicyAuthorizesDeployment(policy, p.Candidate)
 		recoverManualQuestion := false
 		if d.AttentionID != "" {
 			old, err := store.GetAttention(ctx, tx.Q(), d.AttentionID)
@@ -198,19 +216,21 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, err
 			}
 			if p.Action != "resume" && d.AssignmentEpoch == issue.AssignmentEpoch && d.Status != "preparing" && reflect.DeepEqual(d.Candidate, p.Candidate) && decision.Question == deliveryCandidateQuestion(*p.Candidate) && ((decision.Status == store.DecisionOpen && decision.Version == 1) || (decision.Status == store.DecisionAnswered && decision.Version == 2)) {
-				if decision.Status == store.DecisionOpen {
+				if decision.Status == store.DecisionOpen && !policyCovers {
 					return Outcome{Result: d}, nil
 				}
-				option, err := deliveryOwnerOption(ctx, tx.Q(), d)
-				if err != nil {
-					return Outcome{}, err
-				}
-				if oneOf(option, "approve", "defer", "end_delivery") {
-					return Outcome{Result: d}, nil
+				if decision.Status == store.DecisionAnswered {
+					option, err := deliveryOwnerOption(ctx, tx.Q(), d)
+					if err != nil {
+						return Outcome{}, err
+					}
+					if oneOf(option, "approve", "defer", "end_delivery") {
+						return Outcome{Result: d}, nil
+					}
 				}
 				// Recover the original concrete confirmation, not an automatic
 				// grant introduced by a later policy change.
-				recoverManualQuestion = true
+				recoverManualQuestion = !policyCovers
 				if d.AcceptanceID == "" && d.ArtifactID == "" {
 					if _, err := currentLiveDeliveryTask(ctx, tx.Q(), issue.IssueID, d.TaskID, p.ExpectedTaskControlRevision); err != nil {
 						return Outcome{}, err
@@ -223,10 +243,6 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			events = append(events, attentionEvent(old))
 		}
 
-		policyIssue, policy, err := store.EffectiveIssuePRPolicy(ctx, tx.Q(), issue)
-		if err != nil {
-			return Outcome{}, err
-		}
 		if policy == nil && !recoverManualQuestion {
 			if d.PolicyAttentionID != "" && reflect.DeepEqual(d.Candidate, p.Candidate) && d.AssignmentEpoch == issue.AssignmentEpoch {
 				return Outcome{Result: d}, nil
@@ -257,7 +273,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return out, err
 		}
 		d.PolicyAttentionID = ""
-		if !recoverManualQuestion && policy != nil && policy.Mode == "auto" && !p.Candidate.Deploy {
+		if !recoverManualQuestion && policyCovers {
 			reviewDuty := d
 			reviewDuty.Candidate = p.Candidate
 			if err := store.RequireDeliveryDutyReview(ctx, tx.Q(), issue, reviewDuty); err != nil {
@@ -441,7 +457,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err != nil {
 			return Outcome{}, err
 		}
-		if task.Lifecycle != protocol.TaskCompleted {
+		if task.Lifecycle != protocol.TaskCompleted && task.Kind != protocol.TaskKindIssueManager {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery execution must complete under its frozen acceptance policy")
 		}
 		obs, err := store.GetDeliveryObservation(ctx, tx.Q(), issue.IssueID, d.Candidate.DeliveryID)
@@ -471,7 +487,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		d.Status = "complete"
 	default:
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery action must be prepare, resume, bind, report, end or complete")
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery action must be submit_result, prepare, resume, bind, report, end or complete")
 	}
 	d.Revision++
 	d.Reason, d.Evidence = p.Reason, evidence

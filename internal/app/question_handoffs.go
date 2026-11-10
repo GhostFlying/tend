@@ -125,7 +125,11 @@ func (a *App) NativeQuestionPredecessor(ctx context.Context, run string) (string
 		return nil
 	})
 	if err == nil && parent == "" {
-		return a.nativePausePredecessor(ctx, run)
+		parent, err = a.nativePausePredecessor(ctx, run)
+		if err == nil && parent == "" {
+			return a.nativeTaskPredecessor(ctx, run)
+		}
+		return parent, err
 	}
 
 	return parent, err

@@ -361,6 +361,7 @@ type Driver struct {
 	Profile             protocol.ExecutionProfile
 	Emit                func(context.Context, Event) error
 	Download            func(context.Context, protocol.ArtifactFile) (string, error)
+	Upload              func(context.Context, string, string) (protocol.ArtifactFile, error)
 	mu                  sync.Mutex
 	threads             map[string]harness.Thread
 	private             map[string]bool
@@ -385,9 +386,9 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		return nil, fmt.Errorf("%w: model catalog is unavailable", harness.ErrRejected)
 	case "start", "resume", "fork":
 		cfg := r.Config
-		nativeOwner := d.NativeOwnerTools && !d.RequireReceiptReader && cfg.Purpose == NativeOwnerPurpose
+		nativeOwner := d.NativeOwnerTools && !d.RequireReceiptReader
 		if !nativeOwner && (cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never") {
-			return nil, fmt.Errorf("%w: manager requires read-only/never", harness.ErrRejected)
+			return nil, fmt.Errorf("%w: receipt or legacy transport requires read-only/never", harness.ErrRejected)
 		}
 		if d.RequireReceiptReader && (r.ThreadID == "" || cfg.Model == "" || cfg.Ephemeral) {
 			return nil, fmt.Errorf("%w: receipt-only resume requires the original thread and applied model", harness.ErrRejected)
@@ -395,17 +396,13 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if cfg.Config == nil {
 			cfg.Config = map[string]any{}
 		}
-		if nativeOwner {
-			// Use the same device profile as the configured native executor.
-			// Tend's presentation defaults are not an owner tool policy.
-			cfg.Sandbox, cfg.ApprovalPolicy, cfg.ApprovalsReviewer = "", "", ""
-			for key := range Isolation() {
-				delete(cfg.Config, key)
-			}
-		} else {
+		if !nativeOwner {
 			for key, value := range Isolation() {
 				cfg.Config[key] = value
 			}
+		}
+		if d.Upload != nil && nativeOwner {
+			cfg.Tools = append(cfg.Tools, harness.UploadFileToolSpec)
 		}
 		cfg.Cwd = d.Directory
 		if !d.RequireReceiptReader {
@@ -608,6 +605,10 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	if d.RequireReceiptReader {
 		return harness.ToolResult{Text: "Receipt-only managers cannot execute native tool callbacks"}
 	}
+	if call.Tool == harness.UploadFileTool && !d.NativeOwnerTools {
+		return harness.ToolResult{Text: "This receipt or legacy transport does not support native file upload"}
+	}
+
 	key := call.ThreadID + "/" + call.TurnID + "/" + call.CallID
 	ch := make(chan harness.ToolResult, 1)
 	d.mu.Lock()
@@ -622,6 +623,22 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	d.tools[key] = ch
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); delete(d.tools, key); d.mu.Unlock(); d.wg.Done() }()
+	if call.Tool == harness.UploadFileTool && d.Upload != nil {
+		var p struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(call.Arguments, &p) != nil || p.Path == "" || p.Name == "" {
+			return harness.ToolResult{Text: "path and name are required"}
+		}
+		file, err := d.Upload(ctx, p.Path, p.Name)
+		if err != nil {
+			return harness.ToolResult{Text: "file upload remains unconfirmed: " + err.Error() + "; preserve the original file and name to reconcile"}
+		}
+		raw, _ := json.Marshal(map[string]any{"ok": true, "result": file})
+		return harness.ToolResult{Success: true, Text: string(raw)}
+	}
+
 	if err := d.Emit(ctx, Event{ThreadID: call.ThreadID, Call: &call}); err != nil {
 		return harness.ToolResult{Text: "Coordinator connection requires reconciliation"}
 	}

@@ -74,7 +74,7 @@ func TestDirectCLIUploadsOriginalInjectsEvidenceAndMessagesExactRun(t *testing.T
 		t.Fatal("source injection created work")
 	}
 	task := e.task("original active worker")
-	rt := &protocol.RunnerRuntime{InstanceID: "message-runner", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunMessages, protocol.CapabilityWorkerQuestions, protocol.CapabilityRunnerHeartbeat}}
+	rt := &protocol.RunnerRuntime{InstanceID: "message-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunMessages, protocol.CapabilityWorkerQuestions, protocol.CapabilityRunnerHeartbeat}}
 	runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}
 	issueWorkerCommand(t, e, runner, protocol.Target{Type: "host", ID: "host-a"}, protocol.HelloPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: rt}, app.Hello{})
 	claimed := issueWorkerCommand(t, e, runner, protocol.Target{Type: "host", ID: "host-a"}, protocol.ClaimPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: rt}, app.Claim{})

@@ -245,7 +245,8 @@ func (c *Controller) tick(ctx context.Context) error {
 	if handled, err := c.recoveryTick(ctx); handled || err != nil {
 		return err
 	}
-	if err := c.cancelStaged(ctx); err != nil {
+	cancellations, err := c.cancelStaged(ctx)
+	if err != nil {
 		return err
 	}
 	observed, err := c.observe(ctx)
@@ -257,6 +258,7 @@ func (c *Controller) tick(ctx context.Context) error {
 	observed.ProcessInstanceID = c.cfg.ProcessInstance
 	observed.BinarySHA256 = c.cfg.BinarySHA256
 	observed.UpdaterReceipt = c.rollbackReceipt(ctx)
+	observed.ServerCancellations = cancellations
 	var selfErr error
 	current, readErr := c.app.CurrentUpgrade(ctx)
 	if readErr != nil {
@@ -475,25 +477,25 @@ func (c *Controller) rollbackReceipt(ctx context.Context) *protocol.UpdaterRecei
 // cancelStaged follows the local operation's original batch, even when a newer
 // batch is already latest. The supervisor CAS prevents a raced stop from being
 // treated as safely unsent cancellation.
-func (c *Controller) cancelStaged(ctx context.Context) error {
+func (c *Controller) cancelStaged(ctx context.Context) (confirmed []string, err error) {
 	check, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	state, err := updater.CallSocket(check, c.cfg.UpdaterSocket, "status", updater.ControlRequest{})
 	if err != nil {
-		return nil
+		return confirmed, nil
 	}
 	if state.InstanceID != c.cfg.Instance {
-		return errors.New("upgradectl: updater belongs to another logical instance")
+		return nil, errors.New("upgradectl: updater belongs to another logical instance")
 	}
 	ids, err := c.app.ListCancelledServerUpgrades(check)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Include the bound historical batch independently of the latest view.
 	if op := state.Operation; op != nil && op.Kind == "upgrade" && op.Phase == "staged" {
 		batch, err := c.app.GetUpgrade(check, op.Binding.UpgradeID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		expired := batch.View.Status == "attention" && batch.ServerGrantDeadline > 0 && batch.ServerGrantDeadline <= c.cfg.Now().UnixMilli() && batch.ServerProcess == op.Binding.ProcessInstanceID
 		if batch.View.Status == "cancelled" || expired {
@@ -510,6 +512,15 @@ func (c *Controller) cancelStaged(ctx context.Context) error {
 	}
 	for _, id := range ids {
 		if receipt, ok := state.Terminals[id]; ok && receipt.Binding.UpgradeID == id && receipt.Binding.InstanceID == c.cfg.Instance && (receipt.Phase == "cancelled" || receipt.Phase == "committed" || receipt.Phase == "rolled_back") {
+			batch, err := c.app.GetUpgrade(check, id)
+			if err != nil {
+				return nil, err
+			}
+			binding := receipt.Binding
+			if batch.ServerInstance != c.cfg.Instance || binding.ProcessInstanceID == "" && receipt.Phase != "cancelled" || binding.ProcessInstanceID != "" && (batch.View.ReleaseID != binding.ReleaseID || batch.ManifestSHA256 != binding.ManifestSHA256 || batch.ServerHash != binding.ArtifactSHA256 || batch.ServerProcess != "" && batch.ServerProcess != binding.ProcessInstanceID) {
+				return nil, errors.New("upgradectl: terminal cancellation identity differs from its original batch")
+			}
+			confirmed = append(confirmed, id)
 			continue
 		}
 		if op := state.Operation; op != nil && op.ID == id {
@@ -518,25 +529,26 @@ func (c *Controller) cancelStaged(ctx context.Context) error {
 			}
 			b := op.Binding
 			if b.InstanceID != c.cfg.Instance || b.UpgradeID != op.ID || b.ProcessInstanceID == "" || state.Process.LaunchID != c.cfg.ProcessInstance || state.Process.SHA256 != c.cfg.BinarySHA256 || state.Current.Artifact.SHA256 != c.cfg.BinarySHA256 {
-				return errors.New("upgradectl: staged updater identity mismatch")
+				return nil, errors.New("upgradectl: staged updater identity mismatch")
 			}
 			batch, err := c.app.GetUpgrade(check, b.UpgradeID)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if batch.View.UpgradeID != b.UpgradeID || batch.Manifest.ReleaseID != b.ReleaseID || batch.ManifestSHA256 != b.ManifestSHA256 || batch.ServerInstance != b.InstanceID || batch.ServerHash != b.ArtifactSHA256 {
-				return errors.New("upgradectl: staged updater batch identity mismatch")
+				return nil, errors.New("upgradectl: staged updater batch identity mismatch")
 			}
 		}
 		state, err = updater.CallSocket(check, c.cfg.UpdaterSocket, "cancel", updater.ControlRequest{ID: id, ExpectedPhase: "staged"})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if state.InstanceID != c.cfg.Instance || !updater.Cancelled(state, id) {
-			return errors.New("upgradectl: cancellation lacks durable terminal proof")
+			return nil, errors.New("upgradectl: cancellation lacks durable terminal proof")
 		}
+		confirmed = append(confirmed, id)
 	}
-	return nil
+	return confirmed, nil
 }
 
 func (c *Controller) recheckManagerParkCandidate(ctx context.Context, id string) error {

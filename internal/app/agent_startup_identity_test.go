@@ -9,16 +9,24 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestAgentStartupFrozenAttachmentRetainsSourceAfterQueuePriorityChanges(t *testing.T) {
+func TestAgentStartupAttachmentRetainsSourceAfterQueuePriorityChanges(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
-	prepareHostedAdmissionRepair(t, h, issue)
 	conversation := "issue:" + issue.IssueID
+	submitHostedAdmissionInput(t, h, conversation)
 	_, _, attachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), conversation)
 	if err != nil || attachment.RequestID == "" || attachment.Reconciliation {
-		t.Fatal("fixture did not select an unadmitted frozen repair", attachment, err)
+		t.Fatal("fixture did not select its unadmitted owner input", attachment, err)
 	}
 	submitHostedAdmissionInput(t, h, conversation)
+	// Reorder the original still-unadmitted delivery. Startup failures remain
+	// charged to the immutable attachment selected before this queue change.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE outbox SET seq=(SELECT MAX(seq)+1 FROM outbox) WHERE request_id=?`, attachment.RequestID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var current store.OutboxMessage
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -78,8 +77,12 @@ func managerRunReconciliation(ctx context.Context, q store.Querier, task, run st
 	if errors.Is(err, sql.ErrNoRows) {
 		out.Blockers = append(out.Blockers, "successful_native_close_missing")
 	} else {
+		raw, err = store.ResolveJSON(ctx, q, raw)
+		if err != nil {
+			return out, err
+		}
 		var reply protocol.ManagerNativeReply
-		if err := json.Unmarshal([]byte(raw), &reply); err != nil || reply.ID != out.CloseRequestID || reply.Error != "" || reply.Rejected || reply.LastSequence < 0 {
+		if err := store.DecodeJSON(ctx, q, raw, &reply); err != nil || reply.ID != out.CloseRequestID || reply.Error != "" || reply.Rejected || reply.LastSequence < 0 {
 			out.Blockers = append(out.Blockers, "native_close_evidence_invalid")
 		} else {
 			out.CloseLastSequence = reply.LastSequence

@@ -48,20 +48,22 @@ type Broker struct {
 	wg           sync.WaitGroup
 }
 type nativeRun struct {
-	writerID        string
-	ctx             context.Context
-	cancel          context.CancelFunc
-	ready           chan struct{}
-	mu              sync.Mutex
-	appURL          string
-	thread          string
-	cwd             string
-	exec            *websocket.Conn
-	controlAttached bool
-	startPending    bool
-	startID         string
-	execAttached    bool
-	tuiResumed      bool
+	optionalContinuation bool
+	resumeID             string
+	writerID             string
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	ready                chan struct{}
+	mu                   sync.Mutex
+	appURL               string
+	thread               string
+	cwd                  string
+	exec                 *websocket.Conn
+	controlAttached      bool
+	startPending         bool
+	startID              string
+	execAttached         bool
+	tuiResumed           bool
 }
 
 func NewBroker(ctx context.Context, cfg BrokerConfig, log *slog.Logger) *Broker {
@@ -161,6 +163,11 @@ func (b *Broker) Serve(w http.ResponseWriter, r *http.Request, runID, channel st
 			}
 			if channel == "control" {
 				run.mu.Lock()
+				if err := b.settleContinuationResume(runID, run, frame); err != nil {
+					run.mu.Unlock()
+					run.cancel()
+					return
+				}
 				if run.startPending && string(frame.ID) == run.startID {
 					var result struct {
 						Thread struct {
@@ -330,9 +337,17 @@ func (b *Broker) serveExec(w http.ResponseWriter, r *http.Request, runID string,
 	if err != nil || json.Unmarshal(data, &hello) != nil || strings.TrimSpace(hello.Cwd) == "" {
 		return
 	}
-	if err := b.bindQuestionHello(ctx, runID, hello); err != nil {
+	hello, err = b.resolveContinuationHello(ctx, runID, hello)
+	if err != nil {
 		return
 	}
+	if hello.OptionalContinuation {
+		raw, _ := json.Marshal(continuationHelloAck{Type: "tend_continuation", ThreadID: hello.ThreadID})
+		if err := client.Write(ctx, websocket.MessageText, raw); err != nil {
+			return
+		}
+	}
+	run.optionalContinuation = hello.OptionalContinuation
 	run.cwd = hello.Cwd
 	run.thread = hello.ThreadID
 	run.exec = client

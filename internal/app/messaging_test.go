@@ -271,18 +271,33 @@ func TestMessagingQuotedMainInputRoutesDirectlyToIssue(t *testing.T) {
 	}
 }
 
-func TestMessagingManagerReplyRequiresExactContext(t *testing.T) {
+func TestMessagingManagerReplyPublishesWithoutContextCeremonyAndRetainsIssueScope(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	turn, principal := startHostedIssueReview(t, h, issue)
-	p := protocol.CoordinationReply{Body: "A scoped progress update", Purpose: "progress", ReplyTo: turn.MessageID, Disposition: "linked", ReviewedKinds: allFactKinds, WorkItemIDs: []string{issue.IssueID}}
-	op := hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, p, CoordinationReply{})
-	if op.Error == nil || op.Error.Code != protocol.CodeInvalidRequest {
-		t.Fatal("missing context accepted", op)
+	for index, contexts := range [][]protocol.LogicalContextReview{nil, {{WorkItemID: issue.IssueID, Revision: h.agentContext(issue.IssueID).Revision + 1}}} {
+		p := protocol.CoordinationReply{Body: "A scoped progress update", Purpose: "progress", ReplyTo: turn.MessageID, Contexts: contexts}
+		op := hostedEffect(t, h, principal, turn, int64(index+1), protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, p, CoordinationReply{})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal("source-review metadata became a publication prerequisite", op)
+		}
+		var receipt struct {
+			MessageID       string `json:"message_id"`
+			PublicationMode string `json:"publication_mode"`
+		}
+		if err := json.Unmarshal(op.Result, &receipt); err != nil || receipt.MessageID == "" || receipt.PublicationMode != "reply" {
+			t.Fatal("publication has no actual persisted receipt", receipt, err)
+		}
+		message, err := h.app.MessagingMessage(t.Context(), receipt.MessageID)
+		if err != nil || message.Body != p.Body || message.ConversationID != "issue:"+issue.IssueID || message.ReplyTo != turn.MessageID {
+			t.Fatal("publication escaped current responsibility", message, err)
+		}
 	}
-	p.Contexts = []protocol.LogicalContextReview{{WorkItemID: issue.IssueID, Revision: h.agentContext(issue.IssueID).Revision + 1}}
-	op = hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, p, CoordinationReply{})
-	if op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
-		t.Fatal("stale context accepted", op)
+	other := createCanonicalOwnerTestIssue(t, h)
+	p := protocol.CoordinationReply{Body: "Must not claim a foreign responsibility", Purpose: "progress", ReplyTo: turn.MessageID, WorkItemIDs: []string{other.IssueID}}
+	before := h.count("conversation_messages")
+	op, err := h.app.Execute(t.Context(), principal, h.env("conversation.reply", protocol.Target{Type: "logical_turn", ID: turn.RequestID}, p, nil), HostedCoordinationCommand{Command: CoordinationReply{}, ExecutionID: turn.RequestID, EffectSeq: 3})
+	if protocol.CodeOf(err) != protocol.CodeForbidden || h.count("conversation_messages") != before {
+		t.Fatal("optional metadata expanded the actual Issue authority", op, err)
 	}
 }

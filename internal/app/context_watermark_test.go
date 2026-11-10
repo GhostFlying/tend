@@ -8,7 +8,7 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-func TestContextWatermarkIgnoresToolRowsButRetainsMessageBarrier(t *testing.T) {
+func TestContextWatermarkUsesProcessingReceiptsInsteadOfSemanticReview(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
 	var reviewed, pending string
@@ -30,6 +30,9 @@ func TestContextWatermarkIgnoresToolRowsButRetainsMessageBarrier(t *testing.T) {
 			if pending == "" && entry.kind == "message" {
 				beforePending = seq
 				reviewed = id
+			}
+			if err := seedProcessedSource(t, tx, id); err != nil {
+				return err
 			}
 			latest = seq
 		}
@@ -58,7 +61,27 @@ func TestContextWatermarkIgnoresToolRowsButRetainsMessageBarrier(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if got := read(); got != beforePending {
+		t.Fatalf("classification fabricated a processing receipt: %d", got)
+	}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return seedProcessedSource(t, tx, pending) }); err != nil {
+		t.Fatal(err)
+	}
 	if got := read(); got != latest {
 		t.Fatalf("watermark %d, want %d", got, latest)
 	}
+}
+
+// This is a read-model fixture of already received terminal native output.
+func seedProcessedSource(t *testing.T, tx *store.Tx, message string) error {
+	t.Helper()
+	logical := "processing-" + message
+	if _, err := tx.Exec(t.Context(), `INSERT INTO logical_turns(logical_turn_id,message_id,status,updated_at) VALUES(?,?,'completed',1)`, logical, message); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO logical_turn_messages(logical_turn_id,message_id) VALUES(?,?)`, logical, message); err != nil {
+		return err
+	}
+	_, err := tx.Exec(t.Context(), `UPDATE logical_turn_processing SET processed_at=1 WHERE logical_turn_id=?`, logical)
+	return err
 }

@@ -314,6 +314,7 @@ func upgradeNotice(ctx context.Context, x *Exec, tx *store.Tx, r store.UpgradeRo
 
 // ServerObservation is supplied by the local controller, never by remote peers.
 type ServerObservation struct {
+	ServerCancellations                                 []string
 	Updater                                             *protocol.UpdaterSelfObservation
 	UpdaterReceipt                                      *protocol.UpdaterReceipt
 	InstanceID, ProcessInstanceID, BinarySHA256, Commit string
@@ -345,6 +346,10 @@ func (tickUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error 
 	return allowKinds(x.Principal, protocol.PrincipalSystem)
 }
 func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	events, err := recordServerCancellationConfirmations(ctx, x, tx, c.Observation)
+	if err != nil {
+		return Outcome{}, err
+	}
 	r, err := store.LatestUpgrade(ctx, tx.Q())
 	if errors.Is(err, store.ErrNotFound) {
 		return Outcome{NoEffect: true}, nil
@@ -353,7 +358,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		return Outcome{}, err
 	}
 	if r.View.Status != "running" && r.View.Status != "attention" {
-		return Outcome{Result: r.View, NoEffect: true}, nil
+		return Outcome{Result: r.View, Events: events, NoEffect: len(events) == 0}, nil
 	}
 	before, _ := json.Marshal(r)
 	now := x.Now.UnixMilli()
@@ -513,7 +518,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	}
 	after, _ := json.Marshal(r)
 	if string(before) == string(after) {
-		return Outcome{Result: r.View, NoEffect: true}, nil
+		return Outcome{Result: r.View, Events: events, NoEffect: len(events) == 0}, nil
 	}
 	r.View.Revision++
 	r.View.UpdatedAt = x.Now
@@ -525,7 +530,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, err
 		}
 	}
-	return Outcome{Result: r.View, Events: []Event{upgradeEvent(r)}}, nil
+	return Outcome{Result: r.View, Events: append(events, upgradeEvent(r))}, nil
 }
 
 func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.UpgradeRow, attention func(string) error) error {

@@ -20,13 +20,13 @@ import (
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
-func TestNamedPoolMakesProgressAcrossOwnerAndRepairGenerations(t *testing.T) {
+func TestNamedPoolKeepsCompletionAcrossOwnerDefinitionChanges(t *testing.T) {
 	testNamedPoolAdmissionProgress(t, false)
 }
-func TestNamedPoolRepairsUnavailableCurrentDefinitionWithoutConsumingNewInput(t *testing.T) {
+func TestNamedPoolDisabledCurrentDefinitionDoesNotConsumeNewInput(t *testing.T) {
 	testNamedPoolAdmissionProgress(t, true)
 }
-func TestNamedPoolDeferredUnavailableOwnerDoesNotStarveFrozenRepair(t *testing.T) {
+func TestNamedPoolUnavailableOwnerPreservesCompletedHistory(t *testing.T) {
 	testNamedPoolAdmissionProgress(t, false, true)
 }
 func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool) {
@@ -91,8 +91,8 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 		cb := contextbuilder.New(e.app, e.store, e.ids, contextbuilder.Config{})
 		return New(e.app, cb, tools.New(e.app, e.store, cb, quiet()), Config{ConversationID: id, Instance: id, Thread: ThreadConfig(t.TempDir(), "unused"), Now: e.now, RestartDelay: 10 * time.Millisecond, Log: quiet(), OpenNamed: func(ctx context.Context, _ hostedconfig.Selection) (harness.Session, error) { return h.Open(ctx) }})
 	}
-	// A real first native turn deliberately omits metadata review, producing a
-	// genuine pinned v1 repair before the configuration is changed.
+	// A real first native turn completes without source-review bookkeeping.
+	// Changing configuration must neither replay it nor create a model repair.
 	h.Turn = func(_ *testkit.FakeThread, _ string, _ harness.TurnInput) string { return "completed" }
 	submit("initial goal")
 	original, _, ok, err := e.app.NextDelivery(t.Context(), "background_thread:"+conversation)
@@ -138,7 +138,6 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 	}
 	accept(1)
 	var v1Repairs, v2Inputs atomic.Int32
-	var v2Logical atomic.Value
 	failures := make(chan string, 8)
 	h.Turn = func(th *testkit.FakeThread, turn string, in harness.TurnInput) string {
 		if in.Repair && in.Model == "v1" {
@@ -167,32 +166,12 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 		if !invoke("issues_read", map[string]any{}, &item) {
 			return "failed"
 		}
-		review := protocol.IssueContextReview{ExpectedAssignmentEpoch: item.AssignmentEpoch, ContextRevision: item.ContextRevision, Summary: "Investigation remains delegated"}
-		for _, source := range item.SourceReviews {
-			review.Sources = append(review.Sources, protocol.LogicalTurnReview{MessageID: source.MessageID, ContentRevision: source.ContentRevision, AssociationRevision: source.AssociationRevision})
-		}
-		if !invoke("issues_context_review", map[string]any{"effect_seq": 1, "payload": review}, nil) {
-			return "failed"
-		}
-		var state protocol.LogicalTurnState
-		if !invoke("issues_turn_read", map[string]any{}, &state) {
-			return "failed"
-		}
-		commit := protocol.LogicalTurnCommit{Contexts: state.Contexts}
-		for _, source := range state.Messages {
-			commit.Messages = append(commit.Messages, protocol.LogicalTurnReview{MessageID: source.MessageID, ContentRevision: source.ContentRevision, AssociationRevision: source.Revision})
-		}
-		if !invoke("issues_turn_commit", map[string]any{"effect_seq": 2, "payload": commit}, nil) {
-			return "failed"
-		}
-		if !in.Repair && in.Model == "v2" && in.UserMessageID == newOwnerMessage {
-			v2Logical.Store(state.ID)
-		}
+
 		return "completed"
 	}
-	pool := &BackgroundPool{App: e.app, Limit: 1, New: func(id string) (*Manager, error) { return newManager(id), nil }}
-	// One phase budget covers the real owner turn and the frozen repair, including
-	// the pool's one-second admission scan and five-second delivery retry floor.
+	var scans atomic.Int32
+	pool := &BackgroundPool{App: e.app, Limit: 1, scanned: func() { scans.Add(1) }, New: func(id string) (*Manager, error) { return newManager(id), nil }}
+	// One bounded pool run verifies current admission and immutable completed history.
 	phaseStarted := time.Now()
 	run, stop := context.WithTimeout(t.Context(), 30*time.Second)
 	finished := make(chan struct{})
@@ -207,29 +186,33 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 		default:
 		}
 		repaired, readErr = e.app.LogicalTurn(run, original.RequestID)
-		currentDone := disable || deferStartup
-		if id, _ := v2Logical.Load().(string); !currentDone && id != "" {
-			var err error
-			current, err = e.app.LogicalTurn(run, id)
-			currentDone = false
-			if err == nil && current.Status == "completed" && v2Inputs.Load() > 0 {
-				for _, source := range current.Messages {
-					if source.MessageID == newOwnerMessage {
-						currentDone = true
-					}
-				}
+		currentDone := false
+		if disable || deferStartup {
+			currentDone = scans.Load() >= 1
+		} else {
+			var nextRequest string
+			err := e.store.Read(run, func(tx *store.ReadTx) error {
+				return tx.Q().QueryRowContext(run, `SELECT request_id FROM main_turns WHERE message_id=? AND status='completed' ORDER BY rowid DESC LIMIT 1`, newOwnerMessage).Scan(&nextRequest)
+			})
+			if err == nil {
+				current, err = e.app.LogicalTurn(run, nextRequest)
+				currentDone = err == nil && current.Status == "completed" && v2Inputs.Load() > 0
 			}
 		}
-		if readErr == nil && repaired.Status == "completed" && v1Repairs.Load() == 1 && currentDone {
+		if readErr == nil && repaired.Status == "completed" && v1Repairs.Load() == 0 && currentDone {
 			break
 		}
+
 		select {
 		case <-run.Done():
-			t.Fatalf("owner v2 and pinned v1 repair did not both commit: repair=%s/%s count=%d owner=%s/%s starts=%d read=%v phase=%v", repaired.ID, repaired.Status, v1Repairs.Load(), current.ID, current.Status, v2Inputs.Load(), readErr, run.Err())
+			t.Fatalf("completed v1 or current owner admission failed: repair=%s/%s count=%d owner=%s/%s starts=%d read=%v phase=%v", repaired.ID, repaired.Status, v1Repairs.Load(), current.ID, current.Status, v2Inputs.Load(), readErr, run.Err())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	t.Logf("pinned v1 repair logical=%s status=%s count=%d; owner v2 source=%s logical=%s status=%s starts=%d disabled=%t deferred=%t phase_elapsed=%s", repaired.ID, repaired.Status, v1Repairs.Load(), newOwnerMessage, current.ID, current.Status, v2Inputs.Load(), disable, deferStartup, time.Since(phaseStarted))
+	t.Logf("preserved v1 completion logical=%s status=%s count=%d; owner v2 source=%s logical=%s status=%s starts=%d disabled=%t deferred=%t phase_elapsed=%s", repaired.ID, repaired.Status, v1Repairs.Load(), newOwnerMessage, current.ID, current.Status, v2Inputs.Load(), disable, deferStartup, time.Since(phaseStarted))
+	if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 0 || v1Repairs.Load() != 0 {
+		t.Fatal("definition change created a source-only model repair")
+	}
 	if (disable || deferStartup) && v2Inputs.Load() != 0 {
 		t.Fatal("disabled current manager consumed new business", v2Inputs.Load())
 	}

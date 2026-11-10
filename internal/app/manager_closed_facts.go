@@ -166,6 +166,10 @@ func closedToolProof(ctx context.Context, q store.Querier, run string, call clos
 		if err := rows.Scan(&id, &raw, &result, &status); err != nil {
 			return nil, nil, nil, err
 		}
+		raw, err = store.ResolveJSON(ctx, q, raw)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		var request struct {
 			ThreadID   string `json:"thread_id"`
 			TurnID     string `json:"turn_id"`
@@ -176,6 +180,13 @@ func closedToolProof(ctx context.Context, q store.Querier, run string, call clos
 			} `json:"tool_result"`
 		}
 		var reply protocol.ManagerNativeReply
+		if result != nil {
+			original, err := store.ResolveJSON(ctx, q, *result)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			result = &original
+		}
 		if status != "completed" || result == nil || json.Unmarshal([]byte(raw), &request) != nil || request.ToolResult == nil || request.ToolResult.Success == nil || request.ToolResult.Text == nil || request.ThreadID != call.ThreadID || request.TurnID != call.TurnID || request.CallID != call.CallID || json.Unmarshal([]byte(*result), &reply) != nil || reply.ID != id || reply.Error != "" || reply.Rejected {
 			return nil, nil, nil, nil
 		}
@@ -246,6 +257,11 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.seq, &r.raw, &r.applied); err != nil {
+			rows.Close()
+			return err
+		}
+		r.raw, err = store.ResolveJSON(ctx, tx.Q(), r.raw)
+		if err != nil {
 			rows.Close()
 			return err
 		}

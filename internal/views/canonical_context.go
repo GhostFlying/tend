@@ -27,43 +27,10 @@ const canonicalContextExecutions = `WITH owned_logical AS (
 func canonicalContextStatus(ctx context.Context, q store.Querier, out *protocol.IssueContextView) error {
 	id := out.IssueID
 	out.DispatchBlockers = []protocol.ContextBlocker{}
-	out.SyncStatus = "synced"
-	rows, err := q.QueryContext(ctx, `SELECT 'source_correction',message_id,'source association or content changed' FROM message_context_obligations WHERE work_item_id=? AND needs_review=1
- UNION ALL SELECT 'fact_review',f.fact_id,'effective fact was invalidated by a source correction' FROM work_item_context_facts f JOIN work_items w ON w.work_item_id=? WHERE f.superseded=0 AND f.needs_review=1 AND (f.work_item_id=w.work_item_id OR f.scope='global' OR (f.scope='project' AND f.project=w.project))`, id, id)
-	if err != nil {
-		return err
-	}
-	var reviews []protocol.ContextBlocker
-	for rows.Next() {
-		var b protocol.ContextBlocker
-		if err := rows.Scan(&b.Code, &b.ObjectID, &b.Message); err != nil {
-			rows.Close()
-			return err
-		}
-		reviews = append(reviews, b)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, b := range reviews {
-		// A removed association remains a correction duty. Admission, rather
-		// than a current association, distinguishes queued owner successors.
-		if b.Code == "source_correction" {
-			admitted, err := store.OwnerInputAdmitted(ctx, q, b.ObjectID)
-			if err != nil {
-				return err
-			}
-			if !admitted {
-				continue
-			}
-		}
-		out.DispatchBlockers = append(out.DispatchBlockers, b)
-		out.SyncStatus = "needs_review"
-	}
-	rows, err = q.QueryContext(ctx, canonicalContextExecutions+`SELECT CASE WHEN l.status='processing' THEN 'context_revision' ELSE 'logical_turn_state' END,l.logical_turn_id,c.revision,l.status FROM owned_logical o JOIN logical_turns l USING(logical_turn_id) JOIN work_item_contexts c ON c.work_item_id=? WHERE l.status<>'completed' AND (l.status<>'processing' OR NOT EXISTS(SELECT 1 FROM logical_turn_context_reviews r WHERE r.logical_turn_id=l.logical_turn_id AND r.work_item_id=c.work_item_id AND r.revision=c.revision))
+	out.SyncStatus = "available"
+	rows, err := q.QueryContext(ctx, canonicalContextExecutions+`SELECT 'logical_turn_state',l.logical_turn_id,c.revision,l.status FROM owned_logical o JOIN logical_turns l USING(logical_turn_id) JOIN work_item_contexts c ON c.work_item_id=? WHERE l.status IN ('unknown','awaiting_clarification','stopped')
  UNION ALL SELECT 'native_receipt',p.request_id,0,'native execution outcome requires reconciliation' FROM native_turn_receipts_pending p JOIN logical_turn_executions e ON e.request_id=p.request_id JOIN owned_logical o USING(logical_turn_id)`, id, id, id)
+
 	if err != nil {
 		return err
 	}
@@ -80,7 +47,7 @@ func canonicalContextStatus(ctx context.Context, q store.Querier, out *protocol.
 	if err != nil {
 		return err
 	}
-	if err := q.QueryRowContext(ctx, canonicalContextExecutions+`SELECT COALESCE((SELECT l.status FROM owned_logical o JOIN logical_turns l USING(logical_turn_id) WHERE l.status<>'completed' ORDER BY (l.status='recovering') DESC,l.updated_at DESC,l.logical_turn_id LIMIT 1),'idle')`, id, id).Scan(&out.CoordinationState); err != nil {
+	if err := q.QueryRowContext(ctx, canonicalContextExecutions+`SELECT COALESCE((SELECT CASE WHEN EXISTS(SELECT 1 FROM native_turn_receipts_pending p JOIN logical_turn_executions e ON e.request_id=p.request_id WHERE e.logical_turn_id=l.logical_turn_id) THEN 'recovering' ELSE l.status END FROM owned_logical o JOIN logical_turns l USING(logical_turn_id) WHERE l.status IN ('processing','unknown','awaiting_clarification','stopped') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p JOIN logical_turn_executions e ON e.request_id=p.request_id WHERE e.logical_turn_id=l.logical_turn_id) ORDER BY l.updated_at DESC,l.logical_turn_id LIMIT 1),'idle')`, id, id).Scan(&out.CoordinationState); err != nil {
 		return err
 	}
 	out.DispatchReady = len(out.DispatchBlockers) == 0

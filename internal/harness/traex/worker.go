@@ -179,9 +179,17 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	previousRun, previousThread := spec.StoppedPredecessor()
 	if previousRun != "" && previousThread != "" && spec.PredecessorStateDir != "" {
 		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+previousRun)
+		if errors.Is(err, os.ErrNotExist) && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil) && spec.RetainedResume == nil {
+			spec.Thread = ""
+			opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, ws.opts.Session.Environment, false)
+		}
 	} else {
 		if previousRun != "" && previousThread != "" && opts.Environment != nil {
-			return nil, fmt.Errorf("%w: isolated continuation needs original execution state", harness.ErrWorkerNotStarted)
+			if spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil {
+				spec.Thread = ""
+			} else {
+				return nil, fmt.Errorf("%w: isolated continuation needs original execution state", harness.ErrWorkerNotStarted)
+			}
 		}
 		opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)
 	}
@@ -243,6 +251,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	if spec.DownloadFile != nil {
 		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
+	}
+	if spec.WaitExternal != nil {
+		cfg.Tools = append(cfg.Tools, harness.WaitExternalToolSpec)
 	}
 	if spec.AskOwner != nil {
 		cfg.Tools = append(cfg.Tools, questionTool(spec))
@@ -505,7 +516,8 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 		if err == nil {
 			return th, nil
 		}
-		if ctx.Err() != nil || ws.opts.StrictResume || !errors.Is(err, harness.ErrRejected) {
+		optionalContinuation := spec.RetainedResume == nil && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil)
+		if ctx.Err() != nil || ws.opts.StrictResume && !optionalContinuation || !errors.Is(err, harness.ErrRejected) {
 			return nil, err
 		}
 		if log := ws.opts.Session.Log; log != nil {

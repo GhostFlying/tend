@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -22,8 +23,28 @@ func validateIssuePRPolicyChange(ctx context.Context, x *Exec, q store.Querier, 
 	if p.Mode != "auto" && p.Mode != "manual" || strings.TrimSpace(p.Repository) == "" || strings.TrimSpace(p.Repository) != p.Repository || strings.TrimSpace(p.Reason) == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "pr_policy requires mode auto/manual, an exact repository and a reason")
 	}
+	if p.Deployment != nil {
+		if p.Mode != "auto" || strings.TrimSpace(p.Deployment.ServerInstance) == "" || p.Deployment.ServerInstance != strings.TrimSpace(p.Deployment.ServerInstance) || p.Deployment.HostIDs == nil {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "automatic deployment scope requires an exact server instance and explicit host_ids (empty for server only)")
+		}
+		for _, host := range p.Deployment.HostIDs {
+			if host == "" || host != strings.TrimSpace(host) {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "deployment host_ids must be nonempty exact identities")
+			}
+		}
+		copyScope := *p.Deployment
+		copyScope.HostIDs = slices.Clone(p.Deployment.HostIDs)
+		slices.Sort(copyScope.HostIDs)
+		copyScope.HostIDs = slices.Compact(copyScope.HostIDs)
+		copyPolicy := *p
+		copyPolicy.Deployment = &copyScope
+		next.Plan.PRPolicy, p = &copyPolicy, &copyPolicy
+	}
 	unchanged := reflect.DeepEqual(previous.Plan.PRPolicy, p)
-	if unchanged && (p.Mode != "auto" || p.Authority != nil && p.Authority.ScopeDigest == store.IssuePRScopeDigest(next.Plan)) {
+	// The frozen digest records the authorized requirements. The owner decides
+	// whether subsequent Issue edits enlarge that scope; textual changes cannot
+	// manufacture a new approval requirement or silently replace its provenance.
+	if unchanged && (p.Mode != "auto" || p.Authority != nil) {
 		return nil
 	}
 	if p.Mode == "manual" {
@@ -123,7 +144,7 @@ func settleIssuePRPolicyQuestion(ctx context.Context, x *Exec, tx *store.Tx, iss
 	if _, err := tx.Exec(ctx, `UPDATE decisions SET status='cancelled',version=version+1,updated_at=? WHERE decision_id=? AND status='open'`, x.Now.UnixMilli(), a.DecisionID); err != nil {
 		return err
 	}
-	a.Status, a.Resolution = "withdrawn", "The Issue integration policy was explicitly recorded; candidate and deployment approvals remain separate"
+	a.Status, a.Resolution = "withdrawn", "The Issue delivery policy was explicitly recorded; authority is limited to its repository and any explicit deployment scope"
 	return saveAttention(ctx, x, tx, &a, a.Revision)
 }
 
@@ -131,5 +152,9 @@ func deliveryExecutionScope(c protocol.IssueDeliveryCandidate, g *protocol.Issue
 	if g == nil || g.Mode != "auto" {
 		return deliveryCandidateQuestion(c)
 	}
-	return fmt.Sprintf("The authenticated Issue policy authorizes automatic merge after the one shared formal PR review and exact-head provider checks. Frozen PR %s; head %s; base %s; target %s. Policy source %s, digest %s. No human candidate approval was fabricated. A revised candidate must refresh affected review/check evidence and use a new frozen execution under the still-valid policy; it does not require another human approval solely because the head changed. This grant does not authorize deployment.", c.URL, c.HeadSHA, c.BaseSHA, c.TargetSHA, g.RequestID, g.PolicyDigest)
+	deployment := "This grant does not authorize deployment."
+	if c.Deploy && c.Deployment != nil {
+		deployment = fmt.Sprintf("The explicit Issue deployment policy also authorizes this execution on server %s and runner identities %v. Preserve the original controlled-upgrade identity when reconciling unknown outcomes.", c.Deployment.ServerInstance, c.Deployment.HostIDs)
+	}
+	return fmt.Sprintf("The authenticated Issue policy authorizes automatic merge after the shared formal PR review and exact-head provider checks. Frozen PR %s; head %s; base %s; target %s. Policy source %s, digest %s. A revised candidate must refresh affected review/check evidence under the still-valid policy; it does not require another human approval solely because the head changed. The Issue owner must request new authority for actual scope enlargement. %s", c.URL, c.HeadSHA, c.BaseSHA, c.TargetSHA, g.RequestID, g.PolicyDigest, deployment)
 }

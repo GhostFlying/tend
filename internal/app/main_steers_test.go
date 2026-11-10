@@ -245,13 +245,13 @@ func TestMainSteerRestartPreservesCompletedAndUncertainNativeFacts(t *testing.T)
 			if err := h.app.SettleOpenTurns(t.Context(), rec.ThreadID); err != nil {
 				t.Fatal(err)
 			}
-			if !completedBeforeRestart {
+			if completedBeforeRestart {
+				steerStatusFixture(t, h, supplement, "completed")
+			} else {
 				if err := h.app.SettleMainSteers(t.Context(), rec.ThreadID, rec.TurnID, store.TurnInterrupted); err != nil {
 					t.Fatal(err)
 				}
-			}
-			steerStatusFixture(t, h, supplement, "consumed")
-			if !completedBeforeRestart {
+				steerStatusFixture(t, h, supplement, "consumed")
 				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 					item, err := store.GetConversationItem(t.Context(), tx.Q(), supplement)
 					if err == nil && item.State != string(protocol.MessageUnknown) {
@@ -261,38 +261,37 @@ func TestMainSteerRestartPreservesCompletedAndUncertainNativeFacts(t *testing.T)
 				}); err != nil {
 					t.Fatal(err)
 				}
+				if d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
+					t.Fatal("unreconciled original execution was automatically replayed", d, ok, err)
+				}
+				state, err := h.app.LogicalTurn(t.Context(), rec.RequestID)
+				if err != nil || state.Status != "unknown" {
+					t.Fatal(state, err)
+				}
 				rec.Status = store.TurnCompleted
 				rec.NativeReconciled = true
 				if err := h.app.PutMainTurn(t.Context(), rec); err != nil {
 					t.Fatal(err)
 				}
 			}
-			repair, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-			if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
-				t.Fatal(repair, ok, err)
-			}
-			r := store.MainTurn{RequestID: repair.RequestID, MessageID: rec.MessageID, ThreadID: rec.ThreadID, TurnID: "repair", Status: store.TurnStarted}
-			if err := h.app.PutMainTurn(t.Context(), r); err != nil {
-				t.Fatal(err)
-			}
-			for _, id := range []string{rec.MessageID, supplement} {
-				if op := h.associate(mainAgent, id); op.Status != protocol.OpSucceeded {
-					t.Fatal(op)
-				}
-			}
-			commitFixtureTurn(t, h, r.RequestID)
-			r.Status = store.TurnCompleted
-			if err := h.app.PutMainTurn(t.Context(), r); err != nil {
-				t.Fatal(err)
-			}
 			steerStatusFixture(t, h, supplement, "completed")
+			state, err := h.app.LogicalTurn(t.Context(), rec.RequestID)
+			if err != nil || state.Status != "completed" || state.RepairAttempts != 0 {
+				t.Fatal("terminal receipt required another source-review model turn", state, err)
+			}
+			if a := h.associations(supplement); a.FactsReviewed || a.Disposition != "pending" {
+				t.Fatal("native receipt fabricated source interpretation", a)
+			}
+			if d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
+				t.Fatal("completed native receipt scheduled metadata recovery", d, ok, err)
+			}
 		})
 	}
 }
 
-func TestSupplementStopCancelsQueuedAndInterruptsRunningRepair(t *testing.T) {
+func TestSupplementStopUsesActualNativeStateWithoutSourceRepair(t *testing.T) {
 	for _, running := range []bool{false, true} {
-		name := "queued"
+		name := "completed"
 		if running {
 			name = "running"
 		}
@@ -303,19 +302,12 @@ func TestSupplementStopCancelsQueuedAndInterruptsRunningRepair(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			original.Status = store.TurnCompleted
-			if err := h.app.PutMainTurn(t.Context(), original); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.app.FinishDelivery(t.Context(), active, DeliveryResult{Outcome: Delivered}); err != nil {
-				t.Fatal(err)
-			}
-			if running {
-				d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-				if err != nil || !ok || d.Operation != "conversation.repair_turn" {
-					t.Fatal(d, ok, err)
+			if !running {
+				original.Status = store.TurnCompleted
+				if err := h.app.PutMainTurn(t.Context(), original); err != nil {
+					t.Fatal(err)
 				}
-				if err := h.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: d.RequestID, MessageID: original.MessageID, ThreadID: original.ThreadID, TurnID: "metadata-repair", Status: store.TurnStarted}); err != nil {
+				if err := h.app.FinishDelivery(t.Context(), active, DeliveryResult{Outcome: Delivered}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -324,7 +316,11 @@ func TestSupplementStopCancelsQueuedAndInterruptsRunningRepair(t *testing.T) {
 				t.Fatal(op)
 			}
 			state, err := h.app.LogicalTurn(t.Context(), active.RequestID)
-			if err != nil || state.Status != "stopped" {
+			wantState := "completed"
+			if running {
+				wantState = "stopped"
+			}
+			if err != nil || state.Status != wantState {
 				t.Fatal(state, err)
 			}
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -664,7 +660,7 @@ func TestLateMainSteerConsumptionReopensOnlyCompletedReview(t *testing.T) {
 	}
 }
 
-func TestStoppedSteerResumesOnlyCompletedNativeReview(t *testing.T) {
+func TestEndedSteerDoesNotRequireMetadataResumeOrRewriteNativeOutcome(t *testing.T) {
 	for _, native := range []string{store.TurnCompleted, store.TurnInterrupted} {
 		t.Run(native, func(t *testing.T) {
 			h, active := activeSteerEnv(t)
@@ -680,57 +676,27 @@ func TestStoppedSteerResumesOnlyCompletedNativeReview(t *testing.T) {
 			if err := h.app.FinishDelivery(t.Context(), active, DeliveryResult{Outcome: Delivered}); err != nil {
 				t.Fatal(err)
 			}
+			steerStatusFixture(t, h, supplement, native)
+			state, err := h.app.LogicalTurn(t.Context(), active.RequestID)
+			if err != nil || state.Status != "completed" {
+				t.Fatal("ended native processing retained a metadata duty", state, err)
+			}
 			if op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: supplement}, nil), InterruptReply{}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
-			}
-			steerStatusFixture(t, h, supplement, "interrupted")
-			state, err := h.app.LogicalTurn(t.Context(), active.RequestID)
-			if err != nil || state.Status != "stopped" {
-				t.Fatal(state, err)
 			}
 			if op := h.exec(owner, h.env("conversation.resume_processing", protocol.Target{Type: "logical_turn", ID: state.ID}, struct{}{}, rev(h.associations(original.MessageID).Processing.Revision)), ResumeLogicalTurn{}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			want := "interrupted"
-			if native == store.TurnCompleted {
-				want = "consumed"
-			}
-			steerStatusFixture(t, h, supplement, want)
-			repair, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-			if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
-				t.Fatal(repair, ok, err)
-			}
-			record := store.MainTurn{RequestID: repair.RequestID, MessageID: original.MessageID, ThreadID: original.ThreadID, TurnID: "resumed-review", Status: store.TurnStarted}
-			if err := h.app.PutMainTurn(t.Context(), record); err != nil {
-				t.Fatal(err)
-			}
-			state, err = h.app.LogicalTurn(t.Context(), repair.RequestID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, message := range state.Messages {
-				if message.Disposition == "pending" {
-					if op := h.associate(mainAgent, message.MessageID); op.Status != protocol.OpSucceeded {
-						t.Fatal(op)
-					}
-				}
-			}
-			commitFixtureTurn(t, h, repair.RequestID)
-			record.Status = store.TurnCompleted
-			if err := h.app.PutMainTurn(t.Context(), record); err != nil {
-				t.Fatal(err)
-			}
-			if native == store.TurnCompleted {
-				want = "completed"
-			}
-			steerStatusFixture(t, h, supplement, want)
-			state, err = h.app.LogicalTurn(t.Context(), repair.RequestID)
-			if err != nil || state.Status != "completed" {
-				t.Fatal(state, err)
+			steerStatusFixture(t, h, supplement, native)
+			if d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination); err != nil || ok {
+				t.Fatal("stop/resume of terminal processing created another model round", d, ok, err)
 			}
 			actual, _, err := h.app.MainTurn(t.Context(), original.RequestID)
 			if err != nil || actual.Status != native || actual.TurnID != original.TurnID {
-				t.Fatal("metadata resume changed native fact", actual, err)
+				t.Fatal("processing resume changed native fact", actual, err)
+			}
+			if got := h.associations(supplement); got.FactsReviewed || got.Disposition != "pending" {
+				t.Fatal("terminal processing fabricated source classification", got)
 			}
 		})
 	}

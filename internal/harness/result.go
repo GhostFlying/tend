@@ -91,6 +91,9 @@ func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
 	if c.Tool == ReadContextTool {
 		return r.readContext(ctx, c)
 	}
+	if c.Tool == WaitExternalTool {
+		return r.waitExternal(ctx, c)
+	}
 	if c.Tool == AskOwnerTool {
 		return r.askOwner(ctx, c)
 	}

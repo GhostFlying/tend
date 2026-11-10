@@ -30,50 +30,8 @@ func canonicalOwnerEndpointFacts(ctx context.Context, q store.Querier, current p
 	if err != nil {
 		return facts, err
 	}
-	rows, err = q.QueryContext(ctx, `SELECT o.message_id,d.content_revision FROM message_context_obligations o JOIN message_dispositions d USING(message_id) WHERE o.work_item_id=? AND o.needs_review=1 ORDER BY o.message_id`, current.IssueID)
-	if err != nil {
-		return facts, err
-	}
-	for rows.Next() {
-		var b protocol.IssueBlocker
-		b.Code = "source_review"
-		if err = rows.Scan(&b.ObjectID, &b.Revision); err != nil {
-			rows.Close()
-			return facts, err
-		}
-		facts.OpenAttention = append(facts.OpenAttention, b)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return facts, err
-	}
-	// A terminal child can receive a late content correction without being
-	// automatically reopened. Its new source duty still belongs to the subtree;
-	// the owner resolves it on that child, not by silently clearing it here.
-	rows, err = q.QueryContext(ctx, `WITH RECURSIVE descendants(id) AS (
- SELECT issue_id FROM issue_controls WHERE parent_issue_id=?
- UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id)
- SELECT d.id,w.revision FROM descendants d JOIN work_items w ON w.work_item_id=d.id
- WHERE EXISTS(SELECT 1 FROM message_context_obligations o WHERE o.work_item_id=d.id AND o.needs_review=1)
- ORDER BY d.id`, current.IssueID)
-	if err != nil {
-		return facts, err
-	}
-	for rows.Next() {
-		var b protocol.IssueBlocker
-		b.Code = "child_source_review"
-		if err = rows.Scan(&b.ObjectID, &b.Revision); err != nil {
-			rows.Close()
-			return facts, err
-		}
-		facts.OpenAttention = append(facts.OpenAttention, b)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return facts, err
-	}
+	// Source changes remain visible context; they do not create additional
+	// semantic-review responsibilities that prevent an actual endpoint.
 	duties, err := store.ListIssueDeliveryDuties(ctx, q, current.IssueID)
 	if err != nil {
 		return facts, err
@@ -107,12 +65,8 @@ func canonicalOwnerEndpointFacts(ctx context.Context, q store.Querier, current p
 	if err := appendCanonicalTaskFacts(ctx, q, current.IssueID, &facts); err != nil {
 		return facts, err
 	}
-	// logical_turn_contexts records a C context-review share (0046), not ownership
-	// of the entire shared main native turn. Source duties above must be explicitly
-	// disposed before the owner endpoint records that share reviewed. They stay
-	// attached to C across owner reparent and are not execution LogicalDuties;
-	// OpenAttention here names this existing source obligation, not a P5 table. Actual worker activity is read separately from primary tasks; manager
-	// execution remains unavailable.
+	// Source interpretation is recorded during ordinary work. It does not add
+	// endpoint gates; active executions and unconfirmed receipts remain facts.
 	return facts, nil
 }
 

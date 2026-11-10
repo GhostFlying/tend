@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -20,13 +21,14 @@ import (
 )
 
 type UpgradeConfig struct {
-	Instance      string           `json:"instance"`
-	ControlSocket string           `json:"control_socket"`
-	UpdaterSocket string           `json:"updater_socket"`
-	ReleaseDir    string           `json:"release_dir"`
-	DrainTimeout  cfgfile.Duration `json:"drain_timeout"`
-	RestartBudget cfgfile.Duration `json:"restart_budget"`
-	GrantDuration cfgfile.Duration `json:"grant_duration"`
+	ExecutionEntry *protocol.DeploymentExecutionEntry `json:"execution_entry,omitempty"`
+	Instance       string                             `json:"instance"`
+	ControlSocket  string                             `json:"control_socket"`
+	UpdaterSocket  string                             `json:"updater_socket"`
+	ReleaseDir     string                             `json:"release_dir"`
+	DrainTimeout   cfgfile.Duration                   `json:"drain_timeout"`
+	RestartBudget  cfgfile.Duration                   `json:"restart_budget"`
+	GrantDuration  cfgfile.Duration                   `json:"grant_duration"`
 }
 
 func prepareUpgradeConfig(cfg *UpgradeConfig, dataDir string) error {
@@ -57,6 +59,30 @@ func prepareUpgradeConfig(cfg *UpgradeConfig, dataDir string) error {
 	}
 	if cfg.DrainTimeout < 0 || cfg.RestartBudget < 0 || cfg.GrantDuration < 0 {
 		return errors.New("upgrade timeouts must not be negative")
+	}
+	if cfg.ExecutionEntry != nil {
+		entry := cfg.ExecutionEntry
+		if entry.Transport != "local" && entry.Transport != "ssh" && entry.Transport != "tailscale_ssh" {
+			return errors.New("upgrades.execution_entry.transport must be local, ssh or tailscale_ssh")
+		}
+		if entry.Transport != "local" && (strings.TrimSpace(entry.Target) == "" || strings.TrimSpace(entry.User) == "") {
+			return errors.New("remote upgrade execution entry requires an explicit target and user")
+		}
+		if entry.Transport == "local" && (entry.Target != "" || entry.User != "") {
+			return errors.New("local upgrade execution entry cannot specify a remote target or user")
+		}
+		if entry.Target != strings.TrimSpace(entry.Target) || entry.User != strings.TrimSpace(entry.User) || (!filepath.IsAbs(entry.CLIPath) && !strings.HasPrefix(entry.CLIPath, "~/")) {
+			return errors.New("upgrade execution entry requires exact target/user and an absolute CLI path")
+		}
+		cliPath, err := cfgfile.Path(entry.CLIPath)
+		if err != nil || entry.CLIPath == "" || !filepath.IsAbs(cliPath) {
+			return errors.New("upgrades.execution_entry.cli_path must be an absolute path to the controlled CLI")
+		}
+		entry.CLIPath = cliPath
+		if entry.ControlSocket != "" && entry.ControlSocket != cfg.ControlSocket {
+			return errors.New("upgrade execution entry must use the configured control socket")
+		}
+		entry.ControlSocket = cfg.ControlSocket
 	}
 	return nil
 }

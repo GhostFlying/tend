@@ -419,6 +419,16 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 				return err
 			}
 		case "result":
+			ownerResult, err := store.OwnerResultEvidence(ctx, q, e.Reference)
+			if err != nil {
+				return err
+			}
+			if ownerResult {
+				if err := q.QueryRowContext(ctx, `WITH RECURSIVE descendants(id) AS (SELECT ? UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id) SELECT EXISTS(SELECT 1 FROM issue_owner_results o JOIN descendants d ON d.id=o.issue_id WHERE o.artifact_id=?)`, w.WorkItemID, e.Reference).Scan(&valid); err != nil {
+					return err
+				}
+				break
+			}
 			var canonical bool
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, w.WorkItemID).Scan(&canonical); err != nil {
 				return err

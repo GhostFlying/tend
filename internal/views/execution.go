@@ -492,6 +492,10 @@ func executionRecovery(ctx context.Context, q store.Querier, runID string) (*pro
 	if kind == "worker.recovery_completed" || kind == "worker.recovery_handed_back" || kind == "worker.startup_started" {
 		return nil, nil
 	}
+	body, err = store.ResolveJSON(ctx, q, body)
+	if err != nil {
+		return nil, err
+	}
 	var recovery protocol.ExecutionRecovery
 	if err := json.Unmarshal([]byte(body), &recovery); err != nil {
 		// Run logs are arbitrary JSON facts; malformed optional metadata must not break task reads.
@@ -533,6 +537,12 @@ func executionRecovery(ctx context.Context, q store.Querier, runID string) (*pro
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
+		if err == nil {
+			observedBody, err = store.ResolveJSON(ctx, q, observedBody)
+			if err != nil {
+				return nil, err
+			}
+		}
 		var observed protocol.ExecutionRecovery
 		if err == nil && observedSeq > seq && json.Unmarshal([]byte(observedBody), &observed) == nil && observed.RootState == "failed" {
 			recovery.Phase = "turn_failed"
@@ -557,6 +567,10 @@ func executionStartup(ctx context.Context, q store.Querier, runID string) (*prot
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	body, err = store.ResolveJSON(ctx, q, body)
 	if err != nil {
 		return nil, err
 	}

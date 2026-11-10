@@ -66,7 +66,7 @@ func IssueHandoffPrompt(ctx context.Context, q store.Querier, issue, run string)
 		out.Queries = append(out.Queries, "tend task show "+handoffArgument(r.TaskID)+" --json", "tend run native-entry "+handoffArgument(run)+" --json", "tend run messages "+handoffArgument(run)+" --after 0 --json")
 	}
 	var prompt strings.Builder
-	fmt.Fprintf(&prompt, "Restore the context of Tend Issue %s (%s) by querying Tend. This prompt does not transfer control.\nIssue revision: %d; assignment epoch: %d; context revision: %d; reviewed-source watermark: %d; context status: %s.\n", issue, out.Title, out.Revision, out.AssignmentEpoch, out.ContextRevision, out.Watermark, out.ContextSyncStatus)
+	fmt.Fprintf(&prompt, "Restore the context of Tend Issue %s (%s) by querying Tend. This prompt does not transfer control.\nIssue revision: %d; assignment epoch: %d; context revision: %d; processed-source watermark: %d; context status: %s.\n", issue, out.Title, out.Revision, out.AssignmentEpoch, out.ContextRevision, out.Watermark, out.ContextSyncStatus)
 	if out.ContextGaps != "" {
 		fmt.Fprintf(&prompt, "Recorded context gaps: %s\n", out.ContextGaps)
 	}

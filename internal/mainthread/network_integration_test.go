@@ -48,7 +48,8 @@ func TestIntegrationNativeNetworkPermissions(t *testing.T) {
 			}
 			defer s.Close()
 			cfg := ThreadConfig(cwd, "probe-model")
-			want := "read-only"
+			cfg.Sandbox, cfg.ApprovalPolicy = "danger-full-access", "never"
+			want := "danger-full-access"
 			if role == "worker" {
 				cfg = harness.ThreadConfig{Cwd: cwd, Model: "probe-model", Sandbox: "danger-full-access", ApprovalPolicy: "never"}
 				want = "danger-full-access"

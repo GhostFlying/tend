@@ -44,7 +44,7 @@ func (a *App) AcknowledgeManagerRepairPrefix(ctx context.Context, run string, se
 				return protocol.Errorf(protocol.CodeUnknownOutcome, "repair prefix contains an unconsumed delta")
 			}
 			var event struct{ Native struct{ Text string } }
-			if err := json.Unmarshal([]byte(raw), &event); err != nil {
+			if err := store.DecodeJSON(ctx, tx.Q(), raw, &event); err != nil {
 				rows.Close()
 				return err
 			}

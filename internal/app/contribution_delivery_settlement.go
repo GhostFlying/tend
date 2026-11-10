@@ -9,6 +9,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // A completed whole-PR execution can discharge earlier accepted contributions.
@@ -16,6 +17,9 @@ import (
 func contributionDeliverySettlementEvidence(ctx context.Context, q store.Querier, issueID string, contribution protocol.IssueDeliveryDuty, p protocol.UpdateIssueDeliveryPayload) ([]protocol.IssueEvidence, error) {
 	if contribution.Status != "preparing" || contribution.Candidate != nil || contribution.ExecutionTaskID != "" || p.ExecutionTaskID == contribution.TaskID {
 		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "only an unbound preparing contribution may reference an already completed delivery")
+	}
+	if p.ExecutionRunID != "" {
+		return historicalContributionSettlementEvidence(ctx, q, issueID, contribution, p)
 	}
 	for _, taskID := range []string{contribution.TaskID, p.ExecutionTaskID} {
 		owner, err := store.GetTaskIssueOwner(ctx, q, taskID)
@@ -68,4 +72,37 @@ func contributionDeliverySettlementEvidence(ctx context.Context, q store.Querier
 	// review or maintenance changes. Never copy the execution's authorization.
 	evidence := []protocol.IssueEvidence{basis, executionBasis}
 	return append(evidence, settled.Evidence...), nil
+}
+
+func historicalContributionSettlementEvidence(ctx context.Context, q store.Querier, issue string, d protocol.IssueDeliveryDuty, p protocol.UpdateIssueDeliveryPayload) ([]protocol.IssueEvidence, error) {
+	original, err := views.HistoricalDeliveryExecutionAuthority(ctx, q, p.ExecutionRunID)
+	if err != nil {
+		return nil, errNotFound(err, "original settled delivery Run does not exist")
+	}
+	if original.IssueID != issue || original.TaskID != p.ExecutionTaskID || original.Settlement == nil || !original.Settlement.Eligible {
+		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "the selected original Run is not a completed delivery for this Issue")
+	}
+	if p.UpgradeID != "" && p.UpgradeID != original.UpgradeID {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "upgrade_id must identify the selected original Run's installation")
+	}
+	var linked bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_delivery_review_links contribution JOIN shared_delivery_review_links execution ON execution.review_id=contribution.review_id AND execution.issue_id=contribution.issue_id WHERE contribution.issue_id=? AND contribution.task_id=? AND execution.task_id=? AND execution.delivery_id=?)`, issue, d.TaskID, p.ExecutionTaskID, original.Candidate.DeliveryID).Scan(&linked); err != nil {
+		return nil, err
+	}
+	if !linked {
+		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "the contribution must retain an explicit link to that original PR")
+	}
+	basis, err := completedTaskEvidence(ctx, q, d.TaskID, p.Reason)
+	if err != nil {
+		return nil, err
+	}
+	var raw string
+	if err := q.QueryRowContext(ctx, `SELECT duty_json FROM issue_delivery_execution_history WHERE run_id=? AND task_id=? ORDER BY created_at DESC,duty_revision DESC LIMIT 1`, p.ExecutionRunID, p.ExecutionTaskID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	var settled protocol.IssueDeliveryDuty
+	if err := json.Unmarshal([]byte(raw), &settled); err != nil {
+		return nil, err
+	}
+	return append([]protocol.IssueEvidence{basis}, settled.Evidence...), nil
 }

@@ -158,13 +158,15 @@ func (v *Verdicts) Verdict() *protocol.VerdictPayload {
 
 // briefSpec is the part of a task spec a worker reads.
 type briefSpec struct {
-	Inputs       []protocol.TaskInput `json:"inputs"`
-	Goal         string               `json:"goal"`
-	Scope        string               `json:"scope"`
-	Constraints  []string             `json:"constraints"`
-	Acceptance   []string             `json:"acceptance"`
-	Deliverables []string             `json:"deliverables"`
-	Delivery     string               `json:"delivery"`
+	ReviewArtifactID string               `json:"review_artifact_id"`
+	ReviewDeliveryID string               `json:"review_delivery_id"`
+	Inputs           []protocol.TaskInput `json:"inputs"`
+	Goal             string               `json:"goal"`
+	Scope            string               `json:"scope"`
+	Constraints      []string             `json:"constraints"`
+	Acceptance       []string             `json:"acceptance"`
+	Deliverables     []string             `json:"deliverables"`
+	Delivery         string               `json:"delivery"`
 }
 
 func reviewerEvidenceGuidance(spec WorkerSpec) string {
@@ -197,7 +199,7 @@ func HandBack(spec WorkerSpec) string {
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before."
 	}
-	return s + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec)
+	return s + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec) + externalWaitRecovery(spec)
 }
 
 // IsHandBack recognizes the exact saved turn input for a handback. Journals can
@@ -226,13 +228,16 @@ func IsHandBack(spec WorkerSpec, input string) bool {
 // its attempt was interrupted (D61). The thread holds the task and the
 // work so far, so it only says what happened.
 func Continuation(spec WorkerSpec) string {
+	if spec.SessionContinuation != nil {
+		return "The same Task continues in a new Run after the previous execution physically stopped. Preserve prior results and independent review judgments; continue from the current ledger context below. Do not repeat unknown external operations. This is an ordinary continuation, not a lost result submission.\nCurrent Task specification and reconstructed next step:\n" + string(spec.Spec) + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec) + externalWaitRecovery(spec)
+	}
 	s := "Your work on this task was interrupted: tend or its runner stopped, or the task was paused. " +
 		"The workspace is as it was when you stopped; anything running then was stopped too. " +
 		"Check the state of the working trees, then continue with the same task where you left off."
 	if spec.Role == protocol.RoleAccept {
 		s += " End by calling " + VerdictTool + " with your verdict, even if you called it before the interruption: that call was lost."
 	}
-	return s + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec)
+	return s + "\n" + contextBrief(spec) + observationBrief(spec) + messageBrief(spec) + questionRecovery(spec) + externalWaitRecovery(spec)
 }
 
 // Brief returns a worker's developer instructions and its turn input. The
@@ -260,6 +265,7 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 	b.WriteString(observationBrief(spec))
 	b.WriteString(messageBrief(spec))
 	b.WriteString(questionRecovery(spec))
+	b.WriteString(externalWaitRecovery(spec))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "Goal:\n%s\n", s.Goal)
 	if len(spec.Relations) > 0 {
@@ -291,6 +297,12 @@ func Brief(spec WorkerSpec) (instructions, input string) {
 		for _, m := range spec.Baseline {
 			fmt.Fprintf(&b, "- %s: task starts at %s; resource original base %s.\n", m.Path, m.StartHEAD, m.ResourceBase)
 		}
+	}
+	if s.ReviewArtifactID != "" {
+		fmt.Fprintf(&b, "\nExplicit original review target: artifact %s. Read this actual original through read_context. Report the exact artifact you reviewed in report.reviewed_artifact_id and your real report.verdict; do not invent a passed verdict.\n", s.ReviewArtifactID)
+	}
+	if s.ReviewDeliveryID != "" {
+		fmt.Fprintf(&b, "\nExplicit PR review target: delivery %s on the original Issue. Read its current shared review binding and candidate, retain previous per-Run conclusions and assess actual changes under this same Task.\n", s.ReviewDeliveryID)
 	}
 	if len(s.Inputs) > 0 {
 		b.WriteString("\nOriginal task inputs (separate from submitted deliverables):\n")

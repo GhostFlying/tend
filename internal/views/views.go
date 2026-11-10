@@ -75,6 +75,12 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		return d, err
 	}
 	d.CurrentArtifactID = row.CurrentArtifactID
+	if row.Kind == protocol.TaskKindIssueManager && row.CurrentArtifactID != "" {
+		d.AcceptancePolicy, err = store.OwnerResultPolicy(ctx, q, row.CurrentArtifactID)
+		if err != nil {
+			return d, err
+		}
+	}
 	if d.Relations, err = TaskRelations(ctx, q, taskID); err != nil {
 		return d, err
 	}
@@ -225,6 +231,19 @@ func Artifact(ctx context.Context, q store.Querier, artifactID string) (protocol
 	if policy.Valid {
 		if err := json.Unmarshal([]byte(policy.String), &detail.AcceptancePolicy); err != nil {
 			return protocol.ArtifactDetail{}, fmt.Errorf("views: decode artifact acceptance policy: %w", err)
+		}
+	}
+	if ownerPolicy, err := store.OwnerResultPolicy(ctx, q, artifactID); err != nil {
+		return protocol.ArtifactDetail{}, err
+	} else if ownerPolicy != nil {
+		detail.AcceptancePolicy = ownerPolicy
+		detail.ReviewerArtifactID, detail.IndependentAcceptanceID, err = store.OwnerResultReviewReferences(ctx, q, artifactID)
+		if err != nil {
+			return protocol.ArtifactDetail{}, err
+		}
+		detail.ResultComplete, err = store.OwnerResultEvidence(ctx, q, artifactID)
+		if err != nil {
+			return protocol.ArtifactDetail{}, err
 		}
 	}
 	return detail, nil

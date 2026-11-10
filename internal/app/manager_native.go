@@ -101,6 +101,31 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if p.Method == "find" {
 			var prior string
 			err := tx.Q().QueryRowContext(ctx, `SELECT request_id FROM manager_native_requests WHERE run_id=? AND method='find' AND payload_json=? AND status IN ('pending','started','unknown') AND result_json IS NULL ORDER BY created_at,rowid LIMIT 1`, run, string(p.Payload)).Scan(&prior)
+			if errors.Is(err, sql.ErrNoRows) {
+				rows, e := tx.Q().QueryContext(ctx, `SELECT request_id,payload_json FROM manager_native_requests WHERE run_id=? AND method='find' AND status IN ('pending','started','unknown') AND result_json IS NULL AND instr(payload_json,'tend:retained-json:v1')>0 ORDER BY created_at,rowid`, run)
+				if e != nil {
+					return Outcome{}, e
+				}
+				for rows.Next() {
+					var id, raw string
+					if e = rows.Scan(&id, &raw); e != nil {
+						break
+					}
+					raw, e = store.ResolveJSON(ctx, tx.Q(), raw)
+					if e != nil {
+						break
+					}
+					if raw == string(p.Payload) {
+						prior = id
+						err = nil
+						break
+					}
+				}
+				e = errors.Join(e, rows.Err(), rows.Close())
+				if e != nil {
+					return Outcome{}, e
+				}
+			}
 			if err == nil {
 				p.ID = prior
 				return Outcome{NoEffect: true, Result: p}, nil
@@ -109,7 +134,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES(?,?,?,?,'pending',?)`, p.ID, run, p.Method, string(p.Payload), x.Now.UnixMilli())
+		payload, err := tx.RetainJSON(ctx, string(p.Payload))
+		if err != nil {
+			return Outcome{}, err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES(?,?,?,?,'pending',?)`, p.ID, run, p.Method, payload, x.Now.UnixMilli())
 		return Outcome{Result: p}, err
 	case protocol.OpManagerNativeClaim:
 		r, err := store.GetRun(ctx, tx.Q(), run)
@@ -128,6 +157,10 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if errors.Is(err, sql.ErrNoRows) {
 				return Outcome{NoEffect: !changed, Result: map[string]any{"request": nil}}, nil
 			}
+			if err != nil {
+				return Outcome{}, err
+			}
+			payload, err = store.ResolveJSON(ctx, tx.Q(), payload)
 			if err != nil {
 				return Outcome{}, err
 			}
@@ -165,6 +198,10 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if status == "completed" {
 			var prior string
 			if err = tx.Q().QueryRowContext(ctx, `SELECT result_json FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, p.ID).Scan(&prior); err != nil {
+				return Outcome{}, err
+			}
+			prior, err = store.ResolveJSON(ctx, tx.Q(), prior)
+			if err != nil {
 				return Outcome{}, err
 			}
 			if prior != string(raw) {
@@ -205,7 +242,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "native close must cover all applied events")
 			}
 		}
-		_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=? WHERE run_id=? AND request_id=?`, string(raw), run, p.ID)
+		result, err := tx.RetainJSON(ctx, string(raw))
+		if err != nil {
+			return Outcome{}, err
+		}
+		_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=? WHERE run_id=? AND request_id=?`, result, run, p.ID)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -235,6 +276,13 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			}
 			if uncertain {
 				ended, err := finishStoppedManager(ctx, x, tx, run, "Native process closed; original business receipts require reconciliation", p.LastSequence)
+				ended.Result = p
+				return ended, err
+			}
+			if v, e := store.GetExternalWait(ctx, tx.Q(), run); e != nil {
+				return Outcome{}, e
+			} else if v != nil && v.Status == "stopping" {
+				ended, err := settleExternalWaitStopped(ctx, x, tx, r, v, "")
 				ended.Result = p
 				return ended, err
 			}
@@ -277,6 +325,10 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if p.Sequence <= last {
 			var body string
 			if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM manager_native_events WHERE run_id=? AND seq=?`, run, p.Sequence).Scan(&body); err != nil {
+				return Outcome{}, err
+			}
+			body, err := store.ResolveJSON(ctx, tx.Q(), body)
+			if err != nil {
 				return Outcome{}, err
 			}
 			if body != string(p.Body) {
@@ -324,14 +376,21 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			}
 		}
 		projectionOnly := false
-		if parsed && event.Native != nil && event.Native.Kind == "agent_message_delta" {
-			closing, err := managerRunClosing(ctx, tx.Q(), run)
-			if err != nil {
-				return Outcome{}, err
+		if parsed && event.Native != nil {
+			switch event.Native.Kind {
+			case "agent_message_delta", "item_started", "item_completed", "context_usage", "request_usage", "child_rollout":
+				closing, err := managerRunClosing(ctx, tx.Q(), run)
+				if err != nil {
+					return Outcome{}, err
+				}
+				projectionOnly = !closing
 			}
-			projectionOnly = !closing
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES(?,?,?)`, run, p.Sequence, string(p.Body))
+		body, err := tx.RetainJSON(ctx, string(p.Body))
+		if err != nil {
+			return Outcome{}, err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES(?,?,?)`, run, p.Sequence, body)
 		return Outcome{ProjectionOnly: projectionOnly, Result: map[string]any{"ack": p.Sequence}}, err
 	}
 	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager transport operation")
@@ -346,6 +405,10 @@ func unresolvedManagerClose(ctx context.Context, q store.Querier, run string) (*
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	payload, err = store.ResolveJSON(ctx, q, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +473,7 @@ func (a *App) ManagerNativeResult(ctx context.Context, run, id string) (protocol
 			return nil
 		}
 		ready = true
-		return json.Unmarshal([]byte(raw.String), &p)
+		return store.DecodeJSON(ctx, tx.Q(), raw.String, &p)
 	})
 	return p, ready, err
 }
@@ -426,6 +489,10 @@ func (a *App) ManagerNativeEvents(ctx context.Context, run string, after int64) 
 			var e protocol.ManagerNativeEvent
 			var body string
 			if err := rows.Scan(&e.Sequence, &body); err != nil {
+				return err
+			}
+			body, err = store.ResolveJSON(ctx, tx.Q(), body)
+			if err != nil {
 				return err
 			}
 			e.Body = json.RawMessage(body)
@@ -552,18 +619,47 @@ func (a *App) ManagerAppliedCursor(ctx context.Context, run string) (int64, erro
 // Completing an item/transport flush also covers its previously buffered deltas.
 func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
 	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, run, seq), "manager.event.ack")
+	changed, scheduling := false, false
 	err := a.write(ctx, func(tx *store.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=?`, run, seq); err != nil {
+		result, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=? AND applied=0`, run, seq)
+		if err != nil {
 			return err
 		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		changed = n > 0
 		if flush {
-			_, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq<? AND json_extract(body_json,'$.native.Kind')='agent_message_delta' AND (?='' OR json_extract(body_json,'$.thread_id')=?) AND (?='' OR json_extract(body_json,'$.native.TurnID')=?) AND (?='' OR json_extract(body_json,'$.native.ItemID')=?)`, run, seq, thread, thread, turn, turn, item, item)
+			result, err = tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq<? AND applied=0 AND json_extract(body_json,'$.native.Kind')='agent_message_delta' AND (?='' OR json_extract(body_json,'$.thread_id')=?) AND (?='' OR json_extract(body_json,'$.native.TurnID')=?) AND (?='' OR json_extract(body_json,'$.native.ItemID')=?)`, run, seq, thread, thread, turn, turn, item, item)
+			if err != nil {
+				return err
+			}
+			n, err = result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			changed = changed || n > 0
+		}
+		if !changed {
+			return nil
+		}
+		closing, err := managerRunClosing(ctx, tx.Q(), run)
+		if err != nil {
 			return err
 		}
+		var terminal bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=? AND observed_state IN ('finished','failed'))`, run).Scan(&terminal); err != nil {
+			return err
+		}
+		scheduling = closing || terminal
 		return nil
 	})
-	if err == nil {
-		a.notifyChange()
+	if err == nil && changed {
+		a.changes.Notify()
+		if scheduling {
+			a.scheduling.Notify()
+		}
 	}
 	return err
 }
@@ -571,6 +667,15 @@ func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64
 // finishStoppedManager releases physical capacity while retaining uncertain
 // business receipts for a new, read-only reconciliation run.
 func finishStoppedManager(ctx context.Context, x *Exec, tx *store.Tx, run, reason string, lastSequence int64) (Outcome, error) {
+	if v, err := store.GetExternalWait(ctx, tx.Q(), run); err != nil {
+		return Outcome{}, err
+	} else if v != nil && v.Status == "stopping" {
+		r, err := store.GetRun(ctx, tx.Q(), run)
+		if err != nil {
+			return Outcome{}, err
+		}
+		return settleExternalWaitStopped(ctx, x, tx, r, v, "")
+	}
 	preserved, err := preserveMaintenancePhysicalStop(ctx, x, tx, run, lastSequence)
 	if err != nil {
 		return Outcome{}, err
