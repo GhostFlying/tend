@@ -609,7 +609,11 @@ func communicationSourceVisible(ctx context.Context, q store.Querier, id string)
 	if err != nil {
 		return err
 	}
-	if m.Author == "owner" {
+	ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, q, m.MessageID)
+	if err != nil {
+		return err
+	}
+	if ownerAuthority {
 		admitted, err := store.OwnerInputAdmitted(ctx, q, id)
 		if err != nil {
 			return err

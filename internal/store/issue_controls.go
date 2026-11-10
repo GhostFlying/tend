@@ -107,6 +107,7 @@ func GetCanonicalIssueRevision(ctx context.Context, q Querier, id string, revisi
 // IssueRevisionProvenance carries app-verified authority. It does not itself
 // authenticate an owner or establish a coordination execution's permission.
 type IssueRevisionProvenance struct {
+	RequestDomain           string
 	Actor                   protocol.Principal
 	RequestID               string
 	SourceMessageID         string
@@ -218,7 +219,11 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	if p.CoordinationExecutionID != "" {
 		effect = p.EffectSeq
 	}
-	_, err = t.Exec(ctx, `INSERT INTO issue_control_revisions(issue_id,revision,snapshot_json,reason_json,actor_json,request_id,source_message_id,coordination_execution_id,effect_seq,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, next.IssueID, next.Revision, string(snapshot), string(reason), string(actor), p.RequestID, nullString(p.SourceMessageID), nullString(p.CoordinationExecutionID), effect, next.UpdatedAt)
+	requestDomain := p.RequestDomain
+	if requestDomain == "" {
+		requestDomain = p.Actor.DedupDomain()
+	}
+	_, err = t.Exec(ctx, `INSERT INTO issue_control_revisions(issue_id,revision,snapshot_json,reason_json,actor_json,request_id,source_message_id,coordination_execution_id,effect_seq,created_at,request_domain) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, next.IssueID, next.Revision, string(snapshot), string(reason), string(actor), p.RequestID, nullString(p.SourceMessageID), nullString(p.CoordinationExecutionID), effect, next.UpdatedAt, requestDomain)
 	if err != nil {
 		return fmt.Errorf("store: record issue control revision: %w", err)
 	}

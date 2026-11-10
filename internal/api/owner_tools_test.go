@@ -546,3 +546,24 @@ func TestMainOwnerRecoversUnrecordedRequestInOriginalDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestMainOwnerRecoveredIssueKeepsOriginalReceiptDomain(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Recovered", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}})
+	original := protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
+	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original, EffectSeq: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issue protocol.Issue
+	if err := json.Unmarshal(response.Operation.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	status, err := e.app.IssueReuseStatus(t.Context(), issue.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.OriginObservation != "recorded" || status.OriginalRequestID != original.RequestID {
+		t.Fatalf("committed creation lost receipt identity: %+v", status)
+	}
+}

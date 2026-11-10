@@ -274,5 +274,7 @@ test("retains Agent authorship while tracking its owner-authorized input turn", 
     replyTo: input.message_id,
     state: "processing",
   });
-  expect(processing([{ ...input, control: undefined }, reply])).toBeUndefined();
+  const withoutControl = { ...input };
+  delete withoutControl.control;
+  expect(processing([withoutControl, reply])).toBeUndefined();
 });

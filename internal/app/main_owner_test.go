@@ -180,3 +180,102 @@ func TestMainOwnerDelegatedInputCanSupplyIssueContextFact(t *testing.T) {
 		})
 	}
 }
+
+func TestMainOwnerInputCreatesIssueReviewObligation(t *testing.T) {
+	for _, delegated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "owner", true: "main"}[delegated], func(t *testing.T) {
+			h := newHarness(t)
+			mainCtx, _ := mainOwnerExecutionFixture(t, h)
+			issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+			before := h.agentContext(issue.IssueID).Revision
+			ctx := t.Context()
+			if delegated {
+				ctx = mainCtx
+			}
+			op, err := h.app.Execute(ctx, owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{ConversationID: "issue:" + issue.IssueID, Body: "A new binding constraint"}, nil), SubmitMessage{})
+			if err != nil || op.Error != nil {
+				t.Fatal(op, err)
+			}
+			var m struct {
+				MessageID string `json:"message_id"`
+			}
+			if err := json.Unmarshal(op.Result, &m); err != nil {
+				t.Fatal(err)
+			}
+			var pending bool
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				return tx.Q().QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM message_context_obligations WHERE work_item_id=? AND message_id=? AND needs_review=1)`, issue.IssueID, m.MessageID).Scan(&pending)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if after := h.agentContext(issue.IssueID).Revision; !pending || after <= before {
+				t.Fatalf("new input leaves pending=%v context %d -> %d", pending, before, after)
+			}
+		})
+	}
+}
+
+func TestMainOwnerCommunicationRejectsUnadmittedInputs(t *testing.T) {
+	for _, state := range []string{"queued", "withdrawn"} {
+		t.Run(state, func(t *testing.T) {
+			h := newHarness(t)
+			ctx, _ := mainOwnerExecutionFixture(t, h)
+			issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+			op, err := h.app.Execute(ctx, owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{Body: "Pending owner instruction"}, nil), SubmitMessage{})
+			if err != nil || op.Error != nil {
+				t.Fatal(op, err)
+			}
+			var m struct {
+				MessageID string `json:"message_id"`
+			}
+			if err := json.Unmarshal(op.Result, &m); err != nil {
+				t.Fatal(err)
+			}
+			if op := h.associate(owner, m.MessageID, issue.IssueID); op.Error != nil {
+				t.Fatal(op)
+			}
+			if state == "withdrawn" {
+				var control protocol.MessageControl
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					var err error
+					control, err = store.MessageControl(t.Context(), tx.Q(), m.MessageID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if op := h.exec(owner, h.env("conversation.withdraw_message", protocol.Target{Type: "message", ID: m.MessageID}, protocol.WithdrawMessagePayload{}, rev(control.Revision)), WithdrawMessage{}); op.Error != nil {
+					t.Fatal(op)
+				}
+			}
+			conversation := "issue:" + issue.IssueID
+			delivery, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
+			if err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			turn := startHostedReview(t, h, conversation, delivery)
+			if input, err := h.app.ReadCommunicationInput(t.Context(), turn.RequestID, m.MessageID); protocol.CodeOf(err) != protocol.CodeForbidden {
+				t.Fatalf("%s source visible before admission: %+v, %v", state, input, err)
+			}
+		})
+	}
+}
+
+func TestMainOwnerReuseAcceptsDelegatedSource(t *testing.T) {
+	h := newHarness(t)
+	ctx, _ := mainOwnerExecutionFixture(t, h)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	submitted, err := h.app.Execute(ctx, owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{Body: "Continue the same approved work"}, nil), SubmitMessage{})
+	if err != nil || submitted.Error != nil {
+		t.Fatal(submitted, err)
+	}
+	var m struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(submitted.Result, &m); err != nil {
+		t.Fatal(err)
+	}
+	op, err := h.app.Execute(ctx, owner, h.env("issues.reuse", protocol.Target{Type: "issue", ID: issue.IssueID}, reusePayload(t, h, issue, m.MessageID), rev(issue.Revision)), ReuseIssue{})
+	if err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal(op, err)
+	}
+}
