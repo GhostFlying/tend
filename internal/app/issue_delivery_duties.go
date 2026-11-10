@@ -187,6 +187,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			d.ExecutionTaskID = ""
 		}
+		recoverManualQuestion := false
 		if d.AttentionID != "" {
 			old, err := store.GetAttention(ctx, tx.Q(), d.AttentionID)
 			if err != nil {
@@ -197,7 +198,24 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, err
 			}
 			if p.Action != "resume" && d.AssignmentEpoch == issue.AssignmentEpoch && d.Status != "preparing" && reflect.DeepEqual(d.Candidate, p.Candidate) && decision.Question == deliveryCandidateQuestion(*p.Candidate) && ((decision.Status == store.DecisionOpen && decision.Version == 1) || (decision.Status == store.DecisionAnswered && decision.Version == 2)) {
-				return Outcome{Result: d}, nil
+				if decision.Status == store.DecisionOpen {
+					return Outcome{Result: d}, nil
+				}
+				option, err := deliveryOwnerOption(ctx, tx.Q(), d)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if oneOf(option, "approve", "defer", "end_delivery") {
+					return Outcome{Result: d}, nil
+				}
+				// Recover the original concrete confirmation, not an automatic
+				// grant introduced by a later policy change.
+				recoverManualQuestion = true
+				if d.AcceptanceID == "" && d.ArtifactID == "" {
+					if _, err := currentLiveDeliveryTask(ctx, tx.Q(), issue.IssueID, d.TaskID, p.ExpectedTaskControlRevision); err != nil {
+						return Outcome{}, err
+					}
+				}
 			}
 			if err := withdrawDeliveryQuestion(ctx, x, tx, &old); err != nil {
 				return Outcome{}, err
@@ -209,7 +227,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err != nil {
 			return Outcome{}, err
 		}
-		if policy == nil {
+		if policy == nil && !recoverManualQuestion {
 			if d.PolicyAttentionID != "" && reflect.DeepEqual(d.Candidate, p.Candidate) && d.AssignmentEpoch == issue.AssignmentEpoch {
 				return Outcome{Result: d}, nil
 			}
@@ -239,7 +257,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return out, err
 		}
 		d.PolicyAttentionID = ""
-		if policy != nil && policy.Mode == "auto" && !p.Candidate.Deploy {
+		if !recoverManualQuestion && policy != nil && policy.Mode == "auto" && !p.Candidate.Deploy {
 			reviewDuty := d
 			reviewDuty.Candidate = p.Candidate
 			if err := store.RequireDeliveryDutyReview(ctx, tx.Q(), issue, reviewDuty); err != nil {

@@ -35,7 +35,7 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 			fs.PrintDefaults()
 		}
 	case "decide":
-		note = fs.String("note", "", "a free-form answer, with or instead of an option")
+		note = fs.String("note", "", "a free-form answer; delivery approve/end_delivery use --reason for audit context; defer may include a note")
 		fs.Usage = func() {
 			fmt.Fprint(e.Stderr, commandUsage([]string{"decide"}))
 			fs.PrintDefaults()
