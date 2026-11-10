@@ -52,7 +52,7 @@ func reviewAppliedOwnerChoice(ctx context.Context, x *Exec, tx *store.Tx, d stor
 	if _, err := tx.Exec(ctx, `UPDATE message_context_obligations SET needs_review=0 WHERE message_id=?`, p.SourceMessageID); err != nil {
 		return err
 	}
-	actor, err := json.Marshal(x.Principal)
+	actor, err := json.Marshal(x.ActualPrincipal())
 	if err != nil {
 		return err
 	}

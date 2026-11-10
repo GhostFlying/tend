@@ -23,6 +23,7 @@ TEND_SERVER_SECRET=... TS_AUTHKEY=... ./tend-server -config tend-server.hujson
 - `hosts[].worker`：可选，默认 `appserver`。这台 host 用哪种 harness 运行 worker（D63、D64）：`appserver` 是 traex app-server 加 runner 自建的工作区；`orca` 在 orca 的 worktree 里运行 agent TUI，只支持单仓库工作区。有活动 host 而它们都不支持多仓库时，tend 拒绝建多个 mount 的任务；已有的这类任务在 `tend status` 里显示没有 host 能领取的原因。runner 配置的 `worker.kind` 必须与它一致，否则 runner 的 hello 和领取被拒绝。
 - `queue.wait_per_hour`：可选，默认 0.1。排队的动作按分数领取（D60）：`p0` 最先；其余的分数是 project 权重 × 评级分（`p1` 3、`p2` 2、`p3` 1，未评级按 `p2`）加上排队小时数 × 这个系数。默认值下，权重为 1 时等 10 小时相当于升一级；设为 0 则不考虑等待时间。
 - `main_agent`：配置后由服务端运行唯一的主协调 Agent，Web 客户端与它对话；工作项后台 Agent 随之启用。未配置时仅提供 owner 管理接口和 runner 调度，不支持外挂 Agent 代替主协调（D114）。
+  - `main_agent.owner_subject` 绑定主 Agent 代表的 owner（D214）。只有一个配置 owner 时自动选取；多个 owner 时必须显式指定其中之一。主 Agent 通过同一 owner API 拥有完整业务、管理和诊断权限，保留真实 Agent actor 和原请求回执。常用工具直接暴露输入结构，其余能力通过 `owner_capabilities` 分页发现、查看原协议类型，再经 `owner_call` 调用实际注册接口；角色受限的 Issue Agent 和执行 worker 不获得此权限。
   - 它是服务端启动的 traex app-server，默认使用运行服务端的用户自己的 traex home：用这台机器上 owner 的 traex 鉴权、配置和 MCP server，主会话也出现在 owner 的 traex 历史里。`main_agent.traex_home` 可以改用一个单独的 home，这时需要在那个 home 下完成一次 traex 鉴权。
   - 启动时保留 `TEND_ADDON=off`，仅用于仍指向旧版二进制的遗留配置；它不能让新 CLI 的已退役命令成功。替换 CLI 和启动 Agent 前必须清理已确认的 Tend 外挂 hook/MCP。
   - 权限（D118）：主 Agent 文件只读、approval 为 never，显式允许网络，但 shell、编辑文件、浏览器、插件、应用、skill 和 memory 等原生路径仍关闭；业务写入通过 Tend 工具。后台 Agent 使用自己的工作目录、workspace-write + on-request + auto_review，显式允许网络；Tend 工具只允许所属工作项读取与正式评估，不赋予业务调度权。网络独立通过原生 turn sandboxPolicy 设置，恢复会话也重新应用。

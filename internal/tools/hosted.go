@@ -362,6 +362,11 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 	if repair && !namedRepairTool(execution.Selection.Purpose, c.Tool) {
 		return fail(protocol.Errorf(protocol.CodeForbidden, "metadata repair cannot perform business operations"))
 	}
+	if execution.Selection.Purpose == agentconfig.Main {
+		if result, handled := s.ownerCall(ctx, c); handled {
+			return result, true
+		}
+	}
 	if c.Tool == "upgrades_start" {
 		if execution.Selection.Purpose != agentconfig.Main {
 			return fail(protocol.Errorf(protocol.CodeForbidden, "only the admitted main coordinator may start a delivery upgrade"))

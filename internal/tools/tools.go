@@ -71,6 +71,7 @@ type UpgradeStarter interface {
 }
 
 type Service struct {
+	owner     OwnerTools
 	upgrades  UpgradeStarter
 	app       *app.App
 	store     *store.Store

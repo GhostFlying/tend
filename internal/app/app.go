@@ -57,9 +57,11 @@ type Exec struct {
 	FollowupQueued   bool
 	Env              *protocol.Envelope
 	Principal        protocol.Principal
-	TraceID          string
-	Now              time.Time
-	IDs              protocol.IDGen
+	// Actor preserves the actual caller when owner authority is delegated.
+	Actor   *protocol.Principal
+	TraceID string
+	Now     time.Time
+	IDs     protocol.IDGen
 	// LeaseTTL is the lease duration of runs allocated by this request.
 	LeaseTTL time.Duration
 	// WaitPerHour is what an hour in the queue adds to an action's score
@@ -114,6 +116,7 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	mainOwner                  string
 	managedHostedRuntimes      map[string]bool
 	extensionValidator         func(context.Context, protocol.ExtensionRelease, extensions.ContentSource, []extensions.ValidationUse) error
 	deliveryObserverStatus     *protocol.DeliveryObserverStatus
@@ -179,6 +182,21 @@ const applySavepoint = "apply"
 // Recorded business failures come back as an Operation with status failed,
 // and replaying the same request returns the same Operation.
 func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.Envelope, cmd Command) (protocol.Operation, error) {
+	if call, ok := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); ok && p.Kind == protocol.PrincipalOwner {
+		if p.Subject != a.mainOwner {
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "owner delegation does not match server binding")
+		}
+		p = call.Actor
+		if call.ReplayPrincipal != nil {
+			p = *call.ReplayPrincipal
+		}
+		preparation, _ := ctx.Value(ownerPreparationKey{}).(bool)
+		step := int64(0)
+		if !preparation {
+			step = call.steps.Add(1)
+		}
+		cmd = ownerExecutionCommand{Command: cmd, call: call, step: step, owner: a.mainOwner, preparation: preparation}
+	}
 	if err := p.Validate(); err != nil {
 		return protocol.Operation{}, fmt.Errorf("app: invalid principal: %w", err)
 	}
@@ -256,6 +274,11 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			Domain: domain, RequestID: env.RequestID, Operation: env.Operation, PayloadHash: hash,
 			PrincipalJSON: string(principalJSON), ParentRequestID: env.ParentRequestID, TraceID: x.TraceID,
 			Reason: env.Reason, CreatedAt: x.Now.UnixMilli(),
+		}
+		if delegated, ok := cmd.(ownerExecutionCommand); ok && delegated.call.ReplayPrincipal == nil && !delegated.preparation {
+			if err := delegated.prepare(ctx, x, tx); err != nil {
+				return err
+			}
 		}
 		if err := tx.Savepoint(ctx, applySavepoint); err != nil {
 			return err
@@ -403,7 +426,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		return err
 	}
 	now := x.Now.UnixMilli()
-	actor, err := json.Marshal(x.Principal)
+	principal := x.Principal
+	if x.Actor != nil {
+		principal = *x.Actor
+	}
+	actor, err := json.Marshal(principal)
 	if err != nil {
 		return fmt.Errorf("app: encode principal: %w", err)
 	}

@@ -113,6 +113,8 @@ type TelegramConfig struct {
 // MainAgentConfig configures the hosted main agent (D68). Every field is
 // optional.
 type MainAgentConfig struct {
+	// OwnerSubject selects the represented owner when multiple owners exist.
+	OwnerSubject          string                    `json:"owner_subject,omitempty"`
 	ManagedExtensions     *extensions.Configuration `json:"managed_extensions,omitempty"`
 	extensionConsumer     *extensions.Consumer
 	CodexEnvironments     *codexenv.Bindings          `json:"codex_environments,omitempty"`
@@ -326,6 +328,23 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			runtimeIDs = append(runtimeIDs, id)
 		}
 		opts = append(opts, app.WithHostedExtensions(runtimeIDs))
+	}
+	if cfg.MainAgent != nil {
+		owner := cfg.MainAgent.OwnerSubject
+		configured := cfg.Owners
+		if cfg.LocalOwner != "" {
+			configured = []string{cfg.LocalOwner}
+		}
+		if owner == "" && len(configured) == 1 {
+			owner = configured[0]
+		}
+		if len(configured) > 1 && owner == "" {
+			return errors.New("main_agent.owner_subject is required with multiple owners")
+		}
+		if owner != "" && !slices.Contains(configured, owner) {
+			return errors.New("main_agent.owner_subject must name a configured owner")
+		}
+		opts = append(opts, app.WithMainOwner(owner))
 	}
 	a := app.New(s, ids, now, opts...)
 	if err := a.RefreshUsageProjection(ctx); err != nil {
@@ -576,6 +595,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		ownerConfig.ConversationHandoff = front.HandoffStatus
 	}
 	owner := api.New(a, s, whois, secret, ownerConfig, log)
+	if cfg.MainAgent != nil {
+		ts.SetOwnerTools(owner.MainOwnerTools())
+	}
 	var hookListener net.Listener
 	var hookServer *http.Server
 	if cfg.Webhooks != nil || cfg.Feishu != nil && cfg.Feishu.CallbackListen != "" {

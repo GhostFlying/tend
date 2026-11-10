@@ -267,7 +267,7 @@ func (c HandleAttention) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "action resolution evidence is required")
 	}
 	a.Status, a.Resolution = "resolved", p.Text
-	actor := x.Principal
+	actor := x.ActualPrincipal()
 	a.ResolutionActor = &actor
 	if err = saveAttention(ctx, x, tx, &a, a.Revision); err != nil {
 		return Outcome{}, err

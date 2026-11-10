@@ -42,7 +42,7 @@ func recordIssueDeliveryDuty(ctx context.Context, x *Exec, tx *store.Tx, issue, 
 	if err != nil {
 		return err
 	}
-	actor, err := json.Marshal(x.Principal)
+	actor, err := json.Marshal(x.ActualPrincipal())
 	if err != nil {
 		return err
 	}
