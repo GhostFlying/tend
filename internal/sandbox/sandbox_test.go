@@ -371,6 +371,13 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		c.call(http.MethodGet, "/api/v1/tasks/"+demo.Tasks[2], nil, &task)
 		return task.Lifecycle == protocol.TaskCompleted
 	})
+	var pausedDispatch protocol.IssueView
+	c.call(http.MethodGet, "/api/v1/issues/"+dispatchedIssue, nil, &pausedDispatch)
+	c.operation("test-dispatch-pause", "issues.set_status", protocol.Target{Type: "issue", ID: dispatchedIssue}, &pausedDispatch.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: pausedDispatch.AssignmentEpoch, Status: protocol.IssueBacklog})
+	waitFor(t, ctx, "dispatched subtree pause is physically complete", func() bool {
+		c.call(http.MethodGet, "/api/v1/issues/"+dispatchedIssue, nil, &pausedDispatch)
+		return pausedDispatch.WorkStatus == protocol.IssueBacklog && pausedDispatch.Pause != nil && pausedDispatch.Pause.Pending == 0 && pausedDispatch.Pause.Unsupported == 0
+	})
 	// Read only new items so historical association projection cannot consume
 	// the short streaming window before the interruption request is sent.
 	var interruptAfter int64
@@ -1009,14 +1016,21 @@ func TestSandboxStory(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Existing completion receipts are upgraded through the same stable story
-	// commands, without resetting retained demo data or duplicating history.
+	// Recover completed receipt IDs while a writer is occupied. Reading retained
+	// completion cannot replay business commands or need a coordinator slot.
 	legacy := demo
 	legacy.Story, legacy.StoryTask, legacy.StoryDecision = "", "", ""
 	if err := writeDemoReceipt(filepath.Join(root, "demo.json"), legacy); err != nil {
 		t.Fatal(err)
 	}
-	upgraded, err := SeedDemo(ctx, r, root)
+	var upgraded Demo
+	err = r.Store.Write(ctx, func(_ *store.Tx) error {
+		recoveryCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+		defer stop()
+		var err error
+		upgraded, err = SeedDemo(recoveryCtx, r, root)
+		return err
+	})
 	if err != nil || fmt.Sprint(upgraded) != fmt.Sprint(demo) {
 		t.Fatalf("legacy receipt upgrade: %+v %v", upgraded, err)
 	}

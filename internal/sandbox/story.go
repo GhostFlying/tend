@@ -3,8 +3,10 @@ package sandbox
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
@@ -14,11 +16,18 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-const storyTitle = "执行并创建 多轮故事：手机布局从需求澄清到独立验收"
+const (
+	storyTitle          = "执行并创建 多轮故事：手机布局从需求澄清到独立验收"
+	storyExecutionTitle = "派发 首次失败后重试：检查手机布局并交付可下载报告"
+	storySummary        = "总结：手机布局、长标题、草稿和返回焦点均已完成这轮核对，保留失败与重试历史。"
+)
 
 // Every round is an owner command followed by a real hosted tool turn. Reads
 // below are synchronization only; no business state is injected into SQLite.
 func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) error {
+	if complete, err := restoreCompletedStory(ctx, runtime, demo); complete || err != nil {
+		return err
+	}
 	s := seeder{app: runtime.App}
 	// These newly created decisions start at revision/version one; replay must
 	// reuse their original envelope even after the answer advances the view.
@@ -86,7 +95,7 @@ func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) erro
 	if err := s.storyMessage(ctx, runtime, "story-choice-confirmed", conversation, "决定已确认：手机优先，保留上述草稿和返回焦点条件。"); err != nil {
 		return err
 	}
-	if err := s.storyMessage(ctx, runtime, "story-dispatch", conversation, "派发 首次失败后重试：检查手机布局并交付可下载报告"); err != nil {
+	if err := s.storyMessage(ctx, runtime, "story-dispatch", conversation, storyExecutionTitle); err != nil {
 		return err
 	}
 	var task string
@@ -95,7 +104,7 @@ func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) erro
 			current, err := views.CanonicalIssue(ctx, tx.Q(), issue.IssueID, 0)
 			if err == nil {
 				for _, ref := range current.Tasks {
-					if ref.Title == "派发 首次失败后重试：检查手机布局并交付可下载报告" {
+					if ref.Title == storyExecutionTitle {
 						task = ref.TaskID
 						break
 					}
@@ -126,13 +135,64 @@ func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) erro
 		return err
 	}
 	for n, text := range []string{
-		"总结：手机布局、长标题、草稿和返回焦点均已完成这轮核对，保留失败与重试历史。",
+		storySummary,
 	} {
 		if err := s.storyMessage(ctx, runtime, fmt.Sprintf("story-summary-%d", n), conversation, text); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// restoreCompletedStory reconstructs only receipt IDs from committed facts.
+// A finished story does not need a live manager or new writes to be displayed.
+func restoreCompletedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) (bool, error) {
+	var issueID, taskID, attentionID string
+	err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+		var conversation string
+		err := tx.Q().QueryRowContext(ctx, `SELECT DISTINCT m.conversation_id FROM conversation_messages m JOIN logical_turn_messages lm USING(message_id) JOIN logical_turns l USING(logical_turn_id) JOIN logical_turn_executions e USING(logical_turn_id) JOIN main_turns t ON t.request_id=e.request_id WHERE m.request_id=? AND m.author='owner' AND l.status='completed' AND t.status='completed'`, seedRequest("story-summary-0")).Scan(&conversation)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(conversation, "issue:") {
+			return nil
+		}
+		issue, err := store.GetCanonicalIssue(ctx, tx.Q(), strings.TrimPrefix(conversation, "issue:"))
+		if err != nil {
+			return err
+		}
+		progress, err := store.IssueProgress(ctx, tx.Q(), issue.IssueID, issue.Revision)
+		if err != nil || progress == nil || progress.Summary != "已核对最新要求："+shortTitle(storySummary) {
+			return err
+		}
+		tasks, err := store.FollowupIDs(ctx, tx.Q(), `SELECT t.task_id FROM task_work_item_owners o JOIN tasks t USING(task_id) WHERE o.work_item_id=? AND t.kind='execution' AND t.title=? AND t.lifecycle='completed'`, issue.IssueID, storyExecutionTitle)
+		if err != nil || len(tasks) != 1 {
+			return err
+		}
+		record, err := store.GetRequest(ctx, tx.Q(), "owner", seedRequest("story-answer"))
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		if err != nil || record.Status != protocol.OpSucceeded || record.Operation != "attentions.respond" {
+			return err
+		}
+		var attention protocol.Attention
+		if err := json.Unmarshal([]byte(record.ResultJSON), &attention); err != nil {
+			return fmt.Errorf("read original story answer: %w", err)
+		}
+		if attention.IssueID == issue.IssueID && attention.TaskID == "" && attention.Status == "resolved" && attention.AttentionID != "" {
+			issueID, taskID, attentionID = issue.IssueID, tasks[0], attention.AttentionID
+		}
+		return nil
+	})
+	if err != nil || issueID == "" {
+		return false, err
+	}
+	demo.Story, demo.StoryTask, demo.StoryDecision = issueID, taskID, attentionID
+	return true, nil
 }
 
 func (s seeder) storyMessage(ctx context.Context, runtime *serverkit.Runtime, key, conversation, text string) error {
