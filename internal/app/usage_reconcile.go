@@ -17,7 +17,7 @@ func (a *App) UsageTargets(ctx context.Context, p protocol.Principal) ([]protoco
 		var query string
 		var args []any
 		if p.Kind == protocol.PrincipalRunner {
-			query = `SELECT DISTINCT r.run_id,COALESCE(e.conversation_id,''),t.thread_id,'','','' FROM runs r JOIN runner_coordination_executions e ON json_extract(e.private_snapshot,'$.runner_run_id')=r.run_id JOIN main_turns t ON t.request_id=e.execution_id WHERE r.host_id=? UNION SELECT DISTINCT l.run_id,'',json_extract(l.body_json,'$.session_id'),'','','' FROM run_logs l JOIN runs r ON r.run_id=l.run_id WHERE r.host_id=? AND l.kind='worker.native_identity' AND json_extract(l.body_json,'$.state')='known' UNION SELECT run_id,conversation_id,thread_id,provider,purpose,parent_session_id FROM token_usage_sources WHERE host_id=? UNION SELECT DISTINCT r.run_id,'',json_extract(f.payload_json,'$.thread_id'),'','','' FROM token_usage_facts f JOIN runs r ON f.subject='run:'||r.run_id WHERE r.host_id=? UNION SELECT DISTINCT l.run_id,'',json_extract(l.body_json,'$.thread_id'),'','','' FROM run_logs l JOIN runs r ON r.run_id=l.run_id WHERE r.host_id=? AND l.kind IN ('native.turn_started','native.turn_completed','item.completed')`
+			query = `SELECT DISTINCT r.run_id,COALESCE(e.conversation_id,''),t.thread_id,'','','' FROM runs r JOIN runner_coordination_executions e ON json_extract(e.private_snapshot,'$.runner_run_id')=r.run_id JOIN main_turns t ON t.request_id=e.execution_id WHERE r.host_id=? UNION SELECT DISTINCT l.run_id,'',json_extract(l.body_json,'$.session_id'),'','','' FROM run_logs l JOIN runs r ON r.run_id=l.run_id WHERE r.host_id=? AND l.kind='worker.native_identity' AND json_extract(l.body_json,'$.state')='known' UNION SELECT s.run_id,s.conversation_id,s.thread_id,s.provider,s.purpose,s.parent_session_id FROM token_usage_sources s JOIN runs r ON r.run_id=s.run_id AND r.host_id=s.host_id WHERE s.host_id=? UNION SELECT DISTINCT r.run_id,'',json_extract(f.payload_json,'$.thread_id'),'','','' FROM token_usage_facts f JOIN runs r ON f.subject='run:'||r.run_id WHERE r.host_id=? UNION SELECT DISTINCT l.run_id,'',json_extract(l.body_json,'$.thread_id'),'','','' FROM run_logs l JOIN runs r ON r.run_id=l.run_id WHERE r.host_id=? AND l.kind IN ('native.turn_started','native.turn_completed','item.completed')`
 			args = []any{p.Subject, p.Subject, p.Subject, p.Subject, p.Subject}
 		} else if p.Kind == protocol.PrincipalOwner {
 			query = `SELECT '',conversation_id,thread_id,'','','' FROM agent_thread_history UNION SELECT '',instance,thread_id,'','','' FROM main_thread_bindings WHERE instance IN (SELECT conversation_id FROM agent_conversations) UNION SELECT DISTINCT '',conversation_id,thread_id,'','','' FROM agent_rollout_events UNION SELECT run_id,conversation_id,json_extract(source_json,'$.thread_id'),json_extract(source_json,'$.provider'),COALESCE(json_extract(source_json,'$.purpose'),''),COALESCE(json_extract(source_json,'$.parent_session_id'),'') FROM token_usage_local_sources`
@@ -29,6 +29,7 @@ func (a *App) UsageTargets(ctx context.Context, p protocol.Principal) ([]protoco
 			return err
 		}
 		defer rows.Close()
+		var discovered []protocol.UsageTarget
 		for rows.Next() {
 			var t protocol.UsageTarget
 			var thread sql.NullString
@@ -39,6 +40,50 @@ func (a *App) UsageTargets(ctx context.Context, p protocol.Principal) ([]protoco
 				continue
 			}
 			t.ThreadID = thread.String
+			discovered = append(discovered, t)
+		}
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		if err = rows.Close(); err != nil {
+			return err
+		}
+		out, err = canonicalUsageTargets(discovered)
+		if err != nil {
+			return err
+		}
+		if p.Kind == protocol.PrincipalRunner {
+			// The coordinator owns this association even when a retained native
+			// source or its child thread has no main_turns thread identity yet.
+			bindings, err := tx.Q().QueryContext(ctx, `SELECT r.run_id,e.conversation_id FROM runner_coordination_executions e JOIN runs r ON json_extract(e.private_snapshot,'$.runner_run_id')=r.run_id WHERE r.host_id=? AND e.conversation_id<>''`, p.Subject)
+			if err != nil {
+				return err
+			}
+			defer bindings.Close()
+			byRun := make(map[string][]int)
+			for i, t := range out {
+				byRun[t.RunID] = append(byRun[t.RunID], i)
+			}
+			for bindings.Next() {
+				var run, conversation string
+				if err = bindings.Scan(&run, &conversation); err != nil {
+					return err
+				}
+				for _, i := range byRun[run] {
+					if err = mergeUsageTargetMetadata(&out[i], protocol.UsageTarget{ConversationID: conversation}); err != nil {
+						return err
+					}
+				}
+			}
+			if err = bindings.Err(); err != nil {
+				return err
+			}
+			if err = bindings.Close(); err != nil {
+				return err
+			}
+		}
+		filtered := out[:0]
+		for _, t := range out {
 			if p.Kind == protocol.PrincipalRunner && t.RunID != "" {
 				var central bool
 				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_local_sources WHERE run_id=?)`, t.RunID).Scan(&central); err != nil {
@@ -54,12 +99,62 @@ func (a *App) UsageTargets(ctx context.Context, p protocol.Principal) ([]protoco
 				_ = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_local_sources WHERE conversation_id=? AND json_extract(source_json,'$.thread_id')=? AND writer_stopped=1)`, t.ConversationID, t.ThreadID).Scan(&t.Stopped)
 			}
 			if t.ThreadID != "" {
-				out = append(out, t)
+				filtered = append(filtered, t)
 			}
 		}
-		return rows.Err()
+		out = filtered
+		return nil
 	})
 	return out, err
+}
+
+func canonicalUsageTargets(discovered []protocol.UsageTarget) ([]protocol.UsageTarget, error) {
+	type identity struct{ run, conversation, thread string }
+	indices := make(map[identity]int)
+	out := make([]protocol.UsageTarget, 0, len(discovered))
+	for _, target := range discovered {
+		key := identity{run: target.RunID, thread: target.ThreadID}
+		if target.RunID == "" {
+			key.conversation = target.ConversationID
+		}
+		if i, exists := indices[key]; exists {
+			if err := mergeUsageTargetMetadata(&out[i], target); err != nil {
+				return nil, err
+			}
+		} else {
+			indices[key] = len(out)
+			out = append(out, target)
+		}
+	}
+	return out, nil
+}
+
+func mergeUsageTargetMetadata(target *protocol.UsageTarget, evidence protocol.UsageTarget) error {
+	for _, field := range []struct {
+		name  string
+		value *string
+		next  string
+	}{
+		{"conversation_id", &target.ConversationID, evidence.ConversationID},
+		{"provider", &target.Provider, evidence.Provider},
+		{"purpose", &target.Purpose, evidence.Purpose},
+		{"parent_session_id", &target.ParentSessionID, evidence.ParentSessionID},
+	} {
+		if field.name == "provider" && field.next == "native" {
+			continue // Historical generic provider is not a different backend.
+		}
+		if field.name == "provider" && *field.value == "native" {
+			*field.value = ""
+		}
+		if field.next == "" {
+			continue
+		}
+		if *field.value != "" && *field.value != field.next {
+			return protocol.Errorf(protocol.CodeConflictPayload, "native usage target %s conflicts for run %q thread %q", field.name, target.RunID, target.ThreadID)
+		}
+		*field.value = field.next
+	}
+	return nil
 }
 
 func authorizeConversationUsage(ctx context.Context, q store.Querier, p protocol.UsageReconcile) error {

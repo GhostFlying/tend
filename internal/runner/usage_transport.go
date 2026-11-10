@@ -99,9 +99,12 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 	decoder.DisallowUnknownFields()
 	var err error
 	var result journal.UsageSourceSnapshot
+	stage, sourceID, runID, threadID, requestID := "queue_usage", "", "", "", ""
 	if q.URL.Path == "/runner/v1/usage/source" {
+		stage = "register_source"
 		var source journal.UsageSource
 		if err = decoder.Decode(&source); err == nil {
+			sourceID, runID, threadID = source.ID, source.RunID, source.Source.ThreadID
 			if source.ID == "" {
 				http.Error(w, "invalid usage source", http.StatusBadRequest)
 				return
@@ -111,6 +114,10 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 	} else {
 		var input journal.UsageQueueRequest
 		if err = decoder.Decode(&input); err == nil {
+			sourceID, runID, threadID = input.Source.ID, input.Source.RunID, input.Source.Source.ThreadID
+			if input.Envelope != nil {
+				requestID = input.Envelope.RequestID
+			}
 			if input.Source.ID == "" || input.Envelope != nil && (input.Envelope.RequestID == "" || input.Envelope.Operation != protocol.OpRunnerUsageUpload || input.Envelope.Target.Type != "host" || input.Envelope.Target.ID != r.cfg.HostID) {
 				http.Error(w, "invalid usage upload binding", http.StatusBadRequest)
 				return
@@ -120,7 +127,16 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 		}
 	}
 	if err != nil {
-		http.Error(w, "usage journal operation not confirmed", http.StatusConflict)
+		code := protocol.CodeOf(err)
+		details, _ := json.Marshal(map[string]string{"stage": stage, "source_id": sourceID, "run_id": runID, "thread_id": threadID, "request_id": requestID})
+		// Return only a stable code and the attempted binding, never SQL errors,
+		// original content, credentials or the caller-controlled error message.
+		if r.cfg.Log != nil {
+			r.cfg.Log.Warn("usage journal operation rejected", "stage", stage, "source_id", sourceID, "run_id", runID, "thread_id", threadID, "request_id", requestID, "code", code)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Error: &protocol.Error{Code: code, Message: "usage journal operation rejected", Details: details}})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

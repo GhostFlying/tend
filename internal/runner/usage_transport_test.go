@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
 func TestPrivateUsageTransportKeepsHostAuthorityAndRejectsBusinessOperations(t *testing.T) {
@@ -45,5 +47,60 @@ func TestPrivateUsageTransportKeepsHostAuthorityAndRejectsBusinessOperations(t *
 	}
 	if got := call(protocol.OpRunnerUsageSources, "host"); got != 200 || calls != 1 {
 		t.Fatal(got, calls)
+	}
+}
+
+func TestPrivateUsageJournalPreservesRealOwnershipAndReportsSafeContext(t *testing.T) {
+	r := controlRunner(t)
+	r.nativeUsageSupported = true
+	original := journal.UsageSource{ID: "original-source", RunID: "original-run", ConversationID: "issue:original", Source: nativeusage.Source{Provider: "codex", ThreadID: "original-thread", SessionID: "original-session"}}
+	if err := r.cfg.Journal.RegisterUsageSource(t.Context(), original); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"conversation", "run", "thread", "session"} {
+		t.Run(field, func(t *testing.T) {
+			candidate := original
+			switch field {
+			case "conversation":
+				candidate.ConversationID = "issue:other"
+			case "run":
+				candidate.RunID = "other-run"
+			case "thread":
+				candidate.Source.ThreadID = "other-thread"
+			case "session":
+				candidate.Source.SessionID = "other-session"
+			}
+			raw, _ := json.Marshal(candidate)
+			response := httptest.NewRecorder()
+			r.updaterHandler().ServeHTTP(response, httptest.NewRequest("POST", "/runner/v1/usage/source", bytes.NewReader(raw)))
+			var result protocol.APIResponse
+			if response.Code != http.StatusConflict || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Error == nil || result.Error.Code != protocol.CodeForbidden || result.Error.Message != "usage journal operation rejected" {
+				t.Fatal(response.Code, response.Body.String())
+			}
+			var details map[string]string
+			if json.Unmarshal(result.Error.Details, &details) != nil || details["stage"] != "register_source" || details["source_id"] != original.ID || details["run_id"] != candidate.RunID || details["thread_id"] != candidate.Source.ThreadID {
+				t.Fatal("journal error lost actual attempted binding", details)
+			}
+		})
+	}
+	snapshot, err := r.cfg.Journal.UsageSourceSnapshot(t.Context(), original.RunID, "codex", original.Source.ThreadID)
+	if err != nil || snapshot.Source.ConversationID != original.ConversationID || snapshot.Source.Source.SessionID != original.Source.SessionID {
+		t.Fatal("rejected maintenance changed original ownership", snapshot, err)
+	}
+	input := journal.UsageQueueRequest{UsageSourceSnapshot: snapshot, Envelope: &protocol.Envelope{RequestID: "original-upload", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: r.cfg.HostID}, Payload: json.RawMessage(`{}`)}}
+	input.ExpectedRevision++
+	raw, _ := json.Marshal(input)
+	response := httptest.NewRecorder()
+	r.updaterHandler().ServeHTTP(response, httptest.NewRequest("POST", "/runner/v1/usage/queue", bytes.NewReader(raw)))
+	var result protocol.APIResponse
+	if response.Code != http.StatusConflict || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Error == nil || result.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("real CAS was bypassed", response.Code, response.Body.String())
+	}
+	var details map[string]string
+	if json.Unmarshal(result.Error.Details, &details) != nil || details["stage"] != "queue_usage" || details["request_id"] != "original-upload" {
+		t.Fatal("original queue request lost", details)
+	}
+	if requests, err := r.cfg.Journal.Requests(t.Context()); err != nil || len(requests) != 0 {
+		t.Fatal("rejected binding/CAS queued an upload", requests, err)
 	}
 }
