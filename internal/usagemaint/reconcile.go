@@ -53,6 +53,7 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		return errors.New("usage reconciliation requires codex or traex")
 	}
 	call := func(ctx context.Context, method, path string, input, output any) error {
+		diagnostic := usageCallDiagnostic(path, input)
 		var body io.Reader
 		if input != nil {
 			raw, err := json.Marshal(input)
@@ -75,11 +76,22 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 		}
 		res, err := c.HTTP.Do(req)
 		if err != nil {
-			return fmt.Errorf("usage reconciliation: transport: %w", err)
+			return fmt.Errorf("usage reconciliation: %s transport: %w", diagnostic, err)
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
-			return fmt.Errorf("usage reconciliation: server rejected request (%d)", res.StatusCode)
+			var response protocol.APIResponse
+			code := protocol.CodeUnknownOutcome
+			if json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&response) == nil && response.Error != nil {
+				switch response.Error.Code {
+				case protocol.CodeInvalidRequest, protocol.CodeMissingRequestID, protocol.CodeConflictPayload,
+					protocol.CodeStaleRevision, protocol.CodeUnauthenticated, protocol.CodeForbidden,
+					protocol.CodeNotFound, protocol.CodeInvalidTransition, protocol.CodeDuplicateEffect,
+					protocol.CodeUnknownOutcome, protocol.CodeInternal:
+					code = response.Error.Code
+				}
+			}
+			return fmt.Errorf("usage reconciliation: %s code=%s http_status=%d", diagnostic, code, res.StatusCode)
 		}
 		if output == nil {
 			return nil
@@ -95,16 +107,16 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 			return err
 		}
 		if response.Error != nil {
-			return response.Error
+			return fmt.Errorf("usage reconciliation: %s: %w", usageCallDiagnostic(path, env), response.Error)
 		}
 		if response.Operation == nil {
-			return errors.New("usage reconciliation: missing operation receipt")
+			return fmt.Errorf("usage reconciliation: %s: missing operation receipt", usageCallDiagnostic(path, env))
 		}
 		if response.Operation.Error != nil {
-			return response.Operation.Error
+			return fmt.Errorf("usage reconciliation: %s: %w", usageCallDiagnostic(path, env), response.Operation.Error)
 		}
 		if response.Operation.Status != protocol.OpSucceeded || response.Operation.RequestID != env.RequestID {
-			return errors.New("usage reconciliation: receipt is not a matching committed result")
+			return fmt.Errorf("usage reconciliation: %s: receipt is not a matching committed result", usageCallDiagnostic(path, env))
 		}
 		if out != nil {
 			return json.Unmarshal(response.Operation.Result, out)
@@ -331,6 +343,34 @@ func Run(ctx context.Context, c Config, out io.Writer) error {
 	}
 
 	return json.NewEncoder(out).Encode(result)
+}
+
+func usageCallDiagnostic(path string, input any) string {
+	stage, sourceID, runID, threadID, requestID := "read_sources", "", "", "", ""
+	switch value := input.(type) {
+	case journal.UsageSource:
+		stage, sourceID, runID, threadID = "register_source", value.ID, value.RunID, value.Source.ThreadID
+	case journal.UsageQueueRequest:
+		stage, sourceID, runID, threadID = "queue_usage", value.Source.ID, value.Source.RunID, value.Source.Source.ThreadID
+		if value.Envelope != nil {
+			requestID = value.Envelope.RequestID
+		}
+	case protocol.Envelope:
+		stage, requestID = value.Operation, value.RequestID
+		var binding struct {
+			RunID    string `json:"run_id"`
+			ThreadID string `json:"root_thread_id"`
+		}
+		if json.Unmarshal(value.Payload, &binding) == nil {
+			runID, threadID = binding.RunID, binding.ThreadID
+		}
+	case protocol.UsageUpload:
+		stage, runID, threadID = "preview_usage", value.RunID, value.RootThreadID
+	}
+	if path == "/runner/v1/usage/pending" {
+		stage = "read_pending"
+	}
+	return fmt.Sprintf("stage=%s source_id=%q run_id=%q thread_id=%q request_id=%q", stage, sourceID, runID, threadID, requestID)
 }
 
 func addPreview(total *protocol.UsagePreview, p protocol.UsagePreview) {
