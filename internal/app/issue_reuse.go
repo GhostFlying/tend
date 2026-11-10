@@ -19,8 +19,8 @@ func issueReuseStatus(ctx context.Context, q store.Querier, id string) (protocol
 	if err != nil {
 		return out, errNotFound(err, "original Issue does not exist")
 	}
-	var origin, actor string
-	err = q.QueryRowContext(ctx, `SELECT request_id,actor_json FROM issue_control_revisions WHERE issue_id=? AND revision=1`, id).Scan(&origin, &actor)
+	var origin, actor, requestDomain string
+	err = q.QueryRowContext(ctx, `SELECT request_id,actor_json,request_domain FROM issue_control_revisions WHERE issue_id=? AND revision=1`, id).Scan(&origin, &actor, &requestDomain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -31,7 +31,14 @@ func issueReuseStatus(ctx context.Context, q store.Querier, id string) (protocol
 	if json.Unmarshal([]byte(actor), &principal) != nil || principal.Validate() != nil || origin == "" {
 		return out, nil
 	}
-	record, err := store.GetRequest(ctx, q, principal.DedupDomain(), origin)
+	legacyDomain := requestDomain == ""
+	if legacyDomain {
+		requestDomain = principal.DedupDomain()
+	}
+	record, err := store.GetRequest(ctx, q, requestDomain, origin)
+	if errors.Is(err, store.ErrNotFound) && legacyDomain {
+		record, err = store.GetOwnerRequest(ctx, q, origin)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return out, nil
 	}
@@ -100,7 +107,11 @@ func (ReuseIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, errNotFound(err, "owner source does not exist")
 	}
-	if message.Author != "owner" {
+	ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), message.MessageID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !ownerAuthority {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "reuse requires an actual owner input")
 	}
 	if x.Principal.Kind != protocol.PrincipalOwner {
@@ -144,7 +155,7 @@ func (ReuseIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	}
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()
-	if err := tx.SaveCanonicalIssue(ctx, issue, expected, store.IssueRevisionProvenance{Actor: x.ActualPrincipal(), RequestID: x.Env.RequestID, SourceMessageID: p.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: p}); err != nil {
+	if err := tx.SaveCanonicalIssue(ctx, issue, expected, store.IssueRevisionProvenance{RequestDomain: x.RequestDomain(), Actor: x.ActualPrincipal(), RequestID: x.Env.RequestID, SourceMessageID: p.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: p}); err != nil {
 		return Outcome{}, err
 	}
 	association.Result = protocol.IssueReuseResult{Issue: issue, OriginalRequestID: p.OriginalRequestID, Source: updated, Reused: true, NextStep: "The original responsibility now owns this source; its existing context review and execution fences still apply."}
