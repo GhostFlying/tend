@@ -155,6 +155,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			}
 		}
 		create := strings.Contains(text, "新建") || strings.Contains(text, "创建")
+		inheritedCreation := false
 		if manager && create {
 			// A root creation source is inherited by its new manager. Only an owner
 			// message physically sent to this Issue can request another child, so a
@@ -163,6 +164,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			if !ok {
 				return "failed"
 			}
+			inheritedCreation = message == nil
 			create = message != nil
 		}
 		if manager && respond {
@@ -186,6 +188,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			}
 		}
 		dispatch := strings.Contains(text, "派发") || strings.HasPrefix(strings.TrimSpace(text), "执行")
+		dispatch = dispatch && !inheritedCreation
 		ask := strings.Contains(text, "问我")
 		switch {
 		case create || dispatch && !manager:

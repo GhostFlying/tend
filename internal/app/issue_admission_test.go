@@ -89,7 +89,7 @@ func TestIssueAdmissionCreationIsPureBacklogAndTodoIsClaimSet(t *testing.T) {
 func TestIssueAdmissionConcurrentClaimsMaterializeOneResponsibility(t *testing.T) {
 	h, r := pendingIssueOwnerHarness(t)
 	i := createBacklogTestIssue(t, h)
-	i = issueAdmissionStatus(t, h, i, protocol.IssueTodo, &protocol.IssueOwnerRequest{CategoryID: "implementer"})
+	issueAdmissionStatus(t, h, i, protocol.IssueTodo, &protocol.IssueOwnerRequest{CategoryID: "implementer"})
 	requests := []*protocol.Envelope{h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil)}
 	var wg sync.WaitGroup
 	for _, env := range requests {

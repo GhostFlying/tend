@@ -111,7 +111,7 @@ func TestIssueReopenConcurrentRequestsPublishOneSuccessor(t *testing.T) {
 		t.Fatal(results)
 	}
 	current := canonicalTaskIssue(t, h, i.IssueID)
-	current = issueAdmissionStatus(t, h, current, protocol.IssueTodo, nil)
+	issueAdmissionStatus(t, h, current, protocol.IssueTodo, nil)
 	reviewClaimManager(t, h, r)
 	if h.count("issue_manager_tasks") != 2 {
 		t.Fatal("explicit todo did not create exactly one successor")
