@@ -80,7 +80,7 @@ func TestFallbackInstructionsUseActualCapabilitiesAndSameGoalContinuation(t *tes
 					t.Fatalf("fallback retained role-based capability/continuation prohibition %q", obsolete)
 				}
 			}
-			if !strings.Contains(cfg.DeveloperInstructions, "category/capabilities") || !strings.Contains(cfg.DeveloperInstructions, "runtime tools") || !strings.Contains(cfg.DeveloperInstructions, "authority") {
+			if !strings.Contains(cfg.DeveloperInstructions, "category/capabilities") || !(strings.Contains(cfg.DeveloperInstructions, "runtime tools") || strings.Contains(cfg.DeveloperInstructions, "native tools")) || !strings.Contains(cfg.DeveloperInstructions, "authority") {
 				t.Fatal("fallback lost configured capability and real authority boundaries", cfg.DeveloperInstructions)
 			}
 			if tt.selection == nil && !strings.Contains(cfg.DeveloperInstructions, "tasks_continue") {
