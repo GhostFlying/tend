@@ -1663,8 +1663,10 @@ rollback_cleanup（显式清理尝试，可能是 no-op），终态失败阶段�
 
 补全 D208 在自动派生 generic receipt-only Run 上的身份继承：原已接受的
 native_owner_tools 模式属于 native thread binding，和本次传输是否只读分别表达。
-自动生成 reader action 时携带该原模式；已有 action 缺少该字段时，从同一管理
-责任可核对的原 action/冻结执行事实恢复，不覆写历史，不按当前配置或可用性猜测。
+自动生成 reader action 只表达 receipt_only，不在普通 Close、Issue 刷新或全局
+Claim 中预先读取历史 binding 证明。实际准备该 reader 的 selection/attachment
+时，统一从同一管理责任可核对的原 action/冻结执行事实恢复原模式，不覆写历史，
+不按当前配置或可用性猜测。
 旧 action 未保存该位时，可使用原 Run 已接受的 hosted selection，保留其原 false
 缺省语义，核对相同责任与完整执行 pin。缺失证据只在该 manager 的附着处保留
 unknown，不将其提升为所有 runner 的 Claim 失败；真实数据库错误仍如实返回。
