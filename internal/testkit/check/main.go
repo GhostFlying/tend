@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/procx"
+	"github.com/GhostFlying/tend/internal/testkit/testbudget"
 )
 
 type budget struct {
@@ -55,10 +56,7 @@ func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 			suiteShards = 1
 		}
 	}
-	packages := max(1, min(6, cpus/10))
-	if jobs > 1 {
-		packages = max(packages, min(2, cpus/(2*jobs)))
-	}
+	packages := testbudget.Packages(cpus, jobs)
 	// Budget the largest simultaneously active test-process sets, rather than
 	// treating a four-shard group as one Go process. Static checks and Web each
 	// reserve one slot; their own build/worker parallelism remains bounded.
@@ -71,7 +69,7 @@ func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 	return budget{
 		jobs: jobs, shards: shards, suiteShards: suiteShards,
 		packages:     packages,
-		procs:        max(1, min(4, cpus/processes)),
+		procs:        testbudget.Procs(cpus, processes),
 		exclusiveE2E: cpus < 32 || jobs == 1,
 	}, nil
 }
@@ -101,17 +99,7 @@ type task struct {
 }
 
 func environment(source []string, values map[string]string) []string {
-	out := make([]string, 0, len(source)+len(values))
-	for _, entry := range source {
-		key, _, _ := strings.Cut(entry, "=")
-		if _, replaced := values[key]; !replaced {
-			out = append(out, entry)
-		}
-	}
-	for key, value := range values {
-		out = append(out, key+"="+value)
-	}
-	return out
+	return testbudget.Environment(source, values)
 }
 
 func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isolated []task) {
