@@ -137,23 +137,6 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 		next.OwnerSelection = choice
 	}
 	if p.Status == protocol.IssueTodo {
-		if next.OwnerSelection == nil {
-			manager, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID)
-			if err != nil && !errors.Is(err, store.ErrNotFound) {
-				return Outcome{}, err
-			}
-			if err == nil {
-				raw, err := store.GetSpec(ctx, tx.Q(), manager.TaskID, 1)
-				if err != nil {
-					return Outcome{}, err
-				}
-				var spec protocol.IssueManagerSpec
-				if err := json.Unmarshal([]byte(raw), &spec); err != nil {
-					return Outcome{}, err
-				}
-				next.OwnerSelection = &protocol.IssueOwnerSelection{CategoryID: spec.CategoryID, AgentID: spec.AgentID, OwnershipPolicy: spec.OwnershipPolicy}
-			}
-		}
 		retainedExecution, err := store.IssueHasRetainedExecution(ctx, tx.Q(), current.IssueID)
 		if err != nil {
 			return Outcome{}, err

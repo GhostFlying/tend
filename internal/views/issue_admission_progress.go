@@ -34,6 +34,6 @@ func (f executionFacts) issueAdmissionProgress(ctx context.Context, q store.Quer
 	if err != nil {
 		return nil, nil, err
 	}
-	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN h.stopped=0 AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN h.stopped=1 OR r.observed_state IN ('finished','failed') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN h.stopped=0 AND NOT EXISTS(SELECT 1 FROM run_pause_contracts c WHERE c.run_id=h.run_id AND c.handoff_allowed=1) THEN 1 ELSE 0 END),0) FROM run_pause_handoffs h JOIN runs r USING(run_id) JOIN issue_pause_tasks t ON t.task_id=r.task_id AND t.issue_id=? AND t.issue_revision=?`, p.IssueID, p.IssueRevision).Scan(&p.Pending, &p.Stopped, &p.Unsupported)
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN h.stopped=0 AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN h.stopped=1 OR r.observed_state IN ('finished','failed') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN h.stopped=0 AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND NOT EXISTS(SELECT 1 FROM run_pause_contracts c WHERE c.run_id=h.run_id AND c.handoff_allowed=1) THEN 1 ELSE 0 END),0) FROM run_pause_handoffs h JOIN runs r USING(run_id) JOIN issue_pause_tasks t ON t.task_id=r.task_id AND t.issue_id=? AND t.issue_revision=?`, p.IssueID, p.IssueRevision).Scan(&p.Pending, &p.Stopped, &p.Unsupported)
 	return reason, &p, err
 }
