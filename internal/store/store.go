@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/url"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,7 +100,8 @@ func dsn(dbPath string, writer bool) string {
 	} else {
 		q.Add("_pragma", "query_only(1)")
 	}
-	return "file:" + dbPath + "?" + q.Encode()
+	u := url.URL{Scheme: "file", OmitHost: true, Path: filepath.ToSlash(dbPath), RawQuery: q.Encode()}
+	return u.String()
 }
 
 // Close closes both pools.

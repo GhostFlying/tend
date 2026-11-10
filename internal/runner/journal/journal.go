@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -99,7 +100,7 @@ func openJournal(ctx context.Context, path string, now func() time.Time, authori
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(FULL)")
 	q.Set("_txlock", "immediate")
-	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
+	db, err := sql.Open("sqlite", sqliteFileURI(path, q))
 	if err != nil {
 		_ = writer.Close()
 		return nil, fmt.Errorf("journal: open: %w", err)
@@ -117,6 +118,13 @@ func openJournal(ctx context.Context, path string, now func() time.Time, authori
 		return nil, err
 	}
 	return j, nil
+}
+
+// sqliteFileURI keeps literal path characters separate from URI options. The
+// omitted authority also preserves relative filenames rather than host names.
+func sqliteFileURI(path string, query url.Values) string {
+	u := url.URL{Scheme: "file", OmitHost: true, Path: filepath.ToSlash(path), RawQuery: query.Encode()}
+	return u.String()
 }
 
 // Close closes the journal.
