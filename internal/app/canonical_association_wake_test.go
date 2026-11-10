@@ -143,8 +143,31 @@ func testNamedMainReplyClassificationWake(t *testing.T, repair, delegated bool) 
 	if notices(reply.MessageID) != 1 {
 		t.Fatal("explicit owner source selection was not routed")
 	}
+	if delegated {
+		var a protocol.MessageAssociations
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			var err error
+			a, err = store.MessageAssociations(t.Context(), tx.Q(), reply.MessageID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ctx := WithOwnerExecution(t.Context(), &OwnerExecution{Actor: principal, ExecutionID: main.RequestID, CallID: h.ids.New(protocol.PrefixRequest), EffectSeq: 3})
+		payload := protocol.SetIssueMessageAssociationsPayload{Disposition: "unassigned", ContentRevision: a.ContentRevision}
+		op, err := h.app.Execute(ctx, owner, h.env("conversation.set_issue_associations", protocol.Target{Type: "message", ID: reply.MessageID}, payload, rev(a.Revision)), SetIssueMessageAssociations{})
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatal("delegated owner lost classification correction authority", op, err)
+		}
+		if notices(reply.MessageID) != 1 {
+			t.Fatal("own narration correction woke a new business input")
+		}
+	}
 	// Repeating bookkeeping cannot clear the owner's existing real duty.
-	classify(reply.MessageID, 3, principal)
+	seq := int64(3)
+	if delegated {
+		seq = 4
+	}
+	classify(reply.MessageID, seq, principal)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var pending int
 		err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM message_context_obligations WHERE work_item_id=? AND message_id=? AND needs_review=1`, issue.IssueID, reply.MessageID).Scan(&pending)
