@@ -411,9 +411,11 @@ func (c *toolCaller) ownerMessage(source string) (*protocol.ConversationItem, bo
 // reads the actual source versions through the same hosted tool boundary.
 func (c *toolCaller) reviewCurrentIssue(issue *protocol.IssueView) bool {
 	for attempt := 0; attempt < 5; attempt++ {
-		if !c.invoke("issues_read", struct{}{}, issue) {
+		var current protocol.IssueView
+		if !c.invoke("issues_read", struct{}{}, &current) {
 			return false
 		}
+		*issue = current
 		if c.reviewIssue(*issue) {
 			return true
 		}
