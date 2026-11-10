@@ -17,7 +17,7 @@ func mainExecutionSourceAdmitted(ctx context.Context, q store.Querier, execution
  JOIN main_turns t ON t.request_id=original.request_id WHERE current.request_id=?
  UNION SELECT request_id,message_id,thread_id,turn_id FROM main_turns WHERE request_id=?
  ) SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id
- WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0 AND (
+ WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0 AND (
  EXISTS(SELECT 1 FROM native_turns t WHERE t.message_id=m.message_id
  OR EXISTS(SELECT 1 FROM conversation_return_links r WHERE r.message_id=t.message_id AND r.source_message_id=m.message_id))
  OR EXISTS(SELECT 1 FROM native_turns t JOIN main_steers s ON s.thread_id=t.thread_id AND s.turn_id=t.turn_id

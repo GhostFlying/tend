@@ -243,7 +243,11 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, errNotFound(err, "message %s does not exist", p.MessageID)
 	}
-	if msg.Author != "owner" {
+	ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), msg.MessageID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !ownerAuthority {
 		if msg.Author == "external" {
 			if _, err := store.ManualSource(ctx, tx.Q(), p.MessageID); err != nil {
 				return Outcome{}, err

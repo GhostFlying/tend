@@ -226,6 +226,9 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	}
 	x := &Exec{managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	x.requestDomain = domain
+	if delegated, ok := cmd.(ownerExecutionCommand); ok {
+		x = delegated.adapted(x)
+	}
 	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
 		if p.Kind != protocol.PrincipalMainAgent {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")
@@ -390,7 +393,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			projectionOnly = out.ProjectionOnly || projectionOnlyOperation(cmd.Operation())
 			queued = out.Notify || x.FollowupQueued || len(out.Outbox) > 0
 			for _, event := range out.Events {
-				queued = queued || wakesMain(x.Principal, event.Kind) || questionEvent(event) || event.ObjectType == "attention"
+				queued = queued || wakesMain(x.ActualPrincipal(), event.Kind) || questionEvent(event) || event.ObjectType == "attention"
 			}
 			applied = true
 		}

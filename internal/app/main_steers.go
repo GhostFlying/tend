@@ -75,7 +75,11 @@ func (a *App) ClaimMainSteer(ctx context.Context, activeRequestID, threadID, tur
 		if err != nil {
 			return err
 		}
-		if msg.Author != "owner" {
+		ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), msg.MessageID)
+		if err != nil {
+			return err
+		}
+		if !ownerAuthority {
 			return nil
 		}
 		now := a.now().UnixMilli()
@@ -461,13 +465,13 @@ func (a *App) NativeItemSources(ctx context.Context, threadID, turnID, itemID st
 // exposes provenance, not additional tool permissions or future queued input.
 func (a *App) OwnerMessageDelivery(ctx context.Context, messageID, threadID, turnID string, historical bool) (requestID string, err error) {
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
-		err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_turns WHERE message_id=m.message_id AND status IN ('started','completed','interrupted','failed') AND (? OR (thread_id=? AND turn_id=?)) ORDER BY updated_at DESC LIMIT 1),(SELECT request_id FROM main_steers WHERE message_id=m.message_id AND native_item_id<>'' AND (? OR (thread_id=? AND turn_id=?))),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0`, historical, threadID, turnID, historical, threadID, turnID, messageID).Scan(&requestID)
+		err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_turns WHERE message_id=m.message_id AND status IN ('started','completed','interrupted','failed') AND (? OR (thread_id=? AND turn_id=?)) ORDER BY updated_at DESC LIMIT 1),(SELECT request_id FROM main_steers WHERE message_id=m.message_id AND native_item_id<>'' AND (? OR (thread_id=? AND turn_id=?))),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0`, historical, threadID, turnID, historical, threadID, turnID, messageID).Scan(&requestID)
 		if err != nil || requestID != "" {
 			return err
 		}
 		// An empty-input execution retains the admitted sources of its logical
 		// responsibility; no new native user item exists in this turn.
-		return tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_steers s WHERE s.message_id=m.message_id AND s.native_item_id<>''),(SELECT request_id FROM main_turns t WHERE t.message_id=m.message_id AND t.status IN ('started','completed','interrupted','failed') ORDER BY updated_at DESC LIMIT 1),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0 AND EXISTS(SELECT 1 FROM main_turns current JOIN agent_recovery_attempts r ON r.request_id=current.request_id JOIN logical_turn_executions e ON e.request_id=current.request_id JOIN logical_turn_messages lm ON lm.logical_turn_id=e.logical_turn_id WHERE current.thread_id=? AND current.turn_id=? AND lm.message_id=m.message_id)`, messageID, threadID, turnID).Scan(&requestID)
+		return tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT request_id FROM main_steers s WHERE s.message_id=m.message_id AND s.native_item_id<>''),(SELECT request_id FROM main_turns t WHERE t.message_id=m.message_id AND t.status IN ('started','completed','interrupted','failed') ORDER BY updated_at DESC LIMIT 1),'') FROM conversation_messages m LEFT JOIN conversation_message_controls c ON c.message_id=m.message_id WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0 AND EXISTS(SELECT 1 FROM main_turns current JOIN agent_recovery_attempts r ON r.request_id=current.request_id JOIN logical_turn_executions e ON e.request_id=current.request_id JOIN logical_turn_messages lm ON lm.logical_turn_id=e.logical_turn_id WHERE current.thread_id=? AND current.turn_id=? AND lm.message_id=m.message_id)`, messageID, threadID, turnID).Scan(&requestID)
 	})
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && requestID == "") {
 		err = protocol.Errorf(protocol.CodeInvalidRequest, "source must be an admitted owner message")

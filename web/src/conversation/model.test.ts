@@ -262,3 +262,17 @@ test.each(["open", "answered", "withdrawn", "superseded"])(
     expect(systemMessageBody({ body: choice.question })).toBe(choice.question);
   },
 );
+
+test("retains Agent authorship while tracking its owner-authorized input turn", () => {
+  const input = item(1, { author: "agent", control: { revision: 1 }, state: "processing" });
+  const reply = item(2, { author: "main_agent", reply_to: input.message_id });
+  expect(processing([input, reply])).toEqual(input);
+  const entries = buildEntries([input, reply], []);
+  expect(entries.some((entry) => entry.kind === "owner")).toBe(false);
+  expect(entries.at(-1)).toMatchObject({
+    kind: "agent",
+    replyTo: input.message_id,
+    state: "processing",
+  });
+  expect(processing([{ ...input, control: undefined }, reply])).toBeUndefined();
+});

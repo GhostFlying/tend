@@ -141,7 +141,15 @@ func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, l
 
 // HideUndeliveredOwner keeps unadmitted owner input and cancelled followups out of model reads.
 func HideUndeliveredOwner(ctx context.Context, q Querier, it *protocol.ConversationItem) error {
-	if it.Author != "owner" {
+	ownerInput := it.Author == "owner"
+	if it.Author == "agent" {
+		var err error
+		ownerInput, err = HasOwnerMessageAuthority(ctx, q, it.MessageID)
+		if err != nil {
+			return err
+		}
+	}
+	if !ownerInput {
 		if it.Author == "system" {
 			var cancelled bool
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM followup_occurrences WHERE message_id=? AND status='cancelled')`, it.MessageID).Scan(&cancelled); err != nil {
@@ -197,7 +205,15 @@ func ConversationActive(ctx context.Context, q Querier, session ...string) (*Con
 // HideUnadmittedForCoordinator admits direct background owner input when its
 // original-source coordination turn starts. Withdrawal remains authoritative.
 func HideUnadmittedForCoordinator(ctx context.Context, q Querier, it *protocol.ConversationItem) error {
-	if it.Author == "owner" {
+	ownerInput := it.Author == "owner"
+	if it.Author == "agent" {
+		var err error
+		ownerInput, err = HasOwnerMessageAuthority(ctx, q, it.MessageID)
+		if err != nil {
+			return err
+		}
+	}
+	if ownerInput {
 		var admitted bool
 		err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_return_links l JOIN main_turns t ON t.message_id=l.message_id WHERE l.source_message_id=? AND t.status IN ('starting','started','completed','interrupted','failed')) AND NOT EXISTS(SELECT 1 FROM conversation_message_controls WHERE message_id=? AND withdrawn_at<>0)`, it.MessageID, it.MessageID).Scan(&admitted)
 		if err != nil {
@@ -214,7 +230,7 @@ func HideUnadmittedForCoordinator(ctx context.Context, q Querier, it *protocol.C
 // delivered to a native turn. Withdrawal remains a separate source correction.
 func OwnerInputAdmitted(ctx context.Context, q Querier, message string) (bool, error) {
 	var pending bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') AND (EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation='main_thread.handle_message' AND json_extract(o.payload_json,'$.message_id')=? AND o.status IN ('pending','sending','unknown') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('started','completed','interrupted','failed')) AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND s.native_item_id<>'')) OR EXISTS(SELECT 1 FROM main_steers s WHERE s.message_id=? AND s.status IN ('sending','accepted','unknown','waiting') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status IN ('started','completed','interrupted','failed'))))`, message, message, message).Scan(&pending)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM owner_authority_messages WHERE message_id=?) AND (EXISTS(SELECT 1 FROM outbox o WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation='main_thread.handle_message' AND json_extract(o.payload_json,'$.message_id')=? AND o.status IN ('pending','sending','unknown') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('started','completed','interrupted','failed')) AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND s.native_item_id<>'')) OR EXISTS(SELECT 1 FROM main_steers s WHERE s.message_id=? AND s.status IN ('sending','accepted','unknown','waiting') AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status IN ('started','completed','interrupted','failed'))))`, message, message, message).Scan(&pending)
 	if err != nil {
 		return false, fmt.Errorf("store: owner input admission: %w", err)
 	}

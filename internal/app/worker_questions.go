@@ -329,7 +329,7 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 
 	p.SourceMessageID = id
 	events := []Event{{ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", Body: map[string]any{"author": author, "reply_to": d.AskedMessageID}}}
-	if author == "owner" {
+	if author == "owner" || x.Actor != nil {
 		events = append(events, Event{ObjectType: "message", ObjectID: id, Kind: "conversation.message_state", Body: map[string]any{"state": protocol.MessageReplied}})
 	}
 	return events, nil

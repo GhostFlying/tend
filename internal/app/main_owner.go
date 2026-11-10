@@ -85,7 +85,11 @@ func (x *Exec) recordMessageAuthority(ctx context.Context, tx *store.Tx, message
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO main_owner_message_authorities(message_id,request_id,owner_subject,actor_json) VALUES(?,?,?,?)`, message, x.Env.RequestID, x.Principal.Subject, string(actor))
+	_, err = tx.Exec(ctx, `INSERT INTO main_owner_message_authorities(message_id,request_id,owner_subject,actor_json) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='agent')`, message, x.Env.RequestID, x.Principal.Subject, string(actor), message)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO conversation_message_controls(message_id) SELECT ? WHERE EXISTS(SELECT 1 FROM main_owner_message_authorities WHERE message_id=?) ON CONFLICT(message_id) DO NOTHING`, message, message)
 	return err
 }
 

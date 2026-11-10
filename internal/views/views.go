@@ -426,6 +426,13 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 		return it, err
 	}
 	it.Associations = &associations
+	ownerInput := r.Author == "owner"
+	if r.Author == "agent" {
+		ownerInput, err = store.HasOwnerMessageAuthority(ctx, q, r.MessageID)
+		if err != nil {
+			return it, err
+		}
+	}
 	var link protocol.ConversationReturnLink
 	if err := q.QueryRowContext(ctx, `SELECT conversation_id,source_message_id FROM conversation_return_links WHERE message_id=? OR message_id=? ORDER BY CASE WHEN message_id=? THEN 0 ELSE 1 END LIMIT 1`, r.MessageID, r.ReplyTo, r.MessageID).Scan(&link.ConversationID, &link.MessageID); err == nil {
 		it.ReturnLink = &link
@@ -436,9 +443,9 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 	case r.Tool != nil:
 		it.Tool = &protocol.ToolUseView{Name: r.Tool.Tool, Input: r.Tool.Input, Output: r.Tool.Output,
 			Status: protocol.ToolStatus(r.Tool.Status), TurnID: r.Tool.TurnID, UpdatedAt: time.UnixMilli(r.Tool.UpdatedAt).UTC()}
-	case r.Author == "owner" && r.State == "":
+	case ownerInput && r.State == "":
 		it.State = protocol.MessageQueued
-	case r.Author == "owner":
+	case ownerInput:
 		it.State = protocol.MessageState(r.State)
 	case r.Author == "system" && r.State != "":
 		// Only notices that initiated an event turn have a recorded state.
@@ -454,7 +461,7 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 			it.Background = &batch
 		}
 	}
-	if r.Author == "owner" {
+	if ownerInput {
 		var steer protocol.MainSteerView
 		err := q.QueryRowContext(ctx, `SELECT status,thread_id,turn_id,native_item_id,reason FROM main_steers s WHERE message_id=? AND NOT (status='waiting' AND EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status<>'rejected'))`, r.MessageID).Scan(&steer.Status, &steer.ThreadID, &steer.TurnID, &steer.NativeItemID, &steer.Reason)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

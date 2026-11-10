@@ -74,6 +74,7 @@ export function buildEntries(
   };
   for (const it of items) {
     const at = Date.parse(it.created_at);
+    if (it.control) triggers.set(it.message_id, it);
     if (it.author === "system") {
       triggers.set(it.message_id, it);
       stamp(at, it.message_id);
@@ -132,7 +133,10 @@ export function buildEntries(
 export function processing(items: readonly ConversationItem[]): ConversationItem | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i]!;
-    if ((it.author === "owner" || it.author === "system") && it.state === "processing") {
+    if (
+      (it.author === "owner" || it.author === "system" || it.control) &&
+      it.state === "processing"
+    ) {
       return it;
     }
   }
