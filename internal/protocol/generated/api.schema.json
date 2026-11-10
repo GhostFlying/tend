@@ -5093,6 +5093,9 @@
         "duty_revision": {
           "type": "integer"
         },
+        "execution_run_id": {
+          "type": "string"
+        },
         "generation": {
           "type": "integer"
         },
@@ -5104,6 +5107,7 @@
         }
       },
       "required": [
+        "execution_run_id",
         "run_id",
         "generation",
         "duty_revision"
@@ -9887,6 +9891,9 @@
       "properties": {
         "after": {
           "type": "string"
+        },
+        "duty_revision": {
+          "type": "integer"
         },
         "id": {
           "type": "string"
@@ -19204,6 +19211,9 @@
         },
         "candidate": {
           "$ref": "#/definitions/IssueDeliveryCandidate"
+        },
+        "execution_duty_revision": {
+          "type": "integer"
         },
         "execution_run_id": {
           "type": "string"

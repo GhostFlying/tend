@@ -8,11 +8,12 @@ import (
 )
 
 type hostedIssueMaterialsArgs struct {
-	IssueID string `json:"issue_id,omitempty"`
-	Kind    string `json:"kind,omitempty"`
-	ID      string `json:"id,omitempty"`
-	After   string `json:"after,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
+	IssueID      string `json:"issue_id,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	ID           string `json:"id,omitempty"`
+	DutyRevision int64  `json:"duty_revision,omitempty"`
+	After        string `json:"after,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
 }
 
 type issueMaterialWindow struct {

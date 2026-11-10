@@ -10,9 +10,9 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// workerSpec projects a frozen spec by role before it crosses the runner
-// boundary. It uses Scope, understood by older runners, rather than relying on
-// a new prompt field being interpreted by an old harness.
+// workerSpec projects a frozen spec before it crosses the runner boundary.
+// Responsibilities select capability requirements, not access to the Task's
+// business background. Scope also carries context understood by older runners.
 func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error) {
 	// Selection is negotiated separately; retain the legacy spec wire shape.
 	var required []protocol.CapabilityReference
@@ -42,8 +42,8 @@ func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error
 			fmt.Fprintf(&b, "[%s] %s (source: %s)\n", fact.Kind, fact.Text, fact.Source)
 		}
 	}
-	if role == protocol.RoleImplement && spec.ImplementationContext != "" {
-		fmt.Fprintf(&b, "\nImplementation-only context:\n%s\n", spec.ImplementationContext)
+	if spec.ImplementationContext != "" {
+		fmt.Fprintf(&b, "\nAuthor-supplied design and investigation input (not independently verified facts or approval; assess proposals and conclusions against the original evidence):\n%s\n", spec.ImplementationContext)
 	}
 	spec.Scope = b.String()
 	spec.ImplementationContext = ""

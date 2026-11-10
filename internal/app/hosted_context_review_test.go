@@ -364,8 +364,8 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 		t.Fatal(op)
 	}
 	acceptance, ok, _ := h.claim("linux-1")
-	if !ok || acceptance.Role != protocol.RoleAccept || acceptance.RunID == implementation.RunID || strings.Contains(string(acceptance.Spec), "PRIVATE_MANAGER_EXECUTION_REASONING") {
-		t.Fatal("independent acceptance was not isolated", acceptance, ok)
+	if !ok || acceptance.Role != protocol.RoleAccept || acceptance.RunID == implementation.RunID || !strings.Contains(string(acceptance.Spec), "PRIVATE_MANAGER_EXECUTION_REASONING") || !strings.Contains(string(acceptance.Spec), "not independently verified facts or approval") {
+		t.Fatal("independent acceptance lost its actual identity or complete author context", acceptance, ok)
 	}
 	if unavailable {
 		// Removing a historical role label no longer removes adapter capability.

@@ -85,6 +85,22 @@ func TestIssueContextToolPreservesPublicServerErrors(t *testing.T) {
 	}
 }
 
+func TestIssueContextReaderPreservesHistoricalDutySelector(t *testing.T) {
+	as := protocol.Assignment{Role: protocol.RoleImplement, RunID: "run_current", TaskID: "task_current", RunToken: "current-run-only"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query, err := protocol.ParseIssueMaterialsQuery(r.URL.Query())
+		if err != nil || query.ID != "run_01J00000000000000000000000" || query.DutyRevision != 3 || r.Header.Get(headerRun) != as.RunID {
+			t.Error("runner transport lost current identity or exact historical selector", r.URL.RawQuery, err)
+		}
+		_ = json.NewEncoder(w).Encode(protocol.RunContext{RunID: as.RunID, TaskID: as.TaskID, Role: as.Role})
+	}))
+	defer server.Close()
+	r := New(Config{ServerURL: server.URL, HTTPClient: server.Client()})
+	if _, err := r.contextReader(t.Context(), as)(t.Context(), protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: "run_01J00000000000000000000000", DutyRevision: 3}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIssueContextReaderFailureDoesNotInventAnEmptySuccessfulPage(t *testing.T) {
 	for _, scenario := range []string{"old server", "forbidden", "rate limited", "unavailable", "malformed", "wrong run", "wrong task", "wrong role"} {
 		t.Run(scenario, func(t *testing.T) {

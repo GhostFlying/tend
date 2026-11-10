@@ -64,6 +64,7 @@ type UpdateIssueDeliveryPayload struct {
 	// unbound contribution to the same PR and Issue; this grants no execution.
 	ExecutionTaskID             string `json:"execution_task_id,omitempty"`
 	ExecutionRunID              string `json:"execution_run_id,omitempty"`
+	ExecutionDutyRevision       int64  `json:"execution_duty_revision,omitempty"`
 	ExpectedTaskControlRevision *int64 `json:"expected_task_control_revision,omitempty"`
 	// submit_result, prepare, resume, bind, report, end, complete.
 	Action    string                  `json:"action"`

@@ -34,7 +34,7 @@ func canonicalTaskReadFixture(t *testing.T, h *harness, issue protocol.Issue) st
 	return id
 }
 
-func TestCanonicalTaskNoStageDetailContextAndAcceptanceIsolation(t *testing.T) {
+func TestCanonicalTaskNoStageDetailAndCompleteReviewContext(t *testing.T) {
 	h := newHarness(t)
 	parent := createCanonicalOwnerTestIssue(t, h)
 	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Child", Project: "default", Intent: "Child goal", Background: []protocol.SharedFact{{Kind: protocol.SharedFactUserConstraint, Text: "Preserve the public API", Source: "owner brief"}}, Stages: []protocol.IssueStage{}}, ParentIssueID: parent.IssueID}
@@ -78,8 +78,8 @@ func TestCanonicalTaskNoStageDetailContextAndAcceptanceIsolation(t *testing.T) {
 			if !strings.Contains(string(raw), "Preserve the public API") || !strings.Contains(string(raw), "Child goal") {
 				t.Fatalf("%s lost shared facts: %s", role, raw)
 			}
-			if strings.Contains(string(raw), "PRIVATE_EXECUTION_RATIONALE") != (role == protocol.RoleImplement) {
-				t.Fatalf("%s narrative projection=%s", role, raw)
+			if !strings.Contains(string(raw), "PRIVATE_EXECUTION_RATIONALE") || !strings.Contains(string(raw), "not independently verified facts or approval") {
+				t.Fatalf("%s lost retained author rationale or its evidence distinction: %s", role, raw)
 			}
 		}
 		return nil

@@ -29,6 +29,9 @@ func (r *Runner) contextReader(runCtx context.Context, as protocol.Assignment) f
 		if query.Limit != 0 {
 			values.Set("limit", strconv.Itoa(query.Limit))
 		}
+		if query.DutyRevision != 0 {
+			values.Set("duty_revision", strconv.FormatInt(query.DutyRevision, 10))
+		}
 		path := "/runner/v1/context"
 		if len(values) > 0 {
 			path += "?" + values.Encode()

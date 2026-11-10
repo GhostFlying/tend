@@ -356,7 +356,7 @@ func TestIssueMaterialsMarksTruncatedFileProvenance(t *testing.T) {
 	}
 }
 
-func TestIssueMaterialsAcceptanceTaskSpecKeepsOnlyPublicContext(t *testing.T) {
+func TestFreshAcceptanceSessionReadsCompleteTaskBackgroundWithinScope(t *testing.T) {
 	h := newDeliverableHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	file := uploadChatFile(t, h, "public.txt", "text/plain", []byte("public Issue original"))
@@ -366,28 +366,30 @@ func TestIssueMaterialsAcceptanceTaskSpecKeepsOnlyPublicContext(t *testing.T) {
 	if !ok || impl.TaskID != task {
 		t.Fatal(impl)
 	}
-	read := func(p protocol.Principal, id string, private bool) {
+	original := h.storedSpec(task, 1)
+	read := func(p protocol.Principal, id string) {
 		t.Helper()
 		page, err := h.app.ReadRunContext(t.Context(), p, protocol.IssueMaterialsQuery{Kind: "tasks", ID: id})
 		if err != nil || len(page.Materials.Tasks) != 1 {
 			t.Fatal(page, err)
 		}
 		raw := string(page.Materials.Tasks[0].Spec)
-		if strings.Contains(raw, "PRIVATE_OWNER_IMPLEMENTATION_REASONING") != private {
-			t.Fatal("incorrect implementation-only projection", raw)
+		if !strings.Contains(raw, "PRIVATE_OWNER_IMPLEMENTATION_REASONING") {
+			t.Fatal("authorized execution lost retained author context", raw)
 		}
 		var spec map[string]json.RawMessage
 		if err := json.Unmarshal(page.Materials.Tasks[0].Spec, &spec); err != nil {
 			t.Fatal(err)
 		}
-		if !private && spec["implementation_context"] != nil {
-			t.Fatal("private field remains present", raw)
+		var input string
+		if err := json.Unmarshal(spec["implementation_context"], &input); err != nil || input != original.ImplementationContext {
+			t.Fatal("original author input was rewritten or promoted into a different fact", input, err)
 		}
 		if len(spec["goal"]) == 0 || len(spec["acceptance"]) == 0 {
 			t.Fatal("public Task context was hidden", raw)
 		}
 	}
-	read(runPrincipal(impl.RunID, impl.Role), task, true)
+	read(runPrincipal(impl.RunID, impl.Role), task)
 	h.runAs(impl, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
 	artifact := testArtifact(h.task(task).WorkspaceName)
 	artifact.Report = &protocol.ResultReport{Body: "PUBLIC_SUBMITTED_AUTHOR_REPORT"}
@@ -395,7 +397,9 @@ func TestIssueMaterialsAcceptanceTaskSpecKeepsOnlyPublicContext(t *testing.T) {
 		t.Fatal(op)
 	}
 	accept, ok, _ := h.claim("linux-1")
-	if !ok || accept.Role != protocol.RoleAccept || strings.Contains(string(accept.Spec), "PRIVATE_OWNER_IMPLEMENTATION_REASONING") {
+	// The assignment is sufficient for a fresh reviewer without any previous
+	// native session. Author input remains available, not an accepted conclusion.
+	if !ok || accept.Role != protocol.RoleAccept || accept.TaskID != task || !strings.Contains(string(accept.Spec), "PRIVATE_OWNER_IMPLEMENTATION_REASONING") || !strings.Contains(string(accept.Spec), "not independently verified facts or approval") {
 		t.Fatal(accept)
 	}
 	if strings.Contains(string(accept.Artifact), "PUBLIC_SUBMITTED_AUTHOR_REPORT") {
@@ -408,8 +412,10 @@ func TestIssueMaterialsAcceptanceTaskSpecKeepsOnlyPublicContext(t *testing.T) {
 			t.Fatal("submitted public report cannot be deliberately read", page, err, marshalErr)
 		}
 	}
-	read(runPrincipal(accept.RunID, accept.Role), task, false)
-	read(runPrincipal(accept.RunID, accept.Role), "", false)
+	// A replacement session can also deliberately reload the exact original
+	// from the ledger, including through the ordinary paged Task list.
+	read(runPrincipal(accept.RunID, accept.Role), task)
+	read(runPrincipal(accept.RunID, accept.Role), "")
 	if _, err := h.app.ReadRunContextFile(t.Context(), runPrincipal(accept.RunID, accept.Role), file.FileID); err != nil {
 		t.Fatal("acceptance lost ordinary shared originals", err)
 	}
@@ -418,6 +424,22 @@ func TestIssueMaterialsAcceptanceTaskSpecKeepsOnlyPublicContext(t *testing.T) {
 		if err != nil || len(page.Tasks) != 1 || !strings.Contains(string(page.Tasks[0].Spec), "PRIVATE_OWNER_IMPLEMENTATION_REASONING") {
 			t.Fatal("owner/manager projection changed", page, err)
 		}
+	}
+	if current := h.storedSpec(task, 1); !current.Equal(original) || h.task(task).SpecVersion != 1 {
+		t.Fatal("reconstructing review context revised the Task agreement", current)
+	}
+	other := createCanonicalOwnerTestIssue(t, h)
+	materialProjectForTest(t, h, other.IssueID, "unrelated-project")
+	foreignTask := canonicalTaskReadFixture(t, h, other)
+	p := runPrincipal(accept.RunID, accept.Role)
+	if _, err := h.app.ReadRunContext(t.Context(), p, protocol.IssueMaterialsQuery{Kind: "tasks", ID: foreignTask}); protocol.CodeOf(err) != protocol.CodeNotFound {
+		t.Fatal("complete background granted access to a foreign Task", err)
+	}
+	if _, err := h.app.ReadRunContext(t.Context(), p, protocol.IssueMaterialsQuery{Kind: "tasks", IssueID: other.IssueID, ID: foreignTask}); protocol.CodeOf(err) != protocol.CodeForbidden {
+		t.Fatal("caller broadened its actual Issue scope", err)
+	}
+	if _, err := h.app.ReadRunContext(t.Context(), owner, protocol.IssueMaterialsQuery{Kind: "tasks", ID: task}); protocol.CodeOf(err) != protocol.CodeForbidden {
+		t.Fatal("Task material read accepted a caller without actual Run credentials", err)
 	}
 }
 

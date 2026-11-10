@@ -157,8 +157,8 @@ func TestIssueOwnerExecutesWithSameIdentityAndReviewChild(t *testing.T) {
 	if accept.Execution.Identity.LocalID != "beta" || accept.Responsibility == nil || accept.Responsibility.IssueID == issue.IssueID {
 		t.Fatalf("reviewer has no distinct Issue: %+v", accept)
 	}
-	if strings.Contains(string(accept.Spec), "PRIVATE_OWNER_IMPLEMENTATION_DESIGN") {
-		t.Fatal("implementation design leaked into independent acceptance")
+	if !strings.Contains(string(accept.Spec), "PRIVATE_OWNER_IMPLEMENTATION_DESIGN") || !strings.Contains(string(accept.Spec), "not independently verified facts or approval") {
+		t.Fatal("independent acceptance lost author design or its evidence distinction")
 	}
 	review := canonicalTaskIssue(t, h, accept.Responsibility.IssueID)
 	if review.ParentIssueID != issue.IssueID || review.Assignee.Ref != "linux-1/beta" || strings.Contains(review.Plan.Intent+review.Plan.Scope, "PRIVATE_OWNER_IMPLEMENTATION_DESIGN") {

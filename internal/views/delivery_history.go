@@ -2,9 +2,7 @@ package views
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -22,6 +20,7 @@ func deliveryExecutionHistoryIndex(ctx context.Context, q store.Querier, task st
 		if err := rows.Scan(&item.RunID, &item.Generation, &item.DutyRevision, &item.UpgradeID); err != nil {
 			return nil, false, err
 		}
+		item.ExecutionRunID = item.RunID
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -34,15 +33,35 @@ func deliveryExecutionHistoryIndex(ctx context.Context, q store.Querier, task st
 	return items, more, nil
 }
 
-// HistoricalDeliveryExecutionAuthority is selected by its actual original Run.
+// HistoricalDeliveryExecutionAuthority selects an immutable binding by its
+// original Run and duty revision. A Run alone is compatible only when unique.
 // It describes an already settled result; Valid is always false for execution.
-func HistoricalDeliveryExecutionAuthority(ctx context.Context, q store.Querier, run string) (*protocol.DeliveryExecutionAuthority, error) {
+func HistoricalDeliveryExecutionAuthority(ctx context.Context, q store.Querier, run string, dutyRevision int64) (*protocol.DeliveryExecutionAuthority, error) {
+	if dutyRevision < 0 {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "archived duty_revision cannot be negative")
+	}
 	v := &protocol.DeliveryExecutionAuthority{Historical: true, Source: "server.issue_delivery_execution_history", RunID: run, InvalidReason: "historical_result_only; no current execution authority"}
 	var candidate, raw, artifact string
-	if err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,source_task_id,duty_revision,candidate_json,duty_json,artifact_id,upgrade_id FROM issue_delivery_execution_history WHERE run_id=? ORDER BY created_at DESC,duty_revision DESC LIMIT 1`, run).Scan(&v.TaskID, &v.IssueID, &v.SourceTaskID, &v.DutyRevision, &candidate, &raw, &artifact, &v.UpgradeID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
+	rows, err := q.QueryContext(ctx, `SELECT task_id,issue_id,source_task_id,duty_revision,candidate_json,duty_json,artifact_id,upgrade_id FROM issue_delivery_execution_history WHERE run_id=? AND (?=0 OR duty_revision=?) ORDER BY duty_revision DESC LIMIT 2`, run, dutyRevision, dutyRevision)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
+		return nil, store.ErrNotFound
+	}
+	if err := rows.Scan(&v.TaskID, &v.IssueID, &v.SourceTaskID, &v.DutyRevision, &candidate, &raw, &artifact, &v.UpgradeID); err != nil {
+		return nil, err
+	}
+	if rows.Next() {
+		failure := protocol.Errorf(protocol.CodeInvalidRequest, "multiple archived deliveries share this Run; select duty_revision from the Task's history index")
+		failure.Details, _ = json.Marshal(map[string]any{"execution_run_id": run, "selector": "duty_revision"})
+		return nil, failure
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	var frozen struct {

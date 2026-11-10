@@ -20,7 +20,7 @@ func TestIssueMaterialsNamedToolIsOrdinaryReadForCoordinators(t *testing.T) {
 				t.Fatal(err)
 			}
 			props := schema["properties"].(map[string]any)
-			for _, field := range []string{"issue_id", "kind", "id", "after", "limit"} {
+			for _, field := range []string{"issue_id", "kind", "id", "duty_revision", "after", "limit"} {
 				if props[field] == nil {
 					t.Fatal("ordinary read lost a material or pagination selector", purpose, field)
 				}

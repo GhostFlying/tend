@@ -51,6 +51,40 @@ func TestIssueMaterialsCLIDeliveryAuthorityRequiresExactTask(t *testing.T) {
 	}
 }
 
+func TestIssueMaterialsCLISelectsExactHistoricalDuty(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	const run = "run_01J00000000000000000000000"
+	f.on("GET /api/v1/issues/original-issue/materials", func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		query, err := protocol.ParseIssueMaterialsQuery(r.URL.Query())
+		if err != nil || query.ID != run || query.DutyRevision != 3 {
+			t.Error("historical read dropped the immutable selector", r.URL.RawQuery, err)
+		}
+		_ = json.NewEncoder(w).Encode(protocol.IssueMaterials{Kind: query.Kind, DeliveryAuthorization: &protocol.DeliveryExecutionAuthority{RunID: run, DutyRevision: 3, Historical: true, Valid: false}})
+	})
+	if code := e.main("issue", "materials", "original-issue", "--kind", "delivery_authorization", "--id", run, "--duty-revision", "3", "--json"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var result protocol.IssueMaterials
+	if err := json.Unmarshal(e.out.Bytes(), &result); err != nil || result.DeliveryAuthorization == nil || result.DeliveryAuthorization.DutyRevision != 3 || result.DeliveryAuthorization.Valid {
+		t.Fatal("CLI lost historical selection or changed its authority", result, err)
+	}
+}
+
+func TestIssueHistoricalContributionCLIExportsImmutableSelector(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	const body = `{"action":"complete","task_id":"task_report","execution_task_id":"task_producer","execution_run_id":"run_01J00000000000000000000000","execution_duty_revision":3,"reason":"Settle only the selected original completed whole-PR delivery"}`
+	if code := e.main("issue", "update-delivery", "original-issue", "--revision", "7", "--epoch", "3", "--data", body, "--dry-run"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var envelope protocol.Envelope
+	var payload protocol.UpdateIssueDeliveryPayload
+	if json.Unmarshal(e.out.Bytes(), &envelope) != nil || json.Unmarshal(envelope.Payload, &payload) != nil || payload.ExecutionDutyRevision != 3 || payload.ExecutionRunID != "run_01J00000000000000000000000" || envelope.Operation != "issues.update_delivery" || len(f.requests) != 0 {
+		t.Fatal("dry-run changed the exact historical settlement or performed a write", envelope, payload)
+	}
+}
+
 func TestIssueLiveDeliveryBindReplayKeepsBothControlRevisions(t *testing.T) {
 	f := newFakeServer(t)
 	e := newTestEnv(t, f.srv.URL)

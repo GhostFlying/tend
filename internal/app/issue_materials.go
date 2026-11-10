@@ -249,7 +249,7 @@ func (a *App) readMaterials(ctx context.Context, scope store.MaterialScope, quer
 				return protocol.Errorf(protocol.CodeForbidden, "Task is outside this Issue context")
 			}
 			if historical {
-				result.DeliveryAuthorization, err = views.HistoricalDeliveryExecutionAuthority(ctx, tx.Q(), query.ID)
+				result.DeliveryAuthorization, err = views.HistoricalDeliveryExecutionAuthority(ctx, tx.Q(), query.ID, query.DutyRevision)
 				err = errNotFound(err, "original delivery execution history is unavailable")
 			} else {
 				result.DeliveryAuthorization, err = views.DeliveryExecutionAuthority(ctx, tx.Q(), taskID)
@@ -319,21 +319,6 @@ func (a *App) readMaterials(ctx context.Context, scope store.MaterialScope, quer
 	}
 	if err != nil {
 		return result, err
-	}
-	if role == protocol.RoleAccept {
-		for i := range result.Tasks {
-			var spec map[string]json.RawMessage
-			if err := json.Unmarshal(result.Tasks[i].Spec, &spec); err != nil {
-				return result, err
-			}
-			// Only this explicitly implementation-private field is withheld.
-			// Submitted public artifacts remain ordinary readable materials.
-			delete(spec, "implementation_context")
-			result.Tasks[i].Spec, err = json.Marshal(spec)
-			if err != nil {
-				return result, err
-			}
-		}
 	}
 	if query.Kind == "deployment" {
 		deployment, e := a.ReadIssueDeploymentPreparation(ctx, scope.IssueIDs[0])

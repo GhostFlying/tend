@@ -75,7 +75,7 @@ func contributionDeliverySettlementEvidence(ctx context.Context, q store.Querier
 }
 
 func historicalContributionSettlementEvidence(ctx context.Context, q store.Querier, issue string, d protocol.IssueDeliveryDuty, p protocol.UpdateIssueDeliveryPayload) ([]protocol.IssueEvidence, error) {
-	original, err := views.HistoricalDeliveryExecutionAuthority(ctx, q, p.ExecutionRunID)
+	original, err := views.HistoricalDeliveryExecutionAuthority(ctx, q, p.ExecutionRunID, p.ExecutionDutyRevision)
 	if err != nil {
 		return nil, errNotFound(err, "original settled delivery Run does not exist")
 	}
@@ -97,7 +97,7 @@ func historicalContributionSettlementEvidence(ctx context.Context, q store.Queri
 		return nil, err
 	}
 	var raw string
-	if err := q.QueryRowContext(ctx, `SELECT duty_json FROM issue_delivery_execution_history WHERE run_id=? AND task_id=? ORDER BY created_at DESC,duty_revision DESC LIMIT 1`, p.ExecutionRunID, p.ExecutionTaskID).Scan(&raw); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT duty_json FROM issue_delivery_execution_history WHERE run_id=? AND task_id=? AND duty_revision=?`, p.ExecutionRunID, p.ExecutionTaskID, original.DutyRevision).Scan(&raw); err != nil {
 		return nil, err
 	}
 	var settled protocol.IssueDeliveryDuty

@@ -32,7 +32,7 @@ func TestDeliveryContinuationKeepsHistoricalRunAndReleasesOldBinding(t *testing.
 		if current == nil || current.Valid || len(current.History) != 1 || current.History[0].RunID != originalRun {
 			t.Fatal("old authorization was reused as current", current)
 		}
-		previous, err := views.HistoricalDeliveryExecutionAuthority(t.Context(), tx.Q(), originalRun)
+		previous, err := views.HistoricalDeliveryExecutionAuthority(t.Context(), tx.Q(), originalRun, 0)
 		if err != nil {
 			return err
 		}

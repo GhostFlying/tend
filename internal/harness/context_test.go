@@ -55,6 +55,22 @@ func TestReadContextArgumentsAndUnavailableResponses(t *testing.T) {
 	}
 }
 
+func TestReadContextPreservesHistoricalDutySelector(t *testing.T) {
+	var received protocol.IssueMaterialsQuery
+	r := Results{Spec: WorkerSpec{ReadContext: func(_ context.Context, query protocol.IssueMaterialsQuery) (protocol.RunContext, error) {
+		received = query
+		return protocol.RunContext{Materials: protocol.IssueMaterials{DeliveryAuthorization: &protocol.DeliveryExecutionAuthority{RunID: query.ID, DutyRevision: query.DutyRevision, Historical: true, Valid: false}}}, nil
+	}}}
+	result := r.Handle(t.Context(), ToolCall{Tool: "read_context", Arguments: json.RawMessage(`{"kind":"delivery_authorization","id":"run_01J00000000000000000000000","duty_revision":3}`)})
+	if !result.Success || received.DutyRevision != 3 || received.ID != "run_01J00000000000000000000000" {
+		t.Fatal("worker tool lost its exact immutable history selector", received, result)
+	}
+	var schema struct{ Properties map[string]json.RawMessage }
+	if json.Unmarshal(ReadContextToolSpec.InputSchema, &schema) != nil || schema.Properties["duty_revision"] == nil {
+		t.Fatal("worker schema omitted the historical duty selector")
+	}
+}
+
 func TestReadContextHandBackRecognizesPriorSavedInput(t *testing.T) {
 	spec := WorkerSpec{Role: protocol.RoleAccept, Spec: json.RawMessage(`{}`)}
 	previous := HandBack(spec)

@@ -4621,6 +4621,7 @@ export interface ObservedDeliveryApproval {
  */
 export interface DeliveryExecutionReference {
   duty_revision: number;
+  execution_run_id: string;
   generation: number;
   run_id: string;
   upgrade_id?: string;
@@ -4995,6 +4996,7 @@ export interface SharedReviewContributionEvidence {
  */
 export interface IssueMaterialsQuery {
   after?: string;
+  duty_revision?: number;
   id?: string;
   issue_id?: string;
   kind?: string;
@@ -7117,6 +7119,7 @@ export interface UpdateIssueDeliveryPayload {
   acceptance_id?: string;
   action: string;
   candidate?: IssueDeliveryCandidate;
+  execution_duty_revision?: number;
   execution_run_id?: string;
   execution_task_id?: string;
   expected_assignment_epoch: number;
