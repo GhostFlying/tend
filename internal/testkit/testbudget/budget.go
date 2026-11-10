@@ -68,6 +68,9 @@ func PackageLimit(flags string, fallback int) (limit int, explicit bool, err err
 		}
 		value, found := strings.CutPrefix(word, "-p=")
 		if !found {
+			value, found = strings.CutPrefix(word, "--p=")
+		}
+		if !found {
 			continue
 		}
 		limit, err = strconv.Atoi(value)
