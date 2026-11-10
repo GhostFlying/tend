@@ -33,6 +33,8 @@ type capabilityCommand struct {
 }
 
 var capabilityCommands = []capabilityCommand{
+	{Name: "task resume-wait", Operation: protocol.OpTasksResumeWait, Target: "task", RevisionRoute: "-", JSONDefault: true},
+	{Name: "task waits", Route: "/api/v1/tasks/{id}/external-waits", JSONDefault: true},
 	{Name: "maintenance overview", Route: "/api/v1/maintenance", JSONDefault: true},
 	{Name: "capability list", Route: "/api/v1/capabilities", Queries: "state search after limit", JSONDefault: true},
 	{Name: "capability show", Route: "/api/v1/capabilities/{id}", Queries: "definition-revision=revision", JSONDefault: true},
@@ -393,6 +395,10 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	if cmd.Operation == protocol.OpResumeUsageCollection && *reason != "" {
 		return usagef("resume does not accept a retirement reason")
 	}
+	if cmd.Operation == protocol.OpResumeUsageCollection && fields["rescan"] == nil {
+		fields["rescan"] = json.RawMessage(`true`)
+	}
+
 	if cmd.Operation == protocol.OpAnswerDecisionContinuation {
 		var payload protocol.AnswerDecisionPayload
 		decoder := json.NewDecoder(strings.NewReader(string(body)))

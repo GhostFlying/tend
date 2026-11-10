@@ -78,7 +78,7 @@ func bindSharedAcceptanceReview(ctx context.Context, q store.Querier, r protocol
 				return out, protocol.Errorf(protocol.CodeForbidden, "retain the linked delivery's actual formal acceptance reviewer and category")
 			}
 		}
-		ids, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM runs WHERE task_id=? AND role='implement'`, link.TaskID)
+		ids, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM runs WHERE task_id=? AND role IN ('implement','issue_manager')`, link.TaskID)
 		if err != nil {
 			return out, err
 		}

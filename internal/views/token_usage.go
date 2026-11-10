@@ -81,7 +81,7 @@ func addUsageRecord(t *protocol.TokenUsageTotals, r protocol.TokenUsageRecord) {
 }
 
 func usageMetering(ctx context.Context, q store.Querier) (map[string]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT session_id,MAX(coverage<>'caught_up' AND reason<>'empty'),MAX(state='retired' AND reason='unavailable' AND coverage<>'caught_up'),MAX(state='needs_reconcile') FROM (SELECT s.session_id,s.coverage,COALESCE(json_extract(r.collection_json,'$.state'),'unobserved') state,COALESCE(json_extract(r.collection_json,'$.retirement_reason'),'') reason FROM token_usage_sources s LEFT JOIN token_usage_remote_collection r ON r.source_key=s.source_key UNION ALL SELECT COALESCE(NULLIF(json_extract(source_json,'$.session_id'),''),json_extract(source_json,'$.thread_id')),coverage,collection_state,COALESCE(json_extract(collection_json,'$.retirement_reason'),'') FROM token_usage_local_sources) GROUP BY session_id`)
+	rows, err := q.QueryContext(ctx, `SELECT session_id,MAX(coverage<>'caught_up' AND reason<>'empty'),MAX(state='retired' AND reason='unavailable' AND coverage<>'caught_up'),MAX(state='needs_reconcile' OR EXISTS(SELECT 1 FROM token_usage_contributions u WHERE u.session_id=sessions.session_id AND u.conflict=1)),MAX(state='unobserved') FROM (SELECT s.session_id,CASE WHEN r.source_key IS NULL AND s.coverage='caught_up' THEN 'unobserved' WHEN COALESCE(json_array_length(json_extract(r.observation_json,'$.pending_request_ids')),0)>0 THEN 'pending' ELSE s.coverage END coverage,COALESCE(json_extract(r.collection_json,'$.state'),'unobserved') state,COALESCE(json_extract(r.collection_json,'$.retirement_reason'),'') reason FROM token_usage_sources s LEFT JOIN token_usage_remote_collection r ON r.source_key=s.source_key UNION ALL SELECT COALESCE(NULLIF(json_extract(source_json,'$.session_id'),''),json_extract(source_json,'$.thread_id')),coverage,collection_state,COALESCE(json_extract(collection_json,'$.retirement_reason'),'') FROM token_usage_local_sources) sessions GROUP BY session_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -89,13 +89,16 @@ func usageMetering(ctx context.Context, q store.Querier) (map[string]string, err
 	result := map[string]string{}
 	for rows.Next() {
 		var session string
-		var pending, unavailable, needsReconcile bool
-		if err = rows.Scan(&session, &pending, &unavailable, &needsReconcile); err != nil {
+		var pending, unavailable, needsReconcile, unobserved bool
+		if err = rows.Scan(&session, &pending, &unavailable, &needsReconcile, &unobserved); err != nil {
 			return nil, err
 		}
 		result[session] = "caught_up"
 		if pending {
 			result[session] = "syncing"
+		}
+		if unobserved {
+			result[session] = "unobserved"
 		}
 		if unavailable {
 			result[session] = "unavailable"

@@ -118,7 +118,7 @@ func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) pr
 		return protocol.DesiredStopped
 	case task.ControlMode == protocol.ControlHumanControl:
 		return protocol.DesiredHeld
-	case run.PauseHandoff != nil, task.ControlMode != protocol.ControlManaged:
+	case run.DesiredState == protocol.DesiredPaused, run.PauseHandoff != nil, task.ControlMode != protocol.ControlManaged:
 		return protocol.DesiredPaused
 	}
 	return protocol.DesiredRun
@@ -155,7 +155,7 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
 		return protocol.Assignment{}, fmt.Errorf("app: decode spec of %s: %w", run.TaskID, err)
 	}
-	workerInput, err := workerSpec(spec, run.Role)
+	workerInput, err := workerSpecForRun(ctx, q, run, action, task, spec)
 	if err != nil {
 		return protocol.Assignment{}, fmt.Errorf("app: project worker spec: %w", err)
 	}
@@ -203,6 +203,13 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 	if err := store.AssignmentPause(ctx, q, &as); err != nil {
 		return protocol.Assignment{}, err
 	}
+	if err := store.AssignmentSessionContinuation(ctx, q, &as); err != nil {
+		return protocol.Assignment{}, err
+	}
+	if err := store.AssignmentExternalWait(ctx, q, &as); err != nil {
+		return protocol.Assignment{}, err
+	}
+	as.ExternalWaits = run.Protocol >= 3
 	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
 		return protocol.Assignment{}, err
 	}
@@ -344,8 +351,14 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if busy >= host.Slots {
+		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
+	}
 	endClaimRefresh := tx.ObservePhase(store.WriteClaimRefresh)
 	refreshErr := refreshPauseContinuations(ctx, x, tx)
+	if refreshErr == nil {
+		refreshErr = refreshExternalWaits(ctx, x, tx)
+	}
 	if refreshErr == nil {
 		refreshErr = refreshManagerTasks(ctx, x, tx)
 	}
@@ -356,15 +369,21 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	x.managersRefreshed = true
 	endClaimCandidates := tx.ObservePhase(store.WriteClaimCandidates)
 	defer endClaimCandidates()
-	rows, err := store.ListClaimCandidates(ctx, q)
+	rows, err := store.ListHostClaimCandidates(ctx, q, host.HostID, tx.ObservePhase)
 	if err != nil {
 		return Outcome{}, err
 	}
+	endDecode := tx.ObservePhase(store.WriteClaimCandidateDecode)
 	candidates, err := candidatesOf(rows)
+	endDecode()
 	if err != nil {
 		return Outcome{}, err
 	}
-	managerCandidates, err := issueManagerCandidates(ctx, q)
+	managerCandidates, err := views.IssueManagerCandidatesObserved(ctx, q, tx.ObservePhase)
+	if err != nil {
+		return Outcome{}, err
+	}
+	managerCandidates, err = filterExternalWaitManagers(ctx, q, managerCandidates)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -444,6 +463,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		run.Protocol = p.Runtime.Protocol
 	}
 	if err := tx.InsertRun(ctx, run); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE run_external_waits SET successor_run_id=? WHERE continuation_action_id=? AND successor_run_id IS NULL`, run.RunID, run.ActionID); err != nil {
 		return Outcome{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO run_pause_contracts(run_id,handoff_allowed) VALUES(?,?)`, run.RunID, p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityPauseHandoffs)); err != nil {
@@ -727,6 +749,10 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if err != nil {
 			return Outcome{}, err
 		}
+		externalWait, err := store.GetExternalWait(ctx, q, run.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
 		if desired == protocol.DesiredStopped {
 			stop(h.RunID, "the run is no longer wanted")
 			continue
@@ -753,7 +779,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 					}
 				}
 				events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.retained_continued", Body: map[string]any{"continuation_request_id": continuation.RequestID, "lease_id": lease.LeaseID}})
-				res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinueRetained, Desired: desired, PauseHandoff: pause, RetainedResume: &protocol.RetainedRunResume{RequestID: continuation.RequestID, Mode: "attach", RecoveryAuthorizationID: retainedContinuationRecoveryAuthorization(continuation)}})
+				res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinueRetained, Desired: desired, ExternalWait: externalWait, PauseHandoff: pause, RetainedResume: &protocol.RetainedRunResume{RequestID: continuation.RequestID, Mode: "attach", RecoveryAuthorizationID: retainedContinuationRecoveryAuthorization(continuation)}})
 				continue
 			}
 			// The negotiated peer retains this exact journal. Registration and
@@ -773,7 +799,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			}
 			events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.reconciled", Body: map[string]any{"observed": h.Observed}})
 		}
-		res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinue, Desired: desired, PauseHandoff: pause})
+		res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinue, Desired: desired, PauseHandoff: pause, ExternalWait: externalWait})
 	}
 
 	open, err := store.ListOpenRunsOnHost(ctx, q, host.HostID)
@@ -1174,6 +1200,12 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 						if err != nil {
 							return err
 						}
+						if err == nil {
+							state.ExternalWait, err = store.GetExternalWait(ctx, q, rc.run.RunID)
+							if err != nil {
+								return err
+							}
+						}
 						res.Runs = append(res.Runs, state)
 						continue
 					}
@@ -1184,6 +1216,12 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 				state.Renewed = true
 				state.Desired = desiredFor(rc.run, rc.action, rc.task)
 				state.PauseHandoff, err = store.NegotiatedPauseHandoff(ctx, q, rc.run)
+				if err != nil {
+					return err
+				}
+			}
+			if err == nil {
+				state.ExternalWait, err = store.GetExternalWait(ctx, q, rc.run.RunID)
 				if err != nil {
 					return err
 				}
@@ -1215,9 +1253,19 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 			return res, protocol.Errorf(protocol.CodeInvalidRequest, "event %d is malformed", e.Seq)
 		}
 	}
+	bodies := make([][]byte, 0, len(events))
+	for _, event := range events {
+		bodies = append(bodies, event.Body)
+	}
+	staged, err := a.store.StageOriginals(ctx, "run-events:"+runID, bodies...)
+	if err != nil {
+		return res, err
+	}
+	ctx = staged
+
 	now := a.now().UnixMilli()
 	changed, wakeQueued := false, false
-	err := a.write(ctx, func(tx *store.Tx) error {
+	err = a.write(ctx, func(tx *store.Tx) error {
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
 			return errNotFound(err, "run %s does not exist", runID)

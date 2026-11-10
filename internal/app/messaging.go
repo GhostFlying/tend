@@ -487,8 +487,34 @@ func (c PublishCommunication) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	// An Issue owner publishes from its current responsibility. Finishing that
+	// responsibility does not require an old inbound endpoint to remain live.
+	// The operation envelope retains any requested reply identity; the receipt
+	// reports notification rather than pretending that endpoint was available.
+	issuePublication := x.coordinationExecution != nil && x.coordinationExecution.IssueID != ""
+	if !c.Notify && issuePublication {
+		if p.ReplyTo == "" {
+			c.Notify = true
+		} else if err := communicationReplyInput(ctx, tx.Q(), p.ReplyTo); protocol.CodeOf(err) == protocol.CodeNotFound {
+			if err := communicationSourceVisible(ctx, tx.Q(), p.ReplyTo); err != nil {
+				return Outcome{}, errNotFound(err, "reply source is unavailable")
+			}
+			if err := hostedSourceInIssueScope(ctx, tx.Q(), x.coordinationExecution.IssueID, p.ReplyTo); err != nil {
+				return Outcome{}, err
+			}
+			c.Notify = true
+		} else if err != nil {
+			return Outcome{}, err
+		}
+	}
 	if c.Notify {
 		p.ReplyTo = ""
+		if issuePublication && strings.TrimSpace(p.Reason) == "" {
+			p.Reason = x.Env.Reason
+			if strings.TrimSpace(p.Reason) == "" {
+				p.Reason = "Publish the current Issue owner's " + p.Purpose + " result"
+			}
+		}
 	} else if p.ReplyTo == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reply_to is required")
 	}
@@ -538,6 +564,11 @@ func (c PublishCommunication) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		return Outcome{}, err
 	}
 	id := out.Result.(map[string]any)["message_id"].(string)
+	if c.Notify {
+		out.Result.(map[string]any)["publication_mode"] = "notification"
+	} else {
+		out.Result.(map[string]any)["publication_mode"] = "reply"
+	}
 	if _, err = tx.Exec(ctx, `UPDATE message_dispositions SET disposition=CASE WHEN disposition='pending' THEN 'unassigned' ELSE disposition END,classified_revision=content_revision,facts_revision=content_revision WHERE message_id=?`, id); err != nil {
 		return Outcome{}, err
 	}

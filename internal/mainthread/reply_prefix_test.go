@@ -46,12 +46,7 @@ func TestClosingReplyPrefixDoesNotPublishSuppressedRepairOutput(t *testing.T) {
 	if err := e.app.PutMainTurn(t.Context(), rec); err != nil {
 		t.Fatal(err)
 	}
-	var repair string
-	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM logical_turn_executions WHERE logical_turn_id=? AND repair=1`, request).Scan(&repair)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	repair := retainHistoricalRepairForTest(t, e, request)
 	e.m.active = &turn{requestID: repair, messageID: source}
 	thread := &prefixThread{ack: func(context.Context, harness.Event, []int64) error {
 		t.Fatal("suppressed repair prose was treated as a visible durable reply")

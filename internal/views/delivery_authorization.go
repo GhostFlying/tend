@@ -16,10 +16,19 @@ import (
 // a claimed source task, candidate, approval or policy from the reader.
 func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task string) (*protocol.DeliveryExecutionAuthority, error) {
 	v := &protocol.DeliveryExecutionAuthority{Source: "server.issue_delivery_executions", TaskID: task}
+	var err error
+	v.History, v.HistoryMore, err = deliveryExecutionHistoryIndex(ctx, q, task)
+	if err != nil {
+		return nil, err
+	}
 	var raw string
-	err := q.QueryRowContext(ctx, `SELECT issue_id,source_task_id,duty_revision,candidate_json,upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task).
+	err = q.QueryRowContext(ctx, `SELECT issue_id,source_task_id,duty_revision,candidate_json,upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task).
 		Scan(&v.IssueID, &v.SourceTaskID, &v.DutyRevision, &raw, &v.UpgradeID)
 	if errors.Is(err, sql.ErrNoRows) {
+		if len(v.History) > 0 {
+			v.InvalidReason = "no_current_delivery_execution; select an original Run to read historical settlement"
+			return v, nil
+		}
 		return nil, nil
 	}
 	if err != nil {
@@ -49,7 +58,7 @@ func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task strin
 		return nil, err
 	}
 	if policy != nil {
-		v.Policy = &protocol.ObservedDeliveryPolicy{IssueID: policyIssue.IssueID, IssueRevision: policyIssue.Revision, Mode: policy.Mode, Repository: policy.Repository, Digest: store.IssuePRPolicyDigest(policy)}
+		v.Policy = &protocol.ObservedDeliveryPolicy{IssueID: policyIssue.IssueID, IssueRevision: policyIssue.Revision, Mode: policy.Mode, Repository: policy.Repository, Digest: store.IssuePRPolicyDigest(policy), Deployment: policy.Deployment}
 		if authority := policy.Authority; authority != nil {
 			v.Policy.RequestID, v.Policy.SourceMessageID, v.Policy.SourceRevision = authority.RequestID, authority.SourceMessageID, authority.SourceRevision
 		}

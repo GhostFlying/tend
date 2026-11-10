@@ -126,8 +126,11 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 			return false, err
 		}
 	}
-	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities) || !slices.Equal(old.Runtime.AgentExecutors, r.AgentExecutors) || !slices.Equal(old.Runtime.AgentContinuations, r.AgentContinuations) || old.Runtime.ContinuationBackend != r.ContinuationBackend
+	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.ConfirmedCancelledUpgradeID != r.ConfirmedCancelledUpgradeID || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities) || !slices.Equal(old.Runtime.AgentExecutors, r.AgentExecutors) || !slices.Equal(old.Runtime.AgentContinuations, r.AgentContinuations) || old.Runtime.ContinuationBackend != r.ContinuationBackend
 	if err := tx.PutHostRuntime(ctx, host, store.HostRuntimeRow{Runtime: *r, LastHeartbeatAt: now, Online: true}); err != nil {
+		return false, err
+	}
+	if err := recordRunnerCancellationConfirmation(ctx, tx, host, *r, now); err != nil {
 		return false, err
 	}
 	return changed, nil

@@ -58,7 +58,7 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	}
 	// The accepted mode identifies the original thread. Temporary fencing is
 	// expressed by the receipt flags, not by replacing that binding identity.
-	nativeOwnerMode := owner && acceptedMode.Bool
+	nativeOwnerMode := acceptedMode.Bool
 	if !receiptOnly && !strict && !closing && !parked {
 		nativeOwnerMode = nativeOwnerMode && nativeTools
 	}
@@ -190,7 +190,7 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 		}
 		mode = &original
 	}
-	selected.NativeOwnerTools = mode != nil && *mode && selected.OwnershipPolicy == protocol.IssueOwnerPolicy
+	selected.NativeOwnerTools = mode != nil && *mode
 	if !selected.ReceiptOnly && !selected.RequireReceiptReader {
 		selected.NativeOwnerTools = selected.NativeOwnerTools && nativeTools
 	}

@@ -849,7 +849,10 @@ func backupBoundedRunnerData(cfg Config, op *Operation) error {
 	if err := os.MkdirAll(op.BackupDir, 0700); err != nil {
 		return err
 	}
-	paths := dataPaths(cfg)
+	paths, err := dataSnapshotPaths(cfg)
+	if err != nil {
+		return err
+	}
 	files := make([]BackupFile, 0, len(paths))
 	for i, path := range paths {
 		file := BackupFile{Path: path, Name: fmt.Sprintf("data-%03d", i)}

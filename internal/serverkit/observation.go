@@ -42,7 +42,12 @@ func deploymentObservation(cfg *UpgradeConfig, ids protocol.IDGen) (app.Option, 
 		if cfg != nil {
 			instance = cfg.Instance
 		}
-		return configuredDeploymentObservation(ctx, actual, socket, instance)
+		d, err := configuredDeploymentObservation(ctx, actual, socket, instance)
+		if cfg != nil && cfg.ExecutionEntry != nil {
+			entry := *cfg.ExecutionEntry
+			d.Preparation.ExecutionEntry = &entry
+		}
+		return d, err
 	}), nil
 }
 

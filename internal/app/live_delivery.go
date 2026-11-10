@@ -24,7 +24,7 @@ func prepareLiveDeliveryDuty(ctx context.Context, tx *store.Tx, issue protocol.I
 		return d, err
 	}
 	var event string
-	if err := tx.Q().QueryRowContext(ctx, `SELECT event_id FROM events WHERE object_type='task' AND object_id=? AND kind='task.created' ORDER BY event_seq LIMIT 1`, p.TaskID).Scan(&event); err != nil {
+	if err := tx.Q().QueryRowContext(ctx, `SELECT event_id FROM events WHERE object_type='task' AND object_id=? AND kind IN ('task.created','task.owner_materialized') ORDER BY event_seq LIMIT 1`, p.TaskID).Scan(&event); err != nil {
 		return d, err
 	}
 	d = protocol.IssueDeliveryDuty{TaskID: p.TaskID, EventID: event, Revision: 1, Status: "preparing", AssignmentEpoch: issue.AssignmentEpoch, Candidate: p.Candidate, Reason: p.Reason}
@@ -45,8 +45,21 @@ func currentLiveDeliveryTask(ctx context.Context, q store.Querier, issue, task s
 	if err != nil {
 		return r, err
 	}
-	if primary != issue || r.Kind != protocol.TaskKindExecution {
+	if primary != issue || r.Kind != protocol.TaskKindExecution && r.Kind != protocol.TaskKindIssueManager {
 		return r, protocol.Errorf(protocol.CodeForbidden, "delivery must retain this Issue's execution Task")
+	}
+	if r.Kind == protocol.TaskKindIssueManager {
+		manager, err := store.GetIssueManagerTask(ctx, q, task)
+		if err != nil {
+			return r, err
+		}
+		current, err := store.GetCanonicalIssue(ctx, q, issue)
+		if err != nil {
+			return r, err
+		}
+		if manager.State != "assigned" || manager.AssignmentEpoch != current.AssignmentEpoch {
+			return r, protocol.Errorf(protocol.CodeForbidden, "delivery requires this Issue's actual current owner Task")
+		}
 	}
 	if expected == nil || r.ControlRevision != *expected {
 		return r, protocol.Errorf(protocol.CodeStaleRevision, "delivery requires the current Task control revision")

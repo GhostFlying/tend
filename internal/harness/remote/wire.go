@@ -16,8 +16,9 @@ const Path = "/runner/v1/native/"
 
 // Hello pins a connection to the workspace already prepared for its run.
 type Hello struct {
-	Cwd      string `json:"cwd"`
-	ThreadID string `json:"thread_id,omitempty"`
+	OptionalContinuation bool   `json:"optional_continuation,omitempty"`
+	Cwd                  string `json:"cwd"`
+	ThreadID             string `json:"thread_id,omitempty"`
 }
 
 // Dial opens an authenticated run transport. Native messages remain JSON frames.
@@ -76,4 +77,11 @@ func writeFrame(ctx context.Context, c *websocket.Conn, v any) error {
 		return e
 	}
 	return c.Write(ctx, websocket.MessageText, b)
+}
+
+// continuationHelloAck precedes native traffic only on the negotiated optional
+// continuation path. It confirms whether the verified history was reusable.
+type continuationHelloAck struct {
+	Type     string `json:"type"`
+	ThreadID string `json:"thread_id,omitempty"`
 }

@@ -47,6 +47,10 @@ func RunRollout(ctx context.Context, q store.Querier, id string, before, after i
 		if err = rows.Scan(&r.Seq, &r.NativeID, &r.Kind, &body, &at); err != nil {
 			return v, err
 		}
+		body, err = store.ResolveJSON(ctx, q, body)
+		if err != nil {
+			return v, err
+		}
 		r.Body = json.RawMessage(body)
 		r.CreatedAt = time.UnixMilli(at)
 		v.Logs = append(v.Logs, r)

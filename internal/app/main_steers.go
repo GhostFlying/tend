@@ -339,8 +339,8 @@ func (a *App) settleMainSteers(ctx context.Context, tx *store.Tx, threadID, turn
 				settledStatus = store.TurnInterrupted
 			}
 			if incomplete {
-				if m.Reason != "awaiting classification and fact review" {
-					m.Reason = "awaiting classification and fact review"
+				if m.Reason != "awaiting original native completion and receipt reconciliation" {
+					m.Reason = "awaiting original native completion and receipt reconciliation"
 					if err := tx.PutMainSteer(ctx, m, now); err != nil {
 						return err
 					}
@@ -618,7 +618,7 @@ func (a *App) resumeMainSteers(ctx context.Context, tx *store.Tx, logical string
 		if err != nil {
 			return err
 		}
-		steer.Status, steer.Reason = "consumed", "awaiting classification and fact review"
+		steer.Status, steer.Reason = "consumed", "awaiting original native completion and receipt reconciliation"
 		if err := tx.PutMainSteer(ctx, steer, now); err != nil {
 			return err
 		}

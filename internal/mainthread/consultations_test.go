@@ -33,8 +33,8 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 			}
 			return "failed"
 		}
-		if th.Config.Sandbox != "read-only" || th.Config.Config["features.shell_tool"] != false || th.Config.Config["features.apply_patch_freeform"] != false {
-			return fail("hosted consultation/manager has native execution")
+		if th.Config.Sandbox != "" || th.Config.Config["features.shell_tool"] != nil || th.Config.Config["features.apply_patch_freeform"] != nil {
+			return fail("hosted role overrode the configured native defaults")
 		}
 		n := 0
 		invoke := func(name string, args any, out any) bool {

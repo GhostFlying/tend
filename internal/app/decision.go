@@ -15,7 +15,7 @@ func toDomain(r store.TaskRow, budget int64) domain.Task {
 	return domain.Task{
 		ID: r.TaskID, Project: r.Project, Lifecycle: r.Lifecycle, Control: r.ControlMode, ControlRevision: r.ControlRevision,
 		SpecVersion: r.SpecVersion, Rating: r.Rating, Block: r.BlockReason,
-		ImplementGeneration: r.ImplementGeneration, CurrentArtifactID: r.CurrentArtifactID, Budget: budget,
+		ImplementGeneration: r.ImplementGeneration, ImplementContinuations: r.ImplementContinuations, CurrentArtifactID: r.CurrentArtifactID, Budget: budget + r.ImplementContinuations,
 		WorkspaceAssigned: r.WorkspaceAssigned,
 	}
 }
@@ -35,6 +35,7 @@ func fromDomain(t domain.Task, prev store.TaskRow, now int64) store.TaskRow {
 	r.TaskID, r.Project, r.Lifecycle, r.ControlMode, r.ControlRevision = t.ID, t.Project, t.Lifecycle, t.Control, t.ControlRevision
 	r.SpecVersion, r.Rating, r.BlockReason = t.SpecVersion, t.Rating, t.Block
 	r.ImplementGeneration, r.CurrentArtifactID, r.UpdatedAt = t.ImplementGeneration, t.CurrentArtifactID, now
+	r.ImplementContinuations = t.ImplementContinuations
 	return r
 }
 

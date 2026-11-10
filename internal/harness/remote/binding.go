@@ -129,3 +129,51 @@ func (b *Broker) saveThreadBinding(runID string, pin nativeBinding) error {
 	}
 	return b.saveBinding(runID, pin)
 }
+
+// Optional history is chosen before any native RPC dispatch. A verified stopped
+// predecessor permits a fresh binding when its history locator is unavailable;
+// a pending current Run binding still requires its original reconciliation.
+func (b *Broker) resolveContinuationHello(ctx context.Context, run string, hello Hello) (Hello, error) {
+	if !hello.OptionalContinuation {
+		return hello, b.bindQuestionHello(ctx, run, hello)
+	}
+	if _, err := os.Stat(b.bindingPath(run)); !errors.Is(err, os.ErrNotExist) {
+		return hello, b.bindHello(run, hello)
+	}
+	if b.cfg.QuestionPredecessor == nil {
+		return hello, errors.New("continuation has no stopped predecessor")
+	}
+	parent, err := b.cfg.QuestionPredecessor(ctx, run)
+	if err != nil {
+		return hello, err
+	}
+	if parent == "" || parent == run {
+		return hello, errors.New("continuation has no stopped predecessor")
+	}
+	raw, err := os.ReadFile(b.bindingPath(parent))
+	var pin nativeBinding
+	if err == nil && json.Unmarshal(raw, &pin) == nil && !pin.Pending && pin.RunID == parent && pin.Cwd == hello.Cwd && pin.Thread == hello.ThreadID && pin.Thread != "" {
+		return hello, b.bindQuestionHello(ctx, run, hello)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return hello, err
+	}
+	hello.ThreadID = ""
+	return hello, b.bindHello(run, hello)
+}
+
+// Called with the Run lock held. Only a definitive rejected resume clears the
+// new Run's optional history binding; transport loss leaves it unchanged.
+func (b *Broker) settleContinuationResume(runID string, run *nativeRun, frame nativeFrame) error {
+	if !run.optionalContinuation || run.resumeID == "" || string(frame.ID) != run.resumeID {
+		return nil
+	}
+	run.resumeID = ""
+	if len(frame.Error) > 0 && string(frame.Error) != "null" {
+		if err := b.saveBinding(runID, nativeBinding{Cwd: run.cwd}); err != nil {
+			return err
+		}
+		run.thread = ""
+	}
+	return nil
+}

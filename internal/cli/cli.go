@@ -141,6 +141,11 @@ func Main(ctx context.Context, e *Env, args []string) int {
 		return report(e, runWorkerClose(ctx, e, rest))
 	case "upgrade":
 		return report(e, runUpgrade(ctx, e, rest))
+	case "storage":
+		if len(rest) == 0 || rest[0] != "originals" {
+			return report(e, usagef("usage: tend storage originals status|verify|import|migrate"))
+		}
+		return report(e, runOriginalStorage(ctx, e, rest[1:]))
 	case "attachment":
 		return report(e, runAttachment(ctx, e, rest))
 	case "run", "source":

@@ -11,9 +11,17 @@ import (
 )
 
 func ApplyIssueAdmission(ctx context.Context, q store.Querier, c *scheduler.Candidate, primary string, settlement bool) error {
-	issue, err := store.GetCanonicalIssue(ctx, q, primary)
+	facts, err := store.IssueAdmissionFacts(ctx, q, []string{primary})
 	if err != nil {
 		return err
+	}
+	return applyIssueAdmissionFacts(c, primary, settlement, facts)
+}
+
+func applyIssueAdmissionFacts(c *scheduler.Candidate, primary string, settlement bool, facts map[string]protocol.Issue) error {
+	issue, ok := facts[primary]
+	if !ok {
+		return fmt.Errorf("Issue scheduling control is missing: %s", primary)
 	}
 	controls := map[string]protocol.IssueControl{}
 	for current := issue; ; {
@@ -26,17 +34,18 @@ func ApplyIssueAdmission(ctx context.Context, q store.Querier, c *scheduler.Cand
 		if current.ParentIssueID == "" {
 			break
 		}
-		current, err = store.GetCanonicalIssue(ctx, q, current.ParentIssueID)
-		if err != nil {
-			return err
+		parent := current.ParentIssueID
+		current, ok = facts[parent]
+		if !ok {
+			return fmt.Errorf("Issue ancestor control is missing: %s", parent)
 		}
 	}
 	var dependencies []protocol.IssueDependency
 	achieved := map[string]bool{}
 	for _, id := range issue.DependsOn {
-		prerequisite, err := store.GetCanonicalIssue(ctx, q, id)
-		if err != nil {
-			return err
+		prerequisite, exists := facts[id]
+		if !exists {
+			return fmt.Errorf("Issue prerequisite control is missing: %s", id)
 		}
 		achieved[id] = prerequisite.State == protocol.IssueClosed && prerequisite.Closure != nil && prerequisite.Closure.Kind == protocol.WorkItemClosureCompleted
 		dependencies = append(dependencies, protocol.IssueDependency{IssueID: primary, DependsOn: id})

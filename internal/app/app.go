@@ -242,6 +242,21 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	}
 	ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: x.TraceID})
 
+	if _, claim := cmd.(Claim); claim && p.Kind == protocol.PrincipalRunner {
+		noWork, err := a.preflightClaim(ctx, p, env)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		if noWork {
+			return protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{"assignment":null}`)}, nil
+		}
+	}
+
+	ctx, err = a.stageRetainedInput(ctx, env, domain)
+	if err != nil {
+		return protocol.Operation{}, err
+	}
+
 	var (
 		op             protocol.Operation
 		queued         bool

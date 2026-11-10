@@ -17,6 +17,9 @@ import (
 
 // runOwner runs one of the owner's commands.
 func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
+	if cmd == "task" && len(args) > 0 && args[0] == "continue" {
+		return runTaskContinue(ctx, e, args[1:])
+	}
 	fs := newFlags(e, cmd)
 	asJSON := fs.Bool("json", false, "print the server's answer as JSON")
 	request := fs.String("request-id", "", "original request ID; requires original complete payload")

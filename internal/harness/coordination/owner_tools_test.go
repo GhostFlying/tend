@@ -22,7 +22,7 @@ func TestIssueOwnerUsesDeviceToolDefaultsWithPinnedExecution(t *testing.T) {
 			}
 			d := Driver{NativeOwnerTools: true, Session: permissionSession{native.(*testkit.FakeSession)}, Directory: t.TempDir(), Profile: protocol.ExecutionProfile{Model: "pinned", Effort: "high"}, Emit: func(context.Context, Event) error { return nil }}
 			defer func() { cancel(); _, _ = d.Handle(context.Background(), "close", json.RawMessage(`{}`)) }()
-			cfg := harness.ThreadConfig{Purpose: NativeOwnerPurpose, Sandbox: "read-only", ApprovalPolicy: "never", Model: "caller-model", Config: Isolation()}
+			cfg := harness.ThreadConfig{Purpose: NativeOwnerPurpose, Model: "caller-model", Config: map[string]any{}}
 			cfg.Config["device_setting"] = "retained"
 			threadID := ""
 			if method == "resume" {
@@ -55,7 +55,7 @@ func TestIssueOwnerUsesDeviceToolDefaultsWithPinnedExecution(t *testing.T) {
 	}
 }
 
-func TestIssueOwnerToolsDoNotWidenLegacyRequests(t *testing.T) {
+func TestConfiguredNativeRuntimeDoesNotDependOnRoleMarker(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		marker  bool
@@ -80,10 +80,41 @@ func TestIssueOwnerToolsDoNotWidenLegacyRequests(t *testing.T) {
 			}
 			for _, th := range d.threads {
 				got := th.(permissionThread).Config
-				if got.Sandbox != "read-only" || got.ApprovalPolicy != "never" || got.Config["features.shell_tool"] != false {
-					t.Fatal("legacy request changed its default permissions", got)
+				if tc.marker {
+					if got.Sandbox != "read-only" || got.ApprovalPolicy != "never" || got.Config["features.shell_tool"] != nil {
+						t.Fatal("configured native runtime was narrowed by missing role marker", got)
+					}
+				} else if got.Sandbox != "read-only" || got.ApprovalPolicy != "never" || got.Config["features.shell_tool"] != false {
+					t.Fatal("legacy transport did not preserve accepted behavior", got)
 				}
 			}
 		})
+	}
+}
+
+func TestNativeRuntimeRetainsExplicitDeviceAndTaskConfiguration(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	native, err := testkit.NewHarness().Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Driver{NativeOwnerTools: true, Session: permissionSession{native.(*testkit.FakeSession)}, Profile: protocol.ExecutionProfile{Model: "pinned"}, Emit: func(context.Context, Event) error { return nil }}
+	defer func() { cancel(); _, _ = d.Handle(context.Background(), "close", json.RawMessage(`{}`)) }()
+	cfg := harness.ThreadConfig{Purpose: "reviewer", Sandbox: "workspace-write", ApprovalPolicy: "never", Config: map[string]any{"features.shell_tool": false, "features.apply_patch": false, "features.multi_agent": false, "features.image_gen": false}}
+	raw, _ := json.Marshal(Request{Config: cfg})
+	if _, err := d.Handle(ctx, "start", raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, th := range d.threads {
+		got := th.(permissionThread).Config
+		if got.Sandbox != cfg.Sandbox || got.ApprovalPolicy != cfg.ApprovalPolicy {
+			t.Fatal("explicit runtime configuration was erased", got)
+		}
+		for key, value := range cfg.Config {
+			if got.Config[key] != value {
+				t.Fatal("explicit tool configuration was erased", key, got)
+			}
+		}
 	}
 }

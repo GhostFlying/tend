@@ -317,7 +317,7 @@ func TestIssueReusePreservesLegacyAssociation(t *testing.T) {
 
 }
 
-func TestMainExecutionSourceIdentityRetainsNativeRepairAndConsumedSteer(t *testing.T) {
+func TestMainExecutionSourceIdentityRetainsNativeContinuationAndConsumedSteer(t *testing.T) {
 	h, active := activeSteerEnv(t)
 	var original store.MainTurn
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -363,18 +363,26 @@ func TestMainExecutionSourceIdentityRetainsNativeRepairAndConsumedSteer(t *testi
 	if err := h.app.FinishDelivery(t.Context(), steer, DeliveryResult{Outcome: Delivered}); err != nil {
 		t.Fatal(err)
 	}
-	original.Status = store.TurnCompleted
+	original.Status = store.TurnFailed
+	original.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}
 	if err := h.app.PutMainTurn(t.Context(), original); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.app.FinishDelivery(t.Context(), active, DeliveryResult{Outcome: Delivered}); err != nil {
 		t.Fatal(err)
 	}
+	h.clock.Advance(time.Minute)
 	repair, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-	if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
+	if err != nil || !ok || repair.Operation != OpRecoverAgent {
 		t.Fatal(repair, ok, err)
 	}
-	if err := h.app.PutMainTurn(t.Context(), store.MainTurn{RequestID: repair.RequestID, MessageID: original.MessageID, ThreadID: "native", TurnID: "repair-turn", Status: store.TurnStarted}); err != nil {
+	if admitted, err := h.app.AdmitAgentRecovery(t.Context(), repair.RequestID, original.ThreadID); err != nil || !admitted {
+		t.Fatal(admitted, err)
+	}
+	continued := original
+	continued.RequestID, continued.TurnID = repair.RequestID, "actual-native-continuation"
+	continued.Status, continued.Failure = store.TurnStarted, nil
+	if err := h.app.PutMainTurn(t.Context(), continued); err != nil {
 		t.Fatal(err)
 	}
 	check(repair.RequestID, original.MessageID, true)

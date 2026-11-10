@@ -12,7 +12,26 @@ import (
 )
 
 func issueManagerCandidates(ctx context.Context, q store.Querier) ([]scheduler.Candidate, error) {
-	return views.IssueManagerCandidates(ctx, q)
+	candidates, err := views.IssueManagerCandidates(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return filterExternalWaitManagers(ctx, q, candidates)
+}
+func filterExternalWaitManagers(ctx context.Context, q store.Querier, candidates []scheduler.Candidate) ([]scheduler.Candidate, error) {
+	out := candidates[:0]
+	for _, c := range candidates {
+		var waiting bool
+		if c.Manager != nil && !c.Manager.ReceiptOnly {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_external_waits WHERE task_id=? AND status IN ('stopping','waiting'))`, c.TaskID).Scan(&waiting); err != nil {
+				return nil, err
+			}
+		}
+		if !waiting {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.Candidate, r store.RunRow, l store.LeaseRow, pin *protocol.RunExecutionPin) (Outcome, error) {
@@ -93,12 +112,8 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		if err != nil {
 			return Outcome{}, err
 		}
-		owner, err := store.IssueUsesOwnerExecution(ctx, tx.Q(), m.IssueID)
-		if err != nil {
-			return Outcome{}, err
-		}
 		mode := "false"
-		if nativeTools && owner {
+		if nativeTools {
 			mode = "true"
 		}
 		if _, err := tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=json_set(trigger_json,'$.native_owner_tools',json(?)) WHERE action_id=?`, mode, r.ActionID); err != nil {
@@ -144,6 +159,10 @@ func buildManagerAssignment(ctx context.Context, q store.Querier, r store.RunRow
 		return protocol.Assignment{}, err
 	}
 	as := protocol.Assignment{Manager: &protocol.IssueManagerAssignment{NativeOwnerTools: receipt.NativeOwnerTools && nativeTools && !receipt.ReceiptOnly && receipt.ReaderRequestID == "", ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}
+	as.ExternalWaits = r.Protocol >= 3
+	if err := store.AssignmentExternalWait(ctx, q, &as); err != nil {
+		return protocol.Assignment{}, err
+	}
 	if err := store.AssignmentPause(ctx, q, &as); err != nil {
 		return protocol.Assignment{}, err
 	}

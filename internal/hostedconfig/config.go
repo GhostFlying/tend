@@ -138,18 +138,23 @@ func (s Selection) BindingInstance(instance string) string {
 }
 
 func (p *Prepared) Select(localID string, purpose agentconfig.Purpose) (Selection, error) {
+	// These are the actual entry points implemented by the hosted adapter. The
+	// accepted purpose lists are historical configuration, not role permissions.
+	if purpose != agentconfig.Main && purpose != agentconfig.IssueManager && purpose != agentconfig.Consultation {
+		return Selection{}, protocol.Errorf(protocol.CodeInvalidRequest, "the hosted adapter does not support this execution entry point")
+	}
 	for _, a := range p.configuration.Definitions.Agents {
 		if a.LocalID != localID {
 			continue
 		}
-		if !a.Enabled || !slices.Contains(a.Purposes, purpose) {
+		if !a.Enabled {
 			break
 		}
 		for _, runtime := range p.configuration.Definitions.Runtimes {
 			if runtime.ID != a.RuntimeID {
 				continue
 			}
-			if !runtime.Enabled || runtime.Kind != agentconfig.HostedManager || !slices.Contains(runtime.DeclaredPurposes, purpose) {
+			if !runtime.Enabled || runtime.Kind != agentconfig.HostedManager {
 				break
 			}
 			// No plugin/MCP factory is activated by named management configuration.

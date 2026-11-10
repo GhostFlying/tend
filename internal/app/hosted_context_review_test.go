@@ -588,7 +588,7 @@ func TestHostedAssignmentFencesOldManagerAndRequiresNativeUnknownReconcile(t *te
 	}
 }
 
-func TestHostedAssignmentSettlesOnlyEndedOldManagerRepair(t *testing.T) {
+func TestHostedAssignmentRetainsCompletedManagerWithoutMetadataRepair(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	turn, _ := startHostedIssueReview(t, h, issue)
@@ -602,20 +602,20 @@ func TestHostedAssignmentSettlesOnlyEndedOldManagerRepair(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if repairs != 1 {
-		t.Fatalf("fixture did not produce actual unfinished logical repair: %d", repairs)
+	if repairs != 0 {
+		t.Fatalf("native completion scheduled an unnecessary metadata model round: %d", repairs)
 	}
 	before := hostedReviewPayload(t, h, issue)
-	next := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Reason: "Owner receives remaining Issue review after the old native turn ended"}, rev(issue.Revision)), HostedIssueAssignment{}))
-	finish := protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: next.AssignmentEpoch, HandoffID: next.PendingHandoffID, Reason: "Only unsent repair remains; native execution is definitely complete"}
+	next := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: owner.Subject}, Reason: "Owner receives remaining Issue work after the old native turn ended"}, rev(issue.Revision)), HostedIssueAssignment{}))
+	finish := protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: next.AssignmentEpoch, HandoffID: next.PendingHandoffID, Reason: "Native execution is complete; reconcile its original dispatch receipt"}
 	// Native completion precedes the dispatcher's receipt. The claimed
 	// original delivery must be recorded before the handoff can finish.
 	expectWorkCode(t, h.exec(owner, h.env("issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, finish, rev(next.Revision)), HostedIssueAssignment{Finish: true}), protocol.CodeInvalidTransition)
 	finishOriginalHostedDelivery(t, h, turn.RequestID)
 	next = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, finish, rev(next.Revision)), HostedIssueAssignment{Finish: true}))
 	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil || state.Status != "stopped" {
-		t.Fatalf("ended old manager responsibility still admits fenced repair: %+v %v", state, err)
+	if err != nil || state.Status != "completed" {
+		t.Fatalf("handoff rewrote completed manager history: %+v %v", state, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM outbox WHERE operation='conversation.repair_turn' AND status='pending' AND request_id IN (SELECT request_id FROM logical_turn_executions WHERE logical_turn_id=?)`, state.ID).Scan(&repairs)
@@ -630,16 +630,10 @@ func TestHostedAssignmentSettlesOnlyEndedOldManagerRepair(t *testing.T) {
 		t.Fatal("handoff changed unresolved Issue sources", before, after)
 	}
 	next = assignHostedManager(t, h, next)
-	nextTurn, manager := startHostedIssueReview(t, h, next)
+	nextTurn, _ := startHostedIssueReview(t, h, next)
 	frozen, named, err := h.app.HostedExecution(t.Context(), nextTurn.RequestID)
 	if err != nil || !named || frozen.AssignmentEpoch != next.AssignmentEpoch {
 		t.Fatal("new responsible manager was not admitted", frozen, named, err)
-	}
-	if op := hostedEffect(t, h, manager, nextTurn, 1, protocol.Target{Type: "issue", ID: next.IssueID}, nil, hostedReviewPayload(t, h, next), ReviewHostedIssueContext{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	if op := commitHostedReview(t, h, manager, nextTurn, 2); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
 	}
 	nextTurn.Status = store.TurnCompleted
 	if err := h.app.PutMainTurn(t.Context(), nextTurn); err != nil {

@@ -86,7 +86,7 @@ func IssueResults(ctx context.Context, q store.Querier, id, after string) (proto
 		}
 		before = n
 	}
-	rows, err := q.QueryContext(ctx, `SELECT a.rowid,a.artifact_id FROM artifacts a JOIN task_work_item_owners o ON o.task_id=a.task_id JOIN tasks t ON t.task_id=a.task_id WHERE o.work_item_id=? AND t.kind<>'issue_manager' AND (?=0 OR a.rowid<?) ORDER BY a.rowid DESC LIMIT 21`, id, before, before)
+	rows, err := q.QueryContext(ctx, `SELECT a.rowid,a.artifact_id FROM artifacts a JOIN task_work_item_owners o ON o.task_id=a.task_id JOIN tasks t ON t.task_id=a.task_id WHERE o.work_item_id=? AND (t.kind<>'issue_manager' OR EXISTS(SELECT 1 FROM issue_owner_results r WHERE r.artifact_id=a.artifact_id)) AND (?=0 OR a.rowid<?) ORDER BY a.rowid DESC LIMIT 21`, id, before, before)
 	if err != nil {
 		return out, err
 	}

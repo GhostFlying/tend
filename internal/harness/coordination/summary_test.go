@@ -43,7 +43,7 @@ func TestPrivatePersistentSummaryKeepsOwningThreadUsable(t *testing.T) {
 		raw, _ := json.Marshal(request)
 		return driver.Handle(ctx, method, raw)
 	}
-	cfg := harness.ThreadConfig{Purpose: NativeOwnerPurpose, Model: "model", Sandbox: "read-only", ApprovalPolicy: "never"}
+	cfg := harness.ThreadConfig{Purpose: NativeOwnerPurpose, Model: "model", Sandbox: "read-only", ApprovalPolicy: "never", Config: Isolation()}
 	root, err := call("start", Request{Config: cfg})
 	if err != nil {
 		t.Fatal(err)

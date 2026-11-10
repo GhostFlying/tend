@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -82,6 +83,11 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 				err = r.completeWork(ctx, runCtx, as, a, run.WorkerResult)
 			}
 		case journal.PhaseSubmitting, journal.PhaseReleasing:
+			if ready, e := r.externalWaitReceiptReady(ctx, run); e != nil {
+				return e
+			} else if ready {
+				return r.reportExternalWait(ctx, as)
+			}
 			if ready, e := r.pauseReceiptReady(ctx, run); e != nil {
 				return e
 			} else if ready {
@@ -128,6 +134,11 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			// A stop arriving during completion takes precedence over a
 			// pending stop check. Final phases retain their existing request.
 			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "stopped by tend"})
+		case isExternalWaitYield(err):
+			if err := r.stopAgent(ctx, as); err != nil {
+				return &completionPending{err}
+			}
+			return r.finishExternalWait(ctx, as)
 		case isQuestionYield(err):
 			question, _ := errors.AsType[*questionYield](err)
 			if err := r.stopAgent(ctx, as); err != nil {
@@ -139,6 +150,14 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			}
 			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: question.decision, ThreadID: saved.Thread})
 		case errors.Is(err, errPaused), errors.Is(err, errHeld), func() bool { _, ok := errors.AsType[*pauseYield](err); return ok }():
+			if v, e := r.cfg.Journal.ExternalWait(ctx, as.RunID); e != nil {
+				return e
+			} else if v != nil {
+				if err := r.stopAgent(ctx, as); err != nil {
+					return &completionPending{err}
+				}
+				return r.finishExternalWait(ctx, as)
+			}
 			latest, readErr := r.cfg.Journal.Run(ctx, as.RunID)
 			if readErr != nil {
 				return readErr
@@ -264,6 +283,11 @@ func runTarget(as protocol.Assignment) protocol.Target {
 
 // work runs the worker and journals the run's final report.
 func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *active) (workErr error) {
+	if v, e := r.cfg.Journal.ExternalWait(ctx, as.RunID); e != nil {
+		return e
+	} else if v != nil {
+		return &externalWaitYield{wait: *v}
+	}
 	if err := r.settleTakeover(runCtx, as, a); err != nil {
 		return err
 	}
@@ -341,7 +365,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		// Setup, observation and local persistence failures do not prove the
 		// original worker stopped. Preserve it instead of fabricating a new
 		// business failure and entering the ordinary terminal finalizer.
-		if strictResume != nil && workErr != nil && context.Cause(runCtx) == nil && !isCompletionPending(workErr) && !isQuestionYield(workErr) && !errors.Is(workErr, errPaused) && !errors.Is(workErr, errHeld) {
+		if strictResume != nil && workErr != nil && context.Cause(runCtx) == nil && !isCompletionPending(workErr) && !isQuestionYield(workErr) && !isExternalWaitYield(workErr) && !errors.Is(workErr, errPaused) && !errors.Is(workErr, errHeld) {
 			workErr = &completionPending{workErr}
 		}
 	}()
@@ -367,6 +391,26 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		p, err = execution.Workspaces.Prepare(runCtx, as)
 		if err != nil {
 			return stopped(failed(reasonFor(err, "workspace_prepare_failed"), err))
+		}
+	}
+	var waitMu sync.Mutex
+	var waitExternal func(context.Context, protocol.WaitExternalPayload) (protocol.ExternalWait, error)
+	if as.ExternalWaits {
+		if v, e := r.recoverExternalWait(runCtx, as, p); e != nil {
+			return &completionPending{e}
+		} else if v != nil {
+			return &externalWaitYield{wait: *v}
+		}
+		waitExternal = func(call context.Context, payload protocol.WaitExternalPayload) (protocol.ExternalWait, error) {
+			waitMu.Lock()
+			defer waitMu.Unlock()
+			v, err := r.externalWaitRequest(call, as, p, payload)
+			if err == nil {
+				cause := &externalWaitYield{wait: v}
+				stopAttempt(cause)
+				return v, cause
+			}
+			return v, err
 		}
 	}
 	var askOwner func(context.Context, protocol.AskOwnerPayload) (protocol.WorkerQuestion, error)
@@ -461,13 +505,20 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		startupObserved = r.cfg.Now()
 	}
 	previousRun, previousThread := "", ""
+	if as.SessionContinuation != nil {
+		previousRun, previousThread = as.SessionContinuation.RunID, as.SessionContinuation.ThreadID
+	}
+	if as.ExternalWaitContinuation != nil {
+		previousRun, previousThread = as.ExternalWaitContinuation.RunID, as.ExternalWaitContinuation.ThreadID
+	}
 	if as.QuestionContinuation != nil {
 		previousRun, previousThread = as.QuestionContinuation.RunID, as.QuestionContinuation.ThreadID
 	}
 	if as.PauseContinuation != nil {
 		previousRun, previousThread = as.PauseContinuation.RunID, as.PauseContinuation.ThreadID
 	}
-	if run.Thread == "" && previousRun != "" && as.Role == protocol.RoleImplement && (assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer || nativeMessages) {
+	optionalHistory := as.SessionContinuation != nil || as.ExternalWaitContinuation != nil
+	if run.Thread == "" && previousRun != "" && (as.Role == protocol.RoleImplement || optionalHistory) && (assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer || nativeMessages) {
 		run.Thread = previousThread
 		if err := r.cfg.Journal.SetThread(ctx, as.RunID, run.Thread); err != nil {
 			return err
@@ -478,13 +529,19 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		if locator, ok := execution.Workspaces.(interface{ RunStateDirectory(string) (string, error) }); ok {
 			predecessorState, err = locator.RunStateDirectory(previousRun)
 			if err != nil {
-				return err
+				if !optionalHistory || strictResume != nil || runCtx.Err() != nil {
+					return err
+				}
+				predecessorState, run.Thread = "", ""
+				if err := r.cfg.Journal.SetThread(ctx, as.RunID, ""); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
 	evidence := &acceptanceEvidence{r: r, as: as, prepared: p}
-	w, err := startWorker(runCtx, harness.WorkerSpec{PredecessorStateDir: predecessorState, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := startWorker(runCtx, harness.WorkerSpec{SessionContinuation: as.SessionContinuation, WaitExternal: waitExternal, ExternalWaitContinuation: as.ExternalWaitContinuation, PredecessorStateDir: predecessorState, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
@@ -614,7 +671,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		outcome := workerOutcome{Version: 1, RunID: as.RunID, ThreadID: run.Thread, Attempt: attempt, Status: "completed", Source: "worker_wait"}
 		if cause := context.Cause(runCtx); cause != nil {
 			outcome.Status, outcome.Error = "unknown", cause.Error()
-			if errors.Is(cause, errPaused) || errors.Is(cause, errHeld) || errors.Is(cause, errStopped) || isQuestionYield(cause) {
+			if errors.Is(cause, errPaused) || errors.Is(cause, errHeld) || errors.Is(cause, errStopped) || isQuestionYield(cause) || isExternalWaitYield(cause) {
 				outcome.Status, outcome.Source = "interrupted", "run_control"
 			}
 		} else if werr != nil {
@@ -897,6 +954,9 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	}
 	if strictResume != nil && !ok {
 		return &completionPending{errors.New("runner: strict final report is unavailable")}
+	}
+	if err := r.reportSessionStop(ctx, as); err != nil {
+		return &completionPending{err}
 	}
 	// execute has confirmed the process stopped before entering reporting.
 	if ok {
@@ -1181,6 +1241,9 @@ func boundedEventMetadata(body map[string]json.RawMessage) map[string]json.RawMe
 // flushEvents uploads every pending event of a run in batches bounded by
 // count and size.
 func (r *Runner) flushEvents(ctx context.Context, as protocol.Assignment) error {
+	if err := r.syncRolloutArchive(ctx, as); err != nil {
+		return err
+	}
 	for {
 		pending, err := r.cfg.Journal.PendingEvents(ctx, as.RunID, 200)
 		if err != nil || len(pending) == 0 {
@@ -1240,7 +1303,7 @@ func (r *Runner) awaitCompletedStop(ctx, runCtx context.Context, as protocol.Ass
 	if err != nil {
 		return &completionPending{err}
 	}
-	yielding := final && (req.Envelope.Operation == protocol.OpRunsYieldQuestion || req.Envelope.Operation == protocol.OpRunsYieldPause)
+	yielding := final && (req.Envelope.Operation == protocol.OpRunsYieldQuestion || req.Envelope.Operation == protocol.OpRunsYieldPause || req.Envelope.Operation == protocol.OpRunsYieldExternalWait)
 	knownPauseResult := false
 	if (len(run.WorkerResult) > 0 || final && req.Envelope.Operation != protocol.OpRunsRelease) && !run.Held {
 		p, e := r.cfg.Journal.Pause(ctx, as.RunID)

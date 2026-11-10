@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -41,12 +42,16 @@ func issueAcceptanceWasDefault(ctx context.Context, q store.Querier, issue proto
 // taskAcceptancePolicy records the responsible Agent's choice for new work.
 // Frozen Tasks are not rewritten, and explicit human requirements remain.
 func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, spec domain.Spec, input *protocol.IndependentAcceptanceRequest) (*protocol.IssueAcceptancePolicy, error) {
+	review, err := explicitTaskReviewTarget(ctx, q, issue, spec)
+	if err != nil {
+		return nil, err
+	}
 	defaulted, err := issueAcceptanceWasDefault(ctx, q, issue)
 	if err != nil {
 		return nil, err
 	}
 	standing := issue.AcceptancePolicy
-	humanRequired := standing != nil && standing.Required && !defaulted && (standing.DecidedBy.OwnerSubject != "" || standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
+	humanRequired := !review && standing != nil && standing.Required && !defaulted && (standing.DecidedBy.OwnerSubject != "" || standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
 	if humanRequired && input == nil {
 		policy := *standing
 		return &policy, nil
@@ -55,7 +60,13 @@ func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue p
 	if standing != nil && !standing.Required {
 		required = false
 	}
+	if review {
+		required = false
+	}
 	reason := "Issue owner chose self-check for this work; no explicit human independent-acceptance requirement"
+	if review {
+		reason = "This explicit independent review reports its real result once; the reviewed object's policy does not require a review of the review"
+	}
 	if required {
 		reason = "Retain the explicit independent-acceptance requirement for this work"
 	}
@@ -81,6 +92,36 @@ func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue p
 		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "owner", OwnerSubject: x.Principal.Subject}
 	}
 	return p, nil
+}
+
+// The review target is explicit business context, never a category exemption.
+// Ordinary file inputs alone do not change the Task's quality agreement.
+func explicitTaskReviewTarget(ctx context.Context, q store.Querier, issue protocol.Issue, spec domain.Spec) (bool, error) {
+	if spec.ReviewArtifactID == "" && spec.ReviewDeliveryID == "" {
+		return false, nil
+	}
+	if !spec.RequiresDelivery(domain.DeliveryReport) {
+		return false, protocol.Errorf(protocol.CodeInvalidRequest, "an explicit review Task must produce its actual report")
+	}
+	if spec.ReviewArtifactID != "" {
+		if !protocol.ValidID(protocol.PrefixArtifact, spec.ReviewArtifactID) {
+			return false, protocol.Errorf(protocol.CodeInvalidRequest, "review_artifact_id must name an actual immutable result")
+		}
+		if _, err := store.GetArtifact(ctx, q, spec.ReviewArtifactID); err != nil {
+			return false, errNotFound(err, "the original review artifact is unavailable")
+		}
+		allowed, err := store.ArtifactShareReadable(ctx, q, issue.IssueID, spec.ReviewArtifactID, issue.AssignmentEpoch)
+		if err != nil {
+			return false, err
+		}
+		if !allowed {
+			return false, protocol.Errorf(protocol.CodeForbidden, "the explicit review artifact is outside this Issue's readable contribution scope")
+		}
+	}
+	if spec.ReviewDeliveryID != "" && !slices.ContainsFunc(issue.Plan.Deliveries, func(d protocol.IssueDelivery) bool { return d.DeliveryID == spec.ReviewDeliveryID }) {
+		return false, protocol.Errorf(protocol.CodeInvalidRequest, "review_delivery_id must identify this Issue's registered PR")
+	}
+	return true, nil
 }
 
 func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequest) (*protocol.IssueAcceptancePolicy, error) {

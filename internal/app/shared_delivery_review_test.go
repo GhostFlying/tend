@@ -308,7 +308,11 @@ func executeSharedReviewForTest(t *testing.T, h *harness, runtime *protocol.Runn
 	if op := h.runAs(run, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := h.runAs(run, protocol.OpRunsReportWorkspace, protocol.WorkspaceReport{BackendID: run.Workspace.BackendID, Path: t.TempDir(), Baseline: json.RawMessage(`{"files":[]}`)}, ReportWorkspace{}); op.Status != protocol.OpSucceeded {
+	path := h.resourceForTask(task).Path
+	if path == "" {
+		path = t.TempDir()
+	}
+	if op := h.runAs(run, protocol.OpRunsReportWorkspace, protocol.WorkspaceReport{BackendID: run.Workspace.BackendID, Path: path, Baseline: json.RawMessage(`{"files":[]}`)}, ReportWorkspace{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	result := &protocol.SharedReviewResult{ReviewID: review.ReviewID, HeadSHA: review.HeadSHA, BaseSHA: review.BaseSHA, RequirementsDigest: review.RequirementsDigest, Verdict: verdict, RepositoryCheck: "Formal independent repository review of the whole candidate and affected delta"}

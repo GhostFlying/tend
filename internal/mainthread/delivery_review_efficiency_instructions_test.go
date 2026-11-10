@@ -17,8 +17,8 @@ func TestNamedIssueOwnerPlansOnePRReviewAndAssessesExistingChecks(t *testing.T) 
 			t.Errorf("actual Issue-owner configuration lacks %q", guidance)
 		}
 	}
-	if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" || cfg.Config["features.shell_tool"] != false {
-		t.Fatal("review efficiency changed the execution adapter's permissions")
+	if cfg.Sandbox != "" || cfg.ApprovalPolicy != "" || cfg.Config["features.shell_tool"] != nil {
+		t.Fatal("review responsibility changed native runtime defaults")
 	}
 }
 
@@ -31,7 +31,7 @@ func TestNamedOwnerIncrementalReadingGuidancePreservesScopeAndSession(t *testing
 	}{
 		{"Issue owner", agentconfig.IssueManager, protocol.IssueOwnerPolicy, true},
 		{"global planner", agentconfig.Main, "", false},
-		{"legacy manager", agentconfig.IssueManager, "", false},
+		{"legacy manager", agentconfig.IssueManager, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &Manager{cfg: Config{Thread: ThreadConfig(t.TempDir(), "")}, named: &hostedconfig.Selection{Purpose: tc.role, OwnershipPolicy: tc.policy}}

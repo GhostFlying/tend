@@ -197,7 +197,32 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			if x.Env.Target.Type != "run" || primary != current.IssueID {
 				return protocol.Errorf(protocol.CodeForbidden, "run supplement requires this Issue's immutable primary task")
 			}
-		case "issues.update_task", "tasks.cancel", "tasks.rate", "actions.create":
+		case protocol.OpRunsWaitExternal:
+			if x.Env.Target.Type != "run" || execution.Selection.RunnerRunID == "" || x.Env.Target.ID != execution.Selection.RunnerRunID {
+				return protocol.Errorf(protocol.CodeForbidden, "external wait belongs only to this execution")
+			}
+			r, err := store.GetRun(ctx, q, execution.Selection.RunnerRunID)
+			if err != nil {
+				return err
+			}
+			if r.Role != protocol.RoleIssueManager || r.Protocol < 3 {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "external wait requires current Issue owner protocol 3")
+			}
+		case protocol.OpTasksResumeWait:
+			if x.Env.Target.Type != "task" {
+				return protocol.Errorf(protocol.CodeForbidden, "external wait resumption requires its original Task")
+			}
+			primary, err := store.GetTaskIssueOwner(ctx, q, x.Env.Target.ID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			if primary != current.IssueID {
+				manager, err := store.GetIssueManagerTask(ctx, q, x.Env.Target.ID)
+				if err != nil || manager.IssueID != current.IssueID {
+					return protocol.Errorf(protocol.CodeForbidden, "external wait is outside this Issue's current responsibility")
+				}
+			}
+		case "tasks.continue", "issues.update_task", "tasks.cancel", "tasks.rate", "actions.create":
 			primary, err := store.GetTaskIssueOwner(ctx, q, x.Env.Target.ID)
 			if err != nil {
 				return err

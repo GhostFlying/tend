@@ -35,6 +35,20 @@ func queueBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, message, 
 	return nil
 }
 func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, item, message, event, kind string, data json.RawMessage) error {
+	if message != "" {
+		if event == "" {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT event_id FROM events WHERE object_type='message' AND object_id=? ORDER BY event_seq DESC LIMIT 1`, message).Scan(&event); err != nil {
+				return err
+			}
+		}
+		var alreadyDelivered bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.group_key=? AND s.message_id=? AND s.event_id=? AND s.kind=?)`, group, message, event, kind).Scan(&alreadyDelivered); err != nil {
+			return err
+		}
+		if alreadyDelivered {
+			return nil
+		}
+	}
 	if item != "" {
 		if x.affectedIssues != nil {
 			x.affectedIssues[item] = true
@@ -74,9 +88,9 @@ func appendBackgroundSource(ctx context.Context, x *Exec, tx *store.Tx, group, i
 	if errors.Is(err, sql.ErrNoRows) {
 		batch = x.IDs.New(protocol.Prefix("batch"))
 		canonical = x.IDs.New(protocol.PrefixMessage)
-		body := "后台事项等待主 Agent 核对"
+		body := "后台变化已合并，等待主 Agent 处理"
 		if item != "" {
-			body += "：" + item
+			body = "Issue 变化已合并，等待负责人处理：" + item
 		}
 		seq, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: canonical, Author: "system", Body: body, CreatedAt: now})
 		if err != nil {
@@ -172,5 +186,5 @@ func (a *App) BackgroundPrompt(ctx context.Context, message string) (string, err
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("\n[Background batch %s; work item %s; %d retained sources.]\nCall background_sources until more=false before acting, so all owner answers and source constraints are read. Read the current work item and followup revisions; frozen input is history, not continuing authority. The main agent remains the sole coordinator. If there is no new result and no unresolved completion review in this batch, use background_checkin to record waiting silently and finish without an ordinary chat reply. Check-in does not answer decisions, hide choice cards, resolve commitments, close work items or expand authorization. If a result or owner decision is needed, present it normally; background text is published after the turn settles.\n", batch.BatchID, batch.WorkItemID, batch.SourceCount), nil
+	return fmt.Sprintf("\n[Background batch %s; work item %s; %d retained sources.]\nCall background_sources until more=false before acting, so all owner answers and source constraints are read. Read the current work item and followup revisions; frozen input is history, not continuing authority. The main Agent coordinates top-level responsibilities; each Issue owner may investigate, implement and arrange collaboration within its existing scope. If there is no new result and no unresolved completion review in this batch, use background_checkin to record waiting silently and finish without an ordinary chat reply. Check-in does not answer decisions, hide choice cards, resolve commitments, close work items or expand authorization. If a result or owner decision is needed, present it normally; background text is published after the turn settles.\n", batch.BatchID, batch.WorkItemID, batch.SourceCount), nil
 }

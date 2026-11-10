@@ -96,6 +96,10 @@ func (a *App) NativeEntry(ctx context.Context, p protocol.Principal, id, provide
 		if err != nil {
 			return err
 		}
+		raw, err = store.ResolveJSON(ctx, tx.Q(), raw)
+		if err != nil {
+			return err
+		}
 		var identity protocol.NativeIdentity
 		if json.Unmarshal([]byte(raw), &identity) != nil || (identity.Provider != "orca" && identity.Provider != "appserver") {
 			v.Reason = "native_identity_unavailable"

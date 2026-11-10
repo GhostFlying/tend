@@ -18,7 +18,8 @@ func TestIssueOwnerNativeToolsRequireNegotiatedRunnerMode(t *testing.T) {
 		{name: "negotiated_owner", selection: hostedconfig.Selection{RunnerManaged: true, NativeOwnerTools: true, Purpose: agentconfig.IssueManager, OwnershipPolicy: protocol.IssueOwnerPolicy}, native: true},
 		{name: "older_runner", selection: hostedconfig.Selection{RunnerManaged: true, Purpose: agentconfig.IssueManager, OwnershipPolicy: protocol.IssueOwnerPolicy}},
 		{name: "receipt_reader", selection: hostedconfig.Selection{RunnerManaged: true, NativeOwnerTools: true, ReceiptOnly: true, Purpose: agentconfig.IssueManager, OwnershipPolicy: protocol.IssueOwnerPolicy}},
-		{name: "global_planner", selection: hostedconfig.Selection{NativeOwnerTools: true, Purpose: agentconfig.Main}},
+		{name: "global_planner", selection: hostedconfig.Selection{NativeOwnerTools: true, Purpose: agentconfig.Main}, native: true},
+		{name: "consultation", selection: hostedconfig.Selection{RunnerManaged: true, NativeOwnerTools: true, Purpose: agentconfig.Consultation}, native: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.selection.Definition.Model, tc.selection.Definition.Effort = "fixed-model", "high"
@@ -30,10 +31,13 @@ func TestIssueOwnerNativeToolsRequireNegotiatedRunnerMode(t *testing.T) {
 			if cfg.Model != "fixed-model" || cfg.Config["model_reasoning_effort"] != "high" {
 				t.Fatal("configured execution changed", cfg)
 			}
-			// These presentation defaults remain compatible on the wire. Only
-			// the negotiated runner adapter substitutes its device defaults.
-			if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" {
-				t.Fatal("legacy wire defaults changed", cfg)
+			restricted := tc.selection.ReceiptOnly || tc.selection.RequireReceiptReader || tc.selection.RunnerManaged && !tc.selection.NativeOwnerTools
+			if restricted {
+				if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" {
+					t.Fatal("receipt/transport-only mode lost restriction", cfg)
+				}
+			} else if cfg.Sandbox != "" || cfg.ApprovalPolicy != "" {
+				t.Fatal("responsibility changed runtime policy", cfg)
 			}
 		})
 	}

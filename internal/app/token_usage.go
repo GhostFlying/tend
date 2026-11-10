@@ -126,8 +126,9 @@ func (a *App) RecordTokenUsage(ctx context.Context, conversation string, sample 
 	})
 }
 
-// mergeNativeModel accepts only model provenance enrichment; changes to native
-// identity, time, counters, or ownership still use ordinary conflict handling.
+// mergeNativeModel accepts model provenance and optional source-purpose
+// enrichment. Neither changes the immutable native request measurement. Native
+// identity, time, counters, or contradictory nonempty metadata still conflict.
 func mergeNativeModel(old, next protocol.TokenUsageSample) protocol.TokenUsageSample {
 	if old.NativeContentHash != "" && old.NativeContentHash == next.NativeContentHash && old.NativeVersion != "" {
 		next.NativeVersion = old.NativeVersion
@@ -139,6 +140,10 @@ func mergeNativeModel(old, next protocol.TokenUsageSample) protocol.TokenUsageSa
 		}
 	}
 	a, b := old, next
+	purposeChanged := old.Purpose == "" && next.Purpose != ""
+	if old.Purpose == "" || next.Purpose == "" {
+		a.Purpose, b.Purpose = "", ""
+	}
 	a.Model = ""
 	a.ModelSource = ""
 	a.Revision = 0
@@ -149,6 +154,13 @@ func mergeNativeModel(old, next protocol.TokenUsageSample) protocol.TokenUsageSa
 	y, _ := json.Marshal(b)
 	if string(x) != string(y) {
 		return next
+	}
+	if next.Purpose == "" {
+		next.Purpose = old.Purpose
+	}
+	metadataRevision := old.Revision
+	if purposeChanged {
+		metadataRevision++
 	}
 	rank := func(source string) int {
 		switch source {
@@ -162,13 +174,13 @@ func mergeNativeModel(old, next protocol.TokenUsageSample) protocol.TokenUsageSa
 		return 0
 	}
 	if next.Model == old.Model && next.ModelSource == old.ModelSource {
-		next.Revision = old.Revision
+		next.Revision = metadataRevision
 		return next
 	}
 	if next.Model == "" || rank(next.ModelSource) < rank(old.ModelSource) {
 		next.Model = old.Model
 		next.ModelSource = old.ModelSource
-		next.Revision = old.Revision
+		next.Revision = metadataRevision
 		return next
 	}
 	if old.Model == "" || rank(next.ModelSource) > rank(old.ModelSource) {

@@ -29,7 +29,7 @@ func TestCreatorAcceptanceInstructionsReachNamedThreadConfiguration(t *testing.T
 		},
 		{
 			name: "legacy manager", role: agentconfig.IssueManager,
-			want:   []string{"missing policy and legacy contracts still require independent acceptance", "Current assignees and workers cannot self-exempt", "never execute native tools"},
+			want:   []string{"Missing policy and legacy contracts still require independent acceptance", "existing task policies and pending reviews stay frozen", "actual advertised tools"},
 			absent: []string{"workers with independent acceptance;"},
 		},
 		{
@@ -50,8 +50,8 @@ func TestCreatorAcceptanceInstructionsReachNamedThreadConfiguration(t *testing.T
 					t.Errorf("actual %s instructions still mandate %q", tc.name, absent)
 				}
 			}
-			if cfg.Sandbox != "read-only" || cfg.Config["features.shell_tool"] != false || cfg.Config["features.multi_agent"] != false {
-				t.Fatal("acceptance policy enabled native execution")
+			if cfg.Sandbox != "" || cfg.Config["features.shell_tool"] != nil || cfg.Config["features.multi_agent"] != nil {
+				t.Fatal("acceptance responsibility changed native runtime defaults")
 			}
 		})
 	}

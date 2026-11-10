@@ -65,9 +65,9 @@ func canonicalContextProjection(t *testing.T, h *harness, issue string) protocol
 func TestCanonicalContextProjectionDoesNotInheritGlobalRecovery(t *testing.T) {
 	h := newHarness(t)
 	issue, other := createCanonicalOwnerTestIssue(t, h), createCanonicalOwnerTestIssue(t, h)
-	contextProjectionTurn(t, h, "global_recovery", "issue:"+other.IssueID, "", issue.IssueID, other.IssueID)
+	request := contextProjectionTurn(t, h, "global_recovery", "issue:"+other.IssueID, "", issue.IssueID, other.IssueID)
 	got := canonicalContextProjection(t, h, issue.IssueID)
-	if got.Prepared || !got.DispatchReady || got.SyncStatus != "synced" || got.CoordinationState != "idle" || len(got.DispatchBlockers) != 0 {
+	if got.Prepared || !got.DispatchReady || got.SyncStatus != "available" || got.CoordinationState != "idle" || len(got.DispatchBlockers) != 0 {
 		t.Fatalf("unrelated recovery or legacy baseline leaked: %+v", got)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -75,7 +75,7 @@ func TestCanonicalContextProjectionDoesNotInheritGlobalRecovery(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if legacy.DispatchReady || legacy.SyncStatus != "initializing" || legacy.CoordinationState != "recovering" {
+		if !legacy.DispatchReady || legacy.SyncStatus != "available" || legacy.CoordinationState != "recovering" {
 			t.Fatalf("legacy gate changed: %+v", legacy)
 		}
 		var status string
@@ -88,6 +88,17 @@ func TestCanonicalContextProjectionDoesNotInheritGlobalRecovery(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+	// Historical source-repair labels do not block work. A real unconfirmed
+	// native receipt still belongs only to the Issue that owns its execution.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?)`, request)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := canonicalContextProjection(t, h, issue.IssueID); !got.DispatchReady {
+		t.Fatalf("another Issue's native receipt leaked: %+v", got)
 	}
 	otherView := canonicalContextProjection(t, h, other.IssueID)
 	if otherView.DispatchReady || otherView.CoordinationState != "recovering" {
@@ -115,7 +126,7 @@ func TestCanonicalContextProjectionKeepsOwnedNativeAndSourceDuties(t *testing.T)
 	for _, b := range got.DispatchBlockers {
 		seen[b.Code] = true
 	}
-	if got.Prepared || got.DispatchReady || got.SyncStatus != "needs_review" || got.CoordinationState != "recovering" || !seen["native_receipt"] || !seen["source_correction"] || !seen["logical_turn_state"] {
+	if got.Prepared || got.DispatchReady || got.SyncStatus != "available" || got.CoordinationState != "recovering" || !seen["native_receipt"] || seen["source_correction"] || seen["logical_turn_state"] {
 		t.Fatalf("own obligations hidden: %+v", got)
 	}
 	otherView := canonicalContextProjection(t, h, other.IssueID)
@@ -196,7 +207,7 @@ func TestCanonicalContextProjectionRemovedAndQueuedSourceObligations(t *testing.
 	}
 	for _, item := range []string{issue.IssueID, sibling.IssueID} {
 		got := canonicalContextProjection(t, h, item)
-		if got.DispatchReady || got.SyncStatus != "needs_review" || got.CoordinationState != "idle" || len(got.DispatchBlockers) != 1 || got.DispatchBlockers[0].ObjectID != "msg_planner_shared" {
+		if !got.DispatchReady || got.SyncStatus != "available" || got.CoordinationState != "idle" || len(got.DispatchBlockers) != 0 {
 			t.Fatalf("shared source duty or queued admission changed: %+v", got)
 		}
 	}
@@ -252,7 +263,7 @@ func TestCanonicalContextProjectionKeepsEffectiveFactsAndAncestorTaskBindings(t 
 			agreement = true
 		}
 	}
-	if got.DispatchReady || got.SyncStatus != "needs_review" || facts != 2 || agreement {
+	if !got.DispatchReady || got.SyncStatus != "available" || facts != 0 || agreement || len(got.Facts) != 2 || !got.Facts[0].NeedsReview || !got.Facts[1].NeedsReview {
 		t.Fatalf("source facts should remain visible without a new Task permission: %+v", got)
 	}
 }

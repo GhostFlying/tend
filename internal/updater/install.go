@@ -102,8 +102,12 @@ func backupData(cfg Config, op *Operation) error {
 	if err := os.MkdirAll(op.BackupDir, 0o700); err != nil {
 		return err
 	}
+	paths, err := dataSnapshotPaths(cfg)
+	if err != nil {
+		return err
+	}
 	files := make([]BackupFile, 0)
-	for i, p := range dataPaths(cfg) {
+	for i, p := range paths {
 		name := fmt.Sprintf("data-%03d", i)
 		f := BackupFile{Path: p, Name: name}
 		info, err := os.Lstat(p)
@@ -141,12 +145,12 @@ func restoreData(cfg Config, op *Operation) error {
 		return errors.New("updater: data rollback is permanently forbidden after new work")
 	}
 	paths := dataPaths(cfg)
-	if len(paths) != len(op.Backups) {
+	if len(paths) > len(op.Backups) {
 		return errors.New("updater: backup set does not match configured data")
 	}
 	// Verify the entire backup before restoring any file.
 	for i, f := range op.Backups {
-		if f.Path != paths[i] || f.Name != fmt.Sprintf("data-%03d", i) {
+		if (i < len(paths) && f.Path != paths[i] || i >= len(paths) && (!f.Existed || !configuredOriginal(cfg, f.Path))) || f.Name != fmt.Sprintf("data-%03d", i) {
 			return errors.New("updater: backup identity mismatch")
 		}
 		if f.Existed {
@@ -157,6 +161,11 @@ func restoreData(cfg Config, op *Operation) error {
 		}
 	}
 	for _, f := range op.Backups {
+		if configuredOriginal(cfg, f.Path) {
+			if err := prepareOriginalRestore(cfg, f.Path); err != nil {
+				return err
+			}
+		}
 		if f.Existed {
 			if err := copyAtomic(filepath.Join(op.BackupDir, f.Name), f.Path, os.FileMode(f.Mode)); err != nil {
 				return err

@@ -19,7 +19,7 @@ func TestCancelledOriginalBatchClearsLocalStagingEvenAfterNewBatch(t *testing.T)
 	c, f := testController(t)
 	binding := protocol.UpgradeBinding{UpgradeID: "old-batch", InstanceID: c.cfg.Instance, ProcessInstanceID: "candidate", ReleaseID: "release", ManifestSHA256: strings.Repeat("b", 64), ArtifactSHA256: strings.Repeat("c", 64)}
 	f.view.UpgradeID = "new-batch"
-	f.batches = map[string]store.UpgradeRow{binding.UpgradeID: {View: protocol.UpgradeView{UpgradeID: binding.UpgradeID, Status: "cancelled"}, Manifest: release.Manifest{ReleaseID: binding.ReleaseID}, ManifestSHA256: binding.ManifestSHA256, ServerInstance: binding.InstanceID, ServerHash: binding.ArtifactSHA256}}
+	f.batches = map[string]store.UpgradeRow{binding.UpgradeID: {View: protocol.UpgradeView{UpgradeID: binding.UpgradeID, ReleaseID: binding.ReleaseID, Status: "cancelled"}, Manifest: release.Manifest{ReleaseID: binding.ReleaseID}, ManifestSHA256: binding.ManifestSHA256, ServerInstance: binding.InstanceID, ServerHash: binding.ArtifactSHA256}}
 	state := updater.State{InstanceID: c.cfg.Instance, Current: updater.Version{Artifact: release.Artifact{SHA256: c.cfg.BinarySHA256}}, Process: updater.Identity{LaunchID: c.cfg.ProcessInstance, SHA256: c.cfg.BinarySHA256}, Operation: &updater.Operation{ID: binding.UpgradeID, Kind: "upgrade", Phase: "staged", Binding: binding}}
 	var mu sync.Mutex
 	attempts := 0
@@ -74,7 +74,7 @@ func TestCancelledHistoricalBatchGetsTombstoneWithoutLocalOperation(t *testing.T
 	for _, which := range []string{"absent", "different-operation"} {
 		t.Run(which, func(t *testing.T) {
 			c, f := testController(t)
-			f.batches = map[string]store.UpgradeRow{"old": {View: protocol.UpgradeView{UpgradeID: "old", Status: "cancelled"}}}
+			f.batches = map[string]store.UpgradeRow{"old": {View: protocol.UpgradeView{UpgradeID: "old", Status: "cancelled"}, ServerInstance: c.cfg.Instance}}
 			state := updater.State{InstanceID: c.cfg.Instance}
 			if which == "different-operation" {
 				state.Operation = &updater.Operation{ID: "new", Kind: "upgrade", Phase: "checking"}

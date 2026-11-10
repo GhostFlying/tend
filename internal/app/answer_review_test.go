@@ -59,7 +59,7 @@ func reviewDecisionAnswer(t *testing.T, h *harness, decision string) {
 	}
 }
 
-func TestPanelChoiceAnswerRequiresOriginalContextReview(t *testing.T) {
+func TestPanelChoiceAnswerPreservesSourceWithoutContextReviewGate(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
 	h.prepareAgent(w.WorkItemID)
@@ -78,17 +78,24 @@ func TestPanelChoiceAnswerRequiresOriginalContextReview(t *testing.T) {
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		ready, err := store.WorkItemContextReady(t.Context(), tx.Q(), w.WorkItemID)
-		if ready {
-			t.Error("unreviewed answer released background context")
+		if !ready {
+			t.Error("known owner answer was blocked on a source-review ceremony")
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	turn := startAnswerReview(t, h, answer.AnswerSourceID)
-	commitFixtureTurn(t, h, turn.RequestID)
-	if !h.associations(answer.AnswerSourceID).FactsReviewed {
-		t.Fatal("answer was not reviewed")
+	turn.Status = store.TurnCompleted
+	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+		t.Fatal(err)
+	}
+	if h.associations(answer.AnswerSourceID).FactsReviewed {
+		t.Fatal("native processing fabricated an understanding or approval fact")
+	}
+	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 0 {
+		t.Fatal("known answer processing requires another model turn", state, err)
 	}
 }
 

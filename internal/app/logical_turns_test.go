@@ -74,71 +74,40 @@ func TestOwnerUnassignedLocksEntireMessageIncludingNewItems(t *testing.T) {
 		t.Fatal(op)
 	}
 }
-func TestLogicalRepairRestartSchedulesOnceAndOwnerStopPersists(t *testing.T) {
+func TestLogicalSettlementDoesNotScheduleMetadataRepair(t *testing.T) {
 	h := newHarness(t)
 	id, turn := startReviewTurn(t, h)
 	turn.Status = store.TurnCompleted
-	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil || state.RepairAttempts != 1 || state.Status != "recovering" {
-		t.Fatal(state, err)
-	}
-	repair, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
-	// h.say's original delivery is still sending; finish its durable receipt first.
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-			_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='delivered' WHERE request_id=?`, turn.RequestID)
-			return err
-		}); err != nil {
+	for range 2 {
+		if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
 			t.Fatal(err)
 		}
-		repair, _, ok, err = h.app.NextDelivery(t.Context(), MainThreadDestination)
 	}
-	if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
-		t.Fatal(repair, ok, err)
+	state, err := h.app.LogicalTurn(t.Context(), turn.RequestID)
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 0 {
+		t.Fatal(state, err)
 	}
-	r := store.MainTurn{RequestID: repair.RequestID, MessageID: id, ThreadID: mainAgent.Thread, TurnID: "repair-1", Status: store.TurnStarted}
-	if err := h.app.PutMainTurn(t.Context(), r); err != nil {
+	if h.associations(id).FactsReviewed {
+		t.Fatal("physical completion fabricated semantic approval")
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var repairs, processed int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM outbox WHERE operation='conversation.repair_turn'`).Scan(&repairs); err != nil {
+			return err
+		}
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM logical_turn_processing WHERE logical_turn_id=? AND processed_at>0`, state.ID).Scan(&processed); err != nil {
+			return err
+		}
+		if repairs != 0 || processed != 1 {
+			t.Fatalf("repairs=%d processing receipts=%d", repairs, processed)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
-	}
-	if err := h.app.SettleOpenTurns(t.Context(), r.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.SettleOpenTurns(t.Context(), r.ThreadID); err != nil {
-		t.Fatal(err)
-	}
-	state, err = h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil || state.Status != "unknown" || state.RepairAttempts != 1 {
-		t.Fatal("crash must wait for native receipt", state, err)
-	}
-	r.Status = store.TurnInterrupted
-	r.NativeReconciled = true
-	if err := h.app.PutMainTurn(t.Context(), r); err != nil {
-		t.Fatal(err)
-	}
-	state, err = h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if err != nil || state.RepairAttempts != 2 {
-		t.Fatal("repair crash lost or duplicated responsibility", state, err)
-	}
-	cmd := InterruptReply{}
-	op := h.exec(owner, h.env(cmd.Operation(), protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: id}, nil), cmd)
-	if op.Status == protocol.OpFailed {
-		t.Fatal(op)
-	}
-	state, _ = h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if state.Status != "stopped" {
-		t.Fatal(state)
 	}
 }
-func TestLogicalTurnLateReplyReopensAndSchedulesRepair(t *testing.T) {
+
+func TestLogicalTurnLateReplyRecordsProcessingWithoutModelRepair(t *testing.T) {
 	h := newHarness(t)
 	id, turn := startReviewTurn(t, h)
 	h.associate(mainAgent, id)
@@ -160,7 +129,7 @@ func TestLogicalTurnLateReplyReopensAndSchedulesRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, _ = h.app.LogicalTurn(t.Context(), turn.RequestID)
-	if state.Status != "recovering" || state.RepairAttempts != 1 {
+	if state.Status != "completed" || state.RepairAttempts != 0 {
 		t.Fatal(state)
 	}
 }

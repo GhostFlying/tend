@@ -60,4 +60,25 @@ func TestUsageCollectionFiltersAndOriginalControlEnvelope(t *testing.T) {
 	if requests != 1 {
 		t.Fatal("invalid control sent a request", requests)
 	}
+	for _, input := range []struct {
+		body   string
+		rescan bool
+	}{{"", true}, {`{"rescan":false}`, false}} {
+		e.out.Reset()
+		args := []string{"usage", "collection", "resume", "source", "--revision", "9", "--request-id", id, "--dry-run"}
+		if input.body != "" {
+			args = append(args, "--data", input.body)
+		}
+		if code := e.main(args...); code != exitOK {
+			t.Fatal(code, e.errOut)
+		}
+		var env protocol.Envelope
+		var control protocol.UsageCollectionControl
+		if err := json.Unmarshal(e.out.Bytes(), &env); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(env.Payload, &control); err != nil || control.Rescan != input.rescan {
+			t.Fatal(env, control, err)
+		}
+	}
 }

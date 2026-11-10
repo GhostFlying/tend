@@ -11,7 +11,7 @@ import (
 
 func TestAgentInventoryAuthenticatedRegistrationAndStatus(t *testing.T) {
 	e := newEnv(t, time.Millisecond)
-	r := &protocol.RunnerRuntime{InstanceID: "inventory-http", Generation: 1, Sequence: 1, Protocol: 1, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory}}
+	r := &protocol.RunnerRuntime{InstanceID: "inventory-http", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory}}
 	p := protocol.AgentInventoryProjection{FormatVersion: 1, ExecutionEnvironmentID: "linux-1", SourceKind: protocol.AgentSourceInline, Runtimes: []protocol.AgentInventoryRuntime{}, Agents: []protocol.AgentInventoryDefinition{}}
 	_, hash, err := protocol.CanonicalAgentInventory(p)
 	if err != nil {

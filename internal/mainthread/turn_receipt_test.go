@@ -82,7 +82,7 @@ func TestReconnectRecoversFinalNativeMessagesBeforeMetadataRepair(t *testing.T) 
 		t.Fatal("did not locate the exact known native turn")
 	}
 	state, err = e.app.LogicalTurn(t.Context(), req)
-	if err != nil || state.Status != "recovering" || state.RepairAttempts != 1 || len(state.Messages) != 3 {
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 0 || len(state.Messages) != 3 {
 		t.Fatal(state, err)
 	}
 	if e.count(`SELECT COUNT(*) FROM conversation_messages WHERE body IN ('Partial text completed in native history','Final answer never received before crash')`) != 2 {
@@ -91,7 +91,7 @@ func TestReconnectRecoversFinalNativeMessagesBeforeMetadataRepair(t *testing.T) 
 	if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
 		t.Fatal(err)
 	}
-	if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 1 || len(e.h.Starts()) != 0 {
+	if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 0 || len(e.h.Starts()) != 0 {
 		t.Fatal("reconciliation replayed a model execution")
 	}
 }
@@ -186,13 +186,13 @@ func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) 
 				t.Fatal("history rebound a reply across its original consumption boundary")
 			}
 			state, err := e.app.LogicalTurn(t.Context(), d.RequestID)
-			if err != nil || state.Status != "recovering" || state.RepairAttempts != 1 {
+			if err != nil || state.Status != "completed" || state.RepairAttempts != 0 {
 				t.Fatal(state, err)
 			}
 			if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
 				t.Fatal(err)
 			}
-			if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 1 || len(e.h.Starts()) != 0 {
+			if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 0 || len(e.h.Starts()) != 0 {
 				t.Fatal("receipt replay created a competing execution")
 			}
 		})
@@ -245,8 +245,8 @@ func TestNativeReceiptPollingRecoversAfterTransientReadFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.Status == "recovering" {
-			if state.RepairAttempts != 1 || th.calls.Load() != 2 || len(e.h.Starts()) != 0 {
+		if state.Status == "completed" {
+			if state.RepairAttempts != 0 || th.calls.Load() != 2 || len(e.h.Starts()) != 0 {
 				t.Fatal(state, th.calls.Load())
 			}
 			break
@@ -288,12 +288,12 @@ func TestHandoffCanStrandNativeReceipt(t *testing.T) {
 	}
 }
 
-func TestClaimedRepairStoppedBeforeNativeAdmission(t *testing.T) {
+func TestCompletedTurnDoesNotAdmitMetadataRepair(t *testing.T) {
 	f := newHandoffFixture(t)
-	id := f.e.say("Stop this logical responsibility")
+	id := f.e.say("Complete this request without a source ceremony")
 	d, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
 	if err != nil || !ok {
-		t.Fatal(err, ok)
+		t.Fatal(d, ok, err)
 	}
 	rec := store.MainTurn{RequestID: d.RequestID, MessageID: id, ThreadID: f.source.ID(), TurnID: "original", Status: store.TurnCompleted}
 	if err := f.e.app.PutMainTurn(t.Context(), rec); err != nil {
@@ -302,54 +302,28 @@ func TestClaimedRepairStoppedBeforeNativeAdmission(t *testing.T) {
 	if err := f.e.app.FinishDelivery(t.Context(), d, app.DeliveryResult{Outcome: app.Delivered}); err != nil {
 		t.Fatal(err)
 	}
-	repair, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
-	if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
-		t.Fatal(repair, err)
-	}
-	f.e.exec(owner, "conversation.interrupt_reply", protocol.Target{Type: "conversation"}, protocol.InterruptReplyPayload{MessageID: id}, app.InterruptReply{})
-	f.e.m.mu.Lock()
-	f.e.m.session, f.e.m.thread = f.session, f.source
-	close(f.e.m.ready)
-	f.e.m.mu.Unlock()
-	result := f.e.m.Deliver(t.Context(), repair)
-	if result.Outcome != app.Delivered {
-		t.Fatal(result)
-	}
-	if err := f.e.app.FinishDelivery(t.Context(), repair, result); err != nil {
-		t.Fatal(err)
+	next, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+	if err != nil || ok {
+		t.Fatal("metadata-only turn requires a model", next, ok, err)
 	}
 	state, err := f.e.app.LogicalTurn(t.Context(), d.RequestID)
-	if err != nil || state.Status != "stopped" || state.RepairAttempts != 1 || len(f.e.h.Starts()) != 0 {
+	if err != nil || state.Status != "completed" || state.RepairAttempts != 0 || len(f.e.h.Starts()) != 0 {
 		t.Fatal(state, err)
-	}
-	snap, err := f.e.app.HandoffSnapshot(t.Context(), "main")
-	if err != nil || snap.Pending || snap.Active {
-		t.Fatal(snap, err)
 	}
 }
 
-func TestRepairExposesOriginalMessageAsActiveUntilNativeStop(t *testing.T) {
+func TestOriginalMessageRemainsActiveUntilNativeStop(t *testing.T) {
 	f := newHandoffFixture(t)
-	id := f.e.say("Stop a running metadata repair")
+	id := f.e.say("Stop the running original turn")
 	d, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
 	if err != nil || !ok {
 		t.Fatal(err, ok)
 	}
-	rec := store.MainTurn{RequestID: d.RequestID, MessageID: id, ThreadID: f.source.ID(), TurnID: "original", Status: store.TurnCompleted}
+	rec := store.MainTurn{RequestID: d.RequestID, MessageID: id, ThreadID: f.source.ID(), TurnID: "original", Status: store.TurnStarted}
 	if err := f.e.app.PutMainTurn(t.Context(), rec); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.app.FinishDelivery(t.Context(), d, app.DeliveryResult{Outcome: app.Delivered}); err != nil {
-		t.Fatal(err)
-	}
-	repair, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
-	if err != nil || !ok || repair.Operation != "conversation.repair_turn" {
-		t.Fatal(repair, err)
-	}
-	rec.RequestID, rec.TurnID, rec.Status = repair.RequestID, "repair", store.TurnStarted
-	if err := f.e.app.PutMainTurn(t.Context(), rec); err != nil {
-		t.Fatal(err)
-	}
+	repair := d
 	check := func(wantActive bool) {
 		t.Helper()
 		if err := f.e.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -364,9 +338,11 @@ func TestRepairExposesOriginalMessageAsActiveUntilNativeStop(t *testing.T) {
 			} else if page.Active != nil {
 				t.Fatalf("settled repair remains active: %+v", page.Active)
 			}
-			// A metadata retry is not a new owner input that can be withdrawn or edited.
-			if len(page.Items) != 0 {
-				t.Fatalf("repair leaked into owner input queue: %+v", page.Items)
+			if wantActive && (len(page.Items) != 1 || page.Items[0].Item.MessageID != id || page.Items[0].CanWithdraw) {
+				t.Fatalf("active original input lost its immutable queue identity: %+v", page.Items)
+			}
+			if !wantActive && len(page.Items) != 0 {
+				t.Fatalf("settled input remains queued: %+v", page.Items)
 			}
 			return nil
 		}); err != nil {

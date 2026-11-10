@@ -119,6 +119,13 @@ func (a *App) ReadRunContext(ctx context.Context, p protocol.Principal, query pr
 			return err
 		}
 		result.SpecVersion = action.TargetSpecVersion
+		if query.Kind == "overview" || query.Kind == "tasks" && (query.ID == "" || query.ID == r.TaskID) {
+			index, err := taskExecutionContext(ctx, tx.Q(), r, action)
+			if err != nil {
+				return err
+			}
+			result.ExecutionContext = &index
+		}
 		scope, err = selectMaterialIssue(ctx, tx.Q(), s, query.IssueID)
 		return err
 	})
@@ -222,17 +229,31 @@ func (a *App) readMaterials(ctx context.Context, scope store.MaterialScope, quer
 	if query.Kind == "delivery_authorization" {
 		result = protocol.IssueMaterials{Kind: query.Kind, IssueIDs: scope.IssueIDs}
 		if query.ID == "" || query.After != "" {
-			return result, protocol.Errorf(protocol.CodeInvalidRequest, "delivery authorization requires a Task ID and does not take a cursor")
+			return result, protocol.Errorf(protocol.CodeInvalidRequest, "delivery authorization requires a Task ID or original Run ID and does not take a cursor")
 		}
 		err = a.store.Read(ctx, func(tx *store.ReadTx) error {
-			ids, _, _, err := store.MaterialIDs(ctx, tx.Q(), scope, "tasks", query.ID, "", 1)
+			taskID := query.ID
+			historical := protocol.ValidID(protocol.PrefixRun, query.ID)
+			if historical {
+				run, e := store.GetRun(ctx, tx.Q(), query.ID)
+				if e != nil {
+					return errNotFound(e, "original delivery Run is unavailable")
+				}
+				taskID = run.TaskID
+			}
+			ids, _, _, err := store.MaterialIDs(ctx, tx.Q(), scope, "tasks", taskID, "", 1)
 			if err != nil {
 				return err
 			}
 			if len(ids) == 0 {
 				return protocol.Errorf(protocol.CodeForbidden, "Task is outside this Issue context")
 			}
-			result.DeliveryAuthorization, err = views.DeliveryExecutionAuthority(ctx, tx.Q(), query.ID)
+			if historical {
+				result.DeliveryAuthorization, err = views.HistoricalDeliveryExecutionAuthority(ctx, tx.Q(), query.ID)
+				err = errNotFound(err, "original delivery execution history is unavailable")
+			} else {
+				result.DeliveryAuthorization, err = views.DeliveryExecutionAuthority(ctx, tx.Q(), taskID)
+			}
 			return err
 		})
 	} else if slices.Contains([]string{"capabilities", "agent_capabilities", "agent_capability_history", "task_capabilities"}, query.Kind) {

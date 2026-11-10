@@ -73,8 +73,8 @@ func TestNamedHostedMainUsesDefinitionForActualStartAndResume(t *testing.T) {
 		if cfg.Model != "native-model" || cfg.Config["model_reasoning_effort"] != "high" || cfg.Config["model_provider"] != "native-provider" || !strings.Contains(cfg.DeveloperInstructions, "PRIVATE_ROLE_INSTRUCTIONS") {
 			t.Fatalf("actual thread configuration did not consume the definition: %+v", cfg)
 		}
-		if cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never" || cfg.Config["features.shell_tool"] != false || cfg.Config["features.apply_patch_freeform"] != false {
-			t.Fatalf("named native execution was not disabled: %+v", cfg)
+		if cfg.Sandbox != "" || cfg.ApprovalPolicy != "" || cfg.Config["features.shell_tool"] != nil || cfg.Config["features.apply_patch_freeform"] != nil {
+			t.Fatalf("named role injected an unconfigured native policy: %+v", cfg)
 		}
 		eventually(t, "named business turn completed", func() bool {
 			return e.count(`SELECT COUNT(*) FROM main_turns WHERE status='completed' AND model='native-model' AND settings_revision=1`) == i+1

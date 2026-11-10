@@ -102,6 +102,9 @@ func snapshotReviewedContexts(ctx context.Context, x *Exec, tx *store.Tx) error 
 }
 
 func refreshAffectedManagers(ctx context.Context, x *Exec, tx *store.Tx) error {
+	if err := refreshExternalWaits(ctx, x, tx); err != nil {
+		return err
+	}
 	if err := refreshPauseContinuations(ctx, x, tx); err != nil {
 		return err
 	}

@@ -1,7 +1,7 @@
 package coordination
 
-// NativeOwnerPurpose selects the runner's ordinary configured owner runtime.
-// Other coordination requests retain their existing read-only defaults.
+// NativeOwnerPurpose is retained transport metadata. Role names do not select
+// native tool permissions; the accepted runtime and receipt mode do.
 const NativeOwnerPurpose = "issue_owner_native"
 
 // Isolation returns a fresh native execution policy for coordinator sessions.

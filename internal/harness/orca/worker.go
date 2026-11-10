@@ -382,6 +382,9 @@ func (w *worker) openBridge(ctx context.Context) error {
 	if w.spec.DownloadFile != nil {
 		tools = append(tools, harness.DownloadFileToolSpec)
 	}
+	if w.spec.WaitExternal != nil {
+		tools = append(tools, harness.WaitExternalToolSpec)
+	}
 	if w.spec.AskOwner != nil {
 		tools = append(tools, questionTool(w.spec))
 	}

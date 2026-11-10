@@ -161,10 +161,11 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 }
 
 type runReceiptCredential struct {
-	delivery       *protocol.RunMessageDelivery
-	manager        bool
-	questionReplay *protocol.Envelope
-	pauseReplay    *protocol.Envelope
+	delivery           *protocol.RunMessageDelivery
+	manager            bool
+	questionReplay     *protocol.Envelope
+	pauseReplay        *protocol.Envelope
+	externalWaitReplay *protocol.Envelope
 }
 
 func (s *Server) authenticateCredential(r *http.Request, receipt *runReceiptCredential) (protocol.Principal, error) {
@@ -193,6 +194,9 @@ func (s *Server) authenticateCredential(r *http.Request, receipt *runReceiptCred
 		}
 		if receipt != nil && receipt.questionReplay != nil {
 			leaseID, host, role, err = s.app.QuestionHandoffReplayCredential(ctx, runID, receipt.questionReplay)
+		}
+		if receipt != nil && receipt.externalWaitReplay != nil {
+			leaseID, host, role, err = s.app.ExternalWaitReplayCredential(ctx, runID, receipt.externalWaitReplay)
 		}
 		if receipt != nil && receipt.pauseReplay != nil {
 			leaseID, host, role, err = s.app.PauseHandoffReplayCredential(ctx, runID, receipt.pauseReplay)
@@ -270,6 +274,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			p, authErr = s.authenticateCredential(r, &runReceiptCredential{questionReplay: &env})
 		}
 
+		if authErr != nil && (env.Operation == protocol.OpRunsYieldExternalWait || env.Operation == protocol.OpRunsRecordSessionStop) && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
+			p, authErr = s.authenticateCredential(r, &runReceiptCredential{externalWaitReplay: &env})
+		}
 		if authErr != nil && env.Operation == protocol.OpRunsYieldPause && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
 			p, authErr = s.authenticateCredential(r, &runReceiptCredential{pauseReplay: &env})
 		}
@@ -289,38 +296,43 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 // runCommands are the operations a run performs through the ledger.
 var runCommands = map[string]app.Command{
-	protocol.OpManagerNativeClaim:   app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim},
-	protocol.OpManagerNativeReply:   app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply},
-	protocol.OpManagerNativeEvent:   app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent},
-	protocol.OpManagerNativeStopped: app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped},
-	protocol.OpDeliveriesPoll:       app.PollDeliveries{},
-	protocol.OpDeliveriesReport:     app.ReportDelivery{},
-	protocol.OpRunsAskOwner:         app.AskOwner{},
-	protocol.OpRunsYieldQuestion:    app.YieldQuestion{},
-	protocol.OpRunsYieldPause:       app.YieldPause{},
-	protocol.OpRunsClaimMessage:     app.ClaimRunMessage{},
-	protocol.OpRunsReportMessage:    app.ReportRunMessage{},
-	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},
-	protocol.OpWorkspaceRelease:     app.ReleaseWorkspace{},
-	protocol.OpWorkspaceCleanup:     app.ReserveWorkspaceCleanup{},
-	protocol.OpWorkspaceCleanupDone: app.CompleteWorkspaceCleanup{},
-	protocol.OpRunsReportWorkspace:  app.ReportWorkspace{},
-	protocol.OpRunsReportStarted:    app.ReportRunStarted{},
-	protocol.OpRunsSubmitArtifact:   app.SubmitArtifact{},
-	protocol.OpRunsRelease:          app.Release{},
-	protocol.OpRunsReportTakeover:   app.ReportTakeover{},
-	protocol.OpAcceptancesSubmit:    app.SubmitAcceptance{},
+	protocol.OpRunsRecordSessionStop: app.RecordSessionStop{},
+	protocol.OpRunsWaitExternal:      app.WaitExternal{},
+	protocol.OpRunsYieldExternalWait: app.YieldExternalWait{},
+	protocol.OpManagerNativeClaim:    app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim},
+	protocol.OpManagerNativeReply:    app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply},
+	protocol.OpManagerNativeEvent:    app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent},
+	protocol.OpManagerNativeStopped:  app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped},
+	protocol.OpDeliveriesPoll:        app.PollDeliveries{},
+	protocol.OpDeliveriesReport:      app.ReportDelivery{},
+	protocol.OpRunsAskOwner:          app.AskOwner{},
+	protocol.OpRunsYieldQuestion:     app.YieldQuestion{},
+	protocol.OpRunsYieldPause:        app.YieldPause{},
+	protocol.OpRunsClaimMessage:      app.ClaimRunMessage{},
+	protocol.OpRunsReportMessage:     app.ReportRunMessage{},
+	protocol.OpWorkspaceReconcile:    app.ReconcileWorkspaces{},
+	protocol.OpWorkspaceRelease:      app.ReleaseWorkspace{},
+	protocol.OpWorkspaceCleanup:      app.ReserveWorkspaceCleanup{},
+	protocol.OpWorkspaceCleanupDone:  app.CompleteWorkspaceCleanup{},
+	protocol.OpRunsReportWorkspace:   app.ReportWorkspace{},
+	protocol.OpRunsReportStarted:     app.ReportRunStarted{},
+	protocol.OpRunsSubmitArtifact:    app.SubmitArtifact{},
+	protocol.OpRunsRelease:           app.Release{},
+	protocol.OpRunsReportTakeover:    app.ReportTakeover{},
+	protocol.OpAcceptancesSubmit:     app.SubmitAcceptance{},
 }
 
 func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
 	if p.Kind == protocol.PrincipalRun && p.Role == protocol.RoleIssueManager {
 		switch env.Operation {
-		case protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpRunsYieldPause:
+		case protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpRunsYieldPause, protocol.OpRunsWaitExternal, protocol.OpRunsYieldExternalWait, protocol.OpRunsRecordSessionStop:
 		default:
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "manager cannot act as an implementation or acceptance run")
 		}
 	}
 	switch env.Operation {
+	case protocol.OpRunnerRolloutArchive:
+		return s.app.Execute(ctx, p, env, app.ArchiveNativeRollout{})
 	case protocol.OpRunnerUsageSources:
 		if p.Kind != protocol.PrincipalRunner {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "host source inventory required")
@@ -450,7 +462,7 @@ func (s *Server) claim(ctx context.Context, p protocol.Principal, env *protocol.
 	deadline := time.NewTimer(s.cfg.ClaimWait)
 	defer deadline.Stop()
 	for {
-		changed := s.app.Changes().Wait()
+		changed := s.app.SchedulingChanges().Wait()
 		op, err := s.app.Execute(ctx, p, env, app.Claim{})
 		if err != nil || op.Status != protocol.OpSucceeded {
 			return op, err
@@ -524,6 +536,9 @@ func (s *Server) SweepLeases(ctx context.Context, interval time.Duration) {
 		}
 		if _, err := s.app.SweepRunnerPresence(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "runner presence sweep failed", "err", err)
+		}
+		if err := s.app.SweepExternalWaits(ctx); err != nil && ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "external wait sweep failed", "err", err)
 		}
 		if err := s.app.SweepCapabilityWaits(ctx); err != nil && ctx.Err() == nil {
 			s.log.ErrorContext(ctx, "capability wait sweep failed", "err", err)

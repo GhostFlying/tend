@@ -91,6 +91,9 @@ func constrainControl(data []byte, run *nativeRun, desired protocol.RunDesired) 
 			}
 		}
 		if frame.Method == "thread/resume" {
+			if run.optionalContinuation && frame.ID != nil {
+				run.resumeID = string(frame.ID)
+			}
 			p["cwd"], _ = json.Marshal(run.cwd)
 			delete(p, "config")
 			delete(p, "history")

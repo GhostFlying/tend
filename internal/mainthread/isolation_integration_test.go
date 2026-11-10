@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,7 +22,7 @@ import (
 
 // Check the actual native model request, rather than assuming the harness
 // recognizes a configuration key. The model endpoint is local and deterministic.
-func TestIntegrationDispatcherToolIsolation(t *testing.T) {
+func TestIntegrationConfiguredReadOnlyTools(t *testing.T) {
 	bin, err := exec.LookPath("traex")
 	if err != nil {
 		t.Skip("traex not installed")
@@ -55,6 +56,8 @@ func TestIntegrationDispatcherToolIsolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cfg := ThreadConfig(cwd, "probe-model")
+	cfg.Sandbox, cfg.ApprovalPolicy = "read-only", "never"
+	cfg.Config = maps.Clone(Isolation)
 	cfg.Tools = []harness.ToolSpec{{Name: "repos_list", Description: "List registered repositories", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}}
 	start := func() *traex.Session {
 		s, err := traex.Start(ctx, traex.Options{Bin: bin, Dir: cwd, Env: []string{"TRAE_HOME=" + home, "TEND_ADDON=off"}})

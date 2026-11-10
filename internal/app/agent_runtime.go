@@ -29,11 +29,19 @@ func (a *App) RecordAgentUsage(ctx context.Context, id string, usage protocol.Ag
 	})
 }
 func (a *App) RecordRolloutEvent(ctx context.Context, id, thread, turn, item, kind string, data json.RawMessage) error {
-	return a.write(ctx, func(tx *store.Tx) error {
-		if len(data) == 0 {
-			data = json.RawMessage(`{}`)
+	if len(data) == 0 {
+		data = json.RawMessage(`{}`)
+	}
+	staged, err := a.store.StageOriginals(ctx, "conversation-rollout:"+id+":"+thread, data)
+	if err != nil {
+		return err
+	}
+	return a.write(staged, func(tx *store.Tx) error {
+		body, err := tx.RetainJSON(staged, string(data))
+		if err != nil {
+			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO agent_rollout_events(conversation_id,thread_id,turn_id,item_id,kind,data_json,created_at) VALUES(?,?,?,?,?,?,?)`, store.ConversationID(id), thread, turn, item, kind, string(data), a.now().UnixMilli())
+		_, err = tx.Exec(staged, `INSERT INTO agent_rollout_events(conversation_id,thread_id,turn_id,item_id,kind,data_json,created_at) VALUES(?,?,?,?,?,?,?)`, store.ConversationID(id), thread, turn, item, kind, body, a.now().UnixMilli())
 		return err
 	})
 }

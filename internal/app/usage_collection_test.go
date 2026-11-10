@@ -50,6 +50,99 @@ func TestUsageCollectionControlRetiresWithoutClaimingCompleteAndReplaysOriginal(
 	}
 }
 
+func TestLocalUsageResumeRewindsCursorWithoutBusinessExecution(t *testing.T) {
+	h := newHarness(t)
+	s := LocalUsageSource{ID: "original", WriterStopped: true, Source: []byte(`{"thread_id":"thread","provider":"codex","session_id":"thread"}`)}
+	if err := h.app.RegisterLocalUsage(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	all, err := h.app.LocalUsageSources(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = all[0]
+	s.Cursors = []byte(`{"history":{"offset":900,"prefix":"original"}}`)
+	s.Coverage = "caught_up"
+	s.Collection.ReadSucceeded(h.clock.Now().UnixMilli(), true, true, true, true)
+	if err := h.app.CommitLocalUsage(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	all, err = h.app.LocalUsageSources(t.Context(), "")
+	if err != nil || len(all) != 1 {
+		t.Fatal(all, err)
+	}
+	before := h.count("runs")
+	env := h.env(protocol.OpResumeUsageCollection, protocol.Target{Type: "usage_source", ID: s.ID}, protocol.UsageCollectionControl{Rescan: true}, rev(all[0].Collection.Revision))
+	for range 2 {
+		if op := h.exec(owner, env, ControlUsageCollection{Resume: true}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	all, err = h.app.LocalUsageSources(t.Context(), "")
+	if err != nil || len(all) != 1 || string(all[0].Cursors) != "{}" || all[0].Coverage != "pending" || h.count("runs") != before {
+		t.Fatal(all, err)
+	}
+}
+
+func TestUsageUnobservedCollectionDoesNotClaimCaughtUpCoverage(t *testing.T) {
+	h, as := messageRun(t)
+	registration := protocol.NativeUsageRegistration{RunID: as.RunID, ThreadID: "native-thread", SessionID: "native-session", Provider: "traex"}
+	if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageRegister, protocol.Target{Type: "host", ID: "linux-1"}, registration, nil), RegisterNativeUsage{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE token_usage_sources SET coverage='caught_up' WHERE run_id=?`, as.RunID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		page, err := UsageCollections(t.Context(), tx.Q(), protocol.UsageCollectionQuery{}, as.RunID+"/native-thread")
+		if err == nil && (len(page.Sources) != 1 || page.Sources[0].Coverage != "unobserved" || page.Sources[0].Collection.State != "unobserved") {
+			t.Fatal(page)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUsageRescanRequiresNewRunnerWithoutRejectingLegacyResume(t *testing.T) {
+	for _, version := range []int{2, 3} {
+		t.Run(map[int]string{2: "previous", 3: "current"}[version], func(t *testing.T) {
+			h, as := messageRun(t)
+			registration := protocol.NativeUsageRegistration{RunID: as.RunID, ThreadID: "thread", SessionID: "thread", Provider: "codex"}
+			if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageRegister, protocol.Target{Type: "host", ID: "linux-1"}, registration, nil), RegisterNativeUsage{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				return tx.PutHostRuntime(t.Context(), "linux-1", store.HostRuntimeRow{Runtime: protocol.RunnerRuntime{Protocol: int64(version), Capabilities: []string{protocol.CapabilityUsageCollection}}})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			collection := protocol.NewUsageCollection(false, true)
+			collection.Stopped(h.clock.Now().UnixMilli(), "owned-writer", false)
+			p := protocol.UsageCollectionObservation{LocalSourceID: "local", RunID: as.RunID, ThreadID: "thread", SessionID: "thread", WriterStopped: true, Collection: collection, Sequence: 1}
+			if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageCollection, protocol.Target{Type: "host", ID: "linux-1"}, p, nil), ObserveUsageCollection{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			target := protocol.Target{Type: "usage_source", ID: as.RunID + "/thread"}
+			op := h.exec(owner, h.env(protocol.OpResumeUsageCollection, target, protocol.UsageCollectionControl{Rescan: true}, rev(1)), ControlUsageCollection{Resume: true})
+			if version == 2 {
+				expectWorkCode(t, op, protocol.CodeInvalidTransition)
+				op = h.exec(owner, h.env(protocol.OpResumeUsageCollection, target, protocol.UsageCollectionControl{}, rev(1)), ControlUsageCollection{Resume: true})
+			}
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			var command protocol.UsageCollectionCommandStatus
+			if err := json.Unmarshal(op.Result, &command); err != nil || command.Status != "pending" || command.Rescan != (version == 3) {
+				t.Fatal(command, err)
+			}
+		})
+	}
+}
+
 func TestRunnerCollectionObservationIsNegotiatedMonotonicAndIndependentOfCoverage(t *testing.T) {
 	h, as := messageRun(t)
 	registration := protocol.NativeUsageRegistration{RunID: as.RunID, ThreadID: "native-thread", SessionID: "native-session", Provider: "traex"}

@@ -52,7 +52,7 @@ type Options struct {
 	// Probe is read-only adapter setup; Build creates the existing harness factory.
 	Probe func(context.Context, BuildInput) error
 	// ProbeOwner independently verifies the coordination adapter. Nil uses the
-	// actual native read-only/never permission probe, without a model turn.
+	// native setup probe without a model turn or an additional role policy.
 	ProbeOwner func(context.Context, BuildInput) error
 	Build      func(BuildInput) (harness.Workers, error)
 }
@@ -119,7 +119,7 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 		if a.OwnerRuntimeID != "" {
 			ownerRuntime = runtimes[a.OwnerRuntimeID]
 		}
-		if ownerRuntime.Kind == agentconfig.AppServerWorker && (slices.Contains(a.Purposes, agentconfig.IssueManager) || ownerRuntime.CLI != "" && slices.Contains(a.Purposes, agentconfig.WorkerRun)) {
+		if ownerRuntime.Kind == agentconfig.AppServerWorker && ownerRuntime.CLI != "" {
 			input := BuildInput{Runtime: ownerRuntime, Agent: a, Installation: installation[ownerRuntime.ID]}
 			e.ownerInput = &input
 		}
@@ -165,7 +165,7 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 			worker = protocol.WorkerOrca
 		}
 		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
-		if slices.Contains(e.input.Agent.Purposes, agentconfig.WorkerRun) {
+		if workerAdapterSupported(e.input.Runtime.Kind) {
 			reason := e.reason
 			if e.environmentUnavailable && (reason == "" || canProbe(reason)) {
 				reason = "environment_unavailable"
@@ -222,6 +222,13 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 	}
 	return out, nil
 }
+
+// Purpose declarations remain accepted snapshot metadata. Adapter availability,
+// rather than a historical role label, decides which execution pins exist.
+func workerAdapterSupported(kind agentconfig.RuntimeKind) bool {
+	return kind == agentconfig.AppServerWorker || kind == agentconfig.OrcaWorker || kind == agentconfig.CentralWorker
+}
+
 func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runner.ResolvedExecution, error) {
 	if err := pin.Validate(pin.Identity.ExecutionEnvironmentID); err != nil {
 		return runner.ResolvedExecution{}, err

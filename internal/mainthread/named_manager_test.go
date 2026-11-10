@@ -21,7 +21,7 @@ import (
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
-func TestNamedPlannerDelegatesToActualIsolatedManagerTools(t *testing.T) {
+func TestNamedPlannerDelegatesToActualConfiguredManagerTools(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false)
 }
 func TestNamedPlannerTransfersResponsibilityToActualOwner(t *testing.T) {
@@ -30,10 +30,10 @@ func TestNamedPlannerTransfersResponsibilityToActualOwner(t *testing.T) {
 func TestNamedManagerControlsOnlyPrimaryTask(t *testing.T) {
 	testNamedManagerTools(t, false, true, false, false)
 }
-func TestNamedPlannerRepairRejectsBusinessMutation(t *testing.T) {
+func TestNamedPlannerCompletionDoesNotRequestMetadataRepair(t *testing.T) {
 	testNamedManagerTools(t, false, false, true, false)
 }
-func TestNamedManagerRepairRejectsBusinessMutation(t *testing.T) {
+func TestNamedManagerCompletionDoesNotRequestMetadataRepair(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, true)
 }
 func TestNamedPlannerUsesActualAttentionTools(t *testing.T) {
@@ -42,10 +42,10 @@ func TestNamedPlannerUsesActualAttentionTools(t *testing.T) {
 
 type namedManagerTestOptions struct{ Attention, ReadSources, Catalog, Callers, Associations bool }
 
-func TestNamedPlannerRepairClassifiesCanonicalSource(t *testing.T) {
+func TestNamedPlannerClassifiesCanonicalSourceWithoutMetadataRepair(t *testing.T) {
 	testNamedManagerTools(t, false, false, true, false, namedManagerTestOptions{Associations: true})
 }
-func TestNamedPlannerClassifiesCanonicalSourceAndCommits(t *testing.T) {
+func TestNamedPlannerClassifiesCanonicalSource(t *testing.T) {
 	testNamedManagerTools(t, false, false, false, false, namedManagerTestOptions{Associations: true})
 }
 
@@ -150,7 +150,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		}
 		manager := false
 		for _, s := range th.Config.Tools {
-			if s.Name == "issues_context_review" {
+			if s.Name == "issues_turn_read" {
 				manager = true
 			}
 		}
@@ -403,9 +403,9 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			}
 			return "completed"
 		}
-		if th.Config.Sandbox != "read-only" || th.Config.ApprovalPolicy != "never" || th.Config.Config["features.shell_tool"] != false || th.Config.Config["features.apply_patch_freeform"] != false || strings.Contains(th.Config.DeveloperInstructions, "background checker") {
+		if th.Config.Sandbox != "" || th.Config.ApprovalPolicy != "" || th.Config.Config["features.shell_tool"] != nil || th.Config.Config["features.apply_patch_freeform"] != nil || strings.Contains(th.Config.DeveloperInstructions, "background checker") {
 			select {
-			case failed <- "actual manager retained native auto-mode or checker scope":
+			case failed <- "actual manager injected role policy or checker scope":
 			default:
 			}
 			return "failed"
@@ -470,6 +470,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				return "failed"
 			}
 			if managerRepair {
+				managerDone <- item.IssueID
 				return "completed"
 			}
 		}
@@ -617,7 +618,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		if err != nil {
 			t.Fatal(err)
 		}
-		runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 2, Sequence: 1, Protocol: 1, ProtocolMin: 0, ProtocolMax: 1, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
+		runtime := &protocol.RunnerRuntime{InstanceID: "catalog-process", Generation: 2, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityRunnerHeartbeat}}
 		principal := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker-host"}
 		execute(principal, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker-host"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}, app.Hello{})
 		execute(principal, protocol.OpRunnerInventoryRegister, protocol.Target{Type: "host", ID: "worker-host"}, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: 1, SnapshotID: "catalog-snapshot", PublicSHA256: hash, Projection: definition.Public()}, app.RegisterAgentInventory{})
@@ -759,11 +760,11 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	if opts.Callers {
 		expectedManagerExecutions = 2
 	}
-	if managerRepair {
-		expectedManagerExecutions = 2
-	}
 	if e.count(`SELECT COUNT(*) FROM hosted_executions WHERE issue_id=? AND role='issue_manager'`, issue) != expectedManagerExecutions {
 		t.Fatal("manager identity/scope was not frozen")
+	}
+	if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 0 {
+		t.Fatal("ordinary completion scheduled a metadata-only model round")
 	}
 	if e.count(`SELECT COUNT(*) FROM background_assessments`) != 0 {
 		t.Fatal("actual manager was treated as a legacy checker")

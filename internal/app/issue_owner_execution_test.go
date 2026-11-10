@@ -11,13 +11,16 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-func issueOwnerHarness(t *testing.T) (*harness, *protocol.RunnerRuntime, protocol.Issue) {
+func issueOwnerHarness(t *testing.T, configure ...func(*protocol.AgentInventoryProjection)) (*harness, *protocol.RunnerRuntime, protocol.Issue) {
 	t.Helper()
 	h, r, p, _ := inventorySetup(t)
 	p.FormatVersion = 2
 	p.Runtimes[0].CLI = "codex"
 	p.Agents[0].Categories = []string{"implementer"}
 	p.Agents[1].Categories = []string{"reviewer"}
+	for _, apply := range configure {
+		apply(&p)
+	}
 	_, hash, err := protocol.CanonicalAgentInventory(p)
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +51,34 @@ func issueOwnerHarness(t *testing.T) (*harness, *protocol.RunnerRuntime, protoco
 	}
 	stopOwnerClaim(t, h, as)
 	return h, r, canonicalTaskIssue(t, h, issue.IssueID)
+}
+
+func TestHistoricalOwnerPurposeCanCreateAndClaimOwnWorkerTask(t *testing.T) {
+	h, r, issue := issueOwnerHarness(t, func(p *protocol.AgentInventoryProjection) {
+		p.Runtimes[0].DeclaredPurposes = []string{"issue_manager", "worker_run"}
+		p.Agents[0].Purposes = []string{"issue_manager"}
+	})
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		manager, err := store.CurrentIssueManagerTask(t.Context(), tx.Q(), issue.IssueID)
+		if err != nil {
+			return err
+		}
+		worker, err := store.WorkerPinForManager(t.Context(), tx.Q(), *manager.Pin)
+		if err == nil && (worker.Purpose != "" || worker.Identity != manager.Pin.Identity || worker.BackendID != "git") {
+			t.Fatal("retention derived another identity or an unsupported backend", worker)
+		}
+		return err
+	}); err != nil {
+		t.Fatal("historical owner purpose blocked worker retention", err)
+	}
+	op := createOwnerExecution(t, h, issue, "implementer")
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal("historical owner label blocked self execution", op)
+	}
+	as := ownerWorkerClaim(t, h, r, protocol.RoleImplement)
+	if as.Execution == nil || as.Execution.Purpose != "" || as.Execution.Identity.LocalID != "alpha" || as.Execution.BackendID != "git" || as.Responsibility == nil || as.Responsibility.IssueID != issue.IssueID {
+		t.Fatal("self execution lost its real worker pin or Issue identity", as)
+	}
 }
 
 func ownerClaim(t *testing.T, h *harness, r *protocol.RunnerRuntime) protocol.Assignment {

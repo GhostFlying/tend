@@ -22,7 +22,10 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
-	// PredecessorStateDir is a local locator for a question continuation.
+	SessionContinuation      *protocol.SessionContinuation
+	ExternalWaitContinuation *protocol.ExternalWait
+	WaitExternal             func(context.Context, protocol.WaitExternalPayload) (protocol.ExternalWait, error)
+	// PredecessorStateDir locates the configuration of a confirmed stopped Run.
 	PredecessorStateDir string
 
 	// RetainedResume forbids fallback launch or implicit provider input.
@@ -232,6 +235,12 @@ var ErrRetainedResumePending = errors.New("original retained native execution re
 // StoppedPredecessor is a verified physical execution boundary, regardless of why
 // the previous Run handed off. It carries no new business authorization.
 func (s WorkerSpec) StoppedPredecessor() (run, thread string) {
+	if s.SessionContinuation != nil {
+		return s.SessionContinuation.RunID, s.SessionContinuation.ThreadID
+	}
+	if s.ExternalWaitContinuation != nil {
+		return s.ExternalWaitContinuation.RunID, s.ExternalWaitContinuation.ThreadID
+	}
 	if s.PauseContinuation != nil {
 		return s.PauseContinuation.RunID, s.PauseContinuation.ThreadID
 	}

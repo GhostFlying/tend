@@ -92,6 +92,26 @@ func TestDeploymentPreparationIncludesCompleteCurrentTargetSet(t *testing.T) {
 	}
 }
 
+func TestDeploymentPreparationProjectsExplicitControlledExecutionEntry(t *testing.T) {
+	h, as, _ := preparationFixture(t, protocol.RoleImplement)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	observe := h.app.observeDeployment
+	entry := &protocol.DeploymentExecutionEntry{Transport: "tailscale_ssh", Target: "service.example.invalid", User: "operator", CLIPath: "/controlled/current/tend", ControlSocket: "/controlled/upgrades.sock"}
+	h.app.observeDeployment = func(ctx context.Context) (protocol.ObservedDeployment, error) {
+		d, err := observe(ctx)
+		d.Preparation.ExecutionEntry = entry
+		return d, err
+	}
+	ownerView, err := h.app.ReadIssueDeploymentPreparation(t.Context(), issue.IssueID)
+	if err != nil || !reflect.DeepEqual(ownerView.Preparation.ExecutionEntry, entry) {
+		t.Fatal("Issue owner lost the configured deployment route", ownerView, err)
+	}
+	runView, err := h.app.ReadRunObservation(t.Context(), runPrincipal(as.RunID, as.Role))
+	if err != nil || !reflect.DeepEqual(runView.Deployment.Preparation.ExecutionEntry, entry) {
+		t.Fatal("worker lost the configured deployment route", runView, err)
+	}
+}
+
 func TestDeploymentPreparationKeepsInstallationProofSeparateFromHeartbeat(t *testing.T) {
 	for _, change := range []string{"none", "missing", "wrong_host", "old_process", "wrong_hash", "rolled_back", "batch_missing", "stale", "offline"} {
 		t.Run(change, func(t *testing.T) {
