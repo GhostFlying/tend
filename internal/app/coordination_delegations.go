@@ -16,6 +16,10 @@ import (
 
 func delegationCommand(cmd Command) (HostedCoordinationCommand, bool) {
 	c, ok := cmd.(HostedCoordinationCommand)
+	if owner, delegated := cmd.(ownerExecutionCommand); delegated && owner.correction != "" && !owner.preparation {
+		c = HostedCoordinationCommand{Command: owner.Command, ExecutionID: owner.call.ExecutionID, EffectSeq: owner.call.EffectSeq}
+		ok = true
+	}
 	return c, ok && (c.Operation() == "issues.create" || (c.Operation() == protocol.OpIssueRequestManager || c.Operation() == protocol.OpIssueRequestOwner))
 }
 

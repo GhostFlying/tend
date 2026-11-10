@@ -198,7 +198,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		if !preparation {
 			step = call.steps.Add(1)
 		}
-		cmd = ownerExecutionCommand{Command: cmd, call: call, step: step, owner: a.mainOwner, preparation: preparation}
+		cmd = ownerExecutionCommand{Command: cmd, call: call, step: step, owner: a.mainOwner, preparation: preparation, correction: delegationCorrection(env.Payload)}
 	}
 	if err := p.Validate(); err != nil {
 		return protocol.Operation{}, fmt.Errorf("app: invalid principal: %w", err)

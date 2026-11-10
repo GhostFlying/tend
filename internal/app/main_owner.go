@@ -161,6 +161,7 @@ type ownerExecutionCommand struct {
 	step        int64
 	owner       string
 	preparation bool
+	correction  string
 }
 
 func (c ownerExecutionCommand) adapted(x *Exec) *Exec {
@@ -235,6 +236,18 @@ func (c ownerExecutionCommand) prepare(ctx context.Context, x *Exec, tx *store.T
 func (c ownerExecutionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	if c.call.ReplayPrincipal != nil {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "original request is required for replay")
+	}
+	if c.correction != "" {
+		var logical string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, c.call.ExecutionID).Scan(&logical); errors.Is(err, sql.ErrNoRows) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "correction requires a retained logical responsibility")
+		} else if err != nil {
+			return Outcome{}, err
+		}
+		if err := validateDelegationCorrection(ctx, x, tx.Q(), logical, c.Operation()); err != nil {
+			return Outcome{}, err
+		}
+		x.validatedDelegationCorrection = c.correction
 	}
 	out, err := c.Command.Apply(ctx, c.adapted(x), tx)
 	// Retain an exact native-call receipt even for a business no-op.
