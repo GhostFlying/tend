@@ -167,14 +167,33 @@ func TestAcceptanceEvidenceRunnerRecoversOwnedCloseBeforeNativeGate(t *testing.T
 				t.Fatal(err)
 			}
 			nativeLog := filepath.Join(t.TempDir(), "native-methods")
-			workers := &acceptanceReconcileWorkers{inner: traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: bin, Env: []string{acceptanceRunnerServer + "=" + nativeLog}}})}
+			diagnosticPath := filepath.Join(t.TempDir(), "common-owned-close.log")
+			diagnostics, err := os.Create(diagnosticPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = diagnostics.Close() })
+			log := slog.New(slog.NewTextHandler(diagnostics, nil))
+			var originalWorkErr error
+			t.Cleanup(func() {
+				if !t.Failed() {
+					return
+				}
+				t.Logf("original common acceptance work error: %v", originalWorkErr)
+				for _, path := range []string{diagnosticPath, nativeLog, filepath.Join(e.prepared.StateDir, "owned-appserver-process.json"), filepath.Join(e.prepared.StateDir, "pending-verdict.json")} {
+					body, err := os.ReadFile(path)
+					t.Logf("fixed fake native diagnostics %s: %s (read error: %v)", filepath.Base(path), body, err)
+				}
+			})
+			workers := &acceptanceReconcileWorkers{inner: traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: bin, Env: []string{acceptanceRunnerServer + "=" + nativeLog}, Log: log, Stderr: diagnostics}})}
 			spaces := &acceptanceReconcileSpaces{p: e.prepared}
 			cfg.Journal, cfg.Worker, cfg.Workers, cfg.Workspaces = j, protocol.WorkerAppServer, workers, spaces
-			cfg.Log = slog.New(slog.DiscardHandler)
+			cfg.Log = log
 			r := New(cfg)
 			a := &active{as: as, desired: protocol.DesiredRun}
-			if err := r.work(ctx, ctx, as, a); !isCompletionPending(err) {
-				t.Fatalf("original unknown upload lost its pending state: %v", err)
+			originalWorkErr = r.work(ctx, ctx, as, a)
+			if !isCompletionPending(originalWorkErr) {
+				t.Fatalf("original unknown upload lost its pending state: %v", originalWorkErr)
 			}
 			saved, err := j.Run(ctx, as.RunID)
 			if err != nil || saved.Attempts != 1 || saved.StoppedConfirmed || saved.Phase != journal.PhaseStarted || workers.starts != 1 || spaces.prepares != 1 || len(requestIDs) == 0 {
