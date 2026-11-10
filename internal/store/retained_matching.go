@@ -63,12 +63,16 @@ func encodeOriginal(raw []byte, encoding string) ([]byte, error) {
 	}
 }
 
+// SQLite needs the explicit nonempty predicate to use the existing partial
+// index; the caller already excludes an empty canonical hash.
+const canonicalOriginalLookupQuery = `SELECT sha256,archive_id,byte_offset,byte_length,characters FROM retained_original_bodies WHERE canonical_sha256=? AND canonical_sha256<>'' LIMIT 16`
+
 func (s *Store) matchOriginal(ctx context.Context, raw []byte) (*preparedOriginal, error) {
 	canonical := canonicalOriginalHash(raw)
 	if canonical == "" {
 		return nil, nil
 	}
-	rows, err := s.read.QueryContext(ctx, `SELECT sha256,archive_id,byte_offset,byte_length,characters FROM retained_original_bodies WHERE canonical_sha256=? LIMIT 16`, canonical)
+	rows, err := s.read.QueryContext(ctx, canonicalOriginalLookupQuery, canonical)
 	if err != nil {
 		return nil, err
 	}
