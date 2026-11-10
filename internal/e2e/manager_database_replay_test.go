@@ -90,7 +90,14 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	if err := json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	execute(owner, protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Original responsibility"}, &issue.Revision, app.RequestIssueManager{})
+	selected := execute(owner, protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Original responsibility"}, &issue.Revision, app.RequestIssueManager{})
+	if err := json.Unmarshal(selected.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	admitted := execute(owner, "issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
+	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
 	claim := execute(host, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil, app.Claim{})
 	var assignment struct{ Assignment *protocol.Assignment }
 	if err := json.Unmarshal(claim.Result, &assignment); err != nil || assignment.Assignment == nil {

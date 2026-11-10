@@ -17,6 +17,7 @@ import (
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -45,6 +46,25 @@ func TestEndToEnd_FakeHarness(t *testing.T) {
 				default:
 				}
 				return false
+			}
+			if name == "issues_create" {
+				var created struct {
+					Outcome protocol.Issue `json:"outcome"`
+				}
+				if json.Unmarshal(answer.Result, &created) == nil && created.Outcome.Assignee.Kind == protocol.IssueAssigneeAgent && created.Outcome.OwnerSelection == nil {
+					raw, _ := json.Marshal(args)
+					var input struct {
+						Payload protocol.CreateIssuePayload `json:"payload"`
+					}
+					_ = json.Unmarshal(raw, &input)
+					retained, err := issuefixture.Retained(t.Context(), srv.store, srv.ids, srv.now(), created.Outcome.IssueID, input.Payload.SourceMessageID)
+					if err != nil {
+						t.Error(err)
+						return false
+					}
+					created.Outcome = retained
+					answer.Result, _ = json.Marshal(created)
+				}
 			}
 			if out != nil {
 				if err := json.Unmarshal(answer.Result, out); err != nil {

@@ -72,7 +72,13 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		if err != nil {
 			return Outcome{}, err
 		}
-		if err = appendBackgroundSource(ctx, x, tx, "work_item:"+i.IssueID, i.IssueID, m.SourceMessageID, "", "issue.manager_claimed", nil); err != nil {
+		source := m.SourceMessageID
+		if c.Manager.AdmissionRevision > 0 {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(source_message_id,'') FROM issue_control_revisions WHERE issue_id=? AND revision=1`, i.IssueID).Scan(&source); err != nil {
+				return Outcome{}, err
+			}
+		}
+		if err = appendBackgroundSource(ctx, x, tx, "work_item:"+i.IssueID, i.IssueID, source, "", "issue.manager_claimed", nil); err != nil {
 			return Outcome{}, err
 		}
 	}

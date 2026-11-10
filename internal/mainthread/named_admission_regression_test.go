@@ -16,6 +16,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -68,6 +69,11 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 	}
 	accept(0)
 	issue := decodeIssue(execute(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Investigate", Project: "default", Intent: "Delegate investigation"}}, 0, app.CanonicalOwnerIssueCommand{Action: "create"}))
+	retained, fixtureErr := issuefixture.Retained(t.Context(), e.store, e.ids, e.now(), issue.IssueID, "")
+	if fixtureErr != nil {
+		t.Fatal(fixtureErr)
+	}
+	issue = retained
 	issue = decodeIssue(execute(owner, "issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/planner"}, Reason: "Delegate investigation"}, issue.Revision, app.HostedIssueAssignment{}))
 	issue = decodeIssue(execute(owner, "issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, HandoffID: issue.PendingHandoffID, Reason: "No previous execution"}, issue.Revision, app.HostedIssueAssignment{Finish: true}))
 	conversation := "issue:" + issue.IssueID

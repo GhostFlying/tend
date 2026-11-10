@@ -17,6 +17,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -100,6 +101,25 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 				default:
 				}
 				return false
+			}
+			if name == "issues_create" {
+				var created struct {
+					Outcome protocol.Issue `json:"outcome"`
+				}
+				if json.Unmarshal(body.Result, &created) == nil && created.Outcome.Assignee.Kind == protocol.IssueAssigneeAgent && created.Outcome.OwnerSelection == nil {
+					raw, _ := json.Marshal(args)
+					var input struct {
+						Payload protocol.CreateIssuePayload `json:"payload"`
+					}
+					_ = json.Unmarshal(raw, &input)
+					retained, err := issuefixture.Retained(t.Context(), e.store, e.ids, e.now(), created.Outcome.IssueID, input.Payload.SourceMessageID)
+					if err != nil {
+						t.Error(err)
+						return false
+					}
+					created.Outcome = retained
+					body.Result, _ = json.Marshal(created)
+				}
 			}
 			if out != nil && json.Unmarshal(body.Result, out) != nil {
 				select {

@@ -14,7 +14,7 @@ func (a *App) InitializeIssueAdmission(ctx context.Context) error {
 	var ids []string
 	if err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT issue_id FROM issue_controls WHERE work_status='' OR (owner_selection_json='' AND EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=issue_controls.issue_id)) OR (work_status='backlog' AND EXISTS(SELECT 1 FROM runs r JOIN task_work_item_owners o USING(task_id) WHERE o.work_item_id=issue_controls.issue_id AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND NOT EXISTS(SELECT 1 FROM run_pause_handoffs p WHERE p.run_id=r.run_id))) ORDER BY issue_id`)
+		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT issue_id FROM issue_controls WHERE admission_initialized=0 OR EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=issue_controls.issue_id AND m.issue_paused=1) OR (work_status='backlog' AND EXISTS(SELECT 1 FROM runs r JOIN task_work_item_owners o USING(task_id) WHERE o.work_item_id=issue_controls.issue_id AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND NOT EXISTS(SELECT 1 FROM run_pause_handoffs p WHERE p.run_id=r.run_id))) ORDER BY issue_id`)
 		return err
 	}); err != nil {
 		return err
@@ -69,12 +69,20 @@ func (initializeIssueAdmission) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			i.OwnerSelection = &protocol.IssueOwnerSelection{CategoryID: spec.CategoryID, AgentID: spec.AgentID, OwnershipPolicy: spec.OwnershipPolicy}
 		}
 	}
+	// Convert the explicitly marked old Issue-induced Task pause into the
+	// Issue overlay. Independent paused/human controls have no such marker.
+	if _, err := tx.Exec(ctx, `UPDATE tasks SET control_mode='managed',control_revision=control_revision+1 WHERE control_mode='paused' AND EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.task_id=tasks.task_id AND m.issue_id=? AND m.issue_paused=1)`, i.IssueID); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE issue_manager_tasks SET issue_paused=0 WHERE issue_id=? AND issue_paused=1`, i.IssueID); err != nil {
+		return Outcome{}, err
+	}
 	i.Revision++
 	i.UpdatedAt = x.Now.UnixMilli()
 	if err := tx.SaveCanonicalIssue(ctx, i, previous, store.IssueRevisionProvenance{AdmissionDefinition: true, Actor: x.Principal, RequestDomain: x.RequestDomain(), RequestID: x.Env.RequestID, Reason: map[string]string{"reason": "Normalize current admission while preserving original execution facts"}}); err != nil {
 		return Outcome{}, err
 	}
-	if i.BoardStatus() == protocol.IssueBacklog {
+	if i.BoardStatus() == protocol.IssueBacklog || i.State == protocol.IssuePaused {
 		if err := recordIssuePause(ctx, x, tx, i); err != nil {
 			return Outcome{}, err
 		}

@@ -226,6 +226,12 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 		if _, err := t.Exec(ctx, `UPDATE issue_controls SET owner_selection_json=?,todo_at=?,todo_revision=? WHERE issue_id=?`, selection, next.TodoAt, next.TodoRevision, next.IssueID); err != nil {
 			return fmt.Errorf("store: save Issue admission definition: %w", err)
 		}
+		if p.AdmissionDefinition {
+			if _, err := t.Exec(ctx, `UPDATE issue_controls SET admission_initialized=1 WHERE issue_id=?`, next.IssueID); err != nil {
+				return err
+			}
+		}
+
 	}
 	if _, err := t.Exec(ctx, `DELETE FROM issue_dependencies WHERE issue_id=?`, next.IssueID); err != nil {
 		return fmt.Errorf("store: replace issue dependencies: %w", err)

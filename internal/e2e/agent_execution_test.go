@@ -175,6 +175,14 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	if err := json.Unmarshal(issueResponse.Operation.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
+	reviewOwner.run("", "issue", "request-manager", issue.IssueID, "--data", `{"category_id":"implementer","reason":"Explicit named worker fixture admission"}`)
+	admittedRaw := reviewOwner.run("", "issue", "set-status", issue.IssueID, "--status", "todo")
+	if err := json.Unmarshal([]byte(admittedRaw), &issueResponse); err != nil || issueResponse.Operation == nil {
+		t.Fatal(admittedRaw, err)
+	}
+	if err := json.Unmarshal(issueResponse.Operation.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
 	spec := protocol.OwnerTaskSpec{Goal: "named work", Acceptance: []string{"independent check"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, ImplementationContext: "AUTHOR_RATIONALE_PRIVATE", AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", RuntimeID: "worker", Model: "not-selected-model", Effort: "high"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer", RuntimeID: "review-runtime", Effort: "xhigh"}}}
 	if reuseMode != "" {
 		spec.AgentSelection.Implementation.Model = "implement-old"
