@@ -269,6 +269,9 @@ func (c HandleAttention) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	a.Status, a.Resolution = "resolved", p.Text
 	actor := x.ActualPrincipal()
 	a.ResolutionActor = &actor
+	if x.Actor != nil && x.Principal.Kind == protocol.PrincipalOwner {
+		a.ResolutionOwnerSubject = x.Principal.Subject
+	}
 	if err = saveAttention(ctx, x, tx, &a, a.Revision); err != nil {
 		return Outcome{}, err
 	}

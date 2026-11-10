@@ -285,7 +285,11 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if err != nil {
 			return Outcome{}, errNotFound(err, "source message does not exist")
 		}
-		if (p.Kind == "authorization" || p.Kind == "refusal") && msg.Author != "owner" {
+		ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), msg.MessageID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if (p.Kind == "authorization" || p.Kind == "refusal") && !ownerAuthority {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "authority requires an original owner message")
 		}
 		source := protocol.ConversationItem{ConversationContent: protocol.ConversationContent{MessageID: msg.MessageID, Author: msg.Author, Body: msg.Body}}
@@ -296,7 +300,7 @@ func (c ContextCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "source is not admitted or has been withdrawn")
 		}
 		p.Attribution = msg.Author
-		if msg.Author != "owner" && msg.Author != "main_agent" {
+		if !ownerAuthority && msg.Author != "main_agent" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "facts require original owner or assistant messages")
 		}
 		if p.Kind == "commitment" && msg.Author != "main_agent" {

@@ -71,7 +71,7 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	m := protocol.RunMessage{RunMessageDelivery: protocol.RunMessageDelivery{MessageID: x.IDs.New(protocol.PrefixMessage)},
 		TaskID: rc.task.TaskID, RunID: rc.run.RunID, ActionID: rc.action.ActionID, SpecVersion: rc.action.TargetSpecVersion,
 		Generation: rc.run.Generation, ControlRevision: expected, Text: p.Text, Status: protocol.RunMessageQueued,
-		Source: x.Principal, SourceMessageID: p.SourceMessageID, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
+		Source: x.ActualPrincipal(), SourceMessageID: p.SourceMessageID, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
 	runtime, err := store.GetHostRuntime(ctx, tx.Q(), rc.run.HostID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
