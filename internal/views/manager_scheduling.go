@@ -89,6 +89,11 @@ func IssueManagerCandidates(ctx context.Context, q store.Querier) ([]scheduler.C
 			return nil, err
 		}
 		candidate := scheduler.Candidate{ManagerAuthorizationInvalid: !receipt.ReceiptOnly && !valid, Manager: &protocol.IssueManagerSpec{AgentID: contract.AgentID, OwnershipPolicy: ownershipPolicy, ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ExpectedAssignmentEpoch: m.ExpectedEpoch}, ManagerPin: m.Pin, ActionID: a.ActionID, TaskID: t.TaskID, Kind: a.Kind, Status: a.Status, Generation: a.Generation, TargetSpecVersion: 1, SpecVersion: 1, CreatedAt: a.CreatedAt, Lifecycle: t.Lifecycle, Control: t.ControlMode, Block: t.BlockReason, Rating: t.Rating, Weight: project.Weight, DependenciesDone: true, WorkspaceOccupied: occupied || (pending && !receipt.ReceiptOnly)}
+		if previous, err := store.PendingPausePredecessor(ctx, q, candidate.ActionID); err != nil {
+			return nil, err
+		} else if previous != "" {
+			candidate.PauseContinuation = true
+		}
 		if !receipt.ReceiptOnly {
 			if err := ApplyIssueAdmission(ctx, q, &candidate, m.IssueID, true); err != nil {
 				return nil, err

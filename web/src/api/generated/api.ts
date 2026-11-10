@@ -5168,13 +5168,13 @@ export interface IssueBoardCard {
   attention_count: number;
   children?: IssueChildProgress;
   execution: ExecutionCounts;
-  frozen_review_execution?: boolean;
   notification_due_at?: number;
   owner_attention_count?: number;
   pause?: IssuePauseProgress;
   pending_manager_category_id?: string;
   progress?: IssueProgress;
   queue_reason?: QueueWaitReason;
+  retained_execution?: boolean;
   stage_title?: string;
   stages_done: number;
   stages_total: number;

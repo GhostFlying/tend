@@ -14,6 +14,7 @@ import (
 
 // Host is the claiming host as configured, with its current load.
 type Host struct {
+	PauseHandoffs      bool
 	ConcurrencyBlocked map[string]bool
 
 	QuestionHandoffs       bool
@@ -40,9 +41,10 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
-	InitialIssue     bool
-	IssueID          string
-	AdmissionMessage string
+	PauseContinuation bool
+	InitialIssue      bool
+	IssueID           string
+	AdmissionMessage  string
 	// ExecutionFilter restricts a read-only explanation to one exact candidate.
 	// It never replaces the task requirements or its frozen owner pins.
 	ExecutionFilter *protocol.RunExecutionPin
@@ -137,6 +139,9 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 	}
 	if reason := HeldReason(c); reason != nil {
 		return reason
+	}
+	if c.PauseContinuation && !h.PauseHandoffs {
+		return waitReason(protocol.QueueHostRequirements, "runner lacks the frozen pause handoff contract")
 	}
 	if c.Manager != nil {
 		if !h.IssueManagers {

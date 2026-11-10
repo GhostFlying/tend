@@ -147,6 +147,7 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		}
 
 		facts.hosts = append(facts.hosts, executionHost{Host: scheduler.Host{
+			PauseHandoffs:          slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
 			QuestionHandoffs:       slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 			IssueOwners:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
 			ContinuationsSupported: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation), Continuations: continuations, Executors: executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),

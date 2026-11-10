@@ -152,7 +152,7 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 		}
 	}
 	var err error
-	card.FrozenReviewExecution, err = store.IssueHasFrozenReview(ctx, q, issue.IssueID)
+	card.RetainedExecution, err = store.IssueHasRetainedExecution(ctx, q, issue.IssueID)
 	if err != nil {
 		return card, err
 	}

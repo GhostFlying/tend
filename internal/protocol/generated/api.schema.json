@@ -7446,9 +7446,6 @@
         "execution": {
           "$ref": "#/definitions/ExecutionCounts"
         },
-        "frozen_review_execution": {
-          "type": "boolean"
-        },
         "notification_due_at": {
           "type": "integer"
         },
@@ -7466,6 +7463,9 @@
         },
         "queue_reason": {
           "$ref": "#/definitions/QueueWaitReason"
+        },
+        "retained_execution": {
+          "type": "boolean"
         },
         "stage_title": {
           "type": "string"
