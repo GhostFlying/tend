@@ -57,7 +57,14 @@ func (initializeIssueAdmission) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		if e != nil && !errors.Is(e, store.ErrNotFound) {
 			return Outcome{}, e
 		}
-		if e == nil {
+		valid := false
+		if e == nil && (m.State == "pending" || m.State == "assigned") {
+			valid, e = store.IssueManagerAuthorizationValid(ctx, tx.Q(), m.TaskID)
+			if e != nil {
+				return Outcome{}, e
+			}
+		}
+		if valid {
 			raw, e := store.GetSpec(ctx, tx.Q(), m.TaskID, 1)
 			if e != nil {
 				return Outcome{}, e
