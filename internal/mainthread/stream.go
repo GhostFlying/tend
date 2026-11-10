@@ -10,6 +10,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // replyDraft belongs to serve's event loop, never to a delivery goroutine.
@@ -115,13 +116,14 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, draft
 		if r.state == protocol.AssistantStreaming || r.event.Kind != harness.EventAgentMessageDelta {
 			continue
 		}
-		repair, err := m.isRepairEvent(ctx, th, r.event)
+		draftCtx := replyWriteContext(ctx, r.event)
+		repair, err := m.isRepairEvent(draftCtx, th, r.event)
 		if err != nil {
 			return err
 		}
 		if repair {
 			if internal, ok := th.(repairPrefixAcknowledger); ok {
-				if err := internal.AcknowledgeRepairPrefix(ctx, r.event, r.consumed); err != nil {
+				if err := internal.AcknowledgeRepairPrefix(draftCtx, r.event, r.consumed); err != nil {
 					return err
 				}
 			}
@@ -130,7 +132,7 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, draft
 		if !r.persisted {
 			continue
 		}
-		if err := acknowledger.AcknowledgeReplyPrefix(ctx, r.event, r.consumed); err != nil {
+		if err := acknowledger.AcknowledgeReplyPrefix(draftCtx, r.event, r.consumed); err != nil {
 			return err
 		}
 	}
@@ -143,6 +145,7 @@ func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev ha
 }
 
 func (m *Manager) recordReplySources(ctx context.Context, th replyThread, ev harness.Event, state protocol.AssistantState, replyTo string, sources []string) error {
+	ctx = replyWriteContext(ctx, ev)
 	repair, err := m.isRepairEvent(ctx, th, ev)
 	if err != nil {
 		return err
@@ -178,6 +181,14 @@ func (m *Manager) recordReplySources(ctx context.Context, th replyThread, ev har
 	}
 	_, replay := th.(*databaseReplyThread)
 	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{PreservePrefix: replay})
+}
+
+// A ticker, closing drain, or another event may flush retained drafts. Always
+// scope each persistence/ACK to the draft, including explicitly unknown origin,
+// rather than inheriting the event that happened to trigger this flush.
+func replyWriteContext(ctx context.Context, ev harness.Event) context.Context {
+	ctx = store.WithWriteAttachment(ctx, ev.AttachmentRunID, ev.CoordinatorSequence)
+	return store.WithWriteOperation(store.WithWriteEvent(ctx, ev.OriginRunID, ev.OriginSequence), "manager.reply.persist")
 }
 
 func (m *Manager) isRepairEvent(ctx context.Context, th replyThread, ev harness.Event) (bool, error) {

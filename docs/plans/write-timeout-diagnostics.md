@@ -40,3 +40,17 @@ App.write，缺少 Run、事件序号和当时写连接占用者。事件后来�
 manager 启动受到 receipt-only fence 拒绝的另一项故障正在独立调查；
 只有原始 action/回执与源码证实具体缺陷后才另立修复计划，不以本诊断改动
 放宽隔离或把尚未接收的输入视为完成。
+
+## 独立审阅修正
+
+1. 流式 reply 的 ticker、关闭排空和由其他事件触发的 flush 均在 draft 的持久化
+   边界重建诊断作用域。原 Run/原序号、attachment Run/合成协调序号随 draft 的
+   本地事件保留；不继承触发 flush 的另一事件身份。关闭时的 prefix ACK 同样
+   按各 draft 重建作用域。新增本地字段不序列化，不改变正文/请求/应用顺序。
+2. deferred Rollback 调用期间，仅将活跃 writer 的 live stage 设为
+   rollback_cleanup，表示显式清理调用（包括可能的 no-op），不宣称仍持 SQLite
+   锁。不通过 endStage 改写原 callback/commit 失败位置、原错误或已有计时；
+   panic 清理也须可观测。同步仍不包住数据库或观察回调。
+3. 验证先以定向回归复现 ticker/closing/异事件 flush 的身份缺失或误归，以及
+   driver Rollback 被阻塞时并发 waiter 看见错误阶段，再修正后运行必要
+   regular/race/vet。保留旧候选审阅与检查原件，不启动额外完整检查或重放业务。

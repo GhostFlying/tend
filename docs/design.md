@@ -1652,8 +1652,12 @@ apply 的子集；attention 仍是 persist_outcome 子集，不能重复相加�
 NoEffect 回滚仍可能显示通用 error，诊断不改变其业务结果或请求恢复语义。
 
 活跃诊断同步不包住数据库、业务 callback 或日志 callback。观察回调仍在事务和
-连接释放后运行；只保留一条活跃记录，不新增后台查询或全量快写日志。不变更
-wire/schema/超时/事件应用顺序，见[实施计划](plans/write-timeout-diagnostics.md)。
+连接释放后运行；只保留一条活跃记录，不新增后台查询或全量快写日志。reply draft 的 deferred/ticker/关闭持久化及
+prefix ACK 在各自边界从保留事件重建源身份，attachment Run 也随本地 draft 保留，
+不继承另一个触发事件的作用域。deferred Rollback 只将 live writer 标为
+rollback_cleanup（显式清理尝试，可能是 no-op），终态失败阶段与原计时不变，
+也不由该字段宣称仍持 SQLite 锁。不变更 wire/schema/超时/事件应用顺序，
+见[实施计划](plans/write-timeout-diagnostics.md)。
 
 ## D213：自动只读回执 Run 的原线程恢复
 

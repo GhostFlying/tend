@@ -387,6 +387,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	}()
 	lastConcurrencyActivity := int64(0)
 	processEvent := func(ctx context.Context, ev harness.Event) (eventErr error) {
+		ev.AttachmentRunID = diagnostics.runID
 		ctx = diagnostics.eventContext(ctx, ev)
 		defer func() {
 			if eventErr != nil {

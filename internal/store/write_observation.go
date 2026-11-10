@@ -256,9 +256,18 @@ func (c *writeCall) endStage(next string) {
 	if next != "" {
 		c.observation.Stage = next
 	}
+	c.setLiveStage(c.observation.Stage)
+}
+
+// setLiveStage describes current connection cleanup without changing the
+// terminal failure stage or its already measured callback/commit duration.
+func (c *writeCall) setLiveStage(stage string) {
+	if c == nil {
+		return
+	}
 	c.diagnostics.mu.Lock()
 	if c.diagnostics.active.id == c.observation.ID {
-		c.diagnostics.active.stage = c.observation.Stage
+		c.diagnostics.active.stage = stage
 	}
 	c.diagnostics.mu.Unlock()
 }

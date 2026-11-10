@@ -427,3 +427,90 @@ func TestWriteObservationStoreIDsAndPayloadPrivacy(t *testing.T) {
 		}
 	}
 }
+
+type diagnosticRollbackGate struct{ entered, release chan struct{} }
+type diagnosticRollbackConnector struct{ gate *diagnosticRollbackGate }
+
+func (c diagnosticRollbackConnector) Connect(context.Context) (driver.Conn, error) {
+	return diagnosticRollbackConn{gate: c.gate}, nil
+}
+func (diagnosticRollbackConnector) Driver() driver.Driver { return cancelBeginDriver{} }
+
+type diagnosticRollbackConn struct {
+	cancelBeginConn
+	gate *diagnosticRollbackGate
+}
+
+func (c diagnosticRollbackConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+	return diagnosticRollbackTx{gate: c.gate}, nil
+}
+
+type diagnosticRollbackTx struct{ gate *diagnosticRollbackGate }
+
+func (diagnosticRollbackTx) Commit() error     { return nil }
+func (x diagnosticRollbackTx) Rollback() error { close(x.gate.entered); <-x.gate.release; return nil }
+
+func TestWriteObservationWaiterSeesRollbackCleanup(t *testing.T) {
+	for _, ending := range []string{"callback_error", "panic"} {
+		t.Run(ending, func(t *testing.T) {
+			gate := &diagnosticRollbackGate{entered: make(chan struct{}), release: make(chan struct{})}
+			db := sql.OpenDB(diagnosticRollbackConnector{gate: gate})
+			db.SetMaxOpenConns(1)
+			defer db.Close()
+			observed := make(chan WriteObservation, 4)
+			s := &Store{write: db, observer: &writeObserver{now: time.Now, slow: 0, observe: func(o WriteObservation) { observed <- o }}}
+			original := errors.New("original callback failure")
+			type result struct {
+				err      error
+				panicked any
+			}
+			done := make(chan result, 1)
+			go func() {
+				r := result{}
+				defer func() { r.panicked = recover(); done <- r }()
+				r.err = s.Write(t.Context(), func(*Tx) error {
+					if ending == "panic" {
+						panic(original)
+					}
+					return original
+				})
+			}()
+			joined := false
+			var once sync.Once
+			release := func() { once.Do(func() { close(gate.release) }) }
+			defer func() {
+				release()
+				if !joined {
+					<-done
+				}
+			}()
+			<-gate.entered
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
+			if err := s.Write(ctx, func(*Tx) error { t.Error("waiter entered callback during rollback"); return nil }); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal(err)
+			}
+			waiter := <-observed
+			if waiter.ActiveWriter == nil || waiter.ActiveWriter.Stage != "rollback_cleanup" || waiter.Stage != "connection_wait" {
+				t.Fatalf("live rollback misattributed: %+v", waiter)
+			}
+			release()
+			r := <-done
+			joined = true
+			owner := <-observed
+			if owner.Stage != "callback" {
+				t.Fatalf("live stage replaced terminal failure stage: %+v", owner)
+			}
+			if ending == "callback_error" {
+				if !errors.Is(r.err, original) || r.panicked != nil || owner.Outcome != "error" || owner.Rollback <= 0 {
+					t.Fatalf("callback error/timing changed: result=%+v observation=%+v", r, owner)
+				}
+			} else if r.panicked != original || r.err != nil || owner.Outcome != "aborted" {
+				t.Fatalf("panic identity/observation changed: result=%+v observation=%+v", r, owner)
+			}
+			if owner.PoolInUse != 0 {
+				t.Fatalf("observer ran before connection release: %+v", owner)
+			}
+		})
+	}
+}
