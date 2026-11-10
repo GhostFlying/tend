@@ -162,6 +162,9 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 	// Always finish the transaction before closing the explicit connection,
 	// including when the callback panics. After commit Rollback is a no-op.
 	defer func() {
+		// This is a cleanup attempt, possibly a no-op after Commit or an
+		// automatic rollback. It does not assert that a SQLite lock is held.
+		observation.setLiveStage("rollback_cleanup")
 		var started time.Time
 		if observation != nil && err != nil {
 			started = observation.observer.now()
