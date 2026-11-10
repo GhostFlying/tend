@@ -369,6 +369,14 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		evidence = []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: reference, Summary: p.Reason}}
 		d.Status = "ended"
 	case "complete":
+		if p.ExecutionTaskID != "" && p.ExecutionTaskID != d.ExecutionTaskID {
+			evidence, err = contributionDeliverySettlementEvidence(ctx, tx.Q(), issue.IssueID, d, p)
+			if err != nil {
+				return Outcome{}, err
+			}
+			d.ExecutionTaskID, d.Status = p.ExecutionTaskID, "complete"
+			break
+		}
 		if d.ExecutionTaskID == "" || d.Candidate == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "accepted delivery execution is required")
 		}

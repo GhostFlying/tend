@@ -294,3 +294,19 @@ D152 验收修正：candidate.target_sha 为 provider 当前目标分支 tip，�
 ## D195：按需上下文
 
 `conversation context-index <id> --section state|sources|facts|threads --after <cursor> --limit 20 --json` 只读索引，不确认审阅；默认 state，最多 50 条。`conversation rollout <id> --thread <thread-id> --after <seq>` 精确读取原生 thread。`conversation handoff [--status]` 只交接索引，`--prepare-only` 与自动摘要设置已退役；显式 compact 独立保留。
+
+
+D215：已接受的历史贡献仍是 `preparing`、没有自身 candidate/execution 时，
+可使用原 `issue update-delivery` 的 complete 引用同 Issue、同 PR 明确关联且
+已接受并已结清的真实执行。完整输入示例：
+
+```sh
+tend issue update-delivery <issue-id> --revision <current-issue-revision> --epoch <current-assignment-epoch> --data '{"task_id":"accepted-contribution","action":"complete","execution_task_id":"settled-execution","upgrade_id":"original-upgrade","reason":"Record this contribution in the completed whole-PR delivery"}' --dry-run --json
+```
+
+merge-only 执行省略 upgrade_id；部署执行可省略该字段以沿用原冻结证据，
+提供时必须匹配原执行升级，不能引用后来维护批次。此动作只结算历史责任，
+不重新 bind/执行/批准/部署，不复制执行的授权。当前 main、review 或部署基线
+变化不重写原事实；无显式同 PR 贡献关联、未接受或未结清执行不能使用。
+保存 dry-run 原 Envelope，以 `issue replay --file` 提交；unknown 按原 request_id
+读取 `issue request`，不重建请求或复发升级。

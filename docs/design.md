@@ -215,6 +215,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D212 | 写连接超时保留原事件/请求归属、有界内部调用链及失败时刻的单 Store 活跃写入快照，区分排队与事务阶段，不改变写入或确认语义。 | 已实现 |
 | D213 | 自动只读回执 Run 继承已接受的原线程工具模式；包括已有缺字段 action 的恢复，只读取原线程，不以新建、分叉或工具集迁移兜底。 | 已实现 |
 | D214 | 具体交付批准与结束在准入和执行授权间使用一致的纯选项语义，延期可保留说明；不可执行的历史答复允许显式准备原候选的新问题，原答案和来源不可改写。 | 已实现 |
+| D215 | 已接受的同 PR 历史贡献可引用同 Issue 已结清执行完成责任结算，保留原接受与冻结交付证据，不新增执行或授权。 | 已实现 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1697,3 +1698,23 @@ control/lifecycle；已完成历史来源不套 live 前提。新问题仍需真
 本身不制造批准。延期、已结束
 责任及未结清执行保留原围栏，不重开任务或安装。没有 schema、runner wire
 或新操作；见[实施计划](plans/delivery-answer-recovery.md)。
+
+
+## D215：已完成交付中的历史贡献结算
+
+复用 `issues.update_delivery action=complete` 的 `execution_task_id`，为尚处于
+`preparing` 且没有自身候选和执行的已接受贡献，记录同 Issue 已完成执行已经
+交付该贡献的事实。原贡献与执行必须在同一 PR 的 shared review links 中有
+明确 Task 关联；同一 Issue、名称或 follow-up 链本身不足以证明贡献，也不将
+follow-up 链设为并行贡献的必需条件。
+
+引用执行必须经过自身实际完成/接受与原交付责任 complete，保持原执行账本和
+冻结 candidate 一致。结算保留贡献自身 artifact/acceptance、引用 execution 及
+该执行已保存的 provider/upgrade 证据；可选 upgrade_id 必须属于原执行。
+不复制 authorization，不生成执行行、Task、批准或安装，不覆盖已有候选/执行。
+历史事实不依赖当前 main、review 有效性或后续维护基线。
+
+Issue revision、assignment epoch、原请求去重、单事务事件与 outbox 保持；
+不能借结算接受尚未完成/验收、无关 PR、跨 Issue 或未结清执行。现有首次
+complete 路径不变，无 schema、wire 或新操作；CLI 使用原完整输入和请求恢复。
+见[实施计划](plans/contribution-delivery-settlement.md)。
