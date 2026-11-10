@@ -2084,7 +2084,7 @@ try {
       isMobile: viewport.width < 760,
       hasTouch: viewport.width < 760,
     });
-    // A fresh context has no cached categories: an unknown list is not an empty list.
+    // Pure backlog creation remains available while execution categories are loading.
     const discoveryContext = await browser.newContext({ viewport });
     const discoveryPage = await discoveryContext.newPage();
     let releaseCategories!: () => void;
@@ -2111,21 +2111,20 @@ try {
       const discoveryForm = discoveryPage.getByRole("region", { name: "新建 Issue", exact: true });
       await discoveryForm
         .getByRole("textbox", { name: "标题", exact: true })
-        .fill("明确选择 owner");
+        .fill("只记录待安排事项");
       await discoveryForm
         .getByRole("textbox", { name: "目标", exact: true })
-        .fill("等待类别时不误选 owner");
-      const discoverySelect = discoveryForm.getByRole("combobox", { name: "负责人", exact: true });
+        .fill("类别加载完成前也能保存待安排记录");
+      const discoverySelect = discoveryForm.getByRole("combobox", {
+        name: "执行类别（可稍后选择）",
+        exact: true,
+      });
       const discoverySubmit = discoveryForm.getByRole("button", {
         name: "创建 Issue",
         exact: true,
       });
-      await discoveryForm
-        .getByRole("status")
-        .getByText("正在读取负责人类别…", { exact: true })
-        .waitFor();
-      assert.equal(await discoverySelect.inputValue(), "");
-      assert(await discoverySubmit.isDisabled());
+      assert.equal(await discoverySelect.inputValue(), "owner");
+      assert(await discoverySubmit.isEnabled());
       assert.equal(discoveryWrites.length, 0);
       await discoverySelect.selectOption("owner");
       assert(await discoverySubmit.isEnabled());
@@ -2196,11 +2195,14 @@ try {
     await page.getByRole("button", { name: "新建 Issue", exact: true }).click();
     await emptyRead;
     const createForm = page.getByRole("region", { name: "新建 Issue", exact: true });
-    const managerSelect = createForm.getByRole("combobox", { name: "负责人", exact: true });
+    const managerSelect = createForm.getByRole("combobox", {
+      name: "执行类别（可稍后选择）",
+      exact: true,
+    });
     assert.equal(await managerSelect.locator('option[value="category:issue-manager"]').count(), 1);
     assert.equal(await managerSelect.locator('option[value="hosted/qingzhu"]').count(), 0);
-    assert.equal(await managerSelect.inputValue(), "category:issue-manager");
-    await page.screenshot({ path: join(output, `create-default-manager-${viewport.width}.png`) });
+    assert.equal(await managerSelect.inputValue(), "owner");
+    await page.screenshot({ path: join(output, `create-default-backlog-${viewport.width}.png`) });
     await createForm.getByRole("button", { name: "返回", exact: true }).click();
     await navigate(page, "/diagnostics/main");
     hostedUnconfigured = false;
@@ -2931,7 +2933,7 @@ try {
       .getByRole("textbox", { name: "完成条件 1", exact: true })
       .fill("当前任务独立验收通过");
     await archives
-      .getByRole("combobox", { name: "负责人", exact: true })
+      .getByRole("combobox", { name: "执行类别（可稍后选择）", exact: true })
       .selectOption("category:custom-coordinator");
     await page.screenshot({ path: join(output, `archive-new-issue-${viewport.width}.png`) });
     await archives.getByRole("button", { name: "创建 Issue", exact: true }).click();
@@ -2948,7 +2950,9 @@ try {
     await archives.getByRole("button", { name: /^(保存所选材料并继续|核实原来源并继续)$/ }).click();
     await archives.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
     assert.equal(
-      await archives.getByRole("combobox", { name: "负责人", exact: true }).inputValue(),
+      await archives
+        .getByRole("combobox", { name: "执行类别（可稍后选择）", exact: true })
+        .inputValue(),
       "category:custom-coordinator",
     );
     issueCreateReady = true;
