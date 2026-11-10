@@ -954,7 +954,7 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 		replyTo = source
 	}
 	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": replyTo,
-		"tool": ev.Tool.Name, "input": ev.Tool.Input, "output": ev.Tool.Output, "status": ev.Tool.Status}
+		"tool": ev.Tool.Name, "input": protocol.RedactOwnerToolInput(ev.Tool.Name, ev.Tool.Input), "output": ev.Tool.Output, "status": ev.Tool.Status}
 	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase+"/source:"+replyTo, "conversation.record_tool_use", payload, app.RecordToolUse{})
 }
 

@@ -99,6 +99,17 @@ func (g *OwnerTools) Specs() []protocol.OwnerToolSpec {
 		if capability == "POST /api/v1/ops" {
 			continue
 		}
+		if capability == "PUT /api/v1/webhook-keys/{id}" {
+			restricted := map[string]any{}
+			_ = json.Unmarshal(input, &restricted)
+			props := restricted["properties"].(map[string]any)
+			delete(props, "body")
+			delete(props, "content_base64")
+			restricted["required"] = []string{"path", "effect_seq", "webhook_key_ref"}
+			privateInput, _ := json.Marshal(restricted)
+			out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Stage a private webhook credential by opaque webhook_key_ref already held in private server storage. Use path.id for the new reference. Never pass credential bytes in body, content_base64 or model arguments; initial private bytes are staged through the owner's secure CLI key-file path.", InputSchema: privateInput})
+			continue
+		}
 		out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Owner capability: " + capability + ". Operations use target, expected_control_revision, payload and positive effect_seq. HTTP reads use exact path parameters and query (including pagination); HTTP writes use body or content_base64/content_type and effect_seq. The normal owner validation applies; preserve original request identity on unknown outcomes.", InputSchema: input})
 	}
 	return out
@@ -167,6 +178,18 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		requestID = envelope.RequestID
 		if err != nil {
 			return nil, err
+		}
+	}
+	if selected.Capability == "PUT /api/v1/webhook-keys/{id}" {
+		if len(args.Body) != 0 || args.ContentBase64 != "" || args.WebhookKeyRef == "" {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "select webhook_key_ref from private storage; raw credentials are not tool arguments")
+		}
+		if g.server.cfg.WebhookKeys == nil {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "webhook storage is unavailable")
+		}
+		body, err = g.server.cfg.WebhookKeys.Get(ctx, args.WebhookKeyRef)
+		if err != nil {
+			return nil, protocol.Errorf(protocol.CodeNotFound, "private webhook key reference is unavailable")
 		}
 	}
 	for name, value := range args.Path {

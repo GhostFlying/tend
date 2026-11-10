@@ -21,6 +21,10 @@ type OwnerToolCall struct {
 }
 
 type OwnerToolArguments struct {
+	// WebhookKeyRef selects an existing private key without passing key bytes
+	// through model arguments or conversation tool logs.
+	WebhookKeyRef string `json:"webhook_key_ref,omitempty"`
+
 	// OriginalEnvelope is only for an exact replay of an existing owner request.
 	OriginalEnvelope        *Envelope         `json:"original_envelope,omitempty"`
 	Reason                  string            `json:"reason,omitempty"`
