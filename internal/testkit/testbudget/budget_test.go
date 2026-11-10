@@ -29,13 +29,15 @@ func TestPackageLimitRecognizesWholeGoFlags(t *testing.T) {
 		{"", 3, false}, {"-trimpath", 3, false}, {"-trimpath -p=2", 2, true},
 		{"'-p=4' -trimpath", 4, true}, {`"-gcflags=all=-N -p=16"`, 3, false},
 		{"-p=4 -p=2", 2, true},
+		{"--p=1", 1, true}, {"-p=4 --p=1", 1, true}, {"--p=4 -p=2", 2, true},
+		{"'--p=4' -trimpath", 4, true}, {`"-gcflags=all=-N --p=16"`, 3, false},
 	} {
 		got, explicit, err := PackageLimit(tc.flags, 3)
 		if err != nil || got != tc.want || explicit != tc.explicit {
 			t.Fatalf("PackageLimit(%q)=%d,%t,%v", tc.flags, got, explicit, err)
 		}
 	}
-	for _, flags := range []string{"-p=0", "-p=-1", "-p=invalid", `"-p=2`} {
+	for _, flags := range []string{"-p=0", "-p=-1", "-p=invalid", "--p=0", "--p=-1", "--p=invalid", `"-p=2`} {
 		if _, _, err := PackageLimit(flags, 3); err == nil {
 			t.Fatalf("invalid flags accepted: %q", flags)
 		}
@@ -50,6 +52,9 @@ func TestGoEnvironmentOnlyFillsMissingLimits(t *testing.T) {
 		{"unrelated flags", "-trimpath", "", "-trimpath -p=2", "3"},
 		{"parent budget", "-trimpath -p=4", "2", "-trimpath -p=4", "2"},
 		{"package override", "'-p=4'", "", "'-p=4'", "3"},
+		{"double dash override", "--p=1", "", "--p=1", "3"},
+		{"double dash last", "-trimpath -p=4 --p=1", "2", "-trimpath -p=4 --p=1", "2"},
+		{"single dash last", "--p=4 -p=1", "2", "--p=4 -p=1", "2"},
 		{"thread override", "", "7", "-p=2", "7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
