@@ -15,7 +15,26 @@ import (
 
 func moveBoardIssue(t *testing.T, h *harness, issue protocol.Issue, status protocol.IssueWorkStatus) protocol.Issue {
 	t.Helper()
-	return canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}))
+	if status == protocol.IssueTodo && (issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled) {
+		issue = moveBoardIssue(t, h, issue, protocol.IssueBacklog)
+	}
+	payload := protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}
+	if status == protocol.IssueTodo && issue.OwnerSelection == nil {
+		const category = "board-execution"
+		var exists bool
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM agent_category_versions WHERE category_id=?)`, category).Scan(&exists)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			if op := h.exec(owner, h.env("categories.put", protocol.Target{Type: "category", ID: category}, protocol.PutAgentCategoryPayload{Title: "Board execution", State: "active"}, rev(0)), PutAgentCategory{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+		}
+		payload.Owner = &protocol.IssueOwnerRequest{CategoryID: category, Reason: "Explicitly continue the board goal"}
+	}
+	return canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", payload))
 }
 func statusNotice(t *testing.T, h *harness, id string) (issueStatusNotice, bool) {
 	t.Helper()
@@ -101,7 +120,7 @@ func TestIssueBoardStateNoopReplayEpochAndEndpoints(t *testing.T) {
 			t.Fatal("current disagrees with receipt")
 		}
 		history, err := store.GetCanonicalIssueRevision(t.Context(), tx.Q(), initial.IssueID, initial.Revision)
-		if err == nil && history.WorkStatus != "" {
+		if err == nil && history.WorkStatus != initial.WorkStatus {
 			t.Fatal("historical progress was rewritten")
 		}
 		return err

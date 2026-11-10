@@ -140,6 +140,11 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	if err := json.Unmarshal(created.Operation.Result, &managed); err != nil {
 		t.Fatal(err)
 	}
+	payload, _ = json.Marshal(protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: managed.AssignmentEpoch, Status: protocol.IssueTodo})
+	c.call(http.MethodPost, "/api/v1/ops", protocol.Envelope{RequestID: seedRequest("test-runner-manager-todo"), Operation: "issues.set_status", Target: protocol.Target{Type: "issue", ID: managed.IssueID}, ExpectedControlRevision: &managed.Revision, Payload: payload}, &created)
+	if created.Operation == nil || created.Operation.Status != protocol.OpSucceeded {
+		t.Fatal(created)
+	}
 	conversation := "issue:" + managed.IssueID
 	c.operation("test-runner-manager-message", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "请确认负责人已接手"})
 	waitFor(t, ctx, "runner manager reply", func() bool {
@@ -156,12 +161,12 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		}
 		return count == 1
 	})
-	c.operation("test-owner-child", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "创建 owner 子项"})
+	c.operation("test-owner-child", "conversation.submit_message", protocol.Target{Type: "message"}, nil, protocol.SubmitMessagePayload{ConversationID: conversation, Body: "执行并创建 owner 子项"})
 	waitFor(t, ctx, "owner child created and claimed", func() bool {
 		var children protocol.IssuePage
 		c.call(http.MethodGet, "/api/v1/issues?parent_id="+managed.IssueID+"&limit=100", nil, &children)
 		for _, child := range children.Items {
-			if child.ParentIssueID == managed.IssueID && child.Title == "创建 owner 子项" && child.Assignee.Ref == hostID+"/manager" {
+			if child.ParentIssueID == managed.IssueID && child.Title == "执行并创建 owner 子项" && child.Assignee.Ref == hostID+"/manager" {
 				return true
 			}
 		}
@@ -1145,9 +1150,13 @@ func TestSandboxUpgradeRetainsClaimedManagerSnapshot(t *testing.T) {
 		serverRevision = receipt.ServerRevision
 	}
 	register(legacy)
-	created := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: plan("Retained manager", "demo-web"), Manager: &protocol.RequestIssueManagerPayload{Reason: "Base manager responsibility"}}, nil)
+	created := execute(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: plan("Retained manager", "demo-web"), Manager: &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Base manager responsibility"}}, nil)
 	var issue protocol.Issue
 	if err := json.Unmarshal(created.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	admitted := execute(owner, app.CanonicalOwnerIssueCommand{Action: "set_status"}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision)
+	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
 	claim := execute(runner, app.Claim{}, host, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil)

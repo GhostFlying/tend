@@ -32,6 +32,7 @@ type RequestIssueManagerPayload struct {
 
 // IssueManagerSpec is an immutable responsibility contract, not a code workspace.
 type IssueManagerSpec struct {
+	AdmissionRevision         int64  `json:"admission_revision,omitempty"`
 	AgentID                   string `json:"agent_id,omitempty"`
 	OwnershipPolicy           string `json:"ownership_policy,omitempty"`
 	SourceContentRevision     int64  `json:"source_content_revision,omitempty"`

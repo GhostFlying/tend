@@ -71,7 +71,16 @@ func QuestionContinuationForRun(ctx context.Context, q Querier, run string) (*pr
 	var parent string
 	err := q.QueryRowContext(ctx, `SELECT run_id FROM run_question_handoffs WHERE successor_run_id=?`, run).Scan(&parent)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, nil
+		var paused string
+		err = q.QueryRowContext(ctx, `SELECT run_id FROM run_pause_handoffs WHERE successor_run_id=? AND stopped=1`, run).Scan(&paused)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		_, questions, err := QuestionContinuationForRun(ctx, q, paused)
+		return nil, questions, err
 	}
 	if err != nil {
 		return nil, nil, err

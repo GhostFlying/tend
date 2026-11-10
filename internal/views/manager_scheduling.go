@@ -14,7 +14,10 @@ func IssueManagerCandidates(ctx context.Context, q store.Querier) ([]scheduler.C
 	if err != nil {
 		return nil, err
 	}
-	var out []scheduler.Candidate
+	out, err := initialIssueOwnerCandidates(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range ids {
 		a, err := store.GetAction(ctx, q, id)
 		if err != nil {
@@ -85,7 +88,14 @@ func IssueManagerCandidates(ctx context.Context, q store.Querier) ([]scheduler.C
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, scheduler.Candidate{ManagerAuthorizationInvalid: !receipt.ReceiptOnly && !valid, Manager: &protocol.IssueManagerSpec{AgentID: contract.AgentID, OwnershipPolicy: ownershipPolicy, ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ExpectedAssignmentEpoch: m.ExpectedEpoch}, ManagerPin: m.Pin, ActionID: a.ActionID, TaskID: t.TaskID, Kind: a.Kind, Status: a.Status, Generation: a.Generation, TargetSpecVersion: 1, SpecVersion: 1, CreatedAt: a.CreatedAt, Lifecycle: t.Lifecycle, Control: t.ControlMode, Block: t.BlockReason, Rating: t.Rating, Weight: project.Weight, DependenciesDone: true, WorkspaceOccupied: occupied || (pending && !receipt.ReceiptOnly)})
+		candidate := scheduler.Candidate{ManagerAuthorizationInvalid: !receipt.ReceiptOnly && !valid, Manager: &protocol.IssueManagerSpec{AgentID: contract.AgentID, OwnershipPolicy: ownershipPolicy, ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ExpectedAssignmentEpoch: m.ExpectedEpoch}, ManagerPin: m.Pin, ActionID: a.ActionID, TaskID: t.TaskID, Kind: a.Kind, Status: a.Status, Generation: a.Generation, TargetSpecVersion: 1, SpecVersion: 1, CreatedAt: a.CreatedAt, Lifecycle: t.Lifecycle, Control: t.ControlMode, Block: t.BlockReason, Rating: t.Rating, Weight: project.Weight, DependenciesDone: true, WorkspaceOccupied: occupied || (pending && !receipt.ReceiptOnly)}
+		if !receipt.ReceiptOnly {
+			if err := ApplyIssueAdmission(ctx, q, &candidate, m.IssueID, true); err != nil {
+				return nil, err
+			}
+		}
+		candidate.CreatedAt = max(candidate.CreatedAt, i.TodoAt)
+		out = append(out, candidate)
 	}
 	return out, nil
 }

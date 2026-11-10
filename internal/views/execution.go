@@ -15,6 +15,7 @@ import (
 
 type executionFacts struct {
 	candidates map[string]scheduler.Candidate
+	issues     map[string]scheduler.Candidate
 	hosts      []executionHost
 }
 
@@ -87,7 +88,7 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 }
 
 func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, error) {
-	facts := executionFacts{candidates: map[string]scheduler.Candidate{}}
+	facts := executionFacts{issues: map[string]scheduler.Candidate{}, candidates: map[string]scheduler.Candidate{}}
 	rows, err := store.ListClaimCandidates(ctx, q)
 	if err != nil {
 		return facts, err
@@ -105,6 +106,10 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		return facts, err
 	}
 	for _, c := range candidates {
+		if c.InitialIssue {
+			facts.issues[c.IssueID] = c
+			continue
+		}
 		if c.TargetSpecVersion != c.SpecVersion || c.Kind == protocol.ActionImplement && c.Generation != c.ImplementGeneration || c.Kind == protocol.ActionAccept && (c.Lifecycle != protocol.TaskAwaitingAcceptance || c.TargetArtifactID != c.CurrentArtifactID) {
 			continue
 		}
@@ -201,6 +206,11 @@ func (f executionFacts) task(ctx context.Context, q store.Querier, t store.TaskR
 			continue
 		}
 		v.RunID = run.RunID
+		if run.PauseHandoff != nil && run.ObservedState != protocol.RunUnknown {
+			v.State = protocol.ExecutionPaused
+			v.QueueReason = &protocol.QueueWaitReason{Code: protocol.QueueTaskBlocked, Message: "Issue pause awaits confirmed process stop: " + run.PauseHandoff.IssueID}
+			return v, nil
+		}
 		v.Role = run.Role
 		v.Startup, err = executionStartup(ctx, q, run.RunID)
 		if err != nil {

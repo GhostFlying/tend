@@ -81,7 +81,7 @@ func (a *App) AgentConversationClaimed(ctx context.Context, conversation string)
 		// original native history before any successor can claim. This is a
 		// receipt-only attachment, never another business coordinator.
 		var hostedReceipt bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM local_hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id JOIN issue_controls i ON i.issue_id=e.issue_id WHERE e.issue_id=? AND e.assignment_epoch<i.assignment_epoch AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)) AND EXISTS(SELECT 1 FROM manager_migrations mm JOIN issue_manager_tasks m ON m.task_id=mm.task_id WHERE m.issue_id=i.issue_id AND m.expected_epoch>e.assignment_epoch))`, c.WorkItemID).Scan(&hostedReceipt); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM local_hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id JOIN issue_controls i ON i.issue_id=e.issue_id WHERE e.issue_id=? AND e.assignment_epoch<i.assignment_epoch AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)) AND (EXISTS(SELECT 1 FROM manager_migrations mm JOIN issue_manager_tasks m ON m.task_id=mm.task_id WHERE m.issue_id=i.issue_id AND m.expected_epoch>e.assignment_epoch) OR EXISTS(SELECT 1 FROM issue_owner_migrations mm WHERE mm.issue_id=i.issue_id AND mm.assignment_epoch>e.assignment_epoch)))`, c.WorkItemID).Scan(&hostedReceipt); err != nil {
 			return err
 		}
 		if hostedReceipt {
@@ -99,7 +99,11 @@ func (a *App) AgentConversationClaimed(ctx context.Context, conversation string)
 			if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE issue_id=?)`, c.WorkItemID).Scan(&migrated); err != nil {
 				return err
 			}
-			ready = !migrated
+			var deferred bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=? AND (work_status='backlog' OR owner_selection_json<>'' OR assignee_kind='owner'))`, c.WorkItemID).Scan(&deferred); err != nil {
+				return err
+			}
+			ready = !migrated && !deferred
 			return nil
 		}
 		if err != nil {

@@ -36,8 +36,6 @@ func TestOwnerCreateRegisteredManagerIsAtomicAndReplayable(t *testing.T) {
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		for _, query := range []string{
 			`SELECT COUNT(*) FROM agent_conversations WHERE work_item_id=?`,
-			`SELECT COUNT(*) FROM background_batches WHERE work_item_id=?`,
-			`SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.work_item_id=?`,
 		} {
 			var count int
 			if err := tx.Q().QueryRowContext(t.Context(), query, issue.IssueID).Scan(&count); err != nil {
@@ -51,24 +49,11 @@ func TestOwnerCreateRegisteredManagerIsAtomicAndReplayable(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	delivery, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID)
-	if err != nil || !ok {
-		t.Fatal("new manager has no durable wake", ok, err)
+	if _, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID); err != nil || ok {
+		t.Fatal("recorded backlog must not wake execution", ok, err)
 	}
-	conversation := "issue:" + issue.IssueID
-	turn := startHostedReview(t, h, conversation, delivery)
-	manager := protocol.Principal{Kind: protocol.PrincipalBackgroundAgent, Subject: "manager", Thread: turn.ThreadID, ConversationID: conversation}
-	command := BackgroundCommand{Action: "sources", MessageID: turn.MessageID, TurnID: turn.TurnID, DeliveryID: turn.RequestID}
-	read := h.exec(manager, h.env(command.Operation(), protocol.Target{Type: "background_batch"}, map[string]int64{"after": 0}, nil), command)
-	if read.Status != protocol.OpSucceeded {
-		t.Fatal(read)
-	}
-	var page protocol.BackgroundSourcePage
-	if err := json.Unmarshal(read.Result, &page); err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Sources) != 1 || page.Sources[0].MessageID != source || page.Sources[0].Body != body {
-		t.Fatal("selected manager did not receive the original source", page)
+	if issue.WorkStatus != protocol.IssueBacklog || h.count("tasks") != 0 || h.count("runs") != 0 {
+		t.Fatal("creation allocated execution", issue)
 	}
 	if got := canonicalTaskIssue(t, h, issue.IssueID); got.Plan.Intent != payload.Plan.Intent {
 		t.Fatal("manager definition changed", got)

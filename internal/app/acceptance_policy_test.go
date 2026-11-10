@@ -24,7 +24,7 @@ func policyIssue(t *testing.T, h *harness, required bool) protocol.Issue {
 	if err := json.Unmarshal(op.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	return issue
+	return admitExistingIssueFixture(t, h, issue)
 }
 func policyReportTask(t *testing.T, h *harness, issue protocol.Issue) string {
 	t.Helper()
@@ -307,6 +307,9 @@ func TestCreatorPolicyChildAssigneeCannotReplaceCreatingResponsibility(t *testin
 	}
 	if child.AssignmentState != "active" {
 		t.Fatal("the child has no active executor", child)
+	}
+	if child.BoardStatus() == protocol.IssueBacklog {
+		child = admitExistingIssueFixture(t, h, child)
 	}
 	workerTurn, assignee := startHostedIssueReview(t, h, child)
 	change.ExpectedAssignmentEpoch = child.AssignmentEpoch

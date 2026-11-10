@@ -7061,6 +7061,9 @@
         "issue_id": {
           "type": "string"
         },
+        "owner_selection": {
+          "$ref": "#/definitions/IssueOwnerSelection"
+        },
         "parent_issue_id": {
           "type": "string"
         },
@@ -7078,6 +7081,12 @@
         },
         "state": {
           "$ref": "#/definitions/IssueState"
+        },
+        "todo_at": {
+          "type": "integer"
+        },
+        "todo_revision": {
+          "type": "integer"
         },
         "updated_at": {
           "type": "integer"
@@ -7443,11 +7452,17 @@
         "owner_attention_count": {
           "type": "integer"
         },
+        "pause": {
+          "$ref": "#/definitions/IssuePauseProgress"
+        },
         "pending_manager_category_id": {
           "type": "string"
         },
         "progress": {
           "$ref": "#/definitions/IssueProgress"
+        },
+        "queue_reason": {
+          "$ref": "#/definitions/QueueWaitReason"
         },
         "stage_title": {
           "type": "string"
@@ -9796,6 +9811,25 @@
       "title": "IssueOwnerRequest",
       "type": "object"
     },
+    "IssueOwnerSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "category_id": {
+          "type": "string"
+        },
+        "ownership_policy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category_id"
+      ],
+      "title": "IssueOwnerSelection",
+      "type": "object"
+    },
     "IssuePRPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -9886,6 +9920,35 @@
         "more"
       ],
       "title": "IssuePage",
+      "type": "object"
+    },
+    "IssuePauseProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "issue_revision": {
+          "type": "integer"
+        },
+        "pending": {
+          "type": "integer"
+        },
+        "stopped": {
+          "type": "integer"
+        },
+        "unsupported": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pending",
+        "stopped",
+        "unsupported",
+        "issue_id",
+        "issue_revision"
+      ],
+      "title": "IssuePauseProgress",
       "type": "object"
     },
     "IssuePlan": {
@@ -10304,6 +10367,9 @@
         "issue_id": {
           "type": "string"
         },
+        "owner_selection": {
+          "$ref": "#/definitions/IssueOwnerSelection"
+        },
         "parent_issue_id": {
           "type": "string"
         },
@@ -10324,6 +10390,12 @@
         },
         "title": {
           "type": "string"
+        },
+        "todo_at": {
+          "type": "integer"
+        },
+        "todo_revision": {
+          "type": "integer"
         },
         "work_status": {
           "$ref": "#/definitions/IssueWorkStatus"
@@ -10577,11 +10649,17 @@
         "manager": {
           "$ref": "#/definitions/IssueManagerView"
         },
+        "owner_selection": {
+          "$ref": "#/definitions/IssueOwnerSelection"
+        },
         "ownership_policy": {
           "type": "string"
         },
         "parent_issue_id": {
           "type": "string"
+        },
+        "pause": {
+          "$ref": "#/definitions/IssuePauseProgress"
         },
         "pending_assignee": {
           "$ref": "#/definitions/IssueAssignee"
@@ -10600,6 +10678,9 @@
         },
         "progress": {
           "$ref": "#/definitions/IssueProgress"
+        },
+        "queue_reason": {
+          "$ref": "#/definitions/QueueWaitReason"
         },
         "responsibility_runs": {
           "items": {
@@ -10624,6 +10705,12 @@
             "$ref": "#/definitions/IssueTaskSummary"
           },
           "type": "array"
+        },
+        "todo_at": {
+          "type": "integer"
+        },
+        "todo_revision": {
+          "type": "integer"
         },
         "updated_at": {
           "type": "integer"
@@ -13804,6 +13891,9 @@
         "action_id": {
           "type": "string"
         },
+        "issue_id": {
+          "type": "string"
+        },
         "kind": {
           "$ref": "#/definitions/ActionKind"
         },
@@ -13834,8 +13924,6 @@
       },
       "required": [
         "place",
-        "action_id",
-        "task_id",
         "title",
         "project",
         "kind",
@@ -15912,6 +16000,9 @@
       "properties": {
         "expected_assignment_epoch": {
           "type": "integer"
+        },
+        "owner": {
+          "$ref": "#/definitions/IssueOwnerRequest"
         },
         "status": {
           "$ref": "#/definitions/IssueWorkStatus"

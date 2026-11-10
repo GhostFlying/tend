@@ -31,6 +31,17 @@ func TestIssueContextRunDiscoversAndDownloadsOriginalOutsideSpec(t *testing.T) {
 	if err := json.Unmarshal(op.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
+
+	execute(app.PutAgentCategory{}, protocol.Target{Type: "category", ID: "execution"}, protocol.PutAgentCategoryPayload{Title: "Execution", State: "active"}, new(int64))
+	selected := execute(app.RequestIssueManager{}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{CategoryID: "execution", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Select coordination capability"}, &issue.Revision)
+	if err := json.Unmarshal(selected.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	admitted := execute(app.CanonicalOwnerIssueCommand{Action: "set_status"}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{Status: protocol.IssueTodo, ExpectedAssignmentEpoch: issue.AssignmentEpoch}, &issue.Revision)
+	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+
 	original := []byte("GIF89a\x00original frames\xff")
 	upload := func(name string) protocol.ConversationAttachment {
 		t.Helper()

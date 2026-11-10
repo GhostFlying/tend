@@ -115,7 +115,7 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, _ := json.Marshal(protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress})
+	status, _ := json.Marshal(protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo, Owner: &protocol.IssueOwnerRequest{CategoryID: "planner", Reason: "Explicit immediate execution"}})
 	response, err = ownerToolInvoke(t, e, protocol.OwnerToolCall{Actor: call.Actor, ExecutionID: call.ExecutionID}, "issues.set_status", protocol.OwnerToolArguments{EffectSeq: 2, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: status})
 	if err != nil {
 		t.Fatal(response, err)

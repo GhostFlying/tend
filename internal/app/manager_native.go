@@ -644,6 +644,9 @@ func managerNativeReceiptMethod(method string) bool {
 	return false
 }
 func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.RunRow) (bool, error) {
+	if r.PauseHandoff != nil {
+		return false, nil
+	}
 	if fenced, err := maintenanceNativeBusinessFenced(ctx, q, r); err != nil || fenced {
 		return false, err
 	}

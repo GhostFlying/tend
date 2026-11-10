@@ -344,6 +344,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		opts = append(opts, app.WithMainOwner(owner))
 	}
 	a := app.New(s, ids, now, opts...)
+	if err := a.InitializeIssueAdmission(ctx); err != nil {
+		return err
+	}
 	if err := a.RefreshUsageProjection(ctx); err != nil {
 		return err
 	}

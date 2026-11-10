@@ -178,17 +178,27 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 		_, err := tx.Exec(ctx, `INSERT INTO creator_task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,created_at,execution_pin_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, now, rawPin)
 		return nil, err
 	}
-	review := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), ParentIssueID: issue.IssueID, State: protocol.IssueActive, WorkStatus: protocol.IssueTodo, Assignee: issue.Assignee, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1,
+	review := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), ParentIssueID: issue.IssueID, State: protocol.IssueActive, WorkStatus: protocol.IssueBacklog, Assignee: issue.Assignee, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1,
 		Plan: protocol.IssuePlan{Title: "Review: " + spec.Goal, Project: issue.Plan.Project, Intent: "Independently evaluate the frozen task agreement and its submitted artifact", Scope: "Acceptance of task " + task, CompletionCriteria: []string{"Record an independent verdict against the exact artifact and task spec"}, Stages: []protocol.IssueStage{}}, DependsOn: []string{}, CreatedAt: now, UpdatedAt: now}
 	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, review, 0, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "role": protocol.RoleAccept}, "issue.created")
 	if err != nil {
 		return nil, err
 	}
+	review.WorkStatus = protocol.IssueTodo
+	review.TodoAt = now
+	review.TodoRevision = 2
+	review.Revision = 2
+	admitted, err := saveCanonicalOwnerDefinition(ctx, x, tx, review, 1, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "role": protocol.RoleAccept}, "issue.status_changed")
+	if err != nil {
+		return nil, err
+	}
+	out.Events = append(out.Events, admitted.Events...)
+
 	reviewPlan, err := json.Marshal(review.Plan)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,created_at,execution_pin_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, review.IssueID, string(reviewPlan), now, rawPin); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,created_at,execution_pin_json,review_admission_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, review.IssueID, string(reviewPlan), now, rawPin, review.Revision); err != nil {
 		return nil, err
 	}
 	return out.Events, nil
@@ -256,7 +266,7 @@ func claimOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, run store.R
 			return nil, protocol.Errorf(protocol.CodeStaleRevision, "review execution must retain its child Issue owner")
 		}
 		if !claimed {
-			if issue.AssignmentEpoch != 1 || issue.Assignee.Ref != contract.AgentRef || issue.Revision != 1 {
+			if issue.AssignmentEpoch != 1 || issue.Assignee.Ref != contract.AgentRef || issue.Revision != contract.ReviewAdmissionRevision {
 				return nil, protocol.Errorf(protocol.CodeStaleRevision, "the pending review responsibility was changed by its owner")
 			}
 			previous := issue.Revision
@@ -383,7 +393,7 @@ func settleCancelledOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task
 		return nil, err
 	}
 	if count == 0 {
-		if issue.Revision != 1 || issue.Assignee.Ref != contract.AgentRef {
+		if issue.Revision != contract.ReviewAdmissionRevision || issue.Assignee.Ref != contract.AgentRef {
 			return nil, nil
 		}
 	} else {

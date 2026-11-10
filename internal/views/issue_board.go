@@ -160,6 +160,15 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 	if err != nil {
 		return card, err
 	}
+	card.QueueReason, card.Pause, err = facts.issueAdmissionProgress(ctx, q, issue)
+	if err != nil {
+		return card, err
+	}
+	if issue.OwnerSelection != nil {
+		if _, pending := facts.issues[issue.IssueID]; pending {
+			card.PendingManagerCategoryID = issue.OwnerSelection.CategoryID
+		}
+	}
 	card.Children, err = issueChildren(ctx, q, issue.IssueID, facts)
 	return card, err
 }

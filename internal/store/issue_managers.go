@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -63,10 +64,43 @@ func IssueManagerAuthorizationValid(ctx context.Context, q Querier, task string)
 	if err = json.Unmarshal([]byte(raw), &spec); err != nil {
 		return false, err
 	}
+	if spec.AdmissionRevision > 0 {
+		issue, err := GetCanonicalIssueRevision(ctx, q, spec.IssueID, spec.AdmissionRevision)
+		if err != nil {
+			return false, err
+		}
+		selection := issue.OwnerSelection
+		return issue.State == protocol.IssueActive && issue.BoardStatus() != protocol.IssueBacklog && selection != nil && selection.CategoryID == spec.CategoryID && selection.AgentID == spec.AgentID && selection.OwnershipPolicy == spec.OwnershipPolicy && issue.AssignmentEpoch == spec.ExpectedAssignmentEpoch, nil
+	}
 	if spec.SourceMessageID == "" {
 		return true, nil
 	}
 	var valid bool
 	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN message_dispositions d USING(message_id) LEFT JOIN message_association_revisions a USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.message_id=? AND m.kind='message' AND COALESCE(d.content_revision,1)=? AND (COALESCE(a.revision,0)=? OR EXISTS(SELECT 1 FROM message_work_items s WHERE s.message_id=m.message_id AND s.work_item_id=? AND s.active=1)) AND COALESCE(c.withdrawn_at,0)=0)`, spec.SourceMessageID, spec.SourceContentRevision, spec.SourceAssociationRevision, spec.IssueID).Scan(&valid)
 	return valid, err
+}
+
+// IssueNeedsHostedMigration identifies an actual retained hosted responsibility.
+// Fresh backlog definitions and already pinned runner responsibilities need none.
+func IssueNeedsHostedMigration(ctx context.Context, q Querier, i protocol.Issue) (bool, error) {
+	if i.Assignee.Kind != protocol.IssueAssigneeAgent {
+		return false, nil
+	}
+	first, err := GetCanonicalIssueRevision(ctx, q, i.IssueID, 1)
+	if err != nil {
+		return false, err
+	}
+	if first.WorkStatus == protocol.IssueBacklog {
+		return false, nil
+	}
+	prior, err := LatestIssueManagerTask(ctx, q, i.IssueID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	if err == nil && prior.Pin != nil && prior.Pin.Identity.ExecutionEnvironmentID+"/"+prior.Pin.Identity.LocalID == i.Assignee.Ref {
+		return false, nil
+	}
+	var backed bool
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_owner_migrations WHERE issue_id=? AND assignment_epoch=?)`, i.IssueID, i.AssignmentEpoch).Scan(&backed)
+	return !backed, err
 }

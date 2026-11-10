@@ -14,7 +14,7 @@ func reviewManagerAssignment(t *testing.T) (*harness, *protocol.RunnerRuntime, p
 	h, runtime := managerClaimHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	source := queueMessage(t, h, "Coordinate this intent")
-	result := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Continuing responsibility"}, rev(issue.Revision)), RequestIssueManager{})
+	result := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Continuing responsibility"}, rev(issue.Revision)), retainedManagerCommand{})
 	if result.Status != protocol.OpSucceeded {
 		t.Fatal(result)
 	}
@@ -55,6 +55,8 @@ func TestFault_ManagerQueuedNativeTurnRechecksFenceBeforeClaim(t *testing.T) {
 					t.Fatal(result)
 				}
 			case "withdrawal":
+				// This regression covers a retained source-bound contract. Newly admitted
+				// executions use the explicit Issue admission revision as authority.
 				withdrawOwnerSource(t, h, source)
 			case "pause":
 				if result := h.exec(owner, h.env("issues.pause", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Pause native responsibility"}, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "pause"}); result.Status != protocol.OpSucceeded {
@@ -180,6 +182,7 @@ func TestManagerPendingOwnerTakebackCancelsFutureClaim(t *testing.T) {
 	if op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate before selecting an executor"}, rev(issue.Revision)), RequestIssueManager{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	if op, err := h.app.MigrateManager(t.Context(), owner, h.env(OpManagerMigration, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.ManagerMigrationPayload{Phase: "cancel", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner takes back the pending responsibility"}, rev(issue.Revision))); err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatal(op, err)
 	}

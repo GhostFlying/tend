@@ -32,7 +32,7 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		if i.State != protocol.IssueActive {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "new manager responsibility requires an active issue")
 		}
-		if i.AssignmentEpoch != m.ExpectedEpoch || i.AssignmentState != "active" || (i.Assignee.Kind != protocol.IssueAssigneeOwner && m.HandoffID == "") {
+		if i.AssignmentEpoch != m.ExpectedEpoch || i.AssignmentState != "active" || (i.Assignee.Kind != protocol.IssueAssigneeOwner && m.HandoffID == "" && c.Manager.AdmissionRevision == 0) {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "manager responsibility changed")
 		}
 		if m.HandoffID != "" {
@@ -137,5 +137,9 @@ func buildManagerAssignment(ctx context.Context, q store.Querier, r store.RunRow
 	if err != nil {
 		return protocol.Assignment{}, err
 	}
-	return protocol.Assignment{Manager: &protocol.IssueManagerAssignment{NativeOwnerTools: receipt.NativeOwnerTools && nativeTools && !receipt.ReceiptOnly && receipt.ReaderRequestID == "", ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}, nil
+	as := protocol.Assignment{Manager: &protocol.IssueManagerAssignment{NativeOwnerTools: receipt.NativeOwnerTools && nativeTools && !receipt.ReceiptOnly && receipt.ReaderRequestID == "", ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}
+	if err := store.AssignmentPause(ctx, q, &as); err != nil {
+		return protocol.Assignment{}, err
+	}
+	return as, nil
 }

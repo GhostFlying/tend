@@ -121,6 +121,28 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	if err := resolveHostedAssignee(ctx, tx.Q(), x, p.Assignee); err != nil {
 		return Outcome{}, err
 	}
+	if p.Assignee.Kind == protocol.IssueAssigneeOwner && current.OwnerSelection != nil {
+		if _, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID); errors.Is(err, store.ErrNotFound) {
+			next.OwnerSelection = nil
+			next.WorkStatus = protocol.IssueBacklog
+			next.TodoAt = 0
+			next.TodoRevision = 0
+			next.AssignmentEpoch++
+			next.Revision++
+			next.UpdatedAt = x.Now.UnixMilli()
+			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, canonicalOwnerIssueSource{}, p, "issue.owner_selection_cleared")
+			if err != nil {
+				return Outcome{}, err
+			}
+			if err := redirectPendingIssueInputsToOwner(ctx, x, tx, next.IssueID); err != nil {
+				return Outcome{}, err
+			}
+			return out, nil
+		} else if err != nil {
+			return Outcome{}, err
+		}
+	}
+
 	if current.Assignee == p.Assignee {
 		return Outcome{Result: current}, nil
 	}

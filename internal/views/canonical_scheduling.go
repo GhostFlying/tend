@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
@@ -30,17 +29,8 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 				return err
 			}
 			if c.Kind == protocol.ActionAccept {
-				if review.State != protocol.IssueActive || review.AssignmentState != "active" {
-					c.DependenciesDone = false
-				}
-				for _, dependency := range review.DependsOn {
-					prerequisite, err := store.GetCanonicalIssue(ctx, q, dependency)
-					if err != nil {
-						return err
-					}
-					if prerequisite.State != protocol.IssueClosed || prerequisite.Closure == nil || prerequisite.Closure.Kind != protocol.WorkItemClosureCompleted {
-						c.DependenciesDone = false
-					}
+				if err := ApplyIssueAdmission(ctx, q, c, review.IssueID, false); err != nil {
+					return err
 				}
 			}
 			ids, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM run_issue_responsibilities WHERE issue_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1`, review.IssueID)
@@ -56,7 +46,7 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 					c.OwnerResponsibilityChanged = true
 				}
 				c.ReviewOwnerPin = pin
-			} else if review.AssignmentEpoch != 1 || review.Assignee.Ref != contract.AgentRef || review.Revision != 1 {
+			} else if review.AssignmentEpoch != 1 || review.Assignee.Ref != contract.AgentRef || review.Revision != contract.ReviewAdmissionRevision {
 				// No previous run is not authority to undo a human takeover or
 				// edits made while this bounded review was waiting to start.
 				c.OwnerResponsibilityChanged = true
@@ -65,33 +55,12 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
-	controls := map[string]protocol.IssueControl{}
+	if err := ApplyIssueAdmission(ctx, q, c, primary, false); err != nil {
+		return err
+	}
 	issue, err := store.GetCanonicalIssue(ctx, q, primary)
 	if err != nil {
 		return err
-	}
-	for current := issue; ; {
-		controls[current.IssueID] = current.IssueControl
-		if current.ParentIssueID == "" {
-			break
-		}
-		current, err = store.GetCanonicalIssue(ctx, q, current.ParentIssueID)
-		if err != nil {
-			return err
-		}
-	}
-	dependencies := []protocol.IssueDependency{}
-	achieved := map[string]bool{}
-	for _, id := range issue.DependsOn {
-		prerequisite, err := store.GetCanonicalIssue(ctx, q, id)
-		if err != nil {
-			return err
-		}
-		achieved[id] = prerequisite.State == protocol.IssueClosed && prerequisite.Closure != nil && prerequisite.Closure.Kind == protocol.WorkItemClosureCompleted
-		dependencies = append(dependencies, protocol.IssueDependency{IssueID: primary, DependsOn: id})
-	}
-	if len(domain.IssueDispatchBlockers(primary, controls, dependencies, achieved)) > 0 {
-		c.DependenciesDone = false
 	}
 	if err := applyStageDependencies(ctx, q, c, protocol.WorkItem{WorkItemID: issue.IssueID, IssuePlan: issue.Plan}); err != nil {
 		return err

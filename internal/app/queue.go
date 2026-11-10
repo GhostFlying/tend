@@ -28,6 +28,11 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 	if err != nil {
 		return nil, err
 	}
+	managers, err := views.IssueManagerCandidates(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	candidates = append(candidates, managers...)
 	if err := applyIssueDependencies(ctx, q, candidates); err != nil {
 		return nil, err
 	}
@@ -39,14 +44,31 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 	if err != nil {
 		return nil, err
 	}
-	candidates = slices.DeleteFunc(candidates, func(c scheduler.Candidate) bool { return scheduler.Held(c) != "" })
+	candidates = slices.DeleteFunc(candidates, func(c scheduler.Candidate) bool { return c.Manager == nil && scheduler.Held(c) != "" })
 	slices.SortFunc(candidates, func(a, b scheduler.Candidate) int { return scheduler.Compare(a, b, o) })
 	out := make([]protocol.QueueEntry, 0, len(candidates))
 	for i, c := range candidates {
 		t := tasks[c.TaskID]
+		if c.Manager != nil {
+			issue, err := store.GetCanonicalIssue(ctx, q, c.Manager.IssueID)
+			if err != nil {
+				return nil, err
+			}
+			t.Title = "Manage: " + issue.Plan.Title
+			t.Project = issue.Plan.Project
+			c.IssueID = issue.IssueID
+		}
+		actionID := c.ActionID
+		if c.InitialIssue {
+			actionID = ""
+		}
+		why := unplaceable(hosts, c)
+		if reason := scheduler.HeldReason(c); reason != nil {
+			why = reason.Message
+		}
 		out = append(out, protocol.QueueEntry{
-			Place: i + 1, ActionID: c.ActionID, TaskID: c.TaskID, Title: t.Title, Project: t.Project, Kind: c.Kind, Rating: c.Rating,
-			WaitedMillis: max(o.Now-c.CreatedAt, 0), Score: scheduler.Score(c, o), Unplaceable: unplaceable(hosts, c),
+			IssueID: c.IssueID, Place: i + 1, ActionID: actionID, TaskID: c.TaskID, Title: t.Title, Project: t.Project, Kind: c.Kind, Rating: c.Rating,
+			WaitedMillis: max(o.Now-c.CreatedAt, 0), Score: scheduler.Score(c, o), Unplaceable: why,
 		})
 	}
 	return out, nil
@@ -74,6 +96,8 @@ func schedulingHosts(ctx context.Context, q store.Querier, now int64) ([]schedul
 			return nil, err
 		}
 		out = append(out, scheduler.Host{
+			IssueManagers:          runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
+			IssueOwners:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
 			QuestionHandoffs:       slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
 			ContinuationsSupported: runtimeSupportsAgentContinuation(&runtime.Runtime), Continuations: continuations, Executors: executors,
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots,

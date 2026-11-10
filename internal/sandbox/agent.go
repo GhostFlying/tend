@@ -190,9 +190,10 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 		switch {
 		case create || dispatch && !manager:
 			title := shortTitle(text)
-			p := protocol.CreateIssuePayload{Plan: plan(title, "demo-web"), IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &sourceRevision}, Assignee: &protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "sandbox-hosted/manager"}}
+			p := protocol.CreateIssuePayload{Plan: plan(title, "demo-web"), IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &sourceRevision}, Manager: &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Select scripted Issue coordination"}}
 			if manager && issue.OwnershipPolicy == protocol.IssueOwnerPolicy {
 				p.Assignee = nil
+				p.Manager = nil
 				p.Owner = &protocol.IssueOwnerRequest{CategoryID: protocol.DefaultIssueManagerCategory, AgentID: issue.Assignee.Ref, Reason: "Retain child responsibility with the current sandbox Agent"}
 			}
 			if manager {
@@ -204,8 +205,13 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			if !c.mutate("issues_create", "", nil, p, &created) {
 				return "failed"
 			}
+			if dispatch {
+				if !c.mutate("issues_set_status", created.IssueID, &created.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: created.AssignmentEpoch, Status: protocol.IssueTodo}, &created) {
+					return "failed"
+				}
+			}
 			createdIssue = created.IssueID
-			response = "已创建 Issue，交给沙盒负责人继续跟进。"
+			response = "已创建 Issue，保存在待安排；移到待推进后由 runner 领取。"
 			if dispatch {
 				response = "已派发示例目标，负责人将创建执行任务；脚本主机会输出进展并交付结果。"
 			}

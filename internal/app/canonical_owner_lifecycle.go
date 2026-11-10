@@ -163,6 +163,9 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		}
 		next.IssueControl, err = domain.ReopenIssueControl(current.IssueControl)
 		next.Closure = nil
+		next.WorkStatus = protocol.IssueBacklog
+		next.TodoAt = 0
+		next.TodoRevision = 0
 		activation = true
 	case "reparent", "dependencies", "assign":
 		if current.State != protocol.IssueActive && current.State != protocol.IssuePaused {
@@ -196,6 +199,9 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		// The owner explicitly maintains the current endpoint. No ancestor is
 		// activated, and original plan, closure and assignment remain unchanged.
 	case "close", "finish_cancel":
+		if action == "close" && current.BoardStatus() == protocol.IssueBacklog {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "move the Issue from backlog to todo before completing it")
+		}
 		if action == "close" && endpoint.Closure == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "explicit closure is required")
 		}

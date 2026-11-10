@@ -13,13 +13,27 @@ import (
 
 // seedInbox reproduces the resolved-history/pending-failure case through real
 // owner commands and a scripted runner, with no production records or models.
-func seedInbox(ctx context.Context, runtime *serverkit.Runtime, root string) (Demo, error) {
+func seedInbox(ctx context.Context, runtime *serverkit.Runtime, root string, beforeBulk ...func(context.Context) (func(), error)) (Demo, error) {
 	var demo Demo
 	if raw, err := os.ReadFile(filepath.Join(root, "demo.json")); err == nil {
 		return demo, json.Unmarshal(raw, &demo)
 	} else if !os.IsNotExist(err) {
 		return demo, err
 	}
+	release := func() {}
+	if len(beforeBulk) > 0 {
+		unlock, err := beforeBulk[0](ctx)
+		if err != nil {
+			return demo, err
+		}
+		release = unlock
+	}
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
 	s := seeder{app: runtime.App}
 	var history protocol.Issue
 	if err := s.execute(ctx, "inbox-history-issue", protocol.Target{Type: "issue"}, nil,
@@ -48,6 +62,9 @@ func seedInbox(ctx context.Context, runtime *serverkit.Runtime, root string) (De
 		app.CanonicalOwnerIssueCommand{Action: "create"}, &issue); err != nil {
 		return demo, err
 	}
+	if err := s.admit(ctx, "inbox-pwa", &issue); err != nil {
+		return demo, err
+	}
 	payload := taskPayload("移动端 PWA 三项体验修复与证据交付", issue.AssignmentEpoch)
 	payload.Spec.Goal = "复现并修复顶部安全区、附件间距和输入光标问题，交付复现与验证报告。沙盒演示首次失败及原问题的答复与历史保留。"
 	payload.Spec.MaxImplementAttempts = 3
@@ -58,6 +75,8 @@ func seedInbox(ctx context.Context, runtime *serverkit.Runtime, root string) (De
 		payload, app.CanonicalOwnerTaskCreate{}, &task); err != nil {
 		return demo, err
 	}
+	release()
+	released = true
 	attention, err := storyAttention(ctx, runtime, issue.IssueID, task.TaskID)
 	if err != nil {
 		return demo, err

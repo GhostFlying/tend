@@ -28,6 +28,9 @@ func seedRolloutDemo(ctx context.Context, runtime *serverkit.Runtime, root strin
 	}
 	demo.Parent = issue.IssueID
 	demo.Issues = []string{issue.IssueID}
+	if err := s.admit(ctx, "rollout-issue", &issue); err != nil {
+		return demo, err
+	}
 	// Set work intent before a concurrent runner claim can advance revisions.
 	if err := s.execute(ctx, "rollout-issue-start-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, &issue); err != nil {
 		return demo, err

@@ -65,7 +65,7 @@ func TestIssueDeliveryMigrationPreservesClosedAcceptedHistoryWithoutApprovals(t 
 		t.Fatal(err)
 	}
 	if err := old.Read(ctx, func(tx *ReadTx) error {
-		saved, err := GetCanonicalIssue(ctx, tx.Q(), i.IssueID)
+		saved, err := GetCanonicalIssueRevision(ctx, tx.Q(), i.IssueID, i.Revision)
 		if err != nil {
 			return err
 		}

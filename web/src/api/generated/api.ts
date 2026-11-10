@@ -850,18 +850,23 @@ export interface IssueView {
   historical?: boolean;
   issue_id: string;
   manager?: IssueManagerView;
+  owner_selection?: IssueOwnerSelection;
   ownership_policy?: string;
   parent_issue_id?: string;
+  pause?: IssuePauseProgress;
   pending_assignee?: IssueAssignee;
   pending_handoff_id?: string;
   pending_reviews?: WorkItemCompletionReview[];
   plan: IssuePlan;
   progress?: IssueProgress;
+  queue_reason?: QueueWaitReason;
   responsibility_runs?: ExecutionResponsibility[];
   revision: number;
   source_reviews?: IssueSourceReview[];
   state: IssueState;
   tasks?: IssueTaskSummary[];
+  todo_at?: number;
+  todo_revision?: number;
   updated_at: number;
   work_status?: IssueWorkStatus;
 }
@@ -1273,6 +1278,26 @@ export interface AgentRecoveryView {
   next_attempt_at?: number;
   reason?: string;
   status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueOwnerSelection".
+ */
+export interface IssueOwnerSelection {
+  agent_id?: string;
+  category_id: string;
+  ownership_policy?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssuePauseProgress".
+ */
+export interface IssuePauseProgress {
+  issue_id: string;
+  issue_revision: number;
+  pending: number;
+  stopped: number;
+  unsupported: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4099,12 +4124,15 @@ export interface Issue {
   created_at: number;
   depends_on: string[] | null;
   issue_id: string;
+  owner_selection?: IssueOwnerSelection;
   parent_issue_id?: string;
   pending_assignee?: IssueAssignee;
   pending_handoff_id?: string;
   plan: IssuePlan;
   revision: number;
   state: IssueState;
+  todo_at?: number;
+  todo_revision?: number;
   updated_at: number;
   work_status?: IssueWorkStatus;
 }
@@ -5120,6 +5148,7 @@ export interface IssueSummary {
   board?: IssueBoardCard;
   execution?: ExecutionCounts;
   issue_id: string;
+  owner_selection?: IssueOwnerSelection;
   parent_issue_id?: string;
   pending_assignee?: IssueAssignee;
   pending_handoff_id?: string;
@@ -5127,6 +5156,8 @@ export interface IssueSummary {
   revision: number;
   state: IssueState;
   title: string;
+  todo_at?: number;
+  todo_revision?: number;
   work_status?: IssueWorkStatus;
 }
 /**
@@ -5139,8 +5170,10 @@ export interface IssueBoardCard {
   execution: ExecutionCounts;
   notification_due_at?: number;
   owner_attention_count?: number;
+  pause?: IssuePauseProgress;
   pending_manager_category_id?: string;
   progress?: IssueProgress;
+  queue_reason?: QueueWaitReason;
   stage_title?: string;
   stages_done: number;
   stages_total: number;
@@ -6257,6 +6290,7 @@ export interface SetIssueNotificationSettingsPayload {
  */
 export interface SetIssueStatusPayload {
   expected_assignment_epoch: number;
+  owner?: IssueOwnerRequest;
   status: IssueWorkStatus;
 }
 /**
@@ -6349,13 +6383,14 @@ export interface ProjectView {
  * via the `definition` "QueueEntry".
  */
 export interface QueueEntry {
-  action_id: string;
+  action_id?: string;
+  issue_id?: string;
   kind: ActionKind;
   place: number;
   project: string;
   rating: Rating;
   score: number;
-  task_id: string;
+  task_id?: string;
   title: string;
   unplaceable?: string;
   waited_millis: number;

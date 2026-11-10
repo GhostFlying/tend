@@ -88,6 +88,9 @@ export function IssueBoard({
   });
   const mobileTabs = useRef<HTMLDivElement>(null);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
+  const [startItem, setStartItem] = useState<IssueSummary | null>(null);
+  const [startCategory, setStartCategory] = useState("");
+  const categories = useStore(live.agents.categories.state);
   const [menu, setMenu] = useState<IssueSummary | null>(null);
   const [over, setOver] = useState<IssueWorkStatus | null>(null);
   const dragged = useRef<IssueSummary | null>(null);
@@ -104,6 +107,15 @@ export function IssueBoard({
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [mobileColumn]);
   const actions = useBoardActions();
+  const move = (item: IssueSummary, status: IssueWorkStatus) => {
+    if (status === "todo" && !item.owner_selection) {
+      setStartItem(item);
+      setStartCategory("");
+      void live.agents.openCategories();
+      return;
+    }
+    void actions.move(item, status);
+  };
   const { feedback, setFeedback } = actions;
   const online = connection.status === "online";
   const filter = useMemo(() => {
@@ -306,7 +318,7 @@ export function IssueBoard({
                   const item = dragged.current;
                   dragged.current = null;
                   setOver(null);
-                  if (item && workStatus(item) !== id) void actions.move(item, id);
+                  if (item && workStatus(item) !== id) move(item, id);
                 }}
               >
                 {(item) => (
@@ -382,11 +394,18 @@ export function IssueBoard({
             {boardColumns.map(({ id, label }) => (
               <Button
                 key={id}
-                disabled={!online || !!actions.states[menu.issue_id]}
+                disabled={
+                  !online ||
+                  !!actions.states[menu.issue_id] ||
+                  (workStatus(menu) === "backlog" &&
+                    !["backlog", "todo", "cancelled"].includes(id)) ||
+                  (["done", "cancelled"].includes(workStatus(menu)) &&
+                    ![workStatus(menu), "backlog"].includes(id))
+                }
                 aria-current={workStatus(menu) === id}
                 onClick={() => {
                   setMenu(null);
-                  if (workStatus(menu) !== id) void actions.move(menu, id);
+                  if (workStatus(menu) !== id) move(menu, id);
                 }}
               >
                 <span className={styles.dot} data-status={id} />
@@ -396,8 +415,53 @@ export function IssueBoard({
             ))}
           </div>
           <p className={styles.dialogNote}>
-            状态保存后，通知按系统设置合并发送。有阻塞时保留原状态。
+            待安排只记录；待推进即允许领取。退回待安排会暂停整条子责任并保留成果。
           </p>
+        </BoardDialog>
+      )}
+      {startItem && (
+        <BoardDialog title="推进 Issue" onClose={() => setStartItem(null)}>
+          <p>{startItem.title}</p>
+          <label>
+            执行类别
+            <Select value={startCategory} onChange={(e) => setStartCategory(e.target.value)}>
+              <option value="">请选择类别</option>
+              {(categories.value?.items ?? [])
+                .filter((c) => c.state === "active")
+                .map((c) => (
+                  <option key={c.category_id} value={c.category_id}>
+                    {c.title}
+                  </option>
+                ))}
+            </Select>
+          </label>
+          {categories.error && (
+            <p>
+              类别读取失败。
+              <Button onClick={() => void live.agents.openCategories()}>重新读取</Button>
+            </p>
+          )}
+          {categories.value?.more && (
+            <Button
+              onClick={() => void live.agents.openCategories("active", categories.value?.next)}
+            >
+              下一页类别
+            </Button>
+          )}
+          <p>移到待推进后，runner 会在依赖满足且有可用执行能力时领取。</p>
+          <Button
+            disabled={!online || !startCategory}
+            onClick={() => {
+              const item = startItem;
+              setStartItem(null);
+              void actions.move(item, "todo", {
+                category_id: startCategory,
+                reason: "用户将 Issue 移到待推进",
+              });
+            }}
+          >
+            移到待推进
+          </Button>
         </BoardDialog>
       )}
       {!!blockers.length && blockedItem && (

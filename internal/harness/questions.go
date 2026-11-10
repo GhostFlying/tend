@@ -40,6 +40,9 @@ func (r *Results) askOwner(ctx context.Context, call ToolCall) ToolResult {
 // questionRecovery carries durable question identity into both a fresh brief and
 // a continuation whose original native tool call may no longer exist.
 func questionRecovery(spec WorkerSpec) string {
+	if spec.PauseContinuation != nil && len(spec.Questions) == 0 {
+		return "\nThis Run continues the same frozen Task after a confirmed Issue pause. Preserve the retained workspace and existing results. Previous Run: " + spec.PauseContinuation.RunID + ". Do not repeat already completed operations; reconcile any retained unknown outcomes first.\n"
+	}
 	if len(spec.Questions) == 0 {
 		return ""
 	}

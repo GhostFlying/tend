@@ -176,10 +176,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	if err != nil {
 		return nil, err
 	}
-	if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && spec.PredecessorStateDir != "" {
-		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+spec.QuestionContinuation.RunID)
+	previousRun, previousThread := spec.StoppedPredecessor()
+	if previousRun != "" && previousThread != "" && spec.PredecessorStateDir != "" {
+		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+previousRun)
 	} else {
-		if spec.QuestionContinuation != nil && spec.QuestionContinuation.ThreadID != "" && opts.Environment != nil {
+		if previousRun != "" && previousThread != "" && opts.Environment != nil {
 			return nil, fmt.Errorf("%w: isolated continuation needs original execution state", harness.ErrWorkerNotStarted)
 		}
 		opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, opts.Environment, spec.Thread != "" || spec.RetainedResume != nil)

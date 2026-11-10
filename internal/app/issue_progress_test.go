@@ -95,18 +95,18 @@ func checkIssueProgressManagerScope(t *testing.T, h *harness, issue protocol.Iss
 	}
 }
 
-func TestIssueConversationPendingManagerKeepsActualBinding(t *testing.T) {
+func TestIssueConversationPendingSelectionKeepsActualBinding(t *testing.T) {
 	h, runtime := managerClaimHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	request := func(replace bool) {
-		t.Helper()
+		issue = canonicalTaskIssue(t, h, issue.IssueID)
 		op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Replace: replace, Reason: "Delegate continuing responsibility"}, rev(issue.Revision)), RequestIssueManager{})
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
+		issue = canonicalTaskIssue(t, h, issue.IssueID)
 	}
 	read := func(revision int64) protocol.IssueView {
-		t.Helper()
 		var out protocol.IssueView
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
@@ -119,38 +119,18 @@ func TestIssueConversationPendingManagerKeepsActualBinding(t *testing.T) {
 	}
 	request(false)
 	queued := read(0)
-	if queued.Manager == nil || queued.Conversation == nil || !queued.Conversation.CanSend || queued.Conversation.Reason != "manager_pending" || queued.Conversation.ConversationID != "issue:"+issue.IssueID {
-		t.Fatal("pending manager did not expose its queued conversation", queued)
-	}
-	if len(queued.Tasks) != 0 || h.task(queued.Manager.TaskID).Kind != protocol.TaskKindIssueManager {
-		t.Fatal("management responsibility leaked into execution summaries", queued.Tasks)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		activity, err := views.IssueActivity(t.Context(), tx.Q(), issue.IssueID, 0)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, entry := range activity.Items {
-			found = found || entry.Kind == "task.manager_requested" && entry.TaskID == queued.Manager.TaskID
-		}
-		if !found {
-			t.Fatal("published responsibility missing from activity", activity)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	if queued.Manager != nil || queued.QueueReason == nil || queued.Conversation == nil || !queued.Conversation.CanSend || queued.Conversation.Reason != "owner_pending" || h.count("tasks") != 0 {
+		t.Fatal("pending selection invented a task or lost its conversation", queued)
 	}
 	assignment := reviewClaimManager(t, h, runtime)
 	claimed := read(0)
-	if claimed.Conversation == nil || !claimed.Conversation.CanSend || claimed.Conversation.ConversationID != assignment.Manager.ConversationID {
-		t.Fatal("claim did not expose the actual conversation", claimed)
+	if claimed.Manager == nil || claimed.Manager.TaskID != assignment.TaskID || claimed.Conversation == nil || !claimed.Conversation.CanSend || claimed.Conversation.ConversationID != assignment.Manager.ConversationID {
+		t.Fatal("claim did not expose actual responsibility", claimed)
 	}
-	issue = claimed.Issue
 	request(true)
 	fenced := read(0)
-	if fenced.Conversation == nil || !fenced.Conversation.CanSend || fenced.Conversation.Reason != "manager_pending" || fenced.Conversation.ConversationID != claimed.Conversation.ConversationID {
-		t.Fatal("pending replacement did not preserve the queued conversation", fenced)
+	if fenced.Conversation == nil || !fenced.Conversation.CanSend || fenced.Conversation.ConversationID != claimed.Conversation.ConversationID {
+		t.Fatal("replacement lost queued conversation", fenced)
 	}
 	historical := read(1)
 	if historical.Manager != nil || historical.Conversation != nil {

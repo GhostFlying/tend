@@ -24,6 +24,9 @@ func hostedManagerHarness(t *testing.T) *harness {
 }
 func assignHostedManager(t *testing.T, h *harness, issue protocol.Issue) protocol.Issue {
 	t.Helper()
+	if issue.BoardStatus() == protocol.IssueBacklog {
+		issue = admitExistingIssueFixture(t, h, issue)
+	}
 	p := protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "server-hosted/planner"}, Reason: "Delegate investigation to the Issue manager"}
 	next := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(issue.Revision)), HostedIssueAssignment{}))
 	finish := protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: next.AssignmentEpoch, HandoffID: next.PendingHandoffID, Reason: "No previous manager execution is outstanding"}
@@ -273,8 +276,11 @@ func TestHostedPlannerDelegationPersistsActualManagerWake(t *testing.T) {
 		t.Fatal("planner did not finish without manager execution", state, err)
 	}
 	manager, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID)
-	if err != nil || !ok {
-		t.Fatal(manager, ok, err)
+	if err != nil || ok {
+		t.Fatal("backlog creation woke an executor", manager, ok, err)
+	}
+	if issue.BoardStatus() != protocol.IssueBacklog || h.count("tasks") != 0 {
+		t.Fatal(issue)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var pending bool

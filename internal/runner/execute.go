@@ -82,6 +82,11 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 				err = r.completeWork(ctx, runCtx, as, a, run.WorkerResult)
 			}
 		case journal.PhaseSubmitting, journal.PhaseReleasing:
+			if ready, e := r.pauseReceiptReady(ctx, run); e != nil {
+				return e
+			} else if ready {
+				return r.reportPause(ctx, as)
+			}
 			err = r.awaitCompletedStop(ctx, runCtx, as, a)
 			if err == nil {
 				r.mu.Lock()
@@ -133,7 +138,23 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 				return readErr
 			}
 			err = r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: question.decision, ThreadID: saved.Thread})
-		case errors.Is(err, errPaused), errors.Is(err, errHeld):
+		case errors.Is(err, errPaused), errors.Is(err, errHeld), func() bool { _, ok := errors.AsType[*pauseYield](err); return ok }():
+			latest, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+			if readErr != nil {
+				return readErr
+			}
+			if latest.Phase == journal.PhaseWorkerDone && len(latest.WorkerResult) > 0 && !latest.Held {
+				continue
+			}
+
+			if p, e := r.cfg.Journal.Pause(ctx, as.RunID); e != nil {
+				return e
+			} else if p != nil && as.PauseHandoffs && !run.Held {
+				if err := r.stopAgent(ctx, as); err != nil {
+					return &completionPending{err}
+				}
+				return r.finishPause(ctx, as)
+			}
 			// The worker was stopped for a pause or a takeover; the next
 			// attempt waits until tend wants the run again.
 			continue
@@ -423,17 +444,23 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if nativeMessages {
 		startupObserved = r.cfg.Now()
 	}
-	if run.Thread == "" && as.QuestionContinuation != nil && as.Role == protocol.RoleImplement && (assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer || nativeMessages) {
-		run.Thread = as.QuestionContinuation.ThreadID
+	previousRun, previousThread := "", ""
+	if as.QuestionContinuation != nil {
+		previousRun, previousThread = as.QuestionContinuation.RunID, as.QuestionContinuation.ThreadID
+	}
+	if as.PauseContinuation != nil {
+		previousRun, previousThread = as.PauseContinuation.RunID, as.PauseContinuation.ThreadID
+	}
+	if run.Thread == "" && previousRun != "" && as.Role == protocol.RoleImplement && (assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer || nativeMessages) {
+		run.Thread = previousThread
 		if err := r.cfg.Journal.SetThread(ctx, as.RunID, run.Thread); err != nil {
 			return err
 		}
 	}
-
 	predecessorState := ""
-	if as.QuestionContinuation != nil {
+	if previousRun != "" {
 		if locator, ok := execution.Workspaces.(interface{ RunStateDirectory(string) (string, error) }); ok {
-			predecessorState, err = locator.RunStateDirectory(as.QuestionContinuation.RunID)
+			predecessorState, err = locator.RunStateDirectory(previousRun)
 			if err != nil {
 				return err
 			}
@@ -452,7 +479,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		OnUsageSource: func(sourceCtx context.Context, source nativeusage.Source) error {
 			return r.registerUsage(sourceCtx, as, source)
 		},
-		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, QuestionHandoffs: as.QuestionHandoffs, QuestionContinuation: as.QuestionContinuation, SupervisorQuestions: as.SupervisorQuestions, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
+		Execution: as.AcceptanceExecution, QuestionContext: as.QuestionContext, QuestionHandoffs: as.QuestionHandoffs, QuestionContinuation: as.QuestionContinuation, PauseContinuation: as.PauseContinuation, SupervisorQuestions: as.SupervisorQuestions, RunID: as.RunID, Role: as.Role, Dir: p.Dir, ProviderID: p.ProviderID, StateDir: p.StateDir, Baseline: p.Baseline,
 		AskOwner: askOwner, Questions: questions,
 		ReceiveMessages: receiveMessages, AckMessage: ackMessage,
 		ReadObservation: r.observationReader(toolLifetime, as),
@@ -700,6 +727,13 @@ func (r *Runner) waitUntilWanted(ctx context.Context, as protocol.Assignment, a 
 		r.mu.Lock()
 		desired := a.desired
 		r.mu.Unlock()
+		if desired == protocol.DesiredPaused {
+			if p, err := r.cfg.Journal.Pause(ctx, as.RunID); err != nil {
+				return err
+			} else if p != nil && as.PauseHandoffs {
+				return &pauseYield{}
+			}
+		}
 		if desired == protocol.DesiredHeld {
 			if err := r.cfg.Journal.SetHeld(ctx, as.RunID, true); err != nil {
 				return err
@@ -1190,8 +1224,18 @@ func (r *Runner) awaitCompletedStop(ctx, runCtx context.Context, as protocol.Ass
 	if err != nil {
 		return &completionPending{err}
 	}
-	yielding := final && req.Envelope.Operation == protocol.OpRunsYieldQuestion
-	if !yielding && !r.stopRequested(runCtx, a) {
+	yielding := final && (req.Envelope.Operation == protocol.OpRunsYieldQuestion || req.Envelope.Operation == protocol.OpRunsYieldPause)
+	knownPauseResult := false
+	if (len(run.WorkerResult) > 0 || final && req.Envelope.Operation != protocol.OpRunsRelease) && !run.Held {
+		p, e := r.cfg.Journal.Pause(ctx, as.RunID)
+		if e != nil {
+			return e
+		}
+		r.mu.Lock()
+		knownPauseResult = p != nil && a.desired == protocol.DesiredPaused
+		r.mu.Unlock()
+	}
+	if !yielding && !knownPauseResult && !r.stopRequested(runCtx, a) {
 		if err := r.waitUntilWanted(stopCtx, as, a); err != nil {
 			return err
 		}

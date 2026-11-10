@@ -11,7 +11,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestOwnerAPIImmediatelyCreatesSelectedRegisteredManager(t *testing.T) {
+func TestOwnerAPIRecordsSelectedManagerWithoutStartingBacklog(t *testing.T) {
 	e := newEnv(t)
 	e.configure()
 	principal := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}
@@ -48,8 +48,8 @@ func TestOwnerAPIImmediatelyCreatesSelectedRegisteredManager(t *testing.T) {
 	if err := json.Unmarshal(response.Operation.Result, &replay); err != nil || replay.IssueID != issue.IssueID {
 		t.Fatal(replay, err)
 	}
-	if _, _, ok, err := e.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID); err != nil || !ok {
-		t.Fatal("registered manager was not durably woken", ok, err)
+	if _, _, ok, err := e.app.NextDelivery(t.Context(), "background_thread:issue:"+issue.IssueID); err != nil || ok {
+		t.Fatal("backlog creation unexpectedly woken", ok, err)
 	}
 	if got := e.count(`SELECT COUNT(*) FROM issue_controls`); got != 1 {
 		t.Fatal("API replay duplicated Issue", got)

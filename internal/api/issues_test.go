@@ -139,6 +139,7 @@ func TestIssueOwnerHTTPNoStageWorkerAcceptanceReviewAndContractRecovery(t *testi
 	e.configure()
 	token := e.login(protocol.ScopeOwner)
 	issue := createOwnerIssueHTTP(t, e, token, "")
+	issue = admitOwnerIssueHTTP(t, e, token, issue)
 	spec := protocol.OwnerTaskSpec{Goal: "Investigate and fix the build", Acceptance: []string{"Build passes"}, Delivery: "commit", ImplementationContext: "PRIVATE_IMPLEMENTATION_PLAN", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}}
 	// Copying a stored spec must not turn server-frozen context into owner input.
 	wrongSpec, _ := json.Marshal(spec)
@@ -331,4 +332,21 @@ func TestIssueOwnerHTTPSourceShareReadAndTerminalSettlement(t *testing.T) {
 	if issue.State != protocol.IssueCancelled || len(issueDetailHTTP(t, e, token, issue.IssueID).SourceReviews) != 0 {
 		t.Fatal(issue)
 	}
+}
+
+func admitOwnerIssueHTTP(t *testing.T, e *env, token string, i protocol.Issue) protocol.Issue {
+	t.Helper()
+	if i.State == protocol.IssueClosed || i.State == protocol.IssueCancelled {
+		i = issueHTTP(t, e, token, e.envelope("issues.set_status", protocol.Target{Type: "issue", ID: i.IssueID}, &i.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Status: protocol.IssueBacklog}))
+	}
+	if e.count(`SELECT COUNT(*) FROM agent_category_versions WHERE category_id='fixture-execution'`) == 0 {
+		status, response := e.op(token, e.envelope("categories.put", protocol.Target{Type: "category", ID: "fixture-execution"}, new(int64), protocol.PutAgentCategoryPayload{Title: "Fixture execution", State: "active"}))
+		if status != http.StatusOK || response.Operation == nil || response.Operation.Error != nil {
+			t.Fatal(status, response)
+		}
+	}
+	if i.OwnerSelection == nil {
+		i = issueHTTP(t, e, token, e.envelope(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, &i.Revision, protocol.RequestIssueManagerPayload{CategoryID: "fixture-execution", ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Select explicit fixture coordinator"}))
+	}
+	return issueHTTP(t, e, token, e.envelope("issues.set_status", protocol.Target{Type: "issue", ID: i.IssueID}, &i.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Status: protocol.IssueTodo}))
 }

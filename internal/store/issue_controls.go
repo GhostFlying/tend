@@ -28,10 +28,16 @@ func RejectCanonicalLegacyIssueWrite(ctx context.Context, q Querier, id string) 
 // GetCanonicalIssue reads a canonical aggregate without adopting legacy rows.
 func GetCanonicalIssue(ctx context.Context, q Querier, id string) (protocol.Issue, error) {
 	var current protocol.Issue
+	var ownerSelection string
 	var parent, pendingKind, pendingRef, handoff sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT issue_id,parent_issue_id,state,assignee_kind,assignee_ref,assignment_epoch,assignment_state,pending_assignee_kind,pending_assignee_ref,pending_handoff_id,work_status FROM issue_controls WHERE issue_id=?`, id).Scan(&current.IssueID, &parent, &current.State, &current.Assignee.Kind, &current.Assignee.Ref, &current.AssignmentEpoch, &current.AssignmentState, &pendingKind, &pendingRef, &handoff, &current.WorkStatus)
+	err := q.QueryRowContext(ctx, `SELECT issue_id,parent_issue_id,state,assignee_kind,assignee_ref,assignment_epoch,assignment_state,pending_assignee_kind,pending_assignee_ref,pending_handoff_id,work_status,owner_selection_json,todo_at,todo_revision FROM issue_controls WHERE issue_id=?`, id).Scan(&current.IssueID, &parent, &current.State, &current.Assignee.Kind, &current.Assignee.Ref, &current.AssignmentEpoch, &current.AssignmentState, &pendingKind, &pendingRef, &handoff, &current.WorkStatus, &ownerSelection, &current.TodoAt, &current.TodoRevision)
 	if err != nil {
 		return current, notFound(err, "canonical issue "+id)
+	}
+	if ownerSelection != "" {
+		if err := json.Unmarshal([]byte(ownerSelection), &current.OwnerSelection); err != nil {
+			return current, fmt.Errorf("store: decode Issue owner selection: %w", err)
+		}
 	}
 	current.ParentIssueID, current.PendingHandoffID = parent.String, handoff.String
 	if pendingKind.Valid {
@@ -107,6 +113,7 @@ func GetCanonicalIssueRevision(ctx context.Context, q Querier, id string, revisi
 // IssueRevisionProvenance carries app-verified authority. It does not itself
 // authenticate an owner or establish a coordination execution's permission.
 type IssueRevisionProvenance struct {
+	AdmissionDefinition     bool
 	RequestDomain           string
 	Actor                   protocol.Principal
 	RequestID               string
@@ -205,6 +212,19 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	if next.WorkStatus != "" || expected > 0 {
 		if _, err := t.Exec(ctx, `UPDATE issue_controls SET work_status=? WHERE issue_id=?`, next.WorkStatus, next.IssueID); err != nil {
 			return fmt.Errorf("store: save issue work status: %w", err)
+		}
+	}
+	if next.OwnerSelection != nil || next.TodoAt != 0 || next.TodoRevision != 0 || p.AdmissionDefinition {
+		selection := ""
+		if next.OwnerSelection != nil {
+			raw, err := json.Marshal(next.OwnerSelection)
+			if err != nil {
+				return err
+			}
+			selection = string(raw)
+		}
+		if _, err := t.Exec(ctx, `UPDATE issue_controls SET owner_selection_json=?,todo_at=?,todo_revision=? WHERE issue_id=?`, selection, next.TodoAt, next.TodoRevision, next.IssueID); err != nil {
+			return fmt.Errorf("store: save Issue admission definition: %w", err)
 		}
 	}
 	if _, err := t.Exec(ctx, `DELETE FROM issue_dependencies WHERE issue_id=?`, next.IssueID); err != nil {

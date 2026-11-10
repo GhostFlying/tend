@@ -14,7 +14,7 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-const storyTitle = "创建 多轮故事：手机布局从需求澄清到独立验收"
+const storyTitle = "执行并创建 多轮故事：手机布局从需求澄清到独立验收"
 
 // Every round is an owner command followed by a real hosted tool turn. Reads
 // below are synchronization only; no business state is injected into SQLite.

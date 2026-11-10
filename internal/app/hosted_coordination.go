@@ -143,7 +143,25 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			if p.ParentIssueID != current.IssueID || p.Plan.Project != current.Plan.Project {
 				return protocol.Errorf(protocol.CodeForbidden, "a manager may create only child issues in its inherited project")
 			}
-		case "issues.review_delivery", "issues.update_delivery", "issues.set_status", "issues.update_progress", "issues.followups_create", "issues.refresh_delivery", "issues.update", "issues.pause", "issues.resume", "issues.cancel", "issues.finish_cancel", "issues.close", "issues.reopen", "issues.dependencies", "issues.review_completions", "issues.review_sources", "issues.create_task", "issues.review_context", "issues.context_fact":
+		case "issues.set_status":
+			if x.Env.Target.Type != "issue" {
+				return protocol.Errorf(protocol.CodeForbidden, "Issue target required")
+			}
+			if x.Env.Target.ID != current.IssueID {
+				child, err := store.GetCanonicalIssue(ctx, q, x.Env.Target.ID)
+				if err != nil {
+					return err
+				}
+				var p protocol.SetIssueStatusPayload
+				if err := decodePayload(x.Env, &p); err != nil {
+					return err
+				}
+				if child.ParentIssueID != current.IssueID || child.AcceptancePolicy == nil || child.AcceptancePolicy.Creator.SourceIssueID != current.IssueID || child.BoardStatus() != protocol.IssueBacklog || p.Status != protocol.IssueTodo {
+					return protocol.Errorf(protocol.CodeForbidden, "only the creating parent may explicitly start its child from backlog")
+				}
+			}
+
+		case "issues.review_delivery", "issues.update_delivery", "issues.update_progress", "issues.followups_create", "issues.refresh_delivery", "issues.update", "issues.pause", "issues.resume", "issues.cancel", "issues.finish_cancel", "issues.close", "issues.reopen", "issues.dependencies", "issues.review_completions", "issues.review_sources", "issues.create_task", "issues.review_context", "issues.context_fact":
 			if x.Env.Target.Type != "issue" || x.Env.Target.ID != current.IssueID {
 				return protocol.Errorf(protocol.CodeForbidden, "tool target is outside this issue")
 			}

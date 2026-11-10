@@ -35,6 +35,7 @@ func TestSharedReviewExistingEvidenceGrantContextWitness(t *testing.T) {
 			}
 			sharedReviewAction(t, h, reader.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr"})
 			reader = canonicalTaskIssue(t, h, reader.IssueID)
+			reader = admitExistingIssueFixture(t, h, reader)
 			spec := protocol.OwnerTaskSpec{Goal: "Assess linked PR evidence", Acceptance: []string{"Read original contributor checks"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}}}
 			op = h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: reader.IssueID}, protocol.CreateIssueTaskPayload{Title: "Assess linked evidence", ExpectedAssignmentEpoch: reader.AssignmentEpoch, Spec: spec}, rev(reader.Revision)), CanonicalOwnerTaskCreate{})
 			var created taskResult
