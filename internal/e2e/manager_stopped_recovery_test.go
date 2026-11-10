@@ -16,15 +16,18 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 type stoppedManagerNoNative struct {
-	pin   protocol.RunExecutionPin
-	opens atomic.Int64
+	pin    protocol.RunExecutionPin
+	opens  atomic.Int64
+	normal bool
 }
 
 func (n *stoppedManagerNoNative) Refresh(context.Context) error { return nil }
@@ -36,19 +39,28 @@ func (n *stoppedManagerNoNative) Resolve(context.Context, protocol.RunExecutionP
 	return runner.ResolvedExecution{}, errors.New("recovery cannot start a worker")
 }
 func (n *stoppedManagerNoNative) ResolveManager(context.Context, protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	if n.normal {
+		return runner.ManagerExecution{Profile: n.pin.Profile, Open: func(ctx context.Context, _ string) (harness.Session, error) {
+			n.opens.Add(1)
+			return testkit.NewHarness().Open(ctx)
+		}}, nil
+	}
 	n.opens.Add(1)
 	return runner.ManagerExecution{}, errors.New("completed close cannot reopen native execution")
 }
 
 type stoppedManagerRecoveryHTTP struct {
-	t              *testing.T
-	s              *server
-	as             protocol.Assignment
-	close, stopped protocol.Envelope
-	business       string
-	settled        bool
-	mu             sync.Mutex
-	seen           []protocol.Envelope
+	t               *testing.T
+	s               *server
+	as              protocol.Assignment
+	close, stopped  protocol.Envelope
+	business        string
+	settled         bool
+	normal          bool
+	stoppedAccepted bool
+	claims          int
+	mu              sync.Mutex
+	seen            []protocol.Envelope
 }
 
 func (n *stoppedManagerRecoveryHTTP) RoundTrip(q *http.Request) (*http.Response, error) {
@@ -66,18 +78,60 @@ func (n *stoppedManagerRecoveryHTTP) RoundTrip(q *http.Request) (*http.Response,
 		n.mu.Lock()
 		n.seen = append(n.seen, env)
 		n.mu.Unlock()
-		want := n.close
-		if env.Operation == protocol.OpManagerNativeStopped {
-			want = n.stopped
-		}
-		if !reflect.DeepEqual(env, want) {
-			n.t.Error("runner changed original factual envelope", env)
+		if n.normal {
+			n.mu.Lock()
+			want := &n.close
+			if env.Operation == protocol.OpManagerNativeStopped {
+				want = &n.stopped
+			}
+			if want.RequestID == "" {
+				*want = env
+			}
+			if !reflect.DeepEqual(env, *want) {
+				n.t.Error("normal recovery changed original envelope", env)
+			}
+			gotHash, hashErr := protocol.PayloadHash(&env)
+			wantHash, wantErr := protocol.PayloadHash(want)
+			if hashErr != nil || wantErr != nil || gotHash != wantHash {
+				n.t.Error("normal recovery changed original payload hash", hashErr, wantErr)
+			}
+			if env.Operation == protocol.OpManagerNativeStopped {
+				var p protocol.ManagerStoppedPayload
+				if err := json.Unmarshal(env.Payload, &p); err != nil || p.LastSequence != 3 {
+					n.t.Error("physical stop changed original event cursor", p, err)
+				}
+			}
+			pending := env.Operation == protocol.OpManagerNativeReply && !n.stoppedAccepted
+			n.mu.Unlock()
+			if pending {
+				// A completed native operation has not yet been accepted by the
+				// server. Never synthesize success; real App handles both facts
+				// after the runner's independently confirmed physical stop.
+				body, _ := json.Marshal(map[string]any{"error": protocol.Errorf(protocol.CodeUnknownOutcome, "native close must cover all applied events")})
+				return &http.Response{StatusCode: http.StatusConflict, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: q}, nil
+			}
+		} else {
+			want := n.close
+			if env.Operation == protocol.OpManagerNativeStopped {
+				want = n.stopped
+			}
+			if !reflect.DeepEqual(env, want) {
+				n.t.Error("runner changed original factual envelope", env)
+			}
 		}
 	} else if env.Operation == protocol.OpManagerNativeClaim {
-		n.t.Error("closed manager reopened native command admission")
+		if !n.normal {
+			n.t.Error("closed manager reopened native command admission")
+		}
+		n.mu.Lock()
+		n.claims++
+		n.mu.Unlock()
 	}
 	response, err := http.DefaultTransport.RoundTrip(q)
 	if err == nil && response.StatusCode == http.StatusOK && env.Operation == protocol.OpManagerNativeStopped {
+		n.mu.Lock()
+		n.stoppedAccepted = true
+		n.mu.Unlock()
 		if n.s.count(`SELECT COUNT(*) FROM runs r JOIN leases l USING(run_id) WHERE r.run_id=? AND r.observed_state='failed' AND l.status='released'`, n.as.RunID) != 1 {
 			n.t.Error("physical stop did not release the original server run")
 		}
@@ -126,11 +180,13 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 			t.Fatal(err)
 		}
 	}
-	revision := s.task(as.TaskID).ControlRevision
-	raw := mustClosedFactsJSON(t, map[string]any{})
-	op, err := s.app.Execute(ctx, owner, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: "tasks.cancel", Target: protocol.Target{Type: "task", ID: as.TaskID}, ExpectedControlRevision: &revision, Payload: raw}, app.CancelTask{})
-	if err != nil || op.Status != protocol.OpSucceeded {
-		t.Fatal(op, err)
+	if !options.normal {
+		revision := s.task(as.TaskID).ControlRevision
+		raw := mustClosedFactsJSON(t, map[string]any{})
+		op, err := s.app.Execute(ctx, owner, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: "tasks.cancel", Target: protocol.Target{Type: "task", ID: as.TaskID}, ExpectedControlRevision: &revision, Payload: raw}, app.CancelTask{})
+		if err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatal(op, err)
+		}
 	}
 	if _, err := j.NextProcessGeneration(ctx); err != nil {
 		t.Fatal(err)
@@ -145,8 +201,8 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 			t.Fatal(err)
 		}
 	}
-	transport := &stoppedManagerRecoveryHTTP{t: t, s: s, as: as, close: closeEnvelope, stopped: stopped, business: business, settled: options.settled}
-	executions := &stoppedManagerNoNative{pin: *as.Execution}
+	transport := &stoppedManagerRecoveryHTTP{t: t, s: s, as: as, close: closeEnvelope, stopped: stopped, business: business, settled: options.settled, normal: options.normal}
+	executions := &stoppedManagerNoNative{pin: *as.Execution, normal: options.normal}
 	// Maintenance only prevents unrelated claims. The real Hello still admits
 	// recovery of the exact stopped manager through the normal executor path.
 	r := runner.New(runner.Config{ServerURL: s.url, HostID: "linux-1", HostToken: hostToken, Journal: j,
@@ -168,17 +224,32 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 		_, err := j.Run(ctx, as.RunID)
 		return errors.Is(err, journal.ErrNotFound)
 	})
+	if options.normal && run.Err() != nil {
+		t.Fatal("normal deadline required external cancellation", run.Err())
+	}
 	stop()
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		t.Fatal(runErr)
 	}
-	if executions.opens.Load() != 0 {
-		t.Fatal("physical receipt recovery attempted another native execution")
+	wantOpens := int64(0)
+	if options.normal {
+		wantOpens = 1
+	}
+	if executions.opens.Load() != wantOpens {
+		t.Fatal("physical receipt recovery changed native execution count", executions.opens.Load())
 	}
 	transport.mu.Lock()
 	seen := append([]protocol.Envelope(nil), transport.seen...)
 	transport.mu.Unlock()
-	if len(seen) != 2 || !reflect.DeepEqual(seen[0], stopped) || !reflect.DeepEqual(seen[1], closeEnvelope) {
+	if options.normal {
+		if len(seen) < 3 || seen[0].Operation != protocol.OpManagerNativeReply || !transport.stoppedAccepted || transport.claims != 1 || !reflect.DeepEqual(seen[len(seen)-1], transport.close) {
+			t.Fatal("normal deadline did not preserve its original close across actual physical stop", seen)
+		}
+		closeEnvelope = transport.close
+		if t.Context().Err() != nil {
+			t.Fatal("normal recovery required external cancellation")
+		}
+	} else if len(seen) != 2 || !reflect.DeepEqual(seen[0], stopped) || !reflect.DeepEqual(seen[1], closeEnvelope) {
 		t.Fatal("original close blocked physical stop or changed its identity", seen)
 	}
 	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND run_id=? AND status='completed' AND json_extract(result_json,'$.last_sequence')=3 AND COALESCE(json_extract(result_json,'$.error'),'')=''`, closeResultID(t, closeEnvelope), as.RunID) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) != 0 {

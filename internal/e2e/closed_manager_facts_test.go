@@ -45,7 +45,7 @@ func TestFault_ManagerStoppedSettledCloseHTTPRecovery(t *testing.T) {
 	}
 }
 
-type closedManagerRecoveryOptions struct{ runner, settled, bounded bool }
+type closedManagerRecoveryOptions struct{ runner, settled, bounded, normal bool }
 
 func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	t.Helper()
@@ -180,38 +180,40 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	native(protocol.OpManagerNativeClaim, map[string]any{})
-	if err := s.store.Write(ctx, func(tx *store.Tx) error {
-		if err := tx.UpdateRunObserved(ctx, as.RunID, protocol.RunUnknown, s.now().UnixMilli()); err != nil {
+	if !options.normal {
+		native(protocol.OpManagerNativeClaim, map[string]any{})
+		if err := s.store.Write(ctx, func(tx *store.Tx) error {
+			if err := tx.UpdateRunObserved(ctx, as.RunID, protocol.RunUnknown, s.now().UnixMilli()); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE leases SET status='lapsed' WHERE run_id=?`, as.RunID)
 			return err
+		}); err != nil {
+			t.Fatal(err)
 		}
-		_, err := tx.Exec(ctx, `UPDATE leases SET status='lapsed' WHERE run_id=?`, as.RunID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	prepare, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest)}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var old store.RunRow
-	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-		var err error
-		old, err = store.GetRun(ctx, tx.Q(), as.RunID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	plan := protocol.CommittedMaintenancePlan{MaintenanceID: "closed-facts-fixture", RequestID: s.ids.New(protocol.PrefixRequest), LinkRequestID: s.ids.New(protocol.PrefixRequest), PreparationRevision: prepare.Revision, Previous: protocol.UpgradeBinding{InstanceID: "server", ProcessInstanceID: "previous", ArtifactSHA256: strings.Repeat("a", 64)}, Successor: protocol.UpgradeBinding{UpgradeID: "closed-facts-fixture", InstanceID: "server", ProcessInstanceID: "successor", ArtifactSHA256: strings.Repeat("b", 64)}, ReceiptRecoveryStop: &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{{TaskID: as.TaskID, Run: protocol.RunView{RunID: as.RunID, Role: as.Role, Host: old.HostID, Generation: old.Generation, SpecVersion: 1, Observed: old.ObservedState}}}}}
-	process := protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: "successor", SHA256: plan.Successor.ArtifactSHA256}
-	if _, err := s.app.RegisterCommittedMaintenance(ctx, plan, process); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.app.LinkCommittedMaintenance(ctx, protocol.CommittedMaintenanceReceipt{MaintenanceID: plan.MaintenanceID, RequestID: plan.RequestID, Previous: plan.Previous, Successor: plan.Successor, Process: process, Generation: 9, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest), ExpectedControlRevision: prepare.Revision}, false); err != nil {
-		t.Fatal(err)
+		prepare, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest)}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var old store.RunRow
+		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			var err error
+			old, err = store.GetRun(ctx, tx.Q(), as.RunID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		plan := protocol.CommittedMaintenancePlan{MaintenanceID: "closed-facts-fixture", RequestID: s.ids.New(protocol.PrefixRequest), LinkRequestID: s.ids.New(protocol.PrefixRequest), PreparationRevision: prepare.Revision, Previous: protocol.UpgradeBinding{InstanceID: "server", ProcessInstanceID: "previous", ArtifactSHA256: strings.Repeat("a", 64)}, Successor: protocol.UpgradeBinding{UpgradeID: "closed-facts-fixture", InstanceID: "server", ProcessInstanceID: "successor", ArtifactSHA256: strings.Repeat("b", 64)}, ReceiptRecoveryStop: &protocol.CommittedReceiptRecoveryStop{Runs: []protocol.CommittedRetainedRun{{TaskID: as.TaskID, Run: protocol.RunView{RunID: as.RunID, Role: as.Role, Host: old.HostID, Generation: old.Generation, SpecVersion: 1, Observed: old.ObservedState}}}}}
+		process := protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: "successor", SHA256: plan.Successor.ArtifactSHA256}
+		if _, err := s.app.RegisterCommittedMaintenance(ctx, plan, process); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.app.LinkCommittedMaintenance(ctx, protocol.CommittedMaintenanceReceipt{MaintenanceID: plan.MaintenanceID, RequestID: plan.RequestID, Previous: plan.Previous, Successor: plan.Successor, Process: process, Generation: 9, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest), ExpectedControlRevision: prepare.Revision}, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 	j, err := journal.Open(ctx, filepath.Join(t.TempDir(), "journal.db"), s.now)
 	if err != nil {
@@ -224,8 +226,10 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	if err := j.SetThread(ctx, as.RunID, thread); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := j.NextAttempt(ctx, as.RunID); err != nil {
-		t.Fatal(err)
+	if !options.normal {
+		if _, err := j.NextAttempt(ctx, as.RunID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, body := range eventBodies {
 		env := protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeEvent, Target: target}
@@ -235,6 +239,10 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 		if err := j.DeleteRequest(ctx, env.RequestID); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if options.normal {
+		recoverStoppedManagerHTTP(t, s, j, as, runtime, protocol.Envelope{}, protocol.Envelope{}, business, turn, options)
+		return
 	}
 	if _, _, err := j.ManagerOperation(ctx, as.RunID, protocol.ManagerNativeRequest{ID: closeID, Method: "close", Payload: json.RawMessage(`{}`)}); err != nil {
 		t.Fatal(err)

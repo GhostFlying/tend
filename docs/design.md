@@ -211,6 +211,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D208 | Manager 已接受的原生工具模式属于线程 binding 身份，关闭、park 和回执恢复只改变当前许可，不改写该模式或历史绑定；新执行仍按协商能力准入。 | 已实现 |
 | D209 | 当前负责协调者可显式解除 Agent 自己设置的技术等待；管理换代后的原已停止 handoff 可在当前 epoch 下显式承接相同命名执行责任，保留原合同、原 Run 及 owner 等待边界。 | 已实现 |
 | D210 | 已关闭 manager 在停止后以 runner lifetime 有界恢复原回执，物理停止与业务回执独立结算；不重复原生工作。 | 已实现 |
+| D211 | Manager 原生回执投递使用既有 RequestTimeout 的单次总预算，到期保留原事实并退出到真实停止与回执恢复，不限制模型执行。 | 已实现 |
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |
 
@@ -1619,3 +1620,14 @@ runner 已持久化成功的原 native close 后，即使 owner 后来停止该 
 retained 期间不自行结清，正式 Stop 后
 只恢复原关闭事实，不重新附着或调用 provider。没有成功 close 的原执行继续原有
 核验路径。不改变 wire/API/schema；见[实施计划](plans/manager-close-recovery.md)。
+
+## D211：Manager 回执阶段的单次总预算
+
+正常 manager 原生操作完成后，原 reply 的投递以既有 RequestTimeout 作为整个阶段
+预算。该 deadline 在 retry 循环外建立，不因逐次 HTTP 重试或退避续期；更短的调用方
+预算仍生效。native command 与模型执行本身在该阶段之外，不增加模型时间限制。
+
+回执超时不改变原请求身份、payload、游标或 unknown，不授权重放。已有真实 close
+与物理退出确认仍按原条件收尾，然后分别传原事件、stopped 与迟到原 reply；只读
+传输按真实原历史结算业务。没有真实退出证明的原执行仍保持未知与 fencing。
+不新增配置、协议、迁移或权限；见[实施计划](plans/manager-receipt-deadline.md)。

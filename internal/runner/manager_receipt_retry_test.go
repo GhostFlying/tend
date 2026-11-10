@@ -36,7 +36,7 @@ func TestManagerReceiptBackoffBoundsRequestsAndPreservesEnvelope(t *testing.T) {
 						t.Error("receipt retry changed its original envelope or identity")
 					}
 					attempts.Add(1)
-					if attempts.Load() <= 5 {
+					if attempts.Load() <= 4 {
 						if failure == "transport" {
 							return nil, errors.New("connection lost")
 						}
@@ -67,13 +67,8 @@ func TestManagerReceiptBackoffBoundsRequestsAndPreservesEnvelope(t *testing.T) {
 				if attempts.Load() != 4 {
 					t.Fatalf("unconfirmed receipt was retried too often: attempts = %d at 29s, want 4", attempts.Load())
 				}
-				time.Sleep(30 * time.Second)
-				synctest.Wait()
-				if attempts.Load() != 5 {
-					t.Fatalf("unconfirmed receipt was retried too often: attempts = %d at 59s, want 5", attempts.Load())
-				}
 				time.Sleep(time.Second)
-				if err := <-done; err != nil || attempts.Load() != 6 {
+				if err := <-done; err != nil || attempts.Load() != 5 {
 					t.Fatalf("receipt did not recover within its retry bound: attempts = %d, error = %v", attempts.Load(), err)
 				}
 			})
@@ -94,7 +89,7 @@ func TestManagerReceiptBackoffCancellationAndLongConfiguredDelay(t *testing.T) {
 					}
 					return managerReceiptHTTPResponse(http.StatusOK, rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
 				})}
-				r := New(Config{ServerURL: "http://runner.invalid", HTTPClient: client, Now: time.Now, RetryDelay: time.Minute, Log: slog.New(slog.DiscardHandler)})
+				r := New(Config{ServerURL: "http://runner.invalid", HTTPClient: client, Now: time.Now, RetryDelay: 2 * time.Minute, Log: slog.New(slog.DiscardHandler)})
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				done := make(chan error, 1)
@@ -115,8 +110,8 @@ func TestManagerReceiptBackoffCancellationAndLongConfiguredDelay(t *testing.T) {
 					return
 				}
 				time.Sleep(time.Second)
-				if err := <-done; err != nil || attempts.Load() != 2 {
-					t.Fatalf("receipt did not resume after configured delay: attempts = %d, error = %v", attempts.Load(), err)
+				if err := <-done; !errors.Is(err, context.DeadlineExceeded) || attempts.Load() != 1 {
+					t.Fatalf("configured retry delay exceeded the total receipt budget: attempts = %d, error = %v", attempts.Load(), err)
 				}
 			})
 		})
