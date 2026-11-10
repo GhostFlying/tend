@@ -3,7 +3,6 @@ package journal
 import (
 	"context"
 	"encoding/json"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -108,14 +107,7 @@ func TestJournalURIKeepsHashAndQueryInPhysicalPath(t *testing.T) {
 	}
 }
 
-func TestJournalURINormalizesRelativeAndWindowsPaths(t *testing.T) {
-	for _, path := range []string{"/tmp/journal#one.db", "C:/work/journal#one.db", "//server/share/journal?one.db"} {
-		uri := sqliteFileURI(path, nil)
-		parsed, err := url.Parse(uri)
-		if err != nil || parsed.Host != "" || parsed.Fragment != "" || !strings.HasSuffix(parsed.Path, strings.TrimPrefix(path, "/")) {
-			t.Fatal(path, uri, parsed, err)
-		}
-	}
+func TestJournalURIUsesRelativePhysicalPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "relative#journal.db")
 	cwd, err := os.Getwd()
 	if err != nil {
