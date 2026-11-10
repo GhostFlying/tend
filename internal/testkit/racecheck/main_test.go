@@ -3,7 +3,10 @@ package main
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"testing"
+
+	"github.com/GhostFlying/tend/internal/testkit/testbudget"
 )
 
 func TestCIGroupsPartitionPackagesExactlyOnce(t *testing.T) {
@@ -128,5 +131,44 @@ func TestCountPreservesRaceTimeoutAndNativeCachingByDefault(t *testing.T) {
 	}
 	if got := testArgs("2m", 1); !slices.Equal(got, []string{"test", "-race", "-timeout", "2m", "-count", "1"}) {
 		t.Fatal(got)
+	}
+}
+
+func TestRaceBudgetUsesActualPhaseInsteadOfUnselectedAppShards(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		cpus, app, suite      int
+		packages              []string
+		wantPeak, wantThreads int
+	}{
+		{"other on small runner", 4, 4, 4, []string{"example/store", "example/sandbox"}, 1, 4},
+		{"app on small runner", 4, 4, 1, []string{appPackage}, 4, 1},
+		{"api", 8, 4, 2, []string{"github.com/GhostFlying/tend/internal/api"}, 2, 4},
+		{"transport", 8, 4, 2, []string{e2ePackage}, 2, 4},
+		{"all concurrent shards", 16, 2, 2, []string{appPackage, e2ePackage,
+			"github.com/GhostFlying/tend/internal/api", "github.com/GhostFlying/tend/internal/mainthread", "example/store"}, 6, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, peak, err := raceEnvironment(tc.cpus, tc.app, tc.suite, tc.packages, nil)
+			if err != nil || peak != tc.wantPeak || testbudget.Value(env, "GOMAXPROCS") != strconv.Itoa(tc.wantThreads) {
+				t.Fatal(env, peak, err)
+			}
+		})
+	}
+}
+
+func TestRaceAutomaticPhaseBudgetFitsEffectiveCPUs(t *testing.T) {
+	selected := []string{appPackage, e2ePackage, "github.com/GhostFlying/tend/internal/api",
+		"github.com/GhostFlying/tend/internal/mainthread", "example/store", "example/sandbox", "example/new"}
+	for cpus := 1; cpus <= 128; cpus++ {
+		shards := max(1, min(4, cpus/8))
+		env, peak, err := raceEnvironment(cpus, shards, shards, selected, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		threads, err := strconv.Atoi(testbudget.Value(env, "GOMAXPROCS"))
+		if err != nil || peak*threads > cpus {
+			t.Fatalf("effectiveCPUs=%d peak=%d env=%v err=%v", cpus, peak, env, err)
+		}
 	}
 }

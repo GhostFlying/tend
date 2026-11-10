@@ -6,6 +6,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -103,5 +105,133 @@ esac
 	data, err := os.ReadFile(record)
 	if err != nil || strings.Count(string(data), "-run ") != 2 || !strings.Contains(string(data), "TestPeer") {
 		t.Fatal("peer shard did not finish", string(data), err)
+	}
+}
+
+func TestIndependentGoSubprocessesReceiveDefaultsOrPreserveParentBudget(t *testing.T) {
+	for _, tc := range []struct{ name, flags, procs, wantFlags, wantProcs string }{
+		{"standalone", "", "", "-p=1", "4"},
+		{"parent check", "-trimpath -p=3", "2", "-trimpath -p=3", "2"},
+		{"explicit package", "-p=2", "", "-p=2", "2"},
+		{"explicit threads", "-trimpath", "3", "-trimpath -p=1", "3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			directory := t.TempDir()
+			selected, record := filepath.Join(directory, "selected go"), filepath.Join(directory, "commands")
+			script := `#!/bin/sh
+printf '%s|%s|%s\n' "$GOFLAGS" "$GOMAXPROCS" "$*" >> "$RECORD"
+case "$1" in
+ list) printf '%s\n' 'example/store' 'example/sandbox' ;;
+esac
+`
+			if err := os.WriteFile(selected, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("RECORD", record)
+			t.Setenv("GOFLAGS", tc.flags)
+			t.Setenv("GOMAXPROCS", tc.procs)
+			if err := checkWithCPUs(t.Context(), 4, selected, 4, 4, 0, "1m", "other", "", []string{"./..."}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+			if len(lines) != 2 {
+				t.Fatal("package discovery or complete package run lost", lines)
+			}
+			for _, line := range lines {
+				parts := strings.SplitN(line, "|", 3)
+				if len(parts) != 3 {
+					t.Fatal("invalid fake Go observation", line)
+				}
+				// Discovery uses a single-process phase; the actual test phase
+				// must budget both selected packages for an explicit -p=2.
+				wantProcs := tc.wantProcs
+				if strings.HasPrefix(parts[2], "list ") && tc.name == "explicit package" {
+					wantProcs = "4"
+				}
+				if parts[0] != tc.wantFlags || parts[1] != wantProcs || strings.Contains(parts[2], "-count") {
+					t.Fatal("inherited budget or native cache changed", line)
+				}
+			}
+			if !strings.Contains(string(data), "example/sandbox example/store") {
+				t.Fatal("new packages omitted", string(data))
+			}
+		})
+	}
+}
+
+func TestBudgetedAllEntryPointDiscoversEveryRootAndKeepsExplicitCount(t *testing.T) {
+	directory := t.TempDir()
+	selected, record := filepath.Join(directory, "selected go"), filepath.Join(directory, "commands")
+	script := `#!/bin/sh
+printf '%s|%s|%s\n' "$GOFLAGS" "$GOMAXPROCS" "$*" >> "$RECORD"
+case "$1" in
+ list) printf '%s\n' "$PACKAGES" ;;
+ test) case "$*" in *-list*) printf '%s\n' TestOne TestTwo ExampleNew FuzzNew ;; esac ;;
+esac
+`
+	if err := os.WriteFile(selected, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sharded := []string{appPackage, e2ePackage, "github.com/GhostFlying/tend/internal/api", "github.com/GhostFlying/tend/internal/mainthread"}
+	t.Setenv("PACKAGES", strings.Join(append(slices.Clone(sharded), "example/new", "example/store"), "\n"))
+	t.Setenv("RECORD", record)
+	t.Setenv("GOFLAGS", "-trimpath")
+	t.Setenv("GOMAXPROCS", "")
+	if err := checkWithCPUs(t.Context(), 16, selected, 2, 2, 1, "1m", "all", "", []string{"./..."}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]int)
+	unsharded := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 || parts[0] != "-trimpath -p=1" {
+			t.Fatal("Go subprocess omitted package budget", line)
+		}
+		args := strings.Fields(parts[2])
+		if args[0] == "list" {
+			continue
+		}
+		if parts[1] != "2" {
+			t.Fatal("concurrent shard phase omitted thread budget", line)
+		}
+		if slices.Contains(args, "-list") {
+			continue
+		}
+		if !strings.Contains(parts[2], "-race -timeout 1m -count 1") {
+			t.Fatal("race, original deadline or explicit count lost", line)
+		}
+		i := slices.Index(args, "-run")
+		if i < 0 {
+			unsharded++
+			if !slices.Contains(args, "example/new") || !slices.Contains(args, "example/store") {
+				t.Fatal("unrecognized packages dropped", args)
+			}
+			continue
+		}
+		pattern := regexp.MustCompile(args[i+1])
+		pkg := args[len(args)-1]
+		for _, root := range []string{"TestOne", "TestTwo", "ExampleNew", "FuzzNew"} {
+			if pattern.MatchString(root) {
+				seen[pkg+"/"+root]++
+			}
+		}
+	}
+	if unsharded != 1 {
+		t.Fatal("unsharded phase omitted or repeated", unsharded)
+	}
+	for _, pkg := range sharded {
+		for _, root := range []string{"TestOne", "TestTwo", "ExampleNew", "FuzzNew"} {
+			if seen[pkg+"/"+root] != 1 {
+				t.Fatal("discovered root omitted or repeated", seen)
+			}
+		}
 	}
 }

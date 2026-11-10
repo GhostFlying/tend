@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/GhostFlying/tend/internal/testkit/testbudget"
 )
 
 const appPackage = "github.com/GhostFlying/tend/internal/app"
@@ -73,8 +75,9 @@ func packagePhases(packages []string) (others, isolated []string, app bool) {
 	return others, isolated, app
 }
 
-func run(ctx context.Context, report, command string, args ...string) (err error) {
+func run(ctx context.Context, env []string, report, command string, args ...string) (err error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if report != "" {
 		file, createErr := os.Create(report)
@@ -87,8 +90,9 @@ func run(ctx context.Context, report, command string, args ...string) (err error
 	return cmd.Run()
 }
 
-func output(ctx context.Context, command string, args ...string) ([]byte, error) {
+func output(ctx context.Context, env []string, command string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Env = env
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
 }
@@ -158,7 +162,41 @@ func testArgs(timeout string, count int) []string {
 	return args
 }
 
+func raceEnvironment(cpus, shards, suiteShards int, packages, source []string) (env []string, peak int, err error) {
+	parallel, _, err := testbudget.PackageLimit(testbudget.Value(source, "GOFLAGS"), testbudget.Packages(cpus, 1))
+	if err != nil {
+		return nil, 0, err
+	}
+	others, isolated, app := packagePhases(packages)
+	var unsharded, bulk int
+	for _, pkg := range others {
+		if suiteShards > 1 && (packageGroup(pkg) == "api" || packageGroup(pkg) == "mainthread") {
+			bulk += suiteShards
+		} else {
+			unsharded++
+		}
+	}
+	if app {
+		bulk += shards
+	}
+	peak = max(1, min(parallel, unsharded), bulk)
+	if len(isolated) > 0 {
+		peak = max(peak, suiteShards)
+	}
+	env, err = testbudget.GoEnvironment(source, parallel, testbudget.Procs(cpus, peak))
+	return env, peak, err
+}
+
 func check(ctx context.Context, goTool string, shards, suiteShards, count int, timeout, group, reportDir string, packages []string) error {
+	return checkWithCPUs(ctx, runtime.GOMAXPROCS(0), goTool, shards, suiteShards, count, timeout, group, reportDir, packages)
+}
+
+func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteShards, count int, timeout, group, reportDir string, packages []string) error {
+	source := os.Environ()
+	env, err := testbudget.GoEnvironment(source, testbudget.Packages(cpus, 1), testbudget.Procs(cpus, 1))
+	if err != nil {
+		return err
+	}
 	var reports string
 	if reportDir != "" {
 		if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -180,7 +218,7 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 		}
 		return filepath.Join(reports, name+".jsonl")
 	}
-	listed, err := output(ctx, goTool, append([]string{"list"}, packages...)...)
+	listed, err := output(ctx, env, goTool, append([]string{"list"}, packages...)...)
 	if err != nil {
 		return fmt.Errorf("list packages: %w", err)
 	}
@@ -188,6 +226,13 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 	if err != nil {
 		return err
 	}
+	env, peak, err := raceEnvironment(cpus, shards, suiteShards, selected, source)
+	if err != nil {
+		return err
+	}
+	parallel, explicit, _ := testbudget.PackageLimit(testbudget.Value(source, "GOFLAGS"), testbudget.Packages(cpus, 1))
+	fmt.Printf("[race] group=%s effective-cpus=%d app-shards=%d suite-shards=%d peak-processes=%d Go-package-parallel=%d GOMAXPROCS=%s inherited-package-limit=%t inherited-procs=%t\n",
+		group, cpus, shards, suiteShards, peak, parallel, testbudget.Value(env, "GOMAXPROCS"), explicit, strings.TrimSpace(testbudget.Value(source, "GOMAXPROCS")) != "")
 	others, isolated, app := packagePhases(selected)
 	type command struct {
 		name string
@@ -198,7 +243,7 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 		if count == 1 {
 			return []command{{name, append(slices.Clone(args), pkg)}}, nil
 		}
-		list, err := output(ctx, goTool, "test", "-race", "-list", ".", pkg)
+		list, err := output(ctx, env, goTool, "test", "-race", "-list", ".", pkg)
 		if err != nil {
 			return nil, fmt.Errorf("list %s test roots: %w", pkg, err)
 		}
@@ -220,7 +265,7 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 		for _, command := range commands {
 			wg.Go(func() {
 				fmt.Printf("race %s started\n", command.name)
-				err := run(ctx, report(command.name), goTool, command.args...)
+				err := run(ctx, env, report(command.name), goTool, command.args...)
 				fmt.Printf("race %s finished: %v\n", command.name, err)
 				results <- err
 			})
@@ -246,7 +291,7 @@ func check(ctx context.Context, goTool string, shards, suiteShards, count int, t
 		}
 	}
 	if len(unsharded) > 0 {
-		failures = append(failures, run(ctx, report("packages"), goTool, append(slices.Clone(args), orderPackages(unsharded, packageCosts)...)...))
+		failures = append(failures, run(ctx, env, report("packages"), goTool, append(slices.Clone(args), orderPackages(unsharded, packageCosts)...)...))
 	}
 	// Standalone all-package checks retain an independent transport phase. The
 	// local scheduler additionally reserves the entire phase on small machines.
