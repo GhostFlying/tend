@@ -306,10 +306,10 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, ctx, "dispatch source and completed reply are classified and committed", func() bool {
+	waitFor(t, ctx, "dispatch source and completed reply retain actual completed processing", func() bool {
 		var page protocol.ConversationPage
 		c.call(http.MethodGet, fmt.Sprintf("/api/v1/conversation?after=%d&limit=200", dispatchSeq-1), nil, &page)
-		sourceDone, replyDone, committed := false, false, false
+		sourceDone, replyDone := false, false
 		for _, item := range page.Items {
 			if item.MessageID != dispatchSource && item.ReplyTo != dispatchSource {
 				continue
@@ -318,8 +318,9 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 				if item.Tool.Status == protocol.ToolFailed || bytes.Contains([]byte(item.Tool.Output), []byte(`"ok":false`)) {
 					t.Fatalf("dispatch tool failed: %+v", item.Tool)
 				}
-				if item.Tool.Name == "conversation_turn_commit" && item.Tool.Status == protocol.ToolCompleted {
-					committed = true
+				switch item.Tool.Name {
+				case "conversation_turn_commit", "issues_context_review", "issues_turn_commit":
+					t.Fatalf("normal work invoked retired source ceremony: %s", item.Tool.Name)
 				}
 				continue
 			}
@@ -333,16 +334,16 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 				t.Fatal(err)
 			}
 			linked := associations.Disposition == "linked" && len(associations.Items) == 1 && associations.Items[0].WorkItemID == dispatchedIssue
-			reviewed := associations.FactsReviewed && associations.Processing != nil && associations.Processing.Status == "completed"
+			processed := associations.Processing != nil && associations.Processing.Status == "completed"
 			if item.MessageID == dispatchSource {
 				// Owner metadata may point at an active manager turn sharing this
-				// source. The completed assistant below witnesses the main commit.
-				sourceDone = linked && associations.FactsReviewed && item.State == protocol.MessageReplied
+				// source. Completion below still requires the actual native reply.
+				sourceDone = linked && item.State == protocol.MessageReplied
 			} else if item.Author == "main_agent" {
-				replyDone = linked && reviewed && item.AssistantState == protocol.AssistantCompleted
+				replyDone = linked && processed && item.AssistantState == protocol.AssistantCompleted
 			}
 		}
-		return sourceDone && replyDone && committed
+		return sourceDone && replyDone
 	})
 	c.call(http.MethodGet, "/api/v1/issues?include_closed=true&limit=100", nil, &after)
 	if len(after.Items) != len(allBefore.Items)+2 {

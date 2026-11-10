@@ -109,11 +109,11 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 	}
 	var issue protocol.IssueView
 	if manager {
-		if !c.reviewCurrentIssue(&issue) {
+		if !c.invoke("issues_read", struct{}{}, &issue) {
 			return "failed"
 		}
 	}
-	// Repair turns review metadata only; they never repeat business operations.
+	// A scripted recovery-only turn never repeats business operations.
 	respond := false
 	createdIssue := ""
 	replySource := ""
@@ -251,9 +251,9 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 					return "failed"
 				}
 			}
-			// Separate native message items make a real multi-page transcript while
-			// a bounded number of reads avoids quadratic seed/tool bookkeeping.
-			for n := 0; n < 40; n++ {
+			// Native message items alone exceed the transcript's 50-item first
+			// page. Pagination must not depend on obsolete review tool frames.
+			for n := 0; n < 60; n++ {
 				if ctx.Err() != nil {
 					return "interrupted"
 				}
@@ -298,7 +298,7 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 			return "interrupted"
 		}
 	}
-	// Keep the metadata read/CAS sequence isolated from other scripted tools.
+	// Keep source association writes isolated from other scripted tools.
 	// Streaming and business planning remain concurrent; native event consumers
 	// must be free to persist the completed frame before this section begins.
 	select {
@@ -308,11 +308,6 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 	}
 	c.locked = true
 	defer func() { coordination <- struct{}{} }()
-	if manager {
-		if !c.reviewCurrentIssue(&issue) {
-			return "failed"
-		}
-	}
 	if !c.invoke(read, struct{}{}, &state) {
 		return "failed"
 	}
@@ -374,17 +369,6 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 		}
 	}
 
-	commit := protocol.LogicalTurnCommit{Contexts: state.Contexts}
-	for _, message := range state.Messages {
-		commit.Messages = append(commit.Messages, protocol.LogicalTurnReview{MessageID: message.MessageID, ContentRevision: message.ContentRevision, AssociationRevision: message.Revision})
-	}
-	if manager {
-		if !c.mutate("issues_turn_commit", "", nil, commit, nil) {
-			return "failed"
-		}
-	} else if !c.invoke("conversation_turn_commit", commit, nil) {
-		return "failed"
-	}
 	inputTokens, outputTokens := int64(240), int64(80)
 	th.Emit(harness.Event{Kind: harness.EventRequestUsage, TurnID: turn, RequestUsage: &protocol.TokenUsageSample{Source: "sandbox-script", RequestID: turn, ThreadID: th.ID(), Revision: 1, Settlement: "final", Model: model, Input: &inputTokens, Output: &outputTokens}})
 	return "completed"
@@ -493,33 +477,6 @@ func (c *toolCaller) managerMessage(source string, wanted map[string]int64) (*pr
 		}
 		after = page.Next
 	}
-}
-
-// Review retries only a stale read/CAS, never a business mutation. Every retry
-// reads the actual source versions through the same hosted tool boundary.
-func (c *toolCaller) reviewCurrentIssue(issue *protocol.IssueView) bool {
-	for attempt := 0; attempt < 5; attempt++ {
-		var current protocol.IssueView
-		if !c.invoke("issues_read", struct{}{}, &current) {
-			return false
-		}
-		*issue = current
-		if c.reviewIssue(*issue) {
-			return true
-		}
-		if !delay(c.ctx, 25*time.Millisecond) {
-			return false
-		}
-	}
-	return false
-}
-
-func (c *toolCaller) reviewIssue(issue protocol.IssueView) bool {
-	review := protocol.IssueContextReview{ExpectedAssignmentEpoch: issue.AssignmentEpoch, ContextRevision: issue.ContextRevision, Summary: "已检查沙盒来源与当前上下文；没有额外事实。", Sources: []protocol.LogicalTurnReview{}}
-	for _, source := range issue.SourceReviews {
-		review.Sources = append(review.Sources, protocol.LogicalTurnReview{MessageID: source.MessageID, ContentRevision: source.ContentRevision, AssociationRevision: source.AssociationRevision})
-	}
-	return c.mutate("issues_context_review", issue.IssueID, nil, review, nil)
 }
 
 func streamReply(ctx context.Context, th *testkit.FakeThread, turn, response string, duration time.Duration, firstDelta func()) bool {
