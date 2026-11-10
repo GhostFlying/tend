@@ -62,7 +62,7 @@ func (SetIssueMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store
 		return Outcome{}, err
 	}
 	narration := *x
-	narration.Principal = x.ActualPrincipal()
+	narration.associationDisplayOnly = true
 	out, err := applyMessageAssociations(ctx, &narration, tx, protocol.SetMessageAssociationsPayload{WorkItemIDs: p.IssueIDs, Disposition: p.Disposition, ContentRevision: p.ContentRevision}, true)
 	if err != nil {
 		return Outcome{}, err

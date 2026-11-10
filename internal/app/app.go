@@ -40,6 +40,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	associationDisplayOnly        bool // Keep narration bookkeeping separate from owner authority.
 	requestDomain                 string
 	managedHostedRuntimes         map[string]bool
 	serverDeliveryObservations    bool

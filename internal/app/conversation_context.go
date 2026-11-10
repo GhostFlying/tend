@@ -77,11 +77,13 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 			}
 		}
 	}
+	authorityOwner := x.Principal.Kind == protocol.PrincipalOwner
+	classificationOwner := authorityOwner && !x.associationDisplayOnly
 	same := old.Disposition == p.Disposition && len(old.Items) == len(desired)
 	for _, item := range old.Items {
 		same = same && desired[item.WorkItemID]
 	}
-	if same && (x.Principal.Kind != protocol.PrincipalOwner || old.OwnerLocked) {
+	if same && (!classificationOwner || old.OwnerLocked) {
 		if err := attachAssociationReviewSource(ctx, x, tx, old.MessageID, canonical); err != nil {
 			return Outcome{}, err
 		}
@@ -91,7 +93,7 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner message classification cannot be overridden")
 	}
 	source := "agent"
-	owner := x.Principal.Kind == protocol.PrincipalOwner
+	owner := classificationOwner
 	if owner {
 		source = "owner"
 	}
@@ -109,7 +111,7 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT owner_locked FROM message_work_items WHERE message_id=? AND work_item_id=?),0),COALESCE((SELECT active FROM message_work_items WHERE message_id=? AND work_item_id=?),0)`, old.MessageID, id, old.MessageID, id).Scan(&locked, &active); err != nil {
 			return Outcome{}, err
 		}
-		if !owner && locked && active != desired[id] {
+		if !authorityOwner && locked && active != desired[id] {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "owner association correction cannot be overridden")
 		}
 		if active == desired[id] && (!owner || preserveRetained) {
