@@ -3,12 +3,14 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/serverkit"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // seedInbox reproduces the resolved-history/pending-failure case through real
@@ -80,6 +82,25 @@ func seedInbox(ctx context.Context, runtime *serverkit.Runtime, root string, bef
 	attention, err := storyAttention(ctx, runtime, issue.IssueID, task.TaskID)
 	if err != nil {
 		return demo, err
+	}
+	// This scenario asks the human to choose the retry. Route the original
+	// runner question through its real supervisor chain, preserving its ID.
+	for hop := 0; hop < 2; hop++ {
+		var current protocol.Attention
+		if err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+			var err error
+			current, err = store.GetAttention(ctx, tx.Q(), attention.AttentionID)
+			return err
+		}); err != nil {
+			return demo, err
+		}
+		if current.Responsibility == nil || current.Responsibility.RecipientKind == "owner" {
+			break
+		}
+		r := current.Responsibility
+		if err := s.execute(ctx, fmt.Sprintf("inbox-pwa-escalate-%d", hop), protocol.Target{Type: "attention", ID: attention.AttentionID}, &r.Revision, protocol.HandleAttentionPayload{ExpectedAssignmentEpoch: r.AssignmentEpoch, Reason: "The inbox demonstration requires the human to choose the original retry"}, app.HandleAttention{Escalate: true}, nil); err != nil {
+			return demo, err
+		}
 	}
 	demo.Issues = []string{history.IssueID, issue.IssueID}
 	demo.Tasks = []string{task.TaskID}
