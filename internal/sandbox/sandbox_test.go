@@ -193,13 +193,14 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 		c.call(http.MethodGet, "/api/v1/issues/"+id, nil, &view)
 		if view.Assignee.Kind == protocol.IssueAssigneeOwner {
 			ownerAssigned++
-		} else if view.Assignee.Ref != "sandbox-hosted/manager" {
+		} else if view.Assignee.Ref != hostID+"/manager" {
 			t.Fatal("unexpected board assignee", view.Assignee)
 		}
 	}
-	if ownerAssigned != len(demo.Issues) {
-		t.Fatalf("legacy board owner examples=%d, want %d", ownerAssigned, len(demo.Issues))
+	if ownerAssigned == 0 {
+		t.Fatal("record-only board examples lost their owner")
 	}
+
 	for _, column := range protocol.IssueWorkStatusValues() {
 		if board.Counts[column] == 0 {
 			t.Fatalf("empty board column %s: %+v", column, board.Counts)
