@@ -10,7 +10,9 @@ import (
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // AcceptHostedConfiguration is called by server startup with a validated local
@@ -171,11 +173,23 @@ func namedHostedSelection(ctx context.Context, q store.Querier, prepared *hosted
 	if selected, named, err := runnerReceiptSelection(ctx, q, issue.IssueID); err != nil || named {
 		return selected, named, err
 	}
+	admission := scheduler.Candidate{DependenciesDone: true}
+	if err := views.ApplyIssueAdmission(ctx, q, &admission, issue.IssueID, issue.State == protocol.IssueCancelling); err != nil {
+		return hostedconfig.Selection{}, false, err
+	}
+	if !admission.DependenciesDone && issue.State != protocol.IssueClosed && issue.State != protocol.IssueCancelled {
+		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "%s", admission.AdmissionMessage)
+	}
+
 	if m, e := store.CurrentIssueManagerTask(ctx, q, issue.IssueID); e == nil {
 		return runnerManagerSelection(ctx, q, m)
 	} else if !errors.Is(e, store.ErrNotFound) {
 		return hostedconfig.Selection{}, false, e
 	}
+	if issue.OwnerSelection != nil || issue.WorkStatus == protocol.IssueBacklog {
+		return hostedconfig.Selection{}, false, protocol.Errorf(protocol.CodeInvalidTransition, "Issue awaits runner claim under its explicit todo intent")
+	}
+
 	var migrated bool
 	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE issue_id=?)`, issue.IssueID).Scan(&migrated); err != nil {
 		return hostedconfig.Selection{}, false, err
@@ -465,7 +479,7 @@ func (a *App) canonicalManagerAdmission(ctx context.Context, q store.Querier, co
 	}
 	frozen := false
 	if request != "" {
-		_, pinned, err := a.hostedFrozenSelection(ctx, q, request)
+		selection, pinned, err := a.hostedFrozenSelection(ctx, q, request)
 		if err != nil {
 			if protocol.CodeOf(err) == protocol.CodeForbidden {
 				return true, false, nil
@@ -473,6 +487,15 @@ func (a *App) canonicalManagerAdmission(ctx context.Context, q store.Querier, co
 			return true, false, err
 		}
 		frozen = pinned
+		if pinned && !selection.ReceiptOnly && !selection.RequireReceiptReader && issue.State != protocol.IssueClosed && issue.State != protocol.IssueCancelled {
+			candidate := scheduler.Candidate{DependenciesDone: true}
+			if err := views.ApplyIssueAdmission(ctx, q, &candidate, issueID, issue.State == protocol.IssueCancelling); err != nil {
+				return true, false, err
+			}
+			if !candidate.DependenciesDone {
+				return true, false, nil
+			}
+		}
 
 	}
 	var uncertain bool

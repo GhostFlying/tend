@@ -20,7 +20,7 @@ func TestIssueProgressHTTPHistoryReplayAndActivity(t *testing.T) {
 	issue := createOwnerIssueHTTP(t, e, token, parent.IssueID)
 	path := "/api/v1/issues/" + issue.IssueID
 	initial := issueDetailHTTP(t, e, token, issue.IssueID)
-	if initial.Progress != nil || initial.Conversation == nil || initial.Conversation.CanSend || len(initial.Ancestors) != 1 || initial.Ancestors[0].IssueID != parent.IssueID {
+	if initial.Progress != nil || initial.Conversation == nil || !initial.Conversation.CanSend || len(initial.Ancestors) != 1 || initial.Ancestors[0].IssueID != parent.IssueID {
 		t.Fatalf("initial=%+v", initial)
 	}
 	env := e.envelope("issues.update_progress", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.UpdateIssueProgressPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Summary: "调查结论已确认", NextStep: "独立验收"})
@@ -164,6 +164,13 @@ func TestIssueProgressPreservesBoardAndChildActivityResults(t *testing.T) {
 	parent := createOwnerIssueHTTP(t, e, token, "")
 	child := createOwnerIssueHTTP(t, e, token, parent.IssueID)
 	move := func(status protocol.IssueWorkStatus) {
+		if status == protocol.IssueTodo || ((child.BoardStatus() == protocol.IssueBacklog) && (status != protocol.IssueBacklog && status != protocol.IssueWorkCancelled)) {
+			child = admitOwnerIssueHTTP(t, e, token, child)
+			if status == protocol.IssueTodo {
+				return
+			}
+		}
+
 		t.Helper()
 		child = issueHTTP(t, e, token, e.envelope("issues.set_status", protocol.Target{Type: "issue", ID: child.IssueID}, &child.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Status: status}))
 	}
@@ -221,6 +228,13 @@ func TestIssueChildActivityRetainsHistoricalParent(t *testing.T) {
 	child := createOwnerIssueHTTP(t, e, token, a.IssueID)
 	target := protocol.Target{Type: "issue", ID: child.IssueID}
 	move := func(status protocol.IssueWorkStatus) {
+		if status == protocol.IssueTodo || ((child.BoardStatus() == protocol.IssueBacklog) && (status != protocol.IssueBacklog && status != protocol.IssueWorkCancelled)) {
+			child = admitOwnerIssueHTTP(t, e, token, child)
+			if status == protocol.IssueTodo {
+				return
+			}
+		}
+
 		child = issueHTTP(t, e, token, e.envelope("issues.set_status", target, &child.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Status: status}))
 	}
 	read := func(id string) []protocol.IssueActivityEntry {

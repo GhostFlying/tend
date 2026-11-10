@@ -40,6 +40,9 @@ type Host struct {
 
 // Candidate is a pending action together with the facts the rules need.
 type Candidate struct {
+	InitialIssue     bool
+	IssueID          string
+	AdmissionMessage string
 	// ExecutionFilter restricts a read-only explanation to one exact candidate.
 	// It never replaces the task requirements or its frozen owner pins.
 	ExecutionFilter *protocol.RunExecutionPin
@@ -189,6 +192,8 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 // when only the hosts decide.
 func HeldReason(c Candidate) *protocol.QueueWaitReason {
 	switch {
+	case c.AdmissionMessage != "":
+		return waitReason(protocol.QueueTaskBlocked, c.AdmissionMessage)
 	case c.ManagerAuthorizationInvalid:
 		return waitReason(protocol.QueueTaskBlocked, "manager publication source changed or was withdrawn; explicit reauthorization is required")
 	case c.Status != protocol.ActionPending:

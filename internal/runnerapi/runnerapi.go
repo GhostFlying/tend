@@ -164,6 +164,7 @@ type runReceiptCredential struct {
 	delivery       *protocol.RunMessageDelivery
 	manager        bool
 	questionReplay *protocol.Envelope
+	pauseReplay    *protocol.Envelope
 }
 
 func (s *Server) authenticateCredential(r *http.Request, receipt *runReceiptCredential) (protocol.Principal, error) {
@@ -192,6 +193,9 @@ func (s *Server) authenticateCredential(r *http.Request, receipt *runReceiptCred
 		}
 		if receipt != nil && receipt.questionReplay != nil {
 			leaseID, host, role, err = s.app.QuestionHandoffReplayCredential(ctx, runID, receipt.questionReplay)
+		}
+		if receipt != nil && receipt.pauseReplay != nil {
+			leaseID, host, role, err = s.app.PauseHandoffReplayCredential(ctx, runID, receipt.pauseReplay)
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -266,6 +270,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			p, authErr = s.authenticateCredential(r, &runReceiptCredential{questionReplay: &env})
 		}
 
+		if authErr != nil && env.Operation == protocol.OpRunsYieldPause && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
+			p, authErr = s.authenticateCredential(r, &runReceiptCredential{pauseReplay: &env})
+		}
+
 		if authErr != nil {
 			s.writeError(w, r, &env, authErr)
 			return
@@ -289,6 +297,7 @@ var runCommands = map[string]app.Command{
 	protocol.OpDeliveriesReport:     app.ReportDelivery{},
 	protocol.OpRunsAskOwner:         app.AskOwner{},
 	protocol.OpRunsYieldQuestion:    app.YieldQuestion{},
+	protocol.OpRunsYieldPause:       app.YieldPause{},
 	protocol.OpRunsClaimMessage:     app.ClaimRunMessage{},
 	protocol.OpRunsReportMessage:    app.ReportRunMessage{},
 	protocol.OpWorkspaceReconcile:   app.ReconcileWorkspaces{},

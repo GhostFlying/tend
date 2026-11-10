@@ -60,16 +60,7 @@ export function IssueDefinition({
       .join("\n") ?? "",
   );
   const [selectedAssignee, setAssignee] = useState<string>();
-  const preferredCategory =
-    activeCategories.find((category) => category.category_id === "issue-manager") ??
-    activeCategories[0];
-  const assignee =
-    selectedAssignee ??
-    (preferredCategory
-      ? `category:${preferredCategory.category_id}`
-      : categories.value
-        ? "owner"
-        : "");
+  const assignee = selectedAssignee ?? "owner";
   const [result, setResult] = useState<OpOutcome | null>(null);
   const operation = useDurableOp(
     client,
@@ -126,7 +117,6 @@ export function IssueDefinition({
     if (!issue) void live.agents.openCategories();
   }, [live, issue]);
   const save = async (reconcile = false) => {
-    if (!issue && !assignee && !reconcile) return;
     const old = editPlan;
     const plan: IssuePlan = {
       ...(old ?? { stages: [] }),
@@ -424,7 +414,7 @@ export function IssueDefinition({
           {!issue && (
             <>
               <label>
-                负责人
+                执行类别（可稍后选择）
                 <select
                   disabled={blocked}
                   value={shownAssignee}
@@ -435,7 +425,7 @@ export function IssueDefinition({
                       正在读取负责人类别…
                     </option>
                   )}
-                  <option value="owner">我自己负责（不会有 Agent 对话）</option>
+                  <option value="owner">暂不安排执行</option>
                   {shownAssignee &&
                     shownAssignee !== "owner" &&
                     !activeCategories.some(
@@ -518,7 +508,7 @@ export function IssueDefinition({
         <p>
           {issue
             ? "保存变化并通知负责人，由其判断是否需要调整任务。"
-            : "创建后由所选负责人持续推进。"}
+            : "创建后进入待安排，仅保存记录；移到待推进后由 runner 领取。"}
         </p>
         <div className={styles.actions}>
           {operation.pending ? (
@@ -534,7 +524,6 @@ export function IssueDefinition({
               className={styles.primary}
               disabled={
                 blocked ||
-                (!issue && !assignee) ||
                 !title.trim() ||
                 !project.trim() ||
                 !intent.trim() ||

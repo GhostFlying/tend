@@ -13,6 +13,7 @@ func TestCanonicalDefinitionFieldsPersistHistoryAndFrozenFacts(t *testing.T) {
 	h := newHarness(t)
 	plan := protocol.IssuePlan{Title: "Define a bounded responsibility", Project: "default", Intent: "Investigate the goal", Scope: "Only the isolated fixture", CompletionCriteria: []string{"Owner can retrieve the final evidence"}, Stages: []protocol.IssueStage{}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: plan}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	issue = admitExistingIssueFixture(t, h, issue)
 	task := createCanonicalTaskForTest(t, h, issue)
 	var original []protocol.TaskWorkContext
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {

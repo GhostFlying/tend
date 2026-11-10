@@ -13,10 +13,10 @@ import (
 func progressChild(t *testing.T, h *harness, parent protocol.Issue, title string) protocol.Issue {
 	t.Helper()
 	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: title, Project: "default", Intent: "Independent responsibility", Stages: []protocol.IssueStage{}}, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
-	return canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	return admitExistingIssueFixture(t, h, canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})))
 }
 
-func TestIssueDelegationStartsParentWithoutCoordinatorClaimOrReplayChanges(t *testing.T) {
+func TestIssueRecordingChildKeepsParentTodoAndReplaysCreation(t *testing.T) {
 	h := hostedManagerHarness(t)
 	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	turn, principal := startHostedIssueReview(t, h, issue)
@@ -31,8 +31,8 @@ func TestIssueDelegationStartsParentWithoutCoordinatorClaimOrReplayChanges(t *te
 		t.Fatal(op)
 	}
 	current := canonicalTaskIssue(t, h, issue.IssueID)
-	if current.BoardStatus() != protocol.IssueInProgress || current.Revision != issue.Revision+1 {
-		t.Fatal("delegation did not start parent", current)
+	if current.BoardStatus() != protocol.IssueTodo || current.Revision != issue.Revision {
+		t.Fatal("recording a backlog child started parent work", current)
 	}
 	replay := h.exec(principal, env, command)
 	if !bytes.Equal(op.Result, replay.Result) || canonicalTaskIssue(t, h, issue.IssueID).Revision != current.Revision {

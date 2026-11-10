@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { IssueSummary, IssueWorkStatus } from "../api/generated/api.ts";
+import type { IssueSummary, IssueWorkStatus, IssueOwnerRequest } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { DurableOp } from "../app/durableOp.ts";
 import { performOwnerCommand } from "../app/ownerCommand.ts";
@@ -33,7 +33,7 @@ export function useBoardActions() {
     };
   }, []);
 
-  const move = async (item: IssueSummary, status?: IssueWorkStatus) => {
+  const move = async (item: IssueSummary, status?: IssueWorkStatus, owner?: IssueOwnerRequest) => {
     if (!ready || running.current.has(item.issue_id) || (states[item.issue_id] && status)) return;
     running.current.add(item.issue_id);
     setStates((old) => ({ ...old, [item.issue_id]: "saving" }));
@@ -47,7 +47,11 @@ export function useBoardActions() {
               operation: "issues.set_status",
               target: { type: "issue", id: item.issue_id },
               expected_control_revision: item.revision,
-              payload: { status, expected_assignment_epoch: item.assignment_epoch },
+              payload: {
+                status,
+                expected_assignment_epoch: item.assignment_epoch,
+                ...(owner ? { owner } : {}),
+              },
             }
           : undefined,
       );

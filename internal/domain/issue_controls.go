@@ -227,6 +227,9 @@ func IssueDispatchBlockers(primary string, controls map[string]protocol.IssueCon
 		if control.State != protocol.IssueActive {
 			blockers = append(blockers, protocol.IssueBlocker{Code: "issue_admission", ObjectID: id})
 		}
+		if control.BoardStatus() == protocol.IssueBacklog {
+			blockers = append(blockers, protocol.IssueBlocker{Code: "issue_backlog", ObjectID: id})
+		}
 		if control.AssignmentState != "active" {
 			blockers = append(blockers, protocol.IssueBlocker{Code: "issue_assignment", ObjectID: id})
 		}

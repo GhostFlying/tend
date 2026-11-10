@@ -102,23 +102,7 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 		if err != nil {
 			return err
 		}
-		// Issue control fences coordinator runs without touching delegated
-		// workers. Restore only pauses this projection introduced itself.
-		if i.State == protocol.IssuePaused {
-			if _, err = tx.Exec(ctx, `UPDATE issue_manager_tasks SET issue_paused=1 WHERE task_id=? AND EXISTS(SELECT 1 FROM tasks WHERE task_id=? AND control_mode='managed')`, id, id); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `UPDATE tasks SET control_mode='paused',control_revision=control_revision+1 WHERE task_id=? AND control_mode='managed'`, id); err != nil {
-				return err
-			}
-		} else if i.State == protocol.IssueActive || i.State == protocol.IssueCancelling {
-			if _, err = tx.Exec(ctx, `UPDATE tasks SET control_mode='managed',control_revision=control_revision+1 WHERE task_id=? AND control_mode='paused' AND EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND issue_paused=1)`, id, id); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `UPDATE issue_manager_tasks SET issue_paused=0 WHERE task_id=?`, id); err != nil {
-				return err
-			}
-		}
+
 		task, err := store.GetTask(ctx, tx.Q(), id)
 		if err != nil {
 			return err

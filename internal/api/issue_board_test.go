@@ -14,6 +14,7 @@ func TestIssueBoardHTTPStatusReceiptsCountsAndSettings(t *testing.T) {
 	token := e.login(protocol.ScopeOwner)
 	issue := createOwnerIssueHTTP(t, e, token, "")
 	createOwnerIssueHTTP(t, e, token, issue.IssueID)
+	issue = admitOwnerIssueHTTP(t, e, token, issue)
 	command := e.envelope("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress})
 	moved := issueHTTP(t, e, token, command)
 	status, response := e.op(token, e.envelope(command.Operation, command.Target, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInReview}))

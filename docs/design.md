@@ -218,6 +218,7 @@ CLI 经组装注入调用本机模块；serverkit、runner 和 harness 可依赖
 | D215 | 已接受的同 PR 历史贡献可引用同 Issue 已结清执行完成责任结算，保留原接受与冻结交付证据，不新增执行或授权。 | 已实现 |
 | D216 | SQLite 文件路径经标准 URI 编码，journal/独立进程代次库与 Store 读写池不误解字面特殊字符，保持真实文件及原锁/连接选项。 | 已实现 |
 | D217 | 主 Agent 使用与 owner 相同的业务、管理与诊断能力，通过服务端绑定的 owner 权限调用实际 owner 接口；真实 actor、原请求域、原生执行与协调 effect 保留。能力从实际注册表导出，普通 Issue Agent、worker 和 runner 不获得此权限。原 owner 领域校验、状态机、执行收束及验收事实继续适用；主 Agent 可在用户目标内自主作代理决定，无需逐操作新增用户消息。见 docs/plans/main-owner-and-issue-admission.md。 | 已实现 |
+| D218 | 新 Issue 默认 backlog，仅保存意图与可选执行类别；显式 backlog → todo 才开放 runner 主动领取，禁止跨过 todo 进入执行或完成。候选由 Issue 当前状态与选择派生，领取事务才创建 Task/action/Run/租约，无独立发布或主 Agent 再分派步骤。退回 backlog 或暂停关闭整条子责任准入，通过协商的 run-pause-handoff-v1 记录确认停止后交还当前 Run 与槽位，保留 Task/spec、预算、工作区、成果与原生引用；再次 todo 生成唯一后继，独立 Task 暂停、人工控制和 unknown 义务继续适用。取消优先收束，不恢复被暂停的业务工作。历史定义以新 revision 归一化；旧协议默认行为保留，未协商交还的原执行仍占槽位。见 docs/plans/issue-admission-runtime.md。 | 实施中 |
 
 
 | D176 | Token 用量在 app 写事务维护请求贡献与四小时汇总桶，读取只用汇总、精确边界贡献和有界明细；后补归属、冲突/重叠及报价变更原子刷新，迁移后启动补齐，无新增定时器。见 docs/plans/token-usage-projection.md。 | 已实现，待验证 |

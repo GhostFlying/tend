@@ -45,6 +45,8 @@ type IssueSourceReview struct {
 }
 
 type IssueView struct {
+	QueueReason        *QueueWaitReason          `json:"queue_reason,omitempty"`
+	Pause              *IssuePauseProgress       `json:"pause,omitempty"`
 	Children           *IssueChildProgress       `json:"children,omitempty"`
 	DeliveryDuties     []IssueDeliveryDuty       `json:"delivery_duties,omitempty"`
 	OwnershipPolicy    string                    `json:"ownership_policy,omitempty"`

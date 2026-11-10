@@ -147,6 +147,8 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			if options.runnerTransport != nil {
 				clientTransport = options.runnerTransport
 			}
+			gate := &seedClaimGate{base: clientTransport, token: make(chan struct{}, 1)}
+			clientTransport = gate
 			instance := runtime.IDs.New(protocol.Prefix("rni"))
 			executions := &scriptedExecutions{sessions: sessions, spaces: workspaces{root: filepath.Join(root, "workspaces")}}
 			executions.workers = &scriptedWorkers{nativeRoot: filepath.Join(root, "native", "sessions"), pacing: pacing(options.FastPacing), fastSeed: seeding.Load, generation: func(ctx context.Context, id string) (int64, error) {
@@ -216,11 +218,16 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 			}
 			var demo Demo
 			if options.Scenario == "inbox" {
-				demo, err = seedInbox(ctx, runtime, root)
+				demo, err = seedInbox(ctx, runtime, root, gate.acquire)
 			} else if options.Scenario == "rollout" {
+				release, lockErr := gate.acquire(ctx)
+				if lockErr != nil {
+					return lockErr
+				}
 				demo, err = seedRolloutDemo(ctx, runtime, root)
+				release()
 			} else {
-				demo, err = seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly)
+				demo, err = seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly, gate.acquire)
 			}
 			if err != nil {
 				return err

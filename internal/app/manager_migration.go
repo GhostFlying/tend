@@ -56,6 +56,14 @@ func (c ManagerMigration) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	}
 	if p.Phase == "status" {
 		m, err := store.CurrentIssueManagerTask(ctx, tx.Q(), x.Env.Target.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			issue, err := store.GetCanonicalIssue(ctx, tx.Q(), x.Env.Target.ID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			blockers, err := hostedHandoffBlockers(ctx, tx.Q(), issue.IssueID, issue.AssignmentEpoch)
+			return Outcome{NoEffect: true, Result: map[string]any{"issue": issue, "blockers": blockers}}, err
+		}
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -75,6 +83,14 @@ func (c ManagerMigration) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	}
 	if p.Phase == "cancel" {
 		m, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID)
+		if errors.Is(err, store.ErrNotFound) && current.OwnerSelection != nil {
+			inner := *x
+			env := *x.Env
+			inner.Env = &env
+			env.Operation = "issues.assign"
+			env.Payload, _ = json.Marshal(protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}, Reason: p.Reason})
+			return (HostedIssueAssignment{}).Apply(ctx, &inner, tx)
+		}
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -139,22 +155,23 @@ func (c ManagerMigration) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	env := *x.Env
 	env.Payload = raw
 	adapted.Env = &env
-	out, err := (RequestIssueManager{migration: true}).Apply(ctx, &adapted, tx)
+	out, err := selectIssueOwnerDefinition(ctx, &adapted, tx, input, "", true)
 	if err != nil {
 		return Outcome{}, err
 	}
-	manager, ok := out.Result.(store.IssueManagerTask)
+	selected, ok := out.Result.(protocol.Issue)
 	if !ok {
-		return Outcome{}, protocol.Errorf(protocol.CodeInternal, "migration produced no manager responsibility")
+		return Outcome{}, protocol.Errorf(protocol.CodeInternal, "migration produced no Issue selection")
 	}
 	backup, err := json.Marshal(c.Backup)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO manager_migrations(request_id,issue_id,task_id,backup_json,created_at) VALUES(?,?,?,?,?)`, x.Env.RequestID, current.IssueID, manager.TaskID, string(backup), x.Now.UnixMilli()); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO issue_owner_migrations(request_id,issue_id,assignment_epoch,backup_json,created_at) VALUES(?,?,?,?,?)`, x.Env.RequestID, current.IssueID, selected.AssignmentEpoch, string(backup), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	out.Result = map[string]any{"manager": manager, "backup": c.Backup, "phase": "fencing"}
+	out.Result = map[string]any{"issue": selected, "backup": c.Backup, "phase": "fencing"}
+
 	return out, nil
 }
 

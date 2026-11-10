@@ -496,6 +496,16 @@ export function IssueDetails({
                   </time>
                 </p>
                 <p className={styles.intent}>{issue.plan.intent}</p>
+                {issue.queue_reason && <p role="status">等待领取：{issue.queue_reason.message}</p>}
+                {issue.pause && (
+                  <p role="status">
+                    {issue.pause.issue_id === issue.issue_id ? "已暂停" : "继承父项暂停"}；等待停止{" "}
+                    {issue.pause.pending} 个执行，已交还 {issue.pause.stopped} 个。
+                    {issue.pause.unsupported > 0
+                      ? `其中 ${issue.pause.unsupported} 个旧执行尚未协商交还能力，仍占用原槽位。`
+                      : "成果和工作区已保留。"}
+                  </p>
+                )}
                 <p className={styles.muted}>
                   独立验收：
                   {issue.acceptance_policy?.required === false

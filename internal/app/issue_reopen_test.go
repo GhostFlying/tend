@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"sync"
 	"testing"
 
@@ -9,17 +8,22 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func publishReopenManager(t *testing.T, h *harness, i protocol.Issue) store.IssueManagerTask {
+func publishReopenManager(t *testing.T, h *harness, r *protocol.RunnerRuntime, i protocol.Issue) (store.IssueManagerTask, protocol.Assignment) {
 	t.Helper()
 	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Coordinate continuing responsibility"}, rev(i.Revision)), RequestIssueManager{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	as := reviewClaimManager(t, h, r)
 	var m store.IssueManagerTask
-	if err := json.Unmarshal(op.Result, &m); err != nil {
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		m, err = store.GetIssueManagerTask(t.Context(), tx.Q(), as.TaskID)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	return m
+	return m, as
 }
 func TestIssueReopenRestoresNewCoordinatorAndPreservesTerminalHistory(t *testing.T) {
 	h, r := managerClaimHarness(t)
@@ -30,64 +34,62 @@ func TestIssueReopenRestoresNewCoordinatorAndPreservesTerminalHistory(t *testing
 	i = canonicalTaskIssue(t, h, i.IssueID)
 	d := deliveryDutyForTest(t, h, i.IssueID, task)
 	i = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, i, "review_completions", map[string]any{"expected_assignment_epoch": i.AssignmentEpoch, "reviews": []protocol.CompletionReviewAcknowledgement{{EventID: d.EventID, Reason: "Explicit owner endpoint reviewed"}}}))
-	previous := publishReopenManager(t, h, i)
+	previous, as := publishReopenManager(t, h, r, i)
+	stopOwnerClaim(t, h, as)
+	i = canonicalTaskIssue(t, h, i.IssueID)
 	closed := canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, i, "close", canonicalLifecycleClosure(i, protocol.WorkItemClosureCompleted)))
 	envelope := h.env("issues.reopen", protocol.Target{Type: "issue", ID: i.IssueID}, canonicalOwnerControl{ExpectedAssignmentEpoch: closed.AssignmentEpoch}, rev(closed.Revision))
 	op := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "reopen"})
 	restored := canonicalLifecycleIssue(t, op)
-	if restored.AssignmentEpoch != closed.AssignmentEpoch+1 || restored.State != protocol.IssueActive || restored.Closure != nil {
+	if restored.State != protocol.IssueActive || restored.Closure != nil || restored.BoardStatus() != protocol.IssueBacklog || restored.OwnerSelection == nil {
 		t.Fatal(restored)
 	}
-	var next store.IssueManagerTask
+	before := h.count("tasks")
+	if replay := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "reopen"}); string(replay.Result) != string(op.Result) || h.count("tasks") != before {
+		t.Fatal("reopen replay allocated execution", replay)
+	}
+	if got := admissionClaim(t, h, r); got != nil {
+		t.Fatal("reopen started backlog", got)
+	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		old, err := store.GetIssueManagerTask(t.Context(), tx.Q(), previous.TaskID)
 		if err != nil {
 			return err
 		}
-		next, err = store.CurrentIssueManagerTask(t.Context(), tx.Q(), i.IssueID)
-		if err != nil {
-			return err
-		}
 		history, err := store.GetCanonicalIssueRevision(t.Context(), tx.Q(), i.IssueID, closed.Revision)
-		if err != nil {
-			return err
+		if err == nil && (old.State != "completed" || history.Closure == nil || history.State != protocol.IssueClosed) {
+			t.Fatal(old, history)
 		}
-		if old.State != "completed" || next.TaskID == old.TaskID || next.ConversationID != old.ConversationID || history.Closure == nil || history.State != protocol.IssueClosed {
-			t.Fatal(old, next, history)
-		}
-		return nil
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if h.task(task).Lifecycle != protocol.TaskCompleted || h.task(previous.TaskID).Lifecycle != protocol.TaskCompleted {
-		t.Fatal("terminal task resurrected")
+	conversation := previous.ConversationID
+	submitHostedAdmissionInput(t, h, conversation)
+	if ready, err := h.app.AgentConversationClaimed(t.Context(), conversation); err != nil || ready {
+		t.Fatal("backlog admitted", ready, err)
 	}
-	before := h.count("tasks")
-	replay := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "reopen"})
-	if string(replay.Result) != string(op.Result) || h.count("tasks") != before {
-		t.Fatal("reopen replay duplicated coordination")
-	}
-	// Messages use the same responsibility conversation, wait for the new claim,
-	// and are never routed back to the terminal task.
-	submitHostedAdmissionInput(t, h, next.ConversationID)
-	if ready, err := h.app.AgentConversationClaimed(t.Context(), next.ConversationID); err != nil || ready {
-		t.Fatal("unclaimed successor admitted", ready, err)
-	}
+	restored = issueAdmissionStatus(t, h, restored, protocol.IssueTodo, nil)
 	assignment := reviewClaimManager(t, h, r)
-	if assignment.TaskID != next.TaskID || assignment.Manager == nil {
+	if assignment.TaskID == previous.TaskID || assignment.Manager == nil || assignment.Manager.ConversationID != conversation || h.count("tasks") != before+1 {
 		t.Fatal(assignment)
 	}
-	if ready, err := h.app.AgentConversationClaimed(t.Context(), next.ConversationID); err != nil || !ready {
-		t.Fatal("reopened coordinator not runnable", ready, err)
+	if h.task(task).Lifecycle != protocol.TaskCompleted || h.task(previous.TaskID).Lifecycle != protocol.TaskCompleted {
+		t.Fatal("terminal Task resurrected")
+	}
+	if ready, err := h.app.AgentConversationClaimed(t.Context(), conversation); err != nil || !ready {
+		t.Fatal("claimed successor not admitted", ready, err)
 	}
 	if h.count("issue_delivery_executions") != 0 || h.count("acceptances") != 1 {
-		t.Fatal("reopen created delivery authority or rewrote acceptance")
+		t.Fatal("reopen rewrote delivery/acceptance")
 	}
 }
 func TestIssueReopenConcurrentRequestsPublishOneSuccessor(t *testing.T) {
-	h, _ := managerClaimHarness(t)
+	h, r := managerClaimHarness(t)
 	i := createCanonicalOwnerTestIssue(t, h)
-	publishReopenManager(t, h, i)
+	_, as := publishReopenManager(t, h, r, i)
+	stopOwnerClaim(t, h, as)
+	i = canonicalTaskIssue(t, h, i.IssueID)
 	closed := canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, i, "close", canonicalLifecycleClosure(i, protocol.WorkItemClosureCompleted)))
 	var results [2]protocol.Operation
 	var wg sync.WaitGroup
@@ -105,15 +107,20 @@ func TestIssueReopenConcurrentRequestsPublishOneSuccessor(t *testing.T) {
 			t.Fatal(op)
 		}
 	}
-	if succeeded != 1 || h.count("issue_manager_tasks") != 2 {
+	if succeeded != 1 || h.count("issue_manager_tasks") != 1 {
 		t.Fatal(results)
+	}
+	current := canonicalTaskIssue(t, h, i.IssueID)
+	current = issueAdmissionStatus(t, h, current, protocol.IssueTodo, nil)
+	reviewClaimManager(t, h, r)
+	if h.count("issue_manager_tasks") != 2 {
+		t.Fatal("explicit todo did not create exactly one successor")
 	}
 }
 func TestIssueReopenUnknownCoordinatorCannotStartAnother(t *testing.T) {
 	h, r := managerClaimHarness(t)
 	i := createCanonicalOwnerTestIssue(t, h)
-	previous := publishReopenManager(t, h, i)
-	as := reviewClaimManager(t, h, r)
+	previous, as := publishReopenManager(t, h, r, i)
 	i = canonicalTaskIssue(t, h, i.IssueID)
 	closed := canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, i, "close", canonicalLifecycleClosure(i, protocol.WorkItemClosureCompleted)))
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {

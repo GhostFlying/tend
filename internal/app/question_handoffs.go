@@ -124,6 +124,10 @@ func (a *App) NativeQuestionPredecessor(ctx context.Context, run string) (string
 		parent = ids[0]
 		return nil
 	})
+	if err == nil && parent == "" {
+		return a.nativePausePredecessor(ctx, run)
+	}
+
 	return parent, err
 }
 

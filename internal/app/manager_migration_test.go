@@ -20,7 +20,7 @@ func TestManagerMigrationBacksUpAndReplaysWithoutDuplicatingResponsibility(t *te
 		t.Fatal(first, err)
 	}
 	replay, err := h.app.MigrateManager(t.Context(), owner, env)
-	if err != nil || !bytes.Equal(first.Result, replay.Result) || h.count("issue_manager_tasks") != 1 || h.count("manager_migrations") != 1 {
+	if err != nil || !bytes.Equal(first.Result, replay.Result) || h.count("issue_manager_tasks") != 0 || h.count("issue_owner_migrations") != 1 {
 		t.Fatal("migration retry duplicated state", replay, err)
 	}
 	receipt, err := h.store.BackupManagers(t.Context(), env.RequestID)
@@ -36,10 +36,10 @@ func TestManagerMigrationBacksUpAndReplaysWithoutDuplicatingResponsibility(t *te
 		t.Fatal("migration changed original bytes")
 	}
 	var result struct {
-		Manager store.IssueManagerTask `json:"manager"`
+		Issue protocol.Issue `json:"issue"`
 	}
-	if err = json.Unmarshal(first.Result, &result); err != nil || result.Manager.HostID != "" {
-		t.Fatal("migration selected a host before claim", err)
+	if err = json.Unmarshal(first.Result, &result); err != nil || result.Issue.OwnerSelection == nil {
+		t.Fatal("migration did not retain an unclaimed selection", err)
 	}
 }
 

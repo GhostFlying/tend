@@ -66,6 +66,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if action == "create" || action == "set-acceptance-policy" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
+	statusFlag := fs.String("status", "", "explicit Issue work status; backlog records only, todo permits runner claim")
+	categoryFlag := fs.String("category", "", "owner capability category selected when moving to todo")
+	agentFlag := fs.String("agent", "", "optional environment/local owner identity with --category")
 	asJSON := fs.Bool("json", false, "print the complete structured result")
 	data := fs.String("data", "", "inline JSON payload (or original Envelope for replay)")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
@@ -240,6 +243,27 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
 		return usagef("issue payload must be a JSON object")
 	}
+	if *statusFlag != "" || *categoryFlag != "" || *agentFlag != "" {
+		if action != "set-status" {
+			return usagef("--status, --category and --agent require issue set-status")
+		}
+		if *agentFlag != "" && *categoryFlag == "" {
+			return usagef("--agent requires --category")
+		}
+		if *statusFlag != "" {
+			if _, ok := fields["status"]; ok {
+				return usagef("do not supply status in both flags and JSON")
+			}
+			fields["status"], _ = json.Marshal(*statusFlag)
+		}
+		if *categoryFlag != "" {
+			if _, ok := fields["owner"]; ok {
+				return usagef("do not supply owner in both flags and JSON")
+			}
+			fields["owner"], _ = json.Marshal(protocol.IssueOwnerRequest{CategoryID: *categoryFlag, AgentID: *agentFlag})
+		}
+	}
+
 	if action != "create" {
 		var suppliedEpoch int64
 		if raw, ok := fields["expected_assignment_epoch"]; ok {

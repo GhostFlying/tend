@@ -111,3 +111,25 @@ func TestIssueTaskCLIUsesOnlyCanonicalPrimaryProjection(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueCLIExplicitTodoSelectionKeepsOriginalControlIdentity(t *testing.T) {
+	f := newFakeServer(t)
+	te := newTestEnv(t, f.srv.URL)
+	if code := te.main("issue", "set-status", "wi_original", "--status", "todo", "--category", "implementation", "--agent", "runner/worker", "--revision", "7", "--epoch", "3", "--dry-run"); code != exitOK {
+		t.Fatal(code, te.errOut.String())
+	}
+	var env protocol.Envelope
+	if err := json.Unmarshal(te.out.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	var p protocol.SetIssueStatusPayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if env.Operation != "issues.set_status" || env.Target.ID != "wi_original" || env.ExpectedControlRevision == nil || *env.ExpectedControlRevision != 7 || p.ExpectedAssignmentEpoch != 3 || p.Status != protocol.IssueTodo || p.Owner == nil || p.Owner.CategoryID != "implementation" || p.Owner.AgentID != "runner/worker" {
+		t.Fatal(env, p)
+	}
+	if len(f.seen("POST /api/v1/ops")) != 0 {
+		t.Fatal("dry run executed work")
+	}
+}

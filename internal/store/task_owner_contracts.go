@@ -14,12 +14,13 @@ type TaskOwnerContract struct {
 	TaskID, IssueID, AgentRef, RuntimeID, Model, Effort, ReviewIssueID string
 	ReviewPlanJSON                                                     string
 	AssignmentEpoch, AgentRevision, RuntimeRevision                    int64
+	ReviewAdmissionRevision                                            int64
 }
 
 func GetTaskOwnerContract(ctx context.Context, q Querier, task string) (TaskOwnerContract, error) {
 	var c TaskOwnerContract
 	var raw string
-	err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,COALESCE(execution_pin_json,'') FROM task_execution_contracts WHERE task_id=?`, task).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON, &raw)
+	err := q.QueryRowContext(ctx, `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,COALESCE(execution_pin_json,''),COALESCE((SELECT review_admission_revision FROM task_owner_contracts origin WHERE origin.task_id=task_execution_contracts.task_id),1) FROM task_execution_contracts WHERE task_id=?`, task).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON, &raw, &c.ReviewAdmissionRevision)
 	if err != nil {
 		return c, notFound(err, "task owner contract")
 	}
@@ -83,7 +84,7 @@ func TaskOwnerContractCurrent(ctx context.Context, q Querier, task string) (bool
 func TaskIssueResponsibilityOrigin(ctx context.Context, q Querier, task string) (protocol.ExecutionResponsibility, error) {
 	var origin protocol.ExecutionResponsibility
 	var revision int64
-	err := q.QueryRowContext(ctx, `SELECT o.work_item_id,json_extract(c.value,'$.revision') FROM task_work_item_owners o JOIN issue_ownership_policies p ON p.issue_id=o.work_item_id JOIN task_specs s ON s.task_id=o.task_id AND s.spec_version=1 JOIN json_each(s.body_json,'$.shared_context') c WHERE o.task_id=? AND json_extract(c.value,'$.work_item_id')=o.work_item_id LIMIT 1`, task).Scan(&origin.IssueID, &revision)
+	err := q.QueryRowContext(ctx, `SELECT o.work_item_id,json_extract(c.value,'$.revision') FROM task_work_item_owners o JOIN task_specs s ON s.task_id=o.task_id AND s.spec_version=1 JOIN json_each(s.body_json,'$.shared_context') c WHERE o.task_id=? AND json_extract(c.value,'$.work_item_id')=o.work_item_id LIMIT 1`, task).Scan(&origin.IssueID, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return origin, ErrNotFound
 	}
@@ -94,6 +95,16 @@ func TaskIssueResponsibilityOrigin(ctx context.Context, q Querier, task string) 
 	if err != nil {
 		return origin, err
 	}
+	enabled := issue.OwnerSelection != nil && issue.OwnerSelection.OwnershipPolicy == protocol.IssueOwnerPolicy
+	if issue.OwnerSelection == nil {
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_ownership_policies WHERE issue_id=?)`, issue.IssueID).Scan(&enabled); err != nil {
+			return origin, err
+		}
+	}
+	if !enabled {
+		return origin, ErrNotFound
+	}
+
 	origin.TaskID, origin.IssueRevision, origin.AssignmentEpoch, origin.AgentRef = task, revision, issue.AssignmentEpoch, issue.Assignee.Ref
 	return origin, nil
 }

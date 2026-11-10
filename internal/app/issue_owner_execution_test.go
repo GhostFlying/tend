@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -216,6 +217,7 @@ func TestIssueOwnerDelegatesChildAndChildCanExecute(t *testing.T) {
 	if replay := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "create"}); string(replay.Result) != string(op.Result) || h.count("work_items") != before {
 		t.Fatal("child delegation was repeated", replay)
 	}
+	child = issueAdmissionStatus(t, h, child, protocol.IssueTodo, nil)
 	as := ownerClaim(t, h, r)
 	for range 4 {
 		if as.Manager != nil && as.Manager.IssueID == child.IssueID {
@@ -224,6 +226,7 @@ func TestIssueOwnerDelegatesChildAndChildCanExecute(t *testing.T) {
 		if as.Role != protocol.RoleIssueManager {
 			t.Fatal("unexpected execution while waiting for child owner", as)
 		}
+		h.clock.Advance(time.Millisecond)
 		stopOwnerClaim(t, h, as)
 		as = ownerClaim(t, h, r)
 	}

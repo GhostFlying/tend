@@ -61,6 +61,7 @@ func TestCanonicalLifecycleCancellationRequiresEachActualFollowOnDisposition(t *
 	h := newHarness(t)
 	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Report", Project: "default", Intent: "Produce report", Stages: []protocol.IssueStage{}, FollowOns: []protocol.IssueFollowOn{{FollowOnID: "report", Kind: protocol.WorkItemFollowOnCommitment, Text: "Send report", Source: "Owner request", Status: protocol.WorkItemFollowOnOpen}}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	issue = admitExistingIssueFixture(t, h, issue)
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
 	payload := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends the scope"}}
 	before := canonicalGuardBusinessSnapshot(t, h)
@@ -279,6 +280,7 @@ func TestCanonicalLifecycleRejectedParentEndpointRollsBackSourceDisposition(t *t
 	issue := createCanonicalOwnerTestIssue(t, h)
 	childPayload := canonicalOwnerIssueCreate{Plan: issue.Plan, ParentIssueID: issue.IssueID, ExpectedParentRevision: rev(issue.Revision)}
 	child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, childPayload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	child = admitExistingIssueFixture(t, h, child)
 	source, _ := startReviewTurn(t, h)
 	if op := h.associate(owner, source, issue.IssueID); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -341,6 +343,7 @@ func TestCanonicalLifecycleCompletionDependencyRequiresAchievedEndpoint(t *testi
 			prerequisite := createCanonicalOwnerTestIssue(t, h)
 			p := canonicalOwnerIssueCreate{Plan: prerequisite.Plan, DependsOn: []string{prerequisite.IssueID}}
 			issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+			issue = admitExistingIssueFixture(t, h, issue)
 			if endpoint == "cancelled" {
 				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: prerequisite.AssignmentEpoch}))
 				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: prerequisite.AssignmentEpoch, Reason: "Owner cancels prerequisite"}}))
@@ -376,7 +379,9 @@ func TestCanonicalLifecycleGraphAndAncestorGates(t *testing.T) {
 	parent := createCanonicalOwnerTestIssue(t, h)
 	childPayload := canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
 	first := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, childPayload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	first = admitExistingIssueFixture(t, h, first)
 	second := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, childPayload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	second = admitExistingIssueFixture(t, h, second)
 	replace := func(issue protocol.Issue, ids []string) protocol.Operation {
 		p := struct {
 			canonicalOwnerControl
@@ -423,6 +428,7 @@ func TestCanonicalLifecycleParentEndpointSerializesWithChildActivation(t *testin
 				childEnv = h.env("issues.create", protocol.Target{Type: "issue"}, childPayload, nil)
 			} else {
 				child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, childPayload, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+				child = admitExistingIssueFixture(t, h, child)
 				child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted)))
 				childAction = "reopen"
 				childEnv = h.env("issues.reopen", protocol.Target{Type: "issue", ID: child.IssueID}, canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}, rev(child.Revision))
@@ -484,6 +490,7 @@ func TestCanonicalLifecycleParentRetainsLateTerminalChildSourceDuty(t *testing.T
 	parent := createCanonicalOwnerTestIssue(t, h)
 	cp := canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
 	child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, cp, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	child = admitExistingIssueFixture(t, h, child)
 	input, turn := startReviewTurn(t, h)
 	report := recordAgentMessagePayload{Body: "Preliminary report", ReplyTo: input, TurnID: turn.TurnID, ItemID: "late-child-report", Status: protocol.AssistantStreaming}
 	op := h.exec(mainAgent, h.env("conversation.record_agent_message", protocol.Target{Type: "conversation"}, report, nil), RecordAgentMessage{})
@@ -518,6 +525,7 @@ func TestCanonicalLifecycleParentRetainsLateTerminalChildSourceDuty(t *testing.T
 		t.Fatal("parent endpoint discarded late child duty")
 	}
 	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}))
+	child = admitExistingIssueFixture(t, h, child)
 	endpoint = canonicalLifecycleSourceEndpoint(t, h, child, source.MessageID)
 	endpoint.Closure = canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted).Closure
 	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", endpoint))
@@ -537,6 +545,7 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 			parent := createCanonicalOwnerTestIssue(t, h)
 			cp := canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
 			child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, cp, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+			child = admitExistingIssueFixture(t, h, child)
 			input, turn := startReviewTurn(t, h)
 			report := recordAgentMessagePayload{Body: "Preliminary child report", ReplyTo: input, TurnID: turn.TurnID, ItemID: "terminal-child-source", Status: protocol.AssistantStreaming}
 			op := h.exec(mainAgent, h.env("conversation.record_agent_message", protocol.Target{Type: "conversation"}, report, nil), RecordAgentMessage{})
@@ -638,6 +647,7 @@ func TestCanonicalLifecycleTerminalSourceReviewCanSettleNamedBatches(t *testing.
 	legacy := h.createWork(workPlan())
 	cp := canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
 	child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, cp, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	child = admitExistingIssueFixture(t, h, child)
 	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted)))
 	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch}))
 	first, turn := startReviewTurn(t, h)

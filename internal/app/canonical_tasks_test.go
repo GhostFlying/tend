@@ -12,6 +12,9 @@ import (
 
 func createCanonicalTaskForTest(t *testing.T, h *harness, issue protocol.Issue) string {
 	t.Helper()
+	if issue.BoardStatus() == protocol.IssueBacklog {
+		issue = admitExistingIssueFixture(t, h, issue)
+	}
 	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Investigate the vague goal", Spec: testSpec, Rating: protocol.RatingP1, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise the independent acceptance lifecycle"}}
 	payload.Spec.ImplementationContext = "PRIVATE_OWNER_IMPLEMENTATION_REASONING"
 	cmd := CanonicalOwnerTaskCreate{}
@@ -592,6 +595,7 @@ func TestCanonicalTaskOptionalStageKeepsExplicitPrerequisites(t *testing.T) {
 	h := newHarness(t)
 	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Lightweight steps", Project: "default", Intent: "Investigate then implement", Stages: []protocol.IssueStage{{StageID: "investigate", Title: "Investigation", Status: protocol.WorkItemStagePlanned}, {StageID: "implement", Title: "Implementation", Status: protocol.WorkItemStagePlanned, DependsOn: []string{"investigate"}}}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	issue = admitExistingIssueFixture(t, h, issue)
 	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Explicit later step", Spec: testSpec, Rating: protocol.RatingP1, StageIDs: []string{"implement"}}
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {

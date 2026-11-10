@@ -11,10 +11,20 @@ func TestLocalIssueWriteDoesNotRefreshUnrelatedManager(t *testing.T) {
 	h, _ := managerClaimHarness(t)
 	local := createCanonicalOwnerTestIssue(t, h)
 	other := createCanonicalOwnerTestIssue(t, h)
-	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: other.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: other.AssignmentEpoch, Reason: "Delegate unrelated responsibility"}, rev(other.Revision)), RequestIssueManager{})
+	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: other.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: other.AssignmentEpoch, Reason: "Delegate unrelated responsibility"}, rev(other.Revision)), retainedManagerCommand{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	previous := other.Revision
+	other.State = protocol.IssueClosed
+	other.Closure = &protocol.IssueClosure{Kind: protocol.WorkItemClosureDeclined, Reason: "Retained terminal projection awaiting refresh"}
+	other.Revision++
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		return tx.SaveCanonicalIssue(t.Context(), other, previous, store.IssueRevisionProvenance{Actor: owner, RequestID: h.ids.New(protocol.PrefixRequest)})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// Turn a visit to the unrelated manager into an observable failure. A local
 	// update must succeed, while an explicit global refresh must still visit it.
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {

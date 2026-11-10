@@ -12,67 +12,38 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-func TestManagerPublicationAndClaimFreezeResponsibilityWithoutWorkspace(t *testing.T) {
+func TestManagerSelectionAndClaimFreezeResponsibilityWithoutWorkspace(t *testing.T) {
 	h, r := managerClaimHarness(t)
-	var op protocol.Operation
-	var err error
 	i := createCanonicalOwnerTestIssue(t, h)
 	request := h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Delegate the continuing responsibility"}, rev(i.Revision))
-	op = h.exec(owner, request, RequestIssueManager{})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	var manager store.IssueManagerTask
-	if err = json.Unmarshal(op.Result, &manager); err != nil {
-		t.Fatal(err)
-	}
-	if manager.HostID != "" || manager.Pin != nil || manager.AssignmentEpoch != 0 {
-		t.Fatal("publication selected an executor", manager)
-	}
-	if h.count("workspaces") != 0 {
-		t.Fatal("manager created a code workspace")
+	selected := canonicalLifecycleIssue(t, h.exec(owner, request, RequestIssueManager{}))
+	if selected.OwnerSelection == nil || selected.OwnerSelection.CategoryID != protocol.DefaultIssueManagerCategory || selected.Assignee != i.Assignee || selected.AssignmentEpoch != i.AssignmentEpoch || h.count("tasks") != 0 || h.count("plan_actions") != 0 || h.count("workspaces") != 0 {
+		t.Fatal("selection allocated execution", selected)
 	}
 	claim := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil)
-	op = h.exec(runner("linux-1"), claim, Claim{})
+	op := h.exec(runner("linux-1"), claim, Claim{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	var result claimResult
-	if err = json.Unmarshal(op.Result, &result); err != nil {
+	if err := json.Unmarshal(op.Result, &result); err != nil {
 		t.Fatal(err)
 	}
 	as := result.Assignment
-	var wire struct {
-		Assignment map[string]json.RawMessage `json:"assignment"`
+	if as.Manager == nil || as.Role != protocol.RoleIssueManager || as.Execution == nil || as.TaskID == "" || as.Workspace.ID != "" {
+		t.Fatal(as)
 	}
-	if err := json.Unmarshal(op.Result, &wire); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := wire.Assignment["workspace"]; exists {
-		t.Fatal("manager wire contract contains a code workspace", string(op.Result))
-	}
-	if as.Manager == nil || as.Role != protocol.RoleIssueManager || as.Execution == nil || as.TaskID != manager.TaskID || as.Workspace.ID != "" {
-		t.Fatalf("assignment=%+v receipt=%s", as, op.Result)
-	}
-	if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		current, err := store.GetCanonicalIssue(t.Context(), tx.Q(), i.IssueID)
-		if err != nil {
-			return err
-		}
-		if current.Assignee.Ref != "linux-1/alpha" || current.AssignmentEpoch != i.AssignmentEpoch+1 || current.Revision != i.Revision+1 {
-			t.Fatal("claim did not atomically update assignee", current)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	current := canonicalTaskIssue(t, h, i.IssueID)
+	if current.Assignee.Ref != "linux-1/alpha" || current.AssignmentEpoch != i.AssignmentEpoch+1 || current.Revision != selected.Revision+1 {
+		t.Fatal("claim did not atomically update responsibility", current)
 	}
 	if h.count("workspaces") != 0 || h.count("workspace_runs") != 0 || h.count("acceptances") != 0 {
-		t.Fatal("manager acquired execution artifacts")
+		t.Fatal("manager acquired worker artifacts")
 	}
 	before := h.count("runs")
 	replay := h.exec(runner("linux-1"), claim, Claim{})
 	if string(replay.Result) != string(op.Result) || h.count("runs") != before {
-		t.Fatal("replayed claim allocated another execution", replay)
+		t.Fatal("claim replay allocated again", replay)
 	}
 }
 
@@ -107,7 +78,7 @@ func managerClaimHarness(t *testing.T) (*harness, *protocol.RunnerRuntime) {
 func TestManagerHandoffWaitsForOldProcessAndRetainsConversation(t *testing.T) {
 	h, r := managerClaimHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
-	publish := func(replace bool) store.IssueManagerTask {
+	publish := func(replace bool) protocol.Issue {
 		t.Helper()
 		var current protocol.Issue
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -121,7 +92,7 @@ func TestManagerHandoffWaitsForOldProcessAndRetainsConversation(t *testing.T) {
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
-		var m store.IssueManagerTask
+		var m protocol.Issue
 		if err := json.Unmarshal(op.Result, &m); err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +115,7 @@ func TestManagerHandoffWaitsForOldProcessAndRetainsConversation(t *testing.T) {
 		t.Fatal("no first manager")
 	}
 	next := publish(true)
-	if next.TaskID == first.TaskID || next.HandoffID == "" {
+	if next.AssignmentEpoch <= first.AssignmentEpoch || h.count("tasks") != 1 {
 		t.Fatal("replacement did not record a new fenced responsibility", next)
 	}
 	if got := claim(); got != nil {
@@ -155,10 +126,10 @@ func TestManagerHandoffWaitsForOldProcessAndRetainsConversation(t *testing.T) {
 		t.Fatal(stop)
 	}
 	successor := claim()
-	if successor == nil || successor.TaskID != next.TaskID || successor.Manager.ConversationID != old.Manager.ConversationID {
+	if successor == nil || successor.TaskID == old.TaskID || successor.Manager.ConversationID != old.Manager.ConversationID {
 		t.Fatal("handoff did not preserve issue conversation", successor)
 	}
-	if h.task(first.TaskID).Lifecycle != protocol.TaskCompleted {
+	if h.task(old.TaskID).Lifecycle != protocol.TaskCompleted {
 		t.Fatal("old responsibility did not finish after real stop")
 	}
 }
@@ -323,7 +294,7 @@ func TestManagerWithdrawnPublicationCannotClaimResponsibility(t *testing.T) {
 	h, r := managerClaimHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	source := queueMessage(t, h, "Delegate this responsibility")
-	published := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate by the exact source"}, rev(issue.Revision)), RequestIssueManager{})
+	published := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate by the exact source"}, rev(issue.Revision)), retainedManagerCommand{})
 	if published.Status != protocol.OpSucceeded {
 		t.Fatal(published)
 	}
@@ -420,20 +391,23 @@ func TestMainAgentCreatesCategoryManagerBeforeAnyRunnerIdentityIsSelected(t *tes
 	if issue.Assignee.Kind != protocol.IssueAssigneeOwner || issue.Assignee.Ref != owner.Subject {
 		t.Fatal("publication impersonated the owner or selected a runner early", issue)
 	}
-	var published store.IssueManagerTask
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var err error
-		published, err = store.CurrentIssueManagerTask(t.Context(), tx.Q(), issue.IssueID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	if issue.WorkStatus != protocol.IssueBacklog || issue.OwnerSelection == nil || h.count("tasks") != 0 {
+		t.Fatal("main creation allocated execution", issue)
 	}
-	if published.Pin != nil || published.HostID != "" || published.SourceMessageID != source {
-		t.Fatal("main publication did not retain source/category-only selection", published)
+	h.app.mainOwner = owner.Subject
+	env := h.env("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, rev(issue.Revision))
+	ctx := WithOwnerExecution(t.Context(), &OwnerExecution{Actor: mainAgent, ExecutionID: turn.RequestID, CallID: env.RequestID, EffectSeq: 2})
+	started, err := h.app.Execute(ctx, owner, env, CanonicalOwnerIssueCommand{Action: "set_status"})
+	if err != nil || started.Status != protocol.OpSucceeded {
+		t.Fatal(started, err)
 	}
+	if h.count("tasks") != 0 {
+		t.Fatal("todo allocated a task before claim")
+	}
+
 	claimed := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil), Claim{})
 	var assignment claimResult
-	if err := json.Unmarshal(claimed.Result, &assignment); err != nil || assignment.Assignment.Manager == nil || assignment.Assignment.TaskID != published.TaskID {
+	if err := json.Unmarshal(claimed.Result, &assignment); err != nil || assignment.Assignment.Manager == nil || assignment.Assignment.TaskID == "" {
 		t.Fatal("main's category task was not claimable", claimed, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -470,6 +444,10 @@ func TestManagerPendingMessagesSurviveOwnerReturnAndClaim(t *testing.T) {
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
+				issue = canonicalTaskIssue(t, h, issue.IssueID)
+				if issue.BoardStatus() == protocol.IssueBacklog {
+					issue = issueAdmissionStatus(t, h, issue, protocol.IssueTodo, nil)
+				}
 			}
 			publish()
 			conversation := "issue:" + issue.IssueID
@@ -485,7 +463,7 @@ func TestManagerPendingMessagesSurviveOwnerReturnAndClaim(t *testing.T) {
 				if len(board.Items) != 1 || board.Items[0].Board.PendingManagerCategoryID != category {
 					t.Fatal("pending category missing from board projection", board)
 				}
-				if view.Conversation.ConversationID != conversation || !view.Conversation.CanSend || view.Conversation.Reason != "manager_pending" {
+				if view.Conversation.ConversationID != conversation || !view.Conversation.CanSend || view.Conversation.Reason != "owner_pending" {
 					t.Fatal(view.Conversation)
 				}
 				return nil

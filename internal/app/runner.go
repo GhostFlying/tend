@@ -118,7 +118,7 @@ func desiredFor(run store.RunRow, action store.ActionRow, task store.TaskRow) pr
 		return protocol.DesiredStopped
 	case task.ControlMode == protocol.ControlHumanControl:
 		return protocol.DesiredHeld
-	case task.ControlMode != protocol.ControlManaged:
+	case run.PauseHandoff != nil, task.ControlMode != protocol.ControlManaged:
 		return protocol.DesiredPaused
 	}
 	return protocol.DesiredRun
@@ -199,6 +199,9 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
 		SpecVersion: action.TargetSpecVersion,
 		Spec:        workerInput, Workspace: ws,
+	}
+	if err := store.AssignmentPause(ctx, q, &as); err != nil {
+		return protocol.Assignment{}, err
 	}
 	if err := assignmentQuestions(ctx, q, &as, run.HostID); err != nil {
 		return protocol.Assignment{}, err
@@ -342,7 +345,10 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	endClaimRefresh := tx.ObservePhase(store.WriteClaimRefresh)
-	refreshErr := refreshManagerTasks(ctx, x, tx)
+	refreshErr := refreshPauseContinuations(ctx, x, tx)
+	if refreshErr == nil {
+		refreshErr = refreshManagerTasks(ctx, x, tx)
+	}
 	endClaimRefresh()
 	if refreshErr != nil {
 		return Outcome{}, refreshErr
@@ -415,6 +421,13 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if !ok {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 	}
+	var materialized []Event
+	if pick.InitialIssue {
+		materialized, err = materializeIssueOwner(ctx, x, tx, &pick)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
 
 	now := x.Now.UnixMilli()
 	run := store.RunRow{
@@ -432,6 +445,13 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO run_pause_contracts(run_id,handoff_allowed) VALUES(?,?)`, run.RunID, p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityPauseHandoffs)); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE run_pause_handoffs SET successor_run_id=? WHERE continuation_action_id=? AND successor_run_id IS NULL`, run.RunID, run.ActionID); err != nil {
+		return Outcome{}, err
+	}
+
 	if run.Role != protocol.RoleIssueManager {
 		if err := freezeAcceptanceEvidenceContract(ctx, tx, run, p.Runtime); err != nil {
 			return Outcome{}, err
@@ -500,7 +520,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	if pick.Kind == protocol.ActionCoordinate {
-		return claimIssueManager(ctx, x, tx, pick, run, lease, execution)
+		out, err := claimIssueManager(ctx, x, tx, pick, run, lease, execution)
+		out.Events = append(materialized, out.Events...)
+		return out, err
 	}
 	ownerEvents, err := claimOwnerExecution(ctx, x, tx, run, execution)
 	if err != nil {
@@ -700,6 +722,10 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 		desired := desiredFor(run, rc.action, rc.task)
+		pause, err := store.NegotiatedPauseHandoff(ctx, q, run)
+		if err != nil {
+			return Outcome{}, err
+		}
 		if desired == protocol.DesiredStopped {
 			stop(h.RunID, "the run is no longer wanted")
 			continue
@@ -726,7 +752,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 					}
 				}
 				events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.retained_continued", Body: map[string]any{"continuation_request_id": continuation.RequestID, "lease_id": lease.LeaseID}})
-				res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinueRetained, Desired: desired, RetainedResume: &protocol.RetainedRunResume{RequestID: continuation.RequestID, Mode: "attach", RecoveryAuthorizationID: retainedContinuationRecoveryAuthorization(continuation)}})
+				res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinueRetained, Desired: desired, PauseHandoff: pause, RetainedResume: &protocol.RetainedRunResume{RequestID: continuation.RequestID, Mode: "attach", RecoveryAuthorizationID: retainedContinuationRecoveryAuthorization(continuation)}})
 				continue
 			}
 			// The negotiated peer retains this exact journal. Registration and
@@ -746,7 +772,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			}
 			events = append(events, Event{ObjectType: "run", ObjectID: run.RunID, Kind: "run.reconciled", Body: map[string]any{"observed": h.Observed}})
 		}
-		res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinue, Desired: desired})
+		res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinue, Desired: desired, PauseHandoff: pause})
 	}
 
 	open, err := store.ListOpenRunsOnHost(ctx, q, host.HostID)
@@ -1143,6 +1169,10 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 							state.Renewed = true
 						}
 						state.Desired = desiredFor(rc.run, rc.action, rc.task)
+						state.PauseHandoff, err = store.NegotiatedPauseHandoff(ctx, q, rc.run)
+						if err != nil {
+							return err
+						}
 						res.Runs = append(res.Runs, state)
 						continue
 					}
@@ -1152,6 +1182,10 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 				}
 				state.Renewed = true
 				state.Desired = desiredFor(rc.run, rc.action, rc.task)
+				state.PauseHandoff, err = store.NegotiatedPauseHandoff(ctx, q, rc.run)
+				if err != nil {
+					return err
+				}
 			}
 			res.Runs = append(res.Runs, state)
 		}

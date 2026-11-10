@@ -37,21 +37,13 @@ func TestOwnerDelegationPreservesSourceFailureAndPublishesOrdinaryResponsibility
 		t.Fatal(err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		manager, err := store.CurrentIssueManagerTask(t.Context(), tx.Q(), issue.IssueID)
-		if err != nil {
-			return err
+		if issue.BoardStatus() != protocol.IssueBacklog || issue.OwnerSelection == nil || issue.OwnerSelection.CategoryID != "planner" || issue.OwnerSelection.OwnershipPolicy != protocol.IssueOwnerPolicy {
+			t.Fatal("creation did not retain an unallocated selection", issue)
 		}
-		raw, err := store.GetSpec(t.Context(), tx.Q(), manager.TaskID, 1)
-		if err != nil {
-			return err
+		if h.count("tasks") != 0 {
+			t.Fatal("backlog creation allocated execution")
 		}
-		var spec protocol.IssueManagerSpec
-		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
-			return err
-		}
-		if spec.CategoryID != "planner" || spec.OwnershipPolicy != protocol.IssueOwnerPolicy || manager.Pin != nil {
-			t.Fatal("publication invented a manager identity or required a special category", spec, manager)
-		}
+
 		reason, err := delegationBlockReason(t.Context(), tx.Q(), turn.RequestID)
 		if err == nil && reason != "" {
 			t.Fatal("corrected source did not discharge this exact owner delegation", reason)

@@ -31,7 +31,17 @@ func (c IssueControl) BoardStatus() IssueWorkStatus {
 	return c.WorkStatus
 }
 
+type IssuePauseProgress struct {
+	Pending       int64  `json:"pending"`
+	Stopped       int64  `json:"stopped"`
+	Unsupported   int64  `json:"unsupported"`
+	IssueID       string `json:"issue_id"`
+	IssueRevision int64  `json:"issue_revision"`
+}
+
 type IssueBoardCard struct {
+	QueueReason              *QueueWaitReason    `json:"queue_reason,omitempty"`
+	Pause                    *IssuePauseProgress `json:"pause,omitempty"`
 	Progress                 *IssueProgress      `json:"progress,omitempty"`
 	Children                 *IssueChildProgress `json:"children,omitempty"`
 	PendingManagerCategoryID string              `json:"pending_manager_category_id,omitempty"`
@@ -46,8 +56,9 @@ type IssueBoardCard struct {
 }
 
 type SetIssueStatusPayload struct {
-	ExpectedAssignmentEpoch int64           `json:"expected_assignment_epoch"`
-	Status                  IssueWorkStatus `json:"status"`
+	Owner                   *IssueOwnerRequest `json:"owner,omitempty"`
+	ExpectedAssignmentEpoch int64              `json:"expected_assignment_epoch"`
+	Status                  IssueWorkStatus    `json:"status"`
 }
 
 // IssueChildProgress summarizes direct responsibilities, not execution sessions.

@@ -26,6 +26,10 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 	if err != nil {
 		return err
 	}
+	out.QueueReason, out.Pause, err = facts.issueAdmissionProgress(ctx, q, out.Issue)
+	if err != nil {
+		return err
+	}
 	out.Children, err = issueChildren(ctx, q, out.IssueID, facts)
 	if err != nil {
 		return err
@@ -36,12 +40,18 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 		return err
 	}
 	switch {
+	case out.WorkStatus == protocol.IssueBacklog:
+		binding.Reason = "backlog"
+		binding.CanSend = binding.ConversationID != ""
 	case out.State == protocol.IssueClosed || out.State == protocol.IssueCancelled || out.State == protocol.IssueCancelling:
 		binding.Reason = "ended"
 	case out.AssignmentState != "active":
 		binding.Reason = "handoff"
 	case out.Manager != nil && out.Manager.HostID == "" && !out.Manager.State.Terminal():
 		binding.Reason = "manager_pending"
+		binding.CanSend = binding.ConversationID != ""
+	case out.OwnerSelection != nil && out.Manager == nil:
+		binding.Reason = "owner_pending"
 		binding.CanSend = binding.ConversationID != ""
 	case out.Assignee.Kind == protocol.IssueAssigneeOwner:
 		binding.Reason = "owner"

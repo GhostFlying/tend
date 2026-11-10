@@ -52,6 +52,9 @@ func TestCapabilityCLIRealOwnerWorkflow(t *testing.T) {
 	owner := e.login(protocol.ScopeOwner)
 	issue := createOwnerIssueHTTP(t, e, owner, "")
 	c := newCapabilityCLI(t, e)
+	issue = admitOwnerIssueHTTP(t, e, owner, issue)
+	c.run("issue", "set-status", issue.IssueID, "--status", "backlog")
+	c.run("issue", "set-status", issue.IssueID, "--status", "todo", "--category", "fixture-execution")
 	c.run("issue", "set-status", issue.IssueID, "--data", `{"status":"in_progress"}`)
 	var current protocol.IssueView
 	if err := json.Unmarshal(c.run("issue", "show", issue.IssueID, "--json"), &current); err != nil || current.WorkStatus != protocol.IssueInProgress {

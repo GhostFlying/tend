@@ -45,6 +45,7 @@ type WorkerSpec struct {
 	Execution            *protocol.ExecutionProfile
 	QuestionContext      bool
 	QuestionContinuation *protocol.QuestionContinuation
+	PauseContinuation    *protocol.PauseContinuation
 	QuestionHandoffs     bool
 	SupervisorQuestions  bool
 	ReceiveMessages      func(context.Context) (*protocol.RunMessage, error)
@@ -227,3 +228,15 @@ var ErrVerdictSelectionRejected = errors.New("acceptance evidence selection was 
 // ErrRetainedResumePending leaves the original execution unresolved and intact.
 // Missing identity is not a business failure or permission to launch again.
 var ErrRetainedResumePending = errors.New("original retained native execution requires reconciliation")
+
+// StoppedPredecessor is a verified physical execution boundary, regardless of why
+// the previous Run handed off. It carries no new business authorization.
+func (s WorkerSpec) StoppedPredecessor() (run, thread string) {
+	if s.PauseContinuation != nil {
+		return s.PauseContinuation.RunID, s.PauseContinuation.ThreadID
+	}
+	if s.QuestionContinuation != nil {
+		return s.QuestionContinuation.RunID, s.QuestionContinuation.ThreadID
+	}
+	return "", ""
+}

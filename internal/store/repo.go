@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -302,6 +303,7 @@ func (t *Tx) CancelOpenActions(ctx context.Context, taskID string, now int64) er
 
 // RunRow is a stored run.
 type RunRow struct {
+	PauseHandoff  *protocol.PauseHandoff
 	Protocol      int64
 	RunID         string
 	TaskID        string
@@ -327,13 +329,17 @@ func (t *Tx) InsertRun(ctx context.Context, r RunRow) error {
 	return nil
 }
 
-const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at, protocol`
+const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at, protocol, COALESCE((SELECT json_object('request_id',h.request_id,'issue_id',h.issue_id,'issue_revision',h.issue_revision,'control_revision',h.control_revision) FROM run_pause_handoffs h WHERE h.run_id=runs.run_id AND h.stopped=0),'')`
 
 func scanRun(row interface{ Scan(...any) error }) (RunRow, error) {
 	var r RunRow
 	var host sql.NullString
-	err := row.Scan(&r.RunID, &r.TaskID, &r.ActionID, &r.Generation, &r.Role, &host, &r.DesiredState, &r.ObservedState, &r.CreatedAt, &r.Protocol)
+	var pause string
+	err := row.Scan(&r.RunID, &r.TaskID, &r.ActionID, &r.Generation, &r.Role, &host, &r.DesiredState, &r.ObservedState, &r.CreatedAt, &r.Protocol, &pause)
 	r.HostID = host.String
+	if err == nil && pause != "" {
+		err = json.Unmarshal([]byte(pause), &r.PauseHandoff)
+	}
 	return r, err
 }
 

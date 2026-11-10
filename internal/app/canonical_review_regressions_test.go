@@ -15,6 +15,7 @@ func TestCanonicalTaskDefinitionStageAdmissionUsesOnlyNewBindings(t *testing.T) 
 			plan := workPlan()
 			plan.Project = "default"
 			issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, canonicalOwnerIssueCreate{Plan: plan}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+			issue = admitExistingIssueFixture(t, h, issue)
 			p := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Explicit task agreement", Spec: testSpec}
 			if kind == "existing_active" {
 				p.StageIDs = []string{"investigate"}
@@ -136,6 +137,7 @@ func TestCanonicalTaskSecondaryEvidenceDoesNotCreateLegacyWaitCycle(t *testing.T
 			var tasks []string
 			if canonical {
 				issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, canonicalOwnerIssueCreate{Plan: plan}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+				issue = admitExistingIssueFixture(t, h, issue)
 				for _, stage := range []string{"first", "second"} {
 					issue = canonicalTaskIssue(t, h, issue.IssueID)
 					p := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Worker for " + stage, Spec: testSpec, StageIDs: []string{stage}}

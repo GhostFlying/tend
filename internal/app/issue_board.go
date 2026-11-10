@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -21,7 +22,10 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 	if err := domain.CheckIssueEpoch(current.IssueControl, p.ExpectedAssignmentEpoch); err != nil {
 		return Outcome{}, err
 	}
-	if current.BoardStatus() == p.Status {
+	if current.BoardStatus() == protocol.IssueBacklog && p.Status != protocol.IssueBacklog && p.Status != protocol.IssueTodo && p.Status != protocol.IssueWorkCancelled {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "move backlog to todo before starting work")
+	}
+	if current.BoardStatus() == p.Status && p.Owner == nil {
 		return Outcome{Result: current}, nil
 	}
 	if p.Status == protocol.IssueDone || p.Status == protocol.IssueWorkCancelled {
@@ -97,6 +101,9 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 	next := current
 	activation := false
 	if current.State == protocol.IssueClosed || current.State == protocol.IssueCancelled {
+		if p.Status != protocol.IssueBacklog {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reopen the Issue to backlog before moving it to todo")
+		}
 		var err error
 		next.IssueControl, err = domain.ReopenIssueControl(current.IssueControl)
 		if err != nil {
@@ -106,6 +113,58 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 		activation = true
 	} else if current.State == protocol.IssueCancelling {
 		return Outcome{}, canonicalEndpointError("cancellation must settle before changing work status", []protocol.IssueBlocker{{Code: "issue_cancelling", ObjectID: current.IssueID}})
+	}
+	if p.Owner != nil {
+		choice := &protocol.IssueOwnerSelection{CategoryID: p.Owner.CategoryID, AgentID: p.Owner.AgentID, OwnershipPolicy: protocol.IssueOwnerPolicy}
+		if err := validateIssueOwnerSelection(ctx, tx.Q(), choice); err != nil {
+			return Outcome{}, err
+		}
+		if manager, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID); err == nil {
+			raw, err := store.GetSpec(ctx, tx.Q(), manager.TaskID, 1)
+			if err != nil {
+				return Outcome{}, err
+			}
+			var spec protocol.IssueManagerSpec
+			if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+				return Outcome{}, err
+			}
+			if spec.CategoryID != choice.CategoryID || spec.AgentID != choice.AgentID || spec.OwnershipPolicy != choice.OwnershipPolicy {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace the existing owner explicitly before changing execution selection")
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return Outcome{}, err
+		}
+		next.OwnerSelection = choice
+	}
+	if p.Status == protocol.IssueTodo {
+		if next.OwnerSelection == nil {
+			manager, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return Outcome{}, err
+			}
+			if err == nil {
+				raw, err := store.GetSpec(ctx, tx.Q(), manager.TaskID, 1)
+				if err != nil {
+					return Outcome{}, err
+				}
+				var spec protocol.IssueManagerSpec
+				if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+					return Outcome{}, err
+				}
+				next.OwnerSelection = &protocol.IssueOwnerSelection{CategoryID: spec.CategoryID, AgentID: spec.AgentID, OwnershipPolicy: spec.OwnershipPolicy}
+			}
+		}
+		if err := validateIssueOwnerSelection(ctx, tx.Q(), next.OwnerSelection); err != nil {
+			return Outcome{}, err
+		}
+		if current.BoardStatus() != protocol.IssueTodo {
+			next.TodoAt = x.Now.UnixMilli()
+			next.TodoRevision = current.Revision + 1
+		}
+	}
+	if activation {
+		next.TodoAt = 0
+		next.TodoRevision = 0
 	}
 	next.WorkStatus = p.Status
 	next.Revision++

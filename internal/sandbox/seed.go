@@ -54,6 +54,17 @@ func (s seeder) execute(ctx context.Context, key string, target protocol.Target,
 	return nil
 }
 
+// admit explicitly records selection and backlog -> todo for scripted demo work.
+// It uses stable receipts just like an owner's consecutive requests.
+func (s seeder) admit(ctx context.Context, key string, issue *protocol.Issue) error {
+	if issue.OwnerSelection == nil {
+		if err := s.execute(ctx, key+"-selection", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Select scripted demo execution"}, app.RequestIssueManager{}, issue); err != nil {
+			return err
+		}
+	}
+	return s.execute(ctx, key+"-todo", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, issue)
+}
+
 func seedCategories(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 	s := seeder{app: a}
 	zero := int64(0)
@@ -71,7 +82,7 @@ func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Dem
 	return seedDemo(ctx, runtime, root, false, false)
 }
 
-func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skipStory, storyOnly bool) (Demo, error) {
+func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skipStory, storyOnly bool, beforeBulk ...func(context.Context) (func(), error)) (Demo, error) {
 	receipt := filepath.Join(root, "demo.json")
 	var demo Demo
 	if raw, err := os.ReadFile(receipt); err == nil {
@@ -101,6 +112,13 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 	if storyOnly {
 		return demo, writeDemoReceipt(receipt, demo)
 	}
+	if len(beforeBulk) > 0 {
+		release, err := beforeBulk[0](ctx)
+		if err != nil {
+			return demo, err
+		}
+		defer release()
+	}
 	names := []string{"收集下一轮体验优化建议", "完善手机端导航与长标题换行：在连续对话、Issue 看板、执行记录和收件箱之间切换时，保持未发送草稿、原始消息来源、输入焦点与浏览器返回位置，并确认较长中文内容不会被截断", "正在验证真实消息发送与可重试请求", "评审交付说明与独立验收证据", "已完成示例：检查关闭记录与归档展示", "已取消示例：优先级调整后停止的探索"}
 	for n, status := range protocol.IssueWorkStatusValues() {
 		var issue protocol.Issue
@@ -116,6 +134,11 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 			return demo, err
 		}
 		demo.Issues = append(demo.Issues, issue.IssueID)
+		if status != protocol.IssueBacklog && status != protocol.IssueWorkCancelled {
+			if err := s.admit(ctx, key, &issue); err != nil {
+				return demo, err
+			}
+		}
 		if err := s.execute(ctx, key+"-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, nil); err != nil {
 			return demo, err
 		}
@@ -160,6 +183,9 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 			return demo, err
 		}
 		issue.Revision++
+		if err := s.admit(ctx, key, &issue); err != nil {
+			return demo, err
+		}
 		// Set work intent before a concurrent runner claim can advance revisions.
 		if err := s.execute(ctx, key+"-start-status", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress}, app.CanonicalOwnerIssueCommand{Action: "set_status"}, &issue); err != nil {
 			return demo, err

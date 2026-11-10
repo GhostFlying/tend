@@ -64,6 +64,7 @@ const (
 
 // RunVerdict tells the runner what to do with a run it reported.
 type RunVerdict struct {
+	PauseHandoff   *PauseHandoff      `json:"pause_handoff,omitempty"`
 	RetainedResume *RetainedRunResume `json:"retained_resume,omitempty"`
 	RunID          string             `json:"run_id"`
 	Verdict        string             `json:"verdict"`
@@ -97,6 +98,9 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
+	PauseHandoffs     bool                  `json:"pause_handoffs,omitempty"`
+	PauseHandoff      *PauseHandoff         `json:"pause_handoff,omitempty"`
+	PauseContinuation *PauseContinuation    `json:"pause_continuation,omitempty"`
 	CapabilityBinding *RunCapabilityBinding `json:"capability_binding,omitempty"`
 	// AcceptanceEvidenceFiles enables explicitly selected durable verdict files.
 	// An absent flag retains the original verdict-only wire contract.
@@ -212,9 +216,10 @@ type HeartbeatResult struct {
 // longer active is not renewed; the runner must fence itself and reconcile
 // through hello.
 type LeaseState struct {
-	RunID   string     `json:"run_id"`
-	Renewed bool       `json:"renewed"`
-	Desired RunDesired `json:"desired"`
+	PauseHandoff *PauseHandoff `json:"pause_handoff,omitempty"`
+	RunID        string        `json:"run_id"`
+	Renewed      bool          `json:"renewed"`
+	Desired      RunDesired    `json:"desired"`
 }
 
 // RunEvent is a fact a runner observed about a run. Seq is assigned by the

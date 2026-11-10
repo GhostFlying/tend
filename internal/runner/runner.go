@@ -660,6 +660,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		// What tend wants now, not what it wanted when it assigned the run.
 		as := run.Assignment
 		as.Desired = v.Desired
+		if err := r.cfg.Journal.RecordPause(ctx, as.RunID, v.PauseHandoff); err != nil {
+			return err
+		}
 		if r.boundedRunQuarantined(ctx, v.RunID) && (v.Verdict != protocol.VerdictContinueRetained || !r.boundedContinuationMatches(v.RetainedResume)) {
 			// A host Stop can settle an already committed terminal fact only
 			// after the original worker's physical exit was independently known.
@@ -717,6 +720,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 				yieldReady := false
 				if sameAuthority && !resultReady {
 					yieldReady, err = r.retainedQuestionYieldReady(ctx, run)
+					if err == nil && !yieldReady {
+						yieldReady, err = r.pauseReceiptReady(ctx, run)
+					}
 					if err != nil {
 						return err
 					}
@@ -826,6 +832,10 @@ func (r *Runner) lookup(runID string) *active {
 // start launches the executor of a journaled run unless one is running.
 func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt time.Time) {
 	runID := as.RunID
+	if err := r.cfg.Journal.RecordPause(ctx, as.RunID, as.PauseHandoff); err != nil {
+		r.cfg.Log.ErrorContext(ctx, "pause assignment not journaled", "run_id", as.RunID, "err", err)
+		return
+	}
 	if r.boundedRunQuarantined(ctx, runID) {
 		permit, err := r.cfg.Journal.RetainedResume(ctx, runID)
 		if err != nil || !r.boundedContinuationMatches(permit) {
@@ -1001,6 +1011,10 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	}
 	deadline := r.fenceDeadline(sent)
 	for _, s := range res.Runs {
+		if err := r.cfg.Journal.RecordPause(ctx, s.RunID, s.PauseHandoff); err != nil {
+			r.cfg.Log.ErrorContext(ctx, "pause control not journaled", "run_id", s.RunID, "err", err)
+			continue
+		}
 		a := r.lookup(s.RunID)
 		if a == nil {
 			continue

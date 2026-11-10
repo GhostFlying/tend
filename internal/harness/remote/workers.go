@@ -120,7 +120,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 	if spec.NativeDial == nil || spec.Lifetime == nil {
 		return nil, fmt.Errorf("%w: native run transport unavailable", harness.ErrWorkerNotStarted)
 	}
-	if spec.QuestionContinuation != nil && spec.Thread != "" {
+	if previous, _ := spec.StoppedPredecessor(); previous != "" && spec.Thread != "" {
 		var e error
 		spec.Thread, e = rebindQuestionThread(spec)
 		if e != nil {
@@ -696,7 +696,8 @@ func rebindQuestionThread(spec harness.WorkerSpec) (string, error) {
 	if state.RunID == spec.RunID {
 		return spec.Thread, nil
 	}
-	if state.RunID != spec.QuestionContinuation.RunID || !state.ExecutorStopped || state.BriefPending || state.Reconcile || state.Thread == "" || state.Cwd != spec.Dir || state.ProviderID != spec.ProviderID {
+	previous, _ := spec.StoppedPredecessor()
+	if state.RunID != previous || !state.ExecutorStopped || state.BriefPending || state.Reconcile || state.Thread == "" || state.Cwd != spec.Dir || state.ProviderID != spec.ProviderID {
 		return "", errors.New("question predecessor is not safely stopped in the original environment")
 	}
 	state.RunID = spec.RunID

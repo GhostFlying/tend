@@ -74,6 +74,26 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 				return err
 			}
 		}
+		if previous, err := store.PendingPausePredecessor(ctx, q, c.ActionID); err != nil {
+			return err
+		} else if previous != "" {
+			r, err := store.GetRun(ctx, q, previous)
+			if err != nil {
+				return err
+			}
+			current, err := store.RunIssueResponsibilityCurrent(ctx, q, previous)
+			if err != nil {
+				return err
+			}
+			c.OwnerResponsibilityChanged = !current
+			c.Requirements.HostID = r.HostID
+			pin, err := store.GetRunExecution(ctx, q, previous)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			c.HandoffPin = pin
+		}
+
 		scope, err := store.ResolveTaskIssueScope(ctx, q, c.TaskID)
 		if err != nil {
 			return err

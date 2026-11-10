@@ -39,6 +39,11 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 		return err
 	}
 	if run.Phase == journal.PhaseReleasing {
+		if ready, e := r.pauseReceiptReady(lifetime, run); e != nil {
+			return e
+		} else if ready {
+			return r.reportPause(lifetime, as)
+		}
 		return r.reportManagerStopped(lifetime, as)
 	}
 	attempt, stop := context.WithCancelCause(runCtx)
@@ -86,6 +91,11 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 		}
 		r.requestReconcile()
 		return nil
+	}
+	if p, e := r.cfg.Journal.Pause(receiptCtx, as.RunID); e != nil {
+		return e
+	} else if p != nil && as.PauseHandoffs && !run.Held {
+		return r.finishPause(receiptCtx, as)
 	}
 	last, readErr := r.cfg.Journal.LastManagerEvent(receiptCtx, as.RunID)
 	if readErr != nil {

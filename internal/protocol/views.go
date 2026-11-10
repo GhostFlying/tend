@@ -217,10 +217,11 @@ type ProjectView struct {
 
 // QueueEntry is a queued action that waits only for a host to take it.
 type QueueEntry struct {
+	IssueID string `json:"issue_id,omitempty"`
 	// Place is the entry's place in the whole queue, from 1.
 	Place    int        `json:"place"`
-	ActionID string     `json:"action_id"`
-	TaskID   string     `json:"task_id"`
+	ActionID string     `json:"action_id,omitempty"`
+	TaskID   string     `json:"task_id,omitempty"`
 	Title    string     `json:"title"`
 	Project  string     `json:"project"`
 	Kind     ActionKind `json:"kind"`

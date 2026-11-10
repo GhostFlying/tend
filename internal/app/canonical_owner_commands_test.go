@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func createCanonicalOwnerTestIssue(t *testing.T, h *harness) protocol.Issue {
+func createBacklogTestIssue(t *testing.T, h *harness) protocol.Issue {
 	t.Helper()
 	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Investigate an intent", Project: "default", Intent: "Produce a verified result", Stages: []protocol.IssueStage{}}}
 	op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"})
@@ -23,6 +24,59 @@ func createCanonicalOwnerTestIssue(t *testing.T, h *harness) protocol.Issue {
 	}
 	if issue.Assignee.Kind != protocol.IssueAssigneeOwner || issue.Assignee.Ref != owner.Subject || issue.AssignmentEpoch != 1 || issue.Revision != 1 {
 		t.Fatalf("created=%+v", issue)
+	}
+	return issue
+}
+
+// Most domain fixtures represent an already admitted historical responsibility.
+// Keep creation tests separate so the production default remains pure backlog.
+func createCanonicalOwnerTestIssue(t *testing.T, h *harness) protocol.Issue {
+	t.Helper()
+	p := canonicalOwnerIssueCreate{Plan: protocol.IssuePlan{Title: "Investigate an intent", Project: "default", Intent: "Produce a verified result", Stages: []protocol.IssueStage{}}}
+	op := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), historicalAdmittedIssueFixture{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var issue protocol.Issue
+	if err := json.Unmarshal(op.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	return issue
+}
+
+// Seed the prior release's already admitted aggregate; it deliberately does not
+// exercise today's creation default, which createBacklogTestIssue verifies.
+type historicalAdmittedIssueFixture struct{}
+
+func (historicalAdmittedIssueFixture) Operation() string { return "issues.create" }
+func (historicalAdmittedIssueFixture) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+	return allowKinds(x.Principal, protocol.PrincipalOwner)
+}
+func (historicalAdmittedIssueFixture) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	var p canonicalOwnerIssueCreate
+	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	now := x.Now.UnixMilli()
+	issue := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), State: protocol.IssueActive, WorkStatus: protocol.IssueTodo, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1, Plan: p.Plan, DependsOn: []string{}, CreatedAt: now, UpdatedAt: now}
+	var err error
+	issue.AcceptancePolicy, err = newIssueAcceptancePolicy(x, nil)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return saveCanonicalOwnerDefinition(ctx, x, tx, issue, 0, canonicalOwnerIssueSource{}, p, "issue.created")
+}
+
+func admitExistingIssueFixture(t *testing.T, h *harness, issue protocol.Issue) protocol.Issue {
+	t.Helper()
+	issue.WorkStatus = protocol.IssueTodo
+	issue.TodoAt = h.clock.Now().UnixMilli()
+	issue.TodoRevision = issue.Revision + 1
+	issue.Revision++
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		return tx.SaveCanonicalIssue(t.Context(), issue, issue.Revision-1, store.IssueRevisionProvenance{Actor: owner, RequestID: h.ids.New(protocol.PrefixRequest), Reason: map[string]string{"reason": "Already admitted historical responsibility fixture"}})
+	}); err != nil {
+		t.Fatal(err)
 	}
 	return issue
 }

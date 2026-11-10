@@ -76,6 +76,8 @@ func TestConsultationQuestionHasNoIssueAndActualRequestDelegatesToManagerTask(t 
 	if issue.Assignee.Ref != "server-hosted/planner" || h.count("tasks") != 0 {
 		t.Fatal("consultation became worker or no manager", issue)
 	}
+	// This historical hosted executor fixture is explicitly admitted before work.
+	issue = admitExistingIssueFixture(t, h, issue)
 	// The manager, not the consultation, creates the real frozen task.
 	managerTurn, manager := startHostedIssueReview(t, h, issue)
 	task := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Write investigation report", Spec: testSpec, Rating: protocol.RatingP1}

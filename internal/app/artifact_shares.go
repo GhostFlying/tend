@@ -142,7 +142,7 @@ func (c ArtifactShareCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	// Authorization provenance is retained in the exact share and revision reason.
 	// SourceMessageID also grants general message/file material access, which an
 	// artifact-only approval must never confer (including after revocation).
-	if err := tx.SaveCanonicalIssue(ctx, issue, expected, store.IssueRevisionProvenance{RequestDomain: x.RequestDomain(), Actor: x.ActualPrincipal(), RequestID: x.Env.RequestID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: control}); err != nil {
+	if err := tx.SaveCanonicalIssue(ctx, issue, expected, store.IssueRevisionProvenance{AdmissionDefinition: true, RequestDomain: x.RequestDomain(), Actor: x.ActualPrincipal(), RequestID: x.Env.RequestID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: control}); err != nil {
 		return Outcome{}, err
 	}
 	value.Applicable = value.Status == "active" && value.AssignmentEpoch == issue.AssignmentEpoch

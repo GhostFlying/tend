@@ -26,15 +26,26 @@ type IssueAssignee struct {
 
 // IssueControl has no independent revision: work_items.revision owns the aggregate.
 type IssueControl struct {
-	WorkStatus       IssueWorkStatus `json:"work_status,omitempty"`
-	IssueID          string          `json:"issue_id"`
-	ParentIssueID    string          `json:"parent_issue_id,omitempty"`
-	State            IssueState      `json:"state"`
-	Assignee         IssueAssignee   `json:"assignee"`
-	AssignmentEpoch  int64           `json:"assignment_epoch"`
-	AssignmentState  string          `json:"assignment_state"`
-	PendingAssignee  *IssueAssignee  `json:"pending_assignee,omitempty"`
-	PendingHandoffID string          `json:"pending_handoff_id,omitempty"`
+	OwnerSelection   *IssueOwnerSelection `json:"owner_selection,omitempty"`
+	TodoAt           int64                `json:"todo_at,omitempty"`
+	TodoRevision     int64                `json:"todo_revision,omitempty"`
+	WorkStatus       IssueWorkStatus      `json:"work_status,omitempty"`
+	IssueID          string               `json:"issue_id"`
+	ParentIssueID    string               `json:"parent_issue_id,omitempty"`
+	State            IssueState           `json:"state"`
+	Assignee         IssueAssignee        `json:"assignee"`
+	AssignmentEpoch  int64                `json:"assignment_epoch"`
+	AssignmentState  string               `json:"assignment_state"`
+	PendingAssignee  *IssueAssignee       `json:"pending_assignee,omitempty"`
+	PendingHandoffID string               `json:"pending_handoff_id,omitempty"`
+}
+
+// IssueOwnerSelection records the intended executor without publishing work.
+// The actual Agent, Task and Run are bound only when a runner claims the Issue.
+type IssueOwnerSelection struct {
+	CategoryID      string `json:"category_id"`
+	AgentID         string `json:"agent_id,omitempty"`
+	OwnershipPolicy string `json:"ownership_policy,omitempty"`
 }
 
 type IssueDependency struct {
