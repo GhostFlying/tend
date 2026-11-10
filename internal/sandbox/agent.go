@@ -141,12 +141,17 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 		// sources may trigger work, so completion notifications cannot dispatch again.
 		if manager {
 			text, source = "", ""
-			for _, pending := range issue.SourceReviews {
-				if pending.Author == "owner" && !pending.Withdrawn {
-					text, source = pending.Body, pending.MessageID
-					respond = true
-					sourceRevision = pending.ContentRevision
-				}
+			sources, err := managerInputSources(ctx, runtime, input.UserMessageID)
+			if err != nil {
+				return "failed"
+			}
+			message, ok := c.managerMessage(input.UserMessageID, sources)
+			if !ok {
+				return "failed"
+			}
+			if message != nil {
+				text, source, sourceRevision = message.Body, message.MessageID, message.ContentRevision
+				respond = true
 			}
 		}
 		create := strings.Contains(text, "新建") || strings.Contains(text, "创建")
@@ -393,8 +398,11 @@ func (c *toolCaller) ownerMessage(source string) (*protocol.ConversationItem, bo
 			return nil, false
 		}
 		for _, item := range page.Items {
-			if item.MessageID == source && item.Author == "owner" {
-				return &item, true
+			if item.MessageID == source {
+				if item.Author == "owner" && (item.Control == nil || item.Control.WithdrawnAt == 0) {
+					return &item, true
+				}
+				return nil, true
 			}
 		}
 		if source == "" || !page.More {
@@ -404,6 +412,77 @@ func (c *toolCaller) ownerMessage(source string) (*protocol.ConversationItem, bo
 			return nil, false
 		}
 		before = page.NextBeforeSeq
+	}
+}
+
+// managerInputSources observes only the server-selected delivery identity. Source
+// bodies and author checks still pass through the scoped Issue context tool.
+func managerInputSources(ctx context.Context, runtime *serverkit.Runtime, message string) (map[string]int64, error) {
+	sources := map[string]int64{}
+	err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+		rows, err := tx.Q().QueryContext(ctx, `SELECT s.message_id,s.seq FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.message_id=? AND b.status='frozen' AND s.cancelled_at=0 AND s.kind IN ('issue.delegated','issue.manager_claimed') ORDER BY s.seq`, message)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var seq int64
+			if err := rows.Scan(&id, &seq); err != nil {
+				return err
+			}
+			sources[id] = seq
+		}
+		return rows.Err()
+	})
+	return sources, err
+}
+
+// managerMessage separates this delivery's original input from pending metadata
+// reviews. A main turn may have already reviewed an inherited source; status or
+// association notifications must not replay that earlier business request.
+func (c *toolCaller) managerMessage(source string, wanted map[string]int64) (*protocol.IssueSourceReview, bool) {
+	message, ok := c.ownerMessage(source)
+	if !ok {
+		return nil, false
+	}
+	if message != nil {
+		revision := int64(1)
+		if message.Associations != nil {
+			revision = message.Associations.ContentRevision
+		}
+		return &protocol.IssueSourceReview{MessageID: message.MessageID, Author: message.Author, Body: message.Body, ContentRevision: revision}, true
+	}
+	if len(wanted) == 0 {
+		return nil, true
+	}
+	var selected *protocol.IssueSourceReview
+	selectedSeq := int64(0)
+	after := int64(0)
+	for {
+		var page protocol.IssueContextView
+		if !c.invoke("issues_context_read", map[string]int64{"after_source": after}, &page) {
+			return nil, false
+		}
+		for _, item := range page.Sources {
+			sequence := wanted[item.MessageID]
+			if sequence <= selectedSeq || item.Author != "owner" || item.Control != nil && item.Control.WithdrawnAt != 0 {
+				continue
+			}
+			revision := int64(1)
+			if item.Associations != nil {
+				revision = item.Associations.ContentRevision
+			}
+			selected = &protocol.IssueSourceReview{MessageID: item.MessageID, Author: item.Author, Body: item.Body, ContentRevision: revision}
+			selectedSeq = sequence
+		}
+		if !page.More {
+			return selected, true
+		}
+		if page.Next <= after {
+			return nil, false
+		}
+		after = page.Next
 	}
 }
 
