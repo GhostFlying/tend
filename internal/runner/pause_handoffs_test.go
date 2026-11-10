@@ -178,3 +178,90 @@ func TestPauseHandoffPreservesAlreadyCompletedResultWithoutRestartingWorker(t *t
 		t.Fatal("known outcome was lost or rerun", results.Load(), workers.starts.Load())
 	}
 }
+
+func TestPauseHandoffRetainsHumanControlledExecution(t *testing.T) {
+	for _, unknown := range []bool{false} {
+		t.Run(map[bool]string{false: "stopped", true: "unknown-stop"}[unknown], func(t *testing.T) {
+			clock := testkit.NewClock()
+			j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer j.Close()
+			as := protocol.Assignment{RunID: "original", TaskID: "task", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, PauseHandoffs: true}
+			if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerAppServer); err != nil {
+				t.Fatal(err)
+			}
+			if err := j.SetPhase(t.Context(), as.RunID, journal.PhaseStarted); err != nil {
+				t.Fatal(err)
+			}
+			p := &protocol.PauseHandoff{RequestID: "original-pause", IssueID: "issue", IssueRevision: 3, ControlRevision: 1}
+			workers := &pauseWorkers{started: make(chan struct{}), unknown: unknown}
+			var reports atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				var env protocol.Envelope
+				if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+					t.Error(err)
+					return
+				}
+				if env.Operation == protocol.OpRunsYieldPause {
+					reports.Add(1)
+					saved, err := j.Run(req.Context(), as.RunID)
+					if err != nil || !saved.StoppedConfirmed || workers.running.Load() {
+						t.Error("handoff lacks durable stop proof", err)
+					}
+					var sent protocol.YieldPausePayload
+					if err := json.Unmarshal(env.Payload, &sent); err != nil {
+						t.Error(err)
+					}
+					if sent.PauseHandoff != *p || sent.ThreadID != "retained-thread" {
+						t.Error("original pause identity changed", sent)
+					}
+				}
+				if env.Operation == protocol.OpRunsRelease || env.Operation == protocol.OpRunsSubmitArtifact {
+					t.Error("pause became a failed or completed result", env.Operation)
+				}
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+			}))
+			defer server.Close()
+			r := New(Config{Journal: j, Worker: protocol.WorkerAppServer, Now: clock.Now, IDs: testkit.NewIDGen(clock, 3), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), ServerURL: server.URL, HTTPClient: server.Client(), Workers: workers, Workspaces: prelaunchSpaces{dir: t.TempDir(), state: t.TempDir()}, RetryDelay: time.Millisecond})
+			ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+			defer cancel()
+			a := &active{as: as, desired: protocol.DesiredRun, resume: make(chan struct{}, 1)}
+			stopped := make(chan struct{})
+			go func() {
+				defer close(stopped)
+				select {
+				case <-workers.started:
+				case <-ctx.Done():
+					return
+				}
+				if err := j.RecordPause(ctx, as.RunID, p); err != nil {
+					t.Error(err)
+					return
+				}
+				r.applyDesired(ctx, a, protocol.DesiredHeld, clock.Now())
+			}()
+			err = r.execute(ctx, ctx, as.RunID, a)
+			<-stopped
+			if unknown {
+				if err == nil || reports.Load() != 0 {
+					t.Fatalf("unknown stop released slot: %v reports=%d", err, reports.Load())
+				}
+				if _, err := j.Run(t.Context(), as.RunID); err != nil {
+					t.Fatal("lost retained original", err)
+				}
+			} else {
+				if reports.Load() != 0 {
+					t.Fatal(err, reports.Load())
+				}
+				if saved, err := j.Run(t.Context(), as.RunID); err != nil || !saved.Held {
+					t.Fatal("human controlled execution was discarded", saved, err)
+				}
+			}
+			if workers.starts.Load() != 1 {
+				t.Fatal("pause restarted model", workers.starts.Load())
+			}
+		})
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 	"github.com/GhostFlying/tend/internal/views"
@@ -137,6 +138,19 @@ func (e *env) exec(p protocol.Principal, op string, target protocol.Target, payl
 	res, err := e.app.Execute(context.Background(), p, envl, cmd)
 	if err != nil || res.Status == protocol.OpFailed {
 		e.t.Fatalf("%s: %+v, %v", op, res, err)
+	}
+	// These helpers construct retained execution fixtures; admission behavior
+	// is covered by the real owner API and new Issue tests.
+	if op == "issues.create" && res.Status == protocol.OpSucceeded {
+		var issue protocol.Issue
+		if err := json.Unmarshal(res.Result, &issue); err != nil {
+			e.t.Fatal(err)
+		}
+		issue, err = issuefixture.Retained(e.t.Context(), e.store, e.ids, e.now(), issue.IssueID, "")
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		res.Result, _ = json.Marshal(issue)
 	}
 	return res.Result
 }

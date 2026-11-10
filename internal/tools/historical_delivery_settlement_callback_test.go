@@ -16,6 +16,7 @@ import (
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/views"
 )
 
@@ -57,6 +58,17 @@ func (f *historicalHostedDelivery) execute(t *testing.T, who protocol.Principal,
 	op, err := f.e.svc.app.Execute(t.Context(), who, &protocol.Envelope{RequestID: f.ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, Payload: raw, ExpectedControlRevision: revision}, command)
 	if err != nil || op.Error != nil {
 		t.Fatal(command.Operation(), op, err)
+	}
+	if command.Operation() == "issues.create" && op.Status == protocol.OpSucceeded {
+		var i protocol.Issue
+		if err := json.Unmarshal(op.Result, &i); err != nil {
+			t.Fatal(err)
+		}
+		i, err = issuefixture.Retained(t.Context(), f.e.store, f.ids, f.clock.Now(), i.IssueID, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		op.Result, _ = json.Marshal(i)
 	}
 	return op
 }

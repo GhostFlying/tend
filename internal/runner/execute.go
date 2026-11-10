@@ -149,7 +149,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 
 			if p, e := r.cfg.Journal.Pause(ctx, as.RunID); e != nil {
 				return e
-			} else if p != nil && as.PauseHandoffs && !run.Held {
+			} else if p != nil && as.PauseHandoffs && !latest.Held {
 				if err := r.stopAgent(ctx, as); err != nil {
 					return &completionPending{err}
 				}

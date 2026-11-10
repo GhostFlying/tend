@@ -79,7 +79,12 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 	if err := json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	must(owner, app.RequestIssueManager{}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate existing responsibility"}, &issue.Revision)
+	selectionOp := must(owner, app.RequestIssueManager{}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate existing responsibility"}, &issue.Revision)
+	if err := json.Unmarshal(selectionOp.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	must(owner, app.CanonicalOwnerIssueCommand{Action: "set_status"}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision)
+
 	claimed := must(runner, app.Claim{}, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: runtime}, nil)
 	var claim struct {
 		Assignment *protocol.Assignment `json:"assignment"`

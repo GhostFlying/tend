@@ -332,7 +332,14 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool) {
 	if err = json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	execute(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate by category"}, &issue.Revision, app.RequestIssueManager{})
+	selected := execute(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate by category"}, &issue.Revision, app.RequestIssueManager{})
+	if err := json.Unmarshal(selected.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	admitted := execute("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
+	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.NewTimer(90 * time.Second)
 	defer deadline.Stop()
 	for {

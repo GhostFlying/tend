@@ -13,6 +13,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 )
 
 func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
@@ -34,6 +35,17 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 		op, err := e.svc.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, ExpectedControlRevision: expected, Payload: raw}, command)
 		if err != nil || op.Status != protocol.OpSucceeded && op.Status != protocol.OpAccepted {
 			t.Fatal(op, err)
+		}
+		if command.Operation() == "issues.create" && op.Status == protocol.OpSucceeded {
+			var i protocol.Issue
+			if err := json.Unmarshal(op.Result, &i); err != nil {
+				t.Fatal(err)
+			}
+			i, err = issuefixture.Retained(t.Context(), e.store, ids, clock.Now(), i.IssueID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			op.Result, _ = json.Marshal(i)
 		}
 		return op
 	}

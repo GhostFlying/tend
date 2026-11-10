@@ -31,6 +31,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 )
 
@@ -161,6 +162,18 @@ func (s *server) exec(p protocol.Principal, op string, target protocol.Target, p
 	res, err := s.app.Execute(context.Background(), p, env, cmd)
 	if err != nil || res.Status == protocol.OpFailed {
 		s.t.Fatalf("%s: %+v, %v", op, res, err)
+	}
+	// Existing direct worker fixtures represent already admitted agreements.
+	if op == "issues.create" && res.Status == protocol.OpSucceeded {
+		var issue protocol.Issue
+		if err := json.Unmarshal(res.Result, &issue); err != nil {
+			s.t.Fatal(err)
+		}
+		issue, err = issuefixture.Retained(s.t.Context(), s.store, s.ids, s.now(), issue.IssueID, "")
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		res.Result, _ = json.Marshal(issue)
 	}
 	return res
 }

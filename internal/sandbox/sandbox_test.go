@@ -955,7 +955,7 @@ func TestSandboxStory(t *testing.T) {
 					blocks++
 					continuation = continuation || entry.Block.More
 				}
-				if entry.Kind == "issue.progress_updated" && entry.Author == "沙盒负责人 Agent" {
+				if entry.Kind == "issue.progress_updated" && entry.Author == "沙盒 Issue 负责人" {
 					attributed = true
 				}
 				if entry.Block == nil && entry.Author == "" {

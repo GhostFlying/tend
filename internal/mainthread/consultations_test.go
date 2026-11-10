@@ -15,10 +15,12 @@ import (
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
 func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T) {
+	var e *env
 	h := testkit.NewHarness()
 	h.Models = []harness.Model{{ID: "consult-model", SupportedEfforts: []string{"high"}, DefaultEffort: "high"}}
 	done := make(chan string, 8)
@@ -45,6 +47,25 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 			if !v.Success || json.Unmarshal([]byte(v.Text), &body) != nil || !body.OK {
 				fail(name + ": " + v.Text)
 				return false
+			}
+			if name == "consultation_promote" {
+				var created struct {
+					Outcome protocol.Issue `json:"outcome"`
+				}
+				if json.Unmarshal(body.Result, &created) == nil && created.Outcome.IssueID != "" {
+					raw, _ := json.Marshal(args)
+					var input struct {
+						Payload protocol.PromoteConsultationPayload `json:"payload"`
+					}
+					_ = json.Unmarshal(raw, &input)
+					retained, err := issuefixture.Retained(t.Context(), e.store, e.ids, e.now(), created.Outcome.IssueID, input.Payload.SourceMessageID)
+					if err != nil {
+						t.Error(err)
+						return false
+					}
+					created.Outcome = retained
+					body.Result, _ = json.Marshal(created)
+				}
 			}
 			if out != nil && json.Unmarshal(body.Result, out) != nil {
 				fail("invalid typed result " + name)
@@ -136,7 +157,7 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 		done <- "task"
 		return "completed"
 	}
-	e := newEnv(t, h)
+	e = newEnv(t, h)
 	e.stop()
 	e.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "worker-host", OS: "linux", Arch: "amd64", Slots: 1, TokenHash: strings.Repeat("ab", 32), Nodes: []string{"tag:worker"}}}}, app.SyncConfig{})
 	e.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker-host"}, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker-host"}, protocol.HelloPayload{WorkspaceProtocol: 1}, app.Hello{})

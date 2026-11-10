@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -46,9 +47,18 @@ func TestResponsibilityAdoptionMigrationPreservesFrozenContracts(t *testing.T) {
 			var c TaskOwnerContract
 			// Full contract decoding uses the preserved production view before/after.
 			if err := s.Read(t.Context(), func(tx *ReadTx) error {
-				var err error
-				c, err = GetTaskOwnerContract(t.Context(), tx.Q(), id)
-				return err
+				// The migration fixture deliberately stops before admission fields exist.
+				// Read the exact historical production view without querying later columns.
+				var raw string
+				err := tx.Q().QueryRowContext(t.Context(), `SELECT task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,COALESCE(execution_pin_json,'') FROM task_execution_contracts WHERE task_id=?`, id).Scan(&c.TaskID, &c.IssueID, &c.AssignmentEpoch, &c.AgentRef, &c.AgentRevision, &c.RuntimeID, &c.RuntimeRevision, &c.Model, &c.Effort, &c.ReviewIssueID, &c.ReviewPlanJSON, &raw)
+				if err != nil {
+					return err
+				}
+				if raw != "" {
+					c.Execution = new(protocol.RunExecutionPin)
+					return json.Unmarshal([]byte(raw), c.Execution)
+				}
+				return nil
 			}); err != nil {
 				t.Fatal(err)
 			}

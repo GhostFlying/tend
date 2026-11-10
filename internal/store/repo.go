@@ -329,7 +329,7 @@ func (t *Tx) InsertRun(ctx context.Context, r RunRow) error {
 	return nil
 }
 
-const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at, protocol, COALESCE((SELECT json_object('request_id',h.request_id,'issue_id',h.issue_id,'issue_revision',h.issue_revision,'control_revision',h.control_revision) FROM run_pause_handoffs h WHERE h.run_id=runs.run_id AND h.stopped=0),'')`
+const runColumns = `run_id, task_id, action_id, generation, role, host_id, desired_state, observed_state, created_at, protocol, COALESCE((SELECT json_object('request_id',h.request_id,'issue_id',h.issue_id,'issue_revision',h.issue_revision,'control_revision',h.control_revision) FROM run_pause_handoffs h WHERE h.run_id=runs.run_id AND h.stopped=0 AND (EXISTS(SELECT 1 FROM run_pause_contracts c WHERE c.run_id=runs.run_id AND c.handoff_allowed=1) OR EXISTS(WITH RECURSIVE ancestors(id) AS (SELECT COALESCE((SELECT rr.issue_id FROM run_issue_responsibilities rr WHERE rr.run_id=runs.run_id),CASE WHEN runs.role='accept' THEN (SELECT NULLIF(c.review_issue_id,'') FROM task_execution_contracts c WHERE c.task_id=runs.task_id) END,(SELECT o.work_item_id FROM task_work_item_owners o WHERE o.task_id=runs.task_id),h.issue_id) UNION ALL SELECT i.parent_issue_id FROM issue_controls i JOIN ancestors a ON i.issue_id=a.id WHERE i.parent_issue_id<>'') SELECT 1 FROM ancestors a JOIN issue_controls i ON i.issue_id=a.id WHERE i.work_status='backlog' OR i.state='paused'))),'')`
 
 func scanRun(row interface{ Scan(...any) error }) (RunRow, error) {
 	var r RunRow

@@ -18,6 +18,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -74,6 +75,11 @@ func testNamedPoolStartup(t *testing.T, prepare bool) {
 	requests := map[string]string{}
 	for _, assignee := range []string{"bad-one", "bad-two", "planner"} {
 		issue := decodeIssue(execute(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: assignee, Project: "default", Intent: "Investigate this goal"}}, 0, app.CanonicalOwnerIssueCommand{Action: "create"}))
+		retained, fixtureErr := issuefixture.Retained(t.Context(), e.store, e.ids, e.now(), issue.IssueID, "")
+		if fixtureErr != nil {
+			t.Fatal(fixtureErr)
+		}
+		issue = retained
 		issue = decodeIssue(execute(owner, "issues.assign", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.IssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "hosted/" + assignee}, Reason: "Delegate investigation"}, issue.Revision, app.HostedIssueAssignment{}))
 		issue = decodeIssue(execute(owner, "issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, HandoffID: issue.PendingHandoffID, Reason: "No previous execution"}, issue.Revision, app.HostedIssueAssignment{Finish: true}))
 		id := "issue:" + issue.IssueID

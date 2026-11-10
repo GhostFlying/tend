@@ -340,3 +340,29 @@ func TestIssuePausePhysicalStopDoesNotReplayUnknownNativeWork(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIssueAdmissionFirstClaimRetainsOriginalDelegationMaterial(t *testing.T) {
+	h, r := managerClaimHarness(t)
+	source, _ := h.say("Execute the original bounded request")
+	version := int64(1)
+	p := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: &version}, Plan: protocol.IssuePlan{Title: "Original goal", Project: "default", Intent: "Keep the original source with its new owner"}, Manager: &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Select coordination"}}
+	i := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
+	if h.count("tasks") != 0 {
+		t.Fatal("recording preallocated execution")
+	}
+	i = issueAdmissionStatus(t, h, i, protocol.IssueTodo, nil)
+	as := admissionClaim(t, h, r)
+	if as == nil || as.Manager == nil {
+		t.Fatal("not claimed")
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var count int
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.work_item_id=? AND s.message_id=?`, i.IssueID, source).Scan(&count)
+		if err == nil && count != 1 {
+			t.Fatal("original delegation was omitted or duplicated", count)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

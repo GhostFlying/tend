@@ -123,6 +123,7 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	}
 	if p.Assignee.Kind == protocol.IssueAssigneeOwner && current.OwnerSelection != nil {
 		if _, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID); errors.Is(err, store.ErrNotFound) {
+			next.Assignee = p.Assignee
 			next.OwnerSelection = nil
 			next.WorkStatus = protocol.IssueBacklog
 			next.TodoAt = 0
@@ -150,6 +151,12 @@ func (c HostedIssueAssignment) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	next.IssueControl, err = domain.BeginIssueAssignment(current.IssueControl, p.Assignee, true, handoff)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if p.Assignee.Kind == protocol.IssueAssigneeOwner {
+		next.OwnerSelection = nil
+		next.WorkStatus = protocol.IssueBacklog
+		next.TodoAt = 0
+		next.TodoRevision = 0
 	}
 	obligations, err := hostedHandoffBlockers(ctx, tx.Q(), current.IssueID, next.AssignmentEpoch)
 	if err != nil {

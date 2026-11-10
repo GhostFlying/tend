@@ -12,6 +12,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 )
 
 func TestDecisionContinuationManagerCallbackRequiresUnwithdrawnOwnerSource(t *testing.T) {
@@ -34,6 +35,17 @@ func TestDecisionContinuationManagerCallbackRequiresUnwithdrawnOwnerSource(t *te
 				op, err := e.svc.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, cmd)
 				if err != nil || op.Status != protocol.OpSucceeded && op.Status != protocol.OpAccepted {
 					t.Fatal(cmd.Operation(), op, err)
+				}
+				if cmd.Operation() == "issues.create" && op.Status == protocol.OpSucceeded {
+					var i protocol.Issue
+					if err := json.Unmarshal(op.Result, &i); err != nil {
+						t.Fatal(err)
+					}
+					i, err = issuefixture.Retained(t.Context(), e.store, ids, clock.Now(), i.IssueID, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					op.Result, _ = json.Marshal(i)
 				}
 				return op
 			}
