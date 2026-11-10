@@ -127,10 +127,6 @@ func TestTypedValidationRejectsUnsupportedDefinitions(t *testing.T) {
 		{"mcp", "unsupported_option", "$.agents[0].mcp_servers", func(c *Config) { c.Agents[0].MCPServers = []string{privateSentinel} }},
 		{"empty-category", "required", "$.agents[0].categories", func(c *Config) { c.Agents[0].Categories = nil }},
 		{"duplicate-category", "duplicate_value", "$.agents[0].categories[1]", func(c *Config) { c.Agents[0].Categories = []string{"planner", "planner"} }},
-		{"worker-cannot-consult", "unsupported_purpose", "$.agents[0].purposes[0]", func(c *Config) { c.Agents[0].Purposes = []Purpose{Consultation} }},
-		{"hosted-cannot-execute", "unsupported_purpose", "$.runtimes[2].declared_purposes[0]", func(c *Config) { c.Runtimes[2].DeclaredPurposes = []Purpose{WorkerRun} }},
-		{"undeclared-purpose", "purpose_mismatch", "$.agents[2].purposes[1]", func(c *Config) { c.Runtimes[2].DeclaredPurposes = []Purpose{IssueManager} }},
-		{"duplicate-purpose", "duplicate_value", "$.agents[0].purposes[1]", func(c *Config) { c.Agents[0].Purposes = []Purpose{WorkerRun, WorkerRun} }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := fixture()

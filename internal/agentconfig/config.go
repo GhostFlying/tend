@@ -42,7 +42,7 @@ type RuntimeBinding struct {
 	Kind             RuntimeKind `json:"kind"`
 	CLI              string      `json:"cli,omitempty"`
 	ExecutableRef    string      `json:"executable_ref"`
-	DeclaredPurposes []Purpose   `json:"declared_purposes"`
+	DeclaredPurposes []Purpose   `json:"declared_purposes"` // Historical labels, not adapter eligibility.
 	Enabled          bool        `json:"enabled"`
 }
 
@@ -61,7 +61,7 @@ type AgentDefinition struct {
 	DisplayName    string    `json:"display_name"`
 	RuntimeID      string    `json:"runtime_id"`
 	Categories     []string  `json:"categories"`
-	Purposes       []Purpose `json:"purposes"`
+	Purposes       []Purpose `json:"purposes"` // Historical labels, not capability permissions.
 	Model          string    `json:"model"`
 	Effort         string    `json:"effort,omitempty"`
 	Skills         []string  `json:"skills,omitempty"`
@@ -161,12 +161,6 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 		default:
 			return nil, invalid("unsupported_runtime", path+".kind")
 		}
-		if err := validatePurposes(r.DeclaredPurposes, r.Kind, path+".declared_purposes", cfg.FormatVersion); err != nil {
-			return nil, err
-		}
-		if cfg.FormatVersion == 2 && r.Kind == AppServerWorker && slices.Contains(r.DeclaredPurposes, IssueManager) && r.CLI == "" {
-			return nil, invalid("required", path+".cli")
-		}
 		runtimes[r.ID] = r
 	}
 	seen := make(map[string]bool, len(cfg.Agents))
@@ -218,14 +212,6 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 			}
 			categories[c] = true
 		}
-		if err := validatePurposes(a.Purposes, r.Kind, path+".purposes", cfg.FormatVersion); err != nil {
-			return nil, err
-		}
-		for j, p := range a.Purposes {
-			if !slices.Contains(r.DeclaredPurposes, p) {
-				return nil, invalid("purpose_mismatch", fmt.Sprintf("%s.purposes[%d]", path, j))
-			}
-		}
 		if a.Model == "" && a.Effort != "" && r.Kind == OrcaWorker {
 			return nil, invalid("unsupported_effort_only", path+".effort")
 		}
@@ -243,28 +229,6 @@ func Validate(environmentID string, cfg Config, source SourceReference) (*Defini
 		}
 	}
 	return &Definitions{environmentID: environmentID, config: cloneConfig(cfg), source: source}, nil
-}
-
-func validatePurposes(purposes []Purpose, kind RuntimeKind, path string, format uint64) error {
-	if len(purposes) == 0 {
-		return invalid("required", path)
-	}
-	seen := make(map[Purpose]bool, len(purposes))
-	for i, p := range purposes {
-		field := fmt.Sprintf("%s[%d]", path, i)
-		if seen[p] {
-			return invalid("duplicate_value", field)
-		}
-		seen[p] = true
-		if kind == HostedManager {
-			if p != Main && p != IssueManager && p != Consultation {
-				return invalid("unsupported_purpose", field)
-			}
-		} else if p != WorkerRun && !(format == 2 && kind == AppServerWorker && p == IssueManager) {
-			return invalid("unsupported_purpose", field)
-		}
-	}
-	return nil
 }
 
 func validID(s string) bool {

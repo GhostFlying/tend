@@ -174,12 +174,11 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 		if (r.Kind == "orca-worker" && r.CLI != "codex" && r.CLI != "traex") || (r.Kind != "orca-worker" && r.Kind != "central-traex-worker" && r.CLI != "" && !(p.FormatVersion == 2 && (r.CLI == "codex" || r.CLI == "traex"))) {
 			return bad()
 		}
-		if p.FormatVersion == 2 && r.Kind == "appserver-worker" && slices.Contains(r.DeclaredPurposes, "issue_manager") && r.CLI == "" {
-			return nil, "", Errorf(CodeInvalidRequest, "manager runtime requires its CLI identity")
-		}
-		if !inventoryPurposes(r.DeclaredPurposes, r.Kind, p.FormatVersion) || r.Availability.Reason != inventoryUnavailable(r, true) {
+		if r.Availability.Reason != inventoryUnavailable(r, true) {
 			return bad()
 		}
+		// Preserve historical labels in the canonical snapshot. Adapter support,
+		// categories and capabilities determine execution eligibility elsewhere.
 		r.DeclaredPurposes = slices.Clone(r.DeclaredPurposes)
 		slices.Sort(r.DeclaredPurposes)
 		p.Runtimes[i] = r
@@ -208,13 +207,8 @@ func CanonicalAgentInventory(p AgentInventoryProjection) ([]byte, string, error)
 			binding := *a.OwnerBinding
 			a.OwnerBinding = &binding
 		}
-		if !inventoryPurposes(a.Purposes, r.Kind, p.FormatVersion) || len(a.Categories) == 0 || !uniqueInventoryStrings(a.Categories) || !slices.Contains([]string{"", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}, a.RequestedEffort) {
+		if len(a.Categories) == 0 || !uniqueInventoryStrings(a.Categories) || !slices.Contains([]string{"", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}, a.RequestedEffort) {
 			return bad()
-		}
-		for _, purpose := range a.Purposes {
-			if !slices.Contains(r.DeclaredPurposes, purpose) {
-				return bad()
-			}
 		}
 		a.Categories = slices.Clone(a.Categories)
 		slices.Sort(a.Categories)
@@ -255,22 +249,6 @@ func uniqueInventoryStrings(values []string) bool {
 			return false
 		}
 		seen[v] = true
-	}
-	return true
-}
-
-func inventoryPurposes(values []string, kind string, format uint64) bool {
-	if len(values) == 0 || !uniqueInventoryStrings(values) {
-		return false
-	}
-	for _, v := range values {
-		if kind == "hosted-manager" {
-			if v != "main" && v != "issue_manager" && v != "consultation" {
-				return false
-			}
-		} else if v != "worker_run" && !(format == 2 && kind == "appserver-worker" && v == "issue_manager") {
-			return false
-		}
 	}
 	return true
 }
