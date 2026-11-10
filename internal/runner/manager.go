@@ -502,6 +502,10 @@ func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment,
 		_, err := r.send(ctx, runCredential(as), env)
 		return err
 	}
+	// This budget covers delivery of an already completed native operation,
+	// not the operation itself. Retries retain its original envelope/deadline.
+	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
+	defer cancel()
 	delay := r.cfg.RetryDelay
 	limit := max(delay, 30*time.Second)
 	for {
