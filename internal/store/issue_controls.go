@@ -219,13 +219,18 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	if p.CoordinationExecutionID != "" {
 		effect = p.EffectSeq
 	}
-	requestDomain := p.RequestDomain
-	if requestDomain == "" {
-		requestDomain = p.Actor.DedupDomain()
+	columns := "issue_id,revision,snapshot_json,reason_json,actor_json,request_id,source_message_id,coordination_execution_id,effect_seq,created_at"
+	values := "?,?,?,?,?,?,?,?,?,?"
+	args := []any{next.IssueID, next.Revision, string(snapshot), string(reason), string(actor), p.RequestID, nullString(p.SourceMessageID), nullString(p.CoordinationExecutionID), effect, next.UpdatedAt}
+	// Historical-schema fixtures do not supply fields added by later migrations.
+	if p.RequestDomain != "" {
+		columns += ",request_domain"
+		values += ",?"
+		args = append(args, p.RequestDomain)
 	}
-	_, err = t.Exec(ctx, `INSERT INTO issue_control_revisions(issue_id,revision,snapshot_json,reason_json,actor_json,request_id,source_message_id,coordination_execution_id,effect_seq,created_at,request_domain) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, next.IssueID, next.Revision, string(snapshot), string(reason), string(actor), p.RequestID, nullString(p.SourceMessageID), nullString(p.CoordinationExecutionID), effect, next.UpdatedAt, requestDomain)
-	if err != nil {
+	if _, err = t.Exec(ctx, `INSERT INTO issue_control_revisions(`+columns+`) VALUES(`+values+`)`, args...); err != nil {
 		return fmt.Errorf("store: record issue control revision: %w", err)
 	}
+
 	return nil
 }

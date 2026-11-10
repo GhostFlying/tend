@@ -567,3 +567,38 @@ func TestMainOwnerRecoveredIssueKeepsOriginalReceiptDomain(t *testing.T) {
 		t.Fatalf("committed creation lost receipt identity: %+v", status)
 	}
 }
+
+func TestMainOwnerDecisionAnswerDoesNotWakeItself(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	var opened struct {
+		DecisionID string `json:"decision_id"`
+	}
+	if err := json.Unmarshal(e.exec("decisions.open", protocol.Target{Type: "decision"}, nil, map[string]any{"question": "Which?", "options": []string{"a", "b"}}, app.OpenDecision{}), &opened); err != nil {
+		t.Fatal(err)
+	}
+	before := e.count(`SELECT COUNT(*) FROM outbox WHERE destination='main_thread'`)
+	payload, _ := json.Marshal(protocol.AnswerDecisionPayload{Version: 1, Option: "a"})
+	response, err := ownerToolInvoke(t, e, call, "decisions.respond", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "decision", ID: opened.DecisionID}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	if after := e.count(`SELECT COUNT(*) FROM outbox WHERE destination='main_thread'`); after != before {
+		t.Fatalf("own answer queued %d additional turns", after-before)
+	}
+}
+
+func TestMainOwnerManualSourceKeepsActualSupplier(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	payload, _ := json.Marshal(protocol.InjectSourcePayload{Text: "External evidence"})
+	response, err := ownerToolInvoke(t, e, call, "conversation.inject_source", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "conversation"}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	var source protocol.ManualSource
+	if err := json.Unmarshal(response.Operation.Result, &source); err != nil {
+		t.Fatal(err)
+	}
+	if source.SuppliedBy.Kind != protocol.PrincipalMainAgent {
+		t.Fatalf("supplier=%+v", source.SuppliedBy)
+	}
+}

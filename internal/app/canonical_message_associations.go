@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 
@@ -60,7 +61,9 @@ func (SetIssueMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store
 	if err != nil {
 		return Outcome{}, err
 	}
-	out, err := applyMessageAssociations(ctx, x, tx, protocol.SetMessageAssociationsPayload{WorkItemIDs: p.IssueIDs, Disposition: p.Disposition, ContentRevision: p.ContentRevision}, true)
+	narration := *x
+	narration.Principal = x.ActualPrincipal()
+	out, err := applyMessageAssociations(ctx, &narration, tx, protocol.SetMessageAssociationsPayload{WorkItemIDs: p.IssueIDs, Disposition: p.Disposition, ContentRevision: p.ContentRevision}, true)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -116,7 +119,14 @@ func attachAssociationReviewSource(ctx context.Context, x *Exec, tx *store.Tx, m
 // Repairs retain the original logical identity. A later owner selection does
 // not enter this exception and still creates its original review duty/wake.
 func ownCoordinationNarration(ctx context.Context, x *Exec, q store.Querier, message string) (bool, error) {
-	if x.coordinationExecution == nil || x.coordinationExecution.Selection.Purpose != agentconfig.Main {
+	logical := x.coordinationLogicalID
+	if x.ownerExecutionID != "" && x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
+		if err := q.QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, x.ownerExecutionID).Scan(&logical); errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+	} else if x.coordinationExecution == nil || x.coordinationExecution.Selection.Purpose != agentconfig.Main {
 		return false, nil
 	}
 	var own bool
@@ -124,6 +134,6 @@ func ownCoordinationNarration(ctx context.Context, x *Exec, q store.Querier, mes
           SELECT 1 FROM conversation_agent_messages a
           JOIN main_turns t ON t.thread_id=a.thread_id AND t.turn_id=a.turn_id
           JOIN logical_turn_executions e ON e.request_id=t.request_id
-          WHERE a.message_id=? AND e.logical_turn_id=?)`, message, x.coordinationLogicalID).Scan(&own)
+          WHERE a.message_id=? AND e.logical_turn_id=?)`, message, logical).Scan(&own)
 	return own, err
 }

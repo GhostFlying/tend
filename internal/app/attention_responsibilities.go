@@ -613,7 +613,7 @@ func recordResponsibilityResolution(ctx context.Context, x *Exec, tx *store.Tx, 
 	if i.Assignee.Kind == protocol.IssueAssigneeAgent {
 		return appendBackgroundSource(ctx, x, tx, "work_item:"+issue, issue, message, event, kind, answer)
 	}
-	if x.Principal.Kind == protocol.PrincipalMainAgent {
+	if x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
 		return nil
 	}
 	return appendBackgroundSource(ctx, x, tx, "attention:"+a.AttentionID, "", message, event, kind, answer)

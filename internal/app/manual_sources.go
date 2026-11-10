@@ -46,7 +46,7 @@ func (InjectSource) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	result := out.Result.(map[string]any)
 	id := result["message_id"].(string)
-	value := protocol.ManualSource{MessageID: id, ConversationID: store.ConversationID(p.ConversationID), Metadata: p.Metadata, SuppliedBy: x.Principal}
+	value := protocol.ManualSource{MessageID: id, ConversationID: store.ConversationID(p.ConversationID), Metadata: p.Metadata, SuppliedBy: x.ActualPrincipal()}
 	raw, _ := json.Marshal(value)
 	if _, err := tx.Exec(ctx, `INSERT INTO manual_message_sources(message_id,metadata_json) VALUES(?,?)`, id, string(raw)); err != nil {
 		return Outcome{}, err
