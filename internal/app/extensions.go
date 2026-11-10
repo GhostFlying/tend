@@ -256,7 +256,7 @@ func (a *App) PublishExtensionDraft(ctx context.Context, p protocol.Principal, e
 	var uses []extensions.ValidationUse
 	replayed := false
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		_, err := store.GetRequest(ctx, tx.Q(), ownerRequestPrincipal(ctx, p).DedupDomain(), env.RequestID)
+		_, err := store.GetRequest(ctx, tx.Q(), ownerRequestDomain(ctx, p), env.RequestID)
 		if err == nil {
 			replayed = true
 			return nil

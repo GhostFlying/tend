@@ -66,6 +66,7 @@ func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bo
 	}
 	name := c.Tool
 	arguments := c.Arguments
+	legacy := false
 	if name == "owner_capabilities" {
 		if _, err := s.app.MainOwner(ctx, c.Principal, c.executionRequest()); err != nil {
 			return s.answerHosted(ctx, c, nil, err), true
@@ -89,6 +90,7 @@ func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bo
 		}
 	}
 	if !strings.HasPrefix(name, "owner_") {
+		legacy = true
 		var mutation *hostedMutation
 		for _, m := range hostedMutations {
 			if m.name == name {
@@ -115,7 +117,7 @@ func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bo
 		if err := json.Unmarshal(arguments, &legacy); err != nil {
 			return s.answerHosted(ctx, c, nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid owner arguments")), true
 		}
-		arguments, _ = json.Marshal(protocol.OwnerToolArguments{EffectSeq: legacy.EffectSeq, Target: protocol.Target{Type: mutation.target, ID: legacy.TargetID}, ExpectedControlRevision: legacy.ExpectedControlRevision, Payload: legacy.Payload})
+		arguments, _ = json.Marshal(protocol.OwnerToolArguments{Reason: legacy.Reason, EffectSeq: legacy.EffectSeq, Target: protocol.Target{Type: mutation.target, ID: legacy.TargetID}, ExpectedControlRevision: legacy.ExpectedControlRevision, Payload: legacy.Payload})
 	}
 	request := c.RequestID
 	if request == "" {
@@ -129,6 +131,21 @@ func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bo
 		}
 	}
 	result, err := s.owner.Call(ctx, protocol.OwnerToolCall{Actor: c.Principal, ExecutionID: c.executionRequest(), RequestID: request, Name: name, Arguments: arguments})
+	if legacy && result != nil {
+		data, encodeErr := json.Marshal(result)
+		var response protocol.APIResponse
+		if encodeErr == nil && json.Unmarshal(data, &response) == nil && response.Operation != nil {
+			op := response.Operation
+			result = map[string]any{"request_id": op.RequestID, "status": op.Status, "outcome": op.Result, "current_issue": response.CurrentIssue, "current": response.Current}
+		}
+	}
+	if err != nil {
+		if result == nil {
+			result = map[string]any{"request_id": request}
+		} else if value, ok := result.(map[string]any); ok && value["request_id"] == nil {
+			value["request_id"] = request
+		}
+	}
 	return s.answerHosted(ctx, c, result, err), true
 }
 

@@ -193,6 +193,11 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			return Outcome{}, err
 		}
 		a.Status, a.Resolution, a.ResolutionSourceID = "resolved", p.Summary, p.SourceMessageID
+		actor := x.ActualPrincipal()
+		a.ResolutionActor = &actor
+		if x.Actor != nil && x.Principal.Kind == protocol.PrincipalOwner {
+			a.ResolutionOwnerSubject = x.Principal.Subject
+		}
 	case "withdraw":
 		if a.Kind == "decision" {
 			if a.DecisionID == "" {
@@ -302,7 +307,7 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if p.DecisionID != "" && p.ChoiceID != "" || p.Kind != "decision" && (p.DecisionID != "" || p.ChoiceID != "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only a decision attention references one question")
 	}
-	a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.Principal, BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
+	a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
 	if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
 		return Outcome{}, err
 	}
@@ -437,7 +442,7 @@ func syncAttentionDecision(ctx context.Context, x *Exec, tx *store.Tx, e Event) 
 				return "", e
 			}
 		}
-		a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: issue, TaskID: d.TaskID, Kind: "decision", Title: d.Question, Status: "open", DecisionID: d.DecisionID, SourceMessageID: d.AskedMessageID, RaisedBy: x.Principal, CreatedAt: x.Now.UnixMilli()}
+		a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: issue, TaskID: d.TaskID, Kind: "decision", Title: d.Question, Status: "open", DecisionID: d.DecisionID, SourceMessageID: d.AskedMessageID, RaisedBy: x.ActualPrincipal(), CreatedAt: x.Now.UnixMilli()}
 		if err := saveAttention(ctx, x, tx, &a, 0); err != nil {
 			return "", err
 		}
@@ -486,7 +491,7 @@ func validateAttentionOwnerRelay(ctx context.Context, q store.Querier, x *Exec, 
 		return nil
 	}
 	var original bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0)`, message).Scan(&original); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0)`, message).Scan(&original); err != nil {
 		return err
 	}
 	if !original {
@@ -499,7 +504,7 @@ func validateAttentionOwnerRelay(ctx context.Context, q store.Querier, x *Exec, 
 		return nil
 	}
 	var allowed bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_work_items a JOIN conversation_messages m USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE a.message_id=? AND a.work_item_id=? AND a.active=1 AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0)`, message, issue).Scan(&allowed); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM message_work_items a JOIN conversation_messages m USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE a.message_id=? AND a.work_item_id=? AND a.active=1 AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0)`, message, issue).Scan(&allowed); err != nil {
 		return err
 	}
 	if !allowed {

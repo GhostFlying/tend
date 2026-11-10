@@ -55,6 +55,8 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	author := protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}
 	if x.coordinationExecution != nil {
 		author = issue.Assignee
+	} else if x.Actor != nil && x.actorAgent != nil {
+		author = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: x.actorAgent.ExecutionEnvironmentID + "/" + x.actorAgent.LocalID}
 	}
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()

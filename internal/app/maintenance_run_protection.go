@@ -164,7 +164,7 @@ func preserveMaintenancePhysicalStop(ctx context.Context, x *Exec, tx *store.Tx,
 	if err != nil || p == nil {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO maintenance_physical_stops(request_domain,request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, x.Principal.DedupDomain(), x.Env.RequestID, p.MaintenanceID, run, p.LeaseID, x.Env.Operation, string(x.Env.Payload), lastSequence, x.Now.UnixMilli())
+	_, err = tx.Exec(ctx, `INSERT INTO maintenance_physical_stops(request_domain,request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, x.RequestDomain(), x.Env.RequestID, p.MaintenanceID, run, p.LeaseID, x.Env.Operation, string(x.Env.Payload), lastSequence, x.Now.UnixMilli())
 	return err == nil, err
 }
 
@@ -218,7 +218,7 @@ func preserveMaintenanceGiveUp(ctx context.Context, x *Exec, tx *store.Tx, run s
 	if err != nil || p == nil {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO maintenance_physical_stops(request_domain,request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at) VALUES(?,?,?,?,?,?,?,-1,?)`, x.Principal.DedupDomain(), x.Env.RequestID, p.MaintenanceID, run, p.LeaseID, x.Env.Operation, string(x.Env.Payload), x.Now.UnixMilli())
+	_, err = tx.Exec(ctx, `INSERT INTO maintenance_physical_stops(request_domain,request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at) VALUES(?,?,?,?,?,?,?,-1,?)`, x.RequestDomain(), x.Env.RequestID, p.MaintenanceID, run, p.LeaseID, x.Env.Operation, string(x.Env.Payload), x.Now.UnixMilli())
 	return err == nil, err
 }
 

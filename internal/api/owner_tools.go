@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -100,12 +102,27 @@ func (g *OwnerTools) Specs() []protocol.OwnerToolSpec {
 func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	owner, err := g.server.app.MainOwner(ctx, call.Actor, call.ExecutionID, call.RequestID)
+	var args protocol.OwnerToolArguments
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid owner tool arguments")
+	}
+	receiptID := call.RequestID
+	if args.OriginalEnvelope != nil {
+		receiptID = args.OriginalEnvelope.RequestID
+	}
+	owner, err := g.server.app.MainOwner(ctx, call.Actor, call.ExecutionID, receiptID)
 	if err != nil {
 		return nil, err
 	}
 	if !slices.Contains(g.server.cfg.Owners, owner.Subject) {
 		return nil, protocol.Errorf(protocol.CodeForbidden, "owner is no longer configured")
+	}
+	execution, found, err := g.server.app.HostedExecution(ctx, call.ExecutionID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, protocol.Errorf(protocol.CodeForbidden, "main execution is unavailable")
 	}
 	var selected *protocol.OwnerToolSpec
 	for _, spec := range g.Specs() {
@@ -118,13 +135,13 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 	if selected == nil {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "unknown owner capability")
 	}
-	var args protocol.OwnerToolArguments
-	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid owner tool arguments")
-	}
 	method, path, isRoute := strings.Cut(selected.Capability, " ")
+	if isRoute && args.OriginalEnvelope != nil {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "original_envelope is for operation receipt recovery")
+	}
 	body := args.Body
-	authority := &app.OwnerExecution{Actor: call.Actor, ExecutionID: call.ExecutionID, CallID: call.RequestID, EffectSeq: args.EffectSeq}
+	authority := &app.OwnerExecution{Actor: call.Actor, Agent: execution.Selection.Identity, ExecutionID: call.ExecutionID, CallID: call.RequestID, EffectSeq: args.EffectSeq}
+	requestID := call.RequestID
 	if !isRoute {
 		method, path = http.MethodPost, "/api/v1/ops"
 		if len(args.Payload) == 0 {
@@ -136,23 +153,13 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "original operation does not match this tool")
 			}
 			envelope = *args.OriginalEnvelope
-			err = g.server.store.Read(ctx, func(tx *store.ReadTx) error {
-				record, err := store.GetOwnerRequest(ctx, tx.Q(), envelope.RequestID)
-				if err != nil {
-					return err
-				}
-				var original protocol.Principal
-				if err := json.Unmarshal([]byte(record.PrincipalJSON), &original); err != nil {
-					return err
-				}
-				authority.ReplayPrincipal = &original
-				return nil
-			})
+			err = g.originalOwnerAuthority(ctx, authority, envelope.RequestID)
 			if err != nil {
 				return nil, err
 			}
 		}
 		body, err = json.Marshal(envelope)
+		requestID = envelope.RequestID
 		if err != nil {
 			return nil, err
 		}
@@ -168,13 +175,69 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		query.Set(name, value)
 	}
 	if args.ContentBase64 != "" {
+		if !isRoute {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "operation tools accept payload, not raw HTTP content")
+		}
 		body, err = base64.StdEncoding.DecodeString(args.ContentBase64)
 		if err != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid content_base64")
 		}
 	}
+	if isRoute && method != http.MethodGet {
+		if selected.Capability == "POST /api/v1/extensions/stage" {
+			var input map[string]json.RawMessage
+			if json.Unmarshal(body, &input) == nil && input != nil && len(input["request_id"]) == 0 {
+				input["request_id"], _ = json.Marshal(call.RequestID)
+				body, _ = json.Marshal(input)
+			}
+		}
+		if selected.Capability == "POST /api/v1/conversation/attachments" && query.Get("request_id") == "" {
+			query.Set("request_id", call.RequestID)
+		}
+		var identity struct {
+			RequestID string `json:"request_id"`
+		}
+		if json.Unmarshal(body, &identity) == nil && identity.RequestID != "" {
+			requestID = identity.RequestID
+		}
+		if value := query.Get("request_id"); value != "" {
+			requestID = value
+		}
+		if requestID != call.RequestID {
+			if err := g.originalOwnerAuthority(ctx, authority, requestID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	ledgerWrite := !isRoute || selected.Capability == "POST /api/v1/extensions/stage" || selected.Capability == "POST /api/v1/conversation/attachments"
+	if ledgerWrite && authority.ReplayPrincipal == nil && requestID == call.RequestID {
+		err := g.server.store.Read(ctx, func(tx *store.ReadTx) error {
+			record, err := store.GetOwnerRequest(ctx, tx.Q(), requestID)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			var original protocol.Principal
+			if err := json.Unmarshal([]byte(record.PrincipalJSON), &original); err != nil {
+				return err
+			}
+			authority.ReplayPrincipal = &original
+			authority.RequestDomain = record.Domain
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	if method != http.MethodGet && method != http.MethodHead && args.EffectSeq < 1 && authority.ReplayPrincipal == nil {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "positive effect_seq is required")
+	}
+	if method != http.MethodGet && method != http.MethodHead && (!ledgerWrite || authority.ReplayPrincipal == nil) {
+		if _, err := g.server.app.MainOwner(ctx, call.Actor, call.ExecutionID); err != nil {
+			return nil, err
+		}
 	}
 	ctx = context.WithValue(ctx, mainOwnerRequestKey{}, owner)
 	ctx = app.WithOwnerExecution(ctx, authority)
@@ -200,8 +263,14 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 	// or alternate authentication middleware is selected by tool arguments.
 	g.server.Handler().ServeHTTP(rec, req)
 	var result any
-	if json.Unmarshal(rec.body.Bytes(), &result) != nil {
+	original := rec.Header().Get("Content-Disposition") != "" || rec.Header().Get("X-Content-SHA256") != ""
+	if original || json.Unmarshal(rec.body.Bytes(), &result) != nil {
 		result = map[string]any{"content_type": rec.Header().Get("Content-Type"), "content_base64": base64.StdEncoding.EncodeToString(rec.body.Bytes()), "truncated": rec.truncated, "status_code": rec.code, "content_range": rec.Header().Get("Content-Range"), "content_sha256": rec.Header().Get("X-Content-SHA256")}
+	}
+	if method != http.MethodGet {
+		if value, ok := result.(map[string]any); ok {
+			value["request_id"] = requestID
+		}
 	}
 	// Authentication is established internally. A credential issuance response
 	// must not become model context or a durable native tool log.
@@ -220,4 +289,39 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		return result, response.Operation.Error
 	}
 	return result, nil
+}
+
+func (g *OwnerTools) originalOwnerAuthority(ctx context.Context, authority *app.OwnerExecution, request string) error {
+	return g.server.store.Read(ctx, func(tx *store.ReadTx) error {
+		record, err := store.GetOwnerRequest(ctx, tx.Q(), request)
+		if err == nil {
+			var original protocol.Principal
+			if err := json.Unmarshal([]byte(record.PrincipalJSON), &original); err != nil {
+				return err
+			}
+			authority.ReplayPrincipal = &original
+			authority.RequestDomain = record.Domain
+			return nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		// An unrecorded native call retains its original namespace. Owner
+		// requests without a native mapping retain the shared owner namespace.
+		// App.Execute still arbitrates the exact hash atomically with any late
+		// original commit, so recovery never creates a second business identity.
+		var source string
+		err = tx.Q().QueryRowContext(ctx, `SELECT source FROM native_requests WHERE request_id=?`, request).Scan(&source)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if source != "" && source != "harness:"+authority.Actor.Subject {
+			return protocol.Errorf(protocol.CodeForbidden, "unrecorded native request belongs to another caller")
+		}
+		authority.RequestDomain = "owner"
+		if source != "" {
+			authority.RequestDomain = authority.Actor.DedupDomain()
+		}
+		return nil
+	})
 }

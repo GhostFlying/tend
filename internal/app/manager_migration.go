@@ -215,7 +215,7 @@ func (a *App) MigrateManager(ctx context.Context, p protocol.Principal, env *pro
 	if payload.Phase == "switch" {
 		recorded := false
 		err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			_, err := store.GetRequest(ctx, tx.Q(), ownerRequestPrincipal(ctx, p).DedupDomain(), env.RequestID)
+			_, err := store.GetRequest(ctx, tx.Q(), ownerRequestDomain(ctx, p), env.RequestID)
 			if err == nil {
 				recorded = true
 				return nil

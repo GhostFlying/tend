@@ -48,7 +48,7 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 		_ = json.Unmarshal(failure.Details, &details)
 		// Older successful receipts predate the attempt journal. Exact payload
 		// identity still proves that their business effect is already recorded.
-		original, err := store.GetRequest(ctx, tx.Q(), x.Principal.DedupDomain(), details.Original)
+		original, err := store.GetRequest(ctx, tx.Q(), x.RequestDomain(), details.Original)
 		if err == nil && (original.Status == protocol.OpSucceeded || original.Status == protocol.OpAccepted) {
 			hash, err := protocol.PayloadHash(x.Env)
 			if err != nil {
@@ -61,7 +61,7 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 			return false, err
 		}
 		var same bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM coordination_delegation_attempts WHERE domain=? AND request_id=? AND operation=? AND source_message_id=? AND target_id=? AND intent_key=? AND succeeded=1)`, x.Principal.DedupDomain(), details.Original, c.Operation(), source, x.Env.Target.ID, intent).Scan(&same); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM coordination_delegation_attempts WHERE domain=? AND request_id=? AND operation=? AND source_message_id=? AND target_id=? AND intent_key=? AND succeeded=1)`, x.RequestDomain(), details.Original, c.Operation(), source, x.Env.Target.ID, intent).Scan(&same); err != nil {
 			return false, err
 		}
 		if same {
@@ -76,7 +76,7 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 		}
 		errorJSON = string(encoded)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO coordination_delegation_attempts(domain,request_id,execution_id,logical_turn_id,operation,source_message_id,target_id,intent_key,succeeded,error_json,created_at,intent_json,corrects_request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, x.Principal.DedupDomain(), x.Env.RequestID, c.ExecutionID, logical, c.Operation(), source, x.Env.Target.ID, intent, failure == nil, errorJSON, x.Now.UnixMilli(), string(intentJSON), correction); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO coordination_delegation_attempts(domain,request_id,execution_id,logical_turn_id,operation,source_message_id,target_id,intent_key,succeeded,error_json,created_at,intent_json,corrects_request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, x.RequestDomain(), x.Env.RequestID, c.ExecutionID, logical, c.Operation(), source, x.Env.Target.ID, intent, failure == nil, errorJSON, x.Now.UnixMilli(), string(intentJSON), correction); err != nil {
 		return false, err
 	}
 	body, _ := json.Marshal(map[string]any{"logical_turn_id": logical, "source_message_id": source, "operation": c.Operation(), "succeeded": failure == nil, "error": failure, "corrects_request_id": correction})
@@ -195,7 +195,7 @@ func inheritedDelegationCorrectionAdmitted(ctx context.Context, x *Exec, q store
  WHERE f.logical_turn_id IN responsibility AND f.logical_turn_id<>(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)
  AND f.domain=? AND f.operation=? AND f.target_id=? AND f.source_message_id=? AND f.intent_key=? AND f.succeeded=0
  AND r.operation=f.operation AND r.status='failed' AND json_valid(f.error_json) AND json_extract(f.error_json,'$.code') IN ('invalid_request','stale_revision')
- AND NOT EXISTS(SELECT 1 FROM coordination_delegation_attempts s WHERE s.logical_turn_id IN responsibility AND s.source_message_id=f.source_message_id AND s.operation=f.operation AND s.target_id=f.target_id AND s.intent_key=f.intent_key AND s.succeeded=1 AND s.seq>f.seq)`, execution, execution, x.Principal.DedupDomain(), operation, x.Env.Target.ID, source, intent)
+ AND NOT EXISTS(SELECT 1 FROM coordination_delegation_attempts s WHERE s.logical_turn_id IN responsibility AND s.source_message_id=f.source_message_id AND s.operation=f.operation AND s.target_id=f.target_id AND s.intent_key=f.intent_key AND s.succeeded=1 AND s.seq>f.seq)`, execution, execution, x.RequestDomain(), operation, x.Env.Target.ID, source, intent)
 	if err != nil {
 		return false, err
 	}
@@ -244,7 +244,7 @@ func validateDelegationCorrection(ctx context.Context, x *Exec, q store.Querier,
  SELECT ? UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
  SELECT f.intent_json,f.source_message_id,f.target_id,f.operation,r.status,r.error_code,f.execution_id,f.corrects_request_id
  FROM coordination_delegation_attempts f JOIN request_records r ON r.domain=f.domain AND r.request_id=f.request_id
- WHERE f.domain=? AND f.request_id=? AND f.succeeded=0 AND f.logical_turn_id IN responsibility`, logical, x.Principal.DedupDomain(), original).Scan(&before, &source, &target, &op, &status, &code, &oldExecution, &inheritedCorrection)
+ WHERE f.domain=? AND f.request_id=? AND f.succeeded=0 AND f.logical_turn_id IN responsibility`, logical, x.RequestDomain(), original).Scan(&before, &source, &target, &op, &status, &code, &oldExecution, &inheritedCorrection)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "correction requires a failed delegation in this responsibility")
 	}

@@ -52,7 +52,7 @@ func validateIssuePRPolicyChange(ctx context.Context, x *Exec, q store.Querier, 
 			return err
 		}
 		var actualOwner bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN message_dispositions d USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.message_id=? AND m.author='owner' AND COALESCE(d.content_revision,1)=? AND COALESCE(c.withdrawn_at,0)=0)`, source.SourceMessageID, *source.ExpectedSourceRevision).Scan(&actualOwner); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN message_dispositions d USING(message_id) LEFT JOIN conversation_message_controls c USING(message_id) WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(d.content_revision,1)=? AND COALESCE(c.withdrawn_at,0)=0)`, source.SourceMessageID, *source.ExpectedSourceRevision).Scan(&actualOwner); err != nil {
 			return err
 		}
 		if !actualOwner {

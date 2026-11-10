@@ -415,7 +415,7 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 				valid = true
 				break
 			}
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='owner') OR EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND m.author='owner' AND COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner') OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM owner_authority_messages WHERE message_id=?) OR EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND (COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner' OR COALESCE(json_extract(d.answer_json,'$.owner_subject'),'')<>'')) OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
 				return err
 			}
 		case "result":
@@ -489,7 +489,7 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 // not decisions; a different Issue's confirmation is not inherited authority.
 func resolvedIssueAttentionDecision(ctx context.Context, q store.Querier, issueID, reference string) (bool, error) {
 	var resolved bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attentions a WHERE a.attention_id=? AND a.issue_id=? AND a.status='resolved' AND ((a.kind='action' AND COALESCE(json_extract(a.body_json,'$.resolution_actor.kind'),'owner')='owner') OR (a.kind='decision' AND (EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=a.decision_id AND d.status='answered' AND m.author='owner' AND COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner') OR EXISTS(SELECT 1 FROM work_item_choices c WHERE c.choice_id=a.choice_id AND c.status='answered')))))`, reference, issueID).Scan(&resolved)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attentions a WHERE a.attention_id=? AND a.issue_id=? AND a.status='resolved' AND ((a.kind='action' AND (COALESCE(json_extract(a.body_json,'$.resolution_actor.kind'),'owner')='owner' OR COALESCE(json_extract(a.body_json,'$.resolution_owner_subject'),'')<>'')) OR (a.kind='decision' AND (EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=a.decision_id AND d.status='answered' AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND (COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner' OR COALESCE(json_extract(d.answer_json,'$.owner_subject'),'')<>'')) OR EXISTS(SELECT 1 FROM work_item_choices c WHERE c.choice_id=a.choice_id AND c.status='answered')))))`, reference, issueID).Scan(&resolved)
 	return resolved, err
 }
 

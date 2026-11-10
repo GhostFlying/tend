@@ -281,11 +281,15 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 		}
 	}
 	if p.SourceMessageID != "" {
-		m, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
+		_, err := store.GetMessage(ctx, tx.Q(), p.SourceMessageID)
 		if err != nil {
 			return nil, errNotFound(err, "owner answer message does not exist")
 		}
-		if m.Author != "owner" {
+		ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), p.SourceMessageID)
+		if err != nil {
+			return nil, err
+		}
+		if !ownerAuthority {
 			return nil, protocol.Errorf(protocol.CodeForbidden, "worker answers require an actual owner message")
 		}
 		return nil, nil
@@ -293,7 +297,7 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 	if x.Principal.Kind != protocol.PrincipalOwner {
 		return nil, protocol.Errorf(protocol.CodeForbidden, "worker answers require an actual owner message")
 	}
-	author := "owner"
+	author := x.messageAuthor()
 	body := p.Option
 	if p.Text != "" {
 		if body != "" {
@@ -311,6 +315,9 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 	}
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: body, ReplyTo: reply, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
+		return nil, err
+	}
+	if err := x.recordMessageAuthority(ctx, tx, id); err != nil {
 		return nil, err
 	}
 	if err := registerInteractionAnswerInput(ctx, x, tx, id, d.AskedMessageID); err != nil {

@@ -101,7 +101,11 @@ func (c QuestionInputCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if err != nil {
 		return Outcome{}, errNotFound(err, "owner source does not exist")
 	}
-	if source.Author != "owner" || (source.MessageID != d.AnsweredMessageID && source.ReplyTo != d.AskedMessageID) {
+	ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), p.SourceMessageID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !ownerAuthority || (source.MessageID != d.AnsweredMessageID && source.ReplyTo != d.AskedMessageID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "source must be the actual owner answer or reply to the original question")
 	}
 	rc, err := loadRun(ctx, tx.Q(), d.Worker.RunID)

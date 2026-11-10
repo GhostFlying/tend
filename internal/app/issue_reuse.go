@@ -144,7 +144,7 @@ func (ReuseIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	}
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()
-	if err := tx.SaveCanonicalIssue(ctx, issue, expected, store.IssueRevisionProvenance{Actor: x.Principal, RequestID: x.Env.RequestID, SourceMessageID: p.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: p}); err != nil {
+	if err := tx.SaveCanonicalIssue(ctx, issue, expected, store.IssueRevisionProvenance{Actor: x.ActualPrincipal(), RequestID: x.Env.RequestID, SourceMessageID: p.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: p}); err != nil {
 		return Outcome{}, err
 	}
 	association.Result = protocol.IssueReuseResult{Issue: issue, OriginalRequestID: p.OriginalRequestID, Source: updated, Reused: true, NextStep: "The original responsibility now owns this source; its existing context review and execution fences still apply."}

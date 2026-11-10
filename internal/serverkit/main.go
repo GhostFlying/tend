@@ -331,10 +331,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 	if cfg.MainAgent != nil {
 		owner := cfg.MainAgent.OwnerSubject
-		configured := cfg.Owners
-		if cfg.LocalOwner != "" {
-			configured = []string{cfg.LocalOwner}
-		}
+		configured := effectiveServerOwners(cfg, deps.Listeners != nil)
 		if owner == "" && len(configured) == 1 {
 			owner = configured[0]
 		}
@@ -372,7 +369,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		tn        *netx.Tailnet
 		secure    bool
 	)
-	owners := cfg.Owners
+	owners := effectiveServerOwners(cfg, deps.Listeners != nil)
 	for node, login := range cfg.OwnerNodes {
 		if !slices.Contains(owners, login) {
 			return fmt.Errorf("owner_nodes: %s belongs to %s, who is not in owners", node, login)
@@ -410,9 +407,6 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		listeners = []net.Listener{l}
 		// Off the tailnet there is no peer identity; development only.
 		whois = netx.Static{Identity: &netx.Identity{Node: "local", User: cfg.LocalOwner, Tags: []string{"tag:local"}}}
-		if cfg.LocalOwner != "" {
-			owners = []string{cfg.LocalOwner}
-		}
 		log.Warn("listening without the tailnet; every peer is taken as tag:local and the local owner", "addr", l.Addr().String())
 	}
 
@@ -742,6 +736,14 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		return ctx.Err()
 	}
 	return errors.Join(err, shutdownErr)
+}
+
+// effectiveServerOwners follows the actual listener mode, including test injection.
+func effectiveServerOwners(cfg Config, injected bool) []string {
+	if !injected && cfg.Tailnet == nil && cfg.LocalOwner != "" {
+		return []string{cfg.LocalOwner}
+	}
+	return cfg.Owners
 }
 
 // hostedMainThread prepares the hosted main agent (D68).

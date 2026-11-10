@@ -142,27 +142,40 @@ func (cmd UpdateWorkItemChoice) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer is required")
 		}
 		if cmd.FromMessage {
-			m, e := store.GetMessage(ctx, tx.Q(), p.OwnerMessageID)
+			_, e := store.GetMessage(ctx, tx.Q(), p.OwnerMessageID)
 			if e != nil {
 				return Outcome{}, errNotFound(e, "owner message does not exist")
 			}
-			if m.Author != "owner" {
+			ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), p.OwnerMessageID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if !ownerAuthority {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "answer must cite an actual owner message")
 			}
 			c.AnswerSourceID = p.OwnerMessageID
 			c.AnswerSourceKind = "owner_message"
 		} else {
 			id := x.IDs.New(protocol.PrefixMessage)
-			seq, e := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "owner", Body: p.Answer, ReplyTo: c.MessageID, CreatedAt: c.UpdatedAt})
+			author := x.messageAuthor()
+			seq, e := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: p.Answer, ReplyTo: c.MessageID, RequestID: x.Env.RequestID, CreatedAt: c.UpdatedAt})
 			if e != nil {
 				return Outcome{}, e
+			}
+			if err := x.recordMessageAuthority(ctx, tx, id); err != nil {
+				return Outcome{}, err
 			}
 			if e := registerWebCommunicationInput(ctx, tx, id, c.MessageID); e != nil {
 				return Outcome{}, e
 			}
 			c.AnswerSourceID = id
 			c.AnswerSourceKind = "owner_message"
-			if _, e = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"owner"}`, RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: `{"kind":"owner"}`, CreatedAt: c.UpdatedAt}); e != nil {
+			if author != "owner" {
+				c.AnswerSourceKind = "agent_message"
+			}
+			body, _ := json.Marshal(map[string]string{"author": author})
+			actor, _ := json.Marshal(x.ActualPrincipal())
+			if _, e = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: string(body), RequestID: x.Env.RequestID, TraceID: x.TraceID, ActorJSON: string(actor), CreatedAt: c.UpdatedAt}); e != nil {
 				return Outcome{}, e
 			}
 		}
