@@ -75,7 +75,7 @@ func TestFallbackInstructionsUseActualCapabilitiesAndSameGoalContinuation(t *tes
 			if cfg.Config["features.shell_tool"] != true || cfg.Config["features.apply_patch_freeform"] != true || cfg.Config["features.image_generation"] != false {
 				t.Fatal("fallback changed explicit runtime capability configuration", cfg)
 			}
-			for _, obsolete := range []string{"Technical diagnosis belongs to the worker", "Use only the person-facing planning tools", "Do not reopen a completed Task; use follow_up"} {
+			for _, obsolete := range []string{"Technical diagnosis belongs to the worker", "Use only the person-facing planning tools", "Do not reopen a completed Task; use follow_up", "which the server excludes from independent acceptance", "Do not attach implementation-only design material to an independent reviewer"} {
 				if strings.Contains(cfg.DeveloperInstructions, obsolete) {
 					t.Fatalf("fallback retained role-based capability/continuation prohibition %q", obsolete)
 				}

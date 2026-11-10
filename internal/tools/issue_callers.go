@@ -27,7 +27,7 @@ func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution stor
 		if args.IssueID == "" {
 			args.IssueID = execution.IssueID
 		}
-		query := protocol.IssueMaterialsQuery{Kind: args.Kind, ID: args.ID, After: args.After, Limit: args.Limit}
+		query := protocol.IssueMaterialsQuery{Kind: args.Kind, ID: args.ID, DutyRevision: args.DutyRevision, After: args.After, Limit: args.Limit}
 		value, err := s.app.ReadScopedIssueMaterials(ctx, execution.IssueID, args.IssueID, query)
 		return hostedAnswer(value, err), true
 	}

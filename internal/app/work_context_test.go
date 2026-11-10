@@ -9,9 +9,9 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestWorkContextProjectsRolesBeforeRunnerBoundary(t *testing.T) {
+func TestWorkContextPreservesBusinessBackgroundForEveryResponsibility(t *testing.T) {
 	spec := domain.Spec{Goal: "fix scrolling", Scope: "Browser behavior", ImplementationContext: "AUTHOR_DESIGN_USE_CACHE", SharedContext: []protocol.TaskWorkContext{{WorkItemID: "work", Revision: 3, Intent: "keep controls reachable", Constraints: []string{"Do not deploy"}, Facts: []protocol.SharedFact{{Kind: "observation", Text: "Controls overlap", Source: "owner screenshot"}}}}}
-	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
+	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept, protocol.RoleIssueManager} {
 		raw, err := workerSpec(spec, role)
 		if err != nil {
 			t.Fatal(err)
@@ -21,8 +21,8 @@ func TestWorkContextProjectsRolesBeforeRunnerBoundary(t *testing.T) {
 				t.Fatalf("%s lost %q: %s", role, want, raw)
 			}
 		}
-		if strings.Contains(string(raw), "AUTHOR_DESIGN_USE_CACHE") != (role == protocol.RoleImplement) {
-			t.Fatalf("role context leaked or was lost: %s %s", role, raw)
+		if !strings.Contains(string(raw), "AUTHOR_DESIGN_USE_CACHE") || !strings.Contains(string(raw), "Author-supplied design and investigation input") || !strings.Contains(string(raw), "not independently verified facts or approval") {
+			t.Fatalf("%s lost author input or its evidence distinction: %s", role, raw)
 		}
 		var projected domain.Spec
 		if err := json.Unmarshal(raw, &projected); err != nil {

@@ -77,6 +77,9 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if p.ExecutionDutyRevision < 0 || p.ExecutionDutyRevision > 0 && (p.Action != "complete" || p.ExecutionRunID == "" || p.ExecutionTaskID == "") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "execution_duty_revision requires complete with the original execution_task_id and execution_run_id")
+	}
 	if err := validateCanonicalSourceReference(ctx, tx.Q(), canonicalOwnerIssueSource(p.IssueSourceReference)); err != nil {
 		return Outcome{}, err
 	}
@@ -105,6 +108,9 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	d, err := loadOrPrepareLiveDeliveryDuty(ctx, tx, issue, p)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if p.ExecutionRunID != "" && (p.Action != "complete" || p.ExecutionTaskID == "" || p.ExecutionTaskID == d.ExecutionTaskID) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "execution_run_id selects an archived delivery for an unbound contribution")
 	}
 	if d.Status == "complete" || d.Status == "report" || d.Status == "ended" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery responsibility is already settled")

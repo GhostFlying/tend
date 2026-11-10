@@ -320,6 +320,86 @@ func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {
 	if h.count("issue_delivery_execution_history") != 2 || h.count("tasks") != 2 || h.count("runs") != 2 {
 		t.Fatal("repeated same-Run settlements collided or manufactured execution")
 	}
+	index, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: producer.TaskID})
+	if err != nil || index.DeliveryAuthorization == nil || len(index.DeliveryAuthorization.History) != 2 {
+		t.Fatal("ordinary current Task context lost the historical index", index, err)
+	}
+	if _, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "overview"}); err != nil {
+		t.Fatal("multiple same-Run histories blocked ordinary Issue context", err)
+	}
+	if _, err := h.app.ReadRunContext(t.Context(), runPrincipal(producer.RunID, producer.Role), protocol.IssueMaterialsQuery{Kind: "overview"}); err != nil {
+		t.Fatal("multiple same-Run histories blocked current execution context rebuilding", err)
+	}
+	var completedRevision, endedRevision int64
+	for _, ref := range index.DeliveryAuthorization.History {
+		if ref.ExecutionRunID != producer.RunID || ref.RunID != ref.ExecutionRunID {
+			t.Fatal("history reference changed the actual producer Run", ref)
+		}
+		selected, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: ref.ExecutionRunID, DutyRevision: ref.DutyRevision})
+		if err != nil || selected.DeliveryAuthorization == nil {
+			t.Fatal("fresh session cannot select an advertised immutable history", ref, selected, err)
+		}
+		actual := selected.DeliveryAuthorization
+		if actual.DutyRevision != ref.DutyRevision || actual.Valid || actual.RunID != producer.RunID || actual.Settlement == nil {
+			t.Fatal("history selector read another binding or granted new execution", actual)
+		}
+		if actual.DutyStatus == "complete" {
+			completedRevision = ref.DutyRevision
+			if !actual.Settlement.Eligible || actual.Settlement.ArtifactID != oldArtifact {
+				t.Fatal("later ended binding hid the real completed merge", actual)
+			}
+		} else if actual.DutyStatus == "ended" {
+			endedRevision = ref.DutyRevision
+			if actual.Settlement.Eligible {
+				t.Fatal("ended installation became a completed result", actual)
+			}
+		} else {
+			t.Fatal("fixture lost its distinct original settlements", actual)
+		}
+	}
+	if completedRevision == 0 || endedRevision == 0 {
+		t.Fatal("same-Run complete and ended histories are unavailable")
+	}
+	if _, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: producer.RunID}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+		t.Fatal("Run-only lookup silently selected one of multiple histories", err)
+	}
+	if _, err := h.app.ReadIssueMaterials(t.Context(), issue.IssueID, protocol.IssueMaterialsQuery{Kind: "delivery_authorization", ID: producer.RunID, DutyRevision: endedRevision + 100}); protocol.CodeOf(err) != protocol.CodeNotFound {
+		t.Fatal("missing immutable revision fell back to another history", err)
+	}
+	var contribution string
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT task_id FROM issue_delivery_duties WHERE issue_id=? AND task_id<>? AND status='preparing'`, issue.IssueID, producer.TaskID).Scan(&contribution)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: contribution}))
+	beforeContribution := deliveryDutyForTest(t, h, issue.IssueID, contribution)
+	for _, scenario := range []struct {
+		name     string
+		revision int64
+		task     string
+		code     protocol.Code
+	}{
+		{"ambiguous", 0, producer.TaskID, protocol.CodeInvalidRequest},
+		{"ended", endedRevision, producer.TaskID, protocol.CodeInvalidTransition},
+		{"missing", endedRevision + 100, producer.TaskID, protocol.CodeNotFound},
+		{"different_task", completedRevision, contribution, protocol.CodeInvalidTransition},
+	} {
+		t.Run("historical_contribution/"+scenario.name, func(t *testing.T) {
+			p := protocol.UpdateIssueDeliveryPayload{TaskID: contribution, ExecutionTaskID: scenario.task, ExecutionRunID: producer.RunID, ExecutionDutyRevision: scenario.revision, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Select only the actual completed immutable whole-PR delivery"}}
+			expectWorkCode(t, updateDeliveryForTest(t, h, issue.IssueID, p), scenario.code)
+			if !reflect.DeepEqual(beforeContribution, deliveryDutyForTest(t, h, issue.IssueID, contribution)) {
+				t.Fatal("rejected historical selector changed the contribution")
+			}
+		})
+	}
+	completion := protocol.UpdateIssueDeliveryPayload{TaskID: contribution, ExecutionTaskID: producer.TaskID, ExecutionRunID: producer.RunID, ExecutionDutyRevision: completedRevision, Action: "complete", IssueControlPayload: protocol.IssueControlPayload{Reason: "Settle the actual linked report through its original completed whole-PR delivery"}}
+	if op := updateDeliveryForTest(t, h, issue.IssueID, completion); op.Status != protocol.OpSucceeded {
+		t.Fatal("later ended binding hid the completed delivery from public contribution settlement", op)
+	}
+	if h.count("tasks") != 2 || h.count("runs") != 2 || h.run(producer.RunID).ObservedState == protocol.RunFinished {
+		t.Fatal("historical settlement changed actual execution identity or completion")
+	}
 }
 
 func TestIssueOwnerNewResultCannotEraseUnknownOriginalUpgrade(t *testing.T) {

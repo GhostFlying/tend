@@ -9,11 +9,12 @@ import (
 // IssueMaterialsQuery selects a page or one object from the Issue's retained
 // context. It never supplies execution authority or a filesystem location.
 type IssueMaterialsQuery struct {
-	IssueID string `json:"issue_id,omitempty"`
-	Kind    string `json:"kind,omitempty"`
-	ID      string `json:"id,omitempty"`
-	After   string `json:"after,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
+	IssueID      string `json:"issue_id,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	ID           string `json:"id,omitempty"`
+	DutyRevision int64  `json:"duty_revision,omitempty"`
+	After        string `json:"after,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
 }
 
 type IssueMaterialSource struct {
@@ -101,17 +102,27 @@ func NormalizeIssueMaterialsQuery(q IssueMaterialsQuery) (IssueMaterialsQuery, e
 	if q.IssueID != "" && !ValidID(PrefixWorkItem, q.IssueID) {
 		return q, Errorf(CodeInvalidRequest, "invalid Issue selector")
 	}
+	if q.DutyRevision < 0 || q.DutyRevision > 0 && (q.Kind != "delivery_authorization" || !ValidID(PrefixRun, q.ID)) {
+		return q, Errorf(CodeInvalidRequest, "duty_revision selects an archived delivery_authorization by its original Run ID")
+	}
 	return q, nil
 }
 func ParseIssueMaterialsQuery(values url.Values) (IssueMaterialsQuery, error) {
 	var q IssueMaterialsQuery
 	for key, v := range values {
-		if !slices.Contains([]string{"issue_id", "kind", "id", "after", "limit"}, key) || len(v) != 1 {
-			return q, Errorf(CodeInvalidRequest, "context accepts only issue_id, kind, id, after and limit")
+		if !slices.Contains([]string{"issue_id", "kind", "id", "duty_revision", "after", "limit"}, key) || len(v) != 1 {
+			return q, Errorf(CodeInvalidRequest, "context accepts only issue_id, kind, id, duty_revision, after and limit")
 		}
 	}
 	q.Kind, q.ID, q.After = values.Get("kind"), values.Get("id"), values.Get("after")
 	q.IssueID = values.Get("issue_id")
+	if raw, ok := values["duty_revision"]; ok {
+		value, err := strconv.ParseInt(raw[0], 10, 64)
+		if err != nil || value < 1 {
+			return q, Errorf(CodeInvalidRequest, "duty_revision must be a positive archived duty revision")
+		}
+		q.DutyRevision = value
+	}
 	if raw, ok := values["limit"]; ok {
 		value, err := strconv.Atoi(raw[0])
 		if err != nil || value < 1 || value > 100 {

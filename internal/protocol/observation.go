@@ -58,10 +58,11 @@ type DeliveryExecutionAuthority struct {
 }
 
 type DeliveryExecutionReference struct {
-	RunID        string `json:"run_id"`
-	Generation   int64  `json:"generation"`
-	DutyRevision int64  `json:"duty_revision"`
-	UpgradeID    string `json:"upgrade_id,omitempty"`
+	ExecutionRunID string `json:"execution_run_id"`
+	RunID          string `json:"run_id"`
+	Generation     int64  `json:"generation"`
+	DutyRevision   int64  `json:"duty_revision"`
+	UpgradeID      string `json:"upgrade_id,omitempty"`
 }
 
 // DeliverySettlementAuthority reports whether an already completed deployment

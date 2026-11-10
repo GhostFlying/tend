@@ -35,7 +35,8 @@ type Spec struct {
 	Inputs []protocol.TaskInput `json:"inputs,omitempty"`
 	// SharedContext is frozen by the server, never copied from worker reports.
 	SharedContext []protocol.TaskWorkContext `json:"shared_context,omitempty"`
-	// ImplementationContext is visible only to the implementation role.
+	// ImplementationContext retains author-supplied design or investigation
+	// input for every authorized responsibility; it is not verified evidence.
 	ImplementationContext string `json:"implementation_context,omitempty"`
 	// MaxImplementAttempts bounds implement generations for this version;
 	// zero means DefaultMaxImplementAttempts.
