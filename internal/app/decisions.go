@@ -175,12 +175,13 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			}
 		}
 	}
-	if c.Responsible {
-		var delivery bool
+	mixedExecutionChoice := p.Text != "" && oneOf(p.Option, "approve", "end_delivery")
+	var delivery bool
+	if c.Responsible || mixedExecutionChoice {
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id') WHERE a.decision_id=?)`, d.DecisionID).Scan(&delivery); err != nil {
 			return Outcome{}, err
 		}
-		if delivery {
+		if delivery && c.Responsible {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "delivery confirmation requires an actual owner source; escalate the original question or relay its standing owner authorization")
 		}
 	}
@@ -206,6 +207,9 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			pe.Details = b
 		}
 		return Outcome{}, pe
+	}
+	if delivery && mixedExecutionChoice {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery approve/end_delivery must omit text; use text-only for conditional answers or Envelope.reason for audit explanation; defer may include text")
 	}
 	if obsolete, err := store.TaskRuleQuestionObsolete(ctx, tx.Q(), d.DecisionID); err != nil {
 		return Outcome{}, err

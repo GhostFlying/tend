@@ -258,6 +258,8 @@ tend agents local reload --socket "$RUNNER_CONTROL_SOCKET" --dry-run
 
 旧 pause/resume/cancel/rate/retry/decide 快捷命令仍支持原交互；完整原 payload 可通过 --data/--file 指定，重试同时提供原 request_id 和适用 revision。新动作才能取得新身份。repo register 仅提供原 request_id 时继续查询原结果；需要发送时必须提供原完整 JSON 和 revision，禁止从当前默认值重建未知请求。上传是独立流式接口，dry-run 输出请求身份、文件名、媒体类型、长度与摘要；重试使用原身份和相同原字节/元数据。
 
+D214：`decide` 与 `attention respond` 对具体交付批准/结束使用纯 `approve`/`end_delivery`，不能同时提供 `text`；条件文本不授予执行。`defer` 可以带备注，仍是明确延期，必须经实际 owner resume 才能恢复。原版本化完整输入例如 `tend decide <decision-id> --file answer.json --reason <审计说明> --dry-run --json`，其中 answer.json 为 `{"version":1,"option":"approve"}`。确认后保留原 Envelope/request_id 对账，批准/结束的解释不混入 `text`。历史已经接受但不可执行的答复，可通过 `issue update-delivery` 在当前 Issue revision/epoch、适用的原 Task control revision 下显式 `action=prepare` 同一完整 candidate；旧答案及来源保留，新具体问题再提交纯选项。有效批准、延期、结束交付及未结清执行不能因此绕过；不得换 request 重发未知操作。
+
 任务列表默认提供简明表格，--json 保留完整响应与游标；消息、关注事项、历史和复杂诊断资料保留完整缩进结构，避免通用列选择丢失原文或对象身份。既有 JSON 默认的命令保持输出兼容。Doctor 分开报告 disabled、unavailable、abnormal，异常返回非零；不会做自动维护。
 
 

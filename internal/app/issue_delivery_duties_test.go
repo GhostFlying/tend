@@ -313,7 +313,11 @@ func TestDeliveryCandidateChangeAndOwnerTextCannotReuseApproval(t *testing.T) {
 			if change == "defer" {
 				option = "defer"
 			}
-			answerDeliveryForTest(t, h, d, option, text)
+			if change == "free-text" {
+				retainLegacyDeliveryAnswer(t, h, d, option, text)
+			} else {
+				answerDeliveryForTest(t, h, d, option, text)
+			}
 			switch change {
 			case "head":
 				c.HeadSHA = strings.Repeat("d", 40)
