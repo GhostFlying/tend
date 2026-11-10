@@ -97,7 +97,11 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 }
 
 func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx) error {
-	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT h.run_id FROM run_pause_handoffs h WHERE h.stopped=1 AND h.continuation_action_id IS NULL AND h.successor_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM run_question_handoffs q WHERE q.run_id=h.run_id) ORDER BY h.run_id`)
+	// Retained backlog is not ready work. Avoid loading its frozen Task and
+	// responsibility graph on every unrelated native event or empty claim.
+	// Cancellation of the primary responsibility must still settle its action,
+	// including when the original pause was requested by a held review Issue.
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT h.run_id FROM run_pause_handoffs h JOIN runs r USING(run_id) JOIN plan_actions a ON a.action_id=r.action_id JOIN issue_controls paused ON paused.issue_id=h.issue_id JOIN task_work_item_owners o ON o.task_id=r.task_id JOIN issue_controls primary_issue ON primary_issue.issue_id=o.work_item_id WHERE h.stopped=1 AND h.continuation_action_id IS NULL AND h.successor_run_id IS NULL AND a.status='dispatched' AND ((paused.work_status<>'backlog' AND paused.state<>'paused') OR primary_issue.state='cancelling') AND NOT EXISTS(SELECT 1 FROM run_question_handoffs q WHERE q.run_id=h.run_id) ORDER BY h.run_id`)
 	if err != nil {
 		return err
 	}
