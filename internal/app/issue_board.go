@@ -154,8 +154,14 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 				next.OwnerSelection = &protocol.IssueOwnerSelection{CategoryID: spec.CategoryID, AgentID: spec.AgentID, OwnershipPolicy: spec.OwnershipPolicy}
 			}
 		}
-		if err := validateIssueOwnerSelection(ctx, tx.Q(), next.OwnerSelection); err != nil {
+		frozenReview, err := store.IssueHasFrozenReview(ctx, tx.Q(), current.IssueID)
+		if err != nil {
 			return Outcome{}, err
+		}
+		if next.OwnerSelection != nil || !frozenReview {
+			if err := validateIssueOwnerSelection(ctx, tx.Q(), next.OwnerSelection); err != nil {
+				return Outcome{}, err
+			}
 		}
 		if current.BoardStatus() != protocol.IssueTodo {
 			next.TodoAt = x.Now.UnixMilli()

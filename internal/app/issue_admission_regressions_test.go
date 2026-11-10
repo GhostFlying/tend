@@ -2,7 +2,9 @@ package app
 
 import (
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 	"testing"
 )
 
@@ -102,5 +104,106 @@ func TestIssueAdmissionRegressionInitializerPreservesExplicitlyClearedSelection(
 	i = admissionCurrent(t, h, i.IssueID)
 	if i.OwnerSelection != nil {
 		t.Fatalf("startup resurrected explicitly cleared selection: %+v", i.OwnerSelection)
+	}
+}
+func TestIssueAdmissionRegressionFrozenReviewResumesAfterBacklog(t *testing.T) {
+	h, r, i := issueOwnerHarness(t)
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityPauseHandoffs)
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := createOwnerExecution(t, h, i, "implementer"); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	impl := ownerWorkerClaim(t, h, r, protocol.RoleImplement)
+	if op := h.runAs(impl, protocol.OpRunsSubmitArtifact, testArtifact(h.task(impl.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	accept := ownerWorkerClaim(t, h, r, protocol.RoleAccept)
+	review := admissionCurrent(t, h, accept.Responsibility.IssueID)
+	review = issueAdmissionStatus(t, h, review, protocol.IssueBacklog, nil)
+	paused := h.run(accept.RunID)
+	if paused.PauseHandoff == nil {
+		t.Fatal("review pause was not recorded")
+	}
+	if op := h.runAs(accept, protocol.OpRunsYieldPause, protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff}, YieldPause{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	issueAdmissionStatus(t, h, review, protocol.IssueTodo, nil)
+	successor := ownerWorkerClaim(t, h, r, protocol.RoleAccept)
+	if successor.RunID == accept.RunID || successor.TaskID != accept.TaskID || successor.SpecVersion != accept.SpecVersion || string(successor.Artifact) != string(accept.Artifact) || successor.Execution.Identity != accept.Execution.Identity {
+		t.Fatal("review continuation replaced its frozen work", successor, accept)
+	}
+	if op := h.runAs(successor, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if h.task(accept.TaskID).Lifecycle != protocol.TaskCompleted {
+		t.Fatal(h.task(accept.TaskID))
+	}
+}
+func TestIssueAdmissionRegressionInitializerRetainsPendingReview(t *testing.T) {
+	h, r, i := issueOwnerHarness(t)
+	if op := createOwnerExecution(t, h, i, "implementer"); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	impl := ownerWorkerClaim(t, h, r, protocol.RoleImplement)
+	var reviewID string
+	if e := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if e := tx.Q().QueryRowContext(t.Context(), `SELECT review_issue_id FROM task_owner_contracts WHERE task_id=?`, impl.TaskID).Scan(&reviewID); e != nil {
+			return e
+		}
+		_, e := tx.Exec(t.Context(), `UPDATE issue_controls SET admission_initialized=0 WHERE issue_id=?`, reviewID)
+		return e
+	}); e != nil {
+		t.Fatal(e)
+	}
+	before := admissionCurrent(t, h, reviewID)
+	if e := h.app.InitializeIssueAdmission(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	after := admissionCurrent(t, h, reviewID)
+	if after.Revision != before.Revision+1 {
+		t.Fatal("initializer did not append its definition", before, after)
+	}
+	if op := h.runAs(impl, protocol.OpRunsSubmitArtifact, testArtifact(h.task(impl.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var candidates []scheduler.Candidate
+	if e := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		rows, e := store.ListClaimCandidates(t.Context(), tx.Q())
+		if e != nil {
+			return e
+		}
+		candidates, e = views.SchedulingCandidates(rows)
+		if e != nil {
+			return e
+		}
+		return views.ApplyIssueDependencies(t.Context(), tx.Q(), candidates)
+	}); e != nil {
+		t.Fatal(e)
+	}
+	for _, c := range candidates {
+		if c.TaskID == impl.TaskID && c.Kind == protocol.ActionAccept && c.OwnerResponsibilityChanged {
+			t.Fatalf("initializer alone invalidated pending review: revision %d->%d", before.Revision, after.Revision)
+		}
+	}
+	ownerWorkerClaim(t, h, r, protocol.RoleAccept)
+}
+
+func TestIssueAdmissionRegressionReopenPreservesOwnerPolicy(t *testing.T) {
+	h, r, i := issueOwnerHarness(t)
+	if i.OwnerSelection == nil || i.OwnerSelection.OwnershipPolicy != protocol.IssueOwnerPolicy {
+		t.Fatalf("fixture missing owner policy: %+v", i.OwnerSelection)
+	}
+	closed := canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, i, "close", canonicalLifecycleClosure(i, protocol.WorkItemClosureCompleted)))
+	op := h.exec(owner, h.env("issues.reopen", protocol.Target{Type: "issue", ID: i.IssueID}, canonicalOwnerControl{ExpectedAssignmentEpoch: closed.AssignmentEpoch}, rev(closed.Revision)), CanonicalOwnerIssueCommand{Action: "reopen"})
+	restored := canonicalLifecycleIssue(t, op)
+	if restored.OwnerSelection == nil || restored.OwnerSelection.OwnershipPolicy != protocol.IssueOwnerPolicy {
+		t.Fatalf("reopen changed owner contract: before=%+v after=%+v", i.OwnerSelection, restored.OwnerSelection)
+	}
+	restored = issueAdmissionStatus(t, h, restored, protocol.IssueTodo, nil)
+	if as := admissionClaim(t, h, r); as == nil {
+		t.Fatal("restored owner was not claimed")
 	}
 }

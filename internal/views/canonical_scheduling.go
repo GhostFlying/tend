@@ -46,10 +46,14 @@ func applyCanonicalTaskAdmission(ctx context.Context, q store.Querier, c *schedu
 					c.OwnerResponsibilityChanged = true
 				}
 				c.ReviewOwnerPin = pin
-			} else if review.AssignmentEpoch != 1 || review.Assignee.Ref != contract.AgentRef || review.Revision != contract.ReviewAdmissionRevision {
-				// No previous run is not authority to undo a human takeover or
-				// edits made while this bounded review was waiting to start.
-				c.OwnerResponsibilityChanged = true
+			} else {
+				current, err := store.ReviewAdmissionCurrent(ctx, q, contract, review)
+				if err != nil {
+					return err
+				}
+				if !current {
+					c.OwnerResponsibilityChanged = true
+				}
 			}
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {

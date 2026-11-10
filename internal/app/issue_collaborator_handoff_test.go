@@ -115,6 +115,8 @@ func TestFault_IssueCollaboratorHandoffRetainsOldFactsAndAllowsRealSuccessor(t *
 			if op := h.exec(owner, h.env(protocol.OpIssueRequestOwner, protocol.Target{Type: "issue", ID: issue.IssueID}, request, rev(current.Revision)), RequestIssueOwner{}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
+			current = canonicalTaskIssue(t, h, issue.IssueID)
+			current = issueAdmissionStatus(t, h, current, protocol.IssueTodo, nil)
 			manager := ownerWorkerClaim(t, h, runtime, protocol.RoleIssueManager)
 			if manager.Execution.Identity.LocalID != "beta" {
 				t.Fatal("replacement owner did not acquire its real current identity", manager)
