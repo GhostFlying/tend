@@ -341,36 +341,103 @@ func TestIssueAdmissionRegressionPauseContinuationRequiresNegotiation(t *testing
 }
 
 func TestIssueAdmissionRegressionInitializerRetainsWithdrawnAuthorization(t *testing.T) {
+	for _, beforeInit := range []bool{true, false} {
+		t.Run(map[bool]string{true: "withdraw_before_initialization", false: "withdraw_after_initialization"}[beforeInit], func(t *testing.T) {
+			h, r := managerClaimHarness(t)
+			i := createCanonicalOwnerTestIssue(t, h)
+			source := queueMessage(t, h, "Delegate by this source only")
+			op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "exact original authorization"}, rev(i.Revision)), retainedManagerCommand{})
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			var m store.IssueManagerTask
+			if e := json.Unmarshal(op.Result, &m); e != nil {
+				t.Fatal(e)
+			}
+			if beforeInit {
+				withdrawOwnerSource(t, h, source)
+			}
+			if e := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				_, e := tx.Exec(t.Context(), `UPDATE issue_controls SET admission_initialized=0 WHERE issue_id=?`, i.IssueID)
+				return e
+			}); e != nil {
+				t.Fatal(e)
+			}
+			if e := h.app.InitializeIssueAdmission(t.Context()); e != nil {
+				t.Fatal(e)
+			}
+			if !beforeInit {
+				withdrawOwnerSource(t, h, source)
+			}
+			if h.task(m.TaskID).Lifecycle != protocol.TaskCancelled {
+				t.Fatal("fixture not withdrawn")
+			}
+			if as := admissionClaim(t, h, r); as != nil {
+				t.Fatalf("withdrawn manager restarted: %+v", as)
+			}
+			i = admissionCurrent(t, h, i.IssueID)
+			i = canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Explicitly admit a new responsibility after withdrawal"}, rev(i.Revision)), RequestIssueManager{}))
+			if next := admissionClaim(t, h, r); next == nil || next.TaskID == m.TaskID {
+				t.Fatal("explicit reauthorization did not admit a fresh responsibility", i, next)
+			}
+		})
+	}
+}
+
+func TestIssueAdmissionRegressionRetiredCategoryAllowsFrozenPauseResume(t *testing.T) {
+	h, r, i := issueOwnerHarness(t)
+	r.Capabilities = append(r.Capabilities, protocol.CapabilityPauseHandoffs)
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := createOwnerExecution(t, h, i, "implementer"); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	original := ownerWorkerClaim(t, h, r, protocol.RoleImplement)
+	i = issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
+	paused := h.run(original.RunID)
+	if paused.PauseHandoff == nil {
+		t.Fatal("missing pause contract")
+	}
+	if op := h.runAs(original, protocol.OpRunsYieldPause, protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff}, YieldPause{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	inventoryCategory(t, h, "implementer", 1, "retired")
+	op := h.exec(owner, h.env("issues.set_status", protocol.Target{Type: "issue", ID: i.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Status: protocol.IssueTodo}, rev(i.Revision)), CanonicalOwnerIssueCommand{Action: "set_status"})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatalf("existing frozen worker cannot be resumed after category retirement: %+v", op)
+	}
+	if next := admissionClaim(t, h, r); next == nil || next.TaskID != original.TaskID || next.PauseContinuation == nil {
+		t.Fatal("frozen continuation was replaced or stranded", next)
+	}
+}
+
+func TestIssueAdmissionRegressionInitializerKeepsOriginalManagerCarrier(t *testing.T) {
 	h, r := managerClaimHarness(t)
 	i := createCanonicalOwnerTestIssue(t, h)
-	source := queueMessage(t, h, "Delegate by this source only")
-	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "exact original authorization"}, rev(i.Revision)), retainedManagerCommand{})
+	source := queueMessage(t, h, "Keep the original delegated responsibility")
+	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Retained authorization"}, rev(i.Revision)), retainedManagerCommand{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	var m store.IssueManagerTask
-	if e := json.Unmarshal(op.Result, &m); e != nil {
-		t.Fatal(e)
+	var manager store.IssueManagerTask
+	if err := json.Unmarshal(op.Result, &manager); err != nil {
+		t.Fatal(err)
 	}
-	withdrawOwnerSource(t, h, source)
-	if h.task(m.TaskID).Lifecycle != protocol.TaskCancelled {
-		t.Fatal("fixture not withdrawn")
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE issue_controls SET admission_initialized=0 WHERE issue_id=?`, i.IssueID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if e := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, e := tx.Exec(t.Context(), `UPDATE issue_controls SET admission_initialized=0 WHERE issue_id=?`, i.IssueID)
-		return e
-	}); e != nil {
-		t.Fatal(e)
+	if err := h.app.InitializeIssueAdmission(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	if e := h.app.InitializeIssueAdmission(t.Context()); e != nil {
-		t.Fatal(e)
+	if current := admissionCurrent(t, h, i.IssueID); current.OwnerSelection != nil {
+		t.Fatal("initializer copied old authorization into a new selection", current)
 	}
-	if as := admissionClaim(t, h, r); as != nil {
-		t.Fatalf("withdrawn manager restarted: %+v", as)
-	}
-	i = admissionCurrent(t, h, i.IssueID)
-	i = canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: i.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Explicitly admit a new responsibility after withdrawal"}, rev(i.Revision)), RequestIssueManager{}))
-	if next := admissionClaim(t, h, r); next == nil || next.TaskID == m.TaskID {
-		t.Fatal("explicit reauthorization did not admit a fresh responsibility", i, next)
+	if as := admissionClaim(t, h, r); as == nil || as.TaskID != manager.TaskID {
+		t.Fatal("retained manager was replaced or stranded", as)
 	}
 }

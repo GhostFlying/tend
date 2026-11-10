@@ -149,9 +149,25 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 
 			if p, e := r.cfg.Journal.Pause(ctx, as.RunID); e != nil {
 				return e
-			} else if p != nil && as.PauseHandoffs && !latest.Held {
+			} else if p != nil && as.PauseHandoffs {
+				r.mu.Lock()
+				handBack := a.desired == protocol.DesiredPaused
+				r.mu.Unlock()
+				if latest.Held && !handBack {
+					continue
+				}
 				if err := r.stopAgent(ctx, as); err != nil {
 					return &completionPending{err}
+				}
+				if latest.Held {
+					// DesiredPaused follows the owner's explicit exit from human
+					// control. Close the original execution without restarting it.
+					if err := r.cfg.Journal.SetHeld(ctx, as.RunID, false); err != nil {
+						return err
+					}
+					if latest.Phase == journal.PhaseWorkerDone && len(latest.WorkerResult) > 0 {
+						continue
+					}
 				}
 				return r.finishPause(ctx, as)
 			}

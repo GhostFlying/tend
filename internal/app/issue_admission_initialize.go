@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -52,30 +51,8 @@ func (initializeIssueAdmission) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			i.TodoRevision = previous + 1
 		}
 	}
-	if i.OwnerSelection == nil {
-		m, e := store.LatestIssueManagerTask(ctx, tx.Q(), i.IssueID)
-		if e != nil && !errors.Is(e, store.ErrNotFound) {
-			return Outcome{}, e
-		}
-		valid := false
-		if e == nil && (m.State == "pending" || m.State == "assigned") {
-			valid, e = store.IssueManagerAuthorizationValid(ctx, tx.Q(), m.TaskID)
-			if e != nil {
-				return Outcome{}, e
-			}
-		}
-		if valid {
-			raw, e := store.GetSpec(ctx, tx.Q(), m.TaskID, 1)
-			if e != nil {
-				return Outcome{}, e
-			}
-			var spec protocol.IssueManagerSpec
-			if e := json.Unmarshal([]byte(raw), &spec); e != nil {
-				return Outcome{}, e
-			}
-			i.OwnerSelection = &protocol.IssueOwnerSelection{CategoryID: spec.CategoryID, AgentID: spec.AgentID, OwnershipPolicy: spec.OwnershipPolicy}
-		}
-	}
+	// Retained manager tasks keep their own frozen selection and authorization.
+	// Copying it into a fresh Issue selection would outlive source withdrawal.
 	// Convert the explicitly marked old Issue-induced Task pause into the
 	// Issue overlay. Independent paused/human controls have no such marker.
 	if _, err := tx.Exec(ctx, `UPDATE tasks SET control_mode='managed',control_revision=control_revision+1 WHERE control_mode='paused' AND EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.task_id=tasks.task_id AND m.issue_id=? AND m.issue_paused=1)`, i.IssueID); err != nil {
