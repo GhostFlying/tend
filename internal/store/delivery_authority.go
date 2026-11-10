@@ -88,7 +88,7 @@ func DeliveryOwnerOption(ctx context.Context, q Querier, d protocol.IssueDeliver
 		return "", nil
 	}
 	var current bool
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) LEFT JOIN message_dispositions d USING(message_id) WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0 AND COALESCE(d.content_revision,1)=(SELECT content_revision FROM issue_delivery_answers WHERE decision_id=? AND message_id=m.message_id))`, decision.AnsweredMessageID, decision.DecisionID).Scan(&current)
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) LEFT JOIN message_dispositions d USING(message_id) WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0 AND COALESCE(d.content_revision,1)=(SELECT content_revision FROM issue_delivery_answers WHERE decision_id=? AND message_id=m.message_id))`, decision.AnsweredMessageID, decision.DecisionID).Scan(&current)
 	if err != nil || !current {
 		return "", err
 	}
@@ -128,9 +128,9 @@ func DeliveryGrantValid(ctx context.Context, q Querier, issue protocol.Issue, d 
 	}
 	var valid bool
 	if p.Authority.SourceMessageID != "" {
-		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) LEFT JOIN message_dispositions d USING(message_id) WHERE m.message_id=? AND m.author='owner' AND COALESCE(c.withdrawn_at,0)=0 AND COALESCE(d.content_revision,1)=?)`, p.Authority.SourceMessageID, p.Authority.SourceRevision).Scan(&valid)
+		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m LEFT JOIN conversation_message_controls c USING(message_id) LEFT JOIN message_dispositions d USING(message_id) WHERE m.message_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND COALESCE(c.withdrawn_at,0)=0 AND COALESCE(d.content_revision,1)=?)`, p.Authority.SourceMessageID, p.Authority.SourceRevision).Scan(&valid)
 	} else {
-		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND json_extract(principal_json,'$.kind')='owner' AND status IN ('succeeded','accepted'))`, p.Authority.RequestID).Scan(&valid)
+		valid, err = HasOwnerRequestAuthority(ctx, q, p.Authority.RequestID)
 	}
 	if err != nil {
 		return err

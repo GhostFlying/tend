@@ -259,7 +259,7 @@ func (ContinueRetainedRun) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
-	record := store.RetainedRunContinuation{RequestDomain: x.Principal.DedupDomain(), RequestID: x.Env.RequestID, RunID: s.RunID, TaskID: p.TaskID, LeaseID: p.LeaseID, TaskRevision: expected + 1, ProtectionSHA256: p.ProtectionSetSHA256, PayloadJSON: string(raw), CreatedAt: x.Now.UnixMilli()}
+	record := store.RetainedRunContinuation{RequestDomain: x.RequestDomain(), RequestID: x.Env.RequestID, RunID: s.RunID, TaskID: p.TaskID, LeaseID: p.LeaseID, TaskRevision: expected + 1, ProtectionSHA256: p.ProtectionSetSHA256, PayloadJSON: string(raw), CreatedAt: x.Now.UnixMilli()}
 	if err := tx.InsertRetainedRunContinuation(ctx, record); err != nil {
 		return Outcome{}, err
 	}

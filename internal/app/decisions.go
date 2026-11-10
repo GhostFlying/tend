@@ -106,6 +106,7 @@ type decisionAnswer struct {
 	Text         string                               `json:"text,omitempty"`
 	Effect       *protocol.EffectResult               `json:"effect,omitempty"`
 	Actor        *protocol.Principal                  `json:"actor,omitempty"`
+	OwnerSubject string                               `json:"owner_subject,omitempty"`
 }
 
 // Operation implements Command.
@@ -228,7 +229,7 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the question's task no longer applies")
 		}
 	}
-	newOwnerSource := x.Principal.Kind == protocol.PrincipalOwner && p.SourceMessageID == ""
+	newOwnerSource := x.ActualPrincipal().Kind == protocol.PrincipalOwner && p.SourceMessageID == ""
 	var sourceEvents []Event
 	if c.Responsible {
 		if x.coordinationExecution == nil {
@@ -274,9 +275,12 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		policy := decisionContinuationPolicy(value.Continuation)
 		value.Continuation = &policy
 	}
-	if c.Responsible {
+	if c.Responsible || x.Actor != nil {
 		actor := x.ActualPrincipal()
 		value.Actor = &actor
+		if x.Actor != nil && x.Principal.Kind == protocol.PrincipalOwner {
+			value.OwnerSubject = x.Principal.Subject
+		}
 	}
 	answer, err := json.Marshal(value)
 	if err != nil {
@@ -296,8 +300,8 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 
 	if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_answers(decision_id,message_id,content_revision)
  SELECT ?,m.message_id,COALESCE(md.content_revision,1) FROM conversation_messages m LEFT JOIN message_dispositions md USING(message_id)
- WHERE m.message_id=? AND m.author='owner' AND EXISTS(SELECT 1 FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id') WHERE a.decision_id=?)
- ON CONFLICT DO NOTHING`, d.DecisionID, p.SourceMessageID, d.DecisionID); err != nil {
+ WHERE m.message_id=? AND (m.author='owner' OR ?) AND EXISTS(SELECT 1 FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id') WHERE a.decision_id=?)
+ ON CONFLICT DO NOTHING`, d.DecisionID, p.SourceMessageID, x.Actor != nil && x.Principal.Kind == protocol.PrincipalOwner, d.DecisionID); err != nil {
 		return Outcome{}, err
 	}
 	if p.Option == "defer" {

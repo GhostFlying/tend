@@ -46,7 +46,7 @@ func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue p
 		return nil, err
 	}
 	standing := issue.AcceptancePolicy
-	humanRequired := standing != nil && standing.Required && !defaulted && (standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
+	humanRequired := standing != nil && standing.Required && !defaulted && (standing.DecidedBy.OwnerSubject != "" || standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
 	if humanRequired && input == nil {
 		policy := *standing
 		return &policy, nil
@@ -75,6 +75,8 @@ func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue p
 	if x.coordinationExecution != nil {
 		identity := x.coordinationExecution.Selection.Identity
 		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "agent", Agent: &identity, SourceIssueID: issue.IssueID}
+	} else if x.Actor != nil && x.actorAgent != nil {
+		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "agent", Agent: x.actorAgent, OwnerSubject: x.Principal.Subject}
 	} else if x.Principal.Kind == protocol.PrincipalOwner {
 		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "owner", OwnerSubject: x.Principal.Subject}
 	}
@@ -86,6 +88,8 @@ func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequ
 	if x.coordinationExecution != nil {
 		id := x.coordinationExecution.Selection.Identity
 		creator.Kind, creator.Agent, creator.SourceIssueID = "agent", &id, x.coordinationExecution.IssueID
+	} else if x.Actor != nil && x.actorAgent != nil {
+		creator.Kind, creator.Agent, creator.OwnerSubject = "agent", x.actorAgent, x.Principal.Subject
 	} else if x.Principal.Kind == protocol.PrincipalOwner {
 		creator.Kind, creator.OwnerSubject = "owner", x.Principal.Subject
 	} else {

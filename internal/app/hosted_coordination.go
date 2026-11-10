@@ -203,7 +203,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 	if turn.Status != store.TurnStarting && turn.Status != store.TurnStarted {
 		// A repeated exact request may read its receipt, but a finished native turn
 		// cannot create a fresh effect. Authorize is also run for recorded replays.
-		if _, err := store.GetRequest(ctx, q, x.Principal.DedupDomain(), x.Env.RequestID); errors.Is(err, store.ErrNotFound) {
+		if _, err := store.GetRequest(ctx, q, x.RequestDomain(), x.Env.RequestID); errors.Is(err, store.ErrNotFound) {
 			return protocol.Errorf(protocol.CodeForbidden, "native execution is no longer active")
 		} else if err != nil {
 			return err
@@ -400,7 +400,7 @@ func validateHostedIssueEvidence(ctx context.Context, x *Exec, q store.Querier, 
 				return protocol.Errorf(protocol.CodeInvalidRequest, "owner_decision attention evidence must be a resolved decision or action for this issue")
 			}
 			var answered bool
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN task_work_item_owners o ON o.task_id=d.task_id JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND o.work_item_id=? AND m.author='owner' AND COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, w.WorkItemID, e.Reference, w.WorkItemID).Scan(&answered); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN task_work_item_owners o ON o.task_id=d.task_id JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND o.work_item_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND (COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner' OR COALESCE(json_extract(d.answer_json,'$.owner_subject'),'')<>'')) OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, w.WorkItemID, e.Reference, w.WorkItemID).Scan(&answered); err != nil {
 				return err
 			}
 			if !answered {

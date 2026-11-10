@@ -21,7 +21,7 @@ func agentTechnicalWait(ctx context.Context, q store.Querier, d store.DecisionRo
 	if err := json.Unmarshal([]byte(d.AnswerJSON), &answer); err != nil {
 		return false, err
 	}
-	if answer.Actor == nil || answer.Continuation == nil || answer.Continuation.Mode != protocol.DecisionWait || d.AnsweredMessageID == "" {
+	if answer.OwnerSubject != "" || answer.Actor == nil || answer.Continuation == nil || answer.Continuation.Mode != protocol.DecisionWait || d.AnsweredMessageID == "" {
 		return false, nil
 	}
 	actor := answer.Actor
@@ -145,5 +145,5 @@ func admitStoppedResponsibilityAdoption(ctx context.Context, x *Exec, tx *store.
 	if contract.Execution == nil || original == nil || *contract.Execution != *original || *original != current {
 		return protocol.Errorf(protocol.CodeStaleRevision, "stopped continuation requires the same complete named execution pin")
 	}
-	return tx.InsertResponsibilityAdoption(ctx, store.ResponsibilityAdoption{RequestDomain: x.Principal.DedupDomain(), RequestID: x.Env.RequestID, TaskID: v.TaskID, SpecVersion: task.SpecVersion, TaskControlRevision: task.ControlRevision, DecisionID: v.DecisionID, ContinuationRevision: v.Revision, SourceRunID: v.RunID, IssueID: issue.IssueID, FromAssignmentEpoch: contract.AssignmentEpoch, AssignmentEpoch: issue.AssignmentEpoch, AgentRef: contract.AgentRef, Execution: *original, Reason: strings.TrimSpace(p.Reason), CreatedAt: x.Now.UnixMilli()})
+	return tx.InsertResponsibilityAdoption(ctx, store.ResponsibilityAdoption{RequestDomain: x.RequestDomain(), RequestID: x.Env.RequestID, TaskID: v.TaskID, SpecVersion: task.SpecVersion, TaskControlRevision: task.ControlRevision, DecisionID: v.DecisionID, ContinuationRevision: v.Revision, SourceRunID: v.RunID, IssueID: issue.IssueID, FromAssignmentEpoch: contract.AssignmentEpoch, AssignmentEpoch: issue.AssignmentEpoch, AgentRef: contract.AgentRef, Execution: *original, Reason: strings.TrimSpace(p.Reason), CreatedAt: x.Now.UnixMilli()})
 }

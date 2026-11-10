@@ -421,11 +421,17 @@ func interactionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, reply, 
 		body = origin.RawBody
 	}
 	id := x.IDs.New(protocol.PrefixMessage)
-	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "owner", Body: body, ReplyTo: reply, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
+	author := x.messageAuthor()
+	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: body, ReplyTo: reply, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return "", err
 	}
-	if _, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"owner"}`, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+	if err := x.recordMessageAuthority(ctx, tx, id); err != nil {
+		return "", err
+	}
+	messageBody, _ := json.Marshal(map[string]string{"author": author})
+	actor, _ := json.Marshal(x.ActualPrincipal())
+	if _, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: string(messageBody), ActorJSON: string(actor), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return "", err
 	}
 	child := *x

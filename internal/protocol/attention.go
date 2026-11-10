@@ -4,6 +4,7 @@ package protocol
 // Responsibility determines whether an Agent or a human must handle it.
 // Decision answers stay in their original decision/choice, not in this record.
 type Attention struct {
+	ResolutionOwnerSubject string                   `json:"resolution_owner_subject,omitempty"`
 	ResolutionActor        *Principal               `json:"resolution_actor,omitempty"`
 	Responsibility         *AttentionResponsibility `json:"responsibility,omitempty"`
 	LatestActionAt         *int64                   `json:"latest_action_at,omitempty"`

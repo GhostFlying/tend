@@ -80,6 +80,9 @@ func (s *Server) signFileGrant(g fileGrant) string {
 // filePrincipal permits a scoped download grant only for this file and owner.
 // Ordinary owner tokens continue to travel in headers, never in download URLs.
 func (s *Server) filePrincipal(r *http.Request, kind string) (protocol.Principal, error) {
+	if _, ok := r.Context().Value(mainOwnerRequestKey{}).(protocol.Principal); ok {
+		return s.owner(r)
+	}
 	if r.Header.Get("Authorization") != "" {
 		return s.owner(r)
 	}

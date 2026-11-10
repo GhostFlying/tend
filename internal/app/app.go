@@ -40,6 +40,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	requestDomain                 string
 	managedHostedRuntimes         map[string]bool
 	serverDeliveryObservations    bool
 	webhookKeys                   WebhookKeys
@@ -58,10 +59,11 @@ type Exec struct {
 	Env              *protocol.Envelope
 	Principal        protocol.Principal
 	// Actor preserves the actual caller when owner authority is delegated.
-	Actor   *protocol.Principal
-	TraceID string
-	Now     time.Time
-	IDs     protocol.IDGen
+	Actor      *protocol.Principal
+	actorAgent *protocol.AgentIdentity
+	TraceID    string
+	Now        time.Time
+	IDs        protocol.IDGen
 	// LeaseTTL is the lease duration of runs allocated by this request.
 	LeaseTTL time.Duration
 	// WaitPerHour is what an hour in the queue adds to an action's score
@@ -215,7 +217,15 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
 	}
 	domain := p.DedupDomain()
+	if delegated, ok := cmd.(ownerExecutionCommand); ok && delegated.call.RequestDomain != "" {
+		call := delegated.call
+		if call.RequestDomain != "owner" && call.RequestDomain != p.DedupDomain() {
+			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "original request namespace is not owned by this caller")
+		}
+		domain = call.RequestDomain
+	}
 	x := &Exec{managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x.requestDomain = domain
 	if scoped, ok := cmd.(interface{ executionRequestID() string }); ok {
 		if p.Kind != protocol.PrincipalMainAgent {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "execution scope requires a hosted main agent")

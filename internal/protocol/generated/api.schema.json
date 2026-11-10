@@ -2209,6 +2209,9 @@
         "resolution_actor": {
           "$ref": "#/definitions/Principal"
         },
+        "resolution_owner_subject": {
+          "type": "string"
+        },
         "resolution_source_id": {
           "type": "string"
         },

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -84,6 +85,9 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 	if issue.Assignee.Kind != protocol.IssueAssigneeOwner || issue.Assignee.Ref != ownerLogin {
 		t.Fatal(issue)
 	}
+	if issue.AcceptancePolicy.Creator.Kind != "agent" || issue.AcceptancePolicy.Creator.Agent == nil || issue.AcceptancePolicy.Creator.OwnerSubject != ownerLogin {
+		t.Fatal("creator provenance replaced by represented owner", issue.AcceptancePolicy)
+	}
 	replay, err := ownerToolInvoke(t, e, call, "issues.create", args)
 	if err != nil || string(replay.Operation.Result) != string(response.Operation.Result) {
 		t.Fatal(replay, err)
@@ -92,6 +96,13 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 		t.Fatal("duplicate create", n)
 	}
 	err = e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		allowed, err := store.HasOwnerRequestAuthority(t.Context(), tx.Q(), call.RequestID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			t.Fatal("delegated request lost owner authority")
+		}
 		var actor string
 		if err := tx.Q().QueryRowContext(t.Context(), `SELECT actor_json FROM issue_control_revisions WHERE issue_id=? AND revision=1`, issue.IssueID).Scan(&actor); err != nil {
 			return err
@@ -229,6 +240,14 @@ func TestMainOwnerToolCallbackUsesOwnerAuthority(t *testing.T) {
 	if !result.Success {
 		t.Fatal(result.Text)
 	}
+	var namedReceipt struct {
+		Result struct {
+			Outcome protocol.Issue `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(result.Text), &namedReceipt); err != nil || namedReceipt.Result.Outcome.IssueID == "" {
+		t.Fatal("named tool lost its concrete outcome", result.Text, err)
+	}
 	if e.count(`SELECT COUNT(*) FROM work_items`) != 1 {
 		t.Fatal(result.Text)
 	}
@@ -324,5 +343,206 @@ func TestMainOwnerDiscoveryAndInvocationUseActualCatalog(t *testing.T) {
 	invoke("owner_call", map[string]any{"name": detail["name"], "arguments": protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "task", ID: task}, ExpectedControlRevision: new(int64(1)), Payload: json.RawMessage(`{"mode":"human_control"}`)}})
 	if e.count(`SELECT COUNT(*) FROM tasks WHERE task_id='`+task+`' AND control_mode='human_control'`) != 1 {
 		t.Fatal("owner command not executed")
+	}
+}
+
+func TestMainOwnerDecisionAndMessageProvenance(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	var opened struct {
+		DecisionID string `json:"decision_id"`
+	}
+	if err := json.Unmarshal(e.exec("decisions.open", protocol.Target{Type: "decision"}, nil, map[string]any{"question": "Which?", "options": []string{"a", "b"}}, app.OpenDecision{}), &opened); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(protocol.AnswerDecisionPayload{Version: 1, Option: "a", Text: "Main Agent judgment"})
+	response, err := ownerToolInvoke(t, e, call, "decisions.respond", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "decision", ID: opened.DecisionID}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		decision, err := store.GetDecision(t.Context(), tx.Q(), opened.DecisionID)
+		if err != nil {
+			return err
+		}
+		message, err := store.GetMessage(t.Context(), tx.Q(), decision.AnsweredMessageID)
+		if err != nil {
+			return err
+		}
+		var answer struct {
+			Actor        protocol.Principal `json:"actor"`
+			OwnerSubject string             `json:"owner_subject"`
+		}
+		if err := json.Unmarshal([]byte(decision.AnswerJSON), &answer); err != nil {
+			return err
+		}
+		if message.Author != "agent" || answer.Actor.Kind != protocol.PrincipalMainAgent || answer.OwnerSubject != ownerLogin {
+			t.Fatal(message, decision.AnswerJSON)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ = json.Marshal(protocol.SubmitMessagePayload{Body: "Agent-originated instruction"})
+	response, err = ownerToolInvoke(t, e, call, "conversation.submit_message", protocol.OwnerToolArguments{EffectSeq: 2, Target: protocol.Target{Type: "conversation"}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	var sent struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(response.Operation.Result, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		message, err := store.GetMessage(t.Context(), tx.Q(), sent.MessageID)
+		if err == nil && message.Author != "agent" {
+			t.Fatal(message)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMainOwnerReadsExactOriginalBytesAndRanges(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	original := `{ "token": "original document field", "fact": true }` + "\n"
+	op, err := e.app.UploadConversationAttachment(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}, e.ids.New(protocol.PrefixRequest), "original.json", "application/json", strings.NewReader(original))
+	if err != nil || op.Error != nil {
+		t.Fatal(op, err)
+	}
+	var file protocol.ConversationAttachment
+	if err := json.Unmarshal(op.Result, &file); err != nil {
+		t.Fatal(err)
+	}
+	call.Name = ownerToolName("GET /api/v1/conversation/attachments/{id}")
+	for _, tc := range []struct{ window, want string }{{"", original}, {"bytes=2-5", original[2:6]}} {
+		call.Arguments, _ = json.Marshal(protocol.OwnerToolArguments{Path: map[string]string{"id": file.FileID}, Range: tc.window})
+		result, err := e.server.MainOwnerTools().Call(t.Context(), call)
+		if err != nil {
+			t.Fatal(result, err)
+		}
+		value := result.(map[string]any)
+		raw, err := base64.StdEncoding.DecodeString(value["content_base64"].(string))
+		if err != nil || string(raw) != tc.want || value["content_sha256"] != file.SHA256 {
+			t.Fatal(value, err)
+		}
+	}
+}
+
+func TestMainOwnerErrorRetainsOriginalRequestID(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `CREATE TRIGGER fail_issue_insert BEFORE INSERT ON work_items BEGIN SELECT RAISE(ABORT,'injected write failure'); END`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	call.RequestID = e.ids.New(protocol.PrefixRequest)
+	call.Name = ownerToolName("issues.create")
+	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Injected failure", Project: "default", Intent: "Record", Stages: []protocol.IssueStage{}}})
+	call.Arguments, _ = json.Marshal(protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "issue"}, Payload: payload})
+	result, err := e.server.MainOwnerTools().Call(t.Context(), call)
+	if protocol.CodeOf(err) != protocol.CodeInternal || result.(map[string]any)["request_id"] != call.RequestID {
+		t.Fatal(result, err)
+	}
+}
+
+func TestMainOwnerNamedMutationPreservesReason(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	payload, _ := json.Marshal(protocol.CreateAttentionPayload{Kind: "information", Title: "Recorded information"})
+	response, err := ownerToolInvoke(t, e, call, "attentions.create", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "attention"}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	var attention protocol.Attention
+	if err := json.Unmarshal(response.Operation.Result, &attention); err != nil {
+		t.Fatal(err)
+	}
+	if attention.RaisedBy.Kind != protocol.PrincipalMainAgent {
+		t.Fatal(attention)
+	}
+	service := tools.New(e.app, e.store, e.context, quiet())
+	service.SetOwnerTools(e.server.MainOwnerTools())
+	args, _ := json.Marshal(map[string]any{"target_id": attention.AttentionID, "expected_control_revision": attention.Revision, "reason": "Recorded item is superseded", "effect_seq": 2, "payload": map[string]any{}})
+	result := service.Handle(t.Context(), tools.Call{Principal: call.Actor, ExecutionRequestID: call.ExecutionID, TurnID: "turn", Native: "withdraw-call", Tool: "attentions_withdraw", Arguments: args})
+	if !result.Success {
+		t.Fatal(result.Text)
+	}
+}
+
+func TestMainOwnerMessageAuthorityCannotBeSpoofedByRequestID(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	payload, _ := json.Marshal(protocol.SubmitMessagePayload{Body: "Act for owner"})
+	response, err := ownerToolInvoke(t, e, call, "conversation.submit_message", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "conversation"}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	var original struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(response.Operation.Result, &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		copied := e.ids.New(protocol.PrefixMessage)
+		if _, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: copied, Author: "agent", Body: "Scoped Agent narration", RequestID: response.Operation.RequestID, CreatedAt: e.clock.Now().UnixMilli()}); err != nil {
+			return err
+		}
+		for id, want := range map[string]bool{original.MessageID: true, copied: false} {
+			allowed, err := store.HasOwnerMessageAuthority(t.Context(), tx.Q(), id)
+			if err != nil {
+				return err
+			}
+			if allowed != want {
+				t.Fatal(id, allowed, want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMainOwnerRecoversUnrecordedRequestInOriginalDomain(t *testing.T) {
+	for _, domain := range []string{"owner", "native"} {
+		t.Run(domain, func(t *testing.T) {
+			e, call := mainOwnerFixture(t)
+			payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Recover same request", Project: "default", Intent: "Record", Stages: []protocol.IssueStage{}}})
+			original := protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
+			wantDomain := "owner"
+			if domain == "native" {
+				var err error
+				original.RequestID, err = e.app.NativeRequestID(t.Context(), "harness:"+call.Actor.Subject, "original-unrecorded-call")
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantDomain = call.Actor.DedupDomain()
+			}
+			response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original, EffectSeq: 1})
+			if err != nil || response.Operation.RequestID != original.RequestID {
+				t.Fatal(response, err)
+			}
+			if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				record, err := store.GetRequest(t.Context(), tx.Q(), wantDomain, original.RequestID)
+				if err != nil {
+					return err
+				}
+				var actor protocol.Principal
+				if err := json.Unmarshal([]byte(record.PrincipalJSON), &actor); err != nil {
+					return err
+				}
+				if actor.Kind != protocol.PrincipalMainAgent {
+					t.Fatal("recovery fabricated a human caller", actor)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			again, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original})
+			if err != nil || again.Operation.RequestID != original.RequestID || e.count(`SELECT COUNT(*) FROM work_items`) != 1 {
+				t.Fatal(again, err)
+			}
+		})
 	}
 }

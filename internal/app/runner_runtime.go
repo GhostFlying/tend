@@ -145,7 +145,7 @@ func checkClaimRuntime(ctx context.Context, x *Exec, q store.Querier) error {
 		return err
 	}
 
-	rec, err := store.GetRequest(ctx, q, x.Principal.DedupDomain(), x.Env.RequestID)
+	rec, err := store.GetRequest(ctx, q, x.RequestDomain(), x.Env.RequestID)
 	if err == nil {
 		var result claimResult
 		if json.Unmarshal([]byte(rec.ResultJSON), &result) == nil && result.Assignment.CapabilityBinding != nil && !runtimeSupportsCapabilityDeclarations(p.Runtime) {

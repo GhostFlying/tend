@@ -631,6 +631,7 @@ export interface AttentionView {
   read_at?: number;
   resolution?: string;
   resolution_actor?: Principal;
+  resolution_owner_subject?: string;
   resolution_source_id?: string;
   responsibility?: AttentionResponsibility;
   revision: number;

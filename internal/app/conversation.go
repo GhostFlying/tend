@@ -119,7 +119,7 @@ func (c SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 			return Outcome{}, fmt.Errorf("app: encode decision choice: %w", err)
 		}
 	}
-	author := "owner"
+	author := x.messageAuthor()
 	if c.externalSource {
 		author = "external"
 	}
@@ -129,6 +129,9 @@ func (c SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), DecisionJSON: string(choice),
 	})
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := x.recordMessageAuthority(ctx, tx, id); err != nil {
 		return Outcome{}, err
 	}
 	if !c.externalSource {

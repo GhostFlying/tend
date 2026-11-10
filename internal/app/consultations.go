@@ -89,7 +89,11 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
-	if intentConversation != c.ID || intent.Author != "owner" {
+	ownerAuthority, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), p.SourceMessageID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if intentConversation != c.ID || !ownerAuthority {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "execution intent must be an authenticated owner message in this consultation")
 	}
 	if err := validateCanonicalSourceReference(ctx, tx.Q(), canonicalOwnerIssueSource{SourceMessageID: p.SourceMessageID, ExpectedSourceRevision: p.ExpectedSourceRevision}); err != nil {
