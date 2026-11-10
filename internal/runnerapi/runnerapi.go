@@ -315,7 +315,7 @@ var runCommands = map[string]app.Command{
 func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
 	if p.Kind == protocol.PrincipalRun && p.Role == protocol.RoleIssueManager {
 		switch env.Operation {
-		case protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped:
+		case protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpRunsYieldPause:
 		default:
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "manager cannot act as an implementation or acceptance run")
 		}

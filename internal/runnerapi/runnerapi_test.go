@@ -133,6 +133,28 @@ type credential struct{ header, subject, token string }
 func asHost() credential                     { return credential{HeaderHost, "linux-1", hostToken} }
 func asRun(a protocol.Assignment) credential { return credential{HeaderRun, a.RunID, a.RunToken} }
 
+func TestManagerPauseHandoffReachesRunLifecycleValidation(t *testing.T) {
+	e := newEnv(t, time.Millisecond)
+	s := New(e.app, e.peers, secret, Config{}, slog.New(slog.DiscardHandler))
+	run := e.ids.New(protocol.PrefixRun)
+	p := protocol.Principal{Kind: protocol.PrincipalRun, Subject: run, Role: protocol.RoleIssueManager}
+	// Authentication has supplied a manager identity. Pause is a shared Run
+	// lifecycle operation; its original Run and negotiated handoff must still
+	// be checked by app, rather than rejected as worker execution at routing.
+	op, err := s.dispatch(t.Context(), p, e.envelope(protocol.OpRunsYieldPause, run, protocol.YieldPausePayload{}))
+	if err != nil || op.Error == nil || op.Error.Code != protocol.CodeNotFound {
+		t.Fatalf("pause did not reach missing-Run validation: %+v %v", op, err)
+	}
+	if _, err := s.dispatch(t.Context(), p, e.envelope(protocol.OpRunsYieldPause, e.ids.New(protocol.PrefixRun), protocol.YieldPausePayload{})); protocol.CodeOf(err) != protocol.CodeForbidden {
+		t.Fatalf("manager may pause another Run: %v", err)
+	}
+	for _, operation := range []string{protocol.OpRunsReportStarted, protocol.OpRunsSubmitArtifact, protocol.OpAcceptancesSubmit, protocol.OpRunsYieldQuestion} {
+		if _, err := s.dispatch(t.Context(), p, e.envelope(operation, run, nil)); protocol.CodeOf(err) != protocol.CodeForbidden {
+			t.Fatalf("manager acquired worker operation %s: %v", operation, err)
+		}
+	}
+}
+
 // call posts an envelope and returns the HTTP status and decoded response.
 func (e *env) call(c credential, envl *protocol.Envelope) (int, response) {
 	e.t.Helper()
