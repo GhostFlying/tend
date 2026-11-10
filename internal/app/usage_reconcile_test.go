@@ -111,3 +111,68 @@ func TestUsageTargetsRejectsCatalogHostDifferentFromRealRun(t *testing.T) {
 		t.Fatal("catalog metadata overrode real run host", string(body), err)
 	}
 }
+
+func TestUsageTargetsUsesRetainedManagerBindingAndRunHost(t *testing.T) {
+	for _, state := range []string{"cancelled", "completed"} {
+		t.Run(state, func(t *testing.T) {
+			h, assignment := messageRun(t)
+			issue := createCanonicalOwnerTestIssue(t, h)
+			conversation := "issue:" + issue.IssueID
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				// The task's current host is deliberately different: historical
+				// sources are bounded by the actual run host, not current ownership.
+				_, err := tx.Exec(t.Context(), `INSERT INTO issue_manager_tasks(task_id,issue_id,category_id,expected_epoch,conversation_id,host_id,state,request_id,created_at,updated_at) VALUES(?,?,?,1,?,'other-host',?,'retained-manager',1,1)`, assignment.TaskID, issue.IssueID, "code", conversation, state)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for _, thread := range []string{"native-root", "child-root"} {
+				registration := protocol.NativeUsageRegistration{RunID: assignment.RunID, ThreadID: thread, SessionID: thread, Provider: "codex"}
+				op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerUsageRegister, protocol.Target{Type: "host", ID: "linux-1"}, registration, nil), RegisterNativeUsage{})
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			// There is no coordinator execution for either registered thread.
+			targets, err := h.app.UsageTargets(t.Context(), runner("linux-1"))
+			if err != nil || len(targets) != 2 {
+				t.Fatal(targets, err)
+			}
+			for _, target := range targets {
+				if target.RunID != assignment.RunID || target.ConversationID != conversation {
+					t.Fatal("retained manager context was not reconstructed", target)
+				}
+			}
+			if foreign, err := h.app.UsageTargets(t.Context(), runner("other-host")); err != nil || len(foreign) != 0 {
+				t.Fatal("current manager host overrode historical run host", foreign, err)
+			}
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE token_usage_sources SET conversation_id='issue:conflicting' WHERE run_id=?`, assignment.RunID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.app.UsageTargets(t.Context(), runner("linux-1")); protocol.CodeOf(err) != protocol.CodeConflictPayload {
+				t.Fatal("real source/manager conversation conflict was hidden", err)
+			}
+		})
+	}
+}
+
+func TestUsageTargetsRejectsRetainedManagerCoordinatorConflict(t *testing.T) {
+	h, assignment := messageRun(t)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	execution := contextProjectionTurn(t, h, "native-root", "issue:"+issue.IssueID, issue.IssueID)
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE runner_coordination_executions SET private_snapshot=? WHERE execution_id=?`, fmt.Sprintf(`{"runner_run_id":%q}`, assignment.RunID), execution); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO issue_manager_tasks(task_id,issue_id,category_id,expected_epoch,conversation_id,host_id,state,request_id,created_at,updated_at) VALUES(?,?,?,1,'issue:conflicting','linux-1','completed','retained-manager',1,1)`, assignment.TaskID, issue.IssueID, "code")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.app.UsageTargets(t.Context(), runner("linux-1")); protocol.CodeOf(err) != protocol.CodeConflictPayload {
+		t.Fatal("manager/coordinator conflict was selected arbitrarily", err)
+	}
+}

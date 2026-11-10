@@ -1838,7 +1838,8 @@ offset/length、执行索引和必要状态；不能引用临时 runner 路径�
 重复补采不能重复计费，也不重跑业务任务。
 
 原生来源清单按真实 Run/thread（托管来源按 conversation/thread）归一多种持久证据，
-沿原协调执行绑定补齐负责人会话身份。空元数据可以补全；真实非空归属、provider、
+沿原协调执行和持久负责人 Task 绑定补齐负责人会话身份，包含已经完成或取消的
+历史责任；实际 Run 的 host 仍决定来源边界。空元数据可以补全；真实非空归属、provider、
 purpose 或 parent 冲突明确拒绝，不放宽 journal 的原归属与 CAS 校验。
 前台核验的失败保留实际阶段、source/run/thread、原请求和安全错误码，
 不将本地 journal 拒绝折叠成无上下文的 HTTP 状态，也不返回内部 SQL、原件或凭据。

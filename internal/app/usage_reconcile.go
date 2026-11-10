@@ -53,9 +53,10 @@ func (a *App) UsageTargets(ctx context.Context, p protocol.Principal) ([]protoco
 			return err
 		}
 		if p.Kind == protocol.PrincipalRunner {
-			// The coordinator owns this association even when a retained native
-			// source or its child thread has no main_turns thread identity yet.
-			bindings, err := tx.Q().QueryContext(ctx, `SELECT r.run_id,e.conversation_id FROM runner_coordination_executions e JOIN runs r ON json_extract(e.private_snapshot,'$.runner_run_id')=r.run_id WHERE r.host_id=? AND e.conversation_id<>''`, p.Subject)
+			// Persistent manager tasks and coordinator executions retain this
+			// association for every native thread in the run, including children.
+			// Completed or cancelled tasks still own their historical run context.
+			bindings, err := tx.Q().QueryContext(ctx, `SELECT r.run_id,e.conversation_id FROM runner_coordination_executions e JOIN runs r ON json_extract(e.private_snapshot,'$.runner_run_id')=r.run_id WHERE r.host_id=? AND e.conversation_id<>'' UNION SELECT r.run_id,m.conversation_id FROM runs r JOIN issue_manager_tasks m ON m.task_id=r.task_id WHERE r.host_id=? AND m.conversation_id<>''`, p.Subject, p.Subject)
 			if err != nil {
 				return err
 			}
