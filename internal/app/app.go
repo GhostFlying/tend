@@ -250,6 +250,13 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	err = a.write(ctx, func(tx *store.Tx) error {
 
 		rec, err := store.GetRequest(ctx, tx.Q(), domain, env.RequestID)
+		if p.Kind == protocol.PrincipalOwner && errors.Is(err, store.ErrNotFound) {
+			rec, err = store.GetOwnerRequest(ctx, tx.Q(), env.RequestID)
+			if err == nil {
+				domain = rec.Domain
+				x.requestDomain = domain
+			}
+		}
 		switch {
 		case err == nil:
 			if rec.PayloadHash != hash {

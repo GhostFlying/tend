@@ -43,7 +43,7 @@ func (c MessagingCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			return Outcome{}, err
 		}
 		p.ReplyTo = ""
-		return publishCommunication(ctx, x, tx, p, "", "main", "owner")
+		return publishCommunication(ctx, x, tx, p, x.ownerExecutionID, "main", x.messageAuthor())
 	case "read":
 		var p protocol.MessagingReadPayload
 		if err := decodePayload(x.Env, &p); err != nil {
@@ -229,6 +229,10 @@ func publishCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := x.recordMessageAuthority(ctx, tx, id); err != nil {
+		return Outcome{}, err
+	}
+
 	if err = publishExistingCommunication(ctx, x, tx, id, p, execution); err != nil {
 		return Outcome{}, err
 	}

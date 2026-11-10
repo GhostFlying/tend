@@ -118,3 +118,26 @@ func TestNamedMainRetainsHostedOwnerSourceSelector(t *testing.T) {
 	}
 	t.Fatal("missing decisions_resolve")
 }
+
+func TestDelegatedOwnerSourceSelection(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	message, request := e.ids.New(protocol.PrefixMessage), e.ids.New(protocol.PrefixRequest)
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: message, Author: "agent", Body: "Admitted delegated decision", RequestID: request}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO main_owner_effects(execution_id,effect_seq,step,call_id,request_id,owner_subject) VALUES('main',1,1,?,?,?)`, request, request, owner.Subject); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO main_owner_message_authorities(message_id,request_id,owner_subject,actor_json) VALUES(?,?,?,'{"kind":"main_agent","subject":"main","thread":"native"}')`, message, request, owner.Subject)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"source_message_id": message})
+	call := tools.Call{SourceMessageID: message, Arguments: args, Tool: "decisions_resolve"}
+	if err := e.m.selectOwnerSource(t.Context(), &call); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -602,3 +602,66 @@ func TestMainOwnerManualSourceKeepsActualSupplier(t *testing.T) {
 		t.Fatalf("supplier=%+v", source.SuppliedBy)
 	}
 }
+
+func TestMainOwnerNotificationRetainsAgentAuthorAndExecution(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	payload, _ := json.Marshal(protocol.MessagingPublication{Body: "Agent proactive update", Purpose: "progress", Reason: "New progress"})
+	response, err := ownerToolInvoke(t, e, call, "messaging.notify", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "message"}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	var result struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(response.Operation.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		m, err := store.GetMessage(t.Context(), tx.Q(), result.MessageID)
+		if err != nil {
+			return err
+		}
+		if m.Author != "agent" {
+			t.Fatal(m)
+		}
+		var execution string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT execution_id FROM messaging_messages WHERE message_id=?`, m.MessageID).Scan(&execution); err != nil {
+			return err
+		}
+		if execution != call.ExecutionID {
+			t.Fatal("notification lost native execution", execution, call)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMainOwnerReceiptReplaysThroughOwnerAPIWithoutDuplicate(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Original main request", Project: "default", Intent: "Record", Stages: []protocol.IssueStage{}}})
+	call.RequestID = e.ids.New(protocol.PrefixRequest)
+	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "issue"}, Payload: payload})
+	if err != nil {
+		t.Fatal(response, err)
+	}
+	original := protocol.Envelope{RequestID: call.RequestID, Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
+	var replay protocol.APIResponse
+	if status := e.do("POST", "/api/v1/ops", e.login(protocol.ScopeOwner), original, &replay); status != 200 || replay.Operation == nil || replay.Operation.Error != nil {
+		t.Fatal(status, replay)
+	}
+	var initialIssue, replayedIssue protocol.Issue
+	if err := json.Unmarshal(response.Operation.Result, &initialIssue); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(replay.Operation.Result, &replayedIssue); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count("SELECT COUNT(*) FROM work_items"); n != 1 || replayedIssue.IssueID != initialIssue.IssueID || replay.Operation.RequestID != response.Operation.RequestID {
+		t.Fatal("owner replay duplicated or changed original receipt", n, replay)
+	}
+	original.Payload = json.RawMessage(`{"plan":{"title":"Changed"}}`)
+	if status := e.do("POST", "/api/v1/ops", e.login(protocol.ScopeOwner), original, &replay); status == 200 {
+		t.Fatal("replay ignored changed payload")
+	}
+}

@@ -42,8 +42,8 @@ func (m *Manager) selectOwnerSource(ctx context.Context, c *tools.Call) error {
 	if json.Unmarshal(raw, &id) != nil || id == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "source_message_id must identify owner input")
 	}
-	msg, err := m.app.Message(ctx, id)
-	if err != nil || msg.Author != "owner" {
+	allowed, err := m.app.OwnerMessageAuthority(ctx, id)
+	if err != nil || !allowed {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "source must identify an owner message")
 	}
 	withdrawn, err := m.app.MessageWithdrawn(ctx, id)
