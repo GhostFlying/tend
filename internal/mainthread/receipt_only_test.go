@@ -434,6 +434,29 @@ func TestLegacyReceiptOnlyDeliversPersistedCompact(t *testing.T) {
 	}
 }
 
+func TestHistoryAttachmentReconcilesPersistedCompact(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	e.m.named = receiptOnlySelection()
+	if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), "original-thread"); err != nil {
+		t.Fatal(err)
+	}
+	session := &receiptOnlySession{thread: &receiptThread{Thread: &historyReference{id: "original-thread"}}}
+	if _, err := e.m.openThread(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_compactions(operation_id,conversation_id,thread_id,status,source,created_at,updated_at) VALUES('history-compact','main','original-thread','completed','manual',0,0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := e.m.Reconcile(t.Context(), app.Delivery{Operation: "conversation.compact", Payload: json.RawMessage(`{"operation_id":"history-compact"}`)})
+	if result.Outcome != app.Delivered || session.resumes != 1 || session.starts != 0 || len(e.h.Starts()) != 0 {
+		t.Fatal("persisted compact reconciliation attempted native work or lost its result", result, session.resumes, session.starts)
+	}
+}
+
 func TestLegacyReceiptOnlyRetainsHandoffReconciliation(t *testing.T) {
 	e := newEnv(t, testkit.NewHarness())
 	e.stop()

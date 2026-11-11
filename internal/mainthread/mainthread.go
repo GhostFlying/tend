@@ -1498,7 +1498,7 @@ func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryRes
 	m.mu.Lock()
 	historyOnly := m.historyAttachment
 	m.mu.Unlock()
-	if historyOnly && (d.Operation == "conversation.compact" || d.Operation == "conversation.handoff") {
+	if historyOnly && d.Operation == "conversation.handoff" {
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "History attachments cannot resume native maintenance."}
 	}
 	if d.Operation == "conversation.compact" {
