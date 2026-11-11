@@ -28,6 +28,7 @@ type receiptHistorySession struct {
 	done         chan struct{}
 	once         sync.Once
 	resumes      atomic.Int64
+	histories    atomic.Int64
 	allowCatalog bool
 }
 
@@ -45,6 +46,13 @@ func (s *receiptHistorySession) ResumeThread(_ context.Context, id string, cfg h
 		return nil, errors.New("receipt reader changed original thread/model")
 	}
 	s.resumes.Add(1)
+	return s.thread, nil
+}
+func (s *receiptHistorySession) ReadThreadHistory(_ context.Context, id string) (harness.Thread, error) {
+	if id != "original-native" {
+		return nil, errors.New("receipt reader changed original thread")
+	}
+	s.histories.Add(1)
 	return s.thread, nil
 }
 func (s *receiptHistorySession) Done() <-chan struct{} { return s.done }
@@ -216,7 +224,7 @@ func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.A
 		cancel()
 		wg.Wait()
 		if t.Failed() {
-			t.Logf("reader resumes=%d reads=%d forbidden=%d logs:\n%s", native.resumes.Load(), native.thread.reads.Load(), forbidden.Load(), logs.String())
+			t.Logf("reader resumes=%d histories=%d reads=%d forbidden=%d logs:\n%s", native.resumes.Load(), native.histories.Load(), native.thread.reads.Load(), forbidden.Load(), logs.String())
 		}
 	}()
 	eventually(t, "original history was read", func() bool { return native.thread.reads.Load() > 0 })
@@ -229,7 +237,7 @@ func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.A
 	}
 	cancel()
 	wg.Wait()
-	if forbidden.Load() != 0 || native.resumes.Load() != 1 {
-		t.Fatal("receipt reader started new work or changed original thread", forbidden.Load(), native.resumes.Load())
+	if forbidden.Load() != 0 || native.resumes.Load() != 0 || native.histories.Load() != 1 {
+		t.Fatal("receipt reader started new work or changed original thread", forbidden.Load(), native.resumes.Load(), native.histories.Load())
 	}
 }
