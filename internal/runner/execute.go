@@ -1295,9 +1295,7 @@ func boundedEventMetadata(body map[string]json.RawMessage) map[string]json.RawMe
 // flushEvents uploads every pending event of a run in batches bounded by
 // count and size.
 func (r *Runner) flushEvents(ctx context.Context, as protocol.Assignment) error {
-	if err := r.syncRolloutArchive(ctx, as); err != nil {
-		return err
-	}
+	r.wakeRolloutArchive()
 	for {
 		pending, err := r.cfg.Journal.PendingEvents(ctx, as.RunID, 200)
 		if err != nil || len(pending) == 0 {

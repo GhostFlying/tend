@@ -28,7 +28,10 @@ func (j *Journal) RegisterRollout(ctx context.Context, deployment, run string, s
 			_ = tx.QueryRowContext(ctx, `SELECT path FROM rollout_sources WHERE deployment_id=? AND run_id=? AND session_id=? AND path<>'' ORDER BY ordinal LIMIT 1`, deployment, run, source.SessionID).Scan(&source.Path)
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO rollout_sources(deployment_id,run_id,session_id,turn_id,path) VALUES(?,?,?,?,?) ON CONFLICT(deployment_id,run_id,session_id,turn_id) DO UPDATE SET path=CASE WHEN excluded.path<>'' THEN excluded.path ELSE rollout_sources.path END`, deployment, run, source.SessionID, source.TurnID, source.Path)
-		return err
+		if err != nil {
+			return err
+		}
+		return dirtyArchive(ctx, tx, run)
 	})
 }
 

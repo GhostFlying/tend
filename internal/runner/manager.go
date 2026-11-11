@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -152,6 +153,8 @@ func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignmen
 }
 
 func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assignment) error {
+	ctx, cancelNative := context.WithCancelCause(ctx)
+	defer cancelNative(nil)
 	// Stop cancels new native execution, not recovery of a completed close.
 	receiptCtx, cancelReceipts := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
 	closed, err := r.replayManagerClose(receiptCtx, as)
@@ -224,6 +227,20 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	driver.Download = func(ctx context.Context, file protocol.ArtifactFile) (string, error) {
 		return r.downloadRetainedFile(ctx, as, filepath.Join(dir, "attachments"), file)
 	}
+	failureCtx, cancelFailureObserver := context.WithCancel(ctx)
+	failureDone := make(chan struct{})
+	failures := driver.Failures()
+	go func() {
+		defer close(failureDone)
+		select {
+		case err := <-failures:
+			r.cfg.Log.ErrorContext(lifetime, "manager native event transport failed", "run_id", as.RunID, "err", err)
+			cancelNative(err)
+		case <-failureCtx.Done():
+		}
+	}()
+	defer func() { cancelFailureObserver(); <-failureDone }()
+
 	driver.Emit = func(ctx context.Context, event coordination.Event) error {
 		emitMu.Lock()
 		defer emitMu.Unlock()
@@ -235,29 +252,25 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			var err error
 			native.Raw, err = coordination.CompactNativeImages(native.Raw)
 			if err != nil {
-				return err
+				return fmt.Errorf("compact manager event: %w", err)
 			}
 			event.Native = &native
 		}
 		raw, err := json.Marshal(event)
 		if err != nil {
-			return err
+			return fmt.Errorf("encode manager event: %w", err)
 		}
 		env, err := r.newEnvelope(protocol.OpManagerNativeEvent, runTarget(as), nil)
 		if err != nil {
 			return err
 		}
-		if err = r.flushManagerEvents(ctx, as); err != nil {
-			return err
-		}
 		if err = r.cfg.Journal.SaveManagerEvent(ctx, as.RunID, env, raw); err != nil {
-			return err
+			return fmt.Errorf("persist manager event: %w", err)
 		}
-		_, err = r.send(ctx, runCredential(as), env)
-		if err != nil {
-			return err
+		if err = r.flushManagerEvents(ctx, as); err != nil {
+			return fmt.Errorf("deliver persisted manager event %s: %w", env.RequestID, err)
 		}
-		return r.cfg.Journal.DeleteRequest(ctx, env.RequestID)
+		return nil
 	}
 	defer func() {
 		receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
@@ -598,9 +611,9 @@ func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment,
 }
 
 func (r *Runner) flushManagerEvents(ctx context.Context, as protocol.Assignment) error {
-	if err := r.syncRolloutArchive(ctx, as); err != nil {
-		return err
-	}
+	r.wakeRolloutArchive()
+	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
+	defer cancel()
 	pending, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return err

@@ -236,10 +236,10 @@ func TestRolloutArchiveRejectsForeignHeaderAndTruncateRegrow(t *testing.T) {
 	}
 }
 
-func TestRolloutArchivePrecedesWorkerAndManagerEventDelivery(t *testing.T) {
+func TestFault_RolloutArchiveUnavailableDoesNotBlockWorkerAndManagerEvents(t *testing.T) {
 	for _, manager := range []bool{false, true} {
 		t.Run(map[bool]string{false: "worker", true: "manager"}[manager], func(t *testing.T) {
-			r, as, _, f := archiveRunner(t)
+			r, as, _, _ := archiveRunner(t)
 			if err := r.cfg.Journal.AcceptAssignment(t.Context(), as, ""); err != nil {
 				t.Fatal(err)
 			}
@@ -259,12 +259,12 @@ func TestRolloutArchivePrecedesWorkerAndManagerEventDelivery(t *testing.T) {
 				var env protocol.Envelope
 				_ = json.Unmarshal(data, &env)
 				if env.Operation == protocol.OpRunnerRolloutArchive {
-					q.Body = io.NopCloser(bytes.NewReader(data))
-					f.serve(t, w, q)
+					t.Error("event flush synchronously attempted archival")
+					http.Error(w, "archive unavailable", http.StatusForbidden)
 					return
 				}
-				if env.Operation != operation || len(f.files) != 1 {
-					t.Error("event projected before original archive", env.Operation)
+				if env.Operation != operation {
+					t.Error("wrong business event operation", env.Operation)
 				}
 				delivered++
 				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
@@ -275,12 +275,8 @@ func TestRolloutArchivePrecedesWorkerAndManagerEventDelivery(t *testing.T) {
 			if manager {
 				flush = r.flushManagerEvents
 			}
-			f.drop = true
-			if err := flush(t.Context(), as); !isRetryable(err) || delivered != 0 {
-				t.Fatal("lost original receipt did not retain projected events", err, delivered)
-			}
 			if err := flush(t.Context(), as); err != nil || delivered != 1 {
-				t.Fatal("original receipt recovery did not release events", err, delivered)
+				t.Fatal("archive failure blocked business event", err, delivered)
 			}
 		})
 	}

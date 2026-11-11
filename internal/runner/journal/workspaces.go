@@ -27,7 +27,7 @@ func (j *Journal) HistoricalRun(ctx context.Context, id string) (Run, error) {
 func (j *Journal) ConfirmStopped(ctx context.Context, id string) error {
 	defer j.WakeUsage()
 	return j.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET stopped_confirmed=1 WHERE run_id=?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET stopped_confirmed=1,archive_generation=archive_generation+CASE WHEN stopped_confirmed=0 AND EXISTS(SELECT 1 FROM rollout_sources s WHERE s.run_id=runs.run_id) THEN 1 ELSE 0 END WHERE run_id=?`, id); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT source_id FROM native_usage_sources WHERE run_id=? AND writer_stopped=0`, id)
