@@ -34,7 +34,8 @@ func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment)
 		return err
 	}
 	if len(sources) == 0 {
-		return errors.New("runner: rollout archive has no registered source for this deployment")
+		// Executions without a native original have no archival dependency.
+		return nil
 	}
 	seen := map[string]bool{}
 	var failures []error
