@@ -264,14 +264,9 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			}
 			entry.ID = "block:" + r.id
 			entry.Block = &projected
-			entry.Author = "负责人"
-			var frozen string
-			err = q.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(json_extract(h.private_snapshot,'$.definition.display_name'),''),json_extract(h.private_snapshot,'$.identity.execution_environment_id')||'/'||json_extract(h.private_snapshot,'$.identity.local_id'),'负责人') FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE t.message_id=? ORDER BY h.created_at LIMIT 1`, r.id).Scan(&frozen)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			entry.Author, err = issueConversationAuthor(ctx, q, r.id)
+			if err != nil {
 				return out, err
-			}
-			if frozen != "" {
-				entry.Author = frozen
 			}
 		} else {
 			var body, actor string
@@ -412,7 +407,7 @@ func issueActivityAuthor(ctx context.Context, q store.Querier, raw string, at in
 		if actor.Role == protocol.RoleIssueManager {
 			fallback = "负责人 Agent"
 		}
-		return activityDisplayName(ctx, q, fallback, `WITH pins(pin_json) AS (SELECT pin_json FROM run_agent_executions WHERE run_id=? UNION ALL SELECT m.pin_json FROM issue_manager_tasks m JOIN runs r USING(task_id) WHERE r.run_id=? AND r.role='issue_manager' AND m.pin_json<>'' AND NOT EXISTS(SELECT 1 FROM run_agent_executions e WHERE e.run_id=r.run_id)) SELECT COALESCE(json_extract(a.value,'$.display_name'),'') FROM pins e JOIN agent_inventory_versions v ON v.host_id=json_extract(e.pin_json,'$.identity.execution_environment_id') AND v.local_revision=json_extract(e.pin_json,'$.inventory_revision'),json_each(v.projection_json,'$.agents') a WHERE json_extract(a.value,'$.identity.local_id')=json_extract(e.pin_json,'$.identity.local_id') LIMIT 1`, actor.Subject, actor.Subject)
+		return runActivityAuthor(ctx, q, actor.Subject, fallback)
 	case protocol.PrincipalRunner:
 		// Hosts have no display-name field in the current catalog projection.
 		return "执行主机", nil
