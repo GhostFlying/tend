@@ -74,7 +74,7 @@ func TestManagerCloseDeliveryMigrationDoesNotInferHistoricalReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = legacy.ExecContext(t.Context(), `DROP INDEX runs_archive_pending; ALTER TABLE runs DROP COLUMN archive_generation; ALTER TABLE runs DROP COLUMN archive_uploaded_generation; ALTER TABLE manager_native_operations DROP COLUMN reply_delivered; PRAGMA user_version=24;`); err != nil {
+	if _, err = legacy.ExecContext(t.Context(), `DROP INDEX rollout_sources_run; DROP INDEX runs_archive_pending; ALTER TABLE runs DROP COLUMN archive_generation; ALTER TABLE runs DROP COLUMN archive_uploaded_generation; ALTER TABLE manager_native_operations DROP COLUMN reply_delivered; PRAGMA user_version=24;`); err != nil {
 		t.Fatal(err)
 	}
 	if err = legacy.Close(); err != nil {

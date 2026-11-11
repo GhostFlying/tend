@@ -14,10 +14,12 @@ type ArchiveWork struct {
 	Generation int64
 }
 
-func dirtyArchive(ctx context.Context, tx *sql.Tx, run string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE runs SET archive_generation=archive_generation+1
+const dirtyArchiveQuery = `UPDATE runs SET archive_generation=archive_generation+1
  WHERE run_id=? AND COALESCE(json_extract(assignment_json,'$.protocol'),0)>=3
- AND EXISTS(SELECT 1 FROM rollout_sources WHERE run_id=?)`, run, run)
+ AND EXISTS(SELECT 1 FROM rollout_sources WHERE run_id=?)`
+
+func dirtyArchive(ctx context.Context, tx *sql.Tx, run string) error {
+	_, err := tx.ExecContext(ctx, dirtyArchiveQuery, run, run)
 	return err
 }
 

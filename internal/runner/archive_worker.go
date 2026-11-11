@@ -83,11 +83,13 @@ func (r *Runner) rolloutArchives(ctx context.Context) {
 			if err != nil {
 				r.cfg.Log.WarnContext(ctx, "read pending native archives", "err", err)
 			} else {
+				examined := 0
 				for _, w := range work {
 					if len(active) == 2 {
 						break
 					}
 					after = w.RunID
+					examined++
 					if active[w.RunID] || r.cfg.Now().Before(next[w.RunID]) {
 						continue
 					}
@@ -105,7 +107,7 @@ func (r *Runner) rolloutArchives(ctx context.Context) {
 						}
 					})
 				}
-				if len(work) < 64 {
+				if len(work) < 64 && examined == len(work) {
 					after = ""
 				}
 			}
