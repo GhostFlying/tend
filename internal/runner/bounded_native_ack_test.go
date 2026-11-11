@@ -66,6 +66,10 @@ func TestBoundedNativeReplyRetainsOnlyActualDeliveryAcknowledgement(t *testing.T
 			if err != nil || acknowledgements != 0 {
 				t.Fatal(ids, acknowledgements, err)
 			}
+			delivered, deliveryErr := r.cfg.Journal.ManagerCloseReplyDelivered(t.Context(), as.RunID, "original-close")
+			if deliveryErr != nil || delivered != confirmed {
+				t.Fatal("bounded reply delivery differs from actual peer result", delivered, confirmed, deliveryErr)
+			}
 			pending, err := r.cfg.Journal.Requests(t.Context())
 			if err != nil {
 				t.Fatal(err)
