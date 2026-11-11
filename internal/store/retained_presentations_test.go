@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +63,13 @@ func TestOriginalCommandDisplayRoundTripAndRejectsInvalidControls(t *testing.T) 
 }
 
 func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *testing.T) {
+	for _, format := range []string{"legacy-v1", "compact-v2", "derived-event"} {
+		t.Run(format, func(t *testing.T) { testOriginalChildrenReferencedMixedPack(t, format) })
+	}
+}
+
+func testOriginalChildrenReferencedMixedPack(t *testing.T, format string) {
+	t.Helper()
 	s, path := openTest(t)
 	ctx := t.Context()
 	insertNativeOriginalFixture(t, s)
@@ -89,17 +98,40 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	var sourceID int64
 	if err := s.Write(ctx, func(tx *Tx) error {
 		if _, err := tx.bindOriginalWindow(ctx, preparedOriginal{Window: w}); err != nil {
 			return err
+		}
+		if format != "legacy-v1" {
+			var err error
+			sourceID, err = tx.bindOriginalValue(ctx, preparedOriginal{Window: w, Reference: originalReference{Window: &w, SHA256: w.SHA256}})
+			if err != nil {
+				return err
+			}
 		}
 		_, err := tx.bindOriginalWindow(ctx, preparedOriginal{Window: smallWindow})
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	event, _ := json.Marshal(map[string]any{"type": "commandExecution", "id": "actual-command", "command": display, "result": map[string]any{"structuredContent": map[string]any{"content": mcp}}, "aggregatedOutput": stdout})
+	// The targets must only exist behind the real runlog reference. An inline
+	// copy here or in a ToolUse would seed needed hashes and hide this bug.
+	event, _ := json.Marshal(map[string]any{"type": "commandExecution", "id": "actual-command", "command": display})
 	mustExec(t, s, `INSERT INTO run_logs(run_id,seq,native_id,kind,body_json,created_at) VALUES('body-run',1,'actual-command','item.completed',?,1)`, string(event))
+	var referenced any
+	switch format {
+	case "legacy-v1":
+		referenced = map[string]any{legacyRetainedMarker: originalReference{Window: &w, SHA256: w.SHA256}}
+	case "compact-v2":
+		referenced = map[string]any{retainedMarker: sourceID}
+	case "derived-event":
+		referenced = map[string]any{derivedEventMarker: eventMetadata{OriginalSHA256: hashBytes(w.SHA256), References: []eventReference{{ID: sourceID}}}}
+	}
+	marker, _ := json.Marshal(referenced)
+	for seq := 2; seq <= 3; seq++ {
+		mustExec(t, s, `INSERT INTO run_logs(run_id,seq,native_id,kind,body_json,created_at) VALUES('body-run',?,'referenced-event','item.completed',?,1)`, seq, string(marker))
+	}
 	mustExec(t, s, `INSERT INTO conversation_messages(message_id,author,body,kind,created_at) VALUES('actual-tool','main_agent','','tool_use',1)`)
 	mustExec(t, s, `INSERT INTO conversation_tool_uses(message_id,thread_id,turn_id,item_id,tool,input,output,status,updated_at) VALUES('actual-tool','thread','turn','actual-tool','inspect',?,?,'completed',1)`, nestedField, clip)
 	staged, first, err := s.PrepareOriginalMigration(ctx, 1)
@@ -133,10 +165,19 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	if !done {
 		t.Fatal("bounded child indexing did not complete")
 	}
+	if s.originalIndexBuilds != 1 {
+		t.Fatal("reference expansion rebuilt the needed set per batch", s.originalIndexBuilds)
+	}
 	if err := s.Read(ctx, func(tx *ReadTx) error {
 		log, exists, err := RunLogAt(ctx, tx.Q(), "body-run", 1)
 		if err != nil || !exists || !SemanticJSONEqual(string(event), log.BodyJSON) {
 			t.Fatal("event content or exact command string changed", err)
+		}
+		for seq := 2; seq <= 3; seq++ {
+			log, exists, err := RunLogAt(ctx, tx.Q(), "body-run", int64(seq))
+			if err != nil || !exists || !SemanticJSONEqual(string(source), log.BodyJSON) {
+				t.Fatal("referenced stdout/MCP body changed", seq, err)
+			}
 		}
 		u, err := GetToolUse(ctx, tx.Q(), "turn", "actual-tool")
 		if err == nil && (u.Input != nestedField || u.Output != clip) {
@@ -151,6 +192,18 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	}
 	if raw, err := s.files.ReadWindow(ctx, smallWindow); err != nil || string(raw) != string(smallSource) {
 		t.Fatal("the small quoted original changed", err)
+	}
+	pack, err := os.Stat(filepath.Join(path+".files", "archives", w.Archive))
+	if err != nil || pack.Size() != smallWindow.Offset+smallWindow.Length {
+		t.Fatal("existing pack grew a redundant body", err)
+	}
+	for _, text := range []string{stdout, mcp} {
+		quoted, _ := json.Marshal(text)
+		var count int
+		err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM retained_original_windows w JOIN retained_original_archives a USING(archive_key) WHERE a.archive_id=? AND w.byte_offset>=? AND w.byte_offset+w.byte_length<=? AND w.canonical_sha256=?`, w.Archive, w.Offset, w.Offset+w.Length, hashBytes(canonicalOriginalHash(quoted))).Scan(&count)
+		if err != nil || count == 0 {
+			t.Fatal("referenced child did not reuse its old physical window", count, err)
+		}
 	}
 	var archives, controls, clipRefs, fieldRefs int
 	if err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM retained_original_archives`).Scan(&archives); err != nil || archives != 1 {

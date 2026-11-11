@@ -189,11 +189,28 @@ func (s *Store) missingOriginalChildren(ctx context.Context, children []prepared
 }
 
 // Needed values come from real current business rows, not a catalog of every
-// possible preview. Existing references expose their exact value hash without
-// rereading large originals merely to decide whether to create a clip index.
+// possible preview. A reference must expose the children that body migration
+// will read after resolving it, not just the outer body's hash. Each source is
+// verified and expanded once in this stage-scoped collection.
 func neededOriginalHashes(ctx context.Context, q Querier) (map[string]bool, error) {
 	needed := map[string]bool{}
-	var ids []int64
+	type modes struct{ json, command bool }
+	type source struct {
+		reference originalReference
+		rule      *blobstore.Window
+		modes
+	}
+	merge := func(a, b modes) modes {
+		return modes{a.json || b.json, a.command || b.command}
+	}
+	ids := map[int64]modes{}
+	sources := map[string]source{}
+	addSource := func(ref originalReference, mode modes) {
+		identity, _ := json.Marshal(ref)
+		key := bodyHash(identity)
+		old := sources[key]
+		sources[key] = source{reference: ref, modes: merge(old.modes, mode)}
+	}
 	var walk func(json.RawMessage, string)
 	walk = func(value json.RawMessage, key string) {
 		if len(value) < retainBodyThreshold {
@@ -227,7 +244,7 @@ func neededOriginalHashes(ctx context.Context, q Querier) (map[string]bool, erro
 			}
 		}
 	}
-	add := func(raw string) {
+	add := func(raw string, expand bool) {
 		if len(raw) < retainBodyThreshold {
 			// A compact marker can refer to a large value.
 			if len(raw) == 0 || raw[0] != '{' {
@@ -239,7 +256,7 @@ func neededOriginalHashes(ctx context.Context, q Querier) (map[string]bool, erro
 			if part, ok := object[retainedMarker]; ok {
 				var id int64
 				if json.Unmarshal(part, &id) == nil {
-					ids = append(ids, id)
+					ids[id] = merge(ids[id], modes{json: expand})
 				}
 				return
 			}
@@ -247,6 +264,9 @@ func neededOriginalHashes(ctx context.Context, q Querier) (map[string]bool, erro
 				var ref originalReference
 				if json.Unmarshal(part, &ref) == nil && ref.SHA256 != "" {
 					needed[ref.SHA256] = true
+					if expand {
+						addSource(ref, modes{json: true})
+					}
 				}
 				return
 			}
@@ -254,7 +274,8 @@ func neededOriginalHashes(ctx context.Context, q Querier) (map[string]bool, erro
 				var metadata eventMetadata
 				if json.Unmarshal(part, &metadata) == nil {
 					for _, ref := range metadata.References {
-						ids = append(ids, ref.ID)
+						command := expand && ref.Text && len(ref.Path) > 0 && ref.Path[len(ref.Path)-1] == "command"
+						ids[ref.ID] = merge(ids[ref.ID], modes{json: expand && !ref.Text, command: command})
 					}
 				}
 			}
@@ -281,37 +302,107 @@ func neededOriginalHashes(ctx context.Context, q Querier) (map[string]bool, erro
 			if col.table == "background_replies" && col.column == "tool_json" {
 				var object map[string]string
 				if json.Unmarshal([]byte(raw), &object) == nil {
-					add(object["input"])
-					add(object["output"])
+					add(object["input"], false)
+					add(object["output"], false)
 				}
 			} else {
-				add(raw)
+				add(raw, derivedEventColumn(col))
 			}
 		}
 		if err = errors.Join(err, rows.Err(), rows.Close()); err != nil {
 			return nil, err
 		}
 	}
-	// Read the small identity index once, rather than issuing a query per root.
-	wanted := map[int64]bool{}
-	for _, id := range ids {
-		wanted[id] = true
-	}
-	rows, err := q.QueryContext(ctx, `SELECT body_id,lower(hex(sha256)) FROM retained_original_values`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var id int64
-		var hash string
-		if err = rows.Scan(&id, &hash); err != nil {
-			break
+	// Read the compact identity index and its window metadata once, rather
+	// than loading every referenced value and window with individual queries.
+	var compact []source
+	if len(ids) > 0 {
+		rows, err := q.QueryContext(ctx, `SELECT v.body_id,lower(hex(v.sha256)),v.encoding,v.window_id,
+			COALESCE(a.archive_id,''),COALESCE(w.byte_offset,0),COALESCE(w.byte_length,0),lower(hex(w.sha256)),v.recipe_window_id,
+			COALESCE(ra.archive_id,''),COALESCE(r.byte_offset,0),COALESCE(r.byte_length,0),lower(hex(r.sha256))
+			FROM retained_original_values v LEFT JOIN retained_original_windows w ON w.window_id=v.window_id
+			LEFT JOIN retained_original_archives a ON a.archive_key=w.archive_key
+			LEFT JOIN retained_original_windows r ON r.window_id=v.recipe_window_id
+			LEFT JOIN retained_original_archives ra ON ra.archive_key=r.archive_key`)
+		if err != nil {
+			return nil, err
 		}
-		if wanted[id] {
-			needed[hash] = true
+		for rows.Next() {
+			var id int64
+			var p source
+			var w, r blobstore.Window
+			var window, rule *int64
+			if err = rows.Scan(&id, &p.reference.SHA256, &p.reference.Encoding, &window, &w.Archive, &w.Offset, &w.Length, &w.SHA256, &rule, &r.Archive, &r.Offset, &r.Length, &r.SHA256); err != nil {
+				break
+			}
+			mode, wanted := ids[id]
+			if !wanted {
+				continue
+			}
+			delete(ids, id)
+			needed[p.reference.SHA256] = true
+			if !mode.json && !mode.command {
+				continue // An exact text/whole-value consumer needs no children.
+			}
+			p.modes = mode
+			if window != nil {
+				p.reference.Window = &w
+			} else if rule != nil {
+				p.rule = &r
+			} else {
+				err = errors.New("store: compact original has no source")
+				break
+			}
+			compact = append(compact, p)
+		}
+		if err = errors.Join(err, rows.Err(), rows.Close()); err != nil {
+			return nil, err
+		}
+		if len(ids) > 0 {
+			return nil, errors.New("store: indexed original identity missing")
 		}
 	}
-	return needed, errors.Join(err, rows.Err(), rows.Close())
+	if len(sources) == 0 && len(compact) == 0 {
+		return needed, nil
+	}
+	fq, ok := q.(interface{ FileStore() *blobstore.Store })
+	if !ok || fq.FileStore() == nil {
+		return nil, errors.New("store: original file store unavailable")
+	}
+	for _, p := range compact {
+		if p.rule != nil {
+			raw, err := fq.FileStore().ReadWindow(ctx, *p.rule)
+			if err != nil {
+				return nil, err
+			}
+			expected := p.reference.SHA256
+			if err = json.Unmarshal(raw, &p.reference); err != nil {
+				return nil, err
+			}
+			if p.reference.SHA256 != expected {
+				return nil, errors.New("store: compact rule identity differs")
+			}
+		}
+		addSource(p.reference, p.modes)
+	}
+	for _, source := range sources {
+		body, err := resolveOriginalReference(ctx, fq.FileStore(), source.reference)
+		if err != nil {
+			return nil, fmt.Errorf("store: collect indexed original %s: %w", source.reference.SHA256, err)
+		}
+		needed[source.reference.SHA256] = true
+		if source.json {
+			walk(body, "")
+		}
+		if source.command {
+			// Text that happens to contain JSON is still one exact string. In
+			// particular, a command display needs its real field name for argv
+			// lookup, rather than parsing the display as an event JSON body.
+			quoted, _ := json.Marshal(string(body))
+			walk(quoted, "command")
+		}
+	}
+	return needed, nil
 }
 
 func neededOriginalPresentations(raw []byte, window blobstore.Window, needed map[string]bool) []preparedOriginal {
