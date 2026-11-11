@@ -81,8 +81,8 @@ func (r *Reader) openReference(transcript, relative string) (*os.File, error) {
 	root := strings.TrimSuffix(transcript, ".jsonl") + ".artifacts"
 	var dir *os.Root
 	for _, native := range r.roots {
-		rel, err := filepath.Rel(native, root)
-		if err != nil || !filepath.IsLocal(rel) {
+		rel, err := relativeToRoot(native, root)
+		if err != nil {
 			continue
 		}
 		base, err := os.OpenRoot(native)
