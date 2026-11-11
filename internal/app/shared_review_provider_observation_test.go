@@ -161,3 +161,37 @@ func TestSharedReviewActualProviderCandidateChangeInvalidatesOldResult(t *testin
 		})
 	}
 }
+
+// A target branch may advance without changing the reviewed head or merge
+// base. The existing review remains evidence for that candidate; this does not
+// establish that the advanced target can be integrated without revalidation.
+// A changed merge base needs a real recheck.
+func TestSharedReviewTargetAdvanceRetainsResponsibilityButChangedBaseNeedsRecheck(t *testing.T) {
+	h, _, issue, task, candidate, acceptance := sharedReviewFixture(t)
+	original := importSharedReviewForTest(t, h, issue, task, acceptance)
+	ref := issue.Plan.Deliveries[0]
+	tasks, runs := h.count("tasks"), h.count("runs")
+	advanced := protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{
+		State: "open", HeadSHA: candidate.HeadSHA, BaseSHA: candidate.BaseSHA,
+		TargetSHA: strings.Repeat("f", 40),
+	}}
+	sharedProviderFactForTest(t, h, ref, advanced, "", 0, 0)
+	current := sharedReviewViewForTest(t, h, ref)
+	if !current.Valid || current.ReviewID != original.ReviewID || len(current.Rounds) != 1 || current.Links[0].TaskID != task {
+		t.Fatal("target advance replaced the unchanged reviewed responsibility", current)
+	}
+	rechecked := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: ref.DeliveryID, ReviewerTaskID: task, AcceptanceID: acceptance}))
+	if !rechecked.Valid || rechecked.Revision != original.Revision || len(rechecked.Rounds) != 1 || h.count("tasks") != tasks || h.count("runs") != runs {
+		t.Fatal("unchanged reviewed candidate created another review or business execution", rechecked)
+	}
+	advanced.BaseSHA = strings.Repeat("e", 40)
+	sharedProviderFactForTest(t, h, ref, advanced, "", 0, 0)
+	current = sharedReviewViewForTest(t, h, ref)
+	if current.Valid || current.InvalidReason != "provider candidate changed" || current.ReviewID != original.ReviewID || len(current.Rounds) != 1 || current.Links[0].TaskID != task {
+		t.Fatal("changed base reused or discarded the original review", current)
+	}
+	expectWorkCode(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "assess", DeliveryID: ref.DeliveryID}), protocol.CodeStaleRevision)
+	if h.count("tasks") != tasks || h.count("runs") != runs {
+		t.Fatal("candidate observation automatically created a new business execution")
+	}
+}

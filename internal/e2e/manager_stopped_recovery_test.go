@@ -57,6 +57,8 @@ type stoppedManagerRecoveryHTTP struct {
 	business        string
 	settled         bool
 	normal          bool
+	lostStopped     bool
+	dropped         atomic.Bool
 	stoppedAccepted bool
 	claims          int
 	mu              sync.Mutex
@@ -146,6 +148,10 @@ func (n *stoppedManagerRecoveryHTTP) RoundTrip(q *http.Request) (*http.Response,
 		if n.s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, n.business) != wantPending {
 			n.t.Error("physical stop fabricated a business completion")
 		}
+		if n.lostStopped && n.dropped.CompareAndSwap(false, true) {
+			_ = response.Body.Close()
+			return nil, errors.New("stopped receipt lost after server acceptance")
+		}
 	}
 	return response, err
 }
@@ -205,7 +211,7 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 			t.Fatal(err)
 		}
 	}
-	transport := &stoppedManagerRecoveryHTTP{t: t, s: s, as: as, close: closeEnvelope, stopped: stopped, business: business, settled: options.settled, normal: options.normal}
+	transport := &stoppedManagerRecoveryHTTP{t: t, s: s, as: as, close: closeEnvelope, stopped: stopped, business: business, settled: options.settled, normal: options.normal, lostStopped: options.lostStopped}
 	executions := &stoppedManagerNoNative{pin: *as.Execution, normal: options.normal}
 	// Maintenance only prevents unrelated claims. The real Hello still admits
 	// recovery of the exact stopped manager through the normal executor path.
@@ -253,8 +259,22 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 		if t.Context().Err() != nil {
 			t.Fatal("normal recovery required external cancellation")
 		}
-	} else if len(seen) != 2 || !sameClosedFactsEnvelope(seen[0], stopped) || !sameClosedFactsEnvelope(seen[1], closeEnvelope) {
-		t.Fatal("original close blocked physical stop or changed its identity", seen)
+	} else {
+		want := []protocol.Envelope{stopped, closeEnvelope}
+		if options.lostStopped {
+			want = []protocol.Envelope{stopped, stopped, closeEnvelope}
+			if !transport.dropped.Load() {
+				t.Fatal("the server never accepted the stopped fact before its response was lost")
+			}
+		}
+		if len(seen) != len(want) {
+			t.Fatal("unexpected physical-stop recovery attempts", seen)
+		}
+		for i := range want {
+			if !sameClosedFactsEnvelope(seen[i], want[i]) {
+				t.Fatal("original close or stopped fact changed during recovery", seen)
+			}
+		}
 	}
 	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND run_id=? AND status='completed' AND json_extract(result_json,'$.last_sequence')=3 AND COALESCE(json_extract(result_json,'$.error'),'')=''`, closeResultID(t, closeEnvelope), as.RunID) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) != 0 {
 		t.Fatal("terminal run rejected its original close or lost original event application")
