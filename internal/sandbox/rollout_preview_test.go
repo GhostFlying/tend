@@ -23,7 +23,7 @@ func TestRolloutPreviewThroughRealOwnerAndRunnerHTTP(t *testing.T) {
 	ready := make(chan Demo, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{Data: t.TempDir(), Listener: listener, Scenario: "rollout", FastPacing: true, Ready: func(_ *serverkit.Runtime, d Demo) { ready <- d }}, slog.New(slog.DiscardHandler))
+		done <- Run(ctx, Options{Data: t.TempDir(), Listener: listener, Scenario: "rollout", FastPacing: true, Ready: func(_ *serverkit.Runtime, d Demo) { ready <- d }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 	}()
 	defer func() {
 		cancel()
