@@ -37,16 +37,17 @@ func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment)
 		return errors.New("runner: rollout archive has no registered source for this deployment")
 	}
 	seen := map[string]bool{}
+	var failures []error
 	for _, source := range sources {
 		if seen[source.SessionID] {
 			continue
 		}
 		seen[source.SessionID] = true
 		if err := r.syncRolloutSource(ctx, deployment, as, source); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("runner: archive source %s: %w", source.SessionID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as protocol.Assignment, source protocol.RolloutPreviewSource) error {

@@ -3,6 +3,7 @@ package journal
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -84,5 +85,33 @@ func TestManagerEventAndArchiveGenerationCommitTogether(t *testing.T) {
 	after, err = j.PendingArchives(t.Context(), "", 10)
 	if err != nil || len(after) != 1 || after[0].Generation != before[0].Generation+1 {
 		t.Fatal(after, err)
+	}
+}
+
+func TestArchiveDirtyMarkUsesRunSourceIndex(t *testing.T) {
+	j := open(t, filepath.Join(t.TempDir(), "journal.db"))
+	defer j.Close()
+	rows, err := j.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+dirtyArchiveQuery, "run", "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	indexed := false
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "SCAN rollout_sources") {
+			t.Fatalf("dirty marking scans historical sources: %s", detail)
+		}
+		indexed = indexed || strings.Contains(detail, "rollout_sources_run")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !indexed {
+		t.Fatal("dirty marking does not use the Run source index")
 	}
 }
