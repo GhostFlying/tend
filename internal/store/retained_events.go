@@ -190,7 +190,14 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 		if len(text) < retainBodyThreshold {
 			return text, nil
 		}
-		original, err := s.prepareOpaqueOriginal(ctx, stream, []byte(text))
+		var original *preparedOriginal
+		var err error
+		if len(path) > 0 && path[len(path)-1] == "command" {
+			original, err = s.matchCommandDisplay(ctx, []byte(text))
+		}
+		if err == nil && original == nil {
+			original, err = s.prepareOpaqueOriginal(ctx, stream, []byte(text))
+		}
 		if err != nil {
 			return nil, err
 		}
