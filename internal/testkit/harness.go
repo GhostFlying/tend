@@ -45,6 +45,7 @@ type Harness struct {
 	starts         []harness.TurnInput
 	injected       map[string][]string
 	resumed        int
+	historyReads   int
 	nextID         int
 	nextTurn       int
 	receipts       map[string]harness.TurnReceipt
@@ -101,6 +102,13 @@ func (h *Harness) Resumed() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.resumed
+}
+
+// HistoryReads counts non-executing attachments to persisted original history.
+func (h *Harness) HistoryReads() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.historyReads
 }
 
 // FakeSession is one session of a Harness.
@@ -165,7 +173,10 @@ func (s *FakeSession) StartThread(_ context.Context, cfg harness.ThreadConfig) (
 }
 
 // ResumeThread implements harness.Session.
-func (s *FakeSession) ResumeThread(_ context.Context, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
+func (s *FakeSession) ResumeThread(ctx context.Context, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if cfg.Purpose == harness.ReceiptHistoryPurpose {
+		return s.ReadThreadHistory(ctx, id)
+	}
 	s.h.mu.Lock()
 	known := s.h.persist[id]
 	if known {
@@ -176,6 +187,36 @@ func (s *FakeSession) ResumeThread(_ context.Context, id string, cfg harness.Thr
 		return nil, fmt.Errorf("thread %s: %w", id, harness.ErrRejected)
 	}
 	return s.thread(id, cfg), nil
+}
+
+// ReadThreadHistory reads persisted receipts without resuming a fake executor.
+func (s *FakeSession) ReadThreadHistory(_ context.Context, id string) (harness.Thread, error) {
+	s.h.mu.Lock()
+	known := s.h.persist[id]
+	if known {
+		s.h.historyReads++
+	}
+	s.h.mu.Unlock()
+	if !known {
+		return nil, fmt.Errorf("thread %s: %w", id, harness.ErrRejected)
+	}
+	return &fakeHistoryThread{original: &FakeThread{id: id, s: s}}, nil
+}
+
+type fakeHistoryThread struct{ original *FakeThread }
+
+func (t *fakeHistoryThread) ID() string                 { return t.original.ID() }
+func (t *fakeHistoryThread) RolloutPath() string        { return t.original.RolloutPath() }
+func (*fakeHistoryThread) Events() <-chan harness.Event { return nil }
+func (*fakeHistoryThread) StartTurn(context.Context, harness.TurnInput) (string, error) {
+	return "", harness.ErrRejected
+}
+func (*fakeHistoryThread) InjectDeveloper(context.Context, ...string) error {
+	return harness.ErrRejected
+}
+func (*fakeHistoryThread) Interrupt(context.Context, string) error { return harness.ErrRejected }
+func (t *fakeHistoryThread) FindTurn(ctx context.Context, identity, turn string) (harness.TurnReceipt, bool, error) {
+	return t.original.FindTurn(ctx, identity, turn)
 }
 
 // FakeThread is a thread of a FakeSession.

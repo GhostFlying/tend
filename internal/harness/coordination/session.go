@@ -369,6 +369,7 @@ type Driver struct {
 	wg                  sync.WaitGroup
 	closing             bool
 	failures            chan error
+	forwarding          map[string]bool
 }
 
 // Failures reports transport failures to the execution supervisor. A live
@@ -530,8 +531,14 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if d.threads == nil {
 			d.threads = map[string]harness.Thread{}
 		}
-		_, exists := d.threads[t.ID()]
 		d.threads[t.ID()] = t
+		if d.forwarding == nil {
+			d.forwarding = map[string]bool{}
+		}
+		startForwarding := !receiptHistory && !d.forwarding[t.ID()]
+		if startForwarding {
+			d.forwarding[t.ID()] = true
+		}
 		if d.private == nil {
 			d.private = map[string]bool{}
 		}
@@ -539,7 +546,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			d.private[t.ID()] = true
 		}
 		d.mu.Unlock()
-		if !exists && !receiptHistory {
+		if startForwarding {
 			d.wg.Add(1)
 			go func() {
 				defer d.wg.Done()

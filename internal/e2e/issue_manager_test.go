@@ -396,7 +396,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool) {
 				t.Fatal("unknown start resent business input instead of reconciling history")
 			}
 		}
-		if fake.Resumed() == 0 || s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND observed_state='failed'`) == 0 {
+		if fake.HistoryReads() == 0 || s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND observed_state='failed'`) == 0 {
 			t.Fatal("unknown start did not release capacity for original-history reconciliation")
 		}
 	}

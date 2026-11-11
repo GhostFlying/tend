@@ -97,8 +97,8 @@ func TestArchiveReceiptAttachUsesOriginalThreadWithoutReplacement(t *testing.T) 
 		t.Fatal(needed, err)
 	}
 	resumed, err := e.m.openThread(t.Context(), session)
-	if err != nil || resumed.ID() != thread.ID() || e.h.Resumed() != 1 {
-		t.Fatal("did not resume exact retained thread", resumed, err)
+	if err != nil || resumed.ID() != thread.ID() || e.h.Resumed() != 0 || e.h.HistoryReads() != 1 {
+		t.Fatal("did not read exact retained thread without resuming it", resumed, err)
 	}
 	if len(e.h.Starts()) != 0 {
 		t.Fatal("receipt attachment executed a model")
