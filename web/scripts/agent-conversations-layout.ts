@@ -88,7 +88,6 @@ const settings = {
 };
 let dropAssociationReply = false;
 let dropLookupReply = false;
-let lostRequestID = "";
 function json(res: ServerResponse, value: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(issueBoardFixture(res.req.url, value)));
@@ -186,7 +185,14 @@ const server = createServer(async (req, res) => {
         revision: 1,
       },
     );
-  if (p.endsWith("/associations")) return json(res, associations);
+  if (p.endsWith("/associations"))
+    return dropLookupReply
+      ? json(
+          res,
+          { error: { code: "unavailable", message: "Expected association observation outage" } },
+          503,
+        )
+      : json(res, associations);
   if (p === "/api/v1/inbox" || p === "/api/v1/next-actions") return json(res, { items: [] });
   if (p.endsWith("/activity") || p.endsWith("/results") || p.endsWith("/deliveries"))
     return json(res, { items: [], more: false, event_seq: 1 });
@@ -280,25 +286,10 @@ const server = createServer(async (req, res) => {
     });
   if (p === "/api/v1/conversation/settings") return json(res, settings);
   if (p === "/api/v1/conversation/handoff") return json(res, { enabled: false, revision: 1 });
-  if (p.startsWith("/api/v1/requests/")) {
-    if (dropLookupReply) return res.destroy();
-    const requestId = p.slice("/api/v1/requests/".length);
-    return writes.some((w) => w.request_id === requestId)
-      ? json(res, { request_id: requestId, status: "succeeded", result: {} })
-      : json(res, { error: { code: "not_found", message: "Unknown request" } }, 404);
-  }
   if (p === "/api/v1/ops") {
     let raw = "";
     for await (const chunk of req) raw += String(chunk);
     const e = JSON.parse(raw) as Envelope;
-    const prior = writes.find((w) => w.request_id === e.request_id);
-    if (prior) {
-      assert.deepEqual(e, prior, "request identity must retain the original payload");
-      if (e.request_id === lostRequestID && dropLookupReply) return res.destroy();
-      return json(res, {
-        operation: { request_id: e.request_id, status: "succeeded", result: {} },
-      });
-    }
     writes.push(e);
     if (e.operation === "conversation.set_settings") {
       Object.assign(settings, e.payload);
@@ -324,8 +315,7 @@ const server = createServer(async (req, res) => {
     }
     if (e.operation === "conversation.set_issue_associations" && dropAssociationReply) {
       dropAssociationReply = false;
-      lostRequestID = e.request_id;
-      return res.destroy();
+      return json(res, { operation: { request_id: e.request_id, status: "unknown" } });
     }
     return json(res, { operation: { request_id: e.request_id, status: "succeeded", result: {} } });
   }
@@ -635,7 +625,7 @@ try {
     await editor.getByRole("button", { name: "保存关联" }).click();
     await editor.waitFor({ state: "hidden" });
     assert(writes.some((e) => e.operation === "conversation.set_issue_associations"));
-    // The server commits but both the response and initial receipt lookup are lost.
+    // The server commits; the answer is unknown and the business-state read is temporarily unavailable.
     await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
     await editor.getByRole("checkbox").first().check();
     dropAssociationReply = true;
@@ -647,6 +637,13 @@ try {
     dropLookupReply = false;
     await page.getByRole("button", { name: "修改 Issue 关联", exact: true }).first().click();
     await editor.getByRole("button", { name: "核对原请求" }).click();
+    await editor
+      .getByText("已重新读取当前业务状态，请根据最新内容决定下一步；未确认原操作是否执行。", {
+        exact: true,
+      })
+      .waitFor();
+    assert(await editor.getByRole("checkbox").first().isChecked());
+    await editor.getByRole("button", { name: "取消", exact: true }).click();
     await editor.waitFor({ state: "hidden" });
     assert.equal(writes.length, beforeRecovery, "reload recovery must not create a second write");
     // A delayed background lookup must not override a later return to main.

@@ -9877,6 +9877,9 @@
         "expected_assignment_epoch": {
           "type": "integer"
         },
+        "issue_id": {
+          "type": "string"
+        },
         "rule_id": {
           "type": "string"
         },

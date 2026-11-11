@@ -822,7 +822,7 @@ func TestCapabilityFollowupBindingsSelectTheCorrectBusinessTarget(t *testing.T) 
 					t.Error("wrong followup contract", envelope)
 				}
 				var payload protocol.IssueFollowupPayload
-				if err := json.Unmarshal(envelope.Payload, &payload); err != nil || payload.ExpectedAssignmentEpoch != 3 {
+				if err := json.Unmarshal(envelope.Payload, &payload); err != nil || payload.ExpectedAssignmentEpoch != 3 || payload.IssueID != "issue-one" {
 					t.Error(payload, err)
 				}
 				json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: envelope.RequestID, Status: protocol.OpSucceeded}})
@@ -1018,4 +1018,17 @@ func TestCapabilityServerExecutableFixture(t *testing.T) {
 		os.Exit(2)
 	}
 	os.Exit(0)
+}
+
+func TestCapabilityFollowupRejectsConflictingParentBeforeHTTP(t *testing.T) {
+	f := newFakeServer(t)
+	env := newTestEnv(t, f.srv.URL)
+	if code := env.main("issue", "followup", "pause", "issue-one", "rule-one", "--revision", "2", "--epoch", "3", "--data", `{"issue_id":"another-issue"}`); code != exitUsage {
+		t.Fatal("foreign parent accepted", code, env.out.String(), env.errOut.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.requests) != 0 {
+		t.Fatal("foreign parent reached API", f.requests)
+	}
 }

@@ -44,7 +44,6 @@ let drop = false;
 let sourceCancelled = false;
 const writes: Envelope[] = [];
 const streams = new Set<ServerResponse>();
-const receipts = new Map<string, unknown>();
 function json(res: ServerResponse, value: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   res.end(JSON.stringify(issueBoardFixture(res.req.url, value)));
@@ -98,7 +97,13 @@ const server = createServer(async (req, res) => {
   if (path === `/api/v1/issues/${item.issue_id}/deliveries`) return json(res, { items: [] });
   if (path === "/api/v1/inbox") return json(res, { items: [] });
   if (path === "/api/v1/next") return json(res, { items: [] });
-  if (path.endsWith("/history"))
+  if (path.endsWith("/history")) {
+    if (drop)
+      return json(
+        res,
+        { error: { code: "unavailable", message: "Expected business history outage" } },
+        503,
+      );
     return json(res, {
       rule: rules[0],
       revisions: rules,
@@ -117,6 +122,7 @@ const server = createServer(async (req, res) => {
       })),
       more: false,
     });
+  }
   if (path.startsWith("/api/v1/background/"))
     return json(res, {
       batch: {
@@ -156,55 +162,44 @@ const server = createServer(async (req, res) => {
     return json(res, { enabled: true, blocks: [], more: false, event_seq: seq });
   if (path === "/api/v1/conversation/settings" || path === "/api/v1/conversation/handoff")
     return json(res, { enabled: false, revision: 1 });
-  if (path.startsWith("/api/v1/requests/")) {
-    const result = receipts.get(path.split("/").at(-1)!);
-    return result
-      ? json(res, result)
-      : json(res, { error: { code: "not_found", message: "No receipt yet" } }, 404);
-  }
   if (path === "/api/v1/ops" && req.method === "POST") {
     let raw = "";
     for await (const chunk of req) raw += String(chunk);
     const e = JSON.parse(raw) as Envelope;
     writes.push(e);
-    if (drop) {
-      res.destroy();
-      return;
+    const verb = e.operation.split("_").at(-1);
+    if (verb === "create") {
+      const spec = (e.payload as { spec: FollowupSpec }).spec;
+      assert.equal(
+        (e.payload as { expected_assignment_epoch: number }).expected_assignment_epoch,
+        item.assignment_epoch,
+      );
+      assert.equal(e.expected_control_revision, item.revision);
+      rules.push({
+        ...spec,
+        rule_id: (e.payload as { rule_id: string }).rule_id,
+        issue_id: item.issue_id,
+        status: "active",
+        revision: 1,
+        trigger_count: 0,
+        next_at: spec.at ?? Date.now() + 3600000,
+        created_at: 1,
+        updated_at: 1,
+      });
+    } else {
+      const rule = rules.find((r) => r.rule_id === e.target.id)!;
+      assert.equal(e.expected_control_revision, rule.revision);
+      rule.revision++;
+      if (verb === "update") Object.assign(rule, (e.payload as { spec: FollowupSpec }).spec);
+      if (verb === "pause") rule.status = "paused";
+      if (verb === "resume") rule.status = "active";
+      if (verb === "cancel") rule.status = "cancelled";
+      if (verb === "trigger") rule.trigger_count++;
     }
-    if (!receipts.has(e.request_id)) {
-      const verb = e.operation.split("_").at(-1);
-      if (verb === "create") {
-        const spec = (e.payload as { spec: FollowupSpec }).spec;
-        assert.equal(
-          (e.payload as { expected_assignment_epoch: number }).expected_assignment_epoch,
-          item.assignment_epoch,
-        );
-        assert.equal(e.expected_control_revision, item.revision);
-        rules.push({
-          ...spec,
-          rule_id: `followup-${rules.length + 1}`,
-          issue_id: item.issue_id,
-          status: "active",
-          revision: 1,
-          trigger_count: 0,
-          next_at: spec.at ?? Date.now() + 3600000,
-          created_at: 1,
-          updated_at: 1,
-        });
-      } else {
-        const rule = rules.find((r) => r.rule_id === e.target.id)!;
-        assert.equal(e.expected_control_revision, rule.revision);
-        rule.revision++;
-        if (verb === "update") Object.assign(rule, (e.payload as { spec: FollowupSpec }).spec);
-        if (verb === "pause") rule.status = "paused";
-        if (verb === "resume") rule.status = "active";
-        if (verb === "cancel") rule.status = "cancelled";
-        if (verb === "trigger") rule.trigger_count++;
-      }
-      receipts.set(e.request_id, { request_id: e.request_id, status: "succeeded", result: {} });
-      publish();
-    }
-    return json(res, { operation: receipts.get(e.request_id) });
+    publish();
+    return json(res, {
+      operation: { request_id: e.request_id, status: drop ? "unknown" : "succeeded", result: {} },
+    });
   }
   if (path.startsWith("/api/"))
     return json(res, { error: { code: "not_found", message: "Not in fixture" } }, 404);
@@ -232,7 +227,6 @@ try {
     rules = [];
     sourceCancelled = false;
     writes.length = 0;
-    receipts.clear();
     drop = false;
     const context = await browser.newContext({
       viewport: { width, height: 900 },
@@ -315,8 +309,10 @@ try {
     await page.getByRole("button", { name: "核对结果" }).waitFor();
     assert.equal(writes.at(-1)!.request_id, unknown.request_id);
     drop = false;
-    await page.getByRole("button", { name: "重试原请求" }).click();
+    const beforeRecovery = writes.length;
+    await page.getByRole("button", { name: "核对结果" }).click();
     await page.getByRole("button", { name: "核对结果" }).waitFor({ state: "hidden" });
+    assert.equal(writes.length, beforeRecovery, "reading the newer rule never replays the trigger");
     assert.equal(writes.at(-1)!.request_id, unknown.request_id);
     await other.getByText("已触发 1 / 20", { exact: false }).waitFor();
     assert.equal(rules[0]!.kind, "every");

@@ -408,9 +408,14 @@ function Rule({
             const command = restored
               ? { ...restored, payload: { ...(restored.payload as object), spec } }
               : {
-                  ...issueFollowupCommand({ assignment_epoch: editingEpoch }, editing!, "update", {
-                    spec,
-                  }),
+                  ...issueFollowupCommand(
+                    { issue_id: issue.issue_id, assignment_epoch: editingEpoch },
+                    editing!,
+                    "update",
+                    {
+                      spec,
+                    },
+                  ),
                   reason: reason.trim() || "owner adjusted followup",
                 };
             const out = await operation.execute(command);

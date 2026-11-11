@@ -632,7 +632,10 @@ export class SendQueue {
       await this.outbox.delete(requestId);
       delete next.uploads;
       delete next.references;
-      next.envelope = { ...next.envelope, payload: { message_id: next.messageId } };
+      // The open source form and archive import still display the immutable
+      // source definition. Keep it only in this mounted queue, never in outbox.
+      if (next.envelope.operation !== "conversation.inject_source")
+        next.envelope = { ...next.envelope, payload: { message_id: next.messageId } };
       this.messages.set(
         sorted([...this.messages.get().filter((item) => item.requestId !== requestId), next]),
       );

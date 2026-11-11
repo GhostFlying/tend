@@ -47,6 +47,9 @@ func (c IssueFollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manage owned reminder rules through their deadline or Attention operation")
 		}
 	}
+	if p.IssueID != "" && p.IssueID != id {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "followup Issue reference does not match its actual parent")
+	}
 	issue, err := store.GetCanonicalIssue(ctx, tx.Q(), id)
 	if err != nil {
 		return Outcome{}, errNotFound(err, "Issue does not exist")

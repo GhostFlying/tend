@@ -32,14 +32,18 @@ try {
     };
     Object.assign(window, { revokedPreviewURLs: revoked });
   });
-  const api = async (path: string) =>
-    page.evaluate(async (path) => {
-      const response = await fetch(path, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("tend.token")}` },
-      });
-      if (!response.ok) throw new Error(`API ${response.status}`);
-      return response.json();
-    }, path);
+  const api = async (path: string, allowMissing = false) =>
+    page.evaluate(
+      async ({ path, allowMissing }) => {
+        const response = await fetch(path, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("tend.token")}` },
+        });
+        if (allowMissing && response.status === 404) return null;
+        if (!response.ok) throw new Error(`API ${response.status}`);
+        return response.json();
+      },
+      { path, allowMissing },
+    );
   await page.goto(origin);
   await page.getByRole("textbox", { name: "发消息给 Tend", exact: true }).waitFor();
   const issues = await api("/api/v1/issues");
@@ -185,18 +189,22 @@ try {
     assert(envelope, JSON.stringify(writes));
     const fileId = upload.operation.result.file_id;
     assert(fileId, JSON.stringify(upload));
-    let receipt;
+    const messageId = (envelope.payload as { message_id?: string }).message_id;
+    assert(messageId, "the first composition retains its real message identity");
+    let received;
     for (let attempt = 0; attempt < 100; attempt++) {
-      receipt = await api(`/api/v1/requests/${(envelope as { request_id?: string }).request_id}`);
-      if (["accepted", "succeeded"].includes(receipt.status)) break;
+      received = await api(
+        label === "im"
+          ? `/api/v1/messaging/messages/${messageId}`
+          : `/api/v1/messages/${messageId}`,
+        true,
+      );
+      if (received?.message_id === messageId) break;
       await page.waitForTimeout(100);
     }
-    assert(["accepted", "succeeded"].includes(receipt.status), JSON.stringify(receipt));
-    if (label === "im") {
-      const received = await api(`/api/v1/messaging/messages/${receipt.result.message_id}`);
-      assert.equal(received.body, marker);
-      assert.equal(received.attachments[0].file_id, fileId);
-    }
+    assert.equal(received?.message_id, messageId);
+    assert.equal(received.body, marker);
+    assert.equal(received.attachments[0].file_id, fileId);
     if (label !== "im") {
       const target = (envelope.payload as { conversation_id?: string }).conversation_id;
       const page = await api(
@@ -218,7 +226,7 @@ try {
       marker,
       upload,
       envelope,
-      receipt,
+      message: received,
       sha256: hash(downloaded),
       bytes: downloaded.length,
     });

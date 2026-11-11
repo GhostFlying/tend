@@ -4655,6 +4655,7 @@ export interface IssueFollowupPage {
  */
 export interface IssueFollowupPayload {
   expected_assignment_epoch: number;
+  issue_id?: string;
   rule_id?: string;
   spec?: FollowupSpec;
 }

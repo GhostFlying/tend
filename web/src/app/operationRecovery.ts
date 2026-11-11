@@ -6,6 +6,10 @@ import type {
   IssueView,
   AttentionView,
   IssueFollowupPage,
+  RunMessagePage,
+  IssueMessageAssociations,
+  IssueFollowupHistory,
+  WorkItemChoice,
 } from "../api/generated/api.ts";
 import { newObjectId } from "../api/ids.ts";
 import type { OpOutcome, OpSender } from "./ops.ts";
@@ -62,6 +66,8 @@ const unknown = (): OpOutcome => ({
   message: "尚不能从业务记录确认结果，保留原操作继续核对。",
 });
 const stale = "已重新读取当前业务状态，请根据最新内容决定下一步；未确认原操作是否执行。";
+const newerRevision = (current: number | undefined, expected: number | undefined) =>
+  typeof current === "number" && typeof expected === "number" && current > expected;
 
 /** Reading current state is not proof of a particular request's execution. */
 export async function recoverOperation(sender: OpSender, e: Envelope): Promise<OpOutcome> {
@@ -88,6 +94,30 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       );
       return result?.task_id === payload.task_id ? { kind: "done", result } : unknown();
     }
+    if (e.operation === "runs.send_message" && id && typeof payload.message_id === "string") {
+      let after = 0;
+      // This is a bounded owner read of the original Run, not an execution or
+      // provider-delivery retry. Absence after the budget remains unknown.
+      for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+        const page = await sender.get<RunMessagePage>(
+          `/api/v1/runs/${encoded}/messages?limit=100&after=${after}`,
+        );
+        const result = page.messages?.find((item) => item.message_id === payload.message_id);
+        if (result)
+          return result.run_id === id &&
+            result.task_id === payload.task_id &&
+            result.spec_version === payload.spec_version &&
+            result.generation === payload.generation &&
+            result.control_revision === e.expected_control_revision &&
+            result.text === payload.text &&
+            (result.source_message_id ?? "") === (payload.source_message_id ?? "")
+            ? { kind: "done", result }
+            : unknown();
+        if (!page.more || !Number.isSafeInteger(page.next) || page.next <= after) return unknown();
+        after = page.next;
+      }
+      return unknown();
+    }
     if (
       ["conversation.submit_message", "conversation.inject_source", "messaging.send"].includes(
         e.operation,
@@ -103,7 +133,7 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
     }
     if (e.operation === "issues.followups_create" && id && typeof payload.rule_id === "string") {
       let after = "";
-      for (;;) {
+      for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
         const page = await sender.get<IssueFollowupPage>(
           `/api/v1/issues/${encoded}/followups?limit=100&after=${encodeURIComponent(after)}`,
         );
@@ -112,6 +142,27 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
         if (!page.more || !page.next || page.next === after) return unknown();
         after = page.next;
       }
+      return unknown();
+    }
+    if (
+      [
+        "issues.followups_update",
+        "issues.followups_pause",
+        "issues.followups_resume",
+        "issues.followups_cancel",
+        "issues.followups_trigger",
+      ].includes(e.operation) &&
+      id &&
+      typeof payload.issue_id === "string"
+    ) {
+      const history = await sender.get<IssueFollowupHistory>(
+        `/api/v1/issues/${encodeURIComponent(payload.issue_id)}/followups/${encoded}/history`,
+      );
+      return history.rule?.rule_id === id &&
+        history.rule.issue_id === payload.issue_id &&
+        newerRevision(history.rule.revision, e.expected_control_revision)
+        ? { kind: "stale", message: stale }
+        : unknown();
     }
     if (["tasks.cancel", "control.set_mode"].includes(e.operation) && id) {
       const current = await sender.get<TaskSummary>(`/api/v1/tasks/${encoded}`);
@@ -121,7 +172,18 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
         (e.operation === "control.set_mode" && current.control_mode === payload.mode)
       )
         return { kind: "done", result: current };
-      return { kind: "stale", message: stale, current };
+      return newerRevision(current.control_revision, e.expected_control_revision)
+        ? { kind: "stale", message: stale, current }
+        : unknown();
+    }
+    if (["issues.update_progress", "issues.set_acceptance_policy"].includes(e.operation) && id) {
+      const currentIssue = await sender.get<IssueView>(`/api/v1/issues/${encoded}`);
+      // A newer business revision fences the old CAS without proving whether
+      // it executed. An unchanged or missing revision leaves the intent unknown.
+      return currentIssue?.issue_id === id &&
+        newerRevision(currentIssue.revision, e.expected_control_revision)
+        ? { kind: "stale", message: stale, currentIssue }
+        : unknown();
     }
     if (
       [
@@ -139,7 +201,8 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       id
     ) {
       const currentIssue = await sender.get<IssueView>(`/api/v1/issues/${encoded}`);
-      return currentIssue?.issue_id === id
+      return currentIssue?.issue_id === id &&
+        newerRevision(currentIssue.revision, e.expected_control_revision)
         ? { kind: "stale", message: stale, currentIssue }
         : unknown();
     }
@@ -154,7 +217,8 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       id
     ) {
       const currentAttention = await sender.get<AttentionView>(`/api/v1/attentions/${encoded}`);
-      return currentAttention?.attention_id === id
+      return currentAttention?.attention_id === id &&
+        newerRevision(currentAttention.revision, e.expected_control_revision)
         ? { kind: "stale", message: stale, currentAttention }
         : unknown();
     }
@@ -168,7 +232,23 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       const matches = Object.entries(payload).every(
         ([key, value]) => key === "conversation_id" || current[key] === value,
       );
-      return matches ? { kind: "done", result: current } : { kind: "stale", message: stale };
+      return matches
+        ? { kind: "done", result: current }
+        : newerRevision(
+              typeof current.revision === "number" ? current.revision : undefined,
+              e.expected_control_revision,
+            )
+          ? { kind: "stale", message: stale }
+          : unknown();
+    }
+    if (e.operation === "conversation.set_issue_associations" && id) {
+      const current = await sender.get<IssueMessageAssociations>(
+        `/api/v1/messages/${encoded}/associations?projection=issues`,
+      );
+      return current?.message_id === id &&
+        newerRevision(current.revision, e.expected_control_revision)
+        ? { kind: "stale", message: stale }
+        : unknown();
     }
     if (
       ["conversation.interrupt_reply", "conversation.withdraw_message"].includes(e.operation) &&
@@ -185,13 +265,16 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       return unknown();
     }
     if (e.operation === "work_item_choices.respond" && id) {
-      await sender.get(`/api/v1/work-item-choices/${encoded}`);
-      return { kind: "stale", message: stale };
+      const current = await sender.get<WorkItemChoice>(`/api/v1/work-item-choices/${encoded}`);
+      return current?.choice_id === id &&
+        newerRevision(current.version, e.expected_control_revision)
+        ? { kind: "stale", message: stale }
+        : unknown();
     }
     if (e.operation === "issues.refresh_delivery" && id) {
       await sender.get(`/api/v1/issues/${encoded}/deliveries`);
       return {
-        kind: "stale",
+        kind: "unknown",
         message:
           "已重新读取当前交付事实；原刷新动作是否执行仍未确认，可按当前状态决定是否再次观察。",
       };
