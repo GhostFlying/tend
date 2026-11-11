@@ -192,7 +192,7 @@ func TestRolloutArchiveLargeIncompleteJSONLAndFileGeneration(t *testing.T) {
 	}
 }
 
-func TestRolloutArchiveSkipsProtocol2AndExecutionsWithoutOriginals(t *testing.T) {
+func TestRolloutArchiveSkipsProtocol2AndUnregisteredSources(t *testing.T) {
 	r, as, _, f := archiveRunner(t)
 	as.Protocol = 2
 	if err := r.syncRolloutArchive(t.Context(), as); err != nil || len(f.requests) != 0 {
@@ -200,8 +200,22 @@ func TestRolloutArchiveSkipsProtocol2AndExecutionsWithoutOriginals(t *testing.T)
 	}
 	as.Protocol = 3
 	as.RunID = "without-original"
+	if err := r.cfg.Journal.AcceptAssignment(t.Context(), as, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.RegisterRollout(t.Context(), "other-deployment", as.RunID, protocol.RolloutPreviewSource{SessionID: "other-thread"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := r.cfg.Journal.PendingArchives(t.Context(), "", 10)
+	if err != nil || len(before) != 1 || before[0].RunID != as.RunID {
+		t.Fatal("original archive work was not retained", before, err)
+	}
 	if err := r.syncRolloutArchive(t.Context(), as); err != nil || len(f.requests) != 0 {
-		t.Fatal("invented native source", err)
+		t.Fatal("unregistered current source should not be uploaded", err)
+	}
+	after, err := r.cfg.Journal.PendingArchives(t.Context(), "", 10)
+	if err != nil || len(after) != 1 || after[0] != before[0] {
+		t.Fatal("the missing current source discarded original archive work", after, err)
 	}
 }
 
