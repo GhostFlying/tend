@@ -91,6 +91,20 @@ func TestBackgroundToolAndProsePublishSharedFullOriginals(t *testing.T) {
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	var bufferedIdentity, bgInput, bgOutput string
+	var originalBodies int
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var published int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT json_array(seq,batch_id,thread_id,turn_id,item_id,status,request_id,created_at),json_extract(tool_json,'$.input'),json_extract(tool_json,'$.output'),published FROM background_replies WHERE turn_id=? AND item_id='tool' AND kind='tool_use'`, turn.TurnID).Scan(&bufferedIdentity, &bgInput, &bgOutput, &published); err != nil {
+			return err
+		}
+		if published != 0 {
+			t.Fatal("tool published before turn completion")
+		}
+		return tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM retained_original_values`).Scan(&originalBodies)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	turn.Status = store.TurnCompleted
 	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
 		t.Fatal(err)
@@ -103,15 +117,28 @@ func TestBackgroundToolAndProsePublishSharedFullOriginals(t *testing.T) {
 		if tool.Input != input || tool.Output != output {
 			t.Fatal("full tool evidence lost")
 		}
-		var bgInput, bgOutput, savedInput, savedOutput, bgBody, body string
-		if err = tx.Q().QueryRowContext(t.Context(), `SELECT json_extract(tool_json,'$.input'),json_extract(tool_json,'$.output') FROM background_replies WHERE turn_id=? AND kind='tool_use'`, turn.TurnID).Scan(&bgInput, &bgOutput); err != nil {
+		var publishedIdentity, cachedTool, savedInput, savedOutput, bgBody, body string
+		var published, bodies int
+		if err = tx.Q().QueryRowContext(t.Context(), `SELECT json_array(seq,batch_id,thread_id,turn_id,item_id,status,request_id,created_at),tool_json,published FROM background_replies WHERE turn_id=? AND item_id='tool' AND kind='tool_use'`, turn.TurnID).Scan(&publishedIdentity, &cachedTool, &published); err != nil {
 			return err
 		}
-		if err = tx.Q().QueryRowContext(t.Context(), `SELECT input,output FROM conversation_tool_uses WHERE turn_id=?`, turn.TurnID).Scan(&savedInput, &savedOutput); err != nil {
+		if publishedIdentity != bufferedIdentity || published != 1 || cachedTool != "" {
+			t.Fatal("publication changed identity or retained a redundant tool cache")
+		}
+		if tool.ThreadID != mainAgent.Thread || tool.Tool != "tasks_list" || tool.Status != string(protocol.ToolCompleted) {
+			t.Fatal("formal tool publication changed identity or status")
+		}
+		if err = tx.Q().QueryRowContext(t.Context(), `SELECT input,output FROM conversation_tool_uses WHERE turn_id=? AND item_id='tool'`, turn.TurnID).Scan(&savedInput, &savedOutput); err != nil {
 			return err
 		}
-		if savedInput != bgInput || savedOutput != bgOutput || len(savedOutput) > 100 {
+		if savedInput != bgInput || savedOutput != bgOutput || len(savedInput) > 100 || len(savedOutput) > 100 {
 			t.Fatal("publication copied tool body")
+		}
+		if err = tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM retained_original_values`).Scan(&bodies); err != nil {
+			return err
+		}
+		if bodies != originalBodies {
+			t.Fatal("publication retained a second body")
 		}
 		if err = tx.Q().QueryRowContext(t.Context(), `SELECT r.body,m.body FROM background_replies r JOIN conversation_agent_messages a ON a.thread_id=r.thread_id AND a.turn_id=r.turn_id AND a.item_id=r.item_id JOIN conversation_messages m ON m.message_id=a.message_id WHERE r.turn_id=? AND r.kind='message'`, turn.TurnID).Scan(&bgBody, &body); err != nil {
 			return err
@@ -123,9 +150,15 @@ func TestBackgroundToolAndProsePublishSharedFullOriginals(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		found := false
+		found, foundTool := false, false
 		for _, r := range page {
+			if r.MessageID == tool.MessageID {
+				foundTool = true
+			}
 			if r.Body == prose {
+				if !foundTool {
+					t.Fatal("publication reordered tool and prose")
+				}
 				found = true
 			}
 		}
