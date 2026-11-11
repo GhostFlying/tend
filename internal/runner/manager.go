@@ -502,6 +502,13 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 	if err = r.flushManagerEvents(ctx, as); err != nil {
 		return true, err
 	}
+	if delivered, err := r.cfg.Journal.ManagerCloseReplyDelivered(ctx, as.RunID, reply.ID); err != nil {
+		return true, err
+	} else if delivered {
+		// The original completed close remains physical proof. Its accepted
+		// delivery must not become a new reply after the peer retires it.
+		return true, r.finishJournal(ctx, as.RunID)
+	}
 	pending, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return true, err

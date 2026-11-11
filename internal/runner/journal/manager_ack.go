@@ -115,6 +115,9 @@ func (j *Journal) SettleManagerReceipt(ctx context.Context, run string, env prot
 		if err := json.Unmarshal(original.Payload, &reply); err != nil {
 			return err
 		}
+		if err := markManagerCloseReplyDelivered(ctx, tx, run, reply); err != nil {
+			return err
+		}
 		if err := enqueueManagerReceiptAcknowledgement(ctx, tx, run, reply); err != nil {
 			return err
 		}
@@ -131,4 +134,26 @@ func enqueueManagerReceiptAcknowledgement(ctx context.Context, tx *sql.Tx, run s
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO manager_receipt_ack_ids(run_id,command_id) VALUES(?,?) ON CONFLICT DO NOTHING`, run, reply.ID)
 	return err
+}
+
+// A successful close reply is delivered independently of its preserved physical
+// close proof and independently of confirmation of the following compact ACK.
+func markManagerCloseReplyDelivered(ctx context.Context, tx *sql.Tx, run string, reply protocol.ManagerNativeReply) error {
+	if reply.Error != "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE manager_native_operations SET reply_delivered=1
+ WHERE run_id=? AND request_id=? AND status='completed'
+ AND json_extract(request_json,'$.method')='close'
+ AND COALESCE(json_extract(reply_json,'$.error'),'')=''`, run, reply.ID)
+	return err
+}
+
+func (j *Journal) ManagerCloseReplyDelivered(ctx context.Context, run, command string) (bool, error) {
+	var delivered bool
+	err := j.db.QueryRowContext(ctx, `SELECT reply_delivered FROM manager_native_operations
+ WHERE run_id=? AND request_id=? AND status='completed'
+ AND json_extract(request_json,'$.method')='close'
+ AND COALESCE(json_extract(reply_json,'$.error'),'')=''`, run, command).Scan(&delivered)
+	return delivered, err
 }

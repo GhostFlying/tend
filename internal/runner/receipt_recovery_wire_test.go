@@ -260,10 +260,6 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 	}
 }
 
-func runCredentialDomain(run string) string {
-	return (protocol.Principal{Kind: protocol.PrincipalRun, Subject: run}).DedupDomain()
-}
-
 // Snapshot the original physical-stop business fact, not an RPC result ledger.
 type maintenancePhysicalStopSnapshot struct {
 	RequestID, MaintenanceID, RunID, LeaseID, Operation, Payload string
