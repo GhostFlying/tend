@@ -53,6 +53,77 @@ func retainNativeBody(t *testing.T, s *Store, raw string) string {
 	}
 	return result
 }
+
+func TestLateNativeArchiveRebindsEventValuesWithoutChangingHistory(t *testing.T) {
+	s, path := openTest(t)
+	nativeArchiveFixture(t, s)
+	text := strings.Repeat("原生结果😀\n", 700)
+	body := `{"thread_id":"archive-thread","native":{"Kind":"item_completed","Raw":{"text":` + mustJSONString(t, text) + `},"Text":` + mustJSONString(t, text) + `}}`
+	stored := retainEventFixture(t, s, body)
+	var before int64
+	if err := s.read.QueryRowContext(t.Context(), `SELECT body_id FROM retained_original_values WHERE sha256=?`, hashBytes(bodyHash([]byte(text)))).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	line := []byte(`{"type":"response_item","payload":{"text":` + mustJSONString(t, text) + "}}\n")
+	archiveNativeChunk(t, s, "late-source", 0, line)
+	var after int64
+	var archive, nativeArchive, encoding string
+	if err := s.read.QueryRowContext(t.Context(), `SELECT v.body_id,a.archive_id,v.encoding FROM retained_original_values v JOIN retained_original_windows w USING(window_id) JOIN retained_original_archives a USING(archive_key) WHERE v.sha256=?`, hashBytes(bodyHash([]byte(text)))).Scan(&after, &archive, &encoding); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.read.QueryRowContext(t.Context(), `SELECT archive_id FROM retained_native_sources WHERE source_id='late-source'`).Scan(&nativeArchive); err != nil {
+		t.Fatal(err)
+	}
+	if before != after || archive != nativeArchive || encoding != "json-string" {
+		t.Fatalf("late original did not replace the temporary value source: id=%d/%d archive=%s/%s encoding=%s", before, after, archive, nativeArchive, encoding)
+	}
+	if !SemanticJSONEqual(resolveEventFixture(t, s, stored), body) {
+		t.Fatal("late archive changed already delivered history")
+	}
+	clock := testkit.NewClock()
+	backupID := testkit.NewIDGen(clock, 76).New(protocol.PrefixRequest)
+	if _, err := s.BackupManagers(t.Context(), backupID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := Open(t.Context(), filepath.Join(path+".manager-backups", backupID, "ledger.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backup.Close()
+	if err = os.RemoveAll(path + ".files"); err != nil {
+		t.Fatal(err)
+	}
+	if !SemanticJSONEqual(resolveEventFixture(t, backup, stored), body) {
+		t.Fatal("late native binding did not survive backup and restore")
+	}
+}
+
+func TestNativeArchiveCommittedDuringEventStagingUsesNativeValue(t *testing.T) {
+	s, _ := openTest(t)
+	nativeArchiveFixture(t, s)
+	text := strings.Repeat("并发原件😀\n", 700)
+	body := `{"native":{"Kind":"item_completed","Text":` + mustJSONString(t, text) + `}}`
+	ctx, err := s.StageEventOriginals(t.Context(), "staged-event", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveNativeChunk(t, s, "staged-source", 0, []byte(`{"payload":{"text":`+mustJSONString(t, text)+"}}\n"))
+	var stored string
+	if err = s.Write(ctx, func(tx *Tx) error { var e error; stored, e = tx.RetainEventJSON(ctx, body); return e }); err != nil {
+		t.Fatal(err)
+	}
+	var native bool
+	if err = s.read.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM retained_original_values v JOIN retained_original_windows w USING(window_id) JOIN retained_native_source_index n USING(archive_key) WHERE v.sha256=? AND v.encoding='json-string')`, hashBytes(bodyHash([]byte(text)))).Scan(&native); err != nil || !native {
+		t.Fatal("stale staging kept a redundant value source", native, err)
+	}
+	if !SemanticJSONEqual(resolveEventFixture(t, s, stored), body) {
+		t.Fatal("concurrent original changed the delivered event")
+	}
+}
+
 func TestOriginalNativeArchivePartialBackupResumeAndCrossRunBinding(t *testing.T) {
 	s, path := openTest(t)
 	nativeArchiveFixture(t, s)

@@ -85,6 +85,12 @@ func loadOriginalValue(ctx context.Context, q Querier, id int64) (originalRefere
 }
 
 func (t *Tx) bindOriginalValue(ctx context.Context, p preparedOriginal) (int64, error) {
+	if p.StringSHA256 != "" {
+		id, err := t.bindNativeStringValue(ctx, p)
+		if err != nil || id != 0 {
+			return id, err
+		}
+	}
 	if p.ValueID > 0 {
 		return p.ValueID, nil
 	}

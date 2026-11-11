@@ -22,6 +22,7 @@ type preparedOriginal struct {
 	Window          blobstore.Window
 	Characters      int64
 	CanonicalSHA256 string
+	StringSHA256    string
 	Reference       originalReference
 	Children        []preparedOriginal
 	ValueID         int64
