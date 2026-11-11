@@ -163,12 +163,35 @@ func TestBackgroundInterruptedToolAcceptsLateResultWithoutReordering(t *testing.
 		t.Fatal(err)
 	}
 	before := h.count("conversation_messages")
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var retained string
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT tool_json FROM background_replies WHERE turn_id=? AND item_id='tool'`, turn.TurnID).Scan(&retained)
+		if err == nil && retained != "" {
+			t.Fatal("published interrupted display kept a duplicate body")
+		}
+		if err == nil {
+			u, e := store.GetToolUse(t.Context(), tx.Q(), turn.TurnID, "tool")
+			if e != nil || u.Status != string(protocol.ToolInterrupted) {
+				t.Fatal("interrupted ToolUse lost its actual input/state", e)
+			}
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	record(protocol.ToolCompleted, "retained late result")
 	record(protocol.ToolRunning, "stale start")
 	if h.count("conversation_messages") != before {
 		t.Fatal("late tool duplicated its transcript item")
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var cache string
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT tool_json FROM background_replies WHERE turn_id=? AND item_id='tool'`, turn.TurnID).Scan(&cache); err != nil {
+			return err
+		}
+		if cache != "" {
+			t.Fatal("late published result kept a redundant background body")
+		}
 		u, err := store.GetToolUse(t.Context(), tx.Q(), turn.TurnID, "tool")
 		if err == nil && (u.Status != string(protocol.ToolCompleted) || u.Output != "retained late result") {
 			t.Fatal(u)

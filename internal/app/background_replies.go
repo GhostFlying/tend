@@ -201,6 +201,11 @@ func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b prot
 		if _, err := tx.Exec(ctx, `UPDATE background_replies SET published=1 WHERE batch_id=? AND thread_id=? AND turn_id=? AND item_id=?`, b.BatchID, r.thread, r.turn, r.item); err != nil {
 			return err
 		}
+		if r.kind == "tool_use" {
+			if _, err := tx.RetirePublishedBackgroundTool(ctx, b.BatchID, r.thread, r.turn, r.item); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
