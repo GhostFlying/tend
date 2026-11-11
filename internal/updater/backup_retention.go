@@ -1,12 +1,14 @@
 package updater
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -101,7 +103,7 @@ func writeBackupMetadata(cfg Config, op *Operation) error {
 		created = info.ModTime().UnixMilli()
 	}
 	record := protocol.BackupCheckpoint{ID: id, Directory: op.BackupDir, CreatedAtMillis: created, ManifestSHA256: manifest, Class: "checkpoint", Unknown: true}
-	return writeJSON(path, backupMetadata{Format: 1, InstanceID: cfg.InstanceID, Configuration: cfg, Source: op.Previous, Checkpoint: record})
+	return writeJSON(path, backupMetadata{Format: backupManifestFormat(op.Backups), InstanceID: cfg.InstanceID, Configuration: cfg, Source: op.Previous, Checkpoint: record})
 }
 
 func allocatedBytes(info fs.FileInfo) int64 {
@@ -143,8 +145,13 @@ func readCheckpoint(cfg Config, dir string) (protocol.BackupCheckpoint, error) {
 	if err != nil {
 		return record, err
 	}
-	if err = json.Unmarshal(raw, &record.Files); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&record.Files); err != nil {
 		return record, err
+	}
+	if err = decoder.Decode(new(any)); err != io.EOF {
+		return record, errors.New("updater: trailing checkpoint manifest content")
 	}
 	record.ManifestSHA256 = digestRaw(raw)
 	metadata, err := os.ReadFile(filepath.Join(dir, backupMetadataName))
@@ -153,7 +160,7 @@ func readCheckpoint(cfg Config, dir string) (protocol.BackupCheckpoint, error) {
 		if err = json.Unmarshal(metadata, &saved); err != nil {
 			return record, err
 		}
-		if saved.Format != 1 || saved.InstanceID != cfg.InstanceID || saved.Checkpoint.ID != id || saved.Checkpoint.ManifestSHA256 != record.ManifestSHA256 || digest(saved.Configuration.DataFiles) != digest(cfg.DataFiles) {
+		if (saved.Format != 1 && saved.Format != 2) || saved.Format < backupManifestFormat(record.Files) || saved.InstanceID != cfg.InstanceID || saved.Checkpoint.ID != id || saved.Checkpoint.ManifestSHA256 != record.ManifestSHA256 || digest(saved.Configuration.DataFiles) != digest(cfg.DataFiles) {
 			return record, errors.New("updater: checkpoint metadata identity differs")
 		}
 		files := record.Files
@@ -162,6 +169,18 @@ func readCheckpoint(cfg Config, dir string) (protocol.BackupCheckpoint, error) {
 		record.Files = files
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return record, err
+	} else if backupManifestFormat(record.Files) != 1 {
+		return record, errors.New("updater: multipart backup requires versioned checkpoint metadata")
+	}
+	for _, f := range record.Files {
+		if sharedBackupFile(f) {
+			if !f.Existed {
+				return record, errors.New("updater: missing file has shared backup objects")
+			}
+			if _, err := backupParts(cfg, f); err != nil {
+				return record, err
+			}
+		}
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -169,7 +188,7 @@ func readCheckpoint(cfg Config, dir string) (protocol.BackupCheckpoint, error) {
 	}
 	allowed := map[string]bool{"files.json": true, backupMetadataName: true}
 	for _, f := range record.Files {
-		if f.Existed && f.ObjectSHA256 == "" {
+		if f.Existed && !sharedBackupFile(f) {
 			allowed[f.Name] = true
 		}
 	}
@@ -352,6 +371,9 @@ func (s *Supervisor) backupPreview(ctx context.Context, policy protocol.BackupPo
 		for _, f := range r.Files {
 			if f.ObjectSHA256 != "" {
 				roots[f.ObjectSHA256] = true
+			}
+			for _, part := range f.ObjectParts {
+				roots[part.SHA256] = true
 			}
 		}
 	}
@@ -563,7 +585,7 @@ func (s *Supervisor) VerifyBackup(ctx context.Context, input protocol.BackupVeri
 	record.AllocatedBytes = 0
 	record.Decision = ""
 	record.Reasons = nil
-	metadata := backupMetadata{Format: 1, InstanceID: s.cfg.InstanceID, Configuration: s.cfg, Checkpoint: record}
+	metadata := backupMetadata{Format: backupManifestFormat(record.Files), InstanceID: s.cfg.InstanceID, Configuration: s.cfg, Checkpoint: record}
 	if prior, err := os.ReadFile(filepath.Join(dir, backupMetadataName)); err == nil {
 		var saved backupMetadata
 		if err = json.Unmarshal(prior, &saved); err != nil {
@@ -793,7 +815,7 @@ func removeCheckpoint(dir string, r protocol.BackupCheckpoint) error {
 	}
 	allowed := map[string]bool{"files.json": true, backupMetadataName: true}
 	for _, f := range r.Files {
-		if f.Existed && f.ObjectSHA256 == "" {
+		if f.Existed && !sharedBackupFile(f) {
 			allowed[f.Name] = true
 		}
 	}

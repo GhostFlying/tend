@@ -2525,9 +2525,18 @@ export interface BackupFile {
   existed: boolean;
   mode: number;
   name: string;
+  object_parts?: BackupObjectPart[];
   object_sha256?: string;
   path: string;
   sha256?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupObjectPart".
+ */
+export interface BackupObjectPart {
+  sha256: string;
+  size: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -2504,6 +2504,12 @@
         "name": {
           "type": "string"
         },
+        "object_parts": {
+          "items": {
+            "$ref": "#/definitions/BackupObjectPart"
+          },
+          "type": "array"
+        },
         "object_sha256": {
           "type": "string"
         },
@@ -2559,6 +2565,23 @@
         "reasons"
       ],
       "title": "BackupObject",
+      "type": "object"
+    },
+    "BackupObjectPart": {
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sha256",
+        "size"
+      ],
+      "title": "BackupObjectPart",
       "type": "object"
     },
     "BackupPolicy": {
