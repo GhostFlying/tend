@@ -28,6 +28,16 @@ type Session interface {
 	Close() error
 }
 
+// ReceiptHistoryPurpose selects a non-executing attachment to native history.
+// It must never resume a thread or change its persisted execution policy.
+const ReceiptHistoryPurpose = "receipt_history"
+
+// ThreadHistoryReader opens an original history without native execution or
+// configuration changes. Its handle rejects mutation and implements TurnReader.
+type ThreadHistoryReader interface {
+	ReadThreadHistory(context.Context, string) (Thread, error)
+}
+
 // ThreadForker creates disposable isolated conversations without changing the source.
 // ReleaseThread releases only forks created by this session. Callers must interrupt
 // an unfinished turn before release; native unloading may follow an idle delay.

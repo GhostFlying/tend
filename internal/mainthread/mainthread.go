@@ -642,6 +642,9 @@ func (m *Manager) threadConfig() harness.ThreadConfig {
 				cfg.Config[key] = value
 			}
 		}
+		if selected.ReceiptOnly || selected.RequireReceiptReader {
+			cfg.Purpose = harness.ReceiptHistoryPurpose
+		}
 		if selected.AppliedProvider != "" {
 			cfg.Config["model_provider"] = selected.AppliedProvider
 		}
@@ -797,7 +800,9 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThre
 			return nil, err
 		}
 		// Never replace a rejected thread, migrate its toolset or run a model.
-		return s.ResumeThread(ctx, id, m.threadConfig())
+		cfg := m.threadConfig()
+		cfg.Purpose = harness.ReceiptHistoryPurpose
+		return s.ResumeThread(ctx, id, cfg)
 	}
 
 	if environmentResumeOnly(s) && selected != nil && selected.Purpose == agentconfig.Consultation {

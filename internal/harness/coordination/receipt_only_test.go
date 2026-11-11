@@ -12,10 +12,10 @@ import (
 )
 
 type receiptNativeSession struct {
-	models, starts, resumes int
-	thread                  *receiptNativeThread
-	done                    chan struct{}
-	once                    sync.Once
+	models, starts, resumes, histories int
+	thread                             *receiptNativeThread
+	done                               chan struct{}
+	once                               sync.Once
 }
 
 func (s *receiptNativeSession) Models(context.Context) ([]harness.Model, error) {
@@ -32,6 +32,13 @@ func (s *receiptNativeSession) ResumeThread(_ context.Context, id string, cfg ha
 		return nil, harness.ErrRejected
 	}
 	s.thread.config = cfg
+	return s.thread, nil
+}
+func (s *receiptNativeSession) ReadThreadHistory(_ context.Context, id string) (harness.Thread, error) {
+	s.histories++
+	if id != "original-thread" {
+		return nil, harness.ErrRejected
+	}
 	return s.thread, nil
 }
 func (s *receiptNativeSession) Done() <-chan struct{} { return s.done }
@@ -74,7 +81,8 @@ func (t *receiptNativeThread) FindTurn(_ context.Context, identity, turn string)
 }
 
 func TestReceiptOnlyDriverPreservesAppliedConfigurationWithoutCatalog(t *testing.T) {
-	native := &receiptNativeSession{thread: &receiptNativeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
+	original := harness.ThreadConfig{Model: "original-applied-model", Sandbox: "danger-full-access", ApprovalPolicy: "never", Config: map[string]any{"model_provider": "original-provider", "model_reasoning_effort": "high"}}
+	native := &receiptNativeSession{thread: &receiptNativeThread{events: make(chan harness.Event), config: original}, done: make(chan struct{})}
 	d := Driver{RequireReceiptReader: true, Session: native, Profile: protocol.ExecutionProfile{Model: "original-catalog-alias", Effort: "low"}}
 	defer d.Handle(t.Context(), "close", json.RawMessage(`{}`))
 	raw, _ := json.Marshal(Request{ThreadID: "original-thread", Config: harness.ThreadConfig{Model: "original-applied-model", Sandbox: "read-only", ApprovalPolicy: "never", Config: map[string]any{"model_provider": "original-provider", "model_reasoning_effort": "high"}}})
@@ -82,10 +90,10 @@ func TestReceiptOnlyDriverPreservesAppliedConfigurationWithoutCatalog(t *testing
 		t.Fatal("receipt-only resume required current model readiness", err)
 	}
 	got := native.thread.ModelDefaults()
-	if got != (harness.ModelSelection{Model: "original-applied-model", Provider: "original-provider", Effort: "high"}) || native.models != 0 || native.starts != 0 || native.resumes != 1 {
+	if got != (harness.ModelSelection{Model: "original-applied-model", Provider: "original-provider", Effort: "high"}) || native.models != 0 || native.starts != 0 || native.resumes != 0 || native.histories != 1 || native.thread.config.Sandbox != original.Sandbox {
 		t.Fatal("receipt resume changed original configuration", got, native.models, native.starts, native.resumes)
 	}
-	if result := native.thread.config.OnToolCall(t.Context(), harness.ToolCall{Tool: "must_not_execute"}); result.Success || result.Text == "" {
+	if result := d.tool(t.Context(), harness.ToolCall{Tool: "must_not_execute"}); result.Success || result.Text == "" {
 		t.Fatal("receipt driver executed a native tool callback", result)
 	}
 	read, _ := json.Marshal(Request{ThreadID: "original-thread", MessageID: "original-repair", TurnID: "original-turn"})
@@ -119,7 +127,7 @@ func TestReceiptOnlyDriverRejectsMissingOriginalResumeConfiguration(t *testing.T
 				request.Config.Model = ""
 			}
 			raw, _ := json.Marshal(request)
-			if _, err := d.Handle(t.Context(), "resume", raw); !errors.Is(err, harness.ErrRejected) || native.models != 0 || native.resumes != 0 || native.starts != 0 {
+			if _, err := d.Handle(t.Context(), "resume", raw); !errors.Is(err, harness.ErrRejected) || native.models != 0 || native.resumes != 0 || native.starts != 0 || native.histories != 0 {
 				t.Fatal("missing original configuration reached native lifecycle", err, native.models, native.resumes, native.starts)
 			}
 		})
