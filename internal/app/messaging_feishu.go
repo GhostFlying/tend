@@ -102,7 +102,18 @@ func (c feishuInput) Authorize(ctx context.Context, x *Exec, q store.Querier) er
 }
 func (c feishuInput) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	m := c.Input
-	p := protocol.MessagingInput{Body: m.Text}
+	var existing, state string
+	if err := tx.Q().QueryRowContext(ctx, `SELECT message_id,state FROM feishu_inputs WHERE event_id=? AND owner=? AND binding_revision=?`, m.EventID, x.Principal.Subject, c.Revision).Scan(&existing, &state); err != nil {
+		return Outcome{}, err
+	}
+	if existing != "" {
+		return Outcome{NoEffect: true, Result: map[string]any{"message_id": existing}}, nil
+	}
+	if state == "failed" || state == "unknown" {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "original provider input requires reconciliation")
+	}
+
+	p := protocol.MessagingInput{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, "feishu:"+m.AppID, m.EventID), Body: m.Text}
 	if m.ParentID != "" {
 		if err := tx.Q().QueryRowContext(ctx, `SELECT message_id FROM feishu_inputs WHERE external_message_id=? AND message_id<>'' AND owner=? AND binding_revision=? UNION ALL SELECT d.message_id FROM feishu_deliveries f JOIN messaging_deliveries d USING(delivery_id) WHERE f.external_message_id=? AND d.channel_id='feishu' AND d.binding_revision=? LIMIT 1`, m.ParentID, x.Principal.Subject, c.Revision, m.ParentID, c.Revision).Scan(&p.ReplyTo); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -123,7 +134,7 @@ func (c feishuInput) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 // bindFeishuInputSource uses the authenticated command's durable request identity.
 // It runs before any synchronous acknowledgement publishes a reply to this input.
 func bindFeishuInputSource(ctx context.Context, x *Exec, tx *store.Tx, id string) error {
-	result, err := tx.Exec(ctx, `UPDATE feishu_inputs SET message_id=? WHERE request_id=? AND owner=? AND (message_id='' OR message_id=?)`, id, x.Env.RequestID, x.Principal.Subject, id)
+	result, err := tx.Exec(ctx, `UPDATE feishu_inputs SET message_id=?,state='succeeded' WHERE request_id=? AND owner=? AND (message_id='' OR message_id=?)`, id, x.Env.RequestID, x.Principal.Subject, id)
 	if err != nil {
 		return err
 	}
@@ -182,7 +193,7 @@ func (a *App) ReceiveFeishu(ctx context.Context, m FeishuIncoming) (protocol.Ope
 	if m.ParentID != "" {
 		var pending bool
 		if err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM feishu_inputs parent LEFT JOIN request_records r ON r.domain='owner' AND r.request_id=parent.request_id WHERE parent.external_message_id=? AND parent.owner=? AND parent.binding_revision=? AND parent.message_id='' AND (r.request_id IS NULL OR r.status IN ('accepted','unknown')))`, m.ParentID, owner, revision).Scan(&pending)
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM feishu_inputs parent WHERE parent.external_message_id=? AND parent.owner=? AND parent.binding_revision=? AND parent.message_id='' AND parent.state IN ('pending','accepted','unknown'))`, m.ParentID, owner, revision).Scan(&pending)
 		}); err != nil {
 			return protocol.Operation{}, err
 		}
@@ -192,7 +203,20 @@ func (a *App) ReceiveFeishu(ctx context.Context, m FeishuIncoming) (protocol.Ope
 	}
 	payload, _ := json.Marshal(m)
 	env := &protocol.Envelope{RequestID: request, Operation: "messaging.feishu_input", Target: protocol.Target{Type: "message"}, Payload: payload}
-	return a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalOwner, Subject: owner, Client: "feishu"}, env, feishuInput{Input: m, Revision: revision})
+	op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalOwner, Subject: owner, Client: "feishu"}, env, feishuInput{Input: m, Revision: revision})
+	if err == nil && op.Status == protocol.OpFailed {
+		code := ""
+		if op.Error != nil {
+			code = string(op.Error.Code)
+		}
+		if persistErr := a.write(ctx, func(tx *store.Tx) error {
+			_, e := tx.Exec(ctx, `UPDATE feishu_inputs SET state='failed',failure_code=? WHERE event_id=? AND message_id='' AND state='pending'`, code, m.EventID)
+			return e
+		}); persistErr != nil {
+			return protocol.Operation{}, persistErr
+		}
+	}
+	return op, err
 }
 
 // FeishuPart freezes provider identity and the accepted binding generation.
@@ -304,7 +328,7 @@ func (a *App) ValidateFeishuPart(ctx context.Context, p FeishuPart) error {
 func (a *App) PendingFeishuInputs(ctx context.Context) ([]FeishuIncoming, error) {
 	result := []FeishuIncoming{}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT i.payload FROM feishu_inputs i JOIN feishu_binding b ON b.singleton=1 AND b.enabled=1 AND b.revision=i.binding_revision AND b.owner=i.owner WHERE NOT EXISTS(SELECT 1 FROM request_records r WHERE r.domain='owner' AND r.request_id=i.request_id) AND NOT EXISTS(SELECT 1 FROM feishu_inputs parent LEFT JOIN request_records parent_request ON parent_request.domain='owner' AND parent_request.request_id=parent.request_id WHERE parent.external_message_id=json_extract(i.payload,'$.ParentID') AND parent.owner=i.owner AND parent.binding_revision=i.binding_revision AND parent.message_id='' AND (parent_request.request_id IS NULL OR parent_request.status IN ('accepted','unknown'))) ORDER BY i.rowid LIMIT 50`)
+		rows, err := tx.Q().QueryContext(ctx, `SELECT i.payload FROM feishu_inputs i JOIN feishu_binding b ON b.singleton=1 AND b.enabled=1 AND b.revision=i.binding_revision AND b.owner=i.owner WHERE i.state='pending' AND NOT EXISTS(SELECT 1 FROM feishu_inputs parent WHERE parent.external_message_id=json_extract(i.payload,'$.ParentID') AND parent.owner=i.owner AND parent.binding_revision=i.binding_revision AND parent.message_id='' AND parent.state IN ('pending','accepted','unknown')) ORDER BY i.rowid LIMIT 50`)
 		if err != nil {
 			return err
 		}
@@ -336,7 +360,7 @@ func (a *App) FeishuInputs(ctx context.Context, after int64, limit int, status s
 		return page, protocol.Errorf(protocol.CodeInvalidRequest, "invalid Feishu input status")
 	}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT i.rowid,i.event_id,i.external_message_id,i.request_id,i.binding_revision,i.message_id,COALESCE(r.status,'pending') FROM feishu_inputs i LEFT JOIN request_records r ON r.domain='owner' AND r.request_id=i.request_id WHERE i.rowid>? AND (?='' OR COALESCE(r.status,'pending')=?) ORDER BY i.rowid LIMIT ?`, after, status, status, limit+1)
+		rows, err := tx.Q().QueryContext(ctx, `SELECT i.rowid,i.event_id,i.external_message_id,i.request_id,i.binding_revision,i.message_id,i.state FROM feishu_inputs i WHERE i.rowid>? AND (?='' OR i.state=?) ORDER BY i.rowid LIMIT ?`, after, status, status, limit+1)
 		if err != nil {
 			return err
 		}

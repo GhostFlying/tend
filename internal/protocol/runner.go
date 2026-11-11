@@ -44,6 +44,7 @@ type HelloPayload struct {
 // host whose configured worker changed while its runner kept running
 // does not take work it would run with the wrong harness.
 type ClaimPayload struct {
+	RunID             string         `json:"run_id"`
 	Runtime           *RunnerRuntime `json:"runtime,omitempty"`
 	WorkspaceProtocol int64          `json:"workspace_protocol,omitempty"`
 	Worker            WorkerKind     `json:"worker,omitempty"`

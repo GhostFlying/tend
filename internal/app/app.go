@@ -1,13 +1,8 @@
-// Package app is the use-case layer. Every side-effecting request goes
-// through App.Execute, which deduplicates it by request ID, authorizes it and
-// applies it in one transaction together with its events and outbox
-// messages.
-//
-// Commands that tend issues on its own behalf under the system principal,
-// such as lease expiry sweeps and startup reconciliation, use a fresh
-// request ID for every attempt. Their idempotence comes from state
-// preconditions checked inside Apply, for example "only if the lease is
-// still active and has expired", not from the request record.
+// Package app is the use-case layer. App.Execute authorizes each operation
+// and commits its business changes, events and outbox messages atomically.
+// Commands make retries safe through actual object identities, unique business
+// keys, state preconditions and control revisions. Request IDs are tracing and
+// source provenance; no generic request response ledger is maintained.
 package app
 
 import (
@@ -31,8 +26,8 @@ type Command interface {
 	// Operation is the envelope operation the command handles.
 	Operation() string
 	// Authorize decides whether the principal may perform the request. It
-	// runs on every execution, including replays of recorded requests, so
-	// revoked access cannot read old results.
+	// runs on every execution, including retries, so revoked access cannot
+	// recover data through an earlier transport identity.
 	Authorize(ctx context.Context, x *Exec, q store.Querier) error
 	// Apply performs the request inside the write transaction.
 	Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error)
@@ -40,6 +35,8 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	repeatedPhysicalStop          bool
+	configuredOwner               string
 	associationDisplayOnly        bool // Keep narration bookkeeping separate from owner authority.
 	requestDomain                 string
 	managedHostedRuntimes         map[string]bool
@@ -120,6 +117,7 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	nativeCalls                nativeCallBroker
 	mainOwner                  string
 	managedHostedRuntimes      map[string]bool
 	extensionValidator         func(context.Context, protocol.ExtensionRelease, extensions.ContentSource, []extensions.ValidationUse) error
@@ -166,8 +164,7 @@ func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Optio
 	return a
 }
 
-// businessCodes are deterministic rejections: the same request would be
-// rejected the same way again, so the failure is recorded and replayed.
+// businessCodes are domain rejections returned without committing partial changes.
 var businessCodes = map[protocol.Code]bool{
 	protocol.CodeInvalidRequest:    true,
 	protocol.CodeStaleRevision:     true,
@@ -178,22 +175,14 @@ var businessCodes = map[protocol.Code]bool{
 
 const applySavepoint = "apply"
 
-// Execute runs a side-effecting request exactly once per (dedup domain,
-// request ID).
-//
-// The returned error covers rejections that are not recorded: malformed
-// envelopes, payload conflicts, authorization failures and internal errors.
-// Recorded business failures come back as an Operation with status failed,
-// and replaying the same request returns the same Operation.
+// Execute validates and atomically applies a business command. Idempotency belongs
+// to business identities, state transitions and CAS, not transport request history.
 func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.Envelope, cmd Command) (protocol.Operation, error) {
 	if call, ok := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); ok && p.Kind == protocol.PrincipalOwner {
 		if p.Subject != a.mainOwner {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "owner delegation does not match server binding")
 		}
 		p = call.Actor
-		if call.ReplayPrincipal != nil {
-			p = *call.ReplayPrincipal
-		}
 		preparation, _ := ctx.Value(ownerPreparationKey{}).(bool)
 		step := int64(0)
 		if !preparation {
@@ -210,23 +199,8 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	if env.Operation != cmd.Operation() {
 		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not handled here", env.Operation)
 	}
-	hash, err := protocol.PayloadHash(env)
-	if err != nil {
-		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "payload cannot be hashed")
-	}
-	principalJSON, err := json.Marshal(p)
-	if err != nil {
-		return protocol.Operation{}, fmt.Errorf("app: encode principal: %w", err)
-	}
 	domain := p.DedupDomain()
-	if delegated, ok := cmd.(ownerExecutionCommand); ok && delegated.call.RequestDomain != "" {
-		call := delegated.call
-		if call.RequestDomain != "owner" && call.RequestDomain != p.DedupDomain() {
-			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "original request namespace is not owned by this caller")
-		}
-		domain = call.RequestDomain
-	}
-	x := &Exec{managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	x.requestDomain = domain
 	if delegated, ok := cmd.(ownerExecutionCommand); ok {
 		x = delegated.adapted(x)
@@ -240,6 +214,12 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
+	if op, handled, err := a.nativeObservation(ctx, x, cmd); handled {
+		return op, err
+	}
+	if x.Principal.Kind == protocol.PrincipalOwner {
+		ctx = store.WithBusinessOwner(ctx, x.Principal.Subject)
+	}
 	ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: x.TraceID})
 
 	if _, claim := cmd.(Claim); claim && p.Kind == protocol.PrincipalRunner {
@@ -252,7 +232,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		}
 	}
 
-	ctx, err = a.stageRetainedInput(ctx, env, domain)
+	ctx, err := a.stageRetainedInput(ctx, env, domain)
 	if err != nil {
 		return protocol.Operation{}, err
 	}
@@ -265,33 +245,11 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	)
 	err = a.write(ctx, func(tx *store.Tx) error {
 
-		rec, err := store.GetRequest(ctx, tx.Q(), domain, env.RequestID)
-		if p.Kind == protocol.PrincipalOwner && errors.Is(err, store.ErrNotFound) {
-			rec, err = store.GetOwnerRequest(ctx, tx.Q(), env.RequestID)
-			if err == nil {
-				domain = rec.Domain
-				x.requestDomain = domain
-			}
-		}
-		switch {
-		case err == nil:
-			if rec.PayloadHash != hash {
-				return protocol.Errorf(protocol.CodeConflictPayload, "request_id was already used for a different request")
-			}
-			if err := cmd.Authorize(ctx, x, tx.Q()); err != nil {
-				return err
-			}
-			op = operationOf(rec)
-			return nil
-		case !errors.Is(err, store.ErrNotFound):
-			return err
-		}
-
 		if err := cmd.Authorize(ctx, x, tx.Q()); err != nil {
 			return err
 		}
-		// Committed receipts above remain replayable during recovery. The fence
-		// applies to new actions, with a narrow exception for retained native facts.
+		// Recovery permits only actual existing execution/receipt facts. New
+		// allocations and external actions remain fenced.
 		if p.Kind == protocol.PrincipalOwner || p.Kind == protocol.PrincipalMainAgent || p.Kind == protocol.PrincipalBackgroundAgent || env.Operation == protocol.OpRunnerClaim || p.Kind == protocol.PrincipalSystem && recoveryOwnerControl(env.Operation) {
 			fenced, err := a.recoveryStartupFenced(ctx, tx.Q())
 			if err != nil {
@@ -307,12 +265,8 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 				}
 			}
 		}
-		rec = store.RequestRecord{
-			Domain: domain, RequestID: env.RequestID, Operation: env.Operation, PayloadHash: hash,
-			PrincipalJSON: string(principalJSON), ParentRequestID: env.ParentRequestID, TraceID: x.TraceID,
-			Reason: env.Reason, CreatedAt: x.Now.UnixMilli(),
-		}
-		if delegated, ok := cmd.(ownerExecutionCommand); ok && delegated.call.ReplayPrincipal == nil && !delegated.preparation {
+		op = protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}
+		if delegated, ok := cmd.(ownerExecutionCommand); ok && !delegated.preparation {
 			if err := delegated.prepare(ctx, x, tx); err != nil {
 				return err
 			}
@@ -337,38 +291,18 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if len(out.Events) > 0 || len(out.Outbox) > 0 {
 				return fmt.Errorf("app: %s returned a no-effect outcome with events or outbox messages", env.Operation)
 			}
-			if p.Kind == protocol.PrincipalMainAgent && coordinationWrite(env.Operation) {
-				// Preserve no-effect business semantics, but durably retain the
-				// exact receipt so retries cannot observe a later revision.
-				if err := tx.RollbackTo(ctx, applySavepoint); err != nil {
-					return err
-				}
-				if err := coordinationReceipt(ctx, x, tx, &out); err != nil {
-					return err
-				}
-				result, err := json.Marshal(out.Result)
-				if err != nil {
-					return err
-				}
-				rec.Status, rec.ResultJSON = protocol.OpSucceeded, string(result)
-				endInsert := tx.ObservePhase(store.WriteRequestInsert)
-				insertErr := tx.InsertRequest(ctx, rec)
-				endInsert()
-				if insertErr != nil {
-					return insertErr
-				}
-				op = operationOf(rec)
-				return nil
-			}
 			result, err := json.Marshal(out.Result)
 			if err != nil {
 				return fmt.Errorf("app: encode result: %w", err)
 			}
 			op = protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: result}
+			if out.Accepted {
+				op.Status = protocol.OpAccepted
+			}
 			return errNoEffect
 		}
 		if applyErr == nil {
-			applyErr = a.persistOutcome(ctx, x, tx, out, &rec)
+			applyErr = a.persistOutcome(ctx, x, tx, out, &op)
 			if applyErr == nil {
 				endRefresh := tx.ObservePhase(store.WriteManagerRefresh)
 				applyErr = refreshAffectedManagers(ctx, x, tx)
@@ -395,18 +329,24 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if !ok || !businessCodes[pe.Code] && !(delegation && pe.Code == protocol.CodeForbidden) {
 				return applyErr
 			}
-			// Undo the partial apply but keep the transaction, so the
-			// failure is recorded atomically with nothing else.
+			// Undo partial effects. A real failed delegation or aggregate conflict
+			// counter may still be recorded; no generic error receipt is stored.
 			if err := tx.RollbackTo(ctx, applySavepoint); err != nil {
 				return err
 			}
-			rec.Status, rec.ErrorCode, rec.ErrorMessage, rec.ErrorDetails = protocol.OpFailed, string(pe.Code), pe.Message, string(pe.Details)
-			rec.ResultJSON = ""
+			op.Status, op.Error, op.Result = protocol.OpFailed, pe, nil
+			if env.Operation == "conversation.withdraw_message" && (pe.Code == protocol.CodeStaleRevision || pe.Code == protocol.CodeInvalidTransition) {
+				if err := tx.RecordWithdrawalConflict(ctx); err != nil {
+					return err
+				}
+				applied = true
+			}
+
 			recorded, err := recordDelegationAttempt(ctx, x, tx, cmd, pe)
 			if err != nil {
 				return err
 			}
-			applied = recorded
+			applied = applied || recorded
 		} else {
 			if _, err := recordDelegationAttempt(ctx, x, tx, cmd, nil); err != nil {
 				return err
@@ -421,19 +361,19 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			}
 			applied = true
 		}
-		endInsert := tx.ObservePhase(store.WriteRequestInsert)
-		insertErr := tx.InsertRequest(ctx, rec)
-		endInsert()
-		if insertErr != nil {
-			return insertErr
-		}
-		op = operationOf(rec)
 		return nil
 	})
 	// Compare exactly: a rollback failure joined with the sentinel must
 	// surface, since it usually means the connection is broken.
 	if err != nil && err != errNoEffect {
 		return protocol.Operation{}, err
+	}
+	if err == nil && op.Error == nil && env.Operation == protocol.OpManagerNativeReply {
+		var reply protocol.ManagerNativeReply
+		if json.Unmarshal(env.Payload, &reply) == nil {
+			a.nativeCalls.deliver(env.Target.ID, reply)
+			a.changes.Notify()
+		}
 	}
 	if queued && a.notifier != nil {
 		a.notifier.Notify()
@@ -451,7 +391,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	return op, nil
 }
 
-func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Outcome, rec *store.RequestRecord) error {
+func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Outcome, op *protocol.Operation) error {
 	defer tx.ObservePhase(store.WritePersistOutcome)()
 	if err := reconcileDecisionDependencies(ctx, x, tx, &out); err != nil {
 		return err
@@ -649,26 +589,12 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 	if err != nil {
 		return fmt.Errorf("app: encode result: %w", err)
 	}
-	rec.ResultJSON = string(result)
-	rec.Status = protocol.OpSucceeded
+	op.Result = result
+	op.Status = protocol.OpSucceeded
 	if out.Accepted {
-		rec.Status = protocol.OpAccepted
+		op.Status = protocol.OpAccepted
 	}
 	return nil
-}
-
-func operationOf(r store.RequestRecord) protocol.Operation {
-	op := protocol.Operation{RequestID: r.RequestID, Status: r.Status}
-	if r.ResultJSON != "" {
-		op.Result = json.RawMessage(r.ResultJSON)
-	}
-	if r.ErrorCode != "" {
-		op.Error = &protocol.Error{Code: protocol.Code(r.ErrorCode), Message: r.ErrorMessage}
-		if r.ErrorDetails != "" {
-			op.Error.Details = json.RawMessage(r.ErrorDetails)
-		}
-	}
-	return op
 }
 
 // errNotFound maps a store miss to the protocol code and leaves other

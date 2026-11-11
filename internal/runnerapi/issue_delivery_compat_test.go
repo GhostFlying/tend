@@ -24,6 +24,7 @@ func TestIssueDeliveryObserverPreservesSupportedRunnerProtocols(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				target, raw = composeFixtureBusinessInput(t, e.ids, command.Operation(), target, json.RawMessage(raw))
 				op, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, command)
 				if err != nil || op.Status != protocol.OpSucceeded {
 					t.Fatal(op, err)

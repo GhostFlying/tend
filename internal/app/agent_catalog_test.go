@@ -61,7 +61,7 @@ func TestAgentCatalogSeparatesRegistrationExecutorsAndPresence(t *testing.T) {
 	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	requests, events, outbox := h.count("request_records"), h.count("events"), h.count("outbox")
+	hosts, events, outbox := h.count("hosts"), h.count("events"), h.count("outbox")
 	catalog, err := h.app.RunnerAgentCatalog(t.Context(), "linux-1")
 	if err != nil || !catalog.Online || catalog.Current.State != "registered_staged" || catalog.Current.PublicSHA256 != hash || !reflect.DeepEqual(catalog.Executors, runtime.AgentExecutors) || catalog.Projection.Agents[0].Availability.Available {
 		t.Fatal("registration or actual observation overwritten", catalog, err)
@@ -81,7 +81,7 @@ func TestAgentCatalogSeparatesRegistrationExecutorsAndPresence(t *testing.T) {
 	if err != nil || stale.Online || !reflect.DeepEqual(stale.Executors, catalog.Executors) || stale.LastHeartbeatAtMillis != catalog.LastHeartbeatAtMillis {
 		t.Fatal("reading renewed presence or erased last observation", stale, err)
 	}
-	if h.count("request_records") != requests || h.count("events") != events || h.count("outbox") != outbox {
+	if h.count("hosts") != hosts || h.count("events") != events || h.count("outbox") != outbox {
 		t.Fatal("catalog read wrote business state")
 	}
 	h.withHosts("linux-2")

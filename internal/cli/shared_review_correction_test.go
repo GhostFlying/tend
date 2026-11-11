@@ -45,7 +45,7 @@ func TestIssueReviewCorrectionRetainsActualReportAndOriginalRequest(t *testing.T
 		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: original.RequestID, Status: protocol.OpSucceeded}})
 	})
 	e.out.Reset()
-	if code := e.main("issue", "replay", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
+	if code := e.main("operation", "submit", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
 		t.Fatal(code, e.errOut.String(), f.requests)
 	}
 }

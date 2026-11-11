@@ -18,7 +18,8 @@ func TestFault_ExplicitMissingTitleCorrectionRetainsFailureAndSettles(t *testing
 			p.ExpectedSourceRevision = rev(1)
 			p.Plan.Title = ""
 			cmd := CanonicalOwnerIssueCommand{Action: "create"}
-			failed := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
+			failed := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd)
 			expectWorkCode(t, failed, protocol.CodeInvalidRequest)
 			p.Plan.Title = "Repair the PWA"
 			p.CorrectsRequestID = failed.RequestID
@@ -29,7 +30,7 @@ func TestFault_ExplicitMissingTitleCorrectionRetainsFailureAndSettles(t *testing
 				p.Plan.Intent = "Publish an unrelated replacement"
 			case "unknown":
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE request_id=?`, failed.RequestID)
+					_, err := tx.Exec(t.Context(), `UPDATE coordination_delegation_attempts SET error_json='{"code":"unknown_outcome"}' WHERE request_id=?`, failed.RequestID)
 					return err
 				}); err != nil {
 					t.Fatal(err)
@@ -37,7 +38,7 @@ func TestFault_ExplicitMissingTitleCorrectionRetainsFailureAndSettles(t *testing
 			case "foreign_request":
 				p.CorrectsRequestID = "unrelated-request"
 			}
-			good := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, p, cmd)
+			good := hostedEffect(t, h, mainAgent, turn, 2, target, nil, p, cmd)
 			if kind == "explicit" || kind == "unlinked" {
 				if good.Status != protocol.OpSucceeded {
 					t.Fatal(good)
@@ -53,9 +54,12 @@ func TestFault_ExplicitMissingTitleCorrectionRetainsFailureAndSettles(t *testing
 				if (reason == "") != (kind == "explicit") {
 					t.Fatal(kind, reason)
 				}
-				original, err := store.GetRequest(t.Context(), tx.Q(), mainAgent.DedupDomain(), failed.RequestID)
-				if err == nil && kind != "unknown" && (original.Status != protocol.OpFailed || original.ErrorCode != "invalid_request") {
-					t.Fatal("original failure overwritten", original)
+				var code string
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT json_extract(error_json,'$.code') FROM coordination_delegation_attempts WHERE request_id=?`, failed.RequestID).Scan(&code); err != nil {
+					return err
+				}
+				if kind != "unknown" && code != "invalid_request" {
+					t.Fatal("original no-effect failure changed", code)
 				}
 				if kind == "explicit" {
 					var raw string
@@ -100,7 +104,8 @@ func TestFault_DelegationCorrectionChainRequiresEveryValidatedEdge(t *testing.T)
 				p.Plan.Intent = ""
 			}
 			cmd := CanonicalOwnerIssueCommand{Action: "create"}
-			first := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
+			first := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd)
 			expectWorkCode(t, first, protocol.CodeInvalidRequest)
 			p.CorrectsRequestID = first.RequestID
 			if valid {
@@ -108,14 +113,14 @@ func TestFault_DelegationCorrectionChainRequiresEveryValidatedEdge(t *testing.T)
 			} else {
 				p.Plan.Intent = "Replace the established intent"
 			}
-			second := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, p, cmd)
+			second := hostedEffect(t, h, mainAgent, turn, 2, target, nil, p, cmd)
 			expectWorkCode(t, second, protocol.CodeInvalidRequest)
 			p.CorrectsRequestID = second.RequestID
 			p.Plan.Title = "Repair the PWA"
 			if valid {
 				p.Plan.Intent = "Repair the PWA without widening scope"
 			}
-			third := hostedEffect(t, h, mainAgent, turn, 3, protocol.Target{Type: "issue"}, nil, p, cmd)
+			third := hostedEffect(t, h, mainAgent, turn, 3, target, nil, p, cmd)
 			if third.Status != protocol.OpSucceeded {
 				t.Fatal(third)
 			}

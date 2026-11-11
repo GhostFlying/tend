@@ -201,17 +201,6 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// request reads the outcome of one of the owner's requests.
-func (s *Server) request(w http.ResponseWriter, r *http.Request) {
-	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
-		record, err := store.GetOwnerRequest(r.Context(), q, r.PathValue("id"))
-		if err != nil {
-			return nil, err
-		}
-		return views.Request(r.Context(), q, record.Domain, r.PathValue("id"))
-	})
-}
-
 // runLogs reads a page of a run's logs after a sequence number. With wait,
 // a read that finds nothing new waits up to that many seconds, at most
 // maxLogWait, for logs to arrive or the run to end, unless it has ended.

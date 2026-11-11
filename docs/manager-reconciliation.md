@@ -70,9 +70,10 @@ CLI 保留 JSON 原字段，不替换原证明或自动刷新 revision。可选�
 额外权限。flags 输入的 `--reason` 同时进入 payload 与 Envelope；完整 JSON 输入下，
 `--reason` 仅设置 Envelope reason，JSON 内的 `reason` 保持原值。
 
-发送前加 `--dry-run` 可导出完整 Envelope，使用 `tend request replay --file ENVELOPE_FILE`
-重试同一请求。若响应未知或网络超时，保留完整原 JSON、revision 和 request ID，
-先查询原 request，再用同一请求续账。默认收束模式因原业务回执尚未对账而返回
+发送前加 `--dry-run` 可导出完整业务 Envelope。响应未知或网络超时时，保留原 Run、
+证明、revision 与 JSON，先通过本页只读 reconciliation 核对真实状态；确认仍需提交后
+才使用 `tend operation submit --file ENVELOPE_FILE` 单次发送，不重放未知外部动作。
+默认收束模式因原业务回执尚未对账而返回
 `unknown_outcome` 时不发生收束；回执真正归账后仍可用该原请求继续。切换模式或改变
 证明属于新动作，应使用新 request ID；不能改变已发请求的 payload 规避未知结果。
 

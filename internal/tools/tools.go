@@ -123,7 +123,6 @@ var tools = []tool{
 	{"artifacts_read", "Read an artifact: repository commits, optional Markdown report with evidence and uncertainties, delivery file manifest, and independent verdicts with exact durable evidence file manifests.", (*Service).artifactsRead},
 	{"attachments_read", "Read an original conversation attachment by file_id. Returns metadata, a bounded UTF-8 text window and a hosted local path or download command. Binary originals, including full animated GIFs, remain unchanged; do not infer their contents from metadata. Workers discover their Issue's retained originals through read_context and fetch them with download_file; spec.inputs records starting input snapshots and is not a reading whitelist.", (*Service).attachmentsRead},
 	{"files_read", "Read a bounded UTF-8 text window of a finalized delivery or acceptance evidence file. Use the exact file_id from the artifact or acceptance manifest; a scratch path is not a durable file. Binary files return metadata only.", (*Service).filesRead},
-	{"requests_read", "Look up the outcome of one of your earlier requests instead of repeating it.", (*Service).requestsRead},
 	{"repos_list", "List registered repositories with base candidates and eligible hosts, workspace templates, and host worker capabilities. Use this registry to choose task workspaces; runners resolve filesystem locations. A retired repository is not a new-task target.", (*Service).reposList},
 	{"tend_context", "Show tend's whole ledger again as a full snapshot.", (*Service).tendContext},
 }
@@ -287,6 +286,11 @@ func (s *Service) execute(ctx context.Context, c Call, op string, target protoco
 		if requestID, err = s.app.NativeRequestID(ctx, "harness:"+c.Principal.Subject, c.Native); err != nil {
 			return nil, err
 		}
+	}
+	target = nativeCreationTarget(c, op, target)
+	body, err = nativePayloadIdentities(c, op, body)
+	if err != nil {
+		return nil, err
 	}
 	env := &protocol.Envelope{
 		RequestID: requestID, ParentRequestID: c.ParentRequestID, Operation: op, Target: target,
@@ -511,5 +515,5 @@ func (s *Service) decisionsResolve(ctx context.Context, c Call) (any, error) {
 var repairTools = map[string]bool{
 	"conversation_turn_wait": true, "conversation_turn_read": true, "conversation_turn_commit": true, "conversation_associate": true,
 	"conversation_read":  true,
-	"agent_rollout_read": true, "attachments_read": true, "requests_read": true,
+	"agent_rollout_read": true, "attachments_read": true,
 }

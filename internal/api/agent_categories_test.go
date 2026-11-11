@@ -16,10 +16,12 @@ func TestAgentCategoryOwnerOperation(t *testing.T) {
 	if status != http.StatusOK || res.Operation == nil || res.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("category create=%d %+v", status, res)
 	}
-	status, replay := e.op(token, env)
-	if status != http.StatusOK || replay.Operation == nil || string(replay.Operation.Result) != string(res.Operation.Result) {
-		t.Fatal("owner retry changed category", status, replay)
+	assertOwnerStaleHTTP(t, e, token, env)
+	var current protocol.AgentCategory
+	if status := e.do("GET", "/api/v1/categories/planner", token, nil, &current); status != http.StatusOK || current.Revision != 1 || current.Title != "Planner" {
+		t.Fatal("original category changed", status, current)
 	}
+
 }
 
 func TestAgentCategoryReadUsesOwnerAuthorization(t *testing.T) {

@@ -18,7 +18,8 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	}
 	action := args[0]
 	fs := newFlags(e, kind+" "+action)
-	data := fs.String("data", "", "JSON payload")
+	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
+	data := fs.String("data", "", "JSON payload; retained message input includes its original message_id")
 	file := fs.String("file", "", "JSON payload file or - for stdin")
 	request := fs.String("request-id", "", "original request identity for an identical retry")
 	revision := fs.Int64("revision", -1, "original task control revision (run message only)")
@@ -98,7 +99,7 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 			return usagef("conversation consult takes its registered agent_ref and title in the JSON payload")
 		}
 		operation = "conversation.consult"
-		target.Type = "conversation"
+		target = protocol.Target{Type: "conversation", ID: *identity}
 	case "conversation promote":
 		if len(pos) != 1 {
 			return usagef("conversation promote needs the exact consultation ID and selected source versions")
@@ -128,9 +129,13 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	default:
 		return usagef("unknown %s action %q", kind, action)
 	}
+	if *identity != "" && operation != "conversation.consult" {
+		return usagef("--id is only valid for consultation creation")
+	}
 	if operation != protocol.OpRunsSendMessage && *revision != -1 {
 		return usagef("revision is only valid for a run supplement")
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}
@@ -140,6 +145,9 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	env := protocol.Envelope{RequestID: *request, Operation: operation, Target: target, Payload: body, Reason: *reason}
 	if *revision >= 0 {
 		env.ExpectedControlRevision = revision
+	}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
 	}
 	if *dry {
 		return o.printJSON(env)
@@ -151,7 +159,7 @@ func sendDirectEnvelope(ctx context.Context, o owner, env protocol.Envelope) err
 	if env.ExpectedControlRevision != nil {
 		fmt.Fprintf(o.e.Stderr, " --revision %d", *env.ExpectedControlRevision)
 	}
-	fmt.Fprintln(o.e.Stderr, "; preserve this identity and payload for any retry")
+	fmt.Fprintf(o.e.Stderr, "; %s\n", businessRecovery(env))
 	result, err := o.sendEnvelope(ctx, env)
 	if err != nil {
 		return err
@@ -169,7 +177,7 @@ func sendDirectEnvelope(ctx context.Context, o owner, env protocol.Envelope) err
 		return result.Operation.Error
 	}
 	if result.Operation.Status != protocol.OpSucceeded && result.Operation.Status != protocol.OpAccepted {
-		return protocol.Errorf(protocol.CodeUnknownOutcome, "request outcome is unknown; inspect the original request before any new action")
+		return protocol.Errorf(protocol.CodeUnknownOutcome, "request outcome is unknown; %s", businessRecovery(env))
 	}
 	return nil
 }

@@ -151,6 +151,7 @@ func bindCommunicationIssue(ctx context.Context, x *Exec, tx *store.Tx, id, issu
 
 // communicationOrigin is populated only by Tend's local channel adapters.
 type communicationOrigin struct {
+	MessageID                 string
 	Channel                   string
 	BotID, ChatID, ExternalID int64
 	ReplyTo, CorrectionOf     string
@@ -185,11 +186,15 @@ func submitCommunicationInput(ctx context.Context, x *Exec, tx *store.Tx, p prot
 			logicalReply = ""
 		}
 	}
-	env.Payload, _ = json.Marshal(protocol.SubmitMessagePayload{ConversationID: conversation, Body: p.Body, ReplyTo: logicalReply, Attachments: p.Attachments})
+	env.Payload, _ = json.Marshal(protocol.SubmitMessagePayload{MessageID: p.MessageID, ConversationID: conversation, Body: p.Body, ReplyTo: logicalReply, Attachments: p.Attachments})
 	origin := &communicationOrigin{Channel: channel, BotID: bot, ChatID: chat, ExternalID: external, ReplyTo: p.ReplyTo, CorrectionOf: p.CorrectionOf}
 	out, err := (SubmitMessage{origin: origin, externalSource: externalEvidence}).Apply(ctx, &child, tx)
 	if err != nil {
 		return Outcome{}, err
+	}
+
+	if out.NoEffect {
+		return out, nil
 	}
 
 	if externalEvidence {
@@ -228,7 +233,21 @@ func publishCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol
 			return Outcome{}, err
 		}
 	}
-	id := x.IDs.New(protocol.PrefixMessage)
+	id := p.MessageID
+	existing, err := existingMessage(ctx, tx.Q(), protocol.SubmitMessagePayload{MessageID: id, ConversationID: conversation, Body: p.Body, ReplyTo: p.ReplyTo, Attachments: p.Attachments}, author, nil)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if existing != nil {
+		var purpose, priorExecution string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT purpose,execution_id FROM messaging_messages WHERE message_id=?`, id).Scan(&purpose, &priorExecution); err != nil {
+			return Outcome{}, err
+		}
+		if purpose != p.Purpose || priorExecution != execution {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "publication identity has another purpose or execution")
+		}
+		return Outcome{NoEffect: true, Result: map[string]any{"message_id": id, "seq": existing.Seq}}, nil
+	}
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, ConversationID: conversation, Author: author, Body: p.Body, ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return Outcome{}, err

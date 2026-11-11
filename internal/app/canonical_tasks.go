@@ -22,6 +22,7 @@ func (CanonicalOwnerTaskCreate) Authorize(_ context.Context, x *Exec, _ store.Qu
 
 type canonicalOwnerTaskPayload struct {
 	canonicalOwnerIssueSource
+	TaskID                  string                                 `json:"task_id"`
 	IndependentAcceptance   *protocol.IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
 	ExpectedAssignmentEpoch int64                                  `json:"expected_assignment_epoch"`
 	Title                   string                                 `json:"title"`
@@ -58,7 +59,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err := decodePayload(x.Env, &input); err != nil {
 		return Outcome{}, err
 	}
-	p := canonicalOwnerTaskPayload{canonicalOwnerIssueSource: canonicalOwnerIssueSource{SourceMessageID: input.SourceMessageID, ExpectedSourceRevision: input.ExpectedSourceRevision}, IndependentAcceptance: input.IndependentAcceptance, ExpectedAssignmentEpoch: input.ExpectedAssignmentEpoch, Title: input.Title, Spec: domainSpecFromOwner(input.Spec), Rating: input.Rating, WorkspaceName: input.WorkspaceName, StageIDs: input.StageIDs, Relations: input.Relations, UseDefaultWorkspace: input.UseDefaultWorkspace}
+	p := canonicalOwnerTaskPayload{TaskID: input.TaskID, canonicalOwnerIssueSource: canonicalOwnerIssueSource{SourceMessageID: input.SourceMessageID, ExpectedSourceRevision: input.ExpectedSourceRevision}, IndependentAcceptance: input.IndependentAcceptance, ExpectedAssignmentEpoch: input.ExpectedAssignmentEpoch, Title: input.Title, Spec: domainSpecFromOwner(input.Spec), Rating: input.Rating, WorkspaceName: input.WorkspaceName, StageIDs: input.StageIDs, Relations: input.Relations, UseDefaultWorkspace: input.UseDefaultWorkspace}
 	if err := domain.CheckIssueEpoch(current.IssueControl, p.ExpectedAssignmentEpoch); err != nil {
 		return Outcome{}, err
 	}
@@ -130,9 +131,16 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err != nil {
 		return Outcome{}, err
 	}
-	out, err := createTask(ctx, x, tx, payload, creation)
+	child := *x
+	env := *x.Env
+	env.Target = protocol.Target{Type: "task", ID: input.TaskID}
+	child.Env = &env
+	out, err := createTask(ctx, &child, tx, payload, creation)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if out.NoEffect {
+		return out, nil
 	}
 	if deliveryDuty != nil {
 		task := out.Result.(taskResult).TaskID

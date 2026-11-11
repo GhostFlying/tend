@@ -27,7 +27,7 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
 	fs.Bool("json", true, "print the complete structured result")
-	data := fs.String("data", "", "JSON payload")
+	data := fs.String("data", "", "JSON payload; followup creation retains rule_id across submissions")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "original request identity for retry")
 	revision := fs.Int64("revision", -1, "original Issue or rule revision")
@@ -179,10 +179,14 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}
 	env := protocol.Envelope{RequestID: *request, Operation: operation, Target: target, ExpectedControlRevision: revision, Reason: *reason, Payload: payload}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
+	}
 	if *dry {
 		return json.NewEncoder(e.Stdout).Encode(env)
 	}

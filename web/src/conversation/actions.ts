@@ -5,6 +5,7 @@ import type {
   SendRunMessagePayload,
 } from "../api/generated/api.ts";
 import type { OwnerCommand } from "../app/ownerCommand.ts";
+import { newObjectId } from "../api/ids.ts";
 
 export function consultationCommand(payload: CreateConsultationPayload): OwnerCommand {
   return { operation: "conversation.consult", target: { type: "conversation" }, payload };
@@ -31,12 +32,13 @@ export function injectSourceCommand(payload: InjectSourcePayload): OwnerCommand 
 export function runSupplementCommand(
   runID: string,
   controlRevision: number,
-  payload: SendRunMessagePayload,
+  payload: Omit<SendRunMessagePayload, "message_id"> &
+    Partial<Pick<SendRunMessagePayload, "message_id">>,
 ): OwnerCommand {
   return {
     operation: "runs.send_message",
     target: { type: "run", id: runID },
     expected_control_revision: controlRevision,
-    payload,
+    payload: { ...payload, message_id: payload.message_id ?? newObjectId("msg", Date.now()) },
   };
 }

@@ -23,13 +23,7 @@ func ManagerHandoffBlockers(ctx context.Context, q store.Querier, issue string, 
 	for _, id := range deliveries {
 		blockers = append(blockers, protocol.IssueBlocker{Code: "old_manager_delivery", ObjectID: id})
 	}
-	requests, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT e.request_id FROM hosted_coordination_effects e JOIN hosted_executions h ON h.execution_id=e.execution_id WHERE h.issue_id=? AND h.assignment_epoch<? AND (EXISTS(SELECT 1 FROM request_records r WHERE r.request_id=e.request_id AND r.status IN ('accepted','unknown'))) ORDER BY e.request_id`, issue, nextEpoch)
-	if err != nil {
-		return nil, err
-	}
-	for _, id := range requests {
-		blockers = append(blockers, protocol.IssueBlocker{Code: "old_manager_control", ObjectID: id})
-	}
+
 	runs, err := store.FollowupIDs(ctx, q, `SELECT r.run_id FROM runs r JOIN issue_manager_tasks m USING(task_id) WHERE m.issue_id=? AND COALESCE(m.assignment_epoch,m.expected_epoch)<? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR EXISTS(SELECT 1 FROM leases l WHERE l.run_id=r.run_id AND l.status<>'released')) ORDER BY r.run_id`, issue, nextEpoch)
 	if err != nil {
 		return nil, err

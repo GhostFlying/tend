@@ -89,6 +89,7 @@ type WebhookSubscriptionPage struct {
 }
 
 type WebhookSubscriptionPayload struct {
+	SubscriptionID          string `json:"subscription_id,omitempty"`
 	IssueID                 string `json:"issue_id,omitempty"`
 	ExpectedAssignmentEpoch int64  `json:"expected_assignment_epoch"`
 	Title                   string `json:"title,omitempty"`

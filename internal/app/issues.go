@@ -42,7 +42,16 @@ func (CreateIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, e
 			return Outcome{}, err
 		}
 	}
-	w := protocol.WorkItem{IssuePlan: p.IssuePlan, WorkItemID: x.IDs.New(protocol.PrefixWorkItem), Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
+	id, err := creationID(x, protocol.PrefixWorkItem)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if prior, err := existingIssueCreation(ctx, tx.Q(), id, p.IssuePlan); err != nil {
+		return Outcome{}, err
+	} else if prior != nil {
+		return Outcome{NoEffect: true, Result: *prior}, nil
+	}
+	w := protocol.WorkItem{IssuePlan: p.IssuePlan, WorkItemID: id, Revision: 1, Status: "open", CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}
 	if err := validateIssueReferences(ctx, x, tx.Q(), w, nil); err != nil {
 		return Outcome{}, err
 	}
@@ -415,7 +424,7 @@ func validateIssueEvidenceReferences(ctx context.Context, x *Exec, q store.Queri
 				valid = true
 				break
 			}
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM owner_authority_messages WHERE message_id=?) OR EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND (COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner' OR COALESCE(json_extract(d.answer_json,'$.owner_subject'),'')<>'')) OR EXISTS(SELECT 1 FROM request_records WHERE request_id=? AND domain='owner' AND status='succeeded' AND operation LIKE 'work_items.%') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM owner_authority_messages WHERE message_id=?) OR EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.status='answered' AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND (COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner' OR COALESCE(json_extract(d.answer_json,'$.owner_subject'),'')<>'')) OR EXISTS(SELECT 1 FROM issue_control_revisions WHERE request_id=? AND json_extract(actor_json,'$.kind')='owner') OR EXISTS(SELECT 1 FROM work_item_choices WHERE choice_id=? AND work_item_id=? AND status='answered')`, e.Reference, e.Reference, e.Reference, e.Reference, w.WorkItemID).Scan(&valid); err != nil {
 				return err
 			}
 		case "result":
@@ -608,8 +617,7 @@ func issueCloseGuard(ctx context.Context, q store.Querier, id string) error {
  EXISTS(SELECT 1 FROM runs WHERE task_id IN linked AND observed_state NOT IN ('finished','failed','interrupted')) OR
  EXISTS(SELECT 1 FROM decisions WHERE task_id IN linked AND status='open') OR
  EXISTS(SELECT 1 FROM work_item_choices WHERE work_item_id=? AND status='open') OR
- EXISTS(SELECT 1 FROM plan_actions a JOIN request_records r ON r.request_id=a.created_request_id WHERE a.task_id IN linked AND r.status IN ('unknown','accepted')) OR
- EXISTS(SELECT 1 FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE r.status IN ('unknown','accepted') AND ((e.object_type='task' AND e.object_id IN linked) OR (e.object_type='work_item' AND e.object_id=?)))`, string(membership), id, id).Scan(&blocked)
+ EXISTS(SELECT 1 FROM plan_actions WHERE task_id IN linked AND status='unknown')`, string(membership), id).Scan(&blocked)
 	if err != nil {
 		return err
 	}

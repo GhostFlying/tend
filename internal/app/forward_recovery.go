@@ -45,6 +45,24 @@ func (a *App) recoveryStartupFenced(ctx context.Context, q store.Querier) (bool,
 // recoveryReceiptWrite admits only terminal native history for an existing
 // thread/turn. Reconciled is set by the native-history adapter, never a payload.
 func recoveryReceiptWrite(ctx context.Context, x *Exec, q store.Querier, cmd Command) (bool, error) {
+	if _, claim := cmd.(Claim); claim && x.Principal.Kind == protocol.PrincipalRunner {
+		var payload protocol.ClaimPayload
+		if err := decodePayload(x.Env, &payload); err != nil {
+			return false, err
+		}
+		if payload.RunID == "" {
+			return false, nil
+		}
+		actual, err := store.GetRun(ctx, q, payload.RunID)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return actual.HostID == x.Principal.Subject, nil
+	}
+
 	record, ok := cmd.(RecordAgentMessage)
 	if !ok || !record.Reconciled || x.Principal.Kind != protocol.PrincipalMainAgent {
 		return false, nil
@@ -99,13 +117,8 @@ func (c registerForwardRecovery) Apply(ctx context.Context, x *Exec, tx *store.T
 	if !reflect.DeepEqual(r.View, p.OriginalLedger) || p.LedgerRevision != r.View.Revision || !bindingMatches(r, p.Original) || r.ServerProcess != p.Original.ProcessInstanceID || r.ServerInstance != p.Original.InstanceID || r.ServerHash != p.Original.ArtifactSHA256 || r.View.Status != "completed" {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "original terminal ledger binding/view changed")
 	}
-	originalRequest, err := store.GetRequest(ctx, tx.Q(), "system", p.OriginalRequestID)
-	if err != nil {
-		return Outcome{}, err
-	}
-	var originalResult protocol.UpgradeView
-	if originalRequest.Operation != "upgrades.start" || (originalRequest.Status != protocol.OpSucceeded && originalRequest.Status != protocol.OpAccepted) || json.Unmarshal([]byte(originalRequest.ResultJSON), &originalResult) != nil || originalResult.UpgradeID != p.Original.UpgradeID {
-		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "original start request does not identify the retained upgrade")
+	if r.StartRequestID != p.OriginalRequestID {
+		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "original start does not identify this upgrade")
 	}
 	snapshot, err := json.Marshal(r)
 	if err != nil {

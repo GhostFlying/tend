@@ -23,7 +23,7 @@ func TestIssueMaterialsManagedCallbackReadsBackgroundOriginalWithoutMessage(t *t
 			owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test-owner"}
 			execute := func(who protocol.Principal, command app.Command, target protocol.Target, payload any, expected *int64) protocol.Operation {
 				t.Helper()
-				raw, _ := json.Marshal(payload)
+				target, raw := composeFixtureBusinessInput(t, ids, command.Operation(), target, payload)
 				op, err := e.svc.app.Execute(t.Context(), who, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, ExpectedControlRevision: expected, Payload: raw}, command)
 				if err != nil || op.Status != protocol.OpSucceeded && op.Status != protocol.OpAccepted {
 					t.Fatal(command.Operation(), op, err)

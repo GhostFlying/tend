@@ -139,6 +139,7 @@ type OwnerTaskRequirements struct {
 }
 
 type CreateIssueTaskPayload struct {
+	TaskID                string                        `json:"task_id"`
 	DeliveryAuthorization *IssueDeliveryAuthorization   `json:"delivery_authorization,omitempty"`
 	IndependentAcceptance *IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
 	IssueSourceReference

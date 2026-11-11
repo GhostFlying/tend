@@ -230,12 +230,6 @@ var schemas = map[string]string{
   "required": ["file_id"],
   "additionalProperties": false
 }`,
-	"requests_read": `{
-  "type": "object",
-  "properties": {"request_id": {"type": "string"}},
-  "required": ["request_id"],
-  "additionalProperties": false
-}`,
 	"repos_list": `{
   "type": "object",
   "properties": {},

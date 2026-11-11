@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"reflect"
 	"strings"
@@ -320,7 +321,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		inner := *x
 		env := *x.Env
 		inner.Env = &env
-		env.Target = protocol.Target{Type: "attention"}
+		env.Target = protocol.Target{Type: "attention", ID: protocol.NativeObjectID(protocol.Prefix("attn"), issue.IssueID, fmt.Sprintf("delivery-approval/%s/%d", d.TaskID, d.Revision))}
 		env.ExpectedControlRevision = nil
 		env.Payload, _ = json.Marshal(protocol.CreateAttentionPayload{IssueID: issue.IssueID, Kind: "decision", Title: deliveryCandidateQuestion(*p.Candidate), Options: []string{"approve", "defer", "end_delivery"}, BlocksClose: true})
 		out, err := (AttentionCommand{Action: "create"}).Apply(ctx, &inner, tx)

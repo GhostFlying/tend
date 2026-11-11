@@ -142,14 +142,15 @@ func TestClaimAllocatesRunLeaseAndWorkspace(t *testing.T) {
 	if again, ok := h.claimWith("linux-1", env); !ok || again.RunID != as.RunID {
 		t.Errorf("retried claim = %+v, want run %s", again, as.RunID)
 	}
-	// An idle poll finds nothing and leaves no request record.
-	before := h.count("request_records")
+	// An idle poll allocates no execution and creates no generic ledger.
+	before := h.count("runs")
 	if _, ok, _ := h.claim("linux-1"); ok {
 		t.Error("second claim found work")
 	}
-	if n := h.count("request_records"); n != before {
-		t.Errorf("idle claim recorded a request: %d -> %d", before, n)
+	if n := h.count("runs"); n != before {
+		t.Errorf("idle claim allocated execution: %d -> %d", before, n)
 	}
+	assertNoGenericLedger(t, h)
 	if n := h.count("runs"); n != 1 {
 		t.Errorf("runs = %d, want 1", n)
 	}
@@ -397,6 +398,18 @@ func TestRunEventsAreDeduplicated(t *testing.T) {
 	}
 	if n := h.count("run_logs"); n != 2 {
 		t.Errorf("run logs = %d, want 2", n)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var duplicated int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM inbox WHERE source=?`, "run:"+as.RunID).Scan(&duplicated); err != nil {
+			return err
+		}
+		if duplicated != 0 {
+			t.Fatal("run log's business key was duplicated in inbox", duplicated)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if r := h.run(as.RunID); r.ObservedState != protocol.RunWaiting {
 		t.Errorf("run = %s, want waiting", r.ObservedState)

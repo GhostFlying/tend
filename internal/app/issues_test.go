@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -56,14 +57,23 @@ func expectWorkCode(t *testing.T, op protocol.Operation, code protocol.Code) {
 	}
 }
 
+func expectSameWorkItemObject(t *testing.T, first, repeated protocol.Operation) {
+	t.Helper()
+	var before, after protocol.WorkItem
+	if first.Status != protocol.OpSucceeded || repeated.Status != protocol.OpSucceeded || json.Unmarshal(first.Result, &before) != nil || json.Unmarshal(repeated.Result, &after) != nil || before.WorkItemID == "" || !reflect.DeepEqual(before, after) {
+		t.Fatalf("same business creation resolved a different Issue: %+v %+v", first, repeated)
+	}
+}
+
 func TestWorkItemsRevisionDedupAndHistory(t *testing.T) {
 	h := newHarness(t)
 	plan := workPlan()
 	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: plan}, nil)
 	first := h.exec(mainAgent, env, CreateIssue{})
 	second := h.exec(mainAgent, env, CreateIssue{})
-	if first.Status != protocol.OpSucceeded || string(first.Result) != string(second.Result) || h.count("work_items") != 1 {
-		t.Fatalf("dedup %+v %+v", first, second)
+	expectSameWorkItemObject(t, first, second)
+	if h.count("work_items") != 1 || h.count("work_item_revisions") != 1 {
+		t.Fatal("same Issue key created duplicate facts")
 	}
 	var w protocol.WorkItem
 	_ = json.Unmarshal(first.Result, &w)
@@ -274,14 +284,14 @@ func TestWorkItemsUncertainOperationAndOpenDecisionPreventClosure(t *testing.T) 
 		if _, err := tx.Exec(context.Background(), `UPDATE decisions SET status='answered' WHERE decision_id=?`, decisionID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(context.Background(), `UPDATE request_records SET status='unknown' WHERE request_id=?`, op.RequestID)
+		_, err := tx.Exec(context.Background(), `UPDATE plan_actions SET status='unknown' WHERE task_id=? AND kind='implement'`, task.TaskID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	expectWorkCode(t, closeWork(), protocol.CodeInvalidTransition)
 	if err := h.store.Write(context.Background(), func(tx *store.Tx) error {
-		_, err := tx.Exec(context.Background(), `UPDATE request_records SET status='succeeded' WHERE request_id=?`, op.RequestID)
+		_, err := tx.Exec(context.Background(), `UPDATE plan_actions SET status='done' WHERE task_id=? AND kind='implement'`, task.TaskID)
 		return err
 	}); err != nil {
 		t.Fatal(err)

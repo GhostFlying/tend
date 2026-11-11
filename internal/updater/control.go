@@ -11,10 +11,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 type ControlRequest struct {
+	DiagnosticLogProtection    *protocol.DiagnosticLogProtection           `json:"diagnostic_log_protection,omitempty"`
+	BackupPolicy               *protocol.BackupPolicy                      `json:"backup_policy,omitempty"`
+	BackupVerification         *protocol.BackupVerification                `json:"backup_verification,omitempty"`
+	BackupPrune                *protocol.BackupPruneRequest                `json:"backup_prune,omitempty"`
 	BoundedWindow              *protocol.BoundedMaintenanceState           `json:"bounded_window,omitempty"`
 	BoundedAuthorization       *protocol.BoundedMaintenanceAuthorization   `json:"bounded_authorization,omitempty"`
 	BoundedRunnerGrant         *protocol.BoundedRunnerMaintenanceGrant     `json:"bounded_runner_grant,omitempty"`
@@ -69,6 +74,10 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/backup/") {
+			s.backupHandler(w, r)
+			return
+		}
 		if r.URL.Path == "/self-update/status" || r.URL.Path == "/self-update/apply" {
 			s.selfHandler(w, r)
 			return

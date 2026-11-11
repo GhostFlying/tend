@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { NetworkError, type KeyValueStorage } from "../api/client.ts";
-import type { APIResponse, Envelope, OpStatus, RequestView } from "../api/generated/api.ts";
+import {
+  ApiError,
+  NetworkError,
+  type BusinessMessage,
+  type KeyValueStorage,
+} from "../api/client.ts";
+import type { APIResponse, Envelope, OpStatus } from "../api/generated/api.ts";
 import type { OpSender } from "../app/ops.ts";
 import { Interrupt } from "./interrupt.ts";
 
@@ -21,15 +26,16 @@ class Sender implements OpSender {
   lookups: string[] = [];
   unreachable = true;
   status: OpStatus = "accepted";
-  record: RequestView | null = null;
+  message: BusinessMessage | null = null;
   async submit(envelope: Envelope): Promise<APIResponse> {
     this.submissions.push(structuredClone(envelope));
     if (this.unreachable) throw new NetworkError(new Error("offline"));
     return { operation: { request_id: envelope.request_id, status: this.status } };
   }
-  async lookup(id: string): Promise<RequestView | null> {
-    this.lookups.push(id);
-    return this.record;
+  async get<T>(path: string): Promise<T> {
+    this.lookups.push(path);
+    if (!this.message) throw new ApiError(404, { code: "not_found", message: "message absent" });
+    return this.message as T;
   }
 }
 const terminal = {
@@ -42,60 +48,38 @@ const terminal = {
 };
 
 describe("durable interrupt", () => {
-  test("an undelivered request resumes after reconnect under its original ID", async () => {
-    const sender = new Sender();
-    const interrupt = new Interrupt(sender, { storage: storage(), newId: () => "req_original" });
+  test("a missing business message never authorizes another interrupt", async () => {
+    const sender = new Sender(),
+      interrupt = new Interrupt(sender, { storage: storage(), newId: () => "req_original" });
     await interrupt.start("msg_1");
-    expect(interrupt.state.get()?.phase).toBe("unconfirmed");
     sender.unreachable = false;
     await Promise.all([interrupt.resume(), interrupt.resume()]);
-    expect(sender.lookups).toEqual(["req_original"]);
-    expect(sender.submissions).toHaveLength(2);
-    expect(sender.submissions[1]).toEqual(sender.submissions[0]);
-    expect(interrupt.state.get()?.phase).toBe("recorded");
+    expect(sender.lookups).toEqual(["/api/v1/messages/msg_1"]);
+    expect(sender.submissions).toHaveLength(1);
+    expect(interrupt.state.get()?.phase).toBe("unknown");
     interrupt.observe([terminal]);
     expect(interrupt.state.get()).toBeNull();
   });
 
-  test("page reload restores the full envelope without allocating an ID", async () => {
-    const sender = new Sender();
-    const saved = storage();
+  test("reload keeps the original envelope and clears only on an observed terminal message", async () => {
+    const sender = new Sender(),
+      saved = storage();
     await new Interrupt(sender, { storage: saved, newId: () => "req_original" }).start("msg_1");
     const restored = new Interrupt(sender, {
       storage: saved,
       newId: () => {
-        throw new Error("must retain request ID");
+        throw new Error("must retain identity");
       },
     });
-    sender.unreachable = false;
+    const original = restored.state.get()?.envelope;
     await restored.resume();
-    expect(sender.lookups).toEqual(["req_original"]);
-    expect(sender.submissions[1]).toEqual(sender.submissions[0]);
-    restored.observe([terminal]);
+    expect(restored.state.get()?.envelope).toEqual(original);
+    expect(sender.submissions).toHaveLength(1);
+    sender.message = terminal;
+    await restored.resume();
+    expect(restored.state.get()).toBeNull();
     expect(new Interrupt(sender, { storage: saved }).state.get()).toBeNull();
   });
-
-  test.each(["accepted", "succeeded", "unknown"] as const)(
-    "a recorded %s outcome never resubmits its effect",
-    async (status) => {
-      const sender = new Sender();
-      const saved = storage();
-      await new Interrupt(sender, { storage: saved, newId: () => "req_original" }).start("msg_1");
-      sender.record = {
-        request_id: "req_original",
-        operation: "conversation.interrupt_reply",
-        status,
-      };
-      const restored = new Interrupt(sender, { storage: saved });
-      await restored.resume();
-      expect(sender.submissions).toHaveLength(1);
-      expect(restored.state.get()?.phase).toBe(status === "unknown" ? "unknown" : "recorded");
-      // Even a later missing record cannot authorize replay of a known effect.
-      sender.record = null;
-      await new Interrupt(sender, { storage: saved }).resume();
-      expect(sender.submissions).toHaveLength(1);
-    },
-  );
 
   test("a business unknown response stays fenced through reload", async () => {
     const sender = new Sender();
@@ -119,7 +103,6 @@ describe("durable interrupt", () => {
           answers.set(envelope.request_id, resolve);
         });
       },
-      lookup: async () => null,
     };
     let nextId = 0;
     const interrupt = new Interrupt(sender, { storage: storage(), newId: () => `req_${++nextId}` });
@@ -149,7 +132,6 @@ describe("durable interrupt", () => {
         new Promise((resolve) => {
           answer = resolve;
         }),
-      lookup: async () => null,
     };
     const saved = storage();
     const interrupt = new Interrupt(sender, { storage: saved, newId: () => "req_original" });

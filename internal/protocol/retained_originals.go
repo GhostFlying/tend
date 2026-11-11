@@ -20,14 +20,20 @@ type OriginalImport struct {
 	After     int64  `json:"after,omitempty"`
 	Limit     int    `json:"limit"`
 }
+type OriginalStorageField struct {
+	Table       string `json:"table"`
+	Column      string `json:"column"`
+	PendingRows int64  `json:"pending_rows"`
+}
 type OriginalStorageStatus struct {
-	Revision            int64 `json:"revision"`
-	MigratedRows        int64 `json:"migrated_rows"`
-	MigratedBytes       int64 `json:"migrated_bytes"`
-	Bodies              int64 `json:"bodies"`
-	ReferencedBytes     int64 `json:"referenced_bytes"`
-	OriginalFiles       int64 `json:"original_files"`
-	OriginalPrefixBytes int64 `json:"original_prefix_bytes"`
+	Fields              []OriginalStorageField `json:"fields,omitempty"`
+	Revision            int64                  `json:"revision"`
+	MigratedRows        int64                  `json:"migrated_rows"`
+	MigratedBytes       int64                  `json:"migrated_bytes"`
+	Bodies              int64                  `json:"bodies"`
+	ReferencedBytes     int64                  `json:"referenced_bytes"`
+	OriginalFiles       int64                  `json:"original_files"`
+	OriginalPrefixBytes int64                  `json:"original_prefix_bytes"`
 	// PendingRows is -1 in a mutation receipt; status reads count pending rows
 	// outside the writer. A receipt never scans every historical body.
 	PendingRows   int64 `json:"pending_rows"`

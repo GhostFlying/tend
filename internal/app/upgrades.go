@@ -45,6 +45,14 @@ func (StartUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 	return allowKinds(x.Principal, protocol.PrincipalSystem)
 }
 func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if prior, err := store.GetUpgrade(ctx, tx.Q(), x.Env.Target.ID); err == nil {
+		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "upgrade identity belongs to another admitted installation")
+		}
+		return Outcome{NoEffect: true, Result: prior.View}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
 	if err := checkUpgradeExecution(ctx, tx.Q(), c.ExecutionRequestID); err != nil {
 		return Outcome{}, err
 	}

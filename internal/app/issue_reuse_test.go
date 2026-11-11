@@ -33,20 +33,18 @@ func TestIssueReuseDistinctRequestsPreserveResponsibilityAndReplay(t *testing.T)
 	acceptDeliveryTaskForTest(t, h, task)
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	oldPlan, _ := json.Marshal(issue.Plan)
-	original, err := h.app.IssueReuseStatus(t.Context(), issue.IssueID)
+	_, err := h.app.IssueReuseStatus(t.Context(), issue.IssueID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var originalReceipt store.RequestRecord
+	var originalReceipt string
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var err error
-		originalReceipt, err = store.GetRequest(t.Context(), tx.Q(), owner.DedupDomain(), original.OriginalRequestID)
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT snapshot_json FROM issue_control_revisions WHERE issue_id=? AND revision=1`, issue.IssueID).Scan(&originalReceipt)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	obligations := h.count("issue_delivery_duties")
-	var first protocol.Operation
 	var firstEnv *protocol.Envelope
 	for n := 0; n < 2; n++ {
 		source := queueMessage(t, h, "An additional owner input for the same original responsibility")
@@ -77,7 +75,6 @@ func TestIssueReuseDistinctRequestsPreserveResponsibilityAndReplay(t *testing.T)
 			t.Fatal("new source was falsely reviewed", result.Source)
 		}
 		if n == 0 {
-			first = op
 			firstEnv = env
 		}
 		issue = result.Issue
@@ -86,19 +83,21 @@ func TestIssueReuseDistinctRequestsPreserveResponsibilityAndReplay(t *testing.T)
 		t.Fatal("reuse recreated responsibility or rewrote terminal/delivery facts")
 	}
 	events := h.count("events")
-	replay := h.exec(owner, firstEnv, ReuseIssue{})
-	if !bytes.Equal(first.Result, replay.Result) || events != h.count("events") {
-		t.Fatal("same request replay mutated later responsibility")
+	replay, err := h.app.Execute(t.Context(), owner, firstEnv, ReuseIssue{})
+	if err != nil || replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || events != h.count("events") {
+		t.Fatal("stale retry changed later responsibility", replay, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		r, err := store.GetRequest(t.Context(), tx.Q(), owner.DedupDomain(), original.OriginalRequestID)
-		if err == nil && r.ResultJSON != originalReceipt.ResultJSON {
-			t.Fatal("original creation receipt changed")
+		var raw string
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT snapshot_json FROM issue_control_revisions WHERE issue_id=? AND revision=1`, issue.IssueID).Scan(&raw)
+		if err == nil && raw != originalReceipt {
+			t.Fatal("immutable original Issue changed")
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
+
 }
 func TestIssueReuseRejectsIdentityDriftWithoutPartialAssociation(t *testing.T) {
 	for _, kind := range []string{"origin", "issue revision", "epoch", "source revision", "association revision", "missing association revision", "missing source revision", "withdrawn", "unknown origin", "terminal"} {
@@ -137,7 +136,7 @@ func TestIssueReuseRejectsIdentityDriftWithoutPartialAssociation(t *testing.T) {
 				}
 			case "unknown origin":
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `DELETE FROM request_records WHERE request_id=?`, p.OriginalRequestID)
+					_, err := tx.Exec(t.Context(), `DROP TRIGGER issue_control_revision_immutable_update; UPDATE issue_control_revisions SET actor_json='{}' WHERE request_id=?`, p.OriginalRequestID)
 					return err
 				}); err != nil {
 					t.Fatal(err)
@@ -239,15 +238,16 @@ func TestIssueReuseFromActualMainCreationReceiptInLaterTurn(t *testing.T) {
 	if result.Issue.IssueID != issue.IssueID || result.Issue.AssignmentEpoch != issue.AssignmentEpoch || result.OriginalRequestID != original.RequestID || h.count("issue_controls") != 1 {
 		t.Fatal(result)
 	}
-	replay := h.exec(mainAgent, original, command)
-	if !bytes.Equal(replay.Result, created.Result) {
-		t.Fatal("reuse replaced original Main creation receipt")
+	_, replayErr := h.app.Execute(t.Context(), mainAgent, original, command)
+	if protocol.CodeOf(replayErr) != protocol.CodeForbidden {
+		t.Fatal("finished native execution admitted a fresh effect", replayErr)
 	}
 	finishHostedReview(t, h, current)
-	replayReuse := h.exec(mainAgent, env, reuse)
-	if replayReuse.Status != protocol.OpSucceeded || !bytes.Equal(replayReuse.Result, op.Result) {
-		t.Fatal("settled native execution lost its original reuse receipt", replayReuse)
+	_, replayErr = h.app.Execute(t.Context(), mainAgent, env, reuse)
+	if protocol.CodeOf(replayErr) != protocol.CodeForbidden {
+		t.Fatal("finished native execution admitted reuse", replayErr)
 	}
+
 }
 
 func TestIssueReuseHistoricalClassificationDoesNotAdmitAuthority(t *testing.T) {
@@ -523,23 +523,16 @@ func TestIssueReuseRecognizesSuccessfulConsultationCreation(t *testing.T) {
 	create := h.env("conversation.promote", protocol.Target{Type: "conversation", ID: c.ID}, payload, nil)
 	created := h.exec(owner, create, PromoteConsultation{})
 	issue := canonicalLifecycleIssue(t, created)
-	var original store.RequestRecord
+	status, err := h.app.IssueReuseStatus(t.Context(), issue.IssueID)
+	if err != nil || status.OriginObservation != "recorded" || status.OriginalRequestID != create.RequestID {
+		t.Fatal(status, err)
+	}
+	var original string
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var err error
-		original, err = store.GetRequest(t.Context(), tx.Q(), owner.DedupDomain(), create.RequestID)
-		return err
+		return tx.Q().QueryRowContext(t.Context(), `SELECT snapshot_json FROM issue_control_revisions WHERE issue_id=? AND revision=1`, issue.IssueID).Scan(&original)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	status, err := h.app.IssueReuseStatus(t.Context(), issue.IssueID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var receipt protocol.Issue
-	if err := json.Unmarshal([]byte(original.ResultJSON), &receipt); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("creation request=%s status=%s receipt issue=%s revision=%d; reuse origin=%s", original.Operation, original.Status, receipt.IssueID, receipt.Revision, status.OriginObservation)
 	next := queueMessage(t, h, "Continue the same original responsibility")
 	assoc := h.associations(next)
 	reuse := protocol.ReuseIssuePayload{
@@ -553,31 +546,18 @@ func TestIssueReuseRecognizesSuccessfulConsultationCreation(t *testing.T) {
 		t.Fatal("confirmed consultation-created Issue cannot be reused")
 	}
 	replayed, err := h.app.Execute(t.Context(), owner, reuseRequest, ReuseIssue{})
-	if err != nil || replayed.Status != op.Status || !bytes.Equal(replayed.Result, op.Result) {
-		t.Fatal("promotion-based reuse did not replay its exact result", replayed, err)
+	if err != nil || replayed.Error == nil || replayed.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("stale reuse retry must consult current Issue", replayed, err)
 	}
-	for _, invalid := range []struct {
-		name, operation, result string
-		status                  protocol.OpStatus
-	}{
-		{"other operation", "conversation.associate_issues", original.ResultJSON, protocol.OpSucceeded},
-		{"unknown", original.Operation, original.ResultJSON, protocol.OpUnknown},
-		{"failed", original.Operation, original.ResultJSON, protocol.OpFailed},
-		{"other issue", original.Operation, `{"issue_id":"other","revision":1}`, protocol.OpSucceeded},
-		{"later revision", original.Operation, `{"issue_id":"` + issue.IssueID + `","revision":2}`, protocol.OpSucceeded},
-	} {
-		t.Run(invalid.name, func(t *testing.T) {
-			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-				_, err := tx.Exec(t.Context(), `UPDATE request_records SET operation=?,status=?,result_json=? WHERE domain=? AND request_id=?`, invalid.operation, invalid.status, invalid.result, owner.DedupDomain(), create.RequestID)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			got, err := h.app.IssueReuseStatus(t.Context(), issue.IssueID)
-			if err != nil || got.OriginObservation != "observation_unavailable" || got.OriginalRequestID != "" {
-				t.Fatal("unconfirmed/mismatched promotion became an origin", got, err)
-			}
-		})
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var raw string
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT snapshot_json FROM issue_control_revisions WHERE issue_id=? AND revision=1`, issue.IssueID).Scan(&raw)
+		if err == nil && raw != original {
+			t.Fatal("origin mutated")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
-
+	assertNoGenericLedger(t, h)
 }

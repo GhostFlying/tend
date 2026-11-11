@@ -32,7 +32,7 @@ func TestManualSourceReadDistinguishesInjectedSourceFromOrdinaryMessage(t *testi
 	if err := json.Unmarshal(response.Operation.Result, &injected); err != nil || injected.MessageID == "" {
 		t.Fatal("injected source was not persisted", err)
 	}
-	beforeRequests := e.count(`SELECT COUNT(*) FROM request_records`)
+	beforeEvents := e.count(`SELECT COUNT(*) FROM events`)
 	beforeOutbox := e.count(`SELECT COUNT(*) FROM outbox`)
 	for _, messageID := range []string{ordinary.MessageID, e.ids.New(protocol.PrefixMessage)} {
 		var missing protocol.APIResponse
@@ -48,7 +48,7 @@ func TestManualSourceReadDistinguishesInjectedSourceFromOrdinaryMessage(t *testi
 	if status := e.do(http.MethodGet, "/api/v1/session", token, nil, &session); status != http.StatusOK || session.Login != ownerLogin {
 		t.Fatalf("missing source invalidated the owner session: status=%d session=%+v", status, session)
 	}
-	if e.count(`SELECT COUNT(*) FROM request_records`) != beforeRequests || e.count(`SELECT COUNT(*) FROM outbox`) != beforeOutbox || e.count(`SELECT COUNT(*) FROM manual_message_sources`) != 1 {
+	if e.count(`SELECT COUNT(*) FROM events`) != beforeEvents || e.count(`SELECT COUNT(*) FROM outbox`) != beforeOutbox || e.count(`SELECT COUNT(*) FROM manual_message_sources`) != 1 {
 		t.Fatal("source reads changed requests, effects or manual-source membership")
 	}
 }

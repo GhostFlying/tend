@@ -60,10 +60,9 @@ func TestWorkItemChoiceOwnerAPIReadAnswerAndStaleVersion(t *testing.T) {
 	if status := e.do("GET", path, token, nil, &read); status != http.StatusOK || read.Status != "answered" || read.Version != 2 || read.Answer != "Later, after I inspect the result" || read.AnswerSourceID == "" {
 		t.Fatalf("read answer: %d %+v", status, read)
 	}
-	// Replaying one response must not append another owner answer or change version.
-	if status, response := e.op(token, answer); status != http.StatusOK || response.Operation == nil || response.Operation.Status != protocol.OpSucceeded {
-		t.Fatalf("replay: %d %+v", status, response)
-	}
+	// An already answered version is read from its business object; replaying
+	// the old version cannot append another owner answer.
+	assertOwnerStaleHTTP(t, e, token, answer)
 	stale := e.envelope("work_item_choices.respond", target, &version, protocol.UpdateWorkItemChoicePayload{Answer: "Continue"})
 	_, rejected := e.op(token, stale)
 	if rejected.Operation == nil || rejected.Operation.Error == nil || rejected.Operation.Error.Code != protocol.CodeStaleRevision {

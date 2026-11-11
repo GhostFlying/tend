@@ -15,7 +15,7 @@ import (
 func TestObservationEndpointAuthenticatesRunAndHost(t *testing.T) {
 	e := newEnv(t, 10*time.Millisecond)
 	payload, _ := json.Marshal(map[string]any{"title": "observe", "spec": domain.Spec{Goal: "verify current deployment", Acceptance: []string{"actual state"}, Delivery: domain.DeliveryCommit, Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}, Observation: &protocol.ObservationScope{Deployment: true}}})
-	env := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task"}, Payload: payload}
+	env := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task", ID: e.ids.New(protocol.PrefixTask)}, Payload: payload}
 	owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "web"}
 	if op, err := e.app.Execute(t.Context(), owner, env, app.CreateTask{}); err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatalf("create %v %+v", err, op)

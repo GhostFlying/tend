@@ -59,8 +59,8 @@ func (c CanonicalOwnerIssueCommand) Apply(ctx context.Context, x *Exec, tx *stor
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "canonical owner operation requires its own issue request")
 	}
 	if c.Action == "create" {
-		if x.Env.Target.ID != "" || x.Env.ExpectedControlRevision != nil {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new issue has no existing target or revision")
+		if !protocol.ValidID(protocol.PrefixWorkItem, x.Env.Target.ID) || x.Env.ExpectedControlRevision != nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new issue requires its stable business identity and no expected revision")
 		}
 		return createCanonicalOwnerIssue(ctx, x, tx)
 	}
@@ -124,22 +124,14 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 			}
 			p.Assignee = &parent.Assignee
 		} else {
-			var sourceRequest string
-			if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(request_id,'') FROM conversation_messages WHERE message_id=?`, p.SourceMessageID).Scan(&sourceRequest); err != nil {
-				return Outcome{}, err
-			}
-			record, err := store.GetOwnerRequest(ctx, tx.Q(), sourceRequest)
+			allowed, err := store.HasOwnerMessageAuthority(ctx, tx.Q(), p.SourceMessageID)
 			if err != nil {
 				return Outcome{}, err
 			}
-			var principal protocol.Principal
-			if err := json.Unmarshal([]byte(record.PrincipalJSON), &principal); err != nil {
-				return Outcome{}, err
-			}
-			if principal.Kind != protocol.PrincipalOwner {
+			if !allowed || x.configuredOwner == "" {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "recording ownership requires the authenticated source owner")
 			}
-			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: principal.Subject}
+			p.Assignee = &protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.configuredOwner}
 		}
 	}
 
@@ -173,6 +165,56 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	if p.Plan.Stages == nil {
 		p.Plan.Stages = []protocol.IssueStage{}
 	}
+	if existing, err := store.GetCanonicalIssue(ctx, tx.Q(), x.Env.Target.ID); err == nil {
+		initial, err := store.GetCanonicalIssueRevision(ctx, tx.Q(), existing.IssueID, 1)
+		if err != nil {
+			return Outcome{}, err
+		}
+		var source string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(source_message_id,'') FROM issue_control_revisions WHERE issue_id=? AND revision=1`, existing.IssueID).Scan(&source); err != nil {
+			return Outcome{}, err
+		}
+		wanted := protocol.WorkItem{IssuePlan: p.Plan}
+		if initial.AcceptancePolicy != nil {
+			freezeIssueCurrentEvidence(&wanted, initial.AcceptancePolicy.RequestID)
+		}
+		originalPlan := initial.Plan
+		if originalPlan.PRPolicy != nil {
+			policy := *originalPlan.PRPolicy
+			policy.Authority = nil
+			originalPlan.PRPolicy = &policy
+		}
+		if wanted.PRPolicy != nil {
+			policy := *wanted.PRPolicy
+			policy.Authority = nil
+			wanted.PRPolicy = &policy
+		}
+		depends := slices.Clone(p.DependsOn)
+		if depends == nil {
+			depends = []string{}
+		}
+		slices.Sort(depends)
+		required := p.IndependentAcceptance == nil || p.IndependentAcceptance.Required
+		var selection *protocol.IssueOwnerSelection
+		if p.Manager != nil {
+			selection = &protocol.IssueOwnerSelection{CategoryID: p.Manager.CategoryID, AgentID: p.Manager.AgentID}
+			if p.Owner != nil {
+				selection.OwnershipPolicy = protocol.IssueOwnerPolicy
+			}
+		}
+		if !reflect.DeepEqual(initial.OwnerSelection, selection) {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "issue identity already has a different owner selection")
+		}
+		if !reflect.DeepEqual(originalPlan, wanted.IssuePlan) || initial.ParentIssueID != p.ParentIssueID || !reflect.DeepEqual(initial.DependsOn, depends) || initial.Assignee != owner || source != p.SourceMessageID || initial.AcceptancePolicy == nil || initial.AcceptancePolicy.Required != required {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "issue identity already has a different definition; read its current state")
+		}
+		if p.IndependentAcceptance != nil && initial.AcceptancePolicy.Reason != p.IndependentAcceptance.Reason {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "issue identity already has a different acceptance policy")
+		}
+		return Outcome{Result: existing, NoEffect: true}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
 	if err := validateCanonicalUnboundPlan(x, p.Plan, nil); err != nil {
 		return Outcome{}, err
 	}
@@ -181,7 +223,7 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 	}
 	now := x.Now.UnixMilli()
 	next := protocol.Issue{
-		IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), WorkStatus: protocol.IssueBacklog, ParentIssueID: p.ParentIssueID, State: protocol.IssueActive, Assignee: owner, AssignmentEpoch: 1, AssignmentState: "active"},
+		IssueControl: protocol.IssueControl{IssueID: x.Env.Target.ID, WorkStatus: protocol.IssueBacklog, ParentIssueID: p.ParentIssueID, State: protocol.IssueActive, Assignee: owner, AssignmentEpoch: 1, AssignmentState: "active"},
 		Revision:     1, Plan: p.Plan, DependsOn: slices.Clone(p.DependsOn), CreatedAt: now, UpdatedAt: now,
 	}
 	if p.Manager != nil {

@@ -19,7 +19,7 @@ type issueTransport func(*http.Request) (*http.Response, error)
 
 func (f issueTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T) {
+func TestIssueCLIRealHTTPRecoversBusinessIdentityAfterLostResponses(t *testing.T) {
 	e := newEnv(t)
 	e.configure()
 	token := e.login(protocol.ScopeOwner)
@@ -87,22 +87,26 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 		t.Fatalf("unknown submission was repeated or duplicated issue: ids=%v", ids)
 	}
 	originalID := ids[0]
-	if !strings.Contains(stderr.String(), "unknown_outcome") || !strings.Contains(stderr.String(), "request show "+originalID) {
+	var original protocol.Envelope
+	if err := json.Unmarshal(envelopes[0], &original); err != nil || !protocol.ValidID(protocol.PrefixWorkItem, original.Target.ID) {
+		t.Fatal("creation identity not fixed before sending", original, err)
+	}
+	if !strings.Contains(stderr.String(), "unknown_outcome") || !strings.Contains(stderr.String(), "issue show "+original.Target.ID) {
 		t.Fatal("lost response omitted original-request recovery guidance", stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
 	beforeReads := reads
-	if code := cli.Main(t.Context(), env, []string{"request", "show", originalID, "--json"}); code != 0 {
+	if code := cli.Main(t.Context(), env, []string{"issue", "show", original.Target.ID, "--json"}); code != 0 {
 		t.Fatalf("reconciliation exit=%d out=%s err=%s", code, &stdout, &stderr)
 	}
-	var recorded protocol.RequestView
-	if err := json.Unmarshal(stdout.Bytes(), &recorded); err != nil || recorded.RequestID != originalID || recorded.Status != protocol.OpSucceeded || reads != beforeReads+1 || len(ids) != 1 {
+	var recorded protocol.IssueView
+	if err := json.Unmarshal(stdout.Bytes(), &recorded); err != nil || recorded.IssueID != original.Target.ID || reads != beforeReads+1 || len(ids) != 1 {
 		t.Fatalf("original committed request was not reconciled read-only: %+v err=%v reads=%d ids=%v", recorded, err, reads, ids)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := cli.Main(t.Context(), env, []string{"request", "replay", "--data", string(envelopes[0])}); code != 0 {
+	if code := cli.Main(t.Context(), env, []string{"operation", "submit", "--data", string(envelopes[0])}); code != 0 {
 		t.Fatalf("recovery exit=%d out=%s err=%s", code, &stdout, &stderr)
 	}
 	var response protocol.APIResponse
@@ -111,19 +115,26 @@ func TestIssueCLIRealHTTPRecoversOriginalRequestAfterLostResponses(t *testing.T)
 	}
 	var issue protocol.Issue
 	_ = json.Unmarshal(response.Operation.Result, &issue)
-	var recordedResult, replayedResult bytes.Buffer
-	if err := json.Compact(&recordedResult, recorded.Result); err != nil {
-		t.Fatal(err)
+	if response.Operation.RequestID != originalID || issue.IssueID != original.Target.ID || len(ids) != 2 || ids[1] != originalID || !bytes.Equal(envelopes[0], envelopes[1]) || hashes[0] != hashes[1] || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
+		t.Fatal("explicit saved-input submission changed its business identity or duplicated the Issue")
 	}
-	if err := json.Compact(&replayedResult, response.Operation.Result); err != nil {
-		t.Fatal(err)
+	// The actual object key, rather than a generic request-result ledger,
+	// makes another trace of the same immutable creation harmless.
+	anotherTrace := original
+	anotherTrace.RequestID = e.ids.New(protocol.PrefixRequest)
+	sameObject, _ := json.Marshal(anotherTrace)
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli.Main(t.Context(), env, []string{"operation", "submit", "--data", string(sameObject)}); code != 0 {
+		t.Fatal("same business key with another trace failed", code, stderr.String())
 	}
-	if response.Operation.RequestID != originalID || len(ids) != 2 || ids[1] != originalID || !bytes.Equal(envelopes[0], envelopes[1]) || hashes[0] != hashes[1] || !bytes.Equal(recordedResult.Bytes(), replayedResult.Bytes()) || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
-		t.Fatal("manual recovery changed the original Envelope, recorded result, or duplicated its issue")
+	var current protocol.APIResponse
+	if err := json.Unmarshal(stdout.Bytes(), &current); err != nil || current.Operation == nil || current.Operation.RequestID != anotherTrace.RequestID || e.count(`SELECT count(*) FROM issue_controls`) != 1 {
+		t.Fatal("business identity depended on request cache", current, err)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := cli.Main(t.Context(), env, []string{"issue", "create", "--request-id", originalID, "--data", strings.Replace(payload, "Owner CLI intent", "Different intent", 1)}); code != 1 {
+	if code := cli.Main(t.Context(), env, []string{"issue", "create", "--request-id", originalID, "--id", original.Target.ID, "--data", strings.Replace(payload, "Owner CLI intent", "Different intent", 1)}); code != 1 {
 		t.Fatal("changed payload reused the original identity")
 	}
 	if e.count(`SELECT count(*) FROM issue_controls`) != 1 {

@@ -121,8 +121,8 @@ func TestSharedReviewOriginalReviewerCorrectsTerminalReportWithoutAnotherRound(t
 		t.Fatal(err)
 	}
 	count := h.count("shared_delivery_review_history")
-	if replay := h.exec(principal, envelope, command); string(replay.Result) != string(op.Result) || h.count("shared_delivery_review_history") != count {
-		t.Fatal("unknown response retry appended twice", replay)
+	if replay := h.exec(principal, envelope, command); replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeDuplicateEffect || h.count("shared_delivery_review_history") != count {
+		t.Fatal("retry bypassed the actual applied effect or appended twice", replay)
 	}
 
 	setPRPolicyForTest(t, h, issue.IssueID, "auto")

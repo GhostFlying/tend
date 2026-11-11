@@ -83,7 +83,7 @@ func checkManagerReceiptReaderRecovery(ctx context.Context, q store.Querier, hos
 func managerPhysicalStopProof(ctx context.Context, q store.Querier, run, lease string) (*managerStopProof, error) {
 	var id, raw string
 	var sequence int64
-	err := q.QueryRowContext(ctx, `SELECT p.request_id,p.payload_json,p.last_sequence FROM maintenance_physical_stops p JOIN request_records r ON r.domain=p.request_domain AND r.request_id=p.request_id AND r.operation=p.operation WHERE p.run_id=? AND p.lease_id=? AND p.request_domain=? AND p.operation=? AND r.status='succeeded' AND r.error_code IS NULL ORDER BY p.created_at DESC,p.rowid DESC LIMIT 1`, run, lease, "run:"+run, protocol.OpManagerNativeStopped).Scan(&id, &raw, &sequence)
+	err := q.QueryRowContext(ctx, `SELECT p.request_id,p.payload_json,p.last_sequence FROM maintenance_physical_stops p WHERE p.run_id=? AND p.lease_id=? AND p.request_domain=? AND p.operation=? ORDER BY p.created_at DESC,p.rowid DESC LIMIT 1`, run, lease, "run:"+run, protocol.OpManagerNativeStopped).Scan(&id, &raw, &sequence)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

@@ -105,7 +105,7 @@ func TestRetainedRunCLIDataFileDryRunAndExplicitReplayPreserveIdentity(t *testin
 		}
 		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: actual.RequestID, Status: protocol.OpSucceeded, Result: result}})
 	})
-	for _, call := range [][]string{args, append(slices.Clone(args[:len(args)-3]), "--file", payloadFile, "--json"), {"request", "replay", "--file", frozen, "--json"}} {
+	for _, call := range [][]string{args, append(slices.Clone(args[:len(args)-3]), "--file", payloadFile, "--json"), {"operation", "submit", "--file", frozen, "--json"}} {
 		te.out.Reset()
 		te.errOut.Reset()
 		if code := te.main(call...); code != exitOK {
@@ -168,35 +168,28 @@ func TestRetainedRunCLIUnknownRequiresReadBeforeExplicitReplay(t *testing.T) {
 	if len(f.seen("POST /api/v1/ops")) != 1 {
 		t.Fatal("unknown continuation implicitly resubmitted")
 	}
-	if !strings.Contains(te.errOut.String(), "unknown_outcome") || !strings.Contains(te.errOut.String(), "request show "+retainedCLIRequest) {
+	if !strings.Contains(te.errOut.String(), "unknown_outcome") || !strings.Contains(te.errOut.String(), "run maintenance-reconciliation "+retainedCLIRun) {
 		t.Fatal("unknown result lost original request recovery guidance", te.errOut.String())
 	}
 	if saved, err := os.ReadFile(frozen); err != nil || !bytes.Equal(saved, frozenBytes) {
 		t.Fatal("original local envelope changed", err)
 	}
-	f.answer("GET /api/v1/requests/"+retainedCLIRequest, protocol.RequestView{RequestID: retainedCLIRequest, Operation: protocol.OpContinueRetainedRun, Status: protocol.OpSucceeded, Result: json.RawMessage(`{"task_revision":8}`)})
+	wantState := protocol.RetainedRunReconciliation{RunID: retainedCLIRun, Identity: want.RetainedRunIdentity, TaskRevision: 8, Observed: protocol.RunUnknown, UnresolvedNativeRequests: 1, PendingBusinessReceipts: true}
+	path := "GET /api/v1/runs/" + retainedCLIRun + "/maintenance-reconciliation"
+	f.answer(path, wantState)
 	te.out.Reset()
 	te.errOut.Reset()
-	if code := te.main("request", "show", retainedCLIRequest, "--json"); code != exitOK {
+	if code := te.main("run", "maintenance-reconciliation", retainedCLIRun, "--json"); code != exitOK {
 		t.Fatal(code, te.errOut.String())
 	}
-	var view protocol.RequestView
-	if err := json.Unmarshal(te.out.Bytes(), &view); err != nil || view.RequestID != retainedCLIRequest || view.Status != protocol.OpSucceeded {
-		t.Fatal("original request result unavailable", view, err)
+	var view protocol.RetainedRunReconciliation
+	if err := json.Unmarshal(te.out.Bytes(), &view); err != nil || !reflect.DeepEqual(view, wantState) {
+		t.Fatal("actual retained state unavailable", view, err)
 	}
-	if len(f.seen("POST /api/v1/ops")) != 1 || len(f.seen("GET /api/v1/requests/"+retainedCLIRequest)) != 1 {
-		t.Fatal("request reconciliation mutated work")
+	if len(f.seen("POST /api/v1/ops")) != 1 || len(f.seen(path)) != 1 {
+		t.Fatal("unknown native operation was resubmitted during reconciliation")
 	}
-	f.answer("POST /api/v1/ops", protocol.APIResponse{Operation: &protocol.Operation{RequestID: retainedCLIRequest, Status: protocol.OpSucceeded}})
-	te.out.Reset()
-	te.errOut.Reset()
-	if code := te.main("request", "replay", "--file", frozen, "--json"); code != exitOK {
-		t.Fatal(code, te.errOut.String())
-	}
-	sent := f.seen("POST /api/v1/ops")
-	if len(sent) != 2 || !bytes.Equal(sent[0].body, sent[1].body) {
-		t.Fatal("explicit replay changed original envelope or implicitly retried")
-	}
+
 }
 
 func TestRetainedRunCLIHelpAndCapabilityDescribeCompleteFrozenInput(t *testing.T) {
@@ -205,7 +198,7 @@ func TestRetainedRunCLIHelpAndCapabilityDescribeCompleteFrozenInput(t *testing.T
 		t.Fatal(code, te.errOut.String())
 	}
 	help := strings.ToLower(te.out.String())
-	for _, term := range []string{"revision", "request-id", "file", "data", "dry-run", "protection", "strict", "request show"} {
+	for _, term := range []string{"revision", "request-id", "file", "data", "dry-run", "protection", "strict", "maintenance-reconciliation"} {
 		if !strings.Contains(help, term) {
 			t.Errorf("leaf help omitted %q", term)
 		}

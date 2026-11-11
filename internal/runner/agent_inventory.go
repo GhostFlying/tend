@@ -28,7 +28,24 @@ func (r *Runner) inventoryRuntime() (*protocol.RunnerRuntime, error) {
 }
 
 func (r *Runner) readAgentInventory(ctx context.Context, runtime *protocol.RunnerRuntime, requestID string) (protocol.AgentInventoryStatus, error) {
-	env, err := r.newEnvelope(protocol.OpRunnerInventoryStatus, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.AgentInventoryStatusPayload{Runtime: runtime, RequestID: requestID})
+	input := protocol.AgentInventoryStatusPayload{Runtime: runtime, RequestID: requestID}
+	if requestID != "" && runtime.Protocol >= 4 {
+		pending, err := r.pendingInventory(ctx)
+		if err != nil {
+			return protocol.AgentInventoryStatus{}, err
+		}
+		if pending != nil && pending.RequestID == requestID {
+			var original protocol.RegisterAgentInventoryPayload
+			if err = json.Unmarshal(pending.Payload, &original); err != nil {
+				return protocol.AgentInventoryStatus{}, err
+			}
+			input.RequestID = ""
+			input.LocalRevision = original.LocalRevision
+			input.SnapshotID = original.SnapshotID
+			input.PublicSHA256 = original.PublicSHA256
+		}
+	}
+	env, err := r.newEnvelope(protocol.OpRunnerInventoryStatus, protocol.Target{Type: "host", ID: r.cfg.HostID}, input)
 	if err != nil {
 		return protocol.AgentInventoryStatus{}, err
 	}
@@ -85,7 +102,39 @@ func (r *Runner) RegisterAgentInventory(ctx context.Context) error {
 		if err := json.Unmarshal(pending.Payload, &payload); err != nil {
 			return fmt.Errorf("runner: decode pending inventory: %w", err)
 		}
+		if status.RequestState == "business_state" {
+			if status.Matched != nil {
+				receipt := status.Matched
+				if receipt.HostID != r.cfg.HostID || receipt.LocalRevision != payload.LocalRevision || receipt.SnapshotID != payload.SnapshotID || receipt.PublicSHA256 != payload.PublicSHA256 {
+					return protocol.Errorf(protocol.CodeConflictPayload, "inventory snapshot reconciliation does not match original business identity")
+				}
+				if err := r.cfg.Journal.DeleteRequest(ctx, pending.RequestID); err != nil {
+					return err
+				}
+			} else {
+				if payload.Runtime == nil {
+					return protocol.Errorf(protocol.CodeInvalidRequest, "pending inventory has no original runtime")
+				}
+				if payload.Runtime.InstanceID == runtime.InstanceID && payload.Runtime.Generation == runtime.Generation {
+					if err := r.sendInventory(ctx, pending); err != nil {
+						return err
+					}
+					status, err = r.readAgentInventory(ctx, runtime, "")
+					if err != nil {
+						return err
+					}
+				} else {
+					if payload.Runtime.InstanceID == runtime.InstanceID || payload.Runtime.Generation >= runtime.Generation {
+						return protocol.Errorf(protocol.CodeConflictPayload, "inventory predecessor has not been fenced by a newer process")
+					}
+					if err := r.cfg.Journal.DeleteRequest(ctx, pending.RequestID); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		switch status.RequestState {
+		case "business_state": // Settled above through immutable snapshot identity.
 		case "recorded":
 			hash, err := protocol.PayloadHash(pending)
 			if err != nil {

@@ -43,6 +43,17 @@ func (c WebhookCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "subscription creation targets an Issue")
 		}
 		p.IssueID = x.Env.Target.ID
+		if !protocol.ValidID(protocol.Prefix("webhook"), p.SubscriptionID) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new subscription requires its stable subscription_id")
+		}
+		if old, e := store.GetWebhookSubscription(ctx, tx.Q(), p.SubscriptionID); e == nil {
+			if old.IssueID != p.IssueID {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "subscription identity belongs to another Issue")
+			}
+			return Outcome{Result: old, NoEffect: true}, nil
+		} else if !errors.Is(e, store.ErrNotFound) {
+			return Outcome{}, e
+		}
 	} else {
 		if x.Env.Target.Type != "webhook" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "subscription control targets a webhook")
@@ -83,7 +94,7 @@ func (c WebhookCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "subscription needs title and instruction")
 		}
 		if c.Action == "create" {
-			sub = protocol.WebhookSubscription{ID: x.IDs.New(protocol.Prefix("webhook")), IssueID: p.IssueID, Status: "active", CreatedAt: now, KeyRef: p.KeyRef}
+			sub = protocol.WebhookSubscription{ID: p.SubscriptionID, IssueID: p.IssueID, Status: "active", CreatedAt: now, KeyRef: p.KeyRef}
 		} else if p.KeyRef != "" && p.KeyRef != sub.KeyRef {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "rotate credentials through the rotate operation")
 		}
@@ -143,7 +154,7 @@ func (c ReceiveWebhook) Authorize(ctx context.Context, x *Exec, q store.Querier)
 		return err
 	} else if prepared {
 		var recorded bool
-		if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM request_records WHERE domain='system' AND request_id=?)`, x.Env.RequestID).Scan(&recorded); err != nil {
+		if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM webhook_receipts WHERE subscription_id=? AND delivery_id=?)`, x.Env.Target.ID, webhookDeliveryIdentity(x.Env.Payload)).Scan(&recorded); err != nil {
 			return err
 		}
 		if !recorded {
@@ -334,4 +345,10 @@ func webhookIssueEvents(ctx context.Context, x *Exec, tx *store.Tx, events []Eve
 		}
 	}
 	return nil
+}
+
+func webhookDeliveryIdentity(raw json.RawMessage) string {
+	var p ReceiveWebhookPayload
+	_ = json.Unmarshal(raw, &p)
+	return p.DeliveryID
 }

@@ -70,7 +70,12 @@ func (t *Tx) PutBaseline(ctx context.Context, b Baseline, now int64) error {
 
 // InsertPacket stores a packet in the built state.
 func (t *Tx) InsertPacket(ctx context.Context, p Packet, now int64) error {
-	_, err := t.Exec(ctx, `INSERT INTO context_packets (packet_id, thread_key, epoch, kind, from_seq, to_seq, body, status,
+	var err error
+	p.Body, err = t.RetainJSON(ctx, p.Body)
+	if err != nil {
+		return err
+	}
+	_, err = t.Exec(ctx, `INSERT INTO context_packets (packet_id, thread_key, epoch, kind, from_seq, to_seq, body, status,
 		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'built', ?, ?)`,
 		p.PacketID, p.ThreadKey, p.Epoch, p.Kind, p.FromSeq, p.ToSeq, p.Body, now, now)
 	if err != nil {
@@ -87,13 +92,14 @@ func GetPacket(ctx context.Context, q Querier, packetID string) (Packet, error) 
 	if err != nil {
 		return Packet{}, notFound(err, "packet "+packetID)
 	}
-	return p, nil
+	p.Body, err = ResolveJSON(ctx, q, p.Body)
+	return p, err
 }
 
 // SetPacketStatus moves a packet out of a state; it returns ErrStale when
 // the packet is no longer in from.
 func (t *Tx) SetPacketStatus(ctx context.Context, packetID, from, to string, now int64) error {
-	res, err := t.Exec(ctx, `UPDATE context_packets SET status = ?, updated_at = ? WHERE packet_id = ? AND status = ?`, to, now, packetID, from)
+	res, err := t.Exec(ctx, `UPDATE context_packets SET status = ?, body=CASE WHEN ?='injected' THEN '' ELSE body END, updated_at = ? WHERE packet_id = ? AND status = ?`, to, to, now, packetID, from)
 	if err != nil {
 		return fmt.Errorf("store: set packet status: %w", err)
 	}
@@ -116,7 +122,7 @@ func (t *Tx) SettleBuiltPackets(ctx context.Context, threadKey string, now int64
 // LatestEventSeq returns the sequence number of the newest event, or zero.
 func LatestEventSeq(ctx context.Context, q Querier) (int64, error) {
 	var seq int64
-	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq), 0) FROM events`).Scan(&seq); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT cursor FROM refresh_stream_state WHERE singleton=1`).Scan(&seq); err != nil {
 		return 0, fmt.Errorf("store: latest event: %w", err)
 	}
 	return seq, nil

@@ -67,12 +67,13 @@ func TestDeliveryObservationServerToRunnerFencesLateServerResult(t *testing.T) {
 		t.Fatal("late server read changed current fact", before, after)
 	}
 	if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var status, late string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT status,late_result_json FROM server_delivery_queries WHERE query_id=?`, old.ID).Scan(&status, &late); err != nil {
+		var status string
+		var late int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT status,late_result_at FROM server_delivery_queries WHERE query_id=?`, old.ID).Scan(&status, &late); err != nil {
 			return err
 		}
-		if status != "retired" || late == "" {
-			t.Errorf("original late read lost: status=%q late=%q", status, late)
+		if status != "retired" || late == 0 {
+			t.Errorf("original late read lost: status=%q late=%d", status, late)
 		}
 		return nil
 	}); err != nil {
@@ -249,11 +250,11 @@ func TestServerDeliveryHandoffRetainsUnselectedRunnerReport(t *testing.T) {
 		t.Fatal(before, after)
 	}
 	if err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var late string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT late_report_json FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&late); err != nil {
+		var late int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT late_report_at FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&late); err != nil {
 			return err
 		}
-		if late == "" {
+		if late == 0 {
 			t.Error("unselected original nonce report not retained")
 		}
 		return nil
@@ -334,16 +335,12 @@ func TestRunnerSharedDeliverySerializesNewClaimsAndAcceptsOriginalHistory(t *tes
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var policy bool
-		var raw string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT accept_late_report,late_report_json FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&policy, &raw); err != nil {
+		var raw int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT accept_late_report,late_report_at FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&policy, &raw); err != nil {
 			return err
 		}
-		var report protocol.DeliveryReportPayload
-		if err := json.Unmarshal([]byte(raw), &report); err != nil {
-			return err
-		}
-		if !policy || report.Nonce != old.Nonce || report.Snapshot == nil || report.Snapshot.State != "open" {
-			t.Errorf("original report/history disposition lost: policy=%v report=%+v", policy, report)
+		if !policy || raw == 0 {
+			t.Errorf("original report disposition lost: policy=%v at=%d", policy, raw)
 		}
 		return nil
 	}); err != nil {
@@ -417,12 +414,12 @@ func TestRunnerSharedHistoryKeepsOriginalPayloadAndInstanceChecks(t *testing.T) 
 		t.Fatal("superseded host instance gained history acceptance", op)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var raw string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT late_report_json FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&raw); err != nil {
+		var raw int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT late_report_at FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&raw); err != nil {
 			return err
 		}
-		if raw != "" {
-			t.Errorf("invalid payload recorded as an accepted original report: %s", raw)
+		if raw != 0 {
+			t.Errorf("invalid payload recorded as an accepted original report: %d", raw)
 		}
 		return nil
 	}); err != nil {

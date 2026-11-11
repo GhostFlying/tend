@@ -15,8 +15,7 @@ import (
 func dataSnapshotPaths(cfg Config) ([]string, error) {
 	paths := dataPaths(cfg)
 	var originals []string
-	for _, ledger := range cfg.DataFiles {
-		root := ledger + ".files"
+	for _, root := range originalRoots(cfg) {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				if path == root && errors.Is(walkErr, os.ErrNotExist) {
@@ -51,8 +50,7 @@ func configuredOriginal(cfg Config, path string) bool {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return false
 	}
-	for _, ledger := range cfg.DataFiles {
-		root := filepath.Clean(ledger + ".files")
+	for _, root := range originalRoots(cfg) {
 		relative, err := filepath.Rel(root, path)
 		if err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return true
@@ -74,8 +72,8 @@ func prepareOriginalRestore(cfg Config, path string) error {
 			return err
 		}
 		isRoot := false
-		for _, ledger := range cfg.DataFiles {
-			isRoot = isRoot || parent == filepath.Clean(ledger+".files")
+		for _, root := range originalRoots(cfg) {
+			isRoot = isRoot || parent == root
 		}
 		if isRoot {
 			break
@@ -85,4 +83,12 @@ func prepareOriginalRestore(cfg Config, path string) error {
 		}
 	}
 	return os.MkdirAll(filepath.Dir(path), 0700)
+}
+
+func originalRoots(cfg Config) []string {
+	var roots []string
+	for _, ledger := range cfg.DataFiles {
+		roots = append(roots, filepath.Clean(ledger+".files"), filepath.Clean(ledger+".spool"))
+	}
+	return roots
 }

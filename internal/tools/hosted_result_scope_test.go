@@ -28,10 +28,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test-owner"}
 	execute := func(principal protocol.Principal, command app.Command, target protocol.Target, payload any, expected *int64) protocol.Operation {
 		t.Helper()
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatal(err)
-		}
+		target, raw := composeFixtureBusinessInput(t, ids, command.Operation(), target, payload)
 		op, err := e.svc.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, ExpectedControlRevision: expected, Payload: raw}, command)
 		if err != nil || op.Status != protocol.OpSucceeded && op.Status != protocol.OpAccepted {
 			t.Fatal(op, err)

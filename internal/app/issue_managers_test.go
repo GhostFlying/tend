@@ -375,7 +375,7 @@ func TestMainAgentCreatesCategoryManagerBeforeAnyRunnerIdentityIsSelected(t *tes
 	h, r := managerClaimHarness(t)
 	inventoryCategory(t, h, "planner", 0, "active")
 	_, prepared := acceptHostedFixture(t, h, hostedConfigurationFixture(), 0)
-	h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(prepared))
+	h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(prepared), WithMainOwner(owner.Subject))
 	source, delivery := h.say("Please coordinate this new intent")
 	turn := startHostedReview(t, h, "main", delivery)
 	create := protocol.CreateIssuePayload{IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: source, ExpectedSourceRevision: rev(1)}, Plan: protocol.IssuePlan{Title: "Delegate an intent", Project: "default", Intent: "Coordinate through the runner"}, Manager: &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Delegate ongoing responsibility"}}

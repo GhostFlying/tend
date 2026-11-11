@@ -158,6 +158,25 @@ func (s *server) exec(p protocol.Principal, op string, target protocol.Target, p
 	if err != nil {
 		s.t.Fatal(err)
 	}
+	if prefix := protocol.CreationTargetPrefix(op); prefix != "" && target.ID == "" {
+		target.ID = s.ids.New(prefix)
+	}
+	identities := protocol.NativePayloadIdentities(op)
+	if op == protocol.OpRunnerClaim {
+		identities = map[string]protocol.Prefix{"run_id": protocol.PrefixRun}
+	}
+	if len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(b, &fields); err != nil {
+			s.t.Fatal(err)
+		}
+		for key, prefix := range identities {
+			if len(fields[key]) == 0 || string(fields[key]) == `""` || string(fields[key]) == "null" {
+				fields[key], _ = json.Marshal(s.ids.New(prefix))
+			}
+		}
+		b, _ = json.Marshal(fields)
+	}
 	env := &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: b}
 	res, err := s.app.Execute(context.Background(), p, env, cmd)
 	if err != nil || res.Status == protocol.OpFailed {

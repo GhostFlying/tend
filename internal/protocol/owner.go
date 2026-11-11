@@ -57,6 +57,7 @@ type APIResponse struct {
 
 // SubmitMessagePayload is the payload of conversation.submit_message.
 type SubmitMessagePayload struct {
+	MessageID      string                   `json:"message_id"`
 	ConversationID string                   `json:"conversation_id,omitempty"`
 	Images         []ConversationImageInput `json:"images,omitempty"`
 	Attachments    []string                 `json:"attachments,omitempty"`

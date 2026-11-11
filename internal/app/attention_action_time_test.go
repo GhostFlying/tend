@@ -67,8 +67,8 @@ func TestAttentionActionTimeNoIssueMainReminderAndPresentation(t *testing.T) {
 	if op = h.exec(owner, env, AttentionCommand{Action: "confirm"}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if replay := h.exec(owner, env, AttentionCommand{Action: "confirm"}); replay.Status != protocol.OpSucceeded || string(replay.Result) != string(op.Result) {
-		t.Fatal("confirmation replay changed", replay)
+	if replay := h.exec(owner, env, AttentionCommand{Action: "confirm"}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old confirmation revision was accepted", replay)
 	}
 	if h.occurrences(dueID)[0].Status != "cancelled" || readAttentionForTest(t, h, a.AttentionID).Status != "resolved" {
 		t.Fatal("confirmation lost original business meaning")

@@ -113,12 +113,12 @@ func TestBoundedRunnerOwnerAuthorityAcceptsUnknownAndPreservesOriginalWork(t *te
 	if control.Mode != protocol.RunnerMaintenance || control.Revision != grant.ControlRevision || control.Authorization != nil {
 		t.Fatal("force authority leaked into the ordinary grant", control)
 	}
-	// Lost owner replies use the exact recorded request after both its CAS and
-	// expiry have moved; they must not renew or widen its authority.
+	// Reconcile the immutable business grant after expiry; submitting the stale
+	// command again cannot renew or widen its authority.
 	h.clock.Advance(10 * time.Minute)
 	again, err := h.app.AuthorizeRunnerBoundedMaintenance(t.Context(), owner, p)
-	if err != nil || !reflect.DeepEqual(grant, again) {
-		t.Fatal("original authority receipt was not replayed", again, err)
+	if protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+		t.Fatal("expired maintenance command was admitted again", again, err)
 	}
 	read, err := h.app.RunnerBoundedMaintenance(t.Context(), p.HostID, p.Authorization.RequestID)
 	if err != nil || !reflect.DeepEqual(read, grant) {

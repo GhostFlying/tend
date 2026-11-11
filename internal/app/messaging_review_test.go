@@ -511,9 +511,14 @@ func TestMessagingChoicePanelUsesSameCommunicationMessages(t *testing.T) {
 	}
 	env := h.env("work_item_choices.respond", protocol.Target{Type: "work_item_choice", ID: choice.ChoiceID}, protocol.UpdateWorkItemChoicePayload{Answer: "Later"}, rev(choice.Version))
 	first := h.exec(owner, env, UpdateWorkItemChoice{Action: "respond"})
+	messages := h.count("conversation_messages")
 	second := h.exec(owner, env, UpdateWorkItemChoice{Action: "respond"})
-	if first.Error != nil || string(first.Result) != string(second.Result) {
-		t.Fatal(first, second)
+	if first.Error != nil {
+		t.Fatal(first)
+	}
+	expectWorkCode(t, second, protocol.CodeStaleRevision)
+	if h.count("conversation_messages") != messages || h.count("work_item_choices") != 1 {
+		t.Fatal("stale choice answer duplicated communication or choice facts")
 	}
 	var answered protocol.WorkItemChoice
 	if err := json.Unmarshal(first.Result, &answered); err != nil {

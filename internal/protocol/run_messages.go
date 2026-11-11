@@ -22,6 +22,7 @@ const (
 
 // SendRunMessagePayload supplements a frozen task contract without revising it.
 type SendRunMessagePayload struct {
+	MessageID       string `json:"message_id"`
 	TaskID          string `json:"task_id"`
 	SpecVersion     int64  `json:"spec_version"`
 	Generation      int64  `json:"generation"`

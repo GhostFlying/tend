@@ -69,7 +69,6 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
   const prefix = `issue-delivery-refresh:${issue.issue_id}:${item.delivery.delivery_id}`;
   const [pending, setPending] = useState<{ scope: string; envelope: Envelope }[]>([]);
   const [busy, setBusy] = useState(true);
-  const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
   const [result, setResult] = useState<OpOutcome | null>(null);
   const [error, setError] = useState("");
   const loader = useMemo(
@@ -143,16 +142,10 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
       setBusy(false);
     }
   };
-  const reconcile = async (scope: string, envelope: Envelope, retry: boolean) => {
+  const reconcile = async (scope: string) => {
     setBusy(true);
     setError("");
     try {
-      const receipt = await client.lookup(envelope.request_id);
-      if (!receipt && !retry) {
-        setMissing(new Set([...missing, scope]));
-        setResult({ kind: "unknown", message: "未查到原刷新请求，可显式重试同一请求。" });
-        return;
-      }
       const out = await new DurableOp(scope).reconcile(client);
       setResult(out);
       setPending(await loader());
@@ -282,20 +275,9 @@ function DeliveryRow({ issue, item }: { issue: IssueView; item: IssueDeliveryVie
             <summary>详细信息</summary>
             <CopyIdentifier value={record.envelope.request_id} />
           </details>
-          <button
-            disabled={busy}
-            onClick={() => void reconcile(record.scope, record.envelope, false)}
-          >
-            核对刷新请求
+          <button disabled={busy} onClick={() => void reconcile(record.scope)}>
+            核对交付事实
           </button>
-          {missing.has(record.scope) && (
-            <button
-              disabled={busy}
-              onClick={() => void reconcile(record.scope, record.envelope, true)}
-            >
-              重试原刷新请求
-            </button>
-          )}
         </div>
       ))}
       {error && <p role="status">{error}</p>}

@@ -35,7 +35,7 @@ func TestOriginalTaskInputDownloadsWithOnlyRunCredentials(t *testing.T) {
 		Goal: "inspect original frames", Acceptance: []string{"original verified"}, Delivery: domain.DeliveryCommit,
 		Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}, Inputs: []protocol.TaskInput{{FileID: file.FileID}},
 	}})
-	env := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task"}, Payload: payload}
+	env := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task", ID: e.ids.New(protocol.PrefixTask)}, Payload: payload}
 	if op, err := e.app.Execute(context.Background(), owner, env, app.CreateTask{}); err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatalf("create: %+v %v", op, err)
 	}

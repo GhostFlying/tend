@@ -49,8 +49,9 @@ func TestAttachmentUploadReplayAndMessageReferences(t *testing.T) {
 	if h.count("conversation_attachments") != 1 {
 		t.Fatal("duplicate upload")
 	}
-	if _, err := h.app.UploadConversationAttachment(ctx, p, req, "trace.log", "text/plain", strings.NewReader("changed")); protocol.CodeOf(err) != protocol.CodeConflictPayload {
-		t.Fatalf("different bytes reused identity: %v", err)
+	different, err := h.app.UploadConversationAttachment(ctx, p, req, "trace.log", "text/plain", strings.NewReader("changed"))
+	if err != nil || different.Status != protocol.OpSucceeded || bytes.Equal(different.Result, first.Result) || h.count("conversation_attachments") != 2 {
+		t.Fatal("different immutable content reused its file identity", different, err)
 	}
 	var file protocol.ConversationAttachment
 	_ = json.Unmarshal(first.Result, &file)
@@ -85,9 +86,9 @@ func TestAttachmentUploadReplayAndMessageReferences(t *testing.T) {
 	}
 	var contains int
 	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(ctx, `SELECT count(*) FROM request_records WHERE instr(COALESCE(result_json,''),'original log')>0`).Scan(&contains)
+		return tx.Q().QueryRowContext(ctx, `SELECT (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='request_records') + (SELECT count(*) FROM events WHERE instr(body_json,'original log')>0) + (SELECT count(*) FROM conversation_messages WHERE instr(body,'original log')>0)`).Scan(&contains)
 	}); err != nil || contains > 0 {
-		t.Fatal("file bytes in request record")
+		t.Fatal("retired request storage or copied original file bytes", contains, err)
 	}
 }
 

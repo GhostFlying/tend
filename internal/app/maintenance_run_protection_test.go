@@ -127,7 +127,7 @@ func TestReceiptRecoveryStopPreservesPhysicalFactsAndLateReceipts(t *testing.T) 
 	h.store = reopened
 	h.app = New(reopened, h.ids, h.clock.Now, WithCommittedMaintenanceStartup(p.MaintenanceID))
 	// Simulate another late physical proof after linkage and receipt reading.
-	late := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "late original physical stop", LastSequence: 0}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
+	late := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "lease fenced during explicit server recovery", LastSequence: 0}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
 	if late.Status != protocol.OpSucceeded {
 		t.Fatal(late)
 	}
@@ -167,8 +167,8 @@ func TestReceiptRecoveryStopPreservesPhysicalFactsAndLateReceipts(t *testing.T) 
 		if err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM maintenance_physical_stops WHERE run_id=?`, as.RunID).Scan(&facts); err != nil {
 			return err
 		}
-		if facts != 3 {
-			t.Fatalf("physical stop facts=%d, want 3 with exact replay deduplicated", facts)
+		if facts != 2 {
+			t.Fatalf("physical stop facts=%d, want 2 actual stop facts independent of transport retries", facts)
 		}
 		return nil
 	}); err != nil {
@@ -321,8 +321,8 @@ func TestReceiptRecoveryPhysicalStopThenOwnerCancel(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(stopped, replay) {
 		t.Fatal("original physical receipt changed", stopped, replay, err)
 	}
-	if again := h.exec(owner, control, CanonicalOwnerIssueCommand{Action: "cancel"}); !reflect.DeepEqual(op, again) {
-		t.Fatal("owner retry changed", op, again)
+	if again := h.exec(owner, control, CanonicalOwnerIssueCommand{Action: "cancel"}); again.Error == nil || again.Error.Code != protocol.CodeStaleRevision || h.run(as.RunID).ObservedState != protocol.RunFailed {
+		t.Fatal("old owner cancellation changed current state", again)
 	}
 }
 

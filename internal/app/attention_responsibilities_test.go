@@ -253,8 +253,8 @@ func TestResponsibilityReplayReturnsReceiptAfterEscalationAndRejectsStaleCAS(t *
 		t.Fatal(first)
 	}
 	replay := h.exec(principal, env, cmd)
-	if replay.Status != protocol.OpSucceeded || string(first.Result) != string(replay.Result) {
-		t.Fatal("receipt lost after recipient changed", replay)
+	if replay.Error == nil || replay.Error.Code != protocol.CodeDuplicateEffect {
+		t.Fatal("same coordination effect executed again", replay)
 	}
 	current := readAttentionForTest(t, h, a.AttentionID)
 	stale := h.exec(owner, h.env("attentions.escalate", env.Target, protocol.HandleAttentionPayload{Reason: "Stale follow-up"}, rev(a.Responsibility.Revision)), HandleAttention{Escalate: true})

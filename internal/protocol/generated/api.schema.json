@@ -2406,6 +2406,472 @@
       "title": "BackgroundSourcePage",
       "type": "object"
     },
+    "BackupCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "allocated_bytes": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "class": {
+          "type": "string"
+        },
+        "covered_by_checkpoint_id": {
+          "type": "string"
+        },
+        "created_at_ms": {
+          "type": "integer"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/BackupFile"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "incompatible_schema": {
+          "type": "boolean"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "observation_completed_ms": {
+          "type": "integer"
+        },
+        "protected_reason": {
+          "type": "string"
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "restore_proof_sha256": {
+          "type": "string"
+        },
+        "unknown": {
+          "type": "boolean"
+        },
+        "verified_at_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "directory",
+        "created_at_ms",
+        "manifest_sha256",
+        "class",
+        "recoverable",
+        "unknown",
+        "bytes",
+        "decision",
+        "reasons"
+      ],
+      "title": "BackupCheckpoint",
+      "type": "object"
+    },
+    "BackupFile": {
+      "additionalProperties": false,
+      "properties": {
+        "existed": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "object_sha256": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "existed",
+        "mode"
+      ],
+      "title": "BackupFile",
+      "type": "object"
+    },
+    "BackupObject": {
+      "additionalProperties": false,
+      "properties": {
+        "allocated_bytes": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "bytes",
+        "decision",
+        "reasons"
+      ],
+      "title": "BackupObject",
+      "type": "object"
+    },
+    "BackupPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "daily": {
+          "type": "integer"
+        },
+        "diagnostic_compress_days": {
+          "type": "integer"
+        },
+        "diagnostic_retain_days": {
+          "type": "integer"
+        },
+        "failed_drill_days": {
+          "type": "integer"
+        },
+        "incompatible_days": {
+          "type": "integer"
+        },
+        "migration_days": {
+          "type": "integer"
+        },
+        "minimum_verified": {
+          "type": "integer"
+        },
+        "successful_drill_hours": {
+          "type": "integer"
+        },
+        "weekly": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "minimum_verified",
+        "daily",
+        "weekly",
+        "migration_days",
+        "incompatible_days",
+        "successful_drill_hours",
+        "failed_drill_days",
+        "diagnostic_compress_days",
+        "diagnostic_retain_days"
+      ],
+      "title": "BackupPolicy",
+      "type": "object"
+    },
+    "BackupPreview": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoints": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/BackupCheckpoint"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at_ms": {
+          "type": "integer"
+        },
+        "diagnostic_logs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DiagnosticLog"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exclusive_physical_bytes_known": {
+          "type": "boolean"
+        },
+        "expected_generation": {
+          "type": "integer"
+        },
+        "expected_reclaimed_allocated_bytes": {
+          "type": "integer"
+        },
+        "expected_reclaimed_bytes": {
+          "type": "integer"
+        },
+        "format": {
+          "type": "integer"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "objects": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/BackupObject"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "$ref": "#/definitions/BackupPolicy"
+        },
+        "recovery_checkpoint_id": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "diagnostic_logs",
+        "format",
+        "instance_id",
+        "expected_generation",
+        "created_at_ms",
+        "policy",
+        "checkpoints",
+        "objects",
+        "expected_reclaimed_bytes",
+        "expected_reclaimed_allocated_bytes",
+        "exclusive_physical_bytes_known",
+        "sha256"
+      ],
+      "title": "BackupPreview",
+      "type": "object"
+    },
+    "BackupPruneRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "preview": {
+          "$ref": "#/definitions/BackupPreview"
+        }
+      },
+      "required": [
+        "preview"
+      ],
+      "title": "BackupPruneRequest",
+      "type": "object"
+    },
+    "BackupPruneState": {
+      "additionalProperties": false,
+      "properties": {
+        "completed": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished_at_ms": {
+          "type": "integer"
+        },
+        "in_flight": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "preview": {
+          "$ref": "#/definitions/BackupPreview"
+        },
+        "reclaimed_allocated_bytes": {
+          "type": "integer"
+        },
+        "reclaimed_bytes": {
+          "type": "integer"
+        },
+        "started_at_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "preview",
+        "phase",
+        "completed",
+        "reclaimed_bytes",
+        "reclaimed_allocated_bytes",
+        "started_at_ms"
+      ],
+      "title": "BackupPruneState",
+      "type": "object"
+    },
+    "BackupRestoreProof": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "covered_by_checkpoint_id": {
+          "type": "string"
+        },
+        "explained": {
+          "type": "boolean"
+        },
+        "format": {
+          "type": "integer"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "restored": {
+          "type": "boolean"
+        },
+        "source_artifact_sha256": {
+          "type": "string"
+        },
+        "source_manifest_sha256": {
+          "type": "string"
+        },
+        "source_protocol": {
+          "type": "integer"
+        },
+        "source_release_id": {
+          "type": "string"
+        },
+        "source_storage_version": {
+          "type": "integer"
+        },
+        "unique_evidence_path": {
+          "type": "string"
+        },
+        "unique_evidence_sha256": {
+          "type": "string"
+        },
+        "verified_at_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "checkpoint_id",
+        "manifest_sha256",
+        "restored",
+        "verified_at_ms"
+      ],
+      "title": "BackupRestoreProof",
+      "type": "object"
+    },
+    "BackupStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "preview": {
+          "$ref": "#/definitions/BackupPreview"
+        },
+        "prune": {
+          "$ref": "#/definitions/BackupPruneState"
+        }
+      },
+      "required": [
+        "preview"
+      ],
+      "title": "BackupStatus",
+      "type": "object"
+    },
+    "BackupVerification": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "class": {
+          "type": "string"
+        },
+        "expected_generation": {
+          "type": "integer"
+        },
+        "incompatible_schema": {
+          "type": "boolean"
+        },
+        "manifest_sha256": {
+          "type": "string"
+        },
+        "observation_completed_ms": {
+          "type": "integer"
+        },
+        "protected_reason": {
+          "type": "string"
+        },
+        "restore_proof_path": {
+          "type": "string"
+        },
+        "restore_proof_sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkpoint_id",
+        "expected_generation",
+        "manifest_sha256"
+      ],
+      "title": "BackupVerification",
+      "type": "object"
+    },
     "BindFeishu": {
       "additionalProperties": false,
       "properties": {
@@ -4567,6 +5033,9 @@
           },
           "type": "array"
         },
+        "task_id": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         },
@@ -4578,6 +5047,7 @@
         }
       },
       "required": [
+        "task_id",
         "expected_assignment_epoch",
         "title",
         "spec"
@@ -5321,6 +5791,86 @@
         "control_socket"
       ],
       "title": "DeploymentExecutionEntry",
+      "type": "object"
+    },
+    "DiagnosticLog": {
+      "additionalProperties": false,
+      "properties": {
+        "allocated_bytes": {
+          "type": "integer"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        },
+        "body_sha256": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "closed_at_ms": {
+          "type": "integer"
+        },
+        "compressed": {
+          "type": "boolean"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "closed",
+        "compressed",
+        "bytes",
+        "decision",
+        "reasons"
+      ],
+      "title": "DiagnosticLog",
+      "type": "object"
+    },
+    "DiagnosticLogProtection": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_generation": {
+          "type": "integer"
+        },
+        "log_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "log_id",
+        "expected_generation",
+        "reason"
+      ],
+      "title": "DiagnosticLogProtection",
       "type": "object"
     },
     "DownloadURLResponse": {
@@ -7177,6 +7727,9 @@
         "conversation_id": {
           "type": "string"
         },
+        "message_id": {
+          "type": "string"
+        },
         "metadata": {
           "$ref": "#/definitions/ManualSourceMetadata"
         },
@@ -7185,6 +7738,7 @@
         }
       },
       "required": [
+        "message_id",
         "metadata"
       ],
       "title": "InjectSourcePayload",
@@ -9299,6 +9853,9 @@
       "properties": {
         "expected_assignment_epoch": {
           "type": "integer"
+        },
+        "rule_id": {
+          "type": "string"
         },
         "spec": {
           "$ref": "#/definitions/FollowupSpec"
@@ -11889,10 +12446,16 @@
         "correction_of": {
           "type": "string"
         },
+        "message_id": {
+          "type": "string"
+        },
         "reply_to": {
           "type": "string"
         }
       },
+      "required": [
+        "message_id"
+      ],
       "title": "MessagingInput",
       "type": "object"
     },
@@ -12152,6 +12715,9 @@
           },
           "type": "array"
         },
+        "message_id": {
+          "type": "string"
+        },
         "purpose": {
           "type": "string"
         },
@@ -12169,6 +12735,7 @@
         }
       },
       "required": [
+        "message_id",
         "purpose"
       ],
       "title": "MessagingPublication",
@@ -13696,11 +14263,38 @@
       "title": "OriginalMigrationResult",
       "type": "object"
     },
+    "OriginalStorageField": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "pending_rows": {
+          "type": "integer"
+        },
+        "table": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "column",
+        "pending_rows"
+      ],
+      "title": "OriginalStorageField",
+      "type": "object"
+    },
     "OriginalStorageStatus": {
       "additionalProperties": false,
       "properties": {
         "bodies": {
           "type": "integer"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/definitions/OriginalStorageField"
+          },
+          "type": "array"
         },
         "migrated_bytes": {
           "type": "integer"
@@ -14871,31 +15465,6 @@
       "title": "RequestIssueManagerPayload",
       "type": "object"
     },
-    "RequestView": {
-      "additionalProperties": false,
-      "properties": {
-        "error": {
-          "$ref": "#/definitions/Error"
-        },
-        "operation": {
-          "type": "string"
-        },
-        "request_id": {
-          "type": "string"
-        },
-        "result": {},
-        "status": {
-          "$ref": "#/definitions/OpStatus"
-        }
-      },
-      "required": [
-        "request_id",
-        "operation",
-        "status"
-      ],
-      "title": "RequestView",
-      "type": "object"
-    },
     "ResolvedExtension": {
       "additionalProperties": false,
       "properties": {
@@ -14944,6 +15513,9 @@
         "confirm": {
           "type": "boolean"
         },
+        "message_id": {
+          "type": "string"
+        },
         "option": {
           "type": "string"
         },
@@ -14955,6 +15527,7 @@
         }
       },
       "required": [
+        "message_id",
         "version"
       ],
       "title": "RespondInteraction",
@@ -16402,6 +16975,9 @@
         "generation": {
           "type": "integer"
         },
+        "message_id": {
+          "type": "string"
+        },
         "source_message_id": {
           "type": "string"
         },
@@ -16416,6 +16992,7 @@
         }
       },
       "required": [
+        "message_id",
         "task_id",
         "spec_version",
         "generation",
@@ -17463,11 +18040,15 @@
         "last_seen_seq": {
           "type": "integer"
         },
+        "message_id": {
+          "type": "string"
+        },
         "reply_to": {
           "type": "string"
         }
       },
       "required": [
+        "message_id",
         "body"
       ],
       "title": "SubmitMessagePayload",
@@ -20864,6 +21445,9 @@
         "key_ref": {
           "type": "string"
         },
+        "subscription_id": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         }
@@ -21334,6 +21918,36 @@
     "BackgroundSourcePage": {
       "$ref": "#/definitions/BackgroundSourcePage"
     },
+    "BackupCheckpoint": {
+      "$ref": "#/definitions/BackupCheckpoint"
+    },
+    "BackupFile": {
+      "$ref": "#/definitions/BackupFile"
+    },
+    "BackupObject": {
+      "$ref": "#/definitions/BackupObject"
+    },
+    "BackupPolicy": {
+      "$ref": "#/definitions/BackupPolicy"
+    },
+    "BackupPreview": {
+      "$ref": "#/definitions/BackupPreview"
+    },
+    "BackupPruneRequest": {
+      "$ref": "#/definitions/BackupPruneRequest"
+    },
+    "BackupPruneState": {
+      "$ref": "#/definitions/BackupPruneState"
+    },
+    "BackupRestoreProof": {
+      "$ref": "#/definitions/BackupRestoreProof"
+    },
+    "BackupStatus": {
+      "$ref": "#/definitions/BackupStatus"
+    },
+    "BackupVerification": {
+      "$ref": "#/definitions/BackupVerification"
+    },
     "BindFeishu": {
       "$ref": "#/definitions/BindFeishu"
     },
@@ -21426,6 +22040,9 @@
     },
     "DecisionContinuationView": {
       "$ref": "#/definitions/DecisionContinuationView"
+    },
+    "DiagnosticLogProtection": {
+      "$ref": "#/definitions/DiagnosticLogProtection"
     },
     "DownloadURLResponse": {
       "$ref": "#/definitions/DownloadURLResponse"
@@ -21765,9 +22382,6 @@
     },
     "RequestIssueManagerPayload": {
       "$ref": "#/definitions/RequestIssueManagerPayload"
-    },
-    "RequestView": {
-      "$ref": "#/definitions/RequestView"
     },
     "RespondAttentionPayload": {
       "$ref": "#/definitions/RespondAttentionPayload"

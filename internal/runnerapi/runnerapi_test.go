@@ -108,7 +108,8 @@ func (e *env) system(op string, payload any, cmd app.Command) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: protocol.Target{Type: "x"}, Payload: b}
+	target, b := composeFixtureBusinessInput(e.t, e.ids, op, protocol.Target{Type: "x"}, json.RawMessage(b))
+	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: b}
 	got, err := e.app.Execute(context.Background(), protocol.Principal{Kind: protocol.PrincipalSystem}, envl, cmd)
 	if err != nil || got.Status != protocol.OpSucceeded {
 		e.t.Fatalf("%s: %+v, %v", op, got, err)
@@ -121,7 +122,7 @@ func (e *env) createTask() {
 		Goal: "g", Acceptance: []string{"a"}, Delivery: domain.DeliveryCommit,
 		Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}},
 	}})
-	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task"}, Payload: b}
+	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task", ID: e.ids.New(protocol.PrefixTask)}, Payload: b}
 	owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "me", Client: "c"}
 	if op, err := e.app.Execute(context.Background(), owner, envl, app.CreateTask{}); err != nil || op.Status != protocol.OpSucceeded {
 		e.t.Fatalf("create task: %+v, %v", op, err)
@@ -216,7 +217,8 @@ func (e *env) envelope(op, targetID string, payload any) *protocol.Envelope {
 		}
 	}
 
-	return &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: protocol.Target{Type: "run", ID: targetID}, Payload: b}
+	target, b := composeFixtureBusinessInput(e.t, e.ids, op, protocol.Target{Type: "run", ID: targetID}, json.RawMessage(b))
+	return &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: b}
 }
 
 func (e *env) mustOK(c credential, envl *protocol.Envelope) json.RawMessage {

@@ -30,76 +30,73 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 		return v, err
 	}
 	v.Pricing = protocol.UsagePricing{Source: "OpenRouter", Currency: "USD"}
-	err = q.QueryRowContext(ctx, `SELECT collected_at FROM token_usage_price_catalogs ORDER BY collected_at DESC LIMIT 1`).Scan(&v.Pricing.QuotedAt)
+	err = q.QueryRowContext(ctx, `SELECT collected_at FROM token_usage_latest_prices WHERE singleton=1`).Scan(&v.Pricing.QuotedAt)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return v, err
 	}
 	cutoff := min(v.AsOf, end)
-	dimensions := map[string]UsageDimension{}
-	matched := map[string]bool{}
-	decode := func(key, raw string) (UsageDimension, bool, error) {
-		d, ok := dimensions[key]
-		if !ok {
-			if e := json.Unmarshal([]byte(raw), &d); e != nil {
-				return d, false, e
-			}
-			dimensions[key] = d
-			matched[key] = d.matches(model, subject, filter)
-		}
-		return d, matched[key], nil
-	}
-	rows, err := q.QueryContext(ctx, `SELECT dimension_key,dimension_json,SUM(conflicts) FROM token_usage_summaries WHERE conflicts>0 GROUP BY dimension_key`)
+	dimensions := map[int64]UsageDimension{}
+	matched := map[int64]bool{}
+	rows, err := q.QueryContext(ctx, `SELECT p.dimension_key,`+usageDimensionColumns("d")+` FROM token_usage_partitions p JOIN token_usage_dimensions d USING(dimension_id)`)
 	if err != nil {
 		return v, err
 	}
 	for rows.Next() {
-		var key, raw string
+		var key int64
+		var d UsageDimension
+		var native bool
+		if err = rows.Scan(append([]any{&key}, usageDimensionDestinations(&d, &native)...)...); err != nil {
+			break
+		}
+		if native {
+			d.Record.RecordID = "native"
+		}
+		d.Record.Attribution.Role = d.Record.Role
+		dimensions[key] = d
+		matched[key] = d.matches(model, subject, filter)
+	}
+	if err = closeUsageRows(rows, err); err != nil {
+		return v, err
+	}
+	rows, err = q.QueryContext(ctx, `SELECT dimension_key,SUM(conflicts) FROM token_usage_summaries WHERE conflicts>0 GROUP BY dimension_key`)
+	if err != nil {
+		return v, err
+	}
+	for rows.Next() {
+		var key int64
 		var n int64
-		if err = rows.Scan(&key, &raw, &n); err != nil {
+		if err = rows.Scan(&key, &n); err != nil {
 			break
 		}
-		_, match, e := decode(key, raw)
-		if e != nil {
-			err = e
-			break
-		}
-		if match {
+		if matched[key] {
 			v.Conflicts += n
 		}
 	}
 	if err = closeUsageRows(rows, err); err != nil {
 		return v, err
 	}
-	rows, err = q.QueryContext(ctx, `SELECT dimension_key,bucket,dimension_json,totals_json,first_at,last_at,max_seq FROM token_usage_summaries WHERE bucket=-1 OR (? IS NULL OR bucket+?>?) AND bucket<? OR bucket+?>?`, start, UsageBucketWidth, start, cutoff, UsageBucketWidth, v.AsOf)
+	rows, err = q.QueryContext(ctx, `SELECT s.dimension_key,s.bucket,`+usageTotalsColumns("s")+`,s.first_at,s.last_at,s.max_seq FROM token_usage_summaries s WHERE bucket=-1 OR (? IS NULL OR bucket+?>?) AND bucket<? OR bucket+?>?`, start, UsageBucketWidth, start, cutoff, UsageBucketWidth, v.AsOf)
 	if err != nil {
 		return v, err
 	}
 	type edge struct {
-		Dimension string `json:"dimension"`
-		Bucket    int64  `json:"bucket"`
+		Dimension int64 `json:"dimension"`
+		Bucket    int64 `json:"bucket"`
 	}
 	var edges []edge
 	var aggregates []UsageAggregate
 	for rows.Next() {
-		var key, raw, totals string
-		var bucket, seq int64
-		var first, last *int64
-		if err = rows.Scan(&key, &bucket, &raw, &totals, &first, &last, &seq); err != nil {
+		var key, bucket, seq int64
+		var a UsageAggregate
+		if err = rows.Scan(append(append([]any{&key, &bucket}, usageTotalsDestinations(&a.Totals)...), &a.FirstAt, &a.LastAt, &seq)...); err != nil {
 			break
 		}
-		d, match, e := decode(key, raw)
-		if e != nil {
-			err = e
-			break
-		}
-		if !match {
+		if !matched[key] {
 			continue
 		}
-		a := UsageAggregate{Record: d.Record, FirstAt: first, LastAt: last}
+		d := dimensions[key]
+		a.Record = d.Record
 		a.Record.Seq = seq
-		if err = json.Unmarshal([]byte(totals), &a.Totals); err != nil {
-			break
-		}
 		if a.Totals.Requests == 0 {
 			continue
 		}
@@ -127,23 +124,24 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 		if e != nil {
 			return v, e
 		}
-		rows, err = q.QueryContext(ctx, `SELECT dimension_key,totals_json,occurred_at,fact_seq,native FROM token_usage_contributions WHERE (dimension_key,bucket) IN (SELECT json_extract(value,'$.dimension'),json_extract(value,'$.bucket') FROM json_each(?)) AND visible=1 AND conflict=0 ORDER BY fact_seq DESC`, string(raw))
+		rows, err = q.QueryContext(ctx, `SELECT c.dimension_key,f.settlement,f.input,f.cache_read,f.cache_write,f.output,f.total,c.estimated_usd,c.occurred_at,c.fact_seq,c.native FROM token_usage_contributions c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE (c.dimension_key,c.bucket) IN (SELECT json_extract(value,'$.dimension'),json_extract(value,'$.bucket') FROM json_each(?)) AND visible=1 AND conflict=0 ORDER BY c.fact_seq DESC`, string(raw))
 		if err != nil {
 			return v, err
 		}
 		for rows.Next() {
-			var key, raw string
+			var key, seq int64
 			var at *int64
-			var seq int64
 			var native bool
-			if err = rows.Scan(&key, &raw, &at, &seq, &native); err != nil {
+			var r protocol.TokenUsageRecord
+			var estimate *string
+			if err = rows.Scan(&key, &r.Settlement, &r.Input, &r.CacheRead, &r.CacheWrite, &r.Output, &r.Total, &estimate, &at, &seq, &native); err != nil {
 				break
 			}
-			a := UsageAggregate{Record: dimensions[key].Record, FirstAt: at, LastAt: at}
+			if estimate != nil {
+				r.Estimate = &protocol.UsageEstimate{USD: *estimate}
+			}
+			a := UsageAggregate{Record: dimensions[key].Record, FirstAt: at, LastAt: at, Totals: UsageRecordTotals(r)}
 			a.Record.Seq = seq
-			if err = json.Unmarshal([]byte(raw), &a.Totals); err != nil {
-				break
-			}
 			if native && at != nil && *at >= v.AsOf {
 				MergeUsageTotals(&v.Unattributed, a.Totals)
 				if kind == "total" {
@@ -206,7 +204,7 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 	sort.Slice(v.Trend, func(i, j int) bool { return v.Trend[i].Start < v.Trend[j].Start })
 	grouping.finish(&v)
 	{
-		keys := []string{}
+		keys := []int64{}
 		for key, match := range matched {
 			if match {
 				keys = append(keys, key)
@@ -216,11 +214,13 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 		if e != nil {
 			return v, e
 		}
-		columns := "record_json"
+		columns := store.UsageFactColumns("f") + `,c.dimension_key,c.estimated_usd,c.estimated_model`
+		join := ` JOIN token_usage_fact_details f ON f.seq=c.fact_seq`
 		if filter.Summary {
-			columns = "fact_seq"
+			columns = "c.fact_seq"
+			join = ""
 		}
-		rows, err = q.QueryContext(ctx, `SELECT `+columns+` FROM token_usage_contributions WHERE visible=1 AND conflict=0 AND dimension_key IN (SELECT value FROM json_each(?)) AND (?=0 OR fact_seq<?) AND ((occurred_at<? AND (? IS NULL OR occurred_at>=?)) OR (?='total' AND (occurred_at IS NULL OR (native=1 AND occurred_at>=?)))) ORDER BY fact_seq DESC LIMIT 51`, string(raw), before, before, cutoff, start, start, kind, v.AsOf)
+		rows, err = q.QueryContext(ctx, `SELECT `+columns+` FROM token_usage_contributions c`+join+` WHERE c.visible=1 AND c.conflict=0 AND c.dimension_key IN (SELECT value FROM json_each(?)) AND (?=0 OR c.fact_seq<?) AND ((c.occurred_at<? AND (? IS NULL OR c.occurred_at>=?)) OR (?='total' AND (c.occurred_at IS NULL OR (c.native=1 AND c.occurred_at>=?)))) ORDER BY c.fact_seq DESC LIMIT 51`, string(raw), before, before, cutoff, start, start, kind, v.AsOf)
 		if err != nil {
 			return v, err
 		}
@@ -237,13 +237,16 @@ func projectedTokenUsage(ctx context.Context, q store.Querier, kind string, offs
 				}
 				continue
 			}
-			var raw string
-			if err = rows.Scan(&raw); err != nil {
+			var r protocol.TokenUsageRecord
+			var key int64
+			var estimate, estimatedModel *string
+			if err = rows.Scan(append(store.UsageFactDestinations(&r), &key, &estimate, &estimatedModel)...); err != nil {
 				break
 			}
-			var r protocol.TokenUsageRecord
-			if err = json.Unmarshal([]byte(raw), &r); err != nil {
-				break
+			r.Attribution = dimensions[key].Record.Attribution
+			r.Role = dimensions[key].Record.Role
+			if estimate != nil && estimatedModel != nil {
+				r.Estimate = &protocol.UsageEstimate{USD: *estimate, ModelID: *estimatedModel}
 			}
 			if r.RecordID != "" && r.OccurredAt != nil && *r.OccurredAt >= v.AsOf {
 				r.OccurredAt = nil

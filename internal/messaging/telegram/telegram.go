@@ -310,9 +310,7 @@ func (c *Client) prepareFile(ctx context.Context, u app.TelegramInbox, b app.Tel
 	if err != nil {
 		return "", err
 	}
-	if prior, ok, err := c.app.TelegramUploadedFile(ctx, request); err != nil || ok {
-		return prior, err
-	}
+
 	f, err := c.sdk.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
 	if err != nil {
 		return "", sanitize(err)

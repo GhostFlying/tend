@@ -86,7 +86,7 @@ func (j *Journal) QueueCollectionReport(ctx context.Context, p protocol.UsageCol
 		if s.Collection != p.Collection || s.WriterStopped != p.WriterStopped || p.Sequence != sequence+1 {
 			return protocol.Errorf(protocol.CodeStaleRevision, "collection report snapshot changed")
 		}
-		if err = putRequest(ctx, tx, Request{Envelope: env}, j.now()); err != nil {
+		if err = j.putRequest(ctx, tx, Request{Envelope: env}, j.now()); err != nil {
 			return err
 		}
 		if p.ControlRequestID != "" {

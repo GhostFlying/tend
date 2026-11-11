@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { NetworkError } from "../api/client.ts";
-import type { APIResponse, Envelope, RequestView, WorkItemChoice } from "../api/generated/api.ts";
+import type { APIResponse, Envelope, WorkItemChoice } from "../api/generated/api.ts";
 import { ChoiceResponse } from "./choice.ts";
 const choice: WorkItemChoice = {
   choice_id: "choice-example",
@@ -14,7 +14,7 @@ const choice: WorkItemChoice = {
   created_at: 1,
   updated_at: 1,
 };
-test("unknown choice response is reconciled and retried only under its original identity", async () => {
+test("unknown choice response reads the actual choice without replay", async () => {
   const envelopes: Envelope[] = [];
   let reachable = false;
   const sender = {
@@ -23,7 +23,10 @@ test("unknown choice response is reconciled and retried only under its original 
       if (!reachable) throw new NetworkError("offline");
       return { operation: { request_id: envelope.request_id, status: "succeeded", result: {} } };
     }),
-    lookup: vi.fn(async (): Promise<RequestView | null> => null),
+    get: async <T>() => {
+      if (!reachable) throw new NetworkError("offline");
+      return { ...choice, status: "answered", version: 3 } as T;
+    },
   };
   const response = new ChoiceResponse(sender, vi.fn());
   await response.answer(choice, "稍后决定");
@@ -31,11 +34,10 @@ test("unknown choice response is reconciled and retried only under its original 
   await response.retry();
   expect(envelopes).toHaveLength(1);
   expect(envelopes[0]!.expected_control_revision).toBe(2);
-  await response.check();
   reachable = true;
+  await response.check();
   await response.retry();
-  expect(envelopes).toHaveLength(2);
-  expect(envelopes[1]).toEqual(envelopes[0]);
+  expect(envelopes).toHaveLength(1);
   expect(response.state.get().unknown).toBeUndefined();
 });
 test("closed choices do not submit and stale answers request fresh state", async () => {
@@ -48,7 +50,6 @@ test("closed choices do not submit and stale answers request fresh state", async
         error: { code: "stale_revision", message: "changed" },
       },
     })),
-    lookup: vi.fn(async () => null),
   };
   const response = new ChoiceResponse(sender, changed);
   await response.answer({ ...choice, status: "withdrawn" }, "继续上线");

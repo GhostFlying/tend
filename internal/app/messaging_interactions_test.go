@@ -83,8 +83,11 @@ func TestIMAnswerWebInvalidatesTelegramWithoutRepeatingEffect(t *testing.T) {
 		t.Fatal(later, h.task(task))
 	}
 	replay := h.exec(owner, env, RespondMessagingInteraction{})
-	if string(replay.Result) != string(op.Result) {
-		t.Fatal("request replay changed")
+	var repeated struct {
+		AlreadyHandled bool `json:"already_handled"`
+	}
+	if replay.Status != protocol.OpSucceeded || json.Unmarshal(replay.Result, &repeated) != nil || !repeated.AlreadyHandled || h.task(task).ImplementGeneration != 2 || imQuestion(t, h, d.DecisionID).Interaction.HandledChannel != "web" {
+		t.Fatal("repeated interaction changed its actual answer or task generation", replay)
 	}
 	if _, _, found, err := h.app.NextDelivery(t.Context(), MessagingInteractionDestination); err != nil || found {
 		t.Fatal("closed callbacks duplicated the same presentation update", found, err)

@@ -72,8 +72,8 @@ func TestBoundedRunnerAdmissionReleasePreservesUnknownAndOriginalProtection(t *t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if replay := h.exec(owner, request, ReleaseBoundedRunnerAdmission{}); !reflect.DeepEqual(op, replay) {
-		t.Fatal("admission release did not replay its original receipt", replay)
+	if replay := h.exec(owner, request, ReleaseBoundedRunnerAdmission{}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || !reflect.DeepEqual(control, upgradeCtl(h, release.HostID)) {
+		t.Fatal("stale admission command changed current authority", replay)
 	}
 }
 

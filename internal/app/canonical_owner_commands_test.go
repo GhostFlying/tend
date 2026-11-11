@@ -81,7 +81,7 @@ func admitExistingIssueFixture(t *testing.T, h *harness, issue protocol.Issue) p
 	return issue
 }
 
-func TestCanonicalOwnerDefinitionNoopReceiptSurvivesLaterRevision(t *testing.T) {
+func TestCanonicalOwnerDefinitionNoopRetryReadsCurrentRevision(t *testing.T) {
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	target := protocol.Target{Type: "issue", ID: issue.IssueID}
@@ -109,11 +109,11 @@ func TestCanonicalOwnerDefinitionNoopReceiptSurvivesLaterRevision(t *testing.T) 
 		t.Fatal(op)
 	}
 	counts := map[string]int{}
-	for _, table := range []string{"request_records", "events", "outbox", "conversation_bindings", "work_item_revisions", "issue_control_revisions"} {
+	for _, table := range []string{"events", "outbox", "conversation_bindings", "work_item_revisions", "issue_control_revisions"} {
 		counts[table] = h.count(table)
 	}
 	replay := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "update"})
-	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, noOp.Result) {
+	if replay.Status != protocol.OpFailed || replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
 		t.Fatalf("replay=%+v; original=%+v", replay, noOp)
 	}
 	for table, count := range counts {
@@ -122,13 +122,6 @@ func TestCanonicalOwnerDefinitionNoopReceiptSurvivesLaterRevision(t *testing.T) 
 		}
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var n int
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM request_records WHERE domain='owner' AND request_id=?`, env.RequestID).Scan(&n); err != nil {
-			return err
-		}
-		if n != 1 {
-			t.Fatalf("no-op request count=%d", n)
-		}
 		got, err := store.GetCanonicalIssue(t.Context(), tx.Q(), issue.IssueID)
 		if err != nil {
 			return err
@@ -487,8 +480,9 @@ func TestCanonicalCreateDependencyOrderMatchesReceiptAndHistory(t *testing.T) {
 		t.Fatal(op)
 	}
 	replay := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "create"})
-	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, created.Result) {
-		t.Fatal("create receipt changed after later revision", replay)
+	var current protocol.Issue
+	if err := json.Unmarshal(replay.Result, &current); err != nil || replay.Status != protocol.OpSucceeded || current.IssueID != issue.IssueID || current.Revision != issue.Revision+1 || current.Plan.Title != updated.Plan.Title || h.count("issue_controls") != 3 {
+		t.Fatal("create identity did not return the current Issue", replay, current, err)
 	}
 }
 

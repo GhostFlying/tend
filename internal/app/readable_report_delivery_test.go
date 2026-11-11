@@ -135,7 +135,7 @@ func TestReportDeliveryClosedIssuePublishesOriginalResultFiles(t *testing.T) {
 			id := messageID(t, op)
 			messages := h.count("conversation_messages")
 			replayed, err := h.app.Execute(t.Context(), principal, env, HostedCoordinationCommand{Command: CoordinationReply{}, ExecutionID: turn.RequestID, EffectSeq: 5})
-			if err != nil || replayed.Status != protocol.OpSucceeded || messageID(t, replayed) != id || h.count("conversation_messages") != messages {
+			if err != nil || replayed.Error == nil || replayed.Error.Code != protocol.CodeDuplicateEffect || h.count("conversation_messages") != messages {
 				t.Fatal("original request replay duplicated publication", replayed, err)
 			}
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -218,7 +218,7 @@ func TestReportDeliveryClosedOriginalTurnCanRecordNonblockingAnomaly(t *testing.
 			}
 			count := h.count("attentions")
 			replayed, err := h.app.Execute(t.Context(), principal, env, command)
-			if err != nil || replayed.Status != protocol.OpSucceeded || string(replayed.Result) != string(op.Result) || h.count("attentions") != count {
+			if err != nil || replayed.Error == nil || replayed.Error.Code != protocol.CodeDuplicateEffect || h.count("attentions") != count {
 				t.Fatal("anomaly request replay duplicated its receipt", replayed, err)
 			}
 			if current := canonicalTaskIssue(t, h, issue.IssueID); current.State != protocol.IssueClosed || current.Revision != issue.Revision {

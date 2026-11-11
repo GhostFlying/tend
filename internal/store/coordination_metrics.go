@@ -6,7 +6,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// ReadCoordinationMetrics derives auditable counters from retained ledger rows.
+// ReadCoordinationMetrics reads business facts and compact diagnostic counters.
 // Depth/age describe pending deliveries, not the currently running turn.
 func ReadCoordinationMetrics(ctx context.Context, q Querier) (protocol.CoordinationMetrics, error) {
 	var p protocol.CoordinationMetrics
@@ -30,6 +30,13 @@ func ReadCoordinationMetrics(ctx context.Context, q Querier) (protocol.Coordinat
 	if err != nil {
 		return p, err
 	}
-	err = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM request_records WHERE operation='conversation.withdraw_message' AND status='failed' AND error_code IN ('stale_revision','invalid_transition')`).Scan(&p.WithdrawalConflicts)
+	err = q.QueryRowContext(ctx, `SELECT withdrawal_conflicts FROM coordination_counters WHERE singleton=1`).Scan(&p.WithdrawalConflicts)
 	return p, err
+}
+
+// RecordWithdrawalConflict increments a compact diagnostic counter for an
+// actual rejected withdrawal. It stores no request, payload or replay result.
+func (t *Tx) RecordWithdrawalConflict(ctx context.Context) error {
+	_, err := t.Exec(ctx, `UPDATE coordination_counters SET withdrawal_conflicts=withdrawal_conflicts+1 WHERE singleton=1`)
+	return err
 }

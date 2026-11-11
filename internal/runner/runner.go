@@ -500,7 +500,7 @@ func (r *Runner) claims(ctx context.Context) {
 			}
 			continue
 		}
-		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
+		env, err := r.newEnvelope(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.ClaimPayload{RunID: r.cfg.IDs.New(protocol.PrefixRun), Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
 		if err == nil {
 			err = r.cfg.Journal.PutRequest(ctx, journal.Request{Envelope: *env})
 		}
@@ -790,6 +790,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		}
 		r.start(ctx, as, sent)
 	}
+	r.replayManagerAcknowledgements(ctx)
 	if len(rejected) > 0 {
 		return &retainedContinuationsRejected{runs: rejected}
 	}

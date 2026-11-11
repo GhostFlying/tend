@@ -23,14 +23,14 @@ func runOriginalStorage(ctx context.Context, e *Env, args []string) error {
 	}
 	fs := newFlags(e, "storage originals "+action)
 	fs.Usage = func() {
-		fmt.Fprintln(e.Stderr, "tend storage originals status|verify|import|migrate. Upload complete JSONL files using tend attachment upload before import. Retain original request ID, revision and cursor for retries.")
+		fmt.Fprintln(e.Stderr, "tend storage originals status|verify|import|migrate. Upload complete JSONL files using tend attachment upload before import. Retain the exact input, revision and cursor. After an unknown mutation, read status before deciding whether to continue.")
 		fs.PrintDefaults()
 	}
 	asJSON := fs.Bool("json", false, "print the complete structured result")
 	limit := fs.Int("limit", 100, "bounded records/bodies per call (1..1000)")
 	after := fs.String("after", "", "opaque verification cursor or import byte cursor")
 	revision := fs.Int64("revision", -1, "original storage revision; required for mutation")
-	request := fs.String("request-id", "", "original request identity; required for identical retry")
+	request := fs.String("request-id", "", "transport trace identity; reuse for diagnostics, not a cached result")
 	file := fs.String("file-id", "", "complete JSONL original from attachment upload")
 	source := fs.String("source-key", "", "stable native source identity for this complete original")
 	rescan := fs.Bool("rescan", false, "restart historical scan from the beginning (migrate only)")
@@ -68,7 +68,7 @@ func runOriginalStorage(ctx context.Context, e *Env, args []string) error {
 		return err
 	}
 	if *revision < 1 {
-		return usagef("mutation requires the original positive --revision from storage originals status")
+		return usagef("mutation requires the current positive --revision from storage originals status")
 	}
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)

@@ -3,6 +3,14 @@
 配套总计划：`storage-footprint-governance.md`，Refs: D225。
 本清单区分需要保留的原文、当前查询的小投影和可退出的派生副本。
 
+本轮必要性抽查确认，三事件列的传输包装曾被机械地按精确字节归档，产生了不必要的
+外壳及规则增量。修正时区分 provider Raw、不可解析的实际工具文本、派生 JSON 结构：
+原始内容和未结命令继续保真；派生结构使用紧凑元数据及原件窗口关联，读取时组装合法
+JSON，不为键序、空白或固定 null 字段创建文件。三事件历史迁移核验 JSON 语义、
+稳定身份、消费水位与分页；文本及真实 Raw 文件仍按原件 hash 核验。同一事件的重报
+允许外壳键序变化，拒绝真实内容冲突。先做窗口复用、显式 null/缺省、Unicode、丢 ACK、
+重启及损坏的小回归，再用受保护快照的新副本验证；先前增量演练保留为已知缺陷证据。
+
 ## 表示与事务
 
 - `retained_original_archives` 只保存一次长归档身份；窗口、原生来源和 chunk 通过
@@ -22,9 +30,9 @@
 
 | 字段 | 写入与读取 | 迁移/退出条件 |
 | --- | --- | --- |
-| `manager_native_events.body_json` | 原生原文文件化；DB 只留消费和匹配需要的 thread、turn、item、kind 等小字段 | 包含短事件和旧 v1；消费时还原完整原文 |
-| `agent_rollout_events.data_json` | 文件原文；既有 sequence、thread、turn、item、kind、时间保留 | 分页和 Unicode 窗口沿既有接口读取 |
-| `run_logs.body_json` | 文件原文；保留实际身份、类型和状态查询投影 | Run/seq 去重、时间和当前恢复读取保持；无输入时生成的小默认事实不是原生原文副本 |
+| `manager_native_events.body_json` | 派生事件结构与小状态在 DB，真实 `native.Raw`/长文本共享原件窗口；显式空字段用默认位图 | 包含短事件和旧 v1；消费时组装语义 JSON，保留初次上传 hash 与消费顺序 |
+| `agent_rollout_events.data_json` | 真实 provider 大原文引用既有窗口，不能匹配的独有 Raw 保存一次；小状态不文件化 | sequence、thread、turn、item、kind、时间与分页保留；JSON 键序/空白不是外部合同 |
+| `run_logs.body_json` | 派生结构保留必要身份和状态，大 provider 内容及不透明文本使用窗口关联 | Run/seq 去重、时间与当前恢复保持，重报忽略外层 JSON 键序空白但拒绝真实内容冲突 |
 | `background_replies.tool_json` | 仅保留小路由/状态外壳，input/output 使用共享引用 | 旧大 JSON 按字段迁移；发布后的工具行复用同一引用 |
 | `background_replies.body` | 大回复保存完整原文 | 发布与 `conversation_messages` 共用，不重新复制正文 |
 | `conversation_tool_uses.input/output` | 大文本保存一次，按需读取完整原文 | 新写入不先截断；旧截断文本原样保留，不宣称补回未保存内容 |

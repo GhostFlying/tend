@@ -268,7 +268,6 @@ func TestEndToEnd_AgentInventoryRestartResolvesOriginalRequest(t *testing.T) {
 				t.Fatalf("unknown not retained: %+v", requests)
 			}
 			original := requests[0].Envelope
-			originalHash, _ := protocol.PayloadHash(&original)
 			var old protocol.RegisterAgentInventoryPayload
 			json.Unmarshal(original.Payload, &old)
 			if (f.current() != nil) != (mode == "lose_restart") {
@@ -297,9 +296,9 @@ func TestEndToEnd_AgentInventoryRestartResolvesOriginalRequest(t *testing.T) {
 
 			if mode == "lose_restart" {
 				err := s.store.Read(t.Context(), func(tx *store.ReadTx) error {
-					record, err := store.GetRequest(t.Context(), tx.Q(), (protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}).DedupDomain(), original.RequestID)
-					if err == nil && record.PayloadHash != originalHash {
-						t.Fatal("accepted receipt did not retain original CAS/runtime hash")
+					record, err := store.GetAgentInventory(t.Context(), tx.Q(), "linux-1")
+					if err == nil && (record.Receipt.SnapshotID != old.SnapshotID || record.Receipt.LocalRevision != old.LocalRevision || record.Receipt.PublicSHA256 != old.PublicSHA256 || record.Receipt.ServerRevision != 1) {
+						t.Fatal("accepted inventory changed its original snapshot, hash or revisions", record.Receipt)
 					}
 					return err
 				})

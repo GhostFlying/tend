@@ -34,9 +34,14 @@ func TestWorkItemChoiceDedupAnswerAndStaleWithdrawal(t *testing.T) {
 	env := h.env("work_item_choices.respond", protocol.Target{Type: "work_item_choice", ID: c.ChoiceID}, protocol.UpdateWorkItemChoicePayload{Answer: "Later"}, rev(1))
 	cmd := UpdateWorkItemChoice{Action: "respond"}
 	first := h.exec(owner, env, cmd)
+	messages := h.count("conversation_messages")
 	second := h.exec(owner, env, cmd)
-	if first.Status != protocol.OpSucceeded || string(first.Result) != string(second.Result) {
-		t.Fatal(first, second)
+	if first.Status != protocol.OpSucceeded {
+		t.Fatal(first)
+	}
+	expectWorkCode(t, second, protocol.CodeStaleRevision)
+	if h.count("conversation_messages") != messages || h.count("work_item_choices") != 1 {
+		t.Fatal("stale answer duplicated its actual message or choice")
 	}
 	if h.count("runs") != 0 {
 		t.Fatal("planning choice must not allocate execution")
@@ -93,12 +98,10 @@ func TestChoiceAnswerNotifiesDispatcherExactlyOnce(t *testing.T) {
 	n := &choiceNotifier{}
 	h.app.notifier = n
 	env := h.env("work_item_choices.respond", protocol.Target{Type: "work_item_choice", ID: c.ChoiceID}, protocol.UpdateWorkItemChoicePayload{Answer: "Later"}, rev(c.Version))
-	for range 2 {
-		op := h.exec(owner, env, UpdateWorkItemChoice{Action: "respond"})
-		if op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
-		}
+	if op := h.exec(owner, env, UpdateWorkItemChoice{Action: "respond"}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
 	}
+	expectWorkCode(t, h.exec(owner, env, UpdateWorkItemChoice{Action: "respond"}), protocol.CodeStaleRevision)
 	if n.calls != 1 {
 		t.Fatalf("dispatcher notifications=%d", n.calls)
 	}

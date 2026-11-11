@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -117,7 +116,7 @@ func TestTaskAgreementAssessmentRecordsJudgementWithoutGatingNewSources(t *testi
 	appendAgreementSource(t, h, issue.IssueID)
 	assertAgreementAdmission(t, h, issue.IssueID, task, false)
 	replay := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "update"})
-	if !bytes.Equal(replay.Result, op.Result) || h.count("task_agreement_assessments") != 1 {
+	if replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision || h.count("task_agreement_assessments") != 1 {
 		t.Fatal("replay refreshed an old judgement", replay)
 	}
 	assertAgreementAdmission(t, h, issue.IssueID, task, false)

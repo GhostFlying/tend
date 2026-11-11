@@ -30,6 +30,10 @@ func EffectiveContext(ctx context.Context, q Querier, id string) (string, []prot
 		if err := rows.Scan(&fact, &kind, &body, &source, &original, &version, &association, &needsReview, &associated, &withdrawn); err != nil {
 			return "", nil, err
 		}
+		original, err = ResolveMessageBody(ctx, q, source, original)
+		if err != nil {
+			return "", nil, err
+		}
 		// Coordination promises, open questions and suggestions do not revise
 		// an execution agreement. Their goal/constraint/authority consequences
 		// must be registered in those explicit kinds before changing execution.
@@ -81,6 +85,6 @@ func appliedTransitionReceipt(ctx context.Context, q Querier, source, body strin
 		return false, nil
 	}
 	var applied bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM request_records r JOIN conversation_messages m ON m.request_id=r.request_id JOIN decisions d ON d.decision_id=? WHERE r.domain='owner' AND r.request_id=? AND r.operation='decisions.respond' AND r.status='succeeded' AND m.message_id=? AND m.author='owner' AND d.task_id=? AND json_extract(r.result_json,'$.decision_id')=d.decision_id AND json_extract(r.result_json,'$.effect.applied')=1)`, grant.DecisionID, grant.RequestID, source, grant.TaskID).Scan(&applied)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decisions d JOIN conversation_messages m ON m.message_id=d.answered_message_id WHERE d.decision_id=? AND d.task_id=? AND d.status='answered' AND m.message_id=? AND m.request_id=? AND EXISTS(SELECT 1 FROM owner_authority_messages om WHERE om.message_id=m.message_id) AND json_extract(d.answer_json,'$.effect.applied')=1 AND (COALESCE(json_extract(d.answer_json,'$.actor.kind'),'owner')='owner' OR COALESCE(json_extract(d.answer_json,'$.owner_subject'),'')<>''))`, grant.DecisionID, grant.TaskID, source, grant.RequestID).Scan(&applied)
 	return applied, err
 }

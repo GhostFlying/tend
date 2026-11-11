@@ -31,7 +31,7 @@ func runMessaging(ctx context.Context, e *Env, kind string, args []string) error
 	dry := fs.Bool("dry-run", false, "print original Envelope without sending")
 	fs.Bool("json", true, "print structured response")
 	file := fs.String("file", "", "JSON payload file or - for stdin")
-	data := fs.String("data", "", "JSON payload")
+	data := fs.String("data", "", "JSON payload; retained message input includes its original message_id")
 	request := fs.String("request-id", "", "original request ID for identical retry")
 	revision := fs.Int64("revision", -1, "channel binding revision; required for an identical retry")
 	user := fs.Int64("user-id", 0, "numeric Telegram owner user ID")
@@ -154,12 +154,16 @@ func runMessaging(ctx context.Context, e *Env, kind string, args []string) error
 	if len(body) == 0 {
 		return usagef("provide a JSON payload with --file or --data")
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}
 	env := protocol.Envelope{RequestID: *request, Operation: op, Target: target, Payload: body, Reason: *reason}
 	if action == "bind" || action == "unbind" {
 		env.ExpectedControlRevision = revision
+	}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
 	}
 	if *dry {
 		return o.printJSON(env)

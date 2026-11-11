@@ -31,14 +31,16 @@ type RolloutArchive struct {
 }
 
 func (j *Journal) RolloutArchive(ctx context.Context, deployment, thread string) (RolloutArchive, error) {
-	return readRolloutArchive(ctx, j.db, deployment, thread)
+	j.spoolMu.RLock()
+	defer j.spoolMu.RUnlock()
+	return j.readRolloutArchive(ctx, j.db, deployment, thread)
 }
 
 type archiveQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func readRolloutArchive(ctx context.Context, q archiveQuerier, deployment, thread string) (RolloutArchive, error) {
+func (j *Journal) readRolloutArchive(ctx context.Context, q archiveQuerier, deployment, thread string) (RolloutArchive, error) {
 	var out RolloutArchive
 	var cursor string
 	var pending, next sql.NullString
@@ -53,6 +55,10 @@ func readRolloutArchive(ctx context.Context, q archiveQuerier, deployment, threa
 		return out, err
 	}
 	if pending.Valid {
+		pending.String, err = j.readBody(ctx, pending.String)
+		if err != nil {
+			return out, err
+		}
 		out.Pending = &protocol.Envelope{}
 		if err = json.Unmarshal([]byte(pending.String), out.Pending); err != nil {
 			return out, err
@@ -90,14 +96,18 @@ func (j *Journal) QueueRolloutArchive(ctx context.Context, deployment, thread st
 		return err
 	}
 	return j.tx(ctx, func(tx *sql.Tx) error {
-		current, err := readRolloutArchive(ctx, tx, deployment, thread)
+		current, err := j.readRolloutArchive(ctx, tx, deployment, thread)
 		if err != nil {
 			return err
 		}
 		if current.Pending != nil || current.Cursor != prior {
 			return errors.New("journal: rollout archive changed before queue")
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO rollout_archive_cursors(deployment_id,thread_id,cursor_json,pending_json,next_cursor_json) VALUES(?,?,?,?,?) ON CONFLICT(deployment_id,thread_id) DO UPDATE SET pending_json=excluded.pending_json,next_cursor_json=excluded.next_cursor_json`, deployment, thread, string(before), string(pending), string(after))
+		saved, err := j.retainBody(ctx, string(pending))
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO rollout_archive_cursors(deployment_id,thread_id,cursor_json,pending_json,next_cursor_json) VALUES(?,?,?,?,?) ON CONFLICT(deployment_id,thread_id) DO UPDATE SET pending_json=excluded.pending_json,next_cursor_json=excluded.next_cursor_json`, deployment, thread, string(before), saved, string(after))
 		return err
 	})
 }
@@ -106,7 +116,7 @@ func (j *Journal) QueueRolloutArchive(ctx context.Context, deployment, thread st
 // a malformed or missing receipt leaves both the request and cursor unchanged.
 func (j *Journal) AcknowledgeRolloutArchive(ctx context.Context, deployment, thread, requestID string, receipt protocol.NativeRolloutArchiveReceipt) error {
 	return j.tx(ctx, func(tx *sql.Tx) error {
-		current, err := readRolloutArchive(ctx, tx, deployment, thread)
+		current, err := j.readRolloutArchive(ctx, tx, deployment, thread)
 		if err != nil {
 			return err
 		}

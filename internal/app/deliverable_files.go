@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -124,6 +125,15 @@ func (c UploadFile) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	rc, err := loadRun(ctx, tx.Q(), x.Env.Target.ID)
 	if err != nil {
+		return Outcome{}, err
+	}
+	var existing string
+	err = tx.Q().QueryRowContext(ctx, `SELECT file_id FROM deliverable_files WHERE run_id=? AND name=? AND sha256=? AND size=? ORDER BY file_id LIMIT 1`, rc.run.RunID, manifest.Name, manifest.SHA256, manifest.Size).Scan(&existing)
+	if err == nil {
+		prior, e := store.GetDeliverableFile(ctx, tx.Q(), existing)
+		return Outcome{NoEffect: true, Result: prior.ArtifactFile}, e
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
 		return Outcome{}, err
 	}
 	if rc.run.ObservedState == protocol.RunFinished || rc.run.ObservedState == protocol.RunFailed {

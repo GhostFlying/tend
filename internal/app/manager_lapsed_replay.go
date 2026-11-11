@@ -129,7 +129,7 @@ func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run 
 		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "lapsed manager has no original business receipt")
 	}
 	var resume bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND method IN ('start','resume') AND status='completed' AND COALESCE(json_extract(result_json,'$.error'),'')='' AND json_extract(result_json,'$.result.ID')=?)`, run, replay.ThreadID).Scan(&resume); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=? AND native_thread_id=?)`, run, replay.ThreadID).Scan(&resume); err != nil {
 		return nil, err
 	}
 	if !resume {

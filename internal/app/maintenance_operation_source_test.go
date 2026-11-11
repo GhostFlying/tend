@@ -23,8 +23,7 @@ func operationMaintenanceFixture(t *testing.T) (*harness, protocol.CommittedMain
 		if err := tx.PutUpgrade(ctx, original); err != nil {
 			return err
 		}
-		result, _ := json.Marshal(original.View)
-		return tx.InsertRequest(ctx, store.RequestRecord{Domain: "system", RequestID: original.StartRequestID, Operation: "upgrades.start", PayloadHash: strings.Repeat("f", 64), PrincipalJSON: `{"kind":"system"}`, TraceID: h.ids.New(protocol.PrefixTrace), Status: protocol.OpSucceeded, ResultJSON: string(result)})
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}

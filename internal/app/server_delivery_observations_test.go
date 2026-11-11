@@ -118,11 +118,11 @@ func TestServerDeliveryFencesOriginalRunnerNonce(t *testing.T) {
 		t.Fatal(o)
 	}
 	if err = h.store.Read(context.Background(), func(tx *store.ReadTx) error {
-		var raw string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT late_report_json FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&raw); err != nil {
+		var raw int64
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT late_report_at FROM retired_runner_delivery_queries WHERE nonce=?`, old.Nonce).Scan(&raw); err != nil {
 			return err
 		}
-		if raw == "" {
+		if raw == 0 {
 			t.Error("late report lost")
 		}
 		return nil

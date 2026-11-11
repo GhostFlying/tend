@@ -56,7 +56,7 @@ func TestIssueDeliveryMigrationPreservesClosedAcceptedHistoryWithoutApprovals(t 
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET current_artifact_id=? WHERE task_id=?`, "art_old", task.TaskID); err != nil {
 			return err
 		}
-		_, err := tx.InsertEvent(ctx, EventRow{EventID: "evt_old", Source: "app", ObjectType: "task", ObjectID: task.TaskID, Kind: "task.completed", BodyJSON: `{}`, ActorJSON: `{}`, CreatedAt: 1})
+		_, err := tx.Exec(ctx, `INSERT INTO events(event_id,source,object_type,object_id,kind,body_json,actor_json,created_at) VALUES('evt_old','app','task',?,'task.completed','{}','{}',1)`, task.TaskID)
 		return err
 	})
 	if err != nil {

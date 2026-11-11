@@ -386,8 +386,9 @@ func TestUpgradeManagerParkPreflightPreservesExactRecordedRequest(t *testing.T) 
 		t.Fatal(recorded, err)
 	}
 	other := *env
-	other.Payload = json.RawMessage(`{"release_id":"changed"}`)
-	if _, err := h.app.CheckUpgradeStart(t.Context(), &other, c); protocol.CodeOf(err) != protocol.CodeConflictPayload {
+	changed := c
+	changed.ManifestSHA256 = strings.Repeat("f", 64)
+	if _, err := h.app.CheckUpgradeStart(t.Context(), &other, changed); protocol.CodeOf(err) != protocol.CodeConflictPayload {
 		t.Fatal("changed original payload accepted", err)
 	}
 	c.DeliveryTaskID = "unapproved-delivery"
@@ -524,7 +525,7 @@ func TestUpgradeManagerParkSerializesAllAttachmentClosesWithWindow(t *testing.T)
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
-	if upgradeRead(h).ManagerParks[0].CloseRequestID != original || h.count("manager_native_requests") != 2 || h.run(as.RunID).ObservedState == protocol.RunFinished {
+	if upgradeRead(h).ManagerParks[0].CloseRequestID != original || h.count("manager_native_requests") != 1 || h.run(as.RunID).ObservedState == protocol.RunFinished {
 		t.Fatal("new window repeated unknown or fabricated completion")
 	}
 }

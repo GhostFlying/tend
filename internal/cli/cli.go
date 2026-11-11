@@ -96,8 +96,8 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	if command, tail, ok := findCapabilityCommand(args); ok {
 		return report(e, runCapabilityCommand(ctx, e, command, tail))
 	}
-	if len(args) >= 2 && args[0] == "request" && args[1] == "replay" {
-		return report(e, runRequestReplay(ctx, e, args[2:]))
+	if len(args) >= 2 && args[0] == "operation" && args[1] == "submit" {
+		return report(e, runOperationSubmit(ctx, e, args[2:]))
 	}
 	if len(args) >= 2 && args[0] == "repo" && args[1] == "local" {
 		return report(e, runLocalRepository(ctx, e, args[2:]))
@@ -113,7 +113,7 @@ func Main(ctx context.Context, e *Env, args []string) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "schedule", "event", "webhook", "observation", "request":
+	case "schedule", "event", "webhook", "observation":
 		return report(e, runTriggers(ctx, e, cmd, rest))
 	case "maintenance":
 		return report(e, runMaintenance(ctx, e, rest))

@@ -244,13 +244,7 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		}
 	}
 	if turn.Status != store.TurnStarting && turn.Status != store.TurnStarted {
-		// A repeated exact request may read its receipt, but a finished native turn
-		// cannot create a fresh effect. Authorize is also run for recorded replays.
-		if _, err := store.GetRequest(ctx, q, x.RequestDomain(), x.Env.RequestID); errors.Is(err, store.ErrNotFound) {
-			return protocol.Errorf(protocol.CodeForbidden, "native execution is no longer active")
-		} else if err != nil {
-			return err
-		}
+		return protocol.Errorf(protocol.CodeForbidden, "native execution is no longer active")
 	}
 	return nil
 }
@@ -287,10 +281,10 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 		}
 		x.validatedDelegationCorrection = delegationCorrection(x.Env.Payload)
 	}
-	var original string
-	err = tx.Q().QueryRowContext(ctx, `SELECT request_id FROM hosted_coordination_effects WHERE execution_id=? AND effect_seq=?`, stable, c.EffectSeq).Scan(&original)
+	var original int
+	err = tx.Q().QueryRowContext(ctx, `SELECT 1 FROM hosted_coordination_effects WHERE execution_id=? AND effect_seq=?`, stable, c.EffectSeq).Scan(&original)
 	if err == nil {
-		return Outcome{}, duplicateEffect("coordination effect was already applied", map[string]any{"coordination_execution_id": stable, "effect_seq": c.EffectSeq, "original_request_id": original})
+		return Outcome{}, duplicateEffect("coordination effect was already applied", map[string]any{"coordination_execution_id": stable, "effect_seq": c.EffectSeq})
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Outcome{}, err
@@ -299,7 +293,7 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 	if execution.Selection.ConfigurationRevision == 0 {
 		effectTable = "runner_coordination_effects"
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO `+effectTable+`(execution_id,effect_seq,request_id) VALUES(?,?,?)`, stable, c.EffectSeq, x.Env.RequestID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO `+effectTable+`(execution_id,effect_seq) VALUES(?,?)`, stable, c.EffectSeq); err != nil {
 		return Outcome{}, err
 	}
 	delegationSources := []string{hostedPayloadSource(x.Env.Payload)}
@@ -380,6 +374,14 @@ func (c HostedCoordinationCommand) Apply(ctx context.Context, x *Exec, tx *store
 	if err != nil {
 		return Outcome{}, err
 	}
+	// The outer writer records notifications after this wrapper returns. Carry
+	// only verified execution provenance, never infer it from transport history.
+	x.coordinationExecution = adapted.coordinationExecution
+	x.coordinationEffectSeq = adapted.coordinationEffectSeq
+	x.coordinationID = adapted.coordinationID
+	x.coordinationLogicalID = adapted.coordinationLogicalID
+	x.executionRequest = adapted.executionRequest
+	x.managersRefreshed = x.managersRefreshed || adapted.managersRefreshed
 	out.NoEffect = false
 	return out, nil
 }

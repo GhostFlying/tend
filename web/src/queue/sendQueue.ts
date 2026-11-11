@@ -1,26 +1,25 @@
 // The send queue (v0.1 §14.2, D70). A message is written to the outbox
 // with a new request ID before anything is sent; sending, resending after a
 // reload or reconnect, and the owner's manual resend all reuse that ID, so
-// tend records the message once however many times it arrives (D11).
+// its stable message ID records the business message only once (D225).
 //
 // Messages go out one at a time, oldest first, so tend receives them in
 // the order they were written. A try without an answer is retried a few
 // times; after that the message is unknown and waits for the owner, or for
-// a reconnect to look its request up (invariant 4: reconcile, do not guess).
+// a reconnect to read the actual message (reconcile, do not guess).
 // Until then the messages written after it wait too, so their order holds.
-import { ApiError, NetworkError } from "../api/client.ts";
+import { ApiError, NetworkError, type BusinessMessage } from "../api/client.ts";
 import type {
   APIResponse,
   DecisionChoice,
   Envelope,
   OpStatus,
-  RequestView,
   SubmitMessagePayload,
   ConversationImageInput,
   ConversationAttachment,
   InjectSourcePayload,
 } from "../api/generated/api.ts";
-import { newRequestId } from "../api/ids.ts";
+import { newObjectId, newRequestId } from "../api/ids.ts";
 import { Store, type Readable } from "../state/store.ts";
 import type { Outbox, OutgoingMessage, SendState } from "./outbox.ts";
 
@@ -28,7 +27,7 @@ import type { Outbox, OutgoingMessage, SendState } from "./outbox.ts";
 export interface Sender {
   submit(envelope: Envelope): Promise<APIResponse>;
   upload?(requestId: string, blob: Blob, name: string, signal: AbortSignal): Promise<APIResponse>;
-  lookup(requestId: string): Promise<RequestView | null>;
+  message(messageId: string): Promise<BusinessMessage | null>;
 }
 
 export interface QueueOptions {
@@ -45,8 +44,6 @@ export interface QueueOptions {
   online?: () => boolean;
   /** Pauses between tries; one more try than pauses. */
   backoffMs?: readonly number[];
-  /** How long a sent message stays in the outbox. Default one day. */
-  keepSentMs?: number;
 }
 
 export interface Draft {
@@ -91,7 +88,6 @@ export class SendQueue {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly online: () => boolean;
   private readonly backoffMs: readonly number[];
-  private readonly keepSentMs: number;
   private readonly messages = new Store<readonly OutgoingMessage[]>([]);
   private draining: Promise<void> | null = null;
   private kicked = false;
@@ -111,21 +107,39 @@ export class SendQueue {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.online = options.online ?? (() => navigator.onLine);
     this.backoffMs = options.backoffMs ?? defaultBackoff;
-    this.keepSentMs = options.keepSentMs ?? 24 * 60 * 60 * 1000;
   }
 
   /** Loads the outbox and drops messages sent long ago. Call resume() to send. */
   static async open(options: QueueOptions): Promise<SendQueue> {
     const q = new SendQueue(options);
-    const cutoff = q.now() - q.keepSentMs;
     const kept: OutgoingMessage[] = [];
     for (const m of await q.outbox.all()) {
       if (!q.belongs(m)) continue;
       q.nextOrder = Math.max(q.nextOrder, m.order + 1);
-      if (m.state === "sent" && (q.keepSentMs === 0 || m.updatedAt < cutoff)) {
+      if (m.state === "sent") {
         await q.outbox.delete(m.requestId);
       } else {
-        kept.push(m);
+        if (
+          m.submitAttempted === false &&
+          m.envelope.operation !== "messaging.respond" &&
+          !(m.envelope.payload as { message_id?: string }).message_id
+        ) {
+          const upgraded = await q.outbox.edit(m.requestId, (current) =>
+            current.submitAttempted === false
+              ? {
+                  ...current,
+                  envelope: {
+                    ...current.envelope,
+                    payload: {
+                      ...(current.envelope.payload as object),
+                      message_id: newObjectId("msg", q.now()),
+                    },
+                  },
+                }
+              : current,
+          );
+          if (upgraded) kept.push(upgraded);
+        } else kept.push(m);
       }
     }
     q.messages.set(sorted(kept));
@@ -174,7 +188,8 @@ export class SendQueue {
     const order = this.nextOrder++;
     const now = this.now();
     const requestId = this.newId(now);
-    const payload: SubmitMessagePayload = {
+    const payload: SubmitMessagePayload & { message_id: string } = {
+      message_id: newObjectId("msg", now),
       body: draft.body,
       ...(this.conversationID !== "main" ? { conversation_id: this.conversationID } : {}),
     };
@@ -217,6 +232,7 @@ export class SendQueue {
             }
           : metadata
             ? ({
+                message_id: payload.message_id,
                 text: draft.body,
                 metadata: { ...metadata },
                 ...(payload.attachments ? { attachments: payload.attachments } : {}),
@@ -259,8 +275,8 @@ export class SendQueue {
   }
 
   /**
-   * Looks an unknown message up in tend: a recorded request settles it; a
-   * request tend never recorded is sent again with the same ID.
+   * Reads an unknown message by its stable business key. An absent object
+   * permits repeating only that same atomic message creation, never a new key.
    */
   async reconcile(requestId: string): Promise<void> {
     const m = this.find(requestId);
@@ -272,24 +288,27 @@ export class SendQueue {
       await this.kick();
       return;
     }
-    let view: RequestView | null;
+    const messageId = (m.envelope.payload as { message_id?: string }).message_id;
+    if (!messageId) return; // A legacy attempt has no actual business key to retry safely.
+    let existing: BusinessMessage | null;
     try {
-      view = await this.sender.lookup(requestId);
+      existing = await this.sender.message(messageId);
     } catch {
-      // Still no answer; it stays unknown.
       return;
     }
-    if (view === null) {
+    if (existing && existing.message_id !== messageId) return;
+    if (existing) {
+      await this.update(requestId, {
+        state: "sent",
+        messageId: existing.message_id,
+        seq: existing.seq,
+      });
+    } else {
+      // Absence does not prove non-execution. Repeating this immutable creation
+      // is safe because its actual message key is unique in the business store.
       await this.update(requestId, { state: "sending" });
-      void this.kick();
-      return;
     }
-    const outcome = settle(view.status, view.result, view.error?.message);
-    if (outcome.kind === "settled") {
-      await this.update(requestId, outcome);
-      // Settled, it no longer holds back the messages after it.
-      void this.kick();
-    }
+    void this.kick();
   }
 
   /**
@@ -305,6 +324,11 @@ export class SendQueue {
       await this.reconcile(requestId);
       return;
     }
+    if (
+      !(m.envelope.payload as { message_id?: string }).message_id &&
+      m.envelope.operation !== "messaging.respond"
+    )
+      return;
     await this.update(requestId, { state: "sending" });
     await this.kick();
   }
@@ -391,6 +415,16 @@ export class SendQueue {
       m = current;
     }
     if (!this.online()) return false;
+    if (
+      m.envelope.operation !== "messaging.respond" &&
+      !(m.envelope.payload as { message_id?: string }).message_id
+    ) {
+      await this.update(m.requestId, {
+        state: "unknown",
+        error: "旧消息缺少稳定消息身份，保留原文等待核对；不会自动重发。",
+      });
+      return false;
+    }
     // The same IndexedDB transaction arbitrates cancellation across tabs.
     const claimed = await this.outbox.edit(m.requestId, (current) =>
       current.state === "cancelled"
@@ -441,7 +475,7 @@ export class SendQueue {
     }
   }
 
-  /** Upload receipts and the final reference list are committed before message delivery. */
+  /** Immutable file bytes deduplicate by content; the final reference list are committed before message delivery. */
   private async prepareAttachments(requestId: string): Promise<boolean> {
     for (let index = 0; ; index++) {
       let m = this.find(requestId);
@@ -471,9 +505,12 @@ export class SendQueue {
         this.transfer = { requestId, controller };
         try {
           let operation: APIResponse["operation"];
-          if (upload.attempted) {
-            const existing = await this.sender.lookup(upload.requestId);
-            if (existing) operation = existing;
+          if (upload.unknown) {
+            await this.update(requestId, {
+              state: "unknown",
+              error: "附件业务结果仍未知，保留原文件等待核对",
+            });
+            return false;
           }
           if (!operation) {
             upload.attempted = true;
@@ -498,6 +535,14 @@ export class SendQueue {
             return true;
           }
           if (operation?.status === "unknown") {
+            m = this.find(requestId);
+            if (m)
+              await this.save({
+                ...m,
+                uploads: m.uploads!.map((entry, n) =>
+                  n === index ? { ...entry, unknown: true } : entry,
+                ),
+              });
             await this.update(requestId, { state: "unknown", error: "附件上传结果待核对" });
             return true;
           }
@@ -587,6 +632,18 @@ export class SendQueue {
     }
     if (change.seq !== undefined) {
       next.seq = change.seq;
+    }
+    if (next.state === "sent") {
+      // The server's message is now authoritative. Keep only a small in-memory
+      // bridge for the live feed, and release local files and durable history.
+      await this.outbox.delete(requestId);
+      delete next.uploads;
+      delete next.references;
+      next.envelope = { ...next.envelope, payload: { message_id: next.messageId } };
+      this.messages.set(
+        sorted([...this.messages.get().filter((item) => item.requestId !== requestId), next]),
+      );
+      return;
     }
     await this.save(next);
   }

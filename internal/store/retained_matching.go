@@ -54,6 +54,10 @@ func encodeOriginal(raw []byte, encoding string) ([]byte, error) {
 		return raw, nil
 	case "canonical":
 		return canonicalOriginal(raw)
+	case "json-string":
+		var text string
+		err := json.Unmarshal(raw, &text)
+		return []byte(text), err
 	case "compact":
 		var b bytes.Buffer
 		err := json.Compact(&b, raw)
@@ -65,40 +69,57 @@ func encodeOriginal(raw []byte, encoding string) ([]byte, error) {
 
 // SQLite needs the explicit nonempty predicate to use the existing partial
 // index; the caller already excludes an empty canonical hash.
-const canonicalOriginalLookupQuery = `SELECT sha256,archive_id,byte_offset,byte_length,characters FROM retained_original_bodies WHERE canonical_sha256=? AND canonical_sha256<>'' LIMIT 16`
+const canonicalOriginalLookupQuery = `SELECT lower(hex(w.sha256)),a.archive_id,w.byte_offset,w.byte_length,w.characters FROM retained_original_windows w JOIN retained_original_archives a USING(archive_key) WHERE w.canonical_sha256=? AND w.canonical_sha256<>X'' LIMIT 16`
 
 func (s *Store) matchOriginal(ctx context.Context, raw []byte) (*preparedOriginal, error) {
-	canonical := canonicalOriginalHash(raw)
-	if canonical == "" {
-		return nil, nil
-	}
-	rows, err := s.read.QueryContext(ctx, canonicalOriginalLookupQuery, canonical)
+	hashes := []string{canonicalOriginalHash(raw)}
+	quoted, err := json.Marshal(string(raw))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		p := preparedOriginal{CanonicalSHA256: canonical}
-		if err = rows.Scan(&p.Window.SHA256, &p.Window.Archive, &p.Window.Offset, &p.Window.Length, &p.Characters); err != nil {
-			return nil, err
+	hashes = append(hashes, canonicalOriginalHash(quoted))
+	for _, canonical := range hashes {
+		if canonical == "" {
+			continue
 		}
-		source, err := s.files.ReadWindow(ctx, p.Window)
+		rows, err := s.read.QueryContext(ctx, canonicalOriginalLookupQuery, hashBytes(canonical))
 		if err != nil {
 			return nil, err
 		}
-		for _, encoding := range []string{"raw", "compact", "canonical"} {
-			presented, err := encodeOriginal(source, encoding)
+		var candidates []preparedOriginal
+		for rows.Next() {
+			p := preparedOriginal{CanonicalSHA256: canonical}
+			if err = rows.Scan(&p.Window.SHA256, &p.Window.Archive, &p.Window.Offset, &p.Window.Length, &p.Characters); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			candidates = append(candidates, p)
+		}
+		if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+			return nil, err
+		}
+		for _, p := range candidates {
+			source, err := s.files.ReadWindow(ctx, p.Window)
 			if err != nil {
 				return nil, err
 			}
-			if bytes.Equal(raw, presented) {
-				w := p.Window
-				p.Reference = originalReference{Window: &w, Encoding: encoding, SHA256: bodyHash(raw)}
-				return &p, nil
+			for _, encoding := range []string{"raw", "compact", "canonical", "json-string"} {
+				presented, err := encodeOriginal(source, encoding)
+				if err != nil {
+					if encoding == "json-string" {
+						continue
+					}
+					return nil, err
+				}
+				if bytes.Equal(raw, presented) {
+					w := p.Window
+					p.Reference = originalReference{Window: &w, Encoding: encoding, SHA256: bodyHash(raw)}
+					return &p, nil
+				}
 			}
 		}
 	}
-	return nil, rows.Err()
+	return nil, nil
 }
 
 type originalReplacement struct {
@@ -148,6 +169,11 @@ func (s *Store) originalReplacements(ctx context.Context, raw []byte, base, dept
 	return matches, nil
 }
 func (s *Store) prepareOriginalRecipe(ctx context.Context, stream string, raw []byte) (*preparedOriginal, error) {
+	// Tool text can start with JSON punctuation without being JSON. It remains
+	// an exact text original; it is never parsed into a reconstruction recipe.
+	if !json.Valid(raw) {
+		return nil, nil
+	}
 	matches, err := s.originalReplacements(ctx, raw, 0, 0)
 	if err != nil || len(matches) == 0 {
 		return nil, err
@@ -225,10 +251,13 @@ func resolveOriginalReference(ctx context.Context, files *blobstore.Store, ref o
 }
 
 func (t *Tx) bindOriginalWindow(ctx context.Context, p preparedOriginal) (preparedOriginal, error) {
-	if _, err := t.Exec(ctx, `INSERT OR IGNORE INTO retained_original_bodies(sha256,archive_id,byte_offset,byte_length,characters,canonical_sha256) VALUES(?,?,?,?,?,?)`, p.Window.SHA256, p.Window.Archive, p.Window.Offset, p.Window.Length, p.Characters, p.CanonicalSHA256); err != nil {
+	if _, err := t.Exec(ctx, `INSERT OR IGNORE INTO retained_original_archives(archive_id) VALUES(?)`, p.Window.Archive); err != nil {
 		return p, err
 	}
-	if err := t.Q().QueryRowContext(ctx, `SELECT archive_id,byte_offset,byte_length,characters FROM retained_original_bodies WHERE sha256=?`, p.Window.SHA256).Scan(&p.Window.Archive, &p.Window.Offset, &p.Window.Length, &p.Characters); err != nil {
+	if _, err := t.Exec(ctx, `INSERT OR IGNORE INTO retained_original_windows(sha256,archive_key,byte_offset,byte_length,characters,canonical_sha256) VALUES(?,(SELECT archive_key FROM retained_original_archives WHERE archive_id=?),?,?,?,?)`, hashBytes(p.Window.SHA256), p.Window.Archive, p.Window.Offset, p.Window.Length, p.Characters, hashBytes(p.CanonicalSHA256)); err != nil {
+		return p, err
+	}
+	if err := t.Q().QueryRowContext(ctx, `SELECT a.archive_id,w.byte_offset,w.byte_length,w.characters FROM retained_original_windows w JOIN retained_original_archives a USING(archive_key) WHERE w.sha256=?`, hashBytes(p.Window.SHA256)).Scan(&p.Window.Archive, &p.Window.Offset, &p.Window.Length, &p.Characters); err != nil {
 		return p, err
 	}
 	return p, nil

@@ -159,7 +159,7 @@ func TestDecisionContinuationNamedDispatchUsesOriginalExecutionAndRequest(t *tes
 	e.svc.app = app.New(e.store, ids, clock.Now, app.WithHostedConfiguration(prepared))
 	execute := func(principal protocol.Principal, cmd app.Command, target protocol.Target, payload any, revision *int64) {
 		t.Helper()
-		raw, _ := json.Marshal(payload)
+		target, raw := composeFixtureBusinessInput(t, ids, cmd.Operation(), target, payload)
 		op, err := e.svc.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, cmd)
 		if err != nil || op.Error != nil {
 			t.Fatal(op, err)
@@ -199,9 +199,7 @@ func TestDecisionContinuationNamedDispatchUsesOriginalExecutionAndRequest(t *tes
 	for i, name := range []string{"decision_continuation_answer", "decision_continuation_resume", "decision_continuation_reconcile"} {
 		call.Tool, call.Native, call.RequestID = name, "original-"+name, ids.New(protocol.PrefixRequest)
 		payload := json.RawMessage(`{"expected_revision":0,"source_message_id":"` + input.MessageID + `"}`)
-		operation := "decisions.continuation." + strings.TrimPrefix(name, "decision_continuation_")
 		if name == "decision_continuation_answer" {
-			operation = protocol.OpResolveDecisionContinuation
 			payload = json.RawMessage(`{"version":1,"text":"Wait","continuation":{"mode":"wait","reason":"Await original dependency"},"source_message_id":"` + input.MessageID + `"}`)
 		}
 		call.Arguments, _ = json.Marshal(hostedMutationArgs{TargetID: "missing", ExpectedControlRevision: new(int64), EffectSeq: int64(i + 1), Payload: payload})
@@ -214,20 +212,10 @@ func TestDecisionContinuationNamedDispatchUsesOriginalExecutionAndRequest(t *tes
 		if first.Text != again.Text || first.Success != again.Success {
 			t.Fatal("original native callback changed its receipt", first, again)
 		}
-		expected := protocol.Envelope{RequestID: call.RequestID, Operation: operation, Target: protocol.Target{Type: "decision", ID: "missing"}, ExpectedControlRevision: new(int64), Payload: payload}
-		wantHash, err := protocol.PayloadHash(&expected)
-		if err != nil {
-			t.Fatal(err)
+		if e.count(`SELECT COUNT(*) FROM decisions WHERE decision_id='missing'`) != 0 {
+			t.Fatal("rejected callback created a decision")
 		}
-		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			record, err := store.GetRequest(t.Context(), tx.Q(), principal.DedupDomain(), call.RequestID)
-			if err == nil && (record.Operation != expected.Operation || record.PayloadHash != wantHash || record.Status != protocol.OpFailed || record.ErrorCode != string(protocol.CodeNotFound)) {
-				t.Fatal("named dispatch changed the original request or CAS intent", record, expected)
-			}
-			return err
-		}); err != nil {
-			t.Fatal("original tool request was not recoverable", err)
-		}
+
 	}
 	call.Tool, call.Principal.Thread = "decision_continuation_read", "another-thread"
 	call.Arguments = json.RawMessage(`{"decision_id":"missing"}`)

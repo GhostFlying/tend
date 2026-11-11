@@ -70,6 +70,13 @@ type ExecutionResponsibility struct {
 	Role            RunRole `json:"role"`
 }
 
+// ManagerNativeClaimPayload settles only the runner's acknowledged delivery
+// of original native command receipts. It never authorizes another execution.
+type ManagerNativeClaimPayload struct {
+	AcknowledgeOnly bool     `json:"acknowledgement_only,omitempty"`
+	AcknowledgedIDs []string `json:"acknowledged_ids,omitempty"`
+}
+
 // ManagerNativeRequest is a durable native operation routed to its leased executor.
 // Payload contains no credentials or server filesystem locators.
 type ManagerNativeRequest struct {
@@ -86,6 +93,7 @@ const (
 )
 
 type ManagerNativeReply struct {
+	Method       string          `json:"method,omitempty"`
 	LastSequence int64           `json:"last_sequence,omitempty"`
 	ID           string          `json:"id"`
 	Result       json.RawMessage `json:"result"`

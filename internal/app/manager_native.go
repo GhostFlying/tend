@@ -37,7 +37,13 @@ func (c ManagerNativeCommand) Authorize(ctx context.Context, x *Exec, q store.Qu
 	// Receipt-only writes remain admissible after expiry; they cannot queue
 	// new work or acquire responsibility under a stale epoch.
 	if c.OperationName == protocol.OpManagerNativeClaim && (l.Status != store.LeaseActive || l.ExpiresAt <= x.Now.UnixMilli()) {
-		return protocol.Errorf(protocol.CodeForbidden, "manager lease is not active")
+		var payload protocol.ManagerNativeClaimPayload
+		if err := decodePayload(x.Env, &payload); err != nil {
+			return err
+		}
+		if len(payload.AcknowledgedIDs) == 0 && !payload.AcknowledgeOnly {
+			return protocol.Errorf(protocol.CodeForbidden, "manager lease is not active")
+		}
 	}
 	return nil
 }
@@ -98,39 +104,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if !allowed && !managerNativeReceiptMethod(p.Method) {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "fenced manager may only read and reconcile native receipts")
 		}
-		if p.Method == "find" {
-			var prior string
-			err := tx.Q().QueryRowContext(ctx, `SELECT request_id FROM manager_native_requests WHERE run_id=? AND method='find' AND payload_json=? AND status IN ('pending','started','unknown') AND result_json IS NULL ORDER BY created_at,rowid LIMIT 1`, run, string(p.Payload)).Scan(&prior)
-			if errors.Is(err, sql.ErrNoRows) {
-				rows, e := tx.Q().QueryContext(ctx, `SELECT request_id,payload_json FROM manager_native_requests WHERE run_id=? AND method='find' AND status IN ('pending','started','unknown') AND result_json IS NULL AND instr(payload_json,'tend:retained-json:v1')>0 ORDER BY created_at,rowid`, run)
-				if e != nil {
-					return Outcome{}, e
-				}
-				for rows.Next() {
-					var id, raw string
-					if e = rows.Scan(&id, &raw); e != nil {
-						break
-					}
-					raw, e = store.ResolveJSON(ctx, tx.Q(), raw)
-					if e != nil {
-						break
-					}
-					if raw == string(p.Payload) {
-						prior = id
-						err = nil
-						break
-					}
-				}
-				e = errors.Join(e, rows.Err(), rows.Close())
-				if e != nil {
-					return Outcome{}, e
-				}
-			}
-			if err == nil {
-				p.ID = prior
-				return Outcome{NoEffect: true, Result: p}, nil
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
+		if managerNativeObservationMethod(p.Method) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "observational RPCs use the in-flight transport")
+		}
+		if p.Method == "tool_result" {
+			if err := tx.PutManagerToolResult(ctx, run, p.ID, string(p.Payload), false, x.Now.UnixMilli()); err != nil {
 				return Outcome{}, err
 			}
 		}
@@ -141,6 +119,40 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		_, err = tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES(?,?,?,?,'pending',?)`, p.ID, run, p.Method, payload, x.Now.UnixMilli())
 		return Outcome{Result: p}, err
 	case protocol.OpManagerNativeClaim:
+		var claim protocol.ManagerNativeClaimPayload
+		if err := decodePayload(x.Env, &claim); err != nil {
+			return Outcome{}, err
+		}
+		if len(claim.AcknowledgedIDs) > 128 {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "too many command acknowledgements")
+		}
+		changed := false
+		for _, id := range dedupe(claim.AcknowledgedIDs) {
+			if id == "" {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "command acknowledgement identity is required")
+			}
+			// The runner reports only after receiving success for this original
+			// receipt. A lost acknowledgement request is safe to repeat.
+			result, err := tx.Exec(ctx, `UPDATE manager_native_requests SET runner_acked=1 WHERE run_id=? AND request_id=? AND status='completed' AND runner_acked=0`, run, id)
+			if err != nil {
+				return Outcome{}, err
+			}
+			n, err := result.RowsAffected()
+			if err != nil {
+				return Outcome{}, err
+			}
+			changed = changed || n > 0
+			if _, err := tx.Exec(ctx, `DELETE FROM manager_native_requests WHERE run_id=? AND request_id=? AND coordinator_consumed=1 AND runner_acked=1`, run, id); err != nil {
+				return Outcome{}, err
+			}
+		}
+		lease, err := store.GetLeaseByRun(ctx, tx.Q(), run)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if claim.AcknowledgeOnly || lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() {
+			return Outcome{NoEffect: !changed, Result: map[string]any{"request": nil}}, nil
+		}
 		r, err := store.GetRun(ctx, tx.Q(), run)
 		if err != nil {
 			return Outcome{}, err
@@ -149,11 +161,10 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		changed := false
 		for {
 			var p protocol.ManagerNativeRequest
-			var payload string
-			err := tx.Q().QueryRowContext(ctx, `SELECT request_id,method,payload_json FROM manager_native_requests WHERE run_id=? AND status='pending' ORDER BY created_at,rowid LIMIT 1`, run).Scan(&p.ID, &p.Method, &payload)
+			var payload, status string
+			err := tx.Q().QueryRowContext(ctx, `SELECT request_id,method,payload_json,status FROM manager_native_requests WHERE run_id=? AND status IN ('pending','started') ORDER BY CASE WHEN status='started' THEN 0 ELSE 1 END,created_at,rowid LIMIT 1`, run).Scan(&p.ID, &p.Method, &payload, &status)
 			if errors.Is(err, sql.ErrNoRows) {
 				return Outcome{NoEffect: !changed, Result: map[string]any{"request": nil}}, nil
 			}
@@ -165,12 +176,16 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			p.Payload = json.RawMessage(payload)
+			if status == "started" {
+				return Outcome{NoEffect: !changed, Result: p}, nil
+			}
+
 			if !allowed && !managerNativeReceiptMethod(p.Method) {
 				raw, err := json.Marshal(protocol.ManagerNativeReply{ID: p.ID, Error: "Manager was fenced before native execution", Rejected: true})
 				if err != nil {
 					return Outcome{}, err
 				}
-				if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=? WHERE request_id=?`, string(raw), p.ID); err != nil {
+				if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error='Manager was fenced before native execution',completion_rejected=1,runner_acked=1 WHERE request_id=?`, string(raw), p.ID); err != nil {
 					return Outcome{}, err
 				}
 				changed = true
@@ -178,6 +193,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			}
 			if _, err := tx.Exec(ctx, `UPDATE runs SET observed_state='running' WHERE run_id=? AND observed_state='starting'`, run); err != nil {
 				return Outcome{}, err
+			}
+			if p.Method != "close" {
+				if _, err := tx.Exec(ctx, `UPDATE runs SET native_activity=native_activity+1 WHERE run_id=?`, run); err != nil {
+					return Outcome{}, err
+				}
 			}
 			_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='started' WHERE request_id=? AND status='pending'`, p.ID)
 			return Outcome{Result: p}, err
@@ -187,24 +207,53 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err := decodePayload(x.Env, &p); err != nil {
 			return Outcome{}, err
 		}
-		var method, status string
-		if err := tx.Q().QueryRowContext(ctx, `SELECT method,status FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, p.ID).Scan(&method, &status); err != nil {
+		var method, status, payload string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT method,status,payload_json FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, p.ID).Scan(&method, &status, &payload); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				confirmed, err := consumedManagerNativeReceipt(ctx, tx.Q(), run, p)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if confirmed {
+					return Outcome{NoEffect: true, Result: p}, nil
+				}
+				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "native command is no longer pending; reconcile its original session, tool call or physical stop")
+			}
 			return Outcome{}, err
 		}
-		raw, err := json.Marshal(p)
-		if err != nil {
-			return Outcome{}, err
+		if p.Method != "" && p.Method != method {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native receipt names another command method")
 		}
+		var raw []byte
+		var err error
 		if status == "completed" {
-			var prior string
-			if err = tx.Q().QueryRowContext(ctx, `SELECT result_json FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, p.ID).Scan(&prior); err != nil {
+			var retained sql.NullString
+			if err = tx.Q().QueryRowContext(ctx, `SELECT result_json FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, p.ID).Scan(&retained); err != nil {
 				return Outcome{}, err
 			}
+			if !retained.Valid {
+				confirmed, err := consumedManagerNativeReceipt(ctx, tx.Q(), run, p)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if !confirmed {
+					return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native receipt differs from its completed business fact")
+				}
+				return Outcome{NoEffect: true, Result: p}, nil
+			}
+			prior := retained.String
 			prior, err = store.ResolveJSON(ctx, tx.Q(), prior)
 			if err != nil {
 				return Outcome{}, err
 			}
-			if prior != string(raw) {
+			var before protocol.ManagerNativeReply
+			if err := json.Unmarshal([]byte(prior), &before); err != nil {
+				return Outcome{}, err
+			}
+			before.Method = ""
+			current := p
+			current.Method = ""
+			if !sameBusinessDefinition(before, current) {
 				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native result identity has different content")
 			}
 			return Outcome{Result: p}, nil
@@ -242,11 +291,18 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "native close must cover all applied events")
 			}
 		}
+		if err := tx.CompleteManagerNative(ctx, run, p.ID, method, payload, p, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
 		result, err := tx.RetainJSON(ctx, string(raw))
 		if err != nil {
 			return Outcome{}, err
 		}
-		_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=? WHERE run_id=? AND request_id=?`, result, run, p.ID)
+		completionStatus := "completed"
+		if p.Error != "" && !p.Rejected {
+			completionStatus = "unknown"
+		}
+		_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status=?,result_json=?,completion_error=?,completion_rejected=? WHERE run_id=? AND request_id=?`, completionStatus, result, p.Error, p.Rejected, run, p.ID)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -268,6 +324,9 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			if preserved {
+				if x.repeatedPhysicalStop {
+					return Outcome{NoEffect: true, Result: p}, nil
+				}
 				return Outcome{Result: p, Events: []Event{{ObjectType: "run", ObjectID: run, Kind: "run.maintenance_physical_stop", Body: map[string]any{"last_sequence": p.LastSequence}}}}, nil
 			}
 			uncertain, err := managerBusinessReceiptsPending(ctx, tx.Q(), run)
@@ -331,7 +390,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			if err != nil {
 				return Outcome{}, err
 			}
-			if body != string(p.Body) {
+			if !store.SemanticJSONEqual(body, string(p.Body)) {
 				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native event identity has different content")
 			}
 			return Outcome{ProjectionOnly: true, Result: map[string]any{"ack": p.Sequence}}, nil
@@ -386,7 +445,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				projectionOnly = !closing
 			}
 		}
-		body, err := tx.RetainJSON(ctx, string(p.Body))
+		body, err := tx.RetainEventJSON(ctx, string(p.Body))
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -430,7 +489,7 @@ func settleClosedManagerToolResults(ctx context.Context, tx *store.Tx, run strin
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=? WHERE request_id=?`, string(raw), id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error='Native process closed before tool result delivery',completion_rejected=1,runner_acked=1 WHERE request_id=?`, string(raw), id); err != nil {
 			return err
 		}
 	}
@@ -445,6 +504,27 @@ func settleClosedManagerToolResults(ctx context.Context, tx *store.Tx, run strin
 func (a *App) QueueManagerNative(ctx context.Context, run, method string, payload json.RawMessage) (string, error) {
 	id := a.ids.New(protocol.PrefixRequest)
 	p := protocol.ManagerNativeRequest{ID: id, Method: method, Payload: payload}
+	if managerNativeObservationMethod(method) {
+		if err := a.nativeCalls.add(ctx, run, p); err != nil {
+			return "", err
+		}
+		err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+			r, err := store.GetRun(ctx, tx.Q(), run)
+			if err != nil {
+				return err
+			}
+			if r.Role != protocol.RoleIssueManager || r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "native observation requires a running transport")
+			}
+			return nil
+		})
+		if err != nil {
+			a.nativeCalls.remove(id)
+			return "", err
+		}
+		a.changes.Notify()
+		return id, nil
+	}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return "", err
@@ -459,24 +539,73 @@ func (a *App) QueueManagerNative(ctx context.Context, run, method string, payloa
 			id = request.ID
 		}
 	}
+	if err != nil {
+		a.nativeCalls.remove(id)
+	}
 	return id, err
 }
+
+// A completed command remains only until its business coordinator consumes it.
+// Pending observations use the reader; they never queue behind the writer.
 func (a *App) ManagerNativeResult(ctx context.Context, run, id string) (protocol.ManagerNativeReply, bool, error) {
-	var p protocol.ManagerNativeReply
-	var ready bool
+	if reply, ready, present := a.nativeCalls.result(run, id); present {
+		return reply, ready, nil
+	}
+	var reply protocol.ManagerNativeReply
+	var ready, completed bool
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var raw sql.NullString
-		if err := tx.Q().QueryRowContext(ctx, `SELECT result_json FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, id).Scan(&raw); err != nil {
+		var status string
+		var consumed bool
+		err := tx.Q().QueryRowContext(ctx, `SELECT result_json,status,coordinator_consumed FROM manager_native_requests WHERE run_id=? AND request_id=?`, run, id).Scan(&raw, &status, &consumed)
+		if errors.Is(err, sql.ErrNoRows) {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "native response is unavailable; reconcile the original execution or tool call")
+		}
+		if err != nil {
 			return err
+		}
+		if consumed {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "native handoff was already consumed; read its current session, tool or stop fact")
 		}
 		if !raw.Valid {
 			return nil
 		}
-		ready = true
-		return store.DecodeJSON(ctx, tx.Q(), raw.String, &p)
+		if err := store.DecodeJSON(ctx, tx.Q(), raw.String, &reply); err != nil {
+			return err
+		}
+		ready, completed = true, status == "completed"
+		return nil
 	})
-	return p, ready, err
+	if err != nil || !completed {
+		return reply, ready, err
+	}
+	err = a.write(ctx, func(tx *store.Tx) error {
+		compact := true
+		result, err := tx.Exec(ctx, `UPDATE manager_native_requests SET coordinator_consumed=1,completion_error=?,completion_rejected=?,payload_json=CASE WHEN ? THEN '{}' ELSE payload_json END,result_json=CASE WHEN ? THEN NULL ELSE result_json END WHERE run_id=? AND request_id=? AND status='completed' AND coordinator_consumed=0`, reply.Error, reply.Rejected, compact, compact, run, id)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return protocol.Errorf(protocol.CodeUnknownOutcome, "native response was consumed by another coordinator; reconcile its business fact")
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM manager_native_requests WHERE run_id=? AND request_id=? AND coordinator_consumed=1 AND runner_acked=1`, run, id)
+		return err
+	})
+	return reply, ready && err == nil, err
 }
+
+// The original command's accepted completion class is enough for a duplicate
+// transport ACK. No response body/hash or request-to-object cache is recreated.
+func consumedManagerNativeReceipt(ctx context.Context, q store.Querier, run string, p protocol.ManagerNativeReply) (bool, error) {
+	var accepted bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND request_id=? AND status='completed' AND coordinator_consumed=1 AND completion_error=? AND completion_rejected=?)`, run, p.ID, p.Error, p.Rejected).Scan(&accepted)
+	return accepted, err
+}
+
 func (a *App) ManagerNativeEvents(ctx context.Context, run string, after int64) ([]protocol.ManagerNativeEvent, error) {
 	var events []protocol.ManagerNativeEvent
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -681,6 +810,9 @@ func finishStoppedManager(ctx context.Context, x *Exec, tx *store.Tx, run, reaso
 		return Outcome{}, err
 	}
 	if preserved {
+		if x.repeatedPhysicalStop {
+			return Outcome{NoEffect: true, Result: map[string]any{"run_id": run}}, nil
+		}
 		if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {
 			return Outcome{}, err
 		}
@@ -728,7 +860,7 @@ func settleStoppedManagerRequests(ctx context.Context, tx *store.Tx, run string)
 		if unclaimed {
 			next = "completed"
 		}
-		if _, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status=?,result_json=? WHERE request_id=?`, next, string(raw), id); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status=?,result_json=?,completion_error='Native process stopped; reconcile the original operation before continuing',completion_rejected=?,runner_acked=CASE WHEN ? THEN 1 ELSE runner_acked END WHERE request_id=?`, next, string(raw), unclaimed, unclaimed, id); err != nil {
 			return err
 		}
 	}

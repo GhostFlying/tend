@@ -6,30 +6,17 @@ import (
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
 // stageRetainedInput publishes only immutable bytes before the business write.
 // Admission and references still require the normal transaction authorization.
 func (a *App) stageRetainedInput(ctx context.Context, env *protocol.Envelope, domains ...string) (context.Context, error) {
 	switch env.Operation {
-	case protocol.OpRunnerRolloutArchive, protocol.OpMigrateOriginals, protocol.OpImportOriginals, "manager.native_enqueue", protocol.OpManagerNativeEvent, protocol.OpManagerNativeReply:
+	case protocol.OpRunnerRolloutArchive, protocol.OpMigrateOriginals, protocol.OpImportOriginals, "manager.native_enqueue", protocol.OpManagerNativeEvent, protocol.OpManagerNativeReply, "conversation.record_tool_use", "conversation.record_agent_message":
 	default:
 		return ctx, nil
 	}
-	if len(domains) > 0 {
-		recorded := false
-		err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM request_records WHERE domain=? AND request_id=?)`, domains[0], env.RequestID).Scan(&recorded)
-			return err
-		})
-		if err != nil {
-			return ctx, err
-		}
-		if recorded {
-			return ctx, nil
-		}
-	}
+
 	switch env.Operation {
 	case protocol.OpRunnerRolloutArchive:
 		if len(domains) == 0 || !strings.HasPrefix(domains[0], "runner:") {
@@ -73,7 +60,13 @@ func (a *App) stageRetainedInput(ctx context.Context, env *protocol.Envelope, do
 		if json.Unmarshal(env.Payload, &p) != nil {
 			return ctx, nil
 		}
-		return a.store.StageOriginals(ctx, "manager-commands:"+env.Target.ID, p.Payload)
+		var tool struct {
+			ToolResult struct {
+				Text string `json:"Text"`
+			} `json:"tool_result"`
+		}
+		_ = json.Unmarshal(p.Payload, &tool)
+		return a.store.StageOriginals(ctx, "manager-commands:"+env.Target.ID, p.Payload, []byte(tool.ToolResult.Text))
 	case protocol.OpManagerNativeReply:
 		var p protocol.ManagerNativeReply
 		if json.Unmarshal(env.Payload, &p) != nil {
@@ -84,12 +77,24 @@ func (a *App) stageRetainedInput(ctx context.Context, env *protocol.Envelope, do
 			return ctx, err
 		}
 		return a.store.StageOriginals(ctx, "manager-results:"+env.Target.ID, raw)
+	case "conversation.record_tool_use":
+		var p recordToolUsePayload
+		if json.Unmarshal(env.Payload, &p) != nil {
+			return ctx, nil
+		}
+		return a.store.StageOriginals(ctx, "conversation-tools:"+env.Target.ID, []byte(protocol.RedactOwnerToolInput(p.Tool, p.Input)), []byte(p.Output))
+	case "conversation.record_agent_message":
+		var p recordAgentMessagePayload
+		if json.Unmarshal(env.Payload, &p) != nil {
+			return ctx, nil
+		}
+		return a.store.StageOriginals(ctx, "conversation-replies:"+env.Target.ID, []byte(p.Body))
 	case protocol.OpManagerNativeEvent:
 		var p protocol.ManagerNativeEvent
 		if json.Unmarshal(env.Payload, &p) != nil {
 			return ctx, nil
 		}
-		return a.store.StageOriginals(ctx, "manager-events:"+env.Target.ID, p.Body)
+		return a.store.StageEventOriginals(ctx, "manager-events:"+env.Target.ID, p.Body)
 	}
 	return ctx, nil
 }

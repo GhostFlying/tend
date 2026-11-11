@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
+	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -22,6 +24,29 @@ func (CreateConsultation) Authorize(_ context.Context, x *Exec, _ store.Querier)
 func (CreateConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.CreateConsultationPayload
 	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	id := x.Env.Target.ID
+	if !protocol.ValidID(protocol.Prefix("consultation:conversation"), id) || x.Env.ExpectedControlRevision != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new consultation requires its stable conversation identity")
+	}
+	if existing, err := store.AgentConversation(ctx, tx.Q(), id); err == nil {
+		if existing.Kind != "consultation" || existing.Title != p.Title || existing.AgentRef != p.AgentRef {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "consultation identity already has a different goal or agent")
+		}
+		var raw string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT private_snapshot FROM consultation_conversations WHERE conversation_id=?`, id).Scan(&raw); err != nil {
+			return Outcome{}, err
+		}
+		var selected hostedconfig.Selection
+		if err := json.Unmarshal([]byte(raw), &selected); err != nil {
+			return Outcome{}, err
+		}
+		if p.CategoryID != "" && selected.CategoryID != p.CategoryID {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "consultation identity already has a different category")
+		}
+		return Outcome{Result: existing, NoEffect: true}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
 	if x.hostedConfiguration == nil {
@@ -46,7 +71,6 @@ func (CreateConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if err != nil {
 		return Outcome{}, err
 	}
-	id := "consultation:" + x.IDs.New(protocol.Prefix("conversation"))
 	if _, err := tx.Exec(ctx, `INSERT INTO agent_conversations(conversation_id,model,effort,created_at) VALUES(?,'','',?)`, id, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
@@ -158,7 +182,7 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		env := *x.Env
 		env.Operation = "issues.create"
-		env.Target = protocol.Target{Type: "issue"}
+		env.Target = protocol.Target{Type: "issue", ID: protocol.NativeObjectID(protocol.PrefixWorkItem, c.ID, p.SourceMessageID)}
 		env.ExpectedControlRevision = nil
 		env.Payload = raw
 		adapted.Env = &env
@@ -195,19 +219,56 @@ func (PromoteConsultation) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		} else if err != nil {
 			return Outcome{}, err
 		}
-		out.Result = issue
+		out = Outcome{Result: issue, NoEffect: true}
+	}
+	changed := !out.NoEffect
+	var conversationExists bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_conversations WHERE conversation_id=?)`, "issue:"+issue.IssueID).Scan(&conversationExists); err != nil {
+		return Outcome{}, err
 	}
 	if _, err := ensureCanonicalManagerConversation(ctx, tx, issue, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
+	changed = changed || !conversationExists
+	ids := make([]string, 0, len(seen))
 	for id := range seen {
-		if err := tx.BindMessage(ctx, id, "work_item", issue.IssueID, "consultation_promotion"); err != nil {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		var bound bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_bindings WHERE message_id=? AND object_type='work_item' AND object_id=? AND kind='consultation_promotion')`, id, issue.IssueID).Scan(&bound); err != nil {
 			return Outcome{}, err
 		}
-		if err := appendBackgroundSource(ctx, x, tx, "work_item:"+issue.IssueID, issue.IssueID, id, "", "consultation.promoted", nil); err != nil {
+		if !bound {
+			if err := tx.BindMessage(ctx, id, "work_item", issue.IssueID, "consultation_promotion"); err != nil {
+				return Outcome{}, err
+			}
+			changed = true
+		}
+		// A source's native event is the delivery identity. A new source version
+		// or a genuinely missing historical association remains recoverable;
+		// already delivered material does not create another wake or event.
+		const deliveredSQL = `SELECT EXISTS(SELECT 1 FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.group_key=? AND s.message_id=? AND s.event_id=(SELECT event_id FROM events WHERE object_type='message' AND object_id=? ORDER BY event_seq DESC LIMIT 1) AND s.kind='consultation.promoted')`
+		var delivered bool
+		if err := tx.Q().QueryRowContext(ctx, deliveredSQL, "work_item:"+issue.IssueID, id, id).Scan(&delivered); err != nil {
 			return Outcome{}, err
+		}
+		if !delivered {
+			if err := appendBackgroundSource(ctx, x, tx, "work_item:"+issue.IssueID, issue.IssueID, id, "", "consultation.promoted", nil); err != nil {
+				return Outcome{}, err
+			}
+			// Owner-held backlog has no Agent wake. Only a persisted new source
+			// changes this outcome; a skipped wake must not manufacture progress.
+			if err := tx.Q().QueryRowContext(ctx, deliveredSQL, "work_item:"+issue.IssueID, id, id).Scan(&delivered); err != nil {
+				return Outcome{}, err
+			}
+			changed = changed || delivered
 		}
 	}
-	out.Events = append(out.Events, Event{ObjectType: "conversation", ObjectID: c.ID, Kind: "conversation.promoted", Body: map[string]any{"issue_id": issue.IssueID, "source_message_id": p.SourceMessageID}})
+	out.NoEffect = !changed
+	if changed {
+		out.Events = append(out.Events, Event{ObjectType: "conversation", ObjectID: c.ID, Kind: "conversation.promoted", Body: map[string]any{"issue_id": issue.IssueID, "source_message_id": p.SourceMessageID}})
+	}
 	return out, nil
 }

@@ -11,6 +11,15 @@ export const cryptoRandom: RandomBytes = (n) => crypto.getRandomValues(new Uint8
 
 /** Returns a new request ID, such as req_01K8…, valid for the protocol's ValidID. */
 export function newRequestId(now: number, random: RandomBytes = cryptoRandom): string {
+  return newObjectId("req", now, random);
+}
+
+/** A stable business object key, reserved before transport. */
+export function newObjectId(
+  prefix: string,
+  now: number,
+  random: RandomBytes = cryptoRandom,
+): string {
   let value = BigInt(Math.floor(now)) & 0xffff_ffff_ffffn;
   for (const b of random(10)) {
     value = (value << 8n) | BigInt(b);
@@ -20,7 +29,7 @@ export function newRequestId(now: number, random: RandomBytes = cryptoRandom): s
     out = crockford[Number(value & 31n)] + out;
     value >>= 5n;
   }
-  return `req_${out}`;
+  return `${prefix}_${out}`;
 }
 
 /** Returns a new client ID for POST /api/v1/session: 8 to 64 of [A-Za-z0-9_-]. */

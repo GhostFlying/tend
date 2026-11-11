@@ -232,15 +232,7 @@ func (a *App) MigrateManager(ctx context.Context, p protocol.Principal, env *pro
 	if payload.Phase == "switch" {
 		recorded := false
 		err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-			_, err := ownerRequestRecord(ctx, tx.Q(), p, env.RequestID)
-			if err == nil {
-				recorded = true
-				return nil
-			}
-			if errors.Is(err, store.ErrNotFound) {
-				return nil
-			}
-			return err
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_migrations WHERE issue_id=? AND request_id=?)`, env.Target.ID, env.RequestID).Scan(&recorded)
 		})
 		if err != nil {
 			return protocol.Operation{}, err

@@ -73,9 +73,8 @@ func TestAgentCategoryOwnerCASAndHistoricalReplay(t *testing.T) {
 	first := inventoryCategory(t, h, "planner", 0, "active")
 	inventoryCategory(t, h, "planner", 1, "retired")
 	op := h.exec(owner, first, PutAgentCategory{})
-	var old protocol.AgentCategory
-	if err := json.Unmarshal(op.Result, &old); err != nil || old.Revision != 1 || old.State != "active" {
-		t.Fatalf("historical receipt=%s %v", op.Result, err)
+	if op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("stale category mutation replayed instead of requiring current CAS", op)
 	}
 	stale := h.exec(owner, h.env("categories.put", first.Target, protocol.PutAgentCategoryPayload{Title: "Planner", State: "active"}, rev(1)), PutAgentCategory{})
 	if stale.Error == nil || stale.Error.Code != protocol.CodeStaleRevision {
@@ -117,15 +116,15 @@ func TestAgentInventoryVersionsReplayAndCurrentProcessStatus(t *testing.T) {
 	if replay := h.exec(runner("linux-1"), first, RegisterAgentInventory{}); !bytes.Equal(replay.Result, one.Result) || h.count("events") != beforeEvents {
 		t.Fatal("old success re-executed CAS or changed receipt")
 	}
-	status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: r, RequestID: first.RequestID})
+	status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: r, RequestID: first.RequestID, LocalRevision: 1, SnapshotID: "snapshot-one", PublicSHA256: hash})
 	if err != nil || status.Current == nil || status.Current.ServerRevision != 2 || status.Current.LocalRevision != 2 || status.Current.SnapshotID != "snapshot-two" || status.Current.PublicSHA256 != hash || status.Current.State != "registered_staged" {
 		t.Fatalf("status=%+v %v", status, err)
 	}
 	if status.Online || status.LastHeartbeatAtMillis != h.clock.Now().Add(-61*time.Second).UnixMilli() {
 		t.Fatal("registration/read refreshed presence", status)
 	}
-	expectedHash, _ := protocol.PayloadHash(first)
-	if status.Request == nil || !bytes.Equal(status.Request.Result, one.Result) || status.RequestPayloadHash != expectedHash || status.Current.Categories[0].Revision != 1 {
+	historical, _ := json.Marshal(status.Matched)
+	if status.Request != nil || !bytes.Equal(historical, one.Result) || status.RequestPayloadHash != "" || status.Current.Categories[0].Revision != 1 {
 		t.Fatal("historical request/category facts changed", status)
 	}
 	for _, a := range status.Projection.Agents {
@@ -150,13 +149,13 @@ func TestAgentInventoryVersionsReplayAndCurrentProcessStatus(t *testing.T) {
 	if _, err := h.app.Execute(t.Context(), runner("linux-1"), first, RegisterAgentInventory{}); protocol.CodeOf(err) != protocol.CodeConflictPayload {
 		t.Fatal("retired incarnation replayed", err)
 	}
-	status, err = h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: next, RequestID: first.RequestID})
-	if err != nil || status.Request == nil || status.Request.RequestID != first.RequestID {
+	status, err = h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: next, RequestID: first.RequestID, LocalRevision: 1, SnapshotID: "snapshot-one", PublicSHA256: hash})
+	if err != nil || status.Matched == nil || status.Matched.RequestID != first.RequestID {
 		t.Fatal("new process cannot reconcile old receipt", status, err)
 	}
-	beforeRequests, beforeEvents := h.count("request_records"), h.count("events")
+	beforeRequests, beforeEvents := h.count("agent_inventory_versions"), h.count("events")
 	status, err = h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: next, RequestID: "req_not_recorded"})
-	if err != nil || status.RequestState != "not_recorded" || status.Request != nil || beforeRequests != h.count("request_records") || beforeEvents != h.count("events") {
+	if err != nil || status.RequestState != "business_state" || status.Request != nil || status.Matched != nil || beforeRequests != h.count("agent_inventory_versions") || beforeEvents != h.count("events") {
 		t.Fatal("status read wrote state or invented receipt", status, err)
 	}
 }
@@ -172,7 +171,9 @@ func TestAgentInventoryRejectsConflictsAndPrivateFields(t *testing.T) {
 	requireInventoryCode(t, h, runner("linux-1"), inventoryRequest(h, r, p, "wrong-hash", 2, 1, "snapshot-two"), protocol.CodeInvalidRequest)
 	changed := *first
 	changed.ExpectedControlRevision = rev(1)
-	requireInventoryCode(t, h, runner("linux-1"), &changed, protocol.CodeConflictPayload)
+	if result := h.exec(runner("linux-1"), &changed, RegisterAgentInventory{}); result.Status != protocol.OpSucceeded {
+		t.Fatal("business snapshot identity depended on transport CAS", result)
+	}
 	// The same local revision with identical content is a recorded no-op.
 	noOp := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 1, "snapshot-one"), RegisterAgentInventory{})
 	if !bytes.Equal(noOp.Result, h.exec(runner("linux-1"), first, RegisterAgentInventory{}).Result) {
@@ -202,9 +203,9 @@ func TestAgentInventoryRejectsConflictsAndPrivateFields(t *testing.T) {
 
 func TestAgentInventoryTransactionRollsBackWithoutReceipt(t *testing.T) {
 	h, r, p, hash := inventorySetup(t)
-	beforeEvents, beforeRequests := h.count("events"), h.count("request_records")
+	beforeEvents, beforeRequests := h.count("events"), h.count("agent_inventory_versions")
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `CREATE TRIGGER fail_inventory_receipt BEFORE INSERT ON request_records WHEN NEW.operation='runner.inventory_register' BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END`)
+		_, err := tx.Exec(t.Context(), `CREATE TRIGGER fail_inventory_receipt BEFORE INSERT ON events WHEN NEW.kind='host.agent_inventory_registered' BEGIN SELECT RAISE(ABORT,'injected inventory event failure'); END`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -213,7 +214,7 @@ func TestAgentInventoryTransactionRollsBackWithoutReceipt(t *testing.T) {
 	if _, err := h.app.Execute(t.Context(), runner("linux-1"), env, RegisterAgentInventory{}); err == nil {
 		t.Fatal("injected receipt failure disappeared")
 	}
-	if h.count("events") != beforeEvents || h.count("request_records") != beforeRequests || h.count("agent_inventory_versions") != 0 {
+	if h.count("events") != beforeEvents || h.count("agent_inventory_versions") != beforeRequests || h.count("agent_inventory_versions") != 0 {
 		t.Fatal("partial registration escaped transaction")
 	}
 }
@@ -294,5 +295,59 @@ func TestAgentInventorySameLocalIdentityOnDifferentHosts(t *testing.T) {
 	}
 	if h.count("agent_inventory_versions") != 2 || one.Projection.Agents[0].Identity.LocalID != two.Projection.Agents[0].Identity.LocalID || one.Projection.Agents[0].Identity == two.Projection.Agents[0].Identity {
 		t.Fatal("host-local identities collapsed")
+	}
+}
+
+func TestAgentInventoryOldV3LostDeliveryUsesActualSnapshotBeforeRegistrationCAS(t *testing.T) {
+	h, r, p, hash := inventorySetup(t)
+	r.Protocol = 3
+	r.ProtocolMin = 3
+	r.ProtocolMax = 3
+	r.Sequence++
+	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	original := inventoryRequest(h, r, p, hash, 1, 0, "snapshot-original")
+	one := h.exec(runner("linux-1"), original, RegisterAgentInventory{})
+	if one.Status != protocol.OpSucceeded {
+		t.Fatal(one)
+	}
+	// An unmodified old wire client asks only about its original transport ID.
+	status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: r, RequestID: original.RequestID})
+	if err != nil || status.RequestState != "not_recorded" || status.Current == nil || status.Current.SnapshotID != "snapshot-original" {
+		t.Fatal(status, err)
+	}
+	before := h.count("agent_inventory_versions")
+	replay := h.exec(runner("linux-1"), original, RegisterAgentInventory{})
+	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, one.Result) || h.count("agent_inventory_versions") != before {
+		t.Fatal("old CAS prevented actual snapshot recovery", replay)
+	}
+	next := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 2, 1, "snapshot-later"), RegisterAgentInventory{})
+	if next.Status != protocol.OpSucceeded {
+		t.Fatal(next)
+	}
+	replay = h.exec(runner("linux-1"), original, RegisterAgentInventory{})
+	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, one.Result) || h.count("agent_inventory_versions") != before+1 {
+		t.Fatal("later catalog hid actual original registration", replay)
+	}
+}
+func TestAgentInventoryV4MatchesHistoricalSnapshotWithoutRequestID(t *testing.T) {
+	h, r, p, hash := inventorySetup(t)
+	one := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 0, "snapshot-original"), RegisterAgentInventory{})
+	if one.Status != protocol.OpSucceeded {
+		t.Fatal(one)
+	}
+	if next := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 2, 1, "snapshot-later"), RegisterAgentInventory{}); next.Status != protocol.OpSucceeded {
+		t.Fatal(next)
+	}
+	input := protocol.AgentInventoryStatusPayload{Runtime: r, SnapshotID: "snapshot-original", PublicSHA256: hash, LocalRevision: 1}
+	status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), input)
+	if err != nil || status.RequestState != "business_state" || status.Matched == nil || status.Matched.SnapshotID != "snapshot-original" || status.Current.SnapshotID != "snapshot-later" || status.Request != nil || status.RequestPayloadHash != "" {
+		t.Fatal(status, err)
+	}
+	input.LocalRevision = 99
+	status, err = h.app.ReadAgentInventory(t.Context(), runner("linux-1"), input)
+	if err != nil || status.Matched != nil {
+		t.Fatal("different business identity falsely matched", status, err)
 	}
 }

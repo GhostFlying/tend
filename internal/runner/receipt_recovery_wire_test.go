@@ -52,13 +52,16 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 	a := app.New(db, ids, clock.Now)
 	execute := func(p protocol.Principal, op string, target protocol.Target, payload any, rev *int64, cmd app.Command) protocol.Operation {
 		t.Helper()
+		if op == "tasks.create" && target.ID == "" {
+			target.ID = ids.New(protocol.PrefixTask)
+		}
 		raw, e := json.Marshal(payload)
 		if e != nil {
 			t.Fatal(e)
 		}
 		result, e := a.Execute(ctx, p, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: raw, ExpectedControlRevision: rev}, cmd)
 		if e != nil || result.Status != protocol.OpSucceeded {
-			t.Fatalf("%s: status=%s err=%v result=%s", op, result.Status, e, result.Result)
+			t.Fatalf("%s: status=%s err=%v operation_error=%v result=%s", op, result.Status, e, result.Error, result.Result)
 		}
 		return result
 	}
@@ -69,7 +72,7 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 	hp := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker"}
 	execute(hp, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Hello{})
 	runtime.Sequence++
-	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
+	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{RunID: ids.New(protocol.PrefixRun), WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
 	var claimed struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}
@@ -195,7 +198,7 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 	if err != nil || retained.Phase != journal.PhaseReleasing || !retained.StoppedConfirmed || ws.finishes.Load() != 0 {
 		t.Fatal("unknown give-up cleaned original journal/workspace", retained.Phase, err, ws.finishes.Load())
 	}
-	var accepted store.RequestRecord
+	var accepted maintenancePhysicalStopSnapshot
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
 		now, e := store.GetRun(ctx, tx.Q(), as.RunID)
 		if e != nil {
@@ -218,13 +221,13 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 		if count != 1 {
 			t.Fatal("retries duplicated physical fact", count)
 		}
-		accepted, e = store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		accepted, e = readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		return e
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Status != protocol.OpAccepted {
-		t.Fatal("give-up result not durably pending", accepted.Status)
+	if accepted.Operation != env.Operation || accepted.Payload != string(env.Payload) {
+		t.Fatal("give-up result not durably pending", accepted.Operation)
 	}
 	if _, err := a.LinkCommittedMaintenance(ctx, protocol.CommittedMaintenanceReceipt{MaintenanceID: p.MaintenanceID, RequestID: p.RequestID, Previous: p.Previous, Successor: p.Successor, Process: process, Generation: 9, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}); err != nil {
 		t.Fatal(err)
@@ -241,7 +244,7 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 		if now.ObservedState != protocol.RunFailed {
 			t.Fatal("independent cancel did not settle physical stop", now)
 		}
-		original, e := store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		original, e := readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		if e == nil && !reflect.DeepEqual(accepted, original) {
 			t.Fatal("owner cancel rewrote original accepted request")
 		}
@@ -259,4 +262,16 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 
 func runCredentialDomain(run string) string {
 	return (protocol.Principal{Kind: protocol.PrincipalRun, Subject: run}).DedupDomain()
+}
+
+// Snapshot the original physical-stop business fact, not an RPC result ledger.
+type maintenancePhysicalStopSnapshot struct {
+	RequestID, MaintenanceID, RunID, LeaseID, Operation, Payload string
+	LastSequence, CreatedAt                                      int64
+}
+
+func readMaintenancePhysicalStop(ctx context.Context, q store.Querier, run, request string) (maintenancePhysicalStopSnapshot, error) {
+	var row maintenancePhysicalStopSnapshot
+	err := q.QueryRowContext(ctx, `SELECT request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at FROM maintenance_physical_stops WHERE run_id=? AND request_id=?`, run, request).Scan(&row.RequestID, &row.MaintenanceID, &row.RunID, &row.LeaseID, &row.Operation, &row.Payload, &row.LastSequence, &row.CreatedAt)
+	return row, err
 }

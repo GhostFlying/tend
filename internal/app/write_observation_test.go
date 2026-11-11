@@ -14,7 +14,7 @@ import (
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
-func TestExecuteWriteObservationPreservesReplay(t *testing.T) {
+func TestExecuteWriteObservationTracksBusinessEvaluation(t *testing.T) {
 	clock := testkit.NewClock()
 	path := filepath.Join(t.TempDir(), "tend.db")
 	initial, err := openAppFixture(t.Context(), path, clock.Now)
@@ -56,7 +56,7 @@ func TestExecuteWriteObservationPreservesReplay(t *testing.T) {
 	for _, p := range observations[0].Phases {
 		phases[p.Phase] = p.Duration
 	}
-	for _, p := range []store.WritePhase{store.WriteReviewedContext, store.WriteApply, store.WritePersistOutcome, store.WriteAttention, store.WriteFollowup, store.WriteManagerRefresh, store.WriteMaintenance, store.WriteRequestInsert} {
+	for _, p := range []store.WritePhase{store.WriteReviewedContext, store.WriteApply, store.WritePersistOutcome, store.WriteAttention, store.WriteFollowup, store.WriteManagerRefresh, store.WriteMaintenance} {
 		if phases[p] <= 0 {
 			t.Errorf("missing phase %s: %+v", p, observations[0])
 		}
@@ -64,16 +64,16 @@ func TestExecuteWriteObservationPreservesReplay(t *testing.T) {
 	if phases[store.WritePersistOutcome] <= phases[store.WriteAttention]+phases[store.WriteFollowup] || observations[0].Callback <= phases[store.WritePersistOutcome] {
 		t.Errorf("nested phases must be inclusive: %+v", observations[0])
 	}
-	if len(observations[1].Phases) != 0 {
-		t.Errorf("replay reran Apply/public tail: %+v", observations[1])
+	if len(observations[1].Phases) == 0 {
+		t.Errorf("business reevaluation lost diagnostic stages: %+v", observations[1])
 	}
 	if err := s.Read(context.Background(), func(tx *store.ReadTx) error {
 		var count int
-		if err := tx.Q().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM request_records WHERE request_id=?", env.RequestID).Scan(&count); err != nil {
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('request_records','native_requests')`).Scan(&count); err != nil {
 			return err
 		}
-		if count != 1 {
-			t.Errorf("request records = %d, want 1", count)
+		if count != 0 {
+			t.Errorf("generic request tables = %d, want 0", count)
 		}
 		return nil
 	}); err != nil {

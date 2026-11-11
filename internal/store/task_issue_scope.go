@@ -135,3 +135,18 @@ func IssueTaskIDs(ctx context.Context, q Querier, issueID string) ([]string, err
 	}
 	return ids, nil
 }
+
+// TaskIssueResultReadable includes delegated descendant results, matching the
+// named tool's existing read scope without granting source or control authority.
+func TaskIssueResultReadable(ctx context.Context, q Querier, taskID, issueID string) (bool, error) {
+	linked, err := TaskIssueEvidenceReadable(ctx, q, taskID, issueID)
+	if err != nil || linked {
+		return linked, err
+	}
+	var descendant bool
+	err = q.QueryRowContext(ctx, `WITH RECURSIVE descendants(id) AS (
+ SELECT issue_id FROM issue_controls WHERE parent_issue_id=?
+ UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id)
+ SELECT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN descendants d ON d.id=o.work_item_id WHERE o.task_id=?)`, issueID, taskID).Scan(&descendant)
+	return descendant, err
+}

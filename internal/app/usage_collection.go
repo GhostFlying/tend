@@ -274,7 +274,7 @@ func (ObserveUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	}
 	if c.RetirementReason == "empty" {
 		var facts bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE json_extract(payload_json,'$.thread_id')=?)`, p.ThreadID).Scan(&facts); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE thread_id=?)`, p.ThreadID).Scan(&facts); err != nil {
 			return Outcome{}, err
 		}
 		if facts {

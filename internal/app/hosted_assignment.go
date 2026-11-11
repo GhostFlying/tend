@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -197,25 +196,10 @@ func resolveHostedAssignee(ctx context.Context, q store.Querier, x *Exec, target
 	if target.Kind == protocol.IssueAssigneeOwner {
 		owner := x.Principal.Subject
 		if x.Principal.Kind != protocol.PrincipalOwner {
-			// Hosted callbacks retain their actual agent identity. The single
-			// owner's identity comes from an authenticated, persisted request,
-			// never from an external message author or the binding instance.
-			var raw string
-			err := q.QueryRowContext(ctx, `SELECT principal_json FROM request_records WHERE domain='owner' ORDER BY created_at DESC, rowid DESC LIMIT 1`).Scan(&raw)
-			if errors.Is(err, sql.ErrNoRows) {
-				return protocol.Errorf(protocol.CodeInvalidRequest, "authenticated owner identity is unavailable")
+			owner = x.configuredOwner
+			if owner == "" {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "configured owner identity is unavailable")
 			}
-			if err != nil {
-				return err
-			}
-			var principal protocol.Principal
-			if err := json.Unmarshal([]byte(raw), &principal); err != nil {
-				return err
-			}
-			if principal.Kind != protocol.PrincipalOwner || principal.Subject == "" {
-				return protocol.Errorf(protocol.CodeInvalidRequest, "authenticated owner identity is unavailable")
-			}
-			owner = principal.Subject
 		}
 		if target.Ref != owner {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "owner assignment must name the authenticated owner")

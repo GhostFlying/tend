@@ -137,7 +137,7 @@ func TestFault_ManagerReceiptReaderReleasesOnlyProvedClosedTransport(t *testing.
 	if err == nil && hello.Status == protocol.OpSucceeded {
 		t.Fatal("downgraded runner recovered a strict reader with its ordinary business probe")
 	}
-	if again, err := h.app.Execute(t.Context(), owner, env, ReconcileManagerRun{}); err != nil || !reflect.DeepEqual(again, op) {
+	if again, err := h.app.Execute(t.Context(), owner, env, ReconcileManagerRun{}); err != nil || again.Status != protocol.OpFailed || protocol.CodeOf(again.Error) != protocol.CodeStaleRevision {
 		t.Fatal("same admission request changed its result", again, err)
 	}
 }
@@ -182,7 +182,7 @@ func TestManagerReceiptReaderRetainsAllFences(t *testing.T) {
 						_, err := tx.Exec(t.Context(), `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES(?,1,'{}')`, as.RunID)
 						return err
 					case "later_activity":
-						_, err := tx.Exec(t.Context(), `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,result_json,created_at) VALUES(?,?,'resume','{}','completed','{}',?)`, h.ids.New(protocol.PrefixRequest), as.RunID, h.clock.Now().UnixMilli())
+						_, err := tx.Exec(t.Context(), `UPDATE runs SET native_activity=native_activity+1,native_thread_id='later-thread',native_thread_json='{"ID":"later-thread"}' WHERE run_id=?`, as.RunID)
 						return err
 					case "changed_pin":
 						query = `UPDATE issue_manager_tasks SET pin_json=json_set(pin_json,'$.profile.model','different')`

@@ -24,7 +24,7 @@ func TestExternalCoordinatorRetired(t *testing.T) {
 	if st := e.do("GET", "/api/v1/session", old, nil, nil); st != http.StatusUnauthorized {
 		t.Fatal(st)
 	}
-	before := e.count("SELECT count(*) FROM request_records")
+	before := e.count("SELECT count(*) FROM events")
 	for _, identity := range []struct {
 		token      string
 		postStatus int
@@ -44,7 +44,7 @@ func TestExternalCoordinatorRetired(t *testing.T) {
 			}
 		}
 	}
-	if after := e.count("SELECT count(*) FROM request_records"); after != before {
+	if after := e.count("SELECT count(*) FROM events"); after != before {
 		t.Fatalf("retired endpoints wrote %d requests", after-before)
 	}
 }

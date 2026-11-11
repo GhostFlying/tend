@@ -163,7 +163,7 @@ func (t *Tx) ApplyOriginalImport(ctx context.Context, batch *OriginalImportBatch
 	// indexed; metadata checkpoints do not declare unindexed history collected.
 	all := append([]preparedOriginal{batch.whole}, batch.originals...)
 	for _, p := range all {
-		if _, err = t.Exec(ctx, `INSERT OR IGNORE INTO retained_original_bodies(sha256,archive_id,byte_offset,byte_length,characters,canonical_sha256) VALUES(?,?,?,?,?,?)`, p.Window.SHA256, p.Window.Archive, p.Window.Offset, p.Window.Length, p.Characters, p.CanonicalSHA256); err != nil {
+		if _, err = t.bindOriginalWindow(ctx, p); err != nil {
 			return result, err
 		}
 	}

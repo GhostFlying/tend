@@ -48,9 +48,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	var latest int64
+	var expired bool
 	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
 		latest, err = store.LatestEventSeq(ctx, tx.Q())
+		if err == nil && query.Has("after") {
+			expired, err = store.RefreshCursorExpired(ctx, tx.Q(), after)
+		}
 		return err
 	}); err != nil {
 		s.writeError(w, r, err)
@@ -60,10 +64,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	case !query.Has("after"):
 		after = latest
 	case after > latest:
-		// Events are never deleted, so the cursor comes from another
-		// ledger, such as one restored from an older backup.
+		// A cursor ahead of current state can belong to a restored ledger.
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest,
 			"after %d is past the ledger's newest event %d; reload and connect without after", after, latest))
+		return
+	case expired:
+		s.writeError(w, r, protocol.Errorf(protocol.CodeStaleRevision,
+			"refresh cursor expired; reload authoritative views and connect without after"))
 		return
 	}
 
@@ -82,8 +89,16 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		// read is not missed.
 		changed := s.app.Changes().Wait()
 		var batch []protocol.LedgerEvent
+		var resetAt int64
 		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-			var err error
+			expired, err := store.RefreshCursorExpired(ctx, tx.Q(), after)
+			if err != nil {
+				return err
+			}
+			if expired {
+				resetAt, err = store.LatestEventSeq(ctx, tx.Q())
+				return err
+			}
 			batch, err = views.Events(ctx, tx.Q(), after, eventBatch)
 			return err
 		}); err != nil {
@@ -92,8 +107,17 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if resetAt > 0 {
+			// A resync is explicit even after response headers were committed.
+			// Older clients reconnect and receive the same expired-cursor error.
+			_ = writeEvent(w, "reset", 0, protocol.StreamStart{EventSeq: resetAt})
+			flusher.Flush()
+			return
+		}
+		refreshed := false
 		for _, ev := range batch {
 			after = ev.EventSeq
+			refreshed = refreshed || store.RefreshKind(ev.Kind)
 			var payload any = ev
 			if strings.HasPrefix(r.URL.Path, "/api/v1/messaging/") {
 				kind := ev.Kind
@@ -128,6 +152,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 		if len(batch) > 0 {
 			flusher.Flush()
+			if refreshed {
+				if err := s.app.AcknowledgeRefreshes(ctx, after); err != nil {
+					return
+				}
+			}
 			if len(batch) == eventBatch {
 				continue
 			}

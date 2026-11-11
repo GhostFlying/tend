@@ -35,11 +35,10 @@ func TestConversationSettingsOwnerAPIAndReplayWithoutCatalog(t *testing.T) {
 	if status := e.do("POST", "/api/v1/ops", owner, env, &response); status != http.StatusOK || response.Operation == nil || response.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("set = %+v (HTTP %d)", response, status)
 	}
-	// The receipt is durable even when capability validation is unavailable.
+	// Read current business state when the model catalog is unavailable. The
+	// original CAS cannot replay a completed change or create another revision.
 	available.Store(false)
-	if status := e.do("POST", "/api/v1/ops", owner, env, &response); status != http.StatusOK || response.Operation == nil || response.Operation.Status != protocol.OpSucceeded {
-		t.Fatalf("replay = %+v (HTTP %d)", response, status)
-	}
+	assertOwnerStaleHTTP(t, e, owner, env)
 	if status := e.do("GET", "/api/v1/conversation/settings", owner, nil, &view); status != http.StatusOK || view.Revision != 1 || view.Model != "a" || view.Effort != "high" || view.Available {
 		t.Fatalf("saved settings = %+v (HTTP %d)", view, status)
 	}

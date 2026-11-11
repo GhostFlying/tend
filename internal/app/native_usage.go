@@ -77,7 +77,7 @@ func (UploadNativeUsage) Authorize(ctx context.Context, x *Exec, q store.Querier
 		return protocol.Errorf(protocol.CodeInvalidRequest, "usage source identity is required")
 	}
 	var known bool
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_sources WHERE run_id=? AND host_id=? AND thread_id=?) OR EXISTS(SELECT 1 FROM main_turns t JOIN runner_coordination_executions e ON e.execution_id=t.request_id WHERE json_extract(e.private_snapshot,'$.runner_run_id')=? AND t.thread_id=?) OR EXISTS(SELECT 1 FROM run_logs WHERE run_id=? AND kind='worker.native_identity' AND json_extract(body_json,'$.state')='known' AND json_extract(body_json,'$.session_id')=?) OR EXISTS(SELECT 1 FROM token_usage_facts WHERE subject='run:'||? AND json_extract(payload_json,'$.thread_id')=?) OR EXISTS(SELECT 1 FROM run_logs WHERE run_id=? AND kind IN ('native.turn_started','native.turn_completed','item.completed') AND json_extract(body_json,'$.thread_id')=?)`, p.RunID, r.HostID, p.RootThreadID, p.RunID, p.RootThreadID, p.RunID, p.RootThreadID, p.RunID, p.RootThreadID, p.RunID, p.RootThreadID).Scan(&known)
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_sources WHERE run_id=? AND host_id=? AND thread_id=?) OR EXISTS(SELECT 1 FROM main_turns t JOIN runner_coordination_executions e ON e.execution_id=t.request_id WHERE json_extract(e.private_snapshot,'$.runner_run_id')=? AND t.thread_id=?) OR EXISTS(SELECT 1 FROM run_logs WHERE run_id=? AND kind='worker.native_identity' AND json_extract(body_json,'$.state')='known' AND json_extract(body_json,'$.session_id')=?) OR EXISTS(SELECT 1 FROM token_usage_fact_details WHERE subject='run:'||? AND thread_id=?) OR EXISTS(SELECT 1 FROM run_logs WHERE run_id=? AND kind IN ('native.turn_started','native.turn_completed','item.completed') AND json_extract(body_json,'$.thread_id')=?)`, p.RunID, r.HostID, p.RootThreadID, p.RunID, p.RootThreadID, p.RunID, p.RootThreadID, p.RunID, p.RootThreadID, p.RunID, p.RootThreadID).Scan(&known)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func enrichUsage(ctx context.Context, q store.Querier, s *protocol.TokenUsageSam
 // reconcileUsageAliases keeps legacy evidence while counting its native request
 // once. Synthetic response IDs are matched with thread, turn, and known values.
 func reconcileUsageAliases(ctx context.Context, tx *store.Tx, s protocol.TokenUsageSample, now int64) error {
-	rows, err := tx.Q().QueryContext(ctx, `SELECT f.seq,f.source,f.request_id,f.payload_json,c.conflict FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE json_extract(f.payload_json,'$.thread_id')=? AND json_extract(f.payload_json,'$.turn_id')=? AND json_extract(f.payload_json,'$.request_id')=?`, s.ThreadID, s.TurnID, s.RequestID)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT `+store.UsageFactColumns("f")+`,f.request_id,c.conflict FROM token_usage_current c JOIN token_usage_fact_details f ON f.seq=c.fact_seq WHERE f.thread_id=? AND f.turn_id=? AND f.response_id=?`, s.ThreadID, s.TurnID, s.RequestID)
 	if err != nil {
 		return err
 	}
@@ -239,13 +239,11 @@ func reconcileUsageAliases(ctx context.Context, tx *store.Tx, s protocol.TokenUs
 	var natives, legacy []fact
 	for rows.Next() {
 		var f fact
-		var raw string
-		if err = rows.Scan(&f.seq, &f.source, &f.id, &raw, &f.conflict); err != nil {
+		var record protocol.TokenUsageRecord
+		if err = rows.Scan(append(store.UsageFactDestinations(&record), &f.id, &f.conflict)...); err != nil {
 			break
 		}
-		if err = json.Unmarshal([]byte(raw), &f.sample); err != nil {
-			break
-		}
+		f.seq, f.source, f.sample = record.Seq, record.Source, record.TokenUsageSample
 		if f.sample.RecordID != "" && !f.conflict {
 			natives = append(natives, f)
 		} else if f.sample.RecordID == "" && !f.conflict {

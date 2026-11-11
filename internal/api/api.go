@@ -96,6 +96,7 @@ var statusOf = map[protocol.Code]int{
 	protocol.CodeInvalidRequest:   http.StatusBadRequest,
 	protocol.CodeMissingRequestID: http.StatusBadRequest,
 	protocol.CodeConflictPayload:  http.StatusConflict,
+	protocol.CodeStaleRevision:    http.StatusConflict,
 	protocol.CodeUnauthenticated:  http.StatusUnauthorized,
 	protocol.CodeForbidden:        http.StatusForbidden,
 	protocol.CodeNotFound:         http.StatusNotFound,

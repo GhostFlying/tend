@@ -109,4 +109,4 @@ tend agents concurrency history --issue issue-example --session native-session-e
 写命令支持 --dry-run 输出原信封，--request-id/--revision 重试必须保留原输入。
 部分参数更新只在首次执行时读取当前值补齐；重放 update 应使用原完整 --data
 或 --file，或完整的 name/min/initial/max 标志，不能重读新默认值。
-也可将 dry-run 原信封交给 `tend request replay`，以原 request_id 和版本恢复。
+先读实际并发组与历史。确认仍需提交后，可将含完整业务身份和原 CAS 的 dry-run 信封交给 `tend operation submit --file original-envelope.json`；控制版本过期时重新判断，不读取通用请求缓存。

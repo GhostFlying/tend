@@ -8,20 +8,6 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// MapNativeRequest returns the request ID of a native identity, allocating
-// newID for it on first sight.
-func (t *Tx) MapNativeRequest(ctx context.Context, source, nativeKey, newID string, now int64) (string, error) {
-	if _, err := t.Exec(ctx, `INSERT INTO native_requests (source, native_key, request_id, created_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT (source, native_key) DO NOTHING`, source, nativeKey, newID, now); err != nil {
-		return "", fmt.Errorf("store: map native request: %w", err)
-	}
-	var id string
-	if err := t.Q().QueryRowContext(ctx, `SELECT request_id FROM native_requests WHERE source = ? AND native_key = ?`, source, nativeKey).Scan(&id); err != nil {
-		return "", fmt.Errorf("store: read native request: %w", err)
-	}
-	return id, nil
-}
-
 // ListTasks returns the tasks of a project, or of every project when
 // project is empty: unfinished ones first, by rating, then the most
 // recently updated finished ones, up to limit in total.

@@ -34,6 +34,7 @@ type IssueContextView struct {
 }
 
 type IssueFollowupPayload struct {
+	RuleID                  string        `json:"rule_id,omitempty"`
 	ExpectedAssignmentEpoch int64         `json:"expected_assignment_epoch"`
 	Spec                    *FollowupSpec `json:"spec,omitempty"`
 }

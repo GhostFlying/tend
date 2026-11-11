@@ -288,11 +288,10 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	i = canonicalTaskIssue(t, h, i.IssueID)
 	request.ExpectedAssignmentEpoch = i.AssignmentEpoch
 	completion := h.env("issues.update_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, request, rev(i.Revision))
-	for range 2 {
-		if op := h.exec(owner, completion, UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
-		}
+	if op := h.exec(owner, completion, UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
 	}
+	expectWorkCode(t, h.exec(owner, completion, UpdateIssueDelivery{}), protocol.CodeStaleRevision)
 	settled := deliveryDutyForTest(t, h, i.IssueID, original)
 	if settled.Status != "complete" || len(settled.Evidence) != 3 || settled.Evidence[2].Upgrade == nil || h.task(original).Lifecycle != protocol.TaskCompleted || h.count("upgrades") != 1 {
 		t.Fatal(settled)

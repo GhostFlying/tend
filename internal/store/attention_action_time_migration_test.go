@@ -40,7 +40,7 @@ func testAttentionActionTimeMigration(t *testing.T, version int) {
 		if err := tx.SaveIssue(ctx, w, 0, map[string]any{"reason": "original"}); err != nil {
 			return err
 		}
-		if _, err := tx.InsertMessage(ctx, MessageRow{MessageID: "msg_old-clock", Author: "system", Body: "Original reminder", CreatedAt: clock.Now().UnixMilli()}); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO conversation_messages(message_id,author,body,created_at) VALUES('msg_old-clock','system','Original reminder',?)`, clock.Now().UnixMilli()); err != nil {
 			return err
 		}
 		r := protocol.FollowupRule{RuleID: "followup_old-clock", WorkItemID: w.WorkItemID, Revision: 1, Status: "active", FollowupSpec: protocol.FollowupSpec{Kind: "at", Purpose: "Original reminder", Instruction: "Retain original", SourceID: "req_original", Timezone: "UTC", At: clock.Now().Add(time.Hour).UnixMilli()}, CreatedAt: clock.Now().UnixMilli(), UpdatedAt: clock.Now().UnixMilli()}

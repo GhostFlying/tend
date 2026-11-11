@@ -11,17 +11,11 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// currentIssueWriter uses the durable callback identity, including at the writer
-// tail where the adapted inner Exec is no longer present. Other Agents' changes
-// remain external input to this responsibility.
-func currentIssueWriter(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue) (bool, error) {
-	if x.coordinationExecution != nil {
-		e := x.coordinationExecution
-		return e.IssueID == issue.IssueID && e.AssignmentEpoch == issue.AssignmentEpoch, nil
-	}
-	var current bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_coordination_effects e JOIN hosted_executions h USING(execution_id) WHERE e.request_id=? AND h.issue_id=? AND h.assignment_epoch=? AND h.agent_ref=?)`, x.Env.RequestID, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref).Scan(&current)
-	return current, err
+// currentIssueWriter uses execution provenance already checked by the command.
+// The effect identity can span Runs and must not be used as an execution key.
+func currentIssueWriter(x *Exec, issue protocol.Issue) bool {
+	e := x.coordinationExecution
+	return e != nil && e.IssueID == issue.IssueID && e.AssignmentEpoch == issue.AssignmentEpoch
 }
 
 // recordIssueChangeEvent observes committed business drafts in the same writer
@@ -47,10 +41,7 @@ func recordIssueChangeEvent(ctx context.Context, x *Exec, tx *store.Tx, event Ev
 	if issue.Assignee.Kind != protocol.IssueAssigneeAgent {
 		return nil
 	}
-	self, err := currentIssueWriter(ctx, x, tx.Q(), issue)
-	if err != nil {
-		return err
-	}
+	self := currentIssueWriter(x, issue)
 	kind := event.Kind
 	if self {
 		return nil

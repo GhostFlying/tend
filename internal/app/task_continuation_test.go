@@ -39,7 +39,7 @@ func TestTaskContinuationRetainsSpecAcceptanceAndRequestIdentity(t *testing.T) {
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if replay := h.exec(owner, env, ContinueTask{}); replay.Status != protocol.OpSucceeded || string(replay.Result) != string(op.Result) {
+	if replay := h.exec(owner, env, ContinueTask{}); replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision {
 		t.Fatal(replay)
 	}
 	if h.task(created.TaskID).SpecVersion != old.SpecVersion || h.task(created.TaskID).CurrentArtifactID != old.CurrentArtifactID || h.count("acceptances") != 1 || h.count("artifacts") != 1 || h.count("task_specs") != 1 {

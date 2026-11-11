@@ -199,8 +199,8 @@ func TestCanonicalTaskOwnerExecutionAcceptanceReviewAndClosure(t *testing.T) {
 	if len(h.events("issue.completions_reviewed")) != beforeReplayEvents || h.count("work_item_revisions") != beforeReplayPlan || h.count("issue_control_revisions") != beforeReplayControl {
 		t.Fatal("completion replay duplicated revision/history/event")
 	}
-	if replay.Status != protocol.OpSucceeded || string(replay.Result) != string(reviewed.Result) {
-		t.Fatal("review receipt did not survive closure")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("historical review CAS bypassed closure", replay)
 	}
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
 	plan := issue.Plan
@@ -297,8 +297,8 @@ func TestCanonicalTaskCreateReplayStaleRollbackAndPlannerIsolation(t *testing.T)
 		t.Fatal("rejected create left task")
 	}
 	replay := h.exec(owner, env, cmd)
-	if replay.Status != protocol.OpSucceeded || string(replay.Result) != string(created.Result) || h.count("tasks") != before {
-		t.Fatal("create replay duplicated or returned new state")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || h.count("tasks") != before {
+		t.Fatal("stale Issue creation CAS changed Task facts", replay)
 	}
 	if _, err := h.app.Execute(t.Context(), mainAgent, env, cmd); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatalf("create reauthorization: %v", err)

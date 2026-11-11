@@ -74,7 +74,7 @@ func TestIssueMaterialsFrozenDeliveryAndAcceptanceShareSavedOriginals(t *testing
 		t.Fatal("fixture scope is not frozen", update, err)
 	}
 	counts := map[string]int{}
-	for _, table := range []string{"request_records", "events", "outbox", "plan_actions", "task_specs"} {
+	for _, table := range []string{"conversation_messages", "events", "outbox", "plan_actions", "task_specs"} {
 		counts[table] = h.count(table)
 	}
 	read := func(as protocol.Assignment) {

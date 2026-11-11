@@ -56,7 +56,7 @@ func TestRepoRegistryCompleteSafeReadAndToolParity(t *testing.T) {
 	}
 	tok := e.login(protocol.ScopeOwner)
 	counts := map[string]int{}
-	for _, table := range []string{"repos", "hosts", "tasks", "events", "request_records", "outbox"} {
+	for _, table := range []string{"repos", "hosts", "tasks", "events", "outbox"} {
 		counts[table] = e.count("SELECT count(*) FROM " + table)
 	}
 	var raw json.RawMessage

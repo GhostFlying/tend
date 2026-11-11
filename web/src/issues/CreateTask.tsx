@@ -1,4 +1,5 @@
 import { runtimeLabel } from "../agents/runtimeLabel.ts";
+import { newObjectId } from "../api/ids.ts";
 import { useEffect, useMemo, useState } from "react";
 import type {
   AgentRequirement,
@@ -67,6 +68,7 @@ export function CreateIssueTask({
   const submit = async (reconcile = false) => {
     try {
       const payload: Omit<CreateIssueTaskPayload, "expected_assignment_epoch"> = {
+        task_id: newObjectId("task", Date.now()),
         title,
         spec: {
           goal,

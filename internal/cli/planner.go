@@ -24,6 +24,7 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 	action := args[0]
 	fs := newFlags(e, noun+" "+action)
 	fs.Bool("json", true, "print structured response")
+	identity := fs.String("id", "", "stable new planner entry or deadline ID; no current revision")
 	data := fs.String("data", "", "inline payload or original Envelope")
 	file := fs.String("file", "", "JSON file; - reads stdin")
 	request := fs.String("request-id", "", "original request for retry")
@@ -70,6 +71,9 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 		if env.Operation != op && !(deadline && env.Operation == "issues.deadlines_cancel") {
 			return usagef("wrong replay operation")
 		}
+		if err := validateBusinessEnvelope(env); err != nil {
+			return err
+		}
 		if *dry {
 			return o.printJSON(env)
 		}
@@ -77,6 +81,9 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 	}
 	if action != "put" && !(deadline && action == "cancel") {
 		return usagef("unknown %s action", noun)
+	}
+	if *identity != "" && (len(pos) != 0 || action != "put") {
+		return usagef("--id identifies a new record; updates use its positional ID and CAS")
 	}
 	if len(pos) > 1 || *revision == 0 || *revision < -1 {
 		return usagef("put accepts at most one ID and positive revision")
@@ -101,17 +108,24 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 			}
 			*revision = current.Revision
 		}
-	} else if *revision != -1 {
-		return usagef("new record has no current revision")
+	} else {
+		if *revision != -1 {
+			return usagef("new record has no current revision")
+		}
+		target.ID = *identity
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	} else if !protocol.ValidID(protocol.PrefixRequest, *request) {
 		return usagef("invalid request identity")
 	}
 	env := protocol.Envelope{RequestID: *request, Operation: op, Target: target, Payload: body, Reason: *reason}
-	if target.ID != "" {
+	if len(pos) == 1 {
 		env.ExpectedControlRevision = revision
+	}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
 	}
 	if *dry {
 		return o.printJSON(env)

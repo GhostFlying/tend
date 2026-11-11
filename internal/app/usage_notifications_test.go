@@ -10,7 +10,7 @@ func usageNotifications(t *testing.T, h *harness) int {
 	t.Helper()
 	var count int
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM events WHERE kind='token_usage.changed'`).Scan(&count)
+		return tx.Q().QueryRowContext(t.Context(), `SELECT COALESCE(MAX(revision),0) FROM refresh_notifications WHERE kind='token_usage.changed'`).Scan(&count)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestUsageChangeNotifiesOncePerTransactionAndNotOnReplay(t *testing.T) {
 func TestUsageNotificationFailureRollsBackFactsAndDoesNotWake(t *testing.T) {
 	h := newHarness(t)
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `CREATE TRIGGER reject_usage_notification BEFORE INSERT ON events WHEN NEW.kind='token_usage.changed' BEGIN SELECT RAISE(ABORT,'injected event failure'); END`)
+		_, err := tx.Exec(t.Context(), `CREATE TRIGGER reject_usage_notification BEFORE INSERT ON refresh_notifications WHEN NEW.kind='token_usage.changed' BEGIN SELECT RAISE(ABORT,'injected event failure'); END`)
 		return err
 	}); err != nil {
 		t.Fatal(err)

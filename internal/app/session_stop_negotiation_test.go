@@ -7,8 +7,8 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestSessionStopMetadataNegotiatedOnlyForProtocolThreeAssignment(t *testing.T) {
-	for _, version := range []int64{2, 3} {
+func TestSessionStopMetadataNegotiatedForSupportedAssignments(t *testing.T) {
+	for _, version := range []int64{3, 4} {
 		t.Run(strconv.FormatInt(version, 10), func(t *testing.T) {
 			h := newHarness(t)
 			runtime := testRuntime("session-stop-negotiation")
@@ -20,8 +20,8 @@ func TestSessionStopMetadataNegotiatedOnlyForProtocolThreeAssignment(t *testing.
 				t.Fatal(op)
 			}
 			as, ok := h.claimInputRun(runtime)
-			if !ok || as.Protocol != version || as.SessionStopReports != (version == 3) {
-				t.Fatal("assignment changed the protocol-2 terminal reporting contract", as, ok)
+			if !ok || as.Protocol != version || !as.SessionStopReports {
+				t.Fatal("supported assignment lost negotiated terminal reporting", as, ok)
 			}
 		})
 	}

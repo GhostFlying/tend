@@ -159,7 +159,11 @@ export class EventStream {
         arm();
         this.call(() => this.options.onAlive?.());
         for (const m of parser.feed(decoder.decode(value, { stream: true }))) {
-          if (m.event === "start") {
+          if (m.event === "reset") {
+            // A coalesced refresh position expired while connected. Rebuild
+            // current views on the next cursor-free start, not from stale deltas.
+            return { kind: "reset" };
+          } else if (m.event === "start") {
             const start = JSON.parse(m.data) as StreamStart;
             const fresh = this.cursorSeq === undefined;
             this.cursorSeq = start.event_seq;

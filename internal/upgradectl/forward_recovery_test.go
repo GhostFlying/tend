@@ -59,12 +59,6 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := protocol.ForwardRecoveryPlan{RecoveryID: "forward-201", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), OriginalRequestID: ids.New(protocol.PrefixRequest), OriginalLedger: original.View, LedgerRevision: 8, Original: protocol.UpgradeBinding{UpgradeID: "old-201", InstanceID: "server", ProcessInstanceID: "old-launch", ReleaseID: "old-release", ManifestSHA256: original.ManifestSHA256, ArtifactSHA256: original.ServerHash}}
-	if err := db.Write(ctx, func(tx *store.Tx) error {
-		result, _ := json.Marshal(original.View)
-		return tx.InsertRequest(ctx, store.RequestRecord{Domain: "system", RequestID: plan.OriginalRequestID, Operation: "upgrades.start", PayloadHash: strings.Repeat("f", 64), PrincipalJSON: `{"kind":"system"}`, TraceID: ids.New(protocol.PrefixTrace), Status: protocol.OpSucceeded, ResultJSON: string(result)})
-	}); err != nil {
-		t.Fatal(err)
-	}
 	plan.Successor = protocol.UpgradeBinding{UpgradeID: plan.RecoveryID, InstanceID: "server", ProcessInstanceID: actual.LaunchID, ReleaseID: "new-release", ArtifactSHA256: actual.SHA256, ManifestSHA256: strings.Repeat("c", 64)}
 	a := app.New(db, ids, time.Now, app.WithForwardRecoveryStartup(plan.RecoveryID))
 	socket := filepath.Join(root, "updater.sock")

@@ -97,6 +97,23 @@ afterEach(async () => {
 });
 
 describe("EventStream", () => {
+  test("an expired refresh position rebuilds views from a fresh start", async () => {
+    stream.start();
+    await tick();
+    tend.last.push(start(5) + ledger(6));
+    await tick();
+    tend.last.push('event: reset\ndata: {"event_seq":10}\n\n');
+    await tick();
+    expect(tend.opens.map((o) => o.after)).toEqual([undefined, undefined]);
+    tend.last.push(start(10));
+    await tick();
+    expect(starts).toEqual([
+      [5, true],
+      [10, true],
+    ]);
+    expect(events).toEqual([6]);
+    expect(stream.cursor).toBe(10);
+  });
   test("a first connection has no cursor and starts fresh", async () => {
     stream.start();
     await tick();

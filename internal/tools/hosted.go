@@ -146,7 +146,7 @@ var hostedMutations = []hostedMutation{
 	{"issues_turn_commit", "Commit this manager's explicit current source/context review; native completion remains separate.", "logical_turn", protocol.LogicalTurnCommit{}, app.CommitLogicalTurn{}, false},
 }
 
-func hostedMutationSchema(payload any) json.RawMessage {
+func hostedMutationSchema(payload any, operations ...string) json.RawMessage {
 	var root, body map[string]any
 	if err := json.Unmarshal([]byte(argumentSchema(hostedMutationArgs{})), &root); err != nil {
 		panic(err)
@@ -161,6 +161,19 @@ func hostedMutationSchema(payload any) json.RawMessage {
 			props["mode"].(map[string]any)["description"] = "Omitted means new. Set reuse explicitly with source_task_id to continue a known same-Issue resource. Reuse preserves files but does not authorize committing inherited edits."
 			props["source_task_id"].(map[string]any)["description"] = "Read the referenced source task and resource first; use only for explicit mode=reuse. A follow_up relation does not inherit its workspace or input files."
 			props["include_existing_changes"].(map[string]any)["description"] = "For a reused commit task, set true only after establishing that inherited dirty edits belong to the existing authorized goal. Preserving files alone does not include them in commit scope. Inspect runs[].preparation on a confirmed prelaunch failure, then correct the same task with issues_update_task. Never absorb unrelated edits or blindly repeat the unchanged contract."
+		}
+	}
+	if len(operations) > 0 {
+		identities := protocol.NativePayloadIdentities(operations[0])
+		if required, ok := body["required"].([]any); ok {
+			kept := make([]any, 0, len(required))
+			for _, value := range required {
+				field, _ := value.(string)
+				if _, automatic := identities[field]; !automatic {
+					kept = append(kept, value)
+				}
+			}
+			body["required"] = kept
 		}
 	}
 	delete(body, "definitions")
@@ -199,7 +212,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		if (m.name == "consultation_promote") != (purpose == agentconfig.Consultation) && !communicationMutation(m.name) || purpose == agentconfig.Main && !m.main || purpose == agentconfig.IssueManager && m.main && !communicationMutation(m.name) && m.name != "issues_set_status" && m.name != "issues_pause" && m.name != "issues_resume" && m.name != "issues_cancel" && m.name != "issues_finish_cancel" && m.name != "issues_create" && m.name != "issues_request_owner" && m.name != "issues_set_acceptance_policy" && !strings.HasPrefix(m.name, "attentions_") && m.name != "runs_continue_retained" && m.name != "tasks_rate" && m.name != "issues_deadline_put" && m.name != "planner_entry_put" && !decisionContinuationMutation(m.name) {
 			continue
 		}
-		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload)}
+		spec := harness.ToolSpec{Name: m.name, Description: m.description, InputSchema: hostedMutationSchema(m.payload, m.command.Operation())}
 		if decisionContinuationMutation(m.name) {
 			spec.InputSchema = decisionContinuationMutationSchema(spec.InputSchema, m.name)
 		}
@@ -491,7 +504,11 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 			}
 		}
 		c.RequestID = request
-		env := &protocol.Envelope{RequestID: request, Operation: command.Operation(), Target: protocol.Target{Type: m.target, ID: args.TargetID}, ExpectedControlRevision: args.ExpectedControlRevision, Reason: args.Reason, Payload: args.Payload}
+		payload, payloadErr := nativePayloadIdentities(c, command.Operation(), args.Payload)
+		if payloadErr != nil {
+			return fail(payloadErr)
+		}
+		env := &protocol.Envelope{RequestID: request, Operation: command.Operation(), Target: nativeCreationTarget(c, command.Operation(), protocol.Target{Type: m.target, ID: args.TargetID}), ExpectedControlRevision: args.ExpectedControlRevision, Reason: args.Reason, Payload: payload}
 		result, err := s.app.Execute(ctx, c.Principal, env, cmd)
 		receipt := map[string]any{"request_id": request}
 		if result.RequestID != "" {
@@ -757,16 +774,7 @@ func namedRepairTool(purpose agentconfig.Purpose, name string) bool {
 // hostedTaskResultReadable adds delegated descendant results to the existing
 // explicitly linked evidence scope. It never grants task or source control.
 func hostedTaskResultReadable(ctx context.Context, q store.Querier, taskID, issueID string) (bool, error) {
-	linked, err := store.TaskIssueEvidenceReadable(ctx, q, taskID, issueID)
-	if err != nil || linked {
-		return linked, err
-	}
-	var descendant bool
-	err = q.QueryRowContext(ctx, `WITH RECURSIVE descendants(id) AS (
- SELECT issue_id FROM issue_controls WHERE parent_issue_id=?
- UNION ALL SELECT c.issue_id FROM issue_controls c JOIN descendants d ON c.parent_issue_id=d.id)
- SELECT EXISTS(SELECT 1 FROM task_work_item_owners o JOIN descendants d ON d.id=o.work_item_id WHERE o.task_id=?)`, issueID, taskID).Scan(&descendant)
-	return descendant, err
+	return store.TaskIssueResultReadable(ctx, q, taskID, issueID)
 }
 
 func responsibilityReadRecipient(purpose agentconfig.Purpose) string {

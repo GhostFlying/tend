@@ -52,6 +52,23 @@ func newEnv(t *testing.T) *env {
 func (e *env) exec(p protocol.Principal, op string, target protocol.Target, rev *int64, payload any, cmd app.Command) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(payload)
+	if prefix := protocol.CreationTargetPrefix(op); prefix != "" && target.ID == "" {
+		target.ID = e.ids.New(prefix)
+	}
+	identities := protocol.NativePayloadIdentities(op)
+	if op == protocol.OpRunnerClaim {
+		identities = map[string]protocol.Prefix{"run_id": protocol.PrefixRun}
+	}
+	if len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(b, &fields)
+		for key, prefix := range identities {
+			if len(fields[key]) == 0 || string(fields[key]) == `""` || string(fields[key]) == "null" {
+				fields[key], _ = json.Marshal(e.ids.New(prefix))
+			}
+		}
+		b, _ = json.Marshal(fields)
+	}
 	envl := &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: rev, Payload: b}
 	res, err := e.app.Execute(context.Background(), p, envl, cmd)
 	if err != nil || res.Status != protocol.OpSucceeded {

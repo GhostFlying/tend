@@ -272,7 +272,9 @@ func scriptedTurn(ctx context.Context, runtime *serverkit.Runtime, th *testkit.F
 	formalReply := false
 	if replySource != "" {
 		err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_messages m JOIN request_records r ON r.request_id=m.request_id WHERE m.message_id=? AND r.operation LIKE 'messaging.%')`, replySource).Scan(&formalReply)
+			// Web inputs also have durable messaging identities. Only external
+			// channels use the completed-publication path instead of native streaming.
+			return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messaging_messages WHERE message_id=? AND channel_id<>'web')`, replySource).Scan(&formalReply)
 		})
 		if err != nil {
 			return "failed"

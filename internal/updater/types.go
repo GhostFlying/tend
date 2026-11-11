@@ -59,13 +59,7 @@ type Version struct {
 	Artifact       release.Artifact `json:"artifact"`
 	Binary         string           `json:"binary"`
 }
-type BackupFile struct {
-	Path    string `json:"path"`
-	Name    string `json:"name"`
-	Existed bool   `json:"existed"`
-	SHA256  string `json:"sha256,omitempty"`
-	Mode    uint32 `json:"mode"`
-}
+type BackupFile = protocol.BackupFile
 type Operation struct {
 	HealthWindow          *HealthWindow        `json:"health_window,omitempty"`
 	LaunchExit            *LaunchExitProof     `json:"launch_exit,omitempty"`
@@ -116,29 +110,31 @@ type CommittedProof struct {
 	Process Identity `json:"process"`
 }
 type State struct {
-	OperationHistory    map[string]Operation                              `json:"operation_history,omitempty"`
-	BoundedRunnerGrants map[string]protocol.BoundedRunnerMaintenanceGrant `json:"bounded_runner_grants,omitempty"`
-	BoundedHistory      map[string]protocol.BoundedMaintenanceState       `json:"bounded_history,omitempty"`
-	BoundedRunnerGrant  *protocol.BoundedRunnerMaintenanceGrant           `json:"bounded_runner_grant,omitempty"`
-	Bounded             *protocol.BoundedMaintenanceState                 `json:"bounded,omitempty"`
-	Maintenance         *CommittedMaintenance                             `json:"committed_maintenance,omitempty"`
-	MaintenanceHistory  map[string]CommittedMaintenance                   `json:"committed_maintenance_history,omitempty"`
-	UpdaterBootID       string                                            `json:"updater_boot_id,omitempty"`
-	Generation          uint64                                            `json:"generation,omitempty"`
-	UpdaterEpoch        string                                            `json:"updater_epoch,omitempty"`
-	Recovery            *ForwardRecovery                                  `json:"recovery,omitempty"`
-	Recoveries          map[string]ForwardRecovery                        `json:"recoveries,omitempty"`
-	ProofHistory        []CommittedProof                                  `json:"proof_history,omitempty"`
-	Configurations      map[string]StagedConfiguration                    `json:"configurations,omitempty"`
-	CommittedProof      *CommittedProof                                   `json:"committed_proof,omitempty"`
-	RollbackProof       *RollbackProof                                    `json:"rollback_proof,omitempty"`
-	Terminals           map[string]TerminalReceipt                        `json:"terminals,omitempty"`
-	Format              int                                               `json:"format"`
-	InstanceID          string                                            `json:"instance_id"`
-	Current             Version                                           `json:"current"`
-	Process             Identity                                          `json:"process"`
-	Operation           *Operation                                        `json:"operation,omitempty"`
-	LastError           string                                            `json:"last_error,omitempty"`
+	DiagnosticLogProtections map[string]string                                 `json:"diagnostic_log_protections,omitempty"`
+	BackupPrune              *protocol.BackupPruneState                        `json:"backup_prune,omitempty"`
+	OperationHistory         map[string]Operation                              `json:"operation_history,omitempty"`
+	BoundedRunnerGrants      map[string]protocol.BoundedRunnerMaintenanceGrant `json:"bounded_runner_grants,omitempty"`
+	BoundedHistory           map[string]protocol.BoundedMaintenanceState       `json:"bounded_history,omitempty"`
+	BoundedRunnerGrant       *protocol.BoundedRunnerMaintenanceGrant           `json:"bounded_runner_grant,omitempty"`
+	Bounded                  *protocol.BoundedMaintenanceState                 `json:"bounded,omitempty"`
+	Maintenance              *CommittedMaintenance                             `json:"committed_maintenance,omitempty"`
+	MaintenanceHistory       map[string]CommittedMaintenance                   `json:"committed_maintenance_history,omitempty"`
+	UpdaterBootID            string                                            `json:"updater_boot_id,omitempty"`
+	Generation               uint64                                            `json:"generation,omitempty"`
+	UpdaterEpoch             string                                            `json:"updater_epoch,omitempty"`
+	Recovery                 *ForwardRecovery                                  `json:"recovery,omitempty"`
+	Recoveries               map[string]ForwardRecovery                        `json:"recoveries,omitempty"`
+	ProofHistory             []CommittedProof                                  `json:"proof_history,omitempty"`
+	Configurations           map[string]StagedConfiguration                    `json:"configurations,omitempty"`
+	CommittedProof           *CommittedProof                                   `json:"committed_proof,omitempty"`
+	RollbackProof            *RollbackProof                                    `json:"rollback_proof,omitempty"`
+	Terminals                map[string]TerminalReceipt                        `json:"terminals,omitempty"`
+	Format                   int                                               `json:"format"`
+	InstanceID               string                                            `json:"instance_id"`
+	Current                  Version                                           `json:"current"`
+	Process                  Identity                                          `json:"process"`
+	Operation                *Operation                                        `json:"operation,omitempty"`
+	LastError                string                                            `json:"last_error,omitempty"`
 }
 
 type Process interface {

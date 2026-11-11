@@ -18,6 +18,7 @@ func TestManagerExternalWaitHTTPKeepsOriginalIdentityAndReceipts(t *testing.T) {
 	execute := func(command app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
 		t.Helper()
 		env := e.envelope(command.Operation(), target.ID, payload)
+		target, env.Payload = composeFixtureBusinessInput(t, e.ids, command.Operation(), target, json.RawMessage(env.Payload))
 		env.Target, env.ExpectedControlRevision = target, revision
 		op, err := e.app.Execute(t.Context(), owner, env, command)
 		if err != nil || op.Status != protocol.OpSucceeded {

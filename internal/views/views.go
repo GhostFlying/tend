@@ -249,26 +249,6 @@ func Artifact(ctx context.Context, q store.Querier, artifactID string) (protocol
 	return detail, nil
 }
 
-// Request reads the recorded outcome of a request in a dedup domain. A
-// request never recorded is store.ErrNotFound.
-func Request(ctx context.Context, q store.Querier, domain, requestID string) (protocol.RequestView, error) {
-	rec, err := store.GetRequest(ctx, q, domain, requestID)
-	if err != nil {
-		return protocol.RequestView{}, err
-	}
-	v := protocol.RequestView{RequestID: rec.RequestID, Operation: rec.Operation, Status: rec.Status}
-	if rec.ResultJSON != "" {
-		v.Result = json.RawMessage(rec.ResultJSON)
-	}
-	if rec.ErrorCode != "" {
-		v.Error = &protocol.Error{Code: protocol.Code(rec.ErrorCode), Message: rec.ErrorMessage}
-		if rec.ErrorDetails != "" {
-			v.Error.Details = json.RawMessage(rec.ErrorDetails)
-		}
-	}
-	return v, nil
-}
-
 // Snapshot reads the owner's overview, of one project or, when project is
 // empty, of all. queue is the whole queue in claim order; the projects'
 // loads are counted over all of it.

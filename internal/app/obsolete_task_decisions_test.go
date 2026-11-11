@@ -56,8 +56,8 @@ func TestObsoleteTaskDecisionCancellationRetiresOnlyOriginalQuestion(t *testing.
 		t.Fatal(err)
 	}
 	replay := h.exec(owner, cancel, CancelTask{})
-	if !reflect.DeepEqual(replay, op) {
-		t.Fatalf("cancel replay changed: %+v %+v", op, replay)
+	if replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision {
+		t.Fatalf("cancel retry bypassed CAS: %+v %+v", op, replay)
 	}
 	if got := readTaskDecision(t, h, old.DecisionID); !reflect.DeepEqual(got, after) {
 		t.Fatal("replay advanced question twice")

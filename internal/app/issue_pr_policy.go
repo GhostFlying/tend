@@ -111,7 +111,7 @@ func ensureIssuePRPolicyQuestion(ctx context.Context, x *Exec, tx *store.Tx, i p
 	inner := *x
 	env := *x.Env
 	inner.Env = &env
-	env.Target = protocol.Target{Type: "attention"}
+	env.Target = protocol.Target{Type: "attention", ID: protocol.NativeObjectID(protocol.Prefix("attn"), i.IssueID, "pr-policy/"+repository+"/"+existing)}
 	env.ExpectedControlRevision = nil
 	env.Payload, _ = json.Marshal(protocol.CreateAttentionPayload{IssueID: i.IssueID, Kind: "decision", Title: "Choose this Issue's PR integration policy for " + repository + ": authorize Tend to merge after one shared formal review and required checks, or require a concrete candidate approval. Merge authority does not grant deployment. Preparation, review and CI may continue while this policy is unresolved.", Options: []string{"automatic_merge", "manual_approval", "defer"}, BlocksClose: true})
 	out, err := (AttentionCommand{Action: "create"}).Apply(ctx, &inner, tx)

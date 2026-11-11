@@ -48,13 +48,16 @@ func testRetainedStrictRetryObservesAuthoritativeStop(t *testing.T, blockEvents 
 	a := app.New(db, ids, clock.Now)
 	execute := func(p protocol.Principal, op string, target protocol.Target, payload any, rev *int64, cmd app.Command) protocol.Operation {
 		t.Helper()
+		if op == "tasks.create" && target.ID == "" {
+			target.ID = ids.New(protocol.PrefixTask)
+		}
 		raw, e := json.Marshal(payload)
 		if e != nil {
 			t.Fatal(e)
 		}
 		result, e := a.Execute(ctx, p, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: raw, ExpectedControlRevision: rev}, cmd)
 		if e != nil || result.Status != protocol.OpSucceeded {
-			t.Fatalf("%s: status=%s err=%v result=%s", op, result.Status, e, result.Result)
+			t.Fatalf("%s: status=%s err=%v operation_error=%v result=%s", op, result.Status, e, result.Error, result.Result)
 		}
 		return result
 	}
@@ -65,7 +68,7 @@ func testRetainedStrictRetryObservesAuthoritativeStop(t *testing.T, blockEvents 
 	hp := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker"}
 	execute(hp, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker"}, protocol.HelloPayload{Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Hello{})
 	runtime.Sequence++
-	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
+	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{RunID: ids.New(protocol.PrefixRun), Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
 	var claimed struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}
@@ -193,13 +196,13 @@ func testRetainedStrictRetryObservesAuthoritativeStop(t *testing.T, blockEvents 
 	if _, err := r.c.do(ctx, runCredential(as), &env); !isRetryable(err) || protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 		t.Fatal("protected release did not produce a durable unknown outcome", err)
 	}
-	var accepted store.RequestRecord
+	var accepted maintenancePhysicalStopSnapshot
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
 		var e error
-		accepted, e = store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		accepted, e = readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		return e
-	}); err != nil || accepted.Status != protocol.OpAccepted {
-		t.Fatal("original accepted fact missing", accepted.Status, err)
+	}); err != nil || accepted.Operation != env.Operation || accepted.Payload != string(env.Payload) {
+		t.Fatal("original accepted fact missing", accepted.Operation, err)
 	}
 	if blockEvents {
 		if err := j.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: "original-unapplied-event", Kind: "turn.observed", Body: json.RawMessage(`{"state":"unknown"}`)}); err != nil {
@@ -279,7 +282,7 @@ func testRetainedStrictRetryObservesAuthoritativeStop(t *testing.T, blockEvents 
 		if !reflect.DeepEqual(actual, superseded) {
 			t.Fatal("local cleanup rewrote the historical server run", actual, superseded)
 		}
-		original, e := store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		original, e := readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		if e != nil {
 			return e
 		}

@@ -20,9 +20,13 @@ func TestForwardRecoveryHTTPCommittedReplay(t *testing.T) {
 		t.Fatalf("fixture %d %+v", st, first)
 	}
 	app.WithForwardRecoveryStartup("fixture-recovery")(e.app)
+	var current protocol.TaskDetail
+	if status := e.do("GET", "/api/v1/tasks/"+taskID, tok, nil, &current); status != http.StatusOK || current.ControlMode != protocol.ControlPaused || current.ControlRevision != 2 {
+		t.Fatal("committed business state was unavailable behind admission fence", status, current)
+	}
 	st, again := e.op(tok, env)
-	if st != http.StatusOK || again.Operation == nil || string(again.Operation.Result) != string(first.Operation.Result) {
-		t.Fatalf("committed retry returned %d %+v instead of original receipt", st, again)
+	if st == http.StatusOK || protocol.CodeOf(again.Error) != protocol.CodeInvalidTransition {
+		t.Fatal("old trace bypassed durable receipt admission fence", st, again)
 	}
 	env.RequestID = e.ids.New(protocol.PrefixRequest)
 	status, fresh := e.op(tok, env)

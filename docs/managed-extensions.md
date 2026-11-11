@@ -74,7 +74,7 @@ stdio 使用 PATH 中的 `command`、`args` 和环境变量名称 `env_vars`，�
 
 ## 请求恢复与回退
 
-安装包含独立内容暂存请求和草稿编辑请求，CLI 将两个 ID 输出到 stderr。网络结果未知时先对账原 ID，不能换新 ID 重发未知写入。`extensions reconcile REQUEST_ID` 返回原请求状态；完整重试保留原 request ID、控制 revision 和输入文件。publish 重试必须保留原候选 payload，而不是重新读取当前草稿；可用 CLI 通用 request replay 发送保存的原 envelope。
+安装包含独立内容暂存和草稿编辑。网络结果未知时先用 `extensions status` 或 `extensions releases RELEASE_ID` 读取实际草稿或发布记录，不能换业务 ID 重发未知动作。publish 使用冻结的 release ID 和候选；不重新读取当前草稿替代原候选。确认仍需内部提交后，`tend operation submit --file original-envelope.json` 只发送一次完整信封；通用请求查询和缓存重放已退役。
 
 ```sh
 tend extensions reconcile REQUEST_ID

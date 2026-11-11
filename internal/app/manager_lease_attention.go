@@ -23,8 +23,9 @@ func (a *App) recordManagerLeaseProblem(ctx context.Context, tx *store.Tx, run s
 	if err != nil {
 		return false, err
 	}
-	fresh, err := tx.InsertInbox(ctx, "manager-lease-problem:"+run.RunID, leaseID, now.UnixMilli())
-	if err != nil || !fresh {
+	var exists bool
+	err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_bindings WHERE object_type='lease' AND object_id=? AND kind='manager_lease_expired')`, leaseID).Scan(&exists)
+	if err != nil || exists {
 		return false, err
 	}
 	x := &Exec{Env: &protocol.Envelope{RequestID: a.ids.New(protocol.PrefixRequest)}, Principal: protocol.Principal{Kind: protocol.PrincipalSystem}, Now: now, IDs: a.ids}

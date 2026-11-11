@@ -151,19 +151,22 @@ type ThreadHandoff struct {
 	SourceGeneration, SourceVersion, CreatedAtMillis, UpdatedAtMillis                           int64
 }
 
-func scanHandoff(row *sql.Row) (ThreadHandoff, error) {
+func scanHandoff(ctx context.Context, q Querier, row *sql.Row) (ThreadHandoff, error) {
 	var v ThreadHandoff
 	err := row.Scan(&v.ID, &v.Instance, &v.SourceThreadID, &v.SourceGeneration, &v.SourceVersion, &v.ToolsetHash, &v.TargetThreadID, &v.TargetRolloutPath, &v.Prompt, &v.Phase, &v.CreatedAtMillis, &v.UpdatedAtMillis)
+	if err == nil {
+		v.Prompt, err = ResolveJSON(ctx, q, v.Prompt)
+	}
 	return v, err
 }
 
 const handoffColumns = `handoff_id,instance,source_thread_id,source_generation,source_version,toolset_hash,target_thread_id,target_path,prompt,phase,created_at,updated_at`
 
 func GetThreadHandoff(ctx context.Context, q Querier, id string) (ThreadHandoff, error) {
-	return scanHandoff(q.QueryRowContext(ctx, `SELECT `+handoffColumns+` FROM main_thread_handoffs WHERE handoff_id=?`, id))
+	return scanHandoff(ctx, q, q.QueryRowContext(ctx, `SELECT `+handoffColumns+` FROM main_thread_handoffs WHERE handoff_id=?`, id))
 }
 func GetPendingHandoff(ctx context.Context, q Querier, instance string) (ThreadHandoff, error) {
-	return scanHandoff(q.QueryRowContext(ctx, `SELECT `+handoffColumns+` FROM main_thread_handoffs WHERE instance=? AND phase<>'committed'`, instance))
+	return scanHandoff(ctx, q, q.QueryRowContext(ctx, `SELECT `+handoffColumns+` FROM main_thread_handoffs WHERE instance=? AND phase<>'committed'`, instance))
 }
 
 // SummaryObservationIDs selects every required current item or deletion marker.

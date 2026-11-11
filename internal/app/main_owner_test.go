@@ -295,9 +295,10 @@ func TestMainOwnerCorrectsRetainedDelegationFailure(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 			ownerEffect := func(seq int64, payload protocol.CreateIssuePayload) protocol.Operation {
 				cmd := CanonicalOwnerIssueCommand{Action: "create"}
-				env := h.env(cmd.Operation(), protocol.Target{Type: "issue"}, payload, nil)
+				env := h.env(cmd.Operation(), target, payload, nil)
 				ctx := WithOwnerExecution(t.Context(), &OwnerExecution{Actor: mainAgent, Agent: execution.Selection.Identity, ExecutionID: turn.RequestID, CallID: env.RequestID, EffectSeq: seq})
 				op, err := h.app.Execute(ctx, owner, env, cmd)
 				if err != nil {
@@ -312,7 +313,7 @@ func TestMainOwnerCorrectsRetainedDelegationFailure(t *testing.T) {
 			if ownerInitial {
 				failed = ownerEffect(1, p)
 			} else {
-				failed = hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
+				failed = hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
 			}
 			expectWorkCode(t, failed, protocol.CodeInvalidRequest)
 			p.Plan.Title = "Repair the PWA"

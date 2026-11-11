@@ -315,9 +315,7 @@ func TestInitialContextDoesNotMutateCreateEnvelope(t *testing.T) {
 		t.Fatal("nested fact changed caller envelope")
 	}
 	retry := h.exec(mainAgent, env, CreateIssue{})
-	if retry.Status != protocol.OpSucceeded || string(retry.Result) != string(op.Result) {
-		t.Fatal(retry)
-	}
+	expectSameWorkItemObject(t, op, retry)
 }
 
 func TestInheritedBackgroundReplyHasNoMainReviewObligation(t *testing.T) {

@@ -4,6 +4,7 @@ package protocol
 // comes from the actual execution; historical review metadata is optional and
 // never a prerequisite for publication or proof of understanding/authorization.
 type CoordinationReply struct {
+	MessageID     string                 `json:"message_id"`
 	ReplyTo       string                 `json:"reply_to,omitempty"`
 	Attachments   []string               `json:"attachments,omitempty"`
 	Body          string                 `json:"body"`

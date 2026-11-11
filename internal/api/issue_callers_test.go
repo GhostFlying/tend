@@ -78,6 +78,7 @@ func TestCanonicalIssueCallerHTTPAndCLILifecycle(t *testing.T) {
 		t.Fatal(rule)
 	}
 	request := result.Operation.RequestID
+	payload, _ = json.Marshal(map[string]any{"rule_id": rule.RuleID, "spec": protocol.FollowupSpec{Purpose: "Check current publication", Instruction: "Review existing delivery facts", Kind: "at", At: at, Timezone: "UTC"}})
 	var replay protocol.APIResponse
 	if json.Unmarshal(run("followup", "create", issue.IssueID, "--data", string(payload), "--request-id", request, "--revision", strconv.FormatInt(issue.Revision, 10), "--epoch", strconv.FormatInt(issue.AssignmentEpoch, 10)), &replay) != nil || string(replay.Operation.Result) != string(result.Operation.Result) {
 		t.Fatal("CLI replay changed rule", replay)

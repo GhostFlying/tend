@@ -55,7 +55,7 @@ func (j *Journal) ConfirmStopped(ctx context.Context, id string) error {
 			}
 			s.WriterStopped = true
 			s.Collection.Stopped(j.now().UnixMilli(), "confirmed-owned-run-close:"+id, len(s.Cursors) == 0)
-			if err = saveUsageSource(ctx, tx, s, nil, j.now().UnixMilli()); err != nil {
+			if err = j.saveUsageSource(ctx, tx, s, nil, j.now().UnixMilli()); err != nil {
 				return err
 			}
 		}

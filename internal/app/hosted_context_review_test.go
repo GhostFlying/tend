@@ -18,7 +18,7 @@ func hostedManagerHarness(t *testing.T) *harness {
 		t.Fatal(op)
 	}
 	_, p := acceptHostedFixture(t, h, hostedConfigurationFixture(), 0)
-	h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(p))
+	h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(p), WithMainOwner(owner.Subject))
 	return h
 }
 func assignHostedManager(t *testing.T, h *harness, issue protocol.Issue) protocol.Issue {

@@ -14,7 +14,7 @@ import (
 )
 
 // runIssuePRPolicy freezes a complete Issue update before sending it. Recovery
-// uses issue replay with that Envelope, without rebuilding the current plan.
+// submits that saved Envelope explicitly, without rebuilding the current plan.
 func runIssuePRPolicy(ctx context.Context, e *Env, args []string) error {
 	if len(args) == 0 || args[0] != "set" && args[0] != "clear" && args[0] != "show" {
 		return usagef("issue pr-policy expects show|set|clear")

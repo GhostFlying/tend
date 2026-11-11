@@ -52,7 +52,7 @@ func TestIssuePRPolicyFreezesSelectedPlanWithoutImplicitTaskAssessment(t *testin
 	})
 	reads := len(f.requests)
 	e.out.Reset()
-	if code := e.main("issue", "replay", "--file", file, "--json"); code != exitOK || len(f.requests) != reads+1 {
+	if code := e.main("operation", "submit", "--file", file, "--json"); code != exitOK || len(f.requests) != reads+1 {
 		t.Fatal("recovery fetched a newer plan", code, e.errOut.String())
 	}
 }

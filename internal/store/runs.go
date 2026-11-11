@@ -397,28 +397,13 @@ func ListMountFacts(ctx context.Context, q Querier, workspaceID string) (map[str
 	return out, rows.Err()
 }
 
-// InsertInbox records an external fact's identity. It reports false when the
-// fact was already received.
-func (t *Tx) InsertInbox(ctx context.Context, source, sourceEventID string, now int64) (bool, error) {
-	res, err := t.Exec(ctx, `INSERT INTO inbox (source, source_event_id, received_at) VALUES (?, ?, ?)
-		ON CONFLICT (source, source_event_id) DO NOTHING`, source, sourceEventID, now)
-	if err != nil {
-		return false, fmt.Errorf("store: insert inbox: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("store: insert inbox: %w", err)
-	}
-	return n == 1, nil
-}
-
 // InsertRunLog keeps a run fact that does not change state.
 func (t *Tx) InsertRunLog(ctx context.Context, runID string, e protocol.RunEvent, now int64) error {
 	body := string(e.Body)
 	if body == "" {
 		body = "{}"
 	}
-	body, err := t.RetainJSON(ctx, body)
+	body, err := t.RetainEventJSON(ctx, body)
 	if err != nil {
 		return err
 	}

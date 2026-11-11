@@ -31,6 +31,12 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return true, Outcome{}, err
 	}
+	if err == nil {
+		old, err = store.ResolveJSON(ctx, tx.Q(), old)
+		if err != nil {
+			return true, Outcome{}, err
+		}
+	}
 	result := Outcome{Result: map[string]any{"background_batch_id": b.BatchID, "retained": true}}
 	extend := preservePrefix && oldStatus == string(protocol.AssistantInterrupted) && status == protocol.AssistantInterrupted && strings.HasPrefix(p.Body, old)
 	if err == nil && (oldStatus != string(protocol.AssistantStreaming) && !extend || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old))) {
@@ -39,7 +45,11 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 	if p.Body == "" && errors.Is(err, sql.ErrNoRows) {
 		return true, Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, p.Body, string(status), x.Env.RequestID, x.Now.UnixMilli(), preservePrefix && status == protocol.AssistantInterrupted)
+	retained, err := tx.RetainJSON(ctx, p.Body)
+	if err != nil {
+		return true, Outcome{}, err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, retained, string(status), x.Env.RequestID, x.Now.UnixMilli(), preservePrefix && status == protocol.AssistantInterrupted)
 	if err != nil {
 		return true, Outcome{}, err
 	}
@@ -95,7 +105,11 @@ func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 	if err != nil {
 		return true, Outcome{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,kind,tool_json,status,request_id,created_at) VALUES(?,?,?,?,'','tool_use',?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET tool_json=excluded.tool_json,status=excluded.status,published=0`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, string(raw), string(p.Status), x.Env.RequestID, x.Now.UnixMilli())
+	retained, err := tx.RetainToolRecord(ctx, string(raw))
+	if err != nil {
+		return true, Outcome{}, err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,kind,tool_json,status,request_id,created_at) VALUES(?,?,?,?,'','tool_use',?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET tool_json=excluded.tool_json,status=excluded.status,published=0`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, retained, string(p.Status), x.Env.RequestID, x.Now.UnixMilli())
 	if err == nil && b.Status != "pending" && b.Status != "frozen" {
 		err = publishBackgroundReplies(ctx, x, tx, b, b.Status)
 	}
@@ -135,17 +149,31 @@ func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b prot
 		var out Outcome
 		if r.kind == "tool_use" {
 			var p recordToolUsePayload
-			if err := json.Unmarshal([]byte(r.tool), &p); err != nil {
+			var full string
+			full, err = store.ResolveToolRecord(ctx, tx.Q(), r.tool)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal([]byte(full), &p); err != nil {
 				return err
 			}
 			if p.Status == protocol.ToolRunning {
 				p.Status = protocol.ToolInterrupted
 			}
-			out, err = recordVisibleToolUse(ctx, &copy, tx, p)
+			var retained recordToolUsePayload
+			if err = json.Unmarshal([]byte(r.tool), &retained); err != nil {
+				return err
+			}
+			retained.Status = p.Status
+			out, err = recordVisibleToolUse(ctx, &copy, tx, retained)
 			if err == nil {
 				_, err = tx.Exec(ctx, `UPDATE background_replies SET status=? WHERE batch_id=? AND thread_id=? AND turn_id=? AND item_id=?`, string(p.Status), b.BatchID, r.thread, r.turn, r.item)
 			}
 		} else if r.body != "" && !(status == store.TurnCompleted && b.Checkin != nil) {
+			r.body, err = store.ResolveJSON(ctx, tx.Q(), r.body)
+			if err != nil {
+				return err
+			}
 			state := protocol.AssistantState(r.status)
 			if state == protocol.AssistantStreaming {
 				state = protocol.AssistantInterrupted

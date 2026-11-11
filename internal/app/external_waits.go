@@ -506,23 +506,16 @@ func (a *App) ExternalWaitReplayCredential(ctx context.Context, run string, env 
 	if (env.Operation != protocol.OpRunsYieldExternalWait && env.Operation != protocol.OpRunsRecordSessionStop) || env.Target.Type != "run" || env.Target.ID != run {
 		return "", "", "", store.ErrNotFound
 	}
-	hash, e := protocol.PayloadHash(env)
-	if e != nil {
-		return "", "", "", store.ErrNotFound
-	}
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		if !committedRunReceipt(ctx, tx.Q(), run, env) {
+			return store.ErrNotFound
+		}
+
 		r, e := store.GetRun(ctx, tx.Q(), run)
 		if e != nil {
 			return e
 		}
-		p := protocol.Principal{Kind: protocol.PrincipalRun, Subject: run, Role: r.Role}
-		record, e := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), env.RequestID)
-		if e != nil {
-			return e
-		}
-		if record.Status != protocol.OpSucceeded || record.Operation != env.Operation || record.PayloadHash != hash {
-			return store.ErrNotFound
-		}
+
 		if env.Operation == protocol.OpRunsYieldExternalWait {
 			v, e := store.GetExternalWait(ctx, tx.Q(), run)
 			if e != nil {

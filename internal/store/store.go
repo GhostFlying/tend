@@ -298,6 +298,11 @@ func (s *Store) migrate(ctx context.Context, upTo int) error {
 			if _, err := tx.Exec(ctx, m.sql); err != nil {
 				return fmt.Errorf("store: apply migration %04d_%s: %w", m.version, m.name, err)
 			}
+			if m.version == 122 {
+				if err := migrateRetiredRequests(ctx, tx); err != nil {
+					return fmt.Errorf("store: retire request ledgers: %w", err)
+				}
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 				m.version, m.name, s.now().UnixMilli()); err != nil {
 				return fmt.Errorf("store: record migration %04d: %w", m.version, err)

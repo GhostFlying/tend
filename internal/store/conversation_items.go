@@ -30,13 +30,26 @@ func GetToolUse(ctx context.Context, q Querier, turnID, itemID string) (ToolUseR
 	if err != nil {
 		return ToolUseRow{}, notFound(err, "tool use "+itemID)
 	}
-	return u, nil
+	u.Input, err = ResolveJSON(ctx, q, u.Input)
+	if err == nil {
+		u.Output, err = ResolveJSON(ctx, q, u.Output)
+	}
+	return u, err
 }
 
 // PutToolUse records a tool use's details; its conversation item must
 // exist.
 func (t *Tx) PutToolUse(ctx context.Context, u ToolUseRow) error {
-	_, err := t.Exec(ctx, `INSERT INTO conversation_tool_uses (message_id, thread_id, turn_id, item_id, tool, input, output, status, updated_at)
+	var err error
+	u.Input, err = t.RetainJSON(ctx, u.Input)
+	if err != nil {
+		return err
+	}
+	u.Output, err = t.RetainJSON(ctx, u.Output)
+	if err != nil {
+		return err
+	}
+	_, err = t.Exec(ctx, `INSERT INTO conversation_tool_uses (message_id, thread_id, turn_id, item_id, tool, input, output, status, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (message_id) DO UPDATE SET tool = excluded.tool, input = excluded.input,
 		output = excluded.output, status = excluded.status, updated_at = excluded.updated_at`,
 		u.MessageID, u.ThreadID, u.TurnID, u.ItemID, u.Tool, u.Input, u.Output, u.Status, u.UpdatedAt)
@@ -134,6 +147,9 @@ func ListConversation(ctx context.Context, q Querier, before, after int64, limit
 		if err != nil {
 			return nil, err
 		}
+		if err = hydrateConversationTool(ctx, q, &r); err != nil {
+			return nil, err
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -145,7 +161,26 @@ func GetConversationItem(ctx context.Context, q Querier, messageID string) (Conv
 	if err != nil {
 		return ConversationRow{}, notFound(err, "conversation item "+messageID)
 	}
+	if err = hydrateConversationTool(ctx, q, &r); err != nil {
+		return ConversationRow{}, err
+	}
 	return r, nil
+}
+
+func hydrateConversationTool(ctx context.Context, q Querier, r *ConversationRow) error {
+	var err error
+	r.Body, err = ResolveMessageBody(ctx, q, r.MessageID, r.Body)
+	if err != nil {
+		return err
+	}
+	if r.Tool == nil {
+		return nil
+	}
+	r.Tool.Input, err = ResolveJSON(ctx, q, r.Tool.Input)
+	if err == nil {
+		r.Tool.Output, err = ResolveJSON(ctx, q, r.Tool.Output)
+	}
+	return err
 }
 
 func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, error) {
@@ -165,8 +200,10 @@ func scanConversation(row interface{ Scan(...any) error }) (ConversationRow, err
 
 // ListEvents returns up to limit events after seq, in order.
 func ListEvents(ctx context.Context, q Querier, after int64, limit int) ([]EventView, error) {
-	rows, err := q.QueryContext(ctx, `SELECT event_seq, object_type, object_id, kind, created_at FROM events
-		WHERE event_seq > ? ORDER BY event_seq LIMIT ?`, after, limit)
+	rows, err := q.QueryContext(ctx, `SELECT event_seq, object_type, object_id, kind, created_at FROM (
+ SELECT event_seq,object_type,object_id,kind,created_at FROM events WHERE event_seq>?
+ UNION ALL SELECT event_seq,object_type,object_id,kind,changed_at FROM refresh_notifications WHERE event_seq>?)
+ ORDER BY event_seq LIMIT ?`, after, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list events: %w", err)
 	}

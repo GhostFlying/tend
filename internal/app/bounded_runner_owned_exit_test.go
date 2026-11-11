@@ -45,8 +45,12 @@ func TestBoundedRunnerOwnedExitGrantPreservesOriginalProtectionWithoutHello(t *t
 		t.Fatal("owned root exit changed unresolved business work")
 	}
 	again, err := h.app.AuthorizeRunnerBoundedMaintenance(t.Context(), owner, p)
-	if err != nil || !reflect.DeepEqual(again, grant) {
-		t.Fatal("original replacement request was not replayed", err)
+	if protocol.CodeOf(err) != protocol.CodeStaleRevision {
+		t.Fatal("stale replacement changed authority", again, err)
+	}
+	read, err := h.app.RunnerBoundedMaintenance(t.Context(), p.HostID, p.Authorization.RequestID)
+	if err != nil || !reflect.DeepEqual(read, grant) {
+		t.Fatal("immutable replacement authority could not be read", read, err)
 	}
 }
 

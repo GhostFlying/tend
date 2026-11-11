@@ -15,6 +15,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	}
 	action := args[0]
 	fs := newFlags(e, "attention "+action)
+	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
 	data := fs.String("data", "", "inline JSON payload or original Envelope; latest_action_at omitted preserves, 0 clears the deadline")
 	file := fs.String("file", "", "JSON file; - reads stdin")
 	req := fs.String("request-id", "", "original request identity for retry")
@@ -76,6 +77,9 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 		if !attentionOperation(env.Operation) {
 			return usagef("not an attention operation")
 		}
+		if err := validateBusinessEnvelope(env); err != nil {
+			return err
+		}
 		if *dry {
 			return o.printJSON(env)
 		}
@@ -96,6 +100,11 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 		return usagef("unknown attention action")
 	}
 	target := protocol.Target{Type: "attention"}
+	if action == "create" {
+		target.ID = *identity
+	} else if *identity != "" {
+		return usagef("--id is only valid for create")
+	}
 	if action == "create" {
 		if len(pos) != 0 || *revision != -1 {
 			return usagef("new attention has no ID or revision")
@@ -152,6 +161,7 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 		}
 		body, _ = json.Marshal(fields)
 	}
+	allocateIdentity := *req == ""
 	if *req == "" {
 		*req = e.IDs.New(protocol.PrefixRequest)
 	} else if !protocol.ValidID(protocol.PrefixRequest, *req) {
@@ -160,6 +170,9 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	env := protocol.Envelope{RequestID: *req, Operation: op, Target: target, Reason: *reason, Payload: body}
 	if action != "create" {
 		env.ExpectedControlRevision = revision
+	}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
 	}
 	if *dry {
 		return o.printJSON(env)

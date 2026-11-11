@@ -30,12 +30,8 @@ func checkIssueProgressManagerScope(t *testing.T, h *harness, issue protocol.Iss
 	other := createCanonicalOwnerTestIssue(t, h)
 	target := protocol.Target{Type: "issue", ID: issue.IssueID}
 	var contextRevision int64
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, issue.IssueID).Scan(&contextRevision); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO background_assessments(assessment_id,conversation_id,delivery_id,context_revision,disposition,note,evidence_json,created_at) VALUES(?,?,?,?,?,?,?,?)`, "progress-assessment", "issue:"+issue.IssueID, "progress-delivery", contextRevision, "reviewed", "Reviewed source context", "{}", 1)
-		return err
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT revision FROM work_item_contexts WHERE work_item_id=?`, issue.IssueID).Scan(&contextRevision)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -52,12 +48,8 @@ func checkIssueProgressManagerScope(t *testing.T, h *harness, issue protocol.Iss
 		if current.Conversation == nil || current.Conversation.ConversationID != "issue:"+issue.IssueID || !current.Conversation.CanSend {
 			t.Fatal(current.Conversation)
 		}
-		var stale int
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT stale FROM background_assessments WHERE assessment_id=?`, "progress-assessment").Scan(&stale); err != nil {
-			return err
-		}
-		if stale != 0 || current.ContextRevision != contextRevision {
-			t.Fatalf("progress invalidated source assessment: stale=%d context=%d want=%d", stale, current.ContextRevision, contextRevision)
+		if current.ContextRevision != contextRevision {
+			t.Fatalf("progress revised the original source context: context=%d want=%d", current.ContextRevision, contextRevision)
 		}
 		activity, err := views.IssueActivity(t.Context(), tx.Q(), issue.IssueID, 0)
 		if err != nil {

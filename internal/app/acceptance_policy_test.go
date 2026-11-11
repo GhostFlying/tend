@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -66,8 +65,8 @@ func TestCreatorPolicyReportCompletesWithHonestAtomicNotice(t *testing.T) {
 		t.Fatal(first)
 	}
 	replay := h.exec(p, env, SubmitArtifact{})
-	if !bytes.Equal(first.Result, replay.Result) {
-		t.Fatal("result replay changed")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeInvalidTransition {
+		t.Fatal("ended Run acquired a new result mutation", replay)
 	}
 	if h.task(task).Lifecycle != protocol.TaskCompleted || h.count("acceptances") != 0 {
 		t.Fatal("report was not completed honestly", h.task(task))
@@ -166,11 +165,14 @@ func TestCreatorPolicyMissingIssueRecordsAndReplaysNotFound(t *testing.T) {
 		t.Fatal("deterministic failure did not replay", first, second)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		receipt, err := views.Request(t.Context(), tx.Q(), "owner", env.RequestID)
-		if err == nil && (receipt.Status != protocol.OpFailed || receipt.Error == nil || receipt.Error.Code != protocol.CodeNotFound) {
-			t.Fatal(receipt)
+		var count int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('request_records','native_requests')`).Scan(&count); err != nil {
+			return err
 		}
-		return err
+		if count != 0 {
+			t.Fatalf("generic request storage still present: %d", count)
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +191,8 @@ func TestCreatorPolicyRejectsWorkerAssigneeAndStaleChanges(t *testing.T) {
 		t.Fatal(first)
 	}
 	replay := h.exec(owner, env, SetIssueAcceptancePolicy{})
-	if !bytes.Equal(first.Result, replay.Result) {
-		t.Fatal("replay changed")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old policy CAS changed current facts", replay)
 	}
 	stale := policyChange(t, h, issue, true)
 	if stale.Error == nil || stale.Error.Code != protocol.CodeStaleRevision {

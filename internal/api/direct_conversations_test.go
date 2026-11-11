@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,7 +96,7 @@ func TestDirectCLIUploadsOriginalInjectsEvidenceAndMessagesExactRun(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	text := protocol.SendRunMessagePayload{TaskID: as.TaskID, SpecVersion: as.SpecVersion, Generation: as.Generation, Text: "Additional owner evidence"}
+	text := protocol.SendRunMessagePayload{MessageID: e.ids.New(protocol.PrefixMessage), TaskID: as.TaskID, SpecVersion: as.SpecVersion, Generation: as.Generation, Text: "Additional owner evidence"}
 	raw, _ = json.Marshal(text)
 	request := e.ids.New(protocol.PrefixRequest)
 	command("run", "message", as.RunID, "--revision", strconv.FormatInt(revision, 10), "--request-id", request, "--data", string(raw))
@@ -109,7 +110,7 @@ func TestDirectCLIUploadsOriginalInjectsEvidenceAndMessagesExactRun(t *testing.T
 	receipt := issueWorkerCommand(t, e, worker, protocol.Target{Type: "run", ID: as.RunID}, protocol.RunMessageDelivery{MessageID: supplement.MessageID, Receiver: "original-worker", ThreadID: "native-thread", TurnID: "native-turn"}, app.ClaimRunMessage{})
 	_ = json.Unmarshal(receipt.Result, &supplement)
 	issueWorkerCommand(t, e, worker, protocol.Target{Type: "run", ID: as.RunID}, protocol.RunMessageReceipt{RunMessageDelivery: supplement.RunMessageDelivery, Status: protocol.RunMessageAccepted}, app.ReportRunMessage{})
-	beforeRequests := e.count(`SELECT COUNT(*) FROM request_records`)
+	beforeEvents := e.count(`SELECT COUNT(*) FROM events`)
 	beforeOutbox := e.count(`SELECT COUNT(*) FROM outbox`)
 	command("run", "native-entry", as.RunID)
 	var entry protocol.NativeEntry
@@ -120,7 +121,7 @@ func TestDirectCLIUploadsOriginalInjectsEvidenceAndMessagesExactRun(t *testing.T
 	if err := json.Unmarshal(stdout.Bytes(), &entry); err != nil || entry.AdapterImplemented || entry.Reason != "adapter_not_implemented" {
 		t.Fatal(entry, err)
 	}
-	if e.count(`SELECT COUNT(*) FROM request_records`) != beforeRequests || e.count(`SELECT COUNT(*) FROM outbox`) != beforeOutbox {
+	if e.count(`SELECT COUNT(*) FROM events`) != beforeEvents || e.count(`SELECT COUNT(*) FROM outbox`) != beforeOutbox {
 		t.Fatal("viewing native entry sent a control effect")
 	}
 	command("run", "messages", as.RunID)
@@ -132,6 +133,8 @@ func TestDirectCLIUploadsOriginalInjectsEvidenceAndMessagesExactRun(t *testing.T
 
 func TestDirectCLIConsultationAndOwnerPromotionUseSelectedOriginal(t *testing.T) {
 	e := newEnv(t)
+	var serverLog bytes.Buffer
+	e.server.log = slog.New(slog.NewTextHandler(&serverLog, nil))
 	e.configure()
 	principal := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}
 	zero := int64(0)
@@ -158,7 +161,7 @@ func TestDirectCLIConsultationAndOwnerPromotionUseSelectedOriginal(t *testing.T)
 		stdout.Reset()
 		stderr.Reset()
 		if code := cli.Main(t.Context(), env, args); code != 0 {
-			t.Fatal(args, stdout.String(), stderr.String())
+			t.Fatal(args, stdout.String(), stderr.String(), serverLog.String())
 		}
 	}
 	command("login", "--server", e.url)
@@ -193,9 +196,68 @@ func TestDirectCLIConsultationAndOwnerPromotionUseSelectedOriginal(t *testing.T)
 	request := e.ids.New(protocol.PrefixRequest)
 	command("conversation", "promote", consultation.ID, "--data", string(raw), "--request-id", request)
 	first := stdout.String()
+	counts := func() [4]int {
+		return [4]int{e.count(`SELECT COUNT(*) FROM events`), e.count(`SELECT COUNT(*) FROM outbox`), e.count(`SELECT COUNT(*) FROM conversation_bindings`), e.count(`SELECT COUNT(*) FROM background_sources`)}
+	}
+	before := counts()
 	command("conversation", "promote", consultation.ID, "--data", string(raw), "--request-id", request)
-	if stdout.String() != first || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 || e.count(`SELECT COUNT(*) FROM tasks`) != 0 {
-		t.Fatal("owner promotion replay changed or bypassed manager", stdout.String())
+	if stdout.String() != first || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 || e.count(`SELECT COUNT(*) FROM tasks`) != 0 || counts() != before {
+		t.Fatal("owner promotion repeated its effects or bypassed the manager", stdout.String(), before, counts())
+	}
+	// A new trace of the same authenticated source still reads the existing
+	// Issue. This is business identity, not an old transport receipt.
+	command("conversation", "promote", consultation.ID, "--data", string(raw))
+	if counts() != before || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 {
+		t.Fatal("another trace duplicated source delivery", before, counts())
+	}
+	// Restore genuine partial historical associations without repeating the
+	// Issue or treating an incomplete first delivery as a successful no-op.
+	for _, table := range []string{"conversation_bindings", "background_sources"} {
+		if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
+			query := `DELETE FROM conversation_bindings WHERE message_id=? AND kind='consultation_promotion'`
+			if table == "background_sources" {
+				query = `DELETE FROM background_sources WHERE message_id=? AND kind='consultation.promoted'`
+			}
+			_, err := tx.Exec(t.Context(), query, intent.MessageID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		command("conversation", "promote", consultation.ID, "--data", string(raw))
+		afterRepair := counts()
+		if afterRepair[0] <= before[0] || afterRepair[2] != before[2] || afterRepair[3] != before[3] || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 {
+			t.Fatal("partial delivery was not restored", table, before, afterRepair)
+		}
+		command("conversation", "promote", consultation.ID, "--data", string(raw))
+		if counts() != afterRepair {
+			t.Fatal("restored delivery repeated its effects", table, afterRepair, counts())
+		}
+		before = afterRepair
+	}
+	command("conversation", "send", consultation.ID, "--data", `{"body":"Include this additional investigation constraint"}`)
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	var additional struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(response.Operation.Result, &additional); err != nil || additional.MessageID == "" {
+		t.Fatal(response, err)
+	}
+	sourceRevision := int64(1)
+	payload.Sources = []protocol.IssueSourceReference{{SourceMessageID: additional.MessageID, ExpectedSourceRevision: &sourceRevision}}
+	raw, _ = json.Marshal(payload)
+	before = counts()
+	command("conversation", "promote", consultation.ID, "--data", string(raw))
+	afterAdditional := counts()
+	// The selected original has one Issue association and one batch-source
+	// association. The delivery itself is still one background source.
+	if afterAdditional[0] <= before[0] || afterAdditional[2] != before[2]+2 || afterAdditional[3] != before[3]+1 || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 {
+		t.Fatal("additional source did not produce one real increment", before, afterAdditional)
+	}
+	command("conversation", "promote", consultation.ID, "--data", string(raw))
+	if counts() != afterAdditional {
+		t.Fatal("additional source repeated delivery", afterAdditional, counts())
 	}
 	command("conversation", "show", consultation.ID)
 	if !strings.Contains(stdout.String(), "Please execute") {

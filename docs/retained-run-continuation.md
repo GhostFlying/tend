@@ -25,19 +25,20 @@ native/业务回执、blockers 及已有决议。`original_requests_json` 保留
 ```sh
 tend run continue-retained RUN --revision REVISION --request-id REQUEST \
   --file proof.json --dry-run > original-envelope.json
-tend request replay --file original-envelope.json --json
+tend operation submit --file original-envelope.json --json
 ```
 
 也支持 `--data` 和 `--file -`。缺少显式 CAS 在发起 HTTP 前即拒绝；命令不会刷新 revision
-后重发。未知结果时保留原 ID、输入、revision 与 Envelope，先查询再按原字节显式重试：
+后重发。未知结果时保留实际 Run、输入、revision 与 Envelope，先查原业务状态：
 
 ```sh
-tend request show REQUEST --json
-tend request replay --file original-envelope.json --json
+tend run maintenance-reconciliation RUN --json
+tend operation submit --file original-envelope.json --json
 ```
 
-不要换 ID 或改 payload 重试未知动作。同 ID 不同输入冲突。新维护 capture、控制变化或
-新未决业务使旧决议失效；这不改变旧请求已有回执，也不代表可以将未知请求替换成新决议。
+不换业务 ID 或改输入重试未知动作。只有原业务已对账且仍需提交时才单次发送。
+新维护 capture、控制变化或新未决业务使旧决议失效；读取当前决议后重新判断，
+不能将未知动作替换成新决议，也不依赖保存第一次传输响应。
 
 动作提交只记录独立附着许可；同 Run、同 lease 的原 journal Hello 才能续活原 lapsed
 租约。新 runner 必须报告 strict-retained-resume 能力，并可解析原不可变 pin；旧 runner

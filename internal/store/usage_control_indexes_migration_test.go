@@ -37,9 +37,9 @@ func TestUsageAndControlIndexesMigratePopulatedSchema82(t *testing.T) {
 	if err = s.migrate(ctx, 84); err != nil {
 		t.Fatal(err)
 	}
-	// A subsequent current-schema migration must neither replay these indexes nor
-	// require the test to erase later schema history when another feature lands.
-	if err = s.migrate(ctx, 0); err != nil {
+	// Reopening this historical index migration must not replay its indexes.
+	// Later compact storage migrations have their own semantic preservation test.
+	if err = s.migrate(ctx, 84); err != nil {
 		t.Fatal(err)
 	}
 	var after, request, usage string

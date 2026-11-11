@@ -48,7 +48,7 @@ func TestQuestionInputsOwnerSourceMetadataAndOriginalRunBytes(t *testing.T) {
 	var message struct {
 		MessageID string `json:"message_id"`
 	}
-	payload, _ := json.Marshal(protocol.SubmitMessagePayload{Body: "Original file for that answer", ReplyTo: question.QuestionMessageID, Attachments: []string{file.FileID, other.FileID}})
+	payload, _ := json.Marshal(protocol.SubmitMessagePayload{MessageID: e.ids.New(protocol.PrefixMessage), Body: "Original file for that answer", ReplyTo: question.QuestionMessageID, Attachments: []string{file.FileID, other.FileID}})
 	source, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "conversation.submit_message", Target: protocol.Target{Type: "conversation"}, Payload: payload}, app.SubmitMessage{})
 	if err != nil || (source.Status != protocol.OpAccepted && source.Status != protocol.OpSucceeded) || json.Unmarshal(source.Result, &message) != nil {
 		t.Fatal(source, err)

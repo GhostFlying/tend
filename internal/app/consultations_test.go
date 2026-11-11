@@ -66,8 +66,8 @@ func TestConsultationQuestionHasNoIssueAndActualRequestDelegatesToManagerTask(t 
 	command := HostedCoordinationCommand{Command: PromoteConsultation{}, ExecutionID: turn.RequestID, EffectSeq: 1}
 	first := h.exec(principal, env, command)
 	issue := canonicalLifecycleIssue(t, first)
-	if replay := h.exec(principal, env, command); string(replay.Result) != string(first.Result) {
-		t.Fatal("same callback lost receipt", replay)
+	if replay := h.exec(principal, env, command); replay.Error == nil || replay.Error.Code != protocol.CodeDuplicateEffect || h.count("issue_controls") != 1 {
+		t.Fatal("same callback repeated its business effect", replay)
 	}
 	duplicate := hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "conversation", ID: c.ID}, nil, payload, PromoteConsultation{})
 	if duplicate.Error == nil || duplicate.Error.Code != protocol.CodeDuplicateEffect || h.count("issue_controls") != 1 {

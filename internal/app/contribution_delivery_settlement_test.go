@@ -130,8 +130,8 @@ func TestContributionDeliverySettlementClosesIssueFromCompletedSharedPRExecution
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			if replay := h.exec(owner, env, UpdateIssueDelivery{}); !reflect.DeepEqual(op, replay) {
-				t.Fatal("historical settlement was replayed as new work", replay)
+			if replay := h.exec(owner, env, UpdateIssueDelivery{}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+				t.Fatal("historical settlement accepted the old revision", replay)
 			}
 			done := deliveryDutyForTest(t, h, issue.IssueID, source)
 			if done.Status != "complete" || done.ExecutionTaskID != execution || done.Candidate != nil || done.Authorization != nil || done.AcceptanceID != original.AcceptanceID || done.ArtifactID != original.ArtifactID || len(done.Evidence) < 3 {

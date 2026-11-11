@@ -19,8 +19,8 @@ func issueReuseStatus(ctx context.Context, q store.Querier, id string) (protocol
 	if err != nil {
 		return out, errNotFound(err, "original Issue does not exist")
 	}
-	var origin, actor, requestDomain string
-	err = q.QueryRowContext(ctx, `SELECT request_id,actor_json,request_domain FROM issue_control_revisions WHERE issue_id=? AND revision=1`, id).Scan(&origin, &actor, &requestDomain)
+	var origin, actor, operation string
+	err = q.QueryRowContext(ctx, `SELECT request_id,actor_json,operation FROM issue_control_revisions WHERE issue_id=? AND revision=1`, id).Scan(&origin, &actor, &operation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -28,25 +28,7 @@ func issueReuseStatus(ctx context.Context, q store.Querier, id string) (protocol
 		return out, err
 	}
 	var principal protocol.Principal
-	if json.Unmarshal([]byte(actor), &principal) != nil || principal.Validate() != nil || origin == "" {
-		return out, nil
-	}
-	legacyDomain := requestDomain == ""
-	if legacyDomain {
-		requestDomain = principal.DedupDomain()
-	}
-	record, err := store.GetRequest(ctx, q, requestDomain, origin)
-	if errors.Is(err, store.ErrNotFound) && legacyDomain {
-		record, err = store.GetOwnerRequest(ctx, q, origin)
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		return out, nil
-	}
-	if err != nil {
-		return out, err
-	}
-	var created protocol.Issue
-	if record.Status != protocol.OpSucceeded || (record.Operation != "issues.create" && record.Operation != "conversation.promote") || json.Unmarshal([]byte(record.ResultJSON), &created) != nil || created.IssueID != id || created.Revision != 1 {
+	if json.Unmarshal([]byte(actor), &principal) != nil || principal.Validate() != nil || origin == "" || operation != "issues.create" && operation != "conversation.promote" {
 		return out, nil
 	}
 	out.OriginObservation = "recorded"

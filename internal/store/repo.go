@@ -22,74 +22,6 @@ func notFound(err error, what string) error {
 
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
 
-// RequestRecord is the dedup record of a side-effecting request.
-type RequestRecord struct {
-	Domain          string
-	RequestID       string
-	Operation       string
-	PayloadHash     string
-	PrincipalJSON   string
-	ParentRequestID string
-	TraceID         string
-	Status          protocol.OpStatus
-	ResultJSON      string
-	ErrorCode       string
-	ErrorMessage    string
-	ErrorDetails    string
-	// Reason is the caller's note on why it made the request.
-	Reason    string
-	CreatedAt int64
-}
-
-// GetRequest returns the record for (domain, requestID), or ErrNotFound.
-func GetRequest(ctx context.Context, q Querier, domain, requestID string) (RequestRecord, error) {
-	r := RequestRecord{Domain: domain, RequestID: requestID}
-	var parent, result, code, msg, details, reason sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT operation, payload_hash, principal_json, parent_request_id, trace_id, status,
-		result_json, error_code, error_message, error_details, reason, created_at
-		FROM request_records WHERE domain = ? AND request_id = ?`, domain, requestID).
-		Scan(&r.Operation, &r.PayloadHash, &r.PrincipalJSON, &parent, &r.TraceID, &r.Status, &result, &code, &msg, &details, &reason, &r.CreatedAt)
-	if err != nil {
-		return RequestRecord{}, notFound(err, "request record")
-	}
-	r.ParentRequestID, r.ResultJSON, r.ErrorCode, r.ErrorMessage, r.ErrorDetails = parent.String, result.String, code.String, msg.String, details.String
-	r.Reason = reason.String
-	r.ResultJSON, err = ResolveJSON(ctx, q, r.ResultJSON)
-	if err != nil {
-		return RequestRecord{}, err
-	}
-	r.ResultJSON, err = restoreCommandReceipt(ctx, q, r.ResultJSON)
-	if err != nil {
-		return RequestRecord{}, err
-	}
-	return r, nil
-}
-
-// InsertRequest stores a new request record.
-func (t *Tx) InsertRequest(ctx context.Context, r RequestRecord) error {
-	result, err := compactCommandReceipt(ctx, t, r)
-	if err != nil {
-		return err
-	}
-	r.ResultJSON = result
-	if r.Operation == "manager.native_reply" {
-		r.ResultJSON, err = t.RetainJSON(ctx, r.ResultJSON)
-		if err != nil {
-			return err
-		}
-	}
-	_, err = t.Exec(ctx, `INSERT INTO request_records (domain, request_id, operation, payload_hash, principal_json,
-		parent_request_id, trace_id, status, result_json, error_code, error_message, error_details, reason, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.Domain, r.RequestID, r.Operation, r.PayloadHash, r.PrincipalJSON, nullString(r.ParentRequestID), r.TraceID,
-		r.Status, nullString(r.ResultJSON), nullString(r.ErrorCode), nullString(r.ErrorMessage), nullString(r.ErrorDetails),
-		nullString(r.Reason), r.CreatedAt, r.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("store: insert request record: %w", err)
-	}
-	return nil
-}
-
 // TaskRow is the stored task projection.
 type TaskRow struct {
 	Kind                   protocol.TaskKind
@@ -428,15 +360,16 @@ func (t *Tx) InsertDecision(ctx context.Context, id, taskID, question, optionsJS
 
 // EventRow is a ledger event to append.
 type EventRow struct {
-	EventID       string
-	Source        string
-	ObjectType    string
-	ObjectID      string
-	ObjectVersion int64
-	Kind          string
-	BodyJSON      string
-	RequestID     string
-	TraceID       string
+	EventID         string
+	Source          string
+	ObjectType      string
+	ObjectID        string
+	ObjectVersion   int64
+	Kind            string
+	RunAttentionKey string
+	BodyJSON        string
+	RequestID       string
+	TraceID         string
 	// ActorJSON is the principal of the request that recorded the event,
 	// if any.
 	ActorJSON string
@@ -445,10 +378,15 @@ type EventRow struct {
 
 // InsertEvent appends an event and returns its sequence number.
 func (t *Tx) InsertEvent(ctx context.Context, e EventRow) (int64, error) {
-	res, err := t.Exec(ctx, `INSERT INTO events (event_id, source, object_type, object_id, object_version, kind, body_json,
-		request_id, trace_id, actor_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if RefreshKind(e.Kind) {
+		return t.advanceRefresh(ctx, e)
+	}
+	// The event insert and trigger reserve its stream position together. Only
+	// coalesced notices need to advance a cursor without inserting a real event.
+	res, err := t.Exec(ctx, `INSERT INTO events (event_seq, event_id, source, object_type, object_id, object_version, kind, body_json,
+		request_id, trace_id, actor_json, created_at, run_attention_key) VALUES ((SELECT cursor+1 FROM refresh_stream_state WHERE singleton=1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.EventID, e.Source, e.ObjectType, e.ObjectID, e.ObjectVersion, e.Kind, e.BodyJSON, nullString(e.RequestID),
-		nullString(e.TraceID), nullString(e.ActorJSON), e.CreatedAt)
+		nullString(e.TraceID), nullString(e.ActorJSON), e.CreatedAt, nullString(e.RunAttentionKey))
 	if err != nil {
 		return 0, fmt.Errorf("store: insert event: %w", err)
 	}

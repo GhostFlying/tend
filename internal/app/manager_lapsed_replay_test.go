@@ -128,6 +128,39 @@ func recordLapsedReply(t *testing.T, h *harness, body string, command RecordAgen
 	}
 }
 
+// changeNativeEventFixture publishes a replacement fixture original before
+// updating its reference. It never edits a retained body's reference envelope.
+func changeNativeEventFixture(t *testing.T, tx *store.Tx, run string, sequence int64, key, value string) error {
+	t.Helper()
+	var raw string
+	if err := tx.Q().QueryRowContext(t.Context(), `SELECT body_json FROM manager_native_events WHERE run_id=? AND seq=?`, run, sequence).Scan(&raw); err != nil {
+		return err
+	}
+	resolved, err := store.ResolveJSON(t.Context(), tx.Q(), raw)
+	if err != nil {
+		return err
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(resolved), &body); err != nil {
+		return err
+	}
+	native, ok := body["native"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("native event fixture missing native body")
+	}
+	native[key] = value
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	retained, err := tx.RetainJSON(t.Context(), string(encoded))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(t.Context(), `UPDATE manager_native_events SET body_json=? WHERE run_id=? AND seq=?`, retained, run, sequence)
+	return err
+}
+
 func TestLapsedManagerReplayPreservesScopeAndActiveSelection(t *testing.T) {
 	for _, change := range []string{"active", "released", "no_pending", "no_close", "pin", "lease_host", "epoch", "frozen_model", "resume", "event_turn", "non_reply"} {
 		t.Run(change, func(t *testing.T) {
@@ -158,11 +191,11 @@ func TestLapsedManagerReplayPreservesScopeAndActiveSelection(t *testing.T) {
 				case "frozen_model":
 					_, err = tx.Exec(t.Context(), `UPDATE runner_coordination_executions SET private_snapshot=json_set(private_snapshot,'$.definition.model','replacement')`)
 				case "resume":
-					_, err = tx.Exec(t.Context(), `UPDATE manager_native_requests SET result_json=json_set(result_json,'$.result.ID','another-thread') WHERE method='resume'`)
+					_, err = tx.Exec(t.Context(), `UPDATE runs SET native_thread_id='another-thread',native_thread_json='{"ID":"another-thread"}' WHERE run_id=?`, as.RunID)
 				case "event_turn":
-					_, err = tx.Exec(t.Context(), `UPDATE manager_native_events SET body_json=json_set(body_json,'$.native.TurnID','another-turn') WHERE seq=18`)
+					err = changeNativeEventFixture(t, tx, as.RunID, 18, "TurnID", "another-turn")
 				case "non_reply":
-					_, err = tx.Exec(t.Context(), `UPDATE manager_native_events SET body_json=json_set(body_json,'$.native.Kind','turn_completed') WHERE seq=18`)
+					err = changeNativeEventFixture(t, tx, as.RunID, 18, "Kind", "turn_completed")
 				}
 				return err
 			}); err != nil {

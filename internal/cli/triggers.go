@@ -23,6 +23,7 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 	}
 	action := args[0]
 	fs := newFlags(e, noun+" "+action)
+	identity := fs.String("id", "", "stable new followup or webhook ID; create only")
 	issue := fs.String("issue", "", "Issue identity")
 	source := fs.String("source", "", "followup, observation or webhook")
 	schedule := fs.String("schedule", "", "exact schedule or subscription identity")
@@ -48,6 +49,9 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
+	}
+	if *identity != "" && !(action == "create" && (noun == "schedule" || noun == "webhook")) {
+		return usagef("--id is only valid for rule or webhook creation")
 	}
 	if *limit < 1 || *limit > 100 || *since < 0 || *until < 0 {
 		return usagef("invalid page size or time range")
@@ -121,33 +125,9 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			}
 		}
 	}
-	if noun == "request" && action == "replay" {
-		body, err := issueInput(e, *data, *file)
-		if err != nil {
-			return err
-		}
-
-		var env protocol.Envelope
-		if json.Unmarshal(body, &env) != nil {
-			return usagef("replay requires an original Envelope")
-		}
-		if !strings.HasPrefix(env.Operation, "issues.") && !strings.HasPrefix(env.Operation, "webhooks.") {
-			return usagef("unsupported owner replay operation")
-		}
-		if env.Operation == "webhooks.receive" {
-			return usagef("external events are replayed by their signed sender")
-		}
-		if *dry {
-			return o.printJSON(env)
-		}
-		return sendIssueEnvelope(ctx, o, env)
-	}
-	if action == "show" || action == "trace" || noun == "request" {
+	if action == "show" || action == "trace" {
 		if len(pos) != 1 {
 			return usagef("%s takes one ID", action)
-		}
-		if noun == "request" {
-			base = "/api/v1/requests"
 		}
 		var raw json.RawMessage
 		if err = c.do(ctx, "GET", base+"/"+url.PathEscape(pos[0]), nil, &raw); err != nil {
@@ -201,6 +181,9 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			}
 			payload["spec"] = &spec
 		}
+		if action == "create" && *identity != "" {
+			payload["rule_id"] = *identity
+		}
 		raw, _ := json.Marshal(payload)
 		tail := []string{"followup", action, *issue}
 		if action != "create" {
@@ -248,6 +231,12 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			return usagef("invalid webhook metadata")
 		}
 	}
+	if *identity != "" {
+		if p.SubscriptionID != "" && p.SubscriptionID != *identity {
+			return usagef("--id differs from payload.subscription_id")
+		}
+		p.SubscriptionID = *identity
+	}
 	if *epoch > 0 && p.ExpectedAssignmentEpoch > 0 && p.ExpectedAssignmentEpoch != *epoch {
 		return usagef("epoch differs from payload")
 	}
@@ -272,19 +261,20 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			}
 		}
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}
 	if !protocol.ValidID(protocol.PrefixRequest, *request) {
 		return usagef("invalid request ID")
 	}
+	var key []byte
 	if *keyFile != "" {
 		if action != "create" && action != "rotate" {
 			return usagef("credentials change only with create or rotate")
 		}
 		p.KeyRef = *request
 		if !*dry {
-			var key []byte
 			if *keyFile == "-" {
 				if *file == "-" {
 					return usagef("payload and key cannot both consume stdin")
@@ -299,16 +289,21 @@ func runTriggers(ctx context.Context, e *Env, noun string, args []string) error 
 			if len(key) < 32 || len(key) > 4096 {
 				return usagef("private key must contain 32..4096 bytes")
 			}
-			fmt.Fprintf(e.Stderr, "webhook credential staging for request %s; retain the original identity\n", *request)
-			if err = stageCLIWebhookKey(ctx, c, p.KeyRef, key); err != nil {
-				return err
-			}
 		}
 	}
 	raw, _ := json.Marshal(p)
 	env := protocol.Envelope{RequestID: *request, Operation: "webhooks." + action, Target: target, ExpectedControlRevision: revision, Payload: raw, Reason: *reason}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
+	}
 	if *dry {
 		return o.printJSON(env)
+	}
+	if len(key) > 0 {
+		fmt.Fprintf(e.Stderr, "webhook credential staging for request %s; retain the original identity\n", *request)
+		if err = stageCLIWebhookKey(ctx, c, p.KeyRef, key); err != nil {
+			return err
+		}
 	}
 	return sendIssueEnvelope(ctx, o, env)
 }

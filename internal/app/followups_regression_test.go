@@ -47,8 +47,9 @@ func TestFollowupRegressionCreatePlanningReplay(t *testing.T) {
 	source := h.ownerEvidence().Reference
 	p := protocol.FollowupSpec{Kind: "at", At: h.clock.Now().Add(time.Hour).UnixMilli(), Purpose: "check", Instruction: "read facts", Timezone: "UTC", SourceID: source}
 	cmd := FollowupCommand{Action: "create"}
+	id := h.ids.New(protocol.Prefix("followup"))
 	for range 2 {
-		op := h.exec(mainAgent, h.env(cmd.Operation(), workTarget(w.WorkItemID), p, rev(w.Revision)), cmd)
+		op := h.exec(mainAgent, h.env(cmd.Operation(), workTarget(w.WorkItemID), protocol.CreateFollowupPayload{FollowupSpec: p, RuleID: id}, rev(w.Revision)), cmd)
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}

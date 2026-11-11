@@ -42,7 +42,7 @@ tend event list --issue "$ISSUE_ID" --source webhook --json
 tend event trace "$EVENT_ID" --json
 tend event sources "$EVENT_ID" --after-source 0 --json
 tend event watch --issue "$ISSUE_ID" --json
-tend request show "$REQUEST_ID" --json
+tend schedule show "$RULE_ID" --json
 ```
 
 `rule.json` 是 FollowupSpec。例如每天当地 09:00 检查，时区明确、期限由 owner 指定：
@@ -63,7 +63,7 @@ tend request show "$REQUEST_ID" --json
 
 截止时间使用 UTC 毫秒，必须仍在未来。cron 仅接受五字段数字语法；支持 `*`、`,`、`-`、`/`，星期 0/7 为周日。不接受六字段秒级或 `@daily`。时区缺失、无效日期和期限前没有下一次机会时拒绝登记。固定间隔 every 仍为时长，不等价于当地每日时间。
 
-写入前输出 request ID 与原 revision/epoch。回执丢失后先查询该 request；重试携带原 ID、revision、epoch 与相同输入。`--dry-run` 可输出原信封供调用方保存，`tend request replay --file original.json` 重放原 owner 信封；不自动刷新旧请求控制版本。CLI 不保存另一份业务账本。外部 webhook 由原签名发送方沿 delivery ID 重试。
+写入前分配实际 rule/subscription ID 并输出原 revision/epoch。回执丢失后先读实际安排、订阅或来源事件；不通过 request ID 查询响应缓存。`--dry-run` 输出完整业务信封，确认仍需提交后可用 `tend operation submit --file original.json` 单次发送，不自动更新 CAS 或重放未知外部动作。CLI 不保存另一份业务账本；外部 webhook 仍由原签名发送方沿 delivery ID 重试。
 
 ## Webhook 配置
 

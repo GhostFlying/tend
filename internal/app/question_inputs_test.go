@@ -53,8 +53,8 @@ func TestQuestionInputsOriginalAnswerMetadataBytesAndRevocation(t *testing.T) {
 		t.Fatal(op)
 	}
 	replay := h.exec(owner, env, QuestionInputCommand{})
-	if !bytes.Equal(op.Result, replay.Result) {
-		t.Fatal("grant replay changed")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("stale grant was admitted", replay)
 	}
 	saved, err := h.app.WorkerQuestion(t.Context(), principal, q.DecisionID)
 	if err != nil || saved.InputRevision != 1 || len(saved.Inputs) != 1 || saved.Inputs[0].FileID != file.FileID || saved.Inputs[0].SHA256 != file.SHA256 || !bytes.Equal(saved.Answer, q.Answer) {
@@ -113,8 +113,8 @@ func TestQuestionInputsOriginalAnswerMetadataBytesAndRevocation(t *testing.T) {
 		t.Fatal("revoked grant still allowed fetch")
 	}
 	replay = h.exec(owner, env, QuestionInputCommand{})
-	if !bytes.Equal(op.Result, replay.Result) {
-		t.Fatal("revocation rewrote historical request")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("revoked authority was restored by an old command", replay)
 	}
 	saved, err = h.app.WorkerQuestion(t.Context(), principal, q.DecisionID)
 	if err != nil || len(saved.Inputs) != 0 || saved.InputRevision != 2 || !bytes.Equal(saved.Answer, q.Answer) {

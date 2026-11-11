@@ -34,8 +34,9 @@ func TestFollowUpPreservesCompletedTaskAndReadsBothDirections(t *testing.T) {
 		t.Fatal(err)
 	}
 	replay := h.exec(owner, env, CreateTask{})
-	if string(first.Result) != string(replay.Result) {
-		t.Fatal("create replay changed result")
+	var current taskResult
+	if replay.Status != protocol.OpSucceeded || json.Unmarshal(replay.Result, &current) != nil || current.TaskID != result.TaskID || h.countWhere(`SELECT COUNT(*) FROM tasks WHERE task_id=?`, result.TaskID) != 1 {
+		t.Fatal("stable create identity duplicated or replaced the task", replay)
 	}
 	if got := h.task(original); got != before {
 		t.Fatalf("follow-up changed original: %+v", got)

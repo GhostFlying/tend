@@ -455,8 +455,8 @@ func (s *Supervisor) maintenanceStep(ctx context.Context) error {
 		if err := s.maintenanceOldGone(ctx, m); err != nil {
 			return err
 		}
-		op := &Operation{BackupDir: filepath.Join(s.cfg.StateDir, "maintenance-backups", m.Plan.MaintenanceID)}
-		if err := backupData(s.cfg, op); err != nil {
+		op := &Operation{BackupDir: filepath.Join(s.cfg.StateDir, "maintenance-backups", m.Plan.MaintenanceID), StartedAt: s.opts.Now(), Previous: s.state.Current}
+		if err := backupDataContext(ctx, s.cfg, op); err != nil {
 			return err
 		}
 		m.Backups = op.Backups

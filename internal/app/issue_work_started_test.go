@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -35,7 +34,9 @@ func TestIssueRecordingChildKeepsParentTodoAndReplaysCreation(t *testing.T) {
 		t.Fatal("recording a backlog child started parent work", current)
 	}
 	replay := h.exec(principal, env, command)
-	if !bytes.Equal(op.Result, replay.Result) || canonicalTaskIssue(t, h, issue.IssueID).Revision != current.Revision {
+	expectWorkCode(t, replay, protocol.CodeDuplicateEffect)
+	child := canonicalTaskIssue(t, h, env.Target.ID)
+	if child.ParentIssueID != issue.IssueID || child.Plan.Title != p.Plan.Title || canonicalTaskIssue(t, h, issue.IssueID).Revision != current.Revision {
 		t.Fatal("replay repeated the parent transition")
 	}
 	if _, pending := statusNotice(t, h, issue.IssueID); pending {

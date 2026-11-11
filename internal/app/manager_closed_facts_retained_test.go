@@ -19,6 +19,13 @@ func retainClosedManagerTestBody(t *testing.T, f closedToolFixture, query, updat
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := f.h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		original, err = store.ResolveJSON(t.Context(), tx.Q(), original)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Preserve the exact original JSON, including presentation bytes which must
 	// be hashed rather than the smaller retained identity projection.
 	original += strings.Repeat(" \n\t", 500)
@@ -55,12 +62,12 @@ func TestClosedManagerRepairConsumesRetainedOriginalFacts(t *testing.T) {
 						`UPDATE manager_native_events SET body_json=? WHERE run_id=? AND seq=?`, f.as.RunID, seq)
 				}
 			}
-			var payload, reply string
+
 			if scenario == "all" {
-				payload = retainClosedManagerTestBody(t, f,
+				_ = retainClosedManagerTestBody(t, f,
 					`SELECT payload_json FROM manager_native_requests WHERE request_id=?`,
 					`UPDATE manager_native_requests SET payload_json=? WHERE request_id=?`, f.resultID)
-				reply = retainClosedManagerTestBody(t, f,
+				_ = retainClosedManagerTestBody(t, f,
 					`SELECT result_json FROM manager_native_requests WHERE request_id=?`,
 					`UPDATE manager_native_requests SET result_json=? WHERE request_id=?`, f.resultID)
 			}
@@ -95,9 +102,12 @@ func TestClosedManagerRepairConsumesRetainedOriginalFacts(t *testing.T) {
 					t.Fatal("audit hashed the retained projection instead of original bytes", fact)
 				}
 			}
-			if scenario == "all" && (audit.Tools[0].ToolResultSHA256 != closedFactHash([]byte(payload)) || audit.Tools[0].ToolResultReplySHA256 != closedFactHash([]byte(reply))) {
-				t.Fatal("tool result proof lost original presentation bytes", audit)
+			// RPC wrappers are no longer permanent evidence. These hashes describe
+			// the actual callback result reconstructed from its business facts.
+			if audit.Tools[0].ToolResultSHA256 == "" || audit.Tools[0].ToolResultReplySHA256 == "" {
+				t.Fatal("actual callback proof hashes missing")
 			}
+
 			if f.h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending`) != 1 || f.h.countWhere(`SELECT COUNT(*) FROM logical_turns WHERE status='unknown'`) != 1 {
 				t.Fatal("transport consumption invented business completion")
 			}

@@ -123,7 +123,13 @@ func (c SubmitMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	if c.externalSource {
 		author = "external"
 	}
-	id := x.IDs.New(protocol.PrefixMessage)
+	id := p.MessageID
+	if prior, err := existingMessage(ctx, tx.Q(), p, author, images); err != nil {
+		return Outcome{}, err
+	} else if prior != nil {
+		seq, err := store.GetConversationSeq(ctx, tx.Q(), id)
+		return Outcome{NoEffect: true, Result: map[string]any{"message_id": id, "seq": seq}}, err
+	}
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{
 		ConversationID: p.ConversationID, MessageID: id, Author: author, ClientID: x.Principal.Client, Body: p.Body, ReplyTo: p.ReplyTo,
 		LastSeenSeq: p.LastSeenSeq, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), DecisionJSON: string(choice),
@@ -338,6 +344,7 @@ type RecordAgentMessage struct {
 }
 
 type recordAgentMessagePayload struct {
+	MessageID    string                  `json:"message_id,omitempty"`
 	Body         string                  `json:"body"`
 	ReplyTo      string                  `json:"reply_to"`
 	TurnID       string                  `json:"turn_id"`
@@ -390,6 +397,10 @@ func preserveRecordedReplyPrefix(ctx context.Context, tx *store.Tx, thread strin
 		if err := rows.Scan(&original); err != nil {
 			return err
 		}
+		original, err = store.ResolveJSON(ctx, tx.Q(), original)
+		if err != nil {
+			return err
+		}
 		if !strings.HasPrefix(p.Body, original) {
 			return protocol.Errorf(protocol.CodeUnknownOutcome, "database replay does not preserve the recorded reply prefix")
 		}
@@ -423,6 +434,15 @@ func recordVisibleAgentMessageWithFiles(ctx context.Context, x *Exec, tx *store.
 	if !utf8.ValidString(p.Body) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body must be UTF-8")
 	}
+	if p.MessageID != "" {
+		prior, err := existingMessage(ctx, tx.Q(), protocol.SubmitMessagePayload{MessageID: p.MessageID, Body: p.Body, ReplyTo: p.ReplyTo, Attachments: files}, "main_agent", nil)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if prior != nil {
+			return Outcome{NoEffect: true, Result: map[string]any{"message_id": p.MessageID, "seq": prior.Seq}}, nil
+		}
+	}
 	var id string
 	var seq int64
 	var row store.AgentMessageRow
@@ -453,7 +473,10 @@ func recordVisibleAgentMessageWithFiles(ctx context.Context, x *Exec, tx *store.
 		if p.Body == "" && len(files) == 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "body is required")
 		}
-		id = x.IDs.New(protocol.PrefixMessage)
+		id = p.MessageID
+		if id == "" {
+			id = x.IDs.New(protocol.PrefixMessage)
+		}
 		var err error
 		seq, err = tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: "main_agent", Body: p.Body, ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 		if err != nil {
@@ -951,10 +974,6 @@ func (a *App) Message(ctx context.Context, messageID string) (store.MessageView,
 	return m, err
 }
 
-// maxToolText bounds a tool use's input and output in the conversation;
-// the rest is cut off with a note.
-const maxToolText = 8 << 10
-
 // RecordToolUse handles conversation.record_tool_use: the main agent
 // started or finished using a tool in a turn (D69). The first record of
 // an item adds it to the conversation; later ones update it in place.
@@ -992,7 +1011,7 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	case p.Status != protocol.ToolRunning && p.Status != protocol.ToolCompleted && p.Status != protocol.ToolFailed:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
 	}
-	p.Input, p.Output = clipText(protocol.RedactOwnerToolInput(p.Tool, p.Input)), clipText(p.Output)
+	p.Input = protocol.RedactOwnerToolInput(p.Tool, p.Input)
 	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p); handled || err != nil {
 		return out, err
 	}
@@ -1030,19 +1049,6 @@ func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 		Events: []Event{{ObjectType: "message", ObjectID: u.MessageID, ObjectVersion: seq, Kind: "conversation.tool_use",
 			Body: map[string]any{"author": "main_agent", "seq": seq, "status": u.Status}}},
 	}, nil
-}
-
-// clipText cuts s to maxToolText bytes on a character boundary and says
-// how much was left out.
-func clipText(s string) string {
-	if len(s) <= maxToolText {
-		return s
-	}
-	cut := maxToolText
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", cut, len(s))
 }
 
 // TurnOpen reports whether the turn handling a message is starting or

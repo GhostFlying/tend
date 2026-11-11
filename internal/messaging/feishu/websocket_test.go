@@ -203,13 +203,35 @@ func TestWebSocketRejectsTenantAndOwnerAndPreservesUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = db.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE request_id=(SELECT request_id FROM feishu_inputs LIMIT 1)`)
+		_, err := tx.Exec(t.Context(), `UPDATE feishu_inputs SET state='unknown' WHERE event_id='ev-1'`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = handler.Do(t.Context(), body); err == nil {
+	if _, err = handler.Do(t.Context(), body); err != nil {
+		t.Fatal("committed message did not resolve an uncertain input receipt", err)
+	}
+	if err = db.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO feishu_inputs(event_id,external_message_id,request_id,payload,owner,binding_revision,state) SELECT 'ev-unknown','om-unknown','req_00000000000000000000000031',json_set(payload,'$.EventID','ev-unknown','$.MessageID','om-unknown'),owner,binding_revision,'unknown' FROM feishu_inputs WHERE event_id='ev-1'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unknown := strings.NewReplacer("ev-1", "ev-unknown", "om-1", "om-unknown").Replace(string(body))
+	if _, err = handler.Do(t.Context(), []byte(unknown)); err == nil {
 		t.Fatal("unknown business receipt acknowledged")
+	}
+	if err = db.Read(t.Context(), func(tx *store.ReadTx) error {
+		var messages int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM conversation_messages`).Scan(&messages); err != nil {
+			return err
+		}
+		if messages != 1 {
+			t.Fatal("uncertain input was replayed", messages)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	revoked := *transport
 	revoked.owners = []string{"another-owner"}

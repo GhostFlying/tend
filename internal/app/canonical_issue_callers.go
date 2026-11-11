@@ -80,7 +80,7 @@ func (c IssueFollowupCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	env := *x.Env
 	inner.Env = &env
 	if c.Action == "create" {
-		env.Payload, err = json.Marshal(p.Spec)
+		env.Payload, err = json.Marshal(protocol.CreateFollowupPayload{FollowupSpec: *p.Spec, RuleID: p.RuleID})
 	} else {
 		env.Payload, err = json.Marshal(protocol.UpdateFollowupPayload{Spec: p.Spec})
 	}

@@ -29,6 +29,12 @@ func (YieldQuestion) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	if h == nil || h.DecisionID != p.DecisionID {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "execution has no matching question handoff")
 	}
+	if h.Stopped {
+		if h.ThreadID != p.ThreadID {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "physical session identity changed")
+		}
+		return Outcome{NoEffect: true, Result: map[string]any{"run_id": h.RunID, "decision_id": h.DecisionID, "observed": protocol.RunFinished}}, nil
+	}
 	rc, err := loadRun(ctx, tx.Q(), h.RunID)
 	if err != nil {
 		return Outcome{}, err
@@ -142,23 +148,16 @@ func (a *App) QuestionHandoffReplayCredential(ctx context.Context, run string, e
 	if env.Operation != protocol.OpRunsYieldQuestion || env.Target.Type != "run" || env.Target.ID != run {
 		return "", "", "", store.ErrNotFound
 	}
-	hash, err := protocol.PayloadHash(env)
-	if err != nil {
-		return "", "", "", store.ErrNotFound
-	}
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		if !committedRunReceipt(ctx, tx.Q(), run, env) {
+			return store.ErrNotFound
+		}
+
 		r, err := store.GetRun(ctx, tx.Q(), run)
 		if err != nil {
 			return err
 		}
-		p := protocol.Principal{Kind: protocol.PrincipalRun, Subject: run, Role: r.Role}
-		record, err := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), env.RequestID)
-		if err != nil {
-			return err
-		}
-		if record.Operation != env.Operation || record.PayloadHash != hash || record.Status != protocol.OpSucceeded {
-			return store.ErrNotFound
-		}
+
 		h, err := store.GetQuestionHandoff(ctx, tx.Q(), run)
 		if err != nil {
 			return err

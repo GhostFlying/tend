@@ -118,7 +118,6 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
           sender: client,
           operation: "messaging.send",
           scope: "im",
-          keepSentMs: 0,
         }),
       )
       .then((q) => {

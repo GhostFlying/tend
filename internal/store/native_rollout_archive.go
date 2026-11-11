@@ -192,12 +192,16 @@ func (t *Tx) ApplyNativeRollout(ctx context.Context, p *PreparedNativeRollout) (
 	if current != p.PreviousNext {
 		return receipt, protocol.Errorf(protocol.CodeStaleRevision, "native original advanced while staging")
 	}
-	if _, err := t.Exec(ctx, `INSERT INTO retained_native_sources(host_id,source_id,thread_id,archive_id,next_offset,indexed_offset) VALUES(?,?,?,?,?,?) ON CONFLICT(host_id,source_id) DO UPDATE SET next_offset=excluded.next_offset,indexed_offset=excluded.indexed_offset`, p.Host, p.Input.SourceID, p.Input.ThreadID, p.Window.Archive, receipt.NextOffset, p.Indexed); err != nil {
+	if _, err := t.Exec(ctx, `INSERT OR IGNORE INTO retained_original_archives(archive_id) VALUES(?)`, p.Window.Archive); err != nil {
 		return receipt, err
 	}
-	if _, err := t.Exec(ctx, `INSERT INTO retained_native_chunks(host_id,source_id,byte_offset,byte_length,sha256,indexed_offset) VALUES(?,?,?,?,?,?)`, p.Host, p.Input.SourceID, p.Window.Offset, p.Window.Length, p.Window.SHA256, p.Indexed); err != nil {
+	if _, err := t.Exec(ctx, `INSERT INTO retained_native_source_index(host_id,source_id,thread_id,archive_key,next_offset,indexed_offset) VALUES(?,?,?,(SELECT archive_key FROM retained_original_archives WHERE archive_id=?),?,?) ON CONFLICT(host_id,source_id) DO UPDATE SET next_offset=excluded.next_offset,indexed_offset=excluded.indexed_offset`, p.Host, p.Input.SourceID, p.Input.ThreadID, p.Window.Archive, receipt.NextOffset, p.Indexed); err != nil {
 		return receipt, err
 	}
+	if _, err := t.Exec(ctx, `INSERT INTO retained_native_chunk_index(host_id,source_id,byte_offset,byte_length,sha256,indexed_offset) VALUES(?,?,?,?,?,?)`, p.Host, p.Input.SourceID, p.Window.Offset, p.Window.Length, hashBytes(p.Window.SHA256), p.Indexed); err != nil {
+		return receipt, err
+	}
+
 	// Every accepted chunk is a backup dependency, including an unindexed tail.
 	windows := append([]preparedOriginal{{Window: p.Window, Characters: int64(utf8.RuneCount(p.Input.Data))}}, p.Originals...)
 	for _, original := range windows {

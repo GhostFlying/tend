@@ -514,6 +514,7 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	if cmd.RevisionRoute == "" && *revision != -1 {
 		return usagef("this operation has no control revision")
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	}
@@ -524,6 +525,9 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	env := protocol.Envelope{RequestID: *request, Operation: cmd.Operation, Target: target, Payload: body, Reason: *reason}
 	if *revision >= 0 {
 		env.ExpectedControlRevision = revision
+	}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
 	}
 	if *dry {
 		return (owner{e: e, json: true}).printJSON(env)

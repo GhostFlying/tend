@@ -125,8 +125,8 @@ func TestBoundedRunnerAdmissionReleaseCannotReplacePublishedLineageReceipt(t *te
 	if op.Error == nil || !strings.Contains(op.Error.Message, release.RequestID) {
 		t.Fatal("refusal omitted the original release recovery identity", op, err)
 	}
-	if replay := h.exec(owner, request, ReleaseBoundedRunnerAdmission{}); !reflect.DeepEqual(first, replay) {
-		t.Fatal("original release no longer replays after host CAS changes", first, replay)
+	if replay := h.exec(owner, request, ReleaseBoundedRunnerAdmission{}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || !reflect.DeepEqual(before, upgradeCtl(h, release.HostID)) {
+		t.Fatal("stale release changed published authority", first, replay)
 	}
 }
 

@@ -48,7 +48,7 @@ func TestCreatorAcceptancePolicyCLIUsesNamedControlAndExactReplay(t *testing.T) 
 	})
 	te.out.Reset()
 	te.errOut.Reset()
-	if code := te.main("issue", "replay", "--file", path); code != exitOK {
+	if code := te.main("operation", "submit", "--file", path); code != exitOK {
 		t.Fatal(code, te.errOut.String())
 	}
 	if len(f.requests) != 1 {

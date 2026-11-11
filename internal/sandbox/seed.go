@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/serverkit"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // Demo is the stable seed receipt, not a replacement for live owner views.
@@ -37,9 +39,27 @@ func seedRequest(key string) string {
 }
 
 func (s seeder) execute(ctx context.Context, key string, target protocol.Target, revision *int64, payload any, command app.Command, out any) error {
+	if target.ID == "" {
+		if prefix := protocol.CreationTargetPrefix(command.Operation()); prefix != "" {
+			target.ID = protocol.NativeObjectID(prefix, "sandbox", key)
+		}
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
+	}
+	if identities := protocol.NativePayloadIdentities(command.Operation()); len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		for field, prefix := range identities {
+			if len(fields[field]) == 0 || string(fields[field]) == `""` {
+				fields[field], _ = json.Marshal(protocol.NativeObjectID(prefix, "sandbox", key+"/"+field))
+			}
+		}
+		raw, _ = json.Marshal(fields)
 	}
 	result, err := s.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalOwner, Subject: localOwner, Client: "sandbox-seed"}, &protocol.Envelope{RequestID: seedRequest(key), Operation: command.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, command)
 	if err != nil {
@@ -69,9 +89,27 @@ func (s seeder) admit(ctx context.Context, key string, issue *protocol.Issue) er
 
 func seedCategories(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 	s := seeder{app: a}
-	zero := int64(0)
+	categories := map[string]protocol.AgentCategory{}
+	after := ""
+	for {
+		page, err := a.AgentCategories(ctx, "all", after, 100)
+		if err != nil {
+			return err
+		}
+		for _, item := range page.Items {
+			categories[item.CategoryID] = item
+		}
+		if !page.More {
+			break
+		}
+		after = page.Next
+	}
 	for _, entry := range []struct{ id, title string }{{"sandbox-planner", "沙盒协调与咨询"}, {protocol.DefaultIssueManagerCategory, "沙盒 Issue 负责人"}, {"sandbox-reviewer", "沙盒独立验收"}} {
-		if err := s.execute(ctx, "category-"+entry.id, protocol.Target{Type: "category", ID: entry.id}, &zero, protocol.PutAgentCategoryPayload{Title: entry.title, State: "active"}, app.PutAgentCategory{}, nil); err != nil {
+		current := categories[entry.id]
+		if current.Title == entry.title && current.State == "active" && current.Description == "" {
+			continue
+		}
+		if err := s.execute(ctx, "category-"+entry.id, protocol.Target{Type: "category", ID: entry.id}, &current.Revision, protocol.PutAgentCategoryPayload{Title: entry.title, State: "active"}, app.PutAgentCategory{}, nil); err != nil {
 			return err
 		}
 	}
@@ -79,7 +117,7 @@ func seedCategories(ctx context.Context, a *app.App, _ protocol.IDGen) error {
 }
 
 // SeedDemo only uses real app commands, each with a stable request identity.
-// Replaying a partial seed reuses exact payloads and original returned revisions.
+// Restarting a seed reconstructs actual objects and reads their current revisions.
 func SeedDemo(ctx context.Context, runtime *serverkit.Runtime, root string) (Demo, error) {
 	return seedDemo(ctx, runtime, root, false, false)
 }
@@ -136,6 +174,9 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 			return demo, err
 		}
 		demo.Issues = append(demo.Issues, issue.IssueID)
+		if issue.BoardStatus() == status {
+			continue
+		}
 		if status != protocol.IssueBacklog && status != protocol.IssueWorkCancelled {
 			if err := s.admit(ctx, key, &issue); err != nil {
 				return demo, err
@@ -180,6 +221,24 @@ func seedDemo(ctx context.Context, runtime *serverkit.Runtime, root string, skip
 		}
 		if err := s.execute(ctx, key, protocol.Target{Type: "issue"}, nil, p, app.CanonicalOwnerIssueCommand{Action: "create"}, &issue); err != nil {
 			return demo, err
+		}
+		// Completed seed work is reconstructed from its actual Task, without
+		// replaying setup writes against a later Issue revision.
+		taskID := protocol.NativeObjectID(protocol.PrefixTask, "sandbox", key+"-task/task_id")
+		var taskExists bool
+		if err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
+			_, err := store.GetTask(ctx, tx.Q(), taskID)
+			taskExists = err == nil
+			if errors.Is(err, store.ErrNotFound) {
+				return nil
+			}
+			return err
+		}); err != nil {
+			return demo, err
+		}
+		if taskExists {
+			demo.Tasks = append(demo.Tasks, taskID)
+			continue
 		}
 		if err := s.execute(ctx, key+"-progress", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.UpdateIssueProgressPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Summary: "示例要求已确认，等待脚本主机执行。", NextStep: "检查报告与独立验收"}, app.UpdateIssueProgress{}, nil); err != nil {
 			return demo, err

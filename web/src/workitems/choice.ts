@@ -1,6 +1,7 @@
 import type { Envelope, WorkItemChoice } from "../api/generated/api.ts";
 import { newRequestId } from "../api/ids.ts";
-import { runOp, settleOp, type OpOutcome, type OpSender } from "../app/ops.ts";
+import { runOp, type OpOutcome, type OpSender } from "../app/ops.ts";
+import { recoverOperation } from "../app/operationRecovery.ts";
 import { Store } from "../state/store.ts";
 
 export interface ChoiceResponseState {
@@ -35,18 +36,10 @@ export class ChoiceResponse {
     if (before.pending || !before.unknown) return;
     this.state.set({ ...before, pending: true });
     try {
-      const receipt = await this.sender.lookup(before.unknown.envelope.request_id);
-      if (receipt)
-        this.settle(
-          settleOp(receipt.status, receipt.result, receipt.error),
-          before.unknown.envelope,
-        );
-      else
-        this.state.set({
-          pending: false,
-          message: "尚未查到回答，可重试原请求。",
-          unknown: { ...before.unknown, missing: true },
-        });
+      this.settle(
+        await recoverOperation(this.sender, before.unknown.envelope),
+        before.unknown.envelope,
+      );
     } catch {
       this.state.set({
         ...before,

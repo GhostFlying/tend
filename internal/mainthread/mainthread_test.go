@@ -117,6 +117,23 @@ func (e *env) stop() {
 func (e *env) exec(p protocol.Principal, op string, target protocol.Target, payload any, cmd app.Command) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(payload)
+	if prefix := protocol.CreationTargetPrefix(op); prefix != "" && target.ID == "" {
+		target.ID = e.ids.New(prefix)
+	}
+	identities := protocol.NativePayloadIdentities(op)
+	if op == protocol.OpRunnerClaim {
+		identities = map[string]protocol.Prefix{"run_id": protocol.PrefixRun}
+	}
+	if len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(b, &fields)
+		for key, prefix := range identities {
+			if len(fields[key]) == 0 || string(fields[key]) == `""` || string(fields[key]) == "null" {
+				fields[key], _ = json.Marshal(e.ids.New(prefix))
+			}
+		}
+		b, _ = json.Marshal(fields)
+	}
 	if op == protocol.OpRunnerHello || op == protocol.OpRunnerClaim {
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(b, &fields)

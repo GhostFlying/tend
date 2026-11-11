@@ -65,7 +65,7 @@ func TestArtifactShareCLIUsesExactOriginalControlAndPagination(t *testing.T) {
 			})
 			e.out.Reset()
 			e.errOut.Reset()
-			if code := e.main("issue", "replay", "--file", file); code != exitOK || len(f.seen("POST /api/v1/ops")) != 1 {
+			if code := e.main("operation", "submit", "--file", file); code != exitOK || len(f.seen("POST /api/v1/ops")) != 1 {
 				t.Fatal(code, e.errOut.String())
 			}
 		})

@@ -20,7 +20,7 @@ func TestIssueDeploymentPreparationOwnerAPIAndNativeCLIShareReadOnlyProjection(t
 		t.Helper()
 		var v [3]int64
 		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM request_records), (SELECT COUNT(*) FROM events), (SELECT COUNT(*) FROM outbox)`).Scan(&v[0], &v[1], &v[2])
+			return tx.Q().QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM issue_controls), (SELECT COUNT(*) FROM events), (SELECT COUNT(*) FROM outbox)`).Scan(&v[0], &v[1], &v[2])
 		}); err != nil {
 			t.Fatal(err)
 		}

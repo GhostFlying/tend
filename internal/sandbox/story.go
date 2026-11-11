@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -150,7 +149,7 @@ func restoreCompletedStory(ctx context.Context, runtime *serverkit.Runtime, demo
 	var issueID, taskID, attentionID string
 	err := runtime.Store.Read(ctx, func(tx *store.ReadTx) error {
 		var conversation string
-		err := tx.Q().QueryRowContext(ctx, `SELECT DISTINCT m.conversation_id FROM conversation_messages m JOIN logical_turn_messages lm USING(message_id) JOIN logical_turns l USING(logical_turn_id) JOIN logical_turn_executions e USING(logical_turn_id) JOIN main_turns t ON t.request_id=e.request_id WHERE m.request_id=? AND m.author='owner' AND l.status='completed' AND t.status='completed'`, seedRequest("story-summary-0")).Scan(&conversation)
+		err := tx.Q().QueryRowContext(ctx, `SELECT DISTINCT m.conversation_id FROM conversation_messages m JOIN logical_turn_messages lm USING(message_id) JOIN logical_turns l USING(logical_turn_id) JOIN logical_turn_executions e USING(logical_turn_id) JOIN main_turns t ON t.request_id=e.request_id WHERE m.message_id=? AND m.author='owner' AND l.status='completed' AND t.status='completed'`, protocol.NativeObjectID(protocol.PrefixMessage, "sandbox", "story-summary-0/message_id")).Scan(&conversation)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -172,16 +171,17 @@ func restoreCompletedStory(ctx context.Context, runtime *serverkit.Runtime, demo
 		if err != nil || len(tasks) != 1 {
 			return err
 		}
-		record, err := store.GetRequest(ctx, tx.Q(), "owner", seedRequest("story-answer"))
-		if errors.Is(err, store.ErrNotFound) {
+		var resolvedAttentionID string
+		err = tx.Q().QueryRowContext(ctx, `SELECT attention_id FROM attentions WHERE issue_id=? AND kind='decision' AND COALESCE(json_extract(body_json,'$.task_id'),'')='' AND status='resolved' ORDER BY updated_at DESC LIMIT 1`, issue.IssueID).Scan(&resolvedAttentionID)
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		if err != nil || record.Status != protocol.OpSucceeded || record.Operation != "attentions.respond" {
+		if err != nil {
 			return err
 		}
-		var attention protocol.Attention
-		if err := json.Unmarshal([]byte(record.ResultJSON), &attention); err != nil {
-			return fmt.Errorf("read original story answer: %w", err)
+		attention, err := store.GetAttention(ctx, tx.Q(), resolvedAttentionID)
+		if err != nil {
+			return err
 		}
 		if attention.IssueID == issue.IssueID && attention.TaskID == "" && attention.Status == "resolved" && attention.AttentionID != "" {
 			issueID, taskID, attentionID = issue.IssueID, tasks[0], attention.AttentionID

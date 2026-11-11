@@ -101,8 +101,8 @@ func TestAttentionHumanActionsAndPresentationHaveSeparateMeaning(t *testing.T) {
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if replay := h.exec(owner, confirm, AttentionCommand{Action: "confirm"}); replay.Status != protocol.OpSucceeded || string(replay.Result) != string(op.Result) {
-		t.Fatal("owner confirmation replay changed", replay)
+	if replay := h.exec(owner, confirm, AttentionCommand{Action: "confirm"}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || readAttentionForTest(t, h, a.AttentionID).Status != "resolved" {
+		t.Fatal("confirmation did not retain current resolved state", replay)
 	}
 	info := attentionForTest(t, h, protocol.CreateAttentionPayload{IssueID: issue.IssueID, Kind: "information", Title: "Read this when useful"})
 	if info.BlocksClose {

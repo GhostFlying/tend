@@ -57,7 +57,7 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		child := *x
 		env := *x.Env
 		child.Env = &env
-		env.Payload, _ = json.Marshal(protocol.MessagingPublication{Body: p.Body, ReplyTo: p.ReplyTo, Attachments: p.Attachments, Purpose: p.Purpose})
+		env.Payload, _ = json.Marshal(protocol.MessagingPublication{MessageID: p.MessageID, Body: p.Body, ReplyTo: p.ReplyTo, Attachments: p.Attachments, Purpose: p.Purpose})
 		return (PublishCommunication{}).Apply(ctx, &child, tx)
 	}
 	if p.Purpose != "progress" && p.Purpose != "final" {
@@ -121,11 +121,14 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		}
 		replyTo = p.ReplyTo
 	}
-	env.Payload, _ = json.Marshal(recordAgentMessagePayload{Body: p.Body, ReplyTo: replyTo, ReplySources: sources, TurnID: turn.TurnID, ItemID: "reply:" + x.Env.RequestID})
+	env.Payload, _ = json.Marshal(recordAgentMessagePayload{MessageID: p.MessageID, Body: p.Body, ReplyTo: replyTo, ReplySources: sources, TurnID: turn.TurnID, ItemID: "reply:" + p.MessageID})
 	// This is explicit publication; ordinary native background prose may buffer.
 	out, err := recordVisibleAgentMessageWithFiles(ctx, &child, tx, p.Attachments)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if out.NoEffect {
+		return out, nil
 	}
 	result, ok := out.Result.(map[string]any)
 	if !ok {
@@ -186,7 +189,7 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		}
 		result["background_batch_id"] = batch.BatchID
 	}
-	if err := publishExistingCommunication(ctx, x, tx, id, protocol.MessagingPublication{Body: p.Body, ReplyTo: replyTo, Attachments: p.Attachments, Purpose: p.Purpose}, execution); err != nil {
+	if err := publishExistingCommunication(ctx, x, tx, id, protocol.MessagingPublication{MessageID: p.MessageID, Body: p.Body, ReplyTo: replyTo, Attachments: p.Attachments, Purpose: p.Purpose}, execution); err != nil {
 		return Outcome{}, err
 	}
 	out.Notify = true

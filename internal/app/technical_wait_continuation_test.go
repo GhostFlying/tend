@@ -83,8 +83,8 @@ func TestStoppedResponsibilityAdoptionResumesAndClaimsOriginalTask(t *testing.T)
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal("same-Agent stopped responsibility could not resume", op)
 	}
-	if again := f.h.exec(owner, env, ResumeDecisionContinuation{}); !reflect.DeepEqual(again, op) {
-		t.Fatal("resume did not retain its exact receipt", again, op)
+	if again := f.h.exec(owner, env, ResumeDecisionContinuation{}); again.Status != protocol.OpFailed || protocol.CodeOf(again.Error) != protocol.CodeStaleRevision {
+		t.Fatal("resume retry bypassed the original continuation revision", again, op)
 	}
 	next := ownerWorkerClaim(t, f.h, f.runtime, protocol.RoleImplement)
 	if next.TaskID != f.task || next.Generation != f.as.Generation || next.SpecVersion != f.as.SpecVersion || next.QuestionContinuation == nil || next.Responsibility == nil || next.Responsibility.AssignmentEpoch != issue.AssignmentEpoch || !reflect.DeepEqual(next.Execution, f.as.Execution) {

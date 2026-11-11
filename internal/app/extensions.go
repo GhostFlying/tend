@@ -254,16 +254,7 @@ func (a *App) PublishExtensionDraft(ctx context.Context, p protocol.Principal, e
 	cmd := PublishExtensions{Rollback: rollback}
 	var candidate protocol.ExtensionRelease
 	var uses []extensions.ValidationUse
-	replayed := false
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		_, err := ownerRequestRecord(ctx, tx.Q(), p, env.RequestID)
-		if err == nil {
-			replayed = true
-			return nil
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
 		s, err := store.GetExtensionState(ctx, tx.Q())
 		if err != nil {
 			return err
@@ -297,7 +288,7 @@ func (a *App) PublishExtensionDraft(ctx context.Context, p protocol.Principal, e
 		}
 		return protocol.Operation{}, err
 	}
-	if !replayed {
+	{
 		if a.extensionValidator == nil {
 			cmd.validationError = protocol.Errorf(protocol.CodeInvalidTransition, "native extension validation is unavailable on this server")
 			return a.Execute(ctx, p, env, cmd)

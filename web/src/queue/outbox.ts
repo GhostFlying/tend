@@ -17,6 +17,8 @@ export interface OutgoingAttachment {
   blob: Blob;
   /** Saved before starting transport, so reload first reconciles this ID. */
   attempted?: boolean;
+  /** An explicit unknown business result is not a missing transport response. */
+  unknown?: boolean;
   receipt?: ConversationAttachment;
 }
 
