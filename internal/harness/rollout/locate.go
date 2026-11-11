@@ -15,8 +15,9 @@ import (
 func Open(roots []string, path string) (*os.File, error) {
 	missing := false
 	for _, root := range roots {
-		rel, err := filepath.Rel(root, path)
-		if err != nil || !filepath.IsLocal(rel) {
+		rel, err := relativeToRoot(root, path)
+		if err != nil {
+			missing = missing || errors.Is(err, os.ErrNotExist)
 			continue
 		}
 		dir, err := os.OpenRoot(root)
@@ -37,6 +38,28 @@ func Open(roots []string, path string) (*os.File, error) {
 		return nil, os.ErrNotExist
 	}
 	return nil, fs.ErrPermission
+}
+
+// relativeToRoot recognizes native canonical paths and configured directory
+// aliases. Only ancestors are resolved: the leaf is still opened through
+// os.Root, so resolving an alias never authorizes a symlink outside the root.
+func relativeToRoot(root, path string) (string, error) {
+	if rel, err := filepath.Rel(root, path); err == nil && filepath.IsLocal(rel) {
+		return rel, nil
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(canonicalRoot, filepath.Join(parent, filepath.Base(path)))
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", fs.ErrPermission
+	}
+	return rel, nil
 }
 
 // Locate uses names only to narrow candidates; the native header proves the identity.
