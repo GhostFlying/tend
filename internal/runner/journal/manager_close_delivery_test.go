@@ -74,7 +74,7 @@ func TestManagerCloseDeliveryMigrationDoesNotInferHistoricalReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = legacy.ExecContext(t.Context(), `ALTER TABLE manager_native_operations DROP COLUMN reply_delivered; PRAGMA user_version=24;`); err != nil {
+	if _, err = legacy.ExecContext(t.Context(), `DROP INDEX runs_archive_pending; ALTER TABLE runs DROP COLUMN archive_generation; ALTER TABLE runs DROP COLUMN archive_uploaded_generation; ALTER TABLE manager_native_operations DROP COLUMN reply_delivered; PRAGMA user_version=24;`); err != nil {
 		t.Fatal(err)
 	}
 	if err = legacy.Close(); err != nil {
@@ -88,7 +88,7 @@ func TestManagerCloseDeliveryMigrationDoesNotInferHistoricalReceipt(t *testing.T
 	if err := j.db.QueryRowContext(t.Context(), `PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if err != nil || closeErr != nil || delivered || closed == nil || version != 25 {
+	if err != nil || closeErr != nil || delivered || closed == nil || int64(version) != CurrentVersion {
 		t.Fatal("migration fabricated historical acceptance or removed close proof", version, delivered, closed, err, closeErr)
 	}
 }

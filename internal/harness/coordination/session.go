@@ -368,6 +368,43 @@ type Driver struct {
 	tools               map[string]chan harness.ToolResult
 	wg                  sync.WaitGroup
 	closing             bool
+	failures            chan error
+}
+
+// Failures reports transport failures to the execution supervisor. A live
+// provider process does not mean its event consumer is still functioning.
+func (d *Driver) Failures() <-chan error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.failures == nil {
+		d.failures = make(chan error, 1)
+	}
+	return d.failures
+}
+
+func (d *Driver) emit(ctx context.Context, event Event) error {
+	err := d.Emit(ctx, event)
+	if err != nil && ctx.Err() == nil {
+		kind := "tool_callback"
+		turn, call := "", ""
+		if event.Native != nil {
+			kind = string(event.Native.Kind)
+			turn = event.Native.TurnID
+		} else if event.Disconnected {
+			kind = "disconnected"
+		} else if event.Call != nil {
+			turn, call = event.Call.TurnID, event.Call.CallID
+		}
+		failure := fmt.Errorf("coordinator event %s thread %s turn %s call %s: %w", kind, event.ThreadID, turn, call, err)
+		d.Failures()
+		d.mu.Lock()
+		select {
+		case d.failures <- failure:
+		default:
+		}
+		d.mu.Unlock()
+	}
+	return err
 }
 
 func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage) (any, error) {
@@ -506,11 +543,11 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 							closing := d.closing || d.private[t.ID()]
 							d.mu.Unlock()
 							if !closing {
-								_ = d.Emit(ctx, Event{ThreadID: t.ID(), Disconnected: true})
+								_ = d.emit(ctx, Event{ThreadID: t.ID(), Disconnected: true})
 							}
 							return
 						}
-						if d.Emit(ctx, Event{ThreadID: t.ID(), Native: &e}) != nil {
+						if d.emit(ctx, Event{ThreadID: t.ID(), Native: &e}) != nil {
 							return
 						}
 					}
@@ -639,8 +676,11 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 		return harness.ToolResult{Success: true, Text: string(raw)}
 	}
 
-	if err := d.Emit(ctx, Event{ThreadID: call.ThreadID, Call: &call}); err != nil {
-		return harness.ToolResult{Text: "Coordinator connection requires reconciliation"}
+	if err := d.emit(ctx, Event{ThreadID: call.ThreadID, Call: &call}); err != nil {
+		if ctx.Err() != nil {
+			return harness.ToolResult{Text: "Coordinator execution ended before tool event delivery; preserve the original call for reconciliation"}
+		}
+		return harness.ToolResult{Text: "Coordinator tool event delivery failed; the execution supervisor has been notified. Preserve the original call for reconciliation"}
 	}
 	select {
 	case result := <-ch:

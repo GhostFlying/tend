@@ -23,7 +23,11 @@ func (r *Runner) registerRollout(ctx context.Context, run string, source protoco
 	if deployment == "" || len(r.cfg.RolloutRoots) == 0 || source.SessionID == "" {
 		return nil
 	}
-	return r.cfg.Journal.RegisterRollout(ctx, deployment, run, source)
+	err := r.cfg.Journal.RegisterRollout(ctx, deployment, run, source)
+	if err == nil {
+		r.wakeRolloutArchive()
+	}
+	return err
 }
 func (r *Runner) recordRolloutEvent(ctx context.Context, run string, ev harness.WorkerEvent) error {
 	// Lifecycle and child identity facts cover new turns without adding a journal

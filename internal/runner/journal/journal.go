@@ -28,7 +28,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 25
+const CurrentVersion int64 = 26
 
 // Run phases.
 const (
@@ -609,7 +609,7 @@ func (j *Journal) AppendEvent(ctx context.Context, runID string, e protocol.RunE
 		if err != nil {
 			return fmt.Errorf("journal: append event: %w", err)
 		}
-		return nil
+		return dirtyArchive(ctx, tx, runID)
 	})
 }
 

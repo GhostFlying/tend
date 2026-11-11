@@ -18,9 +18,8 @@ import (
 
 const rolloutArchiveChunkBytes = protocol.MaxNativeRolloutChunkBytes
 
-// syncRolloutArchive runs before event projection. Original file bytes are
-// durable on the server before it attempts to replace event bodies with offsets.
-// Protocol 2 and executions without configured originals keep their old path.
+// syncRolloutArchive performs one bounded transport attempt, independently of
+// event or business delivery. Only acknowledged bytes advance the saved cursor.
 func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment) error {
 	r.controlMu.Lock()
 	deployment, version := r.previewDeployment, r.runnerProtocol
@@ -30,15 +29,12 @@ func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment)
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
 	defer cancel()
-	select {
-	case r.rolloutArchiveGate <- struct{}{}:
-		defer func() { <-r.rolloutArchiveGate }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 	sources, err := r.cfg.Journal.RolloutSources(ctx, deployment, as.RunID)
 	if err != nil {
 		return err
+	}
+	if len(sources) == 0 {
+		return errors.New("runner: rollout archive has no registered source for this deployment")
 	}
 	seen := map[string]bool{}
 	for _, source := range sources {
@@ -54,6 +50,11 @@ func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment)
 }
 
 func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as protocol.Assignment, source protocol.RolloutPreviewSource) error {
+	unlock, err := r.lockArchiveSource(ctx, deployment+"/"+source.SessionID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	saved, err := r.cfg.Journal.RolloutArchive(ctx, deployment, source.SessionID)
 	if err != nil {
 		return err
@@ -72,8 +73,8 @@ func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as pr
 			return err
 		}
 		if source.Path == "" {
-			// A missing locator is not permission to read a different session.
-			return nil
+			// Missing originals stay pending; EOF was not observed.
+			return errors.New("runner: rollout archive original is not yet available")
 		}
 		if err := r.registerRollout(ctx, as.RunID, source); err != nil {
 			return err

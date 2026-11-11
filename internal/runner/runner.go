@@ -173,7 +173,9 @@ type Runner struct {
 	previewSupported    bool
 	previewDeployment   string
 	previewWake         chan struct{}
-	rolloutArchiveGate  chan struct{}
+	archiveWake         chan struct{}
+	archiveMu           sync.Mutex
+	archiveLocks        map[string]*archiveSourceLock
 
 	runnerProtocol int64
 	cfg            Config
@@ -249,7 +251,7 @@ func New(cfg Config) *Runner {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
-	return &Runner{previewWake: make(chan struct{}, 1), rolloutArchiveGate: make(chan struct{}, 1),
+	return &Runner{previewWake: make(chan struct{}, 1), archiveWake: make(chan struct{}, 1), archiveLocks: map[string]*archiveSourceLock{},
 		cfg:                  cfg,
 		runnerProtocol:       protocol.PreviousRunnerProtocol,
 		bootstrapMaintenance: cfg.InitialMaintenance,
@@ -332,6 +334,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if len(r.cfg.RolloutRoots) > 0 {
 		r.wg.Go(func() { r.rolloutPreviews(ctx) })
+		r.wg.Go(func() { r.rolloutArchives(ctx) })
 	}
 	if r.cfg.Executions != nil {
 		r.requestReconcile()

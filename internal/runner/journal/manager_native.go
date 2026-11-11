@@ -145,7 +145,10 @@ func (j *Journal) SaveManagerEvent(ctx context.Context, run string, env *protoco
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE manager_event_sequences SET next_seq=next_seq+1 WHERE run_id=?`, run)
-		return err
+		if err != nil {
+			return err
+		}
+		return dirtyArchive(ctx, tx, run)
 	})
 }
 
