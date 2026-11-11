@@ -84,6 +84,7 @@ type Manager struct {
 	active             *turn
 	maintenanceBlocked bool
 	compactRecovery    bool // original compact event stream, never fresh native work
+	historyAttachment  bool // non-executing native receipt handle
 	lastActivity       time.Time
 	toolSourceMu       sync.Mutex // serializes callback source binding with visible tool records
 	usageIndex         *nativeusage.Discovery
@@ -188,6 +189,9 @@ func (m *Manager) Run(ctx context.Context) error {
 // handles the thread's events until the session ends.
 func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	started := false
+	m.mu.Lock()
+	m.historyAttachment = false
+	m.mu.Unlock()
 	defer func() { m.mu.Lock(); m.compactRecovery = false; m.mu.Unlock() }()
 	var startupAttachment app.AgentStartupAttachment
 	diagnostics := m.sessionDiagnostics(nil)
@@ -341,8 +345,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			return err
 		}
 	}
+	var historyExit <-chan struct{}
 	m.mu.Lock()
 	m.session, m.thread = s, th
+	if m.historyAttachment {
+		historyExit = s.Done()
+	}
 	if !remote {
 		m.archiveStarting = false
 	}
@@ -577,7 +585,24 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-historyExit:
+			return errors.New("mainthread: the native session ended")
 		case <-ticker.C:
+			m.mu.Lock()
+			historyOnly := m.historyAttachment
+			m.mu.Unlock()
+			// Named receipt-only Runs are closed by their pool. The shared
+			// front thread instead survives a cancelled preparation and must
+			// reopen normal execution before any new input can be admitted.
+			if historyOnly && (!named || !selected.ReceiptOnly && !selected.RequireReceiptReader) {
+				current, err := m.app.ArchivePreparation(ctx)
+				if err != nil {
+					return err
+				}
+				if !current.Prepared {
+					return nil
+				}
+			}
 			if compactRecovery {
 				pending, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID)
 				if err != nil {
@@ -619,6 +644,7 @@ func (m *Manager) detach(th harness.Thread) harness.Session {
 	}
 	s := m.session
 	m.session, m.thread = nil, nil
+	m.historyAttachment = false
 	m.ready = make(chan struct{})
 	return s
 }
@@ -802,7 +828,13 @@ func (m *Manager) openThread(ctx context.Context, s harness.Session, compactThre
 		// Never replace a rejected thread, migrate its toolset or run a model.
 		cfg := m.threadConfig()
 		cfg.Purpose = harness.ReceiptHistoryPurpose
-		return s.ResumeThread(ctx, id, cfg)
+		th, err := s.ResumeThread(ctx, id, cfg)
+		if err == nil {
+			m.mu.Lock()
+			m.historyAttachment = true
+			m.mu.Unlock()
+		}
+		return th, err
 	}
 
 	if environmentResumeOnly(s) && selected != nil && selected.Purpose == agentconfig.Consultation {
@@ -1000,7 +1032,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		return harness.ToolResult{Text: "Receipt-only attachments cannot execute native tool callbacks."}
 	}
 	m.mu.Lock()
-	blocked := m.compactRecovery || m.maintenanceBlocked || (m.cfg.MaintenanceEnabled && (m.thread == nil || m.thread.ID() != c.ThreadID))
+	blocked := m.compactRecovery || m.historyAttachment || m.maintenanceBlocked || (m.cfg.MaintenanceEnabled && (m.thread == nil || m.thread.ID() != c.ThreadID))
 	m.mu.Unlock()
 	if blocked {
 		return harness.ToolResult{Text: "Tend tools are disabled while preparing a conversation handoff."}
@@ -1139,10 +1171,10 @@ func (m *Manager) waitThread(ctx context.Context) (harness.Thread, error) {
 // thread as one turn and returns when the turn ended.
 func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult {
 	m.mu.Lock()
-	compactRecovery := m.compactRecovery
+	compactRecovery := m.compactRecovery || m.historyAttachment
 	m.mu.Unlock()
 	if compactRecovery {
-		return retry(errors.New("native compact attachment must finish normal toolset startup before new work"))
+		return retry(errors.New("native recovery attachment must finish normal startup before new work"))
 	}
 	if selected := m.namedSelection(); selected != nil && selected.RequireReceiptReader {
 		return app.DeliveryResult{Outcome: app.Retry, Reason: "Receipt-only attachments cannot start native work."}
@@ -1166,10 +1198,10 @@ func (m *Manager) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResul
 	m.workMu.Lock()
 	defer m.workMu.Unlock()
 	m.mu.Lock()
-	compactRecovery = m.compactRecovery
+	compactRecovery = m.compactRecovery || m.historyAttachment
 	m.mu.Unlock()
 	if compactRecovery {
-		return retry(errors.New("native compact attachment must finish normal toolset startup before new work"))
+		return retry(errors.New("native recovery attachment must finish normal startup before new work"))
 	}
 	if blocked, err := m.app.AgentRecoveryUncertain(ctx, m.cfg.ConversationID); err != nil {
 		return retry(err)
@@ -1463,6 +1495,12 @@ wait:
 // Reconcile implements dispatch.Handler for a delivery a previous process
 // left in the middle.
 func (m *Manager) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResult {
+	m.mu.Lock()
+	historyOnly := m.historyAttachment
+	m.mu.Unlock()
+	if historyOnly && (d.Operation == "conversation.compact" || d.Operation == "conversation.handoff") {
+		return app.DeliveryResult{Outcome: app.Unknown, Reason: "History attachments cannot resume native maintenance."}
+	}
 	if d.Operation == "conversation.compact" {
 		return m.reconcileCompact(ctx, d)
 	}
