@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -134,13 +135,8 @@ func backupDataContext(ctx context.Context, cfg Config, op *Operation) error {
 		if err := persistBackupFile(ctx, cfg, op, &f, p); err != nil {
 			return err
 		}
-		dst, err := backupFilePath(cfg, op.BackupDir, f)
-		if err != nil {
+		if err := copyBackupContents(ctx, cfg, op.BackupDir, f, io.Discard); err != nil {
 			return err
-		}
-		sum, err := hashBackupFile(ctx, dst)
-		if err != nil || sum != f.SHA256 {
-			return errors.New("updater: backup verification failed")
 		}
 		files = append(files, f)
 	}
@@ -164,11 +160,7 @@ func restoreData(cfg Config, op *Operation) error {
 			}
 		}
 		if f.Existed {
-			source, err := backupFilePath(cfg, op.BackupDir, f)
-			if err != nil {
-				return err
-			}
-			if err := copyAtomic(source, f.Path, os.FileMode(f.Mode)); err != nil {
+			if err := restoreBackupFile(context.Background(), cfg, op.BackupDir, f); err != nil {
 				return err
 			}
 		} else {

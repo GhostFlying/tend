@@ -15,12 +15,20 @@ type BackupPolicy struct {
 }
 
 type BackupFile struct {
-	Path         string `json:"path"`
-	Name         string `json:"name"`
-	Existed      bool   `json:"existed"`
-	SHA256       string `json:"sha256,omitempty"`
-	ObjectSHA256 string `json:"object_sha256,omitempty"`
-	Mode         uint32 `json:"mode"`
+	Path         string             `json:"path"`
+	Name         string             `json:"name"`
+	Existed      bool               `json:"existed"`
+	SHA256       string             `json:"sha256,omitempty"`
+	ObjectSHA256 string             `json:"object_sha256,omitempty"`
+	ObjectParts  []BackupObjectPart `json:"object_parts,omitempty"`
+	Mode         uint32             `json:"mode"`
+}
+
+// BackupObjectPart is one complete immutable CAS object, in file order. Parts
+// are flat: they cannot refer to another checkpoint or manifest.
+type BackupObjectPart struct {
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
 }
 
 type BackupCheckpoint struct {

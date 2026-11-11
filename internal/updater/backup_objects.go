@@ -19,6 +19,9 @@ func backupObjectStore(cfg Config) (*blobstore.Store, error) {
 // immutable original/spool bytes share the existing content-addressed facility.
 func persistBackupFile(ctx context.Context, cfg Config, op *Operation, f *BackupFile, source string) error {
 	if configuredOriginal(cfg, source) && cfg.StateDir != "" {
+		if reused, err := reuseBackupPrefix(ctx, cfg, op, f, source); reused || err != nil {
+			return err
+		}
 		s, err := backupObjectStore(cfg)
 		if err != nil {
 			return err
@@ -55,6 +58,9 @@ func persistBackupFile(ctx context.Context, cfg Config, op *Operation, f *Backup
 }
 
 func backupFilePath(cfg Config, directory string, f BackupFile) (string, error) {
+	if len(f.ObjectParts) != 0 {
+		return "", errors.New("updater: multipart backup requires a streaming reader")
+	}
 	if f.ObjectSHA256 != "" {
 		if f.ObjectSHA256 != f.SHA256 || !configuredOriginal(cfg, f.Path) || cfg.StateDir == "" {
 			return "", errors.New("updater: invalid shared backup object")
@@ -83,23 +89,8 @@ func verifyBackupFiles(cfg Config, directory string, files []BackupFile) error {
 		if !f.Existed {
 			continue
 		}
-		path, err := backupFilePath(cfg, directory, f)
-		if err != nil {
+		if err := copyBackupContents(context.Background(), cfg, directory, f, io.Discard); err != nil {
 			return err
-		}
-		st, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		if !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
-			return errors.New("updater: backup is not a regular file")
-		}
-		hash, err := hashFile(path)
-		if err != nil {
-			return err
-		}
-		if hash != f.SHA256 {
-			return errors.New("updater: corrupt backup content")
 		}
 	}
 	return nil
