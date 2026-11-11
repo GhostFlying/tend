@@ -22,6 +22,7 @@ type PreparedNativeRollout struct {
 	PreviousNext, PreviousIndexed int64
 	Indexed                       int64
 	Originals                     []preparedOriginal
+	Values                        []preparedOriginal
 	Replay                        bool
 	Binding                       bool
 }
@@ -165,6 +166,11 @@ func (s *Store) PrepareNativeRollout(ctx context.Context, host string, p protoco
 				batch := OriginalImportBatch{whole: preparedOriginal{Window: prepared.Window}}
 				indexOriginalJSON(&batch, trimmed, start+int64(bytes.Index(record, trimmed)), 0)
 				prepared.Originals = append(prepared.Originals, batch.originals...)
+				values, err := s.prepareLateNativeValues(ctx, trimmed, start+int64(bytes.Index(record, trimmed)), batch.originals)
+				if err != nil {
+					return nil, err
+				}
+				prepared.Values = append(prepared.Values, values...)
 			}
 		}
 		// Oversized lines remain in their original chunks. The preview reader has
@@ -206,6 +212,11 @@ func (t *Tx) ApplyNativeRollout(ctx context.Context, p *PreparedNativeRollout) (
 	windows := append([]preparedOriginal{{Window: p.Window, Characters: int64(utf8.RuneCount(p.Input.Data))}}, p.Originals...)
 	for _, original := range windows {
 		if _, err := t.bindOriginalWindow(ctx, original); err != nil {
+			return receipt, err
+		}
+	}
+	for _, value := range p.Values {
+		if err := t.bindLateNativeValue(ctx, value); err != nil {
 			return receipt, err
 		}
 	}

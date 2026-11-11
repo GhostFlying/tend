@@ -295,7 +295,7 @@ func (s *Store) prepareOpaqueOriginal(ctx context.Context, stream string, raw []
 			return &cached, nil
 		}
 	}
-	p := &preparedOriginal{Characters: int64(utf8.RuneCount(raw))}
+	p := &preparedOriginal{Characters: int64(utf8.RuneCount(raw)), StringSHA256: bodyHash(quoted)}
 	err := s.read.QueryRowContext(ctx, `SELECT body_id FROM retained_original_values WHERE sha256=?`, hashBytes(hash)).Scan(&p.ValueID)
 	if err == nil {
 		p.Reference, err = loadOriginalValue(ctx, fileQuerier{s.read, s.files}, p.ValueID)
