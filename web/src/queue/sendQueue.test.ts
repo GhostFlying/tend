@@ -802,6 +802,32 @@ test("source files recover by content and the actual message ID without entering
   });
   expect(effects).toBe(1);
   expect(uploads).toBe(2);
+  expect(reloaded.list.get()[0]?.envelope.payload).toEqual(sender.submitted[0]?.payload);
+  expect(reloaded.list.get()[0]?.uploads).toBeUndefined();
+  expect(reloaded.list.get()[0]?.references).toBeUndefined();
+  expect(await stored()).toEqual([]);
+  expect((await open(options)).list.get()).toEqual([]);
+});
+
+test("a confirmed source preserves the open form's definition only in memory", async () => {
+  const q = await open({ operation: "conversation.inject_source", scope: "manual:main" });
+  await q.enqueueSource(
+    { body: "original source" },
+    { author: "Original author", url: "https://example.invalid/source" },
+  );
+  await q.idle();
+  expect(q.list.get()[0]).toMatchObject({
+    state: "sent",
+    envelope: {
+      payload: {
+        text: "original source",
+        metadata: { author: "Original author", url: "https://example.invalid/source" },
+      },
+    },
+  });
+  expect(await stored()).toEqual([]);
+  expect(q.list.get()[0]?.uploads).toBeUndefined();
+  expect(q.list.get()[0]?.references).toBeUndefined();
 });
 
 function messageEntry(id: string, seq: number): BusinessMessage {

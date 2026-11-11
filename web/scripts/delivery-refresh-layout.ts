@@ -68,9 +68,7 @@ const streams = new Set<ServerResponse>();
 const requests = new Set<string>();
 let event = 0;
 let acceptWrites = false;
-let missingReceipt = false;
 const submissions: Envelope[] = [];
-const accepted = new Map<string, Envelope>();
 const json = (res: ServerResponse, value: unknown, status = 200) => {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   res.end(JSON.stringify(issueBoardFixture(res.req.url, value)));
@@ -135,21 +133,12 @@ const server = await createServer({
               requests.add(envelope.request_id);
               submissions.push(envelope);
               if (acceptWrites) {
-                accepted.set(envelope.request_id, envelope);
                 json(res, {
                   operation: { request_id: envelope.request_id, status: "succeeded", result: {} },
                 });
               } else res.destroy();
             });
             return;
-          }
-          if (path.startsWith("/api/v1/requests/")) {
-            const requestId = path.split("/").at(-1)!;
-            if (accepted.has(requestId))
-              return json(res, { request_id: requestId, status: "succeeded", result: {} });
-            return missingReceipt
-              ? json(res, { error: { code: "not_found", message: "Not found" } }, 404)
-              : json(res, { request_id: requestId, status: "unknown" });
           }
           if (path === "/api/v1/snapshot")
             return json(res, {
@@ -301,7 +290,6 @@ try {
         refresh_pending: false,
       },
     ];
-    missingReceipt = true;
     acceptWrites = false;
     const terminalContext: BrowserContext = await browser.newContext({ serviceWorkers: "block" });
     const terminalPage: Page = await terminalContext.newPage();
@@ -312,7 +300,7 @@ try {
     const refresh = details.getByRole("button", { name: "重新观察交付", exact: true });
     const before: number = requests.size;
     await refresh.click();
-    await details.getByRole("button", { name: "核对刷新请求", exact: true }).waitFor();
+    await details.getByRole("button", { name: "核对交付事实", exact: true }).waitFor();
     assert.equal(requests.size, before + 1);
     const original = submissions.at(-1)!;
     // Reconnect and reread preserve unknown, even with no future provider polls.
@@ -335,28 +323,26 @@ try {
     await openIssueAux(terminalPage, "跟进与交付");
     if (output)
       await details
-        .getByRole("button", { name: "核对刷新请求", exact: true })
+        .getByRole("button", { name: "核对交付事实", exact: true })
         .scrollIntoViewIfNeeded();
     if (output)
       await terminalPage.screenshot({
         path: join(output, `delivery-${terminal}-reload-unknown.png`),
       });
-    await details.getByRole("button", { name: "核对刷新请求", exact: true }).click();
-    await details.getByText("未查到原刷新请求，可显式重试同一请求。", { exact: true }).waitFor();
+    await details.getByRole("button", { name: "核对交付事实", exact: true }).click();
+    await details
+      .getByText(
+        "已重新读取当前交付事实；原刷新动作是否执行仍未确认，可按当前状态决定是否再次观察。",
+        { exact: true },
+      )
+      .waitFor();
     assert(await refresh.isDisabled());
     assert.equal(requests.size, before + 1);
-    acceptWrites = true;
-    await details.getByRole("button", { name: "重试原刷新请求", exact: true }).click();
-    await details
-      .getByRole("button", { name: "核对刷新请求", exact: true })
-      .waitFor({ state: "hidden" });
     assert.deepEqual(
       submissions.at(-1),
       original,
-      "explicit retry preserves full original envelope",
+      "observation-only reconciliation preserves the original envelope without another POST",
     );
-    assert.equal(requests.size, before + 1, "retry never allocates a fresh request identity");
-    assert.equal(await refresh.isDisabled(), false);
     await terminalContext.close();
   }
   // The approved canonical detail replaces legacy discussion templates. Opening

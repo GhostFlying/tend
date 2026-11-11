@@ -16,6 +16,8 @@ import { Markdown } from "../conversation/Markdown.tsx";
 import { fileSize } from "../conversation/Attachments.tsx";
 import { ImageTile } from "../conversation/Images.tsx";
 import { useSourceTransfer } from "../conversation/useSourceTransfer.ts";
+import { DurableOp } from "../app/durableOp.ts";
+import { pendingArchiveIssues, type PendingArchiveIssue } from "./recovery.ts";
 import { IssueDefinition } from "../issues/Definition.tsx";
 import styles from "./Archive.module.css";
 import form from "../agents/Catalog.module.css";
@@ -128,6 +130,30 @@ function ArchiveContents({
   const [importing, setImporting] = useState(false);
   const [resume, setResume] = useState<OutgoingMessage | null>(null);
   const [transfers, setTransfers] = useState<OutgoingMessage[]>([]);
+  const [pendingIssues, setPendingIssues] = useState<PendingArchiveIssue[]>([]);
+  const [resumeIssue, setResumeIssue] = useState<PendingArchiveIssue | null>(null);
+  const [recoveryError, setRecoveryError] = useState(false);
+  const [recoveryRevision, setRecoveryRevision] = useState(0);
+  const { client } = useServices();
+  useEffect(() => {
+    let active = true;
+    void DurableOp.pendingScopes("issue-create:")
+      .then((pending) => pendingArchiveIssues(client, entry.archive_id, location.origin, pending))
+      .then(
+        (result) => {
+          if (active) {
+            setPendingIssues(result.items);
+            setRecoveryError(result.unreadable);
+          }
+        },
+        () => {
+          if (active) setRecoveryError(true);
+        },
+      );
+    return () => {
+      active = false;
+    };
+  }, [client, entry.archive_id, importing, resume, resumeIssue, recoveryRevision]);
   useEffect(() => {
     let active = true;
     void openOutbox()
@@ -174,6 +200,16 @@ function ArchiveContents({
         {entry.reason && <p>{entry.reason}</p>}
       </>
     );
+  if (resumeIssue)
+    return (
+      <IssueDefinition
+        sourceMessageID={resumeIssue.sourceMessageID}
+        sourceRevision={resumeIssue.sourceRevision}
+        sourceDescription={`来源：历史归档 ${entry.archive_id} · 已保存为当前资料 ${resumeIssue.sourceMessageID}。旧档案保持只读。`}
+        onBack={() => setResumeIssue(null)}
+        onSaved={onIssue}
+      />
+    );
   if (importing || resume)
     return (
       <ArchiveImport
@@ -201,6 +237,21 @@ function ArchiveContents({
           : "封存时间未记录"}
         {entry.metadata?.source_build ? ` · 来源版本${entry.metadata.source_build}` : ""}
       </p>
+      {recoveryError && (
+        <p role="status">
+          部分未完成 Issue 的来源暂时无法读取，原操作仍保留。
+          <Button onClick={() => setRecoveryRevision((revision) => revision + 1)}>
+            重新核对来源
+          </Button>
+        </p>
+      )}
+      {pendingIssues.map((pending) => (
+        <p key={pending.requestID}>
+          <Button className={form.button} onClick={() => setResumeIssue(pending)}>
+            继续使用已保存材料新建 Issue
+          </Button>
+        </p>
+      ))}
       {transfers.length > 0 && (
         <section className={styles.record} aria-label="已保存的材料提交">
           <h3>材料提交记录</h3>

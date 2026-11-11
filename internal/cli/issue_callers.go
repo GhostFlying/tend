@@ -27,7 +27,7 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
 	fs.Bool("json", true, "print the complete structured result")
-	data := fs.String("data", "", "JSON payload; followup creation retains rule_id across submissions")
+	data := fs.String("data", "", "JSON payload; followups retain their parent Issue and creation rule_id")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "original request identity for retry")
 	revision := fs.Int64("revision", -1, "original Issue or rule revision")
@@ -139,6 +139,15 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
 		return usagef("payload must be a JSON object")
+	}
+	if action == "followup" {
+		if raw, ok := fields["issue_id"]; ok {
+			var parent string
+			if json.Unmarshal(raw, &parent) != nil || parent != pos[0] {
+				return usagef("issue_id must match the supplied Issue")
+			}
+		}
+		fields["issue_id"], _ = json.Marshal(pos[0])
 	}
 	var supplied int64
 	if raw, ok := fields["expected_assignment_epoch"]; ok {

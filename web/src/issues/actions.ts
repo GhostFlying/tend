@@ -141,7 +141,7 @@ export function createIssueFollowupCommand(
 
 /** A rule edit compares the rule revision, independently of its Issue revision. */
 export function issueFollowupCommand(
-  issue: Pick<IssueView, "assignment_epoch">,
+  issue: Pick<IssueView, "assignment_epoch" | "issue_id">,
   rule: { rule_id: string; revision: number },
   action: "update" | "pause" | "resume" | "cancel" | "trigger",
   payload: Omit<IssueFollowupPayload, "expected_assignment_epoch"> = {},
@@ -150,7 +150,11 @@ export function issueFollowupCommand(
     operation: `issues.followups_${action}`,
     target: { type: "followup", id: rule.rule_id },
     expected_control_revision: rule.revision,
-    payload: { ...payload, expected_assignment_epoch: issue.assignment_epoch },
+    payload: {
+      ...payload,
+      issue_id: issue.issue_id,
+      expected_assignment_epoch: issue.assignment_epoch,
+    },
   };
 }
 

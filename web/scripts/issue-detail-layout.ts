@@ -4,7 +4,7 @@ import { fixtureRoot, navigate } from "./navigation.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { chromium } from "playwright";
 import { openIssueAux, openIssueDefinition, issueSidebar } from "./issue-detail-helpers.ts";
@@ -41,8 +41,6 @@ const streams = new Set<ServerResponse>();
 const writes: Envelope[] = [];
 const requests: string[] = [];
 let dropProgressReply = false;
-let progressRefusalReady = false;
-const progressRequests = new Map<string, Envelope>();
 const issue: IssueView = {
   issue_id: "wi_01ARZ3NDEKTSV4RRFFQ69G5FAV",
   state: "active",
@@ -518,17 +516,6 @@ const server = createServer(async (req, res) => {
     return json({ items, more, ...(more ? { next: items.at(-1)!.attention_id } : {}) });
   }
   if (p === "/api/v1/attentions/attention-decision") return json(decision);
-  if (p.startsWith("/api/v1/requests/")) {
-    const original = progressRequests.get(p.split("/").at(-1)!);
-    if (!original || !progressRefusalReady)
-      return json({ error: { code: "unavailable", message: "Pending receipt" } }, 503);
-    return json({
-      request_id: original.request_id,
-      operation: original.operation,
-      status: "failed",
-      error: { code: "stale_revision", message: "Issue changed" },
-    });
-  }
   if (p === "/api/v1/ops") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -554,7 +541,6 @@ const server = createServer(async (req, res) => {
     }
     if (envelope.operation === "issues.update_progress") {
       if (dropProgressReply) {
-        progressRequests.set(envelope.request_id, envelope);
         req.socket.destroy();
         return;
       }
@@ -2358,62 +2344,112 @@ try {
   await context.close();
   console.log("PASS 390: returning from a child preserves the parent's selected child page");
   dropProgressReply = true;
-  const recoveryContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
-  const recovery = await recoveryContext.newPage();
-  await recovery.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
-  const recoveryDetail = recovery.getByRole("region", { name: "Issue 详情", exact: true });
-  await recoveryDetail.getByRole("button", { name: "编辑", exact: true }).click();
-  const editor = recovery.getByRole("dialog", { name: "编辑当前进展", exact: true });
-  await editor.getByRole("textbox", { name: "当前进展", exact: true }).fill("原请求中的进展");
-  await editor.getByRole("textbox", { name: "下一步", exact: true }).fill("原请求中的下一步");
-  const beforeWrites = writes.length;
-  await editor.getByRole("button", { name: "保存进展", exact: true }).click();
-  await editor.getByRole("button", { name: "核对原更新请求", exact: true }).waitFor();
-  await editor.getByRole("button", { name: /^关闭/ }).first().click();
-  issue.revision++;
-  issue.progress!.summary = "其他更新已被保存";
-  issue.progress!.next_step = "其他人的下一步";
-  publish();
-  await recoveryDetail.getByText("其他更新已被保存", { exact: true }).waitFor();
-  await recoveryDetail.getByRole("button", { name: "编辑", exact: true }).click();
-  await editor.getByRole("button", { name: "核对原更新请求", exact: true }).waitFor();
-  assert.equal(
-    await editor.getByRole("textbox", { name: "当前进展", exact: true }).inputValue(),
-    "原请求中的进展",
-  );
-  progressRefusalReady = true;
-  await editor.getByRole("button", { name: "核对原更新请求", exact: true }).click();
-  await editor
-    .getByText("Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
-    .waitFor();
-  assert.equal(
-    await editor.getByRole("textbox", { name: "当前进展", exact: true }).inputValue(),
-    "原请求中的进展",
-  );
-  assert.equal(
-    await editor.getByRole("textbox", { name: "下一步", exact: true }).inputValue(),
-    "原请求中的下一步",
-  );
-  const recoveredWrites = writes
-    .slice(beforeWrites)
-    .filter((envelope) => envelope.operation === "issues.update_progress");
-  assert(recoveredWrites.length > 0);
-  assert.equal(
-    new Set(recoveredWrites.map((envelope) => envelope.request_id)).size,
-    1,
-    "receipt recovery preserves the original update identity",
-  );
-  for (const envelope of recoveredWrites)
-    assert.deepEqual(
-      envelope,
-      recoveredWrites[0],
-      "transport retries preserve the complete original envelope",
+  for (const width of [1440, 390]) {
+    const recoveryContext = await browser.newContext({ viewport: { width, height: 1000 } });
+    const recovery = await recoveryContext.newPage();
+    const recoveryErrors: string[] = [];
+    const recoveryConsole: { type: string; text: string; url: string }[] = [];
+    recovery.on("pageerror", (error) => recoveryErrors.push(error.message));
+    recovery.on("console", (message) => {
+      if (["warning", "error"].includes(message.type()))
+        recoveryConsole.push({
+          type: message.type(),
+          text: message.text(),
+          url: message.location().url,
+        });
+    });
+    await recovery.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
+    assert.match(await recovery.title(), /tend/i);
+    const recoveryDetail = recovery.getByRole("region", { name: "Issue 详情", exact: true });
+    await recoveryDetail.getByRole("button", { name: "编辑", exact: true }).click();
+    const editor = recovery.getByRole("dialog", { name: "编辑当前进展", exact: true });
+    await editor.getByRole("textbox", { name: "当前进展", exact: true }).fill("原请求中的进展");
+    await editor.getByRole("textbox", { name: "下一步", exact: true }).fill("原请求中的下一步");
+    const beforeWrites = writes.length;
+    await editor.getByRole("button", { name: "保存进展", exact: true }).click();
+    await editor.getByRole("button", { name: "核对原更新请求", exact: true }).waitFor();
+    await recovery.screenshot({ path: join(output, `progress-unknown-${width}.png`) });
+    await editor.getByRole("button", { name: /^关闭/ }).first().click();
+    issue.revision++;
+    issue.progress!.summary = "其他更新已被保存";
+    issue.progress!.next_step = "其他人的下一步";
+    publish();
+    await recoveryDetail.getByText("其他更新已被保存", { exact: true }).waitFor();
+    await recoveryDetail.getByRole("button", { name: "编辑", exact: true }).click();
+    await editor.getByRole("button", { name: "核对原更新请求", exact: true }).waitFor();
+    assert.equal(
+      await editor.getByRole("textbox", { name: "当前进展", exact: true }).inputValue(),
+      "原请求中的进展",
     );
-  assert.equal(progressRequests.size, 1);
-
-  assert.equal(issue.progress!.summary, "其他更新已被保存");
-  await recoveryContext.close();
-  console.log("PASS 390: restored progress text and next step survive a rejected original receipt");
+    const beforeReads = requests.length;
+    const beforeReconcileWrites = writes.length;
+    await editor.getByRole("button", { name: "核对原更新请求", exact: true }).click();
+    await editor
+      .getByText("Issue 已变化，请关闭后重新打开进展编辑；当前输入仍保留。", { exact: true })
+      .waitFor();
+    assert.equal(
+      await editor.getByRole("textbox", { name: "当前进展", exact: true }).inputValue(),
+      "原请求中的进展",
+    );
+    assert.equal(
+      await editor.getByRole("textbox", { name: "下一步", exact: true }).inputValue(),
+      "原请求中的下一步",
+    );
+    const recoveredWrites = writes
+      .slice(beforeWrites)
+      .filter((e) => e.operation === "issues.update_progress");
+    assert(recoveredWrites.length > 0);
+    assert.equal(
+      writes.length,
+      beforeReconcileWrites,
+      "current-state reconciliation never replays the POST",
+    );
+    assert.equal(new Set(recoveredWrites.map((envelope) => envelope.request_id)).size, 1);
+    for (const envelope of recoveredWrites)
+      assert.deepEqual(
+        envelope,
+        recoveredWrites[0],
+        "browser transport retries preserve the complete original envelope",
+      );
+    const recoveredReads = requests.slice(beforeReads);
+    assert(recoveredReads.some((path) => path === `/api/v1/issues/${issue.issue_id}`));
+    assert.equal(requests.filter((path) => path.startsWith("/api/v1/requests/")).length, 0);
+    assert.equal(issue.progress!.summary, "其他更新已被保存");
+    assert.deepEqual(recoveryErrors, []);
+    assert(
+      recoveryConsole.every(
+        (message) =>
+          (message.type === "error" &&
+            message.url.endsWith("/api/v1/ops") &&
+            /net::ERR_/.test(message.text)) ||
+          message.text === "Service Worker registration blocked by Playwright",
+      ),
+      JSON.stringify(recoveryConsole),
+    );
+    await recovery.screenshot({ path: join(output, `progress-current-recovery-${width}.png`) });
+    await writeFile(
+      join(output, `progress-recovery-observations-${width}.json`),
+      JSON.stringify(
+        {
+          url: recovery.url(),
+          title: await recovery.title(),
+          recoveryErrors,
+          recoveryConsole,
+          original: recoveredWrites[0],
+          currentIssueRevision: issue.revision,
+          recoveredReads,
+          transportAttempts: recoveredWrites.length,
+          reconciliationWrites: writes.length - beforeReconcileWrites,
+        },
+        null,
+        2,
+      ),
+    );
+    await recoveryContext.close();
+    console.log(
+      `PASS ${width}: progress draft survives current Issue CAS recovery without receipt lookup or replay`,
+    );
+  }
   const isolationContext = await browser.newContext({ viewport: { width: 390, height: 1000 } });
   const isolation = await isolationContext.newPage();
   await isolation.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);

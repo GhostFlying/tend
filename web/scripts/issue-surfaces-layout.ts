@@ -91,10 +91,7 @@ const activeTask: TaskDetail = {
 };
 issue.tasks = [activeTask];
 let runMessages: Record<string, unknown>[] = [];
-let supplementRequest = "",
-  supplementReady = false;
-let takeRequest = "",
-  takeReceiptReady = false;
+let supplementReady = false;
 const summary = (id: string, title: string, parent = ""): IssueSummary => ({
   issue_id: id,
   title,
@@ -175,11 +172,10 @@ const information: AttentionView = {
   title: "发布进度已更新（仅通知）",
 };
 const streams = new Set<ServerResponse>();
+const readPaths: string[] = [];
+const expectedReadOutages = new Set<string>();
 const writes: Envelope[] = [];
-let lostID = "";
-let releaseReceipt = false;
 let seq = 1;
-const sourceReceipts = new Map<string, unknown>();
 let uploadGate = Promise.resolve();
 let uploadCount = 0,
   sourceCount = 0;
@@ -193,14 +189,11 @@ let replyRevision = 1;
 let importedIssue: IssueView | undefined;
 let taskQueued = false;
 let sourceContentRevision = 7;
-let issueCreateRequest = "";
 let issueCreateReady = false;
 let policyRequest = "";
-let policyReceiptStale = false;
 let completionResult: IssueResult | undefined;
 let rejectSource = false;
-let handoffRequest = "",
-  handoffReceiptReady = false;
+let handoffRequest = "";
 const manualSources = new Map<string, object>();
 const archiveSummary = {
   archive_id: "archive-2026",
@@ -224,6 +217,7 @@ const publish = () => {
 const server = createServer(async (req, res) => {
   const u = new URL(req.url!, "http://localhost");
   const p = u.pathname;
+  if (req.method === "GET") readPaths.push(p);
   res.setHeader("Cache-Control", "no-store");
   const json = (data: unknown, status = 200) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -540,7 +534,11 @@ const server = createServer(async (req, res) => {
       more_before: false,
     });
   if (p.startsWith("/api/v1/runs/") && p.endsWith("/messages"))
-    return json({ run_id: p.split("/")[4], messages: runMessages, more: false });
+    return json({
+      run_id: p.split("/")[4],
+      messages: supplementReady ? runMessages : [],
+      more: false,
+    });
   if (p.startsWith("/api/v1/runs/") && p.endsWith("/native-entry"))
     return json({
       run_id: p.split("/")[4],
@@ -649,6 +647,16 @@ const server = createServer(async (req, res) => {
     const row = issueRows.find((row) => row.issue_id === p.split("/").at(-1));
     if (row) return json({ ...issue, ...row, plan: { ...issue.plan, title: row.title } });
   }
+  if (importedIssue && p === `/api/v1/issues/${importedIssue.issue_id}`) {
+    if (!issueCreateReady) {
+      expectedReadOutages.add(p);
+      return json(
+        { error: { code: "unavailable", message: "Fixture Issue observation unavailable" } },
+        503,
+      );
+    }
+    return json(importedIssue);
+  }
   if (p.startsWith("/api/v1/issues/"))
     return json(
       p.endsWith("/context")
@@ -667,15 +675,13 @@ const server = createServer(async (req, res) => {
             sources: [],
             more: false,
           }
-        : p.endsWith("issue-imported")
-          ? importedIssue
-          : {
-              ...issue,
-              conversation: {
-                conversation_id: "work-item:issue-root",
-                can_send: issue.assignment_state === "active",
-              },
+        : {
+            ...issue,
+            conversation: {
+              conversation_id: "work-item:issue-root",
+              can_send: issue.assignment_state === "active",
             },
+          },
     );
   if (p === "/api/v1/next-actions")
     return json({
@@ -825,7 +831,7 @@ const server = createServer(async (req, res) => {
       ],
     });
   }
-  if (/^\/api\/v1\/messages\/manual-source-\d+\/associations$/.test(p))
+  if (p.endsWith("/associations") && manualSources.has(p.split("/")[4]!))
     return json({
       message_id: p.split("/")[4],
       revision: 1,
@@ -834,6 +840,16 @@ const server = createServer(async (req, res) => {
       items: [],
     });
   if (p === "/api/v1/messages/owner-plan/associations") return json(messageAssociations);
+  if (p.startsWith("/api/v1/messages/") && manualSources.has(p.split("/").at(-1)!)) {
+    if (p.endsWith(sourceRequest) && sourceCount === 1 && !sourceReceiptReady) {
+      expectedReadOutages.add(p);
+      return json(
+        { error: { code: "unavailable", message: "Fixture source observation unavailable" } },
+        503,
+      );
+    }
+    return json(manualSources.get(p.split("/").at(-1)!));
+  }
   if (p === "/api/v1/messages/attention-source-note")
     return json({
       message_id: "attention-source-note",
@@ -924,19 +940,19 @@ const server = createServer(async (req, res) => {
     assert.equal(bytes.toString(), "original file bytes");
     await uploadGate;
     uploadCount++;
-    sourceReceipts.set(id, {
-      request_id: id,
-      operation: "conversation.upload_attachment",
-      status: "succeeded",
-      result: {
-        file_id: "source-file",
-        name: u.searchParams.get("name") ?? "evidence.txt",
-        media_type: u.searchParams.get("media_type") ?? "text/plain",
-        sha256: "fixturehash",
-        size: bytes.length,
+    return json({
+      operation: {
+        request_id: id,
+        status: "succeeded",
+        result: {
+          file_id: "source-file",
+          name: u.searchParams.get("name") ?? "evidence.txt",
+          media_type: u.searchParams.get("media_type") ?? "text/plain",
+          sha256: "fixturehash",
+          size: bytes.length,
+        },
       },
     });
-    return json({ operation: { request_id: id, status: "unknown" } });
   }
   if (p === "/api/v1/ops") {
     let data = "";
@@ -948,18 +964,30 @@ const server = createServer(async (req, res) => {
       return json({ operation: { request_id: policyRequest, status: "unknown" } });
     }
     if (envelope.operation === "conversation.inject_source") {
-      sourceCount++;
-      sourceRequest = envelope.request_id;
       const payload = envelope.payload as {
+        message_id: string;
         conversation_id?: string;
         text: string;
         metadata: object;
         attachments?: string[];
       };
-      manualSources.set(`manual-source-${sourceCount}`, {
-        message_id: `manual-source-${sourceCount}`,
+      assert(payload.message_id);
+      if (rejectSource)
+        return json({
+          operation: {
+            request_id: envelope.request_id,
+            status: "failed",
+            error: { code: "invalid_request", message: "fixture rejected source" },
+          },
+        });
+      sourceCount++;
+      sourceRequest = payload.message_id;
+      manualSources.set(payload.message_id, {
+        message_id: payload.message_id,
+        seq: sourceCount,
         conversation_id: payload.conversation_id || "main",
         text: payload.text,
+        body: payload.text,
         metadata: payload.metadata,
         created_at: now,
         attachments: (payload.attachments ?? []).map((id) => ({
@@ -970,31 +998,12 @@ const server = createServer(async (req, res) => {
           sha256: "fixturehash",
         })),
       });
-      sourceReceipts.set(envelope.request_id, {
-        request_id: envelope.request_id,
-        operation: envelope.operation,
-        status: "succeeded",
-        result: {
-          message_id: `manual-source-${sourceCount}`,
-          conversation_id: "main",
-          metadata: { author: "文档作者" },
-        },
-      });
-      if (rejectSource) {
-        const refused = {
-          request_id: envelope.request_id,
-          operation: envelope.operation,
-          status: "failed",
-          error: { code: "invalid_request", message: "fixture rejected source" },
-        };
-        sourceReceipts.set(envelope.request_id, refused);
-        return json({ operation: refused });
-      }
       return json({
-        operation:
-          sourceCount > 1
-            ? sourceReceipts.get(envelope.request_id)
-            : { request_id: envelope.request_id, status: "unknown" },
+        operation: {
+          request_id: envelope.request_id,
+          status: sourceCount === 1 ? "unknown" : "succeeded",
+          result: { message_id: payload.message_id, seq: sourceCount },
+        },
       });
     }
     if (envelope.operation === "issues.create") {
@@ -1023,7 +1032,7 @@ const server = createServer(async (req, res) => {
       assert(!(payload.assignee && payload.owner));
       importedIssue = {
         ...issue,
-        issue_id: "issue-imported",
+        issue_id: envelope.target.id!,
         plan: payload.plan,
         tasks: [],
         assignee: payload.assignee ?? { kind: "owner", ref: "owner" },
@@ -1035,12 +1044,6 @@ const server = createServer(async (req, res) => {
             }
           : undefined,
       } as IssueView;
-      issueCreateRequest = envelope.request_id;
-      sourceReceipts.set(envelope.request_id, {
-        request_id: envelope.request_id,
-        status: "succeeded",
-        result: importedIssue,
-      });
       return json({ operation: { request_id: envelope.request_id, status: "unknown" } });
     }
     if (envelope.operation === "conversation.set_issue_associations") {
@@ -1065,7 +1068,7 @@ const server = createServer(async (req, res) => {
       });
     }
     if (envelope.operation === "conversation.consult") {
-      consultationID = "consultation:fixture";
+      consultationID = envelope.target.id!;
       return json({
         operation: {
           request_id: envelope.request_id,
@@ -1083,27 +1086,33 @@ const server = createServer(async (req, res) => {
         operation: {
           request_id: envelope.request_id,
           status: "succeeded",
-          result: { task_id: "task-created" },
+          result: { task_id: (envelope.payload as { task_id: string }).task_id },
         },
       });
     if (envelope.operation === "runs.send_message") {
-      const payload = envelope.payload as { text: string };
+      const payload = envelope.payload as {
+        message_id: string;
+        task_id: string;
+        spec_version: number;
+        generation: number;
+        text: string;
+      };
+      assert(payload.message_id);
       runMessages = [
         {
-          message_id: "supplement-one",
+          ...payload,
           run_id: envelope.target.id,
-          text: payload.text,
-          status: "accepted",
+          control_revision: envelope.expected_control_revision,
+          sequence: 1,
+          status: "queued",
           created_at: now,
         },
       ];
-      supplementRequest = envelope.request_id;
       return json({ operation: { request_id: envelope.request_id, status: "unknown" } });
     }
     if (envelope.operation === "control.set_mode") {
       const payload = envelope.payload as { mode: TaskDetail["control_mode"] };
       if (payload.mode === "human_control") {
-        takeRequest = envelope.request_id;
         return json({ operation: { request_id: envelope.request_id, status: "unknown" } });
       }
       activeTask.control_mode = payload.mode;
@@ -1149,7 +1158,6 @@ const server = createServer(async (req, res) => {
       const payload = envelope.payload as { summary: string; source_message_id?: string };
       action.resolution = payload.summary;
       if (payload.source_message_id) action.resolution_source_id = payload.source_message_id;
-      lostID = envelope.request_id;
       return json(
         { error: { code: "internal", message: "Expected fixture lost acknowledgement" } },
         503,
@@ -1167,61 +1175,6 @@ const server = createServer(async (req, res) => {
       return json({ operation: { status: "succeeded", result: decision } });
     }
     return json({ operation: { status: "succeeded", result: {} } });
-  }
-  if (p.startsWith("/api/v1/requests/")) {
-    const id = decodeURIComponent(p.split("/").at(-1)!);
-    if (id === policyRequest)
-      return json({
-        request_id: id,
-        operation: "issues.set_acceptance_policy",
-        status: policyReceiptStale ? "failed" : "unknown",
-        ...(policyReceiptStale
-          ? {
-              error: {
-                code: "stale_revision",
-                message: "Issue changed while the request was pending",
-              },
-            }
-          : {}),
-      });
-    if (id === supplementRequest)
-      return json({
-        request_id: id,
-        status: supplementReady ? "succeeded" : "unknown",
-        result: runMessages[0],
-      });
-    if (id === handoffRequest) {
-      if (!handoffReceiptReady) return json({ request_id: id, status: "unknown" });
-      if (!issue.pending_handoff_id) {
-        issue.pending_handoff_id = "handoff-one";
-        issue.pending_assignee = { kind: "owner", ref: "owner" };
-        issue.assignment_state = "draining";
-        issue.revision++;
-      }
-      return json({ request_id: id, status: "succeeded", result: issue });
-    }
-    if (id === takeRequest) {
-      if (!takeReceiptReady) return json({ request_id: id, status: "unknown" });
-      if (activeTask.control_mode !== "human_control") {
-        activeTask.control_mode = "human_control";
-        activeTask.control_revision++;
-      }
-      return json({ request_id: id, status: "succeeded", result: activeTask });
-    }
-    if (id === issueCreateRequest && !issueCreateReady)
-      return json({ request_id: id, status: "unknown" });
-    if (sourceReceipts.has(id))
-      return json(
-        id === sourceRequest && !sourceReceiptReady
-          ? { ...(sourceReceipts.get(id) as object), status: "unknown" }
-          : sourceReceipts.get(id),
-      );
-    if (p.endsWith(lostID) && releaseReceipt) {
-      action = { ...action, status: "resolved", revision: action.revision + 1 };
-      publish();
-      return json({ request_id: lostID, status: "succeeded", result: action });
-    }
-    return json({ error: { code: "internal", message: "Expected fixture receipt outage" } }, 503);
   }
   if (p.startsWith("/api/"))
     return json({ error: { code: "not_found", message: "Not in fixture" } }, 404);
@@ -2039,19 +1992,15 @@ try {
     manualSources.clear();
     replyBody = "我会统筹目标与下一步。当前需要你确认发布范围；相关任务按约定实施与独立验收。";
     replyRevision = 1;
-    lostID = "";
-    releaseReceipt = false;
     writes.length = 0;
     importedIssue = undefined;
     taskQueued = false;
     sourceContentRevision = 7;
-    issueCreateRequest = "";
     issueCreateReady = false;
     delete information.archived_at;
     activeTask.control_mode = "managed";
     activeTask.control_revision = 7;
     runMessages = [];
-    supplementRequest = "";
     supplementReady = false;
     issue.plan = {
       title: "发布流程整理",
@@ -2061,9 +2010,7 @@ try {
       completion_criteria: ["步骤可核对"],
       stages: [],
     };
-    takeRequest = "";
-    takeReceiptReady = false;
-    sourceReceipts.clear();
+    expectedReadOutages.clear();
     uploadCount = 0;
     sourceCount = 0;
     sourceRequest = "";
@@ -2076,7 +2023,6 @@ try {
     delete issue.pending_assignee;
     issue.assignment_state = "active";
     handoffRequest = "";
-    handoffReceiptReady = false;
     const consoleErrors: string[] = [];
     const httpErrors: { path: string; status: number }[] = [];
     const context = await browser.newContext({
@@ -2630,20 +2576,48 @@ try {
       await policyForm.getByRole("textbox", { name: "调整理由", exact: true }).inputValue(),
       retainedReason,
     );
-    policyReceiptStale = true;
+    const beforePolicyReads = readPaths.length;
+    await policyForm.getByRole("button", { name: "核对原策略请求", exact: true }).click();
+    await policyForm
+      .getByText("尚不能从业务记录确认结果，保留原操作继续核对。", { exact: true })
+      .waitFor();
+    await policyForm.getByRole("button", { name: "核对原策略请求", exact: true }).waitFor();
+    issue.revision++;
+    publish();
     await policyForm.getByRole("button", { name: "核对原策略请求", exact: true }).click();
     await policyForm.getByRole("button", { name: "保存后续任务策略", exact: true }).waitFor();
+    await policyForm
+      .getByText("Issue 已变化，请重新打开策略编辑；原输入仍保留。", { exact: true })
+      .waitFor();
     assert.equal(await policyForm.getByRole("checkbox").isChecked(), false);
     assert.equal(
       await policyForm.getByRole("textbox", { name: "调整理由", exact: true }).inputValue(),
       retainedReason,
     );
     assert.equal(writes.filter((w) => w.operation === "issues.set_acceptance_policy").length, 1);
+    const policyReads = readPaths.slice(beforePolicyReads);
+    assert(policyReads.filter((path) => path === `/api/v1/issues/${issue.issue_id}`).length >= 2);
+    assert.equal(policyReads.filter((path) => path.startsWith("/api/v1/requests/")).length, 0);
+    await writeFile(
+      join(output, `policy-recovery-observations-${viewport.width}.json`),
+      JSON.stringify(
+        {
+          url: page.url(),
+          title: await page.title(),
+          policyReads,
+          writes: 1,
+          currentIssueRevision: issue.revision,
+          retainedReason,
+          required: await policyForm.getByRole("checkbox").isChecked(),
+        },
+        null,
+        2,
+      ),
+    );
     await page.screenshot({
       path: join(output, `creator-policy-stale-input-${viewport.width}.png`),
     });
     policyRequest = "";
-    policyReceiptStale = false;
     completionResult = undefined;
     delete issue.acceptance_policy;
     await page.reload();
@@ -2718,7 +2692,9 @@ try {
     const supplement = writes.find((w) => w.operation === "runs.send_message")!;
     assert.equal(supplement.target.id, "run-current");
     assert.equal(supplement.expected_control_revision, 7);
+    assert.match((supplement.payload as { message_id: string }).message_id, /^msg_[0-9A-Z]{26}$/);
     assert.deepEqual(supplement.payload, {
+      message_id: (supplement.payload as { message_id: string }).message_id,
       task_id: activeTask.task_id,
       spec_version: 2,
       generation: 3,
@@ -2728,7 +2704,8 @@ try {
     await taskDialog.getByRole("button", { name: "核实原管理操作", exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "control.set_mode").length, 1);
     await page.screenshot({ path: join(output, `run-control-unknown-${viewport.width}.png`) });
-    takeReceiptReady = true;
+    activeTask.control_mode = "human_control";
+    activeTask.control_revision++;
     await taskDialog.getByRole("button", { name: "核实原管理操作", exact: true }).click();
     await taskDialog.getByRole("button", { name: "交还给 tend", exact: true }).waitFor();
     assert(
@@ -2816,7 +2793,8 @@ try {
       "设备A：Android 14，明天上午可用。",
     );
     assert(await inbox.getByRole("textbox").isDisabled());
-    releaseReceipt = true;
+    action = { ...action, status: "resolved", revision: action.revision + 1 };
+    publish();
     await inbox.getByRole("button", { name: "核实原提交结果", exact: true }).click();
     await inbox
       .locator("p")
@@ -2857,7 +2835,7 @@ try {
       .filter({ hasText: /^核实原来源提交$/ })
       .waitFor();
     assert.equal(uploadCount, 1);
-    assert.equal(sourceCount, 0);
+    assert.equal(sourceCount, 1);
     await page.reload();
     await page.getByRole("textbox", { name: "消息", exact: true }).waitFor();
     await page.getByRole("button", { name: "更多", exact: true }).click();
@@ -2870,15 +2848,63 @@ try {
         null,
     );
     await source.getByRole("button", { name: "核实原来源提交", exact: true }).waitFor();
-    // Reopening resolves the original upload, then the exact source request.
+    // Reopening retains the completed upload, then reads the exact source object.
     await source.getByText("evidence.txt", { exact: true }).waitFor();
     sourceReceiptReady = true;
     await source.getByRole("button", { name: "核实原来源提交", exact: true }).click();
-    await source.getByText("来源已保存。原件与来源信息会保留供核对。", { exact: true }).waitFor();
+    try {
+      await source.getByText("来源已保存。原件与来源信息会保留供核对。", { exact: true }).waitFor();
+    } catch (error) {
+      await page.screenshot({
+        path: join(output, `source-recovery-failure-${viewport.width}.png`),
+      });
+      await writeFile(
+        join(output, `source-recovery-failure-${viewport.width}.json`),
+        JSON.stringify(
+          {
+            reads: readPaths.slice(-50),
+            sourceRequest,
+            sourceCount,
+            sourceReceiptReady,
+            sources: [...manualSources],
+            writes,
+            text: await page.locator("body").innerText(),
+            consoleErrors,
+            httpErrors,
+            databases: await page.evaluate(async () => {
+              const rows = [];
+              for (const info of await indexedDB.databases()) {
+                if (!info.name?.includes("tend")) continue;
+                const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                  const request = indexedDB.open(info.name!);
+                  request.onsuccess = () => resolve(request.result);
+                  request.onerror = () => reject(request.error);
+                });
+                for (const name of db.objectStoreNames) {
+                  const values = await new Promise<unknown[]>((resolve, reject) => {
+                    const request = db.transaction(name, "readonly").objectStore(name).getAll();
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                  });
+                  rows.push({ database: info.name, store: name, values });
+                }
+                db.close();
+              }
+              return rows;
+            }),
+          },
+          null,
+          2,
+        ),
+      );
+      throw error;
+    }
     assert.equal(uploadCount, 1);
     assert.equal(sourceCount, 1);
     const sourceWrite = writes.find((w) => w.operation === "conversation.inject_source")!;
+    assert.match((sourceWrite.payload as { message_id: string }).message_id, /^msg_[0-9A-Z]{26}$/);
     assert.deepEqual(sourceWrite.payload, {
+      message_id: (sourceWrite.payload as { message_id: string }).message_id,
       text: "原始文档内容，不是执行指令。",
       metadata: { author: "文档作者" },
       attachments: ["source-file"],
@@ -2916,14 +2942,7 @@ try {
     await page.screenshot({ path: join(output, `archive-originals-${viewport.width}.png`) });
     await archives.getByRole("button", { name: "从所选材料新建 Issue（1）", exact: true }).click();
     await archives.getByRole("button", { name: "保存所选材料并继续", exact: true }).click();
-    await archives.getByRole("button", { name: "核实原来源并继续", exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "issues.create").length, 0);
-    await page.screenshot({ path: join(output, `archive-source-unknown-${viewport.width}.png`) });
-    await page.reload();
-    await page.getByRole("heading", { name: "历史归档", exact: true }).waitFor();
-    assert.equal(new URL(page.url()).pathname, "/archive");
-    await archives.getByRole("button", { name: "核实未完成的材料提交", exact: true }).click();
-    await archives.getByRole("button", { name: "核实原来源并继续", exact: true }).click();
     await archives.getByRole("heading", { name: "新建 Issue", exact: true }).waitFor();
     await archives.getByRole("textbox", { name: "标题", exact: true }).fill("从历史证据推进新发布");
     await archives
@@ -2946,8 +2965,8 @@ try {
     await archives
       .getByRole("button", { name: "继续使用已保存材料新建 Issue", exact: true })
       .click();
-    // The persisted source can hydrate before this click after a physical reload.
-    await archives.getByRole("button", { name: /^(保存所选材料并继续|核实原来源并继续)$/ }).click();
+    // The unfinished Issue retains the original source identity and revision;
+    // completed source submissions are absent from the outbox.
     await archives.getByRole("button", { name: "核实原保存请求", exact: true }).waitFor();
     assert.equal(
       await archives
@@ -2973,7 +2992,11 @@ try {
     const newIssueWrite = writes.find((w) => w.operation === "issues.create")!;
     assert.equal(
       (newIssueWrite.payload as { source_message_id: string }).source_message_id,
-      "manual-source-2",
+      (
+        writes.filter((w) => w.operation === "conversation.inject_source").at(-1)!.payload as {
+          message_id: string;
+        }
+      ).message_id,
     );
     assert.equal(
       (newIssueWrite.payload as { expected_source_revision: number }).expected_source_revision,
@@ -3002,7 +3025,7 @@ try {
     });
     rejectSource = true;
     await rejected.getByRole("button", { name: "保存来源", exact: true }).click();
-    await rejected.getByRole("button", { name: "核实原来源提交", exact: true }).click();
+    // A definite rejection is already settled; only editing starts a new source intent.
     await rejected.getByText("fixture rejected source", { exact: true }).last().waitFor();
     const rejectedRequest = writes
       .filter((w) => w.operation === "conversation.inject_source")
@@ -3111,7 +3134,10 @@ try {
       await handoffDialog.getByRole("textbox", { name: "交接说明", exact: true }).inputValue(),
       "我来核对发布范围，保留已有任务与原件。",
     );
-    handoffReceiptReady = true;
+    issue.pending_handoff_id = "handoff-one";
+    issue.pending_assignee = { kind: "owner", ref: "owner" };
+    issue.assignment_state = "draining";
+    issue.revision++;
     await handoffDialog.getByRole("button", { name: "核实原交接请求", exact: true }).click();
     await handoffDialog.getByRole("button", { name: "继续交接", exact: true }).waitFor();
     assert.equal(writes.filter((w) => w.operation === "issues.assign").length, 1);
@@ -3163,17 +3189,18 @@ try {
       mimeType: "text/plain",
       buffer: Buffer.from("original file bytes"),
     });
-    releaseReceipt = false;
     const beforeConfirm = writes.filter((w) => w.operation === "attentions.confirm").length;
     await finalInbox.getByRole("button", { name: "提交处理结果", exact: true }).click();
-    await finalInbox.getByText("原件保存结果待核实；处理事项尚未解决。", { exact: true }).waitFor();
-    assert.equal(writes.filter((w) => w.operation === "attentions.confirm").length, beforeConfirm);
-    await finalInbox.getByRole("button", { name: "提交处理结果", exact: true }).click();
     await finalInbox.getByRole("button", { name: "核实原提交结果", exact: true }).waitFor();
+    assert.equal(
+      writes.filter((w) => w.operation === "attentions.confirm").length,
+      beforeConfirm + 1,
+    );
     const fileConfirm = writes.filter((w) => w.operation === "attentions.confirm").at(-1)!;
     const sourceID = (fileConfirm.payload as { source_message_id: string }).source_message_id;
     assert(sourceID && manualSources.has(sourceID));
-    releaseReceipt = true;
+    action = { ...action, status: "resolved", revision: action.revision + 1 };
+    publish();
     await finalInbox.getByRole("button", { name: "核实原提交结果", exact: true }).click();
     await finalInbox.getByText("查看原件与来源信息", { exact: true }).click();
     await finalInbox.getByText("标注作者：未知 · 原始时间：未知", { exact: true }).waitFor();
@@ -3308,7 +3335,7 @@ try {
       httpErrors.every(
         (error) =>
           error.status === 503 &&
-          (error.path === "/api/v1/ops" || error.path.startsWith("/api/v1/requests/")),
+          (error.path === "/api/v1/ops" || expectedReadOutages.has(error.path)),
       ),
     );
     await writeFile(

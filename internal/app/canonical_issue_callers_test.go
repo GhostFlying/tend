@@ -29,8 +29,13 @@ func TestCanonicalFollowupOwnerLifecycleKeepsHistoryAndDeadlineAuthority(t *test
 	h.app.followupsEnabled = true
 	issue := createCanonicalOwnerTestIssue(t, h)
 	spec := canonicalFollowupSpec(h)
-	payload := protocol.IssueFollowupPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec}
+	payload := protocol.IssueFollowupPayload{IssueID: issue.IssueID, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec}
 	cmd := IssueFollowupCommand{Action: "create"}
+	foreign := payload
+	foreign.IssueID = "another-issue"
+	if denied := h.exec(owner, h.env(cmd.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, foreign, rev(issue.Revision)), cmd); denied.Error == nil || denied.Error.Code != protocol.CodeInvalidRequest {
+		t.Fatal("foreign parent accepted for followup creation", denied)
+	}
 	env := h.env(cmd.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision))
 	first := h.exec(owner, env, cmd)
 	r := canonicalRuleForTest(t, first)
@@ -45,12 +50,19 @@ func TestCanonicalFollowupOwnerLifecycleKeepsHistoryAndDeadlineAuthority(t *test
 		t.Fatal("legacy guard removed", legacy)
 	}
 	for _, action := range []string{"pause", "resume", "update", "trigger", "cancel"} {
-		p := protocol.IssueFollowupPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}
+		p := protocol.IssueFollowupPayload{IssueID: issue.IssueID, ExpectedAssignmentEpoch: issue.AssignmentEpoch}
 		if action == "update" {
 			spec.At += 3600000
 			p.Spec = &spec
 		}
 		c := IssueFollowupCommand{Action: action}
+		foreign := p
+		foreign.IssueID = "another-issue"
+		bad := h.env(c.Operation(), protocol.Target{Type: "followup", ID: r.RuleID}, foreign, rev(r.Revision))
+		bad.Reason = "Check the real parent"
+		if denied := h.exec(owner, bad, c); denied.Error == nil || denied.Error.Code != protocol.CodeInvalidRequest {
+			t.Fatal("foreign parent accepted for followup control", action, denied)
+		}
 		e := h.env(c.Operation(), protocol.Target{Type: "followup", ID: r.RuleID}, p, rev(r.Revision))
 		e.Reason = "Owner updates the existing check"
 		r = canonicalRuleForTest(t, h.exec(owner, e, c))
