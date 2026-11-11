@@ -71,6 +71,12 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	stdout := strings.Repeat("complete stdout\n", 1500)
 	fullTool := strings.Repeat("a", 8191) + strings.Repeat("中文😀", 2500)
 	clip := string(historicalToolClip([]byte(fullTool)))
+	nestedField := strings.Repeat("nested 字段😀\n", 128)
+	inner, _ := json.Marshal(map[string]string{"field": nestedField})
+	smallSource, _ := json.Marshal(string(inner))
+	if len(nestedField) < retainBodyThreshold || len(smallSource) < retainBodyThreshold || len(smallSource) >= 8192 {
+		t.Fatal("fixture does not exercise the small quoted-JSON prefilter boundary")
+	}
 	source, _ := json.Marshal(map[string]any{"command": args, "result": map[string]any{"structuredContent": map[string]any{"content": mcp}}, "aggregatedOutput": stdout, "tool_output": fullTool})
 	if _, err := s.files.AppendOriginal(ctx, "legacy-mixed", []byte("opaque preceding bytes\n")); err != nil {
 		t.Fatal(err)
@@ -79,8 +85,15 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	smallWindow, err := s.files.AppendOriginal(ctx, "legacy-mixed", smallSource)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Write(ctx, func(tx *Tx) error {
-		_, err := tx.bindOriginalWindow(ctx, preparedOriginal{Window: w})
+		if _, err := tx.bindOriginalWindow(ctx, preparedOriginal{Window: w}); err != nil {
+			return err
+		}
+		_, err := tx.bindOriginalWindow(ctx, preparedOriginal{Window: smallWindow})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -88,7 +101,7 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	event, _ := json.Marshal(map[string]any{"type": "commandExecution", "id": "actual-command", "command": display, "result": map[string]any{"structuredContent": map[string]any{"content": mcp}}, "aggregatedOutput": stdout})
 	mustExec(t, s, `INSERT INTO run_logs(run_id,seq,native_id,kind,body_json,created_at) VALUES('body-run',1,'actual-command','item.completed',?,1)`, string(event))
 	mustExec(t, s, `INSERT INTO conversation_messages(message_id,author,body,kind,created_at) VALUES('actual-tool','main_agent','','tool_use',1)`)
-	mustExec(t, s, `INSERT INTO conversation_tool_uses(message_id,thread_id,turn_id,item_id,tool,input,output,status,updated_at) VALUES('actual-tool','thread','turn','actual-tool','inspect','',?,'completed',1)`, clip)
+	mustExec(t, s, `INSERT INTO conversation_tool_uses(message_id,thread_id,turn_id,item_id,tool,input,output,status,updated_at) VALUES('actual-tool','thread','turn','actual-tool','inspect',?,?,'completed',1)`, nestedField, clip)
 	staged, first, err := s.PrepareOriginalMigration(ctx, 1)
 	if err != nil || len(first.rows) != 0 || len(first.originals) == 0 {
 		t.Fatalf("existing child indices must precede body staging: %+v %v", first, err)
@@ -126,8 +139,8 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 			t.Fatal("event content or exact command string changed", err)
 		}
 		u, err := GetToolUse(ctx, tx.Q(), "turn", "actual-tool")
-		if err == nil && u.Output != clip {
-			t.Fatal("historical clip display changed")
+		if err == nil && (u.Input != nestedField || u.Output != clip) {
+			t.Fatal("nested original field or historical clip display changed")
 		}
 		return err
 	}); err != nil {
@@ -136,7 +149,10 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	if raw, err := s.files.ReadWindow(ctx, w); err != nil || string(raw) != string(source) {
 		t.Fatal("the existing original changed", err)
 	}
-	var archives, controls, clipRefs int
+	if raw, err := s.files.ReadWindow(ctx, smallWindow); err != nil || string(raw) != string(smallSource) {
+		t.Fatal("the small quoted original changed", err)
+	}
+	var archives, controls, clipRefs, fieldRefs int
 	if err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM retained_original_archives`).Scan(&archives); err != nil || archives != 1 {
 		t.Fatal("derived display created new files", archives, err)
 	}
@@ -145,6 +161,9 @@ func TestOriginalChildrenMigrationReusesMixedPackAndExactClipAfterRestart(t *tes
 	}
 	if err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM retained_original_values WHERE encoding='json-string-clip'`).Scan(&clipRefs); err != nil || clipRefs != 1 {
 		t.Fatal("clip did not reuse original tool output", clipRefs, err)
+	}
+	if err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM retained_original_values WHERE encoding LIKE 'json-string-field:%'`).Scan(&fieldRefs); err != nil || fieldRefs != 1 {
+		t.Fatal("small quoted JSON field did not reuse its original", fieldRefs, err)
 	}
 	verified, err := s.VerifyOriginals(ctx, "", 100)
 	if err != nil || verified.More || verified.Checked < 6 {

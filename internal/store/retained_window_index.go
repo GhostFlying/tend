@@ -86,7 +86,7 @@ func (s *Store) prepareOriginalChildren(ctx context.Context, batch *OriginalMigr
 			if e != nil {
 				return false, e
 			}
-			if first[0] == '{' || first[0] == '[' || strings.ContainsRune(" \t\r\n", rune(first[0])) || p.w.Length > 8192 && len(needed) > 0 {
+			if first[0] == '"' || first[0] == '{' || first[0] == '[' || strings.ContainsRune(" \t\r\n", rune(first[0])) || p.w.Length > 8192 && len(needed) > 0 {
 				raw, e := s.files.ReadWindow(ctx, p.w)
 				if e != nil {
 					return false, fmt.Errorf("store: read indexed original window %d: %w", p.id, e)
