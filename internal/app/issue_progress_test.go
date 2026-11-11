@@ -59,7 +59,9 @@ func checkIssueProgressManagerScope(t *testing.T, h *harness, issue protocol.Iss
 		for _, entry := range activity.Items {
 			if entry.Block != nil {
 				found = true
-				if principal.Kind == protocol.PrincipalRun && entry.Author != issue.Assignee.Ref {
+				// The fixture's frozen inventory calls this execution Alpha;
+				// the stable assignee reference is not its display name.
+				if principal.Kind == protocol.PrincipalRun && entry.Author != "Alpha" {
 					t.Fatal("runner reply lost its frozen author", entry)
 				}
 				if entry.Block.Trigger.ConversationID != "issue:"+issue.IssueID {
