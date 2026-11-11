@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/blobstore"
@@ -49,6 +50,26 @@ func canonicalOriginalHash(raw []byte) string {
 	return bodyHash(value)
 }
 func encodeOriginal(raw []byte, encoding string) ([]byte, error) {
+	if strings.HasPrefix(encoding, stringFieldEncoding) {
+		return decodeOriginalStringField(raw, encoding)
+	}
+	if strings.HasPrefix(encoding, commandDisplayEncoding) {
+		return decodeCommandDisplay(raw, encoding)
+	}
+	if base, ok := strings.CutSuffix(encoding, "-clip"); ok {
+		if base != "raw" && base != "json-string" && base != "compact" && base != "canonical" {
+			return nil, errors.New("store: unknown original clip presentation")
+		}
+		body, err := encodeOriginal(raw, base)
+		if err != nil {
+			return nil, err
+		}
+		clipped := historicalToolClip(body)
+		if clipped == nil {
+			return nil, errors.New("store: original clip source is not truncated")
+		}
+		return clipped, nil
+	}
 	switch encoding {
 	case "", "raw":
 		return raw, nil

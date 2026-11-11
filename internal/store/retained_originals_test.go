@@ -209,8 +209,11 @@ func TestOriginalMigrationCorruptionRollsBackAndBackupRestores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := staged.Value(preparedOriginalKey{}).(map[string]preparedOriginal)[bodyHash([]byte(body))]
-	archive := filepath.Join(path+".files", "archives", prepared.Window.Archive)
+	event := staged.Value(preparedEventsKey{}).(map[string]preparedEvent)[bodyHash([]byte(body))]
+	if len(event.References) != 1 || event.References[0].Original.Reference.Window == nil {
+		t.Fatal("missing actual text original")
+	}
+	archive := filepath.Join(path+".files", "archives", event.References[0].Original.Reference.Window.Archive)
 	original, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatal(err)

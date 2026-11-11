@@ -104,7 +104,7 @@ func TestCompactOriginalMigratesLegacyRuleWithoutChangingPaginationOrCoverage(t 
 		t.Fatal("legacy marker leaked into preview", err)
 	}
 	var refJSON string
-	if err = s.read.QueryRowContext(ctx, `SELECT data_json FROM agent_rollout_events`).Scan(&refJSON); err != nil || len(refJSON) > 150 {
+	if err = s.read.QueryRowContext(ctx, `SELECT data_json FROM agent_rollout_events`).Scan(&refJSON); err != nil || len(refJSON) > 512 || strings.Contains(refJSON, `"parts"`) {
 		t.Fatal("embedded rule retained", len(refJSON), err)
 	}
 	var hashBytesCount int

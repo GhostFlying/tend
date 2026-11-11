@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/blobstore"
@@ -36,13 +37,17 @@ const readIdleConnections = 8
 // connection with BEGIN IMMEDIATE avoids lock upgrade deadlocks and makes
 // concurrent writers queue in order.
 type Store struct {
-	path             string
-	files            *blobstore.Store
-	write            *sql.DB
-	read             *sql.DB
-	now              func() time.Time
-	observer         *writeObserver
-	writeDiagnostics writeDiagnostics
+	path                string
+	files               *blobstore.Store
+	write               *sql.DB
+	read                *sql.DB
+	now                 func() time.Time
+	observer            *writeObserver
+	writeDiagnostics    writeDiagnostics
+	originalIndexMu     sync.Mutex
+	originalIndexNeed   map[string]bool
+	originalIndexAt     int64
+	originalIndexBuilds int
 }
 
 // Open opens or creates the database at path and applies pending

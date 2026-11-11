@@ -65,6 +65,8 @@ type OriginalMigrationBatch struct {
 	rescan     bool
 	rules      []legacyOriginalRule
 	ruleSchema int
+	originals  []preparedOriginal
+	values     []preparedOriginal
 }
 
 // PrepareOriginalMigration performs bounded reads and durable staging without
@@ -78,6 +80,14 @@ func (s *Store) PrepareOriginalMigration(ctx context.Context, limit int, rescan 
 		return ctx, nil, err
 	}
 	batch := &OriginalMigrationBatch{positions: map[originalColumn]int64{}, rescan: len(rescan) > 0 && rescan[0]}
+	indexed, err := s.prepareOriginalChildren(ctx, batch, limit)
+	if err != nil {
+		return ctx, nil, err
+	}
+	if indexed {
+		batch.more = true
+		return ctx, batch, nil
+	}
 	totalBytes := 0
 	err = s.Read(ctx, func(tx *ReadTx) error {
 		for _, col := range columns {
@@ -172,6 +182,11 @@ func (s *Store) PrepareOriginalMigration(ctx context.Context, limit int, rescan 
 		}
 	}
 
+	if !batch.more {
+		s.originalIndexMu.Lock()
+		s.originalIndexNeed = nil
+		s.originalIndexMu.Unlock()
+	}
 	return ctx, batch, nil
 }
 
@@ -246,6 +261,16 @@ func (t *Tx) ApplyOriginalMigration(ctx context.Context, batch *OriginalMigratio
 	}
 	if _, err := t.Exec(ctx, `UPDATE retained_body_migration SET rewriting=1 WHERE singleton=1`); err != nil {
 		return result, err
+	}
+	for _, original := range batch.originals {
+		if _, err := t.bindOriginalWindow(ctx, original); err != nil {
+			return result, err
+		}
+	}
+	for _, value := range batch.values {
+		if _, err := t.bindOriginalValue(ctx, value); err != nil {
+			return result, err
+		}
 	}
 	for _, row := range batch.rows {
 		var replacement string
