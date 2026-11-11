@@ -47,7 +47,13 @@ func TestFault_ManagerStoppedSettledCloseHTTPRecovery(t *testing.T) {
 	}
 }
 
-type closedManagerRecoveryOptions struct{ runner, settled, bounded, normal bool }
+// The server accepts physical stop but its reply is lost while the runner is
+// recovering after a restart. The original stopped fact must settle once.
+func TestFault_ManagerStoppedReceiptLostAfterServerAcceptance(t *testing.T) {
+	closedRepairToolFacts(t, closedManagerRecoveryOptions{runner: true, lostStopped: true})
+}
+
+type closedManagerRecoveryOptions struct{ runner, settled, bounded, normal, lostStopped bool }
 
 func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	t.Helper()
