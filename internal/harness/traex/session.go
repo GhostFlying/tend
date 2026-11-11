@@ -384,6 +384,9 @@ func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (ha
 
 // ResumeThread implements harness.Session.
 func (s *Session) ResumeThread(ctx context.Context, threadID string, cfg harness.ThreadConfig) (harness.Thread, error) {
+	if cfg.Purpose == harness.ReceiptHistoryPurpose {
+		return s.ReadThreadHistory(ctx, threadID)
+	}
 	unlock, err := s.lockThreadLifecycle(ctx)
 	if err != nil {
 		return nil, err

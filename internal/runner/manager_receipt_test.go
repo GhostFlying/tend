@@ -43,10 +43,10 @@ func (r *receiptBridgeResolver) ResolveManagerReceipt(_ context.Context, pin pro
 
 type receiptBridgeSession struct {
 	harness.Session
-	thread                  *receiptBridgeThread
-	models, starts, resumes int
-	done                    chan struct{}
-	once                    sync.Once
+	thread                             *receiptBridgeThread
+	models, starts, resumes, histories int
+	done                               chan struct{}
+	once                               sync.Once
 }
 
 func (s *receiptBridgeSession) Models(context.Context) ([]harness.Model, error) {
@@ -63,6 +63,13 @@ func (s *receiptBridgeSession) ResumeThread(_ context.Context, id string, cfg ha
 		return nil, harness.ErrRejected
 	}
 	s.thread.config = cfg
+	return s.thread, nil
+}
+func (s *receiptBridgeSession) ReadThreadHistory(_ context.Context, id string) (harness.Thread, error) {
+	s.histories++
+	if id != "original-thread" {
+		return nil, harness.ErrRejected
+	}
 	return s.thread, nil
 }
 func (s *receiptBridgeSession) Done() <-chan struct{} { return s.done }
@@ -140,7 +147,7 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 		t.Fatal(err)
 	}
 	mark("assignment-saved", nil)
-	native := &receiptBridgeSession{thread: &receiptBridgeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
+	native := &receiptBridgeSession{thread: &receiptBridgeThread{events: make(chan harness.Event), config: harness.ThreadConfig{Model: "original-applied-model", Sandbox: "danger-full-access", ApprovalPolicy: "never", Config: map[string]any{"model_provider": "original-provider", "model_reasoning_effort": "high"}}}, done: make(chan struct{})}
 	resolver := &receiptBridgeResolver{native: native, pin: pin}
 	resume, _ := json.Marshal(coordination.Request{ThreadID: "original-thread", Config: harness.ThreadConfig{Model: "original-applied-model", Sandbox: "read-only", ApprovalPolicy: "never", Config: map[string]any{"model_provider": "original-provider", "model_reasoning_effort": "high"}}})
 	find, _ := json.Marshal(coordination.Request{ThreadID: "original-thread", MessageID: "original-repair", TurnID: "original-turn"})
@@ -181,7 +188,7 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 		t.Fatalf("actual runner could not read the original native receipt: %v; %s", err, diagnostic())
 	}
 	mark("manager-native-completed", nil)
-	if resolver.receipts.Load() != 1 || resolver.business.Load() != 0 || native.models != 0 || native.starts != 0 || native.resumes != 1 || native.thread.reads != 1 || native.thread.ModelDefaults() != (harness.ModelSelection{Model: "original-applied-model", Provider: "original-provider", Effort: "high"}) {
+	if resolver.receipts.Load() != 1 || resolver.business.Load() != 0 || native.models != 0 || native.starts != 0 || native.resumes != 0 || native.histories != 1 || native.thread.reads != 1 || native.thread.config.Sandbox != "danger-full-access" || native.thread.ModelDefaults() != (harness.ModelSelection{Model: "original-applied-model", Provider: "original-provider", Effort: "high"}) {
 		t.Fatal("runner receipt-only mode was lost before native history", resolver.receipts.Load(), resolver.business.Load(), native.models, native.starts, native.resumes, native.thread.reads)
 	}
 	if len(replies) != len(commands) {

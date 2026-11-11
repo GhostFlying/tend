@@ -101,7 +101,7 @@ func TestReceiptOnlyResumesOriginalWithoutToolsetHandoff(t *testing.T) {
 			if session.starts != 0 || session.resumes != 1 || len(e.h.Starts()) != 0 {
 				t.Fatal("receipt attachment entered a new native execution", session.starts, session.resumes, e.h.Starts())
 			}
-			if session.config.Model != "original-native-model" || session.config.Config["model_provider"] != "original-provider" || session.config.Config["model_reasoning_effort"] != "high" {
+			if session.config.Purpose != harness.ReceiptHistoryPurpose || session.config.Model != "original-native-model" || session.config.Config["model_provider"] != "original-provider" || session.config.Config["model_reasoning_effort"] != "high" {
 				t.Fatal("receipt resume changed frozen model selection", session.config)
 			}
 			binding, found, err := e.app.MainThreadBinding(t.Context(), e.m.bindingInstance())

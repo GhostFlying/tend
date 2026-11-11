@@ -423,12 +423,16 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		return nil, fmt.Errorf("%w: model catalog is unavailable", harness.ErrRejected)
 	case "start", "resume", "fork":
 		cfg := r.Config
+		receiptHistory := d.RequireReceiptReader || cfg.Purpose == harness.ReceiptHistoryPurpose
 		nativeOwner := d.NativeOwnerTools && !d.RequireReceiptReader
 		if !nativeOwner && (cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never") {
 			return nil, fmt.Errorf("%w: receipt or legacy transport requires read-only/never", harness.ErrRejected)
 		}
 		if d.RequireReceiptReader && (r.ThreadID == "" || cfg.Model == "" || cfg.Ephemeral) {
 			return nil, fmt.Errorf("%w: receipt-only resume requires the original thread and applied model", harness.ErrRejected)
+		}
+		if receiptHistory && (method != "resume" || r.ThreadID == "" || cfg.Ephemeral) {
+			return nil, fmt.Errorf("%w: history reads require an original persistent thread", harness.ErrRejected)
 		}
 		if cfg.Config == nil {
 			cfg.Config = map[string]any{}
@@ -438,11 +442,11 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 				cfg.Config[key] = value
 			}
 		}
-		if d.Upload != nil && nativeOwner {
+		if d.Upload != nil && nativeOwner && !receiptHistory {
 			cfg.Tools = append(cfg.Tools, harness.UploadFileToolSpec)
 		}
 		cfg.Cwd = d.Directory
-		if !d.RequireReceiptReader {
+		if !receiptHistory {
 			cfg.Model = d.Profile.Model
 			// Definitions can name a catalog ID while the CLI reports its native
 			// model name. Resolve that alias against this executor's own catalog.
@@ -470,7 +474,13 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		cfg.OnToolCall = d.tool
 		var t harness.Thread
 		var err error
-		if method == "start" {
+		if receiptHistory {
+			reader, ok := d.Session.(harness.ThreadHistoryReader)
+			if !ok {
+				return nil, fmt.Errorf("%w: non-executing native history reader is unavailable", harness.ErrRejected)
+			}
+			t, err = reader.ReadThreadHistory(ctx, r.ThreadID)
+		} else if method == "start" {
 			t, err = d.Session.StartThread(ctx, cfg)
 		} else if method == "fork" {
 			d.mu.Lock()
@@ -510,7 +520,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if p, ok := t.(harness.PermissionedThread); ok {
 			info.Permissions = p.PermissionDefaults()
 		}
-		if !nativeOwner && (info.Permissions.Sandbox != "read-only" || info.Permissions.ApprovalPolicy != "never") {
+		if !nativeOwner && !receiptHistory && (info.Permissions.Sandbox != "read-only" || info.Permissions.ApprovalPolicy != "never") {
 			return nil, fmt.Errorf("%w: native manager permissions differ", harness.ErrRejected)
 		}
 		if info.Model.Model != "" && info.Model.Model != cfg.Model {
@@ -529,7 +539,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			d.private[t.ID()] = true
 		}
 		d.mu.Unlock()
-		if !exists {
+		if !exists && !receiptHistory {
 			d.wg.Add(1)
 			go func() {
 				defer d.wg.Done()
