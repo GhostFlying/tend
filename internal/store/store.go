@@ -303,6 +303,11 @@ func (s *Store) migrate(ctx context.Context, upTo int) error {
 					return fmt.Errorf("store: retire request ledgers: %w", err)
 				}
 			}
+			if m.version == 124 {
+				if err := migratePublishedBackgroundTools(ctx, tx); err != nil {
+					return fmt.Errorf("store: retire published background tools: %w", err)
+				}
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 				m.version, m.name, s.now().UnixMilli()); err != nil {
 				return fmt.Errorf("store: record migration %04d: %w", m.version, err)
