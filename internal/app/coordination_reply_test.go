@@ -1041,11 +1041,23 @@ func TestTaskControlWritesReturnReceiptAndPreserveSameTurnDispatch(t *testing.T)
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
-		var result map[string]json.RawMessage
-		json.Unmarshal(op.Result, &result)
-		t.Logf("mode %s result %s", mode, op.Result)
-		if result["revision"] == nil {
-			t.Error("control write omitted coordination receipt")
+		var result struct {
+			Receipt struct {
+				Turn     *protocol.LogicalTurnState `json:"turn"`
+				Contexts []struct {
+					WorkItemID      string `json:"work_item_id"`
+					ContextRevision int64  `json:"context_revision"`
+					Reviewed        bool   `json:"reviewed"`
+					DispatchReady   bool   `json:"dispatch_ready"`
+				} `json:"contexts"`
+			} `json:"receipt"`
+		}
+		if err := json.Unmarshal(op.Result, &result); err != nil {
+			t.Fatal(err)
+		}
+		r := result.Receipt
+		if r.Turn == nil || r.Turn.ID != turn.RequestID || len(r.Contexts) != 1 || r.Contexts[0].WorkItemID != w.WorkItemID || r.Contexts[0].ContextRevision <= before.Revision || !r.Contexts[0].Reviewed || !r.Contexts[0].DispatchReady {
+			t.Fatal("control write omitted the original turn's reviewed dispatch receipt", string(op.Result))
 		}
 	}
 	after := h.agentContext(w.WorkItemID)

@@ -51,6 +51,9 @@ func TestStaticSeedCreatesEmptyLedgerAndRejectsOldOwnerAndRunnerIdentity(t *test
 		if operation == protocol.OpRunnerHello {
 			principal = protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "runner-a"}
 		}
+		if prefix := protocol.CreationTargetPrefix(operation); prefix != "" && target.ID == "" {
+			target.ID = ids.New(prefix)
+		}
 		result, err := oldApp.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: operation, Target: target, Payload: body}, command)
 		if err != nil || result.Error != nil {
 			t.Fatal(result, err)

@@ -112,12 +112,19 @@ func TestArchiveLocalCLIUsesPersistentGateHostCASAndExplicitCancellation(t *test
 	if p.Prepared {
 		t.Fatal("cancel did not reopen server")
 	}
-	if code := command("prepare", "--request-id", request, "--revision", "0"); code != 0 {
-		t.Fatal("original receipt not replayed", stderr.String())
+	cancelled := p
+	if code := command("prepare", "--request-id", request, "--revision", "0"); code == 0 || !strings.Contains(stderr.String(), "HTTP 409") {
+		t.Fatal("stale original control bypassed the current business revision", code, stderr.String())
+	}
+	if code := command("status"); code != 0 {
+		t.Fatal(code, stderr.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil || view.Preparation != cancelled {
+		t.Fatal("status did not reconstruct current cancellation", view, err)
 	}
 	p, _ = a.ArchivePreparation(t.Context())
-	if p.Prepared {
-		t.Fatal("replay reapplied old control")
+	if p != cancelled || p.Prepared {
+		t.Fatal("old request identity reapplied a cancelled control", p, cancelled)
 	}
 	view, err = controller.Status(t.Context())
 	if err != nil || view.Hosts[0].Control.Mode != protocol.RunnerMaintenance {

@@ -87,7 +87,7 @@ func (n *stoppedManagerRecoveryHTTP) RoundTrip(q *http.Request) (*http.Response,
 			if want.RequestID == "" {
 				*want = env
 			}
-			if !reflect.DeepEqual(env, *want) {
+			if !sameClosedFactsEnvelope(env, *want) {
 				n.t.Error("normal recovery changed original envelope", env)
 			}
 			gotHash, hashErr := protocol.PayloadHash(&env)
@@ -115,11 +115,15 @@ func (n *stoppedManagerRecoveryHTTP) RoundTrip(q *http.Request) (*http.Response,
 			if env.Operation == protocol.OpManagerNativeStopped {
 				want = n.stopped
 			}
-			if !reflect.DeepEqual(env, want) {
+			if !sameClosedFactsEnvelope(env, want) {
 				n.t.Error("runner changed original factual envelope", env)
 			}
 		}
 	} else if env.Operation == protocol.OpManagerNativeClaim {
+		var claim protocol.ManagerNativeClaimPayload
+		if json.Unmarshal(env.Payload, &claim) == nil && claim.AcknowledgeOnly && len(claim.AcknowledgedIDs) > 0 {
+			return http.DefaultTransport.RoundTrip(q)
+		}
 		if !n.normal {
 			n.t.Error("closed manager reopened native command admission")
 		}
@@ -242,14 +246,14 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 	seen := append([]protocol.Envelope(nil), transport.seen...)
 	transport.mu.Unlock()
 	if options.normal {
-		if len(seen) < 3 || seen[0].Operation != protocol.OpManagerNativeReply || !transport.stoppedAccepted || transport.claims != 1 || !reflect.DeepEqual(seen[len(seen)-1], transport.close) {
+		if len(seen) < 3 || seen[0].Operation != protocol.OpManagerNativeReply || !transport.stoppedAccepted || transport.claims != 1 || !sameClosedFactsEnvelope(seen[len(seen)-1], transport.close) {
 			t.Fatal("normal deadline did not preserve its original close across actual physical stop", seen)
 		}
 		closeEnvelope = transport.close
 		if t.Context().Err() != nil {
 			t.Fatal("normal recovery required external cancellation")
 		}
-	} else if len(seen) != 2 || !reflect.DeepEqual(seen[0], stopped) || !reflect.DeepEqual(seen[1], closeEnvelope) {
+	} else if len(seen) != 2 || !sameClosedFactsEnvelope(seen[0], stopped) || !sameClosedFactsEnvelope(seen[1], closeEnvelope) {
 		t.Fatal("original close blocked physical stop or changed its identity", seen)
 	}
 	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND run_id=? AND status='completed' AND json_extract(result_json,'$.last_sequence')=3 AND COALESCE(json_extract(result_json,'$.error'),'')=''`, closeResultID(t, closeEnvelope), as.RunID) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) != 0 {
@@ -278,6 +282,20 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 	if s.count(`SELECT COUNT(*) FROM tasks`) != 1 || s.count(`SELECT COUNT(*) FROM main_turns`) != 2 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != 3 {
 		t.Fatal("receipt recovery rebuilt business work or changed original event history")
 	}
+}
+
+func sameClosedFactsEnvelope(a, b protocol.Envelope) bool {
+	first, err := protocol.PayloadHash(&a)
+	second, otherErr := protocol.PayloadHash(&b)
+	if err != nil || otherErr != nil || first != second {
+		return false
+	}
+	left, right := string(a.Payload), string(b.Payload)
+	if left != right && !store.SemanticJSONEqual(left, right) {
+		return false
+	}
+	a.Payload, b.Payload = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 func closeResultID(t *testing.T, envelope protocol.Envelope) string {

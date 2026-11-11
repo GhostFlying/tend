@@ -36,7 +36,7 @@ func TestEndToEnd_RunMessageHostedToolsAndRunHTTPContract(t *testing.T) {
 
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerHello, protocol.Target{Type: "runner"}, protocol.HelloPayload{Runtime: &protocol.RunnerRuntime{InstanceID: "message-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunMessages}}}, app.Hello{})
 	task := srv.createTask()
-	claimBody, _ := json.Marshal(protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "message-runner", Generation: 1, Sequence: 2, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunMessages}}})
+	claimBody, _ := json.Marshal(protocol.ClaimPayload{RunID: srv.ids.New(protocol.PrefixRun), WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "message-runner", Generation: 1, Sequence: 2, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunMessages}}})
 	claim := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunnerClaim, Target: protocol.Target{Type: "runner"}, Payload: claimBody}
 	as := srv.claimDirectly(claim)
 	if !as.RunMessages {

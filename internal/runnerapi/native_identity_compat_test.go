@@ -71,7 +71,7 @@ func TestNativeIdentityOpaqueEventsRemainCompatible(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if saved != string(raw) {
+				if !store.SemanticJSONEqual(saved, string(raw)) {
 					t.Fatal("opaque body changed", saved)
 				}
 				run, err := store.GetRun(t.Context(), tx.Q(), as.RunID)

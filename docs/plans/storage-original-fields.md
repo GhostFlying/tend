@@ -4,10 +4,12 @@
 本清单区分需要保留的原文、当前查询的小投影和可退出的派生副本。
 
 本轮必要性抽查确认，三事件列的传输包装曾被机械地按精确字节归档，产生了不必要的
-外壳及规则增量。修正时区分 provider Raw、不可解析的实际工具文本、派生 JSON 结构：
-原始内容和未结命令继续保真；派生结构使用紧凑元数据及原件窗口关联，读取时组装合法
-JSON，不为键序、空白或固定 null 字段创建文件。三事件历史迁移核验 JSON 语义、
-稳定身份、消费水位与分页；文本及真实 Raw 文件仍按原件 hash 核验。同一事件的重报
+外壳及规则增量。完整 rollout 原始文件、实际工具文本和未结命令继续保真；
+JSON 结构（包括 `native.Raw`）整体命中既有原件时复用窗口，未命中则递归共享子值，
+不把整个外壳再次归档。只有确实独有的不透明字符串新增原文；JSON-looking 字符串
+仍按文本保真。结构使用紧凑元数据及原件窗口关联，读取时组装合法 JSON，不为键序、
+空白或固定 null 字段创建文件。三事件历史迁移核验 JSON 语义、稳定身份、消费水位与
+分页；文本及完整原始文件按原件 hash 核验。同一事件的重报
 允许外壳键序变化，拒绝真实内容冲突。先做窗口复用、显式 null/缺省、Unicode、丢 ACK、
 重启及损坏的小回归，再用受保护快照的新副本验证；先前增量演练保留为已知缺陷证据。
 
@@ -30,8 +32,8 @@ JSON，不为键序、空白或固定 null 字段创建文件。三事件历史�
 
 | 字段 | 写入与读取 | 迁移/退出条件 |
 | --- | --- | --- |
-| `manager_native_events.body_json` | 派生事件结构与小状态在 DB，真实 `native.Raw`/长文本共享原件窗口；显式空字段用默认位图 | 包含短事件和旧 v1；消费时组装语义 JSON，保留初次上传 hash 与消费顺序 |
-| `agent_rollout_events.data_json` | 真实 provider 大原文引用既有窗口，不能匹配的独有 Raw 保存一次；小状态不文件化 | sequence、thread、turn、item、kind、时间与分页保留；JSON 键序/空白不是外部合同 |
+| `manager_native_events.body_json` | 派生事件结构与小状态在 DB，`native.Raw` 递归共享实际长文本/子 JSON 窗口；显式空字段用默认位图 | 包含短事件和旧 v1；消费时组装语义 JSON，保留初次上传 hash 与消费顺序 |
+| `agent_rollout_events.data_json` | provider JSON 整体或递归复用既有窗口，只有独有不透明文本保存一次；小状态与外壳不文件化 | sequence、thread、turn、item、kind、时间与分页保留；JSON 键序/空白不是外部合同 |
 | `run_logs.body_json` | 派生结构保留必要身份和状态，大 provider 内容及不透明文本使用窗口关联 | Run/seq 去重、时间与当前恢复保持，重报忽略外层 JSON 键序空白但拒绝真实内容冲突 |
 | `background_replies.tool_json` | 仅保留小路由/状态外壳，input/output 使用共享引用 | 旧大 JSON 按字段迁移；发布后的工具行复用同一引用 |
 | `background_replies.body` | 大回复保存完整原文 | 发布与 `conversation_messages` 共用，不重新复制正文 |

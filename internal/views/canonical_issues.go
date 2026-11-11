@@ -121,7 +121,16 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return out, err
+	}
+	for i := range out.SourceReviews {
+		source := &out.SourceReviews[i]
+		source.Body, err = store.ResolveMessageBody(ctx, q, source.MessageID, source.Body)
+		if err != nil {
+			return out, err
+		}
+	}
 	page, err := Attentions(ctx, q, AttentionFilter{ResponsibleIssueID: id, Status: "open", ActionableOnly: true, IncludeArchived: true})
 	if err != nil {
 		return out, err

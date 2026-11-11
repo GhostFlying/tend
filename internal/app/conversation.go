@@ -288,10 +288,17 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
+	firstStop := false
 	if turnErr == nil {
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_recovery_stops(message_id,stopped_at) VALUES(?,?) ON CONFLICT DO NOTHING`, turn.MessageID, x.Now.UnixMilli()); err != nil {
+		inserted, err := tx.Exec(ctx, `INSERT INTO agent_recovery_stops(message_id,stopped_at) VALUES(?,?) ON CONFLICT DO NOTHING`, turn.MessageID, x.Now.UnixMilli())
+		if err != nil {
 			return Outcome{}, err
 		}
+		n, err := inserted.RowsAffected()
+		if err != nil {
+			return Outcome{}, err
+		}
+		firstStop = n > 0
 	}
 	changed, err := cancelAgentRecoveries(ctx, tx, x.IDs, p.MessageID, state == protocol.MessageProcessing || state == protocol.MessageUnknown, turnErr == nil, x.Now.UnixMilli())
 	if err != nil {
@@ -323,6 +330,11 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			}
 		}
 		return Outcome{Result: result, Events: events, Notify: changed > 0}, nil
+	}
+	if !firstStop {
+		// The original outbox entry already owns delivery of this stop. Its
+		// uncertain transport result cannot authorize a second interruption.
+		return Outcome{Result: result, Events: events, Notify: changed > 0, Accepted: true, NoEffect: changed == 0}, nil
 	}
 	return Outcome{
 		Result:   result,

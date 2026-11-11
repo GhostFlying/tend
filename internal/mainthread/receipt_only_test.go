@@ -158,7 +158,7 @@ func TestReceiptOnlyClearsPendingOnlyForOriginalTerminalHistory(t *testing.T) {
 	}
 }
 
-// These are persisted synthetic startup receipts, not provider terminal proof.
+// These are synthetic confirmed Run/session facts, not provider terminal proof.
 func seedClosingReceiptMetadata(t *testing.T, e *env, modelsStatus string, closing bool) {
 	t.Helper()
 	ctx := t.Context()
@@ -172,15 +172,10 @@ func seedClosingReceiptMetadata(t *testing.T, e *env, modelsStatus string, closi
 		if err := tx.InsertRun(ctx, store.RunRow{RunID: "receipt-reader-run", TaskID: "task_cached", ActionID: "action_cached", Generation: 1, Role: protocol.RoleIssueManager, DesiredState: protocol.DesiredRun, ObservedState: protocol.RunUnknown}); err != nil {
 			return err
 		}
-		models, err := json.Marshal(map[string]any{"result": []harness.Model{{ID: "original-catalog-model", Name: "original-native-model", Provider: "original-provider", DefaultEffort: "high", SupportedEfforts: []string{"high"}}}})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,result_json,status,created_at) VALUES('models_cached','receipt-reader-run','models','{}',?,?,0)`, string(models), modelsStatus); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,result_json,status,created_at) VALUES('resume_cached','receipt-reader-run','resume','{}','{"result":{"ID":"original-thread","Permissions":{"Sandbox":"read-only","ApprovalPolicy":"never"}}}','completed',0)`); err != nil {
-			return err
+		if modelsStatus == "completed" {
+			if _, err := tx.Exec(ctx, `UPDATE runs SET native_thread_id='original-thread',native_thread_json='{"ID":"original-thread","Model":{"Model":"original-native-model","Provider":"original-provider","Effort":"high"},"Permissions":{"Sandbox":"read-only","ApprovalPolicy":"never"}}' WHERE run_id='receipt-reader-run'`); err != nil {
+				return err
+			}
 		}
 		if closing {
 			_, err := tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES('close_cached','receipt-reader-run','close','{}','pending',0)`)
@@ -203,7 +198,7 @@ func TestReceiptOnlyClosingAttachmentRestoresConfirmedModel(t *testing.T) {
 		{"ordinary_reader", "completed", false, false},
 		{"unconfirmed_resume", "completed", true, false},
 		{"wrong_original_thread", "completed", true, false},
-		{"unavailable_frozen_model", "completed", true, false},
+		{"changed_catalog_model", "completed", true, true},
 		{"non_runner_reader", "completed", true, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -214,13 +209,13 @@ func TestReceiptOnlyClosingAttachmentRestoresConfirmedModel(t *testing.T) {
 			seedClosingReceiptMetadata(t, e, test.status, test.closing)
 			if test.name == "unconfirmed_resume" {
 				if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE manager_native_requests SET status='unknown' WHERE request_id='resume_cached'`)
+					_, err := tx.Exec(t.Context(), `UPDATE runs SET native_thread_id='',native_thread_json='' WHERE run_id='receipt-reader-run'`)
 					return err
 				}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if test.name == "unavailable_frozen_model" {
+			if test.name == "changed_catalog_model" {
 				e.m.named.Definition.Model = "unavailable-model"
 			}
 			if test.name == "non_runner_reader" {
@@ -302,15 +297,13 @@ func TestReceiptOnlyClosingReaderRestoresConfirmedResumeWithoutModels(t *testing
 			e.m.named = receiptOnlySelection()
 			e.m.named.AppliedModel, e.m.named.AppliedProvider, e.m.named.AppliedEffort = "", "", ""
 			seedClosingReceiptMetadata(t, e, "completed", true)
+			if catalog == "legacy_differs" {
+				e.m.named.Definition.Model = "different-current-catalog"
+			}
 			// The strict reader never issued Models. Its confirmed resume is the
 			// persisted source of the actual provider configuration after teardown.
 			if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
-				if catalog == "absent" {
-					if _, err := tx.Exec(t.Context(), `DELETE FROM manager_native_requests WHERE request_id='models_cached'`); err != nil {
-						return err
-					}
-				}
-				_, err := tx.Exec(t.Context(), `UPDATE manager_native_requests SET result_json='{"result":{"ID":"original-thread","Model":{"Model":"retained-native-model","Provider":"retained-provider","Effort":"medium"},"Permissions":{"Sandbox":"read-only","ApprovalPolicy":"never"}}}' WHERE request_id='resume_cached'`)
+				_, err := tx.Exec(t.Context(), `UPDATE runs SET native_thread_json='{"ID":"original-thread","Model":{"Model":"retained-native-model","Provider":"retained-provider","Effort":"medium"},"Permissions":{"Sandbox":"read-only","ApprovalPolicy":"never"}}' WHERE run_id='receipt-reader-run'`)
 				return err
 			}); err != nil {
 				t.Fatal(err)

@@ -376,12 +376,29 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 					return "failed"
 				}
 				// Retained callbacks can still contain the previous record-shaped
-				// input. Preserve its original payload and request receipt on replay.
+				// input. Repeated effects read the real object rather than replaying an RPC.
 				legacy := map[string]any{"effect_seq": seq + 4, "target_id": planned.Outcome.EntryID, "expected_control_revision": planned.Outcome.Revision, "payload": protocol.PutPlannerEntryPayload{Entry: planned.Outcome}}
 				first := th.CallTool(context.Background(), turn, "retained-planner-write", "planner_entry_put", legacy)
 				replay := th.CallTool(context.Background(), turn, "retained-planner-write", "planner_entry_put", legacy)
-				if !first.Success || !replay.Success || first.Text != replay.Text {
-					failed <- "record-shaped planner callback lost its exact durable replay: " + replay.Text
+				var duplicate struct {
+					Error *protocol.Error `json:"error"`
+				}
+				var original struct {
+					Result struct {
+						Outcome protocol.PlannerEntry `json:"outcome"`
+					} `json:"result"`
+				}
+				if !first.Success || json.Unmarshal([]byte(first.Text), &original) != nil || replay.Success || json.Unmarshal([]byte(replay.Text), &duplicate) != nil || duplicate.Error == nil || duplicate.Error.Code != protocol.CodeDuplicateEffect {
+					failed <- "record-shaped planner callback repeated its effect: " + replay.Text
+					return "failed"
+				}
+				var current protocol.PlannerEntry
+				if err := e.store.Read(context.Background(), func(tx *store.ReadTx) error {
+					var err error
+					current, err = store.GetPlannerEntry(context.Background(), tx.Q(), planned.Outcome.EntryID)
+					return err
+				}); err != nil || current.Revision != original.Result.Outcome.Revision {
+					failed <- "repeated planner callback changed its real business revision"
 					return "failed"
 				}
 			}
@@ -538,10 +555,13 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 			if !invoke("tasks_cancel", args, nil) {
 				return "failed"
 			}
-			// Same native callback identity reads its receipt and does not add a second effect.
+			// A consumed coordination effect cannot apply another cancellation.
 			result := th.CallTool(context.Background(), turn, fmt.Sprintf("named-tool-%d", n), "tasks_cancel", args)
-			if !result.Success {
-				failed <- "cancel receipt replay failed: " + result.Text
+			var duplicate struct {
+				Error *protocol.Error `json:"error"`
+			}
+			if result.Success || json.Unmarshal([]byte(result.Text), &duplicate) != nil || duplicate.Error == nil || duplicate.Error.Code != protocol.CodeDuplicateEffect || e.count(`SELECT COUNT(*) FROM events WHERE object_id=? AND kind='task.cancelled'`, task.TaskID) != 1 {
+				failed <- "cancel repeated its original effect: " + result.Text
 				return "failed"
 			}
 			seq++
@@ -597,7 +617,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	}
 	execute := func(principal protocol.Principal, op string, target protocol.Target, payload any, command app.Command) {
 		t.Helper()
-		raw, _ := json.Marshal(payload)
+		target, raw := positiveFixtureInput(t, e.ids, op, target, payload)
 		zero := int64(0)
 		if op == "issues.followups_trigger" {
 			zero = followupRule.Revision
@@ -624,7 +644,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		execute(principal, protocol.OpRunnerInventoryRegister, protocol.Target{Type: "host", ID: "worker-host"}, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: 1, SnapshotID: "catalog-snapshot", PublicSHA256: hash, Projection: definition.Public()}, app.RegisterAgentInventory{})
 	}
 	execute(protocol.Principal{Kind: protocol.PrincipalSystem}, "hosted.configure", protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": prepared.Revision(), "hash": prepared.Hash()}, app.AcceptHostedConfiguration{Prepared: prepared})
-	e.app = app.New(e.store, e.ids, e.now, app.WithNotifier(e.signal), app.WithHostedConfiguration(prepared), app.WithFollowups(opts.Callers))
+	e.app = app.New(e.store, e.ids, e.now, app.WithMainOwner(owner.Subject), app.WithNotifier(e.signal), app.WithHostedConfiguration(prepared), app.WithFollowups(opts.Callers))
 	cb := contextbuilder.New(e.app, e.store, e.ids, contextbuilder.Config{})
 	service := tools.New(e.app, e.store, cb, quiet())
 	makeManager := func(conversation string) *Manager {
@@ -637,7 +657,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 	}
 	if taskControls {
 		payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Separate owner's Issue", Project: "default", Intent: "Keep primary control separate"}})
-		op, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}, app.CanonicalOwnerIssueCommand{Action: "create"})
+		op, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue", ID: e.ids.New(protocol.PrefixWorkItem)}, Payload: payload}, app.CanonicalOwnerIssueCommand{Action: "create"})
 		if err != nil || op.Status != protocol.OpSucceeded {
 			t.Fatal(op, err)
 		}
@@ -645,7 +665,7 @@ func testNamedManagerTools(t *testing.T, ownerTransfer, taskControls, repairMode
 		if err := json.Unmarshal(op.Result, &separate); err != nil {
 			t.Fatal(err)
 		}
-		taskPayload := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: separate.AssignmentEpoch, Title: "Separate primary task", Spec: protocol.OwnerTaskSpec{Goal: "Independent investigation", Acceptance: []string{"Report result"}, Deliverables: []string{"report"}, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}
+		taskPayload := protocol.CreateIssueTaskPayload{TaskID: e.ids.New(protocol.PrefixTask), ExpectedAssignmentEpoch: separate.AssignmentEpoch, Title: "Separate primary task", Spec: protocol.OwnerTaskSpec{Goal: "Independent investigation", Acceptance: []string{"Report result"}, Deliverables: []string{"report"}, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}
 		payload, _ = json.Marshal(taskPayload)
 		op, err = e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create_task", Target: protocol.Target{Type: "issue", ID: separate.IssueID}, ExpectedControlRevision: &separate.Revision, Payload: payload}, app.CanonicalOwnerTaskCreate{})
 		if err != nil || op.Status != protocol.OpSucceeded {

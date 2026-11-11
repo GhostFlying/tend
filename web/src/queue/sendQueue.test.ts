@@ -835,17 +835,19 @@ describe("IM durable queue", () => {
       body: "重新实现",
       interaction: { id: "int_question", version: 7, option: "retry the implementation" },
     });
+    const messageID = (message.envelope.payload as { message_id: string }).message_id;
+    expect(messageID).toMatch(/^msg_[0-9A-Z]{26}$/);
     expect((await open()).list.get()).toEqual([]);
     const restored = await open({ operation: "messaging.send", scope: "im" });
     expect(restored.list.get()[0]?.envelope).toMatchObject({
       request_id: message.requestId,
       operation: "messaging.respond",
       target: { type: "interaction", id: "int_question" },
-      payload: { version: 7, option: "retry the implementation" },
+      payload: { message_id: messageID, version: 7, option: "retry the implementation" },
     });
     online = true;
     await restored.resume();
-    expect(sender.submitted[0]?.request_id).toBe(message.requestId);
+    expect(sender.submitted[0]).toEqual(message.envelope);
     expect(sender.submitted[0]?.payload).not.toHaveProperty("channel");
   });
   test("an answer already handled elsewhere retains the unsent words for recovery", async () => {
@@ -874,21 +876,31 @@ describe("IM durable queue", () => {
   });
 });
 
-test("a legacy uncertain message without a business ID is retained without transport replay", async () => {
-  online = false;
-  const q = await open();
-  const original = await q.enqueue({ body: "Keep this original" });
-  await q.idle();
-  const box = await openOutbox(factory);
-  await box.edit(original.requestId, (m) => {
-    const payload = { ...(m.envelope.payload as Record<string, unknown>) };
-    delete payload.message_id;
-    return { ...m, submitAttempted: true, envelope: { ...m.envelope, payload } };
-  });
-  online = true;
-  const reopened = await open();
-  await reopened.resume();
-  expect(sender.submitted).toEqual([]);
-  expect(reopened.list.get()[0]).toMatchObject({ state: "unknown", body: "Keep this original" });
-  expect((await stored())[0]?.body).toBe("Keep this original");
-});
+test.each([false, true])(
+  "a legacy uncertain message without a business ID is retained without transport replay (interaction=%s)",
+  async (interaction) => {
+    online = false;
+    const options = interaction ? { operation: "messaging.send" as const, scope: "im" } : {};
+    const q = await open(options);
+    const original = await q.enqueue({
+      body: "Keep this original",
+      ...(interaction
+        ? { interaction: { id: "interaction-original", version: 7, option: "Continue" } }
+        : {}),
+    });
+    await q.idle();
+    const box = await openOutbox(factory);
+    await box.edit(original.requestId, (m) => {
+      const payload = { ...(m.envelope.payload as Record<string, unknown>) };
+      delete payload.message_id;
+      return { ...m, submitAttempted: true, envelope: { ...m.envelope, payload } };
+    });
+    online = true;
+    const reopened = await open(options);
+    await reopened.resume();
+    await reopened.resend(original.requestId);
+    expect(sender.submitted).toEqual([]);
+    expect(reopened.list.get()[0]).toMatchObject({ state: "unknown", body: "Keep this original" });
+    expect((await stored())[0]?.body).toBe("Keep this original");
+  },
+);

@@ -18,6 +18,7 @@ import (
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/tools"
 )
@@ -58,7 +59,7 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	ctx := t.Context()
 	execute := func(principal protocol.Principal, op string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
 		t.Helper()
-		body, _ := json.Marshal(payload)
+		target, body := positiveFixtureInput(t, s.ids, op, target, payload)
 		result, err := s.app.Execute(ctx, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: body, ExpectedControlRevision: revision}, command)
 		if err != nil || result.Status != protocol.OpSucceeded {
 			t.Fatal(op, result, err)
@@ -66,7 +67,7 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 		return result
 	}
 	host := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}
-	runtime := &protocol.RunnerRuntime{InstanceID: "database-replay-fixture", Generation: 1, Sequence: 1, Protocol: 2, ProtocolMin: 1, ProtocolMax: 2, Mode: protocol.RunnerNormal, JournalVersion: 13, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityAgentInventory}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "database-replay-fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, JournalVersion: journal.CurrentVersion, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityAgentInventory}}
 	execute(host, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil, app.Hello{})
 	zero := int64(0)
 	execute(owner, "categories.put", protocol.Target{Type: "category", ID: protocol.DefaultIssueManagerCategory}, protocol.PutAgentCategoryPayload{Title: "Managers", State: "active"}, &zero, app.PutAgentCategory{})

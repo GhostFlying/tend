@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -53,10 +55,7 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	s := newServer(t, time.Hour)
 	execute := func(principal protocol.Principal, operation string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
 		t.Helper()
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatal(err)
-		}
+		target, raw := positiveFixtureInput(t, s.ids, operation, target, payload)
 		op, err := s.app.Execute(ctx, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: operation, Target: target, Payload: raw, ExpectedControlRevision: revision}, command)
 		if err != nil || op.Status != protocol.OpSucceeded {
 			t.Fatalf("%s: status=%s error=%v operation_error=%v", operation, op.Status, err, op.Error)
@@ -329,8 +328,8 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=?`, as.RunID) != requestBefore || s.count(`SELECT COUNT(*) FROM runs`) != 1 || s.count(`SELECT COUNT(*) FROM main_turns`) != 2 || s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='lapsed'`, as.RunID) != 1 {
 		t.Fatal("receipt reconciliation created native work, a run, turn or lease")
 	}
-	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, business) != 1 || s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id=?`, thread) != 0 || s.count(`SELECT COUNT(*) FROM conversation_tool_uses WHERE thread_id=?`, thread) != 0 {
-		t.Fatal("physical receipts settled business unknown or published repair output")
+	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, business) != 1 || s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id=?`, thread) != 0 || s.count(`SELECT COUNT(*) FROM conversation_tool_uses WHERE thread_id=?`, thread) != 1 {
+		t.Fatal("physical receipts settled business unknown or lost its actual callback fact")
 	}
 	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var saved string
@@ -340,14 +339,37 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 		if saved != answerBefore {
 			return fmt.Errorf("original tool result changed")
 		}
+		tool, err := store.GetToolUse(ctx, tx.Q(), turn, callID)
+		if err != nil {
+			return err
+		}
+		var nativeRun, deliveryID, deliveryStatus, conversation string
+		var success bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT u.native_run_id,u.native_delivery_id,u.native_delivery_status,u.native_result_success,m.conversation_id FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id) WHERE u.message_id=?`, tool.MessageID).Scan(&nativeRun, &deliveryID, &deliveryStatus, &success, &conversation); err != nil {
+			return err
+		}
+		if tool.ThreadID != thread || tool.TurnID != turn || tool.ItemID != callID || tool.Output != result.Text || tool.Status != "completed" || nativeRun != as.RunID || deliveryID != answer || deliveryStatus != "delivered" || success != result.Success || conversation != as.Manager.ConversationID {
+			return fmt.Errorf("original callback output, delivery or owning responsibility changed")
+		}
+		// The original call event below also preserves the exact tool and input.
 		for i, original := range eventBodies {
 			var raw string
 			var applied bool
 			if err := tx.Q().QueryRowContext(ctx, `SELECT body_json,applied FROM manager_native_events WHERE run_id=? AND seq=?`, as.RunID, i+1).Scan(&raw, &applied); err != nil {
 				return err
 			}
-			if raw != string(original) || !applied {
-				return fmt.Errorf("original event %d was changed or left unconsumed", i+1)
+			body, err := store.ResolveJSON(ctx, tx.Q(), raw)
+			if err != nil {
+				return err
+			}
+			transportHash, derived := store.EventOriginalSHA256(raw)
+			if !derived {
+				sum := sha256.Sum256([]byte(body))
+				transportHash = hex.EncodeToString(sum[:])
+			}
+			wantHash := sha256.Sum256(original)
+			if !store.SemanticJSONEqual(body, string(original)) || transportHash != hex.EncodeToString(wantHash[:]) || !applied {
+				return fmt.Errorf("original event %d lost its semantic body, transport hash or consumption fact", i+1)
 			}
 		}
 		return nil

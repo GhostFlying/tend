@@ -161,6 +161,34 @@ test("parent-scoped task creation keeps its actual task identity across a reload
   expect(sender.submitted).toHaveLength(1);
 });
 
+test("interaction answers preserve their message identity and original target across reload", async () => {
+  const sender = new Sender(),
+    factory = new IDBFactory(),
+    first = new DurableOp("interaction:original", factory);
+  expect(
+    (
+      await first.submit(sender, {
+        request_id: "req_interaction",
+        operation: "messaging.respond",
+        target: { type: "interaction", id: "interaction-original" },
+        payload: { version: 7, option: "Continue" },
+      })
+    ).kind,
+  ).toBe("unknown");
+  const original = await first.pending();
+  expect(original?.target).toEqual({ type: "interaction", id: "interaction-original" });
+  expect(original?.payload).toMatchObject({
+    version: 7,
+    option: "Continue",
+    message_id: expect.stringMatching(/^msg_[0-9A-Z]{26}$/),
+  });
+  const restored = new DurableOp("interaction:original", factory);
+  expect(await restored.pending()).toEqual(original);
+  expect((await restored.reconcile(sender)).kind).toBe("unknown");
+  expect(await restored.pending()).toEqual(original);
+  expect(sender.submitted).toEqual([original]);
+});
+
 test("deadline and planner creation reserve actual keys while edits retain their target", async () => {
   for (const [operation, prefix] of [
     ["issues.deadlines_put", "deadline"],

@@ -293,7 +293,8 @@ const (
 
 // TakeoverPayload says how the runner noticed a takeover.
 type TakeoverPayload struct {
-	Reason string `json:"reason"`
+	ObservationID string `json:"observation_id"`
+	Reason        string `json:"reason"`
 }
 
 // ArtifactPayload submits immutable outputs of an implement run. Commit

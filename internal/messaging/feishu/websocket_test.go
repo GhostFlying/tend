@@ -28,9 +28,34 @@ var feishuFixture storefixture.Template
 
 func websocketApp(t *testing.T) (*app.App, *store.Store, *testkit.Clock) {
 	t.Helper()
+	return websocketAppWithFixture(t, "")
+}
+
+func websocketAppWithFixture(t *testing.T, prepared string) (*app.App, *store.Store, *testkit.Clock) {
+	t.Helper()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 81)
-	db, err := feishuFixture.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	path := filepath.Join(t.TempDir(), "ledger.db")
+	var db *store.Store
+	var err error
+	if prepared == "" {
+		db, err = feishuFixture.Open(t.Context(), path, clock.Now)
+	} else {
+		data, readErr := os.ReadFile(prepared)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		_, writeErr := file.Write(data)
+		closeErr := file.Close()
+		if writeErr != nil || closeErr != nil {
+			t.Fatal(writeErr, closeErr)
+		}
+		db, err = store.Open(t.Context(), path, clock.Now)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +309,11 @@ func TestWebSocketCredentialFailureDoesNotStopRecovery(t *testing.T) {
 func TestWebSocketSDKLogsDoNotExposeSecrets(t *testing.T) {
 	const sentinel = "TEND_PRIVATE_FEISHU_TICKET_SENTINEL"
 	if os.Getenv("TEND_TEST_FEISHU_LOG_CHILD") == "1" {
-		a, _, clock := websocketApp(t)
+		prepared := os.Getenv("TEND_TEST_FEISHU_LOG_FIXTURE")
+		if prepared == "" {
+			t.Fatal("SDK child requires its prepared immutable fixture")
+		}
+		a, _, clock := websocketAppWithFixture(t, prepared)
 		var origin string
 		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == larkws.GenEndpointUri {
@@ -331,10 +360,22 @@ func TestWebSocketSDKLogsDoNotExposeSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Keep first-time schema migration outside the SDK's bounded subprocess.
+	// The closed template is read-only; the child opens an exclusive copy.
+	prepared := filepath.Join(t.TempDir(), "ledger.db")
+	preparationStarted := time.Now()
+	database, err := feishuFixture.Open(t.Context(), prepared, testkit.NewClock().Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("SDK child database preparation completed in %s", time.Since(preparationStarted))
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "-test.run=^TestWebSocketSDKLogsDoNotExposeSecrets$", "-test.count=1")
-	command.Env = append(os.Environ(), "TEND_TEST_FEISHU_LOG_CHILD=1")
+	command.Env = append(os.Environ(), "TEND_TEST_FEISHU_LOG_CHILD=1", "TEND_TEST_FEISHU_LOG_FIXTURE="+prepared)
 	output, err := command.CombinedOutput()
 	if strings.Contains(string(output), sentinel) {
 		t.Fatal("SDK exposed private credential or ticket in process output")

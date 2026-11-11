@@ -50,7 +50,7 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	original := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "old-201", ReleaseID: "old-release", Status: "completed", Phase: "completed", Revision: 8}, ManifestSHA256: strings.Repeat("a", 64), ServerHash: strings.Repeat("b", 64), ServerInstance: "server", ServerProcess: "old-launch", ServerHealthy: 1}
+	original := store.UpgradeRow{StartRequestID: ids.New(protocol.PrefixRequest), View: protocol.UpgradeView{UpgradeID: "old-201", ReleaseID: "old-release", Status: "completed", Phase: "completed", Revision: 8}, ManifestSHA256: strings.Repeat("a", 64), ServerHash: strings.Repeat("b", 64), ServerInstance: "server", ServerProcess: "old-launch", ServerHealthy: 1}
 	if err := db.Write(ctx, func(tx *store.Tx) error { return tx.PutUpgrade(ctx, original) }); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := protocol.ForwardRecoveryPlan{RecoveryID: "forward-201", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), OriginalRequestID: ids.New(protocol.PrefixRequest), OriginalLedger: original.View, LedgerRevision: 8, Original: protocol.UpgradeBinding{UpgradeID: "old-201", InstanceID: "server", ProcessInstanceID: "old-launch", ReleaseID: "old-release", ManifestSHA256: original.ManifestSHA256, ArtifactSHA256: original.ServerHash}}
+	plan := protocol.ForwardRecoveryPlan{RecoveryID: "forward-201", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), OriginalRequestID: original.StartRequestID, OriginalLedger: original.View, LedgerRevision: 8, Original: protocol.UpgradeBinding{UpgradeID: "old-201", InstanceID: "server", ProcessInstanceID: "old-launch", ReleaseID: "old-release", ManifestSHA256: original.ManifestSHA256, ArtifactSHA256: original.ServerHash}}
 	plan.Successor = protocol.UpgradeBinding{UpgradeID: plan.RecoveryID, InstanceID: "server", ProcessInstanceID: actual.LaunchID, ReleaseID: "new-release", ArtifactSHA256: actual.SHA256, ManifestSHA256: strings.Repeat("c", 64)}
 	a := app.New(db, ids, time.Now, app.WithForwardRecoveryStartup(plan.RecoveryID))
 	socket := filepath.Join(root, "updater.sock")

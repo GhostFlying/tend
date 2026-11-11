@@ -565,7 +565,7 @@ func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment,
 			if err = json.Unmarshal(env.Payload, &reply); err != nil {
 				return err
 			}
-			if err = r.cfg.Journal.AcknowledgeManagerReceipt(ctx, as.RunID, reply); err != nil {
+			if err = r.cfg.Journal.SettleManagerReceipt(ctx, as.RunID, *env); err != nil {
 				return err
 			}
 			if ackErr := r.flushManagerAcknowledgements(ctx, as); ackErr != nil {

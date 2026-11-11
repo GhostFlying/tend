@@ -2,14 +2,52 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func TestToolFailuresRestoreRetainedErrorAndRejectMissingOriginal(t *testing.T) {
+	e := newEnv(t)
+	output := `{"error":{"code":"invalid_request","message":"original failure"},"private":"` + strings.Repeat("PRIVATE_RESULT", 500) + `"}`
+	ctx, err := e.store.StageOriginals(t.Context(), "failed-tool-original", []byte(output))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.store.Write(ctx, func(tx *store.Tx) error {
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: "retained-failure", Author: "main_agent"}); err != nil {
+			return err
+		}
+		return tx.PutToolUse(ctx, store.ToolUseRow{MessageID: "retained-failure", ThreadID: "thread", TurnID: "turn", ItemID: "retained-call", Tool: "tasks_create", Input: "PRIVATE_INPUT", Output: output, Status: "failed"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page := e.call("tool_failures_list", toolFailuresArgs{}, "")
+	var got struct {
+		Items []toolFailure `json:"items"`
+	}
+	if !page.OK || json.Unmarshal(page.Result, &got) != nil || len(got.Items) != 1 || got.Items[0].Error == nil || got.Items[0].Error.Message != "original failure" || strings.Contains(string(page.Result), "PRIVATE_") {
+		t.Fatal("retained error lost or private output leaked", page)
+	}
+	object, err := e.store.FileStore().Path(strings.Repeat("0", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(filepath.Dir(filepath.Dir(object)), "archives", fmt.Sprintf("%x", sha256.Sum256([]byte("failed-tool-original"))))
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	if page := e.call("tool_failures_list", toolFailuresArgs{}, ""); page.OK {
+		t.Fatal("missing original silently erased the failure", page)
+	}
+}
 
 func TestToolFailuresPaginationAndRedaction(t *testing.T) {
 	e := newEnv(t)

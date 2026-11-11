@@ -66,11 +66,11 @@ func TestTransportSignedCallbackDurableMessageOutboxAndRevokedOwner(t *testing.T
 	if err != nil || len(page.Items) != 1 {
 		t.Fatal(page, err)
 	}
-	inputs, err := a.FeishuInputs(t.Context(), 0, 1, "accepted")
+	inputs, err := a.FeishuInputs(t.Context(), 0, 1, "succeeded")
 	if err != nil || len(inputs.Items) != 1 || inputs.Items[0].MessageID != page.Items[0].MessageID {
 		t.Fatal(inputs, err)
 	}
-	execute("messaging.notify", protocol.Target{Type: "message"}, protocol.MessagingPublication{Body: "Resolved", Purpose: "final", Reason: "requested_result"}, nil, app.MessagingCommand{Action: "notify"})
+	execute("messaging.notify", protocol.Target{Type: "message"}, protocol.MessagingPublication{MessageID: ids.New(protocol.PrefixMessage), Body: "Resolved", Purpose: "final", Reason: "requested_result"}, nil, app.MessagingCommand{Action: "notify"})
 	delivery, _, ok, err := a.NextDelivery(t.Context(), app.FeishuDestination)
 	if err != nil || !ok {
 		t.Fatal(ok, err)

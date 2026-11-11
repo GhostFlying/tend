@@ -257,51 +257,53 @@ func (j *Journal) putRequest(ctx context.Context, tx *sql.Tx, r Request, now tim
 
 // DeleteRequest forgets a request once it is acknowledged.
 func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
-	return j.tx(ctx, func(tx *sql.Tx) error {
-		var operation, payload string
-		err := tx.QueryRowContext(ctx, `SELECT operation,payload_json FROM requests WHERE request_id=?`, requestID).Scan(&operation, &payload)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		payload, err = j.readRequestBody(ctx, operation, payload)
-		if err != nil {
-			return err
-		}
-		if operation == protocol.OpRunnerUsageRegister || operation == protocol.OpRunnerUsageUpload {
-			var scope protocol.UsageUpload
-			if err = json.Unmarshal([]byte(payload), &scope); err != nil {
-				return err
-			}
-			if operation == protocol.OpRunnerUsageRegister {
-				var reg protocol.NativeUsageRegistration
-				if err = json.Unmarshal([]byte(payload), &reg); err != nil {
-					return err
-				}
-				scope.RootThreadID = reg.ThreadID
-			}
-			if _, err = tx.ExecContext(ctx, `UPDATE native_usage_sources SET collection_report_pending=1 WHERE run_id=? AND json_extract(state_json,'$.source.thread_id')=?`, scope.RunID, scope.RootThreadID); err != nil {
-				return err
-			}
-		}
-		if operation == protocol.OpManagerNativeReply {
-			var reply protocol.ManagerNativeReply
-			if err = json.Unmarshal([]byte(payload), &reply); err != nil {
-				return err
-			}
-			// A confirmed server receipt settles transport storage only. Preserve
-			// ambiguous native effects and actual close facts for reconciliation.
-			if reply.Error == "" || reply.Rejected {
-				if _, err = tx.ExecContext(ctx, `DELETE FROM manager_native_operations WHERE request_id=? AND status='completed' AND json_extract(request_json,'$.method')<>'close'`, reply.ID); err != nil {
-					return err
-				}
-			}
-		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id=?`, requestID)
+	return j.tx(ctx, func(tx *sql.Tx) error { return j.deleteRequest(ctx, tx, requestID) })
+}
+
+func (j *Journal) deleteRequest(ctx context.Context, tx *sql.Tx, requestID string) error {
+	var operation, payload string
+	err := tx.QueryRowContext(ctx, `SELECT operation,payload_json FROM requests WHERE request_id=?`, requestID).Scan(&operation, &payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return err
-	})
+	}
+	payload, err = j.readRequestBody(ctx, operation, payload)
+	if err != nil {
+		return err
+	}
+	if operation == protocol.OpRunnerUsageRegister || operation == protocol.OpRunnerUsageUpload {
+		var scope protocol.UsageUpload
+		if err = json.Unmarshal([]byte(payload), &scope); err != nil {
+			return err
+		}
+		if operation == protocol.OpRunnerUsageRegister {
+			var reg protocol.NativeUsageRegistration
+			if err = json.Unmarshal([]byte(payload), &reg); err != nil {
+				return err
+			}
+			scope.RootThreadID = reg.ThreadID
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE native_usage_sources SET collection_report_pending=1 WHERE run_id=? AND json_extract(state_json,'$.source.thread_id')=?`, scope.RunID, scope.RootThreadID); err != nil {
+			return err
+		}
+	}
+	if operation == protocol.OpManagerNativeReply {
+		var reply protocol.ManagerNativeReply
+		if err = json.Unmarshal([]byte(payload), &reply); err != nil {
+			return err
+		}
+		// A confirmed server receipt settles transport storage only. Preserve
+		// ambiguous native effects and actual close facts for reconciliation.
+		if reply.Error == "" || reply.Rejected {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM manager_native_operations WHERE request_id=? AND status='completed' AND json_extract(request_json,'$.method')<>'close'`, reply.ID); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id=?`, requestID)
+	return err
 }
 
 // Requests returns the journaled requests, oldest first.

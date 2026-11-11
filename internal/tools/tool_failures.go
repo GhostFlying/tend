@@ -56,6 +56,7 @@ func (s *Service) toolFailuresList(ctx context.Context, c Call) (any, error) {
 			return err
 		}
 		defer rows.Close()
+		var outputs []string
 		for rows.Next() {
 			var item toolFailure
 			var output string
@@ -66,15 +67,28 @@ func (s *Service) toolFailuresList(ctx context.Context, c Call) (any, error) {
 				result.NextBeforeSeq = result.Items[len(result.Items)-1].Seq
 				break
 			}
+			result.Items = append(result.Items, item)
+			outputs = append(outputs, output)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for i, output := range outputs {
+			output, err := store.ResolveJSON(ctx, tx.Q(), output)
+			if err != nil {
+				return err
+			}
 			var decoded struct {
 				Error *protocol.Error `json:"error"`
 			}
 			if json.Unmarshal([]byte(output), &decoded) == nil {
-				item.Error = decoded.Error
+				result.Items[i].Error = decoded.Error
 			}
-			result.Items = append(result.Items, item)
 		}
-		return rows.Err()
+		return nil
 	})
 	return result, err
 }

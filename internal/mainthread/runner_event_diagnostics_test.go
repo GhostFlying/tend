@@ -28,7 +28,10 @@ func TestRunnerEventDiagnosticsKeepHistoricalRunAndSequence(t *testing.T) {
 				return err
 			}
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,result_json,status,created_at) SELECT 'diagnostic_'||request_id,?,method,payload_json,result_json,status,created_at FROM manager_native_requests WHERE run_id=?`, reader, first); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE runs SET native_thread_id=(SELECT native_thread_id FROM runs WHERE run_id=?),native_thread_json=(SELECT native_thread_json FROM runs WHERE run_id=?) WHERE run_id=?`, first, first, reader); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES('diagnostic_close',?,'close','{}','pending',0)`, reader); err != nil {
 			return err
 		}
 		for _, id := range []string{first, second} {

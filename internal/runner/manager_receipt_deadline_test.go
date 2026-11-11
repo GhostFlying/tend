@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -71,7 +70,7 @@ func TestFault_NormalManagerReceiptDeadlineReleasesOnlyActualClosedProcess(t *te
 					if original == nil {
 						saved := env
 						original, originalHash = &saved, hash
-					} else if !reflect.DeepEqual(*original, env) || hash != originalHash {
+					} else if !sameManagerReceiptEnvelope(*original, env) || hash != originalHash {
 						t.Error("receipt retry changed original identity or payload")
 					}
 					var reply protocol.ManagerNativeReply

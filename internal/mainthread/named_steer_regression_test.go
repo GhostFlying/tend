@@ -103,7 +103,7 @@ func newNamedSteerFixture(t *testing.T, h *testkit.Harness, inputs chan harness.
 	}
 	execute(owner, "categories.put", protocol.Target{Type: "category", ID: "planning"}, protocol.PutAgentCategoryPayload{Title: "Planning", State: "active"}, app.PutAgentCategory{})
 	execute(protocol.Principal{Kind: protocol.PrincipalSystem}, "hosted.configure", protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": prepared.Revision(), "hash": prepared.Hash()}, app.AcceptHostedConfiguration{Prepared: prepared})
-	e.app = app.New(e.store, e.ids, e.now, app.WithNotifier(e.signal), app.WithHostedConfiguration(prepared))
+	e.app = app.New(e.store, e.ids, e.now, app.WithMainOwner(owner.Subject), app.WithNotifier(e.signal), app.WithHostedConfiguration(prepared))
 	cb := contextbuilder.New(e.app, e.store, e.ids, contextbuilder.Config{})
 	e.m = New(e.app, cb, tools.New(e.app, e.store, cb, quiet()), Config{Instance: "main", Thread: ThreadConfig(t.TempDir(), "legacy-unused"), OpenNamed: func(ctx context.Context, _ hostedconfig.Selection) (harness.Session, error) {
 		session, err := h.Open(ctx)

@@ -167,7 +167,7 @@ func TestTelegramOutgoingStreamingAndUnknown(t *testing.T) {
 	}
 	var file protocol.ConversationAttachment
 	_ = json.Unmarshal(uploaded.Result, &file)
-	payload, _ := json.Marshal(protocol.MessagingPublication{Body: "Result", Purpose: "final", Reason: "verified_result", Attachments: []string{file.FileID}})
+	payload, _ := json.Marshal(protocol.MessagingPublication{MessageID: ids.New(protocol.PrefixMessage), Body: "Result", Purpose: "final", Reason: "verified_result", Attachments: []string{file.FileID}})
 	op, err := a.Execute(t.Context(), owner, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "messaging.notify", Target: protocol.Target{Type: "message"}, Payload: payload}, app.MessagingCommand{Action: "notify"})
 	if err != nil || op.Error != nil {
 		t.Fatal(op, err)
@@ -280,7 +280,7 @@ func TestTelegramPhotoPreservesBytesAndForwardedAuthorship(t *testing.T) {
 	if err != nil || source.SuppliedBy.Subject != "owner" {
 		t.Fatal(source, err)
 	}
-	payload, _ := json.Marshal(protocol.MessagingPublication{Purpose: "final", Reason: "requested_original", Attachments: []string{page.Items[0].Attachments[0].FileID}})
+	payload, _ := json.Marshal(protocol.MessagingPublication{MessageID: ids.New(protocol.PrefixMessage), Purpose: "final", Reason: "requested_original", Attachments: []string{page.Items[0].Attachments[0].FileID}})
 	op, err := a.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "messaging.notify", Target: protocol.Target{Type: "message"}, Payload: payload}, app.MessagingCommand{Action: "notify"})
 	if err != nil || op.Error != nil {
 		t.Fatal(op, err)

@@ -37,7 +37,7 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 	e.stop()
 	execute := func(principal protocol.Principal, operation string, target protocol.Target, payload any, revision int64, command app.Command) protocol.Operation {
 		t.Helper()
-		raw, _ := json.Marshal(payload)
+		target, raw := positiveFixtureInput(t, e.ids, operation, target, payload)
 		expected := &revision
 		if operation == "issues.create" || operation == "conversation.submit_message" {
 			expected = nil
@@ -65,7 +65,7 @@ func testNamedPoolAdmissionProgress(t *testing.T, disable bool, deferred ...bool
 			t.Fatal(err)
 		}
 		execute(protocol.Principal{Kind: protocol.PrincipalSystem}, "hosted.configure", protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": p.Revision(), "hash": p.Hash()}, expected, app.AcceptHostedConfiguration{Prepared: p})
-		e.app = app.New(e.store, e.ids, e.now, app.WithHostedConfiguration(p))
+		e.app = app.New(e.store, e.ids, e.now, app.WithMainOwner(owner.Subject), app.WithHostedConfiguration(p))
 	}
 	accept(0)
 	issue := decodeIssue(execute(owner, "issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Investigate", Project: "default", Intent: "Delegate investigation"}}, 0, app.CanonicalOwnerIssueCommand{Action: "create"}))

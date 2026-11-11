@@ -26,12 +26,12 @@ function services() {
   const submit = vi.fn(async (_envelope: Envelope) => ({
     operation: { status: "succeeded", result: { decision_id: decision.decision_id } },
   }));
-  const lookup = vi.fn();
+  const get = vi.fn();
   const enqueue = vi.fn();
   const refreshSnapshot = vi.fn();
   const refreshDetail = vi.fn();
   const value = {
-    client: { submit, lookup },
+    client: { submit, get },
     queue: { enqueue },
     live: {
       conversation: { get: () => ({ items: [{ seq: 8 }] }) },
@@ -40,7 +40,7 @@ function services() {
       refreshDetail,
     },
   } as unknown as Services;
-  return { value, submit, lookup, enqueue, refreshSnapshot, refreshDetail };
+  return { value, submit, get, enqueue, refreshSnapshot, refreshDetail };
 }
 
 afterEach(dismissNotice);
@@ -71,20 +71,22 @@ test("worker options and free text answer the original decision directly", async
   }
 });
 
-test("a lost worker answer receipt is looked up under the same request identity", async () => {
+test("a lost worker answer stays unknown without evidence of the original answer", async () => {
   const s = services();
   s.submit.mockRejectedValueOnce(new NetworkError("lost receipt"));
-  s.lookup.mockResolvedValueOnce({ status: "succeeded", result: { status: "answered" } });
-  expect(await answer(s.value, decision, "Keep them", undefined)).toBe(true);
-  const id = s.submit.mock.calls[0]![0].request_id;
-  expect(s.lookup).toHaveBeenCalledWith(id);
+  // An answered decision alone cannot prove which input was applied. This
+  // operation has no business-object recovery path that proves our answer.
+  s.get.mockResolvedValueOnce({ ...decision, status: "answered" });
+  expect(await answer(s.value, decision, "Keep them", undefined)).toBe(false);
   expect(s.submit).toHaveBeenCalledOnce();
+  expect(s.get).not.toHaveBeenCalled();
+  expect(notice.get()?.tone).toBe("warn");
 });
 
 test("unknown worker answer is not reported as success or blindly resubmitted", async () => {
   const s = services();
   s.submit.mockRejectedValueOnce(new NetworkError("lost receipt"));
-  s.lookup.mockRejectedValueOnce(new NetworkError("still offline"));
+  s.get.mockRejectedValueOnce(new NetworkError("still offline"));
   expect(await answer(s.value, decision, "", undefined, "Keep this draft")).toBe(false);
   expect(s.submit).toHaveBeenCalledOnce();
   expect(notice.get()?.tone).toBe("warn");

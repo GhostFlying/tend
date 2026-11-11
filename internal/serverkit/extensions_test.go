@@ -57,7 +57,7 @@ func TestHostedExtensionFailureDoesNotBlockUnrelatedConversation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	exec(owner, app.CreateConsultation{}, protocol.Target{Type: "conversation"}, protocol.CreateConsultationPayload{AgentRef: "hosted/planner", Title: "Healthy consultation"}, nil)
+	exec(owner, app.CreateConsultation{}, protocol.Target{Type: "conversation", ID: ids.New(protocol.CreationTargetPrefix("conversation.consult"))}, protocol.CreateConsultationPayload{AgentRef: "hosted/planner", Title: "Healthy consultation"}, nil)
 	attempts := 0
 	consumer := &extensions.Consumer{UserHome: t.TempDir(), Config: extensions.Configuration{Directory: filepath.Join(root, "cache"), Runtimes: map[string]extensions.Runtime{"native": {Home: filepath.Join(root, "home")}}}, Validate: func(context.Context, codexenv.Profile, string) error {
 		attempts++

@@ -71,3 +71,35 @@ func AdaptRunnerInventoryStatus(runtime *RunnerRuntime, status AgentInventorySta
 	}
 	return status
 }
+
+// AdaptRunnerTakeover preserves each actual observation across transport retry.
+// Only protocol3 may lack this business identity; protocol4 must provide it.
+// Protocol3 adapter runner-v3 retires at protocol5.
+func AdaptRunnerTakeover(env Envelope, version int64) (Envelope, error) {
+	if !RunnerProtocolSupported(version) {
+		return env, Errorf(CodeInvalidRequest, "runner protocol is unsupported")
+	}
+	var p TakeoverPayload
+	if json.Unmarshal(env.Payload, &p) != nil {
+		return env, Errorf(CodeInvalidRequest, "takeover payload is malformed")
+	}
+	if p.ObservationID == "" && version == 3 {
+		p.ObservationID = TakeoverObservationFromHistoricalEvent(env.Target.ID, env.RequestID)
+		if p.ObservationID != "" {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(env.Payload, &fields); err != nil || fields == nil {
+				return env, Errorf(CodeInvalidRequest, "takeover payload must be an object")
+			}
+			fields["observation_id"], _ = json.Marshal(p.ObservationID)
+			var err error
+			env.Payload, err = json.Marshal(fields)
+			if err != nil {
+				return env, fmt.Errorf("encode adapted takeover: %w", err)
+			}
+		}
+	}
+	if !ValidID(PrefixRequest, p.ObservationID) {
+		return env, Errorf(CodeInvalidRequest, "takeover requires its stable observation_id")
+	}
+	return env, nil
+}
