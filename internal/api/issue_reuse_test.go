@@ -46,8 +46,10 @@ func TestIssueReuseOwnerHTTPOriginAndExactReplay(t *testing.T) {
 	if err := json.Unmarshal(result.Operation.Result, &reused); err != nil || reused.Issue.IssueID != issue.IssueID || !reused.Reused {
 		t.Fatal(reused, err)
 	}
-	code, replay := e.op(token, env)
-	if code != 200 || replay.Operation == nil || string(replay.Operation.Result) != string(result.Operation.Result) {
-		t.Fatal(code, replay)
+	assertOwnerStaleHTTP(t, e, token, env)
+	current := issueDetailHTTP(t, e, token, issue.IssueID)
+	if current.Revision != reused.Issue.Revision || current.IssueID != issue.IssueID || e.count(`SELECT COUNT(*) FROM issue_controls`) != 1 {
+		t.Fatal("stale reuse changed its original responsibility", current)
 	}
+
 }

@@ -74,8 +74,8 @@ func TestDecisionContinuationDependencyRejectsMutualWaitsAtomically(t *testing.T
 				if op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeInvalidRequest {
 					t.Fatal("mutual wait admitted", op)
 				}
-				if replay := h.exec(owner, env, cmd); !reflect.DeepEqual(op, replay) {
-					t.Fatal("cycle failure receipt changed", op, replay)
+				if replay := h.exec(owner, env, cmd); replay.Error == nil || replay.Error.Code != protocol.CodeInvalidRequest {
+					t.Fatal("cycle was admitted on repeated validation", replay)
 				}
 				if got := a.view(t); !reflect.DeepEqual(got, before) {
 					t.Fatal("other answer changed", before, got)

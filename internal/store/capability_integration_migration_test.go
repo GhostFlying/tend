@@ -30,9 +30,9 @@ func TestCapabilityMigrationAppendsAfterMainHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	var status, result string
-	if err := db.QueryRowContext(ctx, `SELECT status,result_json FROM request_records WHERE request_id='original'`).Scan(&status, &result); err != nil || status != "unknown" || result != payload {
-		t.Fatal("upgrade rewrote original unknown request", status, result, err)
+	var generic int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN ('request_records','native_requests')`).Scan(&generic); err != nil || generic != 0 {
+		t.Fatal("generic request history was not retired", generic, err)
 	}
 	for _, table := range []string{"retained_run_continuations", "decision_continuations", "agent_compaction_runtimes", "run_acceptance_evidence_contracts", "capability_definition_versions", "run_capability_bindings"} {
 		var count int

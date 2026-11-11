@@ -185,7 +185,12 @@ func TestQuestionHandoffHTTPReplaysOnlyCommittedExit(t *testing.T) {
 	fresh.RequestID = e.envelope(protocol.OpRunsYieldQuestion, as.RunID, nil).RequestID
 	wrongRun := *exit
 	wrongRun.Target.ID = "run_other"
-	for _, env := range []*protocol.Envelope{&changed, &fresh, &wrongRun, e.envelope(protocol.OpRunsReportStarted, as.RunID, nil), e.envelope(protocol.OpRunsAskOwner, as.RunID, protocol.AskOwnerPayload{QuestionKey: "new", Question: "New authority?"})} {
+	// A new transport trace may read the same committed physical handoff;
+	// it cannot change its thread, Run or grant any fresh execution authority.
+	if got := e.mustOK(asRun(*as), &fresh); string(got) != string(first) {
+		t.Fatal("business handoff changed across transport traces")
+	}
+	for _, env := range []*protocol.Envelope{&changed, &wrongRun, e.envelope(protocol.OpRunsReportStarted, as.RunID, nil), e.envelope(protocol.OpRunsAskOwner, as.RunID, protocol.AskOwnerPayload{QuestionKey: "new", Question: "New authority?"})} {
 		if status, response := e.call(asRun(*as), env); status != http.StatusForbidden || response.Error == nil || response.Error.Code != protocol.CodeForbidden {
 			t.Fatalf("historical credential admitted %s: %d %+v", env.Operation, status, response)
 		}

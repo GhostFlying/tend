@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"unicode/utf8"
 
@@ -19,6 +20,22 @@ func (InjectSource) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 func (InjectSource) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p protocol.InjectSourcePayload
 	if err := decodePayload(x.Env, &p); err != nil {
+		return Outcome{}, err
+	}
+	if !protocol.ValidID(protocol.PrefixMessage, p.MessageID) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message_id must identify the supplied source")
+	}
+	if prior, err := store.ManualSource(ctx, tx.Q(), p.MessageID); err == nil {
+		if prior.ConversationID != store.ConversationID(p.ConversationID) || prior.Text != p.Text || !sameBusinessDefinition(prior.Metadata, p.Metadata) || len(prior.Attachments) != len(p.Attachments) {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "source identity already has another immutable input")
+		}
+		for i, id := range p.Attachments {
+			if prior.Attachments[i].FileID != id {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "source attachment differs")
+			}
+		}
+		return Outcome{NoEffect: true, Result: prior}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
 	if !utf8.ValidString(p.Text) || len(p.Text) > maxMessageBytes || len(p.Metadata.Author) > 2000 || len(p.Metadata.URL) > 8192 {
@@ -39,7 +56,7 @@ func (InjectSource) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	adapted := *x
 	env := *x.Env
 	adapted.Env = &env
-	env.Payload, _ = json.Marshal(protocol.SubmitMessagePayload{ConversationID: p.ConversationID, Body: body, Attachments: p.Attachments})
+	env.Payload, _ = json.Marshal(protocol.SubmitMessagePayload{MessageID: p.MessageID, ConversationID: p.ConversationID, Body: body, Attachments: p.Attachments})
 	out, err := (SubmitMessage{externalSource: true}).Apply(ctx, &adapted, tx)
 	if err != nil {
 		return Outcome{}, err

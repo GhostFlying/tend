@@ -1,6 +1,6 @@
 // One owner write through POST /api/v1/ops, under a fresh request ID: the
 // buttons' actions, such as stopping a reply, answering a decision with an
-// effect or pausing a task. A write without an answer is looked up once,
+// effect or pausing a task. A write without an answer reads its business object,
 // never sent again blindly (invariant 4).
 import { ApiError, NetworkError } from "../api/client.ts";
 import type {
@@ -8,17 +8,17 @@ import type {
   Code,
   Envelope,
   OpStatus,
-  RequestView,
   TaskSummary,
   IssueView,
   AttentionView,
 } from "../api/generated/api.ts";
+import { prepareOperation, recoverOperation } from "./operationRecovery.ts";
 import { newRequestId } from "../api/ids.ts";
 
 /** The part of the API client a write uses. */
 export interface OpSender {
   submit(envelope: Envelope): Promise<APIResponse>;
-  lookup(requestId: string): Promise<RequestView | null>;
+  get?<T>(path: string, signal?: AbortSignal): Promise<T>;
 }
 
 export type OpOutcome =
@@ -40,7 +40,10 @@ export async function runOp(
   op: Omit<Envelope, "request_id"> & { request_id?: string },
   now: () => number = Date.now,
 ): Promise<OpOutcome> {
-  const envelope: Envelope = { ...op, request_id: op.request_id ?? newRequestId(now()) };
+  const envelope = prepareOperation(
+    { ...op, request_id: op.request_id ?? newRequestId(now()) },
+    now(),
+  );
   let res: APIResponse;
   try {
     res = await sender.submit(envelope);
@@ -52,11 +55,7 @@ export async function runOp(
       throw err;
     }
     try {
-      const view = await sender.lookup(envelope.request_id);
-      if (view) {
-        return settleOp(view.status, view.result, view.error);
-      }
-      return { kind: "unknown", message: "tend 没有收到这个操作，可以再试一次" };
+      return await recoverOperation(sender, envelope);
     } catch {
       return { kind: "unknown", message: "tend 没有回应，不知道操作是否生效" };
     }

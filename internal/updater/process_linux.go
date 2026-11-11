@@ -341,11 +341,6 @@ func (p LinuxProcess) start(ctx context.Context, binary string, cfg Config, extr
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}
-	log, err := os.OpenFile(cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
-	}
-	defer log.Close()
 	executable, err := os.Open(binary)
 	if err != nil {
 		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
@@ -359,6 +354,11 @@ func (p LinuxProcess) start(ctx context.Context, binary string, cfg Config, extr
 	if requested := extra["TEND_RELEASE_SHA256"]; requested != "" && verifiedSHA != requested {
 		return Identity{}, fmt.Errorf("%w: selected executable changed", ErrNotStarted)
 	}
+	log, err := openDiagnosticWriter(cfg, launchID, verifiedSHA)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: %w", ErrNotStarted, err)
+	}
+	defer log.Close()
 	receipt, err := prepareOwnedLaunch(cfg, launchID, verifiedSHA, extra)
 	if err != nil {
 		return Identity{}, fmt.Errorf("%w: launch receipt preparation: %v", ErrUnknown, err)

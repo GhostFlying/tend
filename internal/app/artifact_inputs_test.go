@@ -37,7 +37,7 @@ func TestArtifactInputsAcrossIndependentWorkspacesAndBothRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := []int{h.count("tasks"), h.count("task_specs"), h.count("plan_actions"), h.count("deliverable_files")}
-	if replay := h.exec(owner, env, CreateTask{}); !bytes.Equal(replay.Result, created.Result) {
+	if replay := h.exec(owner, env, CreateTask{}); !sameTaskState(t, created, replay) {
 		t.Fatalf("create replay changed result: %+v", replay)
 	}
 	for i, table := range []string{"tasks", "task_specs", "plan_actions", "deliverable_files"} {

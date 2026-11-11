@@ -112,7 +112,7 @@ func localUsageEmpty(ctx context.Context, q store.Querier, s LocalUsageSource) (
 		return false, err
 	}
 	var facts bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE json_extract(payload_json,'$.thread_id')=?)`, source.ThreadID).Scan(&facts)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE thread_id=?)`, source.ThreadID).Scan(&facts)
 	return !facts, err
 }
 

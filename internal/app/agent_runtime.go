@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 
@@ -32,12 +33,29 @@ func (a *App) RecordRolloutEvent(ctx context.Context, id, thread, turn, item, ki
 	if len(data) == 0 {
 		data = json.RawMessage(`{}`)
 	}
-	staged, err := a.store.StageOriginals(ctx, "conversation-rollout:"+id+":"+thread, data)
+	staged, err := a.store.StageRolloutOriginals(ctx, "conversation-rollout:"+id+":"+thread, data)
 	if err != nil {
 		return err
 	}
 	return a.write(staged, func(tx *store.Tx) error {
-		body, err := tx.RetainJSON(staged, string(data))
+		if stableRolloutEvent(thread, turn, item, kind) {
+			var before string
+			err := tx.Q().QueryRowContext(staged, `SELECT data_json FROM agent_rollout_events WHERE conversation_id=? AND thread_id=? AND COALESCE(turn_id,'')=? AND COALESCE(item_id,'')=? AND kind=? ORDER BY seq LIMIT 1`, store.ConversationID(id), thread, turn, item, kind).Scan(&before)
+			if err == nil {
+				before, err = store.ResolveJSON(staged, tx.Q(), before)
+				if err != nil {
+					return err
+				}
+				if !store.SemanticJSONEqual(before, string(data)) {
+					return protocol.Errorf(protocol.CodeConflictPayload, "native rollout identity has different content")
+				}
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		body, err := tx.RetainEventJSON(staged, string(data))
 		if err != nil {
 			return err
 		}
@@ -206,4 +224,19 @@ func (a *App) AgentCompactionsUncertain(ctx context.Context) (bool, error) {
 		return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_compactions WHERE status IN ('starting','running','unknown'))`).Scan(&blocked)
 	})
 	return blocked, err
+}
+
+// Deltas and incomplete identities do not provide an immutable item key.
+func stableRolloutEvent(thread, turn, item, kind string) bool {
+	if thread == "" || turn == "" {
+		return false
+	}
+	switch kind {
+	case "item_started", "item_completed":
+		return item != ""
+	case "turn_started", "turn_completed", "native_receipt":
+		return true
+	default:
+		return false
+	}
 }

@@ -38,7 +38,7 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{t: t, app: New(s, ids, clock.Now), store: s, clock: clock, ids: ids}
 	h.syncConfig(testConfig())
 	h.seeded = map[string]int{}
-	for _, table := range []string{"request_records", "events", "inbox", "outbox", "tasks", "plan_actions", "runs"} {
+	for _, table := range []string{"events", "inbox", "outbox", "tasks", "plan_actions", "runs"} {
 		h.seeded[table] = h.count(table)
 	}
 	return h
@@ -85,6 +85,34 @@ func (h *harness) env(op string, target protocol.Target, payload any, revision *
 			h.t.Fatal(err)
 		}
 		raw = b
+	}
+	if target.ID == "" {
+		if prefix := protocol.CreationTargetPrefix(op); prefix != "" {
+			target.ID = h.ids.New(prefix)
+		}
+	}
+
+	if op == protocol.OpRunnerClaim {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		if fields["run_id"] == nil || string(fields["run_id"]) == "\"\"" {
+			fields["run_id"], _ = json.Marshal(h.ids.New(protocol.PrefixRun))
+		}
+		raw, _ = json.Marshal(fields)
+	}
+	for field, prefix := range protocol.NativePayloadIdentities(op) {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		if fields[field] == nil || string(fields[field]) == "\"\"" {
+			fields[field], _ = json.Marshal(h.ids.New(prefix))
+		}
+		raw, _ = json.Marshal(fields)
 	}
 	// Ordinary fixtures use a supported versioned runner. Retirement tests
 	// construct their unsupported wire payload explicitly.
@@ -147,7 +175,7 @@ func runTarget(id string) protocol.Target  { return protocol.Target{Type: "run",
 
 func (h *harness) createTask(p protocol.Principal, payload createTaskPayload) (protocol.Operation, taskResult) {
 	h.t.Helper()
-	op := h.exec(p, h.env("tasks.create", protocol.Target{Type: "task"}, payload, nil), CreateTask{})
+	op := h.exec(p, h.env("tasks.create", protocol.Target{Type: "task", ID: h.ids.New(protocol.PrefixTask)}, payload, nil), CreateTask{})
 	var res taskResult
 	if op.Status == protocol.OpSucceeded {
 		if err := json.Unmarshal(op.Result, &res); err != nil {
@@ -265,6 +293,17 @@ func TestHappyPathToCompleted(t *testing.T) {
 	}
 }
 
+// sameTaskState compares current business facts, excluding newly scheduled
+// action descriptions that are returned only by the mutating attempt.
+func sameTaskState(t *testing.T, a, b protocol.Operation) bool {
+	t.Helper()
+	var first, second taskResult
+	if json.Unmarshal(a.Result, &first) != nil || json.Unmarshal(b.Result, &second) != nil {
+		t.Fatal("invalid task state")
+	}
+	return a.Status == protocol.OpSucceeded && b.Status == protocol.OpSucceeded && first.TaskID != "" && first.TaskID == second.TaskID && first.Lifecycle == second.Lifecycle && first.ControlMode == second.ControlMode && first.ControlRevision == second.ControlRevision && first.SpecVersion == second.SpecVersion && first.Rating == second.Rating && first.BlockReason == second.BlockReason
+}
+
 func TestFault_RetrySameRequestID(t *testing.T) {
 	h := newHarness(t)
 	env := h.env("tasks.create", protocol.Target{Type: "task"}, createTaskPayload{Title: "a", Spec: testSpec}, nil)
@@ -272,16 +311,16 @@ func TestFault_RetrySameRequestID(t *testing.T) {
 	again := *env
 	again.TraceID = h.ids.New(protocol.PrefixTrace) // A new transport attempt.
 	second := h.exec(owner, &again, CreateTask{})
-	if string(first.Result) != string(second.Result) || first.Status != second.Status {
+	if !sameTaskState(t, first, second) {
 		t.Errorf("retry returned a different operation:\n%+v\n%+v", first, second)
 	}
 	if n := h.count("tasks"); n != 1 {
 		t.Errorf("tasks = %d, want 1", n)
 	}
-	// Another client of the same owner shares the dedup domain.
+	// Another client of the same owner reads the same business identity.
 	phone := owner
 	phone.Client = "cli-phone"
-	if third := h.exec(phone, env, CreateTask{}); string(third.Result) != string(first.Result) {
+	if third := h.exec(phone, env, CreateTask{}); !sameTaskState(t, first, third) {
 		t.Errorf("retry from another client returned %+v", third)
 	}
 }
@@ -304,7 +343,7 @@ func TestFault_ConcurrentSameRequestID(t *testing.T) {
 	}
 	wg.Wait()
 	for i := 1; i < n; i++ {
-		if string(results[i].Result) != string(results[0].Result) {
+		if !sameTaskState(t, results[0], results[i]) {
 			t.Fatalf("concurrent duplicates diverged: %s vs %s", results[i].Result, results[0].Result)
 		}
 	}
@@ -323,7 +362,7 @@ func TestFault_SameIDDifferentPayload(t *testing.T) {
 	if protocol.CodeOf(err) != protocol.CodeConflictPayload {
 		t.Fatalf("reused ID with a new payload: err = %v, want conflict_payload", err)
 	}
-	if again := h.exec(owner, env, CreateTask{}); string(again.Result) != string(first.Result) {
+	if again := h.exec(owner, env, CreateTask{}); !sameTaskState(t, first, again) {
 		t.Errorf("original request changed after conflict: %+v", again)
 	}
 	if n := h.count("tasks"); n != 1 {
@@ -380,10 +419,8 @@ func TestFault_ChildRequestsDistinct(t *testing.T) {
 	if len(first) != 2 || first[0] == first[1] {
 		t.Fatalf("children = %v, want two distinct IDs", first)
 	}
-	h.exec(owner, env, outboxCommand{})
-	if again := children(); len(again) != 2 || again[0] != first[0] || again[1] != first[1] {
-		t.Errorf("replaying the parent changed its children: %v -> %v", first, again)
-	}
+	// The synthetic command has no business identity. Real commands must
+	// guard their own effects; the app does not archive a generic parent request.
 }
 
 func TestFault_NewCallIDSamePhase(t *testing.T) {
@@ -527,9 +564,7 @@ func TestFault_InternalErrorRetrySafe(t *testing.T) {
 	if n := h.count("inbox"); n != 0 {
 		t.Errorf("rows after internal error = %d, want 0", n)
 	}
-	if n := h.count("request_records"); n != 0 {
-		t.Errorf("request records after internal error = %d, want 0", n)
-	}
+	assertNoGenericLedger(t, h)
 	if op := h.exec(owner, env, flakyCommand{&calls}); op.Status != protocol.OpSucceeded {
 		t.Fatalf("retry: %+v", op)
 	}
@@ -573,7 +608,7 @@ func TestNoEffectIsNotRecorded(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("Apply calls = %d, want 2: a no-effect request must run again on retry", calls)
 	}
-	for _, table := range []string{"inbox", "request_records", "events"} {
+	for _, table := range []string{"inbox", "events"} {
 		if n := h.count(table); n != 0 {
 			t.Errorf("%s rows = %d, want 0", table, n)
 		}
@@ -587,7 +622,7 @@ func TestNoEffectWithEventsIsAnError(t *testing.T) {
 	if _, err := h.app.Execute(context.Background(), owner, env, idleCommand{calls: &calls, events: true}); err == nil {
 		t.Fatal("Execute succeeded, want an error for a no-effect outcome with events")
 	}
-	if n := h.count("inbox") + h.count("request_records"); n != 0 {
+	if n := h.count("inbox"); n != 0 {
 		t.Errorf("rows = %d, want 0", n)
 	}
 }
@@ -622,9 +657,7 @@ func TestAuthorization(t *testing.T) {
 	if got := h.task(taskID).Lifecycle; got != protocol.TaskAwaitingAcceptance {
 		t.Errorf("forbidden requests changed the task to %s", got)
 	}
-	if n := h.count("request_records WHERE status = 'failed'"); n != 0 {
-		t.Errorf("forbidden requests were recorded: %d", n)
-	}
+	assertNoGenericLedger(t, h)
 }
 
 func TestEnvelopeRejectedBeforeSideEffects(t *testing.T) {
@@ -638,7 +671,7 @@ func TestEnvelopeRejectedBeforeSideEffects(t *testing.T) {
 	if _, err := h.app.Execute(context.Background(), owner, wrongOp, CreateTask{}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
 		t.Errorf("mismatched operation: err = %v, want invalid_request", err)
 	}
-	if n := h.count("tasks") + h.count("request_records"); n != 0 {
+	if n := h.count("tasks"); n != 0 {
 		t.Errorf("rejected envelopes left %d rows", n)
 	}
 }
@@ -659,5 +692,19 @@ func TestBusinessFailureRollsBackPartialWrites(t *testing.T) {
 	good.Spec = testSpec
 	if op, _ := h.createTask(mainAgent, good); op.Status != protocol.OpSucceeded {
 		t.Errorf("corrected retry of the same planning commit: %+v", op)
+	}
+}
+
+func assertNoGenericLedger(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var n int
+		err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN ('request_records','native_requests')`).Scan(&n)
+		if n != 0 {
+			t.Error("generic request ledger exists")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

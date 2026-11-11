@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/protocol/schema"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
 // OwnerTools is injected by assembly; tools does not import the API layer.
@@ -65,36 +63,6 @@ func (s *Service) NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 func (s *Service) ownerCall(ctx context.Context, c Call) (harness.ToolResult, bool) {
 	if s.owner == nil {
 		return harness.ToolResult{}, false
-	}
-	// Retained typed-answer receipts were recorded under the source-resolving
-	// operation. Let the original handler replay that immutable envelope.
-	if c.Tool == "decision_continuation_answer" {
-		request := c.RequestID
-		if request == "" && c.Native != "" {
-			var err error
-			request, err = s.app.NativeRequestID(ctx, "harness:"+c.Principal.Subject, c.Native)
-			if err != nil {
-				return s.answerHosted(ctx, c, nil, err), true
-			}
-		}
-		old := false
-		err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-			record, err := store.GetRequest(ctx, tx.Q(), c.Principal.DedupDomain(), request)
-			if errors.Is(err, store.ErrNotFound) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			old = record.Operation == protocol.OpResolveDecisionContinuation
-			return nil
-		})
-		if err != nil {
-			return s.answerHosted(ctx, c, nil, err), true
-		}
-		if old {
-			return harness.ToolResult{}, false
-		}
 	}
 	name := c.Tool
 	arguments := c.Arguments

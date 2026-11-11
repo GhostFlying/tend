@@ -624,7 +624,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		}
 		if op.Kind == "upgrade" {
 			op.BackupDir = filepath.Join(s.cfg.StateDir, "backups", op.ID)
-			if err := backupData(s.cfg, op); err != nil {
+			if err := backupDataContext(ctx, s.cfg, op); err != nil {
 				return err
 			}
 		}

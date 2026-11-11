@@ -1,13 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { expect, test } from "vitest";
 import { NetworkError } from "../api/client.ts";
-import type {
-  APIResponse,
-  AttentionView,
-  Envelope,
-  IssueView,
-  RequestView,
-} from "../api/generated/api.ts";
+import type { APIResponse, AttentionView, Envelope, IssueView } from "../api/generated/api.ts";
 import { issueCommand } from "../issues/actions.ts";
 import { attentionCommand, withdrawAttentionCommand } from "../attention/actions.ts";
 import { runSupplementCommand } from "../conversation/actions.ts";
@@ -25,7 +19,6 @@ test("unknown Issue control retains original request, revision and epoch across 
       if (!online) throw new NetworkError("lost response");
       return { operation: { request_id: e.request_id, status: "succeeded", result: {} } };
     },
-    lookup: async () => null,
   };
   const original = issueCommand(
     { issue_id: "issue-one", revision: 4, assignment_epoch: 2 },
@@ -49,6 +42,7 @@ test("unknown Issue control retains original request, revision and epoch across 
   expect((await performOwnerCommand(sender, journal, changed)).kind).toBe("unknown");
   expect(submitted).toHaveLength(1);
   online = true;
+  sender.get = async <T>() => ({ issue_id: "issue-one", revision: 5, assignment_epoch: 3 }) as T;
   expect(
     (
       await performOwnerCommand(
@@ -58,8 +52,8 @@ test("unknown Issue control retains original request, revision and epoch across 
         () => refreshed++,
       )
     ).kind,
-  ).toBe("done");
-  expect(submitted).toEqual([pending, pending]);
+  ).toBe("stale");
+  expect(submitted).toEqual([pending]);
   expect(refreshed).toBe(1);
 });
 
@@ -80,7 +74,6 @@ test("stale owner requests retain current Issue and Attention projections withou
         current_attention: attention,
       };
     },
-    lookup: async (): Promise<RequestView | null> => null,
   };
   const outcome = await runOp(
     sender,
@@ -100,7 +93,6 @@ test("original question answer and exact-run supplement use durable identities; 
     submit: async () => {
       throw new NetworkError("offline");
     },
-    lookup: async () => null,
   };
   const answer = attentionCommand({ attention_id: "attention-one", revision: 5 }, "respond", {
     version: 3,

@@ -97,6 +97,10 @@ func (j *Journal) AcknowledgeBoundedFinal(ctx context.Context, request Request, 
 		if err := json.Unmarshal([]byte(target), &original.Target); err != nil {
 			return err
 		}
+		payload, err = j.readRequestBody(ctx, operation, payload)
+		if err != nil {
+			return err
+		}
 		original.RequestID, original.Operation, original.Payload = request.Envelope.RequestID, operation, json.RawMessage(payload)
 		if revision.Valid {
 			original.ExpectedControlRevision = &revision.Int64

@@ -38,6 +38,10 @@ func BackgroundSources(ctx context.Context, q Querier, message string, after int
 		if err := rows.Scan(&s.Seq, &s.MessageID, &s.EventID, &s.Kind, &s.RuleID, &s.OccurrenceID, &s.CancelledAt, &s.Body, &data); err != nil {
 			return p, err
 		}
+		s.Body, err = ResolveMessageBody(ctx, q, s.MessageID, s.Body)
+		if err != nil {
+			return p, err
+		}
 		if data != "" {
 			s.Data = json.RawMessage(data)
 		}

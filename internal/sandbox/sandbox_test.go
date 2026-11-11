@@ -63,9 +63,42 @@ func (c *webClient) call(method, path string, body, out any) {
 		}
 	}
 }
+
+// composeSandboxTestInput creates stable business identities before transport.
+func composeSandboxTestInput(t *testing.T, key, operation string, target protocol.Target, payload any) (protocol.Target, json.RawMessage) {
+	t.Helper()
+	if prefix := protocol.CreationTargetPrefix(operation); prefix != "" && target.ID == "" {
+		target.ID = protocol.NativeObjectID(prefix, "sandbox-test", key)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := protocol.NativePayloadIdentities(operation)
+	if operation == protocol.OpRunnerClaim {
+		identities = map[string]protocol.Prefix{"run_id": protocol.PrefixRun}
+	}
+	if len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		for field, prefix := range identities {
+			if len(fields[field]) == 0 || string(fields[field]) == `""` || string(fields[field]) == "null" {
+				fields[field], _ = json.Marshal(protocol.NativeObjectID(prefix, "sandbox-test", key+"/"+field))
+			}
+		}
+		raw, _ = json.Marshal(fields)
+	}
+	return target, raw
+}
+
 func (c *webClient) operation(id, name string, target protocol.Target, revision *int64, payload any) {
 	c.t.Helper()
-	raw, _ := json.Marshal(payload)
+	target, raw := composeSandboxTestInput(c.t, id, name, target, payload)
 	var result protocol.APIResponse
 	c.call(http.MethodPost, "/api/v1/ops", protocol.Envelope{RequestID: seedRequest(id), Operation: name, Target: target, ExpectedControlRevision: revision, Payload: raw}, &result)
 	if result.Operation == nil || result.Operation.Status == protocol.OpFailed {
@@ -132,7 +165,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	// Default-category creation must reach a runner-managed scripted session.
 	var created protocol.APIResponse
 	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: plan("负责人领取测试", "demo-web"), Owner: &protocol.IssueOwnerRequest{CategoryID: protocol.DefaultIssueManagerCategory, Reason: "Delegate to sandbox owner"}})
-	c.call(http.MethodPost, "/api/v1/ops", protocol.Envelope{RequestID: seedRequest("test-runner-manager-create"), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}, &created)
+	c.call(http.MethodPost, "/api/v1/ops", protocol.Envelope{RequestID: seedRequest("test-runner-manager-create"), Operation: "issues.create", Target: protocol.Target{Type: "issue", ID: protocol.NativeObjectID(protocol.PrefixWorkItem, "sandbox-test", "test-runner-manager-create")}, Payload: payload}, &created)
 	if created.Operation == nil || created.Operation.Status != protocol.OpSucceeded {
 		t.Fatal(created)
 	}
@@ -306,10 +339,12 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	dispatchStateLogged := false
 	waitFor(t, ctx, "dispatch source and completed reply retain actual completed processing", func() bool {
 		var page protocol.ConversationPage
 		c.call(http.MethodGet, fmt.Sprintf("/api/v1/conversation?after=%d&limit=200", dispatchSeq-1), nil, &page)
 		sourceDone, replyDone := false, false
+		var states []string
 		for _, item := range page.Items {
 			if item.MessageID != dispatchSource && item.ReplyTo != dispatchSource {
 				continue
@@ -335,12 +370,30 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 			}
 			linked := associations.Disposition == "linked" && len(associations.Items) == 1 && associations.Items[0].WorkItemID == dispatchedIssue
 			processed := associations.Processing != nil && associations.Processing.Status == "completed"
+			if !dispatchStateLogged {
+				raw, _ := json.Marshal(associations)
+				states = append(states, fmt.Sprintf("id=%s author=%s reply_to=%s state=%s assistant=%s associations=%s", item.MessageID, item.Author, item.ReplyTo, item.State, item.AssistantState, raw))
+			}
 			if item.MessageID == dispatchSource {
 				// Owner metadata may point at an active manager turn sharing this
 				// source. Completion below still requires the actual native reply.
 				sourceDone = linked && item.State == protocol.MessageReplied
 			} else if item.Author == "main_agent" {
 				replyDone = linked && processed && item.AssistantState == protocol.AssistantCompleted
+			}
+		}
+		if !sourceDone || !replyDone {
+			if !dispatchStateLogged {
+				var turns []string
+				if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
+					var err error
+					turns, err = store.FollowupIDs(ctx, tx.Q(), `SELECT json_object('logical',l.logical_turn_id,'status',l.status,'reason',l.reason,'request',e.request_id,'native',COALESCE(t.status,''),'outbox',COALESCE(o.status,''),'pending_receipt',EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=e.request_id)) FROM logical_turns l JOIN logical_turn_executions e USING(logical_turn_id) LEFT JOIN main_turns t USING(request_id) LEFT JOIN outbox o USING(request_id) WHERE EXISTS(SELECT 1 FROM logical_turn_messages m WHERE m.logical_turn_id=l.logical_turn_id AND m.message_id=?) ORDER BY l.rowid,e.rowid`, dispatchSource)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("dispatch processing pending: source_done=%v reply_done=%v page_items=%d messages=%v turns=%v", sourceDone, replyDone, len(page.Items), states, turns)
+				dispatchStateLogged = true
 			}
 		}
 		return sourceDone && replyDone
@@ -946,12 +999,12 @@ func TestSandboxStory(t *testing.T) {
 	// source must create the business object before seed advancement.
 	var recoveries int
 	if err := r.Store.Read(ctx, func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM request_records WHERE request_id=?`, seedRequest("story-create-recovery-1")).Scan(&recoveries)
+		return tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_messages WHERE message_id=? AND author='owner'`, protocol.NativeObjectID(protocol.PrefixMessage, "sandbox", "story-create-recovery-1/message_id")).Scan(&recoveries)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if recoveries != 1 {
-		t.Fatalf("missing stable recovery request: %d", recoveries)
+		t.Fatalf("missing stable recovery source: %d", recoveries)
 	}
 	if demo.Story == "" || demo.StoryTask == "" || demo.StoryDecision == "" {
 		t.Fatal("missing multi-round story receipt", demo)
@@ -1148,6 +1201,7 @@ func TestSandboxUpgradeRetainsClaimedManagerSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		target, raw = composeSandboxTestInput(t, ids.New(protocol.PrefixRequest), command.Operation(), target, json.RawMessage(raw))
 		op, err := application.Execute(ctx, principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, Payload: raw, ExpectedControlRevision: revision}, command)
 		if err != nil || op.Status != protocol.OpSucceeded {
 			t.Fatalf("%s: %+v %v", command.Operation(), op, err)

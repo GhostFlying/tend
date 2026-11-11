@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -21,13 +20,9 @@ func TestIssueBoardHTTPStatusReceiptsCountsAndSettings(t *testing.T) {
 	if status != http.StatusOK || response.Operation == nil || response.Operation.Error == nil || response.Operation.Error.Code != protocol.CodeStaleRevision || response.CurrentIssue == nil || response.CurrentIssue.Revision != moved.Revision {
 		t.Fatalf("stale=%d %+v", status, response)
 	}
-	var receipt protocol.RequestView
-	if status := e.do("GET", "/api/v1/requests/"+command.RequestID, token, nil, &receipt); status != http.StatusOK || receipt.Status != protocol.OpSucceeded {
-		t.Fatal(status, receipt)
-	}
-	var saved protocol.Issue
-	if err := json.Unmarshal(receipt.Result, &saved); err != nil || saved.WorkStatus != protocol.IssueInProgress {
-		t.Fatal(err, saved)
+	var saved protocol.IssueView
+	if status := e.do("GET", "/api/v1/issues/"+issue.IssueID, token, nil, &saved); status != http.StatusOK || saved.WorkStatus != protocol.IssueInProgress {
+		t.Fatal(status, saved)
 	}
 	var page protocol.IssuePage
 	if status := e.do("GET", "/api/v1/issues?board=true&project=default&board_status=in_progress&limit=1&include_closed=true", token, nil, &page); status != http.StatusOK || len(page.Items) != 1 || page.Counts[protocol.IssueInProgress] != 1 || page.Counts[protocol.IssueTodo] != 0 || len(page.Counts) != 6 || page.Items[0].Board == nil {

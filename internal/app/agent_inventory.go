@@ -112,6 +112,16 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if hash != p.PublicSHA256 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "inventory public hash does not match")
 	}
+	// Reconcile the actual immutable registration before checking the CAS for
+	// a new version. A lost delivery reply cannot turn an accepted snapshot
+	// into a second registration or make its original revision stale.
+	existing, existingErr := store.GetAgentInventorySnapshot(ctx, tx.Q(), x.Principal.Subject, p.SnapshotID, hash)
+	if existingErr != nil && !errors.Is(existingErr, store.ErrNotFound) {
+		return Outcome{}, existingErr
+	}
+	if existingErr == nil && existing.Receipt.LocalRevision == p.LocalRevision && existing.CanonicalJSON == string(canonical) {
+		return Outcome{Result: existing.Receipt}, nil
+	}
 	current, err := store.GetAgentInventory(ctx, tx.Q(), x.Principal.Subject)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
@@ -191,24 +201,23 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 		if result.Projection != nil && result.Projection.CapabilityVersion != 0 && !runtimeSupportsCapabilityInventory(input.Runtime) {
 			result.Projection = nil
 		}
-		if input.RequestID != "" {
-			result.RequestState = "not_recorded"
-			rec, err := store.GetRequest(ctx, tx.Q(), p.DedupDomain(), input.RequestID)
-			if errors.Is(err, store.ErrNotFound) {
-				return nil
+		if input.RequestID != "" || input.LocalRevision != 0 || input.SnapshotID != "" || input.PublicSHA256 != "" {
+			result.RequestState = "business_state"
+			if input.SnapshotID != "" || input.PublicSHA256 != "" || input.LocalRevision != 0 {
+				if input.SnapshotID == "" || input.PublicSHA256 == "" || input.LocalRevision <= 0 {
+					return protocol.Errorf(protocol.CodeInvalidRequest, "pending inventory requires its complete original snapshot identity")
+				}
+				matched, lookupErr := store.GetAgentInventorySnapshot(ctx, tx.Q(), p.Subject, input.SnapshotID, input.PublicSHA256)
+				if lookupErr != nil && !errors.Is(lookupErr, store.ErrNotFound) {
+					return lookupErr
+				}
+				if lookupErr == nil && matched.Receipt.LocalRevision == input.LocalRevision {
+					result.Matched = &matched.Receipt
+				}
 			}
-			if err != nil {
-				return err
-			}
-			if rec.Operation != protocol.OpRunnerInventoryRegister {
-				return protocol.Errorf(protocol.CodeInvalidRequest, "request is not an inventory registration")
-			}
-			op := operationOf(rec)
-			result.RequestPayloadHash = rec.PayloadHash
-			result.Request = &op
-			result.RequestState = "recorded"
 		}
+
 		return nil
 	})
-	return result, err
+	return protocol.AdaptRunnerInventoryStatus(input.Runtime, result), err
 }

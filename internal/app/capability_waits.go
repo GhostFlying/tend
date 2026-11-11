@@ -103,7 +103,7 @@ func (sweepCapabilityWaits) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 		inner := *x
 		env := *x.Env
 		inner.Env = &env
-		env.Target = protocol.Target{Type: "attention"}
+		env.Target = protocol.Target{Type: "attention", ID: protocol.NativeObjectID(protocol.Prefix("attn"), wait.taskID, fmt.Sprintf("capability-wait/%d/%s", wait.specVersion, wait.role))}
 		env.ExpectedControlRevision = nil
 		env.Payload, _ = json.Marshal(p)
 		notice, err := createAttention(ctx, &inner, tx)

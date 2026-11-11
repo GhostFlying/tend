@@ -104,7 +104,7 @@ func TestTriggerCLIRealHTTPCompleteManagement(t *testing.T) {
 	if json.Unmarshal(run("event", "trace", events.Items[0].ID, "--json"), &event) != nil || len(event.Steps) == 0 {
 		t.Fatal(event)
 	}
-	run("request", "show", response.Operation.RequestID, "--json")
+	run("webhook", "show", list.Items[0].ID, "--json")
 	if strings.Contains(out.String(), strings.Repeat("s", 32)) {
 		t.Fatal("private key leaked")
 	}

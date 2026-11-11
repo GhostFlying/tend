@@ -158,7 +158,11 @@ func (b *Builder) Prepare(ctx context.Context, threadKey string, messageSeq int6
 		if err != nil {
 			return err
 		}
-		snap = Snapshot{Full: !hasBase || !base.Valid, Epoch: base.Epoch, Watermark: latest}
+		expired, err := store.RefreshCursorExpired(ctx, q, base.Watermark)
+		if err != nil {
+			return err
+		}
+		snap = Snapshot{Full: !hasBase || !base.Valid || expired, Epoch: base.Epoch, Watermark: latest}
 		from := base.Watermark
 		// The hosted main agent sees every project.
 		sc, _, err := scopeOf(ctx, q, protocol.Principal{})
@@ -206,6 +210,7 @@ func (b *Builder) PrepareIndex(ctx context.Context, threadKey string, messageSeq
 		return nil, err
 	}
 	var packet store.Packet
+	var expired bool
 	err := b.store.Read(ctx, func(tx *store.ReadTx) error {
 		base, err := store.GetBaseline(ctx, tx.Q(), threadKey)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -219,6 +224,10 @@ func (b *Builder) PrepareIndex(ctx context.Context, threadKey string, messageSeq
 			return nil
 		}
 		index.FocusMessageSeq = messageSeq
+		expired, err = store.RefreshCursorExpired(ctx, tx.Q(), base.Watermark)
+		if err != nil {
+			return err
+		}
 		if base.Valid && base.Watermark > 0 {
 			args := []any{base.Watermark, index.ThroughEventSeq}
 			placeholders := make([]string, len(told))
@@ -252,6 +261,9 @@ func (b *Builder) PrepareIndex(ctx context.Context, threadKey string, messageSeq
 		if err != nil {
 			return err
 		}
+		if expired {
+			text = "Refresh notification cursor expired; this index was rebuilt from current authoritative records. Real business changes remain in the ledger.\n" + text
+		}
 		packet = store.Packet{PacketID: b.ids.New(protocol.PrefixPacket), ThreadKey: threadKey, Epoch: base.Epoch + 1, Kind: "index", FromSeq: base.Watermark + 1, ToSeq: index.ThroughEventSeq, Body: text}
 		return nil
 	})
@@ -261,7 +273,7 @@ func (b *Builder) PrepareIndex(ctx context.Context, threadKey string, messageSeq
 	if err = b.app.RecordPacket(ctx, packet); err != nil {
 		return nil, err
 	}
-	return &Packet{ID: packet.PacketID, Text: packet.Body}, nil
+	return &Packet{ID: packet.PacketID, Text: packet.Body, Full: expired}, nil
 }
 
 // settleUnconfirmed marks a packet a previous attempt left neither
@@ -309,6 +321,11 @@ func (b *Builder) Compose(ctx context.Context, q store.Querier, r ComposeRequest
 	if err != nil {
 		return Composed{}, err
 	}
+	expired, err := store.RefreshCursorExpired(ctx, q, r.Watermark)
+	if err != nil {
+		return Composed{}, err
+	}
+	r.Full = r.Full || expired
 	snap := Snapshot{PacketID: r.PacketID, Epoch: r.Epoch, Watermark: latest, Full: r.Full}
 	budget := b.cfg.FullBudget
 	if r.Full {

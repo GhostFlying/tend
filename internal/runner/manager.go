@@ -343,7 +343,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			}
 		}
 		if request == nil {
-			request, err = r.newEnvelope(protocol.OpManagerNativeClaim, runTarget(as), nil)
+			payload, payloadErr := r.managerClaimPayload(ctx, as, false)
+			if payloadErr != nil {
+				return payloadErr
+			}
+			request, err = r.newEnvelope(protocol.OpManagerNativeClaim, runTarget(as), payload)
 			if err != nil {
 				return err
 			}
@@ -353,6 +357,12 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		}
 		op, err := r.send(ctx, runCredential(as), request)
 		if err != nil {
+			return err
+		}
+		if op.Status != protocol.OpSucceeded {
+			return errors.New("runner: native claim has not succeeded")
+		}
+		if err = r.confirmManagerClaim(ctx, as, request); err != nil {
 			return err
 		}
 		var command protocol.ManagerNativeRequest
@@ -378,11 +388,16 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		// the recovery anchor for received, started and completed operations.
 		if reply == nil {
 			reply = &protocol.ManagerNativeReply{ID: command.ID}
+			if r.supportsManagerAcknowledgements() {
+				reply.Method = command.Method
+			}
 			if status == "started" {
 				reply.Error = "Native operation outcome requires reconciliation; automatic replay is disabled"
 			} else {
-				if err = r.cfg.Journal.StartManagerOperation(ctx, command.ID); err != nil {
-					return err
+				if !journal.ManagerReadOnly(command.Method) {
+					if err = r.cfg.Journal.StartManagerOperation(ctx, command.ID); err != nil {
+						return err
+					}
 				}
 				result, callErr := driver.Handle(ctx, command.Method, command.Payload)
 				if command.Method == "close" && callErr == nil {
@@ -441,9 +456,14 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 					}
 				}
 			}
-			if err = r.cfg.Journal.CompleteManagerOperation(ctx, *reply); err != nil {
-				return err
+			if !journal.ManagerReadOnly(command.Method) {
+				if err = r.cfg.Journal.CompleteManagerOperation(ctx, *reply); err != nil {
+					return err
+				}
 			}
+		}
+		if r.supportsManagerAcknowledgements() {
+			reply.Method = command.Method
 		}
 		env, err := r.newEnvelope(protocol.OpManagerNativeReply, runTarget(as), reply)
 		if err != nil {
@@ -536,7 +556,22 @@ func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment,
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		_, err := r.sendOnce(ctx, runCredential(as), env)
+		op, err := r.sendOnce(ctx, runCredential(as), env)
+		if err == nil && op.Status != protocol.OpSucceeded {
+			err = protocol.Errorf(protocol.CodeUnknownOutcome, "native result delivery is not yet confirmed")
+		}
+		if err == nil && r.supportsManagerAcknowledgements() {
+			var reply protocol.ManagerNativeReply
+			if err = json.Unmarshal(env.Payload, &reply); err != nil {
+				return err
+			}
+			if err = r.cfg.Journal.AcknowledgeManagerReceipt(ctx, as.RunID, reply); err != nil {
+				return err
+			}
+			if ackErr := r.flushManagerAcknowledgements(ctx, as); ackErr != nil {
+				r.cfg.Log.WarnContext(ctx, "native delivery acknowledgement remains pending", "run_id", as.RunID, "command_id", reply.ID, "err", ackErr)
+			}
+		}
 		if err == nil || !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 			return err
 		}

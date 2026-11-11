@@ -58,8 +58,8 @@ func TestArchivePrepareRetainsClaimsFactsAndQueuedWorkAcrossRestart(t *testing.T
 		t.Fatal(cancelled, err)
 	}
 	replay, err := restarted.ChangeArchivePreparation(ctx, request, true)
-	if err != nil || replay != p {
-		t.Fatal("prepare did not replay original receipt", replay, err)
+	if protocol.CodeOf(err) != protocol.CodeStaleRevision {
+		t.Fatal("old preparation revision was accepted", replay, err)
 	}
 	current, _ := restarted.ArchivePreparation(ctx)
 	if current.Prepared {

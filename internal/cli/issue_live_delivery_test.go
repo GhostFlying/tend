@@ -128,7 +128,7 @@ func TestIssueLiveDeliveryBindReplayKeepsBothControlRevisions(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: original.RequestID, Status: protocol.OpSucceeded}})
 	})
 	e.out.Reset()
-	if code := e.main("issue", "replay", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
+	if code := e.main("operation", "submit", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
 		t.Fatal("binding replay performed implicit control reads", code, e.errOut.String())
 	}
 }
@@ -175,7 +175,7 @@ func TestIssueContributionDeliverySettlementCLIPreservesOriginalRequest(t *testi
 		_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
 	})
 	e.out.Reset()
-	if code := e.main("issue", "replay", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
+	if code := e.main("operation", "submit", "--file", file, "--json"); code != exitOK || len(f.requests) != 1 {
 		t.Fatal("settlement replay performed implicit lookup or binding", code, e.errOut.String())
 	}
 }

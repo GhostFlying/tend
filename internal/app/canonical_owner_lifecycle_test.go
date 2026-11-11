@@ -332,8 +332,8 @@ func TestCanonicalLifecyclePauseResumeAndSameOwnerReceipt(t *testing.T) {
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "pause", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
 	events = h.count("events")
 	replay := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "assign"})
-	if replay.Status != protocol.OpSucceeded || !bytes.Equal(first.Result, replay.Result) || h.count("events") != events {
-		t.Fatal("owner no-op replay lost its original receipt", replay)
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || h.count("events") != events {
+		t.Fatal("old no-op assignment crossed current revision", replay)
 	}
 }
 func TestCanonicalLifecycleCompletionDependencyRequiresAchievedEndpoint(t *testing.T) {
@@ -637,8 +637,8 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 				t.Fatal(err)
 			}
 			replay := h.exec(owner, reviewEnv, CanonicalOwnerIssueCommand{Action: "review_sources"})
-			if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, reviewed.Result) {
-				t.Fatal("source review lost exact receipt", replay)
+			if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+				t.Fatal("source review accepted an old revision", replay)
 			}
 			ended := canonicalTaskIssue(t, h, parent.IssueID)
 			if ended.State != protocol.IssueCancelled || ended.Revision != parent.Revision {
@@ -726,8 +726,8 @@ func TestCanonicalLifecycleTerminalSourceReviewCanSettleNamedBatches(t *testing.
 		t.Fatal(err)
 	}
 	replay := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "review_sources"})
-	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, reviewed.Result) {
-		t.Fatal("source batch replay lost its older receipt", replay)
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("source batches accepted an old revision", replay)
 	}
 	ended := canonicalTaskIssue(t, h, parent.IssueID)
 	if ended.State != protocol.IssueCancelled || ended.Revision != parent.Revision || child.State != protocol.IssueClosed {

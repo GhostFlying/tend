@@ -15,7 +15,7 @@ func TestMainOwnerRecoveryRetainsOneNativeCallIdentity(t *testing.T) {
 	invoke := func(seq int64) {
 		payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Original", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}})
 		env := protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
-		args, _ := json.Marshal(map[string]any{"name": ownerToolName("issues.create"), "arguments": protocol.OwnerToolArguments{OriginalEnvelope: &env, EffectSeq: seq}})
+		args, _ := json.Marshal(map[string]any{"name": ownerToolName("issues.create"), "arguments": protocol.OwnerToolArguments{Target: env.Target, Payload: payload, EffectSeq: seq}})
 		result := service.Handle(t.Context(), tools.Call{Principal: call.Actor, ExecutionRequestID: call.ExecutionID, TurnID: "turn", Native: "same-native-id", Tool: "owner_call", Arguments: args})
 		t.Logf("seq %d success %t", seq, result.Success)
 	}

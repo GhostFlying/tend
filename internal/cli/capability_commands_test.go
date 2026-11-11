@@ -64,6 +64,10 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			fmt.Fprint(w, `{"plan":{"recovery_id":"forward"},"linked":true}`)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/backup/") {
+			fmt.Fprint(w, `{"result":{"verified":true}}`)
+			return
+		}
 		if r.URL.Path == "/status" || strings.HasPrefix(r.URL.Path, "/recovery/") {
 			fmt.Fprint(w, `{"state":{"generation":2,"recoveries":{}}}`)
 			return
@@ -194,6 +198,14 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	backupInputs := map[string]string{}
+	for action, body := range map[string]string{"verify": `{"checkpoint_id":"backups/original","expected_generation":2,"manifest_sha256":"original"}`, "prune": `{"format":1,"sha256":"original-preview"}`, "protect-log": `{"log_id":"original","expected_generation":2,"reason":"incident evidence"}`} {
+		path := filepath.Join(dir, "backup-"+action+".json")
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		backupInputs[action] = path
+	}
 	recoveryPath := filepath.Join(dir, "recovery.json")
 	for _, entry := range CapabilityBindings() {
 		t.Run(entry.Capability+"/"+entry.Command, func(t *testing.T) {
@@ -215,7 +227,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			_ = os.Remove(output)
 			args := append([]string(nil), entry.Example...)
 			for i, arg := range args {
-				args[i] = strings.NewReplacer("{server}", remote.URL, "{server-binary}", serverPath, "{server-sha256}", hex.EncodeToString(serverSum[:]), "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{bounded-authorization}", boundedAuthorization, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
+				args[i] = strings.NewReplacer("{backup-verify}", backupInputs["verify"], "{backup-prune}", backupInputs["prune"], "{backup-protect-log}", backupInputs["protect-log"], "{server}", remote.URL, "{server-binary}", serverPath, "{server-sha256}", hex.EncodeToString(serverSum[:]), "{socket}", socket, "{input}", input, "{secret}", secret, "{output}", output, "{release}", dir, "{request}", requestID, "{recovery}", recoveryPath, "{maintenance}", maintenancePath, "{bounded-authorization}", boundedAuthorization, "{first-capture}", firstCapture, "{second-capture}", secondCapture, "{installer}", installerPath, "{installer-sha256}", hex.EncodeToString(installerSum[:]), "{config}", filepath.Join(dir, "fixed.json"), "{handoff}", filepath.Join(dir, "handoff.json")).Replace(arg)
 			}
 			mu.Lock()
 			calls = nil
@@ -428,7 +440,7 @@ func TestCapabilityDryRunAndTransportUnknownKeepExactEnvelope(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: envelope.RequestID, Status: protocol.OpSucceeded}})
 	})
-	if code := env.main("request", "replay", "--data", string(original)); code != exitError {
+	if code := env.main("operation", "submit", "--data", string(original)); code != exitError {
 		t.Fatal(code, env.errOut)
 	}
 	calls := f.seen("POST /api/v1/ops")
@@ -438,7 +450,7 @@ func TestCapabilityDryRunAndTransportUnknownKeepExactEnvelope(t *testing.T) {
 	if len(f.seen("GET /api/v1/issue-notification-settings")) != 1 {
 		t.Fatal("replay refreshed control state")
 	}
-	if code := env.main("request", "replay", "--data", `{"request_id":"`+envelope.RequestID+`","operation":"runner.claim","target":{"type":"runner"}}`); code != exitUsage {
+	if code := env.main("operation", "submit", "--data", `{"request_id":"`+envelope.RequestID+`","operation":"runner.claim","target":{"type":"runner"}}`); code != exitUsage {
 		t.Fatal("executor protocol exposed as owner operation")
 	}
 }

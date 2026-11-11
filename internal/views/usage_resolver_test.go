@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
@@ -124,15 +125,7 @@ func TestUsageResolverRunAmbiguityMatchesOriginalSQL(t *testing.T) {
 			}
 		}
 		for i, key := range keys {
-			payload, err := json.Marshal(map[string]string{"thread_id": key.thread, "turn_id": key.turn})
-			if err != nil {
-				return err
-			}
-			result, err := tx.Exec(ctx, `INSERT INTO token_usage_facts(source,request_id,revision,payload_hash,payload_json,subject,role,received_at) VALUES('fixture',?,1,'hash',?,'conversation:main','main',1)`, fmt.Sprint(i), string(payload))
-			if err != nil {
-				return err
-			}
-			seq, err := result.LastInsertId()
+			seq, err := store.InsertUsageFact(ctx, tx, protocol.TokenUsageSample{Source: "fixture", RequestID: fmt.Sprint(i), ThreadID: key.thread, TurnID: key.turn, Revision: 1}, "conversation:main", "main", 1)
 			if err != nil {
 				return err
 			}

@@ -147,12 +147,15 @@ func TestCommittedMaintenanceActualProcessHealthAndLinkReplay(t *testing.T) {
 		t.Fatal("linked window still owns controller", handled, err)
 	}
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
-		var count int
-		if err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM request_records WHERE request_id=?`, p.LinkRequestID).Scan(&count); err != nil {
+		var rows, effects int
+		if err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM server_committed_maintenances WHERE maintenance_id=? AND request_id=? AND linked=1`, p.MaintenanceID, p.RequestID).Scan(&rows); err != nil {
 			return err
 		}
-		if count != 1 {
-			t.Fatal("link request identity changed", count)
+		if err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE object_type='maintenance' AND object_id=? AND kind='committed_maintenance_linked'`, p.MaintenanceID).Scan(&effects); err != nil {
+			return err
+		}
+		if rows != 1 || effects != 1 || row.Plan.LinkRequestID != p.LinkRequestID {
+			t.Fatal("maintenance linkage duplicated or changed identity", rows, effects, row.Plan)
 		}
 		return nil
 	}); err != nil {

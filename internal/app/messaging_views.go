@@ -12,7 +12,7 @@ import (
 func (a *App) MessagingChannels(ctx context.Context) ([]protocol.MessagingChannel, error) {
 	result := []protocol.MessagingChannel{}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		rows, err := tx.Q().QueryContext(ctx, `SELECT c.channel_id,c.status,c.revision,c.mark_read_mode,c.health,c.last_observed_at,CASE WHEN c.channel_id='feishu' THEN (SELECT count(*) FROM feishu_inputs i LEFT JOIN request_records r ON r.domain='owner' AND r.request_id=i.request_id WHERE i.message_id='' AND (r.status IS NULL OR r.status IN ('accepted','unknown'))) ELSE (SELECT count(*) FROM telegram_inbox i WHERE i.bot_id=c.bot_id AND i.state='pending') END FROM messaging_channels c ORDER BY channel_id`)
+		rows, err := tx.Q().QueryContext(ctx, `SELECT c.channel_id,c.status,c.revision,c.mark_read_mode,c.health,c.last_observed_at,CASE WHEN c.channel_id='feishu' THEN (SELECT count(*) FROM feishu_inputs i WHERE i.message_id='' AND i.state IN ('pending','accepted','unknown')) ELSE (SELECT count(*) FROM telegram_inbox i WHERE i.bot_id=c.bot_id AND i.state='pending') END FROM messaging_channels c ORDER BY channel_id`)
 		if err != nil {
 			return err
 		}
@@ -89,6 +89,10 @@ func messagingMessage(ctx context.Context, q store.Querier, id string) (protocol
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, protocol.Errorf(protocol.CodeNotFound, "communication message not found")
 	}
+	if err != nil {
+		return m, err
+	}
+	m.Body, err = store.ResolveMessageBody(ctx, q, id, m.Body)
 	if err != nil {
 		return m, err
 	}

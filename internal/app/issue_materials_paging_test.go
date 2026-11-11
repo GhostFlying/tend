@@ -84,7 +84,7 @@ func TestIssueMaterialsKnownFileAndSelectedIssueAvoidUnrelatedTaskContexts(t *te
 	if err != nil || metadata.SHA256 != file.SHA256 {
 		t.Fatal("exact file loaded unrelated project history", metadata, err)
 	}
-	beforeEvents, beforeRequests := h.count("events"), h.count("request_records")
+	beforeEvents, beforeRequests := h.count("events"), h.count("task_specs")
 	exact, err := h.app.ReadRunContext(t.Context(), p, protocol.IssueMaterialsQuery{Kind: "files", ID: file.FileID})
 	if err != nil || len(exact.Materials.Files) != 1 || exact.Materials.Files[0].SHA256 != file.SHA256 {
 		t.Fatal("index and exact metadata disagree", exact, err)
@@ -93,7 +93,7 @@ func TestIssueMaterialsKnownFileAndSelectedIssueAvoidUnrelatedTaskContexts(t *te
 	if err != nil || len(page.Materials.Files) != 1 || page.Materials.Files[0].FileID != file.FileID || !slices.Contains(page.Materials.IssueIDs, other.IssueID) || slices.Contains(page.Materials.IssueIDs, unrelated.IssueID) {
 		t.Fatal("explicit Issue selection did not stay bounded", page, err)
 	}
-	if beforeEvents != h.count("events") || beforeRequests != h.count("request_records") {
+	if beforeEvents != h.count("events") || beforeRequests != h.count("task_specs") {
 		t.Fatal("discovery created a grant or business write")
 	}
 	if _, err := h.app.ReadIssueMaterials(t.Context(), root.IssueID, protocol.IssueMaterialsQuery{IssueID: other.IssueID}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {

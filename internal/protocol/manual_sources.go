@@ -9,6 +9,7 @@ type ManualSourceMetadata struct {
 	CorrectionOf string `json:"correction_of,omitempty"`
 }
 type InjectSourcePayload struct {
+	MessageID      string               `json:"message_id"`
 	ConversationID string               `json:"conversation_id,omitempty"`
 	Text           string               `json:"text,omitempty"`
 	Attachments    []string             `json:"attachments,omitempty"`

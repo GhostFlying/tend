@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -99,6 +100,9 @@ func dataPaths(cfg Config) []string {
 	return paths
 }
 func backupData(cfg Config, op *Operation) error {
+	return backupDataContext(context.Background(), cfg, op)
+}
+func backupDataContext(ctx context.Context, cfg Config, op *Operation) error {
 	if err := os.MkdirAll(op.BackupDir, 0o700); err != nil {
 		return err
 	}
@@ -108,7 +112,7 @@ func backupData(cfg Config, op *Operation) error {
 	}
 	files := make([]BackupFile, 0)
 	for i, p := range paths {
-		name := fmt.Sprintf("data-%03d", i)
+		name := backupName(i)
 		f := BackupFile{Path: p, Name: name}
 		info, err := os.Lstat(p)
 		if os.IsNotExist(err) {
@@ -123,42 +127,35 @@ func backupData(cfg Config, op *Operation) error {
 		}
 		f.Existed = true
 		f.Mode = uint32(info.Mode().Perm())
-		f.SHA256, err = hashFile(p)
+		f.SHA256, err = hashBackupFile(ctx, p)
 		if err != nil {
 			return err
 		}
-		dst := filepath.Join(op.BackupDir, name)
-		if err := copyAtomic(p, dst, 0o600); err != nil {
+		if err := persistBackupFile(ctx, cfg, op, &f, p); err != nil {
 			return err
 		}
-		sum, err := hashFile(dst)
+		dst, err := backupFilePath(cfg, op.BackupDir, f)
+		if err != nil {
+			return err
+		}
+		sum, err := hashBackupFile(ctx, dst)
 		if err != nil || sum != f.SHA256 {
 			return errors.New("updater: backup verification failed")
 		}
 		files = append(files, f)
 	}
 	op.Backups = files
-	return writeJSON(filepath.Join(op.BackupDir, "files.json"), files)
+	if err := writeJSON(filepath.Join(op.BackupDir, "files.json"), files); err != nil {
+		return err
+	}
+	return writeBackupMetadata(cfg, op)
 }
 func restoreData(cfg Config, op *Operation) error {
 	if op.Irreversible {
 		return errors.New("updater: data rollback is permanently forbidden after new work")
 	}
-	paths := dataPaths(cfg)
-	if len(paths) > len(op.Backups) {
-		return errors.New("updater: backup set does not match configured data")
-	}
-	// Verify the entire backup before restoring any file.
-	for i, f := range op.Backups {
-		if (i < len(paths) && f.Path != paths[i] || i >= len(paths) && (!f.Existed || !configuredOriginal(cfg, f.Path))) || f.Name != fmt.Sprintf("data-%03d", i) {
-			return errors.New("updater: backup identity mismatch")
-		}
-		if f.Existed {
-			sum, err := hashFile(filepath.Join(op.BackupDir, f.Name))
-			if err != nil || sum != f.SHA256 {
-				return errors.New("updater: backup missing or corrupt")
-			}
-		}
+	if err := verifyBackupFiles(cfg, op.BackupDir, op.Backups); err != nil {
+		return err
 	}
 	for _, f := range op.Backups {
 		if configuredOriginal(cfg, f.Path) {
@@ -167,7 +164,11 @@ func restoreData(cfg Config, op *Operation) error {
 			}
 		}
 		if f.Existed {
-			if err := copyAtomic(filepath.Join(op.BackupDir, f.Name), f.Path, os.FileMode(f.Mode)); err != nil {
+			source, err := backupFilePath(cfg, op.BackupDir, f)
+			if err != nil {
+				return err
+			}
+			if err := copyAtomic(source, f.Path, os.FileMode(f.Mode)); err != nil {
 				return err
 			}
 		} else {
@@ -181,3 +182,5 @@ func restoreData(cfg Config, op *Operation) error {
 	}
 	return nil
 }
+
+func backupName(i int) string { return fmt.Sprintf("data-%03d", i) }

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -46,14 +45,6 @@ func maintenanceOperationSource(ctx context.Context, q store.Querier, p protocol
 		if host.CandidateInstance != "" {
 			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "runner candidate requires independent reconciliation before server responsibility transfer")
 		}
-	}
-	original, err := store.GetRequest(ctx, q, "system", source.OriginalRequestID)
-	if err != nil {
-		return nil, err
-	}
-	var result protocol.UpgradeView
-	if original.Operation != "upgrades.start" || (original.Status != protocol.OpAccepted && original.Status != protocol.OpSucceeded) || json.Unmarshal([]byte(original.ResultJSON), &result) != nil || result.UpgradeID != r.View.UpgradeID {
-		return nil, protocol.Errorf(protocol.CodeConflictPayload, "original start request does not identify unfinished installation")
 	}
 	return &r, nil
 }

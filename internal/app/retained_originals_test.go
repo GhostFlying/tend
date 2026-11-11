@@ -16,7 +16,7 @@ func TestRetainedNativeCommandsAndRepliesReturnOriginalBodies(t *testing.T) {
 	h, _, _, as, _ := reviewManagerAssignment(t)
 	ctx := t.Context()
 	payload := json.RawMessage(`{"thread_id":"original-thread","configuration":"` + strings.Repeat("中文😀", 1000) + `"}`)
-	id, err := h.app.QueueManagerNative(ctx, as.RunID, "models", payload)
+	id, err := h.app.QueueManagerNative(ctx, as.RunID, "resume", payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,45 +31,49 @@ func TestRetainedNativeCommandsAndRepliesReturnOriginalBodies(t *testing.T) {
 	if command.ID != id || string(command.Payload) != string(payload) {
 		t.Fatal("claim changed original command", command.ID)
 	}
-	models := json.RawMessage(`[{"id":"original-model","description":"` + strings.Repeat("model details ", 2000) + `"}]`)
-	reply := protocol.ManagerNativeReply{ID: id, Result: models}
+	thread := json.RawMessage(`{"ID":"original-thread","description":"` + strings.Repeat("session details ", 2000) + `"}`)
+	reply := protocol.ManagerNativeReply{ID: id, Method: "resume", Result: thread}
 	env := h.env(protocol.OpManagerNativeReply, protocol.Target{Type: "run", ID: as.RunID}, reply, nil)
 	principal := runPrincipal(as.RunID, as.Role)
 	original, err := h.app.Execute(ctx, principal, env, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
 	if err != nil || original.Status != protocol.OpSucceeded {
 		t.Fatal(original, err)
 	}
-	replay, err := h.app.Execute(ctx, principal, env, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
-	if err != nil || string(replay.Result) != string(original.Result) {
-		t.Fatal("reply retry changed original receipt", err)
+	if err = h.store.Read(ctx, func(tx *store.ReadTx) error {
+		var input, output string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT payload_json,result_json FROM manager_native_requests WHERE request_id=? AND coordinator_consumed=0`, id).Scan(&input, &output); err != nil {
+			return err
+		}
+		if len(input) > 1000 || len(output) > 1000 {
+			t.Fatal("pending handoff duplicated full originals")
+		}
+		input, err := store.ResolveJSON(ctx, tx.Q(), input)
+		if err != nil || input != string(payload) {
+			t.Fatal("unconsumed command input changed", err)
+		}
+		var decoded protocol.ManagerNativeReply
+		if err := store.DecodeJSON(ctx, tx.Q(), output, &decoded); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(decoded, reply) {
+			t.Fatal("unconsumed result changed")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	result, ready, err := h.app.ManagerNativeResult(ctx, as.RunID, id)
 	if err != nil || !ready || !reflect.DeepEqual(result, reply) {
-		t.Fatal("full models result lost", ready, err)
-	}
-	if _, err = h.app.QueueManagerNative(ctx, as.RunID, "close", json.RawMessage(`{}`)); err != nil {
-		t.Fatal(err)
-	}
-	closing, err := h.app.ManagerClosingAttachment(ctx, as.RunID, "models", "")
-	if err != nil || string(closing) != string(models) {
-		t.Fatal("closing attachment lost models array", err)
+		t.Fatal("full handoff result lost", ready, err)
 	}
 	if err = h.store.Read(ctx, func(tx *store.ReadTx) error {
-		var requestBytes, resultBytes int
-		if err := tx.Q().QueryRowContext(ctx, `SELECT length(payload_json),length(result_json) FROM manager_native_requests WHERE request_id=?`, id).Scan(&requestBytes, &resultBytes); err != nil {
-			return err
+		saved, err := store.NativeThread(ctx, tx.Q(), as.RunID)
+		if err != nil || saved != string(thread) {
+			t.Fatal("real execution session fact lost", err)
 		}
-		if requestBytes > 1000 || resultBytes > 1000 {
-			t.Fatal("native bodies copied into ledger", requestBytes, resultBytes)
-		}
-		for _, request := range []string{id, claimed.RequestID, env.RequestID} {
-			record, err := store.GetRequest(ctx, tx.Q(), map[bool]string{true: "system", false: principal.DedupDomain()}[request == id], request)
-			if err != nil {
-				return err
-			}
-			if !json.Valid([]byte(record.ResultJSON)) {
-				t.Fatal("stored receipt no longer valid JSON")
-			}
+		var consumed, cleared bool
+		if err = tx.Q().QueryRowContext(ctx, `SELECT coordinator_consumed,payload_json='{}' AND result_json IS NULL FROM manager_native_requests WHERE request_id=?`, id).Scan(&consumed, &cleared); err != nil || !consumed || !cleared {
+			t.Fatal("consumed RPC wrapper retained", consumed, cleared, err)
 		}
 		return nil
 	}); err != nil {
@@ -97,7 +101,7 @@ func TestOriginalStorageControlRetryDoesNotAdvanceAnotherBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Status != protocol.OpSucceeded || string(first.Result) != string(second.Result) || before.Revision != after.Revision || before.MigratedRows != after.MigratedRows {
+	if first.Status != protocol.OpSucceeded || second.Status != protocol.OpFailed || protocol.CodeOf(second.Error) != protocol.CodeStaleRevision || before.Revision != after.Revision || before.MigratedRows != after.MigratedRows {
 		t.Fatal("original retry advanced storage migration", first, second, before, after)
 	}
 }
@@ -155,7 +159,7 @@ func TestOriginalNativeArchiveHostReceiptRetryAndEventReuse(t *testing.T) {
 			return err
 		}
 		restored, err := store.ResolveJSON(ctx, tx.Q(), raw)
-		if err == nil && restored != string(body) {
+		if err == nil && !store.SemanticJSONEqual(restored, string(body)) {
 			t.Fatal("event source changed")
 		}
 		return err

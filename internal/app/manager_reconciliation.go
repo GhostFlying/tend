@@ -3,9 +3,8 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -69,39 +68,23 @@ func managerRunReconciliation(ctx context.Context, q store.Querier, task, run st
 		out.Blockers = append(out.Blockers, "responsibility_changed")
 	}
 	var raw string
-	var closeRow int64
-	err = q.QueryRowContext(ctx, `SELECT request_id,result_json,rowid FROM manager_native_requests WHERE run_id=? AND method='close' AND status='completed' AND COALESCE(json_extract(result_json,'$.error'),'')='' AND COALESCE(json_extract(result_json,'$.rejected'),0)=0 ORDER BY rowid DESC LIMIT 1`, run).Scan(&out.CloseRequestID, &raw, &closeRow)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var stopped bool
+	out.CloseRequestID, out.CloseLastSequence, stopped, err = store.ManagerNativeClose(ctx, q, run)
+	if err != nil {
 		return out, err
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if out.CloseRequestID == "" {
 		out.Blockers = append(out.Blockers, "successful_native_close_missing")
-	} else {
-		raw, err = store.ResolveJSON(ctx, q, raw)
-		if err != nil {
-			return out, err
-		}
-		var reply protocol.ManagerNativeReply
-		if err := store.DecodeJSON(ctx, q, raw, &reply); err != nil || reply.ID != out.CloseRequestID || reply.Error != "" || reply.Rejected || reply.LastSequence < 0 {
-			out.Blockers = append(out.Blockers, "native_close_evidence_invalid")
-		} else {
-			out.CloseLastSequence = reply.LastSequence
-			sum := sha256.Sum256([]byte(raw))
-			out.CloseResultSHA256 = hex.EncodeToString(sum[:])
-		}
+	} else if !stopped {
+		out.Blockers = append(out.Blockers, "native_activity_after_close")
 	}
-	if closeRow != 0 {
-		// A prior close cannot prove a later resume or native action stopped.
-		// Only observational reads and definite pre-execution rejection retain
-		// that proof. Tied timestamps still have an unambiguous append order.
-		var laterActivity bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND rowid>? AND method NOT IN ('models','find','usage') AND NOT(status='completed' AND COALESCE(json_extract(result_json,'$.rejected'),0)=1))`, run, closeRow).Scan(&laterActivity); err != nil {
-			return out, err
-		}
-		if laterActivity {
-			out.Blockers = append(out.Blockers, "native_activity_after_close")
-		}
+	if out.CloseRequestID != "" {
+		data, _ := json.Marshal(protocol.ManagerNativeReply{ID: out.CloseRequestID, LastSequence: out.CloseLastSequence})
+		raw = string(data)
+		sum := sha256.Sum256(data)
+		out.CloseResultSHA256 = hex.EncodeToString(sum[:])
 	}
+	_ = raw
 	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0),COALESCE(SUM(CASE WHEN applied=0 THEN 1 ELSE 0 END),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&out.EventLastSequence, &out.UnappliedEvents); err != nil {
 		return out, err
 	}

@@ -13,13 +13,13 @@ import (
 
 func (h *harness) reconcileResources(host string) []protocol.WorkspaceReconcile {
 	h.t.Helper()
-	before := h.count("request_records")
+	before := h.count("events")
 	op := h.exec(runner(host), h.env(protocol.OpWorkspaceReconcile, protocol.Target{Type: "host", ID: host}, struct{}{}, nil), ReconcileWorkspaces{})
 	if op.Status != protocol.OpSucceeded {
 		h.t.Fatalf("reconcile resources: %+v", op)
 	}
-	if h.count("request_records") != before {
-		h.t.Fatal("read-only reconciliation recorded a mutation request")
+	if h.count("events") != before {
+		h.t.Fatal("read-only reconciliation appended business events")
 	}
 	var result protocol.WorkspaceReconcileResult
 	if err := json.Unmarshal(op.Result, &result); err != nil {

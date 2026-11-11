@@ -61,8 +61,9 @@ func (a *App) recordRootAttention(ctx context.Context, tx *store.Tx, run store.R
 	if fact.ManagedTurnAt > 0 {
 		key = "managed:" + strconv.FormatInt(fact.ManagedTurnAt, 10)
 	}
-	fresh, err := tx.InsertInbox(ctx, "root-attention:"+run.RunID, key, now.UnixMilli())
-	if err != nil || !fresh {
+	var exists bool
+	err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE kind='run.attention_required' AND object_id=? AND run_attention_key=?)`, run.RunID, key).Scan(&exists)
+	if err != nil || exists {
 		return false, err
 	}
 	id, eventID := a.ids.New(protocol.PrefixMessage), a.ids.New(protocol.PrefixEvent)
@@ -82,7 +83,7 @@ func (a *App) recordRootAttention(ctx context.Context, tx *store.Tx, run store.R
 			return false, err
 		}
 	}
-	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: eventID, Source: "runner", ObjectType: "run", ObjectID: run.RunID, Kind: "run.attention_required", BodyJSON: string(e.Body), CreatedAt: now.UnixMilli()}); err != nil {
+	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: eventID, Source: "runner", ObjectType: "run", ObjectID: run.RunID, Kind: "run.attention_required", RunAttentionKey: key, BodyJSON: string(e.Body), CreatedAt: now.UnixMilli()}); err != nil {
 		return false, err
 	}
 	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "app", ObjectType: "message", ObjectID: id, ObjectVersion: seq, Kind: "conversation.message", BodyJSON: `{"author":"system"}`, CreatedAt: now.UnixMilli()}); err != nil {

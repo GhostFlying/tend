@@ -145,7 +145,7 @@ func TestDeploymentPreparationKeepsInstallationProofSeparateFromHeartbeat(t *tes
 			}); err != nil {
 				t.Fatal(err)
 			}
-			beforeEvents, beforeRequests, beforeOutbox := h.count("events"), h.count("request_records"), h.count("outbox")
+			beforeEvents, beforeRuns, beforeOutbox := h.count("events"), h.count("runs"), h.count("outbox")
 			view, err := h.app.ReadRunObservation(t.Context(), runPrincipal(as.RunID, as.Role))
 			if err != nil {
 				t.Fatal(err)
@@ -165,7 +165,7 @@ func TestDeploymentPreparationKeepsInstallationProofSeparateFromHeartbeat(t *tes
 			if change != "missing" && other.UpdaterReceipt == nil {
 				t.Fatal("original mismatched/unknown receipt was discarded")
 			}
-			if h.count("events") != beforeEvents || h.count("request_records") != beforeRequests || h.count("outbox") != beforeOutbox {
+			if h.count("events") != beforeEvents || h.count("runs") != beforeRuns || h.count("outbox") != beforeOutbox {
 				t.Fatal("read scheduled a provider query or wrote a business effect")
 			}
 		})

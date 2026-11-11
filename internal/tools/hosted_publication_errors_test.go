@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -28,6 +27,7 @@ func TestHostedPublicationLogsRawFailureWithoutExposingBody(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	before := f.count(t, "messaging_messages")
 	const privateBody = "Private report body must stay out of diagnostic errors"
 	payload, _ := json.Marshal(protocol.CoordinationReply{ReplyTo: f.turn.MessageID, Body: privateBody, Purpose: "final", Disposition: "linked", WorkItemIDs: []string{f.issue.IssueID}, Contexts: []protocol.LogicalContextReview{{WorkItemID: f.issue.IssueID, Revision: revision}}, ReviewedKinds: []string{"goal", "constraint", "authorization", "refusal", "commitment", "question", "suggestion"}})
 	args, _ := json.Marshal(hostedMutationArgs{EffectSeq: 1, TargetID: f.turn.RequestID, Payload: payload})
@@ -45,13 +45,7 @@ func TestHostedPublicationLogsRawFailureWithoutExposingBody(t *testing.T) {
 	if strings.Contains(result.Text, "injected publication") || strings.Contains(result.Text, privateBody) || strings.Contains(logs.String(), privateBody) {
 		t.Fatal("publication diagnostics exposed internal details or the report body")
 	}
-	if err := f.e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		_, err := store.GetRequest(t.Context(), tx.Q(), f.principal.DedupDomain(), request)
-		if !errors.Is(err, store.ErrNotFound) {
-			t.Fatal("failed transaction invented a committed request receipt", err)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	if count := f.count(t, "messaging_messages"); count != before {
+		t.Fatalf("failed publication committed %d messages", count)
 	}
 }

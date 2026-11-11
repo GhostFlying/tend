@@ -31,10 +31,10 @@ func TestUsageProjectionMigrationPreservesFactsAndQueuesBackfill(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.migrate(ctx, 0); err != nil {
+	if err = s.migrate(ctx, 91); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.migrate(ctx, 0); err != nil {
+	if err = s.migrate(ctx, 91); err != nil {
 		t.Fatal(err)
 	}
 	var got, source, id string
@@ -74,7 +74,7 @@ func TestUsagePricingCaseMigrationQueuesRetainedRequestsOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.migrate(ctx, 0); err != nil {
+	if err := s.migrate(ctx, 103); err != nil {
 		t.Fatal(err)
 	}
 	var source, id, got string
@@ -90,7 +90,7 @@ func TestUsagePricingCaseMigrationQueuesRetainedRequestsOnce(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `DELETE FROM token_usage_dirty`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.migrate(ctx, 0); err != nil {
+	if err := s.migrate(ctx, 103); err != nil {
 		t.Fatal(err)
 	}
 	var count int

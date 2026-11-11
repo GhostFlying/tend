@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { ApiError, NetworkError } from "../api/client.ts";
-import type {
-  APIResponse,
-  ConversationSettingsView,
-  Envelope,
-  RequestView,
-} from "../api/generated/api.ts";
+import type { APIResponse, ConversationSettingsView, Envelope } from "../api/generated/api.ts";
 import { LiveData } from "../live/data.ts";
 import { ConversationSettings } from "./settings.ts";
 
@@ -32,14 +27,12 @@ function fixture() {
   let answer: APIResponse | Error = {
     operation: { request_id: "req_returned", status: "succeeded" },
   };
-  let record: RequestView | null = null;
   const sender = {
     submit: vi.fn(async (e: Envelope) => {
       submitted.push(e);
       if (answer instanceof Error) throw answer;
       return answer;
     }),
-    lookup: vi.fn(async () => record),
   };
   const settings = new ConversationSettings({ get: async <T>() => (await get()) as T });
   return {
@@ -52,9 +45,6 @@ function fixture() {
     },
     setAnswer: (a: APIResponse | Error) => {
       answer = a;
-    },
-    setRecord: (r: RequestView | null) => {
-      record = r;
     },
   };
 }
@@ -102,24 +92,21 @@ describe("shared conversation settings", () => {
     await f.settings.stop();
   });
 
-  test("unknown receipts keep the original request for lookup and never resend", async () => {
+  test("lost settings response reads current settings and never repeats the write", async () => {
     const f = fixture();
     f.settings.start();
     await flush();
     f.setAnswer(new NetworkError(new Error("lost")));
-    f.sender.lookup.mockRejectedValueOnce(new Error("still offline"));
+    f.get.mockRejectedValueOnce(new Error("offline")).mockRejectedValueOnce(new Error("offline"));
     await f.settings.save(f.sender, { model: "model-a", effort: "low" });
-    const id = f.submitted[0]!.request_id;
-    expect(f.settings.state.get().pendingId).toBe(id);
-    await f.settings.save(f.sender, { model: "model-b", effort: "none" });
-    f.setRecord({ request_id: id, operation: "conversation.set_settings", status: "unknown" });
+    expect(f.settings.state.get().pendingId).toBe(f.submitted[0]!.request_id);
+    f.get.mockRejectedValueOnce(new Error("still offline"));
     await f.settings.reconcile(f.sender);
-    expect(f.sender.lookup).toHaveBeenLastCalledWith(id);
-    expect(f.settings.state.get().pendingId).toBe(id);
-    expect(f.submitted).toHaveLength(1);
-    f.setRecord({ request_id: id, operation: "conversation.set_settings", status: "succeeded" });
+    expect(f.settings.state.get().pendingId).toBeTruthy();
+    f.setView({ ...ready, revision: 4, effort: "low" });
     await f.settings.reconcile(f.sender);
     expect(f.settings.state.get().pendingId).toBeUndefined();
+    expect(f.settings.state.get().view?.effort).toBe("low");
     expect(f.submitted).toHaveLength(1);
     await f.settings.stop();
   });

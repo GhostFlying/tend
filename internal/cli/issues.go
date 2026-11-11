@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -66,11 +65,12 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if action == "create" || action == "set-acceptance-policy" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
+	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
 	statusFlag := fs.String("status", "", "explicit Issue work status; backlog records only, todo permits runner claim")
 	categoryFlag := fs.String("category", "", "owner capability category selected when moving to todo")
 	agentFlag := fs.String("agent", "", "optional environment/local owner identity with --category")
 	asJSON := fs.Bool("json", false, "print the complete structured result")
-	data := fs.String("data", "", "inline JSON payload (or original Envelope for replay)")
+	data := fs.String("data", "", "inline JSON payload; retained create-task input includes task_id")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "reuse the original request identity with its original revision, epoch and payload")
 	revision := fs.Int64("revision", -1, "expected control revision; first requests may read the current value")
@@ -178,47 +178,18 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			return o.printJSON(view)
 		}
 		return printIssueView(e, view)
-	case "request":
-		if len(pos) != 1 {
-			return usagef("issue request takes one original request ID")
-		}
-		var view protocol.RequestView
-		if err := c.do(ctx, "GET", "/api/v1/requests/"+url.PathEscape(pos[0]), nil, &view); err != nil {
-			return err
-		}
-		return o.printJSON(view)
-	case "replay":
-		if len(pos) != 0 || *request != "" || *revision != -1 || *epoch != -1 {
-			return usagef("issue replay uses the complete original Envelope via --file or --data; do not override its identity or revisions")
-		}
-		body, err := issueInput(e, *data, *file)
-		if err != nil {
-			return err
-		}
-		var env protocol.Envelope
-		if err := json.Unmarshal(body, &env); err != nil {
-			return usagef("invalid original Envelope: %v", err)
-		}
-		if !protocol.ValidID(protocol.PrefixRequest, env.RequestID) || (!strings.HasPrefix(env.Operation, "issues.") && env.Operation != protocol.OpGrantArtifactShare && env.Operation != protocol.OpRevokeArtifactShare) || env.ParentRequestID != "" {
-			return usagef("replay requires an independent original Issue owner request")
-		}
-		known := false
-		for _, op := range issueOperations {
-			known = known || op == env.Operation
-		}
-		if !known {
-			return usagef("issue operation %q is not published", env.Operation)
-		}
-		if *dry {
-			return o.printJSON(env)
-		}
-		return sendIssueEnvelope(ctx, o, env)
+
 	}
 	operation, ok := issueOperations[action]
 	if !ok {
 		return usagef("unknown issue command %q", action)
 	}
 	target := protocol.Target{Type: "issue"}
+	if action == "create" {
+		target.ID = *identity
+	} else if *identity != "" {
+		return usagef("--id is only valid for create")
+	}
 	if action == "create" {
 		if len(pos) != 0 || *revision != -1 || *epoch != -1 {
 			return usagef("issue create has no current ID/revision/epoch")
@@ -317,6 +288,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)
 	} else if !protocol.ValidID(protocol.PrefixRequest, *request) {
@@ -326,6 +298,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if action != "create" {
 		value := *revision
 		env.ExpectedControlRevision = &value
+	}
+	if err := prepareBusinessEnvelope(e, &env, allocateIdentity); err != nil {
+		return err
 	}
 	if *dry {
 		return o.printJSON(env)
@@ -369,7 +344,7 @@ func sendIssueEnvelope(ctx context.Context, o owner, env protocol.Envelope) erro
 	if control.Epoch > 0 {
 		fmt.Fprintf(o.e.Stderr, " --epoch %d", control.Epoch)
 	}
-	fmt.Fprintf(o.e.Stderr, "; inspect with tend issue request %s; retry only the original request\n", env.RequestID)
+	fmt.Fprintf(o.e.Stderr, "; %s\n", businessRecovery(env))
 	response, err := o.sendEnvelope(ctx, env)
 	if err != nil {
 		return err
@@ -392,6 +367,6 @@ func sendIssueEnvelope(ctx context.Context, o owner, env protocol.Envelope) erro
 		}
 		return errors.New("the operation failed without a reason")
 	default:
-		return protocol.Errorf(protocol.CodeUnknownOutcome, "request %s is %s; inspect/reconcile this request before any new action", env.RequestID, response.Operation.Status)
+		return protocol.Errorf(protocol.CodeUnknownOutcome, "request %s is %s; %s", env.RequestID, response.Operation.Status, businessRecovery(env))
 	}
 }

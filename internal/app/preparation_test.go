@@ -74,6 +74,12 @@ func TestFault_PreparationFailureWakesOwnerAndCorrectsSameTask(t *testing.T) {
 	if replay := h.exec(runPrincipal(as.RunID, as.Role), env, Release{}); string(replay.Result) != string(op.Result) || h.count("background_sources") != sources || h.count("outbox") != outbox {
 		t.Fatal("release replay duplicated wake", replay)
 	}
+	changed := preparationPayload(as)
+	changed.Preparation.Changes[0].Path = "different.txt"
+	conflicting, conflictErr := h.app.Execute(t.Context(), runPrincipal(as.RunID, as.Role), h.env(protocol.OpRunsRelease, runTarget(as.RunID), changed, nil), Release{})
+	if boundedReleaseCode(conflicting, conflictErr) != protocol.CodeConflictPayload || h.count("background_sources") != sources || h.count("outbox") != outbox {
+		t.Fatal("conflicting Run preparation evidence changed the original failure", conflicting, conflictErr)
+	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var count int
 		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources s JOIN background_batches b ON b.batch_id=s.batch_id WHERE s.kind='task.preparation_blocked' AND b.work_item_id=?`, issue.IssueID).Scan(&count); err != nil {

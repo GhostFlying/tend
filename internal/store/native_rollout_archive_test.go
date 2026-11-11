@@ -124,8 +124,8 @@ func TestOriginalNativeArchiveCanonicalAndNestedValuesReuseSource(t *testing.T) 
 		t.Fatal(err)
 	}
 	retained := retainNativeBody(t, s, string(canonical))
-	if !strings.Contains(retained, `"canonical"`) {
-		t.Fatalf("expected source presentation recipe: %s", retained)
+	if !strings.Contains(retained, retainedMarker) || strings.Contains(retained, "canonical") || len(retained) > 100 {
+		t.Fatalf("expected only compact source reference: %s", retained)
 	}
 	event := `{"Kind":"item_completed","Raw":` + string(canonical) + `,"Text":` + string(mustOriginalJSON(t, text)) + `}`
 	retained = retainNativeBody(t, s, event)
@@ -144,8 +144,12 @@ func TestOriginalNativeArchiveCanonicalAndNestedValuesReuseSource(t *testing.T) 
 		}
 		total += info.Size()
 	}
-	if total != int64(len(line)) {
-		t.Fatalf("source fragments duplicated: archive bytes=%d source=%d", total, len(line))
+	if total <= int64(len(line)) || total > int64(len(line)+2500) {
+		t.Fatalf("only a small shared rule should be added: archive=%d source=%d", total, len(line))
+	}
+	var count int
+	if err = s.read.QueryRowContext(t.Context(), `SELECT count(*) FROM retained_original_values WHERE recipe_window_id IS NOT NULL`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("shared rule count=%d err=%v", count, err)
 	}
 	// Recipe cache survives closing/reopening and still validates original hashes.
 	if err = s.Close(); err != nil {

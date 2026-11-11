@@ -20,7 +20,7 @@ type closedToolFixture struct {
 	resultID string
 }
 
-func closedRepairToolFixture(t *testing.T, success bool) closedToolFixture {
+func closedRepairToolFixture(t *testing.T, success bool, representations ...string) closedToolFixture {
 	t.Helper()
 	h, as := repairPrefixFixture(t)
 	if err := h.app.AcknowledgeManagerRepairPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", "part17part18part19", []int64{17, 18, 19}); err != nil {
@@ -38,6 +38,12 @@ func closedRepairToolFixture(t *testing.T, success bool) closedToolFixture {
 	args := json.RawMessage(`{"revision":7}`)
 	call := workerharness.ToolCall{ThreadID: "native", TurnID: "original-turn", CallID: "original-call", Tool: "inspect_original", Arguments: args}
 	result := workerharness.ToolResult{Success: success, Text: "unchanged original result"}
+	if len(representations) > 0 {
+		result.Text = representations[0]
+	}
+	if len(representations) > 1 {
+		seedManagerToolOutput(t, h, as, call.Tool, string(args), representations[1], call.TurnID, call.CallID)
+	}
 	request, _ := json.Marshal(coordination.Request{ThreadID: call.ThreadID, TurnID: call.TurnID, CallID: call.CallID, ToolResult: result})
 	id, err := h.app.QueueManagerNative(t.Context(), as.RunID, "tool_result", request)
 	if err != nil {
@@ -306,10 +312,10 @@ func TestClosedManagerRepairRejectsUnprovenFactsAtomically(t *testing.T) {
 				query := map[string]string{
 					"ordinary_turn":   `UPDATE logical_turn_executions SET repair=0`,
 					"changed_pin":     `UPDATE issue_manager_tasks SET pin_json=json_set(pin_json,'$.agent_revision',99)`,
-					"missing_result":  `DELETE FROM manager_native_requests WHERE method='tool_result'`,
-					"started_result":  `UPDATE manager_native_requests SET status='started' WHERE method='tool_result'`,
-					"unknown_result":  `UPDATE manager_native_requests SET status='unknown' WHERE method='tool_result'`,
-					"wrong_result_id": `UPDATE manager_native_requests SET result_json=json_set(result_json,'$.id','foreign-result') WHERE method='tool_result'`,
+					"missing_result":  `UPDATE conversation_tool_uses SET native_delivery_id='' WHERE native_delivery_id<>''`,
+					"started_result":  `UPDATE conversation_tool_uses SET native_delivery_status='produced' WHERE native_delivery_id<>''`,
+					"unknown_result":  `UPDATE conversation_tool_uses SET native_delivery_status='unknown' WHERE native_delivery_id<>''`,
+					"wrong_result_id": `UPDATE conversation_tool_uses SET native_run_id='foreign-run' WHERE native_delivery_id<>''`,
 					"audit_failure":   `CREATE TRIGGER fail_closed_fact_audit BEFORE INSERT ON events WHEN NEW.kind='run.manager_closed_tool_facts_consumed' BEGIN SELECT RAISE(ABORT,'injected factual audit failure'); END`,
 				}[scenario]
 				_, err := tx.Exec(t.Context(), query)

@@ -92,7 +92,7 @@ func (c BackgroundCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{Result: page, Notify: true}, nil
 	}
 	var published bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages a JOIN conversation_messages m ON m.message_id=a.message_id JOIN request_records r ON r.request_id=m.request_id WHERE a.thread_id=? AND a.turn_id=? AND r.operation='conversation.reply' AND r.status='succeeded')`, x.Principal.Thread, c.TurnID).Scan(&published); err != nil {
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_agent_messages a JOIN conversation_messages m ON m.message_id=a.message_id WHERE a.thread_id=? AND a.turn_id=? AND EXISTS(SELECT 1 FROM conversation_reply_sources s WHERE s.reply_id=m.message_id))`, x.Principal.Thread, c.TurnID).Scan(&published); err != nil {
 		return Outcome{}, err
 	}
 	if published {

@@ -60,7 +60,7 @@ func TestCoordinationThreeWritesAndSameTurnClaim(t *testing.T) {
 	}
 	messages, events, facts := h.count("conversation_messages"), h.count("events"), h.count("work_item_context_facts")
 	replay := h.exec(mainAgent, replyEnv, CoordinationReply{})
-	if string(replay.Result) != string(result.Result) || h.count("conversation_messages") != messages || h.count("events") != events || h.count("work_item_context_facts") != facts {
+	if replay.Error != nil || messageID(t, replay) != messageID(t, result) || h.count("conversation_messages") != messages || h.count("events") != events || h.count("work_item_context_facts") != facts {
 		t.Fatal("reply replay changed state")
 	}
 	if _, ok, _ := h.claim("linux-1"); !ok {
@@ -184,7 +184,7 @@ func TestRepeatedPrepareAndAssociationKeepExactVersions(t *testing.T) {
 	}
 }
 
-func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
+func TestNoEffectCurrentStateRejectsOldCASAfterUpdate(t *testing.T) {
 	h := newHarness(t)
 	w := h.createWork(workPlan())
 	args := protocol.UpdateWorkItemPayload{IssuePlan: w.IssuePlan}
@@ -194,16 +194,16 @@ func TestNoEffectReceiptReplaysOriginalVersions(t *testing.T) {
 		t.Fatal(first)
 	}
 	var result map[string]json.RawMessage
-	if err := json.Unmarshal(first.Result, &result); err != nil || result["receipt"] == nil {
-		t.Fatal("no-effect omitted receipt", err)
+	if err := json.Unmarshal(first.Result, &result); err != nil || result["revision"] == nil {
+		t.Fatal("no-effect omitted current revision", err)
 	}
 	args.Intent += " and document evidence"
 	if op := h.exec(mainAgent, h.env("work_items.update", workTarget(w.WorkItemID), args, rev(w.Revision)), UpdateIssue{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	replay := h.exec(mainAgent, env, UpdateIssue{})
-	if string(replay.Result) != string(first.Result) {
-		t.Fatal("replay refreshed an old receipt")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old no-effect update bypassed current CAS", replay)
 	}
 }
 
@@ -1012,12 +1012,12 @@ func assertCreatorReceiptStillUnknown(t *testing.T, h *harness, turn store.MainT
 		t.Fatal("creator receipt was erased", pending, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var status string
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT r.status FROM events e JOIN request_records r ON r.request_id=e.request_id WHERE e.object_type='task' AND e.object_id=? AND e.kind='task.created'`, task).Scan(&status); err != nil {
+		var count int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM events WHERE object_type='task' AND object_id=? AND kind='task.created'`, task).Scan(&count); err != nil {
 			return err
 		}
-		if status != "succeeded" {
-			t.Fatal("fixture contained an unresolved delegate write", status)
+		if count != 1 {
+			t.Fatal("actual created Task fact is missing or duplicated", count)
 		}
 		return nil
 	}); err != nil {
@@ -1044,7 +1044,7 @@ func TestTaskControlWritesReturnReceiptAndPreserveSameTurnDispatch(t *testing.T)
 		var result map[string]json.RawMessage
 		json.Unmarshal(op.Result, &result)
 		t.Logf("mode %s result %s", mode, op.Result)
-		if result["receipt"] == nil {
+		if result["revision"] == nil {
 			t.Error("control write omitted coordination receipt")
 		}
 	}
@@ -1270,7 +1270,7 @@ func TestTasklessBackgroundFormalReplyIsPublishedOnceAndCannotBecomeSilent(t *te
 				t.Fatal(op)
 			}
 			replay := h.exec(mainAgent, env, CoordinationReply{})
-			if string(replay.Result) != string(out.Result) || h.count("conversation_messages") != count {
+			if replay.Error != nil || messageID(t, replay) != messageID(t, out) || h.count("conversation_messages") != count {
 				t.Fatal("formal background replay duplicated a message")
 			}
 			h.associate(mainAgent, turn.MessageID)

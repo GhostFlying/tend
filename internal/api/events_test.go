@@ -89,7 +89,7 @@ func (s *stream) next() sse {
 
 func (e *env) say(body string) {
 	e.t.Helper()
-	b, _ := json.Marshal(protocol.SubmitMessagePayload{Body: body})
+	b, _ := json.Marshal(protocol.SubmitMessagePayload{MessageID: e.ids.New(protocol.PrefixMessage), Body: body})
 	owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}
 	if res, err := e.app.Execute(context.Background(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest),
 		Operation: "conversation.submit_message", Target: protocol.Target{Type: "message"}, Payload: b}, app.SubmitMessage{}); err != nil || res.Status == protocol.OpFailed {

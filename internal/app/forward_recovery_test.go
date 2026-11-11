@@ -12,17 +12,11 @@ import (
 
 func TestForwardRecoveryLedgerFencesAdmissionAndPreservesTerminal(t *testing.T) {
 	h := newHarness(t)
-	original := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "old-201", ReleaseID: "old-release", Status: "completed", Phase: "completed", Revision: 8}, ManifestSHA256: strings.Repeat("a", 64), ServerHash: strings.Repeat("b", 64), ServerInstance: "server", ServerProcess: "old-launch", ServerHealthy: 1, ServerGrantDeadline: 1234567}
+	original := store.UpgradeRow{StartRequestID: h.ids.New(protocol.PrefixRequest), View: protocol.UpgradeView{UpgradeID: "old-201", ReleaseID: "old-release", Status: "completed", Phase: "completed", Revision: 8}, ManifestSHA256: strings.Repeat("a", 64), ServerHash: strings.Repeat("b", 64), ServerInstance: "server", ServerProcess: "old-launch", ServerHealthy: 1, ServerGrantDeadline: 1234567}
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), original) }); err != nil {
 		t.Fatal(err)
 	}
-	p := protocol.ForwardRecoveryPlan{RecoveryID: "forward-201", RequestID: h.ids.New(protocol.PrefixRequest), LinkRequestID: h.ids.New(protocol.PrefixRequest), OriginalRequestID: h.ids.New(protocol.PrefixRequest), Original: protocol.UpgradeBinding{UpgradeID: original.View.UpgradeID, ReleaseID: original.View.ReleaseID, InstanceID: original.ServerInstance, ProcessInstanceID: original.ServerProcess, ManifestSHA256: original.ManifestSHA256, ArtifactSHA256: original.ServerHash}, OriginalLedger: original.View, LedgerRevision: 8}
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		result, _ := json.Marshal(original.View)
-		return tx.InsertRequest(t.Context(), store.RequestRecord{Domain: "system", RequestID: p.OriginalRequestID, Operation: "upgrades.start", PayloadHash: strings.Repeat("f", 64), PrincipalJSON: `{"kind":"system"}`, TraceID: h.ids.New(protocol.PrefixTrace), Status: protocol.OpSucceeded, ResultJSON: string(result)})
-	}); err != nil {
-		t.Fatal(err)
-	}
+	p := protocol.ForwardRecoveryPlan{RecoveryID: "forward-201", RequestID: h.ids.New(protocol.PrefixRequest), LinkRequestID: h.ids.New(protocol.PrefixRequest), OriginalRequestID: original.StartRequestID, Original: protocol.UpgradeBinding{UpgradeID: original.View.UpgradeID, ReleaseID: original.View.ReleaseID, InstanceID: original.ServerInstance, ProcessInstanceID: original.ServerProcess, ManifestSHA256: original.ManifestSHA256, ArtifactSHA256: original.ServerHash}, OriginalLedger: original.View, LedgerRevision: 8}
 	p.Successor = protocol.UpgradeBinding{UpgradeID: p.RecoveryID, InstanceID: "server", ProcessInstanceID: "new-launch", ReleaseID: "new-release", ArtifactSHA256: strings.Repeat("c", 64), ManifestSHA256: strings.Repeat("d", 64)}
 	process := protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: p.Successor.ProcessInstanceID, SHA256: p.Successor.ArtifactSHA256}
 	h.app.forwardRecoveryID = p.RecoveryID
@@ -124,8 +118,8 @@ func TestForwardRecoveryReplaysCommittedClaimButBlocksNewAdmission(t *testing.T)
 	}
 	conflict := *env
 	conflict.Payload = json.RawMessage(`{"different":"payload"}`)
-	if _, err := h.app.Execute(t.Context(), runner("linux-1"), &conflict, Claim{}); protocol.CodeOf(err) != protocol.CodeConflictPayload {
-		t.Fatal("recovery hid a conflicting request identity", err)
+	if _, err := h.app.Execute(t.Context(), runner("linux-1"), &conflict, Claim{}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+		t.Fatal("recovery admitted a claim without its existing Run identity", err)
 	}
 }
 

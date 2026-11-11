@@ -92,18 +92,20 @@ func TestSharedDeliveryMigrationPreservesOriginalApprovalAndExecution(t *testing
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET current_artifact_id='art_original' WHERE task_id=?`, duty.TaskID); err != nil {
 			return err
 		}
-		if _, err := tx.InsertEvent(ctx, EventRow{EventID: duty.EventID, Source: "app", ObjectType: "task", ObjectID: duty.TaskID, Kind: "task.completed", BodyJSON: `{}`, RequestID: "req_original", CreatedAt: 2}); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO events(event_id,source,object_type,object_id,kind,body_json,request_id,created_at) VALUES(?,'app','task',?,'task.completed','{}','req_original',2)`, duty.EventID, duty.TaskID); err != nil {
 			return err
 		}
 		if err := tx.InsertDecision(ctx, "dec_original", duty.TaskID, protocol.DeliveryCandidateQuestion(candidate), `["approve","defer","end_delivery"]`, `{}`, nil, 2); err != nil {
 			return err
 		}
-		if _, err := tx.InsertMessage(ctx, MessageRow{MessageID: "msg_approval", ConversationID: "main", Author: "owner", Body: "Approve this exact candidate", RequestID: "req_approval", CreatedAt: 3}); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO conversation_messages(message_id,conversation_id,author,body,request_id,created_at) VALUES('msg_approval','main','owner','Approve this exact candidate','req_approval',3)`); err != nil {
 			return err
 		}
-		if err := tx.InsertRequest(ctx, RequestRecord{Domain: "owner", RequestID: "req_approval", Operation: "attentions.handle", PayloadHash: "original-payload", PrincipalJSON: `{"kind":"owner","subject":"fixture-owner"}`, TraceID: "trace_original", Status: protocol.OpSucceeded, ResultJSON: `{ "decision_id": "dec_original", "option": "approve" }`, CreatedAt: 3}); err != nil {
+		// This fixture is intentionally pre-retirement schema 97.
+		if _, err := tx.Exec(ctx, `INSERT INTO request_records(domain,request_id,operation,payload_hash,principal_json,trace_id,status,result_json,created_at,updated_at) VALUES('owner','req_approval','attentions.handle','original-payload','{"kind":"owner","subject":"fixture-owner"}','trace_original','succeeded','{ "decision_id": "dec_original", "option": "approve" }',3,3)`); err != nil {
 			return err
 		}
+
 		if err := tx.AnswerDecision(ctx, "dec_original", 1, `{ "option": "approve" }`, "msg_approval", 3); err != nil {
 			return err
 		}
@@ -138,7 +140,6 @@ func TestSharedDeliveryMigrationPreservesOriginalApprovalAndExecution(t *testing
 		`SELECT * FROM attentions ORDER BY attention_id`,
 		`SELECT * FROM attention_revisions ORDER BY attention_id,revision`,
 		`SELECT * FROM decisions ORDER BY decision_id`,
-		`SELECT * FROM request_records ORDER BY domain,request_id`,
 		`SELECT * FROM conversation_messages ORDER BY seq`,
 		`SELECT * FROM task_specs ORDER BY task_id,spec_version`,
 		`SELECT * FROM tasks ORDER BY task_id`,
@@ -148,8 +149,9 @@ func TestSharedDeliveryMigrationPreservesOriginalApprovalAndExecution(t *testing
 		`SELECT * FROM host_runtime ORDER BY host_id`,
 		`SELECT * FROM schema_migrations WHERE version<=97 ORDER BY version`,
 	}
-	// Pin every comparison to the columns present in the original schema.
-	// Later migrations may append fields, but must preserve every old value.
+	// Pin every retained business fact to columns in the original schema. The
+	// transport cache is retired; the decision, actual approval message, duty
+	// and frozen execution below remain authoritative and must be preserved.
 	for index, query := range queries {
 		rows, err := db.QueryContext(ctx, query+" LIMIT 0")
 		if err != nil {

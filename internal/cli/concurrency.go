@@ -165,7 +165,7 @@ func runConcurrency(ctx context.Context, e *Env, args []string) error {
 		return err
 	}
 	if response.Operation == nil {
-		return fmt.Errorf("no receipt; retain request %s, revision %d and exact payload for request replay", *request, *revision)
+		return fmt.Errorf("no receipt; retain request %s, revision %d and exact payload; inspect agents concurrency show before another action", *request, *revision)
 	}
 	if response.Operation.Error != nil {
 		return response.Operation.Error

@@ -167,59 +167,31 @@ func TestMainOwnerCatalogMatchesOwnerAndRejectsOtherActors(t *testing.T) {
 	}
 }
 
-func TestMainOwnerReplaysOriginalOwnerDomainAndReadsMainReceipts(t *testing.T) {
+func TestMainOwnerReadsBusinessStateAndRejectsRequestReplay(t *testing.T) {
 	e, call := mainOwnerFixture(t)
-	owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}
-	create := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Keep original request", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}}
-	original := e.envelope("issues.create", protocol.Target{Type: "issue"}, nil, create)
-	created, err := e.app.Execute(t.Context(), owner, &original, app.CanonicalOwnerIssueCommand{Action: "create"})
+	original := e.envelope("issues.create", protocol.Target{Type: "issue"}, nil, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Read original responsibility", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}})
+	created, err := e.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: ownerLogin, Client: clientID}, &original, app.CanonicalOwnerIssueCommand{Action: "create"})
 	if err != nil || created.Error != nil {
 		t.Fatal(created, err)
 	}
-	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original})
-	var replayed, recorded protocol.Issue
-	if err != nil || response.Operation == nil {
-		t.Fatal(response, err)
-	}
-	if err := json.Unmarshal(response.Operation.Result, &replayed); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(created.Result, &recorded); err != nil {
-		t.Fatal(err)
-	}
-	if replayed.IssueID != recorded.IssueID || replayed.Revision != recorded.Revision || response.Operation.RequestID != original.RequestID {
-		t.Fatal(response, created)
-	}
-	if e.count(`SELECT COUNT(*) FROM work_items`) != 1 {
-		t.Fatal("owner request replayed as a new main request")
+	if _, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+		t.Fatal("retired replay accepted", err)
 	}
 	var issue protocol.Issue
 	if err := json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	bad, _ := json.Marshal(protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueInProgress})
-	call.RequestID = e.ids.New(protocol.PrefixRequest)
-	stale := issue.Revision + 10
-	failed, err := ownerToolInvoke(t, e, call, "issues.set_status", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &stale, Payload: bad})
-	if protocol.CodeOf(err) != protocol.CodeStaleRevision || failed.CurrentIssue == nil {
-		t.Fatal(failed, err)
+	call.Name = ownerToolName("GET /api/v1/issues/{id}")
+	call.Arguments, _ = json.Marshal(protocol.OwnerToolArguments{Path: map[string]string{"id": issue.IssueID}})
+	if value, err := e.server.MainOwnerTools().Call(t.Context(), call); err != nil || value == nil {
+		t.Fatal(value, err)
 	}
-	reader := call
-	reader.RequestID = ""
-	reader.Name = ownerToolName("GET /api/v1/requests/{id}")
-	reader.Arguments, _ = json.Marshal(protocol.OwnerToolArguments{Path: map[string]string{"id": call.RequestID}})
-	value, err := e.server.MainOwnerTools().Call(t.Context(), reader)
-	if err != nil {
-		t.Fatal(err)
+	var old any
+	if status := e.do("GET", "/api/v1/requests/"+original.RequestID, e.login(protocol.ScopeOwner), nil, &old); status != 404 {
+		t.Fatal("retired ledger route", status)
 	}
-	data, _ := json.Marshal(value)
-	var receipt protocol.RequestView
-	if err := json.Unmarshal(data, &receipt); err != nil || receipt.Status != protocol.OpFailed || receipt.Error.Code != protocol.CodeStaleRevision {
-		t.Fatal(string(data), err)
-	}
-	var other protocol.RequestView
-	if status := e.do("GET", "/api/v1/requests/"+call.RequestID, e.login(protocol.ScopeOwner), nil, &other); status != 200 || other.Status != receipt.Status {
-		t.Fatal(status, other)
+	if n := e.count(`SELECT COUNT(*) FROM issue_controls`); n != 1 {
+		t.Fatal(n)
 	}
 }
 
@@ -277,9 +249,9 @@ func TestMainOwnerNativeEffectReplayAndTurnFence(t *testing.T) {
 	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Exact native receipt", Project: "default", Intent: "Record", Stages: []protocol.IssueStage{}}})
 	args := protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "issue"}, Payload: payload}
 	call.RequestID = e.ids.New(protocol.PrefixRequest)
-	first, err := ownerToolInvoke(t, e, call, "issues.create", args)
+	_, err := ownerToolInvoke(t, e, call, "issues.create", args)
 	if err != nil {
-		t.Fatal(first, err)
+		t.Fatal(err)
 	}
 	duplicate := call
 	duplicate.RequestID = e.ids.New(protocol.PrefixRequest)
@@ -292,7 +264,7 @@ func TestMainOwnerNativeEffectReplayAndTurnFence(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if response, err := ownerToolInvoke(t, e, call, "issues.create", args); err != nil || response.Operation.RequestID != first.Operation.RequestID {
+	if response, err := ownerToolInvoke(t, e, call, "issues.create", args); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal(response, err)
 	}
 	args.EffectSeq = 2
@@ -504,54 +476,30 @@ func TestMainOwnerMessageAuthorityCannotBeSpoofedByRequestID(t *testing.T) {
 	}
 }
 
-func TestMainOwnerRecoversUnrecordedRequestInOriginalDomain(t *testing.T) {
-	for _, domain := range []string{"owner", "native"} {
-		t.Run(domain, func(t *testing.T) {
-			e, call := mainOwnerFixture(t)
-			payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Recover same request", Project: "default", Intent: "Record", Stages: []protocol.IssueStage{}}})
-			original := protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
-			wantDomain := "owner"
-			if domain == "native" {
-				var err error
-				original.RequestID, err = e.app.NativeRequestID(t.Context(), "harness:"+call.Actor.Subject, "original-unrecorded-call")
-				if err != nil {
-					t.Fatal(err)
-				}
-				wantDomain = call.Actor.DedupDomain()
-			}
-			response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original, EffectSeq: 1})
-			if err != nil || response.Operation.RequestID != original.RequestID {
-				t.Fatal(response, err)
-			}
-			if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-				record, err := store.GetRequest(t.Context(), tx.Q(), wantDomain, original.RequestID)
-				if err != nil {
-					return err
-				}
-				var actor protocol.Principal
-				if err := json.Unmarshal([]byte(record.PrincipalJSON), &actor); err != nil {
-					return err
-				}
-				if actor.Kind != protocol.PrincipalMainAgent {
-					t.Fatal("recovery fabricated a human caller", actor)
-				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			again, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original})
-			if err != nil || again.Operation.RequestID != original.RequestID || e.count(`SELECT COUNT(*) FROM work_items`) != 1 {
-				t.Fatal(again, err)
-			}
-		})
+func TestMainOwnerRetriesCreationByBusinessIdentity(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	id := e.ids.New(protocol.PrefixWorkItem)
+	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Retain same goal", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}})
+	args := protocol.OwnerToolArguments{Target: protocol.Target{Type: "issue", ID: id}, Payload: payload, EffectSeq: 1}
+	call.RequestID = e.ids.New(protocol.PrefixRequest)
+	first, err := ownerToolInvoke(t, e, call, "issues.create", args)
+	if err != nil || first.Operation == nil {
+		t.Fatal(first, err)
+	}
+	again, err := ownerToolInvoke(t, e, call, "issues.create", args)
+	if err != nil || again.Operation == nil || string(first.Operation.Result) != string(again.Operation.Result) {
+		t.Fatal(again, err)
+	}
+	if e.count(`SELECT COUNT(*) FROM issue_controls WHERE issue_id=?`, id) != 1 || e.count(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('request_records','native_requests')`) != 0 {
+		t.Fatal("business identity created duplicate or request archive")
 	}
 }
 
-func TestMainOwnerRecoveredIssueKeepsOriginalReceiptDomain(t *testing.T) {
+func TestMainOwnerIssueKeepsActualCreationProvenance(t *testing.T) {
 	e, call := mainOwnerFixture(t)
-	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Recovered", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}})
-	original := protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
-	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{OriginalEnvelope: &original, EffectSeq: 1})
+	call.RequestID = e.ids.New(protocol.PrefixRequest)
+	payload, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Created", Project: "default", Intent: "Report", Stages: []protocol.IssueStage{}}})
+	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{Target: protocol.Target{Type: "issue"}, Payload: payload, EffectSeq: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,11 +508,8 @@ func TestMainOwnerRecoveredIssueKeepsOriginalReceiptDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := e.app.IssueReuseStatus(t.Context(), issue.IssueID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status.OriginObservation != "recorded" || status.OriginalRequestID != original.RequestID {
-		t.Fatalf("committed creation lost receipt identity: %+v", status)
+	if err != nil || status.OriginObservation != "recorded" || status.OriginalRequestID != call.RequestID {
+		t.Fatal(status, err)
 	}
 }
 
@@ -645,7 +590,7 @@ func TestMainOwnerReceiptReplaysThroughOwnerAPIWithoutDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(response, err)
 	}
-	original := protocol.Envelope{RequestID: call.RequestID, Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: payload}
+	original := protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue", ID: protocol.NativeObjectID(protocol.PrefixWorkItem, "owner:"+call.ExecutionID, call.RequestID)}, Payload: payload}
 	var replay protocol.APIResponse
 	if status := e.do("POST", "/api/v1/ops", e.login(protocol.ScopeOwner), original, &replay); status != 200 || replay.Operation == nil || replay.Operation.Error != nil {
 		t.Fatal(status, replay)
@@ -657,11 +602,11 @@ func TestMainOwnerReceiptReplaysThroughOwnerAPIWithoutDuplicate(t *testing.T) {
 	if err := json.Unmarshal(replay.Operation.Result, &replayedIssue); err != nil {
 		t.Fatal(err)
 	}
-	if n := e.count("SELECT COUNT(*) FROM work_items"); n != 1 || replayedIssue.IssueID != initialIssue.IssueID || replay.Operation.RequestID != response.Operation.RequestID {
+	if n := e.count("SELECT COUNT(*) FROM work_items"); n != 1 || replayedIssue.IssueID != initialIssue.IssueID || replay.Operation.RequestID != original.RequestID {
 		t.Fatal("owner replay duplicated or changed original receipt", n, replay)
 	}
 	original.Payload = json.RawMessage(`{"plan":{"title":"Changed"}}`)
-	if status := e.do("POST", "/api/v1/ops", e.login(protocol.ScopeOwner), original, &replay); status == 200 {
-		t.Fatal("replay ignored changed payload")
+	if status := e.do("POST", "/api/v1/ops", e.login(protocol.ScopeOwner), original, &replay); status == 200 && replay.Operation != nil && replay.Operation.Error == nil {
+		t.Fatal("business creation ignored changed definition")
 	}
 }

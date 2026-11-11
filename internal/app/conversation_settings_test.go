@@ -27,10 +27,11 @@ func TestConversationSettingsDeduplicateAndRejectStale(t *testing.T) {
 	if first.Status != protocol.OpSucceeded {
 		t.Fatalf("first = %+v", first)
 	}
-	// Reconciliation must still return the receipt if the catalog went away.
+	// The original CAS remains stale even if the catalog is unavailable;
+	// the successful settings stay readable from the business object.
 	replay := h.exec(owner, env, SetConversationSettings{})
-	if string(first.Result) != string(replay.Result) || replay.Status != first.Status {
-		t.Fatalf("replay = %+v, want %+v", replay, first)
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatalf("old settings revision accepted: %+v", replay)
 	}
 	stale := h.exec(owner, h.env(env.Operation, env.Target, protocol.SetConversationSettingsPayload{Model: "model-a", Effort: "low"}, rev(0)), settingsCommand())
 	if stale.Error == nil || stale.Error.Code != protocol.CodeStaleRevision {

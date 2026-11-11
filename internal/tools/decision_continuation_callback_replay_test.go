@@ -56,11 +56,6 @@ func TestDecisionResolveLegacyCallbackPreservesOriginalPayloadAndReceipt(t *test
 					t.Fatal("original valid callback failed", err)
 				}
 				originalID := first["request_id"].(string)
-				payload, _ := json.Marshal(legacyPayload)
-				wantHash, err := protocol.PayloadHash(&protocol.Envelope{RequestID: originalID, Operation: cmd.Operation(), Target: protocol.Target{Type: "decision", ID: args.DecisionID}, Payload: payload, Reason: args.Reason})
-				if err != nil {
-					t.Fatal(err)
-				}
 				result := e.svc.Handle(t.Context(), call)
 				var replay answerView
 				if err := json.Unmarshal([]byte(result.Text), &replay); err != nil || !replay.OK {
@@ -77,9 +72,9 @@ func TestDecisionResolveLegacyCallbackPreservesOriginalPayloadAndReceipt(t *test
 					t.Fatal("original receipt changed", got, want)
 				}
 				if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-					record, err := store.GetRequest(t.Context(), tx.Q(), call.Principal.DedupDomain(), originalID)
-					if err == nil && (record.PayloadHash != wantHash || record.Status != protocol.OpSucceeded) {
-						t.Fatal("original request identity or hash changed", record)
+					d, err := store.GetDecision(t.Context(), tx.Q(), args.DecisionID)
+					if err == nil && d.Status != store.DecisionAnswered {
+						t.Fatal("answer was not committed", d)
 					}
 					return err
 				}); err != nil {

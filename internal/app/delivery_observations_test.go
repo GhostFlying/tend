@@ -207,10 +207,14 @@ func TestFault_DeliveryQueryGenerationRejectsOldHostAndRefreshReports(t *testing
 	if !accepted(t, reportDelivery(t, h, "linux-1", "first", after, "open", "")) {
 		t.Fatal("manual query rejected")
 	}
-	// Replaying the owner envelope must not reopen the already-completed query.
-	h.exec(owner, refresh, RefreshDelivery{})
-	if readObservations(t, h, item.WorkItemID)[0].RefreshPending {
-		t.Fatal("owner request replay repeated refresh")
+	// A further explicit refresh remains a new observation request.
+	// The trace ID is not a cached authorization or old response.
+	if op := h.exec(owner, refresh, RefreshDelivery{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	next := readObservations(t, h, item.WorkItemID)[0]
+	if !next.RefreshPending || next.Generation <= after.Generation {
+		t.Fatal("explicit refresh lost its fresh query identity", next)
 	}
 }
 

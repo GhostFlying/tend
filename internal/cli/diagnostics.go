@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -270,9 +272,10 @@ func runLocalAgentCommand(ctx context.Context, e *Env, args []string) error {
 	return nil
 }
 
-func runRequestReplay(ctx context.Context, e *Env, args []string) error {
-	fs := newFlags(e, "request replay")
-	data := fs.String("data", "", "original Envelope; inspect request show before replaying an unknown outcome")
+func runOperationSubmit(ctx context.Context, e *Env, args []string) error {
+	fs := newFlags(e, "operation submit")
+	fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"operation", "submit"})); fs.PrintDefaults() }
+	data := fs.String("data", "", "saved Envelope with business object identities and original control values")
 	file := fs.String("file", "", "original Envelope file; - reads stdin")
 	dry := fs.Bool("dry-run", false, "print original Envelope")
 	fs.Bool("json", true, "print complete receipt")
@@ -281,17 +284,22 @@ func runRequestReplay(ctx context.Context, e *Env, args []string) error {
 		return err
 	}
 	if len(pos) != 0 {
-		return usagef("replay takes --data or --file")
+		return usagef("operation submit takes --data or --file")
 	}
 	raw, err := issueInput(e, *data, *file)
 	if err != nil {
 		return err
 	}
 	var env protocol.Envelope
-	if err = json.Unmarshal(raw, &env); err != nil {
-		return usagef("original Envelope required")
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&env); err != nil {
+		return usagef("complete original Envelope required: %v", err)
 	}
-	if err = env.Validate(); err != nil {
+	if err = decoder.Decode(new(any)); err != io.EOF {
+		return usagef("provide exactly one original Envelope")
+	}
+	if err = validateBusinessEnvelope(env); err != nil {
 		return err
 	}
 	if !ownerOperationSupported(env.Operation) {

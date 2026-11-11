@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -274,9 +275,12 @@ func (RespondMessagingInteraction) Apply(ctx context.Context, x *Exec, tx *store
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	return respondMessagingInteraction(ctx, x, tx, x.Env.Target.ID, p, &communicationOrigin{Channel: "web"})
+	return respondMessagingInteraction(ctx, x, tx, x.Env.Target.ID, p, &communicationOrigin{Channel: "web", MessageID: p.MessageID})
 }
 func respondMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.RespondInteraction, origin *communicationOrigin) (Outcome, error) {
+	if origin.MessageID == "" {
+		origin.MessageID = p.MessageID
+	}
 	i, err := messagingInteraction(ctx, tx.Q(), id)
 	if err != nil {
 		return Outcome{}, err
@@ -335,7 +339,7 @@ func respondMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, id 
 		if p.Option != "" {
 			body = interactionLabel(p.Option) + "\n\n" + p.Text
 		}
-		return submitCommunicationInput(ctx, x, tx, protocol.MessagingInput{Body: body, ReplyTo: message}, origin.Channel, origin.BotID, origin.ChatID, origin.ExternalID, false)
+		return submitCommunicationInput(ctx, x, tx, protocol.MessagingInput{MessageID: p.MessageID, Body: body, ReplyTo: message}, origin.Channel, origin.BotID, origin.ChatID, origin.ExternalID, false)
 	}
 	inner := *x
 	inner.interactionOrigin = origin
@@ -401,7 +405,7 @@ func respondMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, id 
 	if len(summary) > 1 {
 		answer += "…（完整回答保留在原消息中）"
 	}
-	pReply := protocol.MessagingPublication{Body: "已记录你的回答：" + answer, Purpose: "final", ReplyTo: message}
+	pReply := protocol.MessagingPublication{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, "interaction-confirmation:"+i.ID, message), Body: "已记录你的回答：" + answer, Purpose: "final", ReplyTo: message}
 	if i.Effect != nil {
 		if i.Effect.Applied {
 			pReply.Body += "。已应用所选操作；后续执行结果会继续反馈。"
@@ -420,8 +424,15 @@ func interactionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, reply, 
 	if origin.RawBody != "" {
 		body = origin.RawBody
 	}
-	id := x.IDs.New(protocol.PrefixMessage)
+	id := origin.MessageID
 	author := x.messageAuthor()
+	previous, err := existingMessage(ctx, tx.Q(), protocol.SubmitMessagePayload{MessageID: id, Body: body, ReplyTo: reply}, author, nil)
+	if err != nil {
+		return "", err
+	}
+	if previous != nil {
+		return id, nil
+	}
 	seq, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: id, Author: author, Body: body, ReplyTo: reply, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	if err != nil {
 		return "", err
@@ -449,13 +460,13 @@ func submitCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol.
 			return Outcome{}, err
 		}
 		if i != nil {
-			origin := &communicationOrigin{Channel: channel, BotID: bot, ChatID: chat, ExternalID: external, ReplyTo: p.ReplyTo, RawBody: p.Body}
+			origin := &communicationOrigin{MessageID: p.MessageID, Channel: channel, BotID: bot, ChatID: chat, ExternalID: external, ReplyTo: p.ReplyTo, RawBody: p.Body}
 			if i.State != "open" && (channel == "telegram" || channel == "feishu") {
 				source, err := interactionAnswerSource(ctx, x, tx, p.ReplyTo, p.Body, origin)
 				if err != nil {
 					return Outcome{}, err
 				}
-				notice, err := publishCommunication(ctx, x, tx, protocol.MessagingPublication{Body: boundedInteractionNotice(*i) + "\n\n已保留你的补充文字。原问题不再接受回答；如需继续讨论，请另发新消息。", Purpose: "final", ReplyTo: source}, "", "main", "system")
+				notice, err := publishCommunication(ctx, x, tx, protocol.MessagingPublication{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, "interaction-late-answer:"+i.ID, source), Body: boundedInteractionNotice(*i) + "\n\n已保留你的补充文字。原问题不再接受回答；如需继续讨论，请另发新消息。", Purpose: "final", ReplyTo: source}, "", "main", "system")
 				if err != nil {
 					return Outcome{}, err
 				}
@@ -464,7 +475,7 @@ func submitCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol.
 				notice.Notify = true
 				return notice, nil
 			}
-			response := protocol.RespondInteraction{Version: i.Version, Text: p.Body}
+			response := protocol.RespondInteraction{MessageID: p.MessageID, Version: i.Version, Text: p.Body}
 			if i.ObjectType == "attention" && strings.HasPrefix(strings.TrimSpace(p.Body), "已完成：") {
 				response.Confirm = true
 				response.Text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(p.Body), "已完成："))
@@ -791,7 +802,7 @@ func (c telegramInteraction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	}
 	var out Outcome
 	if parts[2] == "text" && i.State != "open" {
-		out, err = respondMessagingInteraction(ctx, x, tx, i.ID, protocol.RespondInteraction{Version: i.Version, Text: ""}, &communicationOrigin{Channel: "telegram", BotID: c.Inbox.BotID, ChatID: c.Chat, ReplyTo: message})
+		out, err = respondMessagingInteraction(ctx, x, tx, i.ID, protocol.RespondInteraction{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, fmt.Sprintf("telegram:%d", c.Inbox.BotID), fmt.Sprint(c.Inbox.UpdateID)), Version: i.Version, Text: ""}, &communicationOrigin{Channel: "telegram", BotID: c.Inbox.BotID, ChatID: c.Chat, ReplyTo: message})
 	} else if parts[2] == "text" {
 		id := x.IDs.New(protocol.PrefixMessage)
 		body := i.Question + "\n\n请回复这条消息，输入你的回答或补充说明。"
@@ -824,7 +835,7 @@ func (c telegramInteraction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 		if e != nil || index < 0 || index >= len(i.Options) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "无效的问题选项")
 		}
-		out, err = respondMessagingInteraction(ctx, x, tx, i.ID, protocol.RespondInteraction{Version: i.Version, Option: i.Options[index].ID}, &communicationOrigin{Channel: "telegram", BotID: c.Inbox.BotID, ChatID: c.Chat, ReplyTo: message})
+		out, err = respondMessagingInteraction(ctx, x, tx, i.ID, protocol.RespondInteraction{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, fmt.Sprintf("telegram:%d", c.Inbox.BotID), fmt.Sprint(c.Inbox.UpdateID)), Version: i.Version, Option: i.Options[index].ID}, &communicationOrigin{Channel: "telegram", BotID: c.Inbox.BotID, ChatID: c.Chat, ReplyTo: message})
 	}
 	if err != nil {
 		return Outcome{}, err

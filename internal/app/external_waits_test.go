@@ -70,8 +70,10 @@ func TestExternalWaitReleasesOnlyPhysicalStopAndContinuesOriginalTask(t *testing
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if replay := h.exec(runPrincipal(as.RunID, as.Role), env, YieldExternalWait{}); string(replay.Result) != string(op.Result) {
-		t.Fatal("yield replay changed", replay)
+	replay := h.exec(runPrincipal(as.RunID, as.Role), env, YieldExternalWait{})
+	var current protocol.ExternalWait
+	if replay.Status != protocol.OpSucceeded || json.Unmarshal(replay.Result, &current) != nil || current.WaitID != v.WaitID || current.RunID != as.RunID || current.TaskID != as.TaskID || !current.Stopped || current.ThreadID != "previous-session" || current.Status != "continued" || h.count("run_external_waits WHERE continuation_action_id IS NOT NULL") != 1 {
+		t.Fatal("yield retry lost the actual stopped wait or duplicated continuation", replay)
 	}
 	if h.lease(as.RunID).Status != store.LeaseReleased {
 		t.Fatal("lease retained after exit")
@@ -218,8 +220,13 @@ func TestExternalWaitEarlyResumePreservesPhysicalStopAndOriginalOperation(t *tes
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			if replay := h.exec(owner, env, ResumeExternalWait{}); string(replay.Result) != string(op.Result) {
-				t.Fatal("resumption replay changed", replay)
+			replay := h.exec(owner, env, ResumeExternalWait{})
+			if stopped {
+				if replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeInvalidTransition {
+					t.Fatal("settled wait was resumed again", replay)
+				}
+			} else if replay.Status != protocol.OpSucceeded {
+				t.Fatal("live wait retry did not retain the readiness intent", replay)
 			}
 			if !stopped {
 				if h.lease(as.RunID).Status != store.LeaseActive || h.count("run_external_waits WHERE continuation_action_id IS NOT NULL") != 0 {

@@ -24,7 +24,7 @@ func TestFault_UsageAttributionQueryFailurePreservesDirtyProjection(t *testing.T
 		t.Helper()
 		var raw string
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(t.Context(), `SELECT dimension_json FROM token_usage_contributions`).Scan(&raw)
+			return tx.Q().QueryRowContext(t.Context(), `SELECT CAST(dimension_key AS TEXT) FROM token_usage_contributions`).Scan(&raw)
 		}); err != nil {
 			t.Fatal(err)
 		}

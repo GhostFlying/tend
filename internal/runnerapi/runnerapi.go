@@ -454,6 +454,30 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 // effect, so it is safe to run again under the same request ID whenever
 // the ledger changes.
 func (s *Server) claim(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
+	var original protocol.ClaimPayload
+	if err := json.Unmarshal(env.Payload, &original); err != nil {
+		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "claim payload is malformed")
+	}
+	adapted, err := protocol.AdaptRunnerClaim(*env)
+	if err != nil {
+		return protocol.Operation{}, err
+	}
+	if original.RunID == "" {
+		// Only the negotiated protocol-3 adapter reaches this branch. A claim
+		// committed before the upgrade can name a different original Run.
+		id, err := s.app.AssignedRun(ctx, p.Subject, env.RequestID)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		if id != "" {
+			original.RunID = id
+			adapted.Payload, err = json.Marshal(original)
+			if err != nil {
+				return protocol.Operation{}, err
+			}
+		}
+	}
+	env = &adapted
 	// An idle runner is heard from only through its claims (D62). A host
 	// that may not claim is refused by the claim itself.
 	if err := s.app.SeeHost(ctx, p.Subject); err != nil {

@@ -43,7 +43,7 @@ func (FinishManagerTurn) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		return Outcome{Result: map[string]any{"run_id": r.RunID}}, nil
 	}
 	var stopped, uncertain bool
-	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND method='close' AND status='completed' AND COALESCE(json_extract(result_json,'$.error'),'')='')`, r.RunID).Scan(&stopped); err != nil {
+	if _, _, stopped, err = store.ManagerNativeClose(ctx, tx.Q(), r.RunID); err != nil {
 		return Outcome{}, err
 	}
 	uncertain, err = managerBusinessReceiptsPending(ctx, tx.Q(), r.RunID)

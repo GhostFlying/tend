@@ -25,7 +25,8 @@ type OwnerToolArguments struct {
 	// through model arguments or conversation tool logs.
 	WebhookKeyRef string `json:"webhook_key_ref,omitempty"`
 
-	// OriginalEnvelope is only for an exact replay of an existing owner request.
+	// OriginalEnvelope is a retired input retained only to reject old replay calls.
+	// It is never advertised, executed, persisted or used for authorization.
 	OriginalEnvelope        *Envelope         `json:"original_envelope,omitempty"`
 	Reason                  string            `json:"reason,omitempty"`
 	EffectSeq               int64             `json:"effect_seq,omitempty"`

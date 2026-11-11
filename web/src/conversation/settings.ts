@@ -5,7 +5,9 @@ import type {
   SetConversationSettingsPayload,
 } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
-import { runOp, settleOp, type OpSender, type OpOutcome } from "../app/ops.ts";
+import { runOp, type OpSender, type OpOutcome } from "../app/ops.ts";
+import { recoverOperation } from "../app/operationRecovery.ts";
+import type { Envelope } from "../api/generated/api.ts";
 import { Store } from "../state/store.ts";
 
 export interface SettingsState {
@@ -19,6 +21,7 @@ export interface SettingsState {
 
 export class ConversationSettings {
   readonly state = new Store<SettingsState>({ view: null, reading: false, saving: false });
+  private pendingEnvelope: Envelope | undefined;
   private controller: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private delay = 1_000;
@@ -97,9 +100,10 @@ export class ConversationSettings {
     const tracked: OpSender = {
       submit: (envelope) => {
         requestId = envelope.request_id;
+        this.pendingEnvelope = envelope;
         return sender.submit(envelope);
       },
-      lookup: (id) => sender.lookup(id),
+      get: <T>(path: string) => this.api.get<T>(path),
     };
     try {
       const outcome = await runOp(tracked, {
@@ -128,17 +132,19 @@ export class ConversationSettings {
     if (!before.pendingId || before.saving) return;
     this.state.set({ ...before, saving: true });
     try {
-      const record = await sender.lookup(before.pendingId);
-      if (!record) {
+      if (this.pendingEnvelope) {
+        const outcome = await recoverOperation(
+          { ...sender, get: <T>(path: string) => this.api.get<T>(path) },
+          this.pendingEnvelope,
+        );
+        this.settle(outcome, before.pendingId);
+      } else {
         this.state.set({
           ...this.state.get(),
           saving: false,
           pendingId: undefined,
-          error: "尚未查到这次设置操作，已重新读取当前设置",
+          error: "已重新读取当前设置，请按当前值决定下一步。",
         });
-      } else {
-        const outcome = settleOp(record.status, record.result, record.error);
-        this.settle(outcome, before.pendingId);
       }
       await this.refresh();
     } catch {

@@ -67,6 +67,10 @@ func TestNativeIdentityOpaqueEventsRemainCompatible(t *testing.T) {
 				if err := tx.Q().QueryRowContext(t.Context(), `SELECT body_json FROM run_logs WHERE run_id=? AND seq=1`, as.RunID).Scan(&saved); err != nil {
 					return err
 				}
+				saved, err := store.ResolveJSON(t.Context(), tx.Q(), saved)
+				if err != nil {
+					return err
+				}
 				if saved != string(raw) {
 					t.Fatal("opaque body changed", saved)
 				}

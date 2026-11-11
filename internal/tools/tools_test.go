@@ -29,6 +29,7 @@ type env struct {
 	t     *testing.T
 	svc   *Service
 	store *store.Store
+	ids   protocol.IDGen
 	calls int
 }
 
@@ -52,7 +53,7 @@ func newEnv(t *testing.T) *env {
 	if _, err := a.Execute(context.Background(), protocol.Principal{Kind: protocol.PrincipalSystem}, envl, app.SyncConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, svc: New(a, s, contextbuilder.New(a, s, ids, contextbuilder.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil))), store: s}
+	return &env{t: t, svc: New(a, s, contextbuilder.New(a, s, ids, contextbuilder.Config{}), slog.New(slog.NewTextHandler(io.Discard, nil))), store: s, ids: ids}
 }
 
 // call runs a tool as the main agent handling message msg_1. callID
@@ -119,8 +120,13 @@ func TestHistoricalFault_ToolRetrySameCall(t *testing.T) {
 	args := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
 	first := e.historicalToolFixture("tasks_create", args, "call_same")
 	again := e.historicalToolFixture("tasks_create", args, "call_same")
-	if !first.OK || !again.OK || string(first.Result) != string(again.Result) {
-		t.Errorf("replay differs:\n%s\n%s", first.Result, again.Result)
+	if !first.OK || !again.OK {
+		t.Fatalf("same native creation did not resolve its Task: %+v %+v", first, again)
+	}
+	firstID, firstRevision := createdTask(t, first)
+	againID, againRevision := createdTask(t, again)
+	if firstID != againID || firstRevision != againRevision {
+		t.Fatal("same native creation changed business identity or revision", firstID, firstRevision, againID, againRevision)
 	}
 	if n := e.tasks(); n != 1 {
 		t.Errorf("tasks = %d, want 1", n)
@@ -216,12 +222,8 @@ func TestReadTools(t *testing.T) {
 		!strings.Contains(string(a.Result), `"worker":"appserver"`) || strings.Contains(string(a.Result), "single_mount") {
 		t.Errorf("repos_list = %s", a.Result)
 	}
-	var r struct {
-		RequestID string `json:"request_id"`
-	}
-	_ = json.Unmarshal(created.Result, &r)
-	if a := e.call("requests_read", requestArgs{RequestID: r.RequestID}, ""); !a.OK || !strings.Contains(string(a.Result), `"succeeded"`) {
-		t.Errorf("requests_read = %+v %s", a.Error, a.Result)
+	if a := e.call("requests_read", map[string]any{"request_id": "retired-cache"}, ""); a.OK || a.Error == nil || a.Error.Code != protocol.CodeInvalidRequest {
+		t.Errorf("retired request cache remained callable: %+v", a)
 	}
 }
 
@@ -296,7 +298,7 @@ func TestSchemasMatchArgs(t *testing.T) {
 		"tasks_set_control": controlArgs{}, "tasks_cancel": cancelArgs{}, "actions_create": actionArgs{}, "decisions_open": openArgs{}, "decisions_resolve": resolveArgs{}, "question_inputs_read": questionInputsReadArgs{},
 		"tasks_manager_reconciliation": managerReconciliationReadArgs{},
 		"runs_send_message":            sendRunMessageArgs{}, "runs_read_messages": readRunMessagesArgs{},
-		"artifacts_read": artifactArgs{}, "attachments_read": fileArgs{}, "files_read": fileArgs{}, "requests_read": requestArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
+		"artifacts_read": artifactArgs{}, "attachments_read": fileArgs{}, "files_read": fileArgs{}, "repos_list": noArgs{}, "tend_context": noArgs{},
 	}
 	if len(args) != len(tools) {
 		t.Fatalf("%d tools but %d argument types", len(tools), len(args))
@@ -344,18 +346,29 @@ func TestHistoricalUpdateWithTemplateSpec(t *testing.T) {
 	}
 }
 
-func TestRequestsReadKeepsErrorDetails(t *testing.T) {
+func TestDuplicateToolCallKeepsBusinessErrorDetails(t *testing.T) {
 	e := newEnv(t)
 	args := createArgs{Title: "fix", Spec: spec, CommitSeq: 1}
-	e.historicalToolFixture("tasks_create", args, "")
-	e.historicalToolFixture("tasks_create", args, "call_dup")
-	var dup string
-	_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(context.Background(), `SELECT request_id FROM native_requests WHERE native_key LIKE '%call_dup'`).Scan(&dup)
-	})
-	a := e.call("requests_read", requestArgs{RequestID: dup}, "")
-	if !a.OK || !strings.Contains(string(a.Result), "original_request_id") {
-		t.Errorf("requests_read of a duplicate = %s", a.Result)
+	first := e.historicalToolFixture("tasks_create", args, "call_original")
+	if !first.OK {
+		t.Fatal(first.Error)
+	}
+	a := e.historicalToolFixture("tasks_create", args, "call_dup")
+	var details struct {
+		SourceMessageID   string `json:"source_message_id"`
+		CommitSeq         int64  `json:"commit_seq"`
+		OriginalRequestID string `json:"original_request_id"`
+	}
+	if a.OK || a.Error == nil || a.Error.Code != protocol.CodeDuplicateEffect || json.Unmarshal(a.Error.Details, &details) != nil || details.SourceMessageID != "msg_1" || details.CommitSeq != 1 || details.OriginalRequestID == "" {
+		t.Fatalf("duplicate lost the actual planning effect details: %+v", a)
+	}
+	var original string
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		original, err = store.GetPlanCommitRequest(t.Context(), tx.Q(), "msg_1", 1)
+		return err
+	}); err != nil || original != details.OriginalRequestID || e.tasks() != 1 {
+		t.Fatal("duplicate details do not reference the real unchanged planning effect", original, details, err)
 	}
 }
 
@@ -433,7 +446,10 @@ func TestHistoricalCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 		t.Fatal("legacy replay created another task")
 	}
 	var outcome struct {
-		Outcome json.RawMessage `json:"outcome"`
+		Outcome struct {
+			TaskID          string `json:"task_id"`
+			ControlRevision int64  `json:"control_revision"`
+		} `json:"outcome"`
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -442,8 +458,12 @@ func TestHistoricalCreateRequestReplayAfterRelationsUpgrade(t *testing.T) {
 	if err := json.Unmarshal(encoded, &outcome); err != nil {
 		t.Fatal(err)
 	}
-	if string(outcome.Outcome) != string(prior["outcome"].(json.RawMessage)) {
-		t.Fatal("legacy replay changed its result")
+	var original struct {
+		TaskID          string `json:"task_id"`
+		ControlRevision int64  `json:"control_revision"`
+	}
+	if err := json.Unmarshal(prior["outcome"].(json.RawMessage), &original); err != nil || outcome.Outcome != original || original.TaskID == "" {
+		t.Fatal("historical creation resolved a different business Task", outcome, original, err)
 	}
 }
 
@@ -460,4 +480,13 @@ func TestUnregisteredBackgroundIdentityCannotCallTools(t *testing.T) {
 			t.Errorf("background tool %s bypassed identity checks: %s", spec.Name, result.Text)
 		}
 	}
+}
+
+func (e *env) count(query string, args ...any) int {
+	e.t.Helper()
+	var n int
+	if err := e.store.Read(e.t.Context(), func(tx *store.ReadTx) error { return tx.Q().QueryRowContext(e.t.Context(), query, args...).Scan(&n) }); err != nil {
+		e.t.Fatal(err)
+	}
+	return n
 }

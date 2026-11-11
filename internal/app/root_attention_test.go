@@ -59,6 +59,9 @@ func TestFault_FailedRootAttentionIsDurableAndDeduplicated(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if h.countWhere(`SELECT COUNT(*) FROM events WHERE kind='run.attention_required' AND object_id=? AND run_attention_key='123'`, as.RunID) != 1 || h.countWhere(`SELECT COUNT(*) FROM inbox WHERE source=?`, "root-attention:"+as.RunID) != 0 {
+		t.Fatal("root-turn attention did not deduplicate on its actual business fact")
+	}
 }
 
 func TestRootAttentionDoesNotRepeatAnOpenDecision(t *testing.T) {

@@ -70,16 +70,21 @@ func TestCapabilityCLIRealOwnerWorkflow(t *testing.T) {
 		t.Fatal(string(original), err)
 	}
 	c.env.Stdin = bytes.NewReader(original)
-	c.run("request", "replay", "--file", "-")
+	c.run("operation", "submit", "--file", "-")
 	var settings protocol.IssueNotificationSettings
 	if err := json.Unmarshal(c.run("issue", "notifications", "show", "--json"), &settings); err != nil || settings.DelayMinutes != 5 {
 		t.Fatal(settings, err)
 	}
-	c.run("request", "replay", "--data", string(original))
+	if code, _ := c.call("operation", "submit", "--data", string(original)); code == 0 || !strings.Contains(c.stderr.String(), "stale_revision") {
+		t.Fatal("old CAS repeated settings change", code, c.stderr.String())
+	}
 	envelope.Payload = json.RawMessage(`{"delay_minutes":7}`)
 	changed, _ := json.Marshal(envelope)
-	if code, _ := c.call("request", "replay", "--data", string(changed)); code == 0 || !strings.Contains(c.stderr.String(), "conflict_payload") {
-		t.Fatalf("changed original request was accepted: %d %s", code, &c.stderr)
+	if code, _ := c.call("operation", "submit", "--data", string(changed)); code == 0 || !strings.Contains(c.stderr.String(), "stale_revision") {
+		t.Fatalf("changed input crossed original CAS: %d %s", code, &c.stderr)
+	}
+	if err := json.Unmarshal(c.run("issue", "notifications", "show", "--json"), &settings); err != nil || settings.DelayMinutes != 5 || settings.Revision != 1 {
+		t.Fatal("stale input changed business settings", settings, err)
 	}
 	var created protocol.APIResponse
 	if err := json.Unmarshal(c.run("attention", "create", "--data", `{"kind":"action","title":"Check original report"}`), &created); err != nil {

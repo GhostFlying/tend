@@ -17,9 +17,12 @@ import (
 
 func runExtensions(ctx context.Context, e *Env, args []string) error {
 	if len(args) == 0 {
-		return usagef("extensions requires skill|plugin|mcp|category|agent|resolve|plan|publish|releases|rollback|reconcile|status|inventory|doctor")
+		return usagef("extensions requires skill|plugin|mcp|category|agent|resolve|plan|publish|releases|rollback|status|inventory|doctor")
 	}
 	group := args[0]
+	if group == "reconcile" {
+		return usagef("read extensions status or extensions releases <release-id> for actual business state")
+	}
 	action := group
 	tail := args[1:]
 	if slices.Contains([]string{"skill", "plugin", "mcp", "category", "agent"}, group) {
@@ -103,15 +106,7 @@ func runExtensions(ctx context.Context, e *Env, args []string) error {
 				query.Set("id", pos[0])
 			}
 		}
-	case "reconcile":
-		if len(pos) != 1 {
-			return usagef("reconcile requires the original request ID")
-		}
-		var out protocol.RequestView
-		if err = c.do(ctx, "GET", "/api/v1/requests/"+url.PathEscape(pos[0]), nil, &out); err != nil {
-			return err
-		}
-		return print(out)
+
 	}
 	if view != "" {
 		if len(input) > 0 || *agentsFile != "" || *request != "" || *revision >= 0 {
@@ -144,7 +139,7 @@ func runExtensions(ctx context.Context, e *Env, args []string) error {
 	var state protocol.ExtensionState
 	retryPublish := group == "publish" && *request != ""
 	if retryPublish && len(input) == 0 {
-		return usagef("publish with --request-id requires the complete original payload via --data/--file; use extensions reconcile or request replay for an uncertain request")
+		return usagef("publish with --request-id requires the complete original payload via --data/--file; inspect extensions status and extensions releases <release-id> before another action")
 	}
 	if *revision < 0 {
 		if err = c.do(ctx, "GET", "/api/v1/extensions/state", nil, &state); err != nil {
@@ -314,13 +309,13 @@ func decodeExtensionInput(raw []byte, out any) error {
 
 func extensionReceipt(response protocol.APIResponse, request string) error {
 	if response.Operation == nil {
-		return fmt.Errorf("missing extension receipt; reconcile original request %s", request)
+		return fmt.Errorf("missing extension receipt for trace %s; inspect extensions status and the actual release", request)
 	}
 	if response.Operation.Error != nil {
 		return response.Operation.Error
 	}
 	if response.Operation.Status != protocol.OpSucceeded {
-		return fmt.Errorf("extension request %s is %s; reconcile before replay", request, response.Operation.Status)
+		return fmt.Errorf("extension trace %s is %s; inspect extensions status and the actual release before another action", request, response.Operation.Status)
 	}
 	return nil
 }

@@ -1014,6 +1014,11 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 				return &completionPending{errors.New("runner: strict final report awaits business settlement")}
 			}
 		}
+		if err == nil && op.Status == protocol.OpSucceeded {
+			if ackErr := r.cfg.Journal.AcknowledgeResult(ctx, as.RunID, req.Envelope.RequestID); ackErr != nil {
+				r.cfg.Log.WarnContext(ctx, "completed result remains retained locally", "run_id", as.RunID, "request_id", req.Envelope.RequestID, "err", ackErr)
+			}
+		}
 		if err == nil {
 			r.cfg.Log.InfoContext(ctx, "run reported", append([]any{"run_id", as.RunID, "operation", req.Envelope.Operation}, outcome(req.Envelope)...)...)
 		}
@@ -1078,6 +1083,11 @@ func (r *Runner) cleanupReportedRunWithStop(ctx context.Context, as protocol.Ass
 		}
 		return r.cfg.Journal.Done(ctx, as.RunID)
 	})
+	if settleErr == nil {
+		if _, err := r.cfg.Journal.PruneSpool(ctx); err != nil {
+			r.cfg.Log.WarnContext(ctx, "settled spool cleanup remains pending", "run_id", as.RunID, "err", err)
+		}
+	}
 	return settleErr
 }
 

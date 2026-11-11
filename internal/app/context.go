@@ -15,6 +15,11 @@ import (
 // RecordPacket stores a rendered packet before it is injected, so its
 // identity and content are fixed even if injection fails.
 func (a *App) RecordPacket(ctx context.Context, p store.Packet) error {
+	staged, err := a.store.StageOriginals(ctx, "context-packets:"+p.ThreadKey, []byte(p.Body))
+	if err != nil {
+		return err
+	}
+	ctx = staged
 	return a.write(ctx, func(tx *store.Tx) error {
 		return tx.InsertPacket(ctx, p, a.now().UnixMilli())
 	})

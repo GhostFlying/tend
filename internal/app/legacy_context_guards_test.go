@@ -12,7 +12,7 @@ import (
 
 func canonicalGuardBusinessSnapshot(t *testing.T, h *harness) []byte {
 	t.Helper()
-	tables := []string{"work_items", "work_item_revisions", "issue_controls", "issue_control_revisions", "work_item_contexts", "work_item_context_facts", "message_context_obligations", "logical_turn_contexts", "logical_turn_messages", "message_dispositions", "message_work_items", "message_association_revisions", "message_association_history", "message_disposition_history", "conversation_bindings", "plan_commits", "agent_conversations", "conversation_messages", "work_item_task_links", "task_work_item_owners", "tasks", "task_specs", "work_item_choices", "followup_rules", "followup_revisions", "followup_occurrences", "followup_targets", "followup_registrations", "events", "outbox"}
+	tables := []string{"work_items", "work_item_revisions", "issue_controls", "issue_control_revisions", "work_item_contexts", "work_item_context_facts", "message_context_obligations", "logical_turn_contexts", "logical_turn_messages", "message_dispositions", "message_work_items", "message_association_revisions", "message_association_history", "message_disposition_history", "conversation_bindings", "plan_commits", "agent_conversations", "conversation_messages", "work_item_task_links", "task_work_item_owners", "tasks", "task_specs", "work_item_choices", "followup_rules", "followup_revisions", "followup_occurrences", "followup_targets", "events", "outbox"}
 	state := map[string][][]any{}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		for _, table := range tables {

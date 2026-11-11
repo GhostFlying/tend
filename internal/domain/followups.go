@@ -9,12 +9,12 @@ import (
 
 func NormalizeFollowup(p protocol.FollowupSpec, now int64, zone *time.Location) (protocol.FollowupSpec, error) {
 	bad := func() (protocol.FollowupSpec, error) {
-		return p, protocol.Errorf(protocol.CodeInvalidRequest, "followup needs purpose, instruction, source, IANA timezone and a valid bounded trigger")
+		return p, protocol.Errorf(protocol.CodeInvalidRequest, "followup needs purpose, instruction, IANA timezone and a valid bounded trigger")
 	}
 	if p.At > 253402300799999 || p.ExpiresAt > 253402300799999 {
 		return bad()
 	}
-	if strings.TrimSpace(p.Purpose) == "" || len(p.Purpose) > 500 || strings.TrimSpace(p.Instruction) == "" || len(p.Instruction) > 8000 || p.SourceID == "" || p.Timezone == "" || p.Timezone == "Local" {
+	if strings.TrimSpace(p.Purpose) == "" || len(p.Purpose) > 500 || strings.TrimSpace(p.Instruction) == "" || len(p.Instruction) > 8000 || p.Timezone == "" || p.Timezone == "Local" {
 		return bad()
 	}
 	if p.Kind != "cron" && p.Cron != "" {

@@ -64,8 +64,8 @@ func TestBoundedRunnerSavedGiveUpSettlesOnIndependentOwnerCancel(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(saved, replay) {
 		t.Fatal("owner stop rewrote the original accepted give-up receipt", saved, replay, err)
 	}
-	if replay := h.exec(owner, control, CancelTask{}); !reflect.DeepEqual(stopped, replay) {
-		t.Fatal("owner retry changed its original receipt", stopped, replay)
+	if replay := h.exec(owner, control, CancelTask{}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || h.task(as.TaskID).Lifecycle != protocol.TaskCancelled {
+		t.Fatal("stale owner cancellation changed current task", replay)
 	}
 	if again, err := h.app.RunnerBoundedMaintenance(t.Context(), plan.HostID, plan.Authorization.RequestID); err != nil || !reflect.DeepEqual(grant, again) {
 		t.Fatal("owner stop rewrote the immutable replacement authority", again, err)

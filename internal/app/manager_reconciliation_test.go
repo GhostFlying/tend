@@ -104,7 +104,7 @@ func TestManagerRunReconciliationPreservesOriginalFactsAndWaitingResponsibility(
 	if op.Status != protocol.OpSucceeded || h.run(as.RunID).ObservedState != protocol.RunFinished || h.task(as.TaskID).ControlRevision != s.TaskRevision+1 {
 		t.Fatal(op, h.task(as.TaskID))
 	}
-	if replay := h.exec(owner, env, ReconcileManagerRun{}); !reflect.DeepEqual(op, replay) {
+	if replay := h.exec(owner, env, ReconcileManagerRun{}); replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision {
 		t.Fatal("original independent reconciliation receipt changed", replay)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -142,21 +142,22 @@ func TestManagerRunReconciliationDoesNotClassifyUnknownOrChangedEvidence(t *test
 			switch change {
 			case "later-resume", "later-open", "later-turn", "later-uncertain-close":
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-					method := map[string]string{"later-resume": "resume", "later-open": "open", "later-turn": "turn", "later-uncertain-close": "close"}[change]
-					id := h.ids.New(protocol.PrefixRequest)
-					reply := protocol.ManagerNativeReply{ID: id, Result: json.RawMessage(`{}`)}
 					if change == "later-uncertain-close" {
-						reply.Error = "Close outcome was not observed"
-					}
-					raw, err := json.Marshal(reply)
-					if err != nil {
+						_, err := tx.Exec(t.Context(), `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES(?,?,'close','{}','unknown',?)`, h.ids.New(protocol.PrefixRequest), as.RunID, h.clock.Now().UnixMilli())
 						return err
 					}
-					_, err = tx.Exec(t.Context(), `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,result_json,created_at) VALUES(?,?,?,'{}','completed',?,?)`, id, as.RunID, method, string(raw), h.clock.Now().UnixMilli())
+					// A later successful execution is a Run fact, not a cached RPC
+					// result. Its activity invalidates the preceding close proof.
+					query := `UPDATE runs SET native_activity=native_activity+1,native_thread_id='later-thread',native_thread_json='{"ID":"later-thread"}' WHERE run_id=?`
+					if change == "later-turn" {
+						query = `UPDATE runs SET native_activity=native_activity+1,native_turn_id='later-turn' WHERE run_id=?`
+					}
+					_, err := tx.Exec(t.Context(), query, as.RunID)
 					return err
 				}); err != nil {
 					t.Fatal(err)
 				}
+
 			case "unknown-native", "unclassified-business-error":
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 					id := h.ids.New(protocol.PrefixRequest)
@@ -216,7 +217,7 @@ func TestManagerRunReconciliationUnknownRetryKeepsOriginalIdentity(t *testing.T)
 	if err != nil || op.Status != protocol.OpSucceeded || h.run(as.RunID).ObservedState != protocol.RunFinished {
 		t.Fatal("original reconciliation request could not continue", op, err)
 	}
-	if again, err := h.app.Execute(t.Context(), owner, env, ReconcileManagerRun{}); err != nil || !reflect.DeepEqual(op, again) {
+	if again, err := h.app.Execute(t.Context(), owner, env, ReconcileManagerRun{}); err != nil || again.Status != protocol.OpFailed || protocol.CodeOf(again.Error) != protocol.CodeStaleRevision {
 		t.Fatal("completed reconciliation replay changed", again, err)
 	}
 }

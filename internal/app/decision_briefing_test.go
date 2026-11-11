@@ -38,7 +38,7 @@ func TestWorkerIssuesAndCoordinatorBriefing(t *testing.T) {
 	if op := h.exec(mainAgent, env, ExplainDecision{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := h.exec(mainAgent, env, ExplainDecision{}); op.Status != protocol.OpSucceeded || h.count("decision_briefings") != 1 {
+	if op := h.exec(mainAgent, env, ExplainDecision{}); op.Error == nil || op.Error.Code != protocol.CodeStaleRevision || h.count("decision_briefings") != 1 {
 		t.Fatal(op)
 	}
 	if op := h.exec(mainAgent, h.env("decisions.explain", env.Target, brief, &revision), ExplainDecision{}); op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {

@@ -86,7 +86,7 @@ func TestDecisionContinuationCLIDataFileDryRunAndOriginalReplay(t *testing.T) {
 				}
 				_ = json.NewEncoder(w).Encode(protocol.APIResponse{Operation: &protocol.Operation{RequestID: original.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{"revision":4,"state":"waiting","blocked_reason":"original_process_not_stopped"}`)}})
 			})
-			for _, call := range [][]string{args, append(slices.Clone(args[:7]), "--file", payloadFile, "--json"), append(slices.Clone(args[:7]), "--file", "-", "--json"), {"request", "replay", "--file", frozen, "--json"}} {
+			for _, call := range [][]string{args, append(slices.Clone(args[:7]), "--file", payloadFile, "--json"), append(slices.Clone(args[:7]), "--file", "-", "--json"), {"operation", "submit", "--file", frozen, "--json"}} {
 				e.Stdin = strings.NewReader(payload)
 				e.out.Reset()
 				e.errOut.Reset()
@@ -136,7 +136,7 @@ func TestDecisionContinuationCLIUnknownKeepsOriginalRequest(t *testing.T) {
 	if code := e.main("decision-continuation", "resume", "question", "--revision", "7", "--request-id", continuationCLIRequest, "--data", `{"expected_revision":3}`, "--json"); code != exitError {
 		t.Fatal(code, e.errOut.String())
 	}
-	if len(f.seen("POST /api/v1/ops")) != 1 || !strings.Contains(e.errOut.String(), "unknown_outcome") || !strings.Contains(e.errOut.String(), "request show "+continuationCLIRequest) {
+	if len(f.seen("POST /api/v1/ops")) != 1 || !strings.Contains(e.errOut.String(), "unknown_outcome") || !strings.Contains(e.errOut.String(), "decision-continuation show question") {
 		t.Fatal("unknown continuation was retried or lost its recovery identity", e.errOut.String())
 	}
 }
@@ -183,7 +183,7 @@ func TestDecideCLICompleteTypedPayloadAndContinuationHelp(t *testing.T) {
 		if code := e.main(command...); code != exitOK {
 			t.Fatal(command, code, e.errOut.String())
 		}
-		for _, text := range []string{"Legacy", "decision-continuation answer", "continue_now", "wait", "dependency", "expected_revision", "expected_assignment_epoch", "Agent-recorded", "request replay"} {
+		for _, text := range []string{"Legacy", "decision-continuation answer", "continue_now", "wait", "dependency", "expected_revision", "expected_assignment_epoch", "Agent-recorded", "decision-continuation show"} {
 			if !strings.Contains(e.out.String()+e.errOut.String(), text) {
 				t.Fatal("help omitted contract", command, text)
 			}

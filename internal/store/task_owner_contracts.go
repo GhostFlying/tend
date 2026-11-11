@@ -123,7 +123,7 @@ func ReviewAdmissionCurrent(ctx context.Context, q Querier, contract TaskOwnerCo
 		return false, nil
 	}
 	var current bool
-	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM issue_control_revisions v WHERE v.issue_id=? AND v.revision>? AND v.revision<=? AND NOT EXISTS(SELECT 1 FROM request_records r WHERE r.domain=v.request_domain AND r.request_id=v.request_id AND r.operation IN ('system.initialize_issue_admission','issues.set_status','issues.pause','issues.resume')))`, issue.IssueID, contract.ReviewAdmissionRevision, issue.Revision).Scan(&current)
+	err := q.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM issue_control_revisions v WHERE v.issue_id=? AND v.revision>? AND v.revision<=? AND v.operation NOT IN ('system.initialize_issue_admission','issues.set_status','issues.pause','issues.resume'))`, issue.IssueID, contract.ReviewAdmissionRevision, issue.Revision).Scan(&current)
 	if err != nil || !current {
 		return current, err
 	}

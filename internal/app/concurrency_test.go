@@ -40,8 +40,8 @@ func TestConcurrencyOwnerCASAndHistory(t *testing.T) {
 		t.Fatal(stale)
 	}
 	replay := h.exec(owner, create, ConfigureConcurrency{Action: "create"})
-	if string(replay.Result) != string(op.Result) {
-		t.Fatal("replay changed")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old creation CAS replaced current concurrency state", replay)
 	}
 	history, err := h.app.ConcurrencyHistory(t.Context(), protocol.ConcurrencyQuery{Limit: 1})
 	if err != nil || len(history.Items) != 1 || !history.More || history.Items[0].Before != 4 || history.Items[0].After != 3 {

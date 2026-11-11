@@ -169,8 +169,9 @@ func TestIssueOwnerExecutesWithSameIdentityAndReviewChild(t *testing.T) {
 	if result.Status != protocol.OpSucceeded {
 		t.Fatal(result)
 	}
-	if replay := h.exec(runPrincipal(accept.RunID, accept.Role), verdict, SubmitAcceptance{}); string(replay.Result) != string(result.Result) || h.count("work_items") != before {
-		t.Fatal("replay created another responsibility", replay)
+	expectWorkCode(t, h.exec(runPrincipal(accept.RunID, accept.Role), verdict, SubmitAcceptance{}), protocol.CodeInvalidTransition)
+	if h.count("work_items") != before || h.count("acceptances") != 1 || h.task(task.TaskID).Lifecycle != protocol.TaskCompleted {
+		t.Fatal("late verdict created another responsibility or changed the completed result")
 	}
 	if review = canonicalTaskIssue(t, h, review.IssueID); review.State != protocol.IssueClosed || review.Closure == nil {
 		t.Fatal("bounded review responsibility did not settle", review)

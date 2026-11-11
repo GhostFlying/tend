@@ -16,10 +16,7 @@ func TestOnlineRepositoryOwnerAPIAndReplay(t *testing.T) {
 	if status := e.do("POST", "/api/v1/ops", token, envelope, &first); status != http.StatusOK || first.Operation == nil || first.Operation.Status != protocol.OpSucceeded {
 		t.Fatal(status, first)
 	}
-	var replay protocol.APIResponse
-	if status := e.do("POST", "/api/v1/ops", token, envelope, &replay); status != http.StatusOK || string(replay.Operation.Result) != string(first.Operation.Result) {
-		t.Fatal("replay", status, replay)
-	}
+	assertOwnerStaleHTTP(t, e, token, envelope)
 	var registered protocol.RepositoryRegistration
 	if status := e.do("GET", "/api/v1/repos/online", token, nil, &registered); status != http.StatusOK || registered.ControlRevision != 1 || registered.RemoteURL != "https://example.com/online.git" {
 		t.Fatal(status, registered)

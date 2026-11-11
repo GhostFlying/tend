@@ -38,6 +38,10 @@ func ContextSourceDigest(ctx context.Context, q Querier, issue string) (string, 
 		if err := rows.Scan(&id, &kind, &body, &source, &original, &content, &association, &linked, &withdrawn); err != nil {
 			return "", err
 		}
+		original, err = ResolveMessageBody(ctx, q, source, original)
+		if err != nil {
+			return "", err
+		}
 		facts = append(facts, []any{id, kind, body, source, original, content, association, linked, withdrawn})
 	}
 	if err := rows.Err(); err != nil {

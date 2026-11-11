@@ -51,9 +51,7 @@ func TestIssueOwnerRegistersActualResultWithoutWorkerTaskAndCloses(t *testing.T)
 	if err := json.Unmarshal(op.Result, &receipt); err != nil || receipt.ArtifactID == "" || receipt.TaskID != run.TaskID || receipt.RunID != run.RunID {
 		t.Fatal(receipt, err)
 	}
-	if replay := h.exec(principal, env, command); string(replay.Result) != string(op.Result) {
-		t.Fatal("owner result replay changed identity", replay)
-	}
+	expectWorkCode(t, h.exec(principal, env, command), protocol.CodeDuplicateEffect)
 	if h.count("tasks") != tasks || h.count("runs") != runs || h.count("artifacts") != 1 || h.count("acceptances") != 0 || h.run(run.RunID).ObservedState == protocol.RunFinished {
 		t.Fatal("result fabricated a worker, verdict or manager completion")
 	}

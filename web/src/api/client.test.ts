@@ -172,14 +172,17 @@ describe("ApiClient", () => {
     });
   });
 
-  test("lookup returns null for a request tend never recorded", async () => {
+  test("message lookup reads the business object and never the retired request route", async () => {
     tend.handle = (c) =>
-      c.path.endsWith("/req_known")
-        ? json(200, { request_id: "req_known", operation: "o", status: "accepted" })
+      c.path.endsWith("/msg_known")
+        ? json(200, { message_id: "msg_known", seq: 9, control: { revision: 2, withdrawn_at: 10 } })
         : json(404, { error: { code: "not_found", message: "no such request" } });
-    expect(await client.lookup("req_missing")).toBeNull();
-    expect(await client.lookup("req_known")).toMatchObject({ status: "accepted" });
-    expect(tend.calls.at(-1)?.path).toBe("/api/v1/requests/req_known");
+    expect(await client.message("msg_missing")).toBeNull();
+    expect(await client.message("msg_known")).toMatchObject({
+      message_id: "msg_known",
+      control: { withdrawn_at: 10 },
+    });
+    expect(tend.calls.at(-1)?.path).toBe("/api/v1/messages/msg_known");
   });
 
   test("a stream opens with the token and hands back the response", async () => {

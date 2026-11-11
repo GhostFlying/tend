@@ -38,6 +38,9 @@ func (OpenDecision) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 
 // Apply implements Command.
 func (OpenDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	if !protocol.ValidID(protocol.PrefixDecision, x.Env.Target.ID) || x.Env.ExpectedControlRevision != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new decision requires its stable decision identity")
+	}
 	var p openDecisionPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -48,6 +51,19 @@ func (OpenDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if len(p.Options) > 10 || slices.Contains(p.Options, "") || len(p.Options) != len(dedupe(p.Options)) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "options must be at most 10 distinct non-empty strings")
 	}
+	id := x.Env.Target.ID
+	if old, err := store.GetDecision(ctx, tx.Q(), id); err == nil {
+		var options []string
+		if err := json.Unmarshal([]byte(old.OptionsJSON), &options); err != nil {
+			return Outcome{}, err
+		}
+		if old.TaskID != p.TaskID || old.Question != p.Question || !slices.Equal(options, p.Options) || old.AskedMessageID != p.SourceMessageID {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "decision identity already has a different question")
+		}
+		return Outcome{Result: map[string]any{"decision_id": id, "version": old.Version}, NoEffect: true}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
 	if p.TaskID != "" {
 		if _, err := store.GetTask(ctx, tx.Q(), p.TaskID); err != nil {
 			return Outcome{}, errNotFound(err, "task %s does not exist", p.TaskID)
@@ -57,7 +73,6 @@ func (OpenDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: encode options: %w", err)
 	}
-	id := x.IDs.New(protocol.PrefixDecision)
 	if err := tx.InsertDecision(ctx, id, p.TaskID, p.Question, string(options), "{}", nil, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}

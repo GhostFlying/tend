@@ -5,7 +5,7 @@ Capability 是用户显式配置的业务标签，与 Category、runtime、model
 
 ## 定义与配置
 
-定义不可变历史由 owner request_id 去重及 revision CAS 追加。新增 ID 从 revision 0 开始；
+定义不可变历史依据真实 capability ID、不可变输入及 revision CAS 追加；request_id 仅用于追踪。新增 ID 从 revision 0 开始；
 `active` 可被新声明或新 Task 引用，`retired` 保留历史读取和原有冻结引用。
 
 ```sh
@@ -67,9 +67,10 @@ HTTP 对应 `/api/v1/capabilities`、`/{id}`、`/{id}/revisions`，
 以及 `/api/v1/tasks/{id}/capability-match`。写操作为 owner `capabilities.put`。
 主协调/Issue manager 的只读工具使用同一应用查询及原 Issue 权限边界。
 
-写入前用 `--dry-run` 保存完整 Envelope。未知结果先用 `tend request show ORIGINAL_ID` 读取，
-再通过 `tend request replay --file ORIGINAL_ENVELOPE` 对账原 request/CAS/payload；
-不得为未知请求新造 ID 或提升 revision 重复动作。
+写入前用 `--dry-run` 保存完整 Envelope，其中包含真实业务对象 ID、消息/子任务/规则 ID、输入与原 CAS。
+未知结果先通过 `issue show`、`task show`、`message original`、`run maintenance-reconciliation` 等具体命令读取业务事实；
+保留未知状态，不自动重复外部操作。需要显式提交保存的输入时使用 `tend operation submit --file ORIGINAL_ENVELOPE`；
+该辅助命令只提交一次，不查询请求账本、不补造缺失业务 ID、不刷新 revision，也不替代具体业务命令。
 
 ## 存储与交付
 

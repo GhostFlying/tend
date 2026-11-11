@@ -42,9 +42,9 @@ func TestAgentInventoryAuthenticatedRegistrationAndStatus(t *testing.T) {
 	if err := json.Unmarshal(e.mustOK(asHost(), register), &receipt); err != nil || receipt.ServerRevision != 1 || receipt.State != "registered_staged" {
 		t.Fatalf("receipt=%+v %v", receipt, err)
 	}
-	read := makeRequest(protocol.OpRunnerInventoryStatus, protocol.AgentInventoryStatusPayload{Runtime: r, RequestID: register.RequestID})
+	read := makeRequest(protocol.OpRunnerInventoryStatus, protocol.AgentInventoryStatusPayload{Runtime: r, LocalRevision: 1, SnapshotID: "snapshot-http", PublicSHA256: hash})
 	var status protocol.AgentInventoryStatus
-	if err := json.Unmarshal(e.mustOK(asHost(), read), &status); err != nil || status.Request == nil || status.Request.RequestID != register.RequestID || status.Current.ServerRevision != 1 || !status.Online {
+	if err := json.Unmarshal(e.mustOK(asHost(), read), &status); err != nil || status.Matched == nil || status.Matched.SnapshotID != "snapshot-http" || status.Request != nil || status.Current == nil || status.Current.ServerRevision != 1 || !status.Online {
 		t.Fatalf("status=%+v %v", status, err)
 	}
 	read.Target.ID = "other-host"

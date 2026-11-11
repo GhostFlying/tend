@@ -44,7 +44,7 @@ test("a new tab explicitly adopts an unfinished retrieval after the old tab clos
   await old.open();
   old.write("original draft");
   const offline = {
-    lookup: async () => {
+    message: async () => {
       throw new Error("offline");
     },
   } as unknown as ApiClient;
@@ -53,7 +53,9 @@ test("a new tab explicitly adopts an unfinished retrieval after the old tab clos
   const current = new ComposerDraft();
   await current.open();
   current.write("new draft");
-  const client = { lookup: async () => ({ status: "succeeded" }) } as unknown as ApiClient;
+  const client = {
+    message: async () => ({ ...entry.item, control: { revision: 2, withdrawn_at: 10 } }),
+  } as unknown as ApiClient;
   const controller = new Withdrawals(client, current, () => {}, null);
   await controller.resume();
   expect(current.state.get().text).toBe("new draft");
@@ -107,7 +109,11 @@ test.each([undefined, "work-item:background"])(
         request_id: "original-submit",
         operation: "conversation.submit_message",
         target: { type: "conversation" },
-        payload: { body: "retrieve me", conversation_id: conversationId },
+        payload: {
+          message_id: entry.item.message_id,
+          body: "retrieve me",
+          conversation_id: conversationId,
+        },
       },
     };
     const get = vi.fn(async (path: string) => {
@@ -119,14 +125,12 @@ test.each([undefined, "work-item:background"])(
     });
     const submit = vi.fn(async () => ({ operation: { status: "succeeded" } }));
     const client = {
-      lookup: async (id: string) =>
-        id === "original-submit"
-          ? { status: "succeeded", result: { message_id: entry.item.message_id } }
-          : undefined,
+      message: async () => entry.item,
       get,
       submit,
     } as unknown as ApiClient;
     const queue = {
+      list: { get: () => [message] },
       cancelled: async () => false,
       discard: async () => {
         throw new Error("another sender already submitted the message");

@@ -42,13 +42,16 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 	a := app.New(db, ids, clock.Now)
 	execute := func(p protocol.Principal, op string, target protocol.Target, payload any, rev *int64, cmd app.Command) protocol.Operation {
 		t.Helper()
+		if op == "tasks.create" && target.ID == "" {
+			target.ID = ids.New(protocol.PrefixTask)
+		}
 		raw, e := json.Marshal(payload)
 		if e != nil {
 			t.Fatal(e)
 		}
 		result, e := a.Execute(ctx, p, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: raw, ExpectedControlRevision: rev}, cmd)
 		if e != nil || result.Status != protocol.OpSucceeded {
-			t.Fatalf("%s: status=%s err=%v result=%s", op, result.Status, e, result.Result)
+			t.Fatalf("%s: status=%s err=%v operation_error=%v result=%s", op, result.Status, e, result.Error, result.Result)
 		}
 		return result
 	}
@@ -59,7 +62,7 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 	hp := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "worker"}
 	execute(hp, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker"}, protocol.HelloPayload{Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Hello{})
 	runtime.Sequence++
-	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
+	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{RunID: ids.New(protocol.PrefixRun), Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
 	var claimed struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}
@@ -202,7 +205,7 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 	if err != nil || retained.Phase != journal.PhaseReleasing || !retained.StoppedConfirmed || ws.finishes.Load() != 0 {
 		t.Fatal("unknown give-up cleaned original journal/workspace", retained.Phase, err, ws.finishes.Load())
 	}
-	var accepted store.RequestRecord
+	var accepted maintenancePhysicalStopSnapshot
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
 		now, e := store.GetRun(ctx, tx.Q(), as.RunID)
 		if e != nil {
@@ -225,13 +228,13 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 		if count != 1 {
 			t.Fatal("retries duplicated physical fact", count)
 		}
-		accepted, e = store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		accepted, e = readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		return e
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Status != protocol.OpAccepted {
-		t.Fatal("give-up result not durably pending", accepted.Status)
+	if accepted.Operation != env.Operation || accepted.Payload != string(env.Payload) {
+		t.Fatal("give-up result not durably pending", accepted.Operation)
 	}
 	if _, err := a.LinkCommittedMaintenance(ctx, protocol.CommittedMaintenanceReceipt{MaintenanceID: p.MaintenanceID, RequestID: p.RequestID, Previous: p.Previous, Successor: p.Successor, Process: process, Generation: 9, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 2}); err != nil {
 		t.Fatal(err)
@@ -248,7 +251,7 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 		if now.ObservedState != protocol.RunFailed {
 			t.Fatal("independent cancel did not settle physical stop", now)
 		}
-		original, e := store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		original, e := readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		if e == nil && !reflect.DeepEqual(accepted, original) {
 			t.Fatal("owner cancel rewrote original accepted request")
 		}
@@ -280,7 +283,7 @@ func TestRetainedStrictStopWireOwnerCancelPreservesAcceptedHistory(t *testing.T)
 		t.Fatal("Stop erased strict authority", stillStrict, err)
 	}
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
-		original, e := store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
+		original, e := readMaintenancePhysicalStop(ctx, tx.Q(), as.RunID, env.RequestID)
 		if e == nil && !reflect.DeepEqual(accepted, original) {
 			t.Fatal("Stop rewrote accepted history")
 		}
@@ -314,13 +317,16 @@ func testRetainedStrictStopWireLostArtifactReceipt(t *testing.T, forbidPendingEv
 	a := app.New(db, ids, clock.Now)
 	execute := func(p protocol.Principal, op string, target protocol.Target, payload any, rev *int64, cmd app.Command) protocol.Operation {
 		t.Helper()
+		if op == "tasks.create" && target.ID == "" {
+			target.ID = ids.New(protocol.PrefixTask)
+		}
 		raw, e := json.Marshal(payload)
 		if e != nil {
 			t.Fatal(e)
 		}
 		result, e := a.Execute(ctx, p, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: raw, ExpectedControlRevision: rev}, cmd)
 		if e != nil || result.Status != protocol.OpSucceeded {
-			t.Fatalf("%s: status=%s err=%v result=%s", op, result.Status, e, result.Result)
+			t.Fatalf("%s: status=%s err=%v operation_error=%v result=%s", op, result.Status, e, result.Error, result.Result)
 		}
 		return result
 	}
@@ -331,7 +337,7 @@ func testRetainedStrictStopWireLostArtifactReceipt(t *testing.T, forbidPendingEv
 	execute(hp, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "worker"}, protocol.HelloPayload{Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Hello{})
 	execute(owner, "tasks.create", protocol.Target{Type: "task"}, map[string]any{"title": "retained worker", "spec": domain.Spec{Goal: "retain unknown execution", Acceptance: []string{"do not repeat"}, Deliverables: []string{domain.DeliveryReport}, Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}}}, nil, app.CreateTask{})
 	runtime.Sequence++
-	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
+	claim := execute(hp, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{RunID: ids.New(protocol.PrefixRun), Worker: protocol.WorkerOrca, WorkspaceProtocol: 1, Runtime: &runtime}, nil, app.Claim{})
 	var claimed struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}
@@ -482,11 +488,14 @@ func testRetainedStrictStopWireLostArtifactReceipt(t *testing.T, forbidPendingEv
 		if run.ObservedState != protocol.RunFinished {
 			t.Fatal("successful result changed to cancellation/failure", run)
 		}
-		record, e := store.GetRequest(ctx, tx.Q(), runCredentialDomain(as.RunID), env.RequestID)
-		if e == nil && record.Status != protocol.OpSucceeded {
-			t.Fatal("successful original receipt changed", record.Status)
+		var artifacts int
+		if e = tx.Q().QueryRowContext(ctx, `SELECT count(*) FROM artifacts WHERE run_id=?`, as.RunID).Scan(&artifacts); e != nil {
+			return e
 		}
-		return e
+		if artifacts != 1 {
+			t.Fatal("successful result did not retain its actual artifact", artifacts)
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}

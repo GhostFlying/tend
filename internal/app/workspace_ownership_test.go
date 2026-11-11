@@ -110,8 +110,8 @@ func TestWorkspaceUnusedReuseCanDetachWithoutReleasingOtherTask(t *testing.T) {
 				t.Fatal(op)
 			}
 			replay := h.exec(owner, env, UpdateIntent{})
-			if replay.Status != protocol.OpSucceeded || string(replay.Result) != string(op.Result) {
-				t.Fatalf("same request replay changed detach result: %+v", replay)
+			if replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision {
+				t.Fatalf("retry bypassed detach CAS: %+v", replay)
 			}
 			h.assertNoWorkspaceBinding(pending.TaskID)
 			if got := h.resourceForTask(source.TaskID); got != resource || got.OccupiedBy != source.TaskID {

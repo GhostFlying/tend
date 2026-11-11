@@ -48,7 +48,7 @@ func getUsageSource(ctx context.Context, tx usageSourceReader, id string) (Usage
 	return s, nil
 }
 
-func saveUsageSource(ctx context.Context, tx *sql.Tx, s UsageSource, env *protocol.Envelope, now int64) error {
+func (j *Journal) saveUsageSource(ctx context.Context, tx *sql.Tx, s UsageSource, env *protocol.Envelope, now int64) error {
 	old, err := getUsageSource(ctx, tx, s.ID)
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func saveUsageSource(ctx context.Context, tx *sql.Tx, s UsageSource, env *protoc
 		}
 	}
 	if env != nil {
-		return putRequest(ctx, tx, Request{Envelope: *env}, time.UnixMilli(now))
+		return j.putRequest(ctx, tx, Request{Envelope: *env}, time.UnixMilli(now))
 	}
 	return nil
 }

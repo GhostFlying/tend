@@ -21,7 +21,7 @@
 
 托管主代理需要当前来源消息和递增的 `commit_seq`，来源由 Tend 的工具调用上下文注入，不由正文指定。外挂 MCP 不要求 `commit_seq`，记录已认证客户端及可用的原生 session 身份，不能伪装成直接 owner 消息。正文声称自己是 owner、要求提升权限等均不影响身份和正式任务协议。
 
-工具返回 `request_id`、请求状态和 `outcome`，后者包含 `message_id`、投递状态、task/run/action/spec/generation/control_revision、序号与认证来源。必须保留请求身份：请求结果丢失时用 `requests_read` 查询，安全重试使用相同 request_id，不能换新 ID 模拟重试。发送只接受 managed 控制下 running 或 waiting 的原 run；目标不一致、旧 spec/代次或旧控制修订会拒绝。
+工具返回诊断用 `request_id` 和业务 `outcome`，包含稳定 `message_id`、投递状态、task/run/action/spec/generation/control_revision、序号与认证来源。首次提交前分配消息身份，回执丢失时用 `runs_read_messages` 或 `tend run messages RUN --json` 读取该原消息。原生投递未知时继续对账，不换 message_id 重发。发送只接受 managed 控制下 running 或 waiting 的原 Run；目标不一致、旧 spec/代次或旧控制修订仍拒绝。
 
 接收能力冻结在原 run 分配时；后续 host 心跳宣告新能力不会给旧会话添加工具，旧 run 返回 `unsupported/run_not_negotiated`。有尚未确定消息的开放 run 拒绝由缺少 `run-messages-v1` 的 runner 接管，防止升级或回退丢失投递责任。
 

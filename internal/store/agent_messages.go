@@ -23,10 +23,15 @@ func GetAgentMessage(ctx context.Context, q Querier, thread, turn, item string) 
 
 // PutAgentMessage updates the body and its monotonic metadata together.
 func (t *Tx) PutAgentMessage(ctx context.Context, r AgentMessageRow, body string) error {
-	if _, err := t.Exec(ctx, `UPDATE conversation_messages SET body = ? WHERE message_id = ?`, body, r.MessageID); err != nil {
+	preview := string([]rune(body)[:min(160, len([]rune(body)))])
+	retained, err := t.RetainJSON(ctx, body)
+	if err != nil {
+		return err
+	}
+	if _, err := t.Exec(ctx, `UPDATE conversation_messages SET body = ?,body_preview=? WHERE message_id = ?`, retained, preview, r.MessageID); err != nil {
 		return fmt.Errorf("store: update assistant text: %w", err)
 	}
-	_, err := t.Exec(ctx, `INSERT INTO conversation_agent_messages (message_id, thread_id, turn_id, item_id, status, revision) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET status = excluded.status, revision = excluded.revision`, r.MessageID, r.ThreadID, r.TurnID, r.ItemID, r.Status, r.Revision)
+	_, err = t.Exec(ctx, `INSERT INTO conversation_agent_messages (message_id, thread_id, turn_id, item_id, status, revision) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET status = excluded.status, revision = excluded.revision`, r.MessageID, r.ThreadID, r.TurnID, r.ItemID, r.Status, r.Revision)
 	if err != nil {
 		return fmt.Errorf("store: put assistant metadata: %w", err)
 	}

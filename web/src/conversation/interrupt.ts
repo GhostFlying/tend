@@ -5,6 +5,7 @@ import { ApiError, FallbackStorage, type KeyValueStorage } from "../api/client.t
 import type { Envelope, Operation } from "../api/generated/api.ts";
 import { deploymentStorageName } from "../api/deployment.ts";
 import { newRequestId } from "../api/ids.ts";
+import { recoverOperation } from "../app/operationRecovery.ts";
 import type { OpSender } from "../app/ops.ts";
 import { Store, type Readable } from "../state/store.ts";
 
@@ -57,15 +58,18 @@ export class Interrupt {
     if (!request || request.phase === "failed") return Promise.resolve();
     return this.run(request, async () => {
       try {
-        const recorded = await this.sender.lookup(request.envelope.request_id);
+        const observed = await recoverOperation(this.sender, request.envelope);
         if (!this.current(request)) return;
-        if (recorded) this.record(request, recorded);
-        else if (request.phase === "unconfirmed") await this.transmit(request);
-        // A previously recorded request must not become a new external effect,
-        // even if a later lookup cannot find it (for example after a restore).
+        if (observed.kind === "done") this.write(null);
+        else
+          this.write({
+            ...request,
+            phase: "unknown",
+            error: "停止结果尚未确认，继续读取原消息及执行状态；不会重发停止操作。",
+          });
       } catch {
         if (this.current(request) && request.phase === "unconfirmed") {
-          this.write({ ...request, error: "停止请求尚未确认，恢复连接后继续查询原请求" });
+          this.write({ ...request, error: "停止请求尚未确认，恢复连接后继续核对原消息状态" });
         }
       }
     });
@@ -86,13 +90,13 @@ export class Interrupt {
       const response = await this.sender.submit(request.envelope);
       if (!this.current(request)) return;
       if (response.operation) this.record(request, response.operation);
-      else this.write({ ...request, error: "停止请求的回答没有结果，继续查询原请求" });
+      else this.write({ ...request, error: "停止请求的回答没有结果，继续核对原消息状态" });
     } catch (err) {
       if (!this.current(request)) return;
       if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
         this.write({ ...request, phase: "failed", error: err.message });
       } else {
-        this.write({ ...request, error: "停止请求尚未确认，恢复连接后继续查询原请求" });
+        this.write({ ...request, error: "停止请求尚未确认，恢复连接后继续核对原消息状态" });
       }
     }
   }

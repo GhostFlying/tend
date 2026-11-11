@@ -35,10 +35,6 @@ type artifactArgs struct {
 	ArtifactID string `json:"artifact_id"`
 }
 
-type requestArgs struct {
-	RequestID string `json:"request_id"`
-}
-
 type noArgs struct{}
 
 func (s *Service) tasksList(ctx context.Context, c Call) (any, error) {
@@ -87,24 +83,6 @@ func (s *Service) artifactsRead(ctx context.Context, c Call) (any, error) {
 		var err error
 		out, err = views.Artifact(ctx, tx.Q(), a.ArtifactID)
 		return notFound(err, "artifact %s does not exist", a.ArtifactID)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (s *Service) requestsRead(ctx context.Context, c Call) (any, error) {
-	var a requestArgs
-	if err := decode(c.Arguments, &a); err != nil {
-		return nil, err
-	}
-	// Only the caller's own requests: its dedup domain.
-	var out protocol.RequestView
-	err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-		var err error
-		out, err = views.Request(ctx, tx.Q(), c.Principal.DedupDomain(), a.RequestID)
-		return notFound(err, "you made no request %s", a.RequestID)
 	})
 	if err != nil {
 		return nil, err

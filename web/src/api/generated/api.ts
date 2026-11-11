@@ -276,6 +276,16 @@ export interface TendAPI {
   AttentionPage?: AttentionPage;
   AttentionView?: AttentionView;
   BackgroundSourcePage?: BackgroundSourcePage;
+  BackupCheckpoint?: BackupCheckpoint;
+  BackupFile?: BackupFile;
+  BackupObject?: BackupObject;
+  BackupPolicy?: BackupPolicy;
+  BackupPreview?: BackupPreview;
+  BackupPruneRequest?: BackupPruneRequest;
+  BackupPruneState?: BackupPruneState;
+  BackupRestoreProof?: BackupRestoreProof;
+  BackupStatus?: BackupStatus;
+  BackupVerification?: BackupVerification;
   BindFeishu?: BindFeishu;
   BindLocalRepositoryRequest?: BindLocalRepositoryRequest;
   BindTelegram?: BindTelegram;
@@ -307,6 +317,7 @@ export interface TendAPI {
   CreateIssuePayload?: CreateIssuePayload;
   CreateIssueTaskPayload?: CreateIssueTaskPayload;
   DecisionContinuationView?: DecisionContinuationView;
+  DiagnosticLogProtection?: DiagnosticLogProtection;
   DownloadURLResponse?: DownloadURLResponse;
   Envelope?: Envelope;
   ExecutionCounts?: ExecutionCounts;
@@ -420,7 +431,6 @@ export interface TendAPI {
   RepoRegistry?: RepoRegistry;
   RepositoryRegistration?: RepositoryRegistration;
   RequestIssueManagerPayload?: RequestIssueManagerPayload;
-  RequestView?: RequestView;
   RespondAttentionPayload?: RespondAttentionPayload;
   RespondInteraction?: RespondInteraction;
   ResumeDecisionContinuationPayload?: ResumeDecisionContinuationPayload;
@@ -2485,6 +2495,169 @@ export interface BackgroundSource {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupCheckpoint".
+ */
+export interface BackupCheckpoint {
+  allocated_bytes?: number;
+  bytes: number;
+  class: string;
+  covered_by_checkpoint_id?: string;
+  created_at_ms: number;
+  decision: string;
+  directory: string;
+  files?: BackupFile[];
+  id: string;
+  incompatible_schema?: boolean;
+  manifest_sha256: string;
+  observation_completed_ms?: number;
+  protected_reason?: string;
+  reasons: string[] | null;
+  recoverable: boolean;
+  restore_proof_sha256?: string;
+  unknown: boolean;
+  verified_at_ms?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupFile".
+ */
+export interface BackupFile {
+  existed: boolean;
+  mode: number;
+  name: string;
+  object_sha256?: string;
+  path: string;
+  sha256?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupObject".
+ */
+export interface BackupObject {
+  allocated_bytes?: number;
+  bytes: number;
+  decision: string;
+  reasons: string[] | null;
+  sha256: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupPolicy".
+ */
+export interface BackupPolicy {
+  daily: number;
+  diagnostic_compress_days: number;
+  diagnostic_retain_days: number;
+  failed_drill_days: number;
+  incompatible_days: number;
+  migration_days: number;
+  minimum_verified: number;
+  successful_drill_hours: number;
+  weekly: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupPreview".
+ */
+export interface BackupPreview {
+  checkpoints: BackupCheckpoint[] | null;
+  created_at_ms: number;
+  diagnostic_logs: DiagnosticLog[] | null;
+  exclusive_physical_bytes_known: boolean;
+  expected_generation: number;
+  expected_reclaimed_allocated_bytes: number;
+  expected_reclaimed_bytes: number;
+  format: number;
+  instance_id: string;
+  objects: BackupObject[] | null;
+  policy: BackupPolicy;
+  recovery_checkpoint_id?: string;
+  sha256: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DiagnosticLog".
+ */
+export interface DiagnosticLog {
+  allocated_bytes?: number;
+  artifact_sha256?: string;
+  body_sha256?: string;
+  bytes: number;
+  closed: boolean;
+  closed_at_ms?: number;
+  compressed: boolean;
+  decision: string;
+  id: string;
+  path: string;
+  reasons: string[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupPruneRequest".
+ */
+export interface BackupPruneRequest {
+  preview: BackupPreview;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupPruneState".
+ */
+export interface BackupPruneState {
+  completed: string[] | null;
+  finished_at_ms?: number;
+  in_flight?: string;
+  last_error?: string;
+  phase: string;
+  preview: BackupPreview;
+  reclaimed_allocated_bytes: number;
+  reclaimed_bytes: number;
+  started_at_ms: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupRestoreProof".
+ */
+export interface BackupRestoreProof {
+  checkpoint_id: string;
+  covered_by_checkpoint_id?: string;
+  explained?: boolean;
+  format: number;
+  manifest_sha256: string;
+  restored: boolean;
+  source_artifact_sha256?: string;
+  source_manifest_sha256?: string;
+  source_protocol?: number;
+  source_release_id?: string;
+  source_storage_version?: number;
+  unique_evidence_path?: string;
+  unique_evidence_sha256?: string;
+  verified_at_ms: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupStatus".
+ */
+export interface BackupStatus {
+  preview: BackupPreview;
+  prune?: BackupPruneState;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackupVerification".
+ */
+export interface BackupVerification {
+  checkpoint_id: string;
+  class?: string;
+  expected_generation: number;
+  incompatible_schema?: boolean;
+  manifest_sha256: string;
+  observation_completed_ms?: number;
+  protected_reason?: string;
+  restore_proof_path?: string;
+  restore_proof_sha256?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "BindFeishu".
  */
 export interface BindFeishu {
@@ -3222,6 +3395,7 @@ export interface CreateIssueTaskPayload {
   source_message_id?: string;
   spec: OwnerTaskSpec;
   stage_ids?: string[];
+  task_id: string;
   title: string;
   use_default_workspace?: boolean;
   workspace_name?: string;
@@ -3317,6 +3491,15 @@ export interface OwnerTaskMount {
 export interface OwnerTaskBase {
   branch?: string;
   commit?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DiagnosticLogProtection".
+ */
+export interface DiagnosticLogProtection {
+  expected_generation: number;
+  log_id: string;
+  reason: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3799,6 +3982,7 @@ export interface AgentInventoryRuntime {
 export interface InjectSourcePayload {
   attachments?: string[];
   conversation_id?: string;
+  message_id: string;
   metadata: ManualSourceMetadata;
   text?: string;
 }
@@ -4462,6 +4646,7 @@ export interface IssueFollowupPage {
  */
 export interface IssueFollowupPayload {
   expected_assignment_epoch: number;
+  rule_id?: string;
   spec?: FollowupSpec;
 }
 /**
@@ -5593,6 +5778,7 @@ export interface MessagingInput {
   attachments?: string[];
   body?: string;
   correction_of?: string;
+  message_id: string;
   reply_to?: string;
 }
 /**
@@ -5669,6 +5855,7 @@ export interface MessagingPublication {
   attachments?: string[];
   body?: string;
   issue_ids?: string[];
+  message_id: string;
   purpose: string;
   reason?: string;
   reply_to?: string;
@@ -5875,6 +6062,7 @@ export interface OriginalImportResult {
  */
 export interface OriginalStorageStatus {
   bodies: number;
+  fields?: OriginalStorageField[];
   migrated_bytes: number;
   migrated_rows: number;
   original_files: number;
@@ -5883,6 +6071,15 @@ export interface OriginalStorageStatus {
   referenced_bytes: number;
   revision: number;
   unmatched_rows: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "OriginalStorageField".
+ */
+export interface OriginalStorageField {
+  column: string;
+  pending_rows: number;
+  table: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6137,17 +6334,6 @@ export interface RepositoryRegistration {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RequestView".
- */
-export interface RequestView {
-  error?: Error;
-  operation: string;
-  request_id: string;
-  result?: unknown;
-  status: OpStatus;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RespondAttentionPayload".
  */
 export interface RespondAttentionPayload {
@@ -6163,6 +6349,7 @@ export interface RespondAttentionPayload {
  */
 export interface RespondInteraction {
   confirm?: boolean;
+  message_id: string;
   option?: string;
   text?: string;
   version: number;
@@ -6487,6 +6674,7 @@ export interface RetainedAgentDefinition {
 export interface SendRunMessagePayload {
   commit_seq?: number;
   generation: number;
+  message_id: string;
   source_message_id?: string;
   spec_version: number;
   task_id: string;
@@ -6717,6 +6905,7 @@ export interface SubmitMessagePayload {
   decision?: DecisionChoice;
   images?: ConversationImageInput[];
   last_seen_seq?: number;
+  message_id: string;
   reply_to?: string;
 }
 /**
@@ -7421,6 +7610,7 @@ export interface WebhookSubscriptionPayload {
   instruction?: string;
   issue_id?: string;
   key_ref?: string;
+  subscription_id?: string;
   title?: string;
 }
 /**

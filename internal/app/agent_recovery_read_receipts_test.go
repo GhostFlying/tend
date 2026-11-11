@@ -52,18 +52,27 @@ func TestAgentRecoveryPresentationReceiptsDoNotAuthorizeContinuation(t *testing.
 func TestAgentRecoveryPresentationChangeDoesNotSettleBusinessUnknown(t *testing.T) {
 	h := newHarness(t)
 	rec := failedRecoveryTurn(t, h)
-	env := h.env("work_items.create", workTarget(""), protocol.CreateWorkItemPayload{IssuePlan: workPlan()}, nil)
-	env.ParentRequestID = rec.RequestID
-	op := h.exec(owner, env, CreateIssue{})
-	if op.Error != nil {
-		t.Fatal(op.Error)
+	op, task := h.createTask(owner, createTaskPayload{Title: "independent business operation", Spec: testSpec})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
 	}
+	as, ok, _ := h.claim("linux-1")
+	if !ok || as.TaskID != task.TaskID {
+		t.Fatal(as, ok)
+	}
+	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	// The original executor stopped reporting an outcome. Its actual Run and
+	// lease remain authoritative, independently of the native reply display.
 	if err := h.app.write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE domain=? AND request_id=?`, owner.DedupDomain(), env.RequestID)
+		_, err := tx.Exec(t.Context(), `UPDATE runs SET observed_state='unknown' WHERE run_id=?`, as.RunID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
+	beforeRun, beforeLease, beforeTask := h.run(as.RunID), h.lease(as.RunID), h.task(task.TaskID)
+	runs, artifacts := h.count("runs"), h.count("artifacts")
 	r, _, err := h.app.AgentRecovery(t.Context(), rec.RequestID)
 	if err != nil {
 		t.Fatal(err)
@@ -72,10 +81,7 @@ func TestAgentRecoveryPresentationChangeDoesNotSettleBusinessUnknown(t *testing.
 	if admitted, err := h.app.AdmitAgentRecovery(t.Context(), r.ActiveRequestID, rec.ThreadID); err != nil || !admitted {
 		t.Fatalf("independent business receipt blocked native recovery: %t %v", admitted, err)
 	}
-	// The native continuation guard does not rewrite an independently retained
-	// business operation. Its original request still deduplicates as unknown.
-	again := h.exec(owner, env, CreateIssue{})
-	if again.RequestID != op.RequestID || again.Status != protocol.OpUnknown {
-		t.Fatalf("business unknown was replaced or settled: original=%+v replay=%+v", op, again)
+	if got := h.run(as.RunID); got != beforeRun || got.ObservedState != protocol.RunUnknown || h.lease(as.RunID) != beforeLease || h.task(task.TaskID) != beforeTask || h.count("runs") != runs || h.count("artifacts") != artifacts {
+		t.Fatal("native recovery replaced or settled an independent unknown Run", beforeRun, got)
 	}
 }

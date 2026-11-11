@@ -55,9 +55,10 @@ func TestBinaryFileUploadReplayAndAcceptanceDownload(t *testing.T) {
 	if status != http.StatusOK || !bytes.Equal(first.Operation.Result, repeated.Operation.Result) {
 		t.Fatalf("replay: %d %+v", status, repeated)
 	}
-	status, conflict := upload([]byte("different"))
-	if status != http.StatusConflict || conflict.Error == nil || conflict.Error.Code != protocol.CodeConflictPayload {
-		t.Fatalf("changed bytes reused request ID: %d %+v", status, conflict)
+	status, different := upload([]byte("different"))
+	var changed protocol.ArtifactFile
+	if status != http.StatusOK || different.Operation == nil || json.Unmarshal(different.Operation.Result, &changed) != nil || changed.FileID == file.FileID || changed.SHA256 == file.SHA256 {
+		t.Fatalf("different content did not receive its own immutable identity: %d %+v", status, different)
 	}
 	get := func(c credential) (int, []byte) {
 		t.Helper()

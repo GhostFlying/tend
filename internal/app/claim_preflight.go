@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -15,17 +14,16 @@ import (
 func (a *App) preflightClaim(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (bool, error) {
 	var payload protocol.ClaimPayload
 	if json.Unmarshal(env.Payload, &payload) != nil || payload.WorkspaceProtocol < 0 || payload.WorkspaceProtocol > 1 {
-		return false, nil // Preserve normal validation and recorded rejections.
+		return false, nil // Preserve normal validation of the actual claim.
 	}
 	noWork := false
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		q := tx.Q()
-		_, err := store.GetRequest(ctx, q, p.DedupDomain(), env.RequestID)
-		if err == nil {
-			return nil // A recorded assignment must replay even when the host is full.
+		if !protocol.ValidID(protocol.PrefixRun, payload.RunID) {
+			return nil
 		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return err
+		if _, err := store.GetRun(ctx, q, payload.RunID); err == nil {
+			return nil
 		}
 		x := &Exec{Env: env, Principal: p, requestDomain: p.DedupDomain()}
 		if err := checkClaimRuntime(ctx, x, q); err != nil {

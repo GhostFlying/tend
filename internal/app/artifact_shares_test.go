@@ -107,16 +107,16 @@ func TestArtifactShareGrantRevokePreservesImmutableResultAndRequest(t *testing.T
 		t.Fatal(share)
 	}
 	readable(true)
-	if replay := h.exec(owner, env, ArtifactShareCommand{}); !bytes.Equal(result.Result, replay.Result) || h.count("artifact_shares") != 1 {
-		t.Fatal("request replay changed grant", replay)
+	if replay := h.exec(owner, env, ArtifactShareCommand{}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision || h.count("artifact_shares") != 1 {
+		t.Fatal("old grant CAS changed authority", replay)
 	}
 
 	changed := grant
 	changed.Reason = "Different authorization under the same request"
 	conflicting := h.env(protocol.OpGrantArtifactShare, env.Target, changed, env.ExpectedControlRevision)
 	conflicting.RequestID = env.RequestID
-	if _, err := h.app.Execute(t.Context(), owner, conflicting, ArtifactShareCommand{}); protocol.CodeOf(err) != protocol.CodeConflictPayload {
-		t.Fatal("original identity accepted changed input", err)
+	if op, err := h.app.Execute(t.Context(), owner, conflicting, ArtifactShareCommand{}); protocol.CodeOf(err) != protocol.CodeStaleRevision && (op.Error == nil || op.Error.Code != protocol.CodeStaleRevision) {
+		t.Fatal("changed input crossed the original CAS", op, err)
 	}
 
 	// Exercise the access policy against an authoritative changed epoch. The
@@ -158,7 +158,7 @@ func TestArtifactShareGrantRevokePreservesImmutableResultAndRequest(t *testing.T
 		t.Fatal(closed)
 	}
 	readable(false)
-	if replay := h.exec(owner, env, ArtifactShareCommand{}); !bytes.Equal(result.Result, replay.Result) {
+	if replay := h.exec(owner, env, ArtifactShareCommand{}); replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
 		t.Fatal("revocation rewrote original success", replay)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -360,7 +360,7 @@ func TestArtifactShareManagerDownloadAndFrozenWorkerInputSurviveRevocation(t *te
 	}
 }
 
-func TestArtifactShareMissingReferencesPersistOriginalFailure(t *testing.T) {
+func TestArtifactShareMissingReferencesLeaveNoAuthority(t *testing.T) {
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	grant := protocol.GrantArtifactSharePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Inspect exact immutable original"}, ArtifactID: h.ids.New(protocol.PrefixArtifact), RefSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
@@ -374,20 +374,12 @@ func TestArtifactShareMissingReferencesPersistOriginalFailure(t *testing.T) {
 			env := h.env(test.command.Operation(), protocol.Target{Type: "issue", ID: test.issue}, test.payload, rev(issue.Revision))
 			op, err := h.app.Execute(t.Context(), owner, env, test.command)
 			if err != nil || op.Status != protocol.OpFailed || op.Error == nil || op.Error.Code != protocol.CodeNotFound {
-				t.Fatal("missing reference lost business receipt", op, err)
+				t.Fatal("missing reference did not return its actual business failure", op, err)
 			}
-			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-				r, err := store.GetRequest(t.Context(), tx.Q(), owner.DedupDomain(), env.RequestID)
-				if err == nil && (r.Status != protocol.OpFailed || r.ErrorCode != string(protocol.CodeNotFound)) {
-					t.Fatal(r)
-				}
-				return err
-			}); err != nil {
-				t.Fatal("failure cannot be inspected", err)
-			}
+
 			replay, err := h.app.Execute(t.Context(), owner, env, test.command)
 			if err != nil || !reflect.DeepEqual(op, replay) {
-				t.Fatal("original failed identity was not replayed", replay, err)
+				t.Fatal("unchanged missing reference did not return the same business failure", replay, err)
 			}
 			if h.count("artifact_shares") != 0 || canonicalTaskIssue(t, h, issue.IssueID).Revision != issue.Revision {
 				t.Fatal("missing reference mutated target")
@@ -564,8 +556,8 @@ func TestArtifactShareNativeAuthorityRejectsClassifiedHistory(t *testing.T) {
 		t.Fatal(accepted)
 	}
 	replay := h.exec(mainAgent, request, command)
-	if !bytes.Equal(accepted.Result, replay.Result) {
-		t.Fatal("original grant result changed")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeDuplicateEffect || h.count("artifact_shares") != 1 {
+		t.Fatal("original grant effect repeated", replay)
 	}
 	var share protocol.ArtifactShare
 	if err := json.Unmarshal(accepted.Result, &share); err != nil {
@@ -585,8 +577,8 @@ func TestArtifactShareNativeAuthorityRejectsClassifiedHistory(t *testing.T) {
 		t.Fatal(accepted)
 	}
 	replay = h.exec(mainAgent, request, command)
-	if !bytes.Equal(accepted.Result, replay.Result) {
-		t.Fatal("original revoke result changed")
+	if replay.Error == nil || replay.Error.Code != protocol.CodeDuplicateEffect || h.count("artifact_share_revisions") != 2 {
+		t.Fatal("original revoke effect repeated", replay)
 	}
 }
 
@@ -693,7 +685,7 @@ func TestArtifactShareHistoricalInputsRemainIndependentSavedMaterials(t *testing
 		t.Fatal("share revocation erased independently retained inputs", reused)
 	}
 	replayed := h.exec(manager, request, command)
-	if !reflect.DeepEqual(reused, replayed) || h.count("tasks") != beforeTasks+1 || h.count("task_specs") != beforeSpecs+1 {
+	if replayed.Error == nil || replayed.Error.Code != protocol.CodeDuplicateEffect || h.count("tasks") != beforeTasks+1 || h.count("task_specs") != beforeSpecs+1 {
 		t.Fatal("original input reuse was not atomic/idempotent", reused, replayed)
 	}
 	spec := testSpec
@@ -714,7 +706,7 @@ func TestArtifactShareHistoricalInputsRemainIndependentSavedMaterials(t *testing
 		t.Fatal("available saved material required another grant", reused)
 	}
 	replayed = h.exec(manager, request, update)
-	if !reflect.DeepEqual(reused, replayed) || h.count("task_specs") != beforeSpecs+2 || len(h.storedSpec(editable.TaskID, 1).Inputs) != 0 || len(h.storedSpec(editable.TaskID, 2).Inputs) != 1 {
+	if replayed.Error == nil || replayed.Error.Code != protocol.CodeDuplicateEffect || h.count("task_specs") != beforeSpecs+2 || len(h.storedSpec(editable.TaskID, 1).Inputs) != 0 || len(h.storedSpec(editable.TaskID, 2).Inputs) != 1 {
 		t.Fatal("saved input reuse changed its original spec or request identity", reused, replayed)
 	}
 	// Existing contracts retain the bytes they were lawfully granted earlier.

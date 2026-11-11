@@ -97,8 +97,9 @@ func TestFault_IssueCollaboratorHandoffRetainsOldFactsAndAllowsRealSuccessor(t *
 			if op.Status != protocol.OpSucceeded || h.count(table) != 1 || h.task(task).ControlMode != protocol.ControlPaused || h.task(task).Lifecycle == protocol.TaskCompleted || role == protocol.RoleImplement && h.task(task).Lifecycle == protocol.TaskAwaitingAcceptance {
 				t.Fatal("old collaborator result advanced the handed-over responsibility", op, h.task(task))
 			}
-			if replay := h.exec(runPrincipal(as.RunID, as.Role), env, cmd); replay.Status != op.Status || string(replay.Result) != string(op.Result) || h.count(table) != 1 {
-				t.Fatal("late original receipt did not replay exactly", replay)
+			expectWorkCode(t, h.exec(runPrincipal(as.RunID, as.Role), env, cmd), protocol.CodeInvalidTransition)
+			if h.count(table) != 1 || h.task(task).ControlMode != protocol.ControlPaused || h.run(as.RunID).ObservedState != protocol.RunFinished {
+				t.Fatal("late result changed its ended Run or handed-over responsibility")
 			}
 			if role == protocol.RoleAccept {
 				return

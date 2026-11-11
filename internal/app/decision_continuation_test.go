@@ -251,8 +251,8 @@ func TestDecisionContinuationWaitPersistsAndIndependentResumeReplays(t *testing.
 		t.Fatal(op)
 	}
 	replay := f.h.exec(owner, env, cmd)
-	if string(replay.Result) != string(op.Result) {
-		t.Fatal("original resume did not replay", op, replay)
+	if replay.Error == nil || replay.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old resume CAS was accepted", replay)
 	}
 	if original := f.h.exec(owner, answer, AnswerDecision{TypedContinuation: true}); original.Status != protocol.OpSucceeded {
 		t.Fatal(original)

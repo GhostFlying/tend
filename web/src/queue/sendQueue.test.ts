@@ -1,7 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, test } from "vitest";
-import { ApiError, NetworkError } from "../api/client.ts";
-import type { APIResponse, Envelope, RequestView } from "../api/generated/api.ts";
+import { ApiError, NetworkError, type BusinessMessage } from "../api/client.ts";
+import type { APIResponse, Envelope } from "../api/generated/api.ts";
 import { openOutbox, type OutgoingMessage } from "./outbox.ts";
 import { choiceOf, SendQueue, type QueueOptions, type Sender } from "./sendQueue.ts";
 
@@ -12,7 +12,7 @@ class FakeSender implements Sender {
   readonly submitted: Envelope[] = [];
   readonly looked: string[] = [];
   answers: Answer[] = [];
-  records = new Map<string, RequestView>();
+  records = new Map<string, BusinessMessage>();
   private seq = 0;
 
   async submit(envelope: Envelope): Promise<APIResponse> {
@@ -29,9 +29,9 @@ class FakeSender implements Sender {
     return accepted(envelope.request_id, `msg_${this.seq}`, this.seq);
   }
 
-  async lookup(requestId: string): Promise<RequestView | null> {
-    this.looked.push(requestId);
-    return this.records.get(requestId) ?? null;
+  async message(messageId: string): Promise<BusinessMessage | null> {
+    this.looked.push(messageId);
+    return this.records.get(messageId) ?? null;
   }
 }
 
@@ -98,6 +98,7 @@ describe("SendQueue", () => {
     image.data_base64 = "changed after enqueue";
     expect((await stored())[0]?.envelope.payload).toEqual({
       body: "",
+      message_id: expect.any(String),
       images: [{ ...image, data_base64: "AQIDBA==" }],
     });
     online = true;
@@ -106,7 +107,7 @@ describe("SendQueue", () => {
     await reloaded.resume();
     expect(sender.submitted).toHaveLength(2);
     for (const envelope of sender.submitted) expect(envelope).toEqual(queued.envelope);
-    expect((await stored())[0]?.state).toBe("sent");
+    expect((await stored()).filter((item) => item.state === "sent")).toEqual([]);
   });
 
   test("writes a message down before sending it", async () => {
@@ -122,7 +123,12 @@ describe("SendQueue", () => {
       request_id: m.requestId,
       operation: "conversation.submit_message",
       target: { type: "conversation" },
-      payload: { body: "hello", reply_to: "msg_9", last_seen_seq: 7 },
+      payload: {
+        message_id: expect.any(String),
+        body: "hello",
+        reply_to: "msg_9",
+        last_seen_seq: 7,
+      },
     });
     answer.resolve(accepted(m.requestId, "msg_10", 10));
     await q.idle();
@@ -134,7 +140,11 @@ describe("SendQueue", () => {
     const decision = { decision_id: "dec_1", version: 2, option: "revise the spec" };
     const m = await q.enqueue({ body: "关于『x』：修改 spec", decision });
     await q.idle();
-    expect(sender.submitted[0]?.payload).toEqual({ body: "关于『x』：修改 spec", decision });
+    expect(sender.submitted[0]?.payload).toEqual({
+      message_id: expect.any(String),
+      body: "关于『x』：修改 spec",
+      decision,
+    });
     expect(choiceOf(m)).toEqual(decision);
   });
 
@@ -143,7 +153,8 @@ describe("SendQueue", () => {
     const m = await q.enqueue({ body: "hello" });
     await q.idle();
 
-    const [sent] = await stored();
+    const [sent] = q.list.get();
+    expect(await stored()).toEqual([]);
     expect(sent).toMatchObject({
       requestId: m.requestId,
       state: "sent",
@@ -167,7 +178,7 @@ describe("SendQueue", () => {
 
     expect(sender.submitted.map((e) => e.request_id)).toEqual([m.requestId, m.requestId]);
     expect(sender.submitted[1]).toEqual(m.envelope);
-    expect((await stored())[0]?.state).toBe("sent");
+    expect((await stored()).filter((item) => item.state === "sent")).toEqual([]);
   });
 
   test("without a network it waits instead of using up its tries", async () => {
@@ -254,18 +265,20 @@ describe("SendQueue", () => {
     const q = await open();
     const m = await q.enqueue({ body: "hi" });
     await q.idle();
-    sender.records.set(m.requestId, {
-      request_id: m.requestId,
-      operation: "conversation.submit_message",
-      status: "accepted",
-      result: { message_id: "msg_7", seq: 7 },
-    });
+    sender.records.set(
+      (m.envelope.payload as { message_id: string }).message_id,
+      messageEntry((m.envelope.payload as { message_id: string }).message_id, 7),
+    );
 
     await q.resume();
 
-    expect(sender.looked).toEqual([m.requestId]);
+    expect(sender.looked).toEqual([(m.envelope.payload as { message_id: string }).message_id]);
     expect(sender.submitted).toHaveLength(3);
-    expect(q.list.get()[0]).toMatchObject({ state: "sent", messageId: "msg_7", seq: 7 });
+    expect(q.list.get()[0]).toMatchObject({
+      state: "sent",
+      messageId: (m.envelope.payload as { message_id: string }).message_id,
+      seq: 7,
+    });
   });
 
   test("reconnecting resends an unknown message tend never recorded", async () => {
@@ -355,12 +368,10 @@ describe("SendQueue", () => {
 
     test("until a reconnect finds tend has it", async () => {
       const { q, a, b } = await heldBack();
-      sender.records.set(a.requestId, {
-        request_id: a.requestId,
-        operation: "conversation.submit_message",
-        status: "accepted",
-        result: { message_id: "msg_7", seq: 7 },
-      });
+      sender.records.set(
+        (a.envelope.payload as { message_id: string }).message_id,
+        messageEntry((a.envelope.payload as { message_id: string }).message_id, 7),
+      );
       await q.resume();
       await q.idle();
       expect(sender.submitted.slice(3).map((e) => e.request_id)).toEqual([b.requestId]);
@@ -415,8 +426,8 @@ describe("SendQueue", () => {
     expect(await stored()).toEqual([]);
   });
 
-  test("opening drops messages sent long ago", async () => {
-    const q = await open({ keepSentMs: 1_000 });
+  test("opening releases acknowledged message history and files immediately", async () => {
+    const q = await open({});
     await q.enqueue({ body: "old" });
     await q.idle();
     clock += 500;
@@ -424,9 +435,9 @@ describe("SendQueue", () => {
     await q.idle();
 
     clock += 600;
-    const reopened = await open({ keepSentMs: 1_000 });
-    expect(reopened.list.get().map((m) => m.body)).toEqual(["recent"]);
-    expect((await stored()).map((m) => m.body)).toEqual(["recent"]);
+    const reopened = await open({});
+    expect(reopened.list.get().map((m) => m.body)).toEqual([]);
+    expect(await stored()).toEqual([]);
   });
 });
 
@@ -447,7 +458,7 @@ describe("durable attachment uploads", () => {
     const message = await q.enqueue({ body: "", files });
     await q.idle();
     const persisted = (await stored())[0]!;
-    expect(persisted.envelope.payload).toEqual({ body: "" });
+    expect(persisted.envelope.payload).toEqual({ message_id: expect.any(String), body: "" });
     expect(persisted.uploads!.map((entry) => entry.requestId)).toHaveLength(2);
     expect(persisted.uploads![0]!.blob.size).toBe(bytes.length);
     expect(
@@ -463,10 +474,14 @@ describe("durable attachment uploads", () => {
         expect(durable.attachmentsFrozen).toBe(true);
         expect(durable.uploads!.every((entry) => entry.receipt)).toBe(true);
         expect(envelope.request_id).toBe(message.requestId);
-        expect(envelope.payload).toEqual({ body: "", attachments: ["file_1", "file_2"] });
+        expect(envelope.payload).toEqual({
+          message_id: expect.any(String),
+          body: "",
+          attachments: ["file_1", "file_2"],
+        });
         return sender.submit(envelope);
       },
-      lookup: (id) => sender.lookup(id),
+      message: (id) => sender.message(id),
       upload: async (id, blob) => {
         uploaded.push(id);
         return {
@@ -485,70 +500,56 @@ describe("durable attachment uploads", () => {
     expect(reloaded.list.get()[0]!.state).toBe("sent");
   });
 
-  test("lost upload receipt is looked up after reload without uploading again or changing message identity", async () => {
+  test("lost upload response repeats identical content and receives the existing file", async () => {
     let uploads = 0;
     const uploadSender: Sender = {
       submit: (e) => sender.submit(e),
-      lookup: (id) => sender.lookup(id),
+      message: (id) => sender.message(id),
       upload: async (id, blob) => {
         uploads++;
-        sender.records.set(id, {
-          request_id: id,
-          operation: "conversation.upload_attachment",
-          status: "succeeded",
-          result: receipt("file_existing", blob),
-        });
-        throw new NetworkError("response lost");
+        expect(await blob.text()).toBe("bytes");
+        if (uploads === 1) throw new NetworkError("response lost");
+        return {
+          operation: {
+            request_id: id,
+            status: "succeeded",
+            result: receipt("file_existing", blob),
+          },
+        };
       },
     };
     const q = await open({ sender: uploadSender, backoffMs: [] });
     const original = await q.enqueue({ body: "caption", files: [new File(["bytes"], "text.txt")] });
     await q.idle();
     expect(q.list.get()[0]!.state).toBe("unknown");
-    expect(sender.submitted).toHaveLength(0);
     const reloaded = await open({ sender: uploadSender });
     await reloaded.resume();
-    expect(uploads).toBe(1);
-    expect(sender.looked).toEqual([original.uploads![0]!.requestId]);
+    expect(uploads).toBe(2);
+    expect(sender.looked).toEqual([]);
     expect(sender.submitted[0]!.request_id).toBe(original.requestId);
-    expect(sender.submitted[0]!.payload).toEqual({
-      body: "caption",
-      attachments: ["file_existing"],
-    });
+    expect(sender.submitted[0]!.payload).toMatchObject({ attachments: ["file_existing"] });
   });
 
-  test("business unknown upload is only reconciled, while absent records reuse the original upload ID", async () => {
-    const ids: string[] = [];
+  test("an explicit unknown upload keeps its bytes and never replays on reload", async () => {
+    let uploads = 0;
     const uploadSender: Sender = {
       submit: (e) => sender.submit(e),
-      lookup: (id) => sender.lookup(id),
+      message: (id) => sender.message(id),
       upload: async (id) => {
-        ids.push(id);
-        sender.records.set(id, {
-          request_id: id,
-          operation: "conversation.upload_attachment",
-          status: "unknown",
-        });
-        return {
-          operation: {
-            request_id: id,
-            operation: "conversation.upload_attachment",
-            status: "unknown",
-          },
-        };
+        uploads++;
+        return { operation: { request_id: id, status: "unknown" } };
       },
     };
     const q = await open({ sender: uploadSender });
-    const m = await q.enqueue({ body: "", files: [new File(["x"], "unknown.format")] });
+    const original = await q.enqueue({ body: "", files: [new File(["x"], "unknown.format")] });
     await q.idle();
-    await q.resend(m.requestId);
-    await q.idle();
-    expect(ids).toEqual([m.uploads![0]!.requestId]);
+    const reloaded = await open({ sender: uploadSender });
+    await reloaded.resume();
+    await reloaded.resend(original.requestId);
+    expect(uploads).toBe(1);
     expect(sender.submitted).toHaveLength(0);
-    sender.records.clear();
-    await q.reconcile(m.requestId);
-    await q.idle();
-    expect(ids).toEqual([m.uploads![0]!.requestId, m.uploads![0]!.requestId]);
+    expect((await stored())[0]?.uploads?.[0]?.blob.size).toBe(1);
+    expect(reloaded.list.get()[0]?.state).toBe("unknown");
   });
 });
 
@@ -556,7 +557,7 @@ test("discarding an active Blob upload aborts transport and never submits its me
   const started = deferred<AbortSignal>();
   const uploadSender: Sender = {
     submit: (e) => sender.submit(e),
-    lookup: (id) => sender.lookup(id),
+    message: (id) => sender.message(id),
     upload: async (_id, _blob, _name, signal) => {
       started.resolve(signal);
       return new Promise((_resolve, reject) =>
@@ -581,7 +582,7 @@ test("message retries keep frozen attachment references and do not upload origin
   let uploads = 0;
   const uploadSender: Sender = {
     submit: (e) => sender.submit(e),
-    lookup: (id) => sender.lookup(id),
+    message: (id) => sender.message(id),
     upload: async (id, blob, name) => {
       uploads++;
       return {
@@ -612,7 +613,7 @@ test("message retries keep frozen attachment references and do not upload origin
   await reloaded.resume();
   expect(uploads).toBe(1);
   expect(sender.submitted).toEqual([frozen, frozen]);
-  expect(sender.looked).toEqual([m.requestId]);
+  expect(sender.looked).toEqual([(m.envelope.payload as { message_id: string }).message_id]);
 });
 
 test("a second tab cancelling an unsubmitted message fences a stale sender", async () => {
@@ -645,7 +646,7 @@ test("a second tab cannot cancel after the submit marker is committed", async ()
   await expect(second.discard(m.requestId)).rejects.toThrow("先核对");
   answer.resolve(accepted(m.requestId, "msg_result", 1));
   await first.idle();
-  expect((await stored())[0]?.state).toBe("sent");
+  expect((await stored()).filter((item) => item.state === "sent")).toEqual([]);
 });
 
 test("upgrading a legacy unfinished upload retains the file and its receipt", async () => {
@@ -663,7 +664,7 @@ test("upgrading a legacy unfinished upload retains the file and its receipt", as
   });
   const uploadSender: Sender = {
     submit: (env) => sender.submit(env),
-    lookup: (id) => sender.lookup(id),
+    message: (id) => sender.message(id),
     upload: async (id) => ({
       operation: {
         request_id: id,
@@ -681,9 +682,13 @@ test("upgrading a legacy unfinished upload retains the file and its receipt", as
   online = true;
   const next = await open({ sender: uploadSender });
   await next.resume();
-  expect(sender.submitted[0]?.payload).toEqual({ body: "with file", attachments: ["original"] });
-  expect((await stored())[0]?.uploads?.[0]?.receipt?.file_id).toBe("original");
-  expect((await stored())[0]?.submitAttempted).toBe(true);
+  expect(sender.submitted[0]?.payload).toEqual({
+    message_id: expect.any(String),
+    body: "with file",
+    attachments: ["original"],
+  });
+  expect(await stored()).toEqual([]);
+  expect(next.list.get()[0]?.uploads).toBeUndefined();
 });
 
 test("cancelled upload tombstones release original bytes while fencing stale senders", async () => {
@@ -717,64 +722,57 @@ test("reloading and resuming isolates main and background queues and retry targe
   online = true;
   await recovered.resume();
   expect(sender.submitted.map((e) => e.payload)).toEqual([
-    { body: "background only", conversation_id: "work-item:one" },
+    { message_id: expect.any(String), body: "background only", conversation_id: "work-item:one" },
   ]);
   expect(recovered.list.get().map((m) => m.body)).toEqual(["background only"]);
   const recoveredMain = await open();
   await recoveredMain.resume();
   expect(sender.submitted.map((e) => e.payload)).toEqual([
-    { body: "background only", conversation_id: "work-item:one" },
-    { body: "main only" },
+    { message_id: expect.any(String), body: "background only", conversation_id: "work-item:one" },
+    { message_id: expect.any(String), body: "main only" },
   ]);
 });
 
-test("source files recover original upload and source request without entering any chat drain", async () => {
-  let uploads = 0;
-  let sourceEffects = 0;
-  let canReadUpload = false;
-  let canReadSource = false;
-  const uploadReceipt = {
-    file_id: "file_source",
-    name: "original.txt",
-    media_type: "text/plain",
-    size: 14,
-    sha256: "original-hash",
-  };
+test("source files recover by content and the actual message ID without entering chat", async () => {
+  let uploads = 0,
+    effects = 0;
+  let message: BusinessMessage | null = null;
   const sourceSender: Sender = {
-    upload: async (requestId, blob) => {
+    upload: async (id, blob) => {
       uploads++;
       expect(await blob.text()).toBe("original bytes");
-      sender.records.set(requestId, {
-        request_id: requestId,
-        operation: "conversation.upload_attachment",
-        status: "succeeded",
-        result: uploadReceipt,
-      });
-      throw new NetworkError("lost upload response");
+      if (uploads === 1) throw new NetworkError("lost upload response");
+      return {
+        operation: {
+          request_id: id,
+          status: "succeeded",
+          result: {
+            file_id: "file_source",
+            name: "original.txt",
+            media_type: "text/plain",
+            size: 14,
+            sha256: "hash",
+          },
+        },
+      };
     },
-    lookup: async (requestId) => {
-      const record = sender.records.get(requestId);
-      if (record && "file_id" in (record.result as object) && !canReadUpload)
-        throw new NetworkError("lookup unavailable");
-      if (record && "message_id" in (record.result as object) && !canReadSource)
-        throw new NetworkError("lookup unavailable");
-      return record ?? null;
+    message: async (id) => {
+      expect(id).toBe(message?.message_id);
+      return message;
     },
     submit: async (envelope) => {
       sender.submitted.push(envelope);
       expect(envelope.operation).toBe("conversation.inject_source");
-      expect(envelope.payload).toEqual({
+      const payload = envelope.payload as { message_id: string };
+      expect(envelope.payload).toMatchObject({
         text: "external source",
         metadata: { author: "unknown" },
         attachments: ["file_source"],
       });
-      if (!sender.records.has(envelope.request_id)) sourceEffects++;
-      sender.records.set(envelope.request_id, {
-        request_id: envelope.request_id,
-        operation: "conversation.inject_source",
-        status: "succeeded",
-        result: { message_id: "source_message" },
-      });
+      if (!message) {
+        effects++;
+        message = messageEntry(payload.message_id, 1);
+      }
       throw new NetworkError("lost source response");
     },
   };
@@ -791,31 +789,31 @@ test("source files recover original upload and source request without entering a
   );
   await first.idle();
   expect(first.list.get()[0]?.state).toBe("unknown");
-  expect(uploads).toBe(1);
   const chat = await open();
   await chat.resume();
   expect(chat.list.get()).toEqual([]);
-  expect(sender.submitted).toEqual([]);
-  const another = await open({ ...options, scope: "attention:two" });
-  expect(another.list.get()).toEqual([]);
-  canReadUpload = true;
   const reloaded = await open(options);
   await reloaded.resume();
-  expect(uploads).toBe(1);
   expect(reloaded.list.get()[0]?.state).toBe("unknown");
-  expect(sender.submitted[0]?.request_id).toBe(original.requestId);
-  canReadSource = true;
-  const reopened = await open(options);
-  await reopened.resume();
-  expect(reopened.list.get()[0]).toMatchObject({
+  await reloaded.resume();
+  expect(reloaded.list.get()[0]).toMatchObject({
     state: "sent",
-    messageId: "source_message",
-    requestId: original.requestId,
+    messageId: (original.envelope.payload as { message_id: string }).message_id,
   });
-  expect(uploads).toBe(1);
-  expect(sourceEffects).toBe(1);
-  expect(sender.submitted).toHaveLength(1);
+  expect(effects).toBe(1);
+  expect(uploads).toBe(2);
 });
+
+function messageEntry(id: string, seq: number): BusinessMessage {
+  return {
+    message_id: id,
+    seq,
+    author: "owner",
+    kind: "message",
+    created_at: "",
+    control: { revision: 1 },
+  };
+}
 
 describe("IM durable queue", () => {
   test("reopened IM keeps pending inputs but leaves acknowledged history to the feed", async () => {
@@ -826,7 +824,7 @@ describe("IM durable queue", () => {
     online = false;
     await q.enqueue({ body: "still awaiting delivery" });
     await q.idle();
-    const reopened = await open({ operation: "messaging.send", scope: "im", keepSentMs: 0 });
+    const reopened = await open({ operation: "messaging.send", scope: "im" });
     expect(reopened.list.get().map((m) => m.body)).toEqual(["still awaiting delivery"]);
   });
 
@@ -874,4 +872,23 @@ describe("IM durable queue", () => {
       payload: { body: "补充要求", reply_to: "msg_question" },
     });
   });
+});
+
+test("a legacy uncertain message without a business ID is retained without transport replay", async () => {
+  online = false;
+  const q = await open();
+  const original = await q.enqueue({ body: "Keep this original" });
+  await q.idle();
+  const box = await openOutbox(factory);
+  await box.edit(original.requestId, (m) => {
+    const payload = { ...(m.envelope.payload as Record<string, unknown>) };
+    delete payload.message_id;
+    return { ...m, submitAttempted: true, envelope: { ...m.envelope, payload } };
+  });
+  online = true;
+  const reopened = await open();
+  await reopened.resume();
+  expect(sender.submitted).toEqual([]);
+  expect(reopened.list.get()[0]).toMatchObject({ state: "unknown", body: "Keep this original" });
+  expect((await stored())[0]?.body).toBe("Keep this original");
 });

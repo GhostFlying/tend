@@ -49,28 +49,7 @@ func runRepository(ctx context.Context, e *Env, args []string) error {
 		return usagef("retry requires original --revision and payload")
 	}
 	if args[0] == "register" && *requestID != "" && len(input) == 0 {
-		var recorded protocol.RequestView
-		err := c.do(ctx, "GET", "/api/v1/requests/"+url.PathEscape(*requestID), nil, &recorded)
-		if err == nil {
-			if recorded.Operation != "repos.register" {
-				return usagef("request belongs to %s", recorded.Operation)
-			}
-			if recorded.Status == protocol.OpSucceeded {
-				var registration protocol.RepositoryRegistration
-				if err := json.Unmarshal(recorded.Result, &registration); err != nil {
-					return err
-				}
-				if registration.Repo != pos[0] {
-					return usagef("request belongs to repository %s", registration.Repo)
-				}
-			}
-			return repositoryOutcome(e, *asJSON, pos[0], protocol.APIResponse{Operation: &protocol.Operation{RequestID: recorded.RequestID, Status: recorded.Status, Result: recorded.Result, Error: recorded.Error}})
-		}
-		pe, ok := errors.AsType[*protocol.Error](err)
-		if !ok || pe.Code != protocol.CodeNotFound {
-			return err
-		}
-		return usagef("original request is absent; supply original complete --data/--file and --revision, or use request replay")
+		return usagef("submission requires the complete original payload and --revision; inspect repo show %s for current business state", pos[0])
 	}
 	var current protocol.RepositoryRegistration
 	if args[0] == "show" || len(input) == 0 || *revision < 0 {
@@ -147,7 +126,7 @@ func repositoryOutcome(e *Env, asJSON bool, name string, response protocol.APIRe
 		return response.Operation.Error
 	}
 	if response.Operation.Status != protocol.OpSucceeded {
-		return fmt.Errorf("repository registration outcome is %s; reconcile request %s", response.Operation.Status, response.Operation.RequestID)
+		return fmt.Errorf("repository registration outcome is %s; inspect repo show %s before another action", response.Operation.Status, name)
 	}
 	if asJSON {
 		return json.NewEncoder(e.Stdout).Encode(response)

@@ -89,12 +89,56 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 	if p.Title == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "title is required")
 	}
+	taskID, err := creationID(x, protocol.PrefixTask)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if prior, err := store.GetTask(ctx, tx.Q(), taskID); err == nil {
+		original, err := store.GetSpec(ctx, tx.Q(), taskID, 1)
+		if err != nil {
+			return Outcome{}, err
+		}
+		var spec domain.Spec
+		if err = json.Unmarshal([]byte(original), &spec); err != nil {
+			return Outcome{}, err
+		}
+		if len(p.Spec.SharedContext) == 0 {
+			p.Spec.SharedContext = spec.SharedContext
+		}
+		project, err := resolveProject(ctx, tx.Q(), p.Project, x.Principal)
+		if err != nil {
+			return Outcome{}, err
+		}
+		primary, err := store.GetTaskIssueOwner(ctx, tx.Q(), taskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if canonical != nil && primary != canonical.Issue.IssueID {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "Task identity belongs to another Issue")
+		}
+		if canonical == nil && p.WorkItemID != "" && p.WorkItemID != primary {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "Task identity already belongs to another Issue")
+		}
+		workspace, _, err := prepareWorkspace(ctx, tx.Q(), p.Spec.Workspace, project.Template, taskID, primary)
+		if err != nil {
+			return Outcome{}, err
+		}
+		p.Spec.Workspace = workspace
+		if err := freezeTaskInputs(ctx, x, tx.Q(), &p.Spec, spec.Inputs); err != nil {
+			return Outcome{}, err
+		}
+		if prior.Title != p.Title || !spec.Equal(p.Spec.Normalize()) {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "Task identity already has another original definition")
+		}
+		return Outcome{NoEffect: true, Result: taskResult{TaskID: taskID, Lifecycle: prior.Lifecycle, ControlMode: prior.ControlMode, ControlRevision: prior.ControlRevision, SpecVersion: prior.SpecVersion, Rating: prior.Rating, BlockReason: prior.BlockReason}}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
 	if canonical == nil {
 		if err := claimPlanCommit(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
 			return Outcome{}, err
 		}
 	}
-	taskID := x.IDs.New(protocol.PrefixTask)
 	refs, err := validateRelations(ctx, tx.Q(), taskID, p.Relations)
 	if err != nil {
 		return Outcome{}, err

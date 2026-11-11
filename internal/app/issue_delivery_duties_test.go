@@ -377,7 +377,15 @@ func TestDeliveryDuplicateAndConcurrentPreparationRetainOneQuestion(t *testing.T
 		go func() { defer wg.Done(); results[j] = h.exec(owner, env, UpdateIssueDelivery{}) }()
 	}
 	wg.Wait()
-	if results[0].Status != protocol.OpSucceeded || string(results[0].Result) != string(results[1].Result) || h.count("issue_delivery_duties") != 1 || h.count("attentions") != 1 {
+	var succeeded, stale int
+	for _, result := range results {
+		if result.Status == protocol.OpSucceeded {
+			succeeded++
+		} else if result.Status == protocol.OpFailed && result.Error != nil && result.Error.Code == protocol.CodeStaleRevision {
+			stale++
+		}
+	}
+	if succeeded != 1 || stale != 1 || h.count("issue_delivery_duties") != 1 || h.count("attentions") != 1 {
 		t.Fatal(results)
 	}
 	d := deliveryDutyForTest(t, h, i.IssueID, task)

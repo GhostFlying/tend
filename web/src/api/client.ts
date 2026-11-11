@@ -8,11 +8,13 @@ import type {
   Code,
   Envelope,
   Error as ErrorBody,
-  RequestView,
+  IssueConversationItem,
   SessionRequest,
   SessionView,
 } from "./generated/api.ts";
 import { cryptoRandom, newClientId, type RandomBytes } from "./ids.ts";
+
+export type BusinessMessage = IssueConversationItem;
 
 /** What the client knows about its link to tend. */
 export type Connection =
@@ -175,17 +177,12 @@ export class ApiClient {
     return this.request<APIResponse>("POST", "/api/v1/ops", envelope);
   }
 
-  /** Reads the record of an earlier write, or null if tend has none. */
-  async lookup(requestId: string): Promise<RequestView | null> {
+  /** Reads the actual message object, including withdrawal and processing state. */
+  async message(messageId: string): Promise<BusinessMessage | null> {
     try {
-      return await this.request<RequestView>(
-        "GET",
-        `/api/v1/requests/${encodeURIComponent(requestId)}`,
-      );
+      return await this.get<BusinessMessage>(`/api/v1/messages/${encodeURIComponent(messageId)}`);
     } catch (err) {
-      if (err instanceof ApiError && err.code === "not_found") {
-        return null;
-      }
+      if (err instanceof ApiError && err.code === "not_found") return null;
       throw err;
     }
   }

@@ -17,7 +17,7 @@ func TestIssueContextIncrementalHTTPIsSameReadProjection(t *testing.T) {
 	token := e.login(protocol.ScopeOwner)
 	issue := createOwnerIssueHTTP(t, e, token, "")
 	path := "/api/v1/issues/" + issue.IssueID + "/context?view=incremental&limit=1"
-	before := e.count("SELECT COUNT(*) FROM request_records")
+	before := e.count("SELECT COUNT(*) FROM events")
 	var direct protocol.IssueContextIncremental
 	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
@@ -37,7 +37,7 @@ func TestIssueContextIncrementalHTTPIsSameReadProjection(t *testing.T) {
 	if code := e.do("GET", path+"&cursor="+url.QueryEscape(first.NextCursor), token, nil, &second); code != http.StatusOK || second.Kind != "delta" || len(second.Items) != 0 {
 		t.Fatal(code, second)
 	}
-	if e.count("SELECT COUNT(*) FROM request_records") != before {
+	if e.count("SELECT COUNT(*) FROM events") != before {
 		t.Fatal("read created request record")
 	}
 	for _, query := range []string{"view=incremental&after=0", "view=incremental&limit=101", "after=1&after_source=2", "view=incremental&cursor=broken", "view=incremental&limit=1&limit=2"} {

@@ -20,6 +20,9 @@ import (
 )
 
 func runUpdaterHandoff(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "backup" {
+		return runUpdaterBackup(ctx, e, args[1:])
+	}
 	if len(args) > 0 && args[0] == "bounded" {
 		return runBoundedMaintenance(ctx, e, args[1:])
 	}

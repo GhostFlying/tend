@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -31,9 +30,8 @@ func TestConversationPages(t *testing.T) {
 	tok := e.login(protocol.ScopeOwner)
 	exec := func(p protocol.Principal, op string, payload any, cmd app.Command) {
 		t.Helper()
-		b, _ := json.Marshal(payload)
-		res, err := e.app.Execute(context.Background(), p, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op,
-			Target: protocol.Target{Type: "message"}, Payload: b}, cmd)
+		envelope := e.envelope(op, protocol.Target{Type: "message"}, nil, payload)
+		res, err := e.app.Execute(context.Background(), p, &envelope, cmd)
 		if err != nil || res.Status == protocol.OpFailed {
 			t.Fatalf("%s: %+v %v", op, res, err)
 		}

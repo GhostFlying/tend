@@ -1,7 +1,6 @@
 package app
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -42,8 +41,8 @@ func TestStoppedResponsibilityAdoptsExistingUnclaimedContinuation(t *testing.T) 
 	if next.ActionID != queued.ContinuationActionID || next.TaskID != f.task || next.Generation != f.as.Generation || next.Responsibility.AssignmentEpoch != issue.AssignmentEpoch {
 		t.Fatal("adoption replaced or failed to claim the queued action", next)
 	}
-	if replay := f.h.exec(owner, env, ResumeDecisionContinuation{}); !reflect.DeepEqual(replay, op) {
-		t.Fatal("adoption receipt changed after actual claim", replay, op)
+	if replay := f.h.exec(owner, env, ResumeDecisionContinuation{}); replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision || f.h.count("task_execution_responsibility_adoptions") != 1 {
+		t.Fatal("retry bypassed claimed continuation or appended adoption", replay, op)
 	}
 }
 

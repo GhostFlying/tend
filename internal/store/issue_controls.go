@@ -250,9 +250,13 @@ func (t *Tx) SaveCanonicalIssue(ctx context.Context, next protocol.Issue, expect
 	args := []any{next.IssueID, next.Revision, string(snapshot), string(reason), string(actor), p.RequestID, nullString(p.SourceMessageID), nullString(p.CoordinationExecutionID), effect, next.UpdatedAt}
 	// Historical-schema fixtures do not supply fields added by later migrations.
 	if p.RequestDomain != "" {
-		columns += ",request_domain"
-		values += ",?"
-		args = append(args, p.RequestDomain)
+		columns += ",request_domain,operation,authorizing_owner"
+		values += ",?,?,?"
+		owner := businessOwner(ctx)
+		if owner == "" && p.Actor.Kind == protocol.PrincipalOwner {
+			owner = p.Actor.Subject
+		}
+		args = append(args, p.RequestDomain, businessOperation(ctx), owner)
 	}
 	if _, err = t.Exec(ctx, `INSERT INTO issue_control_revisions(`+columns+`) VALUES(`+values+`)`, args...); err != nil {
 		return fmt.Errorf("store: record issue control revision: %w", err)

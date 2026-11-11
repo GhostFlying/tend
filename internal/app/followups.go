@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,24 +46,33 @@ func applyFollowup(ctx context.Context, x *Exec, tx *store.Tx, action string, ca
 		if err != nil {
 			return Outcome{}, err
 		}
-		var p protocol.FollowupSpec
-		if err := decodePayload(x.Env, &p); err != nil {
+		var input protocol.CreateFollowupPayload
+		if err := decodePayload(x.Env, &input); err != nil {
 			return Outcome{}, err
 		}
-		if x.Principal.Kind == protocol.PrincipalOwner {
-			p.SourceID = x.Env.RequestID
+		if !protocol.ValidID(protocol.Prefix("followup"), input.RuleID) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "rule_id must identify the new followup; retain it across retries")
 		}
-		// A model may repeat the same planning call with a fresh call/request ID.
-		// Preserve the original registration across retries and clock changes.
-		identity, _ := json.Marshal(p)
-		key := fmt.Sprintf("%x", sha256.Sum256(append([]byte(w.WorkItemID+"\x00"), identity...)))
-		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT rule_id FROM followup_registrations WHERE identity=?`, key)
-		if err != nil {
+		p := input.FollowupSpec
+		if existing, err := store.GetFollowup(ctx, tx.Q(), input.RuleID); err == nil {
+			var raw string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM followup_revisions WHERE rule_id=? AND revision=1`, input.RuleID).Scan(&raw); err != nil {
+				return Outcome{}, err
+			}
+			var original protocol.FollowupRule
+			if err := json.Unmarshal([]byte(raw), &original); err != nil {
+				return Outcome{}, err
+			}
+			normalized, err := normalizeFollowup(p, original.CreatedAt)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if existing.WorkItemID != w.WorkItemID || !sameBusinessDefinition(original.FollowupSpec, normalized) {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "followup identity already has another original definition")
+			}
+			return Outcome{NoEffect: true, Result: existing}, nil
+		} else if !errors.Is(err, store.ErrNotFound) {
 			return Outcome{}, err
-		}
-		if len(ids) > 0 {
-			existing, err := store.GetFollowup(ctx, tx.Q(), ids[0])
-			return Outcome{Result: existing}, err
 		}
 		p, err = normalizeFollowup(p, now)
 		if err != nil {
@@ -73,15 +81,12 @@ func applyFollowup(ctx context.Context, x *Exec, tx *store.Tx, action string, ca
 		if w.Status == "closed" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "closed work item cannot create followups")
 		}
-		r := protocol.FollowupRule{FollowupSpec: p, RuleID: x.IDs.New(protocol.Prefix("followup")), WorkItemID: w.WorkItemID, Revision: 1, Status: "active", CreatedAt: now, UpdatedAt: now}
+		r := protocol.FollowupRule{FollowupSpec: p, RuleID: input.RuleID, WorkItemID: w.WorkItemID, Revision: 1, Status: "active", CreatedAt: now, UpdatedAt: now}
 		scheduleFollowup(&r, now)
 		if err := validateFollowup(ctx, x, tx, r, w); err != nil {
 			return Outcome{}, err
 		}
 		if err := tx.SaveFollowup(ctx, r, 0, x.Env.RequestID); err != nil {
-			return Outcome{}, err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO followup_registrations(identity,rule_id) VALUES(?,?)`, key, r.RuleID); err != nil {
 			return Outcome{}, err
 		}
 		if err := bindFollowupTargets(ctx, tx, r); err != nil {
@@ -144,9 +149,6 @@ func applyFollowup(ctx context.Context, x *Exec, tx *store.Tx, action string, ca
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "replacement spec is required")
 		}
 		spec := *p.Spec
-		if x.Principal.Kind == protocol.PrincipalOwner {
-			spec.SourceID = x.Env.RequestID
-		}
 		r.FollowupSpec, err = normalizeFollowup(spec, now)
 		if err != nil {
 			return Outcome{}, err

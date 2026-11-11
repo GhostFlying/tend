@@ -68,16 +68,16 @@ func TestIssueOwnerHTTPRecursiveIdentityHistoryAndReplay(t *testing.T) {
 	}
 	later := protocol.IssueControlPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch}
 	current = issueHTTP(t, e, token, e.envelope("issues.pause", update.Target, &current.Revision, later))
-	replay := issueHTTP(t, e, token, update)
-	if replay.Revision != child.Revision+1 || replay.Plan.Title != plan.Title {
-		t.Fatal("same request returned later aggregate", replay)
+	stale = assertOwnerStaleHTTP(t, e, token, update)
+	if stale.CurrentIssue == nil || stale.CurrentIssue.Revision != current.Revision || stale.CurrentIssue.State != current.State {
+		t.Fatal("old input did not report current business state", stale)
 	}
-	before := e.count(`SELECT count(*) FROM request_records`)
+	before := e.count(`SELECT count(*) FROM events`)
 	var historical protocol.IssueView
 	if status := e.do("GET", "/api/v1/issues/"+child.IssueID+"?revision=1", token, nil, &historical); status != http.StatusOK || !historical.Historical || historical.Plan.Title != child.Plan.Title || len(historical.Tasks) != 0 || historical.ContextRevision != 0 {
 		t.Fatalf("history=%d %+v", status, historical)
 	}
-	if e.count(`SELECT count(*) FROM request_records`) != before {
+	if e.count(`SELECT count(*) FROM events`) != before {
 		t.Fatal("history read wrote a request")
 	}
 	// P4 publishes assignment. Incomplete requests reach domain validation;

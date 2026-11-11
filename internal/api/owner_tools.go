@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +17,6 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/protocol/schema"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
 type mainOwnerRequestKey struct{}
@@ -47,7 +44,7 @@ func (w *ownerToolResponse) Flush() {
 func (w *ownerToolResponse) Write(data []byte) (int, error) {
 	w.Flush()
 	// JSON includes immutable operation receipts and may exceed the binary
-	// preview limit. Keep it complete so callers can reconcile the original request.
+	// preview limit. Keep complete business results so callers can read actual state.
 	if strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
 		return w.body.Write(data)
 	}
@@ -93,6 +90,8 @@ func (g *OwnerTools) Specs() []protocol.OwnerToolSpec {
 		root[key] = value
 	}
 	root["definitions"] = document["definitions"]
+	// Legacy replay input is rejected by Call and is not advertised to Agents.
+	delete(root["properties"].(map[string]any), "original_envelope")
 	input, _ := json.Marshal(root)
 	var out []protocol.OwnerToolSpec
 	for _, capability := range OwnerCapabilities() {
@@ -110,7 +109,7 @@ func (g *OwnerTools) Specs() []protocol.OwnerToolSpec {
 			out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Stage a private webhook credential by opaque webhook_key_ref already held in private server storage. Use path.id for the new reference. Never pass credential bytes in body, content_base64 or model arguments; initial private bytes are staged through the owner's secure CLI key-file path.", InputSchema: privateInput})
 			continue
 		}
-		out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Owner capability: " + capability + ". Operations use target, expected_control_revision, payload and positive effect_seq. HTTP reads use exact path parameters and query (including pagination); HTTP writes use body or content_base64/content_type and effect_seq. The normal owner validation applies; preserve original request identity on unknown outcomes.", InputSchema: input})
+		out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Owner capability: " + capability + ". Operations use target, expected_control_revision, payload and positive effect_seq. HTTP reads use exact path parameters and query (including pagination); HTTP writes use body or content_base64/content_type and effect_seq. The normal owner validation applies; read the business object on unknown outcomes; retain actual action identity and never blindly repeat an external side effect.", InputSchema: input})
 	}
 	return out
 }
@@ -122,11 +121,10 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid owner tool arguments")
 	}
-	receiptID := call.RequestID
 	if args.OriginalEnvelope != nil {
-		receiptID = args.OriginalEnvelope.RequestID
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "request replay is retired; read the business object and submit its explicit identity and current revision")
 	}
-	owner, err := g.server.app.MainOwner(ctx, call.Actor, call.ExecutionID, receiptID)
+	owner, err := g.server.app.MainOwner(ctx, call.Actor, call.ExecutionID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,9 +150,6 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "unknown owner capability")
 	}
 	method, path, isRoute := strings.Cut(selected.Capability, " ")
-	if isRoute && args.OriginalEnvelope != nil {
-		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "original_envelope is for operation receipt recovery")
-	}
 	body := args.Body
 	authority := &app.OwnerExecution{Actor: call.Actor, Agent: execution.Selection.Identity, ExecutionID: call.ExecutionID, CallID: call.RequestID, EffectSeq: args.EffectSeq}
 	requestID := call.RequestID
@@ -163,17 +158,27 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		if len(args.Payload) == 0 {
 			args.Payload = json.RawMessage(`{}`)
 		}
-		envelope := protocol.Envelope{RequestID: call.RequestID, Operation: selected.Capability, Target: args.Target, ExpectedControlRevision: args.ExpectedControlRevision, Reason: args.Reason, Payload: args.Payload}
-		if args.OriginalEnvelope != nil {
-			if args.OriginalEnvelope.Operation != selected.Capability {
-				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "original operation does not match this tool")
+		if args.Target.ID == "" {
+			if prefix := protocol.CreationTargetPrefix(selected.Capability); prefix != "" {
+				args.Target.ID = protocol.NativeObjectID(prefix, "owner:"+call.ExecutionID, call.RequestID)
 			}
-			envelope = *args.OriginalEnvelope
-			err = g.originalOwnerAuthority(ctx, authority, envelope.RequestID)
+		}
+		if identities := protocol.NativePayloadIdentities(selected.Capability); len(identities) > 0 {
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(args.Payload, &payload); err != nil || payload == nil {
+				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "operation payload must be an object")
+			}
+			for field, prefix := range identities {
+				if len(payload[field]) == 0 || string(payload[field]) == `""` {
+					payload[field], _ = json.Marshal(protocol.NativeObjectID(prefix, "owner:"+call.ExecutionID, call.RequestID+"/"+field))
+				}
+			}
+			args.Payload, err = json.Marshal(payload)
 			if err != nil {
 				return nil, err
 			}
 		}
+		envelope := protocol.Envelope{RequestID: call.RequestID, Operation: selected.Capability, Target: args.Target, ExpectedControlRevision: args.ExpectedControlRevision, Reason: args.Reason, Payload: args.Payload}
 		body, err = json.Marshal(envelope)
 		requestID = envelope.RequestID
 		if err != nil {
@@ -231,40 +236,10 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		if value := query.Get("request_id"); value != "" {
 			requestID = value
 		}
-		if requestID != call.RequestID {
-			if err := g.originalOwnerAuthority(ctx, authority, requestID); err != nil {
-				return nil, err
-			}
-		}
 	}
-	ledgerWrite := !isRoute || selected.Capability == "POST /api/v1/extensions/stage" || selected.Capability == "POST /api/v1/conversation/attachments"
-	if ledgerWrite && authority.ReplayPrincipal == nil && requestID == call.RequestID {
-		err := g.server.store.Read(ctx, func(tx *store.ReadTx) error {
-			record, err := store.GetOwnerRequest(ctx, tx.Q(), requestID)
-			if errors.Is(err, store.ErrNotFound) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			var original protocol.Principal
-			if err := json.Unmarshal([]byte(record.PrincipalJSON), &original); err != nil {
-				return err
-			}
-			authority.ReplayPrincipal = &original
-			authority.RequestDomain = record.Domain
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if method != http.MethodGet && method != http.MethodHead && args.EffectSeq < 1 && authority.ReplayPrincipal == nil {
-		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "positive effect_seq is required")
-	}
-	if method != http.MethodGet && method != http.MethodHead && (!ledgerWrite || authority.ReplayPrincipal == nil) {
-		if _, err := g.server.app.MainOwner(ctx, call.Actor, call.ExecutionID); err != nil {
-			return nil, err
+	if method != http.MethodGet && method != http.MethodHead {
+		if args.EffectSeq < 1 {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "positive effect_seq is required")
 		}
 	}
 	ctx = context.WithValue(ctx, mainOwnerRequestKey{}, owner)
@@ -317,39 +292,4 @@ func (g *OwnerTools) Call(ctx context.Context, call protocol.OwnerToolCall) (any
 		return result, response.Operation.Error
 	}
 	return result, nil
-}
-
-func (g *OwnerTools) originalOwnerAuthority(ctx context.Context, authority *app.OwnerExecution, request string) error {
-	return g.server.store.Read(ctx, func(tx *store.ReadTx) error {
-		record, err := store.GetOwnerRequest(ctx, tx.Q(), request)
-		if err == nil {
-			var original protocol.Principal
-			if err := json.Unmarshal([]byte(record.PrincipalJSON), &original); err != nil {
-				return err
-			}
-			authority.ReplayPrincipal = &original
-			authority.RequestDomain = record.Domain
-			return nil
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-		// An unrecorded native call retains its original namespace. Owner
-		// requests without a native mapping retain the shared owner namespace.
-		// App.Execute still arbitrates the exact hash atomically with any late
-		// original commit, so recovery never creates a second business identity.
-		var source string
-		err = tx.Q().QueryRowContext(ctx, `SELECT source FROM native_requests WHERE request_id=?`, request).Scan(&source)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if source != "" && source != "harness:"+authority.Actor.Subject {
-			return protocol.Errorf(protocol.CodeForbidden, "unrecorded native request belongs to another caller")
-		}
-		authority.RequestDomain = "owner"
-		if source != "" {
-			authority.RequestDomain = authority.Actor.DedupDomain()
-		}
-		return nil
-	})
 }

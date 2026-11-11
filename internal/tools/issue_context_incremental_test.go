@@ -16,7 +16,7 @@ import (
 func TestIssueContextAfterAliasActuallyAdvances(t *testing.T) {
 	e := newEnv(t)
 	raw, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Context paging", Project: "default", Intent: "Read sources"}})
-	op, err := e.svc.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "context-test"}, &protocol.Envelope{RequestID: "req_01M6VTQR5BF51VNGH14DTYHMPW", Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: raw}, app.CanonicalOwnerIssueCommand{Action: "create"})
+	op, err := e.svc.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "context-test"}, &protocol.Envelope{RequestID: "req_01M6VTQR5BF51VNGH14DTYHMPW", Operation: "issues.create", Target: protocol.Target{Type: "issue", ID: e.ids.New(protocol.PrefixWorkItem)}, Payload: raw}, app.CanonicalOwnerIssueCommand{Action: "create"})
 	if err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatal(op, err)
 	}

@@ -101,7 +101,7 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	internal["/runner/v1/usage/pending"] = "native usage journal owner request read"
 	internal["/runner/v1/usage/source"] = "native usage journal owner source registration"
 	internal["/runner/v1/usage/queue"] = "native usage journal owner cursor and request commit"
-	get := map[string]bool{"/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/upgrades/maintenance/status": true, "/status": true}
+	get := map[string]bool{"/backup/status": true, "/agents/status": true, "/agents/registration": true, "/repositories": true, "/archive/status": true, "/upgrades/status": true, "/upgrades/recovery/status": true, "/upgrades/maintenance/status": true, "/status": true}
 	for _, root := range []string{"../runner", "../../cmd/tend-runner", "../upgradectl", "../updater", "../maintenance"} {
 		err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {

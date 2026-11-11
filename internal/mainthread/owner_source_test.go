@@ -95,8 +95,8 @@ func TestHistoricalOwnerAnswerKeepsCurrentLogicalExecution(t *testing.T) {
 	if !found {
 		t.Fatal("historical answer bypassed current logical review")
 	}
-	if e.count(`SELECT COUNT(*) FROM request_records WHERE operation='decisions.resolve_from_message' AND parent_request_id=?`, oldRequest) != 1 {
-		t.Fatal("historical answer lost its original audit parent")
+	if e.count(`SELECT COUNT(*) FROM decisions WHERE decision_id=? AND status='answered' AND answered_message_id=?`, decision.ID, answer.ID) != 1 || e.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND message_id=? AND status='completed'`, oldRequest, answer.ID) != 1 {
+		t.Fatal("historical decision lost the actual answer or original completed execution")
 	}
 }
 
@@ -127,10 +127,10 @@ func TestDelegatedOwnerSourceSelection(t *testing.T) {
 		if _, err := tx.InsertMessage(t.Context(), store.MessageRow{MessageID: message, Author: "agent", Body: "Admitted delegated decision", RequestID: request}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO main_owner_effects(execution_id,effect_seq,step,call_id,request_id,owner_subject) VALUES('main',1,1,?,?,?)`, request, request, owner.Subject); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO main_owner_effects(execution_id,effect_seq,step,call_id,owner_subject) VALUES('main',1,1,?,?)`, request, owner.Subject); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO main_owner_message_authorities(message_id,request_id,owner_subject,actor_json) VALUES(?,?,?,'{"kind":"main_agent","subject":"main","thread":"native"}')`, message, request, owner.Subject)
+		_, err := tx.Exec(t.Context(), `INSERT INTO main_owner_message_authorities(message_id,execution_id,effect_seq,step,owner_subject,actor_json) VALUES(?,'main',1,1,?,'{"kind":"main_agent","subject":"main","thread":"native"}')`, message, owner.Subject)
 		return err
 	}); err != nil {
 		t.Fatal(err)

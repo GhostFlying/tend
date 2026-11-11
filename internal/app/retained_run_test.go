@@ -101,8 +101,8 @@ func TestRetainedRunContinuationRestoresOnlyOriginalHeldLease(t *testing.T) {
 	if authorized.Status != protocol.OpSucceeded {
 		t.Fatal(authorized)
 	}
-	if again := h.exec(owner, request, ContinueRetainedRun{}); !reflect.DeepEqual(again, authorized) {
-		t.Fatal("original continuation request did not replay")
+	if again := h.exec(owner, request, ContinueRetainedRun{}); again.Error == nil || again.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old continuation command did not observe current protection revision", again)
 	}
 	if h.lease(as.RunID).Status != store.LeaseLapsed || !reflect.DeepEqual(beforeRun, h.run(as.RunID)) {
 		t.Fatal("authorization itself renewed or changed the original Run")
@@ -321,7 +321,7 @@ func TestRetainedRunContinuationRejectsMutatedReplay(t *testing.T) {
 	p.Reason = "Different independent business action"
 	request.Payload, _ = json.Marshal(p)
 	op, err := h.app.Execute(t.Context(), owner, request, ContinueRetainedRun{})
-	if protocol.CodeOf(err) != protocol.CodeConflictPayload && (op.Error == nil || op.Error.Code != protocol.CodeConflictPayload) {
+	if protocol.CodeOf(err) != protocol.CodeStaleRevision && (op.Error == nil || op.Error.Code != protocol.CodeStaleRevision) {
 		t.Fatal("mutated original request was accepted", op, err)
 	}
 }

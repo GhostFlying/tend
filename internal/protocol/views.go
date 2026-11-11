@@ -165,15 +165,6 @@ type ArtifactDetail struct {
 	Acceptances       []AcceptanceView `json:"acceptances"`
 }
 
-// RequestView is the recorded outcome of a request.
-type RequestView struct {
-	RequestID string          `json:"request_id"`
-	Operation string          `json:"operation"`
-	Status    OpStatus        `json:"status"`
-	Result    json.RawMessage `json:"result,omitempty"`
-	Error     *Error          `json:"error,omitempty"`
-}
-
 // HostMaintenanceView separates maintenance from connectivity and slot capacity.
 type HostMaintenanceView struct {
 	Mode          string `json:"mode"`

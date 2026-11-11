@@ -93,6 +93,11 @@ func (r *Runner) settleRun(ctx context.Context, id string, mutate func() error) 
 
 func (r *Runner) finishJournal(ctx context.Context, id string) error {
 	_, err := r.settleRun(ctx, id, func() error { return r.cfg.Journal.Done(ctx, id) })
+	if err == nil {
+		if _, pruneErr := r.cfg.Journal.PruneSpool(ctx); pruneErr != nil {
+			r.cfg.Log.WarnContext(ctx, "settled spool cleanup remains pending", "run_id", id, "err", pruneErr)
+		}
+	}
 	return err
 }
 

@@ -17,8 +17,8 @@ func TestCompletionNoticeIsAtomicAndNotRepeated(t *testing.T) {
 	if first.Status != protocol.OpSucceeded {
 		t.Fatal(first)
 	}
-	if replay := h.exec(p, env, SubmitAcceptance{}); string(replay.Result) != string(first.Result) {
-		t.Fatal("a replay changed the acceptance result")
+	if replay := h.exec(p, env, SubmitAcceptance{}); replay.Error == nil || replay.Error.Code != protocol.CodeInvalidTransition || h.count("acceptances") != 1 || h.task(taskID).Lifecycle != protocol.TaskCompleted {
+		t.Fatal("closed acceptance changed its committed facts", replay)
 	}
 	// A new request reporting the finished acceptance cannot complete the
 	// task a second time, even though its request identity is different.

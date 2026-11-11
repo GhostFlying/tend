@@ -74,7 +74,7 @@ tend host authorize-bounded-maintenance "$HOST_ID" \
 
 保存输出的原 Envelope 后，移除 `--dry-run` 提交。CLI 直接使用 plan 内的 request/CAS，不自动刷新。owner grant 不代表 server 核验了 kernel start ticks 或 journal inode；installer 仍须在本机独立验证这些事实。
 
-owner 提交结果 unknown 时，用 `tend request show <original-id>` 读取原请求，必要时用 `tend request replay --file <original-envelope.json>` 重放完全相同的 Envelope。授权、停止、安装、health、ledger link、恢复 ACK 和原业务恢复的状态彼此独立。
+owner 提交结果 unknown 时，先读实际维护授权、升级批次及原 Run 的对账状态。保留原业务身份和输入，不能从缺少传输回执推断未执行。只有确认原动作未发生且仍有授权时，才可用 `tend operation submit --file original-envelope.json` 单次提交；其自身不对账、不刷新 CAS，也不自动重放外部动作。授权、停止、安装、health、ledger link、恢复 ACK 和原业务恢复分别核实。
 
 替换后的旧 Run 保留恢复隔离。通过 `tend run maintenance-reconciliation <original-run> --json` 取得原身份、全部 protection 和 `recovery_authorization_id`，独立核实后把这些原字段放入 `tend run continue-retained` 的完整 payload，并保留原 Task control revision。普通 host mode 恢复不释放这份隔离；缺少原授权、证据或尚有未知原生请求时不能假称旧工作已恢复。
 

@@ -8,7 +8,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestUsageCollectionControlRetiresWithoutClaimingCompleteAndReplaysOriginal(t *testing.T) {
+func TestUsageCollectionControlRetiresWithoutClaimingCompleteAndFencesLateRetry(t *testing.T) {
 	h := newHarness(t)
 	s := LocalUsageSource{ID: "source", WriterStopped: true, Source: []byte(`{"thread_id":"thread","provider":"codex","session_id":"thread"}`)}
 	if err := h.app.RegisterLocalUsage(t.Context(), s); err != nil {
@@ -21,8 +21,8 @@ func TestUsageCollectionControlRetiresWithoutClaimingCompleteAndReplaysOriginal(
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if again := h.exec(owner, env, ControlUsageCollection{}); string(again.Result) != string(op.Result) {
-		t.Fatal("request replay changed retirement", again)
+	if again := h.exec(owner, env, ControlUsageCollection{}); again.Error == nil || again.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("late request was applied again instead of reporting the current control version", again)
 	}
 	var view protocol.UsageCollectionPage
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -72,14 +72,16 @@ func TestLocalUsageResumeRewindsCursorWithoutBusinessExecution(t *testing.T) {
 		t.Fatal(all, err)
 	}
 	before := h.count("runs")
+	epoch := all[0].Collection.Epoch
 	env := h.env(protocol.OpResumeUsageCollection, protocol.Target{Type: "usage_source", ID: s.ID}, protocol.UsageCollectionControl{Rescan: true}, rev(all[0].Collection.Revision))
-	for range 2 {
-		if op := h.exec(owner, env, ControlUsageCollection{Resume: true}); op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
-		}
+	if op := h.exec(owner, env, ControlUsageCollection{Resume: true}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if repeated := h.exec(owner, env, ControlUsageCollection{Resume: true}); repeated.Error == nil || repeated.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("rescan repeated its epoch transition", repeated)
 	}
 	all, err = h.app.LocalUsageSources(t.Context(), "")
-	if err != nil || len(all) != 1 || string(all[0].Cursors) != "{}" || all[0].Coverage != "pending" || h.count("runs") != before {
+	if err != nil || len(all) != 1 || string(all[0].Cursors) != "{}" || all[0].Coverage != "pending" || all[0].Collection.Epoch != epoch+1 || h.count("runs") != before {
 		t.Fatal(all, err)
 	}
 }

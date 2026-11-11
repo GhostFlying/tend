@@ -79,33 +79,17 @@ func (a *App) ReadRolloutPreview(ctx context.Context, p protocol.Principal, runI
 			}
 		}
 		if run.Role == protocol.RoleIssueManager {
-			rows, err := tx.Q().QueryContext(ctx, `SELECT payload_json,result_json FROM manager_native_requests WHERE run_id=? AND method='turn' AND status='completed' AND error_json IS NULL ORDER BY rowid`, runID)
+			rows, err := tx.Q().QueryContext(ctx, `SELECT DISTINCT t.thread_id,t.turn_id FROM main_turns t JOIN hosted_executions h ON h.execution_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.turn_id IS NOT NULL AND t.turn_id<>'' ORDER BY t.request_id`, runID)
 			if err != nil {
 				return err
 			}
 			defer rows.Close()
 			for rows.Next() {
-				var payload, reply string
-				if err = rows.Scan(&payload, &reply); err != nil {
+				var source protocol.RolloutPreviewSource
+				if err = rows.Scan(&source.SessionID, &source.TurnID); err != nil {
 					return err
 				}
-				payload, err = store.ResolveJSON(ctx, tx.Q(), payload)
-				if err != nil {
-					return err
-				}
-				var request struct {
-					Thread string `json:"thread_id"`
-				}
-				var turn string
-				var response protocol.ManagerNativeReply
-				reply, err = store.ResolveJSON(ctx, tx.Q(), reply)
-				if err != nil {
-					rows.Close()
-					return err
-				}
-				if json.Unmarshal([]byte(payload), &request) == nil && json.Unmarshal([]byte(reply), &response) == nil && response.Error == "" && !response.Rejected && json.Unmarshal(response.Result, &turn) == nil && request.Thread != "" && turn != "" {
-					sources = append(sources, protocol.RolloutPreviewSource{SessionID: request.Thread, TurnID: turn})
-				}
+				sources = append(sources, source)
 			}
 			return rows.Err()
 		}

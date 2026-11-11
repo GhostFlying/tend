@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -37,7 +36,7 @@ func TestRolloutPreviewIsAnEphemeralReadOutsideMaintenanceAndLeases(t *testing.T
 		t.Fatal(op)
 	}
 	counts := map[string]int{}
-	for _, table := range []string{"request_records", "events", "outbox", "runs", "run_logs", "token_usage_facts", "token_usage_current", "token_usage_bindings", "token_usage_sources", "token_usage_local_sources", "token_usage_binding_revisions"} {
+	for _, table := range []string{"conversation_messages", "events", "outbox", "runs", "run_logs", "token_usage_facts", "token_usage_current", "token_usage_bindings", "token_usage_sources", "token_usage_local_sources", "token_usage_binding_revisions"} {
 		counts[table] = h.count(table)
 	}
 	prior := h.run(as.RunID)
@@ -138,29 +137,35 @@ func TestRolloutPreviewRejectsOtherPrincipalsAndOldRunners(t *testing.T) {
 	}
 }
 
-func TestRolloutPreviewHistoricalManagerUsesCompletedReplyEnvelope(t *testing.T) {
+func TestRolloutPreviewHistoricalManagerUsesActualNativeTurnFacts(t *testing.T) {
 	h, as := previewFixture(t)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	execution := contextProjectionTurn(t, h, "manager-session", "issue:"+issue.IssueID, issue.IssueID)
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE runs SET role='issue_manager' WHERE run_id=?`, as.RunID); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE runs SET role='issue_manager',native_thread_id='manager-session',native_turn_id='turn' WHERE run_id=?`, as.RunID); err != nil {
 			return err
 		}
-		for _, candidate := range []struct {
-			id, status string
-			reply      protocol.ManagerNativeReply
-		}{
-			{"valid", "completed", protocol.ManagerNativeReply{ID: "valid", Result: json.RawMessage(`"turn"`)}},
-			{"failed", "completed", protocol.ManagerNativeReply{ID: "failed", Result: json.RawMessage(`"foreign"`), Error: "failed"}},
-			{"rejected", "completed", protocol.ManagerNativeReply{ID: "rejected", Result: json.RawMessage(`"foreign"`), Rejected: true}},
-			{"pending", "pending", protocol.ManagerNativeReply{ID: "pending", Result: json.RawMessage(`"foreign"`)}},
-		} {
-			raw, _ := json.Marshal(candidate.reply)
-			if _, err := tx.Exec(t.Context(), `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,result_json,status,created_at) VALUES(?,?,'turn',?,?,?,?)`, candidate.id, as.RunID, `{"thread_id":"manager-session"}`, string(raw), candidate.status, h.clock.Now().UnixMilli()); err != nil {
-				return err
-			}
+		if _, err := tx.Exec(t.Context(), `UPDATE runner_coordination_executions SET private_snapshot=? WHERE execution_id=?`, `{"runner_run_id":"`+as.RunID+`"}`, execution); err != nil {
+			return err
 		}
-		return nil
+		_, err := tx.Exec(t.Context(), `UPDATE main_turns SET turn_id='turn',status='completed' WHERE request_id=?`, execution)
+		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+	// Starting/failed entries without an actual provider turn never gain one
+	// from an unrelated command's transport result.
+	for _, state := range []string{store.TurnStarting, store.TurnFailed, store.TurnRejected} {
+		pending := contextProjectionTurn(t, h, "manager-"+state, "issue:"+issue.IssueID, issue.IssueID)
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE runner_coordination_executions SET private_snapshot=? WHERE execution_id=?`, `{"runner_run_id":"`+as.RunID+`"}`, pending); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE main_turns SET status=? WHERE request_id=?`, state, pending)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()

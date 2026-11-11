@@ -2,12 +2,10 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"reflect"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -36,73 +34,57 @@ func recordTokenUsage(ctx context.Context, tx *store.Tx, sample protocol.TokenUs
 	if sample.RecordID != "" {
 		identity = sample.RecordID
 	}
-	// Execution-derived model metadata can become available after the native
-	// fact. Preserve counters and identity while appending a metadata revision.
-	if sample.RecordID != "" {
-		var previousRaw, previousSubject, previousRole string
-		e := tx.Q().QueryRowContext(ctx, `SELECT f.payload_json,f.subject,f.role FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE c.source=? AND c.request_id=?`, sample.Source, identity).Scan(&previousRaw, &previousSubject, &previousRole)
-		if e != nil && !errors.Is(e, sql.ErrNoRows) {
-			return e
-		}
-		if e == nil && previousSubject == subject && previousRole == role {
-			var previous protocol.TokenUsageSample
-			if e = json.Unmarshal([]byte(previousRaw), &previous); e != nil {
-				return fmt.Errorf("decode native usage: %w", e)
-			}
-			sample = mergeNativeModel(previous, sample)
-		}
-	}
-	raw, err := json.Marshal(sample)
-	if err != nil {
-		return err
-	}
-	// Attribution is immutable provenance too: an identical native payload
-	// reported under a different subject/role must survive deduplication so
-	// the conflicting ownership is visible and cannot be silently accepted.
-	hash := sha256.Sum256(append(append(append([]byte{}, raw...), []byte("\x00"+subject)...), []byte("\x00"+role)...))
-	digest := hex.EncodeToString(hash[:])
-	result, err := tx.Exec(ctx, `INSERT OR IGNORE INTO token_usage_facts(source,request_id,revision,payload_hash,payload_json,subject,role,received_at) VALUES(?,?,?,?,?,?,?,?)`, sample.Source, identity, sample.Revision, digest, string(raw), subject, role, now)
-	if err != nil {
-		return err
-	}
-	fresh, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if fresh == 0 {
-		return nil
-	}
-	seq, err := result.LastInsertId()
-	if err != nil {
-		return err
-	}
-	// A stale revision can contradict its earlier fact even after a newer
-	// contribution became current. Quarantine the request independent of order.
-	var conflict bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_facts WHERE source=? AND request_id=? AND revision=? AND payload_hash<>?)`, sample.Source, identity, sample.Revision, digest).Scan(&conflict); err != nil {
-		return err
-	}
-	if conflict {
-		_, err = tx.Exec(ctx, `UPDATE token_usage_current SET conflict=1 WHERE source=? AND request_id=?`, sample.Source, identity)
-		return err
-	}
-	var oldRaw, oldSubject, oldRole string
-	err = tx.Q().QueryRowContext(ctx, `SELECT f.payload_json,f.subject,f.role FROM token_usage_current c JOIN token_usage_facts f ON f.seq=c.fact_seq WHERE c.source=? AND c.request_id=?`, sample.Source, identity).Scan(&oldRaw, &oldSubject, &oldRole)
+	// Resolve the current measurement from typed facts, independent of prices
+	// and derived attribution. Model/purpose enrichment retains real revisions.
+	var old protocol.TokenUsageRecord
+	err := tx.Q().QueryRowContext(ctx, `SELECT `+store.UsageFactColumns("f")+` FROM token_usage_current c JOIN token_usage_fact_details f ON f.seq=c.fact_seq WHERE c.source=? AND c.request_id=?`, sample.Source, identity).Scan(store.UsageFactDestinations(&old)...)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	hasOld := err == nil
+	if sample.RecordID != "" && hasOld && old.Subject == subject && old.Role == role {
+		sample = mergeNativeModel(old.TokenUsageSample, sample)
+	}
+	// Retain contradictory variants, including stale revisions. Exact typed
+	// equality is the native business key's consistency check, not a cache of
+	// HTTP parameters or serialized TokenUsageSample data.
+	rows, err := tx.Q().QueryContext(ctx, `SELECT `+store.UsageFactColumns("f")+` FROM token_usage_fact_details f WHERE f.source=? AND f.request_id=? AND f.revision=?`, sample.Source, identity, sample.Revision)
+	if err != nil {
+		return err
+	}
+	var duplicate, conflict bool
+	for rows.Next() {
+		var previous protocol.TokenUsageRecord
+		if err = rows.Scan(store.UsageFactDestinations(&previous)...); err != nil {
+			break
+		}
+		equal := previous.Subject == subject && previous.Role == role && reflect.DeepEqual(previous.TokenUsageSample, sample)
+		duplicate = duplicate || equal
+		conflict = conflict || !equal
+	}
 	if err == nil {
-		var old protocol.TokenUsageSample
-		if err = json.Unmarshal([]byte(oldRaw), &old); err != nil {
-			return fmt.Errorf("decode persisted usage: %w", err)
-		}
-		if oldSubject != subject || oldRole != role || (old.Revision == sample.Revision && oldRaw != string(raw)) {
-			_, err = tx.Exec(ctx, `UPDATE token_usage_current SET conflict=1 WHERE source=? AND request_id=?`, sample.Source, identity)
-			return err
-		}
-		if sample.Revision <= old.Revision || (old.Settlement == "final" && sample.Settlement != "final") {
-			return nil
-		}
+		err = rows.Err()
+	}
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if duplicate {
+		return nil
+	}
+	seq, err := store.InsertUsageFact(ctx, tx, sample, subject, role, now)
+	if err != nil {
+		return err
+	}
+	if conflict || (hasOld && (old.Subject != subject || old.Role != role)) {
+		_, err = tx.Exec(ctx, `UPDATE token_usage_current SET conflict=1 WHERE source=? AND request_id=?`, sample.Source, identity)
+		return err
+	}
+	if hasOld && (sample.Revision <= old.Revision || (old.Settlement == "final" && sample.Settlement != "final")) {
+		return nil
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO token_usage_current(source,request_id,fact_seq) VALUES(?,?,?) ON CONFLICT(source,request_id) DO UPDATE SET fact_seq=excluded.fact_seq`, sample.Source, identity, seq)
 	if err != nil {

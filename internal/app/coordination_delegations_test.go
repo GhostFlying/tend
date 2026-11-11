@@ -19,16 +19,17 @@ func delegationPayload(source string) protocol.CreateIssuePayload {
 
 func TestOwnerDelegationPreservesSourceFailureAndPublishesOrdinaryResponsibility(t *testing.T) {
 	h := hostedManagerHarness(t)
+	target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	source, delivery := h.say("Delegate this goal to a suitable ordinary Agent")
 	turn := startHostedReview(t, h, "main", delivery)
 	payload := delegationPayload(source)
 	payload.Assignee = nil
 	payload.Owner = &protocol.IssueOwnerRequest{CategoryID: "planner", Reason: "Accept the continuing responsibility"}
 	cmd := CanonicalOwnerIssueCommand{Action: "create"}
-	bad := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, payload, cmd)
+	bad := hostedEffect(t, h, mainAgent, turn, 1, target, nil, payload, cmd)
 	expectWorkCode(t, bad, protocol.CodeInvalidRequest)
 	payload.ExpectedSourceRevision = rev(1)
-	good := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, payload, cmd)
+	good := hostedEffect(t, h, mainAgent, turn, 2, target, nil, payload, cmd)
 	if good.Status != protocol.OpSucceeded {
 		t.Fatal(good)
 	}
@@ -73,6 +74,7 @@ func TestDelegationFailureRemainsBlockedAfterMessageReview(t *testing.T) {
 	for _, sourceKind := range []string{"missing_revision", "missing_source", "revision_in_id", "unadmitted_source"} {
 		t.Run(sourceKind, func(t *testing.T) {
 			h := hostedManagerHarness(t)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 			id, delivery := h.say("Repair these three PWA problems")
 			turn := startHostedReview(t, h, "main", delivery)
 			p := delegationPayload(id)
@@ -85,7 +87,7 @@ func TestDelegationFailureRemainsBlockedAfterMessageReview(t *testing.T) {
 				p.SourceMessageID = unconsumedDelegationSource(t, h)
 			}
 			cmd := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "create"}, ExecutionID: turn.RequestID, EffectSeq: 1}
-			env := h.env(cmd.Operation(), protocol.Target{Type: "issue"}, p, nil)
+			env := h.env(cmd.Operation(), target, p, nil)
 			op := h.exec(mainAgent, env, cmd)
 			if op.Status != protocol.OpFailed {
 				t.Fatal(op)
@@ -138,11 +140,12 @@ func TestCorrectedDelegationResolvesOnlyItsExactSource(t *testing.T) {
 	for _, correction := range []string{"same_source", "other_source"} {
 		t.Run(correction, func(t *testing.T) {
 			h := hostedManagerHarness(t)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 			id, delivery := h.say("Repair the PWA")
 			turn := startHostedReview(t, h, "main", delivery)
 			p := delegationPayload(id)
 			cmd := CanonicalOwnerIssueCommand{Action: "create"}
-			bad := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd)
+			bad := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd)
 			expectWorkCode(t, bad, protocol.CodeInvalidRequest)
 			source := id
 			if correction == "other_source" {
@@ -168,7 +171,7 @@ func TestCorrectedDelegationResolvesOnlyItsExactSource(t *testing.T) {
 			}
 			p.SourceMessageID = source
 			p.ExpectedSourceRevision = rev(1)
-			good := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, p, cmd)
+			good := hostedEffect(t, h, mainAgent, turn, 2, target, nil, p, cmd)
 			if good.Status != protocol.OpSucceeded {
 				t.Fatal(good)
 			}
@@ -190,6 +193,7 @@ func TestCorrectedDelegationResolvesOnlyItsExactSource(t *testing.T) {
 
 func TestDelegationFailureReceiptAndResponsibilityCommitTogether(t *testing.T) {
 	h := hostedManagerHarness(t)
+	target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	id, delivery := h.say("Delegate repair")
 	turn := startHostedReview(t, h, "main", delivery)
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
@@ -199,7 +203,7 @@ func TestDelegationFailureReceiptAndResponsibilityCommitTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "create"}, ExecutionID: turn.RequestID, EffectSeq: 1}
-	env := h.env(cmd.Operation(), protocol.Target{Type: "issue"}, delegationPayload(id), nil)
+	env := h.env(cmd.Operation(), target, delegationPayload(id), nil)
 	_, err := h.app.Execute(t.Context(), mainAgent, env, cmd)
 	if err == nil {
 		t.Fatal("injected error was ignored")
@@ -207,16 +211,10 @@ func TestDelegationFailureReceiptAndResponsibilityCommitTogether(t *testing.T) {
 	if h.count("coordination_delegation_attempts") != 0 {
 		t.Fatal("partial responsibility persisted")
 	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var n int
-		err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM request_records WHERE request_id=?`, env.RequestID).Scan(&n)
-		if n != 0 {
-			t.Fatal("failure receipt committed without responsibility")
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	if h.count("events") == 0 || h.count("issue_controls") != 0 || h.count("tasks") != 0 {
+		t.Fatal("failed responsibility transaction changed actual business objects")
 	}
+	assertNoGenericLedger(t, h)
 }
 
 func TestPlannerInputLeavesRecordFieldsToServer(t *testing.T) {
@@ -252,11 +250,14 @@ func TestOneSourceMultipleIssueFailuresRemainIndependent(t *testing.T) {
 	report := delegationPayload(id)
 	report.Plan.Title = "Prepare the report"
 	report.Plan.Intent = "Produce an independent report"
+	repairTarget := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
+	reportTarget := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	for i, p := range []protocol.CreateIssuePayload{repair, report} {
-		expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, int64(i+1), protocol.Target{Type: "issue"}, nil, p, cmd), protocol.CodeInvalidRequest)
+		target := []protocol.Target{repairTarget, reportTarget}[i]
+		expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, int64(i+1), target, nil, p, cmd), protocol.CodeInvalidRequest)
 	}
 	repair.ExpectedSourceRevision = rev(1)
-	if op := hostedEffect(t, h, mainAgent, turn, 3, protocol.Target{Type: "issue"}, nil, repair, cmd); op.Status != protocol.OpSucceeded {
+	if op := hostedEffect(t, h, mainAgent, turn, 3, repairTarget, nil, repair, cmd); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -274,10 +275,11 @@ func TestClarificationInheritsDelegationFailureAndItsCorrection(t *testing.T) {
 	for _, correct := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unresolved", true: "corrected"}[correct], func(t *testing.T) {
 			h := hostedManagerHarness(t)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 			id, delivery := h.say("Repair the mobile PWA")
 			turn := startHostedReview(t, h, "main", delivery)
 			p := delegationPayload(id)
-			failed := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
+			failed := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, CanonicalOwnerIssueCommand{Action: "create"})
 			expectWorkCode(t, failed, protocol.CodeInvalidRequest)
 			wait := AwaitTurnClarification{RequestID: turn.RequestID}
 			if op := h.exec(mainAgent, h.env(wait.Operation(), protocol.Target{Type: "logical_turn", ID: turn.RequestID}, protocol.TurnClarification{Question: "Which mobile browser?"}, nil), wait); op.Status != protocol.OpSucceeded {
@@ -309,7 +311,7 @@ func TestClarificationInheritsDelegationFailureAndItsCorrection(t *testing.T) {
 				p.ExpectedSourceRevision = rev(1)
 				checkCorrection := func(request, operation string, payload protocol.CreateIssuePayload, want bool) {
 					t.Helper()
-					env := h.env(operation, protocol.Target{Type: "issue"}, payload, nil)
+					env := h.env(operation, target, payload, nil)
 					if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 						got, err := inheritedDelegationCorrectionAdmitted(t.Context(), &Exec{Principal: mainAgent, Env: env}, tx.Q(), request, payload.SourceMessageID, operation)
 						if err == nil && got != want {
@@ -327,19 +329,19 @@ func TestClarificationInheritsDelegationFailureAndItsCorrection(t *testing.T) {
 				checkCorrection(next.RequestID, "issues.create", changedIntent, false)
 				checkCorrection(next.RequestID, "issues.reuse", p, false)
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE domain=? AND request_id=?`, mainAgent.DedupDomain(), failed.RequestID)
+					_, err := tx.Exec(t.Context(), `UPDATE coordination_delegation_attempts SET error_json='{"code":"unknown_outcome","message":"unknown original effect"}' WHERE domain=? AND request_id=?`, mainAgent.DedupDomain(), failed.RequestID)
 					return err
 				}); err != nil {
 					t.Fatal(err)
 				}
 				checkCorrection(next.RequestID, "issues.create", p, false)
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='failed' WHERE domain=? AND request_id=?`, mainAgent.DedupDomain(), failed.RequestID)
+					_, err := tx.Exec(t.Context(), `UPDATE coordination_delegation_attempts SET error_json='{"code":"invalid_request","message":"missing expected source revision"}' WHERE domain=? AND request_id=?`, mainAgent.DedupDomain(), failed.RequestID)
 					return err
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if op := hostedEffect(t, h, mainAgent, next, 2, protocol.Target{Type: "issue"}, nil, p, CanonicalOwnerIssueCommand{Action: "create"}); op.Status != protocol.OpSucceeded {
+				if op := hostedEffect(t, h, mainAgent, next, 2, target, nil, p, CanonicalOwnerIssueCommand{Action: "create"}); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
 				checkCorrection(next.RequestID, "issues.create", p, false)
@@ -374,10 +376,11 @@ func TestMalformedDelegationRetainsItsDeterministicReceipt(t *testing.T) {
 	for _, payload := range []string{`[]`, `true`, `"bad"`, `{"plan":[]}`} {
 		t.Run(payload, func(t *testing.T) {
 			h := hostedManagerHarness(t)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 			_, delivery := h.say("Repair the PWA")
 			turn := startHostedReview(t, h, "main", delivery)
 			cmd := HostedCoordinationCommand{Command: CanonicalOwnerIssueCommand{Action: "create"}, ExecutionID: turn.RequestID, EffectSeq: 1}
-			env := h.env(cmd.Operation(), protocol.Target{Type: "issue"}, nil, nil)
+			env := h.env(cmd.Operation(), target, nil, nil)
 			env.Payload = json.RawMessage(payload)
 			op, err := h.app.Execute(t.Context(), mainAgent, env, cmd)
 			if err != nil || op.Status != protocol.OpFailed || op.Error == nil || op.Error.Code != protocol.CodeInvalidRequest {
@@ -393,6 +396,7 @@ func TestMalformedDelegationRetainsItsDeterministicReceipt(t *testing.T) {
 
 func TestNestedDelegationSourceFailureCannotBeClearedByAnotherSource(t *testing.T) {
 	h := hostedManagerHarness(t)
+	target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	inventoryCategory(t, h, protocol.DefaultIssueManagerCategory, 0, "active")
 	id, delivery := h.say("Repair the PWA")
 	turn := startHostedReview(t, h, "main", delivery)
@@ -402,10 +406,10 @@ func TestNestedDelegationSourceFailureCannotBeClearedByAnotherSource(t *testing.
 	p.Assignee = nil
 	p.Manager = &protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, SourceMessageID: other, Reason: "Delegate the repair"}
 	cmd := CanonicalOwnerIssueCommand{Action: "create"}
-	bad := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd)
+	bad := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd)
 	expectWorkCode(t, bad, protocol.CodeForbidden)
 	p.Manager.SourceMessageID = id
-	good := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, p, cmd)
+	good := hostedEffect(t, h, mainAgent, turn, 2, target, nil, p, cmd)
 	if good.Status != protocol.OpSucceeded {
 		t.Fatal(good)
 	}
@@ -422,17 +426,18 @@ func TestNestedDelegationSourceFailureCannotBeClearedByAnotherSource(t *testing.
 
 func TestEquivalentCorrectedDelegationUsesCanonicalPlan(t *testing.T) {
 	h := hostedManagerHarness(t)
+	target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	id, delivery := h.say("Repair the PWA")
 	turn := startHostedReview(t, h, "main", delivery)
 	p := delegationPayload(id)
 	p.Plan.Project = ""
 	cmd := CanonicalOwnerIssueCommand{Action: "create"}
-	expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd), protocol.CodeInvalidRequest)
+	expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd), protocol.CodeInvalidRequest)
 	p.ExpectedSourceRevision = rev(1)
 	p.Plan.Project = "default"
 	p.Plan.Stages = []protocol.IssueStage{}
 	p.Plan.CompletionCriteria = []string{}
-	if op := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, p, cmd); op.Status != protocol.OpSucceeded {
+	if op := hostedEffect(t, h, mainAgent, turn, 2, target, nil, p, cmd); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -450,19 +455,21 @@ func TestDelegationEffectCollisionRequiresTheSameSuccessfulIntention(t *testing.
 	for _, same := range []bool{false, true} {
 		t.Run(map[bool]string{false: "different_intention", true: "same_intention"}[same], func(t *testing.T) {
 			h := hostedManagerHarness(t)
+			target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 			id, delivery := h.say("Repair the PWA and prepare a separate report")
 			turn := startHostedReview(t, h, "main", delivery)
 			p := delegationPayload(id)
 			p.ExpectedSourceRevision = rev(1)
 			cmd := CanonicalOwnerIssueCommand{Action: "create"}
-			if op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd); op.Status != protocol.OpSucceeded {
+			if op := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			if !same {
+				target.ID = h.ids.New(protocol.PrefixWorkItem)
 				p.Plan.Title = "Prepare the separate report"
 				p.Plan.Intent = "Deliver a report independently of the repair"
 			}
-			expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd), protocol.CodeDuplicateEffect)
+			expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd), protocol.CodeDuplicateEffect)
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 				reason, err := delegationBlockReason(t.Context(), tx.Q(), turn.RequestID)
 				if err == nil && (reason == "") != same {
@@ -473,7 +480,7 @@ func TestDelegationEffectCollisionRequiresTheSameSuccessfulIntention(t *testing.
 				t.Fatal(err)
 			}
 			if !same {
-				if op := hostedEffect(t, h, mainAgent, turn, 2, protocol.Target{Type: "issue"}, nil, p, cmd); op.Status != protocol.OpSucceeded {
+				if op := hostedEffect(t, h, mainAgent, turn, 2, target, nil, p, cmd); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
 				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -490,26 +497,27 @@ func TestDelegationEffectCollisionRequiresTheSameSuccessfulIntention(t *testing.
 	}
 }
 
-func TestPreMigrationDelegationReceiptStillProvesExactDuplicate(t *testing.T) {
+func TestMissingDelegationBusinessProofCannotBeInventedFromRetiredReceipt(t *testing.T) {
 	h := hostedManagerHarness(t)
+	target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	id, delivery := h.say("Repair the PWA")
 	turn := startHostedReview(t, h, "main", delivery)
 	p := delegationPayload(id)
 	p.ExpectedSourceRevision = rev(1)
 	cmd := CanonicalOwnerIssueCommand{Action: "create"}
-	if op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd); op.Status != protocol.OpSucceeded {
+	if op := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	// Model the empty journal added by migration to an existing request ledger.
+	// Removing the real intent proof cannot be repaired by a retired receipt cache.
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM coordination_delegation_attempts`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd), protocol.CodeDuplicateEffect)
-	if h.count("coordination_delegation_attempts") != 0 {
-		t.Fatal("historical successful effect became a new failure")
+	expectWorkCode(t, hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd), protocol.CodeDuplicateEffect)
+	if h.count("coordination_delegation_attempts") != 1 {
+		t.Fatal("missing intent proof did not remain an explicit unresolved attempt")
 	}
 	if h.count("issue_controls") != 1 {
 		t.Fatal("duplicate created another Issue")
@@ -518,16 +526,17 @@ func TestPreMigrationDelegationReceiptStillProvesExactDuplicate(t *testing.T) {
 
 func TestInvalidDelegationSequenceAndLinkedIssueKeepFailureVisible(t *testing.T) {
 	h := hostedManagerHarness(t)
+	target := protocol.Target{Type: "issue", ID: h.ids.New(protocol.PrefixWorkItem)}
 	id, delivery := h.say("Repair the PWA and prepare a separate report")
 	turn := startHostedReview(t, h, "main", delivery)
 	p := delegationPayload(id)
 	p.ExpectedSourceRevision = rev(1)
 	cmd := CanonicalOwnerIssueCommand{Action: "create"}
-	bad := hostedEffect(t, h, mainAgent, turn, 0, protocol.Target{Type: "issue"}, nil, p, cmd)
+	bad := hostedEffect(t, h, mainAgent, turn, 0, target, nil, p, cmd)
 	expectWorkCode(t, bad, protocol.CodeInvalidRequest)
 	p.Plan.Title = "Prepare the separate report"
 	p.Plan.Intent = "Produce the report"
-	good := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, p, cmd)
+	good := hostedEffect(t, h, mainAgent, turn, 1, target, nil, p, cmd)
 	if good.Status != protocol.OpSucceeded {
 		t.Fatal(good)
 	}

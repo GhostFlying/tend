@@ -24,7 +24,7 @@ func delegationCommand(cmd Command) (HostedCoordinationCommand, bool) {
 }
 
 // recordDelegationAttempt runs outside the Apply savepoint but in the same
-// transaction as its request receipt. Authorization failures never reach here.
+// transaction as its business effect. Authorization failures never reach here.
 func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Command, failure *protocol.Error) (bool, error) {
 	c, ok := delegationCommand(cmd)
 	if !ok {
@@ -49,26 +49,8 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 	intentJSON := delegationCanonical(ctx, x, tx.Q(), c.Operation())
 	correction := x.validatedDelegationCorrection
 	if failure != nil && failure.Code == protocol.CodeDuplicateEffect {
-		var details struct {
-			Original string `json:"original_request_id"`
-		}
-		_ = json.Unmarshal(failure.Details, &details)
-		// Older successful receipts predate the attempt journal. Exact payload
-		// identity still proves that their business effect is already recorded.
-		original, err := store.GetRequest(ctx, tx.Q(), x.RequestDomain(), details.Original)
-		if err == nil && (original.Status == protocol.OpSucceeded || original.Status == protocol.OpAccepted) {
-			hash, err := protocol.PayloadHash(x.Env)
-			if err != nil {
-				return false, err
-			}
-			if hash == original.PayloadHash {
-				return false, nil
-			}
-		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return false, err
-		}
 		var same bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM coordination_delegation_attempts WHERE domain=? AND request_id=? AND operation=? AND source_message_id=? AND target_id=? AND intent_key=? AND succeeded=1)`, x.RequestDomain(), details.Original, c.Operation(), source, x.Env.Target.ID, intent).Scan(&same); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM coordination_delegation_attempts WHERE domain=? AND execution_id=? AND operation=? AND source_message_id=? AND target_id=? AND intent_key=? AND succeeded=1)`, x.RequestDomain(), c.ExecutionID, c.Operation(), source, x.Env.Target.ID, intent).Scan(&same); err != nil {
 			return false, err
 		}
 		if same {
@@ -82,6 +64,18 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 			return false, err
 		}
 		errorJSON = string(encoded)
+	}
+	var oldExecution, oldLogical, oldOperation, oldSource, oldTarget, oldIntent, oldError, oldCorrection string
+	var succeeded bool
+	err = tx.Q().QueryRowContext(ctx, `SELECT execution_id,logical_turn_id,operation,source_message_id,target_id,intent_key,succeeded,error_json,corrects_request_id FROM coordination_delegation_attempts WHERE domain=? AND request_id=?`, x.RequestDomain(), x.Env.RequestID).Scan(&oldExecution, &oldLogical, &oldOperation, &oldSource, &oldTarget, &oldIntent, &succeeded, &oldError, &oldCorrection)
+	if err == nil {
+		if oldExecution != c.ExecutionID || oldLogical != logical || oldOperation != c.Operation() || oldSource != source || oldTarget != x.Env.Target.ID || oldIntent != intent || succeeded != (failure == nil) || oldError != errorJSON || oldCorrection != correction {
+			return false, protocol.Errorf(protocol.CodeConflictPayload, "delegation attempt identity already describes another actual outcome")
+		}
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO coordination_delegation_attempts(domain,request_id,execution_id,logical_turn_id,operation,source_message_id,target_id,intent_key,succeeded,error_json,created_at,intent_json,corrects_request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, x.RequestDomain(), x.Env.RequestID, c.ExecutionID, logical, c.Operation(), source, x.Env.Target.ID, intent, failure == nil, errorJSON, x.Now.UnixMilli(), string(intentJSON), correction); err != nil {
 		return false, err
@@ -97,7 +91,7 @@ func recordDelegationAttempt(ctx context.Context, x *Exec, tx *store.Tx, cmd Com
 }
 
 // The intended contract stays fixed while source/CAS fields are corrected.
-// Creation has no target ID, so source alone cannot distinguish two Issues.
+// The real target identity distinguishes separate Issues for the same source.
 func delegationIntent(ctx context.Context, x *Exec, q store.Querier, operation string) string {
 	return fmt.Sprintf("%x", sha256.Sum256(delegationCanonical(ctx, x, q, operation)))
 }
@@ -198,10 +192,9 @@ func inheritedDelegationCorrectionAdmitted(ctx context.Context, x *Exec, q store
  SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?
  UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility p ON l.resumed_by=p.id WHERE l.status='awaiting_completion')
  SELECT DISTINCT f.execution_id FROM coordination_delegation_attempts f
- JOIN request_records r ON r.domain=f.domain AND r.request_id=f.request_id
  WHERE f.logical_turn_id IN responsibility AND f.logical_turn_id<>(SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?)
  AND f.domain=? AND f.operation=? AND f.target_id=? AND f.source_message_id=? AND f.intent_key=? AND f.succeeded=0
- AND r.operation=f.operation AND r.status='failed' AND json_valid(f.error_json) AND json_extract(f.error_json,'$.code') IN ('invalid_request','stale_revision')
+ AND json_valid(f.error_json) AND json_extract(f.error_json,'$.code') IN ('invalid_request','stale_revision')
  AND NOT EXISTS(SELECT 1 FROM coordination_delegation_attempts s WHERE s.logical_turn_id IN responsibility AND s.source_message_id=f.source_message_id AND s.operation=f.operation AND s.target_id=f.target_id AND s.intent_key=f.intent_key AND s.succeeded=1 AND s.seq>f.seq)`, execution, execution, x.RequestDomain(), operation, x.Env.Target.ID, source, intent)
 	if err != nil {
 		return false, err
@@ -249,8 +242,8 @@ func validateDelegationCorrection(ctx context.Context, x *Exec, q store.Querier,
 	var before, source, target, op, status, code, oldExecution, inheritedCorrection string
 	err := q.QueryRowContext(ctx, `WITH RECURSIVE responsibility(id) AS (
  SELECT ? UNION SELECT l.logical_turn_id FROM logical_turns l JOIN responsibility r ON l.resumed_by=r.id)
- SELECT f.intent_json,f.source_message_id,f.target_id,f.operation,r.status,r.error_code,f.execution_id,f.corrects_request_id
- FROM coordination_delegation_attempts f JOIN request_records r ON r.domain=f.domain AND r.request_id=f.request_id
+ SELECT f.intent_json,f.source_message_id,f.target_id,f.operation,'failed',json_extract(f.error_json,'$.code'),f.execution_id,f.corrects_request_id
+ FROM coordination_delegation_attempts f
  WHERE f.domain=? AND f.request_id=? AND f.succeeded=0 AND f.logical_turn_id IN responsibility`, logical, x.RequestDomain(), original).Scan(&before, &source, &target, &op, &status, &code, &oldExecution, &inheritedCorrection)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "correction requires a failed delegation in this responsibility")

@@ -21,7 +21,7 @@ func TestCanonicalOriginalLookupUsesPartialIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		details = append(details, detail)
-		if strings.Contains(detail, "SEARCH retained_original_bodies") && strings.Contains(detail, "retained_original_bodies_canonical") {
+		if strings.Contains(detail, "SEARCH w") && strings.Contains(detail, "retained_original_windows_canonical") {
 			indexed = true
 		}
 	}

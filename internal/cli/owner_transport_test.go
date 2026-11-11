@@ -12,7 +12,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestOwnerLostAnswerRequiresOriginalRequestReconciliation(t *testing.T) {
+func TestOwnerLostAnswerRequiresBusinessStateReconciliation(t *testing.T) {
 	f := newFakeServer(t)
 	original := protocol.Envelope{RequestID: "req_01ARZ3NDEKTSV4RRFFQ69G5FAV", Operation: "decisions.respond", Target: protocol.Target{Type: "decision", ID: "dec_original"}, Payload: json.RawMessage(`{"version":3,"option":"retry","text":"original choice"}`)}
 	raw, err := json.Marshal(original)
@@ -35,22 +35,22 @@ func TestOwnerLostAnswerRequiresOriginalRequestReconciliation(t *testing.T) {
 		}
 		_ = connection.Close()
 	})
-	f.answer("GET /api/v1/requests/"+original.RequestID, protocol.RequestView{RequestID: original.RequestID, Operation: original.Operation, Status: protocol.OpSucceeded})
+	f.answer("GET /api/v1/decisions/"+original.Target.ID+"/continuation", protocol.DecisionContinuationView{DecisionID: original.Target.ID, State: "completed", DecisionVersion: 3})
 	te := newTestEnv(t, f.srv.URL)
-	if code := te.main("request", "replay", "--file", file); code != exitError {
+	if code := te.main("operation", "submit", "--file", file); code != exitError {
 		t.Fatalf("lost reply exit=%d: %s", code, te.errOut)
 	}
 	if sent := f.seen("POST /api/v1/ops"); len(sent) != 1 {
 		t.Fatalf("unknown write was automatically repeated: %d POSTs", len(sent))
 	}
-	if !strings.Contains(te.errOut.String(), "unknown_outcome") || !strings.Contains(te.errOut.String(), "request show "+original.RequestID) {
+	if !strings.Contains(te.errOut.String(), "unknown_outcome") || !strings.Contains(te.errOut.String(), "decision-continuation show "+original.Target.ID) {
 		t.Fatalf("missing original-request reconciliation: %s", te.errOut)
 	}
-	if code := te.main("request", "show", original.RequestID, "--json"); code != exitOK {
+	if code := te.main("decision-continuation", "show", original.Target.ID, "--json"); code != exitOK {
 		t.Fatalf("read original request=%d: %s", code, te.errOut)
 	}
-	var view protocol.RequestView
-	if err := json.Unmarshal(te.out.Bytes(), &view); err != nil || view.RequestID != original.RequestID || view.Status != protocol.OpSucceeded {
+	var view protocol.DecisionContinuationView
+	if err := json.Unmarshal(te.out.Bytes(), &view); err != nil || view.DecisionID != original.Target.ID || view.State != "completed" {
 		t.Fatalf("original accepted result unavailable: %+v %v", view, err)
 	}
 	if len(f.seen("POST /api/v1/ops")) != 1 {
@@ -69,7 +69,7 @@ func TestOwnerEnvelopeSuccessAndRejectionStaySingleAttempt(t *testing.T) {
 			}
 			f.answer("POST /api/v1/ops", response)
 			te := newTestEnv(t, f.srv.URL)
-			code := te.main("request", "replay", "--data", `{"request_id":"req_01ARZ3NDEKTSV4RRFFQ69G5FAV","operation":"decisions.respond","target":{"type":"decision","id":"dec_original"},"payload":{"version":3,"option":"retry"}}`)
+			code := te.main("operation", "submit", "--data", `{"request_id":"req_01ARZ3NDEKTSV4RRFFQ69G5FAV","operation":"decisions.respond","target":{"type":"decision","id":"dec_original"},"payload":{"version":3,"option":"retry"}}`)
 			want := exitOK
 			if reject {
 				want = exitError
@@ -119,16 +119,22 @@ func TestOwnerCopiedWritePathsDoNotRepeatUnknownSubmission(t *testing.T) {
 				}
 				_ = connection.Close()
 			})
-			f.answer("GET /api/v1/requests/"+original.RequestID, protocol.RequestView{RequestID: original.RequestID, Operation: original.Operation, Status: protocol.OpSucceeded})
+			readArgs := map[string][]string{
+				"repo":     {"repo", "show", "new", "--json"},
+				"category": {"category", "show", "review", "--json"},
+				"agents":   {"agents", "concurrency", "show", "pool", "--json"},
+			}[args[0]]
+			readPath := map[string]string{"repo": "/api/v1/repos/new", "category": "/api/v1/categories/review", "agents": "/api/v1/concurrency-groups/pool"}[args[0]]
+			f.answer("GET "+readPath, map[string]any{"id": original.Target.ID, "repo": original.Target.ID, "category_id": original.Target.ID, "revision": 5, "control_revision": 5})
 			actual := append(append([]string(nil), args...), "--request-id", original.RequestID)
 			if code := te.main(actual...); code != exitError || len(f.seen("POST /api/v1/ops")) != 1 || !strings.Contains(te.errOut.String(), "unknown_outcome") || !strings.Contains(te.errOut.String(), original.RequestID) {
 				t.Fatalf("unknown write exit=%d calls=%d: %s", code, len(f.seen("POST /api/v1/ops")), te.errOut)
 			}
-			if code := te.main("request", "show", original.RequestID, "--json"); code != exitOK {
+			if code := te.main(readArgs...); code != exitOK {
 				t.Fatal(code, te.errOut)
 			}
-			var view protocol.RequestView
-			if err := json.Unmarshal(te.out.Bytes(), &view); err != nil || view.RequestID != original.RequestID || view.Status != protocol.OpSucceeded {
+			var view map[string]any
+			if err := json.Unmarshal(te.out.Bytes(), &view); err != nil || view[map[string]string{"repo": "repo", "category": "category_id", "agents": "id"}[args[0]]] != original.Target.ID || len(f.seen("GET "+readPath)) != 1 {
 				t.Fatal(view, err)
 			}
 			stillSaved, err := os.ReadFile(file)

@@ -61,8 +61,11 @@ func TestFault_ManagerReceiptReaderLeaseExpiryNotifiesSupervisorOnce(t *testing.
 	if h.run(reader.RunID).ObservedState != protocol.RunUnknown || !reflect.DeepEqual(h.run(original.RunID), beforeOriginal) || !reflect.DeepEqual(h.task(reader.TaskID), beforeTask) {
 		t.Fatal("notification changed retained execution or owner control")
 	}
-	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 || h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='pending' AND result_json IS NULL`, models) != 1 {
-		t.Fatal("notification settled or replaced original pending operations")
+	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 || h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=?`, models) != 0 {
+		t.Fatal("notification changed the pending receipt or archived an ordinary read RPC")
+	}
+	if _, ready, exists := h.app.nativeCalls.result(reader.RunID, models); !exists || ready {
+		t.Fatal("lease notification settled the still-pending read transport")
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM leases WHERE lease_id=? AND status='lapsed'`, reader.LeaseID) != 1 || h.countWhere(`SELECT COUNT(*) FROM run_agent_executions WHERE run_id=? AND pin_json=?`, reader.RunID, string(mustJSON(t, reader.Execution))) != 1 {
 		t.Fatal("notification changed lease isolation or frozen execution")
@@ -77,6 +80,9 @@ func TestFault_ManagerReceiptReaderLeaseExpiryNotifiesSupervisorOnce(t *testing.
 	h.app = New(h.store, h.ids, h.clock.Now)
 	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 0 || h.count("attentions") != before {
 		t.Fatal("restart or repeated expiry duplicated the original problem", n, err)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_bindings WHERE object_type='lease' AND object_id=? AND kind='manager_lease_expired'`, reader.LeaseID) != 1 || h.countWhere(`SELECT COUNT(*) FROM inbox WHERE source=?`, "manager-lease-problem:"+reader.RunID) != 0 {
+		t.Fatal("lease problem did not use its actual lease/message identity")
 	}
 	if op := h.exec(owner, h.env("categories.put", protocol.Target{Type: "category", ID: "planner"}, protocol.PutAgentCategoryPayload{Title: "Planner", State: "active"}, rev(0)), PutAgentCategory{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

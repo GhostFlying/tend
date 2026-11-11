@@ -56,16 +56,11 @@ func TestUsageOverlapIndexesPreserveHistoryAndCompleteViews(t *testing.T) {
 							sample.Total = nil
 						}
 					}
-					raw, err := json.Marshal(sample)
-					if err != nil {
-						return err
+					measurement := sample
+					if kind == "legacy" {
+						measurement.RequestID = id
 					}
-					hash := sha256.Sum256(raw)
-					result, err := tx.Exec(ctx, `INSERT INTO token_usage_facts(source,request_id,revision,payload_hash,payload_json,subject,role,received_at) VALUES(?,?,1,?,?,'run:shared','implement',?)`, kind, id, hex.EncodeToString(hash[:]), string(raw), clock.Now().UnixMilli())
-					if err != nil {
-						return err
-					}
-					seq, err := result.LastInsertId()
+					seq, err := store.InsertUsageFact(ctx, tx, measurement, "run:shared", "implement", clock.Now().UnixMilli())
 					if err != nil {
 						return err
 					}
@@ -199,7 +194,7 @@ func usageIndexHistory(t *testing.T, db *store.Store) string {
 	ctx := context.Background()
 	hash := sha256.New()
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
-		queries := []string{`SELECT version,name,applied_at FROM schema_migrations ORDER BY version`, `SELECT seq,source,request_id,revision,payload_hash,payload_json,subject,role,received_at FROM token_usage_facts ORDER BY seq`, `SELECT source,request_id,fact_seq,conflict FROM token_usage_current ORDER BY source,request_id`, `SELECT legacy_seq,native_source,native_request_id,created_at FROM token_usage_legacy_links ORDER BY legacy_seq`, `SELECT legacy_seq,native_source,native_request_id,matched FROM token_usage_legacy_candidates ORDER BY legacy_seq,native_source,native_request_id`, `SELECT source,request_id,run_id,conversation_id,host_id,proof,attribution_conflict FROM token_usage_bindings ORDER BY source,request_id`}
+		queries := []string{`SELECT version,name,applied_at FROM schema_migrations ORDER BY version`, `SELECT ` + store.UsageFactColumns("f") + ` FROM token_usage_fact_details f ORDER BY f.seq`, `SELECT source,request_id,fact_seq,conflict FROM token_usage_current ORDER BY source,request_id`, `SELECT legacy_seq,native_source,native_request_id,created_at FROM token_usage_legacy_links ORDER BY legacy_seq`, `SELECT legacy_seq,native_source,native_request_id,matched FROM token_usage_legacy_candidates ORDER BY legacy_seq,native_source,native_request_id`, `SELECT source,request_id,run_id,conversation_id,host_id,proof,attribution_conflict FROM token_usage_bindings ORDER BY source,request_id`}
 		for _, query := range queries {
 			rows, err := tx.Q().QueryContext(ctx, query)
 			if err != nil {

@@ -32,6 +32,17 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := validateRunMessageText(p.Text); err != nil {
 		return Outcome{}, err
 	}
+	if !protocol.ValidID(protocol.PrefixMessage, p.MessageID) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "message_id must identify the new supplement; retain it across retries")
+	}
+	if prior, err := store.GetRunMessage(ctx, tx.Q(), p.MessageID); err == nil {
+		if prior.RunID != x.Env.Target.ID || prior.TaskID != p.TaskID || prior.SpecVersion != p.SpecVersion || prior.Generation != p.Generation || prior.Text != p.Text || prior.SourceMessageID != p.SourceMessageID || prior.Source.Kind != x.ActualPrincipal().Kind || prior.Source.Subject != x.ActualPrincipal().Subject {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "supplement identity has another immutable input")
+		}
+		return Outcome{NoEffect: true, Result: prior}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
 		return Outcome{}, err
@@ -68,7 +79,7 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, errNotFound(err, "source message does not exist")
 		}
 	}
-	m := protocol.RunMessage{RunMessageDelivery: protocol.RunMessageDelivery{MessageID: x.IDs.New(protocol.PrefixMessage)},
+	m := protocol.RunMessage{RunMessageDelivery: protocol.RunMessageDelivery{MessageID: p.MessageID},
 		TaskID: rc.task.TaskID, RunID: rc.run.RunID, ActionID: rc.action.ActionID, SpecVersion: rc.action.TargetSpecVersion,
 		Generation: rc.run.Generation, ControlRevision: expected, Text: p.Text, Status: protocol.RunMessageQueued,
 		Source: x.ActualPrincipal(), SourceMessageID: p.SourceMessageID, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli(), UpdatedAt: x.Now.UnixMilli()}

@@ -42,11 +42,20 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if err != nil {
 		return Outcome{}, err
 	}
+	if x.Principal.Role != rc.run.Role {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "pause proof belongs to another execution role")
+	}
+	if committedRunReceipt(ctx, tx.Q(), rc.run.RunID, x.Env) {
+		if rc.run.ObservedState != protocol.RunFinished {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "committed pause proof has no matching finished Run")
+		}
+		return Outcome{NoEffect: true, Result: map[string]any{"run_id": rc.run.RunID, "observed": rc.run.ObservedState, "pause_request_id": p.RequestID}}, nil
+	}
 	expected, err := store.NegotiatedPauseHandoff(ctx, tx.Q(), rc.run)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if expected == nil || *expected != p.PauseHandoff || x.Principal.Role != rc.run.Role {
+	if expected == nil || *expected != p.PauseHandoff {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run has no matching negotiated pause handoff")
 	}
 	if err := endRun(ctx, x, tx, rc.run, protocol.RunFinished); err != nil {
@@ -220,22 +229,16 @@ func (a *App) PauseHandoffReplayCredential(ctx context.Context, run string, env 
 	if env.Operation != protocol.OpRunsYieldPause || env.Target.Type != "run" || env.Target.ID != run {
 		return "", "", "", store.ErrNotFound
 	}
-	hash, err := protocol.PayloadHash(env)
-	if err != nil {
-		return "", "", "", store.ErrNotFound
-	}
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
+		if !committedRunReceipt(ctx, tx.Q(), run, env) {
+			return store.ErrNotFound
+		}
+
 		r, err := store.GetRun(ctx, tx.Q(), run)
 		if err != nil {
 			return err
 		}
-		record, err := store.GetRequest(ctx, tx.Q(), (protocol.Principal{Kind: protocol.PrincipalRun, Subject: run, Role: r.Role}).DedupDomain(), env.RequestID)
-		if err != nil {
-			return err
-		}
-		if record.Status != protocol.OpSucceeded || record.Operation != env.Operation || record.PayloadHash != hash {
-			return store.ErrNotFound
-		}
+
 		var stopped bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT stopped FROM run_pause_handoffs WHERE run_id=?`, run).Scan(&stopped); err != nil {
 			return err

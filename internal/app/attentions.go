@@ -266,8 +266,8 @@ func attentionEvent(a protocol.Attention) Event {
 	return Event{ObjectType: "attention", ObjectID: a.AttentionID, ObjectVersion: a.Revision, Kind: "attention.changed", Body: map[string]any{"issue_id": a.IssueID, "status": a.Status}}
 }
 func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if x.Env.Target.ID != "" || x.Env.ExpectedControlRevision != nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "a new attention has no current identity or revision")
+	if !protocol.ValidID(protocol.Prefix("attn"), x.Env.Target.ID) || x.Env.ExpectedControlRevision != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new attention requires its stable attention identity")
 	}
 	var p protocol.CreateAttentionPayload
 	if err := decodePayload(x.Env, &p); err != nil {
@@ -275,6 +275,39 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	}
 	if !oneOf(p.Kind, "decision", "action", "information") || strings.TrimSpace(p.Title) == "" || p.Kind == "information" && p.BlocksClose {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "attention kind/title and nonblocking information are required")
+	}
+	if old, err := store.GetAttention(ctx, tx.Q(), x.Env.Target.ID); err == nil {
+		var raw string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM attention_revisions WHERE attention_id=? AND revision=1`, old.AttentionID).Scan(&raw); err != nil {
+			return Outcome{}, err
+		}
+		var initial protocol.Attention
+		if err := json.Unmarshal([]byte(raw), &initial); err != nil {
+			return Outcome{}, err
+		}
+		wanted := initial
+		if err := setAttentionActionTime(&wanted, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
+			return Outcome{}, err
+		}
+		if initial.IssueID != p.IssueID || initial.TaskID != p.TaskID || initial.Kind != p.Kind || initial.Title != p.Title || initial.BlocksClose != p.BlocksClose || initial.SourceMessageID != p.SourceMessageID || p.DecisionID != "" && initial.DecisionID != p.DecisionID || initial.ChoiceID != p.ChoiceID || !attentionActionTimeEqual(initial, wanted) || initial.LatestActionTimezone != wanted.LatestActionTimezone {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "attention identity already has a different obligation")
+		}
+		if p.Kind == "decision" && p.DecisionID == "" && p.ChoiceID == "" {
+			decision, err := store.GetDecision(ctx, tx.Q(), initial.DecisionID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			var options []string
+			if err := json.Unmarshal([]byte(decision.OptionsJSON), &options); err != nil {
+				return Outcome{}, err
+			}
+			if !slices.Equal(options, p.Options) {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "attention identity already has different options")
+			}
+		}
+		return Outcome{Result: old, NoEffect: true}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
 	}
 	if p.IssueID != "" {
 		issue, e := store.GetCanonicalIssue(ctx, tx.Q(), p.IssueID)
@@ -307,7 +340,7 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if p.DecisionID != "" && p.ChoiceID != "" || p.Kind != "decision" && (p.DecisionID != "" || p.ChoiceID != "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only a decision attention references one question")
 	}
-	a := protocol.Attention{AttentionID: x.IDs.New(protocol.Prefix("attn")), IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
+	a := protocol.Attention{AttentionID: x.Env.Target.ID, IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
 	if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
 		return Outcome{}, err
 	}
@@ -317,6 +350,7 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 			inner := *x
 			env := *x.Env
 			inner.Env = &env
+			env.Target = protocol.Target{Type: "decision", ID: protocol.NativeObjectID(protocol.PrefixDecision, a.AttentionID, "question")}
 			env.Payload, _ = json.Marshal(openDecisionPayload{TaskID: p.TaskID, Question: p.Title, Options: p.Options, SourceMessageID: p.SourceMessageID})
 			out, e := (OpenDecision{}).Apply(ctx, &inner, tx)
 			if e != nil {

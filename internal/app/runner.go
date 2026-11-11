@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -320,15 +319,34 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 	}
+	if !protocol.ValidID(protocol.PrefixRun, p.RunID) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "run_id must identify the requested execution; retain it across retries")
+	}
 	q := tx.Q()
+	host, err := requireActiveHost(ctx, x, q)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if prior, err := store.GetRun(ctx, q, p.RunID); err == nil {
+		if prior.HostID != host.HostID {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "execution identity belongs to another host")
+		}
+		lease, err := store.GetLeaseByRun(ctx, q, prior.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() || prior.ObservedState == protocol.RunFinished || prior.ObservedState == protocol.RunFailed {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "original execution lease has ended; reconcile that Run")
+		}
+		as, err := buildAssignment(ctx, q, prior, lease, time.Duration(lease.ExpiresAt-x.Now.UnixMilli())*time.Millisecond, x.Now.UnixMilli())
+		return Outcome{NoEffect: true, Result: claimResult{Assignment: as}}, err
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
 	if prepared, err := archivePrepared(ctx, q); err != nil {
 		return Outcome{}, err
 	} else if prepared {
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
-	}
-	host, err := requireActiveHost(ctx, x, q)
-	if err != nil {
-		return Outcome{}, err
 	}
 	control, err := runnerControl(ctx, q, host.HostID, x.Now.UnixMilli())
 	if err != nil {
@@ -452,7 +470,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 
 	now := x.Now.UnixMilli()
 	run := store.RunRow{
-		RunID: x.IDs.New(protocol.PrefixRun), TaskID: pick.TaskID, ActionID: pick.ActionID, Generation: pick.Generation,
+		RunID: p.RunID, TaskID: pick.TaskID, ActionID: pick.ActionID, Generation: pick.Generation,
 		Role: roleOf(pick.Kind), HostID: host.HostID, DesiredState: protocol.DesiredRun,
 		ObservedState: protocol.RunStarting, CreatedAt: now,
 	}
@@ -1041,10 +1059,26 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if preserved, err := preserveMaintenanceGiveUp(ctx, x, tx, rc.run.RunID); err != nil {
 		return Outcome{}, err
 	} else if preserved {
+		if x.repeatedPhysicalStop {
+			return Outcome{NoEffect: true, Accepted: true, Result: map[string]any{"run_id": rc.run.RunID, "business_outcome": "pending_reconciliation", "give_up_classification": "unclassified"}}, nil
+		}
 		return Outcome{Accepted: true, Result: map[string]any{"run_id": rc.run.RunID, "business_outcome": "pending_reconciliation", "give_up_classification": "unclassified"}, Events: []Event{{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.maintenance_give_up_retained", Body: map[string]any{"reason": p.Reason, "classification": "unclassified"}}}}, nil
 	}
 	preparationOwner := false
 	if p.Preparation != nil {
+		previous, err := store.RunPreparationFailure(ctx, tx.Q(), rc.run.RunID)
+		if err == nil {
+			if !sameBusinessDefinition(previous, p.Preparation) {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "Run already records different preparation failure evidence")
+			}
+			if rc.run.ObservedState == protocol.RunFailed {
+				return Outcome{NoEffect: true, Result: map[string]any{"run_id": rc.run.RunID, "observed": rc.run.ObservedState, "task": newTaskResult(toDomain(rc.task, rc.spec.Budget()), nil)}}, nil
+			}
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "preparation failure is recorded but its Run is not settled")
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return Outcome{}, err
+		}
 		if err := tx.InsertRunPreparationFailure(ctx, rc.run.RunID, *p.Preparation, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
@@ -1240,7 +1274,7 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 var eventKindPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
 
 // RecordRunEvents stores facts a run reported. Each event is deduplicated by
-// (run, seq) through the inbox, so a resent batch has no further effect;
+// the run log's (run, seq) business key, so a resent batch has no further effect;
 // this makes it a system maintenance write without a request record. Every
 // event is kept as a run log, and the state kinds also move the run's
 // observed state when the transition is allowed.
@@ -1258,7 +1292,7 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 	for _, event := range events {
 		bodies = append(bodies, event.Body)
 	}
-	staged, err := a.store.StageOriginals(ctx, "run-events:"+runID, bodies...)
+	staged, err := a.store.StageEventOriginals(ctx, "run-events:"+runID, bodies...)
 	if err != nil {
 		return res, err
 	}
@@ -1273,11 +1307,18 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 		}
 		res.Accepted = 0
 		for _, e := range events {
-			fresh, err := tx.InsertInbox(ctx, "run:"+runID, strconv.FormatInt(e.Seq, 10), now)
+			previous, seen, err := store.RunLogAt(ctx, tx.Q(), runID, e.Seq)
 			if err != nil {
 				return err
 			}
-			if !fresh {
+			if seen {
+				body := string(e.Body)
+				if body == "" {
+					body = "{}"
+				}
+				if previous.Kind != e.Kind || previous.NativeID != e.NativeID || !store.SemanticJSONEqual(previous.BodyJSON, body) {
+					return protocol.Errorf(protocol.CodeConflictPayload, "event %d conflicts with the run's recorded fact", e.Seq)
+				}
 				continue
 			}
 			res.Accepted++
@@ -1351,6 +1392,9 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 		}
 		return nil
 	})
+	if err != nil {
+		res.Accepted = 0
+	}
 	if err == nil && res.Accepted > 0 {
 		a.logs.Notify()
 	}

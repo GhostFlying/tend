@@ -74,7 +74,7 @@ func TestAcceptanceEvidenceFilesFinalizeAllVerdictsAndReplay(t *testing.T) {
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			if replay := h.exec(runPrincipal(accept.RunID, accept.Role), env, SubmitAcceptance{}); !bytes.Equal(replay.Result, op.Result) || h.count("acceptances") != before+1 {
+			if replay := h.exec(runPrincipal(accept.RunID, accept.Role), env, SubmitAcceptance{}); replay.Error == nil || replay.Error.Code != protocol.CodeInvalidTransition || h.count("acceptances") != before+1 {
 				t.Fatalf("verdict replay: %+v", replay)
 			}
 			if replay := h.exec(runPrincipal(accept.RunID, accept.Role), upload, UploadFile{Content: original}); replay.Status != protocol.OpSucceeded {
@@ -245,8 +245,13 @@ func TestAcceptanceEvidenceFilesInterruptedStreamHasNoFinalizedReference(t *test
 	if err != nil || !bytes.Equal(replay.Result, first.Result) || h.count("deliverable_files") != 1 {
 		t.Fatalf("upload replay changed identity: %+v %v", replay, err)
 	}
-	if _, err := h.app.UploadDeliverableFile(t.Context(), p, id, "evidence.log", strings.NewReader("substituted original")); protocol.CodeOf(err) != protocol.CodeConflictPayload || h.count("deliverable_files") != 1 {
-		t.Fatalf("old upload request substituted new bytes: %v", err)
+	different, err := h.app.UploadDeliverableFile(t.Context(), p, id, "evidence.log", strings.NewReader("substituted original"))
+	if err != nil || different.Status != protocol.OpSucceeded || h.count("deliverable_files") != 2 {
+		t.Fatalf("new content lacks separate immutable object: %+v %v", different, err)
+	}
+	var other protocol.ArtifactFile
+	if json.Unmarshal(different.Result, &other) != nil || bytes.Equal(different.Result, first.Result) {
+		t.Fatal("different content replaced the original identity")
 	}
 	var file protocol.ArtifactFile
 	if err := json.Unmarshal(first.Result, &file); err != nil {

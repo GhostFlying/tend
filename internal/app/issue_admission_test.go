@@ -287,11 +287,11 @@ func TestIssueAdmissionInitializerAppendsWithoutRewritingPureRecords(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	requests := h.count("request_records")
+	history, events := h.count("issue_control_revisions"), h.count("events")
 	if err := h.app.InitializeIssueAdmission(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if h.count("request_records") != requests || admissionCurrent(t, h, id).Revision != 2 {
+	if h.count("issue_control_revisions") != history || h.count("events") != events || h.count("outbox") != outbox || admissionCurrent(t, h, id).Revision != 2 {
 		t.Fatal("initializer repeated a settled conversion")
 	}
 }

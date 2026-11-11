@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -161,8 +162,18 @@ func preserveMaintenancePhysicalStop(ctx context.Context, x *Exec, tx *store.Tx,
 		return false, err
 	}
 	p, err := activeMaintenanceRunProtection(ctx, tx.Q(), r)
-	if err != nil || p == nil {
+	if err != nil {
 		return false, err
+	}
+	maintenance := ""
+	if p != nil {
+		maintenance = p.MaintenanceID
+	}
+	if preserved, err := existingMaintenanceStop(ctx, x, tx.Q(), run, maintenance, lastSequence); err != nil || preserved {
+		return preserved, err
+	}
+	if p == nil {
+		return false, nil
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO maintenance_physical_stops(request_domain,request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, x.RequestDomain(), x.Env.RequestID, p.MaintenanceID, run, p.LeaseID, x.Env.Operation, string(x.Env.Payload), lastSequence, x.Now.UnixMilli())
 	return err == nil, err
@@ -215,8 +226,18 @@ func preserveMaintenanceGiveUp(ctx context.Context, x *Exec, tx *store.Tx, run s
 		return false, err
 	}
 	p, err := activeMaintenanceRunProtection(ctx, tx.Q(), r)
-	if err != nil || p == nil {
+	if err != nil {
 		return false, err
+	}
+	maintenance := ""
+	if p != nil {
+		maintenance = p.MaintenanceID
+	}
+	if preserved, err := existingMaintenanceStop(ctx, x, tx.Q(), run, maintenance, -1); err != nil || preserved {
+		return preserved, err
+	}
+	if p == nil {
+		return false, nil
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO maintenance_physical_stops(request_domain,request_id,maintenance_id,run_id,lease_id,operation,payload_json,last_sequence,created_at) VALUES(?,?,?,?,?,?,?,-1,?)`, x.RequestDomain(), x.Env.RequestID, p.MaintenanceID, run, p.LeaseID, x.Env.Operation, string(x.Env.Payload), x.Now.UnixMilli())
 	return err == nil, err
@@ -301,4 +322,28 @@ func (a *App) ReceiptRecoveryStartupPending(ctx context.Context) (bool, error) {
 		return nil
 	})
 	return pending, err
+}
+
+// A physical stop is keyed by its actual protected execution and lease. The
+// request fields remain original provenance, never a response replay index.
+func existingMaintenanceStop(ctx context.Context, x *Exec, q store.Querier, run, maintenance string, sequence int64) (bool, error) {
+	var lease, raw string
+	var originalSequence int64
+	err := q.QueryRowContext(ctx, `SELECT lease_id,payload_json,last_sequence FROM maintenance_physical_stops WHERE run_id=? AND operation=? AND (?='' OR maintenance_id=?) ORDER BY created_at DESC LIMIT 1`, run, x.Env.Operation, maintenance, maintenance).Scan(&lease, &raw, &originalSequence)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	current, err := store.GetLeaseByRun(ctx, q, run)
+	if err != nil {
+		return false, err
+	}
+	var before, after any
+	if json.Unmarshal([]byte(raw), &before) != nil || json.Unmarshal(x.Env.Payload, &after) != nil || lease != current.LeaseID || originalSequence != sequence || !sameBusinessDefinition(before, after) {
+		return false, protocol.Errorf(protocol.CodeConflictPayload, "physical stop differs from the original protected Run and lease fact")
+	}
+	x.repeatedPhysicalStop = true
+	return true, nil
 }

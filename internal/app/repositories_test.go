@@ -20,9 +20,7 @@ func TestOnlineRepositorySurvivesBootstrapAndHonorsRevision(t *testing.T) {
 	if first.Status != protocol.OpSucceeded {
 		t.Fatal(first)
 	}
-	if again := h.exec(owner, env, RegisterRepository{}); string(again.Result) != string(first.Result) {
-		t.Fatal("request replay changed", again)
-	}
+	expectWorkCode(t, h.exec(owner, env, RegisterRepository{}), protocol.CodeStaleRevision)
 	if op := h.exec(owner, h.env("repos.register", env.Target, payload, rev(0)), RegisterRepository{}); op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
 		t.Fatal("stale registration accepted", op)
 	}

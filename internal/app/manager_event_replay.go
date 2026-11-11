@@ -8,6 +8,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // ManagerReplayEvent preserves the original run/sequence while a later
@@ -50,20 +51,28 @@ func (a *App) ManagerReplayEvents(ctx context.Context, run string, after int64) 
 func (a *App) ManagerRetainedToolResult(ctx context.Context, current, origin, thread, turn, call string) (json.RawMessage, error) {
 	var raw string
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		err := tx.Q().QueryRowContext(ctx, `SELECT n.payload_json FROM runs current JOIN runs origin ON origin.task_id=current.task_id AND origin.rowid<current.rowid JOIN manager_native_requests n ON n.run_id=origin.run_id WHERE current.run_id=? AND origin.run_id=? AND current.role='issue_manager' AND origin.role='issue_manager' AND n.method='tool_result' AND json_extract(n.payload_json,'$.thread_id')=? AND json_extract(n.payload_json,'$.turn_id')=? AND json_extract(n.payload_json,'$.call_id')=? ORDER BY n.rowid LIMIT 1`, current, origin, thread, turn, call).Scan(&raw)
+		var output, state, tool, input string
+		var success bool
+		err := tx.Q().QueryRowContext(ctx, `SELECT u.native_result_output,u.native_result_success,u.native_delivery_status,u.tool,u.input FROM runs current JOIN runs origin ON origin.task_id=current.task_id AND origin.rowid<current.rowid JOIN conversation_tool_uses u ON u.native_run_id=origin.run_id WHERE current.run_id=? AND origin.run_id=? AND current.role='issue_manager' AND origin.role='issue_manager' AND u.thread_id=? AND u.turn_id=? AND u.item_id=?`, current, origin, thread, turn, call).Scan(&output, &success, &state, &tool, &input)
 		if err != nil {
 			return err
 		}
-		raw, err = store.ResolveJSON(ctx, tx.Q(), raw)
+		if state == store.NativeDeliveryRejectedCurrentTask {
+			input, err = store.ResolveJSON(ctx, tx.Q(), input)
+			if err != nil {
+				return err
+			}
+			output, err = currentManagerTaskRead(ctx, tx.Q(), current, tool, input)
+			success = err == nil
+		} else {
+			output, err = store.ResolveJSON(ctx, tx.Q(), output)
+		}
 		if err != nil {
 			return err
 		}
-		var payload map[string]json.RawMessage
-		if err = json.Unmarshal([]byte(raw), &payload); err != nil {
-			return err
-		}
-		raw = string(payload["tool_result"])
-		return nil
+		data, err := json.Marshal(map[string]any{"Success": success, "Text": output})
+		raw = string(data)
+		return err
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -75,7 +84,7 @@ func (a *App) ManagerRetainedToolResult(ctx context.Context, current, origin, th
 // restarted server attach its event pump while the runner is awaiting close
 // acknowledgement; queuing another native resume behind close would deadlock.
 func (a *App) ManagerClosingAttachment(ctx context.Context, run, method, thread string) (json.RawMessage, error) {
-	if method != "models" && method != "resume" {
+	if method != "resume" {
 		return nil, nil
 	}
 	var raw string
@@ -87,22 +96,14 @@ func (a *App) ManagerClosingAttachment(ctx context.Context, run, method, thread 
 		if !closing {
 			return sql.ErrNoRows
 		}
-		err = tx.Q().QueryRowContext(ctx, `SELECT n.result_json FROM manager_native_requests n JOIN runs r USING(run_id)
- WHERE n.run_id=? AND r.role='issue_manager' AND n.status='completed' AND COALESCE(json_extract(n.result_json,'$.error'),'')=''
- AND ((?='models' AND n.method='models') OR (?='resume' AND n.method IN ('start','resume') AND json_extract(n.result_json,'$.result.ID')=?))
- ORDER BY n.rowid DESC LIMIT 1`, run, method, method, thread).Scan(&raw)
+		raw, err = store.NativeThread(ctx, tx.Q(), run)
 		if err != nil {
 			return err
 		}
-		raw, err = store.ResolveJSON(ctx, tx.Q(), raw)
-		if err != nil {
-			return err
+		var actual struct{ ID string }
+		if json.Unmarshal([]byte(raw), &actual) != nil || actual.ID != thread {
+			return sql.ErrNoRows
 		}
-		var reply protocol.ManagerNativeReply
-		if err = json.Unmarshal([]byte(raw), &reply); err != nil {
-			return err
-		}
-		raw = string(reply.Result)
 		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -119,4 +120,48 @@ func managerRunClosing(ctx context.Context, q store.Querier, run string) (bool, 
 	}
 	prior, err := unresolvedManagerParkClose(ctx, q, run)
 	return prior != nil, err
+}
+
+// currentManagerTaskRead reconstructs one known rejected read, never a tool
+// handler or external effect. A historical Run cannot restore current authority.
+func currentManagerTaskRead(ctx context.Context, q store.Querier, run, tool, input string) (string, error) {
+	target := store.NativeTaskReadTarget(tool, input)
+	if target == "" {
+		return "", protocol.Errorf(protocol.CodeInvalidRequest, "original task read arguments are unavailable")
+	}
+	r, err := store.GetRun(ctx, q, run)
+	if err != nil {
+		return "", err
+	}
+	m, err := store.GetIssueManagerTask(ctx, q, r.TaskID)
+	if err != nil {
+		return "", err
+	}
+	current, err := store.CurrentIssueManagerTask(ctx, q, m.IssueID)
+	if err != nil {
+		return "", errNotFound(err, "current Issue responsibility is unavailable")
+	}
+	issue, err := store.GetCanonicalIssue(ctx, q, m.IssueID)
+	if err != nil {
+		return "", err
+	}
+	if current.TaskID != m.TaskID || m.State != "assigned" || issue.AssignmentEpoch != m.AssignmentEpoch || issue.AssignmentState != "active" || r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
+		return "", protocol.Errorf(protocol.CodeForbidden, "historical tool result grants no current Issue read authority")
+	}
+	if _, err := store.GetTask(ctx, q, target); err != nil {
+		return "", errNotFound(err, "task does not exist")
+	}
+	allowed, err := store.TaskIssueResultReadable(ctx, q, target, m.IssueID)
+	if err != nil {
+		return "", err
+	}
+	if !allowed {
+		return "", protocol.Errorf(protocol.CodeForbidden, "task execution facts are outside this Issue")
+	}
+	value, err := views.Task(ctx, q, target)
+	if err != nil {
+		return "", err
+	}
+	body, err := json.Marshal(map[string]any{"ok": true, "result": value, "observation": "current", "original_delivery": "rejected"})
+	return string(body), err
 }

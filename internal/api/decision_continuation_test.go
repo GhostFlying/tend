@@ -81,12 +81,12 @@ func TestDecisionContinuationOwnerReadAndTwoRevisionCAS(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before := e.count(`SELECT COUNT(*) FROM request_records`)
+	before := e.count(`SELECT COUNT(*) FROM events`)
 	var view protocol.DecisionContinuationView
 	if status := e.do(http.MethodGet, "/api/v1/decisions/"+decision+"/continuation", token, nil, &view); status != http.StatusOK || view.DecisionID != decision || view.RunID != run || view.TaskID != task.TaskID || view.Revision != 3 || view.State != "waiting" || view.BlockedReason != "explicit_resume_required" || view.ResumeCondition != "explicit_resume" || !reflect.DeepEqual(view.Policy, &policy) || view.AnswerRequestID != "original-answer" {
 		t.Fatal(status, view)
 	}
-	if got := e.count(`SELECT COUNT(*) FROM request_records`); got != before {
+	if got := e.count(`SELECT COUNT(*) FROM events`); got != before {
 		t.Fatal("continuation read wrote a business request", before, got)
 	}
 	for _, operation := range []string{protocol.OpResumeDecisionContinuation, protocol.OpReconcileDecisionContinuation} {
@@ -127,13 +127,14 @@ func TestDecisionContinuationOwnerReadAndTwoRevisionCAS(t *testing.T) {
 	if status != http.StatusOK || first.Operation == nil || first.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("HTTP%d operation=%+v", status, first.Operation)
 	}
-	status, replay := e.op(token, envelope)
-	if status != http.StatusOK || !reflect.DeepEqual(first.Operation, replay.Operation) {
-		t.Fatal("original owner resume receipt changed", first, replay)
-	}
+	assertOwnerStaleHTTP(t, e, token, envelope)
 	var admitted protocol.DecisionContinuationView
 	if err := json.Unmarshal(first.Operation.Result, &admitted); err != nil || admitted.State != "continued" || admitted.ContinuationActionID == "" || admitted.AnswerRequestID != "original-answer" || admitted.ResumeRequestID != envelope.RequestID {
 		t.Fatal(admitted, err)
+	}
+	var current protocol.DecisionContinuationView
+	if status := e.do("GET", "/api/v1/decisions/"+decision+"/continuation", token, nil, &current); status != http.StatusOK || current.State != "continued" || current.ContinuationActionID != admitted.ContinuationActionID || current.AnswerRequestID != admitted.AnswerRequestID {
+		t.Fatal("continued handoff changed after stale retry", status, current)
 	}
 	if e.count(`SELECT COUNT(*) FROM run_question_handoffs WHERE continuation_action_id IS NOT NULL`) != 1 {
 		t.Fatal("resume failed to commit exactly one successor")

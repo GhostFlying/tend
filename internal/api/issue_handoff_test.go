@@ -50,7 +50,7 @@ func TestIssueHandoffPromptHTTPCLIRequiresOwnerAndExactResponsibility(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before := e.count("SELECT COUNT(*) FROM request_records")
+	before := e.count("SELECT COUNT(*) FROM events")
 	var result protocol.IssueHandoffPrompt
 	if code := e.do("GET", path, token, nil, &result); code != http.StatusOK {
 		t.Fatal(code)
@@ -93,7 +93,7 @@ func TestIssueHandoffPromptHTTPCLIRequiresOwnerAndExactResponsibility(t *testing
 			t.Fatal(stdout.String())
 		}
 	}
-	if after := e.count("SELECT COUNT(*) FROM request_records"); after != before {
+	if after := e.count("SELECT COUNT(*) FROM events"); after != before {
 		t.Fatal("read-only prompt wrote requests", before, after)
 	}
 }

@@ -20,6 +20,7 @@ func TestIssueContextRunDiscoversAndDownloadsOriginalOutsideSpec(t *testing.T) {
 	execute := func(cmd app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
 		t.Helper()
 		raw, _ := json.Marshal(payload)
+		target, raw = composeFixtureBusinessInput(t, e.ids, cmd.Operation(), target, json.RawMessage(raw))
 		op, err := e.app.Execute(t.Context(), owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, cmd)
 		if err != nil || op.Status != protocol.OpSucceeded && op.Status != protocol.OpAccepted {
 			t.Fatal(cmd.Operation(), op, err)

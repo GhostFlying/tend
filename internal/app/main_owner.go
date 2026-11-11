@@ -21,36 +21,16 @@ func WithMainOwner(subject string) Option {
 // OwnerExecution is the authenticated native call behind an owner interface.
 // Its actor and original request domain survive delegation.
 type OwnerExecution struct {
-	Actor         protocol.Principal
-	Agent         protocol.AgentIdentity
-	ExecutionID   string
-	CallID        string
-	EffectSeq     int64
-	RequestDomain string
-	// ReplayPrincipal is resolved by the owner adapter from the original record.
-	ReplayPrincipal *protocol.Principal
-	steps           atomic.Int64
+	Actor       protocol.Principal
+	Agent       protocol.AgentIdentity
+	ExecutionID string
+	CallID      string
+	EffectSeq   int64
+	steps       atomic.Int64
 }
 
 type ownerExecutionKey struct{}
 type ownerPreparationKey struct{}
-
-func ownerRequestPrincipal(ctx context.Context, p protocol.Principal) protocol.Principal {
-	if call, ok := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); ok && p.Kind == protocol.PrincipalOwner {
-		if call.ReplayPrincipal != nil {
-			return *call.ReplayPrincipal
-		}
-		return call.Actor
-	}
-	return p
-}
-
-func ownerRequestDomain(ctx context.Context, p protocol.Principal) string {
-	if call, ok := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); ok && call.RequestDomain != "" {
-		return call.RequestDomain
-	}
-	return ownerRequestPrincipal(ctx, p).DedupDomain()
-}
 
 // RequestDomain follows the original request's namespace, independently of
 // both delegated owner authority and the actor performing a recovery.
@@ -85,7 +65,15 @@ func (x *Exec) recordMessageAuthority(ctx context.Context, tx *store.Tx, message
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO main_owner_message_authorities(message_id,request_id,owner_subject,actor_json) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='agent')`, message, x.Env.RequestID, x.Principal.Subject, string(actor), message)
+	call, ok := ctx.Value(ownerExecutionKey{}).(*OwnerExecution)
+	if !ok {
+		return protocol.Errorf(protocol.CodeForbidden, "delegated message requires its actual execution authority")
+	}
+	stable, err := store.HostedCoordinationIdentity(ctx, tx.Q(), call.ExecutionID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO main_owner_message_authorities(message_id,execution_id,effect_seq,step,owner_subject,actor_json) SELECT ?,e.execution_id,e.effect_seq,e.step,?,? FROM main_owner_effects e WHERE e.execution_id=? AND e.effect_seq=? AND e.call_id=? AND e.owner_subject=? AND EXISTS(SELECT 1 FROM conversation_messages WHERE message_id=? AND author='agent') ORDER BY e.step DESC LIMIT 1`, message, x.Principal.Subject, string(actor), stable, call.EffectSeq, call.CallID, x.Principal.Subject, message)
 	if err != nil {
 		return err
 	}
@@ -135,22 +123,11 @@ func mainOwnerAuthority(ctx context.Context, q store.Querier, actor protocol.Pri
 }
 
 // MainOwner authorizes a read through the same owner projection as the UI/CLI.
-func (a *App) MainOwner(ctx context.Context, actor protocol.Principal, executionID string, requestID ...string) (protocol.Principal, error) {
+func (a *App) MainOwner(ctx context.Context, actor protocol.Principal, executionID string, _ ...string) (protocol.Principal, error) {
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		replay := false
-		if len(requestID) > 0 && requestID[0] != "" {
-			_, err := store.GetOwnerRequest(ctx, tx.Q(), requestID[0])
-			if err != nil && !errors.Is(err, store.ErrNotFound) {
-				return err
-			}
-			replay = err == nil
-			if !replay {
-				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_owner_effects e JOIN request_records r ON r.request_id=e.request_id WHERE e.call_id=? AND e.owner_subject=?)`, requestID[0], a.mainOwner).Scan(&replay); err != nil {
-					return err
-				}
-			}
-		}
-		return mainOwnerAuthority(ctx, tx.Q(), actor, executionID, a.mainOwner, replay)
+		// Reading current business state remains possible for the actual retained
+		// execution; it does not admit another mutation or depend on old receipts.
+		return mainOwnerAuthority(ctx, tx.Q(), actor, executionID, a.mainOwner, true)
 	})
 	return protocol.Principal{Kind: protocol.PrincipalOwner, Subject: a.mainOwner, Client: "main-owner"}, err
 }
@@ -175,9 +152,7 @@ func (c ownerExecutionCommand) adapted(x *Exec) *Exec {
 }
 
 func (c ownerExecutionCommand) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	_, err := store.GetRequest(ctx, q, x.RequestDomain(), x.Env.RequestID)
-	replay := err == nil
-	if err := mainOwnerAuthority(ctx, q, c.call.Actor, c.call.ExecutionID, c.owner, replay); err != nil {
+	if err := mainOwnerAuthority(ctx, q, c.call.Actor, c.call.ExecutionID, c.owner, false); err != nil {
 		return err
 	}
 	return c.Command.Authorize(ctx, c.adapted(x), q)
@@ -198,28 +173,26 @@ func (c ownerExecutionCommand) prepare(ctx context.Context, x *Exec, tx *store.T
 		return err
 	}
 	var originalEffect int64
-	var originalRequest string
-	err = tx.Q().QueryRowContext(ctx, `SELECT effect_seq,request_id FROM main_owner_effects WHERE execution_id=? AND call_id=? ORDER BY step LIMIT 1`, stable, c.call.CallID).Scan(&originalEffect, &originalRequest)
+	err = tx.Q().QueryRowContext(ctx, `SELECT effect_seq FROM main_owner_effects WHERE execution_id=? AND call_id=? ORDER BY step LIMIT 1`, stable, c.call.CallID).Scan(&originalEffect)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil && originalEffect != c.call.EffectSeq {
-		return duplicateEffect("native callback already identifies another effect", map[string]any{"original_request_id": originalRequest, "effect_seq": originalEffect})
+		return duplicateEffect("native callback already identifies another effect", map[string]any{"coordination_execution_id": stable, "effect_seq": originalEffect})
 	}
 	var priorCall string
-	var priorRequest string
-	err = tx.Q().QueryRowContext(ctx, `SELECT call_id,request_id FROM main_owner_effects WHERE execution_id=? AND effect_seq=? LIMIT 1`, stable, c.call.EffectSeq).Scan(&priorCall, &priorRequest)
+	err = tx.Q().QueryRowContext(ctx, `SELECT call_id FROM main_owner_effects WHERE execution_id=? AND effect_seq=? LIMIT 1`, stable, c.call.EffectSeq).Scan(&priorCall)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if priorCall != "" && priorCall != c.call.CallID {
-		return duplicateEffect("coordination effect was already applied", map[string]any{"coordination_execution_id": stable, "effect_seq": c.call.EffectSeq, "original_request_id": priorRequest})
+		return duplicateEffect("coordination effect was already applied", map[string]any{"coordination_execution_id": stable, "effect_seq": c.call.EffectSeq})
 	}
 	if priorCall == "" {
-		var original string
-		err := tx.Q().QueryRowContext(ctx, `SELECT request_id FROM hosted_coordination_effects WHERE execution_id=? AND effect_seq=?`, stable, c.call.EffectSeq).Scan(&original)
+		var original int
+		err := tx.Q().QueryRowContext(ctx, `SELECT 1 FROM hosted_coordination_effects WHERE execution_id=? AND effect_seq=?`, stable, c.call.EffectSeq).Scan(&original)
 		if err == nil {
-			return duplicateEffect("coordination effect was already applied", map[string]any{"coordination_execution_id": stable, "effect_seq": c.call.EffectSeq, "original_request_id": original})
+			return duplicateEffect("coordination effect was already applied", map[string]any{"coordination_execution_id": stable, "effect_seq": c.call.EffectSeq})
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -232,20 +205,17 @@ func (c ownerExecutionCommand) prepare(ctx context.Context, x *Exec, tx *store.T
 		if e.Selection.ConfigurationRevision == 0 {
 			table = "runner_coordination_effects"
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO `+table+`(execution_id,effect_seq,request_id) VALUES(?,?,?)`, stable, c.call.EffectSeq, x.Env.RequestID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO `+table+`(execution_id,effect_seq) VALUES(?,?)`, stable, c.call.EffectSeq); err != nil {
 			return err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO main_owner_effects(execution_id,effect_seq,step,call_id,request_id,owner_subject) VALUES(?,?,?,?,?,?)`, stable, c.call.EffectSeq, c.step, c.call.CallID, x.Env.RequestID, c.owner); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO main_owner_effects(execution_id,effect_seq,step,call_id,owner_subject) VALUES(?,?,?,?,?) ON CONFLICT(execution_id,effect_seq,step) DO NOTHING`, stable, c.call.EffectSeq, c.step, c.call.CallID, c.owner); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (c ownerExecutionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if c.call.ReplayPrincipal != nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "original request is required for replay")
-	}
 	if c.correction != "" {
 		var logical string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=?`, c.call.ExecutionID).Scan(&logical); errors.Is(err, sql.ErrNoRows) {
@@ -258,19 +228,7 @@ func (c ownerExecutionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 		}
 		x.validatedDelegationCorrection = c.correction
 	}
-	out, err := c.Command.Apply(ctx, c.adapted(x), tx)
-	// Retain an exact native-call receipt even for a business no-op.
-	if !c.preparation {
-		out.NoEffect = false
-	}
-	return out, err
-}
-
-func ownerRequestRecord(ctx context.Context, q store.Querier, p protocol.Principal, id string) (store.RequestRecord, error) {
-	if _, delegated := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); !delegated && p.Kind == protocol.PrincipalOwner {
-		return store.GetOwnerRequest(ctx, q, id)
-	}
-	return store.GetRequest(ctx, q, ownerRequestDomain(ctx, p), id)
+	return c.Command.Apply(ctx, c.adapted(x), tx)
 }
 
 func (a *App) OwnerMessageAuthority(ctx context.Context, id string) (bool, error) {

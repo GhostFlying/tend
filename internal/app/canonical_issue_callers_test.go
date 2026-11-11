@@ -34,8 +34,8 @@ func TestCanonicalFollowupOwnerLifecycleKeepsHistoryAndDeadlineAuthority(t *test
 	env := h.env(cmd.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision))
 	first := h.exec(owner, env, cmd)
 	r := canonicalRuleForTest(t, first)
-	if r.IssueID != issue.IssueID || r.SourceID != env.RequestID {
-		t.Fatal("owner needed a second source transaction", r)
+	if r.IssueID != issue.IssueID || r.RuleID == "" || r.SourceID != "" {
+		t.Fatal("owner rule lacks its business identity or fabricated a message source", r)
 	}
 	if replay := h.exec(owner, env, cmd); string(replay.Result) != string(first.Result) {
 		t.Fatal(replay)
@@ -139,8 +139,15 @@ func TestCanonicalDeliveryRefreshPreservesRunnerFactsAndRequest(t *testing.T) {
 	if first.Status != protocol.OpSucceeded {
 		t.Fatal(first)
 	}
-	if op := h.exec(owner, env, IssueRefreshDelivery{}); string(op.Result) != string(first.Result) {
-		t.Fatal("refresh replay changed generation", op)
+	var previous, next struct {
+		Generation int64 `json:"generation"`
+	}
+	if err := json.Unmarshal(first.Result, &previous); err != nil {
+		t.Fatal(err)
+	}
+	op := h.exec(owner, env, IssueRefreshDelivery{})
+	if err := json.Unmarshal(op.Result, &next); err != nil || op.Status != protocol.OpSucceeded || next.Generation != previous.Generation+1 {
+		t.Fatal("explicit valid refresh did not advance its query generation", op, previous, next, err)
 	}
 	queries := pollDelivery(t, h, "linux-1", "observer")
 	if len(queries) != 1 || queries[0].WorkItemID != issue.IssueID || queries[0].Generation <= as[0].Generation {

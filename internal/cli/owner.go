@@ -535,10 +535,13 @@ func (o owner) writeResult(ctx context.Context, op string, target protocol.Targe
 	}
 	env := protocol.Envelope{RequestID: o.e.IDs.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: revision, Payload: b}
 	env.Reason = o.reason
+	if err := prepareBusinessEnvelope(o.e, &env, true); err != nil {
+		return nil, err
+	}
 	if o.dry {
 		return nil, o.printJSON(env)
 	}
-	fmt.Fprintf(o.e.Stderr, "request %s (%s); inspect with tend request show %s; preserve the original Envelope for retry\n", env.RequestID, env.Operation, env.RequestID)
+	fmt.Fprintf(o.e.Stderr, "request %s (%s); %s\n", env.RequestID, env.Operation, businessRecovery(env))
 
 	var res protocol.APIResponse
 	// An unconfirmed answer must be reconciled before an explicit replay.
@@ -563,7 +566,7 @@ func (o owner) writeResult(ctx context.Context, op string, target protocol.Targe
 		if opr.Error != nil {
 			return nil, opr.Error
 		}
-		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "request %s is %s; inspect the original request before any new action", env.RequestID, opr.Status)
+		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "request %s is %s; %s", env.RequestID, opr.Status, businessRecovery(env))
 	}
 	if !o.json {
 		fmt.Fprintf(o.e.Stdout, "%s: %s (request %s)\n", op, opr.Status, opr.RequestID)
@@ -662,9 +665,12 @@ func (o owner) cancel(ctx context.Context, id string) error {
 // original request was not accepted; the owner must reconcile its identity first.
 func (o owner) sendEnvelope(ctx context.Context, env protocol.Envelope) (protocol.APIResponse, error) {
 	var res protocol.APIResponse
+	if err := validateBusinessEnvelope(env); err != nil {
+		return res, err
+	}
 	err := o.c.do(ctx, "POST", "/api/v1/ops", env, &res)
 	if isTransport(err) {
-		err = fmt.Errorf("%w: %w", protocol.Errorf(protocol.CodeUnknownOutcome, "request %s has no confirmed outcome; inspect with tend request show %s before replaying its original Envelope", env.RequestID, env.RequestID), err)
+		err = fmt.Errorf("%w: %w", protocol.Errorf(protocol.CodeUnknownOutcome, "request %s has no confirmed outcome; %s", env.RequestID, businessRecovery(env)), err)
 	}
 	return res, err
 }

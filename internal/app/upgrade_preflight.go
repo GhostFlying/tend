@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -19,19 +20,18 @@ func (a *App) CheckUpgradeStart(ctx context.Context, env *protocol.Envelope, c S
 	if env.Operation != c.Operation() {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "upgrade start envelope required")
 	}
-	hash, err := protocol.PayloadHash(env)
-	if err != nil {
-		return nil, err
-	}
 	var recorded *protocol.Operation
-	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
-		record, err := store.GetRequest(ctx, tx.Q(), "system", env.RequestID)
+	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
+		r, err := store.GetUpgrade(ctx, tx.Q(), env.Target.ID)
 		if err == nil {
-			if record.PayloadHash != hash {
-				return protocol.Errorf(protocol.CodeConflictPayload, "original upgrade request input changed")
+			if r.StartRequestID != env.RequestID || r.ManifestSHA256 != c.ManifestSHA256 || r.ServerHash != c.ServerHash || r.ReleaseSetSHA256 != c.ReleaseSetSHA256 || r.DeliveryTaskID != c.DeliveryTaskID {
+				return protocol.Errorf(protocol.CodeConflictPayload, "upgrade identity belongs to another admitted installation")
 			}
-			value := operationOf(record)
-			recorded = &value
+			raw, err := json.Marshal(r.View)
+			if err != nil {
+				return err
+			}
+			recorded = &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: raw}
 			return nil
 		}
 		if !errors.Is(err, store.ErrNotFound) {
@@ -70,18 +70,7 @@ func checkUpgradeExecution(ctx context.Context, q store.Querier, id string) erro
 func (a *App) HasRecordedUpgradeStart(ctx context.Context, request string) (bool, error) {
 	var found bool
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		r, err := store.GetRequest(ctx, tx.Q(), "system", request)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if r.Operation != "upgrades.start" {
-			return nil
-		}
-		found = true
-		return nil
+		return tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades WHERE json_extract(state_json,'$.start_request_id')=?)`, request).Scan(&found)
 	})
 	return found, err
 }

@@ -35,7 +35,7 @@ func TestSharedReviewReadScopeFiltersAndPagination(t *testing.T) {
 	create := func(parent string) protocol.Issue {
 		counter++
 		raw, _ := json.Marshal(protocol.CreateIssuePayload{ParentIssueID: parent, Plan: protocol.IssuePlan{Title: "Shared delivery", Project: "default", Intent: "Review exact PR"}})
-		op, err := e.svc.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "review-read-test"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue"}, Payload: raw}, app.CanonicalOwnerIssueCommand{Action: "create"})
+		op, err := e.svc.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "review-read-test"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "issues.create", Target: protocol.Target{Type: "issue", ID: ids.New(protocol.PrefixWorkItem)}, Payload: raw}, app.CanonicalOwnerIssueCommand{Action: "create"})
 		if err != nil || op.Status != protocol.OpSucceeded {
 			t.Fatal(op, err)
 		}

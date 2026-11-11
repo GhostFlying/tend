@@ -69,7 +69,7 @@ func TestAgentCatalogOwnerHTTPAndCLIReadSamePublicFacts(t *testing.T) {
 		t.Helper()
 		var result [3]int
 		if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			for i, table := range []string{"request_records", "events", "outbox"} {
+			for i, table := range []string{"hosts", "events", "outbox"} {
 				if err := tx.Q().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&result[i]); err != nil {
 					return err
 				}

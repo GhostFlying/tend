@@ -79,9 +79,14 @@ func TestRunMessagesFreezeContractAndDeduplicateRequests(t *testing.T) {
 		t.Fatal("supplement changed task contract or acceptance")
 	}
 	changed := *env
-	changed.Payload = json.RawMessage(`{"text":"different"}`)
-	if _, err := h.app.Execute(t.Context(), messageAgent, &changed, SendRunMessage{}); protocol.CodeOf(err) != protocol.CodeConflictPayload {
+	var changedMessage protocol.SendRunMessagePayload
+	if err := json.Unmarshal(env.Payload, &changedMessage); err != nil {
 		t.Fatal(err)
+	}
+	changedMessage.Text = "different"
+	changed.Payload = mustJSON(t, changedMessage)
+	if op, err := h.app.Execute(t.Context(), messageAgent, &changed, SendRunMessage{}); boundedReleaseCode(op, err) != protocol.CodeConflictPayload {
+		t.Fatal(op, err)
 	}
 	if len(readMessages(t, h, as).Messages) != 1 {
 		t.Fatal("duplicate message")

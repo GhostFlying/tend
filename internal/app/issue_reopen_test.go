@@ -45,8 +45,9 @@ func TestIssueReopenRestoresNewCoordinatorAndPreservesTerminalHistory(t *testing
 		t.Fatal(restored)
 	}
 	before := h.count("tasks")
-	if replay := h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "reopen"}); string(replay.Result) != string(op.Result) || h.count("tasks") != before {
-		t.Fatal("reopen replay allocated execution", replay)
+	expectWorkCode(t, h.exec(owner, envelope, CanonicalOwnerIssueCommand{Action: "reopen"}), protocol.CodeStaleRevision)
+	if h.count("tasks") != before || canonicalTaskIssue(t, h, i.IssueID).Revision != restored.Revision {
+		t.Fatal("stale reopen allocated execution or changed the active responsibility")
 	}
 	if got := admissionClaim(t, h, r); got != nil {
 		t.Fatal("reopen started backlog", got)

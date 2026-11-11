@@ -35,7 +35,7 @@ func TestFeishuReplayKeepsOriginalRequestAndOneMessage(t *testing.T) {
 	}
 	wg.Wait()
 	for i, op := range results {
-		if errs[i] != nil || op.Error != nil || op.RequestID != results[0].RequestID || string(op.Result) != string(results[0].Result) {
+		if errs[i] != nil || op.Error != nil || op.RequestID != results[0].RequestID || messageID(t, op) != messageID(t, results[0]) {
 			t.Fatalf("result %d: %+v %v", i, op, errs[i])
 		}
 	}
@@ -150,7 +150,7 @@ func TestFeishuStagedInputRecoversOnlyBeforeRequestCommit(t *testing.T) {
 	// A recorded unknown is an outcome, not a missing transaction. Recovery must
 	// never turn it into a new owner request or another message.
 	if err = h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE domain='owner' AND request_id=?`, request)
+		_, err := tx.Exec(t.Context(), `UPDATE feishu_inputs SET state='unknown' WHERE request_id=?`, request)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestFeishuInteractionAnswersKeepSourceAndLateText(t *testing.T) {
 				t.Fatalf("%+v %v", op, err)
 			}
 			again, err := h.app.ReceiveFeishu(t.Context(), in)
-			if err != nil || again.RequestID != op.RequestID || string(again.Result) != string(op.Result) {
+			if err != nil || again.RequestID != op.RequestID || messageID(t, again) != messageID(t, op) {
 				t.Fatalf("replayed reply changed: %+v %v", again, err)
 			}
 			id := messageID(t, op)
@@ -336,7 +336,7 @@ func TestFeishuFailedParentSettlesChildButUnknownRemainsPending(t *testing.T) {
 			}
 			if uncertain {
 				if err = h.store.Write(t.Context(), func(tx *store.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE request_records SET status='unknown' WHERE request_id=?`, first.RequestID)
+					_, err := tx.Exec(t.Context(), `UPDATE feishu_inputs SET state='unknown' WHERE request_id=?`, first.RequestID)
 					return err
 				}); err != nil {
 					t.Fatal(err)
@@ -419,7 +419,7 @@ func TestFeishuChoiceTextFreezesOptionsAndQuotedReply(t *testing.T) {
 		t.Fatal(answer, err)
 	}
 	again, err := h.app.ReceiveFeishu(t.Context(), in)
-	if err != nil || again.RequestID != answer.RequestID || string(again.Result) != string(answer.Result) {
+	if err != nil || again.RequestID != answer.RequestID || messageID(t, again) != messageID(t, answer) {
 		t.Fatal(again, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {

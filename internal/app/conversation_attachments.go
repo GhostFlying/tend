@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"os"
@@ -26,6 +28,15 @@ func (uploadAttachment) Authorize(_ context.Context, x *Exec, _ store.Querier) e
 }
 func (c uploadAttachment) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	f := c.file
+	var existing string
+	err := tx.Q().QueryRowContext(ctx, `SELECT file_id FROM conversation_attachments WHERE name=? AND media_type=? AND sha256=? AND size=? ORDER BY file_id LIMIT 1`, f.Name, f.MediaType, f.SHA256, f.Size).Scan(&existing)
+	if err == nil {
+		prior, e := store.GetConversationAttachment(ctx, tx.Q(), existing)
+		return Outcome{NoEffect: true, Result: prior.ConversationAttachment}, e
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Outcome{}, err
+	}
 	f.FileID = x.IDs.New(protocol.PrefixFile)
 	if err := tx.InsertConversationAttachment(ctx, store.ConversationAttachmentRow{ConversationAttachment: f, CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return Outcome{}, err

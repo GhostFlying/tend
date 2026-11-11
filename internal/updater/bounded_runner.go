@@ -506,7 +506,7 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 		if err := s.save(); err != nil {
 			return true, err
 		}
-		if err := backupBoundedRunnerData(s.cfg, op); err != nil {
+		if err := backupBoundedRunnerDataContext(stepCtx, s.cfg, op); err != nil {
 			return true, err
 		}
 		op.Phase = "backed_up"
@@ -846,6 +846,9 @@ func boundedRunnerPhaseBudget(phase string, p protocol.MaintenanceTimeoutPolicy)
 // in place. Existing bytes must match the still-stopped source; they are never
 // overwritten by a new copy after a lost backup reply.
 func backupBoundedRunnerData(cfg Config, op *Operation) error {
+	return backupBoundedRunnerDataContext(context.Background(), cfg, op)
+}
+func backupBoundedRunnerDataContext(ctx context.Context, cfg Config, op *Operation) error {
 	if err := os.MkdirAll(op.BackupDir, 0700); err != nil {
 		return err
 	}
@@ -869,23 +872,11 @@ func backupBoundedRunnerData(cfg Config, op *Operation) error {
 		}
 		file.Existed = true
 		file.Mode = uint32(info.Mode().Perm())
-		file.SHA256, err = hashFile(path)
+		file.SHA256, err = hashBackupFile(ctx, path)
 		if err != nil {
 			return err
 		}
-		destination := filepath.Join(op.BackupDir, file.Name)
-		if prior, err := os.Lstat(destination); err == nil {
-			if !prior.Mode().IsRegular() || prior.Mode()&os.ModeSymlink != 0 {
-				return errors.New("updater: original bounded backup type changed")
-			}
-			if hash, err := hashFile(destination); err != nil || hash != file.SHA256 {
-				return errors.New("updater: original bounded backup bytes do not match the retained source")
-			}
-		} else if os.IsNotExist(err) {
-			if err := copyAtomic(path, destination, 0600); err != nil {
-				return err
-			}
-		} else {
+		if err := persistBackupFile(ctx, cfg, op, &file, path); err != nil {
 			return err
 		}
 		files = append(files, file)
@@ -907,7 +898,7 @@ func backupBoundedRunnerData(cfg Config, op *Operation) error {
 		return err
 	}
 	op.Backups = files
-	return nil
+	return writeBackupMetadata(cfg, op)
 }
 
 // A committed process remains under its existing same-version supervisor.

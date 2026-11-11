@@ -109,13 +109,13 @@ export class Withdrawals {
             try {
               await this.queue.discard(w.localRequestId);
             } catch {
-              const submitted = await this.client.lookup(w.localRequestId);
-              const result = submitted?.result as { message_id?: string } | undefined;
-              if (
-                !result?.message_id ||
-                (submitted?.status !== "accepted" && submitted?.status !== "succeeded")
-              )
-                throw new Error("发送结果尚未确认，保留原请求继续核对");
+              const queued = this.queue.list
+                .get()
+                .find((message) => message.requestId === w.localRequestId);
+              const messageID = (queued?.envelope.payload as { message_id?: string } | undefined)
+                ?.message_id;
+              const submitted = messageID ? await this.client.message(messageID) : null;
+              if (!submitted) throw new Error("发送结果尚未确认，保留原消息继续核对");
               const conversation =
                 (w.envelope.payload as SubmitMessagePayload).conversation_id ?? "main";
               let after = 0,
@@ -124,7 +124,7 @@ export class Withdrawals {
                 const page = await this.client.get<ConversationQueuePage>(
                   `/api/v1/conversation/queue?projection=issues&category=owner&after=${after}&conversation_id=${encodeURIComponent(conversation)}`,
                 );
-                entry = page.items?.find((it) => it.item.message_id === result.message_id);
+                entry = page.items?.find((it) => it.item.message_id === submitted.message_id);
                 after = page.next ?? 0;
               } while (!entry && after);
               if (!entry?.can_withdraw) {
@@ -162,17 +162,21 @@ export class Withdrawals {
             continue;
           }
         }
-        const found = await this.client.lookup(w.id);
-        const op = found ?? (await this.client.submit(w.envelope)).operation;
-        if (!op || op.status === "unknown") throw new Error("撤回结果待核对，原消息可能仍在队列中");
-        if (op.status === "failed") {
-          await storage.save("withdrawals", {
-            ...w,
-            state: "failed",
-            error: op.error?.message || "消息已开始或版本已变化，请重新读取",
-          });
-          this.changed();
-          continue;
+        const found = await this.client.message(w.item.message_id);
+        if (!found) throw new Error("原消息当前无法读取，保留原内容继续核对");
+        if (!found.control?.withdrawn_at) {
+          const op = (await this.client.submit(w.envelope)).operation;
+          if (!op || op.status === "unknown")
+            throw new Error("撤回结果待核对，原消息可能仍在队列中");
+          if (op.status === "failed") {
+            await storage.save("withdrawals", {
+              ...w,
+              state: "failed",
+              error: op.error?.message || "消息已开始或版本已变化，请重新读取",
+            });
+            this.changed();
+            continue;
+          }
         }
         const recovered: SavedDraft = {
           id: w.draftId,

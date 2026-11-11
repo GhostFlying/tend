@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -288,7 +289,9 @@ func TestFault_ManagerCloseSettlesTrailingStartupRPC(t *testing.T) {
 		t.Fatal(op)
 	}
 	// A replacement server attachment queues Models behind the claimed close.
-	modelsID, err := h.app.QueueManagerNative(t.Context(), as.RunID, "models", json.RawMessage(`{}`))
+	modelsContext, cancelModels := context.WithCancel(t.Context())
+	defer cancelModels()
+	modelsID, err := h.app.QueueManagerNative(modelsContext, as.RunID, "models", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,8 +299,15 @@ func TestFault_ManagerCloseSettlesTrailingStartupRPC(t *testing.T) {
 		t.Fatal(op)
 	}
 	reply, ready, err := h.app.ManagerNativeResult(t.Context(), as.RunID, modelsID)
-	if err != nil || !ready || !reply.Rejected {
-		t.Fatal("unclaimed RPC did not receive its non-execution receipt", reply, ready, err)
+	if err != nil || ready || h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE method='models'`) != 0 {
+		t.Fatal("unobserved read became a durable or fabricated result", reply, ready, err)
+	}
+	cancelModels()
+	if reply, ready, err := h.app.ManagerNativeResult(t.Context(), as.RunID, modelsID); ready || protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
+		t.Fatal("cancelled observation retained a false receipt", reply, ready, err)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM runs WHERE run_id=? AND native_close_id=? AND native_closed_at>0`, as.RunID, closeID) != 1 {
+		t.Fatal("unobserved read changed the actual physical close")
 	}
 }
 
@@ -336,7 +346,7 @@ func TestFault_ManagerClosingAttachmentUsesConfirmedMetadataToDrainEvents(t *tes
 	for _, read := range []struct {
 		method, thread string
 		want           json.RawMessage
-	}{{"models", "", catalog}, {"resume", "native", thread}, {"resume", "unrelated", nil}, {"start", "native", nil}, {"turn", "native", nil}} {
+	}{{"models", "", nil}, {"resume", "native", thread}, {"resume", "unrelated", nil}, {"start", "native", nil}, {"turn", "native", nil}} {
 		raw, err := h.app.ManagerClosingAttachment(t.Context(), as.RunID, read.method, read.thread)
 		if err != nil || string(raw) != string(read.want) {
 			t.Fatal("closing metadata read changed identity", read.method, string(raw), err)

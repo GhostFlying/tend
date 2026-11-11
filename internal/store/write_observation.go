@@ -71,7 +71,6 @@ const (
 	WriteFollowup             WritePhase = "followup"
 	WriteManagerRefresh       WritePhase = "manager_refresh"
 	WriteMaintenance          WritePhase = "maintenance_settlement"
-	WriteRequestInsert        WritePhase = "request_insert"
 	WriteClaimRefresh         WritePhase = "claim_manager_refresh"
 	WriteClaimCandidates      WritePhase = "claim_candidates"
 	WriteClaimSelection       WritePhase = "claim_selection"
@@ -345,7 +344,7 @@ func (t *Tx) ObservePhase(phase WritePhase) func() {
 		return func() {}
 	}
 	switch phase {
-	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteRequestInsert, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan, WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
+	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan, WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
 	default:
 		return func() {}
 	}

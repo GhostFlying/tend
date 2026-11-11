@@ -41,7 +41,7 @@ func TestIssueCLIOriginalEnvelopeDryRunAndReplay(t *testing.T) {
 	})
 	te.out.Reset()
 	te.errOut.Reset()
-	if code := te.main("issue", "replay", "--file", file); code != exitOK {
+	if code := te.main("operation", "submit", "--file", file); code != exitOK {
 		t.Fatal(code, te.errOut.String())
 	}
 	if len(f.seen("POST /api/v1/ops")) != 1 {

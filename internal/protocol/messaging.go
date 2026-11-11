@@ -15,6 +15,7 @@ type MessagingChannel struct {
 }
 
 type MessagingInput struct {
+	MessageID    string   `json:"message_id"`
 	Body         string   `json:"body,omitempty"`
 	Attachments  []string `json:"attachments,omitempty"`
 	ReplyTo      string   `json:"reply_to,omitempty"`
@@ -23,6 +24,7 @@ type MessagingInput struct {
 
 // MessagingPublication deliberately has no channel or recipient-address fields.
 type MessagingPublication struct {
+	MessageID        string   `json:"message_id"`
 	SourceMessageIDs []string `json:"source_message_ids,omitempty"`
 	IssueIDs         []string `json:"issue_ids,omitempty"`
 	Body             string   `json:"body,omitempty"`
@@ -91,10 +93,11 @@ type MessagingOption struct {
 
 // RespondInteraction never accepts addresses, channels or arbitrary operations.
 type RespondInteraction struct {
-	Confirm bool   `json:"confirm,omitempty"`
-	Version int64  `json:"version"`
-	Option  string `json:"option,omitempty"`
-	Text    string `json:"text,omitempty"`
+	MessageID string `json:"message_id"`
+	Confirm   bool   `json:"confirm,omitempty"`
+	Version   int64  `json:"version"`
+	Option    string `json:"option,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
 type MessagingPage struct {

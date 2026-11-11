@@ -96,13 +96,12 @@ func TestCapabilityDefinitionCASHistoryIdempotencyAndCursor(t *testing.T) {
 	if _, err := h.app.CapabilityDefinitions(t.Context(), "render", "active", "", page.Next, 1); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
 		t.Fatal("cursor changed filters", err)
 	}
-	var d protocol.CapabilityDefinition
 	op := h.exec(owner, first, PutCapability{})
-	if err := json.Unmarshal(op.Result, &d); err != nil || d.Revision != 1 || d.State != "active" {
-		t.Fatal(d, err)
+	if op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("old definition revision was accepted", op)
 	}
 	first.Payload, _ = json.Marshal(p)
-	if op, err := h.app.Execute(t.Context(), owner, first, PutCapability{}); protocol.CodeOf(err) != protocol.CodeConflictPayload && (op.Error == nil || op.Error.Code != protocol.CodeConflictPayload) {
+	if op, err := h.app.Execute(t.Context(), owner, first, PutCapability{}); protocol.CodeOf(err) != protocol.CodeStaleRevision && (op.Error == nil || op.Error.Code != protocol.CodeStaleRevision) {
 		t.Fatal("changed request accepted", op, err)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {

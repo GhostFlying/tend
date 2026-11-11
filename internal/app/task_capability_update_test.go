@@ -99,8 +99,13 @@ func TestTaskCapabilityUpdateReferencesWithoutNewMounts(t *testing.T) {
 					if !reflect.DeepEqual(original, h.storedSpec(task.TaskID, 1)) {
 						t.Fatal("historical spec changed")
 					}
-					if replay := h.exec(owner, env, UpdateIntent{}); !reflect.DeepEqual(replay, op) {
-						t.Fatal("original request replay changed", replay, op)
+					replay := h.exec(owner, env, UpdateIntent{})
+					wantCode := scenario.code
+					if wantCode == "" {
+						wantCode = protocol.CodeStaleRevision
+					}
+					if replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != wantCode {
+						t.Fatal("retry bypassed current validation or CAS", replay, op)
 					}
 				})
 			}
@@ -194,16 +199,16 @@ func TestTaskCapabilityUpdatePreservesInFlightPinAndRequestIdentity(t *testing.T
 	if op.Status != protocol.OpSucceeded || h.task(task).SpecVersion != 2 || !slices.Equal(frozen, readFrozen()) {
 		t.Fatal("update lost original frozen run", op)
 	}
-	if replay := h.exec(owner, env, UpdateIntent{}); !reflect.DeepEqual(replay, op) {
-		t.Fatal("original request replay changed", replay)
+	if replay := h.exec(owner, env, UpdateIntent{}); replay.Status != protocol.OpFailed || protocol.CodeOf(replay.Error) != protocol.CodeStaleRevision {
+		t.Fatal("retry bypassed the original revision", replay)
 	}
 	if stale := h.exec(owner, h.env("tasks.update_intent", taskTarget(task), updateIntentPayload{Spec: &spec}, rev(before.ControlRevision)), UpdateIntent{}); stale.Error == nil || stale.Error.Code != protocol.CodeStaleRevision {
 		t.Fatal("stale CAS accepted", stale)
 	}
-	spec.Scope = "Different payload cannot reuse the original request"
+	spec.Scope = "Different payload still requires the current control revision"
 	env.Payload, _ = json.Marshal(updateIntentPayload{Spec: &spec})
-	if _, err := h.app.Execute(t.Context(), owner, env, UpdateIntent{}); protocol.CodeOf(err) != protocol.CodeConflictPayload {
-		t.Fatal("request identity changed", err)
+	if retry := h.exec(owner, env, UpdateIntent{}); retry.Status != protocol.OpFailed || protocol.CodeOf(retry.Error) != protocol.CodeStaleRevision {
+		t.Fatal("changed input bypassed stale CAS", retry)
 	}
 	if !slices.Equal(frozen, readFrozen()) || h.task(task).SpecVersion != 2 {
 		t.Fatal("replay/conflict changed frozen run or spec")

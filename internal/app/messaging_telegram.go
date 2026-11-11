@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -99,16 +100,11 @@ func (a *App) SettleTelegramInput(ctx context.Context, u TelegramInbox, reason s
 		return err
 	})
 }
-func (a *App) TelegramFileRequest(ctx context.Context, u TelegramInbox, position int) (string, error) {
-	var id string
-	err := a.write(ctx, func(tx *store.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO telegram_file_requests(bot_id,update_id,position,request_id) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, u.BotID, u.UpdateID, position, a.ids.New(protocol.PrefixRequest))
-		if err != nil {
-			return err
-		}
-		return tx.Q().QueryRowContext(ctx, `SELECT request_id FROM telegram_file_requests WHERE bot_id=? AND update_id=? AND position=?`, u.BotID, u.UpdateID, position).Scan(&id)
-	})
-	return id, err
+func (a *App) TelegramFileRequest(_ context.Context, u TelegramInbox, position int) (string, error) {
+	if u.BotID <= 0 || u.UpdateID < 0 || position < 0 {
+		return "", protocol.Errorf(protocol.CodeInvalidRequest, "original Telegram file identity is required")
+	}
+	return protocol.NativeCorrelationID(fmt.Sprintf("telegram-file:%d:%d", u.BotID, u.UpdateID), fmt.Sprint(position)), nil
 }
 
 // TelegramIncoming is constructed only by the authenticated local adapter.
@@ -182,6 +178,7 @@ func (a *App) ReceiveTelegram(ctx context.Context, u TelegramInbox, m TelegramIn
 	if err != nil {
 		return protocol.Operation{}, err
 	}
+	m.Input.MessageID = protocol.NativeObjectID(protocol.PrefixMessage, fmt.Sprintf("telegram:%d", u.BotID), fmt.Sprint(u.UpdateID))
 	payload, _ := json.Marshal(m)
 	env := &protocol.Envelope{RequestID: u.RequestID, Operation: "messaging.telegram_input", Target: protocol.Target{Type: "message"}, Payload: payload}
 	return a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalOwner, Subject: b.Owner, Client: "telegram"}, env, receiveTelegram{Inbox: u, Message: m})
@@ -208,31 +205,6 @@ func (a *App) ValidateMessagingPart(ctx context.Context, p MessagingPart) error 
 	}
 
 	return nil
-}
-
-func (a *App) TelegramUploadedFile(ctx context.Context, request string) (string, bool, error) {
-	var id string
-	found := false
-	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		r, err := store.GetRequest(ctx, tx.Q(), "owner", request)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if r.Status != protocol.OpSucceeded {
-			return protocol.Errorf(protocol.CodeInvalidTransition, "file upload has a recorded failure")
-		}
-		var f protocol.ConversationAttachment
-		if err = json.Unmarshal([]byte(r.ResultJSON), &f); err != nil {
-			return err
-		}
-		id = f.FileID
-		found = true
-		return nil
-	})
-	return id, found, err
 }
 
 // RejectTelegramInput retains a definite input failure and queues a factual

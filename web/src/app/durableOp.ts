@@ -1,8 +1,9 @@
+import { prepareOperation, recoverOperation } from "./operationRecovery.ts";
 import { deploymentStorageName } from "../api/deployment.ts";
 // Owner control requests persist before transport. Recovery retains the original
 // target, revision and payload; a different tab cannot replace a pending request.
 import type { Envelope } from "../api/generated/api.ts";
-import { runOp, settleOp, type OpOutcome, type OpSender } from "./ops.ts";
+import { runOp, type OpOutcome, type OpSender } from "./ops.ts";
 
 export class DurableOp {
   constructor(
@@ -83,6 +84,7 @@ export class DurableOp {
   }
 
   async submit(sender: OpSender, envelope: Envelope): Promise<OpOutcome> {
+    envelope = prepareOperation(envelope);
     const reserved = await this.change((current) => current ?? envelope);
     if (reserved?.request_id !== envelope.request_id) {
       return { kind: "unknown", message: "该操作仍有待核对请求，请先核对原请求。" };
@@ -94,15 +96,10 @@ export class DurableOp {
     const original = await this.pending();
     if (!original) return { kind: "done", result: undefined };
     try {
-      const receipt = await sender.lookup(original.request_id);
-      // A successful not-found lookup permits an explicit retry with exactly
-      // the original identity. This never resubmits a new native operation.
-      const result = receipt
-        ? settleOp(receipt.status, receipt.result, receipt.error)
-        : await runOp(sender, original);
+      const result = await recoverOperation(sender, original);
       return this.settle(original, result);
     } catch {
-      return { kind: "unknown", message: "尚未取得原请求回执，继续保留待核对状态。" };
+      return { kind: "unknown", message: "尚未取得业务对象状态，继续保留待核对状态。" };
     }
   }
 }

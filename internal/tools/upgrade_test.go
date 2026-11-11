@@ -44,7 +44,7 @@ func TestUpgradeManagerParkAdmittedMainTool(t *testing.T) {
 	e.svc.app = app.New(e.store, ids, clock.Now, app.WithHostedConfiguration(prepared))
 	execute := func(principal protocol.Principal, cmd app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
 		t.Helper()
-		raw, _ := json.Marshal(payload)
+		target, raw := composeFixtureBusinessInput(t, ids, cmd.Operation(), target, payload)
 		op, err := e.svc.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, cmd)
 		if err != nil || op.Error != nil {
 			t.Fatal(op, err)

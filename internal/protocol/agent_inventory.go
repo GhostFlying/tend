@@ -128,11 +128,15 @@ type AgentInventoryReceipt struct {
 }
 
 type AgentInventoryStatusPayload struct {
-	Runtime   *RunnerRuntime `json:"runtime"`
-	RequestID string         `json:"request_id,omitempty"`
+	LocalRevision int64          `json:"local_revision,omitempty"`
+	SnapshotID    string         `json:"snapshot_id,omitempty"`
+	PublicSHA256  string         `json:"public_sha256,omitempty"`
+	Runtime       *RunnerRuntime `json:"runtime"`
+	RequestID     string         `json:"request_id,omitempty"`
 }
 
 type AgentInventoryStatus struct {
+	Matched               *AgentInventoryReceipt    `json:"matched,omitempty"`
 	Executors             []AgentExecutor           `json:"executors,omitempty"`
 	Current               *AgentInventoryReceipt    `json:"current,omitempty"`
 	Projection            *AgentInventoryProjection `json:"projection,omitempty"`

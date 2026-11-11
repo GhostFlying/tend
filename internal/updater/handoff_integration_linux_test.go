@@ -159,13 +159,9 @@ func runHandoffSystemdFixture(t *testing.T, interrupted bool) {
 		t.Fatal(err)
 	}
 	defer ledger.Close()
-	original := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: oldBinding.UpgradeID, ReleaseID: oldBinding.ReleaseID, Status: "completed", Phase: "completed", Revision: 8}, ManifestSHA256: oldBinding.ManifestSHA256, ServerHash: oldBinding.ArtifactSHA256, ServerInstance: oldBinding.InstanceID, ServerProcess: oldBinding.ProcessInstanceID, ServerHealthy: 1}
+	original := store.UpgradeRow{StartRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV", View: protocol.UpgradeView{UpgradeID: oldBinding.UpgradeID, ReleaseID: oldBinding.ReleaseID, Status: "completed", Phase: "completed", Revision: 8}, ManifestSHA256: oldBinding.ManifestSHA256, ServerHash: oldBinding.ArtifactSHA256, ServerInstance: oldBinding.InstanceID, ServerProcess: oldBinding.ProcessInstanceID, ServerHealthy: 1}
 	if err := ledger.Write(ctx, func(tx *store.Tx) error {
 		if err := tx.PutUpgrade(ctx, original); err != nil {
-			return err
-		}
-		result, _ := json.Marshal(original.View)
-		if err := tx.InsertRequest(ctx, store.RequestRecord{Domain: "system", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEV", Operation: "upgrades.start", PayloadHash: strings.Repeat("f", 64), PrincipalJSON: `{"kind":"system"}`, TraceID: "trace-fixture", Status: protocol.OpSucceeded, ResultJSON: string(result)}); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `CREATE TABLE recovery_fixture_data(value TEXT NOT NULL)`); err != nil {

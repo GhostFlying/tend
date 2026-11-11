@@ -217,7 +217,7 @@ func TestFault_ActiveClosingManagerConsumesRepairBeforeOriginalCloseReceipt(t *t
 	if err != nil || !ready || uncertain.Rejected || uncertain.Error == "" || h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='unknown'`, started) != 1 {
 		t.Fatal("previously claimed callback delivery was treated as unexecuted or complete", uncertain, ready, err)
 	}
-	if h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=?`, as.RunID) != 7 || h.countWhere(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='native'`) != 0 || h.countWhere(`SELECT COUNT(*) FROM background_replies`) != 0 {
-		t.Fatal("closing repair removed old request history or published internal prose")
+	if h.countWhere(`SELECT COUNT(*) FROM runs WHERE run_id=? AND native_close_id=? AND native_close_sequence=19`, as.RunID, originalClose) != 1 || h.countWhere(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='native'`) != 0 || h.countWhere(`SELECT COUNT(*) FROM background_replies`) != 0 {
+		t.Fatal("closing repair lost the original close fact or published internal prose")
 	}
 }

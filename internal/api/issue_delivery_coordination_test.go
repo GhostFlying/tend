@@ -20,11 +20,12 @@ func TestIssuePRPolicyHTTPAuthorityAndReviewRead(t *testing.T) {
 	if policy == nil || policy.Authority == nil || policy.Authority.RequestID != request.RequestID || policy.Authority.ScopeDigest == "" {
 		t.Fatal("authenticated owner policy lost its server-recorded authority", policy)
 	}
-	replayed := issueHTTP(t, e, token, request)
+	assertOwnerStaleHTTP(t, e, token, request)
+	replayed := issueDetailHTTP(t, e, token, issue.IssueID)
 	if replayed.Revision != updated.Revision || replayed.Plan.PRPolicy.Authority.RequestID != request.RequestID {
-		t.Fatal("policy replay minted another grant", replayed)
+		t.Fatal("stale policy input minted another grant", replayed)
 	}
-	before := e.count(`SELECT count(*) FROM request_records`)
+	before := e.count(`SELECT count(*) FROM events`)
 	var page protocol.SharedDeliveryReviewPage
 	route := "/api/v1/issues/" + issue.IssueID + "/delivery-reviews"
 	if status := e.do("GET", route+"?delivery_id=github%3Aexample%2Fproject%2312&after=previous&limit=2", token, nil, &page); status != http.StatusOK || page.Items == nil || len(page.Items) != 0 || page.More || page.Next != "" {
@@ -38,7 +39,7 @@ func TestIssuePRPolicyHTTPAuthorityAndReviewRead(t *testing.T) {
 			t.Fatal("invalid review page size", limit, status)
 		}
 	}
-	if e.count(`SELECT count(*) FROM request_records`) != before {
+	if e.count(`SELECT count(*) FROM events`) != before {
 		t.Fatal("review reads created business requests")
 	}
 }

@@ -81,7 +81,7 @@ func (j *Journal) registerUsageSource(ctx context.Context, s UsageSource, mainte
 				}
 				if previous.Source.Path == s.Source.Path {
 					if stopped {
-						return saveUsageSource(ctx, tx, previous, nil, j.now().UnixMilli())
+						return j.saveUsageSource(ctx, tx, previous, nil, j.now().UnixMilli())
 					}
 					return nil
 				}
@@ -99,7 +99,7 @@ func (j *Journal) registerUsageSource(ctx context.Context, s UsageSource, mainte
 				previous.Source = s.Source
 				previous.Files = nil
 				previous.DiscoveredAt = 0
-				return saveUsageSource(ctx, tx, previous, nil, j.now().UnixMilli())
+				return j.saveUsageSource(ctx, tx, previous, nil, j.now().UnixMilli())
 			}
 			if !previous.WriterStopped {
 				return protocol.Errorf(protocol.CodeStaleRevision, "original usage writer has not stopped")
@@ -179,7 +179,7 @@ func (j *Journal) QueueUsage(ctx context.Context, s UsageSource, env *protocol.E
 func (j *Journal) QueueUsageSnapshot(ctx context.Context, s UsageSource, env *protocol.Envelope) (UsageSourceSnapshot, error) {
 	var snapshot UsageSourceSnapshot
 	err := j.tx(ctx, func(tx *sql.Tx) error {
-		if err := saveUsageSource(ctx, tx, s, env, j.now().UnixMilli()); err != nil {
+		if err := j.saveUsageSource(ctx, tx, s, env, j.now().UnixMilli()); err != nil {
 			return err
 		}
 		current, err := getUsageSource(ctx, tx, s.ID)
@@ -226,7 +226,7 @@ func (j *Journal) StopUsageSource(ctx context.Context, run, thread string) error
 			}
 			s.WriterStopped = true
 			s.Collection.Stopped(j.now().UnixMilli(), "owned-writer-closed:"+s.Collection.WriterID, len(s.Cursors) == 0)
-			if err = saveUsageSource(ctx, tx, s, nil, j.now().UnixMilli()); err != nil {
+			if err = j.saveUsageSource(ctx, tx, s, nil, j.now().UnixMilli()); err != nil {
 				return err
 			}
 		}
@@ -269,7 +269,7 @@ func (j *Journal) QueueUsageRegistration(ctx context.Context, source UsageSource
 		if err != nil {
 			return err
 		}
-		return putRequest(ctx, tx, Request{Envelope: env}, j.now())
+		return j.putRequest(ctx, tx, Request{Envelope: env}, j.now())
 	})
 }
 

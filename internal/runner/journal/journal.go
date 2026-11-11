@@ -28,7 +28,7 @@ import (
 var migrationFS embed.FS
 
 // CurrentVersion is the journal schema installed by this binary.
-const CurrentVersion int64 = 23
+const CurrentVersion int64 = 24
 
 // Run phases.
 const (
@@ -68,6 +68,7 @@ type Request struct {
 
 // Journal is the runner's journal file.
 type Journal struct {
+	spoolMu   sync.RWMutex
 	path      string
 	db        *sql.DB
 	now       func() time.Time
@@ -116,6 +117,18 @@ func openJournal(ctx context.Context, path string, now func() time.Time, authori
 	if err := j.migrate(ctx); err != nil {
 		_ = j.Close()
 		return nil, err
+	}
+	// Publish/rewrite retained transmission bodies in bounded transactions.
+	// Frozen unknown reconciliation inputs keep their original representation.
+	for {
+		count, err := j.MigrateSpool(ctx, 128)
+		if err != nil {
+			_ = j.Close()
+			return nil, err
+		}
+		if count == 0 {
+			break
+		}
 	}
 	return j, nil
 }
@@ -195,6 +208,8 @@ func (j *Journal) migrate(ctx context.Context) error {
 }
 
 func (j *Journal) tx(ctx context.Context, fn func(*sql.Tx) error) (err error) {
+	j.spoolMu.Lock()
+	defer j.spoolMu.Unlock()
 	tx, err := j.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("journal: begin: %w", err)
@@ -212,14 +227,14 @@ func (j *Journal) tx(ctx context.Context, fn func(*sql.Tx) error) (err error) {
 
 // PutRequest records a request before it is first sent.
 func (j *Journal) PutRequest(ctx context.Context, r Request) error {
-	err := j.tx(ctx, func(tx *sql.Tx) error { return putRequest(ctx, tx, r, j.now()) })
+	err := j.tx(ctx, func(tx *sql.Tx) error { return j.putRequest(ctx, tx, r, j.now()) })
 	if err == nil && (r.Envelope.Operation == protocol.OpRunnerUsageUpload || r.Envelope.Operation == protocol.OpRunnerUsageRegister) {
 		j.WakeUsage()
 	}
 	return err
 }
 
-func putRequest(ctx context.Context, tx *sql.Tx, r Request, now time.Time) error {
+func (j *Journal) putRequest(ctx context.Context, tx *sql.Tx, r Request, now time.Time) error {
 	target, err := json.Marshal(r.Envelope.Target)
 	if err != nil {
 		return fmt.Errorf("journal: encode target: %w", err)
@@ -227,6 +242,10 @@ func putRequest(ctx context.Context, tx *sql.Tx, r Request, now time.Time) error
 	payload := string(r.Envelope.Payload)
 	if payload == "" {
 		payload = "null"
+	}
+	payload, err = j.retainRequestBody(ctx, r.Envelope.Operation, payload)
+	if err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO requests (request_id, operation, run_id, target_json, payload_json, created_at, expected_control_revision)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, r.Envelope.RequestID, r.Envelope.Operation, nullString(r.RunID), string(target), payload, now.UnixMilli(), r.Envelope.ExpectedControlRevision)
@@ -247,6 +266,10 @@ func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
 		if err != nil {
 			return err
 		}
+		payload, err = j.readRequestBody(ctx, operation, payload)
+		if err != nil {
+			return err
+		}
 		if operation == protocol.OpRunnerUsageRegister || operation == protocol.OpRunnerUsageUpload {
 			var scope protocol.UsageUpload
 			if err = json.Unmarshal([]byte(payload), &scope); err != nil {
@@ -263,6 +286,19 @@ func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
 				return err
 			}
 		}
+		if operation == protocol.OpManagerNativeReply {
+			var reply protocol.ManagerNativeReply
+			if err = json.Unmarshal([]byte(payload), &reply); err != nil {
+				return err
+			}
+			// A confirmed server receipt settles transport storage only. Preserve
+			// ambiguous native effects and actual close facts for reconciliation.
+			if reply.Error == "" || reply.Rejected {
+				if _, err = tx.ExecContext(ctx, `DELETE FROM manager_native_operations WHERE request_id=? AND status='completed' AND json_extract(request_json,'$.method')<>'close'`, reply.ID); err != nil {
+					return err
+				}
+			}
+		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id=?`, requestID)
 		return err
 	})
@@ -270,6 +306,8 @@ func (j *Journal) DeleteRequest(ctx context.Context, requestID string) error {
 
 // Requests returns the journaled requests, oldest first.
 func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
+	j.spoolMu.RLock()
+	defer j.spoolMu.RUnlock()
 	rows, err := j.db.QueryContext(ctx, `SELECT request_id, operation, run_id, target_json, payload_json, created_at, expected_control_revision
 		FROM requests ORDER BY created_at, request_id`)
 	if err != nil {
@@ -289,6 +327,10 @@ func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
 		}
 		if err := json.Unmarshal([]byte(target), &r.Envelope.Target); err != nil {
 			return nil, fmt.Errorf("journal: decode target: %w", err)
+		}
+		payload, err = j.readRequestBody(ctx, r.Envelope.Operation, payload)
+		if err != nil {
+			return nil, err
 		}
 		if payload != "null" {
 			r.Envelope.Payload = json.RawMessage(payload)
@@ -367,6 +409,8 @@ func (j *Journal) BindUnstartedWorkerOrigin(ctx context.Context, runID string, w
 
 // Runs returns the runs that are not done.
 func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
+	j.spoolMu.RLock()
+	defer j.spoolMu.RUnlock()
 	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json, phase, fenced, attempts, COALESCE(thread_id, ''), held, COALESCE(worker_result_json,''), COALESCE(worker_done_at,0), stopped_confirmed, worker_kind, COALESCE((SELECT binding_json FROM run_capability_receipts c WHERE c.run_id=runs.run_id ORDER BY c.sequence DESC LIMIT 1),'') FROM runs
 		WHERE phase <> 'done' ORDER BY run_id`)
 	if err != nil {
@@ -383,6 +427,10 @@ func (j *Journal) Runs(ctx context.Context) ([]Run, error) {
 		)
 		if err := rows.Scan(&body, &r.Phase, &r.Fenced, &r.Attempts, &r.Thread, &r.Held, &result, &r.WorkerDoneAtMillis, &r.StoppedConfirmed, &r.WorkerKind, &capability); err != nil {
 			return nil, fmt.Errorf("journal: scan run: %w", err)
+		}
+		result, err = j.readBody(ctx, result)
+		if err != nil {
+			return nil, err
 		}
 		r.WorkerResult = json.RawMessage(result)
 		if err := json.Unmarshal([]byte(body), &r.Assignment); err != nil {
@@ -428,7 +476,14 @@ func (j *Journal) WorkerDone(ctx context.Context, runID string, result json.RawM
 		return errors.New("journal: invalid completed worker result")
 	}
 	now := j.now().UnixMilli()
-	return j.exec(ctx, `UPDATE runs SET phase='worker_done',worker_result_json=?,worker_done_at=COALESCE(worker_done_at,?),updated_at=? WHERE run_id=?`, string(result), now, now, runID)
+	return j.tx(ctx, func(tx *sql.Tx) error {
+		body, err := j.retainBody(ctx, string(result))
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE runs SET phase='worker_done',result_acknowledged=0,worker_result_json=?,worker_done_at=COALESCE(worker_done_at,?),updated_at=? WHERE run_id=?`, body, now, now, runID)
+		return err
+	})
 }
 
 // SetFenced marks or clears a run's fence.
@@ -462,7 +517,7 @@ func (j *Journal) NextAttempt(ctx context.Context, runID string) (int, error) {
 // transaction, so a restart resends exactly that report.
 func (j *Journal) Finish(ctx context.Context, runID, phase string, r Request) error {
 	return j.tx(ctx, func(tx *sql.Tx) error {
-		if err := putRequest(ctx, tx, r, j.now()); err != nil {
+		if err := j.putRequest(ctx, tx, r, j.now()); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE runs SET phase = ?, updated_at = ? WHERE run_id = ?`, phase, j.now().UnixMilli(), runID)
@@ -477,7 +532,7 @@ func (j *Journal) Replace(ctx context.Context, runID, phase, oldRequestID string
 		if _, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id = ?`, oldRequestID); err != nil {
 			return fmt.Errorf("journal: drop request: %w", err)
 		}
-		if err := putRequest(ctx, tx, r, j.now()); err != nil {
+		if err := j.putRequest(ctx, tx, r, j.now()); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE runs SET phase = ?, updated_at = ? WHERE run_id = ?`, phase, j.now().UnixMilli(), runID)
@@ -515,7 +570,7 @@ func (j *Journal) done(ctx context.Context, runID string, stop *RetainedStop) er
 		if err := archiveRetainedStop(ctx, tx, runID); err != nil {
 			return fmt.Errorf("journal: preserve stopped strict facts: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase = 'done', updated_at = ? WHERE run_id = ?`, j.now().UnixMilli(), runID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase = 'done', worker_result_json=CASE WHEN result_acknowledged=1 THEN NULL ELSE worker_result_json END, updated_at = ? WHERE run_id = ?`, j.now().UnixMilli(), runID); err != nil {
 			return fmt.Errorf("journal: finish run: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE run_id = ?`, runID); err != nil {
@@ -539,9 +594,16 @@ func (j *Journal) AppendEvent(ctx context.Context, runID string, e protocol.RunE
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET next_seq = ? WHERE run_id = ?`, seq+1, runID); err != nil {
 			return fmt.Errorf("journal: advance seq: %w", err)
 		}
-		body := string(e.Body)
-		_, err := tx.ExecContext(ctx, `INSERT INTO events (run_id, seq, native_id, kind, body_json) VALUES (?, ?, ?, ?, ?)`,
-			runID, seq, nullString(e.NativeID), e.Kind, nullString(body))
+		body, err := j.retainBody(ctx, string(e.Body))
+		if err != nil {
+			return err
+		}
+		var identity struct {
+			ThreadID string `json:"thread_id"`
+		}
+		_ = json.Unmarshal(e.Body, &identity)
+		_, err = tx.ExecContext(ctx, `INSERT INTO events (run_id, seq, native_id, kind, body_json,thread_id) VALUES (?, ?, ?, ?, ?,?)`,
+			runID, seq, nullString(e.NativeID), e.Kind, nullString(body), identity.ThreadID)
 		if err != nil {
 			return fmt.Errorf("journal: append event: %w", err)
 		}
@@ -551,6 +613,8 @@ func (j *Journal) AppendEvent(ctx context.Context, runID string, e protocol.RunE
 
 // PendingEvents returns up to limit unacknowledged events of a run in order.
 func (j *Journal) PendingEvents(ctx context.Context, runID string, limit int) ([]protocol.RunEvent, error) {
+	j.spoolMu.RLock()
+	defer j.spoolMu.RUnlock()
 	rows, err := j.db.QueryContext(ctx, `SELECT seq, native_id, kind, body_json FROM events WHERE run_id = ? ORDER BY seq LIMIT ?`, runID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("journal: pending events: %w", err)
@@ -567,7 +631,11 @@ func (j *Journal) PendingEvents(ctx context.Context, runID string, limit int) ([
 		}
 		e.NativeID = native.String
 		if body.Valid {
-			e.Body = json.RawMessage(body.String)
+			raw, err := j.readBody(ctx, body.String)
+			if err != nil {
+				return nil, err
+			}
+			e.Body = json.RawMessage(raw)
 		}
 		out = append(out, e)
 	}

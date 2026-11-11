@@ -208,7 +208,12 @@ func (a *App) PrepareHandoff(ctx context.Context, v store.ThreadHandoff) (store.
 	if v.ID == "" {
 		v.ID = a.ids.New(protocol.PrefixRequest)
 	}
-	err := a.handoffWrite(ctx, func(tx *store.Tx) error {
+	staged, err := a.store.StageOriginals(ctx, "handoffs:"+v.Instance, []byte(v.Prompt))
+	if err != nil {
+		return v, err
+	}
+	ctx = staged
+	err = a.handoffWrite(ctx, func(tx *store.Tx) error {
 		old, err := store.GetPendingHandoff(ctx, tx.Q(), v.Instance)
 		if err == nil {
 			if old.SourceThreadID != v.SourceThreadID || old.SourceGeneration != v.SourceGeneration || old.ToolsetHash != v.ToolsetHash {
@@ -230,7 +235,11 @@ func (a *App) PrepareHandoff(ctx context.Context, v store.ThreadHandoff) (store.
 		v.Phase = "prepared"
 		v.CreatedAtMillis = a.now().UnixMilli()
 		v.UpdatedAtMillis = v.CreatedAtMillis
-		_, err = tx.Exec(ctx, `INSERT INTO main_thread_handoffs(handoff_id,instance,source_thread_id,source_generation,source_version,toolset_hash,prompt,phase,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, v.ID, v.Instance, v.SourceThreadID, v.SourceGeneration, v.SourceVersion, v.ToolsetHash, v.Prompt, v.Phase, v.CreatedAtMillis, v.UpdatedAtMillis)
+		prompt, err := tx.RetainJSON(ctx, v.Prompt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO main_thread_handoffs(handoff_id,instance,source_thread_id,source_generation,source_version,toolset_hash,prompt,phase,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, v.ID, v.Instance, v.SourceThreadID, v.SourceGeneration, v.SourceVersion, v.ToolsetHash, prompt, v.Phase, v.CreatedAtMillis, v.UpdatedAtMillis)
 		if err != nil {
 			return err
 		}
@@ -334,7 +343,7 @@ func (a *App) CommitHandoff(ctx context.Context, id string) (v store.MainThreadB
 		if err := tx.PutMainThread(ctx, v.Instance, v.ThreadID, a.now().UnixMilli()); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE main_thread_handoffs SET phase='committed',updated_at=? WHERE handoff_id=?`, a.now().UnixMilli(), id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE main_thread_handoffs SET phase='committed',prompt='',updated_at=? WHERE handoff_id=?`, a.now().UnixMilli(), id); err != nil {
 			return err
 		}
 		h.Phase = "committed"
@@ -452,6 +461,11 @@ func (a *App) RefreshHandoff(ctx context.Context, id string, sourceVersion int64
 	if sourceVersion < 0 || strings.TrimSpace(prompt) == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "handoff reference and source version are required")
 	}
+	staged, err := a.store.StageOriginals(ctx, "handoff-refresh:"+id, []byte(prompt))
+	if err != nil {
+		return err
+	}
+	ctx = staged
 	return a.handoffWrite(ctx, func(tx *store.Tx) error {
 		job, err := store.GetThreadHandoff(ctx, tx.Q(), id)
 		if err != nil {
@@ -477,7 +491,11 @@ func (a *App) RefreshHandoff(ctx context.Context, id string, sourceVersion int64
 		if phase == "injected" {
 			phase = "created"
 		}
-		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET source_version=?,prompt=?,phase=?,updated_at=? WHERE handoff_id=?`, sourceVersion, prompt, phase, a.now().UnixMilli(), id)
+		retained, err := tx.RetainJSON(ctx, prompt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET source_version=?,prompt=?,phase=?,updated_at=? WHERE handoff_id=?`, sourceVersion, retained, phase, a.now().UnixMilli(), id)
 		if err != nil {
 			return err
 		}
@@ -510,6 +528,11 @@ func (a *App) RetargetPreparedHandoff(ctx context.Context, id, newHash string, n
 	if newHash == "" || newSourceVersion < 0 || strings.TrimSpace(prompt) == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "handoff needs toolset hash, observed version and reference")
 	}
+	staged, err := a.store.StageOriginals(ctx, "handoff-refresh:"+id, []byte(prompt))
+	if err != nil {
+		return err
+	}
+	ctx = staged
 	return a.handoffWrite(ctx, func(tx *store.Tx) error {
 		job, err := store.GetThreadHandoff(ctx, tx.Q(), id)
 		if err != nil {
@@ -531,7 +554,11 @@ func (a *App) RetargetPreparedHandoff(ctx context.Context, id, newHash string, n
 		if job.ToolsetHash == newHash && job.SourceVersion == newSourceVersion && job.Prompt == prompt {
 			return nil
 		}
-		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET toolset_hash=?,source_version=?,prompt=?,updated_at=? WHERE handoff_id=?`, newHash, newSourceVersion, prompt, a.now().UnixMilli(), id)
+		retained, err := tx.RetainJSON(ctx, prompt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE main_thread_handoffs SET toolset_hash=?,source_version=?,prompt=?,updated_at=? WHERE handoff_id=?`, newHash, newSourceVersion, retained, a.now().UnixMilli(), id)
 		if err != nil {
 			return err
 		}

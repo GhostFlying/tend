@@ -91,8 +91,9 @@ func TestIssueBoardStateNoopReplayEpochAndEndpoints(t *testing.T) {
 		t.Fatal("no-op reset window")
 	}
 	replay := h.exec(owner, env, CanonicalOwnerIssueCommand{Action: "set_status"})
-	if !bytes.Equal(replay.Result, op.Result) {
-		t.Fatal("replay changed receipt")
+	expectWorkCode(t, replay, protocol.CodeStaleRevision)
+	if current := canonicalTaskIssue(t, h, issue.IssueID); current.Revision != issue.Revision || current.BoardStatus() != protocol.IssueInProgress {
+		t.Fatal("stale board write changed current business state", current)
 	}
 	expectWorkCode(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: 99, Status: protocol.IssueInReview}), protocol.CodeStaleRevision)
 	issue = moveBoardIssue(t, h, issue, protocol.IssueDone)
@@ -294,8 +295,9 @@ func TestIssueBoardSettingsRecalculatePersistedWindow(t *testing.T) {
 	if op.Status != protocol.OpSucceeded || statusSourceCount(t, h, true) != 1 {
 		t.Fatal(op)
 	}
-	if replay := h.exec(owner, env, c); !bytes.Equal(replay.Result, op.Result) || statusSourceCount(t, h, true) != 1 {
-		t.Fatal("settings replay repeated notification")
+	expectWorkCode(t, h.exec(owner, env, c), protocol.CodeStaleRevision)
+	if statusSourceCount(t, h, true) != 1 {
+		t.Fatal("stale settings write repeated notification")
 	}
 	expectWorkCode(t, h.exec(owner, h.env(c.Operation(), env.Target, protocol.SetIssueNotificationSettingsPayload{DelayMinutes: 0}, rev(0)), c), protocol.CodeStaleRevision)
 	if result := h.exec(owner, h.env(c.Operation(), env.Target, protocol.SetIssueNotificationSettingsPayload{DelayMinutes: 0}, rev(1)), c); result.Status != protocol.OpSucceeded {

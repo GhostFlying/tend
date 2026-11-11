@@ -67,9 +67,12 @@ func TestCommittedMaintenancePreservesUnknownRunAndLinksTwoIndependentWindows(t 
 	if _, err := h.app.BeginOwnerMutation(ctx); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
 		t.Fatal("missing startup row did not fence", err)
 	}
-	// The original assignment remains replayable while a new claim is fenced.
-	if replay, ok := h.claimWith("linux-1", env); !ok || !reflect.DeepEqual(replay, as) {
-		t.Fatal("retained claim changed")
+	// A current assignment is rebuilt from the actual pinned execution. This
+	// fixture added a named pin after the initial unnegotiated claim; recovery
+	// must expose that adapter gap rather than replay stale cached assignment.
+	replay, replayErr := h.app.Execute(ctx, runner("linux-1"), env, Claim{})
+	if replayErr != nil || replay.Error == nil || replay.Error.Code != protocol.CodeInvalidTransition || h.count("runs") != 1 {
+		t.Fatal("retained claim bypassed its actual adapter requirement", replay, replayErr)
 	}
 	fresh := h.env(protocol.OpRunnerClaim, env.Target, protocol.ClaimPayload{Worker: h.worker("linux-1"), WorkspaceProtocol: 1, Runtime: r}, nil)
 	if _, err := h.app.Execute(ctx, runner("linux-1"), fresh, Claim{}); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
@@ -230,7 +233,6 @@ func TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHis
 			parentProcess := protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: parent.Successor.ProcessInstanceID, SHA256: parent.Successor.ArtifactSHA256}
 			var frozen protocol.CommittedMaintenanceLedger
 			var parentProof protocol.CommittedMaintenanceReceipt
-			var parentLinkRequest store.RequestRecord
 			if kind != "checking_never_registered" {
 				if _, err := h.app.RegisterCommittedMaintenance(ctx, parent, parentProcess); err != nil {
 					t.Fatal(err)
@@ -238,13 +240,6 @@ func TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHis
 				if kind == "committed_ack_lost" {
 					parentProof = protocol.CommittedMaintenanceReceipt{MaintenanceID: parent.MaintenanceID, RequestID: parent.RequestID, Previous: parent.Previous, Successor: parent.Successor, Process: parentProcess, Generation: 9, Epoch: parentProcess.LaunchID, FirstSequence: 1, SecondSequence: 2}
 					if _, err := h.app.LinkCommittedMaintenance(ctx, parentProof); err != nil {
-						t.Fatal(err)
-					}
-					if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
-						var err error
-						parentLinkRequest, err = store.GetRequest(ctx, tx.Q(), "system", parent.LinkRequestID)
-						return err
-					}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -309,15 +304,7 @@ func TestCommittedMaintenanceFailedParentResponsibilityPassesWithoutRewritingHis
 					if err != nil || !reflect.DeepEqual(replay, frozen) {
 						t.Fatal("successful parent request no longer replays its real receipt", replay, err)
 					}
-					if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
-						recorded, err := store.GetRequest(ctx, tx.Q(), "system", parent.LinkRequestID)
-						if err == nil && !reflect.DeepEqual(recorded, parentLinkRequest) {
-							t.Fatal("successful parent request record changed")
-						}
-						return err
-					}); err != nil {
-						t.Fatal(err)
-					}
+					assertNoGenericLedger(t, h)
 				} else if _, err := h.app.LinkCommittedMaintenance(ctx, stale); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
 					t.Fatal("superseded parent released admission", err)
 				}

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -40,10 +42,18 @@ func (t *Tx) InsertMessage(ctx context.Context, m MessageRow) (int64, error) {
 	if m.Kind == "" {
 		m.Kind = KindMessage
 	}
+	preview := string([]rune(m.Body)[:min(160, len([]rune(m.Body)))])
+	if m.Author == "main_agent" {
+		var err error
+		m.Body, err = t.RetainJSON(ctx, m.Body)
+		if err != nil {
+			return 0, err
+		}
+	}
 	res, err := t.Exec(ctx, `INSERT INTO conversation_messages (kind, message_id, author, client_id, body, reply_to, last_seen_seq,
-		request_id, created_at, decision_json,conversation_id) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?)`,
+		request_id, created_at, decision_json,conversation_id,body_preview) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?)`,
 		m.Kind, m.MessageID, m.Author, nullString(m.ClientID), m.Body, nullString(m.ReplyTo), m.LastSeenSeq, nullString(m.RequestID), m.CreatedAt,
-		nullString(m.DecisionJSON), ConversationID(m.ConversationID))
+		nullString(m.DecisionJSON), ConversationID(m.ConversationID), preview)
 	if err != nil {
 		return 0, fmt.Errorf("store: insert message: %w", err)
 	}
@@ -59,7 +69,24 @@ func GetMessage(ctx context.Context, q Querier, messageID string) (MessageView, 
 	if err != nil {
 		return MessageView{}, notFound(err, "message "+messageID)
 	}
-	return m, nil
+	m.Body, err = ResolveMessageBody(ctx, q, m.MessageID, m.Body)
+	return m, err
+}
+
+// ResolveMessageBody only interprets internal assistant references. Owner input
+// with a reserved-looking JSON literal remains ordinary text.
+func ResolveMessageBody(ctx context.Context, q Querier, id, body string) (string, error) {
+	if !strings.Contains(body, "tend:retained-json:") {
+		return body, nil
+	}
+	var author string
+	if err := q.QueryRowContext(ctx, `SELECT author FROM conversation_messages WHERE message_id=?`, id).Scan(&author); err != nil {
+		return "", err
+	}
+	if author != "main_agent" {
+		return body, nil
+	}
+	return ResolveJSON(ctx, q, body)
 }
 
 // HasMessageTurnOperation identifies a system message that actually initiated

@@ -51,9 +51,35 @@ func (f *historicalHostedDelivery) putObservation(tx *store.Tx, ctx context.Cont
 
 func (f *historicalHostedDelivery) execute(t *testing.T, who protocol.Principal, command app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
 	t.Helper()
+	if target.ID == "" {
+		if prefix := protocol.CreationTargetPrefix(command.Operation()); prefix != "" {
+			target.ID = f.ids.New(prefix)
+		}
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if identities := protocol.NativePayloadIdentities(command.Operation()); len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		for field, prefix := range identities {
+			if len(fields[field]) == 0 || string(fields[field]) == `""` {
+				fields[field], _ = json.Marshal(f.ids.New(prefix))
+			}
+		}
+		raw, _ = json.Marshal(fields)
+	}
+	if command.Operation() == protocol.OpRunnerClaim {
+		var p protocol.ClaimPayload
+		_ = json.Unmarshal(raw, &p)
+		if p.RunID == "" {
+			p.RunID = f.ids.New(protocol.PrefixRun)
+		}
+		raw, _ = json.Marshal(p)
 	}
 	op, err := f.e.svc.app.Execute(t.Context(), who, &protocol.Envelope{RequestID: f.ids.New(protocol.PrefixRequest), Operation: command.Operation(), Target: target, Payload: raw, ExpectedControlRevision: revision}, command)
 	if err != nil || op.Error != nil {
@@ -283,8 +309,8 @@ func TestHistoricalDeliveryHostedCallbackSettlesOriginalDeployment(t *testing.T)
 		t.Fatal(first.Error)
 	}
 	again := f.callback(t, request, issue.Revision, issue.AssignmentEpoch)
-	if !again.OK || !reflect.DeepEqual(first, again) {
-		t.Fatal("original callback lost its receipt", first, again)
+	if again.OK || again.Error == nil || again.Error.Code != protocol.CodeDuplicateEffect {
+		t.Fatal("original callback did not resolve its completed business effect", first, again)
 	}
 	duty := f.duty(t)
 	if duty.Status != "complete" || duty.ExecutionTaskID != f.execution || !reflect.DeepEqual(duty.Candidate, f.original.Candidate) || !reflect.DeepEqual(duty.Authorization, f.original.Authorization) {
@@ -337,17 +363,6 @@ func TestHistoricalDeliveryHostedFailurePreservesOriginalReceipt(t *testing.T) {
 			}
 			if err := json.Unmarshal(first.Result, &result); err != nil || result.RequestID != request || result.Status != protocol.OpFailed {
 				t.Fatal("failed callback hid its original request", first, err)
-			}
-			var receipt store.RequestRecord
-			if err := f.e.store.Read(t.Context(), func(tx *store.ReadTx) error {
-				var err error
-				receipt, err = store.GetRequest(t.Context(), tx.Q(), f.principal.DedupDomain(), request)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if receipt.RequestID != request || receipt.Status != result.Status {
-				t.Fatal(receipt)
 			}
 			again := f.callback(t, request, version, epoch)
 			if !reflect.DeepEqual(first, again) || !reflect.DeepEqual(before, f.duty(t)) || f.count(t, "local_hosted_coordination_effects") != 0 {

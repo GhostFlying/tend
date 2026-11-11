@@ -25,11 +25,11 @@ func (IssueDeadlineCommand) Authorize(_ context.Context, x *Exec, _ store.Querie
 	return allowKinds(x.Principal, protocol.PrincipalOwner)
 }
 func (c IssueDeadlineCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	if x.Env.Target.Type != "deadline" {
+	if x.Env.Target.Type != "deadline" || !protocol.ValidID(protocol.Prefix("deadline"), x.Env.Target.ID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "deadline target is required")
 	}
 	var previous protocol.IssueDeadline
-	if x.Env.Target.ID != "" {
+	if x.Env.ExpectedControlRevision != nil || c.Cancel {
 		var err error
 		previous, err = store.GetIssueDeadline(ctx, tx.Q(), x.Env.Target.ID)
 		if err != nil {
@@ -38,8 +38,28 @@ func (c IssueDeadlineCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != previous.Revision {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "deadline changed")
 		}
-	} else if c.Cancel || x.Env.ExpectedControlRevision != nil {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new deadline has no current revision")
+	} else {
+		prior, err := store.GetIssueDeadline(ctx, tx.Q(), x.Env.Target.ID)
+		if err == nil {
+			var input protocol.PutIssueDeadlinePayload
+			if err := decodePayload(x.Env, &input); err != nil {
+				return Outcome{}, err
+			}
+			var raw string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM issue_deadline_revisions WHERE deadline_id=? AND revision=1`, prior.DeadlineID).Scan(&raw); err != nil {
+				return Outcome{}, err
+			}
+			var original protocol.IssueDeadline
+			if err := json.Unmarshal([]byte(raw), &original); err != nil {
+				return Outcome{}, err
+			}
+			if original.IssueID != input.IssueID || original.Title != input.Title || original.Nature != input.Nature || original.Strength != input.Strength || !reflect.DeepEqual(original.DueAt, input.DueAt) || original.Timezone != input.Timezone || !reflect.DeepEqual(original.EstimateSeconds, input.EstimateSeconds) || original.SourceMessageID != input.SourceMessageID || original.Reason != input.Reason || input.Reminders != nil && original.Reminders != *input.Reminders {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "deadline identity already has another original definition")
+			}
+			return Outcome{NoEffect: true, Result: prior}, nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return Outcome{}, err
+		}
 	}
 	var d protocol.IssueDeadline
 	if x.Principal.Kind == protocol.PrincipalBackgroundAgent && previous.DeadlineID != "" && previous.Nature != "estimate" {
@@ -124,7 +144,7 @@ func (c IssueDeadlineCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	}
 	now := x.Now.UnixMilli()
 	if d.DeadlineID == "" {
-		d.DeadlineID = x.IDs.New(protocol.Prefix("deadline"))
+		d.DeadlineID = x.Env.Target.ID
 		d.CreatedAt = now
 	}
 	clockChanged := previous.DeadlineID == "" || previous.Status != d.Status || !reflect.DeepEqual(previous.DueAt, d.DueAt) || previous.SourceMessageID != d.SourceMessageID || previous.SourceRevision != d.SourceRevision || previous.Reminders != d.Reminders

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -86,13 +87,21 @@ func durableManagerReplyPrefix(ctx context.Context, q store.Querier, thread, tur
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return err
 	} else {
-		var durable bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM background_replies r JOIN background_batches b USING(batch_id) JOIN main_turns t ON t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id WHERE r.thread_id=? AND r.turn_id=? AND r.item_id=? AND r.kind='message' AND r.status IN ('interrupted','unknown','completed','failed') AND r.body=?)`, thread, turn, item, body).Scan(&durable); err != nil {
+		var stored string
+		err := q.QueryRowContext(ctx, `SELECT r.body FROM background_replies r JOIN background_batches b USING(batch_id) JOIN main_turns t ON t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id WHERE r.thread_id=? AND r.turn_id=? AND r.item_id=? AND r.kind='message' AND r.status IN ('interrupted','unknown','completed','failed')`, thread, turn, item).Scan(&stored)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if durable {
-			return nil
+		if err == nil {
+			stored, err = store.ResolveJSON(ctx, q, stored)
+			if err != nil {
+				return err
+			}
+			if stored == body {
+				return nil
+			}
 		}
+
 	}
 	return protocol.Errorf(protocol.CodeUnknownOutcome, "terminal reply prefix has not been persisted")
 }

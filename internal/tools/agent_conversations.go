@@ -115,6 +115,10 @@ func (s *Service) agentList(ctx context.Context, c Call) (any, error) {
 			if err := tx.Q().QueryRowContext(ctx, `SELECT message_id,author,body FROM conversation_messages WHERE seq=?`, item.LastMessageSeq).Scan(&message.MessageID, &message.Author, &message.Body); err != nil {
 				return err
 			}
+			message.Body, err = store.ResolveMessageBody(ctx, tx.Q(), message.MessageID, message.Body)
+			if err != nil {
+				return err
+			}
 			original := message.Body
 			if err := store.HideUndeliveredOwner(ctx, tx.Q(), &message); err != nil {
 				return err

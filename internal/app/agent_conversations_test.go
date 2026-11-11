@@ -61,7 +61,7 @@ func TestAgentAssociationCorrectionsVersionSourcesAndDedup(t *testing.T) {
 	env := h.env("conversation.set_associations", protocol.Target{Type: "message", ID: source}, protocol.SetMessageAssociationsPayload{WorkItemIDs: []string{other.WorkItemID}, Disposition: "linked", ContentRevision: a.ContentRevision}, rev(a.Revision))
 	first := h.exec(owner, env, SetMessageAssociations{})
 	second := h.exec(owner, env, SetMessageAssociations{})
-	if first.Status != protocol.OpSucceeded || string(first.Result) != string(second.Result) {
+	if first.Status != protocol.OpSucceeded || second.Error == nil || second.Error.Code != protocol.CodeStaleRevision {
 		t.Fatal(first, second)
 	}
 	after := h.agentContext(w.WorkItemID)
@@ -109,8 +109,11 @@ func TestAgentNativeCompactUnknownCannotBeReplayed(t *testing.T) {
 		t.Fatal(err)
 	}
 	repeated := h.exec(owner, env, CompactConversation{})
-	if string(repeated.Result) != string(first.Result) {
-		t.Fatal("request identity changed")
+	if repeated.Error == nil || repeated.Error.Code != protocol.CodeInvalidTransition || h.count("agent_compactions") != 1 {
+		t.Fatal("unknown compaction was replayed", repeated)
+	}
+	if state, err := h.app.CompactState(t.Context(), result.ID); err != nil || state != "unknown" {
+		t.Fatal("original unknown fact changed", state, err)
 	}
 	next := h.exec(owner, h.env("conversation.compact", protocol.Target{Type: "conversation", ID: "main"}, struct{}{}, rev(0)), CompactConversation{})
 	expectWorkCode(t, next, protocol.CodeInvalidTransition)

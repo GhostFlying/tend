@@ -47,7 +47,8 @@ func TestCreatorPolicyMigrationPreservesAcceptedDeliveryAndItsExecution(t *testi
 		if err := tx.InsertAcceptance(ctx, "acc_original", task.TaskID, "run_original", 1, "art_original", protocol.VerdictPassed, `[]`, `[]`, 1); err != nil {
 			return err
 		}
-		if _, err := tx.InsertEvent(ctx, EventRow{EventID: "evt_original", Source: "app", ObjectType: "task", ObjectID: task.TaskID, Kind: "task.completed", BodyJSON: `{}`, ActorJSON: `{}`, CreatedAt: 1}); err != nil {
+		// Record the historical event using only columns present in schema 84.
+		if _, err := tx.Exec(ctx, `INSERT INTO events(event_id,source,object_type,object_id,kind,body_json,actor_json,created_at) VALUES('evt_original','app','task',?,'task.completed','{}','{}',1)`, task.TaskID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,acceptance_id,revision,status,body_json) VALUES(?,?,?,?,7,'deferred','{"reason":"Original explicit deferral"}')`, issue.IssueID, task.TaskID, "evt_original", "acc_original"); err != nil {

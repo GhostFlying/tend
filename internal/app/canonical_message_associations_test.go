@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -35,7 +34,6 @@ func TestNamedMainClassifiesExistingCanonicalSourceWithoutReviewingIssue(t *test
 	if err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatal(op, err)
 	}
-	originalResult := op.Result
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var notices int
 		if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE b.work_item_id=? AND s.message_id=? AND s.kind='conversation.associations_changed'`, issue.IssueID, source).Scan(&notices); err != nil {
@@ -80,8 +78,8 @@ func TestNamedMainClassifiesExistingCanonicalSourceWithoutReviewingIssue(t *test
 		counts[table] = h.count(table)
 	}
 	replay, err := h.app.Execute(t.Context(), principal, original, cmd)
-	if err != nil || replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, originalResult) {
-		t.Fatal("original classification replay changed", replay, err)
+	if protocol.CodeOf(err) != protocol.CodeForbidden {
+		t.Fatal("ended native execution regained mutation authority", replay, err)
 	}
 	for table, count := range counts {
 		if h.count(table) != count {

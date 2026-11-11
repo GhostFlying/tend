@@ -70,12 +70,12 @@ func UsageProjectionInputs(ctx context.Context, q store.Querier) ([]UsageContrib
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT f.source,f.request_id,f.seq,f.subject,f.role,f.received_at,
- (c.conflict OR `+store.UsagePendingOverlapSQLFor("f")+`),f.payload_json,
+	rows, err := q.QueryContext(ctx, `SELECT `+store.UsageFactColumns("f")+`,f.request_id,
+ (c.conflict OR `+store.UsagePendingOverlapSQLFor("f")+`),
  COALESCE(b.run_id,''),COALESCE(b.conversation_id,''),COALESCE(b.attribution_conflict,0),
  `+store.UsageLegacyLinkedSQL("f.seq")+`
  FROM token_usage_dirty d CROSS JOIN token_usage_current c USING(source,request_id)
- CROSS JOIN token_usage_facts f ON f.seq=c.fact_seq
+ CROSS JOIN token_usage_fact_details f ON f.seq=c.fact_seq
  LEFT JOIN token_usage_bindings b ON b.source=f.source AND b.request_id=f.request_id
  ORDER BY f.seq DESC`)
 	if err != nil {
@@ -90,14 +90,11 @@ func UsageProjectionInputs(ctx context.Context, q store.Querier) ([]UsageContrib
 	for rows.Next() {
 		var c UsageContribution
 		r := &c.Record
-		var raw string
 		var bindingConflict, linked bool
-		if err = rows.Scan(&c.Source, &c.RequestID, &r.Seq, &r.Subject, &r.Role, &r.ReceivedAt, &r.Conflict, &raw, &c.Dimension.BindingRun, &c.Dimension.BindingConversation, &bindingConflict, &linked); err != nil {
+		if err = rows.Scan(append(store.UsageFactDestinations(r), &c.RequestID, &r.Conflict, &c.Dimension.BindingRun, &c.Dimension.BindingConversation, &bindingConflict, &linked)...); err != nil {
 			return nil, err
 		}
-		if err = json.Unmarshal([]byte(raw), &r.TokenUsageSample); err != nil {
-			return nil, fmt.Errorf("decode usage fact: %w", err)
-		}
+		c.Source = r.Source
 		if bindingConflict {
 			c.Dimension.BindingRun, c.Dimension.BindingConversation = "", ""
 		}
@@ -171,7 +168,7 @@ func usagePrices(ctx context.Context, q store.Querier) (protocol.UsagePricing, d
 	p := protocol.UsagePricing{Source: "OpenRouter", Currency: "USD"}
 	var raw string
 	var prices domain.UsagePrices
-	err := q.QueryRowContext(ctx, `SELECT collected_at,catalog_json FROM token_usage_price_catalogs ORDER BY collected_at DESC LIMIT 1`).Scan(&p.QuotedAt, &raw)
+	err := q.QueryRowContext(ctx, `SELECT collected_at,catalog_json FROM token_usage_latest_prices WHERE singleton=1`).Scan(&p.QuotedAt, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, prices, nil
 	}

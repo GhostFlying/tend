@@ -88,18 +88,17 @@ func TestExtensionDraftPublishFailureRollbackAndReplay(t *testing.T) {
 	}
 	fail = false
 	beforeFailedReplay := validations
-	if op, err := h.app.PublishExtensionDraft(t.Context(), owner, env, false); err != nil || op.Error == nil || validations != beforeFailedReplay {
-		t.Fatal("failed request was silently retried", op, err)
-	}
-	env = h.env("extensions.publish", env.Target, protocol.ExtensionPublishPayload{Release: r}, rev(s.Revision))
 	op, err := h.app.PublishExtensionDraft(t.Context(), owner, env, false)
+	if err != nil || op.Status != protocol.OpSucceeded || validations != beforeFailedReplay+1 {
+		t.Fatal("explicit unchanged publication did not revalidate after a definite rejection", op, err)
+	}
 	if err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatal(op, err)
 	}
 	before := validations
 	replayed, err := h.app.PublishExtensionDraft(t.Context(), owner, env, false)
-	if err != nil || string(replayed.Result) != string(op.Result) || validations != before {
-		t.Fatal("replay performed validation or changed receipt", err)
+	if err != nil || replayed.Error == nil || replayed.Error.Code != protocol.CodeStaleRevision || validations != before {
+		t.Fatal("old publication CAS reran validation", replayed, err)
 	}
 	s = extensionState(t, h)
 	rollback := h.env("extensions.rollback", protocol.Target{Type: "extensions", ID: "catalog"}, protocol.ExtensionPublishPayload{Release: protocol.ExtensionRelease{ID: first.Published.ID}}, rev(s.Revision))

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"strings"
@@ -31,26 +32,27 @@ func (PutPlannerEntry) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	if strings.TrimSpace(v.Title) == "" || strings.TrimSpace(v.Responsible) == "" || strings.TrimSpace(v.Reason) == "" || v.Rank < 0 || v.EstimateSeconds != nil && *v.EstimateSeconds < 0 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "planner entry needs concrete kind/action/responsibility/status/rank and reason")
 	}
-	var old protocol.PlannerEntry
-	if x.Env.Target.ID != "" {
-		var err error
-		old, err = store.GetPlannerEntry(ctx, tx.Q(), x.Env.Target.ID)
-		if err != nil {
-			return Outcome{}, err
+	if !protocol.ValidID(protocol.Prefix("next"), x.Env.Target.ID) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "planner entry requires its stable entry identity")
+	}
+	old, err := store.GetPlannerEntry(ctx, tx.Q(), x.Env.Target.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
+	if err == nil {
+		if v.Kind != old.Kind || v.IssueID != old.IssueID || v.AttentionID != old.AttentionID {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "planner entry identity belongs to another responsibility")
 		}
-		if x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != old.Revision {
+		if x.Env.ExpectedControlRevision == nil {
+			return Outcome{Result: old, NoEffect: true}, nil
+		}
+		if *x.Env.ExpectedControlRevision != old.Revision {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "planner entry changed")
 		}
-		if v.Kind != old.Kind || v.IssueID != old.IssueID || v.AttentionID != old.AttentionID {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "planner target identity cannot change")
-		}
-		v.EntryID = old.EntryID
-	} else {
-		if x.Env.ExpectedControlRevision != nil || v.EntryID != "" {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new entry has no current identity or revision")
-		}
-		v.EntryID = x.IDs.New(protocol.Prefix("next"))
+	} else if x.Env.ExpectedControlRevision != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeNotFound, "planner entry does not exist")
 	}
+	v.EntryID = x.Env.Target.ID
 	if v.IssueID != "" {
 		if _, err := store.GetCanonicalIssue(ctx, tx.Q(), v.IssueID); err != nil {
 			return Outcome{}, err

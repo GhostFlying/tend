@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
 	"reflect"
@@ -149,51 +150,29 @@ func closedToolProof(ctx context.Context, q store.Querier, run string, call clos
 	if err != nil || repair == "" {
 		return nil, nil, nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT request_id,payload_json,result_json,status FROM manager_native_requests WHERE run_id=? AND method='tool_result' AND json_extract(payload_json,'$.thread_id')=? AND json_extract(payload_json,'$.turn_id')=? AND json_extract(payload_json,'$.call_id')=? ORDER BY rowid`, run, call.ThreadID, call.TurnID, call.CallID)
+	u, err := store.GetToolUse(ctx, q, call.TurnID, call.CallID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, nil
+	}
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer rows.Close()
-	var proof *closedManagerToolProof
-	var success *bool
-	var text *string
-	for rows.Next() {
-		if proof != nil {
-			return nil, nil, nil, nil
-		}
-		var id, raw, status string
-		var result *string
-		if err := rows.Scan(&id, &raw, &result, &status); err != nil {
-			return nil, nil, nil, err
-		}
-		raw, err = store.ResolveJSON(ctx, q, raw)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		var request struct {
-			ThreadID   string `json:"thread_id"`
-			TurnID     string `json:"turn_id"`
-			CallID     string `json:"call_id"`
-			ToolResult *struct {
-				Success *bool
-				Text    *string
-			} `json:"tool_result"`
-		}
-		var reply protocol.ManagerNativeReply
-		if result != nil {
-			original, err := store.ResolveJSON(ctx, q, *result)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			result = &original
-		}
-		if status != "completed" || result == nil || json.Unmarshal([]byte(raw), &request) != nil || request.ToolResult == nil || request.ToolResult.Success == nil || request.ToolResult.Text == nil || request.ThreadID != call.ThreadID || request.TurnID != call.TurnID || request.CallID != call.CallID || json.Unmarshal([]byte(*result), &reply) != nil || reply.ID != id || reply.Error != "" || reply.Rejected {
-			return nil, nil, nil, nil
-		}
-		proof = &closedManagerToolProof{ThreadID: call.ThreadID, TurnID: call.TurnID, CallID: call.CallID, RepairRequestID: repair, ToolResultRequestID: id, ToolResultSHA256: closedFactHash([]byte(raw)), ToolResultReplySHA256: closedFactHash([]byte(*result))}
-		success, text = request.ToolResult.Success, request.ToolResult.Text
+	var runID, id, status, serverOutput string
+	var success bool
+	if err = q.QueryRowContext(ctx, `SELECT native_run_id,native_delivery_id,native_delivery_status,native_result_output,native_result_success FROM conversation_tool_uses WHERE message_id=?`, u.MessageID).Scan(&runID, &id, &status, &serverOutput, &success); err != nil {
+		return nil, nil, nil, err
 	}
-	return proof, success, text, rows.Err()
+	if runID != run || status != "delivered" || id == "" || u.ThreadID != call.ThreadID {
+		return nil, nil, nil, nil
+	}
+	text, err := store.ResolveJSON(ctx, q, serverOutput)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	payload, _ := json.Marshal(map[string]any{"thread_id": call.ThreadID, "turn_id": call.TurnID, "call_id": call.CallID, "tool_result": map[string]any{"Success": success, "Text": text}})
+	reply, _ := json.Marshal(protocol.ManagerNativeReply{ID: id})
+	proof := &closedManagerToolProof{ThreadID: call.ThreadID, TurnID: call.TurnID, CallID: call.CallID, RepairRequestID: repair, ToolResultRequestID: id, ToolResultSHA256: closedFactHash(payload), ToolResultReplySHA256: closedFactHash(reply)}
+	return proof, &success, &text, nil
 }
 
 func closedItemMatches(e closedManagerEvent, call closedManagerCall, success bool, text string) bool {
@@ -228,7 +207,7 @@ func closedItemMatches(e closedManagerEvent, call closedManagerCall, success boo
 	if !success {
 		wanted = protocol.ToolFailed
 	}
-	return strings.Join(parts, "\n") == text && n.Tool.Output == text && n.Tool.Status == wanted
+	return sameClosedToolText(strings.Join(parts, "\n"), text) && sameClosedToolText(n.Tool.Output, text) && n.Tool.Status == wanted
 }
 
 func presentClosedFact(raw json.RawMessage) bool {
@@ -316,9 +295,14 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 			continue
 		}
 		for _, fact := range append([]row{r}, items...) {
-			proof.Facts = append(proof.Facts, closedManagerFact{Sequence: fact.seq, SHA256: closedFactHash([]byte(fact.raw))})
-			// Original bytes establish the proof; the unchanged stored reference
-			// identifies the row being consumed, whether inline or retained.
+			hash, derived := store.EventOriginalSHA256(fact.stored)
+			if !derived {
+				hash = closedFactHash([]byte(fact.raw))
+			}
+			proof.Facts = append(proof.Facts, closedManagerFact{Sequence: fact.seq, SHA256: hash})
+			// Native upload identity remains the original received hash even when
+			// the server reconstructs its derived wrapper. Legacy originals still
+			// hash exact bytes. The stored value fences the row being consumed.
 			result, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=? AND body_json=?`, run, fact.seq, fact.stored)
 			if err != nil {
 				return err
@@ -342,4 +326,8 @@ func consumeClosedManagerRepairFacts(ctx context.Context, x *Exec, tx *store.Tx,
 	}
 	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "run", ObjectID: run, Kind: "run.manager_closed_tool_facts_consumed", BodyJSON: string(raw), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	return err
+}
+
+func sameClosedToolText(a, b string) bool {
+	return a == b || store.SemanticJSONEqual(a, b)
 }

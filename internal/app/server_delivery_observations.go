@@ -328,11 +328,7 @@ func retainRetiredDeliveryReport(ctx context.Context, x *Exec, tx *store.Tx, p p
 			return false, false, protocol.Errorf(protocol.CodeForbidden, "observer capability is not available")
 		}
 	}
-	raw, err := json.Marshal(p)
-	if err != nil {
-		return false, false, err
-	}
-	_, err = tx.Exec(ctx, `UPDATE retired_runner_delivery_queries SET late_report_json=? WHERE nonce=? AND late_report_json=''`, string(raw), p.Nonce)
+	_, err = tx.Exec(ctx, `UPDATE retired_runner_delivery_queries SET late_report_at=? WHERE nonce=? AND late_report_at=0`, x.Now.UnixMilli(), p.Nonce)
 	return true, acceptLate, err
 }
 
@@ -349,15 +345,8 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	if err != nil {
 		return Outcome{}, err
 	}
-	raw, err := json.Marshal(struct {
-		Snapshot *protocol.DeliverySnapshot `json:"snapshot,omitempty"`
-		Error    string                     `json:"error,omitempty"`
-	}{snapshot, kind})
-	if err != nil {
-		return Outcome{}, err
-	}
 	if nonce != id {
-		_, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET late_result_json=? WHERE query_id=? AND late_result_json='' `, string(raw), id)
+		_, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET late_result_at=? WHERE query_id=? AND late_result_at=0`, x.Now.UnixMilli(), id)
 		return Outcome{}, err
 	}
 	if (snapshot == nil) == (kind == "") && cached == nil {
@@ -526,7 +515,7 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	if kind != "" {
 		status = "failed"
 	}
-	if _, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET status=?,finished_at=?,result_json=? WHERE query_id=?`, status, now, string(raw), id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET status=?,finished_at=? WHERE query_id=?`, status, now, id); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Events: events}, nil

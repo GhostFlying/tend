@@ -21,10 +21,8 @@ var system = protocol.Principal{Kind: protocol.PrincipalSystem}
 // exec runs a command directly, for setting up the ledger.
 func (e *env) exec(op string, target protocol.Target, revision *int64, payload any, cmd app.Command) json.RawMessage {
 	e.t.Helper()
-	b, _ := json.Marshal(payload)
-	res, err := e.app.Execute(context.Background(), system, &protocol.Envelope{
-		RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: revision, Payload: b,
-	}, cmd)
+	env := e.envelope(op, target, revision, payload)
+	res, err := e.app.Execute(context.Background(), system, &env, cmd)
 	if err != nil || res.Status == protocol.OpFailed {
 		e.t.Fatalf("%s: %+v, %v", op, res, err)
 	}
@@ -73,7 +71,33 @@ func (e *env) op(tok string, env protocol.Envelope) (int, protocol.APIResponse) 
 }
 
 func (e *env) envelope(op string, target protocol.Target, revision *int64, payload any) protocol.Envelope {
+	if target.ID == "" {
+		if prefix := protocol.CreationTargetPrefix(op); prefix != "" {
+			target.ID = e.ids.New(prefix)
+		}
+	}
 	b, _ := json.Marshal(payload)
+	if identities := protocol.NativePayloadIdentities(op); len(identities) > 0 {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(b, &fields)
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+		for field, prefix := range identities {
+			if len(fields[field]) == 0 || string(fields[field]) == `""` {
+				fields[field], _ = json.Marshal(e.ids.New(prefix))
+			}
+		}
+		b, _ = json.Marshal(fields)
+	}
+	if op == protocol.OpRunnerClaim {
+		var p protocol.ClaimPayload
+		_ = json.Unmarshal(b, &p)
+		if p.RunID == "" {
+			p.RunID = e.ids.New(protocol.PrefixRun)
+		}
+		b, _ = json.Marshal(p)
+	}
 	return protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: op, Target: target, ExpectedControlRevision: revision, Payload: b}
 }
 
@@ -99,27 +123,26 @@ func TestFault_ClientRetrySameRequest(t *testing.T) {
 	if st != http.StatusOK || first.Operation == nil || first.Operation.Status != protocol.OpSucceeded {
 		t.Fatalf("pause = %d %+v", st, first)
 	}
-	// The CLI resends after a lost response.
-	st, again := e.op(tok, env)
-	if st != http.StatusOK || again.Operation == nil || again.Operation.Status != protocol.OpSucceeded || string(again.Operation.Result) != string(first.Operation.Result) {
-		t.Errorf("resend = %d %+v, want the original result %s", st, again, first.Operation.Result)
-	}
+	// A lost response is reconciled through the Task; its old CAS cannot
+	// repeat the change even when the same trace is submitted explicitly.
+	assertOwnerStaleHTTP(t, e, tok, env)
 	if n := e.count(`SELECT control_revision FROM tasks WHERE task_id = ?`, taskID); n != 2 {
 		t.Errorf("control revision = %d, want 2", n)
 	}
-	// Reusing the request ID for something else is a conflict.
+	// A changed action still needs its current object revision, regardless of tracing ID.
 	env.Payload = json.RawMessage(`{"mode":"human_control"}`)
-	if st, res := e.op(tok, env); st != http.StatusConflict || res.Error == nil || res.Error.Code != protocol.CodeConflictPayload {
-		t.Errorf("same request ID, other payload = %d %+v", st, res)
+	st, res := e.op(tok, env)
+	if st == http.StatusOK && res.Operation != nil && res.Operation.Error == nil {
+		t.Fatal("stale action changed the current task", res)
 	}
-	// The request can be looked up afterwards.
-	var rv protocol.RequestView
-	if st := e.do("GET", "/api/v1/requests/"+env.RequestID, tok, nil, &rv); st != http.StatusOK || rv.Status != protocol.OpSucceeded || rv.Operation != "control.set_mode" {
-		t.Errorf("request = %d %+v", st, rv)
+	var current protocol.TaskDetail
+	if st := e.do("GET", "/api/v1/tasks/"+taskID, tok, nil, &current); st != http.StatusOK || current.ControlMode != protocol.ControlPaused || current.ControlRevision != 2 {
+		t.Fatal(st, current)
 	}
-	if st := e.do("GET", "/api/v1/requests/req_missing", tok, nil, nil); st != http.StatusNotFound {
-		t.Errorf("unknown request = %d, want 404", st)
+	if st := e.do("GET", "/api/v1/requests/"+env.RequestID, tok, nil, nil); st != http.StatusNotFound {
+		t.Fatal("retired receipt endpoint", st)
 	}
+
 }
 
 func TestOwnerRatesATask(t *testing.T) {
@@ -482,7 +505,7 @@ func TestFault_HostedMainThreadDisabled(t *testing.T) {
 	if st, res := e.op(tok, stop); st != http.StatusBadRequest || res.Error == nil || !strings.Contains(res.Error.Message, "hosted main agent") {
 		t.Errorf("stop without the hosted main agent = %d %+v", st, res.Error)
 	}
-	for _, table := range []string{"request_records", "conversation_messages", "outbox"} {
+	for _, table := range []string{"events", "conversation_messages", "outbox"} {
 		if n := e.count(`SELECT COUNT(*) FROM ` + table); n != 0 {
 			t.Errorf("%s has %d rows after a refused message", table, n)
 		}

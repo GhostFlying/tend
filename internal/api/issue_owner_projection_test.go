@@ -105,12 +105,10 @@ func TestOwnerIssueProjectionPreservesOriginalsAndAssociationCAS(t *testing.T) {
 	if status != http.StatusOK || answer.Operation == nil || answer.Operation.Status != protocol.OpSucceeded {
 		t.Fatal(status, answer)
 	}
-	requests := e.count("SELECT count(*) FROM request_records")
-	if _, answer := e.op(token, command); answer.Operation == nil || answer.Operation.Status != protocol.OpSucceeded {
-		t.Fatal(answer)
-	}
-	if requests != e.count("SELECT count(*) FROM request_records") {
-		t.Fatal("replay wrote another receipt")
+	events := e.count("SELECT count(*) FROM events")
+	assertOwnerStaleHTTP(t, e, token, command)
+	if events != e.count("SELECT count(*) FROM events") {
+		t.Fatal("stale association input wrote another event")
 	}
 	var associations protocol.IssueMessageAssociations
 	if status := e.do("GET", path, token, nil, &associations); status != http.StatusOK || len(associations.Items) != 1 || associations.Items[0].IssueID != issue.IssueID || !associations.OwnerLocked {

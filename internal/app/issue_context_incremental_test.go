@@ -73,7 +73,7 @@ func TestIncrementalIssueContextPagesFactsOnceWithoutSourceBodiesOrWrites(t *tes
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	seedIncrementalContext(t, h, issue, 70, 4)
-	beforeEvents, beforeRequests, beforeOutbox := h.count("events"), h.count("request_records"), h.count("outbox")
+	beforeEvents, beforeOutbox, beforeFacts := h.count("events"), h.count("outbox"), h.count("work_item_context_facts")
 	first := readIncrementalContext(t, h, issue.IssueID, "", 3)
 	again := readIncrementalContext(t, h, issue.IssueID, "", 3)
 	if first.Kind != "snapshot" || !first.More || first.ContentID != again.ContentID || len(first.Items) != 3 {
@@ -99,7 +99,7 @@ func TestIncrementalIssueContextPagesFactsOnceWithoutSourceBodiesOrWrites(t *tes
 	if delta.Kind != "delta" || len(delta.Items) != 0 || delta.More || delta.ContentID != same.ContentID {
 		t.Fatal(delta, same)
 	}
-	if h.count("events") != beforeEvents || h.count("request_records") != beforeRequests || h.count("outbox") != beforeOutbox {
+	if h.count("events") != beforeEvents || h.count("work_item_context_facts") != beforeFacts || h.count("outbox") != beforeOutbox {
 		t.Fatal("read wrote progress or authority")
 	}
 }

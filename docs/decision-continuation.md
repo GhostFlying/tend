@@ -41,7 +41,7 @@ continuation revision。CLI 必须显式给 `--revision`，不会在重试时替
 
 ```sh
 tend decision-continuation resume <decision_id> --revision 7 --request-id <new_request_id> --data '{"expected_revision":3}' --dry-run > original-envelope.json
-tend request replay --file original-envelope.json --json
+tend operation submit --file original-envelope.json --json
 
 tend decision-continuation reconcile <decision_id> --revision 7 --request-id <new_reconcile_request_id> --data '{"expected_revision":3}' --json
 ```
@@ -71,13 +71,14 @@ assignment epoch 下的原 primary Task。Consultation 和缺少已持久 execut
 授权，也不能扩大原任务或交付权限。
 
 传输失败、超时或失去回执时保留 unknown，不换 request ID、不刷新两层 CAS、不自动
-重发。先查原请求，再显式重放保存的同一 Envelope：
+重发。先查实际 continuation、父 Task 及后继 Run：
 
 ```sh
-tend request show <original_request_id> --json
-tend request replay --file original-envelope.json --json
+tend decision-continuation show <decision_id> --json
+tend operation submit --file original-envelope.json --json
 ```
 
-同一 request 的失败或成功回执可恢复；同文答复和重复恢复不能偷偷改变 disposition 或
-创建第二个后继。版本过期时重新读取并作出独立业务决定，不把未知原请求改成新请求。
+业务状态、原答复和后继身份是恢复依据；不保存第一次请求的响应副本。确认仍需提交时
+才单次提交完整信封，同文答复和重复恢复不能改变 disposition 或创建第二个后继。
+版本过期时读实际状态并作出独立业务决定，不将未知动作替换成新动作。
 这些入口不增加 merge、deploy、改 task spec 或清除历史 unknown 的权限。

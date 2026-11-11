@@ -14,6 +14,10 @@ func ManualSource(ctx context.Context, q Querier, id string) (protocol.ManualSou
 	if err != nil {
 		return value, notFound(err, "manual source")
 	}
+	value.Text, err = ResolveMessageBody(ctx, q, id, value.Text)
+	if err != nil {
+		return value, err
+	}
 	text, conversation, at := value.Text, value.ConversationID, value.CreatedAt
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return value, err

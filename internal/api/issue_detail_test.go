@@ -37,7 +37,7 @@ func TestIssueProgressHTTPHistoryReplayAndActivity(t *testing.T) {
 	}
 	count := e.count(`SELECT count(*) FROM issue_progress_revisions`)
 	_, replay := e.op(token, env)
-	if replay.Operation == nil || replay.Operation.Status != protocol.OpSucceeded || e.count(`SELECT count(*) FROM issue_progress_revisions`) != count {
+	if replay.Operation == nil || replay.Operation.Error == nil || replay.Operation.Error.Code != protocol.CodeStaleRevision || e.count(`SELECT count(*) FROM issue_progress_revisions`) != count {
 		t.Fatal(replay)
 	}
 	view := issueDetailHTTP(t, e, token, issue.IssueID)

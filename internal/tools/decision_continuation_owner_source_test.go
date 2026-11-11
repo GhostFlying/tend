@@ -2,8 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -28,10 +26,7 @@ func TestDecisionContinuationManagerCallbackRequiresUnwithdrawnOwnerSource(t *te
 			owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test-owner"}
 			execute := func(principal protocol.Principal, cmd app.Command, target protocol.Target, payload any, revision *int64) protocol.Operation {
 				t.Helper()
-				raw, err := json.Marshal(payload)
-				if err != nil {
-					t.Fatal(err)
-				}
+				target, raw := composeFixtureBusinessInput(t, ids, cmd.Operation(), target, payload)
 				op, err := e.svc.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: cmd.Operation(), Target: target, ExpectedControlRevision: revision, Payload: raw}, cmd)
 				if err != nil || op.Status != protocol.OpSucceeded && op.Status != protocol.OpAccepted {
 					t.Fatal(cmd.Operation(), op, err)
@@ -169,8 +164,16 @@ func TestDecisionContinuationManagerCallbackRequiresUnwithdrawnOwnerSource(t *te
 				t.Fatal("admitted owner answer was rejected", first.Text)
 			}
 			again := e.svc.Handle(t.Context(), call)
-			if !reflect.DeepEqual(first, again) {
-				t.Fatal("original callback receipt changed", first, again)
+			var repeated answerView
+			if err := json.Unmarshal([]byte(again.Text), &repeated); err != nil || repeated.OK || repeated.Error == nil {
+				t.Fatal("repeated callback did not resolve its actual business state", again, err)
+			}
+			want := protocol.CodeDuplicateEffect
+			if withdrawn {
+				want = protocol.CodeForbidden
+			}
+			if repeated.Error.Code != want {
+				t.Fatal("repeated callback changed its real authority or completion boundary", again, want)
 			}
 			if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
 				d, err := store.GetDecision(t.Context(), tx.Q(), question.DecisionID)
@@ -185,23 +188,19 @@ func TestDecisionContinuationManagerCallbackRequiresUnwithdrawnOwnerSource(t *te
 				if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM plan_actions WHERE effect_key=?`, "question_continuation|"+question.DecisionID).Scan(&actions); err != nil {
 					return err
 				}
-				if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM local_hosted_coordination_effects WHERE request_id=?`, call.RequestID).Scan(&effects); err != nil {
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM local_hosted_coordination_effects WHERE execution_id=? AND effect_seq=1`, turn.RequestID).Scan(&effects); err != nil {
 					return err
 				}
-				receipt, err := store.GetRequest(t.Context(), tx.Q(), principal.DedupDomain(), call.RequestID)
 				if withdrawn {
 					// Authorization rejections roll back the whole transaction;
 					// they do not create a recorded business-failure receipt.
-					if d.Status != store.DecisionOpen || d.AnswerJSON != "" || policy != nil || actions != 0 || effects != 0 || !errors.Is(err, store.ErrNotFound) {
-						t.Fatal("rejected callback changed original facts", d, policy, actions, effects, receipt)
+					if d.Status != store.DecisionOpen || d.AnswerJSON != "" || policy != nil || actions != 0 || effects != 0 {
+						t.Fatal("rejected callback changed original facts", d, policy, actions, effects)
 					}
 					return nil
 				}
-				if err != nil {
-					return err
-				}
-				if d.Status != store.DecisionAnswered || policy == nil || actions != 1 || effects != 1 || receipt.Status != protocol.OpSucceeded {
-					t.Fatal("valid callback did not commit exactly once", d, policy, actions, effects, receipt)
+				if d.Status != store.DecisionAnswered || policy == nil || actions != 1 || effects != 1 {
+					t.Fatal("valid callback did not commit exactly once", d, policy, actions, effects)
 				}
 				return nil
 			}); err != nil {
