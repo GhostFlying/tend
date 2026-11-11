@@ -2,10 +2,14 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
-	"strings"
 )
 
 type PutPlannerEntry struct{}
@@ -44,6 +48,16 @@ func (PutPlannerEntry) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "planner entry identity belongs to another responsibility")
 		}
 		if x.Env.ExpectedControlRevision == nil {
+			initial, err := plannerCreationEntry(ctx, tx.Q(), old)
+			if err != nil {
+				return Outcome{}, err
+			}
+			wanted := v
+			wanted.EntryID, wanted.Revision, wanted.UpdatedAt = "", 0, 0
+			initial.EntryID, initial.Revision, initial.UpdatedAt = "", 0, 0
+			if !reflect.DeepEqual(wanted, initial) {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "planner entry identity already has another original definition; changes require its current revision")
+			}
 			return Outcome{Result: old, NoEffect: true}, nil
 		}
 		if *x.Env.ExpectedControlRevision != old.Revision {
@@ -93,4 +107,34 @@ func (PutPlannerEntry) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		return Outcome{}, err
 	}
 	return Outcome{Result: v, Events: []Event{{ObjectType: "planner_entry", ObjectID: v.EntryID, ObjectVersion: v.Revision, Kind: "planner.changed", Body: map[string]any{"entry": v}}}}, nil
+}
+
+func plannerCreationEntry(ctx context.Context, q store.Querier, current protocol.PlannerEntry) (protocol.PlannerEntry, error) {
+	if current.Revision == 1 {
+		return current, nil
+	}
+	missing := func() (protocol.PlannerEntry, error) {
+		return protocol.PlannerEntry{}, protocol.Errorf(protocol.CodeInvalidRequest, "original planner entry definition is unavailable; read the entry and use its current revision for changes")
+	}
+	var raw string
+	if err := q.QueryRowContext(ctx, `SELECT body_json FROM events WHERE object_type='planner_entry' AND object_id=? AND object_version=1 AND kind='planner.changed' ORDER BY event_seq LIMIT 1`, current.EntryID).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return missing()
+		}
+		return protocol.PlannerEntry{}, err
+	}
+	raw, err := store.ResolveJSON(ctx, q, raw)
+	if err != nil {
+		return protocol.PlannerEntry{}, err
+	}
+	var original struct {
+		Entry protocol.PlannerEntry `json:"entry"`
+	}
+	if err := json.Unmarshal([]byte(raw), &original); err != nil {
+		return protocol.PlannerEntry{}, err
+	}
+	if original.Entry.EntryID != current.EntryID || original.Entry.Revision != 1 {
+		return missing()
+	}
+	return original.Entry, nil
 }

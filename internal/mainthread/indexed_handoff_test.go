@@ -36,11 +36,11 @@ func TestIndexHandoffRetryKeepsTargetAndIgnoresUnrelatedLedgerChanges(t *testing
 		t.Fatal("replaced confirmed target", target, err)
 	}
 	after, _, err := f.e.app.GetHandoff(t.Context(), request)
-	if err != nil || after.Prompt != job.Prompt || after.SourceVersion != job.SourceVersion {
+	if err != nil || after.Phase != "committed" || after.Prompt != "" || after.SourceVersion != job.SourceVersion {
 		t.Fatal("unrelated changes rebuilt index", after, err)
 	}
 	injections := f.e.h.Injected(target.ID())
-	if len(injections) != 1 || len(injections[0]) > protocol.ContextIndexBudget || strings.Contains(injections[0], "DO_NOT_COPY_HISTORY") {
+	if len(injections) != 1 || injections[0] != job.Prompt || len(injections[0]) > protocol.ContextIndexBudget || strings.Contains(injections[0], "DO_NOT_COPY_HISTORY") {
 		t.Fatal("copied or repeated historical prose", injections)
 	}
 	if _, forks, _ := f.session.counts(); forks != 0 || len(f.e.h.Starts()) != 0 {

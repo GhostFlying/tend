@@ -270,6 +270,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		if authErr != nil && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) && (env.Operation == protocol.OpManagerNativeReply || env.Operation == protocol.OpManagerNativeEvent || env.Operation == protocol.OpManagerNativeStopped) {
 			p, authErr = s.authenticateCredential(r, &runReceiptCredential{manager: true})
 		}
+		if authErr != nil && env.Operation == protocol.OpManagerNativeClaim && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
+			var ack protocol.ManagerNativeClaimPayload
+			if json.Unmarshal(env.Payload, &ack) == nil && ack.AcknowledgeOnly && len(ack.AcknowledgedIDs) > 0 {
+				p, authErr = s.authenticateCredential(r, &runReceiptCredential{manager: true})
+			}
+		}
 		if authErr != nil && env.Operation == protocol.OpRunsYieldQuestion && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
 			p, authErr = s.authenticateCredential(r, &runReceiptCredential{questionReplay: &env})
 		}

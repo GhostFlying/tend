@@ -9,24 +9,6 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// AcknowledgeManagerReceipt records actual peer acceptance, never native success.
-// The compact ID is not a replayable command or a response cache.
-func (j *Journal) AcknowledgeManagerReceipt(ctx context.Context, run string, reply protocol.ManagerNativeReply) error {
-	if reply.ID == "" || ManagerReadOnly(reply.Method) {
-		return nil
-	}
-	return j.tx(ctx, func(tx *sql.Tx) error {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=?)`, run).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return errors.New("journal: manager receipt has no original Run")
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO manager_receipt_ack_ids(run_id,command_id) VALUES(?,?) ON CONFLICT DO NOTHING`, run, reply.ID)
-		return err
-	})
-}
 func (j *Journal) ManagerReceiptAcknowledgements(ctx context.Context, run string) ([]string, error) {
 	rows, err := j.db.QueryContext(ctx, `SELECT command_id FROM manager_receipt_ack_ids WHERE run_id=? ORDER BY command_id LIMIT 100`, run)
 	if err != nil {
@@ -92,4 +74,61 @@ func (j *Journal) AcknowledgeResult(ctx context.Context, run, request string) er
 		_, err = tx.ExecContext(ctx, `UPDATE runs SET result_acknowledged=1 WHERE run_id=?`, run)
 		return err
 	})
+}
+
+// SettleManagerReceipt commits local retirement before a delivery ACK may reach
+// the peer. A crash leaves either the original pending reply or its compact ACK.
+func (j *Journal) SettleManagerReceipt(ctx context.Context, run string, env protocol.Envelope) error {
+	if env.Operation != protocol.OpManagerNativeReply || env.RequestID == "" {
+		return errors.New("journal: manager settlement requires its original reply")
+	}
+	return j.tx(ctx, func(tx *sql.Tx) error {
+		var operation, originalRun, target, payload string
+		var revision sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT operation,run_id,target_json,payload_json,expected_control_revision FROM requests WHERE request_id=?`, env.RequestID).Scan(&operation, &originalRun, &target, &payload, &revision); err != nil {
+			return err
+		}
+		var original protocol.Envelope
+		if err := json.Unmarshal([]byte(target), &original.Target); err != nil {
+			return err
+		}
+		body, err := j.readRequestBody(ctx, operation, payload)
+		if err != nil {
+			return err
+		}
+		original.RequestID, original.Operation, original.Payload = env.RequestID, operation, json.RawMessage(body)
+		if revision.Valid {
+			original.ExpectedControlRevision = &revision.Int64
+		}
+		before, err := protocol.PayloadHash(&original)
+		if err != nil {
+			return err
+		}
+		after, err := protocol.PayloadHash(&env)
+		if err != nil {
+			return err
+		}
+		if originalRun != run || before != after {
+			return errors.New("journal: manager reply differs from original pending delivery")
+		}
+		var reply protocol.ManagerNativeReply
+		if err := json.Unmarshal(original.Payload, &reply); err != nil {
+			return err
+		}
+		if err := enqueueManagerReceiptAcknowledgement(ctx, tx, run, reply); err != nil {
+			return err
+		}
+		return j.deleteRequest(ctx, tx, env.RequestID)
+	})
+}
+
+func enqueueManagerReceiptAcknowledgement(ctx context.Context, tx *sql.Tx, run string, reply protocol.ManagerNativeReply) error {
+	if reply.ID == "" {
+		return errors.New("journal: manager reply has no command identity")
+	}
+	if ManagerReadOnly(reply.Method) {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO manager_receipt_ack_ids(run_id,command_id) VALUES(?,?) ON CONFLICT DO NOTHING`, run, reply.ID)
+	return err
 }

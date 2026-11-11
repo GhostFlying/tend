@@ -87,7 +87,7 @@ func TestFault_ManagerStoppedFactPrecedesBlockedCloseAfterRetain(t *testing.T) {
 			stopped = true
 			seen = append(seen, env)
 		case protocol.OpManagerNativeReply:
-			if !reflect.DeepEqual(env, closeEnv) {
+			if !sameManagerReceiptEnvelope(env, closeEnv) {
 				t.Error("original close changed", env)
 			}
 			seen = append(seen, env)
@@ -141,7 +141,7 @@ func TestFault_ManagerCompletedCloseSurvivesStoppedAttempt(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if !reflect.DeepEqual(env, closeEnv) {
+		if !sameManagerReceiptEnvelope(env, closeEnv) {
 			t.Error("cancelled attempt changed original close or entered native work", env)
 		}
 		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
@@ -180,7 +180,7 @@ func TestFault_ManagerStopACKRetainsOriginalUnknownClose(t *testing.T) {
 			}
 			stopped.Add(1)
 		case protocol.OpManagerNativeReply:
-			if !reflect.DeepEqual(env, closeEnv) {
+			if !sameManagerReceiptEnvelope(env, closeEnv) {
 				t.Error("unknown close changed", env)
 			}
 			if !acknowledgeClose.Load() {
@@ -200,7 +200,7 @@ func TestFault_ManagerStopACKRetainsOriginalUnknownClose(t *testing.T) {
 		t.Fatal("unacknowledged close was treated as applied")
 	}
 	requests, err := r.cfg.Journal.Requests(t.Context())
-	if err != nil || len(requests) != 1 || !reflect.DeepEqual(requests[0].Envelope, closeEnv) || stopped.Load() != 1 {
+	if err != nil || len(requests) != 1 || !sameManagerReceiptEnvelope(requests[0].Envelope, closeEnv) || stopped.Load() != 1 {
 		t.Fatal("stop ACK removed a different original request", requests, err)
 	}
 	if run, err := r.cfg.Journal.Run(t.Context(), as.RunID); err != nil || run.Phase != journal.PhaseReleasing || !run.StoppedConfirmed {
@@ -256,4 +256,13 @@ func TestFault_ManagerStopCannotProvePriorAttemptClosed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Reply fields may be reconstructed in a different JSON key order. The full
+// business intent and every original envelope identity field must still match.
+func sameManagerReceiptEnvelope(got, want protocol.Envelope) bool {
+	gotHash, gotErr := protocol.PayloadHash(&got)
+	wantHash, wantErr := protocol.PayloadHash(&want)
+	got.Payload, want.Payload = nil, nil
+	return gotErr == nil && wantErr == nil && gotHash == wantHash && reflect.DeepEqual(got, want)
 }

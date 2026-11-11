@@ -21,6 +21,7 @@ func TestTypedCreationFixesBusinessIdentityBeforeSubmission(t *testing.T) {
 		{"message", "send", "--data", `{"body":"hello"}`},
 		{"message", "reply", "original-message", "--data", `{"body":"reply"}`},
 		{"message", "notify", "--data", `{"body":"progress","purpose":"progress","reason":"Observe actual work"}`},
+		{"message", "respond", "original-interaction", "--data", `{"version":1,"text":"Answer the original question"}`},
 		{"issue", "create-task", "issue", "--revision", "2", "--epoch", "3", "--data", `{}`},
 		{"issue", "followup", "create", "issue", "--revision", "2", "--epoch", "3", "--data", `{}`},
 		{"schedule", "create", "--issue", "issue", "--revision", "2", "--epoch", "3", "--data", `{}`},
@@ -41,6 +42,9 @@ func TestTypedCreationFixesBusinessIdentityBeforeSubmission(t *testing.T) {
 			var original protocol.Envelope
 			if err := json.Unmarshal(saved, &original); err != nil {
 				t.Fatal(err)
+			}
+			if original.Operation == "messaging.respond" && original.Target != (protocol.Target{Type: "interaction", ID: "original-interaction"}) {
+				t.Fatal("answer replaced the original interaction target", original)
 			}
 			if prefix := protocol.CreationTargetPrefix(original.Operation); prefix != "" && !protocol.ValidID(prefix, original.Target.ID) {
 				t.Fatal("new target missing", original)
@@ -73,7 +77,7 @@ func TestTypedCreationFixesBusinessIdentityBeforeSubmission(t *testing.T) {
 }
 
 func TestSavedOperationRejectsMissingBusinessIdentitiesWithoutIO(t *testing.T) {
-	for _, operation := range []string{"issues.create", "attentions.create", "conversation.consult", "issues.create_task", "issues.followups_create", "conversation.submit_message", "conversation.inject_source", "messaging.send", "messaging.reply", "messaging.notify", "runs.send_message", "issues.deadlines_put", "planner.entries_put", "webhooks.create"} {
+	for _, operation := range []string{"issues.create", "attentions.create", "conversation.consult", "issues.create_task", "issues.followups_create", "conversation.submit_message", "conversation.inject_source", "messaging.send", "messaging.reply", "messaging.notify", "messaging.respond", "runs.send_message", "issues.deadlines_put", "planner.entries_put", "webhooks.create"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newFakeServer(t)
 			e := newTestEnv(t, f.srv.URL)

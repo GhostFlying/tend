@@ -153,6 +153,15 @@ func (j *Journal) AcknowledgeBoundedFinal(ctx context.Context, request Request, 
 		 ON CONFLICT(run_id) DO UPDATE SET authority_json=json_set(authority_json,'$.bounded_final_ack',json(?))`, as.RunID, string(body), string(body)); err != nil {
 			return err
 		}
+		if as.Protocol >= 4 && operation == protocol.OpManagerNativeReply {
+			var reply protocol.ManagerNativeReply
+			if err := json.Unmarshal(original.Payload, &reply); err != nil {
+				return err
+			}
+			if err := enqueueManagerReceiptAcknowledgement(ctx, tx, as.RunID, reply); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM requests WHERE request_id=? AND run_id=?`, request.Envelope.RequestID, as.RunID)
 		return err
 	})

@@ -50,6 +50,13 @@ func (c WebhookCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			if old.IssueID != p.IssueID {
 				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "subscription identity belongs to another Issue")
 			}
+			initial, err := webhookCreationDefinition(ctx, tx.Q(), old)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if initial != (webhookDefinition{Title: p.Title, Instruction: p.Instruction, KeyRef: p.KeyRef}) {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "subscription identity already has another original definition")
+			}
 			return Outcome{Result: old, NoEffect: true}, nil
 		} else if !errors.Is(e, store.ErrNotFound) {
 			return Outcome{}, e
@@ -135,7 +142,50 @@ func (c WebhookCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 			return Outcome{}, err
 		}
 	}
-	return Outcome{Result: sub, Events: []Event{{ObjectType: "webhook", ObjectID: sub.ID, ObjectVersion: sub.Revision, Kind: "webhook.changed", Body: map[string]any{"issue_id": sub.IssueID, "status": sub.Status}}}}, nil
+	body := map[string]any{"issue_id": sub.IssueID, "status": sub.Status}
+	if c.Action == "create" {
+		body["creation"] = webhookDefinition{Title: sub.Title, Instruction: sub.Instruction, KeyRef: sub.KeyRef}
+	}
+	return Outcome{Result: sub, Events: []Event{{ObjectType: "webhook", ObjectID: sub.ID, ObjectVersion: sub.Revision, Kind: "webhook.changed", Body: body}}}, nil
+}
+
+// A subscription's first business version defines its original purpose and key
+// reference. The current version may subsequently change through explicit CAS.
+type webhookDefinition struct {
+	Title       string `json:"title"`
+	Instruction string `json:"instruction"`
+	KeyRef      string `json:"key_ref"`
+}
+
+func webhookCreationDefinition(ctx context.Context, q store.Querier, current protocol.WebhookSubscription) (webhookDefinition, error) {
+	if current.Revision == 1 {
+		return webhookDefinition{Title: current.Title, Instruction: current.Instruction, KeyRef: current.KeyRef}, nil
+	}
+	missing := func() (webhookDefinition, error) {
+		return webhookDefinition{}, protocol.Errorf(protocol.CodeInvalidRequest, "original subscription definition is unavailable; read the subscription and use its current revision for changes")
+	}
+	var raw string
+	if err := q.QueryRowContext(ctx, `SELECT body_json FROM events WHERE object_type='webhook' AND object_id=? AND object_version=1 AND kind='webhook.changed' ORDER BY event_seq LIMIT 1`, current.ID).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return missing()
+		}
+		return webhookDefinition{}, err
+	}
+	raw, err := store.ResolveJSON(ctx, q, raw)
+	if err != nil {
+		return webhookDefinition{}, err
+	}
+	var original struct {
+		IssueID  string             `json:"issue_id"`
+		Creation *webhookDefinition `json:"creation"`
+	}
+	if err := json.Unmarshal([]byte(raw), &original); err != nil {
+		return webhookDefinition{}, err
+	}
+	if original.Creation == nil || original.IssueID != current.IssueID {
+		return missing()
+	}
+	return *original.Creation, nil
 }
 
 type ReceiveWebhookPayload struct {

@@ -63,6 +63,9 @@ func TestManagerReceiptAcknowledgementSurvivesLostAckAndCompletedRun(t *testing.
 	r.runnerProtocol = 4
 	body, _ := json.Marshal(protocol.ManagerNativeReply{ID: "native-command", Method: "close", Result: json.RawMessage(`null`)})
 	env := protocol.Envelope{Operation: protocol.OpManagerNativeReply, RequestID: "original-receipt", Payload: body}
+	if err = j.PutRequest(ctx, journal.Request{RunID: as.RunID, Envelope: env}); err != nil {
+		t.Fatal(err)
+	}
 	if err = r.sendManagerReceipt(ctx, as, &env); err != nil {
 		t.Fatal("optional compact ACK blocked actual successful receipt", err)
 	}
@@ -115,7 +118,11 @@ func TestManagerAcknowledgementProtocol3AndUnknownRemainConservative(t *testing.
 				return managerReceiptHTTPResponse(http.StatusOK, rpcResponse{Operation: &protocol.Operation{Status: protocol.OpUnknown}})
 			})}})
 			r.runnerProtocol = version
-			if err = j.AcknowledgeManagerReceipt(t.Context(), as.RunID, protocol.ManagerNativeReply{ID: "old"}); err != nil {
+			settled := protocol.Envelope{RequestID: "previous-success", Operation: protocol.OpManagerNativeReply, Payload: json.RawMessage(`{"id":"old","result":null}`)}
+			if err = j.PutRequest(t.Context(), journal.Request{RunID: as.RunID, Envelope: settled}); err != nil {
+				t.Fatal(err)
+			}
+			if err = j.SettleManagerReceipt(t.Context(), as.RunID, settled); err != nil {
 				t.Fatal(err)
 			}
 			if version == 3 {

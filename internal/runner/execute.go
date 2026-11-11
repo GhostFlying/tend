@@ -829,7 +829,7 @@ func (r *Runner) waitUntilWanted(ctx context.Context, as protocol.Assignment, a 
 // could undo a hand-back that came meanwhile.
 func (r *Runner) reportTakeover(ctx context.Context, as protocol.Assignment, a *active, reason string) error {
 	r.cfg.Log.InfoContext(ctx, "the owner took over the run's agent", "run_id", as.RunID, "reason", reason)
-	env, err := r.newEnvelope(protocol.OpRunsReportTakeover, runTarget(as), protocol.TakeoverPayload{Reason: reason})
+	env, err := r.newTakeoverEnvelope(as, reason)
 	if err != nil {
 		return err
 	}
@@ -837,6 +837,16 @@ func (r *Runner) reportTakeover(ctx context.Context, as protocol.Assignment, a *
 		return err
 	}
 	return r.sendTakeover(ctx, as, a, env)
+}
+
+// New observations use the original Run protocol, not a later host handshake.
+// Pending envelopes are recovered verbatim and never acquire another identity.
+func (r *Runner) newTakeoverEnvelope(as protocol.Assignment, reason string) (*protocol.Envelope, error) {
+	payload := protocol.TakeoverPayload{Reason: reason}
+	if as.Protocol >= 4 {
+		payload.ObservationID = r.cfg.IDs.New(protocol.PrefixRequest)
+	}
+	return r.newEnvelope(protocol.OpRunsReportTakeover, runTarget(as), payload)
 }
 
 // settleTakeover resends a takeover report an earlier attempt or process
@@ -857,20 +867,36 @@ func (r *Runner) settleTakeover(ctx context.Context, as protocol.Assignment, a *
 	return nil
 }
 
-// sendTakeover sends a journaled takeover report. Once tend has it, the
-// run is held here without waiting for a heartbeat to say so, which may
-// never come if the owner hands it back first; heartbeats sent before
-// then cannot undo it.
+// sendTakeover settles only a successful original observation. A duplicate may
+// return an owner's newer hand-back, which must not be overwritten locally.
 func (r *Runner) sendTakeover(ctx context.Context, as protocol.Assignment, a *active, env *protocol.Envelope) error {
-	_, err := r.send(ctx, runCredential(as), env)
-	if err != nil && !isRetryable(err) {
-		// tend refused it, as for a run that has ended: nothing to hold.
+	op, err := r.send(ctx, runCredential(as), env)
+	if err == nil && op.Status != protocol.OpSucceeded {
+		err = protocol.Errorf(protocol.CodeUnknownOutcome, "takeover observation is not yet confirmed")
+	}
+	if err != nil {
+		if isRetryable(err) || protocol.CodeOf(err) == protocol.CodeUnknownOutcome || ctx.Err() != nil {
+			return err
+		}
 		r.cfg.Log.WarnContext(ctx, "tend refused the takeover report", "run_id", as.RunID, "err", err)
 		return r.cfg.Journal.DeleteRequest(ctx, env.RequestID)
 	}
-	if err != nil {
-		return err
+	desired := protocol.DesiredHeld
+	var current struct {
+		TaskID      string               `json:"task_id"`
+		ControlMode protocol.ControlMode `json:"control_mode"`
 	}
+	if json.Unmarshal(op.Result, &current) == nil && current.TaskID == as.TaskID {
+		switch current.ControlMode {
+		case protocol.ControlManaged:
+			desired = protocol.DesiredRun
+		case protocol.ControlPaused:
+			desired = protocol.DesiredPaused
+		}
+	}
+	// Held records native ownership that still needs a real hand-back. The
+	// current server desired state may already permit that hand-back, but
+	// only the existing worker start/release path can finish it.
 	if err := r.cfg.Journal.SetHeld(context.WithoutCancel(ctx), as.RunID, true); err != nil {
 		return err
 	}
@@ -878,10 +904,12 @@ func (r *Runner) sendTakeover(ctx context.Context, as protocol.Assignment, a *ac
 		return err
 	}
 	now := r.cfg.Now()
-	r.mu.Lock()
-	a.heldAt = now
-	r.mu.Unlock()
-	r.applyDesired(ctx, a, protocol.DesiredHeld, now)
+	if desired == protocol.DesiredHeld {
+		r.mu.Lock()
+		a.heldAt = now
+		r.mu.Unlock()
+	}
+	r.applyDesired(ctx, a, desired, now)
 	return nil
 }
 
@@ -1421,7 +1449,7 @@ func (r *Runner) stopCompletedAgent(ctx context.Context, as protocol.Assignment,
 }
 
 func (r *Runner) holdCompleted(ctx context.Context, as protocol.Assignment, a *active, reason string) error {
-	env, err := r.newEnvelope(protocol.OpRunsReportTakeover, runTarget(as), protocol.TakeoverPayload{Reason: reason})
+	env, err := r.newTakeoverEnvelope(as, reason)
 	if err != nil {
 		return &completionPending{err}
 	}

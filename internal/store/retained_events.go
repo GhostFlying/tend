@@ -54,14 +54,14 @@ var nativeEventDefaults = [...]struct {
 }
 
 // StageEventOriginals keeps transport structure as semantic JSON. Only actual
-// provider Raw or opaque large text becomes an original; formatting and wrapper
-// fragments never create archive files or reconstruction recipes.
+// opaque large text becomes a new original. Provider JSON reuses registered
+// windows or recursively shares its values; wrappers never create new originals.
 func (s *Store) StageEventOriginals(ctx context.Context, stream string, bodies ...[]byte) (context.Context, error) {
 	return s.stageEvents(ctx, stream, false, bodies...)
 }
 
-// StageRolloutOriginals identifies the provider's own JSON boundary. Its bytes
-// are retained when no registered original can already supply the same content.
+// StageRolloutOriginals identifies provider JSON for whole-value window reuse.
+// An unmatched wrapper is reconstructed from its values, not copied as text.
 func (s *Store) StageRolloutOriginals(ctx context.Context, stream string, bodies ...[]byte) (context.Context, error) {
 	return s.stageEvents(ctx, stream, true, bodies...)
 }
@@ -102,7 +102,6 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	sourceRaw := raw
 	raw = bytes.TrimSpace(raw)
 	if !json.Valid(raw) {
 		return nil, errors.New("store: derived event is not valid JSON")
@@ -111,12 +110,6 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 		original, err := s.matchSemanticOriginal(ctx, raw)
 		if err != nil {
 			return nil, err
-		}
-		if original == nil && provider {
-			original, err = s.prepareOpaqueOriginal(ctx, stream, sourceRaw)
-			if err != nil {
-				return nil, err
-			}
 		}
 		if original != nil {
 			p.References = append(p.References, preparedEventReference{eventReference: eventReference{Path: append([]string(nil), path...)}, Original: *original})

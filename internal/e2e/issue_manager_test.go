@@ -143,7 +143,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool) {
 	category := protocol.DefaultIssueManagerCategory
 	zero := int64(0)
 	execute := func(op string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
-		raw, _ := json.Marshal(payload)
+		target, raw := positiveFixtureInput(t, s.ids, op, target, payload)
 		out, err := s.app.Execute(ctx, owner, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: target, Payload: raw, ExpectedControlRevision: revision}, command)
 		if err != nil || out.Status != protocol.OpSucceeded {
 			t.Fatalf("%s: %+v %v", op, out, err)

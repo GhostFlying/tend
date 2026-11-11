@@ -13,7 +13,7 @@ import (
 func TestWithdrawnOwnerNeverAppearsInContextPacket(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
-	raw, _ := json.Marshal(protocol.SubmitMessagePayload{Body: "WITHDRAWN_INSTRUCTION_MARKER"})
+	raw, _ := json.Marshal(protocol.SubmitMessagePayload{MessageID: e.ids.New(protocol.PrefixMessage), Body: "WITHDRAWN_INSTRUCTION_MARKER"})
 	op, err := e.app.Execute(ctx, owner, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: "conversation.submit_message", Target: protocol.Target{Type: "conversation"}, Payload: raw}, app.SubmitMessage{})
 	if err != nil || op.Status != protocol.OpAccepted {
 		t.Fatalf("submit: %+v %v", op, err)

@@ -62,10 +62,11 @@ func TestSteerCoordinationRetriesKeepExecutionIdentity(t *testing.T) {
 			t.Fatalf("retry %s: %s", id, res.Text)
 		}
 		var details struct {
-			RequestID string `json:"original_request_id"`
+			ExecutionID string `json:"coordination_execution_id"`
+			EffectSeq   int64  `json:"effect_seq"`
 		}
-		if json.Unmarshal(reply.Error.Details, &details) != nil || details.RequestID != original.Result.RequestID {
-			t.Fatalf("original receipt lost: %s", res.Text)
+		if json.Unmarshal(reply.Error.Details, &details) != nil || details.ExecutionID != execution || details.EffectSeq != 1 {
+			t.Fatalf("original coordination effect lost: %s", res.Text)
 		}
 	}
 	duplicate(e.m, "lost-before-steer")

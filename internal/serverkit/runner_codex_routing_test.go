@@ -74,7 +74,7 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 	runtime.AgentExecutors = []protocol.AgentExecutor{{Available: true, Pin: protocol.RunExecutionPin{Purpose: "issue_manager", Identity: projection.Agents[0].Identity, AgentRevision: 1, Runtime: projection.Agents[0].Binding, InventoryRevision: 1, SnapshotID: "runner-inventory", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: "runner-model"}, Worker: protocol.WorkerAppServer}}}
 	runtime.Sequence++
 	must(runner, app.Hello{}, protocol.Target{Type: "host", ID: "worker"}, protocol.HelloPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: runtime}, nil)
-	created := must(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Coordinate an existing Issue", Project: "default", Intent: "Use the chosen runner"}}, nil)
+	created := must(owner, app.CanonicalOwnerIssueCommand{Action: "create"}, protocol.Target{Type: "issue", ID: ids.New(protocol.PrefixWorkItem)}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Coordinate an existing Issue", Project: "default", Intent: "Use the chosen runner"}}, nil)
 	var issue protocol.Issue
 	if err := json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 	}
 	must(owner, app.CanonicalOwnerIssueCommand{Action: "set_status"}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision)
 
-	claimed := must(runner, app.Claim{}, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: runtime}, nil)
+	claimed := must(runner, app.Claim{}, protocol.Target{Type: "host", ID: "worker"}, protocol.ClaimPayload{RunID: ids.New(protocol.PrefixRun), Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: runtime}, nil)
 	var claim struct {
 		Assignment *protocol.Assignment `json:"assignment"`
 	}
@@ -108,6 +108,7 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	replies := make(chan error, 1)
+	var nativeMethods []string
 	go func() {
 		for {
 			wake := a.Changes().Wait()
@@ -130,6 +131,7 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 				}
 				continue
 			}
+			nativeMethods = append(nativeMethods, request.Method)
 			var result json.RawMessage
 			switch request.Method {
 			case "models":
@@ -157,6 +159,9 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 	if err := <-replies; err != nil {
 		t.Error(err)
 	}
+	if strings.Join(nativeMethods, ",") != "models,close" {
+		t.Fatal("runner did not actually serve both native operations", nativeMethods)
+	}
 	if _, err := os.Stat(filepath.Join(root, "server-data", "codex-coordinators")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("remote routing bound a server-local environment", err)
 	}
@@ -174,12 +179,14 @@ func TestNamedSessionRoutesRunnerCodexAtExecutingNode(t *testing.T) {
 		t.Fatalf("local environment validation was bypassed: %v %v", session, err)
 	}
 	if err := ledger.Read(t.Context(), func(tx *store.ReadTx) error {
-		var total, original int
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*),SUM(CASE WHEN run_id=? THEN 1 ELSE 0 END) FROM manager_native_requests`, selected.RunnerRunID).Scan(&total, &original); err != nil {
+		var total, original, closed int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*),SUM(CASE WHEN run_id=? THEN 1 ELSE 0 END),SUM(CASE WHEN method='close' THEN 1 ELSE 0 END) FROM manager_native_requests`, selected.RunnerRunID).Scan(&total, &original, &closed); err != nil {
 			return err
 		}
-		if total != 2 || original != 2 {
-			return fmt.Errorf("transport did not stay on the original claim: total=%d original=%d", total, original)
+		// The completed read-only models lookup leaves no durable request row.
+		// The close receipt must still belong to the actual original runner.
+		if total != 1 || original != 1 || closed != 1 {
+			return fmt.Errorf("transport did not stay on the original claim: total=%d original=%d close=%d", total, original, closed)
 		}
 		return nil
 	}); err != nil {

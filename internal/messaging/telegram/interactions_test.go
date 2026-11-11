@@ -28,7 +28,7 @@ func startInteractionBot(t *testing.T, c *Client, a *app.App) {
 func createInteraction(t *testing.T, a *app.App, ids protocol.IDGen) protocol.MessagingMessage {
 	t.Helper()
 	raw, _ := json.Marshal(protocol.CreateAttentionPayload{Kind: "decision", Title: "请选择检查范围", Options: []string{"手机", "桌面"}})
-	op, err := a.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "attentions.create", Target: protocol.Target{Type: "attention"}, Payload: raw}, app.AttentionCommand{Action: "create"})
+	op, err := a.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "attentions.create", Target: protocol.Target{Type: "attention", ID: ids.New(protocol.Prefix("attn"))}, Payload: raw}, app.AttentionCommand{Action: "create"})
 	if err != nil || op.Error != nil {
 		t.Fatal(op, err)
 	}
@@ -164,7 +164,7 @@ func TestTelegramCrossChannelEditFallbackIsNotRepeated(t *testing.T) {
 	startInteractionBot(t, c, a)
 	m := createInteraction(t, a, ids)
 	deliverQuestion(t, c, a)
-	raw, _ := json.Marshal(protocol.RespondInteraction{Version: m.Interaction.Version, Option: "手机"})
+	raw, _ := json.Marshal(protocol.RespondInteraction{MessageID: ids.New(protocol.PrefixMessage), Version: m.Interaction.Version, Option: "手机"})
 	op, err := a.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test"}, &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "messaging.respond", Target: protocol.Target{Type: "interaction", ID: m.Interaction.ID}, Payload: raw}, app.RespondMessagingInteraction{})
 	if err != nil || op.Error != nil {
 		t.Fatal(op, err)

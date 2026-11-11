@@ -27,6 +27,8 @@ func CreationTargetPrefix(operation string) Prefix {
 // an existing target. Callers allocate these once, before submitting the action.
 func NativePayloadIdentities(operation string) map[string]Prefix {
 	switch operation {
+	case OpRunsReportTakeover:
+		return map[string]Prefix{"observation_id": PrefixRequest}
 	case "webhooks.create":
 		return map[string]Prefix{"subscription_id": Prefix("webhook")}
 	case "issues.create_task":

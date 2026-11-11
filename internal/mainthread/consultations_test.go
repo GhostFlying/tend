@@ -168,9 +168,13 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 	}
 	execute := func(operation string, target protocol.Target, p any, cmd app.Command, principal protocol.Principal) protocol.Operation {
 		t.Helper()
-		raw, _ := json.Marshal(p)
+		target, raw := positiveFixtureInput(t, e.ids, operation, target, p)
 		zero := int64(0)
-		op, err := e.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: operation, Target: target, Payload: raw, ExpectedControlRevision: &zero}, cmd)
+		var expected *int64
+		if protocol.CreationTargetPrefix(operation) == "" {
+			expected = &zero
+		}
+		op, err := e.app.Execute(t.Context(), principal, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: operation, Target: target, Payload: raw, ExpectedControlRevision: expected}, cmd)
 		if err != nil || op.Error != nil {
 			t.Fatal(op, err)
 		}
@@ -178,7 +182,7 @@ func TestConsultationActualHostedPoolDelegatesOnlyExecutionRequest(t *testing.T)
 	}
 	execute("categories.put", protocol.Target{Type: "category", ID: "planning"}, protocol.PutAgentCategoryPayload{Title: "Planning", State: "active"}, app.PutAgentCategory{}, owner)
 	execute("hosted.configure", protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": prepared.Revision(), "hash": prepared.Hash()}, app.AcceptHostedConfiguration{Prepared: prepared}, protocol.Principal{Kind: protocol.PrincipalSystem})
-	e.app = app.New(e.store, e.ids, e.now, app.WithHostedConfiguration(prepared), app.WithNotifier(e.signal))
+	e.app = app.New(e.store, e.ids, e.now, app.WithMainOwner(owner.Subject), app.WithHostedConfiguration(prepared), app.WithNotifier(e.signal))
 	cb := contextbuilder.New(e.app, e.store, e.ids, contextbuilder.Config{})
 	service := tools.New(e.app, e.store, cb, quiet())
 	makeManager := func(id string) *Manager {

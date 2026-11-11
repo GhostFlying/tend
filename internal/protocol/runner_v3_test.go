@@ -78,3 +78,46 @@ func TestRunnerV3InventoryStatusRetainsActualCatalogWithoutRequestCache(t *testi
 		}
 	}
 }
+
+func TestRunnerTakeoverRequiresActualObservationIdentity(t *testing.T) {
+	run := NativeObjectID(PrefixRun, "takeover", "run")
+	request := NativeObjectID(PrefixRequest, "takeover", "transport")
+	raw, _ := json.Marshal(TakeoverPayload{Reason: "one observation"})
+	env := Envelope{RequestID: request, Target: Target{Type: "run", ID: run}, Payload: raw}
+	for _, version := range []int64{2, 3, 4} {
+		adapted, err := AdaptRunnerTakeover(env, version)
+		if version != 3 {
+			if err == nil {
+				t.Fatalf("protocol%d accepted a missing observation", version)
+			}
+			continue
+		}
+		var p TakeoverPayload
+		if err != nil || json.Unmarshal(adapted.Payload, &p) != nil || p.ObservationID != TakeoverObservationFromHistoricalEvent(run, request) {
+			t.Fatal(adapted, err)
+		}
+		again, err := AdaptRunnerTakeover(env, version)
+		if err != nil || string(again.Payload) != string(adapted.Payload) {
+			t.Fatal("unstable legacy observation", again, err)
+		}
+	}
+	malformed := env
+	malformed.Payload = json.RawMessage("null")
+	if _, err := AdaptRunnerTakeover(malformed, 3); err == nil {
+		t.Fatal("null legacy payload was accepted")
+	}
+	observation := NativeObjectID(PrefixRequest, "takeover", "business")
+	raw, _ = json.Marshal(TakeoverPayload{ObservationID: observation, Reason: "one observation"})
+	env.Payload = raw
+	for _, version := range []int64{3, 4} {
+		got, err := AdaptRunnerTakeover(env, version)
+		if err != nil || string(got.Payload) != string(raw) {
+			t.Fatal("changed explicit observation", got, err)
+		}
+	}
+	other := env
+	other.Target.ID = NativeObjectID(PrefixRun, "takeover", "another-run")
+	if TakeoverObservationFromHistoricalEvent(run, request) == TakeoverObservationFromHistoricalEvent(other.Target.ID, request) {
+		t.Fatal("legacy source run was ignored")
+	}
+}

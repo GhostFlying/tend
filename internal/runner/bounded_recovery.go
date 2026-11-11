@@ -155,7 +155,13 @@ func (r *Runner) replayBoundedFacts(ctx context.Context) {
 				continue
 			}
 		}
-		if err := r.cfg.Journal.DeleteRequest(ctx, request.Envelope.RequestID); err != nil {
+		var settleErr error
+		if request.Envelope.Operation == protocol.OpManagerNativeReply && (run.Assignment.Protocol >= 4 || r.supportsManagerAcknowledgements()) {
+			settleErr = r.cfg.Journal.SettleManagerReceipt(ctx, request.RunID, request.Envelope)
+		} else {
+			settleErr = r.cfg.Journal.DeleteRequest(ctx, request.Envelope.RequestID)
+		}
+		if settleErr != nil {
 			blocked[request.RunID] = true
 		}
 	}

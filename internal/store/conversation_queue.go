@@ -136,7 +136,18 @@ func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, l
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if err := hydrateConversationTool(ctx, q, &out[i]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // HideUndeliveredOwner keeps unadmitted owner input and cancelled followups out of model reads.

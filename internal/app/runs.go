@@ -128,6 +128,19 @@ func (ReportTakeover) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
+	// The Run retains its original negotiated protocol across host upgrades.
+	adapted, err := protocol.AdaptRunnerTakeover(*x.Env, rc.run.Protocol)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if err := json.Unmarshal(adapted.Payload, &p); err != nil {
+		return Outcome{}, err
+	}
+	if seen, err := priorTakeoverObservation(ctx, tx.Q(), rc.run, p); err != nil {
+		return Outcome{}, err
+	} else if seen {
+		return Outcome{NoEffect: true, Result: newTaskResult(toDomain(rc.task, rc.spec.Budget()), nil)}, nil
+	}
 	if rc.run.ObservedState == protocol.RunFinished || rc.run.ObservedState == protocol.RunFailed {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run is %s", rc.run.ObservedState)
 	}
@@ -136,6 +149,7 @@ func (ReportTakeover) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
+	events = append(events, Event{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.takeover_observed", Body: map[string]any{"run_id": rc.run.RunID, "role": rc.run.Role, "task_id": rc.task.TaskID, "observation_id": p.ObservationID, "reason": p.Reason, "observed_control_revision": rc.task.ControlRevision, "result_control_revision": d.Task.ControlRevision}})
 	return Outcome{Result: newTaskResult(d.Task, nil), Events: events}, nil
 }
 

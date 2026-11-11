@@ -121,7 +121,6 @@ export class SendQueue {
       } else {
         if (
           m.submitAttempted === false &&
-          m.envelope.operation !== "messaging.respond" &&
           !(m.envelope.payload as { message_id?: string }).message_id
         ) {
           const upgraded = await q.outbox.edit(m.requestId, (current) =>
@@ -225,6 +224,7 @@ export class SendQueue {
         },
         payload: draft.interaction
           ? {
+              message_id: payload.message_id,
               version: draft.interaction.version,
               ...(draft.interaction.confirm ? { confirm: true } : {}),
               ...(draft.interaction.option ? { option: draft.interaction.option } : {}),
@@ -324,11 +324,7 @@ export class SendQueue {
       await this.reconcile(requestId);
       return;
     }
-    if (
-      !(m.envelope.payload as { message_id?: string }).message_id &&
-      m.envelope.operation !== "messaging.respond"
-    )
-      return;
+    if (!(m.envelope.payload as { message_id?: string }).message_id) return;
     await this.update(requestId, { state: "sending" });
     await this.kick();
   }
@@ -415,10 +411,7 @@ export class SendQueue {
       m = current;
     }
     if (!this.online()) return false;
-    if (
-      m.envelope.operation !== "messaging.respond" &&
-      !(m.envelope.payload as { message_id?: string }).message_id
-    ) {
+    if (!(m.envelope.payload as { message_id?: string }).message_id) {
       await this.update(m.requestId, {
         state: "unknown",
         error: "旧消息缺少稳定消息身份，保留原文等待核对；不会自动重发。",

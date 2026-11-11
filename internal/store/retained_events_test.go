@@ -154,8 +154,8 @@ func TestSemanticEventOriginalPrecedesReferenceAndCorruptionIsError(t *testing.T
 	if err := s.read.QueryRowContext(t.Context(), `SELECT a.archive_id,MAX(w.byte_offset+w.byte_length) FROM retained_original_windows w JOIN retained_original_archives a USING(archive_key) GROUP BY a.archive_id`).Scan(&archive, &length); err != nil {
 		t.Fatal(err)
 	}
-	if length != int64(len(raw)) {
-		t.Fatal("text copied outside provider original", length, len(raw))
+	if length != int64(len(text)) {
+		t.Fatal("provider wrapper copied instead of the unique text", length, len(text))
 	}
 	file := filepath.Join(path+".files", "archives", archive)
 	if err := os.Truncate(file, length-1); err != nil {
@@ -197,4 +197,54 @@ func mustJSONString(t *testing.T, text string) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// Different provider envelopes may contain exactly the same registered text.
+// Matching only the whole Raw JSON must not turn that envelope into a new file.
+func TestSemanticEventUnmatchedProviderSharesRegisteredChild(t *testing.T) {
+	for _, rollout := range []bool{false, true} {
+		name := "manager"
+		if rollout {
+			name = "rollout"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, path := openTest(t)
+			nativeArchiveFixture(t, s)
+			text := `{ "original": "` + strings.Repeat("工具😀\n", 500) + `", "nullable": null }`
+			original, _ := json.Marshal(map[string]any{"type": "original", "output": text})
+			archiveNativeChunk(t, s, "child-original", 0, append(original, '\n'))
+			provider, _ := json.Marshal(map[string]any{"id": "different", "contentItems": []any{map[string]any{"type": "inputText", "text": text}}, "nullable": nil})
+			body := `{"thread_id":"thread","native":{"Raw":` + string(provider) + `,"Tool":{"Output":` + mustJSONString(t, text) + `}}}`
+			if rollout {
+				body = string(provider)
+			}
+			ctx := t.Context()
+			var err error
+			if rollout {
+				ctx, err = s.StageRolloutOriginals(ctx, "child-wrapper", []byte(body))
+			} else {
+				ctx, err = s.StageEventOriginals(ctx, "child-wrapper", []byte(body))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stored string
+			if err = s.Write(ctx, func(tx *Tx) error { var e error; stored, e = tx.RetainEventJSON(ctx, body); return e }); err != nil {
+				t.Fatal(err)
+			}
+			if archiveCount(t, path) != 1 {
+				t.Fatal("unmatched provider envelope duplicated its registered child")
+			}
+			if !SemanticJSONEqual(resolveEventFixture(t, s, stored), body) {
+				t.Fatal("provider content, opaque JSON-looking string, or null changed")
+			}
+			if h, ok := EventOriginalSHA256(stored); !ok || h != bodyHash([]byte(body)) {
+				t.Fatal("original transport identity changed")
+			}
+			var rules int
+			if err = s.read.QueryRowContext(ctx, `SELECT count(*) FROM retained_original_values WHERE recipe_window_id IS NOT NULL`).Scan(&rules); err != nil || rules != 0 {
+				t.Fatal("provider wrapper produced a formatting rule", rules, err)
+			}
+		})
+	}
 }

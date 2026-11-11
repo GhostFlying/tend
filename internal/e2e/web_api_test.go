@@ -102,6 +102,9 @@ func (c *webClient) op(requestID, operation string, target protocol.Target, payl
 // send submits a message under a new request ID and returns its ID.
 func (c *webClient) send(p protocol.SubmitMessagePayload) string {
 	c.t.Helper()
+	if p.MessageID == "" {
+		p.MessageID = c.srv.ids.New(protocol.PrefixMessage)
+	}
 	return messageID(c.t, c.op(c.srv.ids.New(protocol.PrefixRequest), "conversation.submit_message", protocol.Target{Type: "message"}, p))
 }
 
@@ -458,10 +461,10 @@ func TestFault_SendReceiptLost(t *testing.T) {
 	web := srv.webLogin(hs.URL)
 
 	retried := srv.ids.New(protocol.PrefixRequest)
-	p := protocol.SubmitMessagePayload{Body: "remember the deadline"}
+	p := protocol.SubmitMessagePayload{MessageID: srv.ids.New(protocol.PrefixMessage), Body: "remember the deadline"}
 	first := web.op(retried, "conversation.submit_message", protocol.Target{Type: "message"}, p)
 	again := web.op(retried, "conversation.submit_message", protocol.Target{Type: "message"}, p)
-	if again.Status != first.Status || messageID(t, first) != messageID(t, again) {
+	if first.Status != protocol.OpAccepted || again.Status != protocol.OpSucceeded || messageID(t, first) != messageID(t, again) {
 		t.Errorf("the resend = %+v, want the first operation %+v", again, first)
 	}
 	eventually(t, "the reply is done", func() bool {
@@ -476,13 +479,13 @@ func TestFault_SendReceiptLost(t *testing.T) {
 			t.Errorf("%s = %d, want %d", query, got, want)
 		}
 	}
-	// The same request ID with another message is refused, not taken as
-	// a new one.
-	b, _ := json.Marshal(protocol.SubmitMessagePayload{Body: "something else"})
+	// Reusing the same business Message identity with different content is
+	// refused; transport request identity alone is not a replay key.
+	b, _ := json.Marshal(protocol.SubmitMessagePayload{MessageID: p.MessageID, Body: "something else"})
 	var res protocol.APIResponse
 	web.do("POST", "/api/v1/ops", protocol.Envelope{RequestID: retried, Operation: "conversation.submit_message", Target: protocol.Target{Type: "message"}, Payload: b}, &res)
 	if res.Error == nil || res.Error.Code != protocol.CodeConflictPayload {
-		t.Errorf("another message under the same request ID = %+v, want %s", res, protocol.CodeConflictPayload)
+		t.Errorf("different content under the same Message identity = %+v, want %s", res, protocol.CodeConflictPayload)
 	}
 }
 

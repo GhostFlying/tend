@@ -320,7 +320,7 @@ func TestToolUsesJoinTheConversation(t *testing.T) {
 	if !slices.Equal(got, want) || page.More {
 		t.Errorf("conversation = %v (more %v), want %v", got, page.More, want)
 	}
-	if out := page.Items[2].Tool.Output; len(out) > 8<<10+64 || !strings.Contains(out, "[truncated: 8192 of 9000 bytes shown]") {
+	if out := page.Items[2].Tool.Output; out != strings.Repeat("x", 9000) {
 		t.Errorf("long output kept %d bytes: ...%q", len(out), out[max(0, len(out)-60):])
 	}
 	if out := page.Items[3].Tool.Output; out != "built" {

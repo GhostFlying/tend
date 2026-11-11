@@ -105,12 +105,22 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore, closePending bool)
 	}
 	var mu sync.Mutex
 	var received []protocol.Envelope
+	var acknowledgements [][]string
 	stoppedReceived := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		var env protocol.Envelope
 		_ = json.NewDecoder(q.Body).Decode(&env)
 		mu.Lock()
 		defer mu.Unlock()
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var payload protocol.ManagerNativeClaimPayload
+			if json.Unmarshal(env.Payload, &payload) != nil || !payload.AcknowledgeOnly || !reflect.DeepEqual(payload.AcknowledgedIDs, []string{command.ID}) {
+				t.Error("bounded receipt recovery attempted to dispatch new native work", env)
+			}
+			acknowledgements = append(acknowledgements, payload.AcknowledgedIDs)
+			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+			return
+		}
 		received = append(received, env)
 		if env.Operation == protocol.OpManagerNativeStopped {
 			stoppedReceived = true
@@ -168,6 +178,13 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore, closePending bool)
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	wantAcknowledgements := 1
+	if closePending {
+		wantAcknowledgements = 0
+	}
+	if len(acknowledgements) != wantAcknowledgements {
+		t.Fatal("physical stop lost actual receipt ACK or acknowledged an unknown close", acknowledgements)
+	}
 	wantReceived := 7
 	if closePending && !releaseBefore {
 		wantReceived++ // A restart retries the still-unacknowledged close.
@@ -180,10 +197,10 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore, closePending bool)
 			t.Fatal("manager event prefix changed", events[i], received[i])
 		}
 	}
-	if received[4].Operation != protocol.OpManagerNativeStopped || !reflect.DeepEqual(received[5], closeEnvelope) || received[len(received)-1].Operation != protocol.OpRunnerHello {
+	if received[4].Operation != protocol.OpManagerNativeStopped || !sameManagerReceiptEnvelope(received[5], closeEnvelope) || received[len(received)-1].Operation != protocol.OpRunnerHello {
 		t.Fatal("manager receipt identities or order changed", received)
 	}
-	if wantReceived == 8 && !reflect.DeepEqual(received[6], closeEnvelope) {
+	if wantReceived == 8 && !sameManagerReceiptEnvelope(received[6], closeEnvelope) {
 		t.Fatal("restart changed the original pending close", received[6])
 	}
 	if closePending {
@@ -216,7 +233,9 @@ func boundedManagerFinalScenario(t *testing.T, releaseBefore, closePending bool)
 			t.Fatal("physical Stop forged a close ACK or lost its pending history", raw)
 		}
 		p := history.StopHistory.Requests[0]
-		if p.ID != closeEnvelope.RequestID || p.Operation != closeEnvelope.Operation || p.Payload != string(closeEnvelope.Payload) {
+		saved := closeEnvelope
+		saved.RequestID, saved.Operation, saved.Payload = p.ID, p.Operation, json.RawMessage(p.Payload)
+		if !sameManagerReceiptEnvelope(saved, closeEnvelope) {
 			t.Fatal("independent Stop changed the original unacknowledged close", raw)
 		}
 	}

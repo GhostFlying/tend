@@ -153,6 +153,8 @@ func CapabilityBindings() []CapabilityBinding {
 				args = append(args, "--data", `{"version":1,"text":"Wait for independent resume","continuation":{"mode":"wait","reason":"Await explicit continuation"}}`)
 			} else if cmd.Operation == protocol.OpResumeDecisionContinuation || cmd.Operation == protocol.OpReconcileDecisionContinuation {
 				args = append(args, "--data", `{"expected_revision":0}`)
+			} else if cmd.Operation == "messaging.respond" {
+				args = append(args, "--data", `{"message_id":"msg_01ARZ3NDEKTSV4RRFFQ69G5FAV","version":1,"text":"Answer the original question"}`)
 			} else if cmd.Operation == protocol.OpReconcileManagerRun {
 				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
 			} else {

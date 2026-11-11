@@ -44,6 +44,7 @@ export function prepareOperation(envelope: Envelope, now = Date.now()): Envelope
     "messaging.input": ["message_id", "msg"],
     "messaging.reply": ["message_id", "msg"],
     "messaging.notify": ["message_id", "msg"],
+    "messaging.respond": ["message_id", "msg"],
     "conversation.reply": ["message_id", "msg"],
     "runs.send_message": ["message_id", "msg"],
   };

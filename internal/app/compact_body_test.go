@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func compactBodyFollowup(t *testing.T, h *harness, w protocol.WorkItem) {
@@ -19,6 +20,59 @@ func compactBodyFollowup(t *testing.T, h *harness, w protocol.WorkItem) {
 		t.Fatal(err)
 	}
 	h.followup(w, protocol.FollowupSpec{Purpose: "Publish the actual background result", Instruction: "Keep the original full result", SourceID: source, Timezone: "UTC", Kind: "at", At: h.clock.Now().UnixMilli()})
+}
+
+func TestRetainedMessageBodiesReachTranscriptAndIssueSources(t *testing.T) {
+	h := newHarness(t)
+	issue := createCanonicalOwnerTestIssue(t, h)
+	body := strings.Repeat("已验收的完整结果😀\n", 500)
+	ownerLiteral := `{"tend:retained-json:v2":999999}`
+	ctx, err := h.store.StageOriginals(t.Context(), "retained-visible-result", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		for _, m := range []store.MessageRow{
+			{MessageID: "source-owner", Author: "owner", Body: ownerLiteral},
+			{MessageID: "source-result", Author: "main_agent", ReplyTo: "source-owner", Body: body},
+		} {
+			if _, err := tx.InsertMessage(ctx, m); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO message_context_obligations(message_id,work_item_id,needs_review) VALUES(?,?,1)`, m.MessageID, issue.IssueID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		var saved string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT body FROM conversation_messages WHERE message_id='source-result'`).Scan(&saved); err != nil {
+			return err
+		}
+		if saved == body || len(saved) > 100 {
+			t.Fatal("fixture did not retain a shared original")
+		}
+		replies, err := store.TranscriptReplies(ctx, tx.Q(), "source-owner", 0, 10)
+		if err != nil {
+			return err
+		}
+		if len(replies) != 1 || replies[0].MessageID != "source-result" || replies[0].Body != body {
+			t.Fatal("transcript returned an internal reference", replies)
+		}
+		view, err := views.CanonicalIssue(ctx, tx.Q(), issue.IssueID, 0)
+		if err != nil {
+			return err
+		}
+		if len(view.SourceReviews) != 2 || view.SourceReviews[0].Body != ownerLiteral || view.SourceReviews[1].Body != body {
+			t.Fatal("source view changed owner text or omitted the original", view.SourceReviews)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestBackgroundToolAndProsePublishSharedFullOriginals(t *testing.T) {
