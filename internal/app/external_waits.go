@@ -455,18 +455,29 @@ func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task stri
 	var ready bool
 	// A queued owner input can predate this wait. Inspect its actual admission
 	// facts instead of treating the registration event head as a consumed cursor.
-	// Uncertain native work retains its existing receipt fence, not a new send.
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o
- JOIN conversation_messages input ON input.message_id=json_extract(o.payload_json,'$.message_id')
- JOIN owner_authority_messages owner_input ON owner_input.message_id=input.message_id
- LEFT JOIN conversation_message_controls controls USING(message_id)
+	// Main admission does not consume a routed Issue input: check the Issue's
+	// carrier, retaining that delivery's native receipt fence rather than resend.
+	err = q.QueryRowContext(ctx, `WITH pending_inputs(request_id,message_id) AS (
+ SELECT o.request_id,json_extract(o.payload_json,'$.message_id') FROM outbox o
  WHERE o.status='pending' AND o.operation='main_thread.handle_message'
  AND (o.destination='main_thread' OR o.destination LIKE 'background_thread:%')
- AND COALESCE(controls.withdrawn_at,0)=0
+ UNION ALL
+ SELECT o.request_id,s.message_id FROM outbox o
+ JOIN background_batches b ON b.message_id=json_extract(o.payload_json,'$.message_id')
+ JOIN background_sources s USING(batch_id)
+ WHERE o.status='pending' AND o.operation='main_thread.handle_event'
+ AND o.destination=? AND b.work_item_id=? AND b.status IN ('pending','frozen')
+ AND s.cancelled_at=0
+)
+ SELECT EXISTS(SELECT 1 FROM pending_inputs carrier
+ JOIN conversation_messages input ON input.message_id=carrier.message_id
+ JOIN owner_authority_messages owner_input ON owner_input.message_id=input.message_id
+ LEFT JOIN conversation_message_controls controls USING(message_id)
+ WHERE COALESCE(controls.withdrawn_at,0)=0
  AND (input.conversation_id=? OR EXISTS(SELECT 1 FROM message_work_items linked WHERE linked.message_id=input.message_id AND linked.work_item_id=? AND linked.active=1))
- AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status<>'rejected')
- AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=o.request_id)
- AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND (s.native_item_id<>'' OR s.status<>'waiting')))`, m.ConversationID, m.IssueID).Scan(&ready)
+ AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=carrier.request_id AND t.status<>'rejected')
+ AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=carrier.request_id)
+ AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=carrier.request_id AND (s.native_item_id<>'' OR s.status<>'waiting')))`, "background_thread:"+m.ConversationID, m.IssueID, m.ConversationID, m.IssueID).Scan(&ready)
 	return ready, err
 }
 

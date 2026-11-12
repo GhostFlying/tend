@@ -1805,6 +1805,8 @@ server 沿既有 sweep 观察条件并合并唤醒原 Task/Issue，不安排模�
 不因已处理历史、其他 Issue 或普通 system 通知重复唤醒。尚未确认的原生输入
 继续沿原回执对账，不把 unknown 当作未发送，也不重放外部操作。每份 wait 只
 生成一份同 Task 的续行；上下文索引或事件水位不替代消息实际投递和消费证据。
+main 已准入或消费原消息不代表关联 Issue 已处理；路由输入按该 Issue 的待投递
+background batch/source 及其实际原生回执判断，不使用 main 的投递结算替代。
 
 协议 3 的 assignment 通过可选 `session_stop_reports` 明确协商 session 停止元数据。
 它不是业务完成或物理停止的必要回执；单次有界上报失败时保留原 Envelope，
