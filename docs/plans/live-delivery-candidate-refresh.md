@@ -19,6 +19,9 @@ Refs: D219、D222。原业务目标是负责人沿同一 Task 完成 PR 合入�
    重复归档。旧 manual/defer 不自动批准，新候选不复制旧 green。
 4. 历史保留旧 executing 状态，始终不可作为新执行或完成结算权限；不写假 complete。
    新旧 session 都能从原 Task 的历史索引读取。Issue 不恢复候选缓存。
+5. 自绑定 Task 真实完成后仍保留原候选替换路径：先核对 Task terminal、Run/租约与
+   workspace 已释放及原升级状态，再准备仍 open 的 PR 新候选。仅非 terminal 的
+   持续责任走 live 刷新；准备新候选不复活已完成 Task，不改写其成果或验收。
 
 ## 历史、入口与兼容
 
@@ -43,6 +46,8 @@ Refs: D219、D222。原业务目标是负责人沿同一 Task 完成 PR 合入�
   stale Issue/epoch/Task、撤销/越范围、缺新审阅/检查真实拒绝。
 - 已合入、原升级运行/未知或相关外部 unknown 不可刷新；独立 Task 的原规则不退化。
   负责人能以真实授权及租约进入受控升级，错误身份/失效租约/并发真实拒绝。
+- 正常提交真实产物、独立验收并释放执行/验收租约与 workspace 的自绑定 Task，
+  PR 尚未合入时可以准备变化后的候选；Task 保持 completed，原成果不变且无新 Run。
 - 原历史迁移和按 Run 查询不变；Task/revision 及无产物读取覆盖 owner API、CLI、
   Agent 共用读取，跨 Issue 对象边界仍有效。
 - PR310 原完整检查已在冻结280上自然通过；原独立审阅及 CI 结果只覆盖该源码。
