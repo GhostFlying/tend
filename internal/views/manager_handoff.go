@@ -44,10 +44,21 @@ func ManagerHandoffBlockers(ctx context.Context, q store.Querier, issue string, 
 // ManagerReceiptPending keeps the original executor available for read-only
 // reconciliation after a fence. A successor's pending task never owns its history.
 func ManagerReceiptPending(ctx context.Context, q store.Querier, m store.IssueManagerTask) (bool, error) {
+	return managerReceiptPending(ctx, q, m, false)
+}
+
+// ManagerNativeReceiptPending excludes an already observed native terminal whose
+// presentation alone needs retry. That retry must not block physical maintenance.
+func ManagerNativeReceiptPending(ctx context.Context, q store.Querier, m store.IssueManagerTask) (bool, error) {
+	return managerReceiptPending(ctx, q, m, true)
+}
+
+func managerReceiptPending(ctx context.Context, q store.Querier, m store.IssueManagerTask, nativeOnly bool) (bool, error) {
 	var pending bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0)`, m.IssueID, m.AssignmentEpoch, m.TaskID).Scan(&pending)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND (t.status IN ('starting','started','unknown') OR (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) AND (?=0 OR t.status NOT IN ('completed','interrupted','failed') OR NOT EXISTS(SELECT 1 FROM agent_rollout_events o WHERE o.conversation_id=e.conversation_id AND o.thread_id=t.thread_id AND o.turn_id=t.turn_id AND o.kind='native_receipt'))))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0)`, m.IssueID, m.AssignmentEpoch, nativeOnly, m.TaskID).Scan(&pending)
 	return pending, err
 }
+
 func ManagerReceiptDue(ctx context.Context, q store.Querier, m store.IssueManagerTask, now int64) (bool, error) {
 	var due bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND ((t.status IN ('starting','started','unknown') AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)) OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id AND p.next_reconcile_at<=?))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0)`, m.IssueID, m.AssignmentEpoch, now, m.TaskID).Scan(&due)

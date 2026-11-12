@@ -137,11 +137,6 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 		if busy {
 			continue
 		}
-		// Keep owner pause/retirement propagation above, but never allocate a new
-		// coordinate generation while this window owns manager admission.
-		if parked {
-			continue
-		}
 		receipt, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
 		if err != nil {
 			return err
@@ -178,6 +173,10 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 					}
 				}
 			}
+			continue
+		}
+		// Maintenance fences new business, not consumption of admitted facts.
+		if parked {
 			continue
 		}
 		if retiring {
@@ -219,6 +218,6 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 
 func managerBusinessReceiptsPending(ctx context.Context, q store.Querier, run string) (bool, error) {
 	var uncertain bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE json_extract(e.private_snapshot,'$.runner_run_id')=? AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=e.execution_id)))`, run).Scan(&uncertain)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE json_extract(e.private_snapshot,'$.runner_run_id')=? AND (t.status IN ('starting','started','unknown') OR (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=e.execution_id) AND (t.status NOT IN ('completed','interrupted','failed') OR NOT EXISTS(SELECT 1 FROM agent_rollout_events o WHERE o.conversation_id=e.conversation_id AND o.thread_id=t.thread_id AND o.turn_id=t.turn_id AND o.kind='native_receipt')))))`, run).Scan(&uncertain)
 	return uncertain, err
 }

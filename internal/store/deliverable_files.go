@@ -58,12 +58,12 @@ func GetFinalizedDeliverableFile(ctx context.Context, q Querier, id string) (Del
 	var artifactID string
 	err = q.QueryRowContext(ctx, `SELECT a.artifact_id
  FROM artifacts a, json_each(a.ref_json, '$.files') entry
- WHERE a.task_id=? AND a.run_id=?
+ WHERE a.task_id=?
  AND json_extract(entry.value, '$.file_id')=?
  AND json_extract(entry.value, '$.name')=?
  AND json_extract(entry.value, '$.size')=?
  AND json_extract(entry.value, '$.sha256')=?
- ORDER BY a.created_at, a.artifact_id LIMIT 1`, f.TaskID, f.RunID, f.FileID, f.Name, f.Size, f.SHA256).Scan(&artifactID)
+ ORDER BY a.created_at, a.artifact_id LIMIT 1`, f.TaskID, f.FileID, f.Name, f.Size, f.SHA256).Scan(&artifactID)
 	if err != nil {
 		return DeliverableFileRow{}, "", notFound(err, "finalized file "+id)
 	}
@@ -88,7 +88,7 @@ func ReadFinalizedDeliverableFile(ctx context.Context, q Querier, id string, off
 	err := q.QueryRowContext(ctx, `SELECT f.file_id,f.task_id,f.run_id,f.name,f.size,f.sha256,f.created_at
  FROM deliverable_files f WHERE f.file_id=? AND (EXISTS (
  SELECT 1 FROM artifacts a, json_each(a.ref_json, '$.files') entry
- WHERE a.task_id=f.task_id AND a.run_id=f.run_id
+ WHERE a.task_id=f.task_id
  AND json_extract(entry.value, '$.file_id')=f.file_id
  ) OR EXISTS (
  SELECT 1 FROM acceptances a,json_each(a.files_json) entry

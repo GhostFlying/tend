@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func captureUpgradeManagers(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow) error {
@@ -73,12 +74,25 @@ func advanceManagerParks(ctx context.Context, x *Exec, tx *store.Tx, batch *stor
 		// Physical exit does not resolve pending or unknown native business.
 		// This guard is shared by terminal and live runs.
 		var nativePending bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND status IN ('pending','started','unknown'))`, run.RunID).Scan(&nativePending); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests WHERE run_id=? AND status IN ('pending','started','unknown') AND method NOT IN ('models','find','usage'))`, run.RunID).Scan(&nativePending); err != nil {
 			return false, err
 		}
 		if nativePending {
 			ready = false
 			view.Phase = "waiting_receipts"
+			continue
+		}
+		manager, err := store.GetIssueManagerTask(ctx, tx.Q(), run.TaskID)
+		if err != nil {
+			return false, err
+		}
+		pending, err := views.ManagerNativeReceiptPending(ctx, tx.Q(), manager)
+		if err != nil {
+			return false, err
+		}
+		if pending {
+			ready = false
+			view.Phase, view.Reason = "waiting_receipts", "Original native receipt requires reconciliation"
 			continue
 		}
 		if terminal := run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed; terminal {
@@ -98,7 +112,7 @@ func advanceManagerParks(ctx context.Context, x *Exec, tx *store.Tx, batch *stor
 		if lease.Status != store.LeaseActive || run.ObservedState == protocol.RunUnknown || run.ObservedState == protocol.RunInterrupted {
 			continue
 		}
-		pending, err := managerBusinessReceiptsPending(ctx, tx.Q(), run.RunID)
+		pending, err = managerBusinessReceiptsPending(ctx, tx.Q(), run.RunID)
 		if err != nil {
 			return false, err
 		}
@@ -165,6 +179,20 @@ func (a *App) UpgradeParkReceiptRead(ctx context.Context, conversation, run stri
 			return err
 		}
 		if !found {
+			var task string
+			err := tx.Q().QueryRowContext(ctx, `SELECT r.task_id FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.run_id=? AND r.role='issue_manager' AND r.observed_state IN ('starting','running','waiting') AND l.status='active' AND json_extract(a.trigger_json,'$.receipt_only')=1 AND EXISTS(SELECT 1 FROM upgrades u,json_each(u.state_json,'$.hosts') h WHERE u.status IN ('running','attention') AND json_extract(u.state_json,'$.park_idle_managers')=1 AND json_extract(h.value,'$.host_id')=r.host_id)`, run).Scan(&task)
+			if err == nil {
+				m, err := store.GetIssueManagerTask(ctx, tx.Q(), task)
+				if err != nil {
+					return err
+				}
+				pending, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
+				allowed = pending && m.ConversationID == conversation
+				return err
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 			prior, err := unresolvedManagerParkClose(ctx, tx.Q(), run)
 			if err != nil || prior == nil {
 				return err

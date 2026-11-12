@@ -51,25 +51,29 @@ func (s *receiptOnlySession) ResumeThread(_ context.Context, id string, cfg harn
 	return s.thread, nil
 }
 
-func TestReceiptOnlyRequiresOriginalThreadAndAppliedModel(t *testing.T) {
+func TestReceiptOnlyRequiresOriginalThreadWithoutModelGate(t *testing.T) {
 	for _, missing := range []string{"thread", "model"} {
 		t.Run(missing, func(t *testing.T) {
 			e := newEnv(t, testkit.NewHarness())
 			e.stop()
 			e.m.named = receiptOnlySelection()
-			e.m.cfg.MaintenanceEnabled = true
-			if missing == "model" {
-				e.m.named.AppliedModel = ""
+			e.m.named.AppliedModel, e.m.named.AppliedProvider, e.m.named.AppliedEffort = "", "", ""
+			if missing != "thread" {
 				if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), "original-thread"); err != nil {
 					t.Fatal(err)
 				}
 			}
-			session := &receiptOnlySession{}
-			if _, err := e.m.openThread(t.Context(), session); err == nil {
-				t.Fatal("incomplete original receipt identity was admitted")
+			session := &receiptOnlySession{thread: &historyReference{id: "original-thread"}}
+			_, err := e.m.openThread(t.Context(), session)
+			if missing == "thread" {
+				if err == nil || session.resumes != 0 {
+					t.Fatal("missing original thread was replaced", err)
+				}
+			} else if err != nil || session.resumes != 1 || session.config.Purpose != harness.ReceiptHistoryPurpose {
+				t.Fatal("pure history required unobserved model metadata", err, session.config)
 			}
-			if session.starts != 0 || session.resumes != 0 {
-				t.Fatal("incomplete original identity reached native lifecycle", session.starts, session.resumes)
+			if session.starts != 0 || e.m.namedSelection().AppliedModel != "" {
+				t.Fatal("history fabricated model facts or a new execution")
 			}
 		})
 	}
@@ -194,12 +198,12 @@ func TestReceiptOnlyClosingAttachmentRestoresConfirmedModel(t *testing.T) {
 		closing, allowed bool
 	}{
 		{"confirmed_closing", "completed", true, true},
-		{"unconfirmed_model", "unknown", true, false},
-		{"ordinary_reader", "completed", false, false},
-		{"unconfirmed_resume", "completed", true, false},
+		{"unconfirmed_model", "unknown", true, true},
+		{"ordinary_reader", "completed", false, true},
+		{"unconfirmed_resume", "completed", true, true},
 		{"wrong_original_thread", "completed", true, false},
 		{"changed_catalog_model", "completed", true, true},
-		{"non_runner_reader", "completed", true, false},
+		{"non_runner_reader", "completed", true, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			e := newEnv(t, testkit.NewHarness())
@@ -236,11 +240,11 @@ func TestReceiptOnlyClosingAttachmentRestoresConfirmedModel(t *testing.T) {
 				if err != nil || thread != original || session.resumes != 1 {
 					t.Fatal("confirmed closing metadata could not restore its attachment", thread, err, session.resumes)
 				}
-				if session.config.Model != "original-native-model" || session.config.Config["model_provider"] != "original-provider" || session.config.Config["model_reasoning_effort"] != "high" {
+				if selected := e.m.namedSelection(); selected.AppliedModel != "" && (session.config.Model != selected.AppliedModel || session.config.Config["model_provider"] != selected.AppliedProvider || session.config.Config["model_reasoning_effort"] != selected.AppliedEffort) {
 					t.Fatal("attachment did not preserve confirmed startup configuration", session.config)
 				}
-			} else if err == nil || session.resumes != 0 {
-				t.Fatal("reader lacking confirmed closing metadata reached native resume", err, session.resumes)
+			} else if err == nil {
+				t.Fatal("history accepted the wrong original thread", err, session.resumes)
 			}
 			if session.starts != 0 || e.count(`SELECT COUNT(*) FROM manager_native_requests`) != before {
 				t.Fatal("metadata attachment created a fresh native request")

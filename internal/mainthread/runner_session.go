@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -92,6 +93,10 @@ func (t *runnerTransport) Call(ctx context.Context, method string, input, output
 		}
 		return err
 	}
+	return t.awaitReply(ctx, method, id, output, attachmentStopped)
+}
+
+func (t *runnerTransport) awaitReply(ctx context.Context, method, id string, output any, attachmentStopped <-chan struct{}) error {
 	for {
 		wake := t.app.Changes().Wait()
 		reply, ready, err := t.app.ManagerNativeResult(ctx, t.run, id)
@@ -115,6 +120,19 @@ func (t *runnerTransport) Call(ctx context.Context, method string, input, output
 			}
 			return nil
 		}
+		ended, err := t.app.ManagerRunEnded(ctx, t.run)
+		if err != nil {
+			return err
+		}
+		if ended {
+			if method == "models" || method == "find" || method == "usage" {
+				return fmt.Errorf("%w: manager run ended before its observational reply", harness.ErrRejected)
+			}
+			// A queued mutation may have executed before the carrier ended.
+			// EOF releases this waiter, but cannot turn its lost reply into a
+			// definite rejection or authorize another native execution.
+			return errors.New("manager run ended before its native reply; reconcile the original operation")
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -130,6 +148,23 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) ([]coordination.E
 		events, err := t.app.ManagerReplayEvents(ctx, t.run, t.rowCursor)
 		if err != nil {
 			return nil, err
+		}
+		if len(events) == 0 {
+			ended, err := t.app.ManagerRunEnded(ctx, t.run)
+			if err != nil {
+				return nil, err
+			}
+			if ended {
+				// A final event may have committed between the first empty read
+				// and the physical end. Terminal Runs cannot append new events.
+				events, err = t.app.ManagerReplayEvents(ctx, t.run, t.rowCursor)
+				if err != nil {
+					return nil, err
+				}
+				if len(events) == 0 {
+					return nil, io.EOF
+				}
+			}
 		}
 		if len(events) > 0 {
 			out := make([]coordination.Event, 0, len(events))

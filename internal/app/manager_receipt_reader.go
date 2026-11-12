@@ -103,11 +103,7 @@ func admitManagerReceiptReader(ctx context.Context, x *Exec, tx *store.Tx, s pro
 	if err != nil {
 		return Outcome{}, err
 	}
-	parked, err := store.ManagerUpgradeParked(ctx, tx.Q())
-	if err != nil {
-		return Outcome{}, err
-	}
-	if prepared || parked {
+	if prepared {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "maintenance preparation blocks receipt-reader admission")
 	}
 	runtime, err := store.GetHostRuntime(ctx, tx.Q(), s.HostID)

@@ -167,6 +167,13 @@ func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) 
 				if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
 					t.Fatal(err)
 				}
+				observed, exists, err := e.app.MainTurn(t.Context(), d.RequestID)
+				if err != nil || !exists || observed.Status != store.TurnCompleted {
+					t.Fatal("incomplete source consumption lost the observed native terminal", observed, err)
+				}
+				if pending, err := e.app.NativeReceiptPending(t.Context(), d.RequestID); err != nil || !pending {
+					t.Fatal("incomplete source consumption was reported delivered", pending, err)
+				}
 				state, err := e.app.LogicalTurn(t.Context(), d.RequestID)
 				if err != nil || state.Status != "unknown" || e.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE item_id='after'`) != 0 {
 					t.Fatal("incomplete history invented attribution", state, err)

@@ -24,21 +24,8 @@ func (t *thread) FindTurn(ctx context.Context, identity, knownTurn string) (harn
 	var receipt harness.TurnReceipt
 	found := false
 	for _, turnRaw := range response.Thread.Turns {
-		var turn struct {
-			ID     string          `json:"id"`
-			Status string          `json:"status"`
-			Error  json.RawMessage `json:"error"`
-			Items  []struct {
-				ID       string `json:"id"`
-				ClientID string `json:"clientId"`
-				Type     string `json:"type"`
-				Text     string `json:"text"`
-				Content  []struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"items"`
-		}
-		if err := json.Unmarshal(turnRaw, &turn); err != nil {
+		turn, err := decodeNativeTurn(turnRaw)
+		if err != nil {
 			return harness.TurnReceipt{}, false, err
 		}
 		matches := knownTurn != "" && turn.ID == knownTurn
@@ -54,23 +41,62 @@ func (t *thread) FindTurn(ctx context.Context, identity, knownTurn string) (harn
 			return harness.TurnReceipt{}, false, fmt.Errorf("native history contains more than one matching execution")
 		}
 		found = true
-		receipt = harness.TurnReceipt{ID: turn.ID, Status: turn.Status, Raw: turnRaw, Failure: nativeFailure(turn.Error, false), ContinuationSafe: t.s.codex && continuationSafe(turnRaw), Items: []harness.Event{}}
-		for _, item := range turn.Items {
-			ev := harness.Event{Kind: harness.EventItemCompleted, TurnID: turn.ID, ItemID: item.ID, ItemType: item.Type, Text: item.Text}
-			if item.Type == harness.ItemUserMessage {
-				ev.Text = ""
-				for _, part := range item.Content {
-					ev.Text += part.Text
-				}
-				receipt.Items = append(receipt.Items, ev)
-			}
-			if item.Type == harness.ItemAgentMessage {
-				receipt.Messages = append(receipt.Messages, ev)
-				receipt.Items = append(receipt.Items, ev)
-			}
+		receipt, err = DecodeRetainedTurnReceipt(turnRaw)
+		if err != nil {
+			return harness.TurnReceipt{}, false, err
 		}
+		receipt.ContinuationSafe = t.s.codex && continuationSafe(turnRaw)
 	}
 	return receipt, found, nil
+}
+
+type nativeReceiptTurn struct {
+	ID     string          `json:"id"`
+	Status string          `json:"status"`
+	Error  json.RawMessage `json:"error"`
+	Items  []struct {
+		ID       string `json:"id"`
+		ClientID string `json:"clientId"`
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Content  []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"items"`
+}
+
+func decodeNativeTurn(raw json.RawMessage) (nativeReceiptTurn, error) {
+	var turn nativeReceiptTurn
+	err := json.Unmarshal(raw, &turn)
+	return turn, err
+}
+
+// DecodeRetainedTurnReceipt projects an already observed native turn original.
+// It performs no provider IO and grants no execution or continuation authority.
+func DecodeRetainedTurnReceipt(raw json.RawMessage) (harness.TurnReceipt, error) {
+	turn, err := decodeNativeTurn(raw)
+	if err != nil {
+		return harness.TurnReceipt{}, err
+	}
+	if turn.ID == "" || turn.Status == "" {
+		return harness.TurnReceipt{}, fmt.Errorf("native turn identity or status is missing")
+	}
+	receipt := harness.TurnReceipt{ID: turn.ID, Status: turn.Status, Raw: raw, Failure: nativeFailure(turn.Error, false), Items: []harness.Event{}}
+	for _, item := range turn.Items {
+		ev := harness.Event{Kind: harness.EventItemCompleted, TurnID: turn.ID, ItemID: item.ID, ItemType: item.Type, Text: item.Text}
+		if item.Type == harness.ItemUserMessage {
+			ev.Text = ""
+			for _, part := range item.Content {
+				ev.Text += part.Text
+			}
+			receipt.Items = append(receipt.Items, ev)
+		}
+		if item.Type == harness.ItemAgentMessage {
+			receipt.Messages = append(receipt.Messages, ev)
+			receipt.Items = append(receipt.Items, ev)
+		}
+	}
+	return receipt, nil
 }
 
 // continuationSafe requires terminal native items, including exited commands.

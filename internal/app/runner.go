@@ -409,7 +409,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if parked, err := store.ManagerUpgradeParked(ctx, q); err != nil {
 		return Outcome{}, err
 	} else if parked {
-		managerCandidates = nil
+		managerCandidates = slices.DeleteFunc(managerCandidates, func(c scheduler.Candidate) bool { return c.Manager == nil || !c.Manager.ReceiptOnly })
 	}
 	candidates = append(candidates, managerCandidates...)
 	candidates, err = filterManagerReceiptReaders(ctx, q, candidates, p.Runtime)
@@ -1135,6 +1135,11 @@ func endRun(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, to pro
 		return protocol.Errorf(protocol.CodeInvalidTransition, "run %s cannot end as %s from %s", run.RunID, to, run.ObservedState)
 	}
 	now := x.Now.UnixMilli()
+	if run.Role == protocol.RoleIssueManager {
+		if _, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) SELECT t.request_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.status IN ('starting','started','unknown') ON CONFLICT(request_id) DO NOTHING`, run.RunID); err != nil {
+			return err
+		}
+	}
 	if err := tx.UpdateRunObserved(ctx, run.RunID, to, now); err != nil {
 		return err
 	}

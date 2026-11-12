@@ -407,6 +407,14 @@ func checkResultDeliverables(ctx context.Context, q store.Querier, spec domain.S
 	if spec.RequiresDelivery(domain.DeliveryFiles) && len(p.Files) == 0 {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "delivery files are required")
 	}
+	var taskID string
+	if len(p.Files) > 0 {
+		run, err := store.GetRun(ctx, q, runID)
+		if err != nil {
+			return err
+		}
+		taskID = run.TaskID
+	}
 	seen := map[string]bool{}
 	names := map[string]bool{}
 	for _, file := range p.Files {
@@ -419,8 +427,8 @@ func checkResultDeliverables(ctx context.Context, q store.Querier, spec domain.S
 		if err != nil {
 			return errNotFound(err, "delivery file does not exist")
 		}
-		if stored.RunID != runID || stored.ArtifactFile != file {
-			return protocol.Errorf(protocol.CodeInvalidRequest, "file does not match this run's immutable upload")
+		if stored.TaskID != taskID || stored.ArtifactFile != file {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "file does not match this Task's immutable upload")
 		}
 	}
 	return nil

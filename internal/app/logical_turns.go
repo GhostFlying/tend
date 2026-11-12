@@ -461,7 +461,7 @@ func (c AdoptClarification) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 func (a *App) UncertainNativeTurns(ctx context.Context, thread string) ([]store.MainTurn, error) {
 	var turns []store.MainTurn
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT request_id FROM main_turns WHERE thread_id=? AND (status='starting' OR request_id IN (SELECT request_id FROM native_turn_receipts_pending)) ORDER BY created_at LIMIT 50`, thread)
+		ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT request_id FROM main_turns WHERE thread_id=? AND (status='starting' OR request_id IN (SELECT request_id FROM native_turn_receipts_pending) OR (status='started' AND EXISTS(SELECT 1 FROM hosted_executions h JOIN runs r ON r.run_id=json_extract(h.private_snapshot,'$.runner_run_id') WHERE h.execution_id=main_turns.request_id AND r.observed_state IN ('finished','failed')))) ORDER BY created_at LIMIT 50`, thread)
 		if err != nil {
 			return err
 		}
