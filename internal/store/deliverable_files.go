@@ -60,6 +60,8 @@ func CompatibleFileProducer(ctx context.Context, q Querier, file DeliverableFile
 // GetFinalizedDeliverableFile resolves a file's immutable artifact provenance.
 // Uploads not included in a submitted artifact are not task inputs. Acceptance
 // is intentionally separate: a failed result can be evidence for later work.
+// Historical ID-only references use the original upload's metadata only when
+// that same producing Run submitted the artifact; cross-Run reuse stays exact.
 func GetFinalizedDeliverableFile(ctx context.Context, q Querier, id string) (DeliverableFileRow, string, error) {
 	f, err := GetDeliverableFile(ctx, q, id)
 	if err != nil {
@@ -70,9 +72,11 @@ func GetFinalizedDeliverableFile(ctx context.Context, q Querier, id string) (Del
  FROM artifacts a JOIN runs consumer ON consumer.run_id=a.run_id JOIN runs producer ON producer.run_id=?, json_each(a.ref_json, '$.files') entry
  WHERE `+compatibleFileProducerSQL+` AND producer.task_id=a.task_id AND consumer.task_id=a.task_id AND a.task_id=?
  AND json_extract(entry.value, '$.file_id')=?
- AND json_extract(entry.value, '$.name')=?
+ AND ((json_extract(entry.value, '$.name')=?
  AND json_extract(entry.value, '$.size')=?
- AND json_extract(entry.value, '$.sha256')=?
+ AND json_extract(entry.value, '$.sha256')=?)
+ OR (producer.run_id=consumer.run_id AND CASE WHEN entry.type='object' THEN
+ json_type(entry.value, '$.file_id')='text' AND (SELECT COUNT(*) FROM json_each(entry.value))=1 ELSE 0 END))
  ORDER BY a.created_at, a.artifact_id LIMIT 1`, f.RunID, f.TaskID, f.FileID, f.Name, f.Size, f.SHA256).Scan(&artifactID)
 	if err != nil {
 		return DeliverableFileRow{}, "", notFound(err, "finalized file "+id)
