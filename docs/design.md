@@ -2069,3 +2069,14 @@ bounded remaining、failed-parent/source_operation 与未建立 fence 规则保�
 不新增表、请求档案、返回缓存、权限、wire 字段或状态格式。真实 App 保持 stale-CAS 拒绝，
 回归必须通过真实 App/archive handler，不能用仍缓存请求结果的 fake 来证明恢复。
 见[维护控制续行计划](plans/maintenance-control-continuation.md)。
+
+## D229：连接级断连独立于单个 thread 消费者收尾
+
+协调连接可以先恢复旧 thread，再为同一责任建立新 thread。连接级断连不属于其中
+随机一个 thread，必须在保留已排队尾事件顺序和原 source 身份后通知全部受影响的
+附件，并结束 Session 与其未结读取/回调；不能等待某个无人消费的旧 thread 再发起关闭。
+重复 Close 不重复外部作用。取消或物理断连不替代原操作的终态，不将 unknown 转为成功。
+
+历史 thread end 只结束原历史段，不能关闭当前连接或重放输入。Manager 与 pool 沿既有
+退出路径释放本地 attachment，同 Task 的真实只读后继继续原回执；不清理业务账本或
+以手工 ACK/清 pool 冒充交接。实现与验证见[协调断连计划](plans/coordination-disconnect-lifecycle.md)。

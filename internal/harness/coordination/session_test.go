@@ -44,7 +44,7 @@ func TestHistoricalCallbacksUseRetainedResultsAndDoNotDisconnectNewAttachment(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := &retainedMemoryTransport{memoryTransport: &memoryTransport{events: make(chan Event, 16)}, replayDone: make(chan struct{})}
+	transport := &retainedMemoryTransport{memoryTransport: &memoryTransport{events: make(chan Event, 16), driverContext: ctx}, replayDone: make(chan struct{})}
 	transport.driver = &Driver{Session: permissionSession{native.(*testkit.FakeSession)}, Profile: protocol.ExecutionProfile{Model: "model"}, Emit: transport.emit}
 	if err := transport.emit(ctx, Event{Historical: true, SourceRunID: "original-run", ThreadID: "th_1", Call: &harness.ToolCall{ThreadID: "th_1", TurnID: "original-turn", CallID: "old-call", Tool: "must_not_execute"}}); err != nil {
 		t.Fatal(err)
@@ -108,10 +108,11 @@ func (s permissionSession) ResumeThread(ctx context.Context, id string, cfg harn
 }
 
 type memoryTransport struct {
-	driver *Driver
-	events chan Event
-	mu     sync.Mutex
-	seq    int64
+	driverContext context.Context
+	driver        *Driver
+	events        chan Event
+	mu            sync.Mutex
+	seq           int64
 }
 
 func (m *memoryTransport) Call(ctx context.Context, method string, input, output any) error {
@@ -119,7 +120,12 @@ func (m *memoryTransport) Call(ctx context.Context, method string, input, output
 	if err != nil {
 		return err
 	}
-	result, err := m.driver.Handle(ctx, method, raw)
+	// A runner owns its native driver independently of an individual RPC.
+	driverContext := ctx
+	if m.driverContext != nil {
+		driverContext = m.driverContext
+	}
+	result, err := m.driver.Handle(driverContext, method, raw)
 	if err != nil {
 		return err
 	}
@@ -175,7 +181,7 @@ func TestRemoteCoordinatorRunsToolsAndResumesNativeSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		transport := &memoryTransport{events: make(chan Event, 64)}
+		transport := &memoryTransport{events: make(chan Event, 64), driverContext: ctx}
 		transport.driver = &Driver{Session: permissionSession{native.(*testkit.FakeSession)}, Directory: "/runner/private-session", Instructions: "PRIVATE_RUNNER_INSTRUCTIONS", Profile: protocol.ExecutionProfile{Model: "manager-model"}, Emit: transport.emit}
 		s := New(ctx, transport)
 		cfg := harness.ThreadConfig{Cwd: "/server/path-must-not-be-used", Model: "manager-model", DeveloperInstructions: "Coordinator role", Sandbox: "read-only", ApprovalPolicy: "never", OnToolCall: func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
