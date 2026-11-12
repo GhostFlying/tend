@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,20 +27,28 @@ func (r *eventFailureResolver) ResolveManager(context.Context, protocol.RunExecu
 }
 
 func TestFault_ManagerToolsAndCompletionDoNotWaitForArchive(t *testing.T) {
-	testManagerEventFailure(t, false)
+	testManagerEventFailure(t, false, false)
 }
 
 func TestFault_ManagerEventDeliveryFailureReachesSupervisorAndKeepsOriginal(t *testing.T) {
-	testManagerEventFailure(t, true)
+	testManagerEventFailure(t, true, false)
 }
 
-func testManagerEventFailure(t *testing.T, failEvent bool) {
+func TestFault_ManagerEventLostReceiptDoesNotReplayBusiness(t *testing.T) {
+	testManagerEventFailure(t, false, true)
+}
+
+func testManagerEventFailure(t *testing.T, failEvent, loseReceipt bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	r, as, _, _ := archiveRunner(t)
 	r.cfg.Log = slog.New(slog.DiscardHandler)
+	r.c.log = r.cfg.Log
 	r.cfg.RequestTimeout = time.Second
+	if loseReceipt {
+		r.cfg.RetryDelay = time.Millisecond
+	}
 	as.Protocol = 4
 	as.Role = protocol.RoleIssueManager
 	as.Execution = &protocol.RunExecutionPin{}
@@ -65,6 +74,13 @@ func testManagerEventFailure(t *testing.T, failEvent bool) {
 	start, _ := json.Marshal(coordination.Request{Config: harness.ThreadConfig{Model: "model"}})
 	commands := []protocol.ManagerNativeRequest{{ID: "original-start", Method: "start", Payload: start}}
 	var mu sync.Mutex
+	type eventKey struct {
+		run      string
+		sequence int64
+	}
+	events := map[eventKey]json.RawMessage{}
+	var lostToolEvent *protocol.Envelope
+	var replayedToolEvent atomic.Int64
 	blocked, release := make(chan struct{}), make(chan struct{})
 	var blockedOnce sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
@@ -89,6 +105,7 @@ func testManagerEventFailure(t *testing.T, failEvent bool) {
 		mu.Lock()
 		defer mu.Unlock()
 		var result any = map[string]any{}
+		loseAck := false
 		switch env.Operation {
 		case protocol.OpManagerNativeClaim:
 			var claim protocol.ManagerNativeClaimPayload
@@ -111,14 +128,45 @@ func testManagerEventFailure(t *testing.T, failEvent bool) {
 			_ = json.Unmarshal(env.Payload, &p)
 			_ = json.Unmarshal(p.Body, &event)
 			if event.Call != nil {
-				tools.Add(1)
-				tool, _ := json.Marshal(coordination.Request{ThreadID: event.Call.ThreadID, TurnID: event.Call.TurnID, CallID: event.Call.CallID, ToolResult: harness.ToolResult{Success: true, Text: "actual business context"}})
-				commands = append(commands, protocol.ManagerNativeRequest{ID: "original-tool-result", Method: "tool_result", Payload: tool})
+				if loseReceipt {
+					if lostToolEvent == nil {
+						original := env
+						lostToolEvent = &original
+						loseAck = true
+					} else if env.RequestID == lostToolEvent.RequestID {
+						if env.Target != lostToolEvent.Target || !bytes.Equal(env.Payload, lostToolEvent.Payload) {
+							t.Error("retry changed the original event envelope")
+						}
+						replayedToolEvent.Add(1)
+					}
+				}
 			}
-			if event.Native != nil && event.Native.Kind == harness.EventTurnCompleted {
-				completed.Add(1)
-				commands = append(commands, protocol.ManagerNativeRequest{ID: "original-close", Method: "close", Payload: json.RawMessage(`{}`)})
+			// The server applies each immutable Run/sequence once even when the
+			// event emitter and pending journal recovery both deliver it.
+			key := eventKey{run: env.Target.ID, sequence: p.Sequence}
+			if original, duplicate := events[key]; duplicate {
+				if !bytes.Equal(original, p.Body) {
+					t.Error("the original event sequence changed content")
+					_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpFailed, Error: protocol.Errorf(protocol.CodeConflictPayload, "event content changed")}})
+					return
+				}
+			} else {
+				events[key] = bytes.Clone(p.Body)
+				if event.Call != nil {
+					tools.Add(1)
+					tool, _ := json.Marshal(coordination.Request{ThreadID: event.Call.ThreadID, TurnID: event.Call.TurnID, CallID: event.Call.CallID, ToolResult: harness.ToolResult{Success: true, Text: "actual business context"}})
+					commands = append(commands, protocol.ManagerNativeRequest{ID: "original-tool-result", Method: "tool_result", Payload: tool})
+				}
+				if event.Native != nil && event.Native.Kind == harness.EventTurnCompleted {
+					completed.Add(1)
+					commands = append(commands, protocol.ManagerNativeRequest{ID: "original-close", Method: "close", Payload: json.RawMessage(`{}`)})
+				}
 			}
+			result = map[string]any{"ack": p.Sequence}
+		}
+		if loseAck {
+			_, _ = w.Write([]byte("event receipt lost after applying the original"))
+			return
 		}
 		raw, _ := json.Marshal(result)
 		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: raw}})
@@ -153,6 +201,9 @@ func testManagerEventFailure(t *testing.T, failEvent bool) {
 	}
 	if err != nil || tools.Load() != 1 || completed.Load() != 1 || turns.Load() != 1 {
 		t.Fatal("business waited for auxiliary archival or replayed the turn", err, tools.Load(), completed.Load(), turns.Load())
+	}
+	if loseReceipt && replayedToolEvent.Load() == 0 {
+		t.Fatal("the injected lost receipt never retried its original event")
 	}
 	work, err := r.cfg.Journal.PendingArchives(ctx, "", 10)
 	if err != nil || len(work) != 1 {
