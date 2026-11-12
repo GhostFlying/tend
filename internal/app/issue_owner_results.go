@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/domain"
@@ -93,8 +94,13 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 		duty.Revision++
 		duty.Status = "preparing"
 	}
-	if err := bindDeliveryUpgradeArtifact(ctx, tx, task, *p.Result); err != nil {
-		return Outcome{}, err
+	// A continuing owner also records predeployment checks and their originals.
+	// Only an explicit upgrade claim binds a batch; recording those facts must
+	// not require an installation, clear one, or settle delivery responsibility.
+	if slices.ContainsFunc(p.Result.Report.Evidence, func(e string) bool { return strings.HasPrefix(e, "upgrade:") }) {
+		if err := bindDeliveryUpgradeArtifact(ctx, tx, task, *p.Result); err != nil {
+			return Outcome{}, err
+		}
 	}
 	raw, err := json.Marshal(p.Result)
 	if err != nil {

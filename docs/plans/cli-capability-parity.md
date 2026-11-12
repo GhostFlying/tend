@@ -287,6 +287,19 @@ D214：`decide` 与 `attention respond` 对具体交付批准/结束使用纯 `a
 
 D152 增量：`issues.update_delivery` 对应 `tend issue update-delivery <issue-id>`，使用完整 JSON 的 action=prepare/resume/report/end/complete；candidate 含 delivery_id、HTTPS PR URL、head_sha、base_sha、target_sha、provider_state、validation、deploy、deployment_scope；已合入的明确部署恢复用 provider_state=merged 及实际 merge_sha，新版本答复不授权再次merge。deploy=true 时还须完整指定 deployment.server_instance 与 deployment.host_ids（与实际受控升级的全部 host 匹配）；action=complete 通过 upgrade_id 读取本次执行开始后的已完成批次，冻结 server 身份、hash、主机安装回执。Tend 的交付执行负责实际调用已有 `tend upgrade start/status`，不是交给外部人工部署。`issue show --json` 输出全部 delivery_duties 及原 taskless Attention；列表筛选和分页沿用 `issue list`。`issue create-task --file` 的 delivery_authorization 引用原 task_id/revision，仅精确原 owner 批准可用。交付执行需 report 产物供独立验收实际核对执行/readback 证据；部署报告 evidence 需唯一 upgrade:<id> 引用，服务端固定原批次，running/attention 期间验收不占排空租约；已有代码不要求虚构新 commit；其他明确要求的产物保留。`issue reopen` 同时恢复协调，遇旧 manager unknown 必须对账。所有新/变更入口保留 `--revision`、`--epoch`、`--dry-run`、`issue request` 和完整原 Envelope 的 `issue replay`；不在 unknown 时生成新身份。能力入口测试通过同一个 CLI 分发自动覆盖登记。
 
+D222 阶段成果：同一负责人 Task 已绑定部署执行后，仍使用现有
+`issue update-delivery` 的 `action=submit_result` 登记当前真实 Run 的检查报告和
+已上传原件，不要求尚未发生的升级引用。例如：
+
+```sh
+tend issue update-delivery <issue-id> --revision <current-issue-revision> --epoch <current-assignment-epoch> --data '{"action":"submit_result","task_id":"owner-task","run_id":"current-run","result":{"report":{"body":"Current candidate checks completed; deployment has not started."},"files":[{"file_id":"uploaded-file","name":"checks.log","size":123,"sha256":"<actual-sha256>"}]},"reason":"Register the original check evidence"}' --dry-run --json
+```
+
+原件必须匹配该 Run 的真实上传。阶段成果不会结束 Task、刷新候选、清除已有批次
+或证明部署；显式提供 `report.evidence` 中的 `upgrade:<id>` 时仍严格校验实际批次。
+最终部署 `complete` 保留原始升级、目标及安装证据要求。输入/输出沿现有 owner
+API、Agent 工具和 CLI，无新字段、协议或生成类型。
+
 部署并发与首发核验补充：candidate.deployment 可携带 baseline_upgrade_id/baseline_upgrade_revision，省略时服务端填入最近已结清批次并写入原问题；变更后旧答复不可用。candidate.reconciliation 明确 evidence_task_id/upgrade_id/source_commit，仅允许核验既有已验收交付，不回填旧任务、不重放安装。`tend upgrade start --delivery-task <task-id>` 通过本机控制接口将实际当前执行、owner epoch、baseline、批准范围和已校验二进制来源一起核对；该参数仅用于 start，dry-run 保留完整请求，丢回执仍按原 request/batch 查询对账。`upgrade status --json` 的 source_commit 来自二进制 VCS 元数据及实际 server 回读，非 worker 自报。旧 manifest 和 runner 2/1 不变；本机管理员已有独立维护入口保留原权限。
 
 D152 验收修正：candidate.target_sha 为 provider 当前目标分支 tip，区别于 PR base_sha；merged 候选要求独立观测的 merge 祖先证明。deferred 下 prepare 保留原问题与延期状态；只有真实 owner 请求 action=resume 才开启新确认，manager relay 必须绑定当前 owner 来源，原 defer 消息不能复用为 resume。
