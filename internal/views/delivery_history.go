@@ -9,7 +9,7 @@ import (
 )
 
 func deliveryExecutionHistoryIndex(ctx context.Context, q store.Querier, task string) ([]protocol.DeliveryExecutionReference, bool, error) {
-	rows, err := q.QueryContext(ctx, `SELECT run_id,generation,duty_revision,upgrade_id FROM issue_delivery_execution_history WHERE task_id=? ORDER BY generation DESC,duty_revision DESC LIMIT 21`, task)
+	rows, err := q.QueryContext(ctx, `SELECT COALESCE(run_id,''),generation,duty_revision,upgrade_id FROM issue_delivery_execution_history WHERE task_id=? ORDER BY generation DESC,duty_revision DESC LIMIT 21`, task)
 	if err != nil {
 		return nil, false, err
 	}
@@ -35,14 +35,26 @@ func deliveryExecutionHistoryIndex(ctx context.Context, q store.Querier, task st
 
 // HistoricalDeliveryExecutionAuthority selects an immutable binding by its
 // original Run and duty revision. A Run alone is compatible only when unique.
-// It describes an already settled result; Valid is always false for execution.
+// It describes retained facts; Valid is always false for execution.
 func HistoricalDeliveryExecutionAuthority(ctx context.Context, q store.Querier, run string, dutyRevision int64) (*protocol.DeliveryExecutionAuthority, error) {
+	return historicalDeliveryExecutionAuthority(ctx, q, "run_id", run, dutyRevision)
+}
+
+// HistoricalTaskDeliveryExecutionAuthority also selects bindings that predate a Run.
+func HistoricalTaskDeliveryExecutionAuthority(ctx context.Context, q store.Querier, task string, dutyRevision int64) (*protocol.DeliveryExecutionAuthority, error) {
+	if dutyRevision <= 0 {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "archived Task delivery requires its duty_revision")
+	}
+	return historicalDeliveryExecutionAuthority(ctx, q, "task_id", task, dutyRevision)
+}
+
+func historicalDeliveryExecutionAuthority(ctx context.Context, q store.Querier, selector, id string, dutyRevision int64) (*protocol.DeliveryExecutionAuthority, error) {
 	if dutyRevision < 0 {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "archived duty_revision cannot be negative")
 	}
-	v := &protocol.DeliveryExecutionAuthority{Historical: true, Source: "server.issue_delivery_execution_history", RunID: run, InvalidReason: "historical_result_only; no current execution authority"}
+	v := &protocol.DeliveryExecutionAuthority{Historical: true, Source: "server.issue_delivery_execution_history", InvalidReason: "historical_result_only; no current execution authority"}
 	var candidate, raw, artifact string
-	rows, err := q.QueryContext(ctx, `SELECT task_id,issue_id,source_task_id,duty_revision,candidate_json,duty_json,artifact_id,upgrade_id FROM issue_delivery_execution_history WHERE run_id=? AND (?=0 OR duty_revision=?) ORDER BY duty_revision DESC LIMIT 2`, run, dutyRevision, dutyRevision)
+	rows, err := q.QueryContext(ctx, `SELECT task_id,issue_id,source_task_id,duty_revision,candidate_json,duty_json,COALESCE(artifact_id,''),upgrade_id,COALESCE(run_id,'') FROM issue_delivery_execution_history WHERE `+selector+`=? AND (?=0 OR duty_revision=?) ORDER BY duty_revision DESC LIMIT 2`, id, dutyRevision, dutyRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +65,17 @@ func HistoricalDeliveryExecutionAuthority(ctx context.Context, q store.Querier, 
 		}
 		return nil, store.ErrNotFound
 	}
-	if err := rows.Scan(&v.TaskID, &v.IssueID, &v.SourceTaskID, &v.DutyRevision, &candidate, &raw, &artifact, &v.UpgradeID); err != nil {
+	if err := rows.Scan(&v.TaskID, &v.IssueID, &v.SourceTaskID, &v.DutyRevision, &candidate, &raw, &artifact, &v.UpgradeID, &v.RunID); err != nil {
 		return nil, err
 	}
 	if rows.Next() {
-		failure := protocol.Errorf(protocol.CodeInvalidRequest, "multiple archived deliveries share this Run; select duty_revision from the Task's history index")
-		failure.Details, _ = json.Marshal(map[string]any{"execution_run_id": run, "selector": "duty_revision"})
+		if selector == "run_id" {
+			failure := protocol.Errorf(protocol.CodeInvalidRequest, "multiple archived deliveries share this Run; select duty_revision from the Task's history index")
+			failure.Details, _ = json.Marshal(map[string]any{"execution_run_id": id, "selector": "duty_revision"})
+			return nil, failure
+		}
+		failure := protocol.Errorf(protocol.CodeInvalidRequest, "multiple archived deliveries share this selector; select the original Run and duty_revision from the Task's history index")
+		failure.Details, _ = json.Marshal(map[string]any{"id": id, "selector": "execution_run_id and duty_revision"})
 		return nil, failure
 	}
 	if err := rows.Err(); err != nil {

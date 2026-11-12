@@ -175,7 +175,15 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err := validateDeliveryCandidate(ctx, tx.Q(), issue, *p.Candidate); err != nil {
 			return Outcome{}, err
 		}
-		if d.ExecutionTaskID != "" {
+		if d.ExecutionTaskID == d.TaskID && d.ExecutionTaskID != "" {
+			if err := refreshSelfDeliveryCandidate(ctx, x, tx, issue, d, p); err != nil {
+				return Outcome{}, err
+			}
+			if sameDeliveryCandidate(d.Candidate, p.Candidate) {
+				return Outcome{Result: d}, nil
+			}
+			d.ExecutionTaskID = ""
+		} else if d.ExecutionTaskID != "" {
 			task, err := store.GetTask(ctx, tx.Q(), d.ExecutionTaskID)
 			if err != nil {
 				return Outcome{}, err

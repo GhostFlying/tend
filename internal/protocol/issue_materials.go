@@ -102,8 +102,8 @@ func NormalizeIssueMaterialsQuery(q IssueMaterialsQuery) (IssueMaterialsQuery, e
 	if q.IssueID != "" && !ValidID(PrefixWorkItem, q.IssueID) {
 		return q, Errorf(CodeInvalidRequest, "invalid Issue selector")
 	}
-	if q.DutyRevision < 0 || q.DutyRevision > 0 && (q.Kind != "delivery_authorization" || !ValidID(PrefixRun, q.ID)) {
-		return q, Errorf(CodeInvalidRequest, "duty_revision selects an archived delivery_authorization by its original Run ID")
+	if q.DutyRevision < 0 || q.DutyRevision > 0 && (q.Kind != "delivery_authorization" || !ValidID(PrefixRun, q.ID) && !ValidID(PrefixTask, q.ID)) {
+		return q, Errorf(CodeInvalidRequest, "duty_revision selects an archived delivery_authorization by its original Task or Run ID")
 	}
 	return q, nil
 }
