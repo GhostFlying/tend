@@ -2,6 +2,7 @@ package mainthread
 
 import (
 	"context"
+	"fmt"
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -135,13 +136,18 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 				return err
 			} else if found {
 				itemReplyTo, itemSources = prior, refs
+			} else if message.Text == "" {
+				// Like the live stream, do not create an empty reply. The raw
+				// receipt above still preserves this native item. An existing
+				// reply must retain its authoritative empty terminal update.
+				continue
 			}
 			payload := map[string]any{"body": message.Text, "reply_to": itemReplyTo, "turn_id": rec.TurnID, "item_id": message.ItemID, "status": string(state)}
 			if len(itemSources) > 1 {
 				payload["reply_sources"] = itemSources
 			}
 			if err := m.record(ctx, th, "native-receipt/"+rec.TurnID+"/"+message.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{Reconciled: true}); err != nil {
-				return err
+				return fmt.Errorf("mainthread: reconcile reply request=%s thread=%s turn=%s item=%s: %w", rec.RequestID, th.ID(), rec.TurnID, message.ItemID, err)
 			}
 		}
 		// A reconnect interruption is not an owner stop. Restricted recovery may
