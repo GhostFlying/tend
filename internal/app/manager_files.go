@@ -35,7 +35,7 @@ func (a *App) ManagerFile(ctx context.Context, p protocol.Principal, id string) 
 		if err != nil {
 			return err
 		}
-		scope.UploadTaskID = r.TaskID
+		scope.UploadTaskID, scope.UploadRunID = r.TaskID, r.RunID
 		metadata, err := views.IssueMaterialFile(ctx, tx.Q(), scope, id)
 		file = metadata.ArtifactFile
 		return err
