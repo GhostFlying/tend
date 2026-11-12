@@ -25,19 +25,60 @@ func captureUpgradeManagers(ctx context.Context, x *Exec, tx *store.Tx, batch *s
 				return err
 			}
 
-			// A new upgrade window is not permission to repeat an uncertain
-			// close on the same execution. Only a definite pre-execution
-			// rejection permits a fresh physical request.
-			var closeID string
-			err = tx.Q().QueryRowContext(ctx, `SELECT request_id FROM manager_native_requests WHERE run_id=? AND method='close' AND (status IN ('pending','started','unknown') OR (COALESCE(json_extract(result_json,'$.error'),'')<>'' AND COALESCE(json_extract(result_json,'$.rejected'),0)=0)) ORDER BY created_at DESC,request_id DESC LIMIT 1`, run.RunID).Scan(&closeID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if err := captureUpgradeManager(ctx, x, tx, batch, run, lease); err != nil {
 				return err
 			}
-			if closeID == "" {
-				closeID = x.IDs.New(protocol.PrefixRequest)
+		}
+	}
+	return nil
+}
+
+// captureUpgradeManager retains one exact physical close identity. Later
+// receipt-only carriers use the same window without borrowing its business rights.
+func captureUpgradeManager(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow, run store.RunRow, lease store.LeaseRow) error {
+	for _, p := range batch.ManagerParks {
+		if p.RunID == run.RunID {
+			if p.TaskID != run.TaskID || p.LeaseID != lease.LeaseID {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "parked manager identity changed")
 			}
-			batch.View.ManagerParks = append(batch.View.ManagerParks, protocol.UpgradeManagerParkView{TaskID: run.TaskID, RunID: run.RunID, Phase: "waiting_idle"})
-			batch.ManagerParks = append(batch.ManagerParks, store.UpgradeManagerPark{TaskID: run.TaskID, RunID: run.RunID, LeaseID: lease.LeaseID, CloseRequestID: closeID})
+			return nil
+		}
+	}
+	var closeID string
+	err := tx.Q().QueryRowContext(ctx, `SELECT request_id FROM manager_native_requests WHERE run_id=? AND method='close' AND (status IN ('pending','started','unknown') OR (COALESCE(json_extract(result_json,'$.error'),'')<>'' AND COALESCE(json_extract(result_json,'$.rejected'),0)=0)) ORDER BY created_at DESC,request_id DESC LIMIT 1`, run.RunID).Scan(&closeID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if closeID == "" {
+		closeID = x.IDs.New(protocol.PrefixRequest)
+	}
+	batch.ManagerParks = append(batch.ManagerParks, store.UpgradeManagerPark{TaskID: run.TaskID, RunID: run.RunID, LeaseID: lease.LeaseID, CloseRequestID: closeID})
+	batch.View.ManagerParks = append(batch.View.ManagerParks, protocol.UpgradeManagerParkView{TaskID: run.TaskID, RunID: run.RunID, Phase: "waiting_idle"})
+	return nil
+}
+
+// bindUpgradeReceiptReader is part of the real Claim transaction, so a reader
+// admitted after initial capture cannot outlive its window's physical teardown.
+func bindUpgradeReceiptReader(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, lease store.LeaseRow) error {
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT upgrade_id FROM upgrades u WHERE u.status IN ('running','attention') AND json_extract(u.state_json,'$.park_idle_managers')=1 AND EXISTS(SELECT 1 FROM json_each(u.state_json,'$.hosts') h WHERE json_extract(h.value,'$.host_id')=?)`, run.HostID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		batch, err := store.GetUpgrade(ctx, tx.Q(), id)
+		if err != nil {
+			return err
+		}
+		before := len(batch.ManagerParks)
+		if err := captureUpgradeManager(ctx, x, tx, &batch, run, lease); err != nil {
+			return err
+		}
+		if len(batch.ManagerParks) != before {
+			batch.View.Revision++
+			batch.View.UpdatedAt = x.Now
+			if err := tx.PutUpgrade(ctx, batch); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -179,20 +220,6 @@ func (a *App) UpgradeParkReceiptRead(ctx context.Context, conversation, run stri
 			return err
 		}
 		if !found {
-			var task string
-			err := tx.Q().QueryRowContext(ctx, `SELECT r.task_id FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.run_id=? AND r.role='issue_manager' AND r.observed_state IN ('starting','running','waiting') AND l.status='active' AND json_extract(a.trigger_json,'$.receipt_only')=1 AND EXISTS(SELECT 1 FROM upgrades u,json_each(u.state_json,'$.hosts') h WHERE u.status IN ('running','attention') AND json_extract(u.state_json,'$.park_idle_managers')=1 AND json_extract(h.value,'$.host_id')=r.host_id)`, run).Scan(&task)
-			if err == nil {
-				m, err := store.GetIssueManagerTask(ctx, tx.Q(), task)
-				if err != nil {
-					return err
-				}
-				pending, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
-				allowed = pending && m.ConversationID == conversation
-				return err
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
 			prior, err := unresolvedManagerParkClose(ctx, tx.Q(), run)
 			if err != nil || prior == nil {
 				return err

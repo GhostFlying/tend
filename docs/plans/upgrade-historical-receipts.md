@@ -76,3 +76,28 @@ pool、原回执与升级准入；测试不先替系统调用 SettleOpenTurns �
 
 本批不启动已记录的 Agent 分配/类别设计或维护交接 backlog；不代做原业务合入、
 部署和最终报告，不直接改业务状态。Refs: D219、D221、D222、D226；拟 D227。
+
+
+## 独立审阅修正（同一交付）
+
+整 PR 审阅发现同 Task 上传复用越过验收原件的真实来源权限，以及三处历史回执
+交接缺口。本轮保留既有失败与原复现，修正后复用同一 reviewer 的聚焦复核。
+
+1. 原件恢复按 producer 的实际 Task 与执行责任匹配。实施/协调的同责任续行可
+   引用原上传；未提交的验收草稿不因 Task 相同变为共享成果。验收文件下载继续
+   遵循真实提交记录、冻结 feedback 与协商能力；索引、结果登记及 finalized
+   原件读取使用同一 producer 区分，不能由错误新引用洗成已发布文件。
+2. 已观察原生终态先持久为现有事件中的小状态元数据并保留 pending。仅在来源
+   消费与原生 item 顺序证据充分后保存唯一可重投影全文；首次不足时沿原身份
+   再读取，完整后才结算。已发布实现原本在 coverage 后保存完整原件，不为本
+   PR 未发布候选引入原件替换/迁移或第二份全文。
+3. 维护期间新领取的 receipt reader 必须绑定同一窗口的实际 task/run/lease
+   与唯一 close identity。消费完成不等于物理停止；原 reader 即使重启或只剩
+   投影仍可被正式调度 close、读回真实退出并释放 lease。未知 close 保留原请求。
+4. 历史非 hosted 执行按原 admitted agent context 的 conversation 优先归属，
+   没有该绑定才回退源消息 conversation，与启动选择一致。不存在原件时仍可
+   沿此正式身份读取历史，不扩大其他 conversation 权限。
+
+验证保留原审阅 overlay 不变；将实际回归纳入仓库，并通过 frozen feedback、
+未提交验收草稿、真实原 producer、完整/不足来源、reader 跨重启 close 与 legacy
+admission 等受影响边界。只执行必要 focused race/vet，由统一交付承担最终全量门槛。

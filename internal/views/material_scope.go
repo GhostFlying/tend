@@ -55,6 +55,6 @@ func SelectMaterialIssue(ctx context.Context, q store.Querier, scope store.Mater
 	}
 	selected, err := MaterialScope(ctx, q, ids)
 	selected.ReaderIssueID, selected.Project = scope.ReaderIssueID, scope.Project
-	selected.UploadTaskID = scope.UploadTaskID
+	selected.UploadTaskID, selected.UploadRunID = scope.UploadTaskID, scope.UploadRunID
 	return selected, err
 }

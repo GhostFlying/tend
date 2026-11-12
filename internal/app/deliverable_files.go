@@ -175,7 +175,11 @@ func (a *App) DeliverableFile(ctx context.Context, p protocol.Principal, id stri
 		if rc.run.RunID == f.RunID {
 			return nil
 		}
-		if rc.task.TaskID == f.TaskID && (rc.run.Role == protocol.RoleImplement || rc.run.Role == protocol.RoleIssueManager) {
+		compatible, err := store.CompatibleFileProducer(ctx, tx.Q(), f, rc.run.RunID)
+		if err != nil {
+			return err
+		}
+		if compatible {
 			lease, err := store.GetLeaseByRun(ctx, tx.Q(), rc.run.RunID)
 			if err != nil {
 				return err

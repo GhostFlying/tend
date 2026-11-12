@@ -10,6 +10,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
@@ -105,6 +106,7 @@ func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, testkit.NewHarness())
 			e.stop()
+			e.m.cfg.DecodeRetainedTurnReceipt = traex.DecodeRetainedTurnReceipt
 			original := e.say("original owner input")
 			d, _, ok, err := e.app.NextDelivery(t.Context(), app.MainThreadDestination)
 			if err != nil || !ok {
@@ -162,7 +164,7 @@ func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) 
 			user := harness.Event{ItemType: harness.ItemUserMessage, ItemID: "supplement-user", Text: steer.InputText}
 			after := harness.Event{ItemType: harness.ItemAgentMessage, ItemID: "after", Text: "reply after supplement"}
 			persisted := harness.Event{ItemType: harness.ItemAgentMessage, ItemID: "persisted", Text: "original completed"}
-			th.receipt = harness.TurnReceipt{ID: rec.TurnID, Status: "completed", Raw: json.RawMessage(`{"status":"completed"}`), Items: []harness.Event{before, after}}
+			th.receipt = harness.TurnReceipt{ID: rec.TurnID, Status: "completed", Raw: json.RawMessage(`{"id":"native-steered","status":"completed","items":[{"type":"agentMessage","id":"before","text":"reply before supplement"},{"type":"agentMessage","id":"after","text":"reply after supplement"}]}`), Items: []harness.Event{before, after}}
 			if consumedBeforeDisconnect {
 				if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
 					t.Fatal(err)
@@ -170,6 +172,9 @@ func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) 
 				observed, exists, err := e.app.MainTurn(t.Context(), d.RequestID)
 				if err != nil || !exists || observed.Status != store.TurnCompleted {
 					t.Fatal("incomplete source consumption lost the observed native terminal", observed, err)
+				}
+				if e.count(`SELECT COUNT(*) FROM agent_rollout_events WHERE thread_id=? AND turn_id=? AND kind='native_terminal'`, th.ID(), rec.TurnID) != 1 || e.count(`SELECT COUNT(*) FROM agent_rollout_events WHERE thread_id=? AND turn_id=? AND kind='native_receipt'`, th.ID(), rec.TurnID) != 0 {
+					t.Fatal("incomplete source coverage froze the original full history")
 				}
 				if pending, err := e.app.NativeReceiptPending(t.Context(), d.RequestID); err != nil || !pending {
 					t.Fatal("incomplete source consumption was reported delivered", pending, err)
@@ -180,6 +185,7 @@ func TestReconnectRestoresSteerReplyAttributionFromOrderedHistory(t *testing.T) 
 				}
 			}
 			th.receipt.Items = []harness.Event{before, user, persisted, after}
+			th.receipt.Raw = json.RawMessage(`{"id":"native-steered","status":"completed","items":[{"type":"agentMessage","id":"before","text":"reply before supplement"},{"type":"userMessage","id":"supplement-user","content":[{"text":"exact native steer input"}]},{"type":"agentMessage","id":"persisted","text":"original completed"},{"type":"agentMessage","id":"after","text":"reply after supplement"}]}`)
 			if err := e.m.reconcileNativeReceipts(t.Context(), th); err != nil {
 				t.Fatal(err)
 			}

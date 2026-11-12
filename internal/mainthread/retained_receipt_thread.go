@@ -58,6 +58,13 @@ func (m *Manager) retainedReceiptThread(ctx context.Context) (harness.Thread, er
 		if receipt.ID != rec.TurnID || receipt.ID == "" {
 			return nil, fmt.Errorf("%w: retained receipt has a different original turn", harness.ErrRejected)
 		}
+		covered, err := m.nativeReceiptSourcesCovered(ctx, id, receipt)
+		if err != nil {
+			return nil, err
+		}
+		if !covered {
+			return nil, nil
+		}
 		receipt.Raw = raw
 		thread.receipts[rec.TurnID] = receipt
 	}
