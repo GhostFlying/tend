@@ -26,7 +26,7 @@ func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task strin
 		Scan(&v.IssueID, &v.SourceTaskID, &v.DutyRevision, &raw, &v.UpgradeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if len(v.History) > 0 {
-			v.InvalidReason = "no_current_delivery_execution; select an original Run to read historical settlement"
+			v.InvalidReason = "no_current_delivery_execution; select the Task or original Run and duty_revision to read historical facts"
 			return v, nil
 		}
 		return nil, nil

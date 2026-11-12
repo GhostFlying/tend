@@ -52,17 +52,25 @@ func TestIssueMaterialsCLIDeliveryAuthorityRequiresExactTask(t *testing.T) {
 }
 
 func TestIssueMaterialsCLISelectsExactHistoricalDuty(t *testing.T) {
+	for _, id := range []string{"run_01J00000000000000000000000", "task_01J00000000000000000000000"} {
+		t.Run(id, func(t *testing.T) {
+			testIssueMaterialsCLIHistoricalSelector(t, id)
+		})
+	}
+}
+
+func testIssueMaterialsCLIHistoricalSelector(t *testing.T, id string) {
+	t.Helper()
 	f := newFakeServer(t)
 	e := newTestEnv(t, f.srv.URL)
-	const run = "run_01J00000000000000000000000"
 	f.on("GET /api/v1/issues/original-issue/materials", func(w http.ResponseWriter, r *http.Request, _ []byte) {
 		query, err := protocol.ParseIssueMaterialsQuery(r.URL.Query())
-		if err != nil || query.ID != run || query.DutyRevision != 3 {
+		if err != nil || query.ID != id || query.DutyRevision != 3 {
 			t.Error("historical read dropped the immutable selector", r.URL.RawQuery, err)
 		}
-		_ = json.NewEncoder(w).Encode(protocol.IssueMaterials{Kind: query.Kind, DeliveryAuthorization: &protocol.DeliveryExecutionAuthority{RunID: run, DutyRevision: 3, Historical: true, Valid: false}})
+		_ = json.NewEncoder(w).Encode(protocol.IssueMaterials{Kind: query.Kind, DeliveryAuthorization: &protocol.DeliveryExecutionAuthority{DutyRevision: 3, Historical: true, Valid: false}})
 	})
-	if code := e.main("issue", "materials", "original-issue", "--kind", "delivery_authorization", "--id", run, "--duty-revision", "3", "--json"); code != exitOK {
+	if code := e.main("issue", "materials", "original-issue", "--kind", "delivery_authorization", "--id", id, "--duty-revision", "3", "--json"); code != exitOK {
 		t.Fatal(code, e.errOut.String())
 	}
 	var result protocol.IssueMaterials

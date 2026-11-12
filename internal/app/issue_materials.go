@@ -233,8 +233,9 @@ func (a *App) readMaterials(ctx context.Context, scope store.MaterialScope, quer
 		}
 		err = a.store.Read(ctx, func(tx *store.ReadTx) error {
 			taskID := query.ID
-			historical := protocol.ValidID(protocol.PrefixRun, query.ID)
-			if historical {
+			byRun := protocol.ValidID(protocol.PrefixRun, query.ID)
+			historical := byRun || query.DutyRevision > 0
+			if byRun {
 				run, e := store.GetRun(ctx, tx.Q(), query.ID)
 				if e != nil {
 					return errNotFound(e, "original delivery Run is unavailable")
@@ -249,7 +250,11 @@ func (a *App) readMaterials(ctx context.Context, scope store.MaterialScope, quer
 				return protocol.Errorf(protocol.CodeForbidden, "Task is outside this Issue context")
 			}
 			if historical {
-				result.DeliveryAuthorization, err = views.HistoricalDeliveryExecutionAuthority(ctx, tx.Q(), query.ID, query.DutyRevision)
+				if byRun {
+					result.DeliveryAuthorization, err = views.HistoricalDeliveryExecutionAuthority(ctx, tx.Q(), query.ID, query.DutyRevision)
+				} else {
+					result.DeliveryAuthorization, err = views.HistoricalTaskDeliveryExecutionAuthority(ctx, tx.Q(), taskID, query.DutyRevision)
+				}
 				err = errNotFound(err, "original delivery execution history is unavailable")
 			} else {
 				result.DeliveryAuthorization, err = views.DeliveryExecutionAuthority(ctx, tx.Q(), taskID)

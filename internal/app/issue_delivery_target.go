@@ -154,8 +154,8 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	if err != nil {
 		return nil, err
 	}
-	var running bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r JOIN leases l USING(run_id) WHERE r.task_id=? AND r.role='implement' AND r.observed_state='running' AND r.desired_state='run' AND l.status='active' AND l.expires_at>?)`, task.TaskID, x.Now.UnixMilli()).Scan(&running); err != nil {
+	running, err := currentDeliveryExecutionLease(ctx, q, task, x.Now.UnixMilli())
+	if err != nil {
 		return nil, err
 	}
 	if task.ControlMode != protocol.ControlManaged || !running {
@@ -187,6 +187,48 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "controlled server is outside the approved scope")
 	}
 	return &frozen.IssueDeliveryCandidate, nil
+}
+
+func currentDeliveryExecutionLease(ctx context.Context, q store.Querier, task store.TaskRow, now int64) (bool, error) {
+	current, err := store.TaskOwnerContractCurrent(ctx, q, task.TaskID)
+	if err != nil || !current || task.Lifecycle.Terminal() || task.ControlMode != protocol.ControlManaged {
+		return false, err
+	}
+	runs, err := store.FollowupIDs(ctx, q, `SELECT r.run_id FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND r.observed_state='running' AND r.desired_state='run' AND l.status='active' AND l.expires_at>? AND a.status='dispatched' AND a.target_spec_version=? AND COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0)=0`, task.TaskID, now, task.SpecVersion)
+	if err != nil {
+		return false, err
+	}
+	for _, id := range runs {
+		run, err := store.GetRun(ctx, q, id)
+		if err != nil {
+			return false, err
+		}
+		current, err := store.RunIssueResponsibilityCurrent(ctx, q, id)
+		if err != nil {
+			return false, err
+		}
+		if !current || run.PauseHandoff != nil {
+			continue
+		}
+		fenced, err := maintenanceNativeBusinessFenced(ctx, q, run)
+		if err != nil {
+			return false, err
+		}
+		if fenced {
+			continue
+		}
+		if task.Kind == protocol.TaskKindIssueManager {
+			allowed, err := managerNativeBusinessAllowed(ctx, q, run)
+			if err != nil {
+				return false, err
+			}
+			if !allowed {
+				continue
+			}
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // Refreshes are passive observations. They fence reads started against a prior

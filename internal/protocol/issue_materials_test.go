@@ -9,6 +9,7 @@ func TestIssueMaterialsHistoricalSelectorIsExplicitAndPositive(t *testing.T) {
 	const run = "run_01J00000000000000000000000"
 	for _, raw := range []string{
 		"kind=delivery_authorization&id=" + run + "&duty_revision=3",
+		"kind=delivery_authorization&id=task_01J00000000000000000000000&duty_revision=3",
 		"kind=delivery_authorization&id=" + run,
 		"kind=overview",
 	} {
@@ -27,7 +28,7 @@ func TestIssueMaterialsHistoricalSelectorIsExplicitAndPositive(t *testing.T) {
 		"kind=delivery_authorization&id=" + run + "&duty_revision=not-a-version",
 		"kind=delivery_authorization&id=" + run + "&duty_revision=3&duty_revision=7",
 		"kind=overview&duty_revision=3",
-		"kind=delivery_authorization&id=task_01J00000000000000000000000&duty_revision=3",
+		"kind=delivery_authorization&id=unknown&duty_revision=3",
 	} {
 		values, _ := url.ParseQuery(raw)
 		if _, err := ParseIssueMaterialsQuery(values); CodeOf(err) != CodeInvalidRequest {
