@@ -19,6 +19,7 @@ type MaterialScope struct {
 	// UploadTaskID is the authenticated Run's Task, independent of selected context.
 	// Empty keeps owner reads within Tasks directly owned by ReaderIssueID.
 	UploadTaskID string
+	UploadRunID  string
 }
 
 // The same scoped candidates back listing and exact metadata/byte reads.
@@ -59,6 +60,7 @@ const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?1,'$.i
  AND (f.task_id=json_extract(?1,'$.upload_task_id') OR (json_extract(?1,'$.upload_task_id')='' AND
  (EXISTS(SELECT 1 FROM task_work_item_owners o WHERE o.task_id=f.task_id AND o.work_item_id=json_extract(?1,'$.reader_issue_id'))
  OR EXISTS(SELECT 1 FROM issue_manager_tasks o WHERE o.task_id=f.task_id AND o.issue_id=json_extract(?1,'$.reader_issue_id')))))
+ AND (json_extract(?1,'$.upload_task_id')='' OR EXISTS(SELECT 1 FROM runs producer JOIN runs consumer ON consumer.run_id=json_extract(?1,'$.upload_run_id') WHERE producer.run_id=f.run_id AND producer.task_id=f.task_id AND ` + compatibleFileProducerSQL + `))
  AND (?2='' OR f.file_id=?2)),
  files_scope(id) AS (
  SELECT a.file_id FROM conversation_message_attachments a WHERE a.message_id IN (SELECT id FROM messages_scope)
@@ -74,7 +76,8 @@ func materialArgs(scope MaterialScope) (string, string, error) {
 		Reader     string   `json:"reader_issue_id"`
 		Project    string   `json:"project"`
 		UploadTask string   `json:"upload_task_id"`
-	}{scope.IssueIDs, scope.ReaderIssueID, scope.Project, scope.UploadTaskID})
+		UploadRun  string   `json:"upload_run_id"`
+	}{scope.IssueIDs, scope.ReaderIssueID, scope.Project, scope.UploadTaskID, scope.UploadRunID})
 	if err != nil {
 		return "", "", err
 	}

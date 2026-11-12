@@ -427,8 +427,12 @@ func checkResultDeliverables(ctx context.Context, q store.Querier, spec domain.S
 		if err != nil {
 			return errNotFound(err, "delivery file does not exist")
 		}
-		if stored.TaskID != taskID || stored.ArtifactFile != file {
-			return protocol.Errorf(protocol.CodeInvalidRequest, "file does not match this Task's immutable upload")
+		compatible, err := store.CompatibleFileProducer(ctx, q, stored, runID)
+		if err != nil {
+			return err
+		}
+		if stored.TaskID != taskID || stored.ArtifactFile != file || !compatible {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "file does not match the original producing execution")
 		}
 	}
 	return nil

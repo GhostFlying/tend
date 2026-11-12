@@ -47,6 +47,16 @@ func GetDeliverableFile(ctx context.Context, q Querier, id string) (DeliverableF
 	return f, nil
 }
 
+// compatibleFileProducerSQL follows the actual producing execution, not merely
+// Task membership. Acceptance drafts remain local to their original Run.
+const compatibleFileProducerSQL = `(producer.run_id=consumer.run_id OR (producer.task_id=consumer.task_id AND producer.role=consumer.role AND producer.role IN ('implement','issue_manager')))`
+
+func CompatibleFileProducer(ctx context.Context, q Querier, file DeliverableFileRow, run string) (bool, error) {
+	var compatible bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs producer JOIN runs consumer ON consumer.run_id=? WHERE producer.run_id=? AND producer.task_id=? AND `+compatibleFileProducerSQL+`)`, run, file.RunID, file.TaskID).Scan(&compatible)
+	return compatible, err
+}
+
 // GetFinalizedDeliverableFile resolves a file's immutable artifact provenance.
 // Uploads not included in a submitted artifact are not task inputs. Acceptance
 // is intentionally separate: a failed result can be evidence for later work.
@@ -57,13 +67,13 @@ func GetFinalizedDeliverableFile(ctx context.Context, q Querier, id string) (Del
 	}
 	var artifactID string
 	err = q.QueryRowContext(ctx, `SELECT a.artifact_id
- FROM artifacts a, json_each(a.ref_json, '$.files') entry
- WHERE a.task_id=?
+ FROM artifacts a JOIN runs consumer ON consumer.run_id=a.run_id JOIN runs producer ON producer.run_id=?, json_each(a.ref_json, '$.files') entry
+ WHERE `+compatibleFileProducerSQL+` AND producer.task_id=a.task_id AND consumer.task_id=a.task_id AND a.task_id=?
  AND json_extract(entry.value, '$.file_id')=?
  AND json_extract(entry.value, '$.name')=?
  AND json_extract(entry.value, '$.size')=?
  AND json_extract(entry.value, '$.sha256')=?
- ORDER BY a.created_at, a.artifact_id LIMIT 1`, f.TaskID, f.FileID, f.Name, f.Size, f.SHA256).Scan(&artifactID)
+ ORDER BY a.created_at, a.artifact_id LIMIT 1`, f.RunID, f.TaskID, f.FileID, f.Name, f.Size, f.SHA256).Scan(&artifactID)
 	if err != nil {
 		return DeliverableFileRow{}, "", notFound(err, "finalized file "+id)
 	}
@@ -84,23 +94,14 @@ func ReadFinalizedDeliverableFile(ctx context.Context, q Querier, id string, off
 	if offset < 0 || count <= 0 || count > 65536 {
 		return DeliverableFileRow{}, protocol.Errorf(protocol.CodeInvalidRequest, "file offset or read size is out of range")
 	}
-	var f DeliverableFileRow
-	err := q.QueryRowContext(ctx, `SELECT f.file_id,f.task_id,f.run_id,f.name,f.size,f.sha256,f.created_at
- FROM deliverable_files f WHERE f.file_id=? AND (EXISTS (
- SELECT 1 FROM artifacts a, json_each(a.ref_json, '$.files') entry
- WHERE a.task_id=f.task_id
- AND json_extract(entry.value, '$.file_id')=f.file_id
- ) OR EXISTS (
- SELECT 1 FROM acceptances a,json_each(a.files_json) entry
- WHERE a.task_id=f.task_id AND a.run_id=f.run_id
- AND json_extract(entry.value,'$.file_id')=f.file_id
- AND json_extract(entry.value,'$.name')=f.name
- AND json_extract(entry.value,'$.size')=f.size
- AND json_extract(entry.value,'$.sha256')=f.sha256
- ))`, id).Scan(&f.FileID, &f.TaskID, &f.RunID, &f.Name, &f.Size, &f.SHA256, &f.CreatedAt)
-	if err != nil {
-		return DeliverableFileRow{}, notFound(err, "finalized file "+id)
+	f, _, err := GetFinalizedDeliverableFile(ctx, q, id)
+	if errors.Is(err, ErrNotFound) {
+		f, _, err = GetFinalizedAcceptanceFile(ctx, q, id)
 	}
+	if err != nil {
+		return DeliverableFileRow{}, err
+	}
+
 	if len(files) == 0 || files[0] == nil {
 		return DeliverableFileRow{}, errors.New("store: file storage required for original byte window")
 	}

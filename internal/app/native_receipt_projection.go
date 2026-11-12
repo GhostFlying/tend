@@ -28,6 +28,19 @@ func (a *App) ObserveNativeTurnTerminal(ctx context.Context, observed store.Main
 		if _, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) VALUES(?) ON CONFLICT DO NOTHING`, prior.RequestID); err != nil {
 			return err
 		}
+		// This is a small observation fact, not a second copy of native items.
+		// Full history is retained only once its required source coverage is known.
+		conversation, err := nativeReceiptConversation(ctx, tx.Q(), prior)
+		if err != nil {
+			return err
+		}
+		terminal, _ := json.Marshal(struct {
+			Status string `json:"status"`
+		}{observed.Status})
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_rollout_events(conversation_id,thread_id,turn_id,item_id,kind,data_json,created_at) SELECT ?,?,?,'','native_terminal',?,? WHERE NOT EXISTS(SELECT 1 FROM agent_rollout_events WHERE conversation_id=? AND thread_id=? AND turn_id=? AND kind='native_terminal')`, conversation, prior.ThreadID, prior.TurnID, string(terminal), a.now().UnixMilli(), conversation, prior.ThreadID, prior.TurnID); err != nil {
+			return err
+		}
+
 		return tx.PutMainTurn(ctx, prior, a.now().UnixMilli())
 	})
 }
@@ -41,14 +54,11 @@ func (a *App) RetainedNativeReceipt(ctx context.Context, conversation, request s
 		if err != nil {
 			return err
 		}
-		execution, err := store.GetHostedExecution(ctx, tx.Q(), request)
-		actual := execution.ConversationID
-		if errors.Is(err, store.ErrNotFound) {
-			actual, err = store.MessageConversation(ctx, tx.Q(), rec.MessageID)
-		}
+		actual, err := nativeReceiptConversation(ctx, tx.Q(), rec)
 		if err != nil {
 			return err
 		}
+
 		if store.ConversationID(actual) != store.ConversationID(conversation) {
 			return protocol.Errorf(protocol.CodeForbidden, "native receipt is outside the original conversation")
 		}
@@ -68,4 +78,19 @@ func (a *App) RetainedNativeReceipt(ctx context.Context, conversation, request s
 		return nil
 	})
 	return original, err
+}
+
+// Legacy source messages may be shared into a different admitted conversation.
+// Match the same precedence used by hostedRuntimeStartupSelection.
+func nativeReceiptConversation(ctx context.Context, q store.Querier, rec store.MainTurn) (string, error) {
+	execution, err := store.GetHostedExecution(ctx, q, rec.RequestID)
+	if err == nil {
+		return store.ConversationID(execution.ConversationID), nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return "", err
+	}
+	var actual string
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(c.conversation_id,m.conversation_id) FROM conversation_messages m LEFT JOIN agent_turn_contexts c ON c.request_id=? WHERE m.message_id=?`, rec.RequestID, rec.MessageID).Scan(&actual)
+	return store.ConversationID(actual), err
 }

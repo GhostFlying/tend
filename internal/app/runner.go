@@ -561,6 +561,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err := tx.SetActionStatus(ctx, pick.ActionID, protocol.ActionDispatched, now); err != nil {
 		return Outcome{}, err
 	}
+	if pick.Manager != nil && pick.Manager.ReceiptOnly {
+		if err := bindUpgradeReceiptReader(ctx, x, tx, run, lease); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if pick.Kind == protocol.ActionCoordinate {
 		out, err := claimIssueManager(ctx, x, tx, pick, run, lease, execution)
 		out.Events = append(materialized, out.Events...)

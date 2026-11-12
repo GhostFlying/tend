@@ -58,7 +58,13 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 				return fmt.Errorf("%w: retained receipt has a different original turn", harness.ErrRejected)
 			}
 			receipt.Raw = raw
-		} else {
+			covered, err := m.nativeReceiptSourcesCovered(ctx, th.ID(), receipt)
+			if err != nil {
+				return err
+			}
+			found = covered
+		}
+		if !found {
 			receipt, found, err = reader.FindTurn(ctx, identity, rec.TurnID)
 			if err != nil {
 				return err
@@ -81,27 +87,19 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 
 func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, rec store.MainTurn, receipt harness.TurnReceipt, repair bool, source string) error {
 	rec.TurnID, rec.Status, rec.Failure = receipt.ID, receipt.Status, receipt.Failure
-	if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), rec.TurnID, "", "native_receipt", receipt.Raw); err != nil {
-		return err
-	}
 	if err := m.app.ObserveNativeTurnTerminal(ctx, rec); err != nil {
 		return err
 	}
-	consumed, err := m.app.ConsumedMainSteers(ctx, th.ID(), receipt.ID)
+	covered, err := m.nativeReceiptSourcesCovered(ctx, th.ID(), receipt)
 	if err != nil {
 		return err
 	}
-	completeSources := true
-	for _, source := range consumed {
-		if !slices.ContainsFunc(receipt.Items, func(item harness.Event) bool {
-			return item.ItemType == harness.ItemUserMessage && item.ItemID == source.NativeItemID && item.Text == source.InputText
-		}) {
-			completeSources = false
-			break
-		}
-	}
-	if !completeSources {
+	if !covered {
 		return nil
+	}
+
+	if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), rec.TurnID, "", "native_receipt", receipt.Raw); err != nil {
+		return err
 	}
 	state := protocol.AssistantCompleted
 	if receipt.Status == "interrupted" {
@@ -185,6 +183,24 @@ func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, r
 		return err
 	}
 	return nil
+}
+
+// Source coverage is shared by provider refresh, retained-only startup and
+// output projection. An observed terminal does not imply its inputs were read.
+func (m *Manager) nativeReceiptSourcesCovered(ctx context.Context, thread string, receipt harness.TurnReceipt) (bool, error) {
+	consumed, err := m.app.ConsumedMainSteers(ctx, thread, receipt.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, source := range consumed {
+		if !slices.ContainsFunc(receipt.Items, func(item harness.Event) bool {
+			return item.ItemType == harness.ItemUserMessage && item.ItemID == source.NativeItemID && item.Text == source.InputText
+		}) {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 // Keep reconciling durable unknown receipts after transient transport failures.
