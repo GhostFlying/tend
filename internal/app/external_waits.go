@@ -452,6 +452,7 @@ func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task stri
 	if err != nil {
 		return false, err
 	}
+	destination := store.ConversationDestination(m.ConversationID)
 	var ready bool
 	// A queued owner input can predate this wait. Inspect its actual admission
 	// facts instead of treating the registration event head as a consumed cursor.
@@ -460,7 +461,7 @@ func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task stri
 	err = q.QueryRowContext(ctx, `WITH pending_inputs(request_id,message_id) AS (
  SELECT o.request_id,json_extract(o.payload_json,'$.message_id') FROM outbox o
  WHERE o.status='pending' AND o.operation='main_thread.handle_message'
- AND (o.destination='main_thread' OR o.destination LIKE 'background_thread:%')
+ AND o.destination=?
  UNION ALL
  SELECT o.request_id,s.message_id FROM outbox o
  JOIN background_batches b ON b.message_id=json_extract(o.payload_json,'$.message_id')
@@ -477,7 +478,7 @@ func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task stri
  AND (input.conversation_id=? OR EXISTS(SELECT 1 FROM message_work_items linked WHERE linked.message_id=input.message_id AND linked.work_item_id=? AND linked.active=1))
  AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=carrier.request_id AND t.status<>'rejected')
  AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=carrier.request_id)
- AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=carrier.request_id AND (s.native_item_id<>'' OR s.status<>'waiting')))`, "background_thread:"+m.ConversationID, m.IssueID, m.ConversationID, m.IssueID).Scan(&ready)
+ AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=carrier.request_id AND (s.native_item_id<>'' OR s.status<>'waiting')))`, destination, destination, m.IssueID, m.ConversationID, m.IssueID).Scan(&ready)
 	return ready, err
 }
 

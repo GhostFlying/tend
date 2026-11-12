@@ -434,3 +434,81 @@ func TestExternalWaitRoutedInputUsesIssueAdmission(t *testing.T) {
 		})
 	}
 }
+
+func TestFault_ExternalWaitPendingMainKeepsIssueAdmissionFence(t *testing.T) {
+	for _, state := range []string{"completed", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			h, _, as, dependency := ownerInboxWaitFixture(t)
+			message, mainRequest := queueOwnerWaitInput(t, h, "main")
+			if op := h.associate(owner, message, as.Manager.IssueID); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			var carrier string
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				return tx.Q().QueryRowContext(t.Context(), `SELECT o.request_id FROM background_sources s JOIN background_batches b USING(batch_id) JOIN outbox o ON json_extract(o.payload_json,'$.message_id')=b.message_id WHERE b.work_item_id=? AND s.message_id=? AND o.destination=? AND o.operation='main_thread.handle_event' AND o.status='pending'`, as.Manager.IssueID, message, store.ConversationDestination(as.Manager.ConversationID)).Scan(&carrier)
+			}); err != nil {
+				t.Fatal("routed source has no independent Issue carrier", err)
+			}
+			delivery, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(as.Manager.ConversationID))
+			if err != nil || !ok || delivery.RequestID != carrier || carrier == mainRequest || delivery.Operation != OpHandleEvent {
+				t.Fatal("fixture did not admit the routed source's Issue carrier", delivery, ok, err)
+			}
+			turn := startHostedReview(t, h, as.Manager.ConversationID, delivery)
+			if state == "completed" {
+				finishHostedReview(t, h, turn)
+			} else {
+				if err := h.app.AwaitNativeReceipts(t.Context(), turn.ThreadID); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.app.SettleOpenTurns(t.Context(), turn.ThreadID); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.app.FinishDelivery(t.Context(), delivery, DeliveryResult{Outcome: Unknown}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wait := waitForTask(t, h, as, dependency, 0)
+			stopOwnerClaim(t, h, as)
+			h.clock.Advance(5 * time.Second)
+			for range 2 {
+				if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waits, err := h.app.ExternalWaits(t.Context(), as.TaskID)
+			if err != nil || len(waits) != 1 || waits[0].WaitID != wait.WaitID || waits[0].Status != "waiting" || h.count("run_external_waits WHERE continuation_action_id IS NOT NULL") != 0 {
+				t.Fatal("pending main input bypassed the Issue's actual admission", waits, err)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var mainStatus, issueStatus string
+				var attempts int
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT status,attempts FROM outbox WHERE request_id=?`, mainRequest).Scan(&mainStatus, &attempts); err != nil {
+					return err
+				}
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT status FROM outbox WHERE request_id=?`, carrier).Scan(&issueStatus); err != nil {
+					return err
+				}
+				if mainStatus != "pending" || attempts != 0 || state == "completed" && issueStatus != "delivered" || state == "unknown" && issueStatus != "unknown" {
+					t.Fatal("waiting altered either original delivery", mainStatus, attempts, issueStatus)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			current, found, err := h.app.MainTurn(t.Context(), carrier)
+			want := store.TurnCompleted
+			if state == "unknown" {
+				want = store.TurnInterrupted
+				if pending, err := h.app.NativeReceiptPending(t.Context(), carrier); err != nil || !pending {
+					t.Fatal("waiting lost the Issue's original unknown receipt", pending, err)
+				}
+				if next, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(as.Manager.ConversationID)); err != nil || ok {
+					t.Fatal("waiting replayed the uncertain Issue carrier", next, ok, err)
+				}
+			}
+			if err != nil || !found || current.RequestID != carrier || current.MessageID != turn.MessageID || current.TurnID != turn.TurnID || current.Status != want {
+				t.Fatal("waiting replaced the Issue's native admission fact", current, found, err)
+			}
+		})
+	}
+}
