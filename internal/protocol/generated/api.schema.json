@@ -19483,10 +19483,16 @@
     "ToolUseView": {
       "additionalProperties": false,
       "properties": {
+        "content_omitted": {
+          "type": "boolean"
+        },
         "input": {
           "type": "string"
         },
         "name": {
+          "type": "string"
+        },
+        "original_message_id": {
           "type": "string"
         },
         "output": {

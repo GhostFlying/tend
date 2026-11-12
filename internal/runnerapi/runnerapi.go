@@ -42,7 +42,7 @@ const (
 	HeaderRun  = "X-Tend-Run"
 )
 
-// maxBody bounds a request body; event batches are the largest requests.
+// maxBody selects the inline decoder budget, not a native-original size limit.
 const maxBody = 4 << 20
 
 // RunToken derives a run's credential from its lease.
@@ -78,6 +78,9 @@ type Server struct {
 	secret []byte
 	cfg    Config
 	log    *slog.Logger
+	// Original processing can materialize one staged body in the existing App.
+	// Small control requests do not acquire this budget.
+	originals chan struct{}
 }
 
 // New returns a Server.
@@ -85,7 +88,7 @@ func New(a *app.App, whois netx.WhoIs, secret []byte, cfg Config, log *slog.Logg
 	if cfg.ClaimWait <= 0 {
 		cfg.ClaimWait = 25 * time.Second
 	}
-	return &Server{app: a, whois: whois, secret: secret, cfg: cfg, log: log}
+	return &Server{app: a, whois: whois, secret: secret, cfg: cfg, log: log, originals: make(chan struct{}, 1)}
 }
 
 // Handler returns the HTTP handler of the protocol.
@@ -242,14 +245,26 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, nil, authErr)
 		return
 	}
-	var env protocol.Envelope
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
-	if err := dec.Decode(&env); err != nil {
+	admitLarge := func() error {
+		if authErr == nil {
+			return nil
+		}
+		// Large historical bodies need an original credential before reading
+		// their remainder. Keep authErr: only the exact postdecode receipt
+		// allowlist below can admit this historical principal.
+		if _, err := s.authenticateCredential(r, &runReceiptCredential{manager: true}); err != nil {
+			return authErr
+		}
+		return nil
+	}
+	env, release, decodeErr := s.readEnvelope(r, admitLarge)
+	defer release()
+	if decodeErr != nil {
 		if authErr != nil {
 			s.writeError(w, r, nil, authErr)
 			return
 		}
-		s.writeError(w, r, nil, protocol.Errorf(protocol.CodeInvalidRequest, "body is not an envelope"))
+		s.writeError(w, r, nil, decodeErr)
 		return
 	}
 	if err := env.Validate(); err != nil {

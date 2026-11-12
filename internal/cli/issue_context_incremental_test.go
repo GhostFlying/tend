@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -34,5 +35,31 @@ func TestIssueContextCLIIncrementalPreservesPagesAndParameters(t *testing.T) {
 	}
 	if len(f.requests) != 1 {
 		t.Fatal("invalid reads performed HTTP", f.requests)
+	}
+}
+
+func TestIssueContextCLIPreservesExplicitOriginalReference(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	want := protocol.IssueContextView{IssueID: "selected", Sources: []protocol.IssueConversationItem{{ConversationContent: protocol.ConversationContent{Seq: 9, Kind: "tool_use", MessageID: "original", Tool: &protocol.ToolUseView{Name: "issues_context_read", ContentOmitted: true, OriginalMessageID: "original", Status: protocol.ToolCompleted}}}}, More: true, Next: 9}
+	f.on("GET /api/v1/issues/selected/context", func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		if r.URL.Query().Get("after_source") != "7" {
+			t.Error(r.URL.Query())
+		}
+		_ = json.NewEncoder(w).Encode(want)
+	})
+	if code := e.main("issue", "context", "selected", "--after-source", "7", "--json"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var got protocol.IssueContextView
+	if err := json.Unmarshal(e.out.Bytes(), &got); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatal("original reference or pagination lost", got, err)
+	}
+	e.out.Reset()
+	if code := e.main("issue", "context", "--help"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	if !strings.Contains(e.out.String(), "content_omitted") || !strings.Contains(e.out.String(), "--kind messages") {
+		t.Fatal("CLI does not explain exact original read", e.out.String())
 	}
 }

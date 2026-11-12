@@ -26,6 +26,18 @@ import (
 func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (resultErr error) {
 	defer func() {
 		if resultErr != nil && lifetime.Err() == nil {
+			if rejection, ok := errors.AsType[*protocol.Error](resultErr); ok && rejection.Code != protocol.CodeUnknownOutcome && !isRetryable(resultErr) {
+				// A permanent rejection leaves the same durable original pending.
+				// Do not immediately hello/re-enter this releasing executor with
+				// identical bytes and no new information.
+				timer := time.NewTimer(r.cfg.RetryDelay)
+				defer timer.Stop()
+				select {
+				case <-lifetime.Done():
+					return
+				case <-timer.C:
+				}
+			}
 			r.requestReconcile()
 		}
 	}()
@@ -125,6 +137,10 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignment) error {
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
 	defer cancel()
+	// This independently records an actually observed process close. It grants
+	// no Run/business completion and must not wait behind a rejected event.
+	// Its existing optional envelope remains durable across an unknown reply.
+	_ = r.reportSessionStop(ctx, as)
 	pending, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return err
@@ -632,7 +648,7 @@ func (r *Runner) flushManagerEvents(ctx context.Context, as protocol.Assignment)
 	sort.Slice(events, func(i, j int) bool { return sequence(events[i]) < sequence(events[j]) })
 	for _, p := range events {
 		if _, err = r.send(ctx, runCredential(as), &p.Envelope); err != nil {
-			return err
+			return fmt.Errorf("deliver original manager event %s sequence %d: %w", p.Envelope.RequestID, sequence(p), err)
 		}
 		if err = r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
 			return err
