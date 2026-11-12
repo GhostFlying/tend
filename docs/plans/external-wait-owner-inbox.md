@@ -38,9 +38,14 @@ canonical association 把原消息加入该 Issue 的 background batch，通过�
 请求身份检查。不得将 main 已处理等同 Issue 已处理，也不把普通 system batch
 当作 owner 输入。pending/frozen batch 的领取事实不单独冒充原生消费。
 
+直接 inbox 只接受等待 Issue 自己会话的投递目的地；main 原消息即使仍 pending，
+也不能绕过该 Issue 独立载体的已处理或未知回执。main 路由来源只能按接收 Issue
+自己的 batch/source 判断，不能再由全局 main inbox 提供第二条准入路径。
+
 补充 main 原输入 sending/delivered、Issue 载体仍 pending 的真实回归，以及
-Issue 载体已处理或仍有未知原生回执的负例；保留首轮 red、冻结候选审阅发现和
-旧完整门槛终止事实。只在最终增量上继续同一独立审阅与完整交付门槛。
+main 保持 pending 时 Issue 载体已处理或仍有未知原生回执的负例。验证原输入和
+载体身份、真实停止后不重复续行及 unknown 不重放；保留首轮 red、冻结候选审阅
+发现和旧完整门槛终止事实。只在最终增量上继续同一独立审阅与完整交付门槛。
 
 ## 协议评估
 

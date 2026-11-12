@@ -1807,6 +1807,8 @@ server 沿既有 sweep 观察条件并合并唤醒原 Task/Issue，不安排模�
 生成一份同 Task 的续行；上下文索引或事件水位不替代消息实际投递和消费证据。
 main 已准入或消费原消息不代表关联 Issue 已处理；路由输入按该 Issue 的待投递
 background batch/source 及其实际原生回执判断，不使用 main 的投递结算替代。
+直接 inbox 仅检查当前 Issue 会话的投递目的地；main 原消息仍待投递也不能绕过
+接收 Issue 自己载体的消费或 unknown 围栏。
 
 协议 3 的 assignment 通过可选 `session_stop_reports` 明确协商 session 停止元数据。
 它不是业务完成或物理停止的必要回执；单次有界上报失败时保留原 Envelope，
