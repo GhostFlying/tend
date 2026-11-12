@@ -35,13 +35,14 @@ type managerEventOrigin struct {
 }
 
 type runnerTransport struct {
-	attachment context.Context
-	mu         sync.Mutex
-	rowCursor  int64
-	sequence   int64
-	origins    map[int64]managerEventOrigin
-	app        *app.App
-	run        string
+	attachment  context.Context
+	mu          sync.Mutex
+	rowCursor   int64
+	sequence    int64
+	origins     map[int64]managerEventOrigin
+	app         *app.App
+	run         string
+	streamEnded bool
 }
 
 func (t *runnerTransport) Call(ctx context.Context, method string, input, output any) error {
@@ -70,6 +71,12 @@ func (t *runnerTransport) Call(ctx context.Context, method string, input, output
 			}
 			return nil
 		}
+	}
+	t.mu.Lock()
+	streamEnded := t.streamEnded
+	t.mu.Unlock()
+	if streamEnded && method != "close" {
+		return fmt.Errorf("%w: native event transport ended; only retained closing metadata is available", harness.ErrRejected)
 	}
 	ended, err := t.app.ManagerRunEnded(ctx, t.run)
 	if err != nil {
@@ -142,7 +149,14 @@ func (t *runnerTransport) awaitReply(ctx context.Context, method, id string, out
 		}
 	}
 }
-func (t *runnerTransport) Events(ctx context.Context, _ int64) ([]coordination.Event, error) {
+func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coordination.Event, eventErr error) {
+	defer func() {
+		if eventErr != nil {
+			t.mu.Lock()
+			t.streamEnded = true
+			t.mu.Unlock()
+		}
+	}()
 	for {
 		wake := t.app.Changes().Wait()
 		events, err := t.app.ManagerReplayEvents(ctx, t.run, t.rowCursor)
@@ -178,6 +192,11 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) ([]coordination.E
 				item.SourceRunID = e.RunID
 				item.SourceSequence = e.Sequence
 				item.Historical = e.RunID != t.run
+				if item.Disconnected && !item.Historical {
+					t.mu.Lock()
+					t.streamEnded = true
+					t.mu.Unlock()
+				}
 				t.rowCursor = e.Cursor
 				t.mu.Lock()
 				if t.origins == nil {

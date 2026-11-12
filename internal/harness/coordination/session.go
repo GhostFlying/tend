@@ -17,6 +17,8 @@ import (
 )
 
 // Transport persists operations before sending them to the leased runner.
+// Once its event stream ends, resume may only expose confirmed local closing
+// metadata. It must never dispatch new native work on that ended connection.
 type Transport interface {
 	Call(context.Context, string, any, any) error
 	Events(context.Context, int64) ([]Event, error)
@@ -75,6 +77,8 @@ type Session struct {
 	mu        sync.Mutex
 	threads   map[string]*thread
 	orphans   map[string][]Event
+	ended     bool
+	closing   bool
 	once      sync.Once
 	closeErr  error
 	handlers  sync.WaitGroup
@@ -95,6 +99,9 @@ func NewAt(ctx context.Context, t Transport, cursor int64) *Session {
 func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) Close() error {
 	s.once.Do(func() {
+		s.mu.Lock()
+		s.closing = true
+		s.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 10*time.Second)
 		defer cancel()
 		s.closeErr = s.transport.Call(ctx, "close", Request{}, nil)
@@ -106,10 +113,30 @@ func (s *Session) Close() error {
 
 // call preserves each caller's deadline while also ending pending operations
 // when their connection ends. Cancellation never establishes a native outcome.
-func (s *Session) call(ctx context.Context, method string, input, output any) error {
+func (s *Session) call(ctx context.Context, method string, input, output any) (callErr error) {
+	s.mu.Lock()
+	closing := s.closing
+	s.mu.Unlock()
+	if closing {
+		return fmt.Errorf("%w: coordinator connection is closing", harness.ErrRejected)
+	}
+	caller := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(s.ctx, cancel)
-	defer func() { stop(); cancel() }()
+	defer func() {
+		stop()
+		cancel()
+		if callErr == nil || caller.Err() != nil || s.ctx.Err() == nil {
+			return
+		}
+		switch method {
+		case "models", "find", "usage":
+			// These calls have no native business effect. Connection EOF may
+			// beat a ledger read of physical end; preserve the same rejection
+			// in either order, without reclassifying a lost mutation reply.
+			callErr = fmt.Errorf("%w: native observation ended with its connection: %v", harness.ErrRejected, callErr)
+		}
+	}()
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
@@ -139,8 +166,32 @@ func (s *Session) ReleaseThread(ctx context.Context, id string) error {
 func (s *Session) open(ctx context.Context, method, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	// Native working directories belong to the runner, never the server.
 	cfg.Cwd = ""
+	request := Request{ThreadID: id, Config: cfg}
 	var info ThreadInfo
-	if err := s.call(ctx, method, Request{ThreadID: id, Config: cfg}, &info); err != nil {
+	s.mu.Lock()
+	ended, closing := s.ended, s.closing
+	s.mu.Unlock()
+	if closing {
+		return nil, fmt.Errorf("%w: coordinator connection is closing", harness.ErrRejected)
+	}
+	var err error
+	attachRetained := ended
+	if !ended {
+		err = s.call(ctx, method, request, &info)
+		s.mu.Lock()
+		ended, closing = s.ended, s.closing
+		s.mu.Unlock()
+		attachRetained = ended && err != nil
+	}
+	if attachRetained && !closing && method == "resume" && ctx.Err() == nil {
+		// The transport has ended, but confirmed closing metadata and original
+		// tails remain readable. Transport.Call must only return local metadata
+		// here; its ended stream cannot dispatch another native operation.
+		err = s.transport.Call(ctx, method, request, &info)
+	} else if attachRetained && err == nil {
+		err = fmt.Errorf("%w: coordinator connection ended", harness.ErrRejected)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if info.ID == "" {
@@ -148,32 +199,45 @@ func (s *Session) open(ctx context.Context, method, id string, cfg harness.Threa
 	}
 	t := &thread{session: s, info: info, handler: cfg.OnToolCall}
 	s.mu.Lock()
-	if s.ctx.Err() != nil {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.closing {
+		return nil, fmt.Errorf("%w: coordinator connection is closing", harness.ErrRejected)
+	}
+	if s.ctx.Err() != nil && !s.ended {
 		return nil, s.ctx.Err()
+	}
+	if s.ended {
+		if current := s.threads[info.ID]; current != nil {
+			return current, nil
+		}
 	}
 	pending := append(s.orphans[info.ID], s.orphans[""]...)
 	sort.Slice(pending, func(i, j int) bool { return pending[i].Sequence < pending[j].Sequence })
-	// Seed retained events before publishing the attachment. Start/resume
-	// must return before a consumer can drain them, and newer events must
-	// never overtake this backlog.
+	// Seed retained events before publishing the attachment. This is also the
+	// local drain-only path after a pre-attachment connection end.
 	t.events = make(chan harness.Event, len(pending)+256)
 	for _, event := range pending {
-		if event.Call != nil {
+		if event.Call != nil && !s.ended {
 			s.startToolLocked(t, event)
 		}
 		if native := coordinatorNativeEvent(event); native != nil {
 			t.events <- *native
 		}
 	}
+	if s.ended {
+		close(t.events)
+		t.closed = true
+	}
 	s.threads[info.ID] = t
 	delete(s.orphans, info.ID)
 	delete(s.orphans, "")
-	s.mu.Unlock()
 	return t, nil
 }
 func (s *Session) pump() {
 	defer func() {
+		s.mu.Lock()
+		s.ended = true
+		s.mu.Unlock()
 		s.cancel()
 		s.mu.Lock()
 		threads := make([]*thread, 0, len(s.threads))
@@ -214,6 +278,9 @@ func (s *Session) pump() {
 				// including a front thread created after a toolset handoff.
 				for _, t := range s.threads {
 					recipients = append(recipients, t)
+				}
+				if len(recipients) == 0 {
+					s.orphans[""] = append(s.orphans[""], e)
 				}
 			} else if t := s.threads[e.ThreadID]; t != nil {
 				recipients = append(recipients, t)
