@@ -160,6 +160,8 @@ func TestFault_CompletedManagerEventFailureReportsStoppedOriginalRun(t *testing.
 func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archiveMode string) {
 	s := newServerWithOptions(t, time.Second*10, time.Now, app.WithFollowups(true))
 	archiveFault := archiveMode == "foreign" || archiveMode == "receipt"
+	externalWait := archiveMode == "external_wait" || archiveMode == "external_wait_migrated"
+	var migration sync.Once
 	if delivery {
 		s.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Slots: 1, Repos: []string{"tend"}, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}}}, app.SyncConfig{})
 	}
@@ -289,7 +291,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		if !invoke("issues_read", map[string]any{}, &item) {
 			return "failed"
 		}
-		if archiveMode == "external_wait" {
+		if externalWait {
 			var task, run string
 			if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 				return tx.Q().QueryRowContext(ctx, `SELECT r.task_id,r.run_id FROM issue_manager_tasks m JOIN runs r USING(task_id) WHERE m.issue_id=? AND r.observed_state IN ('starting','running') ORDER BY r.created_at DESC LIMIT 1`, item.IssueID).Scan(&task, &run)
@@ -474,7 +476,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			if !selected.RunnerManaged || selected.RunnerRunID == "" {
 				return nil, errors.New("server-local manager launch is forbidden")
 			}
-			if archiveMode == "external_wait" && selected.ReceiptOnly {
+			if externalWait && selected.ReceiptOnly {
 				var file protocol.ArtifactFile
 				select {
 				case file = <-waitFile:
@@ -498,6 +500,29 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				}
 				recoveredWaitFiles.Add(1)
 			}
+			if archiveMode == "external_wait_migrated" && !selected.ReceiptOnly {
+				var seedErr error
+				migration.Do(func() {
+					sourceSession, err := fake.Open(ctx)
+					if err != nil {
+						seedErr = err
+						return
+					}
+					source, err := sourceSession.StartThread(ctx, harness.ThreadConfig{Model: "manager-model"})
+					if err != nil {
+						seedErr = err
+						return
+					}
+					if err = sourceSession.Close(); err != nil {
+						seedErr = err
+						return
+					}
+					_, seedErr = s.app.BindMainThread(ctx, selected.BindingInstance("runner-manager/"+id), source.ID(), "previous-toolset", "")
+				})
+				if seedErr != nil {
+					return nil, seedErr
+				}
+			}
 			return mainthread.RunnerSession(ctx, s.app, selected.RunnerRunID), nil
 		}, RestartDelay: time.Millisecond * 20, Log: quiet()}), nil
 	}}
@@ -515,7 +540,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
 		t.Fatal(err)
 	}
-	if archiveMode == "external_wait" {
+	if externalWait {
 		var original string
 		select {
 		case original = <-waitOriginal:
@@ -537,6 +562,24 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		})
 		if fake.HistoryReads() == 0 || len(fake.Starts()) != 1 || s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 {
 			t.Fatal("physical wait replayed business instead of handing off original history", fake.HistoryReads(), len(fake.Starts()))
+		}
+		if archiveMode == "external_wait_migrated" {
+			if s.count(`SELECT COUNT(*) FROM main_thread_handoffs WHERE phase='committed'`) != 1 || fake.Resumed() == 0 {
+				t.Fatal("fixture did not migrate the retained original thread", fake.Resumed())
+			}
+			waitBusinessContinuity(t, "history reader releases its physical carrier and pool", func() bool {
+				drained, err := pool.UpgradeDrainStatus(ctx)
+				return err == nil && drained && s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) == 0
+			})
+			if _, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest)}, true); err != nil {
+				t.Fatal("receipt handoff could not prepare maintenance", err)
+			}
+			if needed, err := s.app.ArchiveNeedsReceiptRead(ctx, "issue:"+issue.IssueID); err != nil || needed {
+				t.Fatal("maintenance retained a settled original receipt", needed, err)
+			}
+			if drained, err := pool.ArchiveDrainStatus(ctx); err != nil || !drained {
+				t.Fatal("settled attachment still blocked maintenance park", drained, err)
+			}
 		}
 		if recoveredWaitFiles.Load() == 0 || s.count(`SELECT COUNT(*) FROM deliverable_files WHERE run_id=?`, original) != 1 || s.count(`SELECT COUNT(*) FROM deliverable_files`) != 1 {
 			t.Fatal("history handoff lost or reuploaded the original evidence", recoveredWaitFiles.Load())

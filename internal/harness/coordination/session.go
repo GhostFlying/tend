@@ -103,9 +103,22 @@ func (s *Session) Close() error {
 	})
 	return s.closeErr
 }
+
+// call preserves each caller's deadline while also ending pending operations
+// when their connection ends. Cancellation never establishes a native outcome.
+func (s *Session) call(ctx context.Context, method string, input, output any) error {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer func() { stop(); cancel() }()
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	return s.transport.Call(ctx, method, input, output)
+}
+
 func (s *Session) Models(ctx context.Context) ([]harness.Model, error) {
 	var models []harness.Model
-	err := s.transport.Call(ctx, "models", Request{}, &models)
+	err := s.call(ctx, "models", Request{}, &models)
 	return models, err
 }
 func (s *Session) StartThread(ctx context.Context, cfg harness.ThreadConfig) (harness.Thread, error) {
@@ -121,13 +134,13 @@ func (s *Session) ForkThread(ctx context.Context, id string, cfg harness.ThreadC
 	return s.open(ctx, "fork", id, cfg)
 }
 func (s *Session) ReleaseThread(ctx context.Context, id string) error {
-	return s.transport.Call(ctx, "release", Request{ThreadID: id}, nil)
+	return s.call(ctx, "release", Request{ThreadID: id}, nil)
 }
 func (s *Session) open(ctx context.Context, method, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	// Native working directories belong to the runner, never the server.
 	cfg.Cwd = ""
 	var info ThreadInfo
-	if err := s.transport.Call(ctx, method, Request{ThreadID: id, Config: cfg}, &info); err != nil {
+	if err := s.call(ctx, method, Request{ThreadID: id, Config: cfg}, &info); err != nil {
 		return nil, err
 	}
 	if info.ID == "" {
@@ -194,27 +207,53 @@ func (s *Session) pump() {
 			}
 			cursor = e.Sequence
 			s.mu.Lock()
-			t := s.threads[e.ThreadID]
-			if e.Disconnected && t == nil {
-				for _, candidate := range s.threads {
-					t = candidate
-					break
+			var recipients []*thread
+			connectionEnd := e.Disconnected && !e.Historical
+			if e.Disconnected && e.ThreadID == "" {
+				// A connection-level end belongs to every attached consumer,
+				// including a front thread created after a toolset handoff.
+				for _, t := range s.threads {
+					recipients = append(recipients, t)
 				}
-			}
-			if t == nil {
+			} else if t := s.threads[e.ThreadID]; t != nil {
+				recipients = append(recipients, t)
+			} else {
 				s.orphans[e.ThreadID] = append(s.orphans[e.ThreadID], e)
 			}
 			s.mu.Unlock()
-			if t != nil && !s.deliver(t, e) {
-				return
+			for _, t := range recipients {
+				if connectionEnd {
+					s.deliverConnectionEnd(t, e)
+				} else if !s.deliver(t, e) {
+					return
+				}
 			}
-			if e.Disconnected && !e.Historical {
-				<-s.ctx.Done()
+			if connectionEnd {
+				// No consumer must issue Close before the connection can end.
+				// Deferred cancellation releases calls/handlers and closes all
+				// streams after their already queued tail, without a new turn.
 				return
 			}
 		}
 	}
 }
+
+// deliverConnectionEnd cannot wait for an abandoned thread to drain. A full
+// buffer keeps every earlier event and reaches EOF when drained; other attached
+// consumers can acknowledge the original end marker. The durable transport
+// retains any unacknowledged marker for its later history reader.
+func (s *Session) deliverConnectionEnd(t *thread, e Event) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return
+	}
+	select {
+	case t.events <- *coordinatorNativeEvent(e):
+	default:
+	}
+}
+
 func (s *Session) startToolLocked(t *thread, e Event) {
 	s.handlers.Add(1)
 	go func() {
@@ -317,30 +356,30 @@ func (t *thread) ModelDefaults() harness.ModelSelection          { return t.info
 func (t *thread) PermissionDefaults() harness.PermissionSettings { return t.info.Permissions }
 func (t *thread) RolloutPath() string                            { return "" }
 func (t *thread) InjectDeveloper(ctx context.Context, texts ...string) error {
-	return t.session.transport.Call(ctx, "inject", Request{ThreadID: t.ID(), Texts: texts}, nil)
+	return t.session.call(ctx, "inject", Request{ThreadID: t.ID(), Texts: texts}, nil)
 }
 func (t *thread) StartTurn(ctx context.Context, in harness.TurnInput) (string, error) {
 	var id string
-	err := t.session.transport.Call(ctx, "turn", Request{ThreadID: t.ID(), Input: in}, &id)
+	err := t.session.call(ctx, "turn", Request{ThreadID: t.ID(), Input: in}, &id)
 	return id, err
 }
 func (t *thread) Interrupt(ctx context.Context, id string) error {
-	return t.session.transport.Call(ctx, "interrupt", Request{ThreadID: t.ID(), TurnID: id}, nil)
+	return t.session.call(ctx, "interrupt", Request{ThreadID: t.ID(), TurnID: id}, nil)
 }
 func (t *thread) SteerTurn(ctx context.Context, id string, in harness.TurnInput) error {
-	return t.session.transport.Call(ctx, "steer", Request{ThreadID: t.ID(), TurnID: id, Input: in}, nil)
+	return t.session.call(ctx, "steer", Request{ThreadID: t.ID(), TurnID: id, Input: in}, nil)
 }
 func (t *thread) ContextUsage(ctx context.Context) (protocol.AgentContextUsage, error) {
 	var usage protocol.AgentContextUsage
-	err := t.session.transport.Call(ctx, "usage", Request{ThreadID: t.ID()}, &usage)
+	err := t.session.call(ctx, "usage", Request{ThreadID: t.ID()}, &usage)
 	return usage, err
 }
 func (t *thread) Compact(ctx context.Context) error {
-	return t.session.transport.Call(ctx, "compact", Request{ThreadID: t.ID()}, nil)
+	return t.session.call(ctx, "compact", Request{ThreadID: t.ID()}, nil)
 }
 func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.TurnReceipt, bool, error) {
 	var result FindResult
-	err := t.session.transport.Call(ctx, "find", Request{ThreadID: t.ID(), MessageID: message, TurnID: id}, &result)
+	err := t.session.call(ctx, "find", Request{ThreadID: t.ID(), MessageID: message, TurnID: id}, &result)
 	return result.Receipt, result.Found, err
 }
 
