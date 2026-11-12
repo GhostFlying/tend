@@ -26,6 +26,22 @@ Issue owner 的当前执行结束前，新的 owner 消息已经保存在原会�
 
 Refs: D221。
 
+## 独立审阅发现：按接收责任区分投递
+
+原 owner 输入在 main 已进入原生 turn 或已完成，不代表其关联 Issue 已处理。
+canonical association 把原消息加入该 Issue 的 background batch，通过独立
+`handle_event` 投递；它仍 pending 时不能用 main 的投递/消费事实排除唤醒。
+
+在原谓词内合并当前待投递的直接 `handle_message` 与该 Issue 的
+`handle_event`/background source，统一核对真实 owner 来源、活动关联、撤回及
+取消。原生 turn、receipt 和 steer 的未知/已准入边界应按各自实际投递载体的
+请求身份检查。不得将 main 已处理等同 Issue 已处理，也不把普通 system batch
+当作 owner 输入。pending/frozen batch 的领取事实不单独冒充原生消费。
+
+补充 main 原输入 sending/delivered、Issue 载体仍 pending 的真实回归，以及
+Issue 载体已处理或仍有未知原生回执的负例；保留首轮 red、冻结候选审阅发现和
+旧完整门槛终止事实。只在最终增量上继续同一独立审阅与完整交付门槛。
+
 ## 协议评估
 
 修复只改变 server 对已提交 inbox 与停止事实的读侧唤醒判断，不更改请求、

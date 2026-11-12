@@ -271,3 +271,166 @@ func TestExternalWaitOwnerInboxKeepsUncertainNativeInputFenced(t *testing.T) {
 		t.Fatal("external wait replaced the original uncertain turn", current, ok, err)
 	}
 }
+
+func routeMainWaitInput(t *testing.T, h *harness, as protocol.Assignment, completed bool) (Delivery, store.MainTurn, string) {
+	t.Helper()
+	message, request := queueOwnerWaitInput(t, h, "main")
+	d, _, ok, err := h.app.NextDelivery(t.Context(), MainThreadDestination)
+	if err != nil || !ok || d.RequestID != request {
+		t.Fatal(d, ok, err)
+	}
+	turn := store.MainTurn{RequestID: request, MessageID: message, ThreadID: "routing-main", Status: store.TurnStarting}
+	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+		t.Fatal(err)
+	}
+	turn.Status, turn.TurnID = store.TurnStarted, "routing-main-turn"
+	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+		t.Fatal(err)
+	}
+	if op := h.associate(owner, message, as.Manager.IssueID); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if completed {
+		turn.Status = store.TurnCompleted
+		if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var carrier string
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT o.request_id FROM background_sources s JOIN background_batches b USING(batch_id) JOIN outbox o ON json_extract(o.payload_json,'$.message_id')=b.message_id WHERE b.work_item_id=? AND s.message_id=? AND o.destination=? AND o.operation='main_thread.handle_event' AND o.status='pending'`, as.Manager.IssueID, message, "background_thread:"+as.Manager.ConversationID).Scan(&carrier)
+	}); err != nil {
+		t.Fatal("original input has no pending delivery to its Issue owner", err)
+	}
+	if carrier == request {
+		t.Fatal("main and Issue must retain their distinct delivery identities")
+	}
+	return d, turn, carrier
+}
+
+func TestFault_ExternalWaitRoutedMainOwnerInput(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "main-sending", true: "main-delivered"}[completed], func(t *testing.T) {
+			h, _, as, dependency := ownerInboxWaitFixture(t)
+			wait := waitForTask(t, h, as, dependency, 0)
+			mainDelivery, mainTurn, carrier := routeMainWaitInput(t, h, as, completed)
+			if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if h.lease(as.RunID).Status != store.LeaseActive || h.count("run_external_waits WHERE continuation_action_id IS NOT NULL") != 0 {
+				t.Fatal("routing owner input released a live Issue process")
+			}
+			stopOwnerClaim(t, h, as)
+			h.clock.Advance(5 * time.Second)
+			for range 2 {
+				if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waits, err := h.app.ExternalWaits(t.Context(), as.TaskID)
+			if err != nil || len(waits) != 1 || waits[0].WaitID != wait.WaitID || waits[0].Status != "continued" || waits[0].WakeReason != "owner_input" || h.count("run_external_waits WHERE continuation_action_id IS NOT NULL") != 1 {
+				t.Fatal("main admission hid the pending Issue-owner input", waits, err)
+			}
+			if current, found, err := h.app.MainTurn(t.Context(), mainDelivery.RequestID); err != nil || !found || current != mainTurn {
+				t.Fatal("Issue wake changed the original main turn", current, found, err)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var status string
+				var attempts int
+				if err := tx.Q().QueryRowContext(t.Context(), `SELECT status,attempts FROM outbox WHERE request_id=?`, carrier).Scan(&status, &attempts); err != nil {
+					return err
+				}
+				if status != "pending" || attempts != 0 {
+					t.Fatal("waking fabricated Issue delivery or consumption", status, attempts)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestExternalWaitRoutedInputUsesIssueAdmission(t *testing.T) {
+	for _, state := range []string{"completed", "unknown", "rejected"} {
+		t.Run(state, func(t *testing.T) {
+			h, _, as, dependency := ownerInboxWaitFixture(t)
+			_, _, carrier := routeMainWaitInput(t, h, as, true)
+			d, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+as.Manager.ConversationID)
+			if err != nil || !ok || d.RequestID != carrier {
+				t.Fatal("fixture did not claim the Issue's actual carrier", d, ok, err)
+			}
+			if state == "rejected" {
+				var payload HandleMessage
+				if err := json.Unmarshal(d.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				selected, named, err := h.app.NamedHostedSelection(t.Context(), as.Manager.ConversationID)
+				if err != nil || !named {
+					t.Fatal(named, err)
+				}
+				turn := store.MainTurn{RequestID: carrier, MessageID: payload.MessageID, ThreadID: "rejected-Issue-input", Hosted: &selected, Status: store.TurnStarting}
+				if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+					t.Fatal(err)
+				}
+				turn.Status = store.TurnRejected
+				if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Retry}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				turn := startHostedReview(t, h, as.Manager.ConversationID, d)
+				if state == "completed" {
+					finishHostedReview(t, h, turn)
+				} else {
+					if err := h.app.AwaitNativeReceipts(t.Context(), turn.ThreadID); err != nil {
+						t.Fatal(err)
+					}
+					if err := h.app.SettleOpenTurns(t.Context(), turn.ThreadID); err != nil {
+						t.Fatal(err)
+					}
+					if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Unknown}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			waitForTask(t, h, as, dependency, 0)
+			if state == "unknown" {
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					ready, err := externalWaitOwnerInputReady(t.Context(), tx.Q(), as.TaskID)
+					if err == nil && ready {
+						t.Fatal("main completion bypassed the Issue's uncertain native carrier")
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if pending, err := h.app.NativeReceiptPending(t.Context(), carrier); err != nil || !pending {
+					t.Fatal("Issue's original receipt fence was lost", pending, err)
+				}
+				if next, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+as.Manager.ConversationID); err != nil || ok {
+					t.Fatal("uncertain Issue carrier was replayed", next, ok, err)
+				}
+				return
+			}
+			stopOwnerClaim(t, h, as)
+			h.clock.Advance(5 * time.Second)
+			if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			waits, err := h.app.ExternalWaits(t.Context(), as.TaskID)
+			want := "waiting"
+			if state == "rejected" {
+				want = "continued"
+			}
+			if err != nil || len(waits) != 1 || waits[0].Status != want {
+				t.Fatal("Issue delivery admission was replaced with main's consumption", waits, err)
+			}
+		})
+	}
+}
