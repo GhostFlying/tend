@@ -75,6 +75,7 @@ func (WaitExternal) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	v := protocol.ExternalWait{WaitExternalPayload: p, WaitID: x.Env.RequestID, RunID: run.RunID, TaskID: run.TaskID, Status: "stopping", CreatedAtMillis: x.Now.UnixMilli(), NextReminderAtMillis: x.Now.Add(externalWaitReminder).UnixMilli()}
 	if run.Role == protocol.RoleIssueManager {
+		// This records the observed event head, not owner input consumption.
 		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events`).Scan(&v.InputEventWatermark); err != nil {
 			return Outcome{}, err
 		}
@@ -387,7 +388,7 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx) (bo
 		if v.ResumeReason != "" {
 			ready, reason = true, "requested"
 		} else if r.Role == protocol.RoleIssueManager {
-			ready, err = externalWaitOwnerInputReady(ctx, tx.Q(), r.TaskID, v.InputEventWatermark)
+			ready, err = externalWaitOwnerInputReady(ctx, tx.Q(), r.TaskID)
 			if err != nil {
 				return false, err
 			}
@@ -446,18 +447,26 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx) (bo
 	return changed, nil
 }
 
-func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task string, watermark int64) (bool, error) {
+func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task string) (bool, error) {
 	m, err := store.GetIssueManagerTask(ctx, q, task)
 	if err != nil {
 		return false, err
 	}
 	var ready bool
-	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
- JOIN conversation_messages input ON e.object_type='message' AND e.object_id=input.message_id
+	// A queued owner input can predate this wait. Inspect its actual admission
+	// facts instead of treating the registration event head as a consumed cursor.
+	// Uncertain native work retains its existing receipt fence, not a new send.
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o
+ JOIN conversation_messages input ON input.message_id=json_extract(o.payload_json,'$.message_id')
+ JOIN owner_authority_messages owner_input ON owner_input.message_id=input.message_id
  LEFT JOIN conversation_message_controls controls USING(message_id)
- WHERE e.event_seq>? AND COALESCE(controls.withdrawn_at,0)=0
- AND EXISTS(SELECT 1 FROM owner_authority_messages owner_input WHERE owner_input.message_id=input.message_id)
- AND (input.conversation_id=? OR EXISTS(SELECT 1 FROM message_work_items linked WHERE linked.message_id=input.message_id AND linked.work_item_id=? AND linked.active=1)))`, watermark, m.ConversationID, m.IssueID).Scan(&ready)
+ WHERE o.status='pending' AND o.operation='main_thread.handle_message'
+ AND (o.destination='main_thread' OR o.destination LIKE 'background_thread:%')
+ AND COALESCE(controls.withdrawn_at,0)=0
+ AND (input.conversation_id=? OR EXISTS(SELECT 1 FROM message_work_items linked WHERE linked.message_id=input.message_id AND linked.work_item_id=? AND linked.active=1))
+ AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status<>'rejected')
+ AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=o.request_id)
+ AND NOT EXISTS(SELECT 1 FROM main_steers s WHERE s.request_id=o.request_id AND (s.native_item_id<>'' OR s.status<>'waiting')))`, m.ConversationID, m.IssueID).Scan(&ready)
 	return ready, err
 }
 
