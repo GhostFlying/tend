@@ -175,43 +175,44 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err := validateDeliveryCandidate(ctx, tx.Q(), issue, *p.Candidate); err != nil {
 			return Outcome{}, err
 		}
-		if d.ExecutionTaskID == d.TaskID && d.ExecutionTaskID != "" {
-			if err := refreshSelfDeliveryCandidate(ctx, x, tx, issue, d, p); err != nil {
-				return Outcome{}, err
-			}
-			if sameDeliveryCandidate(d.Candidate, p.Candidate) {
-				return Outcome{Result: d}, nil
-			}
-			d.ExecutionTaskID = ""
-		} else if d.ExecutionTaskID != "" {
+		if d.ExecutionTaskID != "" {
 			task, err := store.GetTask(ctx, tx.Q(), d.ExecutionTaskID)
 			if err != nil {
 				return Outcome{}, err
 			}
-			var busy bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r LEFT JOIN leases l USING(run_id) WHERE r.task_id=? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR l.status<>'released')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, task.TaskID, task.TaskID).Scan(&busy); err != nil {
-				return Outcome{}, err
-			}
-			if !task.Lifecycle.Terminal() || busy {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reconcile the existing delivery execution and resource before changing its candidate")
-			}
-			var previousUpgrade string
-			if err := tx.Q().QueryRowContext(ctx, `SELECT upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&previousUpgrade); err != nil {
-				return Outcome{}, err
-			}
-			if previousUpgrade != "" {
-				batch, err := store.GetUpgrade(ctx, tx.Q(), previousUpgrade)
-				if err != nil {
+			if d.ExecutionTaskID == d.TaskID && !task.Lifecycle.Terminal() {
+				if err := refreshSelfDeliveryCandidate(ctx, x, tx, issue, d, p); err != nil {
 					return Outcome{}, err
 				}
-				if batch.View.Status == "running" || batch.View.Status == "attention" {
-					return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original controlled upgrade before preparing another execution")
+				if sameDeliveryCandidate(d.Candidate, p.Candidate) {
+					return Outcome{Result: d}, nil
 				}
-			}
-			// Explicit prepare is a new reviewed candidate after the old execution
-			// settled. Keep its task/spec/run and authorization rows immutable.
-			if reflect.DeepEqual(d.Candidate, p.Candidate) {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "this candidate already has a settled execution; reconcile its result before requesting another candidate")
+			} else {
+				var busy bool
+				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r LEFT JOIN leases l USING(run_id) WHERE r.task_id=? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR l.status<>'released')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, task.TaskID, task.TaskID).Scan(&busy); err != nil {
+					return Outcome{}, err
+				}
+				if !task.Lifecycle.Terminal() || busy {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reconcile the existing delivery execution and resource before changing its candidate")
+				}
+				var previousUpgrade string
+				if err := tx.Q().QueryRowContext(ctx, `SELECT upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&previousUpgrade); err != nil {
+					return Outcome{}, err
+				}
+				if previousUpgrade != "" {
+					batch, err := store.GetUpgrade(ctx, tx.Q(), previousUpgrade)
+					if err != nil {
+						return Outcome{}, err
+					}
+					if batch.View.Status == "running" || batch.View.Status == "attention" {
+						return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original controlled upgrade before preparing another execution")
+					}
+				}
+				// Explicit prepare is a new reviewed candidate after the old execution
+				// settled. Keep its task/spec/run and authorization rows immutable.
+				if reflect.DeepEqual(d.Candidate, p.Candidate) {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "this candidate already has a settled execution; reconcile its result before requesting another candidate")
+				}
 			}
 			d.ExecutionTaskID = ""
 		}

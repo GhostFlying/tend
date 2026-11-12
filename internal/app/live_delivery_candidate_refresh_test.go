@@ -253,3 +253,49 @@ func TestLiveDeliveryUpgradeUsesActualCurrentLease(t *testing.T) {
 		})
 	}
 }
+
+func TestLiveSelfDeliveryCompletedTaskKeepsReplacementPath(t *testing.T) {
+	h, runtime, issue, as, candidate := liveReviewedDeliveryFixture(t)
+	prepareLiveDeliveryForTest(t, h, issue.IssueID, as.TaskID, candidate)
+	original := bindSelfCandidateForTest(t, h, issue.IssueID, as.TaskID)
+	result := testArtifact(h.task(as.TaskID).WorkspaceName)
+	result.Mounts[0].Changed, result.Mounts[0].CommitSHA = true, candidate.HeadSHA
+	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, result, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	accept, ok := h.claimInputRun(runtime)
+	if !ok || accept.TaskID != as.TaskID || accept.Role != protocol.RoleAccept {
+		t.Fatal("actual acceptance was not scheduled", accept, ok)
+	}
+	if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	before := h.task(as.TaskID)
+	if before.Lifecycle != protocol.TaskCompleted || h.lease(as.RunID).Status != store.LeaseReleased || h.lease(accept.RunID).Status != store.LeaseReleased {
+		t.Fatal("fixture has not actually completed and stopped", before)
+	}
+	candidate = observeSelfRefreshTarget(t, h, issue.IssueID, candidate)
+	payload := protocol.UpdateIssueDeliveryPayload{Action: "prepare", TaskID: as.TaskID, ExpectedTaskControlRevision: rev(before.ControlRevision), Candidate: &candidate, IssueControlPayload: protocol.IssueControlPayload{Reason: "Prepare a new open PR candidate without reviving its completed Task"}}
+	if op := updateDeliveryForTest(t, h, issue.IssueID, payload); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+		t.Fatal("completed Task bypassed its occupied workspace", op)
+	}
+	if actual := deliveryDutyForTest(t, h, issue.IssueID, as.TaskID); !reflect.DeepEqual(actual, original) {
+		t.Fatal("rejected replacement changed the original delivery", actual, original)
+	}
+	resource := h.resourceForTask(as.TaskID)
+	if !h.releaseResource(as.TaskID, resource.WorkspaceID) {
+		t.Fatal("actual resource was not released")
+	}
+	tasks, runs, artifacts := h.count("tasks"), h.count("runs"), h.count("artifacts")
+	if op := updateDeliveryForTest(t, h, issue.IssueID, payload); op.Status != protocol.OpSucceeded {
+		t.Fatal("completed self-bound execution cannot prepare a replacement after actual resource release", op)
+	}
+	after := h.task(as.TaskID)
+	if after.Lifecycle != before.Lifecycle || after.ControlRevision != before.ControlRevision || after.SpecVersion != before.SpecVersion || after.CurrentArtifactID != before.CurrentArtifactID || h.count("tasks") != tasks || h.count("runs") != runs || h.count("artifacts") != artifacts {
+		t.Fatal("candidate preparation rewrote completed work or created another execution", after, before)
+	}
+	current := deliveryDutyForTest(t, h, issue.IssueID, as.TaskID)
+	if current.ExecutionTaskID != "" || current.Candidate.TargetSHA != candidate.TargetSHA || current.Revision <= original.Revision {
+		t.Fatal("replacement candidate did not follow the existing settled-execution path", current)
+	}
+}
