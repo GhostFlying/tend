@@ -17,7 +17,7 @@ const ResultTool = "submit_result"
 
 var ResultToolSpec = ToolSpec{
 	Name:        ResultTool,
-	Description: "Submit your completed task result. Report is optional unless required by the task. Whole-PR reviewers include report.shared_review with the frozen candidate and requirements digest. Upload only explicitly selected deliverable files. Call at the end; do not rely on your final chat message as delivery.",
+	Description: "Submit your completed task result. Report is optional unless required by the task. Whole-PR reviewers include report.shared_review with the frozen candidate and requirements digest. Upload only explicitly selected deliverable files. To reuse confirmed original uploads from an earlier Run of this same Task, pass their unchanged file_id/name/size/sha256 metadata as existing_files; preserve the original check provenance. Call at the end; do not rely on your final chat message as delivery.",
 	InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -54,6 +54,16 @@ var ResultToolSpec = ToolSpec{
       "required":["body"],
       "additionalProperties":false
     },
+    "existing_files":{
+      "type":"array",
+      "description":"Confirmed original uploads of this same Task; use unchanged metadata from read_context kind=files. References do not assert a new check or acceptance.",
+      "items":{
+        "type":"object",
+        "properties":{"file_id":{"type":"string"},"name":{"type":"string"},"size":{"type":"integer","minimum":0},"sha256":{"type":"string"}},
+        "required":["file_id","name","size","sha256"],
+        "additionalProperties":false
+      }
+    },
     "files":{
       "type":"array",
       "items":{
@@ -70,7 +80,7 @@ var ResultToolSpec = ToolSpec{
 
 var DownloadFileToolSpec = ToolSpec{
 	Name:        "download_file",
-	Description: "Download an original Issue material, task input, submitted artifact or acceptance evidence file by file_id into this run's scratch directory. Use read_context to discover saved materials; spec.inputs is a starting snapshot, not a reading allowlist. Verifies size and SHA-256 and returns the local path.",
+	Description: "Download an original Issue material, task input, confirmed upload from an earlier Run of this Task, submitted artifact or acceptance evidence file by file_id into this run's scratch directory. Use read_context to discover saved materials; spec.inputs is a starting snapshot, not a reading allowlist. Verifies size and SHA-256 and returns the local path.",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"file_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}`),
 }
 
@@ -116,8 +126,9 @@ func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
 	r.callMu.Lock()
 	defer r.callMu.Unlock()
 	var p struct {
-		Report *protocol.ResultReport `json:"report"`
-		Files  []struct {
+		Report        *protocol.ResultReport  `json:"report"`
+		ExistingFiles []protocol.ArtifactFile `json:"existing_files"`
+		Files         []struct {
 			Path string `json:"path"`
 			Name string `json:"name"`
 		} `json:"files"`
@@ -126,7 +137,16 @@ func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
 		return ToolResult{Text: "invalid result"}
 	}
 	// Reject input collisions before uploads so the worker can correct its call.
-	names, paths := map[string]bool{}, map[string]bool{}
+	names, paths, ids := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, file := range p.ExistingFiles {
+		if file.FileID == "" || file.Name == "" || file.Size < 0 || file.SHA256 == "" {
+			return ToolResult{Text: "existing_files require unchanged file_id, name, size and sha256"}
+		}
+		if ids[file.FileID] || names[file.Name] {
+			return ToolResult{Text: "file IDs and delivery names must be unique"}
+		}
+		ids[file.FileID], names[file.Name] = true, true
+	}
 	for _, file := range p.Files {
 		if strings.TrimSpace(file.Path) == "" || file.Name == "" {
 			return ToolResult{Text: "files require a path and delivery name"}
@@ -148,11 +168,11 @@ func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
 		names[file.Name], paths[path] = true, true
 	}
 	// Required report/files and report content can be checked before side effects.
-	candidate := protocol.ArtifactPayload{Report: p.Report, Files: make([]protocol.ArtifactFile, len(p.Files))}
+	candidate := protocol.ArtifactPayload{Report: p.Report, Files: make([]protocol.ArtifactFile, len(p.Files)+len(p.ExistingFiles))}
 	if err := r.validateResult(candidate, false); err != nil {
 		return ToolResult{Text: err.Error()}
 	}
-	out := protocol.ArtifactPayload{Report: p.Report}
+	out := protocol.ArtifactPayload{Report: p.Report, Files: append([]protocol.ArtifactFile(nil), p.ExistingFiles...)}
 	for _, f := range p.Files {
 		if r.Spec.UploadFile == nil {
 			return ToolResult{Text: "file upload is unavailable"}

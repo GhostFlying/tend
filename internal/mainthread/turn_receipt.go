@@ -3,12 +3,13 @@ package mainthread
 import (
 	"context"
 	"fmt"
+	"slices"
+	"time"
+
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
-	"slices"
-	"time"
 )
 
 // Reconcile retained native history before starting more work after reconnect.
@@ -42,9 +43,26 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 			}
 			continue
 		}
-		receipt, found, err := reader.FindTurn(ctx, identity, rec.TurnID)
+		raw, err := m.app.RetainedNativeReceipt(ctx, m.cfg.ConversationID, rec.RequestID)
 		if err != nil {
 			return err
+		}
+		var receipt harness.TurnReceipt
+		found := len(raw) != 0 && m.cfg.DecodeRetainedTurnReceipt != nil
+		if found {
+			receipt, err = m.cfg.DecodeRetainedTurnReceipt(raw)
+			if err != nil {
+				return err
+			}
+			if receipt.ID != rec.TurnID {
+				return fmt.Errorf("%w: retained receipt has a different original turn", harness.ErrRejected)
+			}
+			receipt.Raw = raw
+		} else {
+			receipt, found, err = reader.FindTurn(ctx, identity, rec.TurnID)
+			if err != nil {
+				return err
+			}
 		}
 		if !found || (receipt.Status != "completed" && receipt.Status != "interrupted" && receipt.Status != "failed") {
 			if source != "" {
@@ -54,112 +72,117 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 			}
 			continue
 		}
-		consumed, err := m.app.ConsumedMainSteers(ctx, th.ID(), receipt.ID)
+		if err := m.projectNativeReceipt(ctx, th, rec, receipt, repair, source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, rec store.MainTurn, receipt harness.TurnReceipt, repair bool, source string) error {
+	rec.TurnID, rec.Status, rec.Failure = receipt.ID, receipt.Status, receipt.Failure
+	if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), rec.TurnID, "", "native_receipt", receipt.Raw); err != nil {
+		return err
+	}
+	if err := m.app.ObserveNativeTurnTerminal(ctx, rec); err != nil {
+		return err
+	}
+	consumed, err := m.app.ConsumedMainSteers(ctx, th.ID(), receipt.ID)
+	if err != nil {
+		return err
+	}
+	completeSources := true
+	for _, source := range consumed {
+		if !slices.ContainsFunc(receipt.Items, func(item harness.Event) bool {
+			return item.ItemType == harness.ItemUserMessage && item.ItemID == source.NativeItemID && item.Text == source.InputText
+		}) {
+			completeSources = false
+			break
+		}
+	}
+	if !completeSources {
+		return nil
+	}
+	state := protocol.AssistantCompleted
+	if receipt.Status == "interrupted" {
+		state = protocol.AssistantInterrupted
+	}
+	if receipt.Status == "failed" {
+		state = protocol.AssistantFailed
+	}
+	items := receipt.Items
+	if items == nil {
+		items = receipt.Messages
+	}
+	replyTo, sources := rec.MessageID, []string{rec.MessageID}
+	if source != "" {
+		var err error
+		replyTo, sources, _, err = m.retainedRecoverySources(ctx, rec.RequestID, rec.MessageID)
 		if err != nil {
 			return err
 		}
-		completeSources := true
-		for _, source := range consumed {
-			if !slices.ContainsFunc(receipt.Items, func(item harness.Event) bool {
-				return item.ItemType == harness.ItemUserMessage && item.ItemID == source.NativeItemID && item.Text == source.InputText
-			}) {
-				completeSources = false
-				break
-			}
-		}
-		if !completeSources {
+	}
+	for _, message := range items {
+		if repair {
 			continue
 		}
-		rec.TurnID = receipt.ID
-		rec.Status = store.TurnStarted
-		if err := m.app.PutMainTurn(ctx, rec); err != nil {
-			return err
-		}
-		if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), rec.TurnID, "", "native_receipt", receipt.Raw); err != nil {
-			return err
-		}
-		state := protocol.AssistantCompleted
-		if receipt.Status == "interrupted" {
-			state = protocol.AssistantInterrupted
-		}
-		if receipt.Status == "failed" {
-			state = protocol.AssistantFailed
-		}
-		items := receipt.Items
-		if items == nil {
-			items = receipt.Messages
-		}
-		replyTo, sources := rec.MessageID, []string{rec.MessageID}
-		if source != "" {
-			var err error
-			replyTo, sources, _, err = m.retainedRecoverySources(ctx, rec.RequestID, rec.MessageID)
-			if err != nil {
-				return err
-			}
-		}
-		for _, message := range items {
-			if repair {
-				continue
-			}
-			if message.ItemType == harness.ItemUserMessage {
-				if message.ItemID != "" {
-					matches, err := m.app.MessagingNativeInputMatches(ctx, rec.RequestID, message.Text)
-					if err != nil {
-						return err
-					}
-					if matches {
-						if err := m.app.RecordMessagingConsumption(ctx, rec.RequestID, rec.MessageID, "native_receipt:"+message.ItemID); err != nil {
-							return err
-						}
-					}
-				}
-				if _, _, err := m.app.ConsumeMainSteer(ctx, th.ID(), rec.TurnID, message.Text, message.ItemID); err != nil {
-					return err
-				}
-				source, ok, err := m.app.MainSteerByInput(ctx, th.ID(), rec.TurnID, message.Text)
+		if message.ItemType == harness.ItemUserMessage {
+			if message.ItemID != "" {
+				matches, err := m.app.MessagingNativeInputMatches(ctx, rec.RequestID, message.Text)
 				if err != nil {
 					return err
 				}
-				if ok && source.NativeItemID == message.ItemID && message.ItemID != "" {
-					if err := m.app.RecordMessagingConsumption(ctx, source.RequestID, source.MessageID, "native_receipt:"+message.ItemID); err != nil {
+				if matches {
+					if err := m.app.RecordMessagingConsumption(ctx, rec.RequestID, rec.MessageID, "native_receipt:"+message.ItemID); err != nil {
 						return err
 					}
-					replyTo = source.MessageID
-					if !slices.Contains(sources, replyTo) {
-						sources = append(sources, replyTo)
-					}
 				}
-				continue
 			}
-			itemReplyTo, itemSources := replyTo, sources
-			if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), rec.TurnID, message.ItemID); err != nil {
+			if _, _, err := m.app.ConsumeMainSteer(ctx, th.ID(), rec.TurnID, message.Text, message.ItemID); err != nil {
 				return err
-			} else if found {
-				itemReplyTo, itemSources = prior, refs
-			} else if message.Text == "" {
-				// Like the live stream, do not create an empty reply. The raw
-				// receipt above still preserves this native item. An existing
-				// reply must retain its authoritative empty terminal update.
-				continue
 			}
-			payload := map[string]any{"body": message.Text, "reply_to": itemReplyTo, "turn_id": rec.TurnID, "item_id": message.ItemID, "status": string(state)}
-			if len(itemSources) > 1 {
-				payload["reply_sources"] = itemSources
+			source, ok, err := m.app.MainSteerByInput(ctx, th.ID(), rec.TurnID, message.Text)
+			if err != nil {
+				return err
 			}
-			if err := m.record(ctx, th, "native-receipt/"+rec.TurnID+"/"+message.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{Reconciled: true}); err != nil {
-				return fmt.Errorf("mainthread: reconcile reply request=%s thread=%s turn=%s item=%s: %w", rec.RequestID, th.ID(), rec.TurnID, message.ItemID, err)
+			if ok && source.NativeItemID == message.ItemID && message.ItemID != "" {
+				if err := m.app.RecordMessagingConsumption(ctx, source.RequestID, source.MessageID, "native_receipt:"+message.ItemID); err != nil {
+					return err
+				}
+				replyTo = source.MessageID
+				if !slices.Contains(sources, replyTo) {
+					sources = append(sources, replyTo)
+				}
 			}
+			continue
 		}
-		// A reconnect interruption is not an owner stop. Restricted recovery may
-		// finish metadata after the known native turn, without replaying its actions.
-		rec.Status = receipt.Status
-		rec.NativeReconciled = true
-		rec.Failure = receipt.Failure
-
-		if err := m.app.PutMainTurn(ctx, rec); err != nil {
+		itemReplyTo, itemSources := replyTo, sources
+		if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), rec.TurnID, message.ItemID); err != nil {
 			return err
+		} else if found {
+			itemReplyTo, itemSources = prior, refs
+		} else if message.Text == "" {
+			// Like the live stream, do not create an empty reply. The raw
+			// receipt above still preserves this native item. An existing
+			// reply must retain its authoritative empty terminal update.
+			continue
 		}
+		payload := map[string]any{"body": message.Text, "reply_to": itemReplyTo, "turn_id": rec.TurnID, "item_id": message.ItemID, "status": string(state)}
+		if len(itemSources) > 1 {
+			payload["reply_sources"] = itemSources
+		}
+		if err := m.record(ctx, th, "native-receipt/"+rec.TurnID+"/"+message.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{Reconciled: true}); err != nil {
+			return fmt.Errorf("mainthread: reconcile reply request=%s thread=%s turn=%s item=%s: %w", rec.RequestID, th.ID(), rec.TurnID, message.ItemID, err)
+		}
+	}
+	// A reconnect interruption is not an owner stop. Restricted recovery may
+	// finish metadata after the known native turn, without replaying its actions.
+	rec.Status = receipt.Status
+	rec.NativeReconciled = true
+	rec.Failure = receipt.Failure
 
+	if err := m.app.PutMainTurn(ctx, rec); err != nil {
+		return err
 	}
 	return nil
 }

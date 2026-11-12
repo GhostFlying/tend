@@ -98,6 +98,7 @@ func runMaterialScope(ctx context.Context, q store.Querier, p protocol.Principal
 	if err != nil {
 		return r, scope, err
 	}
+	scope.UploadTaskID = r.TaskID
 	return r, scope, err
 }
 

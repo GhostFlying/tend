@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -124,6 +125,10 @@ func (s managerPermissionSession) ResumeThread(ctx context.Context, id string, c
 	return thread, nil
 }
 
+func TestEndToEndManagerExternalWaitHandsOriginalReceiptToHistory(t *testing.T) {
+	runRunnerManager(t, false, false, false, "external_wait")
+}
+
 func TestEndToEndRunnerManagerClaimsReviewsAndReleasesSlot(t *testing.T) {
 	runRunnerManager(t, false, false, false, "")
 }
@@ -234,6 +239,10 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			}
 		}
 	}
+	waitOriginal := make(chan string, 1)
+	waitFile := make(chan protocol.ArtifactFile, 1)
+	const waitFileBody = "Original check output before physical wait: 原始证据\n"
+	var recoveredWaitFiles atomic.Int64
 	var attempts, continuations, effects atomic.Int64
 	var rateFailed atomic.Bool
 	fake.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
@@ -279,6 +288,51 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		var item protocol.IssueView
 		if !invoke("issues_read", map[string]any{}, &item) {
 			return "failed"
+		}
+		if archiveMode == "external_wait" {
+			var task, run string
+			if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+				return tx.Q().QueryRowContext(ctx, `SELECT r.task_id,r.run_id FROM issue_manager_tasks m JOIN runs r USING(task_id) WHERE m.issue_id=? AND r.observed_state IN ('starting','running') ORDER BY r.created_at DESC LIMIT 1`, item.IssueID).Scan(&task, &run)
+			}); err != nil {
+				failures <- err.Error()
+				return "failed"
+			}
+			// Preserve a real upload that has not yet become a result. The
+			// history successor must recover it without uploading it again.
+			upload, err := s.app.UploadDeliverableFile(ctx, protocol.Principal{Kind: protocol.PrincipalRun, Subject: run, Role: protocol.RoleIssueManager}, s.ids.New(protocol.PrefixRequest), "original-check.log", strings.NewReader(waitFileBody))
+			var file protocol.ArtifactFile
+			if err != nil || upload.Status != protocol.OpSucceeded || json.Unmarshal(upload.Result, &file) != nil {
+				failures <- fmt.Sprintf("original wait upload: %+v %v", upload, err)
+				return "failed"
+			}
+			waitFile <- file
+			if err := s.store.Write(ctx, func(tx *store.Tx) error {
+				if err := tx.InsertTask(ctx, store.TaskRow{TaskID: "wait-dependency", Title: "Existing independent review", Project: "default", Lifecycle: protocol.TaskWaiting, ControlMode: protocol.ControlPaused, SpecVersion: 1}); err != nil {
+					return err
+				}
+				if err := tx.InsertSpec(ctx, "wait-dependency", 1, `{"goal":"Read existing review evidence","workspace":{"mode":"temporary"}}`, "", s.now().UnixMilli()); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `INSERT INTO task_work_item_owners(task_id,work_item_id,source_spec_version) VALUES('wait-dependency',?,1)`, item.IssueID)
+				return err
+			}); err != nil {
+				failures <- err.Error()
+				return "failed"
+			}
+			payload := protocol.WaitExternalPayload{WaitKey: "original-review", Kind: "task", TargetID: "wait-dependency", Reason: "Wait for evidence before continuing the responsibility", Recovery: "Read original history and continue the same Task"}
+			result := th.CallTool(ctx, turn, "external-wait", "runs_wait_external", map[string]any{"effect_seq": 1, "payload": payload})
+			// The stop can beat delivery of the tool result. The committed wait,
+			// not a fabricated successful callback, proves the original effect.
+			if s.count(`SELECT COUNT(*) FROM run_external_waits WHERE run_id=?`, run) != 1 {
+				failures <- "external wait was not recorded: " + result.Text
+				return "failed"
+			}
+			waitOriginal <- run
+			// The fake native process keeps its turn active until the real runner
+			// handles desired=paused and closes it. FakeSession.Close records the
+			// actual interruption in native history, independently of this script.
+			<-ctx.Done()
+			return "interrupted"
 		}
 		if archiveFault && (archive == nil || !archive.released.Load()) {
 			select {
@@ -420,6 +474,30 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			if !selected.RunnerManaged || selected.RunnerRunID == "" {
 				return nil, errors.New("server-local manager launch is forbidden")
 			}
+			if archiveMode == "external_wait" && selected.ReceiptOnly {
+				var file protocol.ArtifactFile
+				select {
+				case file = <-waitFile:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				defer func() { waitFile <- file }()
+				principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: selected.RunnerRunID, Role: protocol.RoleIssueManager}
+				context, err := s.app.ReadRunContext(ctx, principal, protocol.IssueMaterialsQuery{Kind: "files", ID: file.FileID})
+				if err != nil || len(context.Materials.Files) != 1 || context.Materials.Files[0].ArtifactFile != file {
+					return nil, fmt.Errorf("history successor lost original file metadata: %v", err)
+				}
+				metadata, reader, err := s.app.OpenRunContextFile(ctx, principal, file.FileID)
+				if err != nil {
+					return nil, err
+				}
+				body, readErr := io.ReadAll(reader)
+				closeErr := reader.Close()
+				if readErr != nil || closeErr != nil || string(body) != waitFileBody || metadata.ArtifactFile != file {
+					return nil, fmt.Errorf("history successor changed original bytes: %v %v", readErr, closeErr)
+				}
+				recoveredWaitFiles.Add(1)
+			}
 			return mainthread.RunnerSession(ctx, s.app, selected.RunnerRunID), nil
 		}, RestartDelay: time.Millisecond * 20, Log: quiet()}), nil
 	}}
@@ -436,6 +514,34 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	admitted := execute("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
 	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
 		t.Fatal(err)
+	}
+	if archiveMode == "external_wait" {
+		var original string
+		select {
+		case original = <-waitOriginal:
+		case failure := <-failures:
+			t.Fatal(failure)
+		case <-time.After(15 * time.Second):
+			t.Fatal("native owner did not register its wait")
+		}
+		waitBusinessContinuity(t, "physical yield and history settle the original request", func() bool {
+			select {
+			case failure := <-failures:
+				t.Fatal(failure)
+			default:
+			}
+			return s.count(`SELECT COUNT(*) FROM runs WHERE run_id=? AND observed_state='finished'`, original) == 1 &&
+				s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='released'`, original) == 1 &&
+				s.count(`SELECT COUNT(*) FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN outbox o ON o.request_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.status='interrupted' AND o.status='delivered'`, original) == 1 &&
+				s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) == 0
+		})
+		if fake.HistoryReads() == 0 || len(fake.Starts()) != 1 || s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 {
+			t.Fatal("physical wait replayed business instead of handing off original history", fake.HistoryReads(), len(fake.Starts()))
+		}
+		if recoveredWaitFiles.Load() == 0 || s.count(`SELECT COUNT(*) FROM deliverable_files WHERE run_id=?`, original) != 1 || s.count(`SELECT COUNT(*) FROM deliverable_files`) != 1 {
+			t.Fatal("history handoff lost or reuploaded the original evidence", recoveredWaitFiles.Load())
+		}
+		return
 	}
 	if eventFailure != nil {
 		var rejected protocol.Envelope

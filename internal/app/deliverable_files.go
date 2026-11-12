@@ -149,7 +149,8 @@ func (c UploadFile) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	return Outcome{Result: manifest, Events: []Event{{ObjectType: "file", ObjectID: manifest.FileID, Kind: "file.uploaded", Body: map[string]any{"task_id": rc.task.TaskID, "run_id": rc.run.RunID, "name": manifest.Name, "size": manifest.Size, "sha256": manifest.SHA256}}}}, nil
 }
 
-// DeliverableFile reads a file for the owner or the exact producing/judging run.
+// DeliverableFile preserves upload provenance while allowing a current
+// implementation or manager Run to recover its Task's original uploads.
 func (a *App) DeliverableFile(ctx context.Context, p protocol.Principal, id string) (store.DeliverableFileRow, error) {
 	var f store.DeliverableFileRow
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -173,6 +174,15 @@ func (a *App) DeliverableFile(ctx context.Context, p protocol.Principal, id stri
 		}
 		if rc.run.RunID == f.RunID {
 			return nil
+		}
+		if rc.task.TaskID == f.TaskID && (rc.run.Role == protocol.RoleImplement || rc.run.Role == protocol.RoleIssueManager) {
+			lease, err := store.GetLeaseByRun(ctx, tx.Q(), rc.run.RunID)
+			if err != nil {
+				return err
+			}
+			if lease.Status == store.LeaseActive {
+				return nil
+			}
 		}
 		if allowed, err := acceptanceFeedbackFile(ctx, tx.Q(), rc, f); err != nil {
 			return err

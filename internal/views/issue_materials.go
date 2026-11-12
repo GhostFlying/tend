@@ -73,11 +73,18 @@ func IssueMaterialFile(ctx context.Context, q store.Querier, scope store.Materia
 			out.Sources = append(out.Sources, protocol.IssueMaterialSource{Kind: "artifact", TaskID: file.TaskID, ArtifactID: artifact, Status: "retained"})
 		} else if errors.Is(err, store.ErrNotFound) {
 			file, acceptance, err := store.GetFinalizedAcceptanceFile(ctx, q, id)
-			if err != nil {
+			if err == nil {
+				out.ArtifactFile = file.ArtifactFile
+				out.Sources = append(out.Sources, protocol.IssueMaterialSource{Kind: "acceptance", TaskID: file.TaskID, AcceptanceID: acceptance.AcceptanceID, Status: string(acceptance.Verdict)})
+			} else if errors.Is(err, store.ErrNotFound) {
+				file, err = store.MaterialUploadFile(ctx, q, scope, id)
+				if err != nil {
+					return out, err
+				}
+				out.ArtifactFile = file.ArtifactFile
+			} else {
 				return out, err
 			}
-			out.ArtifactFile = file.ArtifactFile
-			out.Sources = append(out.Sources, protocol.IssueMaterialSource{Kind: "acceptance", TaskID: file.TaskID, AcceptanceID: acceptance.AcceptanceID, Status: string(acceptance.Verdict)})
 		} else {
 			return out, err
 		}

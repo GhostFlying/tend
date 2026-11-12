@@ -54,6 +54,8 @@ type Config struct {
 	// Open starts a harness session.
 	Open      func(ctx context.Context) (harness.Session, error)
 	OpenNamed func(context.Context, hostedconfig.Selection) (harness.Session, error)
+	// DecodeRetainedTurnReceipt projects an immutable original without provider IO.
+	DecodeRetainedTurnReceipt func(json.RawMessage) (harness.TurnReceipt, error)
 	// RestartDelay separates attempts to bring a session back. Default 2s.
 	RestartDelay time.Duration
 	// InterruptTimeout bounds a turn/interrupt, so a lost answer cannot
@@ -245,7 +247,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if named {
 		diagnostics = m.sessionDiagnostics(&selected)
 	}
-	if named && selected.RequireReceiptReader {
+	if named && (selected.RequireReceiptReader || selected.ReceiptOnly || receiptOnly) {
 		receiptOnly = true
 		selected, err = m.restoreReceiptOnlyModel(ctx, selected)
 		if err != nil {
@@ -255,6 +257,16 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		copy := selected
 		m.named = &copy
 		m.namedMu.Unlock()
+	}
+	retained, err := m.retainedReceiptThread(ctx)
+	if err != nil {
+		return err
+	}
+	if retained != nil {
+		// Output retry uses the single already observed original. Do not open a
+		// provider or wait for a new carrier merely to rebuild presentation.
+		// Any existing physical carrier retains its separate close obligation.
+		return m.reconcileNativeReceipts(ctx, retained)
 	}
 	var s harness.Session
 	if named {
@@ -276,12 +288,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		defer cancel()
 		m.syncNativeUsageState(flush, closeErr == nil)
 	}()
-	if named {
+	if named && !receiptOnly {
 		var models []harness.Model
 		if selected.AppliedModel == "" {
-			if receiptOnly {
-				return errors.New("original hosted execution model is unavailable for receipt-only attachment")
-			}
 			catalog, ok := s.(harness.ModelCatalog)
 			if !ok {
 				return errors.New("named executor model catalog is unavailable")
@@ -706,55 +715,33 @@ func (m *Manager) restoreReceiptOnlyModel(ctx context.Context, selected hostedco
 	if selected.AppliedModel != "" {
 		return selected, nil
 	}
-	unavailable := errors.New("original hosted execution model is unavailable for receipt-only attachment")
 	if !selected.RunnerManaged || selected.RunnerRunID == "" {
-		return selected, unavailable
+		return selected, nil
 	}
 	id, exists, err := m.app.MainThread(ctx, m.bindingInstance())
 	if err != nil {
 		return selected, err
 	}
 	if !exists {
-		return selected, unavailable
+		return selected, nil
 	}
 	resumeRaw, err := m.app.ManagerClosingAttachment(ctx, selected.RunnerRunID, "resume", id)
 	if err != nil {
 		return selected, err
 	}
 	if len(resumeRaw) == 0 {
-		return selected, unavailable
+		return selected, nil
 	}
 	var resumed struct {
 		Model harness.ModelSelection
 	}
 	if err := json.Unmarshal(resumeRaw, &resumed); err != nil {
-		return selected, fmt.Errorf("read confirmed closing resume: %w", err)
+		return selected, nil
 	}
 	if resumed.Model.Model != "" {
 		selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = resumed.Model.Model, resumed.Model.Provider, resumed.Model.Effort
 		return selected, nil
 	}
-	// Older startup replies did not carry the applied model. Only those
-	// attachments use their original confirmed catalog as a fallback.
-	modelsRaw, err := m.app.ManagerClosingAttachment(ctx, selected.RunnerRunID, "models", "")
-	if err != nil {
-		return selected, err
-	}
-	if len(modelsRaw) == 0 {
-		return selected, unavailable
-	}
-	var models []harness.Model
-	if err := json.Unmarshal(modelsRaw, &models); err != nil {
-		return selected, fmt.Errorf("read confirmed closing models: %w", err)
-	}
-	actual, err := resolveNamedModel(models, selected)
-	if err != nil {
-		return selected, err
-	}
-	if actual.Model == "" {
-		return selected, unavailable
-	}
-	selected.AppliedModel, selected.AppliedProvider, selected.AppliedEffort = actual.Model, actual.Provider, actual.Effort
 	return selected, nil
 }
 
@@ -1488,6 +1475,9 @@ wait:
 	}
 	if err := m.app.PutMainTurn(context.WithoutCancel(ctx), rec); err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not record the finished turn", "turn", turnID, "err", err)
+	}
+	if pending, err := m.app.NativeReceiptPending(ctx, rec.RequestID); err != nil || pending {
+		return app.DeliveryResult{Outcome: app.Unknown, Reason: "Original native receipt requires reconciliation"}
 	}
 	return app.DeliveryResult{Outcome: app.Delivered}
 }

@@ -74,3 +74,16 @@ func TestCodexReceiptMatchesClientIdentity(t *testing.T) {
 		t.Fatal(r, found, err)
 	}
 }
+
+func TestRetainedNativeReceiptDecodesOriginalWithoutExecutionAuthority(t *testing.T) {
+	raw := json.RawMessage(`{"id":"original","status":"failed","error":{"codexErrorInfo":"serverOverloaded"},"items":[{"type":"userMessage","id":"source","content":[{"text":"exact input"}]},{"type":"agentMessage","id":"reply","text":"exact output"},{"type":"commandExecution","id":"cmd","status":"completed","exitCode":0}]}`)
+	receipt, err := DecodeRetainedTurnReceipt(raw)
+	if err != nil || receipt.ID != "original" || receipt.Status != "failed" || receipt.Failure == nil || receipt.Failure.Code != "server_overloaded" || string(receipt.Raw) != string(raw) || len(receipt.Items) != 2 || receipt.Items[0].Text != "exact input" || receipt.Items[1].Text != "exact output" || receipt.ContinuationSafe {
+		t.Fatal("original projection or execution boundary changed", receipt, err)
+	}
+	for _, bad := range []json.RawMessage{json.RawMessage(`{`), json.RawMessage(`{}`), json.RawMessage(`{"id":"original"}`)} {
+		if _, err := DecodeRetainedTurnReceipt(bad); err == nil {
+			t.Fatal("invalid original became a receipt", string(bad))
+		}
+	}
+}

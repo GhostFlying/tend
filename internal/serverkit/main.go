@@ -773,14 +773,15 @@ func hostedMainThread(a *app.App, cb *contextbuilder.Builder, ts *tools.Service,
 		return nil, err
 	}
 	return mainthread.New(a, cb, ts, mainthread.Config{
-		UsageDiscovery:     usageIndex,
-		Instance:           cfg.Instance,
-		ConversationID:     cfg.ConversationID,
-		MaintenanceEnabled: cfg.ConversationID == "",
-		SummaryIdleMinutes: idle,
-		Now:                now,
-		Thread:             mainthread.ThreadConfig(cwd, cfg.Model),
-		OpenNamed:          hostedNamedSessionOpener(a, cfg, dataDir, cwd, env, open, log),
+		UsageDiscovery:            usageIndex,
+		Instance:                  cfg.Instance,
+		ConversationID:            cfg.ConversationID,
+		MaintenanceEnabled:        cfg.ConversationID == "",
+		SummaryIdleMinutes:        idle,
+		Now:                       now,
+		Thread:                    mainthread.ThreadConfig(cwd, cfg.Model),
+		DecodeRetainedTurnReceipt: traex.DecodeRetainedTurnReceipt,
+		OpenNamed:                 hostedNamedSessionOpener(a, cfg, dataDir, cwd, env, open, log),
 		Open: func(ctx context.Context) (harness.Session, error) {
 			if open != nil {
 				return open(ctx, SessionSpec{Config: cfg, Cwd: cwd, Env: env})

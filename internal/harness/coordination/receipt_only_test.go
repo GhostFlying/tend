@@ -114,7 +114,7 @@ func TestReceiptOnlyDriverPreservesAppliedConfigurationWithoutCatalog(t *testing
 	}
 }
 
-func TestReceiptOnlyDriverRejectsMissingOriginalResumeConfiguration(t *testing.T) {
+func TestReceiptOnlyDriverRequiresThreadButNotModelForHistory(t *testing.T) {
 	for _, missing := range []string{"thread", "model"} {
 		t.Run(missing, func(t *testing.T) {
 			native := &receiptNativeSession{thread: &receiptNativeThread{events: make(chan harness.Event)}, done: make(chan struct{})}
@@ -127,8 +127,15 @@ func TestReceiptOnlyDriverRejectsMissingOriginalResumeConfiguration(t *testing.T
 				request.Config.Model = ""
 			}
 			raw, _ := json.Marshal(request)
-			if _, err := d.Handle(t.Context(), "resume", raw); !errors.Is(err, harness.ErrRejected) || native.models != 0 || native.resumes != 0 || native.starts != 0 || native.histories != 0 {
-				t.Fatal("missing original configuration reached native lifecycle", err, native.models, native.resumes, native.starts)
+			_, err := d.Handle(t.Context(), "resume", raw)
+			if missing == "thread" && (!errors.Is(err, harness.ErrRejected) || native.histories != 0) {
+				t.Fatal("missing thread reached native history", err)
+			}
+			if missing == "model" && (err != nil || native.histories != 1) {
+				t.Fatal("history incorrectly required model facts", err)
+			}
+			if native.models != 0 || native.resumes != 0 || native.starts != 0 {
+				t.Fatal("history entered execution")
 			}
 		})
 	}

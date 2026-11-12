@@ -429,8 +429,8 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if !nativeOwner && (cfg.Sandbox != "read-only" || cfg.ApprovalPolicy != "never") {
 			return nil, fmt.Errorf("%w: receipt or legacy transport requires read-only/never", harness.ErrRejected)
 		}
-		if d.RequireReceiptReader && (r.ThreadID == "" || cfg.Model == "" || cfg.Ephemeral) {
-			return nil, fmt.Errorf("%w: receipt-only resume requires the original thread and applied model", harness.ErrRejected)
+		if d.RequireReceiptReader && (r.ThreadID == "" || cfg.Ephemeral) {
+			return nil, fmt.Errorf("%w: receipt-only history requires the original persistent thread", harness.ErrRejected)
 		}
 		if receiptHistory && (method != "resume" || r.ThreadID == "" || cfg.Ephemeral) {
 			return nil, fmt.Errorf("%w: history reads require an original persistent thread", harness.ErrRejected)
