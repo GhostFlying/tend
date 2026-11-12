@@ -2107,5 +2107,8 @@ D229 的连接结束与本地消费者生命期分开：先收到断连的新 se
 原件不截断、不改字节/业务身份，不新增持久包装副本、协议代际或请求账本。
 
 永久拒绝不能触发密集 executor 重入；原 pending 保留并按现有 RetryDelay 退避。
-实际 session_stop 可先作为物理事实保存，不替代 Run/业务终态；原 native_stopped
-和 close 仍按完整尾部高水位收敛。见[实施计划](plans/native-event-ingress-and-context-projection.md)。
+实际 session_stop 可先作为物理事实保存，不替代 Run/业务终态。其可选单次请求
+预算与必需尾回执预算独立；首次停止和 releasing 恢复都从未取消的 runner lifetime
+为后者取得原有有限期限，不继承可选请求已经耗尽的期限。父级取消仍有效，
+不借此延续已停止的 runner。原 native_stopped 和 close 仍按完整尾部高水位
+收敛。见[实施计划](plans/native-event-ingress-and-context-projection.md)。

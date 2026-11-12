@@ -131,16 +131,22 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	if readErr = r.cfg.Journal.Finish(receiptCtx, as.RunID, journal.PhaseReleasing, journal.Request{RunID: as.RunID, Envelope: *env}); readErr != nil {
 		return readErr
 	}
-	return r.reportManagerStopped(receiptCtx, as)
+	// The journal handoff has its own completed budget. Optional metadata must
+	// not consume the separate mandatory tail budget, including on this first
+	// transition into releasing rather than only a later recovery attempt.
+	cancelReceipts()
+	return r.reportManagerStopped(lifetime, as)
 }
 
-func (r *Runner) reportManagerStopped(ctx context.Context, as protocol.Assignment) error {
-	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
-	defer cancel()
+func (r *Runner) reportManagerStopped(lifetime context.Context, as protocol.Assignment) error {
 	// This independently records an actually observed process close. It grants
 	// no Run/business completion and must not wait behind a rejected event.
 	// Its existing optional envelope remains durable across an unknown reply.
-	_ = r.reportSessionStop(ctx, as)
+	_ = r.reportSessionStop(lifetime, as)
+	// Best-effort metadata has its own finite attempt. Start the mandatory tail
+	// budget afterwards, still subject to the caller's lifetime/cancellation.
+	ctx, cancel := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
+	defer cancel()
 	pending, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return err

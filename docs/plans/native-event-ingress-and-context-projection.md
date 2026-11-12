@@ -55,3 +55,23 @@ race 曾揭示新 journal fixture 的大正文超出其原一秒请求预算，�
 兼容修正的三项原行为均已保留真实 RED；修正后相关真实 HTTP、历史回执、
 有界鉴权及 IO 分类共十个根用例的 regular/race 和 runner API vet 已通过。
 原首轮冻结与失败不覆写，最终统一门槛仍由协调者执行。
+
+## 独立审阅修正：辅助停止元数据与必需尾回执预算
+
+真实故障显示，可选 session_stop 请求能耗尽 reportManagerStopped 的共用期限，
+使健康的 event、stopped 和 close 端点在每次恢复中都无法被调用。首次物理停止
+分支还把已创建的 receiptCtx 传入，因此只移动内层 WithTimeout 仍不足以隔离。
+
+可选元数据沿原单次、有限请求先尝试，未知继续保存原身份；完成或超时后，
+必需尾回执从仍有效的 runner lifetime 单独取得原 RequestTimeout 预算。首次
+交接的 journal 读取/写入期限不传播为这个新预算的父级。父级停止/取消仍立即
+终止；不使用 WithoutCancel、异步任务或额外计时器恢复已取消的执行。
+
+保留原审阅 head RED/base GREEN，新增首次停止与 releasing/reopen 的真实 HTTP
+故障回归；覆盖原事件/停止/close 身份、unknown 保留以及关闭取消。仅验证受影响
+路径，原有尾序、物理事实、外部等待与 history 收敛契约不变。
+
+本轮补充已实现：重建原审阅用例在原 head 失败、base 通过；首次停止、
+releasing 重开与父取消新增回归均保留 RED/GREEN。相关十九个根用例的
+race 与 runner vet 已通过，原 unknown 和所有原件身份保留；尚未执行最终
+完整门槛、发布或生产恢复。
