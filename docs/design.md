@@ -2080,3 +2080,13 @@ bounded remaining、failed-parent/source_operation 与未建立 fence 规则保�
 历史 thread end 只结束原历史段，不能关闭当前连接或重放输入。Manager 与 pool 沿既有
 退出路径释放本地 attachment，同 Task 的真实只读后继继续原回执；不清理业务账本或
 以手工 ACK/清 pool 冒充交接。实现与验证见[协调断连计划](plans/coordination-disconnect-lifecycle.md)。
+
+D229 的连接结束与本地消费者生命期分开：先收到断连的新 server 仍可沿原 thread
+已确认的 closing metadata 附着并消费持久尾部，读完即 EOF；这不是原生 resume，
+也不恢复模型、工具或新输入权限。事件传输一旦结束，缺本地原 metadata 的请求
+不得重新排原生操作。空 thread 的 live/history 边界在首个消费者出现前仍保留原
+身份与序号；历史边界不结束当前连接。原生结束、原件可读、消费 ACK 和资源释放
+各保其真实事实，不以取消连接代替这些后续责任。
+
+结束后的启动观测可以立即失败，但不能越过当时已排队尾部的消费与 ACK；先处理
+该有界尾部，再保留原观测或消费错误退出，不把本地附着当作新原生执行就绪。

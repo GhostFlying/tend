@@ -24,6 +24,18 @@ func drainStartupEvents(ctx context.Context, events <-chan harness.Event, apply 
 		select {
 		case err := <-done:
 			joined = true
+			// A local closing-metadata attachment may already have ended.
+			// Its observational read can fail immediately; that cannot skip
+			// the original tail already queued for this startup consumer.
+			for queued := len(events); queued > 0; queued-- {
+				event, ok := <-events
+				if !ok {
+					break
+				}
+				if applyErr := apply(readCtx, event); applyErr != nil {
+					return errors.Join(err, applyErr)
+				}
+			}
 			return err
 		case <-ctx.Done():
 			return ctx.Err()

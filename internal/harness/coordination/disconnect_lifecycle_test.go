@@ -107,8 +107,8 @@ func TestConnectionDisconnectEndsMigratedThreadsAndPendingCalls(t *testing.T) {
 	}
 	select {
 	case err := <-pending:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatal("pending observation did not preserve cancellation", err)
+		if !errors.Is(err, harness.ErrRejected) {
+			t.Fatal("pending observation did not preserve connection-end rejection", err)
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("pending call outlived the connection")
@@ -196,5 +196,27 @@ func TestHistoricalDisconnectKeepsCurrentConnectionAndThreads(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("history blocked current native execution", ctx.Err())
 		}
+	}
+}
+
+func TestObservationCallerCancellationDoesNotBecomeConnectionEnd(t *testing.T) {
+	ctx, session, transport, _, current := disconnectSession(t)
+	caller, cancel := context.WithCancel(ctx)
+	pending := make(chan error, 1)
+	go func() { _, err := current.(harness.ContextManager).ContextUsage(caller); pending <- err }()
+	<-transport.reading
+	cancel()
+	select {
+	case err := <-pending:
+		if !errors.Is(err, context.Canceled) || errors.Is(err, harness.ErrRejected) {
+			t.Fatal("caller cancellation changed meaning", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case <-session.Done():
+		t.Fatal("one caller cancelled the connection")
+	default:
 	}
 }

@@ -18,3 +18,18 @@
 源码及定向回归已完成并冻结。已保存原实现的确定性 RED、首轮替身生命周期失败及修正后的原生结果。连接层 regular、coordination/mainthread 受影响 race、真实迁移与原外部等待 E2E race、既有 App park 正负链和 vet 已通过。E2E 使用真实 App/runner/pool 路径与无模型替身，另验证原回执结算后的正式 archive preparation 和物理排空；实际安装及线上恢复仍未执行。
 
 最终完整检查、独立审阅、CI、合入与部署留待统一执行。
+
+## 原审阅修正：先结束再附着
+
+独立审阅用原 App/runner 传输证实两项同源缺口：事件泵在首个消费者附着前读取 live 断连后取消了整个 Session，连已确认 closing metadata 的本地附着也被拒绝；空 thread 的历史 end 在没有消费者时没有保留，游标却已前移。两项原复现均保留，不提高测试超时。
+
+统一模型区分连接/原生执行结束、持久尾事件可读、消费者附着与新业务准入：
+
+- 已观察连接结束时取消未结原生调用，关闭既有事件流，但不令原件和本地消费者附着失效。新附着只能取原 thread 已确认的 closing metadata 与未消费尾部，事件流按原序读完即 EOF；不重启事件泵或执行工具。
+- runner 传输在事件流结束后只允许已有本地 closing metadata 和原关闭收尾；缺原元数据直接拒绝，不派发新的 resume、输入、工具或模型查询。该本地生命周期事实不是物理停机或业务成功证明。
+- 连接 EOF 与账本物理结束读取可竞争；models/find/usage 的纯观测失败沿既有拒绝语义，真实成功和调用者自己的取消不改写，已排原生 mutation 的丢回复仍未知。
+- 空 thread 的 live/history end 在尚无消费者时进入既有 orphan 队列，保留原 source/sequence；历史边界不关闭当前连接。
+- startup 的原生观测先返回失败时，仍先消费当时已排队的原尾事件和 ACK，不以观测就绪或 Session 尚存为前提，也不吞掉原失败。
+- 回归覆盖真实 App 原 close ACK guard、pre/post-attachment live/history、原双 thread/满缓冲、未知操作及整个 external-wait→history→pool 排空链。恢复不以旧 Session 恰好存活为条件。
+
+本轮修正及定向验证已完成：原审阅四项复现保持原件不变，基线均 RED，修正后的 Session/真实 runner/启动尾部组合 race 与两条真实生命周期 E2E race 均 GREEN，受影响包 vet 通过。已保留原替身失败、启动尾部对照 RED 和首轮 race 暴露的纯观测退出分类失败；未提高预算或重跑宽整包。完整检查、原 reviewer 增量复查、CI、合入及部署仍由协调者执行，本轮没有生产操作。
