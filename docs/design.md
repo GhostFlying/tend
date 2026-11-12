@@ -228,6 +228,7 @@ D225 修订 D11 的通用请求持久化方式，其他未另行修订的基线�
 | D224 | 用量覆盖依据已持久化原生响应与水位；候选读取及 writer 工作有界、按相关变化推进。 | 实施中 |
 | D225 | 内部幂等回到业务唯一 key；退出通用请求档案、重复正文、永久刷新通知和历史估价，以紧凑 DB 状态、单份文件原件及可核验回收治理存储。 | 实施中 |
 | D227 | 物理停止归还执行资源，原请求的未结事实跨载体持续可发现；历史读取与新业务准入分离，停止交接、升级 park 和原件复用沿真实出处推进。 | 实施中 |
+| D228 | 独立维护控制按原计划与当前 archive/host 业务状态收敛；未知回执后不重放过时 CAS，取消与 finish 只执行尚未满足的转换，不恢复通用请求账本。 | 已实现，待统一验证 |
 
 
 
@@ -2044,3 +2045,27 @@ provider、启动模型或复活旧执行载体。来源消费尚未被完整历
 引用原 manifest，原本地文件上传方式不变；独立验收和显式分享继续使用其真实关系。
 
 实施与验证见 [连续责任停止交接计划](plans/upgrade-historical-receipts.md)。
+
+## D228：独立维护控制按业务状态收敛
+
+D225 退役通用请求回执后，D155/D180 的维护准备与释放不能重发旧 CAS 来读取成功。
+updater 用原不可变计划及当前 archive/host SoT 识别精确转换：准备为 false/P-1 → true/P，
+释放为 false/P+1；原 normal host 为 normal/R → maintenance/R+1 → normal/R+2，原本
+maintenance 的 host 始终保留原 R。后状态满足原授权转换，不证明某次传输请求是唯一执行者。
+只执行尚缺的转换，额外修订、错误模式、具名 host 缺失或被另一升级接管拒绝，不刷新原 CAS。
+
+prepare 重开只补原准备中尚未完成的对象。cancel/finish 共用恢复逻辑，先识别实际状态，
+不先创建 preparation 或 host maintenance 再取消；未触碰对象不写，已正式恢复对象不写。
+每步原输入/CAS和现有 context/期限保留，错误停止后续动作；回复丢失后从实际对象继续。
+partial prepare、部分释放、重启、操作者以正式入口先恢复以及重复 finish 均沿同一状态收敛。
+没有全局 run-zero、历史 native unknown 清零或重新审批前提；已有业务保护及物理结果不因此结算。
+
+ArchiveAuthorization 继续表示现有维护观测，不能将 bounded extend 后的新快照当作不可变
+原 prepare 回执。对于原 force/takeover 审计已证明计划 fence 未建立的具体情况，后续偶然
+匹配的模式/修订不能倒推出原 fence；仍由原严格 unchanged-baseline 完成路径核验。
+未准备取消的零写入不替代已安装窗口的该事实门。原 linked proof、健康、generation、
+bounded remaining、failed-parent/source_operation 与未建立 fence 规则保留。
+
+不新增表、请求档案、返回缓存、权限、wire 字段或状态格式。真实 App 保持 stale-CAS 拒绝，
+回归必须通过真实 App/archive handler，不能用仍缓存请求结果的 fake 来证明恢复。
+见[维护控制续行计划](plans/maintenance-control-continuation.md)。
