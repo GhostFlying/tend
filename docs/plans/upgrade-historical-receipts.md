@@ -101,3 +101,8 @@ pool、原回执与升级准入；测试不先替系统调用 SettleOpenTurns �
 验证保留原审阅 overlay 不变；将实际回归纳入仓库，并通过 frozen feedback、
 未提交验收草稿、真实原 producer、完整/不足来源、reader 跨重启 close 与 legacy
 admission 等受影响边界。只执行必要 focused race/vet，由统一交付承担最终全量门槛。
+
+独立复核补齐下载入口：所有已认证 Run 的上传范围同时携带其真实 Task 与 Run；
+`ManagerFile` 的下载元数据及 `OpenRunFile` 原字节必须与上下文读取一致。保留原入口
+的历史 epoch 只读语义，不借复用其他 helper 追加 lease 限制；回归覆盖上传者和同 Task
+真实续行者，连同既有隔离/验收权限边界验证。
