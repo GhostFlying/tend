@@ -62,8 +62,8 @@ func archivePrepared(ctx context.Context, q store.Querier) (bool, error) {
 	return p.Prepared, err
 }
 
-// ChangeArchivePreparation leaves host control separate and explicit. Replays
-// return the original receipt, even after later cancel/prepare actions.
+// ChangeArchivePreparation leaves host control separate and explicit. Every
+// change checks the current business revision; request IDs are correlation only.
 func (a *App) ChangeArchivePreparation(ctx context.Context, r protocol.ArchiveControlRequest, prepare bool) (protocol.ArchivePreparation, error) {
 	a.archiveAdmission.Lock()
 	defer a.archiveAdmission.Unlock()

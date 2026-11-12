@@ -23,7 +23,6 @@ type committedTestAuthority struct {
 	p                     *fakeProcess
 	archive               protocol.ArchiveOnlineStatus
 	sequence              uint64
-	requests              map[string]string
 	unready, blockArchive bool
 }
 
@@ -34,20 +33,6 @@ func (a *committedTestAuthority) MaintenanceArchiveStatus(context.Context) (prot
 	return a.archive, nil
 }
 func (a *committedTestAuthority) MaintenanceArchiveControl(_ context.Context, path string, input any) error {
-	id := ""
-	switch v := input.(type) {
-	case protocol.ArchiveControlRequest:
-		id = v.RequestID
-	case protocol.ArchiveHostControlRequest:
-		id = v.RequestID
-	}
-	key := path + digest(input)
-	if old, ok := a.requests[id]; ok {
-		if old != key {
-			return errors.New("conflicting request")
-		}
-		return nil
-	}
 	switch v := input.(type) {
 	case protocol.ArchiveControlRequest:
 		if v.ExpectedControlRevision != a.archive.Preparation.Revision {
@@ -75,7 +60,6 @@ func (a *committedTestAuthority) MaintenanceArchiveControl(_ context.Context, pa
 			return errors.New("unknown host")
 		}
 	}
-	a.requests[id] = key
 	return nil
 }
 func (a *committedTestAuthority) MaintenanceHealth(_ context.Context, p protocol.CommittedMaintenancePlan) (protocol.CommittedMaintenanceHealth, error) {
@@ -95,7 +79,7 @@ func committedFixture(t *testing.T) (*harness, protocol.CommittedMaintenancePlan
 	h.s.state.Current = v
 	h.s.state.CommittedProof = &CommittedProof{Binding: old.Original, Version: v, Process: old.OriginalProcess}
 	h.s.state.Operation = nil
-	a := &committedTestAuthority{p: h.p, requests: map[string]string{}, archive: protocol.ArchiveOnlineStatus{HostedDrained: false, Hosts: []protocol.ArchiveHostStatus{{HostID: "fixture-host", Fresh: true, Control: protocol.RunnerControl{Revision: 5, Mode: "normal"}, Runtime: &protocol.RunnerRuntime{Mode: "normal", AppliedControlRevision: 5}, OpenRuns: 4}}}}
+	a := &committedTestAuthority{p: h.p, archive: protocol.ArchiveOnlineStatus{HostedDrained: false, Hosts: []protocol.ArchiveHostStatus{{HostID: "fixture-host", Fresh: true, Control: protocol.RunnerControl{Revision: 5, Mode: "normal"}, Runtime: &protocol.RunnerRuntime{Mode: "normal", AppliedControlRevision: 5}, OpenRuns: 4}}}}
 	h.opts.Authority = a
 	h.s.opts.Authority = a
 	p := protocol.CommittedMaintenancePlan{MaintenanceID: "committed-fixture", RequestID: old.RequestID, LinkRequestID: old.LinkRequestID, PreparationRequestID: old.OriginalRequestID, PreparationCancelRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEY", HostControls: []protocol.MaintenanceHostControl{{HostID: "fixture-host", Revision: 5, PreviousMode: "normal", RequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHEZ", RestoreRequestID: "req_01M6F01JSS6Q9BFV6DJNSSBHF0"}}, Previous: old.Original, PreviousProcess: old.OriginalProcess, ExpectedGeneration: h.s.state.Generation, StateSHA256: digest(h.s.state), ConfigSHA256: old.ConfigSHA256, ReleaseDir: old.ReleaseDir, Successor: old.Successor, OperatorUID: old.OperatorUID, WindowClaim: old.WindowClaim, ResourceEvidence: old.ResourceEvidence, ResourceSHA256: old.ResourceSHA256, ExpiresAtMillis: old.ExpiresAtMillis, PreparationRevision: 1}

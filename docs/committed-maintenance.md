@@ -43,7 +43,7 @@ tend updater maintenance authorize --socket "$UPDATER_SOCKET" \
 prepare 建立本窗口的 archive/host CAS。authorize 实读旧 server 已有 archive status；
 HostedDrained 为 false、owner 在途、host 未确认维护、集合或修订变化时绝不停止旧 server。
 持续阻塞可在旧 server 尚未停止时执行 `maintenance cancel`，参数同上；它仅恢复自身
-请求和 CAS，不取消任何业务 run，也不改别人后来设置的维护。过期允许安全取消，不续授权。
+计划允许的实际控制转换，不取消任何业务 run，也不改别人后来设置的维护。过期允许安全取消，不续授权。
 
 ## 提交、独立读回与释放
 
@@ -58,8 +58,10 @@ tend updater maintenance finish --socket "$UPDATER_SOCKET" \
   --plan "$PRIVATE_PLAN" --expected-generation "$STATE_GENERATION" --json
 ```
 
-finish 只在精确 linked 收据后释放本窗口准备及 host 维护 CAS。若别人改过修订会拒绝，
-不能覆盖。旧收据与 journal 不删除；下一版本建立新的窗口、请求与候选，延续 journal 链。
+finish 只在精确 linked 收据后释放本窗口准备及 host 维护 CAS。恢复读取实际状态：已提交的
+prepare/host 设置不重发，未设置的控制不为取消而创建，已正式恢复的精确后状态直接满足目标。
+丢失回执后先读状态与当前 updater generation，再沿原计划继续；request ID 不是旧回执查询。
+若出现原计划之外的修订或模式会拒绝，不能覆盖。旧收据与 journal 不删除；下一版本建立新的窗口、请求与候选，延续 journal 链。
 
 ## 本窗口候选失败后的前滚
 

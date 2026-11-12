@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -107,20 +108,7 @@ func (s *Supervisor) PrepareCommittedMaintenance(ctx context.Context, p protocol
 		}
 		return s.validateFailedAdmission(ctx, p, parent)
 	}
-	// Each request keeps its original CAS and identity, including a reply lost
-	// after commit. Replaying it is an app-level deduplication lookup.
-	if err := a.MaintenanceArchiveControl(ctx, "prepare", protocol.ArchiveControlRequest{RequestID: p.PreparationRequestID, ExpectedControlRevision: p.PreparationRevision - 1}); err != nil {
-		return err
-	}
-	for _, h := range p.HostControls {
-		if h.PreviousMode == "maintenance" {
-			continue
-		}
-		if err := a.MaintenanceArchiveControl(ctx, "host", protocol.ArchiveHostControlRequest{RequestID: h.RequestID, ExpectedControlRevision: h.Revision, HostID: h.HostID, Mode: "maintenance"}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return prepareMaintenanceArchive(ctx, a, p)
 }
 
 func (s *Supervisor) CancelCommittedMaintenance(ctx context.Context, p protocol.CommittedMaintenancePlan, generation uint64) error {
@@ -170,33 +158,173 @@ func (s *Supervisor) cancelCommittedMaintenanceLocked(ctx context.Context, p pro
 	return s.save()
 }
 
+// maintenanceControlPosition identifies only the exact transitions authorized by
+// the frozen plan. A matching poststate satisfies a transition; it does not
+// identify which transport request produced it.
+type maintenanceControlPosition int
+
+const (
+	maintenanceControlInitial maintenanceControlPosition = iota
+	maintenanceControlApplied
+	maintenanceControlRestored
+)
+
+type maintenanceControlState struct {
+	archive maintenanceControlPosition
+	hosts   []maintenanceControlPosition
+}
+
+func classifyMaintenanceControls(p protocol.CommittedMaintenancePlan, v protocol.ArchiveOnlineStatus) (maintenanceControlState, error) {
+	state := maintenanceControlState{hosts: make([]maintenanceControlPosition, len(p.HostControls))}
+	switch {
+	case !v.Preparation.Prepared && v.Preparation.Revision == p.PreparationRevision-1:
+		state.archive = maintenanceControlInitial
+	case v.Preparation.Prepared && v.Preparation.Revision == p.PreparationRevision:
+		state.archive = maintenanceControlApplied
+	case !v.Preparation.Prepared && v.Preparation.Revision == p.PreparationRevision+1:
+		state.archive = maintenanceControlRestored
+	default:
+		return state, errors.New("updater: archive preparation changed outside maintenance control boundary")
+	}
+	byID := make(map[string]protocol.RunnerControl, len(v.Hosts))
+	for _, h := range v.Hosts {
+		if _, duplicate := byID[h.HostID]; duplicate {
+			return state, errors.New("updater: duplicate maintenance host observation")
+		}
+		byID[h.HostID] = h.Control
+	}
+	for i, h := range p.HostControls {
+		actual, ok := byID[h.HostID]
+		if !ok || actual.UpgradeID != "" {
+			return state, errors.New("updater: maintenance host is missing or controlled by an upgrade")
+		}
+		switch {
+		case actual.Mode == h.PreviousMode && actual.Revision == h.Revision:
+			state.hosts[i] = maintenanceControlInitial
+		case h.PreviousMode == protocol.RunnerNormal && actual.Mode == protocol.RunnerMaintenance && actual.Revision == h.Revision+1:
+			state.hosts[i] = maintenanceControlApplied
+		case h.PreviousMode == protocol.RunnerNormal && actual.Mode == protocol.RunnerNormal && actual.Revision == h.Revision+2:
+			state.hosts[i] = maintenanceControlRestored
+		default:
+			return state, errors.New("updater: host changed outside maintenance control boundary")
+		}
+		// This preparation always precedes host writes. Do not adopt an unrelated
+		// host transition while the archive is still at its untouched baseline.
+		if state.archive == maintenanceControlInitial && state.hosts[i] != maintenanceControlInitial {
+			return state, errors.New("updater: host control changed before maintenance preparation")
+		}
+	}
+	return state, nil
+}
+
+func prepareMaintenanceArchive(ctx context.Context, a MaintenanceArchiveAuthority, p protocol.CommittedMaintenancePlan) error {
+	v, err := a.MaintenanceArchiveStatus(ctx)
+	if err != nil {
+		return err
+	}
+	state, err := classifyMaintenanceControls(p, v)
+	if err != nil {
+		return err
+	}
+	if state.archive == maintenanceControlRestored {
+		return errors.New("updater: maintenance preparation was already restored")
+	}
+	for _, position := range state.hosts {
+		if position == maintenanceControlRestored {
+			return errors.New("updater: maintenance host was already restored")
+		}
+	}
+	if state.archive == maintenanceControlInitial {
+		if err := a.MaintenanceArchiveControl(ctx, "prepare", protocol.ArchiveControlRequest{RequestID: p.PreparationRequestID, ExpectedControlRevision: p.PreparationRevision - 1}); err != nil {
+			return fmt.Errorf("updater: prepare archive control: %w", err)
+		}
+	}
+	for i, h := range p.HostControls {
+		if h.PreviousMode == protocol.RunnerMaintenance || state.hosts[i] != maintenanceControlInitial {
+			continue
+		}
+		if err := a.MaintenanceArchiveControl(ctx, "host", protocol.ArchiveHostControlRequest{RequestID: h.RequestID, ExpectedControlRevision: h.Revision, HostID: h.HostID, Mode: protocol.RunnerMaintenance}); err != nil {
+			return fmt.Errorf("updater: prepare host control: %w", err)
+		}
+	}
+	v, err = a.MaintenanceArchiveStatus(ctx)
+	if err != nil {
+		return err
+	}
+	state, err = classifyMaintenanceControls(p, v)
+	if err != nil {
+		return err
+	}
+	if state.archive != maintenanceControlApplied {
+		return errors.New("updater: maintenance preparation did not reach its planned state")
+	}
+	for i, position := range state.hosts {
+		if p.HostControls[i].PreviousMode == protocol.RunnerNormal && position != maintenanceControlApplied {
+			return errors.New("updater: maintenance host did not reach its planned state")
+		}
+	}
+	return nil
+}
+
 func restoreMaintenanceArchive(ctx context.Context, a MaintenanceArchiveAuthority, p protocol.CommittedMaintenancePlan) error {
 	v, err := a.MaintenanceArchiveStatus(ctx)
 	if err != nil {
 		return err
 	}
-	// Replay our preparation first: it proves ownership even if its original
-	// response was lost. A foreign CAS cannot be adopted by this cancellation.
-	if v.Preparation.Prepared || v.Preparation.Revision != p.PreparationRevision-1 {
-		if err := a.MaintenanceArchiveControl(ctx, "prepare", protocol.ArchiveControlRequest{RequestID: p.PreparationRequestID, ExpectedControlRevision: p.PreparationRevision - 1}); err != nil {
-			return err
+	state, err := classifyMaintenanceControls(p, v)
+	if err != nil {
+		return err
+	}
+	// Restore only controls this window could have changed. Never create a
+	// preparation or maintenance transition just to cancel it afterwards.
+	for i, h := range p.HostControls {
+		if state.hosts[i] != maintenanceControlApplied {
+			continue
 		}
-		for _, h := range p.HostControls {
-			if h.PreviousMode == "maintenance" {
-				continue
-			}
-			// A partially completed preparation may not have touched this host. Replay
-			// its original action before restoring exactly the revision it produced.
-			if err := a.MaintenanceArchiveControl(ctx, "host", protocol.ArchiveHostControlRequest{RequestID: h.RequestID, ExpectedControlRevision: h.Revision, HostID: h.HostID, Mode: "maintenance"}); err != nil {
-				return err
-			}
-			if err := a.MaintenanceArchiveControl(ctx, "host", protocol.ArchiveHostControlRequest{RequestID: h.RestoreRequestID, ExpectedControlRevision: h.Revision + 1, HostID: h.HostID, Mode: h.PreviousMode}); err != nil {
-				return err
-			}
+		if err := a.MaintenanceArchiveControl(ctx, "host", protocol.ArchiveHostControlRequest{RequestID: h.RestoreRequestID, ExpectedControlRevision: h.Revision + 1, HostID: h.HostID, Mode: h.PreviousMode}); err != nil {
+			return fmt.Errorf("updater: restore host control: %w", err)
 		}
+	}
+	if state.archive == maintenanceControlApplied {
 		if err := a.MaintenanceArchiveControl(ctx, "cancel", protocol.ArchiveControlRequest{RequestID: p.PreparationCancelRequestID, ExpectedControlRevision: p.PreparationRevision}); err != nil {
-			return err
+			return fmt.Errorf("updater: cancel archive control: %w", err)
 		}
+	}
+	v, err = a.MaintenanceArchiveStatus(ctx)
+	if err != nil {
+		return err
+	}
+	state, err = classifyMaintenanceControls(p, v)
+	if err != nil {
+		return err
+	}
+	if state.archive == maintenanceControlApplied {
+		return errors.New("updater: archive preparation remains active")
+	}
+	for _, position := range state.hosts {
+		if position == maintenanceControlApplied {
+			return errors.New("updater: host maintenance control remains active")
+		}
+	}
+	return nil
+}
+
+// A force may have explicitly installed without establishing its planned fence.
+// Its later controls cannot retroactively become that fence merely by matching
+// a revision. Only the existing unchanged-baseline completion can close it.
+func (s *Supervisor) validateMaintenanceCompletionBaseline(p protocol.CommittedMaintenancePlan) error {
+	b := s.state.Bounded
+	if b == nil {
+		return nil
+	}
+	for _, entry := range b.Audit {
+		if entry.RequestID != boundedRecoveryID(b) || entry.Archive == nil || entry.ObservationError != "" || (entry.Action != "force" && entry.Action != "takeover") {
+			continue
+		}
+		if _, err := classifyMaintenanceControls(p, *entry.Archive); err != nil {
+			return errors.New("updater: original unestablished maintenance fence requires unchanged-baseline completion")
+		}
+		break
 	}
 	return nil
 }
@@ -238,7 +366,10 @@ func (s *Supervisor) FinishCommittedMaintenance(ctx context.Context, p protocol.
 	}
 	completed, err := s.completeUnestablishedBoundedFence(ctx, a, p)
 	if err == nil && !completed {
-		err = restoreMaintenanceArchive(ctx, a, p)
+		err = s.validateMaintenanceCompletionBaseline(p)
+		if err == nil {
+			err = restoreMaintenanceArchive(ctx, a, p)
+		}
 	}
 	if bounded := s.state.Bounded; bounded != nil {
 		if err == nil {
