@@ -309,7 +309,9 @@ func restoreMaintenanceArchive(ctx context.Context, a MaintenanceArchiveAuthorit
 	return nil
 }
 
-// A force may have explicitly installed without establishing its planned fence.
+// A force may have installed without establishing its planned fence, including
+// an apply authorized to force after its drain timeout. Its original successful
+// apply observation remains the baseline; the timeout audit carries an error.
 // Its later controls cannot retroactively become that fence merely by matching
 // a revision. Only the existing unchanged-baseline completion can close it.
 func (s *Supervisor) validateMaintenanceCompletionBaseline(p protocol.CommittedMaintenancePlan) error {
@@ -318,7 +320,7 @@ func (s *Supervisor) validateMaintenanceCompletionBaseline(p protocol.CommittedM
 		return nil
 	}
 	for _, entry := range b.Audit {
-		if entry.RequestID != boundedRecoveryID(b) || entry.Archive == nil || entry.ObservationError != "" || (entry.Action != "force" && entry.Action != "takeover") {
+		if entry.RequestID != boundedRecoveryID(b) || entry.Archive == nil || entry.ObservationError != "" || (entry.Action != "apply" && entry.Action != "force" && entry.Action != "takeover") {
 			continue
 		}
 		if _, err := classifyMaintenanceControls(p, *entry.Archive); err != nil {

@@ -109,3 +109,9 @@ wire 和控制路由均可保持不变。本提案改变 updater 如何推进已
 该既有真实反例保留 unchanged-baseline 门，原正反例均保留。新增真实 App 测试在 race
 下逐子例重复全量迁移触及原十分钟上限；夹具改用仓库已有 storefixture.Template，仅共享
 已关闭的空 schema 原件字节，各子例仍独立打开数据库及原件目录，无延长任何期限。
+
+独立审阅补充：实际复现预授权排空超时转 force 的路径遗漏原 `apply` 成功观测。
+该观测与显式 force/takeover 共用原基线分类；超时阶段带错误的观测不是新的来源。
+保留“原 fence 未建立时，只能按原有严格 unchanged-baseline 规则结清”的限制，
+不能把后来独立 cancel 的后状态当作本窗口曾准备成功。以真实 timeout-force 路径的
+原未准备/外部 cancel 负例和原准备成功/已恢复零写正例验证，不增新权限或账本。
