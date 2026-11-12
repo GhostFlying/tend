@@ -95,7 +95,7 @@ func IssueContext(ctx context.Context, q store.Querier, id string, after int64) 
 		v.More = true
 	}
 	for _, mid := range ids {
-		r, err := store.GetConversationItem(ctx, q, mid)
+		r, err := store.GetConversationContextItem(ctx, q, mid)
 		if err != nil {
 			return v, err
 		}
@@ -105,6 +105,10 @@ func IssueContext(ctx context.Context, q store.Querier, id string, after int64) 
 		}
 		if err = store.HideUndeliveredOwner(ctx, q, &it); err != nil {
 			return v, err
+		}
+		if it.Tool != nil {
+			it.Tool.ContentOmitted = true
+			it.Tool.OriginalMessageID = mid
 		}
 		v.Sources = append(v.Sources, it)
 		v.Next = it.Seq

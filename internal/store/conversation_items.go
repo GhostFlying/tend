@@ -157,14 +157,26 @@ func ListConversation(ctx context.Context, q Querier, before, after int64, limit
 
 // GetConversationItem returns one conversation item, or ErrNotFound.
 func GetConversationItem(ctx context.Context, q Querier, messageID string) (ConversationRow, error) {
+	return getConversationItem(ctx, q, messageID, false)
+}
+
+// GetConversationContextItem keeps tool originals out of the context projection.
+// Exact conversation/material reads continue to resolve their complete text.
+func GetConversationContextItem(ctx context.Context, q Querier, messageID string) (ConversationRow, error) {
+	return getConversationItem(ctx, q, messageID, true)
+}
+func getConversationItem(ctx context.Context, q Querier, messageID string, index bool) (ConversationRow, error) {
 	r, err := scanConversation(q.QueryRowContext(ctx, `SELECT `+conversationCols+` WHERE m.message_id = ?`, messageID))
 	if err != nil {
 		return ConversationRow{}, notFound(err, "conversation item "+messageID)
 	}
-	if err = hydrateConversationTool(ctx, q, &r); err != nil {
-		return ConversationRow{}, err
+	if index && r.Tool != nil {
+		r.Tool.Input, r.Tool.Output = "", ""
+		r.Body, err = ResolveMessageBody(ctx, q, r.MessageID, r.Body)
+	} else {
+		err = hydrateConversationTool(ctx, q, &r)
 	}
-	return r, nil
+	return r, err
 }
 
 func hydrateConversationTool(ctx context.Context, q Querier, r *ConversationRow) error {

@@ -4181,8 +4181,10 @@ export interface MainSteerView {
  * via the `definition` "ToolUseView".
  */
 export interface ToolUseView {
+  content_omitted?: boolean;
   input?: string;
   name: string;
+  original_message_id?: string;
   output?: string;
   status: ToolStatus;
   turn_id: string;

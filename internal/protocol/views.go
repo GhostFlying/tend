@@ -344,15 +344,18 @@ type MainSteerView struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
-// ToolUseView is a tool the main agent used. Input and output are cut off
-// with a note past a size limit.
+// ToolUseView is a tool the main agent used. Exact material reads preserve its
+// original text; a context index explicitly points to that original instead.
 type ToolUseView struct {
-	Name      string     `json:"name"`
-	Input     string     `json:"input,omitempty"`
-	Output    string     `json:"output,omitempty"`
-	Status    ToolStatus `json:"status"`
-	TurnID    string     `json:"turn_id"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	// Context indexes omit both text fields without claiming an empty original.
+	ContentOmitted    bool       `json:"content_omitted,omitempty"`
+	OriginalMessageID string     `json:"original_message_id,omitempty"`
+	Name              string     `json:"name"`
+	Input             string     `json:"input,omitempty"`
+	Output            string     `json:"output,omitempty"`
+	Status            ToolStatus `json:"status"`
+	TurnID            string     `json:"turn_id"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // ConversationPage is a run of conversation items in order.
