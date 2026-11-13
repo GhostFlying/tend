@@ -1181,3 +1181,36 @@ test("followup changes refresh opened canonical rule and history reads without o
     await live.stop();
   }
 });
+
+test("Run changes refresh Agent task activity independently of the selected conversation", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  const opened = live.agents.openHosted();
+  await api.answer("/api/v1/hosted-agents", { projection: { agents: [] } });
+  await opened;
+  live.agents.ensureRunner("host");
+  await api.answer("/api/v1/hosts/host/agents", {
+    task_activity: { running_tasks: {}, uncertain_tasks: {} },
+  });
+  for (const [seq, count] of [
+    [1, 2],
+    [2, 0],
+  ] as const) {
+    live.apply({
+      event_seq: seq,
+      object_type: "run",
+      object_id: "run",
+      kind: "run.observed",
+      created_at: "2026-11-01T00:00:00Z",
+      item: { ...owner(seq), conversation_id: "another-conversation" },
+    });
+    await api.answer("/api/v1/hosted-agents", { projection: { agents: [] } });
+    await api.answer("/api/v1/hosts/host/agents", {
+      task_activity: { running_tasks: { cedar: count }, uncertain_tasks: {} },
+    });
+    expect(live.agents.catalogs.get().get("host")?.value?.task_activity?.running_tasks?.cedar).toBe(
+      count,
+    );
+  }
+  live.stop();
+});

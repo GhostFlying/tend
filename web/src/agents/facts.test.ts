@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { activityOrder, directoryEntry, taskActivity, type Group } from "./entries.ts";
 import { currentObservation } from "./facts.ts";
 import { runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
 import type {
@@ -90,4 +91,40 @@ test("environment labels retain adapter and CLI and never invent missing CLI ide
   expect(runtimeMethod({ kind: "hosted-manager", cli: "codex" })).toBe("Codex · app-server");
   expect(runtimeMethod({ kind: "hosted-manager" })).toBe("app-server");
   expect(runtimeMethod({ kind: "orca-worker", cli: "traex" })).toBe("TraeX · Orca");
+});
+
+test("activity uses the frozen identity aggregate and preserves order within load groups", () => {
+  const group: Group = {
+    id: "host",
+    projection: {
+      format_version: 1,
+      execution_environment_id: "host",
+      source_kind: "local_file",
+      agents: [],
+      runtimes: [],
+    },
+    taskActivity: { running_tasks: { cedar: 2, maple: 1 }, uncertain_tasks: { iris: 1 } },
+  };
+  const entries = ["idle", "cedar", "other-idle", "iris", "maple"].map((local_id) =>
+    directoryEntry(group, { ...agent, identity: { execution_environment_id: "host", local_id } }),
+  );
+  expect(
+    [...entries]
+      .sort((a, b) => activityOrder(a) - activityOrder(b))
+      .map((e) => e.agent.identity.local_id),
+  ).toEqual(["cedar", "maple", "iris", "idle", "other-idle"]);
+  expect(taskActivity(entries[1]!)).toEqual({ running: 2, uncertain: 0 });
+  expect(taskActivity(entries[0]!)).toEqual({ running: 0, uncertain: 0 });
+  expect(
+    taskActivity({ ...entries[1]!, group: { ...group, taskActivity: undefined } }),
+  ).toBeUndefined();
+  expect(
+    taskActivity({ ...entries[1]!, history: { pin: worker.pin, definition: agent, runtimes: [] } }),
+  ).toBeUndefined();
+  group.taskActivity!.running_tasks = {};
+  expect(
+    [...entries]
+      .sort((a, b) => activityOrder(a) - activityOrder(b))
+      .map((e) => e.agent.identity.local_id),
+  ).toEqual(["iris", "idle", "cedar", "other-idle", "maple"]);
 });

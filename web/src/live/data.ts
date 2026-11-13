@@ -251,7 +251,7 @@ export class LiveData {
   apply(event: LedgerEvent): void {
     if (event.kind === "token_usage.changed") this.usage.refresh();
     for (const listener of this.eventListeners) listener(event);
-    if (["category", "host", "hosted_configuration"].includes(event.object_type))
+    if (["category", "host", "hosted_configuration", "run", "task"].includes(event.object_type))
       this.agents.refresh();
     // Global responsibility views must not inherit the selected chat filter.
     if (

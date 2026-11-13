@@ -19,6 +19,7 @@ type RetainedAgentDefinition struct {
 // RunnerAgentCatalog separates registration from the last executor observation
 // and host presence. It grants no execution or configuration authority.
 type RunnerAgentCatalog struct {
+	TaskActivity          *AgentTaskActivity        `json:"task_activity,omitempty"`
 	Capabilities          []AgentCapabilityView     `json:"capabilities,omitempty"`
 	ConcurrencyBindings   []ConcurrencyBinding      `json:"concurrency_bindings,omitempty"`
 	ContinuationSupported bool                      `json:"continuation_supported,omitempty"`
@@ -31,4 +32,12 @@ type RunnerAgentCatalog struct {
 	Executors             []AgentExecutor           `json:"executors,omitempty"`
 	Online                bool                      `json:"online"`
 	LastHeartbeatAtMillis int64                     `json:"last_heartbeat_at_ms"`
+}
+
+// AgentTaskActivity aggregates distinct Tasks by frozen local Agent identity in
+// the containing catalog's environment. Empty maps mean zero; an absent summary
+// means the server did not provide this observation. Conversation turns are not Tasks.
+type AgentTaskActivity struct {
+	RunningTasks   map[string]int `json:"running_tasks"`
+	UncertainTasks map[string]int `json:"uncertain_tasks"`
 }

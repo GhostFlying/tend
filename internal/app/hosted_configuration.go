@@ -110,6 +110,10 @@ func (a *App) HostedAgentInventory(ctx context.Context) (protocol.HostedAgentInv
 		if err != nil {
 			return err
 		}
+		result.TaskActivity, err = views.AgentTaskActivity(ctx, tx.Q(), row.Public.ExecutionEnvironmentID)
+		if err != nil {
+			return err
+		}
 		result.ConcurrencyBindings, err = concurrencyEnvironmentBindings(ctx, tx.Q(), row.Public.ExecutionEnvironmentID)
 		return err
 	})

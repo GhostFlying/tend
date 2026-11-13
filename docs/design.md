@@ -651,6 +651,12 @@ Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑�
 
 D143 排版与元数据修正：format 2 的 hosted runtime 可显式声明 codex/traex，旧配置省略字段仍有效；缺声明只显示已知适配器，缺运行观测显示“未上报”。既有 `tend agents hosted/show --json` 同步输出原安全投影，无新增 API 或 runner wire 变更。见[实施计划](plans/agent-directory-presentation.md)。
 
+D143 当前任务负载：既有目录响应增加可选 `task_activity`，按 Run 冻结身份统计去重 Task。
+启动/运行/执行中等待计入运行，unknown/interrupted 单列待确认；已结束记录、主对话和咨询轮次不计入。
+当前身份汇总旧版本，历史定义行不重复总数；缺失汇总不推断空闲。Web 默认运行优先、待确认其次，
+组内稳定排序并由执行事件刷新。既有 CLI 输出相同字段，不改变 runner wire、调度与配置。
+见[实施计划](plans/agent-running-tasks.md)。
+
 ## D150：问题沿 Issue 责任链处理
 
 D136 的责任主体仍为 Issue owner；`worker` 只指 Task/Run 的执行适配器，不另设管理层。另一 Agent 承担独立工作必须拥有子 Issue，包括调查与正式复核。执行中产生的问题归属于实际执行的 Issue（验收为复核子 Issue），负责 Agent 自己提出的问题则提交上级。

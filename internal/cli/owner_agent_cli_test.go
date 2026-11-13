@@ -68,8 +68,8 @@ func TestIssueAssignmentCLIUsesCurrentCASAndOriginalRequestOnStale(t *testing.T)
 func TestHostedAgentCatalogCLIReadsExistingProjectionAndErrors(t *testing.T) {
 	f := newFakeServer(t)
 	te := newTestEnv(t, f.srv.URL)
-	f.answer("GET /api/v1/hosted-agents", protocol.HostedAgentInventory{ConfigurationRevision: 4, MainAgentID: "planner", State: "registered_staged", Projection: protocol.AgentInventoryProjection{Runtimes: []protocol.AgentInventoryRuntime{{RuntimeID: "traex", Kind: "hosted-manager", CLI: "codex"}}}})
-	if code := te.main("agents", "hosted"); code != exitOK || !strings.Contains(te.out.String(), `"configuration_revision":4`) || !strings.Contains(te.out.String(), `"state":"registered_staged"`) || !strings.Contains(te.out.String(), `"cli":"codex"`) {
+	f.answer("GET /api/v1/hosted-agents", protocol.HostedAgentInventory{TaskActivity: &protocol.AgentTaskActivity{RunningTasks: map[string]int{"planner": 0}, UncertainTasks: map[string]int{}}, ConfigurationRevision: 4, MainAgentID: "planner", State: "registered_staged", Projection: protocol.AgentInventoryProjection{Runtimes: []protocol.AgentInventoryRuntime{{RuntimeID: "traex", Kind: "hosted-manager", CLI: "codex"}}}})
+	if code := te.main("agents", "hosted"); code != exitOK || !strings.Contains(te.out.String(), `"task_activity":{"running_tasks":{"planner":0},"uncertain_tasks":{}}`) || !strings.Contains(te.out.String(), `"configuration_revision":4`) || !strings.Contains(te.out.String(), `"state":"registered_staged"`) || !strings.Contains(te.out.String(), `"cli":"codex"`) {
 		t.Fatal(code, te.out.String(), te.errOut.String())
 	}
 	f.on("GET /api/v1/hosted-agents", func(w http.ResponseWriter, _ *http.Request, _ []byte) {

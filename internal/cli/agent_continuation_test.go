@@ -14,7 +14,7 @@ func TestCapabilityAgentCatalogPreservesContinuationFacts(t *testing.T) {
 	f := newFakeServer(t)
 	te := newTestEnv(t, f.srv.URL)
 	pin := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "runner-one", LocalID: "cedar"}, AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "native-a", Revision: 1}, InventoryRevision: 1, SnapshotID: "original", PublicSHA256: "sha256:" + strings.Repeat("a", 64), Profile: protocol.ExecutionProfile{Model: "model", Effort: "high"}, Worker: protocol.WorkerAppServer, BackendID: "git"}
-	want := protocol.RunnerAgentCatalog{HostID: "runner-one", Online: true, ContinuationSupported: true,
+	want := protocol.RunnerAgentCatalog{TaskActivity: &protocol.AgentTaskActivity{RunningTasks: map[string]int{"cedar": 2}, UncertainTasks: map[string]int{"cedar": 1}}, HostID: "runner-one", Online: true, ContinuationSupported: true,
 		RetainedDefinitions: []protocol.RetainedAgentDefinition{{Pin: pin, Definition: protocol.AgentInventoryDefinition{Identity: pin.Identity, Revision: 1, DisplayName: "Original Cedar", Binding: pin.Runtime, Categories: []string{"implementation"}, Purposes: []string{"worker_run"}, RequestedModel: "model", RequestedEffort: "high", Enabled: true}, Runtimes: []protocol.AgentInventoryRuntime{{RuntimeID: "native-a", Revision: 1, Kind: "appserver-worker", CLI: "codex", DeclaredPurposes: []string{"worker_run"}, Enabled: true}}}},
 		RetainedExecutions:  []protocol.RunExecutionPin{pin}, Continuations: []protocol.AgentExecutor{{Pin: pin, Available: true}},
 	}
