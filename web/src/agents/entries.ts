@@ -80,9 +80,13 @@ export function taskActivity(entry: Entry) {
   const activity = entry.group.taskActivity ?? entry.group.catalog?.task_activity;
   if (!activity) return undefined;
   return {
-    running: activity.running_tasks?.[entry.agent.identity.local_id] ?? 0,
-    uncertain: activity.uncertain_tasks?.[entry.agent.identity.local_id] ?? 0,
+    running: ownTaskCount(activity.running_tasks, entry.agent.identity.local_id),
+    uncertain: ownTaskCount(activity.uncertain_tasks, entry.agent.identity.local_id),
   };
+}
+
+function ownTaskCount(counts: AgentTaskActivity["running_tasks"], id: string): number {
+  return counts && Object.hasOwn(counts, id) ? (counts[id] ?? 0) : 0;
 }
 
 export function activityOrder(entry: Entry): number {
