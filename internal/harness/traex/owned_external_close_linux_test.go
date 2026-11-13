@@ -152,3 +152,51 @@ func TestExternalOwnedCloseSystemdV1RequiresKernelRemoval(t *testing.T) {
 		t.Fatalf("exact original v1 removed proof rejected: %t %v", ok, err)
 	}
 }
+
+func TestExternalMissingOwnedCloseRequiresExactProofAndAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		edit  func(*protocol.WorkerCloseIntent)
+		owned string
+	}{
+		{name: "exact"},
+		{name: "run", edit: func(in *protocol.WorkerCloseIntent) { in.RunID += "-other" }},
+		{name: "thread", edit: func(in *protocol.WorkerCloseIntent) { in.ThreadID += "-other" }},
+		{name: "workspace", edit: func(in *protocol.WorkerCloseIntent) { in.Directory += "-other" }},
+		{name: "state", edit: func(in *protocol.WorkerCloseIntent) { in.StateDirectory += "-other" }},
+		{name: "invented_process", edit: func(in *protocol.WorkerCloseIntent) { in.Processes = []protocol.WorkerCloseProcess{in.Runner} }},
+		{name: "invented_owned_sha", edit: func(in *protocol.WorkerCloseIntent) { in.OwnedRecordSHA256 = strings.Repeat("b", 64) }},
+		{name: "late_malformed_owned", owned: "{"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec, _, original := externalOwnedCloseFixture(t)
+			if err := os.Remove(filepath.Join(spec.StateDir, ownedProcessFile)); err != nil {
+				t.Fatal(err)
+			}
+			in := original.Intent
+			in.Version, in.OwnedRecordMissing, in.OwnedRecordSHA256, in.Processes = 2, true, "", nil
+			if tc.edit != nil {
+				tc.edit(&in)
+			}
+			proof := externalOwnedCloseProof(t, in)
+			body, _ := json.Marshal(proof)
+			if err := os.WriteFile(filepath.Join(spec.StateDir, protocol.WorkerCloseMissingProofFilename), body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.owned != "" {
+				if err := os.WriteFile(filepath.Join(spec.StateDir, ownedProcessFile), []byte(tc.owned), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := NewWorkers(WorkerOptions{}).StopOwnedWorker(t.Context(), spec)
+			if (err == nil) != (tc.name == "exact") {
+				t.Fatalf("wrong missing-ownership result: %v", err)
+			}
+			if tc.name == "exact" {
+				if _, err := os.Stat(filepath.Join(spec.StateDir, ownedProcessFile)); !os.IsNotExist(err) {
+					t.Fatalf("fabricated ownership: %v", err)
+				}
+			}
+		})
+	}
+}

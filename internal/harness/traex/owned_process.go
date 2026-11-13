@@ -52,6 +52,13 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 	}()
 	record, err := ws.ownedWorkerProcess(spec)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if closed, proofErr := verifyExternalMissingOwnedClose(ctx, spec); proofErr != nil {
+				return proofErr
+			} else if closed {
+				return nil
+			}
+		}
 		return err
 	}
 	if record.closed() {

@@ -150,18 +150,25 @@ func workerCloseDirectoryIdentity(path string) (uint64, uint64, error) {
 func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerCloseHost) (protocol.WorkerCloseIntent, error) {
 	var in protocol.WorkerCloseIntent
 	body, err := readWorkerCloseFile(ctx, filepath.Join(q.StateDirectory, "owned-appserver-process.json"))
-	if err != nil {
-		return in, err
-	}
-	if protocol.WorkerCloseSHA256(body) != q.OwnedSHA256 {
-		return in, errors.New("original owned record SHA256 changed")
-	}
 	var owned workerCloseOwnedRecord
-	if err := decodeWorkerCloseJSON(body, &owned); err != nil {
-		return in, err
-	}
-	if owned.Version != 1 || owned.RunID != q.RunID || owned.ThreadID != q.ThreadID || !filepath.IsAbs(owned.Dir) {
-		return in, errors.New("original owned Run/thread/directory differs")
+	if q.OwnedMissing {
+		if err := requireWorkerCloseMissing(ctx, q.StateDirectory); err != nil {
+			return in, err
+		}
+		owned.Dir = q.Directory
+	} else {
+		if err != nil {
+			return in, err
+		}
+		if protocol.WorkerCloseSHA256(body) != q.OwnedSHA256 {
+			return in, errors.New("original owned record SHA256 changed")
+		}
+		if err := decodeWorkerCloseJSON(body, &owned); err != nil {
+			return in, err
+		}
+		if owned.Version != 1 || owned.RunID != q.RunID || owned.ThreadID != q.ThreadID || !filepath.IsAbs(owned.Dir) {
+			return in, errors.New("original owned Run/thread/directory differs")
+		}
 	}
 	boot, err := h.boot(ctx)
 	if err != nil {
@@ -206,6 +213,9 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 	}
 	in.Boundary.Device, in.Boundary.Inode = device, inode
 	in.Boundary.RootDevice, in.Boundary.RootInode = rootDevice, rootInode
+	if q.OwnedMissing {
+		in.Version, in.OwnedRecordMissing, in.Processes = 2, true, nil
+	}
 	if err := in.Validate(); err != nil {
 		return in, err
 	}
@@ -229,15 +239,14 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 		}
 	}
 	// Revalidate the mutable source and live runner after collecting its boundary.
-	current, err := readWorkerCloseFile(ctx, filepath.Join(q.StateDirectory, "owned-appserver-process.json"))
-	if err != nil {
+	if err := validateWorkerCloseOwnership(ctx, in); err != nil {
 		return in, err
 	}
 	again, active, err := h.process(ctx, runner.PID, boot)
 	if err != nil {
 		return in, err
 	}
-	if !active || again != runner || protocol.WorkerCloseSHA256(current) != q.OwnedSHA256 {
+	if !active || again != runner {
 		return in, errors.New("original ownership or runner changed during prepare")
 	}
 	againBoundary, err := h.executionBoundary(ctx, runner.PID, q.Unit)
@@ -257,12 +266,8 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 func confirmWorkerClose(ctx context.Context, in protocol.WorkerCloseIntent, intentSHA string, h workerCloseHost) (protocol.WorkerCloseProof, error) {
 	proof := protocol.WorkerCloseProof{Version: 1, Source: protocol.ExternalExecutionBoundary, OperatorUID: h.uid, IntentSHA256: intentSHA, Intent: in}
 	for i := 0; i < 2; i++ {
-		body, err := readWorkerCloseFile(ctx, filepath.Join(in.StateDirectory, "owned-appserver-process.json"))
-		if err != nil {
+		if err := validateWorkerCloseOwnership(ctx, in); err != nil {
 			return proof, err
-		}
-		if protocol.WorkerCloseSHA256(body) != in.OwnedRecordSHA256 {
-			return proof, errors.New("original owned record changed before confirmation")
 		}
 		boot, err := h.boot(ctx)
 		if err != nil {
@@ -292,7 +297,38 @@ func confirmWorkerClose(ctx context.Context, in protocol.WorkerCloseIntent, inte
 		}
 		proof.Observations = append(proof.Observations, protocol.WorkerCloseObservation{ObservedAt: h.now().UTC().Format(time.RFC3339Nano), State: state})
 	}
+	if err := validateWorkerCloseOwnership(ctx, in); err != nil {
+		return proof, err
+	}
 	return proof, proof.Validate()
+}
+
+func requireWorkerCloseMissing(ctx context.Context, state string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := os.Lstat(filepath.Join(state, "owned-appserver-process.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.New("original owned record is present; use its exact SHA256")
+}
+
+func validateWorkerCloseOwnership(ctx context.Context, in protocol.WorkerCloseIntent) error {
+	if in.OwnedRecordMissing {
+		return requireWorkerCloseMissing(ctx, in.StateDirectory)
+	}
+	body, err := readWorkerCloseFile(ctx, filepath.Join(in.StateDirectory, "owned-appserver-process.json"))
+	if err != nil {
+		return err
+	}
+	if protocol.WorkerCloseSHA256(body) != in.OwnedRecordSHA256 {
+		return errors.New("original owned record changed before confirmation")
+	}
+	return nil
 }
 
 func observeWorkerCloseBoundary(ctx context.Context, boundary protocol.WorkerCloseBoundary, h workerCloseHost) (string, error) {

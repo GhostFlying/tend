@@ -36,19 +36,21 @@ type WorkerCloseBoundary struct {
 }
 
 type WorkerCloseIntent struct {
-	Version           int                  `json:"version"`
-	RequestID         string               `json:"request_id"`
-	RunID             string               `json:"run_id"`
-	ThreadID          string               `json:"thread_id"`
-	StateDirectory    string               `json:"state_directory"`
-	Directory         string               `json:"directory"`
-	OwnedRecordSHA256 string               `json:"owned_record_sha256"`
-	Runner            WorkerCloseProcess   `json:"runner"`
-	Processes         []WorkerCloseProcess `json:"processes"`
-	Boundary          WorkerCloseBoundary  `json:"boundary"`
-	OperatorUID       int                  `json:"operator_uid"`
-	UnitAcknowledged  bool                 `json:"unit_execution_acknowledged"`
-	PreparedAt        string               `json:"prepared_at"`
+	Version           int    `json:"version"`
+	RequestID         string `json:"request_id"`
+	RunID             string `json:"run_id"`
+	ThreadID          string `json:"thread_id"`
+	StateDirectory    string `json:"state_directory"`
+	Directory         string `json:"directory"`
+	OwnedRecordSHA256 string `json:"owned_record_sha256"`
+	// Version 2 records absence rather than inventing an owned process set.
+	OwnedRecordMissing bool                 `json:"owned_record_missing,omitempty"`
+	Runner             WorkerCloseProcess   `json:"runner"`
+	Processes          []WorkerCloseProcess `json:"processes"`
+	Boundary           WorkerCloseBoundary  `json:"boundary"`
+	OperatorUID        int                  `json:"operator_uid"`
+	UnitAcknowledged   bool                 `json:"unit_execution_acknowledged"`
+	PreparedAt         string               `json:"prepared_at"`
 }
 
 type WorkerCloseObservation struct {
@@ -92,6 +94,16 @@ func WorkerCloseProofFilename(ownedSHA256 string) string {
 	return "owned-external-close-" + ownedSHA256 + ".json"
 }
 
+// Missing ownership has one immutable proof per original Run state directory.
+const WorkerCloseMissingProofFilename = "owned-external-close-missing.json"
+
+func (in WorkerCloseIntent) ProofFilename() string {
+	if in.OwnedRecordMissing {
+		return WorkerCloseMissingProofFilename
+	}
+	return WorkerCloseProofFilename(in.OwnedRecordSHA256)
+}
+
 func (p WorkerCloseProcess) Validate() error {
 	if p.PID <= 1 || p.StartTicks == "" || p.BootID == "" {
 		return errors.New("worker-close: incomplete process identity")
@@ -101,13 +113,15 @@ func (p WorkerCloseProcess) Validate() error {
 
 func (in WorkerCloseIntent) Validate() error {
 	digest, err := hex.DecodeString(in.OwnedRecordSHA256)
-	if err != nil || len(digest) != sha256.Size || in.Version != 1 || in.RequestID == "" || in.RunID == "" || in.ThreadID == "" || !filepath.IsAbs(in.StateDirectory) || !filepath.IsAbs(in.Directory) || in.OperatorUID < 0 || in.PreparedAt == "" {
+	ownedValid := in.Version == 1 && !in.OwnedRecordMissing && err == nil && len(digest) == sha256.Size && len(in.Processes) > 0
+	missingValid := in.Version == 2 && in.OwnedRecordMissing && in.OwnedRecordSHA256 == "" && len(in.Processes) == 0
+	if (!ownedValid && !missingValid) || in.RequestID == "" || in.RunID == "" || in.ThreadID == "" || !filepath.IsAbs(in.StateDirectory) || !filepath.IsAbs(in.Directory) || in.OperatorUID < 0 || in.PreparedAt == "" {
 		return errors.New("worker-close: incomplete intent binding")
 	}
 	if err := in.Runner.Validate(); err != nil {
 		return err
 	}
-	if !in.UnitAcknowledged || in.Boundary.Unit == "" || !filepath.IsAbs(in.Boundary.CgroupPath) || in.Boundary.CgroupPath == "/" || in.Boundary.Device == 0 || in.Boundary.Inode == 0 || in.Boundary.RootDevice == 0 || in.Boundary.RootInode == 0 || len(in.Processes) == 0 {
+	if !in.UnitAcknowledged || in.Boundary.Unit == "" || !filepath.IsAbs(in.Boundary.CgroupPath) || in.Boundary.CgroupPath == "/" || in.Boundary.Device == 0 || in.Boundary.Inode == 0 || in.Boundary.RootDevice == 0 || in.Boundary.RootInode == 0 {
 		return errors.New("worker-close: incomplete execution boundary")
 	}
 	if in.Boundary.Hierarchy != "" && in.Boundary.Hierarchy != WorkerCloseSystemdV1 {

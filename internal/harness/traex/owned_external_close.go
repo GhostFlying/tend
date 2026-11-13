@@ -69,6 +69,52 @@ func verifyExternalOwnedClose(ctx context.Context, spec harness.WorkerSpec, reco
 	return true, nil
 }
 
+// A missing owned record is not a stop fact. Only an independently captured
+// whole-boundary proof can close such an attempt; never synthesize ownership.
+func verifyExternalMissingOwnedClose(ctx context.Context, spec harness.WorkerSpec) (bool, error) {
+	if spec.RunID == "" || spec.Thread == "" || !filepath.IsAbs(spec.StateDir) || !filepath.IsAbs(spec.Dir) {
+		return false, errors.New("traex: missing-ownership recovery requires the exact original Run/thread/directories")
+	}
+	absent := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := os.Lstat(filepath.Join(spec.StateDir, ownedProcessFile))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return errors.New("traex: owned record appeared during missing-ownership recovery")
+	}
+	if err := absent(); err != nil {
+		return false, err
+	}
+	body, err := readExternalOwnedCloseFile(ctx, filepath.Join(spec.StateDir, protocol.WorkerCloseMissingProofFilename))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var proof protocol.WorkerCloseProof
+	if err := json.Unmarshal(body, &proof); err != nil {
+		return false, err
+	}
+	if err := proof.Validate(); err != nil {
+		return false, err
+	}
+	in := proof.Intent
+	if !in.OwnedRecordMissing || in.RunID != spec.RunID || in.ThreadID != spec.Thread || in.Directory != spec.Dir || in.StateDirectory != spec.StateDir {
+		return false, errors.New("traex: missing-ownership proof differs from the original Run/thread/directories")
+	}
+	if err := absent(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func readExternalOwnedCloseFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
