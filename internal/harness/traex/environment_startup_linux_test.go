@@ -13,6 +13,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/codexenv"
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func startupEnvironment(t *testing.T) (*codexenv.Service, codexenv.Profile, *codexenv.Binding) {
@@ -118,5 +119,35 @@ func TestEnvironmentLaunchLockHonorsStartupCancellation(t *testing.T) {
 		release()
 		<-done
 		t.Fatal("startup lock ignored the caller deadline")
+	}
+}
+
+func TestContinuationMissingStrictEnvironmentDoesNotUseHistoryFallback(t *testing.T) {
+	for _, kind := range []string{"question", "pause"} {
+		t.Run(kind, func(t *testing.T) {
+			_, _, binding := startupEnvironment(t)
+			root := t.TempDir()
+			spec := harness.WorkerSpec{RunID: "current", Dir: t.TempDir(), StateDir: filepath.Join(root, "current"), Thread: "strict-thread", PredecessorStateDir: filepath.Join(root, "missing"),
+				SessionContinuation:      &protocol.SessionContinuation{RunID: "history", ThreadID: "history-thread"},
+				ExternalWaitContinuation: &protocol.ExternalWait{RunID: "wait", ThreadID: "wait-thread"}}
+			if kind == "question" {
+				spec.QuestionContinuation = &protocol.QuestionContinuation{RunID: "strict", ThreadID: spec.Thread}
+			} else {
+				spec.PauseContinuation = &protocol.PauseContinuation{RunID: "strict", ThreadID: spec.Thread}
+			}
+			workers := NewWorkers(WorkerOptions{Session: Options{Environment: binding}})
+			starts := 0
+			workers.start = func(context.Context, Options) (*Session, error) {
+				starts++
+				return nil, harness.ErrWorkerNotStarted
+			}
+			_, err := workers.Start(t.Context(), spec)
+			if !errors.Is(err, os.ErrNotExist) || !errors.Is(err, harness.ErrWorkerNotStarted) || starts != 0 {
+				t.Fatalf("unrelated history replaced strict predecessor: starts=%d err=%v", starts, err)
+			}
+			if _, err := os.Stat(spec.StateDir); !os.IsNotExist(err) {
+				t.Fatalf("missing original acquired another environment: %v", err)
+			}
+		})
 	}
 }

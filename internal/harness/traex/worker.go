@@ -179,13 +179,13 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	previousRun, previousThread := spec.StoppedPredecessor()
 	if previousRun != "" && previousThread != "" && spec.PredecessorStateDir != "" {
 		opts.Environment, err = codexenv.InheritExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, spec.PredecessorStateDir, "run:"+previousRun)
-		if errors.Is(err, os.ErrNotExist) && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil) && spec.RetainedResume == nil {
+		if errors.Is(err, os.ErrNotExist) && spec.OptionalHistory() && spec.RetainedResume == nil {
 			spec.Thread = ""
 			opts.Environment, err = codexenv.BindExecution(startupCtx, spec.StateDir, "run:"+spec.RunID, ws.opts.Session.Environment, false)
 		}
 	} else {
 		if previousRun != "" && previousThread != "" && opts.Environment != nil {
-			if spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil {
+			if spec.OptionalHistory() {
 				spec.Thread = ""
 			} else {
 				return nil, fmt.Errorf("%w: isolated continuation needs original execution state", harness.ErrWorkerNotStarted)
@@ -516,7 +516,7 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 		if err == nil {
 			return th, nil
 		}
-		optionalContinuation := spec.RetainedResume == nil && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil)
+		optionalContinuation := spec.RetainedResume == nil && spec.OptionalHistory()
 		if ctx.Err() != nil || ws.opts.StrictResume && !optionalContinuation || !errors.Is(err, harness.ErrRejected) {
 			return nil, err
 		}
