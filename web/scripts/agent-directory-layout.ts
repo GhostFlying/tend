@@ -161,7 +161,7 @@ function catalog(host: string): RunnerAgentCatalog {
     task_activity: {
       running_tasks: activityRunning
         ? host === "host-a"
-          ? { cedar: 2, iris: 1 }
+          ? { cedar: 2, iris: 1, elm: 1 }
           : { birch: 3 }
         : {},
       uncertain_tasks: activityRunning && host === "host-a" ? { maple: 1 } : {},
@@ -638,12 +638,14 @@ try {
       await page.waitForFunction(
         () => document.querySelector('[class*="identity"] strong')?.textContent === "Cedar",
       );
-      assert.deepEqual((await names.allInnerTexts()).slice(0, 4), [
+      assert.deepEqual((await names.allInnerTexts()).slice(0, 5), [
         "Cedar",
         "Iris",
+        "Elm",
         "Willow",
         "Maple",
       ]);
+      assert.equal(await directory.getByRole("button", { name: /Elm.*1 个任务运行中/ }).count(), 1);
       const busyRow = directory.getByRole("button", { name: /Cedar.*2 个任务运行中/ });
       await busyRow.waitFor();
       assert.equal(
@@ -678,7 +680,7 @@ try {
       await directory
         .getByRole("combobox", { name: "类别筛选", exact: true })
         .selectOption("implementation");
-      assert.deepEqual(await names.allInnerTexts(), ["Cedar", "Pine"]);
+      assert.deepEqual(await names.allInnerTexts(), ["Cedar", "Elm", "Pine"]);
       await busyRow.click();
       await detail().getByRole("heading", { name: "Cedar", exact: true }).waitFor();
       await backToList();

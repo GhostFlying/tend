@@ -11,6 +11,7 @@ import { agentKey } from "./facts.ts";
 import {
   directoryEntry,
   activityOrder,
+  activeEntries,
   taskActivity,
   entryKey,
   observation,
@@ -91,9 +92,9 @@ export function AgentCatalogView() {
       : entry.agent.purposes?.includes("issue_manager")
         ? 1
         : 2;
-  const current = entries
-    .filter((e) => !e.history)
-    .sort((a, b) => (a.group === b.group && !a.group.catalog ? roleOrder(a) - roleOrder(b) : 0));
+  const current = activeEntries(entries).sort((a, b) =>
+    a.group === b.group && !a.group.catalog ? roleOrder(a) - roleOrder(b) : 0,
+  );
   const query = (filters.search ?? "").trim().toLocaleLowerCase();
   const matches = ({ agent, runtime, group }: Entry) =>
     (!query ||
@@ -104,7 +105,7 @@ export function AgentCatalogView() {
     (!filters.location || group.projection.execution_environment_id === filters.location) &&
     (!filters.environment || runtimeLabel(runtime) === filters.environment);
   const visible = current.filter(matches).sort((a, b) => activityOrder(a) - activityOrder(b));
-  const historical = entries.filter((e) => e.history && matches(e));
+  const historical = entries.filter((e) => e.history && !current.includes(e) && matches(e));
   const selectable = [...visible, ...historical];
   const selected =
     selectable.find((e) => entryKey(e) === filters.selected) ??
@@ -407,6 +408,7 @@ export function AgentCatalogView() {
                     {historical.map((entry) => (
                       <AgentRow
                         key={entryKey(entry)}
+                        showActivity={false}
                         entry={entry}
                         selected={selected === entry}
                         title={title}
@@ -484,11 +486,13 @@ export function AgentCatalogView() {
 function AgentRow({
   entry,
   selected,
+  showActivity = true,
   title,
   onPick,
 }: {
   entry: Entry;
   selected: boolean;
+  showActivity?: boolean;
   title(id: string): string;
   onPick(button: HTMLButtonElement): void;
 }) {
@@ -512,7 +516,7 @@ function AgentRow({
     >
       <span className={styles.identity}>
         <strong>{agent.display_name}</strong>
-        {!entry.history && (
+        {showActivity && (
           <span className={`${styles.activity} ${activity?.running ? styles.busy : ""}`}>
             {activity
               ? activity.running
