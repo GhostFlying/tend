@@ -96,7 +96,7 @@ func deliveryObservationBaseline(ctx context.Context, q store.Querier, issue str
 
 // checkDeliveryUpgradeStart is used only by the local verified-bundle boundary.
 // It does not trust the worker's prose or treat a resolved technical question as
-// user permission. The slot, owner epoch, exact answer and source are rechecked.
+// user permission. The slot, owner epoch, frozen grant and source are rechecked.
 func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c StartUpgrade) (*protocol.IssueDeliveryCandidate, error) {
 	if c.DeliveryTaskID == "" {
 		return nil, nil
@@ -143,12 +143,8 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	if d.ExecutionTaskID != c.DeliveryTaskID || d.Revision != revision || d.Status != "executing" {
 		return nil, protocol.Errorf(protocol.CodeStaleRevision, "delivery execution was superseded")
 	}
-	option, err := deliveryOwnerOption(ctx, q, d)
-	if err != nil {
+	if err := store.DeliveryGrantValid(ctx, q, current, d); err != nil {
 		return nil, err
-	}
-	if option != "approve" {
-		return nil, protocol.Errorf(protocol.CodeForbidden, "an exact current owner answer is required")
 	}
 	task, err := store.GetTask(ctx, q, c.DeliveryTaskID)
 	if err != nil {
