@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"io"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func reportDeliveryCommunicationFixture(t *testing.T) (*harness, protocol.Issue,
 }
 
 func TestReportDeliveryClosedIssuePublishesOriginalResultFiles(t *testing.T) {
-	for _, attachments := range []string{"none", "report", "acceptance", "both"} {
+	for _, attachments := range []string{"none", "report", "acceptance", "both", "unsubmitted"} {
 		t.Run(attachments, func(t *testing.T) {
 			h, issue, turn, principal, files := reportDeliveryCommunicationFixture(t)
 			ids := []string{files[0].FileID}
@@ -126,6 +127,10 @@ func TestReportDeliveryClosedIssuePublishesOriginalResultFiles(t *testing.T) {
 			if attachments == "both" {
 				ids = append(ids, files[1].FileID)
 			}
+			if attachments == "unsubmitted" {
+				ids = []string{files[2].FileID}
+			}
+			artifacts, acceptances := h.count("artifacts"), h.count("acceptances")
 			payload := protocol.CoordinationReply{ReplyTo: turn.MessageID, Body: "The investigation is complete; read the original findings.", Purpose: "final", Disposition: "linked", WorkItemIDs: []string{issue.IssueID}, Contexts: []protocol.LogicalContextReview{{WorkItemID: issue.IssueID, Revision: h.agentContext(issue.IssueID).Revision}}, ReviewedKinds: allFactKinds, Attachments: ids}
 			env := h.env("conversation.reply", protocol.Target{Type: "logical_turn", ID: turn.RequestID}, payload, nil)
 			op, err := h.app.Execute(t.Context(), principal, env, HostedCoordinationCommand{Command: CoordinationReply{}, ExecutionID: turn.RequestID, EffectSeq: 5})
@@ -157,17 +162,31 @@ func TestReportDeliveryClosedIssuePublishesOriginalResultFiles(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			if attachments == "unsubmitted" {
+				meta, original, err := h.app.OpenConversationAttachment(t.Context(), files[2].FileID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := io.ReadAll(original)
+				_ = original.Close()
+				if err != nil || string(body) != "Unsubmitted draft" || meta.SHA256 != files[2].SHA256 || meta.Size != files[2].Size {
+					t.Fatal("ordinary supplement lost its original bytes", meta, string(body), err)
+				}
+			}
+			if current := canonicalTaskIssue(t, h, issue.IssueID); current.State != protocol.IssueClosed || current.Revision != issue.Revision || h.count("artifacts") != artifacts || h.count("acceptances") != acceptances {
+				t.Fatal("ordinary publication changed formal completion", current)
+			}
 		})
 	}
 }
 
-func TestReportDeliveryRejectsUnsubmittedAndForeignOriginals(t *testing.T) {
-	for _, original := range []string{"unsubmitted", "foreign_report", "foreign_acceptance", "foreign_notification", "missing_input"} {
+func TestReportDeliveryRejectsForeignOriginalsAndMissingInput(t *testing.T) {
+	for _, original := range []string{"foreign_report", "foreign_acceptance", "foreign_notification", "missing_input"} {
 		t.Run(original, func(t *testing.T) {
 			h, issue, turn, principal, files := reportDeliveryCommunicationFixture(t)
 			originalNotification := turn.MessageID
 			file := files[2]
-			if original != "unsubmitted" && original != "missing_input" {
+			if original != "missing_input" {
 				// Admit a different real responsibility; it cannot publish the
 				// first Issue's immutable implementation or verdict originals.
 				if op := h.exec(owner, h.env("categories.put", protocol.Target{Type: "category", ID: "planner"}, protocol.PutAgentCategoryPayload{Title: "Planner", State: "active"}, rev(0)), PutAgentCategory{}); op.Status != protocol.OpSucceeded {
@@ -195,7 +214,7 @@ func TestReportDeliveryRejectsUnsubmittedAndForeignOriginals(t *testing.T) {
 				err = op.Error
 			}
 			want := protocol.CodeForbidden
-			if original == "unsubmitted" || original == "missing_input" {
+			if original == "missing_input" {
 				want = protocol.CodeNotFound
 			}
 			if protocol.CodeOf(err) != want || h.count("conversation_messages") != messages {
