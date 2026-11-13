@@ -12735,10 +12735,15 @@
         {
           "properties": {
             "attachments": {
-              "maxItems": 20
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "type": "array"
             },
             "body": {
-              "maxLength": 65536
+              "maxLength": 65536,
+              "type": "string"
             },
             "purpose": {
               "description": "Optional presentation marker only. Omit for an ordinary message; final does not finish or accept work.",
@@ -12746,7 +12751,8 @@
                 "",
                 "progress",
                 "final"
-              ]
+              ],
+              "type": "string"
             }
           }
         },
@@ -12756,7 +12762,8 @@
               "properties": {
                 "body": {
                   "minLength": 1,
-                  "pattern": "\\S"
+                  "pattern": "\\S",
+                  "type": "string"
                 }
               },
               "required": [
@@ -12766,7 +12773,11 @@
             {
               "properties": {
                 "attachments": {
-                  "minItems": 1
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
                 }
               },
               "required": [
@@ -19869,7 +19880,8 @@
         {
           "properties": {
             "reason": {
-              "minLength": 1
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [
@@ -19880,7 +19892,8 @@
           "if": {
             "properties": {
               "action": {
-                "const": "complete"
+                "const": "complete",
+                "type": "string"
               }
             },
             "required": [
@@ -19897,7 +19910,8 @@
         {
           "properties": {
             "execution_duty_revision": {
-              "minimum": 0
+              "minimum": 0,
+              "type": "integer"
             }
           }
         },
@@ -19905,7 +19919,8 @@
           "if": {
             "properties": {
               "execution_duty_revision": {
-                "minimum": 1
+                "minimum": 1,
+                "type": "integer"
               }
             },
             "required": [
@@ -19915,7 +19930,8 @@
           "then": {
             "properties": {
               "action": {
-                "const": "complete"
+                "const": "complete",
+                "type": "string"
               }
             },
             "required": [
@@ -19930,7 +19946,8 @@
           "properties": {
             "action": {
               "const": "submit_result",
-              "description": "Uses result, run_id, independent_acceptance. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses result, run_id, independent_acceptance. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [
@@ -19942,7 +19959,8 @@
           "properties": {
             "action": {
               "const": "prepare",
-              "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [
@@ -19954,7 +19972,8 @@
           "properties": {
             "action": {
               "const": "resume",
-              "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [
@@ -19966,7 +19985,8 @@
           "properties": {
             "action": {
               "const": "bind",
-              "description": "Uses task_id, execution_task_id, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses task_id, execution_task_id, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [
@@ -19980,7 +20000,8 @@
           "properties": {
             "action": {
               "const": "report",
-              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [
@@ -19992,7 +20013,8 @@
           "properties": {
             "action": {
               "const": "end",
-              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [
@@ -20004,7 +20026,8 @@
           "properties": {
             "action": {
               "const": "complete",
-              "description": "Uses task_id, execution_task_id, execution_run_id, execution_duty_revision, upgrade_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+              "description": "Uses task_id, execution_task_id, execution_run_id, execution_duty_revision, upgrade_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
             }
           },
           "required": [

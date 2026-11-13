@@ -10,6 +10,7 @@
 2. 上下文的 keyset 成员上界保持不变；使用永久业务事件作为持续读取的边界，辅助刷新不影响 snapshot 和后续 delta。旧 cursor 保留明确恢复规则；真实历史缺失和错误 scope 不当作成功。
 3. optional purpose 与 delivery action 已存在的字段条件复用协议层定义，使 App、模型工具、owner API 和 CLI 契约一致。历史额外字段仍按原动作忽略，不新增拒绝；candidate 依实际 duty 状态决定，例如 deferred prepare 无需新候选。正式生成 schema/TS，同步帮助和 Agent 指令。
 4. 定向回归从真实 App/Store 入口覆盖上传→直接发布→字节读回、结束/关闭后合法补充、丢回复去重、状态中立、范围拒绝；覆盖页间刷新和业务变化、完成后两个增量区间、真实缺口。
+5. Schema 的约束片段保留原字段类型；通过正式生成的 TypeScript 类型构造文本、动态附件数组、各交付动作和历史代次参数，并纳入现有 Web typecheck，避免只有类型声明可编译而合法调用无法编译。数组长度仍由 Schema/App 校验，TypeScript 保留运行时组装的数组类型，不生成固定长度元组门槛。
 
 ## 边界与验证
 

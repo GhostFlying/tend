@@ -23,6 +23,8 @@ export async function generate(): Promise<string> {
     additionalProperties: false,
     strictIndexSignatures: true,
     unreachableDefinitions: true,
+    // Request arrays are assembled at runtime; Schema/App validate their size.
+    ignoreMinAndMaxItems: true,
     format: true,
     style: { printWidth: 100 },
   });
