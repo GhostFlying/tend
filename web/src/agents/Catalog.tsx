@@ -10,6 +10,8 @@ import { StatusDot } from "../shell/StatusDot.tsx";
 import { agentKey } from "./facts.ts";
 import {
   directoryEntry,
+  activityOrder,
+  taskActivity,
   entryKey,
   observation,
   purposeLabel,
@@ -60,6 +62,7 @@ export function AgentCatalogView() {
   if (hosted.value?.state !== "unconfigured" && hosted.value?.projection)
     groups.push({
       id: "服务端",
+      taskActivity: hosted.value.task_activity,
       projection: hosted.value.projection,
       configurationRevision: hosted.value.configuration_revision,
       concurrencyBindings: hosted.value.concurrency_bindings,
@@ -100,7 +103,7 @@ export function AgentCatalogView() {
     (!filters.category || agent.categories?.includes(filters.category)) &&
     (!filters.location || group.projection.execution_environment_id === filters.location) &&
     (!filters.environment || runtimeLabel(runtime) === filters.environment);
-  const visible = current.filter(matches);
+  const visible = current.filter(matches).sort((a, b) => activityOrder(a) - activityOrder(b));
   const historical = entries.filter((e) => e.history && matches(e));
   const selectable = [...visible, ...historical];
   const selected =
@@ -373,6 +376,10 @@ export function AgentCatalogView() {
             <div className={`${styles.layout} ${selected ? styles.withDetails : ""}`}>
               <div className={styles.list}>
                 {toolbar}
+                <p className={styles.activityNote}>
+                  运行任务优先，组内保留目录顺序。计入启动、运行及执行中等待的去重任务，
+                  不含主对话和咨询轮次；待确认单列。忙碌 Agent 仍可并发。
+                </p>
                 <div className={styles.head}>
                   <span>Agent</span>
                   <span>类别</span>
@@ -487,6 +494,7 @@ function AgentRow({
 }) {
   const { agent, group, runtime } = entry;
   const state = observation(entry);
+  const activity = taskActivity(entry);
   const purpose = !group.catalog ? agent.purposes?.map(purposeLabel).join("、") : "";
   const category = agent.categories?.map(title).join("、");
   const status = (
@@ -504,6 +512,20 @@ function AgentRow({
     >
       <span className={styles.identity}>
         <strong>{agent.display_name}</strong>
+        {!entry.history && (
+          <span className={`${styles.activity} ${activity?.running ? styles.busy : ""}`}>
+            {activity
+              ? activity.running
+                ? `${activity.running} 个任务运行中`
+                : activity.uncertain
+                  ? "运行状态待确认"
+                  : !group.catalog
+                    ? "0 个运行任务"
+                    : "0 个任务 · 空闲"
+              : "任务数未提供"}
+            {!!activity?.uncertain && ` · ${activity.uncertain} 个待确认`}
+          </span>
+        )}
         <small className={entry.history ? styles.historicalIdentity : undefined}>
           {purpose && `${purpose} · `}
           {agent.identity.local_id}

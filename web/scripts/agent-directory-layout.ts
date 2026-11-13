@@ -68,6 +68,8 @@ const runtimes: AgentInventoryRuntime[] = [
     availability: { available: false, reason: "runtime_not_verified" },
   },
 ];
+let activityRunning = false;
+let activityEventSeq = 2;
 let secondHostOnline = true;
 let failCatalog = false;
 let nativeWorker = false;
@@ -156,6 +158,14 @@ function catalog(host: string): RunnerAgentCatalog {
         })
       : [];
   return {
+    task_activity: {
+      running_tasks: activityRunning
+        ? host === "host-a"
+          ? { cedar: 2, iris: 1 }
+          : { birch: 3 }
+        : {},
+      uncertain_tasks: activityRunning && host === "host-a" ? { maple: 1 } : {},
+    },
     host_id: host,
     online: host === "host-a" || secondHostOnline,
     continuation_supported: true,
@@ -398,6 +408,7 @@ const server = createServer(async (req, res) => {
     return json({
       state: "registered_staged",
       configuration_revision: 2,
+      task_activity: { running_tasks: {}, uncertain_tasks: {} },
       main_agent_id: "planner",
       projection: {
         format_version: 1,
@@ -539,6 +550,7 @@ try {
       });
       hideConcurrencyList = false;
       secondHostOnline = true;
+      activityRunning = false;
       nativeWorker = false;
       hostedCLI = "codex";
       associationRequests.length = 0;
@@ -608,6 +620,82 @@ try {
         path: join(output, `agents-${viewport.width}-${theme}.png`),
         fullPage: false,
       });
+      // Real browser + built UI + HTTP/SSE fixture: this proves display and
+      // invalidation, not the backend execution transitions tested in App.
+      const activityChanged = () => {
+        const event = {
+          event_seq: activityEventSeq++,
+          object_type: "run",
+          object_id: "fixture-run",
+          kind: "run.observed",
+          created_at: new Date().toISOString(),
+        };
+        for (const stream of streams)
+          stream.write(`id: ${event.event_seq}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`);
+      };
+      activityRunning = true;
+      activityChanged();
+      await page.waitForFunction(
+        () => document.querySelector('[class*="identity"] strong')?.textContent === "Cedar",
+      );
+      assert.deepEqual((await names.allInnerTexts()).slice(0, 4), [
+        "Cedar",
+        "Iris",
+        "Willow",
+        "Maple",
+      ]);
+      const busyRow = directory.getByRole("button", { name: /Cedar.*2 个任务运行中/ });
+      await busyRow.waitFor();
+      assert.equal(
+        await directory.getByText("运行状态待确认 · 1 个待确认", { exact: true }).count(),
+        1,
+      );
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+        false,
+      );
+      const activityBoxes = await directory
+        .locator('[class*="identity"]')
+        .filter({ visible: true })
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const name = element.querySelector("strong")!.getBoundingClientRect();
+            const badge = element.querySelector('[class*="activity"]')!.getBoundingClientRect();
+            return {
+              overlap: name.bottom > badge.top + 1,
+              width: element.scrollWidth > element.clientWidth + 1,
+            };
+          }),
+        );
+      assert(
+        activityBoxes.every((value) => !value.overlap && !value.width),
+        JSON.stringify(activityBoxes),
+      );
+      await page.screenshot({
+        path: join(output, `busy-${viewport.width}-${theme}.png`),
+        fullPage: false,
+      });
+      await directory
+        .getByRole("combobox", { name: "类别筛选", exact: true })
+        .selectOption("implementation");
+      assert.deepEqual(await names.allInnerTexts(), ["Cedar", "Pine"]);
+      await busyRow.click();
+      await detail().getByRole("heading", { name: "Cedar", exact: true }).waitFor();
+      await backToList();
+      await directory.getByRole("combobox", { name: "类别筛选", exact: true }).selectOption("");
+      activityRunning = false;
+      activityChanged();
+      await page.waitForFunction(
+        () => document.querySelector('[class*="identity"] strong')?.textContent === "Sequoia",
+      );
+      assert.deepEqual((await names.allInnerTexts()).slice(0, 5), [
+        "Sequoia",
+        "Laurel",
+        "Sage",
+        "Cedar",
+        "Iris",
+      ]);
+      await directory.getByRole("button", { name: /Cedar.*0 个任务 · 空闲/ }).waitFor();
       if (mobileDetails) {
         await page.setViewportSize({
           width: viewport.width,

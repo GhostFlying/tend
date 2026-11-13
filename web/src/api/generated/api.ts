@@ -4036,6 +4036,7 @@ export interface HostedAgentInventory {
   projection: AgentInventoryProjection;
   public_sha256: string;
   state: string;
+  task_activity?: AgentTaskActivity;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4062,6 +4063,18 @@ export interface AgentInventoryRuntime {
   registration: string;
   revision: number;
   runtime_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "AgentTaskActivity".
+ */
+export interface AgentTaskActivity {
+  running_tasks: {
+    [k: string]: number | undefined;
+  } | null;
+  uncertain_tasks: {
+    [k: string]: number | undefined;
+  } | null;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6732,6 +6745,7 @@ export interface RunnerAgentCatalog {
   projection?: AgentInventoryProjection;
   retained_definitions?: RetainedAgentDefinition[];
   retained_executions?: RunExecutionPin[];
+  task_activity?: AgentTaskActivity;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

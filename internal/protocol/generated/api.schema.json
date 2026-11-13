@@ -1111,6 +1111,43 @@
       "title": "AgentRuntimeReference",
       "type": "object"
     },
+    "AgentTaskActivity": {
+      "additionalProperties": false,
+      "properties": {
+        "running_tasks": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertain_tasks": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "running_tasks",
+        "uncertain_tasks"
+      ],
+      "title": "AgentTaskActivity",
+      "type": "object"
+    },
     "AnswerDecisionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -7711,6 +7748,9 @@
         },
         "state": {
           "type": "string"
+        },
+        "task_activity": {
+          "$ref": "#/definitions/AgentTaskActivity"
         }
       },
       "required": [
@@ -16704,6 +16744,9 @@
             "$ref": "#/definitions/RunExecutionPin"
           },
           "type": "array"
+        },
+        "task_activity": {
+          "$ref": "#/definitions/AgentTaskActivity"
         }
       },
       "required": [

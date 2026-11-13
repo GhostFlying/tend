@@ -63,6 +63,18 @@ func TestNamedExecutionAssignmentFreezesPinAcrossInventoryUpdateAndReplay(t *tes
 	if workerInput.AgentSelection != nil {
 		t.Fatal("selection leaked into the legacy task input")
 	}
+	assertActivity := func(want int) {
+		t.Helper()
+		catalog, err := h.app.RunnerAgentCatalog(t.Context(), "linux-1")
+		if err != nil || catalog.TaskActivity == nil || catalog.TaskActivity.RunningTasks["alpha"] != want {
+			t.Fatalf("catalog activity after normal transition: %+v, %v", catalog.TaskActivity, err)
+		}
+	}
+	assertActivity(1) // Claim creates starting, including its original frozen pin.
+	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	assertActivity(1)
 	// An older-capability process cannot recover this new mode through hello.
 	legacyHello := h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &legacy}, nil)
 	if _, err := h.app.Execute(t.Context(), runner("linux-1"), legacyHello, Hello{}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
@@ -91,6 +103,11 @@ func TestNamedExecutionAssignmentFreezesPinAcrossInventoryUpdateAndReplay(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
+	assertActivity(1) // New inventory must not reattribute the still-running Task.
+	if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "fixture stopped"}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	assertActivity(0)
 }
 
 func TestNamedWorkspaceRequiresSelectionAndLegacyMountPrecheckIsUnchanged(t *testing.T) {

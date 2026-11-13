@@ -110,3 +110,18 @@ tend agents concurrency history --issue issue-example --session native-session-e
 部分参数更新只在首次执行时读取当前值补齐；重放 update 应使用原完整 --data
 或 --file，或完整的 name/min/initial/max 标志，不能重读新默认值。
 先读实际并发组与历史。确认仍需提交后，可将含完整业务身份和原 CAS 的 dry-run 信封交给 `tend operation submit --file original-envelope.json`；控制版本过期时重新判断，不读取通用请求缓存。
+
+## 当前运行任务
+
+目录及 `tend agents show --host <host-id> --json`、`tend agents hosted --json`
+返回可选 `task_activity`：`running_tasks` 和 `uncertain_tasks` 按该环境的
+Agent local ID 给出去重 Task 数。汇总存在时，map 缺项表示零；汇总缺失表示未提供观测。
+身份取自 Run 冻结 pin，当前目录身份汇总其所有版本，不由当前负责人或在线状态推算。
+启动、运行、执行中等待计入运行；unknown/interrupted 单列待确认，同一 Task
+存在运行 Run 时不重复计入待确认。结束、失败及已停止的历史问题不计入。
+主对话和咨询消息轮次不属于 Task，不计入；“空闲”仅指无运行或待确认 Task，
+不代表对话轮次或配置可用性。历史定义行不重复显示当前身份总数。
+
+Web 默认运行任务前置、待确认其次，组内保留目录顺序；任务或 Run 事件刷新既有读取，
+手动重新读取也可更新。刷新失败保留上次观察并提示，离线状态与账本执行事实分别展示。
+该只读负载不改变并发、资源准入或分配策略。

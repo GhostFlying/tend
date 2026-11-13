@@ -1,5 +1,6 @@
 import type {
   ConcurrencyBinding,
+  AgentTaskActivity,
   AgentInventoryDefinition,
   AgentInventoryProjection,
   AgentInventoryRuntime,
@@ -10,6 +11,7 @@ import { agentKey, currentObservation } from "./facts.ts";
 
 export type Group = {
   id: string;
+  taskActivity?: AgentTaskActivity | undefined;
   projection: AgentInventoryProjection;
   catalog?: RunnerAgentCatalog | undefined;
   configurationRevision?: number | undefined;
@@ -70,4 +72,20 @@ export function observation(entry: Entry): { label: string; available: boolean }
   return value
     ? { label: value.available ? "可用" : "不可用", available: value.available }
     : { label: "未上报", available: false };
+}
+
+/** Current identities include their older frozen versions; history rows do not
+ * repeat that total. Missing observations must never turn into an idle claim. */
+export function taskActivity(entry: Entry) {
+  const activity = entry.group.taskActivity ?? entry.group.catalog?.task_activity;
+  if (entry.history || !activity) return undefined;
+  return {
+    running: activity.running_tasks?.[entry.agent.identity.local_id] ?? 0,
+    uncertain: activity.uncertain_tasks?.[entry.agent.identity.local_id] ?? 0,
+  };
+}
+
+export function activityOrder(entry: Entry): number {
+  const activity = taskActivity(entry);
+  return activity?.running ? 0 : activity?.uncertain ? 1 : 2;
 }

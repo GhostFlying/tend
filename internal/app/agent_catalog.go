@@ -52,6 +52,10 @@ func readRunnerAgentCatalog(ctx context.Context, q store.Querier, host string, n
 		return result, err
 	}
 	result.ConcurrencyBindings = bindings
+	result.TaskActivity, err = views.AgentTaskActivity(ctx, q, host)
+	if err != nil {
+		return result, err
+	}
 	h, err := store.GetHost(ctx, q, host)
 	if err != nil {
 		return result, errNotFound(err, "host does not exist")
