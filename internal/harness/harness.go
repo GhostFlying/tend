@@ -235,17 +235,23 @@ var ErrRetainedResumePending = errors.New("original retained native execution re
 // StoppedPredecessor is a verified physical execution boundary, regardless of why
 // the previous Run handed off. It carries no new business authorization.
 func (s WorkerSpec) StoppedPredecessor() (run, thread string) {
-	if s.SessionContinuation != nil {
-		return s.SessionContinuation.RunID, s.SessionContinuation.ThreadID
-	}
-	if s.ExternalWaitContinuation != nil {
-		return s.ExternalWaitContinuation.RunID, s.ExternalWaitContinuation.ThreadID
-	}
 	if s.PauseContinuation != nil {
 		return s.PauseContinuation.RunID, s.PauseContinuation.ThreadID
 	}
 	if s.QuestionContinuation != nil {
 		return s.QuestionContinuation.RunID, s.QuestionContinuation.ThreadID
 	}
+	if s.ExternalWaitContinuation != nil {
+		return s.ExternalWaitContinuation.RunID, s.ExternalWaitContinuation.ThreadID
+	}
+	if s.SessionContinuation != nil {
+		return s.SessionContinuation.RunID, s.SessionContinuation.ThreadID
+	}
 	return "", ""
+}
+
+// OptionalHistory describes the selected predecessor, not other history that
+// may accompany it. Question and pause bindings retain their strict recovery.
+func (s WorkerSpec) OptionalHistory() bool {
+	return s.PauseContinuation == nil && s.QuestionContinuation == nil && (s.ExternalWaitContinuation != nil || s.SessionContinuation != nil)
 }

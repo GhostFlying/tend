@@ -124,7 +124,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 		var e error
 		spec.Thread, e = rebindQuestionThread(spec)
 		if e != nil {
-			if spec.RetainedResume == nil && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil) {
+			if spec.RetainedResume == nil && spec.OptionalHistory() {
 				spec.Thread = ""
 			} else {
 				return nil, e
@@ -440,7 +440,7 @@ func (ws *Workers) open(ctx context.Context, spec harness.WorkerSpec) (*executio
 		_ = local.CloseNow()
 		return nil, err
 	}
-	optional := spec.RetainedResume == nil && state.Thread != "" && (spec.SessionContinuation != nil || spec.ExternalWaitContinuation != nil)
+	optional := spec.RetainedResume == nil && state.Thread != "" && spec.OptionalHistory()
 	hello, _ := json.Marshal(Hello{Cwd: spec.Dir, ThreadID: state.Thread, OptionalContinuation: optional})
 	if _, err = tunnel.Write(append(hello, '\n')); err != nil {
 		_ = tunnel.Close()

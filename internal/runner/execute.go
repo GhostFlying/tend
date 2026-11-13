@@ -504,25 +504,19 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if nativeMessages {
 		startupObserved = r.cfg.Now()
 	}
-	previousRun, previousThread := "", ""
-	if as.SessionContinuation != nil {
-		previousRun, previousThread = as.SessionContinuation.RunID, as.SessionContinuation.ThreadID
+	continuation := harness.WorkerSpec{
+		SessionContinuation: as.SessionContinuation, ExternalWaitContinuation: as.ExternalWaitContinuation,
+		QuestionContinuation: as.QuestionContinuation, PauseContinuation: as.PauseContinuation,
 	}
-	if as.ExternalWaitContinuation != nil {
-		previousRun, previousThread = as.ExternalWaitContinuation.RunID, as.ExternalWaitContinuation.ThreadID
-	}
-	if as.QuestionContinuation != nil {
-		previousRun, previousThread = as.QuestionContinuation.RunID, as.QuestionContinuation.ThreadID
-	}
-	if as.PauseContinuation != nil {
-		previousRun, previousThread = as.PauseContinuation.RunID, as.PauseContinuation.ThreadID
-	}
-	optionalHistory := as.SessionContinuation != nil || as.ExternalWaitContinuation != nil
+	previousRun, previousThread := continuation.StoppedPredecessor()
+	optionalHistory := continuation.OptionalHistory()
+	inheritedThread := false
 	if run.Thread == "" && previousRun != "" && (as.Role == protocol.RoleImplement || optionalHistory) && (assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer || nativeMessages) {
 		run.Thread = previousThread
 		if err := r.cfg.Journal.SetThread(ctx, as.RunID, run.Thread); err != nil {
 			return err
 		}
+		inheritedThread = run.Thread != ""
 	}
 	predecessorState := ""
 	if previousRun != "" {
@@ -605,15 +599,16 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 		proofCtx := context.WithoutCancel(ctx)
 		var proofErr error
-		if errors.Is(err, harness.ErrWorkerNotStarted) && attempt == 1 && run.Thread == "" {
+		if errors.Is(err, harness.ErrWorkerNotStarted) && attempt == 1 && (run.Thread == "" || inheritedThread) {
 			// This proof comes from the harness before any external launch,
-			// never from an empty thread or a failed request alone.
+			// never from an empty thread or a failed request alone. A thread
+			// inherited here belongs to the predecessor, not a current launch.
 			proofErr = r.cfg.Journal.ConfirmStopped(proofCtx, as.RunID)
 		} else {
 			proofErr = r.recordClosedSession(proofCtx, as)
 		}
 		if proofErr != nil {
-			return &completionPending{proofErr}
+			return &completionPending{errors.Join(err, proofErr)}
 		}
 		return stopped(failed("worker_start_failed", err))
 	}
