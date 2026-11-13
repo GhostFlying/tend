@@ -53,12 +53,12 @@ func (p UpdateIssueDeliveryPayload) ValidateInput() error {
 func (UpdateIssueDeliveryPayload) JSONSchemaConstraints() map[string]any {
 	branches := []any{}
 	for _, rule := range deliveryActions() {
-		props := map[string]any{"action": map[string]any{"const": rule.action, "description": "Uses " + strings.Join(append(append([]string{}, rule.required...), rule.optional...), ", ") + ". Existing common validation still applies; current duty state determines conditional candidate and Task requirements."}}
+		props := map[string]any{"action": map[string]any{"type": "string", "const": rule.action, "description": "Uses " + strings.Join(append(append([]string{}, rule.required...), rule.optional...), ", ") + ". Existing common validation still applies; current duty state determines conditional candidate and Task requirements."}}
 		branches = append(branches, map[string]any{"properties": props, "required": append([]string{"action"}, rule.required...)})
 	}
 	return map[string]any{"anyOf": branches, "allOf": []any{
-		map[string]any{"properties": map[string]any{"reason": map[string]any{"minLength": 1}}, "required": []string{"reason"}},
-		map[string]any{"if": map[string]any{"required": []string{"action", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"const": "complete"}}}, "then": map[string]any{"required": []string{"execution_task_id"}}},
-		map[string]any{"properties": map[string]any{"execution_duty_revision": map[string]any{"minimum": 0}}}, map[string]any{"if": map[string]any{"required": []string{"execution_duty_revision"}, "properties": map[string]any{"execution_duty_revision": map[string]any{"minimum": 1}}}, "then": map[string]any{"required": []string{"execution_task_id", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"const": "complete"}}}},
+		map[string]any{"properties": map[string]any{"reason": map[string]any{"type": "string", "minLength": 1}}, "required": []string{"reason"}},
+		map[string]any{"if": map[string]any{"required": []string{"action", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"type": "string", "const": "complete"}}}, "then": map[string]any{"required": []string{"execution_task_id"}}},
+		map[string]any{"properties": map[string]any{"execution_duty_revision": map[string]any{"type": "integer", "minimum": 0}}}, map[string]any{"if": map[string]any{"required": []string{"execution_duty_revision"}, "properties": map[string]any{"execution_duty_revision": map[string]any{"type": "integer", "minimum": 1}}}, "then": map[string]any{"required": []string{"execution_task_id", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"type": "string", "const": "complete"}}}},
 	}}
 }

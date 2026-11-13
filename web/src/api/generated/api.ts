@@ -237,26 +237,24 @@ export type RelationDirection = "outgoing" | "incoming";
  * via the `definition` "MessagingPublication".
  */
 export type MessagingPublication = {
-  attachments?: {
-    [k: string]: unknown | undefined;
-  };
-  body?: {
-    [k: string]: unknown | undefined;
-  };
+  /**
+   * @maxItems 20
+   */
+  attachments?: string[];
+  body?: string;
   /**
    * Optional presentation marker only. Omit for an ordinary message; final does not finish or accept work.
    */
   purpose?: "" | "progress" | "final";
 } & (
   | {
-      body: {
-        [k: string]: unknown | undefined;
-      };
+      body: string;
     }
   | {
-      attachments: {
-        [k: string]: unknown | undefined;
-      };
+      /**
+       * @minItems 1
+       */
+      attachments: string[];
     }
 ) &
   MessagingPublication1;
@@ -270,13 +268,9 @@ export type TokenScope = "owner";
  * via the `definition` "UpdateIssueDeliveryPayload".
  */
 export type UpdateIssueDeliveryPayload = {
-  reason: {
-    [k: string]: unknown | undefined;
-  };
+  reason: string;
 } & {
-  execution_duty_revision?: {
-    [k: string]: unknown | undefined;
-  };
+  execution_duty_revision?: number;
 } & UpdateIssueDeliveryPayload1 &
   UpdateIssueDeliveryPayload2;
 export type UpdateIssueDeliveryPayload1 =
