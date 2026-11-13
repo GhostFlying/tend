@@ -599,10 +599,12 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 		proofCtx := context.WithoutCancel(ctx)
 		var proofErr error
-		if errors.Is(err, harness.ErrWorkerNotStarted) && attempt == 1 && (run.Thread == "" || inheritedThread) {
+		_, external := execution.Workers.(harness.Releaser)
+		if errors.Is(err, harness.ErrWorkerNotStarted) && attempt == 1 && (run.Thread == "" || inheritedThread && !external) {
 			// This proof comes from the harness before any external launch,
 			// never from an empty thread or a failed request alone. A thread
 			// inherited here belongs to the predecessor, not a current launch.
+			// External executors retain their independent Release boundary.
 			proofErr = r.cfg.Journal.ConfirmStopped(proofCtx, as.RunID)
 		} else {
 			proofErr = r.recordClosedSession(proofCtx, as)
