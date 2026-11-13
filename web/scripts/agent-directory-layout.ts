@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { issueView } from "./issue-fixture.ts";
 import { fixtureRoot, navigate } from "./navigation.ts";
@@ -69,6 +70,7 @@ const runtimes: AgentInventoryRuntime[] = [
   },
 ];
 let activityRunning = false;
+let delayActivityCatalog = false;
 let prototypeActivity: "normal" | "idle" | "running" | "uncertain" = "normal";
 let activityEventSeq = 2;
 let secondHostOnline = true;
@@ -443,7 +445,12 @@ const server = createServer(async (req, res) => {
       res.statusCode = 503;
       return json({ error: { code: "unavailable", message: "Temporary fixture failure" } });
     }
-    return json(catalog(decodeURIComponent(p.split("/")[4]!)));
+    const host = decodeURIComponent(p.split("/")[4]!);
+    const response = catalog(host);
+    // Hosts refresh independently; exercise a valid partial update before the
+    // second host arrives instead of relying on matching response timing.
+    if (delayActivityCatalog && host === "host-b") await delay(500);
+    return json(response);
   }
   if (p === "/api/v1/agent-issues") {
     associationRequests.push(req.url!);
@@ -571,6 +578,7 @@ try {
       hideConcurrencyList = false;
       secondHostOnline = true;
       activityRunning = false;
+      delayActivityCatalog = false;
       prototypeActivity = "normal";
       nativeWorker = false;
       hostedCLI = "codex";
@@ -612,6 +620,23 @@ try {
         await backToList();
       }
       const names = directory.locator('[class*="identity"] strong').filter({ visible: true });
+      const waitForOrder = async (order: string[]) => {
+        const region = await directory.elementHandle();
+        assert(region);
+        try {
+          await page.waitForFunction(
+            ({ root, expected }) => {
+              const visible = [...root.querySelectorAll('[class*="identity"] strong')].filter(
+                (element) => element.getClientRects().length > 0,
+              );
+              return expected.every((name, index) => visible[index]?.textContent === name);
+            },
+            { root: region, expected: order },
+          );
+        } finally {
+          await region.dispose();
+        }
+      };
       await names.first().waitFor();
       assert.equal(await names.count(), 11);
       assert.equal(await names.first().innerText(), "Sequoia");
@@ -654,11 +679,10 @@ try {
         for (const stream of streams)
           stream.write(`id: ${event.event_seq}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`);
       };
+      delayActivityCatalog = true;
       activityRunning = true;
       activityChanged();
-      await page.waitForFunction(
-        () => document.querySelector('[class*="identity"] strong')?.textContent === "Cedar",
-      );
+      await waitForOrder(["Cedar", "Iris", "Elm", "Willow", "Maple"]);
       assert.deepEqual((await names.allInnerTexts()).slice(0, 5), [
         "Cedar",
         "Iris",
@@ -708,9 +732,8 @@ try {
       await directory.getByRole("combobox", { name: "类别筛选", exact: true }).selectOption("");
       activityRunning = false;
       activityChanged();
-      await page.waitForFunction(
-        () => document.querySelector('[class*="identity"] strong')?.textContent === "Sequoia",
-      );
+      await waitForOrder(["Sequoia", "Laurel", "Sage", "Cedar", "Iris"]);
+      await directory.getByRole("button", { name: /Willow.*0 个任务 · 空闲/ }).waitFor();
       assert.deepEqual((await names.allInnerTexts()).slice(0, 5), [
         "Sequoia",
         "Laurel",
@@ -755,9 +778,9 @@ try {
       prototypeActivity = "normal";
       activityChanged();
       await waitForCedarID("cedar");
-      await page.waitForFunction(
-        () => document.querySelector('[class*="identity"] strong')?.textContent === "Sequoia",
-      );
+      await waitForOrder(["Sequoia", "Laurel", "Sage", "Cedar", "Iris"]);
+      await directory.getByRole("button", { name: /Willow.*0 个任务 · 空闲/ }).waitFor();
+      delayActivityCatalog = false;
       if (mobileDetails) {
         await page.setViewportSize({
           width: viewport.width,
