@@ -60,3 +60,11 @@ Web `/` 是正式通信入口，`/diagnostics/main` 保留原生主 Agent 页面
 一个渠道正式受理后，其他渠道的原问题失效并显示实际处理渠道、答案和时间，原始问题版本保持不变。Web 保留已经输入的草稿；Telegram 对失效问题的迟到文字仍保存原文并解释状态，不再次执行业务动作。回调 ACK、阅读和普通输入受理均不代表已回答。
 
 Telegram 原消息编辑走独立、持久化的控制投递，避免排在附件后面；无法编辑时追加一次关联提示。`near` 与 `due` 提醒保留各自约定时间窗口的说明，共用原问题控制。正式回答受理、后续执行和渠道展示同步继续分别记账。
+
+## 普通发布与成果标记（D232）
+
+Agent 用原会话 reply/notify 发送正文和/或已上传文件，可在执行中发进度，也可在完成后由当前有权发送的会话补充。无需先 submit_result、artifact、acceptance 或准备交付。purpose 和通知 reason 可省略；旧 progress/final 仅为可选展示标记，final 显示“成果”，不要求唯一，也不代表通过验收、安装成功或 Issue 完成。正式结果仍可另行登记供审阅；聊天不会修改 Task 当前成果或交付义务。
+
+消息引用保存同一原件的名称、字节数和 hash，生产 Run 结束不删除消息附件；用户读取现有 conversation/attachments 下载入口。普通发送权限、文件范围与撤回分享仍适用，不使用结束 Run 的旧凭据补发，不复活旧工作。丢失回复先读取原请求/消息回执，同一原 Envelope 重试保持去重。保存消息与实际传输送达分别看原回执。
+
+CLI：`tend message notify --data '{"body":"Current progress","reason":"Share current progress"}'`。attachments 可列真实 file_id，正文可省略而仅发文件；purpose 可省略或填 progress/final。正式交付的 action 字段按工具/owner schema 的分支使用，每个 action 展示实际使用字段；历史多余字段保留原忽略语义，不增加新的拒绝。prepare 的 candidate 依真实 duty 状态判断，例如已有 deferred duty 的 prepare 保持原先幂等行为。

@@ -234,9 +234,94 @@ export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancel
 export type RelationDirection = "outgoing" | "incoming";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "MessagingPublication".
+ */
+export type MessagingPublication = {
+  attachments?: {
+    [k: string]: unknown | undefined;
+  };
+  body?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Optional presentation marker only. Omit for an ordinary message; final does not finish or accept work.
+   */
+  purpose?: "" | "progress" | "final";
+} & (
+  | {
+      body: {
+        [k: string]: unknown | undefined;
+      };
+    }
+  | {
+      attachments: {
+        [k: string]: unknown | undefined;
+      };
+    }
+) &
+  MessagingPublication1;
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "TokenScope".
  */
 export type TokenScope = "owner";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateIssueDeliveryPayload".
+ */
+export type UpdateIssueDeliveryPayload = {
+  reason: {
+    [k: string]: unknown | undefined;
+  };
+} & {
+  execution_duty_revision?: {
+    [k: string]: unknown | undefined;
+  };
+} & UpdateIssueDeliveryPayload1 &
+  UpdateIssueDeliveryPayload2;
+export type UpdateIssueDeliveryPayload1 =
+  | {
+      /**
+       * Uses result, run_id, independent_acceptance. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "submit_result";
+    }
+  | {
+      /**
+       * Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "prepare";
+    }
+  | {
+      /**
+       * Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "resume";
+    }
+  | {
+      /**
+       * Uses task_id, execution_task_id, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "bind";
+    }
+  | {
+      /**
+       * Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "report";
+    }
+  | {
+      /**
+       * Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "end";
+    }
+  | {
+      /**
+       * Uses task_id, execution_task_id, execution_run_id, execution_duty_revision, upgrade_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "complete";
+    };
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueTaskDispositionAction".
@@ -4072,6 +4157,7 @@ export interface IssueConversationItem {
   kind: string;
   message_id: string;
   notice_type?: string;
+  purpose?: string;
   recovery?: AgentRecoveryView;
   reply_sources?: string[];
   reply_to?: string;
@@ -5606,6 +5692,7 @@ export interface ConversationItem {
   kind: string;
   message_id: string;
   notice_type?: string;
+  purpose?: string;
   recovery?: AgentRecoveryView;
   reply_sources?: string[];
   reply_to?: string;
@@ -5859,16 +5946,12 @@ export interface MessagingPage {
   more: boolean;
   next: number;
 }
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "MessagingPublication".
- */
-export interface MessagingPublication {
+export interface MessagingPublication1 {
   attachments?: string[];
   body?: string;
   issue_ids?: string[];
   message_id: string;
-  purpose: string;
+  purpose?: string;
   reason?: string;
   reply_to?: string;
   source_message_ids?: string[];
@@ -7312,11 +7395,7 @@ export interface UpdateAttentionPayload {
   options?: string[];
   title: string;
 }
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "UpdateIssueDeliveryPayload".
- */
-export interface UpdateIssueDeliveryPayload {
+export interface UpdateIssueDeliveryPayload2 {
   acceptance_id?: string;
   action: string;
   candidate?: IssueDeliveryCandidate;

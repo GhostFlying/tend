@@ -166,6 +166,12 @@ func (g *Generator) object(t reflect.Type) map[string]any {
 	if len(required) > 0 {
 		obj["required"] = required
 	}
+	// Payload rules are shared by canonical API and model-tool generation.
+	if contract, ok := reflect.New(t).Interface().(interface{ JSONSchemaConstraints() map[string]any }); ok {
+		for key, value := range contract.JSONSchemaConstraints() {
+			obj[key] = value
+		}
+	}
 	return obj
 }
 

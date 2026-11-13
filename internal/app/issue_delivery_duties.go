@@ -78,6 +78,9 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
+	if err := p.ValidateInput(); err != nil {
+		return Outcome{}, err
+	}
 	if p.ExecutionDutyRevision < 0 || p.ExecutionDutyRevision > 0 && (p.Action != "complete" || p.ExecutionRunID == "" || p.ExecutionTaskID == "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "execution_duty_revision requires complete with the original execution_task_id and execution_run_id")
 	}

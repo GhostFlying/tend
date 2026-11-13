@@ -302,6 +302,8 @@ type ConversationItem struct {
 
 // ConversationContent preserves the actual message and media independently of owner metadata.
 type ConversationContent struct {
+	// Purpose is an optional message label, independent of execution state.
+	Purpose     string                   `json:"purpose,omitempty"`
 	Images      []ConversationImage      `json:"images,omitempty"`
 	Attachments []ConversationAttachment `json:"attachments,omitempty"`
 	NoticeType  string                   `json:"notice_type,omitempty"`

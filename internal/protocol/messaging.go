@@ -30,7 +30,7 @@ type MessagingPublication struct {
 	Body             string   `json:"body,omitempty"`
 	Attachments      []string `json:"attachments,omitempty"`
 	ReplyTo          string   `json:"reply_to,omitempty"`
-	Purpose          string   `json:"purpose"`
+	Purpose          string   `json:"purpose,omitempty"`
 	Reason           string   `json:"reason,omitempty"`
 }
 

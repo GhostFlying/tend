@@ -17,39 +17,39 @@ func communicationAttachment(ctx context.Context, x *Exec, tx *store.Tx, file, c
 		conversation = x.coordinationExecution.ConversationID
 	}
 	attachment, err := store.GetConversationAttachment(ctx, tx.Q(), file)
-	// An already published child report still has its immutable result
-	// provenance. Its first chat destination must not hide it from the parent
-	// that owns the formal review/contribution responsibility.
+	// A prior chat destination does not replace the original upload/result
+	// scope. Reuse the same visibility for first publication and supplements.
 	if err == nil && x.coordinationExecution != nil && x.coordinationExecution.IssueID != "" {
-		allowed, checkErr := communicationResultInScope(ctx, tx.Q(), x.coordinationExecution.IssueID, file)
-		if checkErr != nil {
+		original, checkErr := store.GetDeliverableFile(ctx, tx.Q(), file)
+		if checkErr != nil && !errors.Is(checkErr, store.ErrNotFound) {
 			return checkErr
 		}
-		if allowed {
-			return nil
+		if checkErr == nil {
+			allowed, checkErr := communicationUploadInScope(ctx, tx.Q(), x, x.coordinationExecution.IssueID, original)
+			if checkErr != nil {
+				return checkErr
+			}
+			if allowed {
+				return nil
+			}
 		}
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		result, _, err := store.GetFinalizedDeliverableFile(ctx, tx.Q(), file)
-		if errors.Is(err, store.ErrNotFound) {
-			// An independent verdict owns its original evidence just as an
-			// artifact owns its result files; an upload alone authorizes neither.
-			result, _, err = store.GetFinalizedAcceptanceFile(ctx, tx.Q(), file)
-		}
+		result, err := store.GetDeliverableFile(ctx, tx.Q(), file)
 		if err != nil {
-			return errNotFound(err, "finalized attachment unavailable")
+			return errNotFound(err, "attachment original unavailable")
 		}
 		if execution != "" && x.Principal.Kind != protocol.PrincipalOwner && conversation != "main" {
 			var issue string
 			if x.coordinationExecution != nil {
 				issue = x.coordinationExecution.IssueID
 			}
-			allowed, err := communicationResultInScope(ctx, tx.Q(), issue, file)
+			allowed, err := communicationUploadInScope(ctx, tx.Q(), x, issue, result)
 			if err != nil {
 				return err
 			}
 			if !allowed {
-				return protocol.Errorf(protocol.CodeForbidden, "result file is outside this responsibility")
+				return protocol.Errorf(protocol.CodeForbidden, "attachment is outside this conversation or Issue")
 			}
 		}
 		media := mime.TypeByExtension(path.Ext(result.Name))
@@ -122,5 +122,22 @@ func communicationResultInScope(ctx context.Context, q store.Querier, issue, fil
 	if err == nil && revoked {
 		return false, protocol.Errorf(protocol.CodeForbidden, "this result's explicit share was revoked")
 	}
+	return allowed, err
+}
+
+// Ordinary publication is separate from formal artifact/acceptance provenance.
+// Original uploads of this Issue remain usable by its current responsible
+// conversation after the producer finishes; no old Run credential is revived.
+func communicationUploadInScope(ctx context.Context, q store.Querier, x *Exec, issue string, file store.DeliverableFileRow) (bool, error) {
+	if allowed, err := communicationResultInScope(ctx, q, issue, file.FileID); err != nil || allowed {
+		return allowed, err
+	}
+	if x.coordinationExecution != nil && x.coordinationExecution.Selection.RunnerRunID != "" {
+		if compatible, err := store.CompatibleFileProducer(ctx, q, file, x.coordinationExecution.Selection.RunnerRunID); err != nil || compatible {
+			return compatible, err
+		}
+	}
+	var allowed bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_work_item_owners WHERE task_id=? AND work_item_id=? AND ?<>'') OR EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND issue_id=? AND ?<>'')`, file.TaskID, issue, issue, file.TaskID, issue, issue).Scan(&allowed)
 	return allowed, err
 }

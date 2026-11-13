@@ -88,6 +88,16 @@ func TestMessagingCLIAndOwnerAPI(t *testing.T) {
 	if len(trace.Replies) != 1 {
 		t.Fatal(trace)
 	}
+	// Owner HTTP and native CLI share ordinary publication with no result marker.
+	command("message", "notify", "--data", `{"body":"Ordinary progress, no artifact"}`)
+	if json.Unmarshal(stdout.Bytes(), &response) != nil || response.Operation == nil || response.Operation.Error != nil {
+		t.Fatal(stdout.String())
+	}
+	_ = json.Unmarshal(response.Operation.Result, &sent)
+	command("message", "show", sent.ID)
+	if json.Unmarshal(stdout.Bytes(), &message) != nil || message.Purpose != "" || message.Body != "Ordinary progress, no artifact" {
+		t.Fatal("ordinary publication changed", message)
+	}
 	command("channel", "telegram", "bind", "--user-id", "123")
 	command("channel", "show", "telegram")
 	var channel protocol.MessagingChannel

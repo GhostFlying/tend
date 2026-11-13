@@ -2112,3 +2112,11 @@ D229 的连接结束与本地消费者生命期分开：先收到断连的新 se
 为后者取得原有有限期限，不继承可选请求已经耗尽的期限。父级取消仍有效，
 不借此延续已停止的 runner。原 native_stopped 和 close 仍按完整尾部高水位
 收敛。见[实施计划](plans/native-event-ingress-and-context-projection.md)。
+
+## D232：普通发布与稳定上下文边界
+
+消息发布使用普通会话身份和原件可见性；上传文件无需先登记 artifact/acceptance。正式结果引用及验收仍固定其原始来源，消息不改变交付或完成状态。purpose 可省略，旧 progress/final 为可选展示属性。
+
+上下文快照保留对象上界和 keyset；增量位置依赖永久业务事件而非可合并的 refresh 历史。读取当前对象值不等于消费业务授权，真正缺失必要历史仍要求重同步。输入的动作枚举和字段条件由协议层共享，工具和 CLI 不再要求无关动作字段。
+
+实施与实际路径验证见 `docs/plans/ordinary-publication-stable-context.md`。本决策不改变全局等待策略；直接等待工作中的命令和适合现有外部对象的 ExternalWait 都可使用。

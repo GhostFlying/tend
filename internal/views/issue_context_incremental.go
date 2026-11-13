@@ -85,42 +85,69 @@ func CanonicalIssueContextIncremental(ctx context.Context, q store.Querier, id s
 		Project string
 	}{ids, issue.Plan.Project})
 	rawIDs, _ := json.Marshal(ids)
-	latest, err := store.LatestEventSeq(ctx, q)
+	// This index projects permanent business changes, not coalesced refreshes.
+	// Keep the shared SSE/refresh cursor semantics unchanged for other readers.
+	var latest int64
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events`).Scan(&latest)
 	if err != nil {
 		return out, err
 	}
-	c := issueContextCursor{Version: 1, Issue: id, Scope: scope, Kind: "snapshot", Through: latest}
+	c := issueContextCursor{Version: 2, Issue: id, Scope: scope, Kind: "snapshot", Through: latest}
 	if query.Cursor != "" {
 		raw, e := base64.RawURLEncoding.DecodeString(query.Cursor)
-		if e != nil || len(raw) > 4096 || json.Unmarshal(raw, &c) != nil || c.Version != 1 || c.Issue != id || c.Scope != scope || c.From < 0 || c.Through < c.From || c.Through > latest || c.ScanThrough < c.From || c.ScanThrough > c.Through || (c.Kind != "snapshot" && c.Kind != "delta") {
+		if e != nil || len(raw) > 4096 || json.Unmarshal(raw, &c) != nil || (c.Version != 1 && c.Version != 2) || c.Issue != id || c.Scope != scope || c.From < 0 || c.Through < c.From || c.ScanThrough < c.From || c.ScanThrough > c.Through || (c.Kind != "snapshot" && c.Kind != "delta") {
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "context cursor is unavailable or scope changed; start a new incremental snapshot without cursor")
 		}
-		position := c.From
-		if c.Kind == "snapshot" {
-			position = c.Through
+		if c.Version == 1 {
+			// Old snapshots fixed a global refresh position. Their object bounds
+			// remain usable even after that auxiliary position is coalesced. Pin
+			// the same interval to the last permanent event, never current latest.
+			stream, err := store.LatestEventSeq(ctx, q)
+			if err != nil {
+				return out, err
+			}
+			if c.Through > stream {
+				return out, protocol.Errorf(protocol.CodeInvalidRequest, "context cursor is in the future")
+			}
+			if c.Kind == "delta" {
+				expired, err := store.RefreshCursorExpired(ctx, q, c.From)
+				if err != nil {
+					return out, err
+				}
+				if expired {
+					return out, protocol.Errorf(protocol.CodeStaleRevision, "legacy refresh context cursor expired; start a new incremental snapshot without cursor")
+				}
+			}
+			// A missing v1 position might be an archived business event rather
+			// than a coalesced refresh. Migrate only witnessed boundaries; never
+			// silently clamp an unknown historical endpoint to an older event.
+			var witnessed bool
+			if err := q.QueryRowContext(ctx, `WITH positions(seq) AS (SELECT event_seq FROM events WHERE event_seq IN (?,?,?) UNION ALL SELECT event_seq FROM refresh_notifications WHERE event_seq IN (?,?,?) UNION ALL SELECT expired_through FROM refresh_stream_state) SELECT (?=0 OR EXISTS(SELECT 1 FROM positions WHERE seq=?)) AND (?=0 OR EXISTS(SELECT 1 FROM positions WHERE seq=?)) AND (?=0 OR EXISTS(SELECT 1 FROM positions WHERE seq=?))`, c.From, c.Through, c.ScanThrough, c.From, c.Through, c.ScanThrough, c.From, c.From, c.Through, c.Through, c.ScanThrough, c.ScanThrough).Scan(&witnessed); err != nil {
+				return out, err
+			}
+			if !witnessed {
+				return out, protocol.Errorf(protocol.CodeStaleRevision, "legacy context boundary is no longer witnessed; start a new incremental snapshot without cursor")
+			}
+			for _, position := range []*int64{&c.From, &c.Through, &c.ScanThrough} {
+				if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events WHERE event_seq<=?`, *position).Scan(position); err != nil {
+					return out, err
+				}
+			}
+			c.Version = 2
 		}
-		expired, err := store.RefreshCursorExpired(ctx, q, position)
-		if err != nil {
-			return out, err
+		if c.Through > latest {
+			return out, protocol.Errorf(protocol.CodeInvalidRequest, "context event history unavailable or cursor is in the future; start a new incremental snapshot without cursor")
 		}
-		if expired {
-			return out, protocol.Errorf(protocol.CodeStaleRevision, "refresh context cursor expired; start a new incremental snapshot without cursor to reload authoritative records")
-		}
-
 		var retained bool
-		// A boundary can be a current refresh position, or the last coalesced
-		// position already consumed by this reader. Older positions require a
-		// snapshot; a deleted business boundary still fails this check.
-		if err := q.QueryRowContext(ctx, `WITH positions(seq) AS (
- SELECT event_seq FROM events WHERE event_seq IN (?,?)
- UNION ALL SELECT event_seq FROM refresh_notifications WHERE event_seq IN (?,?)
- UNION ALL SELECT expired_through FROM refresh_stream_state)
- SELECT (?=0 OR EXISTS(SELECT 1 FROM positions WHERE seq=?)) AND (?=0 OR EXISTS(SELECT 1 FROM positions WHERE seq=?))`, c.From, c.Through, c.From, c.Through, c.From, c.From, c.Through, c.Through).Scan(&retained); err != nil {
+		// Both durable endpoints must still exist. Refresh coalescence cannot
+		// remove them; actually archived business boundaries still require resync.
+		if err := q.QueryRowContext(ctx, `SELECT (?=0 OR EXISTS(SELECT 1 FROM events WHERE event_seq=?)) AND (?=0 OR EXISTS(SELECT 1 FROM events WHERE event_seq=?)) AND (?=0 OR EXISTS(SELECT 1 FROM events WHERE event_seq=?))`, c.From, c.From, c.Through, c.Through, c.ScanThrough, c.ScanThrough).Scan(&retained); err != nil {
 			return out, err
 		}
 		if !retained {
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "context event history unavailable; start a new incremental snapshot without cursor")
 		}
+
 	} else {
 		if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM conversation_messages`).Scan(&c.MessageThrough); err != nil {
 			return out, err
@@ -178,9 +205,8 @@ func CanonicalIssueContextIncremental(ctx context.Context, q store.Querier, id s
 	} else {
 		if c.ScanThrough == c.From {
 			if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),?) FROM (
- SELECT event_seq FROM (SELECT event_seq FROM events WHERE event_seq>? AND event_seq<=?
- UNION ALL SELECT event_seq FROM refresh_notifications WHERE event_seq>? AND event_seq<=?)
- ORDER BY event_seq LIMIT ?)`, c.From, c.From, c.Through, c.From, c.Through, issueContextEventWindow).Scan(&c.ScanThrough); err != nil {
+ SELECT event_seq FROM events WHERE event_seq>? AND event_seq<=?
+ ORDER BY event_seq LIMIT ?)`, c.From, c.From, c.Through, issueContextEventWindow).Scan(&c.ScanThrough); err != nil {
 				return out, err
 			}
 			// Deleted/archived event intervals must not silently look synchronized.
