@@ -1,5 +1,11 @@
 import { expect, test } from "vitest";
-import { activityOrder, directoryEntry, taskActivity, type Group } from "./entries.ts";
+import {
+  activityOrder,
+  activeEntries,
+  directoryEntry,
+  taskActivity,
+  type Group,
+} from "./entries.ts";
 import { currentObservation } from "./facts.ts";
 import { runtimeLabel, runtimeMethod } from "./runtimeLabel.ts";
 import type {
@@ -120,11 +126,42 @@ test("activity uses the frozen identity aggregate and preserves order within loa
   ).toBeUndefined();
   expect(
     taskActivity({ ...entries[1]!, history: { pin: worker.pin, definition: agent, runtimes: [] } }),
-  ).toBeUndefined();
+  ).toEqual({ running: 2, uncertain: 0 });
   group.taskActivity!.running_tasks = {};
   expect(
     [...entries]
       .sort((a, b) => activityOrder(a) - activityOrder(b))
       .map((e) => e.agent.identity.local_id),
   ).toEqual(["iris", "idle", "cedar", "other-idle", "maple"]);
+});
+
+test("working retired identities remain discoverable without repeating their task total", () => {
+  const group: Group = {
+    id: "host",
+    projection: {
+      format_version: 1,
+      execution_environment_id: "host",
+      source_kind: "local_file",
+      agents: [],
+      runtimes: [],
+    },
+    taskActivity: { running_tasks: { cedar: 2 }, uncertain_tasks: { maple: 1 } },
+  };
+  const history = (local_id: string, revision: number) => {
+    const definition = { ...agent, identity: { execution_environment_id: "host", local_id } };
+    return directoryEntry(group, definition, {
+      definition,
+      pin: { ...worker.pin, inventory_revision: revision, snapshot_id: String(revision) },
+      runtimes: [],
+    });
+  };
+  const old = history("cedar", 1),
+    latest = history("cedar", 2),
+    uncertain = history("maple", 1),
+    idle = history("iris", 1);
+  expect(activeEntries([old, latest, uncertain, idle])).toEqual([latest, uncertain]);
+  const current = directoryEntry(group, agent);
+  expect(activeEntries([current, old, latest, uncertain, idle])).toEqual([current, uncertain]);
+  group.taskActivity!.running_tasks = {};
+  expect(activeEntries([old, latest, uncertain, idle])).toEqual([uncertain]);
 });

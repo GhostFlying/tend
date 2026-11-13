@@ -74,11 +74,11 @@ export function observation(entry: Entry): { label: string; available: boolean }
     : { label: "未上报", available: false };
 }
 
-/** Current identities include their older frozen versions; history rows do not
- * repeat that total. Missing observations must never turn into an idle claim. */
+/** Current identities include their older frozen versions. Missing observations
+ * must never turn into an idle claim. */
 export function taskActivity(entry: Entry) {
   const activity = entry.group.taskActivity ?? entry.group.catalog?.task_activity;
-  if (entry.history || !activity) return undefined;
+  if (!activity) return undefined;
   return {
     running: activity.running_tasks?.[entry.agent.identity.local_id] ?? 0,
     uncertain: activity.uncertain_tasks?.[entry.agent.identity.local_id] ?? 0,
@@ -88,4 +88,26 @@ export function taskActivity(entry: Entry) {
 export function activityOrder(entry: Entry): number {
   const activity = taskActivity(entry);
   return activity?.running ? 0 : activity?.uncertain ? 1 : 2;
+}
+
+/** Keep working retired identities discoverable, once each, using their latest
+ * retained definition. Other historical versions stay in the history section. */
+export function activeEntries(entries: Entry[]): Entry[] {
+  const current = new Set(
+    entries.filter((entry) => !entry.history).map((entry) => agentKey(entry.agent)),
+  );
+  const retained = new Map<string, Entry>();
+  for (const entry of entries) {
+    const key = agentKey(entry.agent),
+      activity = taskActivity(entry);
+    if (!entry.history || current.has(key) || (!activity?.running && !activity?.uncertain))
+      continue;
+    const previous = retained.get(key);
+    if (
+      !previous ||
+      entry.history.pin.inventory_revision > previous.history!.pin.inventory_revision
+    )
+      retained.set(key, entry);
+  }
+  return entries.filter((entry) => !entry.history || retained.get(agentKey(entry.agent)) === entry);
 }
