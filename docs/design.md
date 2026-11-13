@@ -2130,7 +2130,9 @@ pause、question、ExternalWait、历史 session。多个来源并存时不能�
 分别决定身份和目录。严格恢复与可选历史回退继续遵循原来的作用域。
 
 继承历史 thread 不代表本轮启动过进程。第一次尝试在当前调用中继承该 thread 后，
-harness 明确返回 ErrWorkerNotStarted，仍可持久记录本轮未启动；旧尝试、单独存在
+harness 明确返回 ErrWorkerNotStarted，本地自有执行仍可持久记录本轮未启动；
+外部 Releaser 的独立执行器必须先沿原关闭入口确认，不能把内层未启动当作外层
+已经停止。旧尝试、单独存在
 的 thread、缺失进程归属文件和普通失败均不能证明停止。启动与关闭对账同时失败时
 保留两者原因，不能用后续文件错误覆盖最初的启动错误。
 

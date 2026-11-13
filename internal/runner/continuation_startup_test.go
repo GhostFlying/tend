@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,5 +170,87 @@ func TestFault_StartupFailurePreservesOriginalAndClosureErrors(t *testing.T) {
 	saved, err := j.Run(t.Context(), as.RunID)
 	if err != nil || saved.StoppedConfirmed || saved.Attempts != 1 || spaces.recoveryReads != 1 {
 		t.Fatalf("uncertainty was changed into stop proof: %+v reads=%d err=%v", saved, spaces.recoveryReads, err)
+	}
+}
+
+type continuationExternalStartup struct {
+	alive            atomic.Bool
+	starts, releases int
+	closeErr         error
+}
+
+func (w *continuationExternalStartup) Start(context.Context, harness.WorkerSpec) (harness.Worker, error) {
+	w.starts++
+	w.alive.Store(true)
+	return nil, fmt.Errorf("%w: inner native preflight rejected after outer executor started", harness.ErrWorkerNotStarted)
+}
+
+func (w *continuationExternalStartup) Release(context.Context, string, string) error {
+	w.releases++
+	if w.closeErr != nil {
+		return w.closeErr
+	}
+	w.alive.Store(false)
+	return nil
+}
+
+func TestFault_InheritedPrelaunchWaitsForExternalExecutorClose(t *testing.T) {
+	ctx := t.Context()
+	clock := testkit.NewClock()
+	j, err := journal.Open(ctx, filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	as := protocol.Assignment{RunID: "external-current", TaskID: "review", Role: protocol.RoleImplement, Desired: protocol.DesiredRun,
+		SessionContinuation:      &protocol.SessionContinuation{RunID: "history", ThreadID: "history-thread"},
+		ExternalWaitContinuation: &protocol.ExternalWait{RunID: "wait", ThreadID: "wait-thread"}}
+	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	outer := &continuationExternalStartup{closeErr: errors.New("outer executor closure unconfirmed")}
+	sent := make(chan protocol.Envelope, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+			t.Error(err)
+		}
+		if outer.alive.Load() {
+			t.Error("Run was released before the external executor closed")
+		}
+		sent <- env
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
+	}))
+	defer server.Close()
+	spaces := &continuationStartupSpaces{root: t.TempDir(), dir: t.TempDir(), state: t.TempDir()}
+	r := New(Config{Journal: j, Worker: protocol.WorkerAppServer, Workers: outer, Workspaces: spaces, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), Log: slog.New(slog.DiscardHandler), ServerURL: server.URL, HTTPClient: server.Client(), RequestTimeout: time.Second, RetryDelay: time.Millisecond})
+	a := &active{as: as, desired: protocol.DesiredRun}
+	if err := r.work(ctx, ctx, as, a); !errors.Is(err, harness.ErrWorkerNotStarted) {
+		t.Fatal(err)
+	}
+	if err := r.finish(ctx, as, journal.PhaseReleasing, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "worker_start_failed"}); err != nil {
+		t.Fatal(err)
+	}
+	pending, _, err := j.RequestForRun(ctx, as.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = r.awaitCompletedStop(ctx, ctx, as, a)
+	saved, readErr := j.Run(ctx, as.RunID)
+	if !errors.Is(err, outer.closeErr) || readErr != nil || saved.StoppedConfirmed || !outer.alive.Load() || outer.releases != 1 || len(sent) != 0 {
+		t.Fatalf("inner no-launch proof bypassed outer cleanup: stop=%t alive=%t releases=%d sent=%d err=%v read=%v", saved.StoppedConfirmed, outer.alive.Load(), outer.releases, len(sent), err, readErr)
+	}
+	outer.closeErr = nil
+	if err := r.execute(ctx, ctx, as.RunID, a); err != nil {
+		t.Fatal(err)
+	}
+	if outer.alive.Load() || outer.starts != 1 || outer.releases != 2 || len(sent) != 1 {
+		t.Fatalf("outer cleanup was not reconciled exactly once: alive=%t starts=%d releases=%d sent=%d", outer.alive.Load(), outer.starts, outer.releases, len(sent))
+	}
+	if env := <-sent; env.Operation != protocol.OpRunsRelease || env.RequestID != pending.Envelope.RequestID || env.Target.ID != as.RunID {
+		t.Fatalf("external close recovery changed the original release: %+v", env)
 	}
 }

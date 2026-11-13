@@ -23,6 +23,10 @@ ErrWorkerNotStarted，仍可记录本轮未启动的事实。仅有旧 thread、
 启动错误或前一次未结尝试不能提供该证明。关闭对账失败时同时保留原始启动错误，
 不丢失任何 unknown。
 
+继承 thread 的这一证明只适用于本地自有执行。外部 Releaser 可能已启动外层
+执行器，内层 preflight 拒绝不能代替其独立关闭；保留原 Release/awaitCompletedStop
+路径，并覆盖关闭暂未确认、随后成功关闭、原请求仅释放一次且不重复启动的恢复。
+
 ## C. 验证真实调用路径
 
 通过 runner.work/execute、真实 app-server harness 与环境继承路径构造混合来源；
