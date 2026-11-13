@@ -621,19 +621,7 @@ export function IssueDetails({
                     到最新 ↓
                   </Button>
                 </div>
-                {conversation ? (
-                  <ConversationSessionProvider conversation={conversation} connection={connection}>
-                    <IssueActivity
-                      issue={issue}
-                      reads={reads}
-                      reading={reading}
-                      results={results.value?.items ?? []}
-                      onIssue={onSelect}
-                      onTask={onTask}
-                      scroll={scroll}
-                    />
-                  </ConversationSessionProvider>
-                ) : (
+                <ConversationSessionProvider conversation={conversation} connection={connection}>
                   <IssueActivity
                     issue={issue}
                     reads={reads}
@@ -643,7 +631,7 @@ export function IssueDetails({
                     onTask={onTask}
                     scroll={scroll}
                   />
-                )}
+                </ConversationSessionProvider>
               </div>
             </div>
             <div className={styles.composer}>

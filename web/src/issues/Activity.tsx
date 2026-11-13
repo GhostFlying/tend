@@ -26,7 +26,7 @@ import { Chevron } from "../shell/icons.tsx";
 import { clock } from "../conversation/model.ts";
 import { groupActivityEvents, identifyActivityGroups } from "./activity.ts";
 import { IssueTurnRead } from "./turn.ts";
-import { IssueResultCard, HistoricalResultCard } from "./Results.tsx";
+import { ActivityResultCard } from "./Results.tsx";
 import type { IssueReadingState } from "./reading.ts";
 import type { Issues } from "./data.ts";
 import styles from "./DetailPage.module.css";
@@ -89,9 +89,14 @@ export function IssueActivity({
         node.clientHeight === scrollportSize.current.height
       )
         return false;
+      const widthChanged = node.clientWidth !== scrollportSize.current.width;
+      const atPreviousEnd =
+        Math.abs(node.scrollHeight - node.scrollTop - scrollportSize.current.height) < 1;
       scrollportSize.current = { width: node.clientWidth, height: node.clientHeight };
       if (following.current || reading.followsLatest()) {
-        correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
+        // Async composer readiness must not replace an already restored reading point.
+        if (widthChanged || atPreviousEnd)
+          correctScroll(node, () => node.scrollTo({ top: node.scrollHeight }));
         setNewItems(false);
       } else if (readingAnchor.current)
         correctScroll(node, () => restoreAnchor(node, readingAnchor.current!));
@@ -648,11 +653,7 @@ function Milestone({
           {entry.author || "tend"} {entry.title} ·{" "}
           {new Date(entry.created_at).toLocaleString("zh-CN")}
         </p>
-        {result ? (
-          <IssueResultCard result={result} onTask={onTask} />
-        ) : (
-          <HistoricalResultCard artifactID={entry.artifact_id} onTask={onTask} />
-        )}
+        <ActivityResultCard artifactID={entry.artifact_id} result={result} onTask={onTask} />
       </div>
     );
   return (
