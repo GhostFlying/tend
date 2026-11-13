@@ -164,6 +164,7 @@ func TestExternalMissingOwnedCloseRequiresExactProofAndAbsence(t *testing.T) {
 		{name: "thread", edit: func(in *protocol.WorkerCloseIntent) { in.ThreadID += "-other" }},
 		{name: "workspace", edit: func(in *protocol.WorkerCloseIntent) { in.Directory += "-other" }},
 		{name: "state", edit: func(in *protocol.WorkerCloseIntent) { in.StateDirectory += "-other" }},
+		{name: "wrong_attempt", edit: func(in *protocol.WorkerCloseIntent) { in.Attempt = 2 }},
 		{name: "invented_process", edit: func(in *protocol.WorkerCloseIntent) { in.Processes = []protocol.WorkerCloseProcess{in.Runner} }},
 		{name: "invented_owned_sha", edit: func(in *protocol.WorkerCloseIntent) { in.OwnedRecordSHA256 = strings.Repeat("b", 64) }},
 		{name: "late_malformed_owned", owned: "{"},
@@ -175,12 +176,13 @@ func TestExternalMissingOwnedCloseRequiresExactProofAndAbsence(t *testing.T) {
 			}
 			in := original.Intent
 			in.Version, in.OwnedRecordMissing, in.OwnedRecordSHA256, in.Processes = 2, true, "", nil
+			in.Attempt, spec.Attempt = 1, 1
 			if tc.edit != nil {
 				tc.edit(&in)
 			}
 			proof := externalOwnedCloseProof(t, in)
 			body, _ := json.Marshal(proof)
-			if err := os.WriteFile(filepath.Join(spec.StateDir, protocol.WorkerCloseMissingProofFilename), body, 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(spec.StateDir, protocol.WorkerCloseMissingProofFilename(1)), body, 0600); err != nil {
 				t.Fatal(err)
 			}
 			if tc.owned != "" {

@@ -25,6 +25,7 @@ type workerCloseOptions struct {
 	OwnedSHA256     string `json:"owned_record_sha256,omitempty"`
 	OwnedMissing    bool   `json:"owned_record_missing,omitempty"`
 	Directory       string `json:"directory,omitempty"`
+	Attempt         int    `json:"attempt,omitempty"`
 	RunnerPID       int    `json:"runner_pid,omitempty"`
 	RunnerStart     string `json:"runner_start_ticks,omitempty"`
 	RunnerBoot      string `json:"runner_boot_id,omitempty"`
@@ -66,6 +67,7 @@ func runWorkerCloseOnHost(ctx context.Context, e *Env, args []string, host worke
 		fs.StringVar(&q.OwnedSHA256, "owned-sha256", "", "SHA256 of original owned-appserver-process.json bytes")
 		fs.BoolVar(&q.OwnedMissing, "owned-missing", false, "original owned record is absent; bind the entire acknowledged execution unit instead")
 		fs.StringVar(&q.Directory, "directory", "", "exact original absolute workspace directory, required with --owned-missing")
+		fs.IntVar(&q.Attempt, "attempt", 0, "exact original journal attempt number, required with --owned-missing")
 		fs.IntVar(&q.RunnerPID, "runner-pid", 0, "original live runner PID")
 		fs.StringVar(&q.RunnerStart, "runner-start-ticks", "", "original runner /proc start ticks")
 		fs.StringVar(&q.RunnerBoot, "runner-boot-id", "", "original runner kernel boot ID")
@@ -84,10 +86,10 @@ func runWorkerCloseOnHost(ctx context.Context, e *Env, args []string, host worke
 	}
 	if q.Action == "prepare" {
 		digest, decodeErr := hex.DecodeString(q.OwnedSHA256)
-		ownedValid := !q.OwnedMissing && decodeErr == nil && len(digest) == 32 && q.Directory == ""
-		missingValid := q.OwnedMissing && q.OwnedSHA256 == "" && filepath.IsAbs(q.Directory)
+		ownedValid := !q.OwnedMissing && q.Attempt == 0 && decodeErr == nil && len(digest) == 32 && q.Directory == ""
+		missingValid := q.OwnedMissing && q.Attempt > 0 && q.OwnedSHA256 == "" && filepath.IsAbs(q.Directory)
 		if (!ownedValid && !missingValid) || q.RunID == "" || q.ThreadID == "" || q.RunnerPID <= 1 || q.RunnerStart == "" || q.RunnerBoot == "" || q.Unit == "" || !q.AcknowledgeUnit {
-			return usagef("worker-close prepare requires exact Run/thread/runner PID/start/boot, --unit, --acknowledge-unit-execution and either --owned-sha256 or --owned-missing with --directory")
+			return usagef("worker-close prepare requires exact Run/thread/runner PID/start/boot, --unit, --acknowledge-unit-execution and either --owned-sha256 or --owned-missing with --directory and --attempt")
 		}
 	}
 	if *dry {
@@ -117,7 +119,7 @@ func executeWorkerClose(ctx context.Context, q workerCloseOptions, host workerCl
 			return receipt, err
 		}
 		in := receipt.Intent
-		if in.RequestID != q.RequestID || in.StateDirectory != q.StateDirectory || q.Action == "prepare" && (in.RunID != q.RunID || in.ThreadID != q.ThreadID || in.OwnedRecordSHA256 != q.OwnedSHA256 || in.OwnedRecordMissing != q.OwnedMissing || q.OwnedMissing && in.Directory != q.Directory || in.Runner.PID != q.RunnerPID || in.Runner.StartTicks != q.RunnerStart || in.Runner.BootID != q.RunnerBoot || in.Boundary.Unit != q.Unit) {
+		if in.RequestID != q.RequestID || in.StateDirectory != q.StateDirectory || q.Action == "prepare" && (in.RunID != q.RunID || in.ThreadID != q.ThreadID || in.OwnedRecordSHA256 != q.OwnedSHA256 || in.OwnedRecordMissing != q.OwnedMissing || in.Attempt != q.Attempt || q.OwnedMissing && in.Directory != q.Directory || in.Runner.PID != q.RunnerPID || in.Runner.StartTicks != q.RunnerStart || in.Runner.BootID != q.RunnerBoot || in.Boundary.Unit != q.Unit) {
 			return receipt, errors.New("local request input differs from its original intent")
 		}
 	} else if errors.Is(err, os.ErrNotExist) && q.Action == "prepare" {

@@ -2142,12 +2142,13 @@ harness 明确返回 ErrWorkerNotStarted，本地自有执行仍可持久记录�
 ## D234：缺失归属记录的独立执行边界关闭事实
 
 启动失败留下的历史 Run 若缺失 owned 记录，不能直接判断没有启动或允许重放。
-本机 `worker-close` 可显式绑定原 Run/thread/工作目录、精确存活的原 runner 和
+本机 `worker-close` 可显式绑定原 Run/thread/已有 journal attempt/工作目录、精确存活的原 runner 和
 操作员确认涵盖原执行及后代的独立 systemd 单元，保存准备时归属文件缺失的事实。
 只有停止后核验原 runner 退出及整个原内核执行边界关闭，才能生成独立关闭证明。
 systemd v1 仍要求原内核目录已移除；晚到的 owned 记录或身份变化必须拒绝确认。
 
 这种证明只用于原 runner 的物理停止和正常失败释放，不生成 owned 记录、不宣称
 native Close 或业务成功，不更改授权或在线协议。原 Task 后续由 owner 正常接续。
-本机 intent 版本区分缺失与原 SHA 绑定，旧格式读取及不可变字节保持兼容。
+本机 intent 版本区分缺失与原 SHA 绑定，旧格式读取及不可变字节保持兼容。缺失证明
+及文件名固定原 attempt；后续 NextAttempt 不能复用旧事实确认新尝试已经停止。
 见 `docs/plans/missing-owned-boundary-recovery.md`。

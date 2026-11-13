@@ -45,6 +45,7 @@ type WorkerCloseIntent struct {
 	OwnedRecordSHA256 string `json:"owned_record_sha256"`
 	// Version 2 records absence rather than inventing an owned process set.
 	OwnedRecordMissing bool                 `json:"owned_record_missing,omitempty"`
+	Attempt            int                  `json:"attempt,omitempty"`
 	Runner             WorkerCloseProcess   `json:"runner"`
 	Processes          []WorkerCloseProcess `json:"processes"`
 	Boundary           WorkerCloseBoundary  `json:"boundary"`
@@ -94,12 +95,14 @@ func WorkerCloseProofFilename(ownedSHA256 string) string {
 	return "owned-external-close-" + ownedSHA256 + ".json"
 }
 
-// Missing ownership has one immutable proof per original Run state directory.
-const WorkerCloseMissingProofFilename = "owned-external-close-missing.json"
+// Missing ownership binds the exact journal attempt, including across restart.
+func WorkerCloseMissingProofFilename(attempt int) string {
+	return fmt.Sprintf("owned-external-close-missing-%d.json", attempt)
+}
 
 func (in WorkerCloseIntent) ProofFilename() string {
 	if in.OwnedRecordMissing {
-		return WorkerCloseMissingProofFilename
+		return WorkerCloseMissingProofFilename(in.Attempt)
 	}
 	return WorkerCloseProofFilename(in.OwnedRecordSHA256)
 }
@@ -113,8 +116,8 @@ func (p WorkerCloseProcess) Validate() error {
 
 func (in WorkerCloseIntent) Validate() error {
 	digest, err := hex.DecodeString(in.OwnedRecordSHA256)
-	ownedValid := in.Version == 1 && !in.OwnedRecordMissing && err == nil && len(digest) == sha256.Size && len(in.Processes) > 0
-	missingValid := in.Version == 2 && in.OwnedRecordMissing && in.OwnedRecordSHA256 == "" && len(in.Processes) == 0
+	ownedValid := in.Version == 1 && !in.OwnedRecordMissing && in.Attempt == 0 && err == nil && len(digest) == sha256.Size && len(in.Processes) > 0
+	missingValid := in.Version == 2 && in.OwnedRecordMissing && in.Attempt > 0 && in.OwnedRecordSHA256 == "" && len(in.Processes) == 0
 	if (!ownedValid && !missingValid) || in.RequestID == "" || in.RunID == "" || in.ThreadID == "" || !filepath.IsAbs(in.StateDirectory) || !filepath.IsAbs(in.Directory) || in.OperatorUID < 0 || in.PreparedAt == "" {
 		return errors.New("worker-close: incomplete intent binding")
 	}

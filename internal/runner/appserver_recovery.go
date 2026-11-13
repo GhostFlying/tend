@@ -51,7 +51,7 @@ func (r *Runner) stopOwnedAppServer(ctx context.Context, as protocol.Assignment,
 	if err != nil {
 		return true, err
 	}
-	return true, stopper.StopOwnedWorker(ctx, harness.WorkerSpec{RunID: as.RunID, Dir: p.Dir, StateDir: p.StateDir, Thread: run.Thread})
+	return true, stopper.StopOwnedWorker(ctx, harness.WorkerSpec{RunID: as.RunID, Dir: p.Dir, StateDir: p.StateDir, Thread: run.Thread, Attempt: run.Attempts})
 }
 
 // recoverAppServerAttempt settles an interrupted local attempt as a failure,

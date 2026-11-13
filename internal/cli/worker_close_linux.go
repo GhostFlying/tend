@@ -215,6 +215,7 @@ func prepareWorkerClose(ctx context.Context, q workerCloseOptions, h workerClose
 	in.Boundary.RootDevice, in.Boundary.RootInode = rootDevice, rootInode
 	if q.OwnedMissing {
 		in.Version, in.OwnedRecordMissing, in.Processes = 2, true, nil
+		in.Attempt = q.Attempt
 	}
 	if err := in.Validate(); err != nil {
 		return in, err

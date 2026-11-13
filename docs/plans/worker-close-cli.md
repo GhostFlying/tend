@@ -17,9 +17,9 @@
 实际运维记录仅保存在忽略目录。
 
 启动失败且原 owned 文件确实缺失时，使用 `prepare --owned-missing --directory
-<原工作目录>` 替代 `--owned-sha256`；其余原 Run/thread、活 runner PID/start/boot、
+<原工作目录> --attempt <原 journal 尝试编号>` 替代 `--owned-sha256`；其余原 Run/thread、活 runner PID/start/boot、
 unit 和明确的单元边界确认仍全部必填。先 prepare，再经已授权维护关闭整个原执行
 单元，在新 runner 启动前 confirm。命令只保存独立 intent/proof，不创建进程归属
-或环境归属文件；缺失模式 proof 使用原 Run state directory 内固定文件名。
+或环境归属文件；缺失模式 proof 使用原 Run state directory 内绑定 attempt 的固定文件名。
 原文件晚到则停止该缺失模式对账，重新核对真实身份，不能绕过已存在的记录。
 详见 D234 与 `missing-owned-boundary-recovery.md`。

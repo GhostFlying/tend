@@ -26,7 +26,7 @@ func TestWorkerCloseMissingOwnershipRequiresOriginalBoundaryClosure(t *testing.T
 			var out, stderr bytes.Buffer
 			e := Env{Stdout: &out, Stderr: &stderr}
 			args := []string{"prepare", "--state-dir", f.q.StateDirectory, "--request-id", f.q.RequestID, "--run", f.q.RunID, "--thread", f.q.ThreadID,
-				"--owned-missing", "--directory", filepath.Join(filepath.Dir(f.q.StateDirectory), "workspace"), "--runner-pid", "100", "--runner-start-ticks", "1000", "--runner-boot-id", f.q.RunnerBoot, "--unit", f.q.Unit, "--acknowledge-unit-execution"}
+				"--owned-missing", "--directory", filepath.Join(filepath.Dir(f.q.StateDirectory), "workspace"), "--runner-pid", "100", "--runner-start-ticks", "1000", "--runner-boot-id", f.q.RunnerBoot, "--unit", f.q.Unit, "--acknowledge-unit-execution", "--attempt", "1"}
 			if err := runWorkerCloseOnHost(t.Context(), &e, args, f.host); err != nil {
 				t.Fatalf("missing original ownership cannot prepare boundary: %v", err)
 			}
@@ -75,6 +75,7 @@ func TestWorkerCloseMissingOwnershipRequiresOriginalBoundaryClosure(t *testing.T
 
 func TestWorkerCloseMissingOwnershipRejectsLateOwnedRecord(t *testing.T) {
 	f := newWorkerCloseFixture(t)
+	f.q.Attempt = 1
 	f.q.OwnedMissing, f.q.OwnedSHA256, f.q.Directory = true, "", filepath.Join(filepath.Dir(f.q.StateDirectory), "workspace")
 	if _, err := executeWorkerClose(t.Context(), f.q, f.host); err == nil {
 		t.Fatal("existing ownership ignored")
@@ -91,7 +92,7 @@ func TestWorkerCloseMissingOwnershipRejectsLateOwnedRecord(t *testing.T) {
 	if _, err := executeWorkerClose(t.Context(), f.q, f.host); err == nil {
 		t.Fatal("late ownership was bypassed")
 	}
-	if _, err := os.Lstat(filepath.Join(f.q.StateDirectory, protocol.WorkerCloseMissingProofFilename)); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(f.q.StateDirectory, protocol.WorkerCloseMissingProofFilename(1))); !os.IsNotExist(err) {
 		t.Fatalf("unconfirmed closure published: %v", err)
 	}
 }
