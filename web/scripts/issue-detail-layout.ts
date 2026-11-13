@@ -587,117 +587,240 @@ const browser = await chromium.launch();
 try {
   // Read summaries as summaries, then fetch the full report and its original bytes on demand.
   for (const width of [1440, 390]) {
-    const context = await browser.newContext({
-      viewport: { width, height: width > 760 ? 1000 : 844 },
-      serviceWorkers: "block",
-      acceptDownloads: true,
-    });
-    const page = await context.newPage();
-    page.setDefaultTimeout(10_000);
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (message) => {
-      if (
-        message.type() === "warning" &&
-        message.text() === "Service Worker registration blocked by Playwright"
-      )
-        return;
-      if (["warning", "error"].includes(message.type())) errors.push(message.text());
-    });
-    const body =
-      "# 调查报告\n\n## 原始背景与问题\n\n解释已完成结果仍显示恢复标签的原因。\n\n" +
-      Array.from(
-        { length: 80 },
-        (_, index) =>
-          `### 证据段 ${index + 1}\n\n保留实际观察、原始问题和未知，读者无需从聊天拼接结论。\n\n`,
-      ).join("") +
-      "报告末尾：本次只调查，没有修改业务代码。\n\n" +
-      `[查看关联任务](/tasks/${results.items![0]!.task_id}?from=${issue.issue_id})\n\n` +
-      `[查看关联问题](/issues/${child.issue_id})`;
-    const file = {
-      file_id: "file-readable-report",
-      name: "report.md",
-      size: Buffer.byteLength(body),
-      sha256: createHash("sha256").update(body).digest("hex"),
-    };
-    reportDownload = body;
-    let originalReads = 0;
-    const beforeWrites = writes.length;
-    await page.route("**/api/v1/artifacts/artifact-one", (route) =>
-      route.fulfill({
-        json: {
-          ...results.items![0],
-          artifact: {
-            ...results.items![0]!.artifact,
-            ref: { report: { body }, files: [file] },
-          },
+    for (const indexTiming of ["index-first", "historical-first", "while-reading"] as const) {
+      const context = await browser.newContext({
+        viewport: { width, height: width > 760 ? 1000 : 844 },
+        serviceWorkers: "block",
+        acceptDownloads: true,
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(10_000);
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      page.on("console", (message) => {
+        if (
+          message.type() === "warning" &&
+          message.text() === "Service Worker registration blocked by Playwright"
+        )
+          return;
+        if (["warning", "error"].includes(message.type())) errors.push(message.text());
+      });
+      const body =
+        "# 调查报告\n\n## 原始背景与问题\n\n解释已完成结果仍显示恢复标签的原因。\n\n" +
+        Array.from(
+          { length: 80 },
+          (_, index) =>
+            `### 证据段 ${index + 1}\n\n保留实际观察、原始问题和未知，读者无需从聊天拼接结论。\n\n`,
+        ).join("") +
+        "报告末尾：本次只调查，没有修改业务代码。\n\n" +
+        `[查看关联任务](/tasks/${results.items![0]!.task_id}?from=${issue.issue_id})\n\n` +
+        `[查看关联问题](/issues/${child.issue_id})`;
+      const file = {
+        file_id: "file-readable-report",
+        name: "report.md",
+        size: Buffer.byteLength(body),
+        sha256: createHash("sha256").update(body).digest("hex"),
+      };
+      reportDownload = body;
+      let originalReads = 0;
+      const beforeWrites = writes.length;
+      let holdIndex = indexTiming !== "index-first";
+      let releaseIndex = () => {};
+      const indexGate = new Promise<void>((resolve) => {
+        releaseIndex = resolve;
+      });
+      let returning = false;
+      let returnedIndex = Promise.resolve();
+      let indexReceived = () => {};
+      await page.route(`**/api/v1/issues/${issue.issue_id}/results*`, async (route) => {
+        const returningRequest = returning;
+        if (holdIndex) await indexGate;
+        await route.fulfill({ json: { ...results, more: true, next: "older" } });
+        if (returningRequest) indexReceived();
+      });
+      await page.route(`**/api/v1/issues/${issue.issue_id}`, async (route) => {
+        if (returning) {
+          // Reconstruct the opposite, equally legal order from the first historical read.
+          await returnedIndex;
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) =>
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+              ),
+          );
+        }
+        await route.fulfill({
+          json: { ...issue, attentions: { items: [decision], more: false } },
+        });
+      });
+      let releaseConversation = () => {};
+      let conversationGate = new Promise<void>((resolve) => {
+        releaseConversation = resolve;
+      });
+      const conversationID = issue.conversation?.conversation_id;
+      assert(conversationID, "the reader fixture needs its actual Issue conversation");
+      const conversationPath = `/api/v1/agent-conversations/${encodeURIComponent(conversationID)}`;
+      await page.route(
+        (url) => url.pathname === conversationPath,
+        async (route) => {
+          const gate = conversationGate;
+          const response = await route.fetch();
+          await gate;
+          await route.fulfill({ response });
         },
-      }),
-    );
-    await page.route(`**/api/v1/files/${file.file_id}`, (route) => {
-      originalReads++;
-      return route.fulfill({ contentType: "application/octet-stream", body });
-    });
-    await page.route(`**/api/v1/files/${file.file_id}/download-url`, (route) =>
-      route.fulfill({ json: { url: `http://127.0.0.1:${address.port}/report-download` } }),
-    );
-    try {
-      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
-      const card = page.locator('[data-artifact="artifact-one"]').first();
-      await card.getByRole("heading", { name: "报告摘要", exact: true }).waitFor();
-      await card.getByRole("button", { name: "阅读完整报告 →", exact: true }).click();
-      await card.getByRole("heading", { name: "报告正文", exact: true }).waitFor();
-      await card.getByText("报告末尾：本次只调查，没有修改业务代码。", { exact: true }).waitFor();
-      assert.equal(originalReads, 0, "report metadata must not fetch original files eagerly");
-      assert.equal(await card.getByRole("button", { name: "阅读 report.md" }).isVisible(), false);
-      await card
-        .locator("summary")
-        .filter({ hasText: /^原件与证据/ })
-        .click();
-      const open = card.getByRole("button", { name: "阅读 report.md", exact: true });
-      await open.click();
-      const reader = page.getByRole("dialog", { name: "阅读 report.md", exact: true });
-      await reader.getByRole("heading", { name: "原始背景与问题", exact: true }).waitFor();
-      await reader.getByText("报告末尾：本次只调查，没有修改业务代码。", { exact: true }).waitFor();
-      assert.equal(originalReads, 1);
-      assert(await reader.evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
-      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-      await page.screenshot({ path: join(output, `readable-report-${width}.png`) });
-      const pendingDownload = page.waitForEvent("download");
-      await reader.getByRole("button", { name: "下载 report.md", exact: true }).click();
-      const download = await pendingDownload;
-      assert.equal(download.suggestedFilename(), file.name);
-      const downloaded = join(output, `readable-report-${width}.md`);
-      await download.saveAs(downloaded);
-      assert.equal(await readFile(downloaded, "utf8"), body);
-      await page.keyboard.press("Escape");
-      await reader.waitFor({ state: "hidden" });
-      assert(await open.evaluate((node) => node === document.activeElement));
-      for (const target of [
-        { label: "查看关联任务", path: `/tasks/${results.items![0]!.task_id}` },
-        { label: "查看关联问题", path: `/issues/${child.issue_id}` },
-      ]) {
-        await open.click();
-        await reader.getByRole("link", { name: target.label, exact: true }).click();
-        await page.waitForURL((url) => url.pathname === target.path);
-        if (target.path.startsWith("/tasks/"))
-          await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
-        else await page.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
-        await page.goBack();
-        await page.waitForURL((url) => url.pathname === `/issues/${issue.issue_id}`);
-        await open.waitFor();
-        await page.waitForFunction(
-          () => document.activeElement?.getAttribute("aria-label") === "阅读 report.md",
+      );
+      const finishConversation = async () => {
+        const response = page.waitForResponse(
+          (reply) => new URL(reply.url()).pathname === conversationPath,
         );
+        releaseConversation();
+        await response;
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        );
+      };
+      await page.route("**/api/v1/artifacts/artifact-one", (route) =>
+        route.fulfill({
+          json: {
+            ...results.items![0],
+            artifact: {
+              ...results.items![0]!.artifact,
+              ref: { report: { body }, files: [file] },
+            },
+          },
+        }),
+      );
+      await page.route(`**/api/v1/files/${file.file_id}`, (route) => {
+        originalReads++;
+        return route.fulfill({ contentType: "application/octet-stream", body });
+      });
+      await page.route(`**/api/v1/files/${file.file_id}/download-url`, (route) =>
+        route.fulfill({ json: { url: `http://127.0.0.1:${address.port}/report-download` } }),
+      );
+      try {
+        await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+        const card = page.locator('[data-artifact="artifact-one"]').first();
+        // Historical originals are readable before the independently fetched current index.
+        await page.locator('[data-scroll-id="result:artifact-one"]').scrollIntoViewIfNeeded();
+        await card.getByRole("heading", { name: "报告摘要", exact: true }).waitFor();
+        if (indexTiming === "index-first")
+          await card.getByText(results.items![0]!.title, { exact: true }).waitFor();
+        await card.getByRole("button", { name: "阅读完整报告 →", exact: true }).click();
+        await card.getByRole("heading", { name: "报告正文", exact: true }).waitFor();
+        await card.getByText("报告末尾：本次只调查，没有修改业务代码。", { exact: true }).waitFor();
+        assert.equal(originalReads, 0, "report metadata must not fetch original files eagerly");
+        assert.equal(await card.getByRole("button", { name: "阅读 report.md" }).isVisible(), false);
+        await card
+          .locator("summary")
+          .filter({ hasText: /^原件与证据/ })
+          .click();
+        const open = card.getByRole("button", { name: "阅读 report.md", exact: true });
+        await open.click();
+        const reader = page.getByRole("dialog", { name: "阅读 report.md", exact: true });
+        await reader.getByRole("heading", { name: "原始背景与问题", exact: true }).waitFor();
+        await reader
+          .getByText("报告末尾：本次只调查，没有修改业务代码。", { exact: true })
+          .waitFor();
+        assert.equal(originalReads, 1);
+        if (indexTiming === "while-reading") {
+          const previousCard = await card.elementHandle();
+          const previousOpen = await open.elementHandle();
+          holdIndex = false;
+          releaseIndex();
+          await card.getByText(results.items![0]!.title, { exact: true }).waitFor();
+          assert.equal(
+            await reader.isVisible(),
+            true,
+            "index metadata must retain the open reader",
+          );
+          assert(await card.evaluate((node, previous) => node === previous, previousCard));
+          assert(await open.evaluate((node, previous) => node === previous, previousOpen));
+          assert.equal(originalReads, 1, "index arrival must not reread immutable original bytes");
+        }
+        const beforeConversationCard = await card.elementHandle();
+        const beforeConversationOpen = await open.elementHandle();
+        await finishConversation();
+        assert.equal(
+          await reader.isVisible(),
+          true,
+          "conversation readiness must retain the reader",
+        );
+        assert(await card.evaluate((node, previous) => node === previous, beforeConversationCard));
+        assert(await open.evaluate((node, previous) => node === previous, beforeConversationOpen));
+        assert.equal(
+          originalReads,
+          1,
+          "conversation readiness must not reread immutable originals",
+        );
+        assert(await reader.evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        await page.screenshot({
+          path: join(output, `readable-report-${width}-${indexTiming}.png`),
+        });
+        const pendingDownload = page.waitForEvent("download");
+        await reader.getByRole("button", { name: "下载 report.md", exact: true }).click();
+        const download = await pendingDownload;
+        assert.equal(download.suggestedFilename(), file.name);
+        const downloaded = join(output, `readable-report-${width}-${indexTiming}.md`);
+        await download.saveAs(downloaded);
+        assert.equal(await readFile(downloaded, "utf8"), body);
+        await page.keyboard.press("Escape");
+        await reader.waitFor({ state: "hidden" });
         assert(await open.evaluate((node) => node === document.activeElement));
-        assert.equal(await page.locator("dialog[open]").count(), 0);
+        for (const target of [
+          { label: "查看关联任务", path: `/tasks/${results.items![0]!.task_id}` },
+          { label: "查看关联问题", path: `/issues/${child.issue_id}` },
+        ]) {
+          await open.click();
+          await reader.getByRole("link", { name: target.label, exact: true }).click();
+          await page.waitForURL((url) => url.pathname === target.path);
+          if (target.path.startsWith("/tasks/"))
+            await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
+          else await page.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
+          holdIndex = false;
+          releaseIndex();
+          returnedIndex = new Promise<void>((resolve) => {
+            indexReceived = resolve;
+          });
+          returning = true;
+          conversationGate = new Promise<void>((resolve) => {
+            releaseConversation = resolve;
+          });
+          await page.goBack();
+          await page.waitForURL((url) => url.pathname === `/issues/${issue.issue_id}`);
+          await card.getByText(results.items![0]!.title, { exact: true }).waitFor();
+          await open.waitFor();
+          const originals = card
+            .locator("summary")
+            .filter({ hasText: /^原件与证据/ })
+            .locator("..");
+          assert(await originals.evaluate((node) => (node as HTMLDetailsElement).open));
+          await page.waitForFunction(
+            () => document.activeElement?.getAttribute("aria-label") === "阅读 report.md",
+          );
+          assert(await open.evaluate((node) => node === document.activeElement));
+          assert.equal(await page.locator("dialog[open]").count(), 0);
+          const restoredOpen = await open.elementHandle();
+          await finishConversation();
+          assert(await open.evaluate((node, previous) => node === previous, restoredOpen));
+          assert(await originals.evaluate((node) => (node as HTMLDetailsElement).open));
+          assert(await open.evaluate((node) => node === document.activeElement));
+        }
+        assert.equal(writes.length, beforeWrites);
+        assert.deepEqual(errors, []);
+        console.log(
+          `PASS ${width}/${indexTiming}: Issue activity → same artifact → original bytes/download → Task and Issue return/focus`,
+        );
+      } finally {
+        releaseIndex();
+        indexReceived();
+        releaseConversation();
+        await context.close();
+        reportDownload = undefined;
       }
-      assert.equal(writes.length, beforeWrites);
-      assert.deepEqual(errors, []);
-      console.log(`PASS ${width}: Issue activity → full report → original Markdown and download`);
-    } finally {
-      await context.close();
-      reportDownload = undefined;
     }
   }
   // Historical activity loads a full artifact, so its collapsed preview must be bounded too.
@@ -2897,6 +3020,25 @@ try {
         "returning from task lost continued-page reading position",
       );
       assert.equal(await more.count(), 0, "returned turn forgot loaded continuation depth");
+      await detail.locator("[data-issue-scroll]").evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await page.setViewportSize({ width, height: 780 });
+      await page.waitForFunction(() => {
+        const node = document.querySelector("[data-issue-scroll]") as HTMLElement;
+        return Math.abs(node.scrollHeight - node.scrollTop - node.clientHeight) < 1;
+      });
+      await page.setViewportSize({ width, height: 844 });
+      await page.waitForFunction(() => {
+        const node = document.querySelector("[data-issue-scroll]") as HTMLElement;
+        return Math.abs(node.scrollHeight - node.scrollTop - node.clientHeight) < 1;
+      });
       await page.goto(`http://127.0.0.1:${address.port}/issues`);
       base.items![0]!.body = `新访问的实时回复 ${width}`;
       await detail.waitFor({ state: "hidden" });

@@ -113,7 +113,7 @@ export function ConversationSessionProvider({
   children,
   visible = true,
 }: {
-  conversation: IssueAgentConversation;
+  conversation: IssueAgentConversation | null;
   connection: Connection;
   children: ReactNode;
   visible?: boolean;
@@ -121,30 +121,38 @@ export function ConversationSessionProvider({
   const parent = useServices();
   const registry = useContext(ConversationSessionsContext);
   if (!registry) throw new Error("ConversationSessionProvider requires the app registry");
+  const conversationID = conversation?.conversation_id;
   const session = useMemo(
-    () => registry.get(conversation.conversation_id),
-    [registry, conversation.conversation_id],
+    () => (conversationID ? registry.get(conversationID) : null),
+    [registry, conversationID],
   );
-  const queue = useStore(session.queue);
+  // Pending metadata keeps the same child tree without opening a session or outbox.
+  const pendingQueue = useMemo(() => new Store<SendQueue | null>(null), []);
+  const queue = useStore(session?.queue ?? pendingQueue);
   useEffect(() => {
+    if (!session) return;
     if (visible) return session.acquire();
     session.pauseIfIdle();
   }, [session, visible]);
   return (
     <ServicesContext
-      value={{
-        ...parent,
-        live: session.live,
-        draft: session.draft,
-        queue,
-        conversation: {
-          id: conversation.conversation_id,
-          title: conversation.title,
-          kind: conversation.kind,
-          ...(conversation.issue_id ? { workItemID: conversation.issue_id } : {}),
-          ...(conversation.agent_ref ? { agentRef: conversation.agent_ref } : {}),
-        },
-      }}
+      value={
+        session && conversation
+          ? {
+              ...parent,
+              live: session.live,
+              draft: session.draft,
+              queue,
+              conversation: {
+                id: conversation.conversation_id,
+                title: conversation.title,
+                kind: conversation.kind,
+                ...(conversation.issue_id ? { workItemID: conversation.issue_id } : {}),
+                ...(conversation.agent_ref ? { agentRef: conversation.agent_ref } : {}),
+              },
+            }
+          : parent
+      }
     >
       {children}
     </ServicesContext>

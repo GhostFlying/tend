@@ -168,12 +168,14 @@ export function IssueResultsList({ id, onTask }: { id: string; onTask(id: string
   );
 }
 
-/** Older timeline cards fetch only their artifact when they enter the viewport. */
-export function HistoricalResultCard({
+/** Keep one activity card and DOM path while its independently read index arrives. */
+export function ActivityResultCard({
   artifactID,
+  result,
   onTask,
 }: {
   artifactID: string;
+  result?: ResultCardValue | undefined;
   onTask(id: string): void;
 }) {
   const { client, live } = useServices();
@@ -188,8 +190,9 @@ export function HistoricalResultCard({
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, []);
+  const indexed = !!result;
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || indexed) return;
     void read.open(`/api/v1/artifacts/${encodeURIComponent(artifactID)}`);
     const stop = live.subscribeEvents((event) => {
       if (event.object_type !== "message") void read.refresh();
@@ -198,13 +201,15 @@ export function HistoricalResultCard({
     return () => {
       stop();
       reset();
-      read.close();
+      // Retain the fallback metadata when an index takes over, without retaining IO.
+      read.pause();
     };
-  }, [visible, read, artifactID, live]);
+  }, [visible, indexed, read, artifactID, live]);
+  const value = result ?? (state.value ? { ...state.value, title: "交付成果" } : null);
   return (
     <div ref={ref}>
-      {state.value ? (
-        <IssueResultCard result={{ ...state.value, title: "交付成果" }} onTask={onTask} />
+      {value ? (
+        <IssueResultCard result={value} onTask={onTask} />
       ) : (
         <p role="status">
           {state.error ? (
