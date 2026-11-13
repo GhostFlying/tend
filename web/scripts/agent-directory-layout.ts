@@ -69,6 +69,7 @@ const runtimes: AgentInventoryRuntime[] = [
   },
 ];
 let activityRunning = false;
+let prototypeActivity: "normal" | "idle" | "running" | "uncertain" = "normal";
 let activityEventSeq = 2;
 let secondHostOnline = true;
 let failCatalog = false;
@@ -100,7 +101,11 @@ function catalog(host: string): RunnerAgentCatalog {
     ["maple", "Maple", "formal-review", "codex", "GPT-6.1-Sol", "xhigh"],
     ["birch", "Birch", "implementation-economy", "traex", "deepseek-v4.1-flash", "high"],
   ].map(([id, name, category, runtime, model, effort]) => ({
-    identity: { execution_environment_id: host, local_id: id! },
+    identity: {
+      execution_environment_id: host,
+      local_id:
+        prototypeActivity !== "normal" && host === "host-a" && id === "cedar" ? "constructor" : id!,
+    },
     revision: 4,
     display_name:
       host === "host-a"
@@ -129,7 +134,10 @@ function catalog(host: string): RunnerAgentCatalog {
       ? [2, 3].map((version) => {
           const historical: AgentInventoryDefinition = {
             ...agents[0]!,
-            identity: { execution_environment_id: host, local_id: "elm" },
+            identity: {
+              execution_environment_id: host,
+              local_id: prototypeActivity !== "normal" ? "toString" : "elm",
+            },
             display_name: "Elm",
             revision: version,
             categories: ["implementation"],
@@ -159,12 +167,24 @@ function catalog(host: string): RunnerAgentCatalog {
       : [];
   return {
     task_activity: {
-      running_tasks: activityRunning
-        ? host === "host-a"
-          ? { cedar: 2, iris: 1, elm: 1 }
-          : { birch: 3 }
-        : {},
-      uncertain_tasks: activityRunning && host === "host-a" ? { maple: 1 } : {},
+      running_tasks:
+        prototypeActivity !== "normal" && host === "host-a"
+          ? prototypeActivity === "running"
+            ? { constructor: 2, toString: 1 }
+            : {}
+          : activityRunning
+            ? host === "host-a"
+              ? { cedar: 2, iris: 1, elm: 1 }
+              : { birch: 3 }
+            : {},
+      uncertain_tasks:
+        prototypeActivity !== "normal" && host === "host-a"
+          ? prototypeActivity === "uncertain"
+            ? { constructor: 1, toString: 1 }
+            : {}
+          : activityRunning && host === "host-a"
+            ? { maple: 1 }
+            : {},
     },
     host_id: host,
     online: host === "host-a" || secondHostOnline,
@@ -551,6 +571,7 @@ try {
       hideConcurrencyList = false;
       secondHostOnline = true;
       activityRunning = false;
+      prototypeActivity = "normal";
       nativeWorker = false;
       hostedCLI = "codex";
       associationRequests.length = 0;
@@ -698,6 +719,45 @@ try {
         "Iris",
       ]);
       await directory.getByRole("button", { name: /Cedar.*0 个任务 · 空闲/ }).waitFor();
+      // Legal IDs can shadow Object.prototype after JSON decoding. Exercise
+      // current and retired identities through the actual rendered directory.
+      prototypeActivity = "idle";
+      activityChanged();
+      const waitForCedarID = async (id: string) =>
+        page.waitForFunction(
+          (expected) =>
+            [...document.querySelectorAll('[class*="identity"]')].some(
+              (element) =>
+                element.querySelector("strong")?.textContent === "Cedar" &&
+                element.querySelector("small")?.textContent?.includes(expected),
+            ),
+          id,
+        );
+      await waitForCedarID("constructor");
+      assert.equal(await names.first().innerText(), "Sequoia");
+      assert.equal(await names.count(), 11);
+      assert.equal(await directory.getByText(/native code/).count(), 0);
+      prototypeActivity = "running";
+      activityChanged();
+      await directory.getByRole("button", { name: /Cedar.*2 个任务运行中/ }).waitFor();
+      await directory.getByRole("button", { name: /Elm.*1 个任务运行中/ }).waitFor();
+      assert.deepEqual((await names.allInnerTexts()).slice(0, 2), ["Cedar", "Elm"]);
+      assert.equal(await directory.getByRole("button", { name: /Elm.*1 个任务运行中/ }).count(), 1);
+      await page.screenshot({
+        path: join(output, `prototype-ids-${viewport.width}-${theme}.png`),
+        fullPage: false,
+      });
+      prototypeActivity = "uncertain";
+      activityChanged();
+      await directory.getByRole("button", { name: /Cedar.*运行状态待确认 · 1 个待确认/ }).waitFor();
+      await directory.getByRole("button", { name: /Elm.*运行状态待确认 · 1 个待确认/ }).waitFor();
+      assert.equal(await directory.getByRole("button", { name: /Cedar.*任务运行中/ }).count(), 0);
+      prototypeActivity = "normal";
+      activityChanged();
+      await waitForCedarID("cedar");
+      await page.waitForFunction(
+        () => document.querySelector('[class*="identity"] strong')?.textContent === "Sequoia",
+      );
       if (mobileDetails) {
         await page.setViewportSize({
           width: viewport.width,

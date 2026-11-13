@@ -12,102 +12,115 @@ import (
 )
 
 func TestNamedExecutionAssignmentFreezesPinAcrossInventoryUpdateAndReplay(t *testing.T) {
-	h, r, p, _ := inventorySetup(t)
-	p.Agents[0].Categories = []string{"implementer"}
-	p.Agents[1].Categories = []string{"reviewer"}
-	_, hash, err := protocol.CanonicalAgentInventory(p)
-	if err != nil {
-		t.Fatal(err)
+	for _, finish := range []string{"release", "artifact"} {
+		t.Run(finish, func(t *testing.T) {
+			h, r, p, _ := inventorySetup(t)
+			p.Agents[0].Categories = []string{"implementer"}
+			p.Agents[1].Categories = []string{"reviewer"}
+			_, hash, err := protocol.CanonicalAgentInventory(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registered := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 0, "snapshot-first"), RegisterAgentInventory{})
+			if registered.Status != protocol.OpSucceeded {
+				t.Fatal(registered)
+			}
+			r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentExecution)
+			r.JournalVersion = 12
+			for _, a := range p.Agents {
+				r.AgentExecutors = append(r.AgentExecutors, protocol.AgentExecutor{Available: true, Pin: protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: 1, SnapshotID: "snapshot-first", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: protocol.WorkerAppServer, BackendID: "git"}})
+			}
+			r.Sequence++
+			if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			spec := testSpec
+			spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
+			_, task := h.createTask(owner, createTaskPayload{Title: "named", Spec: spec})
+			legacy := *r
+			legacy.JournalVersion = 11
+			legacy.AgentExecutors = nil
+			legacy.Capabilities = slices.DeleteFunc(slices.Clone(r.Capabilities), func(value string) bool { return value == protocol.CapabilityAgentExecution })
+			status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: &legacy})
+			if err != nil || len(status.Executors) != 0 {
+				t.Fatal("status added a field for a client without execution support", status, err)
+			}
+			legacyClaim := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: &legacy}, nil), Claim{})
+			var unselected claimResult
+			if err := json.Unmarshal(legacyClaim.Result, &unselected); err != nil || unselected.Assignment.RunID != "" {
+				t.Fatal("stored capability overrode current request", legacyClaim, err)
+			}
+			request := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil)
+			op := h.exec(runner("linux-1"), request, Claim{})
+			var result claimResult
+			if err := json.Unmarshal(op.Result, &result); err != nil {
+				t.Fatal(err)
+			}
+			as := result.Assignment
+			if as.TaskID != task.TaskID || as.Execution == nil || as.Execution.Identity.LocalID != "alpha" || as.Workspace.BackendID != "git" {
+				t.Fatalf("assignment=%+v result=%s", as, op.Result)
+			}
+			var workerInput domain.Spec
+			json.Unmarshal(as.Spec, &workerInput)
+			if workerInput.AgentSelection != nil {
+				t.Fatal("selection leaked into the legacy task input")
+			}
+			assertActivity := func(want int) {
+				t.Helper()
+				catalog, err := h.app.RunnerAgentCatalog(t.Context(), "linux-1")
+				if err != nil || catalog.TaskActivity == nil || catalog.TaskActivity.RunningTasks["alpha"] != want {
+					t.Fatalf("catalog activity after normal transition: %+v, %v", catalog.TaskActivity, err)
+				}
+			}
+			assertActivity(1) // Claim creates starting, including its original frozen pin.
+			if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			assertActivity(1)
+			// An older-capability process cannot recover this new mode through hello.
+			legacyHello := h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &legacy}, nil)
+			if _, err := h.app.Execute(t.Context(), runner("linux-1"), legacyHello, Hello{}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+				t.Fatal("named recovery silently became legacy", err)
+			}
+			// A newer inventory changes future choices, never this run or its receipt.
+			p.Agents[0].Revision++
+			p.Agents[0].RequestedModel = "future-model"
+			_, nextHash, err := protocol.CanonicalAgentInventory(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if op := h.exec(runner("linux-1"), inventoryRequest(h, r, p, nextHash, 2, 1, "snapshot-next"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			replay := h.exec(runner("linux-1"), request, Claim{})
+			if string(replay.Result) != string(op.Result) {
+				t.Fatal("claim retry selected current inventory")
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				pin, err := store.GetRunExecution(t.Context(), tx.Q(), as.RunID)
+				if err == nil && (*pin != *as.Execution || pin.SnapshotID != "snapshot-first") {
+					t.Fatal("stored execution changed", pin)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			assertActivity(1) // New inventory must not reattribute the still-running Task.
+			if finish == "release" {
+				if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "fixture stopped"}, Release{}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			} else {
+				if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				if got := h.run(as.RunID).ObservedState; got != protocol.RunFinished {
+					t.Fatalf("successful result state=%s", got)
+				}
+			}
+			assertActivity(0)
+		})
 	}
-	registered := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 0, "snapshot-first"), RegisterAgentInventory{})
-	if registered.Status != protocol.OpSucceeded {
-		t.Fatal(registered)
-	}
-	r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentExecution)
-	r.JournalVersion = 12
-	for _, a := range p.Agents {
-		r.AgentExecutors = append(r.AgentExecutors, protocol.AgentExecutor{Available: true, Pin: protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: 1, SnapshotID: "snapshot-first", PublicSHA256: hash, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: protocol.WorkerAppServer, BackendID: "git"}})
-	}
-	r.Sequence++
-	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	spec := testSpec
-	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
-	_, task := h.createTask(owner, createTaskPayload{Title: "named", Spec: spec})
-	legacy := *r
-	legacy.JournalVersion = 11
-	legacy.AgentExecutors = nil
-	legacy.Capabilities = slices.DeleteFunc(slices.Clone(r.Capabilities), func(value string) bool { return value == protocol.CapabilityAgentExecution })
-	status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: &legacy})
-	if err != nil || len(status.Executors) != 0 {
-		t.Fatal("status added a field for a client without execution support", status, err)
-	}
-	legacyClaim := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: &legacy}, nil), Claim{})
-	var unselected claimResult
-	if err := json.Unmarshal(legacyClaim.Result, &unselected); err != nil || unselected.Assignment.RunID != "" {
-		t.Fatal("stored capability overrode current request", legacyClaim, err)
-	}
-	request := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: r}, nil)
-	op := h.exec(runner("linux-1"), request, Claim{})
-	var result claimResult
-	if err := json.Unmarshal(op.Result, &result); err != nil {
-		t.Fatal(err)
-	}
-	as := result.Assignment
-	if as.TaskID != task.TaskID || as.Execution == nil || as.Execution.Identity.LocalID != "alpha" || as.Workspace.BackendID != "git" {
-		t.Fatalf("assignment=%+v result=%s", as, op.Result)
-	}
-	var workerInput domain.Spec
-	json.Unmarshal(as.Spec, &workerInput)
-	if workerInput.AgentSelection != nil {
-		t.Fatal("selection leaked into the legacy task input")
-	}
-	assertActivity := func(want int) {
-		t.Helper()
-		catalog, err := h.app.RunnerAgentCatalog(t.Context(), "linux-1")
-		if err != nil || catalog.TaskActivity == nil || catalog.TaskActivity.RunningTasks["alpha"] != want {
-			t.Fatalf("catalog activity after normal transition: %+v, %v", catalog.TaskActivity, err)
-		}
-	}
-	assertActivity(1) // Claim creates starting, including its original frozen pin.
-	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	assertActivity(1)
-	// An older-capability process cannot recover this new mode through hello.
-	legacyHello := h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &legacy}, nil)
-	if _, err := h.app.Execute(t.Context(), runner("linux-1"), legacyHello, Hello{}); protocol.CodeOf(err) != protocol.CodeInvalidRequest {
-		t.Fatal("named recovery silently became legacy", err)
-	}
-	// A newer inventory changes future choices, never this run or its receipt.
-	p.Agents[0].Revision++
-	p.Agents[0].RequestedModel = "future-model"
-	_, nextHash, err := protocol.CanonicalAgentInventory(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if op := h.exec(runner("linux-1"), inventoryRequest(h, r, p, nextHash, 2, 1, "snapshot-next"), RegisterAgentInventory{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	replay := h.exec(runner("linux-1"), request, Claim{})
-	if string(replay.Result) != string(op.Result) {
-		t.Fatal("claim retry selected current inventory")
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		pin, err := store.GetRunExecution(t.Context(), tx.Q(), as.RunID)
-		if err == nil && (*pin != *as.Execution || pin.SnapshotID != "snapshot-first") {
-			t.Fatal("stored execution changed", pin)
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	assertActivity(1) // New inventory must not reattribute the still-running Task.
-	if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "fixture stopped"}, Release{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	assertActivity(0)
 }
 
 func TestNamedWorkspaceRequiresSelectionAndLegacyMountPrecheckIsUnchanged(t *testing.T) {

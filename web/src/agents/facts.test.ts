@@ -165,3 +165,51 @@ test("working retired identities remain discoverable without repeating their tas
   group.taskActivity!.running_tasks = {};
   expect(activeEntries([old, latest, uncertain, idle])).toEqual([uncertain]);
 });
+
+test.each(["constructor", "toString", "hasOwnProperty", "valueOf"])(
+  "task counts for %s use only own JSON map entries for current and retained identities",
+  (local_id) => {
+    const definition = { ...agent, identity: { execution_environment_id: "host", local_id } };
+    const group: Group = {
+      id: "host",
+      projection: {
+        format_version: 1,
+        execution_environment_id: "host",
+        source_kind: "local_file",
+        agents: [definition],
+        runtimes: [],
+      },
+      taskActivity: JSON.parse('{"running_tasks":{},"uncertain_tasks":{}}'),
+    };
+    const current = directoryEntry(group, definition);
+    const retained = directoryEntry(group, definition, {
+      definition,
+      pin: worker.pin,
+      runtimes: [],
+    });
+    for (const entry of [current, retained]) {
+      expect(taskActivity(entry)).toEqual({ running: 0, uncertain: 0 });
+      expect(activityOrder(entry)).toBe(2);
+    }
+    expect(activeEntries([retained])).toEqual([]);
+    group.taskActivity = JSON.parse(
+      JSON.stringify({ running_tasks: { [local_id]: 2 }, uncertain_tasks: {} }),
+    );
+    for (const entry of [current, retained]) {
+      expect(taskActivity(entry)).toEqual({ running: 2, uncertain: 0 });
+      expect(activityOrder(entry)).toBe(0);
+    }
+    expect(activeEntries([retained])).toEqual([retained]);
+    expect(activeEntries([current, retained])).toEqual([current]);
+    group.taskActivity = JSON.parse(
+      JSON.stringify({ running_tasks: {}, uncertain_tasks: { [local_id]: 3 } }),
+    );
+    for (const entry of [current, retained]) {
+      expect(taskActivity(entry)).toEqual({ running: 0, uncertain: 3 });
+      expect(activityOrder(entry)).toBe(1);
+    }
+    expect(activeEntries([retained])).toEqual([retained]);
+    group.taskActivity = { running_tasks: null, uncertain_tasks: null };
+    expect(taskActivity(current)).toEqual({ running: 0, uncertain: 0 });
+  },
+);
