@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -360,6 +361,8 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 		t.Fatal(implementation, ok)
 	}
 	h.runAs(implementation, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	// This ordinary upload is deliberately absent from the submitted artifact.
+	messageFile, _ := h.uploadResultFile(implementation, "supplement.txt", []byte("post-completion original"))
 	if op := h.runAs(implementation, protocol.OpRunsSubmitArtifact, testArtifact(h.task(created.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -470,10 +473,30 @@ func testHostedCompletionFacts(t *testing.T, unavailable bool, closeParent ...bo
 	if child.State != protocol.IssueClosed {
 		t.Fatal(child)
 	}
-	if op := hostedEffect(t, h, manager, turn, 4, protocol.Target{Type: "issue", ID: child.IssueID}, nil, hostedReviewPayload(t, h, child), ReviewHostedIssueContext{}); op.Status != protocol.OpSucceeded {
+	beforeRun, beforeLease := h.run(implementation.RunID), h.lease(implementation.RunID)
+	beforeTasks, beforeArtifacts := h.count("tasks"), h.count("artifacts")
+	for _, effect := range []int64{4, 5} {
+		publication := protocol.CoordinationReply{Body: "Additional original after completion", Attachments: []string{messageFile.FileID}}
+		if op := hostedEffect(t, h, manager, turn, effect, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, publication, CoordinationReply{}); op.Status != protocol.OpSucceeded {
+			t.Fatal("closed Issue cannot publish unsubmitted original", op)
+		}
+		meta, body, err := h.app.OpenConversationAttachment(t.Context(), messageFile.FileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(body)
+		_ = body.Close()
+		if err != nil || string(raw) != "post-completion original" || meta.SHA256 != messageFile.SHA256 {
+			t.Fatal(meta, string(raw), err)
+		}
+	}
+	if !reflect.DeepEqual(beforeRun, h.run(implementation.RunID)) || !reflect.DeepEqual(beforeLease, h.lease(implementation.RunID)) || beforeTasks != h.count("tasks") || beforeArtifacts != h.count("artifacts") {
+		t.Fatal("supplement revived producer or fabricated a result")
+	}
+	if op := hostedEffect(t, h, manager, turn, 6, protocol.Target{Type: "issue", ID: child.IssueID}, nil, hostedReviewPayload(t, h, child), ReviewHostedIssueContext{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := commitHostedReview(t, h, manager, turn, 5); op.Status != protocol.OpSucceeded {
+	if op := commitHostedReview(t, h, manager, turn, 7); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	finishHostedReview(t, h, turn)

@@ -154,6 +154,16 @@ func runMessaging(ctx context.Context, e *Env, kind string, args []string) error
 	if len(body) == 0 {
 		return usagef("provide a JSON payload with --file or --data")
 	}
+	if action == "notify" {
+		var publication protocol.MessagingPublication
+		if err := json.Unmarshal(body, &publication); err != nil {
+			return usagef("invalid notification payload: %v", err)
+		}
+		publication.ReplyTo = "" // notify follows App's existing reply-field semantics.
+		if err := publication.ValidateInput(); err != nil {
+			return usagef("%v", err)
+		}
+	}
 	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)

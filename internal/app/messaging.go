@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -209,18 +208,7 @@ func submitCommunicationInput(ctx context.Context, x *Exec, tx *store.Tx, p prot
 	return out, nil
 }
 
-func validatePublication(p protocol.MessagingPublication) error {
-	if !utf8.ValidString(p.Body) || len(p.Body) > maxMessageBytes || (strings.TrimSpace(p.Body) == "" && len(p.Attachments) == 0) || len(p.Attachments) > 20 || len(p.SourceMessageIDs) > 100 || len(p.IssueIDs) > 50 {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "nonempty bounded message or attachments required")
-	}
-	if p.Purpose != "progress" && p.Purpose != "final" {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "purpose must be progress or final")
-	}
-	if p.ReplyTo == "" && (strings.TrimSpace(p.Reason) == "" || len(p.Reason) > 2000) {
-		return protocol.Errorf(protocol.CodeInvalidRequest, "notification requires a bounded business reason")
-	}
-	return nil
-}
+func validatePublication(p protocol.MessagingPublication) error { return p.ValidateInput() }
 
 func publishCommunication(ctx context.Context, x *Exec, tx *store.Tx, p protocol.MessagingPublication, execution, conversation, author string) (Outcome, error) {
 	if err := validatePublication(p); err != nil {
@@ -530,9 +518,6 @@ func (c PublishCommunication) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		p.ReplyTo = ""
 		if issuePublication && strings.TrimSpace(p.Reason) == "" {
 			p.Reason = x.Env.Reason
-			if strings.TrimSpace(p.Reason) == "" {
-				p.Reason = "Publish the current Issue owner's " + p.Purpose + " result"
-			}
 		}
 	} else if p.ReplyTo == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reply_to is required")

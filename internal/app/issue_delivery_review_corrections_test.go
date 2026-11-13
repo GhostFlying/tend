@@ -427,6 +427,14 @@ func TestDeliveryDeferSurvivesPrepareProviderAndBaselineDrift(t *testing.T) {
 				if unchanged.Status != "deferred" || unchanged.Revision != deferred.Revision || unchanged.AttentionID != d.AttentionID {
 					t.Fatal("unchanged prepare erased owner deferral", unchanged)
 				}
+				// A deferred prepare is an idempotent read of that disposition,
+				// not a new candidate requirement, even with historical extra fields.
+				if op := updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: source, Action: "prepare", UpgradeID: "historically-ignored", IssueControlPayload: protocol.IssueControlPayload{Reason: "Keep the recorded owner deferral"}}); op.Status != protocol.OpSucceeded {
+					t.Fatal("schema normalization added a candidate gate", op)
+				}
+				if next := deliveryDutyForTest(t, h, i.IssueID, source); next.Status != "deferred" || next.Revision != deferred.Revision {
+					t.Fatal("idempotent prepare changed deferral", next)
+				}
 				c.Validation = "fresh checks on unchanged head"
 				switch drift {
 				case "provider":

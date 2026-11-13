@@ -415,6 +415,9 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 	it := protocol.ConversationItem{ConversationID: r.ConversationID, ConversationContent: protocol.ConversationContent{Seq: r.Seq, Kind: r.Kind, MessageID: r.MessageID, Author: r.Author, Body: r.Body,
 		ReplyTo: r.ReplyTo, CreatedAt: time.UnixMilli(r.CreatedAt).UTC(),
 		AssistantState: protocol.AssistantState(r.AssistantState), AssistantRevision: r.AssistantRevision}}
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT purpose FROM messaging_messages WHERE message_id=?),'')`, r.MessageID).Scan(&it.Purpose); err != nil {
+		return it, err
+	}
 	recovery, err := store.MessageRecovery(ctx, q, r.MessageID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return it, err

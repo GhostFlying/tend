@@ -7,8 +7,8 @@ type CoordinationReply struct {
 	MessageID     string                 `json:"message_id"`
 	ReplyTo       string                 `json:"reply_to,omitempty"`
 	Attachments   []string               `json:"attachments,omitempty"`
-	Body          string                 `json:"body"`
-	Purpose       string                 `json:"purpose"`
+	Body          string                 `json:"body,omitempty"`
+	Purpose       string                 `json:"purpose,omitempty"`
 	Disposition   string                 `json:"disposition,omitempty"`
 	WorkItemIDs   []string               `json:"work_item_ids,omitempty"`
 	Contexts      []LogicalContextReview `json:"contexts,omitempty"`

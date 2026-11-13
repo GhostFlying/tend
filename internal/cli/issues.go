@@ -288,6 +288,15 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	if action == "update-delivery" {
+		var payload protocol.UpdateIssueDeliveryPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return usagef("invalid delivery payload: %v", err)
+		}
+		if err := payload.ValidateInput(); err != nil {
+			return usagef("%v", err)
+		}
+	}
 	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)

@@ -25,6 +25,7 @@ test("the final assistant reply exposes its original report in the attachment sc
             created_at: "2026-01-01T00:00:00Z",
             assistant_state: "completed",
             body: "已完成调查，完整背景和结论见报告原件。",
+            purpose: "final",
             attachments: [
               {
                 file_id: "file_report",
@@ -41,5 +42,7 @@ test("the final assistant reply exposes its original report in the attachment sc
   );
   expect(output).toContain("已完成调查，完整背景和结论见报告原件。");
   expect(output).toContain("阅读 report.md");
+  expect(output).toContain("成果</span>");
+  expect(output).toContain("不代表验收或交付状态");
   expect(output).toContain('data-scope="conversation/attachments"');
 });

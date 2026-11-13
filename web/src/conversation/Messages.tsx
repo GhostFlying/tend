@@ -295,6 +295,11 @@ const AgentItem = memo(function AgentItem({
         />
       ) : (
         <>
+          {item.purpose === "final" && (
+            <span className={styles.state} title="Agent 标记的成果消息，不代表验收或交付状态">
+              成果
+            </span>
+          )}
           <div className={proseClassName}>
             <Markdown
               text={item.body ?? ""}

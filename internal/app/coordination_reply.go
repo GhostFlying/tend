@@ -60,8 +60,8 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		env.Payload, _ = json.Marshal(protocol.MessagingPublication{MessageID: p.MessageID, Body: p.Body, ReplyTo: p.ReplyTo, Attachments: p.Attachments, Purpose: p.Purpose})
 		return (PublishCommunication{}).Apply(ctx, &child, tx)
 	}
-	if p.Purpose != "progress" && p.Purpose != "final" {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "purpose must be progress or final")
+	if !protocol.ValidPublicationPurpose(p.Purpose) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "purpose must be omitted, progress or final")
 	}
 	if len(p.WorkItemIDs) > 50 || len(p.Facts) > 100 || len(p.Contexts) > 50 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "too many linked Issues or facts")

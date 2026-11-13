@@ -4598,6 +4598,9 @@
         "notice_type": {
           "type": "string"
         },
+        "purpose": {
+          "type": "string"
+        },
         "recovery": {
           "$ref": "#/definitions/AgentRecoveryView"
         },
@@ -8914,6 +8917,9 @@
         "notice_type": {
           "type": "string"
         },
+        "purpose": {
+          "type": "string"
+        },
         "recovery": {
           "$ref": "#/definitions/AgentRecoveryView"
         },
@@ -12725,6 +12731,51 @@
     },
     "MessagingPublication": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "attachments": {
+              "maxItems": 20
+            },
+            "body": {
+              "maxLength": 65536
+            },
+            "purpose": {
+              "description": "Optional presentation marker only. Omit for an ordinary message; final does not finish or accept work.",
+              "enum": [
+                "",
+                "progress",
+                "final"
+              ]
+            }
+          }
+        },
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "body": {
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "body"
+              ]
+            },
+            {
+              "properties": {
+                "attachments": {
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "attachments"
+              ]
+            }
+          ]
+        }
+      ],
       "properties": {
         "attachments": {
           "items": {
@@ -12761,8 +12812,7 @@
         }
       },
       "required": [
-        "message_id",
-        "purpose"
+        "message_id"
       ],
       "title": "MessagingPublication",
       "type": "object"
@@ -19815,6 +19865,154 @@
     },
     "UpdateIssueDeliveryPayload": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "reason": {
+              "minLength": 1
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "complete"
+              }
+            },
+            "required": [
+              "action",
+              "execution_run_id"
+            ]
+          },
+          "then": {
+            "required": [
+              "execution_task_id"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "execution_duty_revision": {
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "execution_duty_revision": {
+                "minimum": 1
+              }
+            },
+            "required": [
+              "execution_duty_revision"
+            ]
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "const": "complete"
+              }
+            },
+            "required": [
+              "execution_task_id",
+              "execution_run_id"
+            ]
+          }
+        }
+      ],
+      "anyOf": [
+        {
+          "properties": {
+            "action": {
+              "const": "submit_result",
+              "description": "Uses result, run_id, independent_acceptance. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "prepare",
+              "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "task_id"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "resume",
+              "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "task_id"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "bind",
+              "description": "Uses task_id, execution_task_id, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "task_id",
+            "execution_task_id",
+            "expected_task_control_revision"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "report",
+              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "task_id"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "end",
+              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "task_id"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "complete",
+              "description": "Uses task_id, execution_task_id, execution_run_id, execution_duty_revision, upgrade_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements."
+            }
+          },
+          "required": [
+            "action",
+            "task_id"
+          ]
+        }
+      ],
       "properties": {
         "acceptance_id": {
           "type": "string"

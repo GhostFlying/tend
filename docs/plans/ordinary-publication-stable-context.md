@@ -1,0 +1,22 @@
+# 普通发布、稳定上下文与输入契约（D232）
+
+## 目标
+
+消息正文和已上传原件沿普通会话权限直接发布；artifact、独立验收、交付及完成条件不再作为聊天附件前置。purpose 和通知 reason 可省略，progress/final 仅为展示属性。保持实际 sender、文件来源、不可变字节、请求身份及范围校验，不复活终止 Run。
+
+## 实施
+
+1. 将 publication 文件可见性与正式 task input/artifact provenance 分开。发布建立现有 conversation attachment/message 引用，下载及保留沿现有原件表，发送不更新 Task/duty/acceptance。
+2. 上下文的 keyset 成员上界保持不变；使用永久业务事件作为持续读取的边界，辅助刷新不影响 snapshot 和后续 delta。旧 cursor 保留明确恢复规则；真实历史缺失和错误 scope 不当作成功。
+3. optional purpose 与 delivery action 已存在的字段条件复用协议层定义，使 App、模型工具、owner API 和 CLI 契约一致。历史额外字段仍按原动作忽略，不新增拒绝；candidate 依实际 duty 状态决定，例如 deferred prepare 无需新候选。正式生成 schema/TS，同步帮助和 Agent 指令。
+4. 定向回归从真实 App/Store 入口覆盖上传→直接发布→字节读回、结束/关闭后合法补充、丢回复去重、状态中立、范围拒绝；覆盖页间刷新和业务变化、完成后两个增量区间、真实缺口。
+
+## 边界与验证
+
+不新增成果审核、分页会话、权限、并行账本、定时器或通用 shell 交接。模型可以直接等待仍工作的本地命令；已有 ExternalWait 仅在适合已有外部目标时可选使用。既有业务路径文档适用，不新增审批表。
+
+先保存定向 RED/GREEN 与 race/契约结果；完整 PR 独立审阅和最终 make check/精确 CI 由协调者执行。无生产变更，无部署证明。旧 artifact/review/duty/消息保留。optional 输入是兼容扩展，不改变 server/runner 原始信封、租约、身份或已持久化格式；读取游标版本为服务端 opaque token，旧 token 兼容/恢复不赋予写入权限。
+
+## 游标兼容与实际边界
+
+新 opaque v2 上下文游标使用本读取器的永久 events 水位，固定对象上界和 keyset 不变；全局 SSE/refresh cursor 无改动。旧 v1 snapshot 在原位置仍由保留事件、当前 refresh 或精确 expired_through 证明时，按原 Through 找最后一条永久事件；更老且无法判断是否被归档业务事件的 v1 位置明确要求重同步，不能默默向前截断。迁移不跳到最新，保留页位置和对象上界；这允许初始 Through 本来是后来合并掉的 refresh。旧 v1 delta 若真的失去 refresh 历史，明确要求一次重同步，得到不再依赖 refresh 的 v2。新读取仍检查永久 From/Through/扫描窗口边界存在及合法作用域，实际归档边界不能冒充已同步。辅助 refresh 不承载此索引的业务对象；本索引查询的是永久业务变化，不提供通用 refresh 流。
