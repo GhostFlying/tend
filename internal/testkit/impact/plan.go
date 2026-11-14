@@ -56,12 +56,25 @@ func fullReason(file string) string {
 		return "wire or generated API contract"
 	case strings.HasPrefix(file, "internal/store/migrations/"):
 		return "persistent schema and historical migration contract"
+	case (strings.HasPrefix(file, "internal/release/") || strings.HasPrefix(file, "cmd/")) && strings.HasSuffix(file, ".go") && !strings.HasSuffix(file, "_test.go"):
+		return "executable assembly and complete distribution identity contract"
 	}
 	return ""
 }
 
 func documentation(file string) bool {
 	return strings.HasPrefix(file, "docs/") && strings.HasSuffix(file, ".md") || file == "README.md" || file == "AGENTS.md" || file == "CLAUDE.md" || file == "LICENSE"
+}
+
+// API capability coverage parses these control registrations as source, rather
+// than importing their packages. Keep this real edge alongside Go dependencies.
+func localControlSource(file string) bool {
+	for _, root := range []string{"internal/runner/", "internal/updater/", "internal/upgradectl/", "internal/maintenance/"} {
+		if strings.HasPrefix(file, root) {
+			return true
+		}
+	}
+	return false
 }
 
 // Select computes package-level coverage, never a fixed list of test names.
@@ -105,6 +118,10 @@ func Select(files []string, packages []Package, forceFull bool) Plan {
 			selected[pkg] = true
 			if !strings.HasSuffix(file, "_test.go") {
 				production = append(production, pkg)
+				if localControlSource(file) {
+					capability = true
+					p.Reasons = append(p.Reasons, file+": API capability tests parse local control source registrations")
+				}
 			}
 			if strings.HasPrefix(file, "internal/api/") || strings.HasPrefix(file, "internal/tools/") || strings.HasPrefix(file, "internal/cli/") {
 				capability = true

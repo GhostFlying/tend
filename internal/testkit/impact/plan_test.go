@@ -39,6 +39,35 @@ func TestTestOnlyChangesDoNotPretendProductionImportsChanged(t *testing.T) {
 	}
 }
 
+func TestLocalControlRegistrationsRetainCapabilityCoverageWithoutImportEdges(t *testing.T) {
+	for _, name := range []string{"runner", "updater", "upgradectl", "maintenance"} {
+		packages := append(dependencyFixture(), Package{ImportPath: module + "internal/" + name, Dir: "internal/" + name})
+		p := Select([]string{"internal/" + name + "/control.go"}, packages, false)
+		if p.Full || !slices.Contains(p.QualityTargets, "capability-check") {
+			t.Fatal("source-inspected operator contract omitted", name, p)
+		}
+		if slices.Contains(p.Packages, module+"internal/api") {
+			t.Fatal("source-scanning capability check unnecessarily selected unrelated API runtime tests", name, p)
+		}
+		p = Select([]string{"internal/" + name + "/control_test.go"}, packages, false)
+		if slices.Contains(p.QualityTargets, "capability-check") {
+			t.Fatal("test-only change incorrectly changed a production registration", name, p)
+		}
+	}
+}
+
+func TestAssemblyAndDistributionProductionChangesRetainFullBaseline(t *testing.T) {
+	for _, dir := range []string{"cmd/tend", "internal/release"} {
+		packages := append(dependencyFixture(), Package{ImportPath: module + dir, Dir: dir})
+		if p := Select([]string{dir + "/main.go"}, packages, false); !p.Full || !p.Release || !p.Cross {
+			t.Fatal("complete artifact contract omitted", dir, p)
+		}
+		if p := Select([]string{dir + "/main_test.go"}, packages, false); p.Full || len(p.Packages) != 1 {
+			t.Fatal("test-only change unnecessarily selected complete release baseline", dir, p)
+		}
+	}
+}
+
 func TestDocumentationAndFrontendKeepDifferentNecessaryCoverage(t *testing.T) {
 	p := Select([]string{"docs/plans/example.md"}, nil, false)
 	if p.Full || len(p.Packages) != 0 || p.Web || p.Cross || p.Release || !slices.Equal(p.QualityTargets, []string{"diff-check"}) {
@@ -51,7 +80,7 @@ func TestDocumentationAndFrontendKeepDifferentNecessaryCoverage(t *testing.T) {
 }
 
 func TestBroadOrUnknownInputsRetainCompleteValidation(t *testing.T) {
-	for _, file := range []string{"go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", "internal/protocol/request.go", "web/src/api/generated/api.ts", "internal/store/migrations/next.sql", "internal/testkit/impact/plan.go", "internal/testkit/testphase/context.go", "unknown.json", "docs/examples/tend-server.hujson", "internal/removed/last.go"} {
+	for _, file := range []string{"go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", "internal/protocol/request.go", "web/src/api/generated/api.ts", "internal/store/migrations/next.sql", "internal/testkit/impact/plan.go", "internal/testkit/testphase/context.go", "internal/release/manifest.go", "cmd/tend/main.go", "unknown.json", "docs/examples/tend-server.hujson", "internal/removed/last.go"} {
 		t.Run(file, func(t *testing.T) {
 			p := Select([]string{file}, dependencyFixture(), false)
 			if !p.Full || !p.Web || !p.Layout || !p.Cross || !p.Release || len(p.Groups) != 5 {
