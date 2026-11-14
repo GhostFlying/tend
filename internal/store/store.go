@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,11 +29,9 @@ import (
 var migrationFS embed.FS
 
 // Bound concurrent SQLite schema initialization and retain the entire pool
-// across bursts. Eight readers keep low-CPU services responsive; the upper bound
-// prevents large hosts from multiplying schema state without limit.
-func readPoolConnections() int {
-	return min(32, max(8, runtime.GOMAXPROCS(0)))
-}
+// across bursts. More CPU does not remove the driver's shared allocation lock;
+// opening more readers can increase contention without adding useful throughput.
+const readConnections = 8
 
 // Store holds a single-connection pool for writes and a pool for reads.
 // SQLite allows one writer at a time; funnelling writes through one
@@ -73,9 +70,8 @@ func OpenWithOptions(ctx context.Context, dbPath string, now func() time.Time, o
 		write.Close()
 		return nil, fmt.Errorf("store: open reader: %w", err)
 	}
-	readLimit := readPoolConnections()
-	read.SetMaxOpenConns(readLimit)
-	read.SetMaxIdleConns(readLimit)
+	read.SetMaxOpenConns(readConnections)
+	read.SetMaxIdleConns(readConnections)
 	files, err := blobstore.New(dbPath + ".files")
 	if err != nil {
 		write.Close()
