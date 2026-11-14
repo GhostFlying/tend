@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"io"
 	"net"
@@ -12,6 +13,9 @@ import (
 	"net/url"
 	"time"
 )
+
+// SelfUpdateTimeout bounds one local supervisor request, not the whole batch.
+const SelfUpdateTimeout = 15 * time.Second
 
 func (s *Supervisor) selfHandler(w http.ResponseWriter, r *http.Request) {
 	var status SelfUpdateStatus
@@ -86,9 +90,9 @@ func selfUpdateCall(ctx context.Context, socket string, request *SelfUpdateReque
 	if err != nil {
 		return out, err
 	}
-	response, err := (&http.Client{Transport: tr, Timeout: 15 * time.Second}).Do(req)
+	response, err := (&http.Client{Transport: tr, Timeout: SelfUpdateTimeout}).Do(req)
 	if err != nil {
-		return out, errors.New("updater: self-update observation unavailable; reconcile original request")
+		return out, fmt.Errorf("updater: self-update %s unavailable; reconcile original request: %w", method, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {

@@ -678,11 +678,13 @@ func deliveryTaskCurrent(ctx context.Context, q store.Querier, task string) (boo
 			if err != nil {
 				return false, err
 			}
-			option, err := deliveryOwnerOption(ctx, q, d)
-			if err != nil {
+			if err := store.DeliveryGrantValid(ctx, q, i, d); err != nil {
+				if protocol.CodeOf(err) == protocol.CodeForbidden {
+					return false, nil
+				}
 				return false, err
 			}
-			return batch.View.Status == "completed" && option == "approve", nil
+			return batch.View.Status == "completed", nil
 		}
 	}
 	_, err = deliveryExecutionAuthorized(ctx, q, i, protocol.IssueDeliveryAuthorization{TaskID: source, Revision: revision})

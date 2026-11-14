@@ -143,12 +143,8 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	if d.ExecutionTaskID != c.DeliveryTaskID || d.Revision != revision || d.Status != "executing" {
 		return nil, protocol.Errorf(protocol.CodeStaleRevision, "delivery execution was superseded")
 	}
-	option, err := deliveryOwnerOption(ctx, q, d)
-	if err != nil {
+	if err := store.DeliveryGrantValid(ctx, q, current, d); err != nil {
 		return nil, err
-	}
-	if option != "approve" {
-		return nil, protocol.Errorf(protocol.CodeForbidden, "an exact current owner answer is required")
 	}
 	task, err := store.GetTask(ctx, q, c.DeliveryTaskID)
 	if err != nil {

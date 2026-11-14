@@ -250,6 +250,18 @@ Issue 已有的自动部署授权与管理员维护权限分别按其真实范�
 
 completed 批次标签不能替代实际进程、配置、健康、committed receipt 和正常 ACK。安装证明、原 owner 成果及质量、交付义务结清、最终消息正文与附件回执、整个 Issue closure 分别核对。该 Issue 的专用观察器只在整体完成或用户暂停时停止，保留检查点、策略和实际最终发布证据。长期产品修复单独记录责任，不自动成为这次已有正式恢复路径的前置条件。
 
+## 执行窗口与诊断（D234）
+
+完整发布集的构建、下载暂存、实际基线核对、备份和所需操作输入应尽量在发起批次前准备。已接纳批次沿原整体/阶段期限推进，不把人工准备耗时补成新的 deadline；恢复前先核对剩余时间是否足以完成尚未执行的步骤。固定期限不是每步重新获得的完整窗口。
+
+同哈希 server 也记录准确进程和两次实际健康观测；独立维护批次后续供正式交付引用时不能省略这些证明。同哈希 runner 完成既有 updater 核实后，把恢复正常与清除本轮元数据放在一次控制更新中，仍等待真实正常 ACK 才推进下一主机。真实替换或配置变化继续走完整排空、安装、健康和恢复路径。串行主机、下载、排空和心跳等待要分别计时，不能把一个已部分安装的批次当成全新部署的耗时基准。
+
+server 日志中的 `upgrade control step` 关联原 `upgrade_id`、`request_id`、步骤、耗时、阶段/整体期限及剩余时间；`upgrade phase changed` 与 `upgrade host phase changed` 记录转换和原因。updater 的 `updater operation changed` 记录实际持久阶段、进程身份、健康计数与首次或变化的错误。重复健康轮询不重复写阶段日志。
+
+普通自身交接记录 `self-update installer dispatch recorded`、`self-update dispatch command returned`、`self-update installer entered`、阶段持久化和 `self-update installer returned`。用其中的 unit 名读系统日志，例如 `journalctl --user --unit "$INSTALLER_UNIT"`；自动 installer 的 stdout/stderr 明确交给 journal。派发命令退出码只证明该命令的结果，installer 返回也不等于新监督器完成接管，最终仍读原请求的状态、准确进程和提交回执。进程被终止且缺退出证据时继续记为 unknown，不能重建一个成功退出码。
+
+定位当前服务日志时先读取真实运行进程及其监督器配置，不以某个旧日志文件的 mtime 推断服务没有运行。受控启动的分段日志位于配置 `state_dir` 下的 `diagnostic-logs`，以真实 launch ID 关联原件；固定 `log_path` 在旧文件仍存在时未必指向本轮分段。保留原日志、journal 单元信息与状态/回执，再解释缺口，不通过轮转、清空或重发安装消除故障现场。分享日志前移除凭据。
+
 ## 普通 updater 自身交接与旧节点 bootstrap（D200）
 
 本轮源码实现不自动部署。首次接入旧节点时，使用新包中的独立 updater installer；

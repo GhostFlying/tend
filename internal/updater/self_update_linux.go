@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -403,7 +404,30 @@ func (a systemSelfActions) Start(ctx context.Context, p SelfUpdatePlan) error {
 	return err
 }
 
-func ApplySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan) (j SelfUpdateJournal, err error) {
+func ApplySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan) (SelfUpdateJournal, error) {
+	return applySelfUpdate(ctx, cfg, p, slog.Default())
+}
+
+func applySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan, log *slog.Logger) (j SelfUpdateJournal, err error) {
+	started := time.Now()
+	log = log.With("upgrade_id", p.Request.UpgradeID, "request_id", p.Request.Target.RequestID, "instance_id", cfg.InstanceID, "unit", selfInstallerUnit(cfg, p.Request), "installer_pid", os.Getpid(), "deadline_ms", p.Request.Target.ExpiresAtMillis)
+	log.InfoContext(ctx, "self-update installer entered")
+	defer func() {
+		level := slog.LevelInfo
+		if err != nil {
+			level = slog.LevelError
+		}
+		log.Log(ctx, level, "self-update installer returned", "phase", j.Phase, "elapsed_ms", time.Since(started).Milliseconds(), "error", err, "context_error", ctx.Err(), "receipt_present", j.Receipt != nil)
+	}()
+	phaseStarted := started
+	save := func() error {
+		err := writeSelf(cfg, j)
+		if err == nil {
+			log.InfoContext(ctx, "self-update installer phase persisted", "phase", j.Phase, "previous_phase_elapsed_ms", time.Since(phaseStarted).Milliseconds())
+			phaseStarted = time.Now()
+		}
+		return err
+	}
 	lock, err := installerLock(cfg)
 	if err != nil {
 		return j, err
@@ -467,7 +491,7 @@ func ApplySelfUpdate(ctx context.Context, cfg Config, p SelfUpdatePlan) (j SelfU
 				}
 			}()
 		}
-		err = advanceSelf(ctx, &j, func() error { return writeSelf(cfg, j) }, systemSelfActions{cfg: cfg, fence: fence}, time.Now)
+		err = advanceSelf(ctx, &j, save, systemSelfActions{cfg: cfg, fence: fence}, time.Now)
 	}
 	if err != nil {
 		j.LastError = err.Error()
@@ -755,9 +779,18 @@ func (s *Supervisor) requestSelf(ctx context.Context, r SelfUpdateRequest) (Self
 	s.selfIdentity = p.Updater
 	s.selfUpdating = true
 	s.mu.Unlock()
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-run", "--user", "--quiet", "--collect", "--unit=tend-self-"+bytesDigest([]byte(s.cfg.StateDir + r.Target.RequestID))[:24], "--property=Type=exec", installer, "self-update", "apply", "--config", p.ConfigFile, "--plan", selfPath(s.cfg))
+	unit := selfInstallerUnit(s.cfg, r)
+	started := s.opts.Now()
+	s.opts.Log.InfoContext(ctx, "self-update installer dispatch recorded", "upgrade_id", r.UpgradeID, "request_id", r.Target.RequestID, "instance_id", s.cfg.InstanceID, "unit", unit, "deadline_ms", r.Target.ExpiresAtMillis)
+	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-run", "--user", "--quiet", "--collect", "--unit="+unit, "--property=Type=exec", "--property=StandardOutput=journal", "--property=StandardError=journal", "--property=SyslogIdentifier=tend-self-installer", installer, "self-update", "apply", "--config", p.ConfigFile, "--plan", selfPath(s.cfg))
 	cmd.WaitDelay = 2 * time.Second
-	if err = cmd.Run(); err != nil {
+	err = cmd.Run()
+	code := -1
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	}
+	s.opts.Log.InfoContext(ctx, "self-update dispatch command returned", "upgrade_id", r.UpgradeID, "request_id", r.Target.RequestID, "instance_id", s.cfg.InstanceID, "unit", unit, "elapsed_ms", s.opts.Now().Sub(started).Milliseconds(), "dispatch_exit_code", code, "error", err, "context_error", ctx.Err())
+	if err != nil {
 		return SelfUpdateStatus{}, fmt.Errorf("updater: installer dispatch result unknown; reconcile original attempt: %w", err)
 	}
 	return s.selfStatus(ctx)
@@ -840,4 +873,9 @@ func selfOtherOwners(cfg Config) (string, string, error) {
 		}
 	}
 	return values[0], values[1], nil
+}
+
+// The unit is diagnostic identity, not authority to dispatch another attempt.
+func selfInstallerUnit(cfg Config, r SelfUpdateRequest) string {
+	return "tend-self-" + bytesDigest([]byte(cfg.StateDir + r.Target.RequestID))[:24]
 }

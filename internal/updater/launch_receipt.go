@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -178,7 +179,11 @@ func (r *ownedLaunchReceipt) recordExit(proof LaunchExitProof) error {
 	if err := r.recordChild(proof.PID); err != nil {
 		return err
 	}
-	return publishLaunchFact(filepath.Join(r.dir, "exit.json"), ownedLaunchExit{Child: r.child(proof.PID), Proof: proof})
+	err := publishLaunchFact(filepath.Join(r.dir, "exit.json"), ownedLaunchExit{Child: r.child(proof.PID), Proof: proof})
+	if err == nil {
+		slog.Info("updater owned process exited", "process_pid", proof.PID, "process_launch_id", proof.LaunchID, "artifact_sha256", proof.ArtifactSHA256, "exit_code", proof.ExitCode, "exit_signal", proof.Signal)
+	}
+	return err
 }
 
 // abandonUnstarted releases only this invocation's exclusive dispatch after
