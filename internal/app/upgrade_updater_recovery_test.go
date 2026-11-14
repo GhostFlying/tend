@@ -108,7 +108,13 @@ func TestSelfCancelledBatchClearsCompletedObservationTarget(t *testing.T) {
 	row := upgradeRead(h)
 	o.Updater = selfUpgradeObservation(row, "server", o.ProcessInstanceID, o.BinarySHA256)
 	upgradeTick(h, o)
-	upgradeTick(h, o)
+	if v := upgradeTick(h, o); v.Phase != "server_checking" {
+		t.Fatal("new batch skipped its own server verification", v)
+	}
+	h.clock.Advance(5 * time.Second)
+	if v := upgradeTick(h, o); v.Phase != "runners" {
+		t.Fatal("new batch did not obtain two spaced server samples", v)
+	}
 	upgradeTick(h, o)
 	if ctl = upgradeCtl(h, "linux-1"); ctl.UpgradeID != row.View.UpgradeID || ctl.Upgrade != nil {
 		t.Fatal("new drain inherited an old batch's download target", ctl)
