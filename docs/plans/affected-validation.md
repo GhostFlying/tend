@@ -20,3 +20,5 @@ Refs: D25、D130；承接测试时间语义修复。本计划在实现前记录�
 用真实历史 docs/UI/后端/迁移差异做选择对照；构造 leaf→生产依赖→跨包测试导入的漏选回归、测试文件单包、删包、未知文件和计划身份变化。用伪 Go/Make 可控执行器验证本地选择与 Actions job 状态聚合，不启动另一套 full 或新 CI。工作流做语法/数据契约静态验证，不能称为 GitHub 已执行。
 
 同步修订本地无条件重复 full 的旧约定：普通本地验证采用影响计划，PR CI 暂时完整覆盖。计划本身和广泛影响以及 main/release 使用完整兜底。独立审阅评估最终候选与选择理由；最终 head/base 改变重新计算影响与已有证据适用性，不机械重复相同不变候选。
+
+收尾依赖审计发现 `TestPublicCapabilityLocalControlCoverage` 会解析 runner、updater、upgradectl、maintenance 及 runner 入口源码，属于 Go imports 不可见的实际契约。对应生产源码变化必须包含既有 `capability-check`，不为这项源码扫描无条件追加全部 API 运行时测试；真实 API 依赖仍由导入图选择。入口程序生产装配与 release 产物身份改动保留完整兜底，入口测试文件仍按所属包选择。增加没有导入边也必须包含能力覆盖的漏选回归，不把这些真实依赖误报为无关。
