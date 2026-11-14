@@ -83,6 +83,11 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		if err != nil {
 			return "", err
 		}
+		if ctl.Mode == protocol.RunnerNormal && ctl.Authorization == nil && ctl.Upgrade == nil && ctl.UpgradeID == "" && ctl.ReleaseID == "" {
+			// Retaining the server never drained these hosts. Preserve their
+			// acknowledged control instead of creating a metadata-only ACK gap.
+			continue
+		}
 		ctl.Revision++
 		ctl.Mode = protocol.RunnerNormal
 		ctl.Authorization = nil

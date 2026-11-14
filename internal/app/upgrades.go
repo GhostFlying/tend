@@ -451,6 +451,9 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 								return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "current server identity is required for installation readback")
 							}
 							r.ServerProcess = c.Observation.ProcessInstanceID
+							// Pin verification even when the updater read is unavailable.
+							// Paused batches reconcile this phase without dispatching.
+							r.View.Phase = "server_checking"
 							reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
 							if err != nil {
 								return Outcome{}, err
