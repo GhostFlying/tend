@@ -26,3 +26,18 @@
 5. 针对性验证后提交候选、准备 draft PR，完整 make check、独立全 PR 审阅、
    required CI 满足后 fresh-main rebase，正常 rebase merge。报告包含背景、结果、
    实际证据与未部署边界。
+
+## 独立审阅修正
+
+原候选的独立审阅发现两项 P2，原轮次与复现原件保留：
+
+- 接受配置已经明确禁用绑定 runtime 时，目录应返回 unavailable/binding_disabled，
+  不能将已有的确定事实降为缺少观察的 unknown。按精确 runtime ID/revision 读取
+  接受配置，补充正式注册禁用及重新启用、重新观察的回归。
+- 没有具名 inventory 的普通 legacy Task 也可能只是 slot 等待。沿原 scheduler
+  用仅恢复 transient readiness/容量的 host 检查恢复性，保持真实 requirements、
+  依赖、workspace、原 pin 和续接限制；只把可恢复的普通 legacy 路径显示为 pending，
+  不恢复无条件 eligible。补充没有 inventory 的实际 claim 阻塞/恢复及永久要求不符回归。
+
+旧候选未结束的本地检查已按精确私有进程范围停止并保留，不能算通过。
+修正后自测、完整验证及同一 reviewer Task 复核最终候选；不另建审阅责任。
