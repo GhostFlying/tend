@@ -321,6 +321,14 @@ export type UpdateIssueDeliveryPayload1 =
  * via the `definition` "IssueTaskDispositionAction".
  */
 export type IssueTaskDispositionAction = "continue_existing" | "updated" | "stopped";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpdateIssueProgressPayload".
+ */
+export type UpdateIssueProgressPayload = {
+  next_step?: string;
+  summary?: string;
+} & UpdateIssueProgressPayload1;
 
 export interface TendAPI {
   APIResponse?: APIResponse;
@@ -3573,6 +3581,8 @@ export interface OwnerTaskMount {
   repo: string;
 }
 /**
+ * Choose a base branch or a base commit, never both. Empty values mean unspecified.
+ *
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "OwnerTaskBase".
  */
@@ -7446,11 +7456,7 @@ export interface IssueTaskDisposition {
   spec_version: number;
   task_id: string;
 }
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "UpdateIssueProgressPayload".
- */
-export interface UpdateIssueProgressPayload {
+export interface UpdateIssueProgressPayload1 {
   expected_assignment_epoch: number;
   next_step: string;
   summary: string;

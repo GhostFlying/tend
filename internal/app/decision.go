@@ -182,7 +182,12 @@ func decodePayload(env *protocol.Envelope, v any) error {
 
 func requireRevision(env *protocol.Envelope) (int64, error) {
 	if env.ExpectedControlRevision == nil {
-		return 0, protocol.Errorf(protocol.CodeInvalidRequest, "expected_control_revision is required")
+		tool := map[string]string{"task": "tasks_read", "issue": "issues_read"}[env.Target.Type]
+		facts := map[string]any{"field": "expected_control_revision", "target_type": env.Target.Type, "target_id": env.Target.ID}
+		if tool != "" {
+			facts["recovery_tool"] = tool
+		}
+		return 0, commandDiagnostic(protocol.CodeInvalidRequest, "expected_control_revision is required; read the original target's current control revision", facts)
 	}
 	return *env.ExpectedControlRevision, nil
 }

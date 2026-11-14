@@ -2213,3 +2213,14 @@ updater 默认 StateDir/control.sock 不变，相应测试选择短 StateDir；�
 listener/进程后清理目录。此约定不新增 Agent 启动器、统一检查容器或生产配置字段。
 
 实施见 `docs/plans/post-mainline-runtime-reliability.md`。
+
+
+## D238：共享输入限制与可执行错误
+
+工具、owner API 与 CLI 使用同源的既有 Unicode 进度限制和工作区 base 互斥条件；
+共享 schema 公开这些真实边界，生成消费者继续接受原有效输入。空值仍可清空进度。
+
+拒绝在现有 Error.details 中说明具体字段、原对象、已读取的当前版本及真正存在的
+恢复入口；只复用该次授权范围内的事实，不扩大读取或绕过 CAS、租约和 unknown。
+已结束 Run 不因此重新接收输入，已完成 Task 的同目标继续仍使用原正式入口。
+见 `docs/plans/tool-contract-diagnostics.md`。

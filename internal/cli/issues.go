@@ -297,6 +297,15 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			return usagef("%v", err)
 		}
 	}
+	if action == "update-progress" {
+		var payload protocol.UpdateIssueProgressPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return usagef("invalid progress payload: %v", err)
+		}
+		if err := payload.ValidateInput(); err != nil {
+			return usagef("%v", err)
+		}
+	}
 	allocateIdentity := *request == ""
 	if *request == "" {
 		*request = e.IDs.New(protocol.PrefixRequest)

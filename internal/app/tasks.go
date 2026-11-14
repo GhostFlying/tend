@@ -362,7 +362,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	}
 	task := toDomain(row, current.Budget())
 	if expected != row.ControlRevision {
-		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "control revision is %d, request expected %d", row.ControlRevision, expected)
+		return Outcome{}, commandDiagnostic(protocol.CodeStaleRevision, "task control revision changed; read the original Task before updating its agreement", map[string]any{"task_id": row.TaskID, "current_control_revision": row.ControlRevision, "expected_control_revision": expected, "spec_version": row.SpecVersion, "recovery_tool": "tasks_read"})
 	}
 	merged := domain.Decision{Task: task}
 	var pendingResource *store.WorkspaceRow
@@ -430,6 +430,15 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		}
 		d, err := domain.UpdateSpecWithAcceptance(task, *p.Spec, current, expected, policy == nil || policy.Required)
 		if err != nil {
+			if task.Lifecycle.Terminal() && protocol.CodeOf(err) == protocol.CodeInvalidTransition {
+				facts := map[string]any{"task_id": row.TaskID, "current_control_revision": row.ControlRevision, "spec_version": row.SpecVersion, "lifecycle": row.Lifecycle, "recovery_tool": "tasks_read"}
+				message := "a terminal Task agreement is immutable; read the original Task and preserve its results"
+				if row.Lifecycle == protocol.TaskCompleted {
+					facts["continuation_tool"] = "tasks_continue"
+					message += "; for the same goal use tasks_continue after reconciling any unresolved physical work"
+				}
+				return Outcome{}, commandDiagnostic(protocol.CodeInvalidTransition, message, facts)
+			}
 			return Outcome{}, err
 		}
 		merged = d

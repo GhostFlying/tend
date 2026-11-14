@@ -14488,6 +14488,23 @@
     },
     "OwnerTaskBase": {
       "additionalProperties": false,
+      "description": "Choose a base branch or a base commit, never both. Empty values mean unspecified.",
+      "not": {
+        "properties": {
+          "branch": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "commit": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch",
+          "commit"
+        ]
+      },
       "properties": {
         "branch": {
           "type": "string"
@@ -20173,6 +20190,20 @@
     },
     "UpdateIssueProgressPayload": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "next_step": {
+              "maxLength": 240,
+              "type": "string"
+            },
+            "summary": {
+              "maxLength": 500,
+              "type": "string"
+            }
+          }
+        }
+      ],
       "properties": {
         "expected_assignment_epoch": {
           "type": "integer"
