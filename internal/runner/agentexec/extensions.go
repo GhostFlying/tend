@@ -33,8 +33,8 @@ func (p *Pool) refreshManaged(ctx context.Context, e *entry, host string) (bool,
 	if !worker && !owner {
 		return false, nil
 	}
-	e.managedWorkerReady = map[string]bool{}
-	e.managedOwnerReady = map[string]bool{}
+	e.managedWorkerReady = map[string]protocol.ExtensionExecutionPin{}
+	e.managedOwnerReady = map[string]protocol.ExtensionExecutionPin{}
 	if !e.input.Agent.Enabled {
 		return true, nil
 	}
@@ -66,24 +66,23 @@ func (p *Pool) refreshManaged(ctx context.Context, e *entry, host string) (bool,
 				}
 				if err == nil {
 					e.workers = workers
-					e.managedWorkerReady[category] = true
+					e.managedWorkerReady[category] = pin
 					anyWorker = true
 				}
 			}
 			pending = errors.Join(pending, err)
 		}
 		if owner && managerPurpose(e) && e.ownerInput.Runtime.Enabled {
-			_, binding, err := p.prepareManaged(ctx, *e.ownerInput, category, identity)
+			pin, binding, err := p.prepareManaged(ctx, *e.ownerInput, category, identity)
 			if err == nil {
 				input := *e.ownerInput
 				input.Environment = binding
 				copy := *e
 				copy.ownerInput = &input
-				pin, ready := p.options.Extensions.Current(input.Runtime.ID, category, identity)
 				key := managedWorkerKey(input, pin)
-				if ready && (p.managedOwners[key] || p.probeManager(ctx, &copy)) {
+				if p.managedOwners[key] || p.probeManager(ctx, &copy) {
 					p.managedOwners[key] = true
-					e.managedOwnerReady[category] = true
+					e.managedOwnerReady[category] = pin
 					anyOwner = true
 				} else {
 					err = errors.New("managed owner isolation is not verified")
