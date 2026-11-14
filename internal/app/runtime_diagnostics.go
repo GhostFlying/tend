@@ -86,7 +86,7 @@ func (a *App) logExecution(ctx context.Context, x *Exec, operation protocol.Oper
 	for _, event := range x.diagnosticEvents {
 		level := slog.LevelDebug
 		switch event.ObjectType {
-		case "task", "run", "work_item", "upgrade", "attention":
+		case "task", "run", "issue", "work_item", "upgrade", "attention":
 			level = slog.LevelInfo
 		}
 		fields := append(append([]any{}, attrs...), "event", event.Kind, "object_type", event.ObjectType, "object_id", event.ObjectID, "object_revision", event.ObjectVersion)
@@ -184,6 +184,18 @@ func inspectOtherUpgradeHosts(ctx context.Context, q store.Querier, exclude stri
 	return false, observations, nil
 }
 
+// TextHandler invokes String while JSONHandler keeps the typed array. Both
+// formats retain the same allowlisted values rather than pointer addresses.
+type upgradeHostFacts []upgradeHostAvailability
+
+func (facts upgradeHostFacts) String() string {
+	raw, err := json.Marshal(facts)
+	if err != nil {
+		return "host facts unavailable"
+	}
+	return string(raw)
+}
+
 func observeUpgradeHostDecision(ctx context.Context, x *Exec, batch store.UpgradeRow, target, decision string, level slog.Level, hosts []upgradeHostAvailability) {
-	x.observeDecision(ctx, level, "upgrade host availability decision", "upgrade_id", batch.View.UpgradeID, "upgrade_revision", batch.View.Revision, "upgrade_phase", batch.View.Phase, "target_host_id", target, "decision", decision, "observed_at_ms", x.Now.UnixMilli(), "stage_deadline_ms", batch.Deadline, "stage_remaining_ms", max(0, batch.Deadline-x.Now.UnixMilli()), "overall_deadline_ms", batch.View.OverallDeadlineMillis, "other_hosts", hosts)
+	x.observeDecision(ctx, level, "upgrade host availability decision", "upgrade_id", batch.View.UpgradeID, "upgrade_revision", batch.View.Revision, "upgrade_phase", batch.View.Phase, "target_host_id", target, "decision", decision, "observed_at_ms", x.Now.UnixMilli(), "stage_deadline_ms", batch.Deadline, "stage_remaining_ms", max(0, batch.Deadline-x.Now.UnixMilli()), "overall_deadline_ms", batch.View.OverallDeadlineMillis, "other_hosts", upgradeHostFacts(hosts))
 }
