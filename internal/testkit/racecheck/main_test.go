@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 	"github.com/GhostFlying/tend/internal/testkit/testbudget"
 )
 
@@ -14,9 +15,13 @@ func TestCIGroupsPartitionPackagesExactlyOnce(t *testing.T) {
 		"github.com/GhostFlying/tend/internal/api",
 		"github.com/GhostFlying/tend/internal/mainthread",
 		"github.com/GhostFlying/tend/internal/store",
+		"github.com/GhostFlying/tend/internal/serverkit",
+		"github.com/GhostFlying/tend/internal/sandbox",
+		"github.com/GhostFlying/tend/internal/runner",
+		"github.com/GhostFlying/tend/internal/runner/journal",
 		"example/new-package"}
 	var combined []string
-	for _, group := range []string{"app", "api", "mainthread", "e2e", "other"} {
+	for _, group := range impact.Groups() {
 		selected, err := selectGroup(packages, group)
 		if err != nil {
 			t.Fatal(err)

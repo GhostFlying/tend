@@ -61,7 +61,7 @@ func capacity(cpus, jobs, shards, suiteShards int) (budget, error) {
 	// Budget the largest simultaneously active test-process sets, rather than
 	// treating a four-shard group as one Go process. Static checks and Web each
 	// reserve one slot; their own build/worker parallelism remains bounded.
-	slots := []int{shards, suiteShards, suiteShards, suiteShards, packages, 1, 1}
+	slots := []int{shards, suiteShards, suiteShards, suiteShards, packages, 1, 1, 1, 1, 1}
 	slices.Sort(slots)
 	processes := 0
 	for _, n := range slots[len(slots)-jobs:] {
@@ -120,7 +120,7 @@ func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isola
 			"VITEST_MAX_WORKERS":     strconv.Itoa(b.procs),
 		})},
 	)
-	for _, group := range []string{"app", "api", "mainthread", "other", "e2e"} {
+	for _, group := range impact.Groups() {
 		t := task{group, []string{"test", "TEST_GROUP=" + group}, base}
 		if group == "e2e" && b.exclusiveE2E {
 			isolated = append(isolated, t)
