@@ -26,23 +26,21 @@ func (p *Pool) ObserveRetained(ctx context.Context) ([]protocol.AgentExecutor, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !p.mu.TryLock() {
-		return nil, nil
-	}
-	defer p.mu.Unlock()
 	p.retainedMu.Lock()
-	defer p.retainedMu.Unlock()
 	out := slices.Clone(p.retainedObserved)
+	p.retainedMu.Unlock()
+	p.observationMu.RLock()
+	defer p.observationMu.RUnlock()
 	for i := range out {
 		if out[i].Pin.Purpose == "issue_manager" {
 			continue
 		}
 		// Resolve retains the factory for native stop/recovery after a refusal.
 		// Selection must reflect the live refusal even before the next refresh.
-		if e := p.snapshots[out[i].Pin.SnapshotID][out[i].Pin.Identity.LocalID]; e != nil && e.reason != "" && !(nativeCodex(e) && canProbe(e.reason)) {
+		if e, ok := p.observations[out[i].Pin.SnapshotID][out[i].Pin.Identity.LocalID]; ok && e.reason != "" && !(e.nativeCodex && canProbe(e.reason)) {
 			out[i].Available = false
 			out[i].Reason = e.reason
-		} else if e != nil && e.environmentUnavailable && !nativeCodex(e) {
+		} else if ok && e.environmentUnavailable && !e.nativeCodex {
 			out[i].Available = false
 			out[i].Reason = "environment_unavailable"
 		}
@@ -82,6 +80,7 @@ func (p *Pool) refreshRetained(ctx context.Context) error {
 				if factoryMissing || e.reason != "" && !(nativeCodex(e) && canProbe(e.reason)) || e.environmentUnavailable && !nativeCodex(e) {
 					err = errors.New("original worker is unavailable")
 				}
+				p.publishSnapshot(pin.SnapshotID, p.snapshots[pin.SnapshotID])
 				p.mu.Unlock()
 			}
 		}
