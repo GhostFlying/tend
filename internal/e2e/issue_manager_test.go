@@ -291,6 +291,10 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		if !invoke("issues_read", map[string]any{}, &item) {
 			return "failed"
 		}
+		if item.BoardStatus() != protocol.IssueInProgress {
+			failures <- fmt.Sprintf("executing manager left Issue in %s", item.BoardStatus())
+			return "failed"
+		}
 		if externalWait {
 			var task, run string
 			if err := s.store.Read(ctx, func(tx *store.ReadTx) error {

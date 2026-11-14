@@ -155,6 +155,9 @@ func TestIssuePauseHandoffEndsRunRetainsTaskAndCreatesOneSuccessor(t *testing.T)
 	if next == nil || next.TaskID != as.TaskID || next.SpecVersion != as.SpecVersion || next.Generation != as.Generation || next.PauseContinuation == nil || next.PauseContinuation.ThreadID != "retained-native-thread" {
 		t.Fatalf("incorrect successor: %+v", next)
 	}
+	if current := admissionCurrent(t, h, i.IssueID); current.BoardStatus() != protocol.IssueInProgress {
+		t.Fatal("resumed owner execution left Issue in todo", current)
+	}
 	if again := admissionClaim(t, h, r); again != nil {
 		t.Fatal("duplicate successor", again)
 	}
@@ -183,12 +186,13 @@ func TestIssueAdmissionAncestorBacklogGatesChildAndPauseRetainsIndependentContro
 		t.Fatal(as)
 	}
 	task := h.task(as.TaskID)
+	childStarted := admissionCurrent(t, h, child.IssueID)
 	if op := h.exec(owner, h.env("control.set_mode", taskTarget(task.TaskID), protocol.SetControlModePayload{Mode: protocol.ControlPaused}, rev(task.ControlRevision)), SetControlMode{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	parent = issueAdmissionStatus(t, h, admissionCurrent(t, h, parent.IssueID), protocol.IssueBacklog, nil)
 	childNow := admissionCurrent(t, h, child.IssueID)
-	if childNow.BoardStatus() != protocol.IssueTodo {
+	if childNow.BoardStatus() != protocol.IssueInProgress || childNow.Revision != childStarted.Revision {
 		t.Fatal("parent rewrote child work status", childNow)
 	}
 	paused := h.run(as.RunID)

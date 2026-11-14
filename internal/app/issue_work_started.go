@@ -7,8 +7,8 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// markIssueWorkStarted records concrete execution/delegation in the same
-// transaction. A coordinator's mere claim or conversation is not work evidence.
+// markIssueWorkStarted records assigned execution in the same transaction.
+// Selecting an owner or recording a conversation alone does not start work.
 func markIssueWorkStarted(ctx context.Context, x *Exec, tx *store.Tx, id string) ([]Event, error) {
 	var events []Event
 	for id != "" {
