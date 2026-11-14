@@ -21,9 +21,10 @@ type BackgroundBatchState struct {
 
 // BackgroundPresentation describes retained facts, not delivery or execution authority.
 type BackgroundPresentation struct {
-	Recipient *BackgroundRecipient      `json:"recipient,omitempty"`
-	Sources   []BackgroundSourcePreview `json:"sources"`
-	More      bool                      `json:"more"`
+	LastSourceSeq int64                     `json:"last_source_seq,omitempty"`
+	Recipient     *BackgroundRecipient      `json:"recipient,omitempty"`
+	Sources       []BackgroundSourcePreview `json:"sources"`
+	More          bool                      `json:"more"`
 }
 
 // BackgroundRecipient comes from this message's frozen execution selection.

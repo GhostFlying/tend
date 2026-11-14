@@ -76,7 +76,7 @@ func TestBackgroundConversationRetainsRecipientAndBoundedOriginalSources(t *test
 				pending = item.Background.Presentation
 			}
 		}
-		if batch == nil || batch.Recipient == nil || batch.Recipient.DisplayName != "原负责人" || batch.Recipient.Identity.LocalID != "old-agent" || batch.Recipient.Status != "completed" {
+		if batch == nil || batch.LastSourceSeq != 5 || batch.Recipient == nil || batch.Recipient.DisplayName != "原负责人" || batch.Recipient.Identity.LocalID != "old-agent" || batch.Recipient.Status != "completed" {
 			t.Fatalf("frozen recipient = %+v", batch)
 		}
 		if len(batch.Sources) != 3 || !batch.More || batch.Sources[0].MessageID != "source-0" || batch.Sources[0].Kind != "task.completed" || batch.Sources[0].ObjectType != "task" || batch.Sources[0].ObjectID != "original-task" || len([]rune(batch.Sources[0].Summary)) != 161 {

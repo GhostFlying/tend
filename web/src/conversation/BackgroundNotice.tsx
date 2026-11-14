@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BackgroundSourcePage,
   IssueConversationItem,
@@ -79,32 +79,58 @@ export function BackgroundNotice({
   const pending = useRef<AbortController | null>(null);
   const previews = item.background?.presentation?.sources ?? [];
   const kinds = [...new Set(previews.map((source) => sourceLabel(source.kind)))];
-  const load = (after = 0) => {
-    pending.current?.abort();
-    const controller = new AbortController();
-    pending.current = controller;
-    setLoading(true);
-    setError("");
-    void client
-      .get<BackgroundSourcePage>(
-        `/api/v1/background/${encodeURIComponent(item.message_id)}/sources?after=${after}`,
-        controller.signal,
-      )
-      .then((next) => {
-        if (controller.signal.aborted) return;
-        setPage((previous) => ({
-          ...next,
-          sources: after ? [...(previous?.sources ?? []), ...(next.sources ?? [])] : next.sources,
-        }));
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) setError(String(cause));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-  };
-  useEffect(() => () => pending.current?.abort(), [item.message_id]);
+  const metadata = JSON.stringify([
+    item.background?.batch_id,
+    item.background?.source_count,
+    item.background?.status,
+    item.background?.frozen_at,
+    item.background?.presentation?.last_source_seq,
+    previews.map((source) => source.seq),
+  ]);
+  const load = useCallback(
+    (after = 0) => {
+      pending.current?.abort();
+      const controller = new AbortController();
+      pending.current = controller;
+      setLoading(true);
+      setError("");
+      if (!after) setPage(undefined);
+      void client
+        .get<BackgroundSourcePage>(
+          `/api/v1/background/${encodeURIComponent(item.message_id)}/sources?after=${after}`,
+          controller.signal,
+        )
+        .then((next) => {
+          if (controller.signal.aborted) return;
+          setPage((previous) => ({
+            ...next,
+            sources: after ? [...(previous?.sources ?? []), ...(next.sources ?? [])] : next.sources,
+          }));
+        })
+        .catch((cause) => {
+          if (!controller.signal.aborted) setError(String(cause));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    },
+    [client, item.message_id],
+  );
+  // Pending batches keep their message identity as sources join or cancel.
+  // Refresh only an open disclosure; reopening also verifies its current page.
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    // Subscribe asynchronously so incoming metadata does not synchronously
+    // cascade state changes from the effect. Closing cancels the subscription.
+    queueMicrotask(() => {
+      if (current) load();
+    });
+    return () => {
+      current = false;
+      pending.current?.abort();
+    };
+  }, [open, metadata, load]);
   const icon = (
     <span className={styles.backgroundIcon} aria-hidden="true">
       <Chevron />
@@ -118,7 +144,6 @@ export function BackgroundNotice({
       onToggle={(event) => {
         const next = event.currentTarget.open;
         setOpen(next);
-        if (next && !page && !loading) load();
       }}
     >
       <summary>

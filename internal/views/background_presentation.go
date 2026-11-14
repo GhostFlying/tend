@@ -16,11 +16,11 @@ import (
 func backgroundPresentation(ctx context.Context, q store.Querier, batch protocol.BackgroundBatch) (protocol.BackgroundPresentation, error) {
 	out := protocol.BackgroundPresentation{Sources: []protocol.BackgroundSourcePreview{}}
 	var snapshot, status string
-	err := q.QueryRowContext(ctx, `SELECT h.private_snapshot,t.status FROM main_turns t JOIN hosted_executions h ON h.execution_id=t.request_id WHERE t.message_id=? ORDER BY t.created_at DESC,t.request_id DESC LIMIT 1`, batch.MessageID).Scan(&snapshot, &status)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(h.private_snapshot,''),COALESCE(t.status,''),(SELECT COALESCE(MAX(s.seq),0) FROM background_sources s WHERE s.batch_id=b.batch_id) FROM background_batches b LEFT JOIN main_turns t ON t.message_id=b.message_id LEFT JOIN hosted_executions h ON h.execution_id=t.request_id WHERE b.batch_id=? ORDER BY t.created_at DESC,t.request_id DESC LIMIT 1`, batch.BatchID).Scan(&snapshot, &status, &out.LastSourceSeq)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	if err == nil {
+	if err == nil && snapshot != "" {
 		var selected struct {
 			Identity   protocol.AgentIdentity `json:"identity"`
 			Definition struct {
@@ -34,19 +34,35 @@ func backgroundPresentation(ctx context.Context, q store.Querier, batch protocol
 			out.Recipient = &protocol.BackgroundRecipient{Identity: selected.Identity, DisplayName: selected.Definition.DisplayName, Status: status}
 		}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT s.seq,s.message_id,s.kind,m.body,COALESCE((SELECT b.object_type FROM conversation_bindings b WHERE b.message_id=s.message_id AND b.object_type IN ('task','issue','work_item') ORDER BY CASE b.object_type WHEN 'task' THEN 0 ELSE 1 END,b.object_id LIMIT 1),''),COALESCE((SELECT b.object_id FROM conversation_bindings b WHERE b.message_id=s.message_id AND b.object_type IN ('task','issue','work_item') ORDER BY CASE b.object_type WHEN 'task' THEN 0 ELSE 1 END,b.object_id LIMIT 1),'') FROM background_sources s JOIN conversation_messages m ON m.message_id=s.message_id WHERE s.batch_id=? AND s.cancelled_at=0 ORDER BY s.seq LIMIT 4`, batch.BatchID)
+	rows, err := q.QueryContext(ctx, `SELECT s.seq,s.message_id,s.kind,m.body,s.data_json,COALESCE((SELECT b.object_type FROM conversation_bindings b WHERE b.message_id=s.message_id AND b.object_type IN ('task','issue','work_item') ORDER BY CASE b.object_type WHEN 'task' THEN 0 ELSE 1 END,b.object_id LIMIT 1),''),COALESCE((SELECT b.object_id FROM conversation_bindings b WHERE b.message_id=s.message_id AND b.object_type IN ('task','issue','work_item') ORDER BY CASE b.object_type WHEN 'task' THEN 0 ELSE 1 END,b.object_id LIMIT 1),'') FROM background_sources s JOIN conversation_messages m ON m.message_id=s.message_id WHERE s.batch_id=? AND s.cancelled_at=0 ORDER BY s.seq LIMIT 4`, batch.BatchID)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var source protocol.BackgroundSourcePreview
-		if err := rows.Scan(&source.Seq, &source.MessageID, &source.Kind, &source.Summary, &source.ObjectType, &source.ObjectID); err != nil {
+		var data string
+		if err := rows.Scan(&source.Seq, &source.MessageID, &source.Kind, &source.Summary, &data, &source.ObjectType, &source.ObjectID); err != nil {
 			return out, err
 		}
 		if len(out.Sources) == 3 {
 			out.More = true
 			break
+		}
+		if source.ObjectID == "" && (source.Kind == "issue.changed" || source.Kind == "issue.status_changed") {
+			var retained struct {
+				IssueID string `json:"issue_id"`
+			}
+			// Only these domain producers own this metadata. Other source payloads
+			// cannot manufacture an Issue association by adding an arbitrary field.
+			if json.Unmarshal([]byte(data), &retained) == nil && retained.IssueID != "" {
+				source.ObjectID = retained.IssueID
+			} else {
+				source.ObjectID = batch.WorkItemID
+			}
+			if source.ObjectID != "" {
+				source.ObjectType = "work_item"
+			}
 		}
 		out.Sources = append(out.Sources, source)
 	}
@@ -60,6 +76,17 @@ func backgroundPresentation(ctx context.Context, q store.Querier, batch protocol
 	}
 	for i := range out.Sources {
 		source := &out.Sources[i]
+		if source.ObjectType == "work_item" {
+			canonical, err := ownerCanonicalIdentity(ctx, q, source.ObjectID)
+			if err != nil {
+				return out, err
+			}
+			if canonical {
+				source.ObjectType = "issue"
+			} else {
+				source.ObjectType, source.ObjectID = "", ""
+			}
+		}
 		body, err := store.ResolveMessageBody(ctx, q, source.MessageID, source.Summary)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -74,17 +101,6 @@ func backgroundPresentation(ctx context.Context, q store.Querier, batch protocol
 		source.Summary = strings.Join(strings.Fields(body), " ")
 		if text := []rune(source.Summary); len(text) > 160 {
 			source.Summary = string(text[:160]) + "…"
-		}
-		if source.ObjectType == "work_item" {
-			canonical, err := ownerCanonicalIdentity(ctx, q, source.ObjectID)
-			if err != nil {
-				return out, err
-			}
-			if canonical {
-				source.ObjectType = "issue"
-			} else {
-				source.ObjectType, source.ObjectID = "", ""
-			}
 		}
 	}
 	return out, nil
