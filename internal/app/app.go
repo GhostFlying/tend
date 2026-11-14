@@ -49,7 +49,10 @@ type Exec struct {
 	coordinationLogicalID         string
 	ownerExecutionID              string
 	validatedDelegationCorrection string
-	hostedConfiguration           *hostedconfig.Prepared
+	// startingManagerIssue suppresses a redundant status wake for the manager
+	// whose execution this claim is already starting. It grants no authority.
+	startingManagerIssue string
+	hostedConfiguration  *hostedconfig.Prepared
 	// planningSource is the turn's initial delivery, supplied by the host.
 	planningSource   string
 	executionRequest string

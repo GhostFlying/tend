@@ -86,6 +86,7 @@ func TestFault_GenericReceiptReaderPreservesOriginalNativeOwnerBinding(t *testin
 			if tc.existing {
 				reopenArchiveCombinationHarness(t, h)
 			}
+			beforeReader := moveBoardIssue(t, h, canonicalTaskIssue(t, h, issue.IssueID), protocol.IssueTodo)
 			var reader protocol.Assignment
 			for range 6 {
 				reader = ownerClaim(t, h, r)
@@ -99,6 +100,9 @@ func TestFault_GenericReceiptReaderPreservesOriginalNativeOwnerBinding(t *testin
 			}
 			if reader.TaskID != original.TaskID || reader.Manager == nil || !reader.Manager.ReceiptOnly || reader.Manager.RequireReceiptReader || *reader.Execution != pin {
 				t.Fatal("generic reader changed original responsibility", reader)
+			}
+			if current := canonicalTaskIssue(t, h, issue.IssueID); current.BoardStatus() != protocol.IssueTodo || current.Revision != beforeReader.Revision {
+				t.Fatal("receipt-only claim started new business work", current)
 			}
 			if h.countWhere(`SELECT COUNT(*) FROM plan_actions WHERE action_id=? AND json_type(trigger_json,'$.native_owner_tools') IS NULL AND json_extract(trigger_json,'$.receipt_only')=1`, reader.ActionID) != 1 {
 				t.Fatal("generic reader generation depended on historical binding enrichment")

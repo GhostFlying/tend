@@ -20,6 +20,9 @@ func TestManagerSelectionAndClaimFreezeResponsibilityWithoutWorkspace(t *testing
 	if selected.OwnerSelection == nil || selected.OwnerSelection.CategoryID != protocol.DefaultIssueManagerCategory || selected.Assignee != i.Assignee || selected.AssignmentEpoch != i.AssignmentEpoch || h.count("tasks") != 0 || h.count("plan_actions") != 0 || h.count("workspaces") != 0 {
 		t.Fatal("selection allocated execution", selected)
 	}
+	if selected.BoardStatus() != protocol.IssueTodo {
+		t.Fatal("owner selection started work before an execution claim", selected)
+	}
 	claim := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil)
 	op := h.exec(runner("linux-1"), claim, Claim{})
 	if op.Status != protocol.OpSucceeded {
@@ -37,6 +40,12 @@ func TestManagerSelectionAndClaimFreezeResponsibilityWithoutWorkspace(t *testing
 	if current.Assignee.Ref != "linux-1/alpha" || current.AssignmentEpoch != i.AssignmentEpoch+1 || current.Revision != selected.Revision+1 {
 		t.Fatal("claim did not atomically update responsibility", current)
 	}
+	if current.BoardStatus() != protocol.IssueInProgress {
+		t.Fatal("assigned manager execution left Issue in todo", current)
+	}
+	if _, pending := statusNotice(t, h, i.IssueID); pending {
+		t.Fatal("manager claim queued a status wake for the execution already starting")
+	}
 	if h.count("workspaces") != 0 || h.count("workspace_runs") != 0 || h.count("acceptances") != 0 {
 		t.Fatal("manager acquired worker artifacts")
 	}
@@ -44,6 +53,9 @@ func TestManagerSelectionAndClaimFreezeResponsibilityWithoutWorkspace(t *testing
 	replay := h.exec(runner("linux-1"), claim, Claim{})
 	if string(replay.Result) != string(op.Result) || h.count("runs") != before {
 		t.Fatal("claim replay allocated again", replay)
+	}
+	if replayed := canonicalTaskIssue(t, h, i.IssueID); replayed.Revision != current.Revision {
+		t.Fatal("claim replay repeated the work-status transition", replayed)
 	}
 }
 

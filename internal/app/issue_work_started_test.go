@@ -167,6 +167,46 @@ func TestIssueOrdinaryExecutionStartsAncestors(t *testing.T) {
 	}
 }
 
+func TestIssueManagerClaimStartsAncestorsAndSurvivesRestart(t *testing.T) {
+	h, runtime := managerClaimHarness(t)
+	parent := createCanonicalOwnerTestIssue(t, h)
+	child := progressChild(t, h, parent, "Manager execution child")
+	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: child.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Reason: "Start the child responsibility"}, rev(child.Revision)), RequestIssueManager{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	for _, id := range []string{parent.IssueID, child.IssueID} {
+		if current := canonicalTaskIssue(t, h, id); current.BoardStatus() != protocol.IssueTodo {
+			t.Fatal("queued responsibility started work", current)
+		}
+	}
+	as := admissionClaim(t, h, runtime)
+	if as == nil || as.Manager == nil || as.Manager.IssueID != child.IssueID {
+		t.Fatal("child manager was not claimed", as)
+	}
+	for _, id := range []string{parent.IssueID, child.IssueID} {
+		if current := canonicalTaskIssue(t, h, id); current.BoardStatus() != protocol.IssueInProgress {
+			t.Fatal("manager claim did not start Issue", current)
+		}
+	}
+	if op := h.runAs(*as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	before := canonicalTaskIssue(t, h, child.IssueID)
+	reopenArchiveCombinationHarness(t, h)
+	runtime.Sequence++
+	hello := protocol.HelloPayload{Runtime: runtime, Held: []protocol.HeldRun{{RunID: as.RunID, LeaseID: as.LeaseID, Observed: protocol.RunRunning}}}
+	if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "runner"}, hello, nil), Hello{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if current := canonicalTaskIssue(t, h, child.IssueID); current.BoardStatus() != protocol.IssueInProgress || current.Revision != before.Revision {
+		t.Fatal("restart rewrote or lost work status", current)
+	}
+	if next := admissionClaim(t, h, runtime); next != nil || h.count("runs") != 1 {
+		t.Fatal("restart duplicated the original execution", next)
+	}
+}
+
 func TestIssueAcceptanceExecutionAttributedToReviewChild(t *testing.T) {
 	h, runtime, issue := issueOwnerHarness(t)
 	op := createOwnerExecution(t, h, issue, "implementer")

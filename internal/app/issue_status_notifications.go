@@ -29,7 +29,7 @@ func readIssueStatusNotice(ctx context.Context, q store.Querier, id string) (iss
 
 func recordIssueStatusChange(ctx context.Context, x *Exec, tx *store.Tx, before, after protocol.Issue) error {
 	self := currentIssueWriter(x, after)
-	if self {
+	if self || x.startingManagerIssue == after.IssueID {
 		// The current owner already knows its own write. An older external
 		// notification is independent input and must not be cancelled here.
 		return nil

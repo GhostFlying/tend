@@ -34,6 +34,11 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 	if err != nil {
 		return Outcome{}, err
 	}
+	if !c.Manager.ReceiptOnly {
+		claim := *x
+		claim.startingManagerIssue = m.IssueID
+		x = &claim
+	}
 	i, err := store.GetCanonicalIssue(ctx, tx.Q(), m.IssueID)
 	if err != nil {
 		return Outcome{}, err
@@ -65,6 +70,9 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		next.Assignee = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID}
 		next.AssignmentEpoch++
 		next.Revision++
+		if !c.Manager.ReceiptOnly && next.BoardStatus() == protocol.IssueTodo {
+			next.WorkStatus = protocol.IssueInProgress
+		}
 		next.UpdatedAt = x.Now.UnixMilli()
 		out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, i.Revision, canonicalOwnerIssueSource{}, map[string]any{"manager_task": r.TaskID}, "issue.manager_claimed")
 		if err != nil {
@@ -94,6 +102,11 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		}
 	}
 	if !c.Manager.ReceiptOnly {
+		started, startErr := markIssueWorkStarted(ctx, x, tx, m.IssueID)
+		if startErr != nil {
+			return Outcome{}, startErr
+		}
+		events = append(events, started...)
 		_, err = tx.Exec(ctx, `UPDATE tasks SET lifecycle='running',updated_at=? WHERE task_id=?`, x.Now.UnixMilli(), r.TaskID)
 	}
 	if err != nil {

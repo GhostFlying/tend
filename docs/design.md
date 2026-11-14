@@ -498,6 +498,12 @@ D63/D66 named TraeX 选择沿既有 Orca Trae TUI 路径传递精确 model/effor
 
 ### D127：顶层 Issue 看板与合并状态通知
 
+负责人和普通 worker 在真实领取并分配执行的事务内，将当前 active/todo Issue
+推进为 in_progress，并沿既有规则推进允许的祖先。仅选择执行类别、排队或补读
+旧回执不开始业务；已领取表示正在启动，启动成功、失败和 unknown 仍由 Run
+事实单独展示。暂停、backlog、交接、in_review 和终态边界保留；同 Task 后继
+领取复用同一转换，无历史批量改写。见[实施计划](plans/issue-manager-work-start.md)。
+
 总览恢复固定六列工作状态看板，工作进度与实际执行事实分离，正式完成/取消仍由 canonical 生命周期决定。六列横向布局及既有筛选、URL 语义不变；“已取消”在未保存新版主动偏好或存储不可读时默认展开。旧版自动保存的值无法区分是否来自主动点击，保留原值但不用于初始化；新版仅在实际点击时保存独立版本化偏好，后续主动收起可继续恢复。见 [默认展开收敛计划](plans/issue-board-cancelled-default.md)。无阻塞的 owner 拖拽/菜单直接保存，有阻塞保留原状态并给出处理入口，不增加完成/取消二次确认。阶段只读摘要，内部详情与阶段编辑不属于本批。
 
 状态与审计即时入账，给当前 Issue Agent 的通知按最后一次实际变更防抖，默认三分钟；系统设置可选立即或一至三十分钟。窗口持久化，拖回起始状态不通知，Agent 自身更新不自唤醒；沿原具名管理会话/background/outbox，保留冻结输入与 unknown 回执对账。追加迁移不回写历史、不触发迁移通知、不改变 runner wire。布局依据已批准稿，样式复用当前 token 与 shell。见 [实施计划](plans/issue-kanban.md)。
