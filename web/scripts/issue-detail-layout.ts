@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { openIssueAux, openIssueDefinition, issueSidebar } from "./issue-detail-helpers.ts";
 import type {
   Envelope,
+  BackgroundSourcePreview,
   IssueView,
   IssueActivityPage,
   IssueTranscriptBlock,
@@ -1248,6 +1249,98 @@ try {
       await page.screenshot({ path: join(output, `named-background-${width}.png`) });
       await source.locator("summary").first().click();
       assert.equal(await source.getAttribute("open"), null);
+      // A pending batch preserves its message key while sources join or cancel.
+      // Exercise the complete page refresh without remounting that disclosure.
+      const pendingMessage = "hierarchy-pending-source";
+      const original = (seq: number, cancelled = false) => ({
+        seq,
+        message_id: `pending-original-${seq}`,
+        kind: "task.completed",
+        body: `Pending original ${seq}`,
+        cancelled_at: cancelled ? 1 : 0,
+      });
+      let pendingOriginals = [original(1)];
+      let pendingReads = 0;
+      const pendingItem = {
+        ...activity.items![0]!,
+        id: "hierarchy-pending",
+        position: 1001,
+        block: {
+          ...activity.items![0]!.block!,
+          position: 1001,
+          trigger: {
+            ...activity.items![0]!.block!.trigger,
+            message_id: pendingMessage,
+            seq: 1001,
+            background: {
+              batch_id: "pending-batch",
+              message_id: pendingMessage,
+              status: "pending",
+              source_count: 1,
+              created_at: now,
+              presentation: {
+                last_source_seq: 1,
+                sources: [] as BackgroundSourcePreview[],
+                more: false,
+              },
+            },
+          },
+        },
+      };
+      await page.route(`**/api/v1/background/${pendingMessage}/sources?*`, async (route) => {
+        pendingReads++;
+        await route.fulfill({
+          json: {
+            batch: pendingItem.block.trigger.background,
+            sources: pendingOriginals,
+            more: false,
+          },
+        });
+      });
+      activity.items!.unshift(pendingItem);
+      publish();
+      const pendingNotice = detail.locator(`[data-scroll-id="${pendingMessage}"]`);
+      await pendingNotice.waitFor();
+      assert.equal(pendingReads, 0, "pending disclosure remains lazy while collapsed");
+      await pendingNotice.locator("summary").first().click();
+      await pendingNotice.getByText("任务完成 · 原始来源 1", { exact: true }).waitFor();
+      await pendingNotice.evaluate((node) => node.setAttribute("data-kept-instance", "same"));
+      pendingOriginals = [...pendingOriginals, original(2)];
+      pendingItem.block.trigger.background.source_count = 2;
+      pendingItem.block.trigger.background.presentation.last_source_seq = 2;
+      publish();
+      await pendingNotice.getByText("任务完成 · 原始来源 2", { exact: true }).waitFor();
+      assert.equal(
+        await pendingNotice.getAttribute("data-kept-instance"),
+        "same",
+        "new sources do not remount the original disclosure",
+      );
+      assert.equal(pendingReads, 2, "open batch refreshes its no-more cached page once");
+      await pendingNotice.locator("summary").first().click();
+      pendingOriginals = [original(1, true), original(2), original(3)];
+      // Cancel plus append keeps the active count equal; the retained seq changes.
+      pendingItem.block.trigger.background.presentation.last_source_seq = 3;
+      pendingItem.block.trigger.background.presentation.sources = [
+        {
+          seq: 3,
+          message_id: "pending-original-3",
+          kind: "task.completed",
+          summary: "最新来源等待展开",
+        },
+      ];
+      publish();
+      await pendingNotice
+        .getByText("最新来源等待展开", { exact: true })
+        .waitFor({ state: "attached" });
+      assert.equal(pendingReads, 2, "collapsed metadata updates do not read originals");
+      await pendingNotice.locator("summary").first().click();
+      await pendingNotice.getByText("任务完成 · 原始来源 3", { exact: true }).waitFor();
+      await pendingNotice.getByText("任务完成 · 已撤销 · 原始来源 1", { exact: true }).waitFor();
+      assert.equal(pendingReads, 3, "reopening verifies additions and cancellation facts");
+      await pendingNotice.locator("summary").first().click();
+      activity.items!.shift();
+      publish();
+      console.log(`PASS pending background source refresh ${width}`);
       await owner.scrollIntoViewIfNeeded();
       assert(Math.abs((await owner.boundingBox())!.x - (await reply.boundingBox())!.x) < 1);
       await detail.locator("[data-issue-scroll]").evaluate((node) => (node.scrollTop = 0));

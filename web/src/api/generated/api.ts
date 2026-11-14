@@ -2571,6 +2571,7 @@ export interface BackgroundCheckin {
  * via the `definition` "BackgroundPresentation".
  */
 export interface BackgroundPresentation {
+  last_source_seq?: number;
   more: boolean;
   recipient?: BackgroundRecipient;
   sources: BackgroundSourcePreview[] | null;

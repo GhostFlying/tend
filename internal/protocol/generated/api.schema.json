@@ -2376,6 +2376,9 @@
     "BackgroundPresentation": {
       "additionalProperties": false,
       "properties": {
+        "last_source_seq": {
+          "type": "integer"
+        },
         "more": {
           "type": "boolean"
         },
