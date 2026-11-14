@@ -20,8 +20,8 @@ type entryObservation struct {
 	managerPurpose         bool
 	managerReady           bool
 	managerRuntime         protocol.AgentRuntimeReference
-	managedWorkerReady     map[string]bool
-	managedOwnerReady      map[string]bool
+	managedWorkerReady     map[string]protocol.ExtensionExecutionPin
+	managedOwnerReady      map[string]protocol.ExtensionExecutionPin
 }
 
 func snapshotObservations(entries map[string]*entry) map[string]entryObservation {

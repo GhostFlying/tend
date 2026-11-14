@@ -25,3 +25,7 @@ manager readiness probe；检查同次心跳仍能读取准确身份及最后已
 保持 probe 实际悬停时读取 current/retained 两种观察，覆盖首次探测、新配置、明确
 拒绝与失败后恢复；用 race 检查发布和读取。本次不恢复旧 PR 的其他维护控制或
 Sandbox 补丁。原数据与历史请求不迁移，业务恢复仍用现有入口。
+
+## 原独立审阅修正
+
+托管扩展的标量就绪必须绑定准确的 release/category/content pin，不能与 live Current 的新 pin 混用。同步暂停新发布后的 worker 及 owner probe，分别覆盖失败与成功发布；探测期间新 pin 不可用，旧 retained pin 不被误删。

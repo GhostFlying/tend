@@ -58,8 +58,8 @@ type Options struct {
 }
 
 type entry struct {
-	managedWorkerReady     map[string]bool
-	managedOwnerReady      map[string]bool
+	managedWorkerReady     map[string]protocol.ExtensionExecutionPin
+	managedOwnerReady      map[string]protocol.ExtensionExecutionPin
 	input                  BuildInput
 	ownerInput             *BuildInput
 	workers                harness.Workers
@@ -204,9 +204,11 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 					pin, ready := p.options.Extensions.Current(row.Pin.Runtime.RuntimeID, category, a.Identity)
 					row.Pin.Extensions = pin
 					if row.Pin.Purpose == "issue_manager" {
-						row.Available = ready && entries[a.Identity.LocalID].managedOwnerReady[category]
+						verified, ok := entries[a.Identity.LocalID].managedOwnerReady[category]
+						row.Available = observation.Available && ready && ok && verified == pin
 					} else {
-						row.Available = ready && entries[a.Identity.LocalID].managedWorkerReady[category]
+						verified, ok := entries[a.Identity.LocalID].managedWorkerReady[category]
+						row.Available = observation.Available && ready && ok && verified == pin
 					}
 					if !ready {
 						row.Available = false
