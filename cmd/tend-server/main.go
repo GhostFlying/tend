@@ -7,17 +7,24 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/GhostFlying/tend/internal/logging"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/serverkit"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	log, logErr := logging.NewText(os.Stderr, os.Getenv(logging.LevelEnv))
+	if logErr != nil {
+		fmt.Fprintln(os.Stderr, logErr)
+		os.Exit(2)
+	}
+	slog.SetDefault(log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if len(os.Args) > 1 && os.Args[1] == "archive" {
@@ -28,6 +35,11 @@ func main() {
 		return
 	}
 	capabilities := flag.Bool("capabilities", false, "print read-only capabilities and the actual executable SHA256 without loading configuration")
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		fmt.Fprintln(flag.CommandLine.Output(), logging.EnvironmentHelp)
+	}
 	path := flag.String("config", "", "configuration file (HuJSON)")
 	flag.Parse()
 	if *capabilities {

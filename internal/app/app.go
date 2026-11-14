@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,9 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	diagnostics                   []executionDiagnostic
+	diagnosticEvents              []Event
+	log                           *slog.Logger
 	repeatedPhysicalStop          bool
 	configuredOwner               string
 	associationDisplayOnly        bool // Keep narration bookkeeping separate from owner authority.
@@ -123,6 +127,7 @@ type OutboxMessage struct {
 type App struct {
 	deploymentIdentity         atomic.Pointer[string]
 	deploymentIdentityInit     chan struct{}
+	log                        *slog.Logger
 	nativeCalls                nativeCallBroker
 	mainOwner                  string
 	managedHostedRuntimes      map[string]bool
@@ -183,7 +188,7 @@ const applySavepoint = "apply"
 
 // Execute validates and atomically applies a business command. Idempotency belongs
 // to business identities, state transitions and CAS, not transport request history.
-func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.Envelope, cmd Command) (protocol.Operation, error) {
+func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.Envelope, cmd Command) (operation protocol.Operation, executeErr error) {
 	if call, ok := ctx.Value(ownerExecutionKey{}).(*OwnerExecution); ok && p.Kind == protocol.PrincipalOwner {
 		if p.Subject != a.mainOwner {
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "owner delegation does not match server binding")
@@ -206,7 +211,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not handled here", env.Operation)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{log: a.log, configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	x.requestDomain = domain
 	if delegated, ok := cmd.(ownerExecutionCommand); ok {
 		x = delegated.adapted(x)
@@ -220,6 +225,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 	if x.TraceID == "" {
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
+	defer func() { a.logExecution(ctx, x, operation, executeErr) }()
 	if op, handled, err := a.nativeObservation(ctx, x, cmd); handled {
 		return op, err
 	}
@@ -360,6 +366,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 			if err := tx.Release(ctx, applySavepoint); err != nil {
 				return err
 			}
+			x.diagnosticEvents = out.Events
 			projectionOnly = out.ProjectionOnly || projectionOnlyOperation(cmd.Operation())
 			queued = out.Notify || x.FollowupQueued || len(out.Outbox) > 0
 			for _, event := range out.Events {

@@ -256,6 +256,12 @@ completed 批次标签不能替代实际进程、配置、健康、committed rec
 
 同哈希 server 也记录准确进程和两次实际健康观测；独立维护批次后续供正式交付引用时不能省略这些证明。同哈希 runner 完成既有 updater 核实后，把恢复正常与清除本轮元数据放在一次控制更新中，仍等待真实正常 ACK 才推进下一主机。真实替换或配置变化继续走完整排空、安装、健康和恢复路径。串行主机、下载、排空和心跳等待要分别计时，不能把一个已部分安装的批次当成全新部署的耗时基准。
 
+server、runner 和 updater 的进程入口统一接受 `TEND_LOG_LEVEL=debug|info|warn|error`，空值为 `info`，`verbose` 是 `debug` 的别名；非法值明确报配置错误并停止启动，不静默降级。稳定性调查期可在原服务环境文件中设置 `TEND_LOG_LEVEL=verbose`，下一次正常受控启动生效；不为调高日志重复未知升级。该设置只改变诊断级别，沿用 stderr、现有监督器分段与轮转，不改变凭据、业务身份、授权、期限或状态。普通 owner CLI 的业务 JSON 输出不受影响。
+
+`app state transition` 在关键 Task／Run／Issue／upgrade 事件实际提交后记录对象、版本和 request／trace；`app command rejected` 保留错误码与对象，避免序列化用户输入或内部错误正文。一般观察放在 debug。`upgrade host availability decision` 在真正暂停时以 warn 记录判断时的逐主机在线、心跳时间／年龄／阈值、slots、运行与控制模式、当前／已应用控制版本、upgrade 身份和具体失败谓词；短暂正常 ACK 间隙仅为 debug，不改变原等待行为。短路未读取的字段保持缺失，不能解释为观测成功。
+
+`server process log provenance` 给出当前 server 的实际 PID／父 PID、可执行文件，以及支持时的 stdout／stderr 文件描述符目标；用此定位本轮日志，不把历史固定日志文件当作正在运行进程的输出。
+
 server 日志中的 `upgrade control step` 关联原 `upgrade_id`、`request_id`、步骤、耗时、阶段/整体期限及剩余时间；`upgrade phase changed` 与 `upgrade host phase changed` 记录转换和原因。updater 的 `updater operation changed` 记录实际持久阶段、进程身份、健康计数与首次或变化的错误。重复健康轮询不重复写阶段日志。
 
 普通自身交接记录 `self-update installer dispatch recorded`、`self-update dispatch command returned`、`self-update installer entered`、阶段持久化和 `self-update installer returned`。用其中的 unit 名读系统日志，例如 `journalctl --user --unit "$INSTALLER_UNIT"`；自动 installer 的 stdout/stderr 明确交给 journal。派发命令退出码只证明该命令的结果，installer 返回也不等于新监督器完成接管，最终仍读原请求的状态、准确进程和提交回执。进程被终止且缺退出证据时继续记为 unknown，不能重建一个成功退出码。

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -20,11 +21,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/logging"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
 func main() {
+	log, logErr := logging.NewText(os.Stderr, os.Getenv(logging.LevelEnv))
+	if logErr != nil {
+		fmt.Fprintln(os.Stderr, logErr)
+		os.Exit(2)
+	}
+	slog.SetDefault(log)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
@@ -49,6 +57,10 @@ func load(path string) (updater.Config, error) {
 	return cfg, nil
 }
 func run(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
+		_, err := fmt.Fprintln(out, "usage: tend-updater serve|bootstrap|upgrade|restart|status|retry|cancel|verify --config <file>\n"+logging.EnvironmentHelp)
+		return err
+	}
 	if len(args) == 0 {
 		return errors.New("usage: tend-updater serve|bootstrap|upgrade|restart|status|retry|cancel|verify --config <file>")
 	}
