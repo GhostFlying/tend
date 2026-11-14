@@ -197,7 +197,7 @@ func main() {
 	suiteShards := flag.Int("suite-shards", 0, "API, mainthread and E2E shards (0 selects by CPU)")
 	goTool := flag.String("go", "go", "Go executable")
 	pnpm := flag.String("pnpm", "pnpm", "pnpm executable")
-	count := flag.Int("count", 1, "repeat race tests explicitly; 0 keeps Go native caching")
+	count := flag.Int("count", 0, "repeat race tests explicitly; 0 keeps Go native caching")
 	flag.Parse()
 	cpus := runtime.GOMAXPROCS(0)
 	b, err := capacity(cpus, *jobs, *shards, *suiteShards)

@@ -21,7 +21,7 @@ Refs: D149，延续 D145、D148。
 - `make check`：按有效 CPU 自动选择预算，完整检查；Web 在私有临时目录构建并清理。
 - `CHECK_JOBS=1 CHECK_SERIAL_REASON="shared resource budget" make check`：顺序回退，自动 App 分片也降为一个。
 - `APP_TEST_SHARDS=4 make check`：显式选择 App 分片，组并发仍可独立调整。
-- `TEST_COUNT=1 make check`：强制重跑 race 测试，用于衡量真实调度耗时；显式 `TEST_COUNT=0` 的开发迭代保留 Go 原生结果缓存；正式检查默认 `TEST_COUNT=1`，见 test-time-semantics.md。
+- `TEST_COUNT=1 make check`：强制重跑 race 测试，用于衡量真实调度耗时；默认保留 Go 原生结果缓存；新鲜定向验收或测量显式 `TEST_COUNT=1`，见 test-time-semantics.md。
 - `make web` / `make web-check`：默认仍在原嵌入目录生成构建产物。
 
 并发预算使用 Go 的有效 GOMAXPROCS，包含运行环境的 CPU 配额约束。组数量最多七个、自动 App 分片最多四个；每个 Go 子进程的运行并发、包并行与 Vitest worker 也有上限。小于 32 个有效 CPU 或选择顺序模式时，E2E 保留独立阶段。

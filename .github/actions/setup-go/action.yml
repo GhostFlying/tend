@@ -7,7 +7,7 @@ inputs:
 outputs:
   build-path:
     value: ${{ steps.paths.outputs.build }}
-    description: Compiled objects and native results; acceptance uses count=1
+    description: Compiled objects and native results; count=1 explicitly re-executes tests
   build-key:
     value: ${{ steps.build.outputs.cache-primary-key }}
     description: Immutable key for this candidate
