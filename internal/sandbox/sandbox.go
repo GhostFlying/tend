@@ -216,18 +216,25 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 				}
 			}
 			var demo Demo
+			seedCtx, finishSeed := context.WithTimeout(ctx, 10*time.Minute)
+			seedStarted := time.Now()
+			seedDeadline, _ := seedCtx.Deadline()
+			log.Info("sandbox seed started", "scenario", options.Scenario, "deadline", seedDeadline)
 			if options.Scenario == "inbox" {
-				demo, err = seedInbox(ctx, runtime, root, gate.acquire)
+				demo, err = seedInbox(seedCtx, runtime, root, gate.acquire)
 			} else if options.Scenario == "rollout" {
-				release, lockErr := gate.acquire(ctx)
+				release, lockErr := gate.acquire(seedCtx)
 				if lockErr != nil {
+					finishSeed()
 					return lockErr
 				}
-				demo, err = seedRolloutDemo(ctx, runtime, root)
+				demo, err = seedRolloutDemo(seedCtx, runtime, root)
 				release()
 			} else {
-				demo, err = seedDemo(ctx, runtime, root, options.skipStory, options.storyOnly, gate.acquire)
+				demo, err = seedDemo(seedCtx, runtime, root, options.skipStory, options.storyOnly, gate.acquire)
 			}
+			log.Info("sandbox seed finished", "scenario", options.Scenario, "elapsed", time.Since(seedStarted), "cause", context.Cause(seedCtx), "error", err)
+			finishSeed()
 			if err != nil {
 				return err
 			}

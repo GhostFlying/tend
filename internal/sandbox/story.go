@@ -24,6 +24,11 @@ const (
 // Every round is an owner command followed by a real hosted tool turn. Reads
 // below are synchronization only; no business state is injected into SQLite.
 func seedStory(ctx context.Context, runtime *serverkit.Runtime, demo *Demo) error {
+	// Bound the complete preparation, including direct SeedDemo callers. Each
+	// synchronization below shares this budget instead of imposing a per-round
+	// performance requirement on real hosted turns.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 	if complete, err := restoreCompletedStory(ctx, runtime, demo); complete || err != nil {
 		return err
 	}
@@ -211,9 +216,10 @@ func (s seeder) storyMessage(ctx context.Context, runtime *serverkit.Runtime, ke
 	})
 }
 func storyWait(ctx context.Context, label string, read func() (bool, error)) error {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
 	for {
+		if err := context.Cause(ctx); err != nil {
+			return fmt.Errorf("seed story %s: %w", label, err)
+		}
 		complete, err := read()
 		if err != nil {
 			return fmt.Errorf("seed story %s: %w", label, err)
@@ -222,7 +228,7 @@ func storyWait(ctx context.Context, label string, read func() (bool, error)) err
 			return nil
 		}
 		if !delay(ctx, 100*time.Millisecond) {
-			return fmt.Errorf("seed story %s: %w", label, ctx.Err())
+			return fmt.Errorf("seed story %s: %w", label, context.Cause(ctx))
 		}
 	}
 }
