@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +16,7 @@ import (
 )
 
 type Options struct {
+	Log                   *slog.Logger
 	ConfigFile            string
 	ValidateConfiguration func(context.Context, string, string, string) error
 	Process               Process
@@ -103,6 +105,9 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.Log == nil {
+		opts.Log = slog.Default()
 	}
 	if opts.NewID == nil {
 		opts.NewID = newID
@@ -210,6 +215,7 @@ func (s *Supervisor) save() error {
 		s.persistenceErr = err
 		return s.durabilityError()
 	}
+	s.logTransition(s.durable, s.state)
 	s.durable = cloneState(s.state)
 	return nil
 }

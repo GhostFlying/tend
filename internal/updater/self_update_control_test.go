@@ -45,6 +45,24 @@ func TestSelfUpdateCapabilityProbeUsesOnlyLegacyReadRoute(t *testing.T) {
 		t.Fatal(supported, calls.Load(), err)
 	}
 }
+
+func TestSelfUpdateTransportPreservesCancellationAndOriginalCause(t *testing.T) {
+	socket := selfControlFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := SelfUpdateCall(ctx, socket, &SelfUpdateRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal("transport erased caller cancellation", err)
+	}
+	ctx, cancel = context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	_, err = ObserveSelfUpdate(ctx, socket, "original-request")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("transport erased the timed out original observation", err)
+	}
+}
 func TestSelfUpdateLostResponseOnlyObservesOriginalAttempt(t *testing.T) {
 	var posts, reads atomic.Int64
 	request := SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: "original"}, UpgradeID: "batch", ReleaseSetSHA256: "set"}

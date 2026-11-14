@@ -19,13 +19,20 @@ func selfUpdaterOnlyReady(t *testing.T) (*harness, StartUpgrade, ServerObservati
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)
-	o := ServerObservation{MainDrained: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "original-server"}
+	o := ServerObservation{MainDrained: true, Healthy: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "original-server"}
 	o.Updater = selfUpgradeObservation(row, "server", o.ProcessInstanceID, o.BinarySHA256)
 	if v := upgradeTick(h, o); v.Phase != "server_draining" {
 		t.Fatal(v)
 	}
+	if v := upgradeTick(h, o); v.Phase != "server_checking" {
+		t.Fatal(v)
+	}
+	h.clock.Advance(5 * time.Second)
 	if v := upgradeTick(h, o); v.Phase != "runners" {
 		t.Fatal(v)
+	}
+	for _, host := range []string{"linux-1", "linux-2"} {
+		upgradeAck(h, host, protocol.RunnerNormal)
 	}
 	upgradeTick(h, o)
 	upgradeAck(h, "linux-1", protocol.RunnerReady)
@@ -57,6 +64,26 @@ func TestSelfUpdaterOnlyNextHostAcknowledgment(t *testing.T) {
 	v = upgradeTick(h, o)
 	if v.Status == "attention" {
 		t.Fatalf("normal per-host acknowledgment gap paused batch: %+v; first control=%+v", v, upgradeCtl(h, "linux-1"))
+	}
+}
+
+func TestSelfUpdaterOnlyRestoresWithOneNormalAcknowledgment(t *testing.T) {
+	h, _, o := selfUpdaterOnlyReady(t)
+	selfRuntimeProof(t, h, "linux-1", protocol.RunnerReady)
+	upgradeTick(h, o)
+	ctl := upgradeCtl(h, "linux-1")
+	if ctl.Mode != protocol.RunnerNormal || ctl.UpgradeID != "" || ctl.ReleaseID != "" {
+		t.Fatal("retained host requires a second metadata-only heartbeat", ctl)
+	}
+	upgradeTick(h, o)
+	if v := upgradeRead(h).View.Hosts[0]; v.Status == "skipped" {
+		t.Fatal("normal control was accepted before its actual ACK", v)
+	}
+	upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	upgradeAck(h, "linux-2", protocol.RunnerNormal)
+	v := upgradeTick(h, o)
+	if v.Hosts[0].Status != "skipped" || upgradeCtl(h, "linux-1").Revision != ctl.Revision || v.Hosts[1].Phase != "draining" {
+		t.Fatal("acknowledged retained host added another round trip", v, upgradeCtl(h, "linux-1"))
 	}
 }
 func TestSelfUpdaterOnlyRetryPendingHandoff(t *testing.T) {

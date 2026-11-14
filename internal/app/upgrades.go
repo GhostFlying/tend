@@ -446,14 +446,19 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 							}
 							break
 						}
-						if r.DeliveryTaskID != "" {
+						if r.DeliveryTaskID != "" || needsSelfUpdate(r) {
 							if c.Observation.ProcessInstanceID == "" {
-								return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "current server identity is required for delivery readback")
+								return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "current server identity is required for installation readback")
 							}
 							r.ServerProcess = c.Observation.ProcessInstanceID
-							_, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
+							reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
 							if err != nil {
 								return Outcome{}, err
+							}
+							if reason != "" {
+								if err := attention(reason); err != nil {
+									return Outcome{}, err
+								}
 							}
 							break
 						}
@@ -596,6 +601,11 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				ctl.Revision++
 				ctl.Mode = protocol.RunnerNormal
 				ctl.Authorization = nil
+				// Restore normal admission and clear its completed batch metadata
+				// together. The next actual ACK proves both, without another
+				// metadata-only heartbeat before the following host may drain.
+				ctl.UpgradeID = ""
+				ctl.ReleaseID = ""
 				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 					return err
 				}
@@ -607,12 +617,6 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				v.Phase = "verified"
 				v.CurrentVersion = rt.Runtime.Build.Version
 				r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
-				ctl.Revision++
-				ctl.UpgradeID = ""
-				ctl.ReleaseID = ""
-				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
-					return err
-				}
 				continue
 			}
 		}

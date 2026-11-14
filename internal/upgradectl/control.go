@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -53,13 +54,15 @@ type Config struct {
 	Interval                  time.Duration
 }
 type Controller struct {
-	recovery    *recoveryRuntime
-	maintenance *maintenanceRuntime
-	cfg         Config
-	app         Backend
-	ids         protocol.IDGen
-	observe     func(context.Context) (app.ServerObservation, error)
-	log         *slog.Logger
+	loggedUpgradeID string
+	stepErrors      map[string]string
+	recovery        *recoveryRuntime
+	maintenance     *maintenanceRuntime
+	cfg             Config
+	app             Backend
+	ids             protocol.IDGen
+	observe         func(context.Context) (app.ServerObservation, error)
+	log             *slog.Logger
 }
 
 func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context) (app.ServerObservation, error), log *slog.Logger) (*Controller, error) {
@@ -110,12 +113,20 @@ func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context
 	}
 	return &Controller{cfg: cfg, app: a, ids: ids, observe: observe, log: log}, nil
 }
-func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) (protocol.UpgradeView, error) {
+func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) (view protocol.UpgradeView, err error) {
+	started := c.cfg.Now()
+	step := "verify_release"
+	defer func() {
+		level := slog.LevelInfo
+		if err != nil {
+			level = slog.LevelWarn
+		}
+		c.log.Log(ctx, level, "upgrade start returned", "upgrade_id", r.UpgradeID, "request_id", r.RequestID, "delivery_task_id", r.DeliveryTaskID, "instance_id", c.cfg.Instance, "step", step, "elapsed_ms", c.cfg.Now().Sub(started).Milliseconds(), "status", view.Status, "phase", view.Phase, "overall_deadline_ms", view.OverallDeadlineMillis, "error", err, "context_error", ctx.Err())
+	}()
 	if !protocol.ValidID(protocol.PrefixRequest, r.RequestID) || !release.ValidID(r.UpgradeID) {
 		return protocol.UpgradeView{}, errors.New("upgradectl: invalid local release request")
 	}
 	var bundle *release.Bundle
-	var err error
 	input, err := json.Marshal(r)
 	if err != nil {
 		return protocol.UpgradeView{}, err
@@ -178,6 +189,7 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
 	command := app.StartUpgrade{ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
 	command.ReleaseSet, command.ReleaseSetSHA256, command.ReleaseSetSize = bundle.Set, bundle.SetSHA256, int64(len(bundle.SetBytes))
+	step = "preflight"
 	recorded, err := c.app.CheckUpgradeStart(ctx, env, command)
 	if err != nil {
 		return protocol.UpgradeView{}, err
@@ -190,8 +202,12 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		err = json.Unmarshal(recorded.Result, &view)
 		return view, err
 	}
+	step = "probe_supervisor"
 	status, err := c.cfg.ObserveUpdater(ctx, c.cfg.UpdaterSocket)
-	if err != nil || !status.Supported || status.Observation.InstanceID != c.cfg.Instance {
+	if err != nil {
+		return protocol.UpgradeView{}, fmt.Errorf("upgradectl: observe supervisor capability: %w", err)
+	}
+	if !status.Supported || status.Observation.InstanceID != c.cfg.Instance {
 		return protocol.UpgradeView{}, errors.New("upgradectl: standalone updater bootstrap required before a complete upgrade")
 	}
 	command.ServerUpdaterSupported = true
@@ -207,6 +223,7 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		}
 	}
 	command.ServerCapabilities = capabilities.Capabilities
+	step = "admit"
 	op, err := c.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, command)
 	if err != nil {
 		return protocol.UpgradeView{}, err
@@ -260,6 +277,7 @@ func (c *Controller) tick(ctx context.Context) error {
 	observed.UpdaterReceipt = c.rollbackReceipt(ctx)
 	observed.ServerCancellations = cancellations
 	var selfErr error
+	var startRequestID string
 	current, readErr := c.app.CurrentUpgrade(ctx)
 	if readErr != nil {
 		return readErr
@@ -269,40 +287,16 @@ func (c *Controller) tick(ctx context.Context) error {
 		if e != nil {
 			return e
 		}
+		startRequestID = row.StartRequestID
 		if row.ReleaseSet != nil && row.ReleaseSet.Format >= 2 {
-			readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			status, e := updater.ObserveSelfUpdate(readCtx, c.cfg.UpdaterSocket, row.StartRequestID)
-			if e == nil || status.Observation.Rejection != nil {
-				observed.Updater = &status.Observation
-			}
-			// Never block the ledger's original deadline waiting for an installer.
-			// A repeated target with this exact identity only observes its durable
-			// attempt in the supervisor; it cannot dispatch stop/start a second time.
-			if e == nil && status.Observation.Rejection == nil && current.Status == "running" && current.Phase == "server_updater" && c.cfg.Now().UnixMilli() < row.View.OverallDeadlineMillis && (row.Deadline == 0 || c.cfg.Now().UnixMilli() < row.Deadline) {
-				request := updater.SelfUpdateRequest{Target: protocol.UpdaterSelfTarget{RequestID: row.StartRequestID, ExpiresAtMillis: row.View.OverallDeadlineMillis}, UpgradeID: row.View.UpgradeID, Release: filepath.Join(c.cfg.ReleaseDir, row.View.UpgradeID), ReleaseSetSHA256: row.ReleaseSetSHA256}
-				if status.Journal == nil || status.Journal.Plan.Request != request {
-					env := &protocol.Envelope{RequestID: c.ids.New(protocol.PrefixRequest), Operation: "upgrades.authorize_supervisor", Target: protocol.Target{Type: "upgrade", ID: current.UpgradeID}, ExpectedControlRevision: &current.Revision}
-					op, grantErr := c.app.Execute(readCtx, protocol.Principal{Kind: protocol.PrincipalSystem}, env, app.AuthorizeServerUpdater{})
-					e = grantErr
-					if e == nil && op.Error != nil {
-						e = op.Error
-					}
-					if e == nil {
-						status, e = updater.SelfUpdateCall(readCtx, c.cfg.UpdaterSocket, &request)
-						if e == nil || status.Observation.Rejection != nil {
-							observed.Updater = &status.Observation
-						}
-					}
-				}
-			}
-			cancel()
-			selfErr = e
+			selfErr = c.reconcileServerUpdater(ctx, row, &observed)
 		}
 	}
 	v, err := c.app.TickUpgrade(ctx, observed)
 	if err != nil {
 		return err
 	}
+	c.logUpgradeTransition(ctx, current, v, startRequestID)
 	if v.Status != "running" || v.Phase != "server_ready" || !observed.MainDrained {
 		return selfErr
 	}
