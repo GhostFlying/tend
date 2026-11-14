@@ -73,6 +73,8 @@ type Pool struct {
 	retainedMu       sync.Mutex
 	retained         []protocol.RunExecutionPin
 	retainedObserved []protocol.AgentExecutor
+	observationMu    sync.RWMutex
+	observations     map[string]map[string]entryObservation
 	options          Options
 	mu               sync.Mutex
 	snapshots        map[string]map[string]*entry
@@ -95,6 +97,17 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 	if saved := p.snapshots[id]; saved != nil {
 		return saved, nil
 	}
+	entries, err := p.readSnapshot(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	p.snapshots[id] = entries
+	p.publishSnapshot(id, entries)
+	return entries, nil
+}
+
+// readSnapshot restores definitions without adapter initialization or native IO.
+func (p *Pool) readSnapshot(ctx context.Context, id string) (map[string]*entry, error) {
 	snapshot, err := p.options.Source.ResolveAccepted(ctx, id)
 	if err != nil {
 		return nil, err
@@ -135,7 +148,6 @@ func (p *Pool) load(ctx context.Context, id string) (map[string]*entry, error) {
 		}
 		entries[a.LocalID] = e
 	}
-	p.snapshots[id] = entries
 	return entries, nil
 }
 func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
@@ -146,36 +158,28 @@ func (p *Pool) Observe(ctx context.Context) ([]protocol.AgentExecutor, error) {
 	if status.Revision == 0 {
 		return nil, nil
 	}
-	if !p.mu.TryLock() {
-		return nil, nil
-	}
-	defer p.mu.Unlock()
-	entries, err := p.load(ctx, status.SnapshotID)
+	entries, err := p.observeSnapshot(ctx, status.SnapshotID)
 	if err != nil {
 		return nil, err
 	}
 	out := []protocol.AgentExecutor{}
 	for _, a := range status.Projection.Agents {
-		e := entries[a.Identity.LocalID]
-		if e == nil {
+		e, ok := entries[a.Identity.LocalID]
+		if !ok {
 			continue
 		}
-		worker := protocol.WorkerAppServer
-		if e.input.Runtime.Kind == agentconfig.OrcaWorker || e.input.Runtime.Kind == agentconfig.CentralWorker {
-			worker = protocol.WorkerOrca
-		}
-		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: worker, BackendID: p.options.BackendID}
-		if workerAdapterSupported(e.input.Runtime.Kind) {
+		pin := protocol.RunExecutionPin{Identity: a.Identity, AgentRevision: a.Revision, Runtime: a.Binding, InventoryRevision: int64(status.Revision), SnapshotID: status.SnapshotID, PublicSHA256: status.PublicSHA256, Profile: protocol.ExecutionProfile{Model: a.RequestedModel, Effort: a.RequestedEffort}, Worker: e.worker, BackendID: p.options.BackendID}
+		if e.workerSupported {
 			reason := e.reason
 			if e.environmentUnavailable && (reason == "" || canProbe(reason)) {
 				reason = "environment_unavailable"
 			}
-			out = append(out, protocol.AgentExecutor{Pin: pin, Available: reason == "" && e.workers != nil, Reason: reason})
+			out = append(out, protocol.AgentExecutor{Pin: pin, Available: e.workerReady && !e.environmentUnavailable, Reason: reason})
 		}
-		if managerPurpose(e) {
+		if e.managerPurpose {
 			pin.Purpose = "issue_manager"
 			pin.Worker = protocol.WorkerAppServer
-			pin.Runtime = protocol.AgentRuntimeReference{RuntimeID: e.ownerInput.Runtime.ID, Revision: e.ownerInput.Runtime.Revision}
+			pin.Runtime = e.managerRuntime
 			pin.BackendID = ""
 			reason := ""
 			if !e.managerReady {
@@ -255,6 +259,7 @@ func (p *Pool) Resolve(ctx context.Context, pin protocol.RunExecutionPin) (runne
 	if err != nil {
 		return runner.ResolvedExecution{}, err
 	}
+	defer p.publishSnapshot(pin.SnapshotID, entries)
 	e := entries[pin.Identity.LocalID]
 	if e != nil && canProbe(e.reason) && pin.Extensions == (protocol.ExtensionExecutionPin{}) {
 		if p.options.Environments.Resolve(e.input.Runtime.ID) != nil || e.input.Runtime.Kind == agentconfig.AppServerWorker && e.input.Runtime.CLI == "codex" {
@@ -314,6 +319,7 @@ func (p *Pool) Reject(pin protocol.RunExecutionPin, reason string) {
 	if entries := p.snapshots[pin.SnapshotID]; entries != nil {
 		if e := entries[pin.Identity.LocalID]; e != nil {
 			e.reason = reason
+			p.publishSnapshot(pin.SnapshotID, entries)
 		}
 	}
 }
@@ -410,6 +416,7 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer p.publishSnapshot(status.SnapshotID, entries)
 	var retry error
 	for _, e := range entries {
 		if handled, err := p.refreshManaged(ctx, e, status.Projection.ExecutionEnvironmentID); handled {
