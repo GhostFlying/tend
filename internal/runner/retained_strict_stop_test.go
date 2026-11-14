@@ -25,6 +25,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 )
 
 // This uses the production RPC handler and bounded strict reporting attempts.
@@ -537,24 +538,48 @@ func TestRetainedStrictStopLaterRetainRevokesSettlementOnly(t *testing.T) {
 	}
 }
 
+type retainedStrictReportingStopProbe struct {
+	*retainedStrictWorkspaceProbe
+	finished chan struct{}
+}
+
+func (p *retainedStrictReportingStopProbe) Finish(ctx context.Context, as protocol.Assignment) error {
+	if err := p.retainedStrictWorkspaceProbe.Finish(ctx, as); err != nil {
+		return err
+	}
+	select {
+	case p.finished <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
 func TestRetainedStrictStopDuringReportingReconcilesAfterExecutorExit(t *testing.T) {
 	r, as, _ := retainedStrictFixture(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	prepare, prepared := testphase.Context(t, t.Context(), "retained Stop journal preparation", time.Minute)
+	if err := r.cfg.Journal.SetFenced(prepare, as.RunID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.SetPhase(prepare, as.RunID, journal.PhaseReleasing); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.ConfirmStopped(prepare, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.SetRetainedResume(prepare, as.RunID, protocol.RetainedRunResume{RequestID: "original-attach", Mode: "attach"}); err != nil {
+		t.Fatal(err)
+	}
+	prepared()
+	// Completing preparation cancels only that phase, not functional work.
+	ctx, finish := testphase.Context(t, t.Context(), "Stop after in-flight reporting", time.Minute)
+	defer finish()
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if err := r.cfg.Journal.SetFenced(ctx, as.RunID, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhaseReleasing); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.cfg.Journal.SetRetainedResume(ctx, as.RunID, protocol.RetainedRunResume{RequestID: "original-attach", Mode: "attach"}); err != nil {
-		t.Fatal(err)
-	}
+	probe := &retainedStrictReportingStopProbe{retainedStrictWorkspaceProbe: r.cfg.Workspaces.(*retainedStrictWorkspaceProbe), finished: make(chan struct{}, 1)}
+	r.cfg.Workspaces = probe
 	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
+	var once, released sync.Once
+	releaseReport := func() { released.Do(func() { close(release) }) }
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		var env protocol.Envelope
 		if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
@@ -578,37 +603,39 @@ func TestRetainedStrictStopDuringReportingReconcilesAfterExecutorExit(t *testing
 		body, _ := json.Marshal(protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{{RunID: as.RunID, Verdict: protocol.VerdictStop, Desired: protocol.DesiredStopped}}})
 		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: body}})
 	}))
-	defer server.Close()
+	defer func() {
+		cancel()
+		releaseReport()
+		server.Close()
+	}()
 	r.c.base, r.c.http = server.URL, server.Client()
 	r.start(ctx, as, r.cfg.Now())
 	select {
 	case <-entered:
+		t.Log("original report entered before authoritative Stop")
 	case <-ctx.Done():
 		t.Fatal("original report not in flight")
 	}
 	if err := r.freshHello(ctx); err != nil {
-		close(release)
 		t.Fatal(err)
 	}
-	close(release)
+	t.Log("authoritative Stop received while original report remained in flight")
+	releaseReport()
 	done := make(chan struct{})
 	go func() { defer close(done); r.reconciler(ctx) }()
 	defer func() { cancel(); <-done; r.wg.Wait() }()
-	for {
-		held, err := r.cfg.Journal.Runs(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(held) == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("Stop lost its executor-exit wakeup")
-		case <-time.After(time.Millisecond):
-		}
+	select {
+	case <-probe.finished:
+		t.Log("executor-exit reconciliation reached original workspace cleanup")
+	case <-ctx.Done():
+		t.Fatal("Stop lost its executor-exit wakeup", context.Cause(ctx))
 	}
-	if r.cfg.Workspaces.(*retainedStrictWorkspaceProbe).finishes.Load() != 1 {
+	r.wg.Wait()
+	held, err := r.cfg.Journal.Runs(ctx)
+	if err != nil || len(held) != 0 {
+		t.Fatal("Stop did not settle the original journal", held, err)
+	}
+	if probe.finishes.Load() != 1 {
 		t.Fatal("original responsibility not cleaned once")
 	}
 }
