@@ -40,8 +40,12 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	}
 	r.mu.Lock()
 	waiting := r.upgradePhase == "updater_ready" && control.Upgrade.Updater != nil && !control.Upgrade.Updater.Authorized
+	submitted := r.upgradePhase == "submitted" || r.upgradePhase == "updater_verified"
 	r.mu.Unlock()
-	if waiting {
+	// Reporting progress is not another execution trigger. Keep the ordinary
+	// retry delay for a failed attempt, and only observe a submitted attempt.
+	coolingDown := r.upgradeRetryRevision == control.Revision && r.cfg.Now().Before(r.upgradeRetryAt)
+	if waiting || submitted || coolingDown {
 		r.updaterMu.Unlock()
 		return
 	}
@@ -51,6 +55,8 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 			if errors.Is(err, errUpdaterAdmissionPending) {
 				return
 			}
+			r.upgradeRetryRevision = control.Revision
+			r.upgradeRetryAt = r.cfg.Now().Add(r.cfg.RetryDelay)
 			r.updateUpgradeAttempt(control, func() {
 				r.upgradePhase = "download_failed"
 				r.upgradeError = "release download or updater confirmation failed"

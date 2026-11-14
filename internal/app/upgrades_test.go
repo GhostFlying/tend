@@ -530,7 +530,7 @@ func TestUpgradeExpiredServerGrantCannotBeExtendedByRetry(t *testing.T) {
 	if err != nil || !grant.Allowed {
 		t.Fatalf("grant %+v %v", grant, err)
 	}
-	h.clock.Advance(301 * time.Second)
+	h.clock.Advance(time.UnixMilli(upgradeRead(h).Deadline).Sub(h.clock.Now()) + time.Millisecond)
 	if refreshed := h.app.RefreshUpgradeGrant(grant); refreshed.Allowed || refreshed.RemainingMillis != 0 {
 		t.Fatal("expired receipt renewed authority", refreshed)
 	}

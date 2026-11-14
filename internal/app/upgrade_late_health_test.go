@@ -24,7 +24,7 @@ func TestUpgradeLateServerHealthReconcilesWithoutRenewingAuthority(t *testing.T)
 				t.Fatal(g, err)
 			}
 			before := upgradeRead(h)
-			h.clock.Advance(4 * time.Minute)
+			h.clock.Advance(time.UnixMilli(before.Deadline).Sub(h.clock.Now()) + time.Millisecond)
 			if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
 				t.Fatal(v)
 			}

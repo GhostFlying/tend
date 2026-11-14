@@ -218,6 +218,8 @@ type Runner struct {
 	resourceReconciled              bool
 	resourceBusy                    bool
 	resourceBlockers                []string
+	upgradeRetryRevision            int64
+	upgradeRetryAt                  time.Time
 	upgradePhase                    string
 	upgradeError                    string
 	downloadedBytes                 int64
