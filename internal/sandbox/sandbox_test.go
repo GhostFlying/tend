@@ -22,6 +22,7 @@ import (
 	"github.com/GhostFlying/tend/internal/serverkit"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 	"github.com/GhostFlying/tend/internal/views"
 )
 
@@ -115,9 +116,9 @@ func waitFor(t *testing.T, ctx context.Context, label string, check func() bool)
 }
 
 func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
-	// Owner child execution adds real coordination and acceptance turns; race
-	// instrumentation needs room for the complete interruption/recovery scenario.
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	// Keep real cold migration/seed outside the functional scenario watchdog.
+	serviceCtx, cancel := context.WithCancel(t.Context())
+	startup, finishStartup := testphase.Context(t, serviceCtx, "sandbox cold start and seed", 10*time.Minute)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -129,7 +130,7 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	done := make(chan error, 1)
 	var interrupting atomic.Bool
 	go func() {
-		done <- Run(ctx, Options{FastPacing: true, skipStory: true, Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
+		done <- Run(serviceCtx, Options{FastPacing: true, skipStory: true, Data: root, Listener: listener, replyDelta: func(ctx context.Context, _ harness.TurnInput) {
 			if interrupting.Load() {
 				<-ctx.Done()
 			}
@@ -152,9 +153,12 @@ func TestSandboxRealOwnerAPIAndRunner(t *testing.T) {
 	case err := <-done:
 		done <- err
 		t.Fatalf("sandbox startup: %v", err)
-	case <-ctx.Done():
-		t.Fatal("sandbox seed timed out")
+	case <-startup.Done():
+		t.Fatal(context.Cause(startup))
 	}
+	finishStartup()
+	ctx, finishScenario := testphase.Context(t, serviceCtx, "sandbox owner and runner scenario", 10*time.Minute)
+	defer finishScenario()
 	r := <-runtime
 	c := webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 	defer c.http.CloseIdleConnections()
@@ -697,8 +701,10 @@ func TestScriptInterruptionJoinsBeforeCompletion(t *testing.T) {
 }
 
 func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
+	serviceCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	var ctx context.Context
+	var finishScenario func()
 	root := t.TempDir()
 	var heartbeatReplies atomic.Int64
 	type started struct {
@@ -711,7 +717,9 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		runCtx, stopRun := context.WithCancel(ctx)
+		startup, finishStartup := testphase.Context(t, serviceCtx, "sandbox start or retained reopen", 10*time.Minute)
+		defer finishStartup()
+		runCtx, stopRun := context.WithCancel(serviceCtx)
 		ready, done := make(chan started, 1), make(chan error, 1)
 		transport := &http.Transport{}
 		t.Cleanup(transport.CloseIdleConnections)
@@ -739,9 +747,11 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 		case err := <-done:
 			done <- err
 			t.Fatalf("sandbox startup: %v", err)
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
+		case <-startup.Done():
+			t.Fatal(context.Cause(startup))
 		}
+		finishStartup()
+		ctx, finishScenario = testphase.Context(t, serviceCtx, "sandbox retained-data scenario", 8*time.Minute)
 		client := &webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 		t.Cleanup(client.http.CloseIdleConnections)
 		client.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "sandbox-restart-test", Scope: protocol.ScopeOwner}, &client.session)
@@ -798,9 +808,11 @@ func TestSandboxRetainedDataRestartReconcilesRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop()
+	finishScenario()
 	heartbeatReplies.Store(0)
 	second, retained, client, stopAgain := start()
 	defer stopAgain()
+	defer func() { finishScenario() }()
 	if fmt.Sprint(retained) != fmt.Sprint(demo) {
 		t.Fatal("restart duplicated or replaced demo identities")
 	}
@@ -949,7 +961,8 @@ func TestSandboxWorkerPacingCancellation(t *testing.T) {
 }
 
 func TestSandboxStory(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	serviceCtx, cancel := context.WithCancel(t.Context())
+	startup, finishStartup := testphase.Context(t, serviceCtx, "story cold start and seed", 10*time.Minute)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -963,7 +976,7 @@ func TestSandboxStory(t *testing.T) {
 	done := make(chan error, 1)
 	var first sync.Once
 	go func() {
-		done <- Run(ctx, Options{FastPacing: true, storyOnly: true, turnInput: func(input harness.TurnInput) harness.TurnInput {
+		done <- Run(serviceCtx, Options{FastPacing: true, storyOnly: true, turnInput: func(input harness.TurnInput) harness.TurnInput {
 			first.Do(func() { input.Repair = true })
 			return input
 		}, Data: root, Listener: listener, Ready: func(r *serverkit.Runtime, d Demo) {
@@ -992,9 +1005,12 @@ func TestSandboxStory(t *testing.T) {
 	case err := <-done:
 		done <- err
 		t.Fatalf("story startup: %v", err)
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+	case <-startup.Done():
+		t.Fatal(context.Cause(startup))
 	}
+	finishStartup()
+	ctx, finishScenario := testphase.Context(t, serviceCtx, "story scenario", 5*time.Minute)
+	defer finishScenario()
 	// The initial source was settled by a metadata-only repair. A recovery
 	// source must create the business object before seed advancement.
 	var recoveries int
@@ -1123,7 +1139,8 @@ func TestWebClientUsesEnclosingDeadline(t *testing.T) {
 }
 
 func TestSandboxInboxPendingHistoryAndRetry(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	serviceCtx, cancel := context.WithCancel(t.Context())
+	startup, finishStartup := testphase.Context(t, serviceCtx, "inbox cold start and seed", 10*time.Minute)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1133,7 +1150,7 @@ func TestSandboxInboxPendingHistoryAndRetry(t *testing.T) {
 	done := make(chan error, 1)
 	root := t.TempDir()
 	go func() {
-		done <- Run(ctx, Options{Scenario: "inbox", FastPacing: true, Data: root, Listener: listener, Ready: func(_ *serverkit.Runtime, demo Demo) { ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+		done <- Run(serviceCtx, Options{Scenario: "inbox", FastPacing: true, Data: root, Listener: listener, Ready: func(_ *serverkit.Runtime, demo Demo) { ready <- demo }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 	}()
 	defer func() {
 		cancel()
@@ -1152,9 +1169,12 @@ func TestSandboxInboxPendingHistoryAndRetry(t *testing.T) {
 	case err := <-done:
 		done <- err
 		t.Fatalf("inbox seed: %v", err)
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+	case <-startup.Done():
+		t.Fatal(context.Cause(startup))
 	}
+	finishStartup()
+	ctx, finishScenario := testphase.Context(t, serviceCtx, "inbox scenario", 2*time.Minute)
+	defer finishScenario()
 	client := webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 	defer client.http.CloseIdleConnections()
 	client.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "inbox-test", Scope: protocol.ScopeOwner}, &client.session)

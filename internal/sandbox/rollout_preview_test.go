@@ -11,10 +11,12 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/serverkit"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 )
 
 func TestRolloutPreviewThroughRealOwnerAndRunnerHTTP(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	serviceCtx, cancel := context.WithCancel(t.Context())
+	startup, finishStartup := testphase.Context(t, serviceCtx, "preview cold start and seed", 10*time.Minute)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -23,7 +25,7 @@ func TestRolloutPreviewThroughRealOwnerAndRunnerHTTP(t *testing.T) {
 	ready := make(chan Demo, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{Data: t.TempDir(), Listener: listener, Scenario: "rollout", FastPacing: true, Ready: func(_ *serverkit.Runtime, d Demo) { ready <- d }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
+		done <- Run(serviceCtx, Options{Data: t.TempDir(), Listener: listener, Scenario: "rollout", FastPacing: true, Ready: func(_ *serverkit.Runtime, d Demo) { ready <- d }}, slog.New(slog.NewTextHandler(testLog{t}, nil)))
 	}()
 	defer func() {
 		cancel()
@@ -42,9 +44,12 @@ func TestRolloutPreviewThroughRealOwnerAndRunnerHTTP(t *testing.T) {
 	case err := <-done:
 		done <- err
 		t.Fatal(err)
-	case <-ctx.Done():
-		t.Fatal("sandbox startup timed out")
+	case <-startup.Done():
+		t.Fatal(context.Cause(startup))
 	}
+	finishStartup()
+	ctx, finishScenario := testphase.Context(t, serviceCtx, "rollout preview scenario", 90*time.Second)
+	defer finishScenario()
 	c := webClient{t: t, ctx: ctx, url: "http://" + listener.Addr().String(), http: &http.Client{Transport: &http.Transport{}}}
 	defer c.http.CloseIdleConnections()
 	c.call(http.MethodPost, "/api/v1/session", protocol.SessionRequest{ClientID: "preview-test", Scope: protocol.ScopeOwner}, &c.session)

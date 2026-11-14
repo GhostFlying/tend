@@ -50,7 +50,17 @@ jobs:
         env:
           APP_TEST_SHARDS: 4
           TEST_GROUP: ${{ matrix.group }}
+          TEST_COUNT: 1
+          TEST_REPORT_DIR: ${{ runner.temp }}/race-reports
         run: make test
+      - name: retain native test events, including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: race-events-${{ matrix.group }}
+          path: ${{ runner.temp }}/race-reports
+          if-no-files-found: error
+          retention-days: 7
       - name: publish main build snapshot
         if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
         uses: actions/cache/save@v4
