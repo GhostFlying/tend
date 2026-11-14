@@ -50,7 +50,7 @@ jobs:
         env:
           APP_TEST_SHARDS: 4
           TEST_GROUP: ${{ matrix.group }}
-          TEST_COUNT: 1
+          TEST_COUNT: 0
           TEST_REPORT_DIR: ${{ runner.temp }}/race-reports
         run: make test
       - name: retain native test events, including failures

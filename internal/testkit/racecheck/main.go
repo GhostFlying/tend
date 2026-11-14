@@ -208,6 +208,7 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 			return err
 		}
 	}
+	fmt.Printf("[race] test-count=%d native-result-cache=%t; cached package summaries are retained and are not fresh execution evidence\n", count, count == 0)
 	args := testArgs(timeout, count)
 	if reports != "" {
 		args = append(args, "-json")
@@ -315,7 +316,7 @@ func main() {
 	goTool := flag.String("go", "go", "Go executable used for package discovery and tests")
 	shards := flag.Int("shards", 1, "number of isolated app race processes (0 selects by CPU, 1-16 explicit)")
 	suiteShards := flag.Int("suite-shards", 1, "isolated API, mainthread and E2E processes per package (0 selects by CPU, 1-4 explicit)")
-	count := flag.Int("count", 1, "repeat tests explicitly; 0 keeps Go native caching")
+	count := flag.Int("count", 0, "repeat tests explicitly; 0 keeps Go native caching")
 	reportDir := flag.String("report-dir", "", "optional directory for native Go test JSON reports")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
 	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, other")

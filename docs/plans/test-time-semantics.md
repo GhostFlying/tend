@@ -13,7 +13,7 @@ Refs: D25、D130（测试策略；不改变产品行为）。
 1. 复用 `storefixture.Template` 的真实迁移、checkpoint、私有独立副本，为 serverkit 非迁移功能用例预备当前 schema。fixture 准备和功能动作各自有明确、可诊断的 context；不注入伪造 Store、不修改迁移 SQL、不改变产品 `Run`。
 2. Sandbox 端到端场景保留真实空库启动和真实 retained restart。分开准备/首次 ready、场景、重开 ready/恢复与清理的有限预算。服务生命周期的 context 不被短场景初始化耗时消耗；启动失败仍被原完成通道传播，退出仍 join 实际 goroutine。不得缓存或跳过这两个真实生命周期路径。
 3. 增加小型共享 testphase 诊断辅助，区分阶段名、实际耗时、deadline、取消原因；业务时间不依赖它。用可控虚拟时间验证慢 setup 不耗尽之后的 scenario、deadline/父取消/真实错误不被吞并。
-4. 本地完整入口与 Actions 使用相同 `make test`/racecheck、完整动态发现和分片。正式验证默认 `TEST_COUNT=1`，允许显式 `TEST_COUNT=0` 做开发缓存，但不得宣称实际执行。保留模块/编译缓存；原生 JSON 报告持久化且 Actions 在失败时也上传原件。验证命令覆盖、失败 peer 和所有新测试分组归属。
+4. 本地完整入口与 Actions 使用相同 `make test`/racecheck、完整动态发现和分片。默认保留 `TEST_COUNT=0` 的 Go 原生结果缓存；新鲜定向回归、测量或逐例执行证明显式 `TEST_COUNT=1`，缓存命中不得宣称为本次实际执行。保留模块/编译缓存；原生 JSON 报告持久化且 Actions 在失败时也上传原件。验证命令覆盖、失败 peer 和所有新测试分组归属。
 5. 审计既有短 sleep/poll 和取消测试；仅修复与已暴露初始化耦合相同故障链，不进行全仓机械超时替换。保留真正的生产重试/租约/清理语义、错误与 unknown。
 
 ## 验收与限界

@@ -2180,4 +2180,4 @@ server停机只结束可重读的claim、消息、问题、日志等待及事件
 
 业务时钟用于到期、租约与重试的语义断言；fixture 初始化和真实执行速度不构成这些语义的性能门槛。serverkit 非迁移功能用例复用真实迁移后关闭的独立数据库模板，准备阶段与功能动作分别记录有限 watchdog。Sandbox 的冷启动、seed 与保留数据重开仍走真实路径，启动 ready 后才开始后续场景预算；服务父 context 保留到真实 goroutine 完成清理。迁移、失败恢复和重开专门测试不使用模板替代。
 
-本地与 Actions 共用动态发现、race 与分片入口，默认 `TEST_COUNT=1`，保留编译/模块缓存；显式 `TEST_COUNT=0` 仅用于开发迭代，缓存命中不算实际执行证据。原生逐例 JSON 持久保存，CI 即使失败也上传。墙钟 watchdog 只用于有限防卡死和诊断；性能 SLA 必须另有环境契约。见 `docs/plans/test-time-semantics.md`。
+本地与 Actions 共用动态发现、race 与分片入口，默认保留 `TEST_COUNT=0` 的 Go 原生结果缓存与编译/模块缓存；需要新鲜回归或测量时显式 `TEST_COUNT=1`。缓存命中不是本次重新执行或耗时证据。原生逐例 JSON 持久保存，CI 即使失败也上传。墙钟 watchdog 只用于有限防卡死和诊断；性能 SLA 必须另有环境契约。见 `docs/plans/test-time-semantics.md`。

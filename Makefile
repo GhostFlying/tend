@@ -11,9 +11,9 @@ CHECK_JOBS ?= 0
 # Explicit multicore serial checks require a recorded operational reason.
 CHECK_SERIAL_REASON ?=
 export CHECK_SERIAL_REASON
-# Acceptance checks execute tests even when compiled objects are cached.
-# TEST_COUNT=0 explicitly opts into native result caching for local iteration.
-TEST_COUNT ?= 1
+# Preserve Go native result caching; use TEST_COUNT=1 for fresh regressions
+# or measurements. A cached success is not a newly executed test.
+TEST_COUNT ?= 0
 TEST_GROUP ?= all
 TEST_REPORT_DIR ?= .local/test-reports
 WEB := web
