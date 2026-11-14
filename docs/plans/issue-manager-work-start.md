@@ -30,3 +30,15 @@ server、runner 与 journal，模型 provider 为 fake harness。不会通过测
 手动 set_status(in_progress) 或直接 SQL 填入目标状态证明本修复。生产当前
 Issue 的人工正常状态维护不作为修复验收。已有只读状态接口与 CLI 无需新增命令，
 server/runner wire 不变。
+
+## 完整检查中的取消回归同步
+
+完整 race 检查揭示已有 pending-read 回归在启动 Models goroutine 后立即报告
+物理停止，没有证明只读请求已经入队。保留原断言的诊断捕获到失败时调用仍在
+ManagerRunEnded 的 SQLite 新读连接初始化中；它最终正确返回 ErrRejected，
+但混入了入队前准备时间，不能据此证明 pending 请求未被释放。
+
+先通过既有 Changes 通知和正式 manager.native_claim 确认原 models 请求及 ID，
+再报告原 Run 物理停止。保留原 3 秒业务 context、300ms 退出断言及全部失败
+原件；不增加生产等待时间、不跳过检查。定向 race 验证同步后的真实入队到停止
+路径，再由原 reviewer Task 核对增量；完整最终候选检查仍为合入门槛。

@@ -94,11 +94,28 @@ func TestRunnerTransportPendingReadEndsWithItsPhysicalCarrier(t *testing.T) {
 	defer cancel()
 	session := RunnerSession(ctx, e.app, "receipt-reader-run")
 	result := make(chan error, 1)
+	// Goroutine launch alone does not prove the call finished its preflight
+	// reads. Observe the original pending request at the provider boundary.
+	queued := e.app.Changes().Wait()
 	go func() { _, err := session.(harness.ModelCatalog).Models(ctx); result <- err }()
+	select {
+	case <-queued:
+	case <-ctx.Done():
+		t.Fatal("observational request was not queued", ctx.Err())
+	}
+	claim := app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim}
+	op, err := e.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: claim.Operation(), Target: protocol.Target{Type: "run", ID: "receipt-reader-run"}, Payload: json.RawMessage(`{}`)}, claim)
+	if err != nil || op.Error != nil {
+		t.Fatal(op, err)
+	}
+	var pending protocol.ManagerNativeRequest
+	if err := json.Unmarshal(op.Result, &pending); err != nil || pending.ID == "" || pending.Method != "models" {
+		t.Fatal("physical stop must follow the original pending models request", pending, err)
+	}
 	// There is no native provider response. The exact original physical stop
 	// must release this observational caller as well as the event subscriber.
 	raw, _ := json.Marshal(protocol.ManagerStoppedPayload{Reason: "Original process stopped", LastSequence: 0})
-	op, err := e.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeStopped, Target: protocol.Target{Type: "run", ID: "receipt-reader-run"}, Payload: raw}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
+	op, err = e.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeStopped, Target: protocol.Target{Type: "run", ID: "receipt-reader-run"}, Payload: raw}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
 	if err != nil || op.Error != nil {
 		t.Fatal(op, err)
 	}
