@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 )
 
 func archiveControlSocket(configured string, upgrade *UpgradeConfig, dataDir string) (string, error) {
@@ -35,12 +36,23 @@ func archiveControlSocket(configured string, upgrade *UpgradeConfig, dataDir str
 	return socket, nil
 }
 
-func shutdownHTTP(ctx context.Context, server *http.Server, budget time.Duration, log *slog.Logger) error {
+func shutdownHTTP(ctx context.Context, server *http.Server, budget time.Duration, log *slog.Logger, trackers ...*httpdiag.Tracker) error {
+	for _, tracker := range trackers {
+		tracker.Snapshot(ctx, "drain_started")
+	}
+	defer func() {
+		for _, tracker := range trackers {
+			tracker.Snapshot(ctx, "drain_finished")
+		}
+	}()
 	bounded, cancel := context.WithTimeout(ctx, budget)
 	err := server.Shutdown(bounded)
 	cancel()
 	if err == nil {
 		return nil
+	}
+	for _, tracker := range trackers {
+		tracker.Snapshot(ctx, "drain_timeout")
 	}
 	log.ErrorContext(ctx, "HTTP shutdown has not drained accepted requests; waiting without forcing connections closed", "err", err)
 	// Readers/store must stay open until real requests finish. The original

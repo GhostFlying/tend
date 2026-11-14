@@ -302,3 +302,14 @@ server/runner 能力接入仍须按部署计划逐台完成；旧服务不会因
 监督器准备明确失败且 installer 尚未派发时，按原请求持久保存 rejection 证明。`self-update status --plan <original-plan>` 可在响应丢失或重启后恢复该证明；业务批次取得证明后可取消并另开批次。无法确认派发结果仍是 unknown，不由超时或缺少 journal 推导拒绝。
 
 legacy bootstrap 仅在可验证的非特权原子状态 writer 上使用目录写围栏；直接业务数据文件不能与 updater 状态文件共用该目录。交接日志位于私有 `self-update` 子目录。旧 writer 停止且原监督锁已取得后恢复原权限；停止未知时保留围栏与原计划供对账，不通过恢复写权限冒充完成。
+
+
+### 安装窗口与停机诊断
+
+普通新批次以 `grant_duration` 为安装额度，runner重启覆盖另包含 `restart_budget` 的预留，并受既有维护上限与原整体截止约束。实际server授权还会按runner报告的保守截止缩短；读取 `remaining_ms` 和原截止，不把配置额度当作保证剩余时间。已发批次或授权不会因再次观察而续期。
+
+协调器和runner在实际状态变化时及时观察/ACK，周期心跳仍兜底；提速不跳过排空、不同健康样本和安装回执。耗时对比须使用同样的替换范围，不能将已有部分组件安装的批次当作全量性能基线。
+
+停机日志包含 `server shutdown phase`、`HTTP shutdown requests`、`HTTP shutdown active request` 及限量的 `HTTP request drained`。用规范化route、method、trace_id/request_id、request_kind、elapsed_ms、cancellation_source与各阶段时间区分只读等待、在途写入和后台关闭；原文件、URL参数及凭据不记录。空闲claim、消息/问题/日志长等待会返回当前事实，真正写入和文件传输仍继续排空。
+
+监督器终态日志的 `historical_error` 保留曾发生的错误，`error` 表示本次记录的新错误；以真实phase和回执判断终局。自更新明确拒绝的原身份status保留首次诊断原因，旧记录未保存时仍为unknown；不能用后来成功填补旧退出或拒绝原因。

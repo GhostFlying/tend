@@ -182,6 +182,7 @@ type Runner struct {
 	c              *client
 	reconcile      chan struct{}
 	workspaceWake  chan struct{}
+	heartbeatWake  chan struct{}
 	helloGate      chan struct{}
 
 	mu      sync.Mutex
@@ -259,6 +260,7 @@ func New(cfg Config) *Runner {
 			timeout: cfg.RequestTimeout},
 		reconcile:      make(chan struct{}, 1),
 		workspaceWake:  make(chan struct{}, 1),
+		heartbeatWake:  make(chan struct{}, 1),
 		helloGate:      make(chan struct{}, 1),
 		ttl:            time.Minute,
 		ttlWake:        make(chan struct{}),
@@ -921,8 +923,18 @@ func (r *Runner) heartbeats(ctx context.Context) {
 		case <-r.ttlChanged():
 			continue
 		case <-time.After(min(r.cfg.HeartbeatInterval, r.leaseTTL()/4)):
+		case <-r.heartbeatWake:
 		}
 		r.heartbeat(ctx)
+	}
+}
+
+// State changes coalesce in the existing serial heartbeat loop. Replayed
+// controls and byte-progress alone never cause another heartbeat.
+func (r *Runner) requestHeartbeat() {
+	select {
+	case r.heartbeatWake <- struct{}{}:
+	default:
 	}
 }
 

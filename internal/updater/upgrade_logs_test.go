@@ -28,6 +28,17 @@ func TestUpgradeLogsRetainFirstErrorAndOnlyDurableTransitions(t *testing.T) {
 		t.Fatal("unchanged polling duplicated a transition", err, out.String())
 	}
 	h.s.state.Operation.Phase = "committed"
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["level"] != "INFO" || record["error"] != "" || record["historical_error"] != "exact original stop error" {
+		t.Fatal("terminal success looked like a current failure", record)
+	}
+	out.Reset()
+	h.s.state.Operation.Phase = "cancelled"
 	h.s.writeState = func(string, State) error { return errors.New("disk unavailable") }
 	if err := h.s.save(); err == nil || out.Len() != 0 {
 		t.Fatal("failed persistence fabricated a commit log", err, out.String())

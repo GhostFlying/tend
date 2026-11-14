@@ -23,7 +23,9 @@ func TestUpgradeLostServerGrantRestoresOnlyWithNoStartProof(t *testing.T) {
 		t.Fatal(g, err)
 	}
 	before := upgradeRead(h)
-	h.clock.Advance(4 * time.Minute)
+	// Cross the actual installation plus restart cutoff, not the old
+	// shortened fixed-window assumption. No authority is renewed.
+	h.clock.Advance(time.UnixMilli(before.Deadline).Sub(h.clock.Now()) + time.Millisecond)
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerMaintenance)
 	}

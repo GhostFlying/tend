@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -64,8 +65,8 @@ type Server struct {
 	endStream sync.Once
 }
 
-// EndStreams ends the event streams, for a server that is shutting down:
-// unlike other requests they never finish by themselves.
+// EndStreams ends event streams and re-readable owner waits on shutdown.
+// Accepted writes and original file transfers keep their request lifetime.
 func (s *Server) EndStreams() { s.endStream.Do(func() { close(s.ending) }) }
 
 // New returns a Server. The store is used for reads only; secret is the
@@ -89,7 +90,7 @@ func (s *Server) Handler() http.Handler {
 	for _, route := range s.ownerRoutes() {
 		mux.HandleFunc(route.pattern, route.handler)
 	}
-	return s.deploymentGuard(s.archiveAdmission(mux))
+	return s.deploymentGuard(s.archiveAdmission(httpdiag.Routes(mux)))
 }
 
 var statusOf = map[protocol.Code]int{

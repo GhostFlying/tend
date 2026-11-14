@@ -380,6 +380,9 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	if err := r.cfg.Journal.SaveControl(ctx, stored); err != nil {
 		return fmt.Errorf("persist runner control: %w", err)
 	}
+	if next.Revision > r.control.Revision {
+		r.requestHeartbeat()
+	}
 	modeChanged := r.control.Mode != stored.Mode || r.control.UpgradeID != stored.UpgradeID
 	// Retained self-update targets keep their original request and journal.
 	// Their new control revision consumes the previous local error observation.

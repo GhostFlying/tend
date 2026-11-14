@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -28,6 +29,9 @@ func (s *Server) runMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	timer := time.NewTimer(time.Duration(wait) * time.Second)
 	defer timer.Stop()
+	if wait > 0 {
+		httpdiag.Waiting(r.Context())
+	}
 	for {
 		changed := s.app.Changes().Wait()
 		page, err := s.app.RunMessages(r.Context(), p, p.Subject, 0, 1, true)
@@ -44,6 +48,10 @@ func (s *Server) runMessages(w http.ResponseWriter, r *http.Request) {
 		case <-timer.C:
 			wait = 0
 		case <-r.Context().Done():
+			return
+		case <-s.cfg.Stopping:
+			httpdiag.WaitStopped(r.Context())
+			writeJSON(w, http.StatusOK, page)
 			return
 		}
 	}

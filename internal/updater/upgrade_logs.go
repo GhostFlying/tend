@@ -21,10 +21,14 @@ func (s *Supervisor) logTransition(before, after State) {
 		old := before.Operation
 		if old == nil || old.ID != op.ID || old.Phase != op.Phase || old.LastError != op.LastError || before.Process != after.Process {
 			level := slog.LevelInfo
-			if op.LastError != "" {
+			currentError := op.LastError
+			if op.Phase == "committed" || op.Phase == "cancelled" || old != nil && old.ID == op.ID && old.LastError == op.LastError {
+				currentError = ""
+			}
+			if currentError != "" {
 				level = slog.LevelWarn
 			}
-			attrs := []any{"instance_id", s.cfg.InstanceID, "upgrade_id", op.Binding.UpgradeID, "operation_id", op.ID, "phase", op.Phase, "error", op.LastError, "elapsed_ms", now.Sub(op.StartedAt).Milliseconds(), "grant_deadline_boottime_ms", op.GrantDeadlineMillis, "process_pid", after.Process.PID, "process_start_ticks", after.Process.StartTicks, "process_launch_id", after.Process.LaunchID, "artifact_sha256", after.Process.SHA256, "health_count", op.HealthCount, "exit_observed", op.LaunchExit != nil}
+			attrs := []any{"instance_id", s.cfg.InstanceID, "upgrade_id", op.Binding.UpgradeID, "operation_id", op.ID, "phase", op.Phase, "error", currentError, "historical_error", op.LastError, "elapsed_ms", now.Sub(op.StartedAt).Milliseconds(), "grant_deadline_boottime_ms", op.GrantDeadlineMillis, "process_pid", after.Process.PID, "process_start_ticks", after.Process.StartTicks, "process_launch_id", after.Process.LaunchID, "artifact_sha256", after.Process.SHA256, "health_count", op.HealthCount, "exit_observed", op.LaunchExit != nil}
 			if op.LaunchExit != nil {
 				attrs = append(attrs, "exit_pid", op.LaunchExit.PID, "exit_launch_id", op.LaunchExit.LaunchID, "exit_code", op.LaunchExit.ExitCode, "exit_signal", op.LaunchExit.Signal)
 			}

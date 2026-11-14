@@ -25,6 +25,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness/remote"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -61,6 +62,8 @@ func HashToken(token string) string {
 
 // Config tunes the server. Zero values select the defaults.
 type Config struct {
+	// Stopping ends only re-readable waits, never an in-flight business write.
+	Stopping      <-chan struct{}
 	NativeWorkers *remote.Broker
 
 	ReleaseDir string
@@ -112,7 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /runner/v1/questions", s.questions)
 	mux.HandleFunc("GET /runner/v1/questions/{id}", s.questions)
 	mux.HandleFunc("GET /runner/v1/messages", s.runMessages)
-	return mux
+	return httpdiag.Routes(mux)
 }
 
 type response struct {
@@ -275,6 +278,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, &env, err)
 		return
 	}
+	httpdiag.Identity(r.Context(), env.RequestID, env.TraceID, "runner_rpc")
 	if authErr != nil {
 		// Historical run tokens only authenticate this exact RPC and delivery.
 		// GETs and every other operation retain ordinary lease authentication.
@@ -522,12 +526,16 @@ func (s *Server) claim(ctx context.Context, p protocol.Principal, env *protocol.
 			res.Assignment.RunToken = RunToken(s.secret, res.Assignment.LeaseID)
 			return withResult(op, res)
 		}
+		httpdiag.Waiting(ctx)
 		select {
 		case <-changed:
 		case <-deadline.C:
 			return op, nil
 		case <-ctx.Done():
 			return protocol.Operation{}, ctx.Err()
+		case <-s.cfg.Stopping:
+			httpdiag.WaitStopped(ctx)
+			return op, nil
 		}
 	}
 }

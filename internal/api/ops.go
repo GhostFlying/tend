@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -107,6 +108,9 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not available to owners", env.Operation))
 		return
+	}
+	if env.Validate() == nil {
+		httpdiag.Identity(r.Context(), env.RequestID, env.TraceID, env.Operation)
 	}
 	var op protocol.Operation
 	if env.Operation == app.OpManagerMigration {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -222,6 +223,7 @@ func (s *Server) runLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	var deadline <-chan time.Time
 	if wait > 0 {
+		httpdiag.Waiting(r.Context())
 		t := time.NewTimer(min(time.Duration(wait)*time.Second, maxLogWait))
 		defer t.Stop()
 		deadline = t.C
@@ -250,6 +252,10 @@ func (s *Server) runLogs(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, page)
 			return
 		case <-ctx.Done():
+			return
+		case <-s.ending:
+			httpdiag.WaitStopped(ctx)
+			writeJSON(w, http.StatusOK, page)
 			return
 		}
 	}

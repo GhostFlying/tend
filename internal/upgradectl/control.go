@@ -52,8 +52,11 @@ type Config struct {
 	RestartMillis             int64
 	GrantMillis               int64
 	Interval                  time.Duration
+	// Changes observes committed external facts while a normal batch is active.
+	Changes func() <-chan struct{}
 }
 type Controller struct {
+	wake            chan struct{}
 	loggedUpgradeID string
 	stepErrors      map[string]string
 	recovery        *recoveryRuntime
@@ -111,9 +114,14 @@ func New(cfg Config, a Backend, ids protocol.IDGen, observe func(context.Context
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("upgradectl: release directory must be private")
 	}
-	return &Controller{cfg: cfg, app: a, ids: ids, observe: observe, log: log}, nil
+	return &Controller{cfg: cfg, app: a, ids: ids, observe: observe, log: log, wake: make(chan struct{}, 1)}, nil
 }
 func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) (view protocol.UpgradeView, err error) {
+	defer func() {
+		if err == nil {
+			c.requestTick()
+		}
+	}()
 	started := c.cfg.Now()
 	step := "verify_release"
 	defer func() {
@@ -235,6 +243,13 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 	err = json.Unmarshal(op.Result, &v)
 	return v, err
 }
+
+func (c *Controller) requestTick() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
 func (c *Controller) Change(ctx context.Context, action string, r protocol.UpgradeChangeRequest) (protocol.UpgradeView, error) {
 	if !protocol.ValidID(protocol.PrefixRequest, r.RequestID) || !release.ValidID(r.UpgradeID) || r.ExpectedControlRevision < 1 {
 		return protocol.UpgradeView{}, errors.New("upgradectl: invalid local control request")
@@ -253,6 +268,9 @@ func (c *Controller) Change(ctx context.Context, action string, r protocol.Upgra
 	}
 	var v protocol.UpgradeView
 	err = json.Unmarshal(op.Result, &v)
+	if err == nil {
+		c.requestTick()
+	}
 	return v, err
 }
 func (c *Controller) tick(ctx context.Context) error {
@@ -426,10 +444,20 @@ func (c *Controller) RunWith(ctx context.Context, archive http.Handler) error {
 			if err := c.tick(ctx); err != nil && ctx.Err() == nil {
 				c.log.WarnContext(ctx, "upgrade reconciliation deferred", "err", err)
 			}
+			// Subscribe after our own writes: they must not trigger a busy loop.
+			// A raced external commit still has the existing periodic fallback.
+			var changed <-chan struct{}
+			if c.cfg.Changes != nil {
+				if current, err := c.app.CurrentUpgrade(ctx); err == nil && current.Status == "running" {
+					changed = c.cfg.Changes()
+				}
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+			case <-changed:
+			case <-c.wake:
 			}
 		}
 	}()
