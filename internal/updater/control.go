@@ -53,6 +53,9 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	path := SocketPath(s.cfg)
+	if err := protocol.ValidateUnixSocketPath("state_dir/control.sock", path); err != nil {
+		return err
+	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return errors.New("updater: control path exists and is not a socket")

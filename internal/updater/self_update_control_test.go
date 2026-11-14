@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 func selfControlFixture(t *testing.T, handler http.HandlerFunc) string {
@@ -20,7 +21,7 @@ func selfControlFixture(t *testing.T, handler http.HandlerFunc) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix socket fixture")
 	}
-	path := filepath.Join(t.TempDir(), "control.sock")
+	path := filepath.Join(testkit.SocketDir(t), "control.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)

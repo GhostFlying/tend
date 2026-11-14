@@ -19,6 +19,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 // This opt-in test creates only its own transient user unit. It never names,
@@ -41,11 +42,7 @@ func runHandoffSystemdFixture(t *testing.T, interrupted bool) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("", "tend-fr-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := testkit.SocketDir(t)
 	stateDir := filepath.Join(root, "state")
 	if err := os.Mkdir(stateDir, 0o700); err != nil {
 		t.Fatal(err)

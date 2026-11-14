@@ -2201,3 +2201,15 @@ PR CI 暂时继续八组完整 race、Web、全部浏览器、交叉编译及发
 本地与 PR CI 保留完整动态发现及 race 断言，将 serverkit、sandbox、runner 三个重包从 other 拆为独立组；本地调度继续按有效 CPU 有界执行，低容量 E2E 仍隔离，全部新包默认进入 other。CI 静态八组、Web、浏览器、跨平台及发布构建全部执行；组角色的构建缓存按现有 main 保留规则清理。默认 Go 原生结果缓存保持，强制新鲜验收使用 TEST_COUNT=1，缓存命中显式区分。
 
 本地按真实来源与反向依赖生成临时影响计划；PR CI 仅输出影子计划，不据此减少覆盖。正式交付验收显式 CHECK_MODE=full。未知来源、协议、迁移及检查基础设施变更扩大为全量；不新增每日任务、永久证据账本或审批流程。计划见 database-test-delivery.md、database-access-reuse.md、test-time-semantics.md 与 affected-validation.md。
+## D237：本机通信地址与长数据目录分离
+
+Unix pathname socket 的预算按目标平台 sockaddr_un 的字节容量计算，包含终止符。
+现有控制入口在删除旧端点或监听前校验完整地址，报告实际字段和字节限制，不悄悄
+改地址、改 cwd 或替换成失去文件权限保护的 abstract socket。
+
+测试和开发沙盒由既有 testkit 分配短、真实、私有、随机唯一的运行目录；长数据、
+报告与缓存目录保留原用途。沙盒明确选择短控制地址，保留原真实数据目录检查。
+updater 默认 StateDir/control.sock 不变，相应测试选择短 StateDir；先关闭本轮
+listener/进程后清理目录。此约定不新增 Agent 启动器、统一检查容器或生产配置字段。
+
+实施见 `docs/plans/post-mainline-runtime-reliability.md`。

@@ -15,6 +15,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 var verdictTool = harness.ToolSpec{Name: "submit_verdict", Description: "deliver the verdict", InputSchema: json.RawMessage(`{"type":"object"}`)}
@@ -22,12 +23,7 @@ var verdictTool = harness.ToolSpec{Name: "submit_verdict", Description: "deliver
 // socketPath is short enough for a unix socket on every platform.
 func socketPath(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "tb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	return filepath.Join(dir, "s")
+	return filepath.Join(testkit.SocketDir(t), "s")
 }
 
 type calls struct {

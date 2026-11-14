@@ -11,6 +11,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
 	"github.com/GhostFlying/tend/internal/httpdiag"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func archiveControlSocket(configured string, upgrade *UpgradeConfig, dataDir string) (string, error) {
@@ -32,6 +33,9 @@ func archiveControlSocket(configured string, upgrade *UpgradeConfig, dataDir str
 	}
 	if upgrade != nil && socket != upgrade.ControlSocket {
 		return "", errors.New("control_socket and upgrades.control_socket must select the same local listener")
+	}
+	if err := protocol.ValidateUnixSocketPath("control_socket", socket); err != nil {
+		return "", err
 	}
 	return socket, nil
 }

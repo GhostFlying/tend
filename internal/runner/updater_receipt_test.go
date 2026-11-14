@@ -38,7 +38,7 @@ func TestHeartbeatCarriesOnlyMatchingTerminalSupervisorRollback(t *testing.T) {
 			case "incomplete":
 				state.Operation.Phase = "rollback_starting"
 			}
-			socket := filepath.Join(t.TempDir(), "updater.sock")
+			socket := filepath.Join(testkit.SocketDir(t), "updater.sock")
 			ln, err := net.Listen("unix", socket)
 			if err != nil {
 				t.Skipf("unix socket unavailable: %v", err)

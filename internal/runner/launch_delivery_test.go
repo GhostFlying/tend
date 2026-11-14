@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -41,11 +40,7 @@ func TestFault_UndeliveredLaunchFinalizesAfterRestart(t *testing.T) {
 			if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
 				t.Fatal(err)
 			}
-			sockets, err := os.MkdirTemp("", "tld-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { os.RemoveAll(sockets) })
+			sockets := testkit.SocketDir(t)
 			alive, failClose := true, true
 			launches, sends, closes := 0, 0, 0
 			client := &orca.Client{Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -81,7 +82,7 @@ func TestCancelledTombstoneFencesLateUpgradePOSTAndRetainsNextBatch(t *testing.T
 	entered, releaseOld := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	defer once.Do(func() { close(releaseOld) })
-	socket := filepath.Join(root, "control.sock")
+	socket := filepath.Join(testkit.SocketDir(t), "control.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Skipf("unix socket unavailable: %v", err)

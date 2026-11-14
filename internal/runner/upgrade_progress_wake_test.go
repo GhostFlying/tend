@@ -84,8 +84,8 @@ func TestUpgradeProgressCannotRedispatchFailedDownload(t *testing.T) {
 	r.cfg.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	r.c.log = r.cfg.Log
 	r.cfg.HeartbeatInterval, r.cfg.RetryDelay = time.Hour, time.Hour
-	r.cfg.UpdaterSocket = filepath.Join(t.TempDir(), "service.sock")
-	r.cfg.UpdaterControlSocket = filepath.Join(t.TempDir(), "supervisor.sock")
+	r.cfg.UpdaterSocket = filepath.Join(testkit.SocketDir(t), "service.sock")
+	r.cfg.UpdaterControlSocket = filepath.Join(testkit.SocketDir(t), "supervisor.sock")
 	r.cfg.UpdaterBundleDir = t.TempDir()
 	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "original", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: strings.Repeat("a", 64), ManifestSize: 1}}
 	var downloads atomic.Int32

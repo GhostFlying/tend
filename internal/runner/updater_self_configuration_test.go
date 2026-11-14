@@ -9,6 +9,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/updater"
 	"net"
 	"net/http"
@@ -26,7 +27,7 @@ func selfConfigurationSocket(t *testing.T, h http.HandlerFunc) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix socket fixture")
 	}
-	p := filepath.Join(t.TempDir(), "u.sock")
+	p := filepath.Join(testkit.SocketDir(t), "u.sock")
 	l, e := net.Listen("unix", p)
 	if e != nil {
 		t.Fatal(e)

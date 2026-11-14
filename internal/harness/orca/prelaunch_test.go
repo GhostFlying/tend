@@ -39,11 +39,7 @@ func TestOwnerConfigPrelaunchProofRequiresFreshFirstAttempt(t *testing.T) {
 				t.Fatal(err)
 			}
 			clock := testkit.NewClock()
-			sockets, err := os.MkdirTemp("", "tnp-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.RemoveAll(sockets) })
+			sockets := testkit.SocketDir(t)
 			calls := 0
 			c := &Client{Exec: func(context.Context, string, []string) ([]byte, error) {
 				calls++

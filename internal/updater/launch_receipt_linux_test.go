@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"os"
 	"path/filepath"
 	"strings"
@@ -204,11 +205,7 @@ func TestOwnedLaunchExitRejectsChangedFacts(t *testing.T) {
 
 func ownedLaunchTestDirectory(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return dir
+	return testkit.SocketDir(t)
 }
 
 func awaitOwnedLaunchExit(t *testing.T, cfg Config, launch, sha string) *LaunchExitProof {

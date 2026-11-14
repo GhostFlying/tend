@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -66,7 +67,7 @@ func (s *stagedCancelStub) serve(w http.ResponseWriter, q *http.Request) {
 }
 func startCancelStub(t *testing.T, s *stagedCancelStub) string {
 	t.Helper()
-	socket := filepath.Join(t.TempDir(), "control.sock")
+	socket := filepath.Join(testkit.SocketDir(t), "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Skipf("unix socket unavailable: %v", err)
@@ -179,7 +180,7 @@ func TestStagedCancellationRequiresExplicitMarkerAndMatchingSafeOperation(t *tes
 func TestSlowUpdaterCancellationDoesNotBlockControlApplication(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	socket := filepath.Join(t.TempDir(), "slow.sock")
+	socket := filepath.Join(testkit.SocketDir(t), "slow.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Skipf("unix socket unavailable: %v", err)
