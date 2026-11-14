@@ -129,7 +129,19 @@ type CapabilityPage struct {
 	AsOf  int64                  `json:"as_of"`
 }
 
+// ExecutorReadiness is an observation of the configured ordinary adapter, not
+// admission for a Task or proof that a capability's native tool works.
+type ExecutorReadiness struct {
+	State            string `json:"state"`
+	Reason           string `json:"reason"`
+	Explanation      string `json:"explanation"`
+	ObservedAtMillis int64  `json:"observed_at_ms"`
+	CheckedAtMillis  int64  `json:"checked_at_ms"`
+}
+
 type AgentCapabilityView struct {
+	DeclarationState   string                       `json:"declaration_state"`
+	ExecutorReadiness  ExecutorReadiness            `json:"executor_readiness"`
 	SchedulingReason   *QueueWaitReason             `json:"scheduling_reason,omitempty"`
 	Binding            AgentRuntimeReference        `json:"runtime_binding_ref"`
 	Categories         []string                     `json:"categories"`

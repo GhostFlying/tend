@@ -1608,8 +1608,10 @@ export interface AgentCapabilityView {
   agent_revision: number;
   categories: string[] | null;
   current: CapabilityMatch;
+  declaration_state: string;
   declared: CapabilityReference[] | null;
   definition_statuses?: CapabilityDefinitionStatus[];
+  executor_readiness: ExecutorReadiness;
   identity: AgentIdentity;
   pin?: RunExecutionPin;
   purposes: string[] | null;
@@ -1657,6 +1659,17 @@ export interface CapabilityDefinition {
   state: string;
   title: string;
   verification_policy: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ExecutorReadiness".
+ */
+export interface ExecutorReadiness {
+  checked_at_ms: number;
+  explanation: string;
+  observed_at_ms: number;
+  reason: string;
+  state: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

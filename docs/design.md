@@ -2261,3 +2261,15 @@ listener/进程后清理目录。此约定不新增 Agent 启动器、统一检�
 
 retained pin 保留原配置与拒绝事实，不改变选择、租约、资源、原生关闭或恢复规则。
 无需历史数据迁移或新监督框架。见 `docs/plans/executor-observation-isolation.md`。
+
+## D242：候选声明与普通执行器观察分离
+
+无任务要求的目录中，`declaration_state` 仅说明配置声明是否为空，
+`executor_readiness` 独立说明 ready/unavailable/unknown、观察时间与原因；
+空声明不表示无法执行普通任务。目录的 `current.required` 为空，eligible 仅表示
+普通执行器被观察为 ready，不承诺具体任务准入或验证原生工具。
+
+具体 Task 按真实冻结 spec/role 匹配 required，保留原身份 pin、续接、runtime、
+host、slot、租约和共享资源准入；无额外能力要求也不能绕过普通限制。
+只增加服务端只读视图字段，不修改 runner 通信、存储、配置 hash 或调度策略。
+见 `docs/plans/capability-candidate-readiness.md`。
