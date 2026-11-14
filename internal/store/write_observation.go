@@ -118,6 +118,7 @@ type WriteObservation struct {
 	PoolOpenConnections   int
 	PoolInUse             int
 	PoolIdle              int
+	ReaderPool            sql.DBStats
 	Phases                []WritePhaseDuration
 }
 
@@ -319,6 +320,10 @@ func (s *Store) finishWriteObservation(c *writeCall, err error) {
 	stats := s.write.Stats()
 	o.PoolWaitCountTotal, o.PoolWaitDurationTotal = stats.WaitCount, stats.WaitDuration
 	o.PoolOpenConnections, o.PoolInUse, o.PoolIdle = stats.OpenConnections, stats.InUse, stats.Idle
+	// Writer-only fault/early-connection boundaries have no reader pool.
+	if s.read != nil {
+		o.ReaderPool = s.read.Stats()
+	}
 	c.observer.observe(o)
 }
 

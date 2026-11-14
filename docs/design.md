@@ -407,6 +407,9 @@ D113 补充：程序可确定处理 owner 无自由文本、精确匹配持久�
 
 D113 部署身份读取补充：`App.DeploymentID` 先在独立读事务中读取持久 singleton，已有身份不进入写池。只有身份缺失时，结束读事务后进入写事务并再次检查，由单写事务完成唯一初始化；成功提交前不发布身份，读、写或提交失败均返回错误和空身份，后续调用可重试。不增加内存缓存，不改变持久身份、响应 header、mutation guard 或 session 特例；不修改连接数、busy timeout、协议或 CLI 能力。见 docs/plans/deployment-identity-read.md。此机制修复不代表线上持续加载已恢复。
 
+D113 数据库热路径修订：持久 singleton 仍在首次缺失时于单写事务中唯一初始化；读取成功或初始化提交成功后，身份仅在同一 App 实例内缓存。server 开放请求前完成加载，其他组装首次调用可惰性加载；失败与取消返回空身份且不缓存错误，等待初始化也可取消。每次创建 App/Store 都重新读取，备份恢复先停止旧进程；不支持存活 App 下替换账本。此条取代前条“不增加内存缓存”限制，header、session、旧身份写入拒绝与认证不变，无 TTL、轮询或包级身份。读池按启动 GOMAXPROCS 限定为 8 至 32 个连接，空闲上限相同以跨突发复用；单 writer、快照隔离和 query_only 不变。慢写日志同时保留读池实际计数/累计等待及关闭计数，不把连接排队等同 SQLite 锁。见 docs/plans/database-access-reuse.md。
+
+
 D114 当前运行边界：D45、D47、D48、D54、D59、D68、D94 及旧部署章节中的外挂行为仅保留为历史设计，不再提供入口。owner 登录只签发 owner token，旧 agent token 和非托管主 Agent 身份拒绝执行。主 Agent 工具只有一套托管 schema；历史 `addon_relay` 及 actor 来源仍按真实身份读取。runner 的 `worker-mcp` 和 provider 类型独立保留，server/runner 通信协议不变。
 
 D114 状态投影补充：主 Agent 的 `agent_conversations_list` 根据已认证的托管身份明确返回后台能力可用，与 owner API 的托管配置语义一致；`runtime_available` 表示能力已配置，会话排队、上下文就绪和运行失败仍由各自状态表达，不由存储查询的布尔零值推断运行时故障。
