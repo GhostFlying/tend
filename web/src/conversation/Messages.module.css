@@ -163,6 +163,21 @@
   width: 14px;
   height: 25px;
 }
+.backgroundDetails {
+  color: var(--label-2);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+.backgroundDetails ul {
+  padding-inline-start: var(--space-5);
+}
+.backgroundDetails p {
+  margin-block: var(--space-1) var(--space-2);
+}
+.backgroundDetails a,
+.backgroundDetails button {
+  color: var(--accent);
+}
 
 .traceTrigger[data-trace-trigger]::before {
   content: "·";

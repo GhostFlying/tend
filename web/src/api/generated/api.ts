@@ -2550,6 +2550,7 @@ export interface BackgroundBatch {
   created_at: number;
   frozen_at?: number;
   message_id: string;
+  presentation?: BackgroundPresentation;
   source_count: number;
   status: string;
   work_item_id?: string;
@@ -2564,6 +2565,36 @@ export interface BackgroundCheckin {
   note: string;
   thread_id?: string;
   turn_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundPresentation".
+ */
+export interface BackgroundPresentation {
+  more: boolean;
+  recipient?: BackgroundRecipient;
+  sources: BackgroundSourcePreview[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundRecipient".
+ */
+export interface BackgroundRecipient {
+  display_name?: string;
+  identity: AgentIdentity;
+  status: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "BackgroundSourcePreview".
+ */
+export interface BackgroundSourcePreview {
+  kind: string;
+  message_id: string;
+  object_id?: string;
+  object_type?: string;
+  seq: number;
+  summary: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4230,6 +4261,7 @@ export interface IssueBackgroundBatch {
   frozen_at?: number;
   issue_id?: string;
   message_id: string;
+  presentation?: BackgroundPresentation;
   source_count: number;
   status: string;
 }

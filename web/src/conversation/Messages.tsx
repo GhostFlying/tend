@@ -28,6 +28,7 @@ import { outgoingImages } from "./images.ts";
 import { recoveryNotice } from "./recovery.ts";
 import { steerNotice } from "./steer.ts";
 import { groupedProcessing } from "./processing.ts";
+import { BackgroundNotice } from "./BackgroundNotice.tsx";
 
 export function Divider({ at }: { at: number }) {
   return <div className={styles.divider}>{dayLabel(at)}</div>;
@@ -331,30 +332,8 @@ export function SystemMessage({
 }) {
   const { openUpgrade } = useServices();
   const title = noticeTitle(item.notice_type);
-  const backgroundIcon = (
-    <span className={styles.backgroundIcon} aria-hidden="true">
-      <Chevron />
-    </span>
-  );
   if (item.notice_type === "background_batch" && item.conversation_id !== "main")
-    return (
-      <details
-        className={styles.background}
-        data-layout={presentation}
-        data-scroll-id={scrollID ?? item.message_id}
-      >
-        <summary>
-          {presentation === "chat" && backgroundIcon}
-          <span>
-            负责人收到后台变化{" "}
-            <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
-          </span>
-          {presentation === "issue" && backgroundIcon}
-        </summary>
-        <Markdown text={systemMessageBody(item)} />
-        {item.recovery && <div role="status">{recoveryNotice(item.recovery)}</div>}
-      </details>
-    );
+    return <BackgroundNotice item={item} scrollID={scrollID} presentation={presentation} />;
   return (
     <section
       className={styles.system}
