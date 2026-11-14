@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,9 +29,12 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// Retain a small read burst without repeatedly initializing SQLite's schema
-// state. This bounds idle resources without limiting concurrent readers.
-const readIdleConnections = 8
+// Bound concurrent SQLite schema initialization and retain the entire pool
+// across bursts. Eight readers keep low-CPU services responsive; the upper bound
+// prevents large hosts from multiplying schema state without limit.
+func readPoolConnections() int {
+	return min(32, max(8, runtime.GOMAXPROCS(0)))
+}
 
 // Store holds a single-connection pool for writes and a pool for reads.
 // SQLite allows one writer at a time; funnelling writes through one
@@ -69,7 +73,9 @@ func OpenWithOptions(ctx context.Context, dbPath string, now func() time.Time, o
 		write.Close()
 		return nil, fmt.Errorf("store: open reader: %w", err)
 	}
-	read.SetMaxIdleConns(readIdleConnections)
+	readLimit := readPoolConnections()
+	read.SetMaxOpenConns(readLimit)
+	read.SetMaxIdleConns(readLimit)
 	files, err := blobstore.New(dbPath + ".files")
 	if err != nil {
 		write.Close()
@@ -203,7 +209,9 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 	return nil
 }
 
-// Read runs fn in a read-only transaction with a consistent snapshot.
+// Read runs fn in a read-only transaction with a consistent snapshot. Helpers
+// called by fn must reuse its Querier rather than acquire another pooled read
+// connection; recursive acquisition can exhaust the bounded pool.
 func (s *Store) Read(ctx context.Context, fn func(*ReadTx) error) error {
 	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

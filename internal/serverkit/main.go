@@ -352,6 +352,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		opts = append(opts, app.WithMainOwner(owner))
 	}
 	a := app.New(s, ids, now, opts...)
+	if _, err := a.DeploymentID(ctx); err != nil {
+		return fmt.Errorf("initialize deployment identity: %w", err)
+	}
 	if err := a.InitializeIssueAdmission(ctx); err != nil {
 		return err
 	}
@@ -907,5 +910,9 @@ func logWriteObservation(log *slog.Logger, o store.WriteObservation) {
 		"callback_inclusive", o.Callback, "commit", o.Commit, "rollback", o.Rollback,
 		"phases_inclusive", o.Phases,
 		"pool_wait_count_total", o.PoolWaitCountTotal, "pool_wait_duration_total", o.PoolWaitDurationTotal,
-		"pool_open_connections", o.PoolOpenConnections, "pool_in_use", o.PoolInUse, "pool_idle", o.PoolIdle)
+		"pool_open_connections", o.PoolOpenConnections, "pool_in_use", o.PoolInUse, "pool_idle", o.PoolIdle,
+		"reader_pool_max_open", o.ReaderPool.MaxOpenConnections, "reader_pool_open", o.ReaderPool.OpenConnections,
+		"reader_pool_in_use", o.ReaderPool.InUse, "reader_pool_idle", o.ReaderPool.Idle,
+		"reader_pool_wait_count_total", o.ReaderPool.WaitCount, "reader_pool_wait_duration_total", o.ReaderPool.WaitDuration,
+		"reader_pool_max_idle_closed_total", o.ReaderPool.MaxIdleClosed)
 }

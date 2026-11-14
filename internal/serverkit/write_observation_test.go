@@ -2,6 +2,7 @@ package serverkit
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"testing"
@@ -16,13 +17,14 @@ func TestWriteObservationLogFields(t *testing.T) {
 	logWriteObservation(log, store.WriteObservation{
 		Source: store.WriteSource{Operation: "test.operation", RequestID: "test-request", TraceID: "test-trace"},
 		Stage:  "callback", Outcome: "error", Total: 2 * time.Second, Callback: time.Second,
-		Phases: []store.WritePhaseDuration{{Phase: store.WritePersistOutcome, Duration: time.Second}, {Phase: store.WriteAttention, Duration: 900 * time.Millisecond}},
+		ReaderPool: sql.DBStats{MaxOpenConnections: 8, OpenConnections: 6, InUse: 4, Idle: 2, WaitCount: 3, WaitDuration: time.Second, MaxIdleClosed: 5},
+		Phases:     []store.WritePhaseDuration{{Phase: store.WritePersistOutcome, Duration: time.Second}, {Phase: store.WriteAttention, Duration: 900 * time.Millisecond}},
 	})
 	var decoded map[string]json.RawMessage
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"request_id": `"test-request"`, "trace_id": `"test-trace"`, "operation": `"test.operation"`, "callback_inclusive": "1000000000"} {
+	for key, want := range map[string]string{"request_id": `"test-request"`, "trace_id": `"test-trace"`, "operation": `"test.operation"`, "callback_inclusive": "1000000000", "reader_pool_max_open": "8", "reader_pool_open": "6", "reader_pool_in_use": "4", "reader_pool_idle": "2", "reader_pool_wait_count_total": "3", "reader_pool_wait_duration_total": "1000000000", "reader_pool_max_idle_closed_total": "5"} {
 		if string(decoded[key]) != want {
 			t.Errorf("%s = %s, want %s", key, decoded[key], want)
 		}

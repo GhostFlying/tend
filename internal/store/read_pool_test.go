@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 func TestReadPoolReusesConcurrentSnapshots(t *testing.T) {
 	s, _ := openTest(t)
+	limit := readPoolConnections()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	mustExec(t, s, `INSERT INTO inbox (source, source_event_id, received_at) VALUES ('pool', 'snapshot', 0)`)
@@ -17,11 +19,11 @@ func TestReadPoolReusesConcurrentSnapshots(t *testing.T) {
 	// Two bursts must reuse the retained connections while each transaction
 	// still observes its own snapshot and refuses writes.
 	for round := range 2 {
-		ready := make(chan error, readIdleConnections)
-		errs := make(chan error, readIdleConnections)
+		ready := make(chan error, limit)
+		errs := make(chan error, limit)
 		release := make(chan struct{})
 		var wg sync.WaitGroup
-		for range readIdleConnections {
+		for range limit {
 			wg.Go(func() {
 				errs <- s.Read(ctx, func(tx *ReadTx) error {
 					var before int
@@ -55,7 +57,7 @@ func TestReadPoolReusesConcurrentSnapshots(t *testing.T) {
 				})
 			})
 		}
-		for range readIdleConnections {
+		for range limit {
 			select {
 			case err := <-ready:
 				if err != nil {
@@ -70,13 +72,13 @@ func TestReadPoolReusesConcurrentSnapshots(t *testing.T) {
 		}
 		close(release)
 		wg.Wait()
-		for range readIdleConnections {
+		for range limit {
 			if err := <-errs; err != nil {
 				t.Error(err)
 			}
 		}
 		stats := s.read.Stats()
-		if stats.Idle != readIdleConnections || stats.MaxIdleClosed != 0 || stats.MaxOpenConnections != 0 {
+		if stats.Idle != limit || stats.MaxIdleClosed != 0 || stats.MaxOpenConnections != limit {
 			t.Errorf("read pool after burst: %+v", stats)
 		}
 	}
@@ -88,5 +90,73 @@ func TestReadPoolReusesConcurrentSnapshots(t *testing.T) {
 	}
 	if s.read.Stats().OpenConnections != 0 || s.write.Stats().OpenConnections != 0 {
 		t.Error("Close left database connections open")
+	}
+}
+
+func TestReadPoolBoundsAndCancelsWaiters(t *testing.T) {
+	s, _ := openTest(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	limit := readPoolConnections()
+	release := make(chan struct{})
+	ready := make(chan struct{}, limit)
+	done := make(chan error, limit)
+	for range limit {
+		go func() {
+			done <- s.Read(ctx, func(tx *ReadTx) error {
+				var n int
+				if err := tx.Q().QueryRowContext(ctx, `SELECT 1`).Scan(&n); err != nil {
+					return err
+				}
+				ready <- struct{}{}
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+		}()
+	}
+	var finish sync.Once
+	finishReads := func() {
+		finish.Do(func() {
+			close(release)
+			for range limit {
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+	defer finishReads()
+	for range limit {
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	stats := s.PoolStats()
+	if stats.Reader.InUse != limit || stats.Reader.OpenConnections != limit || stats.Writer.MaxOpenConnections != 1 {
+		t.Fatalf("pool not bounded: %+v", stats)
+	}
+	waitCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer stop()
+	called := false
+	err := s.Read(waitCtx, func(*ReadTx) error { called = true; return nil })
+	if !errors.Is(err, context.DeadlineExceeded) || called {
+		t.Fatalf("pool waiter: called=%v err=%v", called, err)
+	}
+	stats = s.PoolStats()
+	if stats.Reader.OpenConnections > limit || stats.Reader.WaitCount == 0 {
+		t.Fatalf("wait was not recorded: %+v", stats)
+	}
+	finishReads()
+	if err := s.Read(ctx, func(tx *ReadTx) error {
+		var n int
+		return tx.Q().QueryRowContext(ctx, `SELECT 1`).Scan(&n)
+	}); err != nil {
+		t.Fatalf("read after cancelled waiter/release: %v", err)
 	}
 }

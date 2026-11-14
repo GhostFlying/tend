@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -120,6 +121,8 @@ type OutboxMessage struct {
 
 // App executes commands against the store.
 type App struct {
+	deploymentIdentity         atomic.Pointer[string]
+	deploymentIdentityInit     chan struct{}
 	nativeCalls                nativeCallBroker
 	mainOwner                  string
 	managedHostedRuntimes      map[string]bool
@@ -160,7 +163,7 @@ func WithNotifier(n Notifier) Option {
 
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), scheduling: NewBroadcast(), logs: NewBroadcast()}
+	a := &App{deploymentIdentityInit: make(chan struct{}, 1), agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), scheduling: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}

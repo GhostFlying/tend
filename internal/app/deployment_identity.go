@@ -7,9 +7,39 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// DeploymentID reads the durable identity without acquiring the writer. Only a
-// missing identity requires initialization, using the injected ID source.
+// DeploymentID returns this App's immutable ledger identity. Only a successful
+// read or committed initialization is cached. A new App reloads the identity;
+// replacing a live App's ledger is not a supported restore boundary.
 func (a *App) DeploymentID(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if id := a.deploymentIdentity.Load(); id != nil {
+		return *id, nil
+	}
+	// Waiting for the first load must honor this caller's cancellation. A
+	// failed load releases the gate without publishing or retaining an error.
+	select {
+	case a.deploymentIdentityInit <- struct{}{}:
+		defer func() { <-a.deploymentIdentityInit }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if id := a.deploymentIdentity.Load(); id != nil {
+		return *id, nil
+	}
+	id, err := a.loadDeploymentID(ctx)
+	if err != nil {
+		return "", err
+	}
+	a.deploymentIdentity.Store(&id)
+	return id, nil
+}
+
+func (a *App) loadDeploymentID(ctx context.Context) (string, error) {
 	var id string
 	read := func(q store.Querier) error {
 		return q.QueryRowContext(ctx, `SELECT COALESCE((SELECT deployment_id FROM deployment_identity WHERE singleton=1),'')`).Scan(&id)
