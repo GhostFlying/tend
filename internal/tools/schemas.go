@@ -7,7 +7,7 @@ import "github.com/GhostFlying/tend/internal/protocol"
 
 const agentRequirementSchema = `{"type":"object","properties":{"category_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_.-]*$"},"runtime_id":{"type":"string","pattern":"^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"},"model":{"type":"string","maxLength":200},"effort":{"type":"string","enum":["","minimal","low","medium","high","xhigh","max","ultra"]}},"required":["category_id"],"additionalProperties":false}`
 
-const specSchema = `{
+var specSchema = `{
   "type": "object",
   "description": "What the task must achieve. Immutable once created; changes make a new version.",
   "properties": {
@@ -39,7 +39,7 @@ const specSchema = `{
           "properties": {
             "repo": {"type": "string", "description": "A registered repository; see repos_list."},
             "path": {"type": "string"},
-            "base": {"type": "object", "properties": {"branch": {"type": "string"}, "commit": {"type": "string"}}, "additionalProperties": false},
+            "base": ` + argumentSchema(protocol.OwnerTaskBase{}) + `,
             "profile": {"type": "string"}
           },
           "required": ["repo"],

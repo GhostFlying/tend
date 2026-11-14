@@ -161,7 +161,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `issues.set_notification_settings` | `issue notifications set` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `issues.set_status` | `issue set-status` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `issues.update` | `issue update` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
-| `issues.update_progress` | `issue update-progress` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
+| `issues.update_progress` | `issue update-progress` | 完整 JSON；summary/next_step 同时提供，最多 500/240 Unicode 码点；双空串清空；原 request_id；revision/epoch 见业务合同 | API | CLI 分发、共享限制与 Envelope |
 | `issues.update_task` | `issue update-task` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `messaging.bind` | `channel bind` | 完整 JSON；原 request_id | API；Telegram 共用业务 | CLI 分发与 Envelope |
 | `messaging.notify` | `message notify` | 完整 JSON；原 request_id | API；Telegram 共用业务 | CLI 分发与 Envelope |

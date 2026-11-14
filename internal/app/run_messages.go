@@ -45,6 +45,9 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
+		if x.Env.ExpectedControlRevision == nil {
+			return Outcome{}, commandDiagnostic(protocol.CodeInvalidRequest, "expected_control_revision is required; use tasks_read with the original payload task_id", map[string]any{"field": "expected_control_revision", "task_id": p.TaskID, "run_id": x.Env.Target.ID, "recovery_tool": "tasks_read"})
+		}
 		return Outcome{}, err
 	}
 	rc, err := loadRun(ctx, tx.Q(), x.Env.Target.ID)
@@ -52,10 +55,10 @@ func (SendRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, errNotFound(err, "target run does not exist")
 	}
 	if x.Env.Target.Type != "run" || p.TaskID != rc.task.TaskID || p.SpecVersion != rc.action.TargetSpecVersion || p.Generation != rc.run.Generation || expected != rc.task.ControlRevision {
-		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "task, run, spec, generation or control revision does not match")
+		return Outcome{}, commandDiagnostic(protocol.CodeStaleRevision, "task_id, run_id, spec_version, generation or expected_control_revision does not match; read the original Task and its Runs", map[string]any{"task_id": rc.task.TaskID, "run_id": rc.run.RunID, "spec_version": rc.action.TargetSpecVersion, "generation": rc.run.Generation, "current_control_revision": rc.task.ControlRevision, "recovery_tool": "tasks_read"})
 	}
 	if desiredFor(rc.run, rc.action, rc.task) != protocol.DesiredRun || (rc.run.ObservedState != protocol.RunRunning && rc.run.ObservedState != protocol.RunWaiting) {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "target run must be running or waiting under managed control")
+		return Outcome{}, commandDiagnostic(protocol.CodeInvalidTransition, "target Run must be running or waiting under managed control; read its retained result before choosing a current Run", map[string]any{"task_id": rc.task.TaskID, "run_id": rc.run.RunID, "spec_version": rc.action.TargetSpecVersion, "generation": rc.run.Generation, "current_control_revision": rc.task.ControlRevision, "observed_state": rc.run.ObservedState, "desired_state": desiredFor(rc.run, rc.action, rc.task), "recovery_tool": "tasks_read"})
 	}
 	if x.coordinationExecution == nil && x.Principal.Kind == protocol.PrincipalMainAgent {
 		if p.SourceMessageID == "" || p.CommitSeq < 1 {

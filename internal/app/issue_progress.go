@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -44,13 +43,13 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "summary and next_step must both be supplied; use two empty strings to clear")
 	}
 	if issue.Revision != expected || p.ExpectedAssignmentEpoch != issue.AssignmentEpoch {
-		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "issue revision or assignment changed")
+		return Outcome{}, commandDiagnostic(protocol.CodeStaleRevision, "issue revision or assignment changed; read the original Issue before updating progress", map[string]any{"issue_id": issue.IssueID, "current_control_revision": issue.Revision, "expected_control_revision": expected, "current_assignment_epoch": issue.AssignmentEpoch, "expected_assignment_epoch": p.ExpectedAssignmentEpoch, "recovery_tool": "issues_read"})
 	}
 	if issue.AssignmentState != "active" || (issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "issue is not editable")
 	}
-	if !utf8.ValidString(p.Summary) || !utf8.ValidString(p.NextStep) || utf8.RuneCountInString(p.Summary) > 500 || utf8.RuneCountInString(p.NextStep) > 240 {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "summary or next step exceeds its character limit")
+	if err := p.ValidateInput(); err != nil {
+		return Outcome{}, err
 	}
 	author := protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}
 	if x.coordinationExecution != nil {
