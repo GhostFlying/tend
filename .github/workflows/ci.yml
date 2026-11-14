@@ -18,10 +18,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-go
         id: go
         with:
           role: quality
+      - name: compare affected plan without reducing CI coverage
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
+          FULL_BASELINE: ${{ github.event_name != 'pull_request' }}
+        run: |
+          mkdir -p .local
+          full=()
+          if [ "$FULL_BASELINE" = true ]; then full=(-full); fi
+          go run ./internal/testkit/impactcmd -base "$BASE_REF" "${full[@]}" -output .local/affected-shadow.json
+      - name: retain affected-plan comparison
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: affected-plan-shadow
+          path: .local/affected-shadow.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
       - name: static checks and capability coverage
         run: make ci-check capability-check protocol-check fmt-check vet staticcheck
       - name: release publication recovery checks

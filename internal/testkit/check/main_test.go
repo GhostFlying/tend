@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -209,5 +210,26 @@ func TestExplicitSerialBudgetRequiresReason(t *testing.T) {
 		if err == nil && b.jobs == 1 && reason == "" {
 			t.Fatalf("unrecorded serial budget: %+v", tc)
 		}
+	}
+}
+
+func TestImpactSelectionRetainsRequiredGroupsAndPrivatePlanWithoutWeb(t *testing.T) {
+	b, _ := capacity(64, 0, 0, 0)
+	parallel, isolated := tasks(b, t.TempDir(), "go", "pnpm", 1)
+	plan := impact.Plan{Groups: []string{"app", "e2e", "other"}}
+	parallel, isolated = plannedTasks(parallel, isolated, plan, "candidate-plan.json")
+	var got []string
+	for _, task := range append(parallel, isolated...) {
+		got = append(got, task.name)
+		if !slices.Contains(task.env, "TEST_PLAN=candidate-plan.json") || !slices.Contains(task.env, "TEST_COUNT=1") {
+			t.Fatal("selected work lost source plan or actual execution", task)
+		}
+		if task.name == "quality" && !slices.Equal(task.args, []string{"impact-quality"}) {
+			t.Fatal(task)
+		}
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"app", "e2e", "other", "quality"}) {
+		t.Fatal("required peer omitted or unrelated group retained", got)
 	}
 }
