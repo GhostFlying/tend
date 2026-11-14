@@ -79,6 +79,13 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 					break
 				}
 			}
+			for _, binding := range inv.Runtimes {
+				if binding.RuntimeID == agent.Binding.RuntimeID && binding.Revision == agent.Binding.Revision && !binding.Enabled {
+					v.ExecutorReadiness.State = "unavailable"
+					v.ExecutorReadiness.Reason = "binding_disabled"
+					v.ExecutorReadiness.Explanation = "the accepted runtime binding is disabled; enable the binding before waiting for an executor observation"
+				}
+			}
 			if !agent.Enabled {
 				v.ExecutorReadiness.State = "unavailable"
 				v.ExecutorReadiness.Reason = "agent_disabled"
@@ -259,6 +266,18 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 			}
 			v.Candidates = append(v.Candidates, candidate)
 			if m.State == "pending" && v.State != "eligible" {
+				v.State = "pending"
+			}
+		}
+		// Ordinary legacy work has no named executor inventory to iterate.
+		// Classify only waits that disappear when transient host capacity is
+		// restored; the same scheduler still checks all frozen task constraints.
+		if !eligible && c.AgentSelection == nil && c.Manager == nil && c.HandoffPin == nil && !c.NamedExecutionAssigned && c.OwnerPin == nil && c.ReviewOwnerPin == nil && scheduler.SkipReason(restored, c) == nil {
+			recoverable = true
+			if reason != "" {
+				v.Reasons = append(v.Reasons, reason)
+			}
+			if v.State != "eligible" {
 				v.State = "pending"
 			}
 		}

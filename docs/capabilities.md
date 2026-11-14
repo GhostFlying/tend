@@ -54,7 +54,8 @@ tend task list --all --capability image_gen --capability-role accept --json
 - `executor_readiness.state=ready/unavailable/unknown`：普通执行器是否有匹配当前接受
   配置的观察；`reason`、`explanation`、`observed_at_ms`（最近 runner 心跳，0 表示
   未观察）、`checked_at_ms` 解释来源及时间。未观察到匹配执行器是 unknown；明确
-  adapter 不可用或心跳过期是 unavailable；恢复普通观察即可恢复 ready。
+  adapter 不可用或心跳过期是 unavailable；明确禁用的接受配置返回 unavailable，
+  如 binding_disabled，需要先启用精确绑定，再观察执行器。恢复后可重新显示 ready。
 - 目录 `current.required` 为空，`current.state=eligible` 仅表示观察到普通执行器 ready，
   其他情况为 pending；`--state` 筛选此汇总，`--capability` 仅筛声明。该目录未指定
   Task，不承诺任意任务的容量、租约、workspace、host 或共享资源准入，也不验证
@@ -64,7 +65,9 @@ tend task list --all --capability image_gen --capability-role accept --json
 匹配，`scheduling_reason` 单独解释普通准入限制；顶层 `state` 使用真实 scheduler
 的角色、原 pin、backend、依赖及容量边界。`pending` 是可恢复的 readiness/容量等待；
 `unavailable` 表示没有符合冻结要求的候选。空要求仍保留普通调度准入，不无条件
-返回 eligible。只读查询不预留资源；独立审阅需求继续由原 Task 合同决定。
+返回 eligible；没有具名 inventory 的普通 legacy Task 也按原 scheduler 解释临时容量
+等待为 pending，永久要求不符仍为 unavailable。只读查询不预留资源；独立审阅需求
+继续由原 Task 合同决定。
 
 Agent list/show 和 Task explanation 候选的 `declared` 保留原配置的精确引用；
 `definition_statuses` 另列该引用对应定义的当前 revision/state 及说明。例如 Agent 声明
