@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -40,6 +41,9 @@ func (s *Server) questions(w http.ResponseWriter, r *http.Request) {
 	}
 	deadline := time.NewTimer(time.Duration(wait) * time.Second)
 	defer deadline.Stop()
+	if wait > 0 {
+		httpdiag.Waiting(r.Context())
+	}
 	for {
 		changed := s.app.Changes().Wait()
 		question, err := s.app.WorkerQuestion(r.Context(), p, id)
@@ -58,6 +62,10 @@ func (s *Server) questions(w http.ResponseWriter, r *http.Request) {
 			// an answer or cancellation committed while the timer fired.
 			wait = 0
 		case <-r.Context().Done():
+			return
+		case <-s.cfg.Stopping:
+			httpdiag.WaitStopped(r.Context())
+			writeJSON(w, http.StatusOK, question)
 			return
 		}
 	}

@@ -355,6 +355,10 @@ func (r *Runner) updateUpgradeAttempt(control protocol.RunnerControl, update fun
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforePhase, beforeError := r.upgradePhase, r.upgradeError
 	update()
+	if beforePhase != r.upgradePhase || beforeError != r.upgradeError {
+		r.requestHeartbeat()
+	}
 	return true
 }

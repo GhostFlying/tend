@@ -137,7 +137,7 @@ func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.
 			return errors.New("agent compaction needs reconciliation")
 		}
 		return nil
-	}, Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds(), Interval: interval}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
+	}, Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds(), Interval: interval, Changes: a.SchedulingChanges().Wait}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
 		var agents []upgradeDrainer
 		if front != nil {
 			agents = append(agents, front)

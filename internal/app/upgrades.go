@@ -479,7 +479,11 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						if err != nil {
 							return Outcome{}, err
 						}
-						grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(&r, now+r.GrantMillis), RunIDs: []string{}}
+						// Coverage includes the separate restart reserve. The server
+						// installation grant is still clipped to the runner's actual,
+						// conservative ACK and never renews this issued deadline.
+						coverage := min(r.GrantMillis+r.RestartMillis, (15 * time.Minute).Milliseconds())
+						grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(&r, now+coverage), RunIDs: []string{}}
 						for _, run := range runs {
 							lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
 							if err != nil {
@@ -506,7 +510,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						}
 					}
 					r.View.Phase = "server_ready"
-					r.Deadline = capUpgradeDeadline(&r, now+r.GrantMillis-r.RestartMillis)
+					r.Deadline = capUpgradeDeadline(&r, now+r.GrantMillis)
 				}
 			case "server_ready", "server_checking":
 				reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)

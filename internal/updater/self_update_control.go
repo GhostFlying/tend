@@ -31,6 +31,9 @@ func (s *Supervisor) selfHandler(w http.ResponseWriter, r *http.Request) {
 			if rejected != nil {
 				status.Observation.InstanceID = s.cfg.InstanceID
 				status.Observation.Rejection = &rejected.Proof
+				if rejected.Cause != "" {
+					err = errors.Join(errors.New(rejected.Cause), err)
+				}
 			}
 		}
 	case r.Method == http.MethodPost && r.URL.Path == "/self-update/apply":

@@ -32,6 +32,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness/rollout"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/messaging"
 	"github.com/GhostFlying/tend/internal/messaging/telegram"
@@ -187,11 +188,18 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer func() {
+		started := now()
+		err := s.Close()
+		log.Info("server shutdown phase", "phase", "store_close", "elapsed_ms", now().Sub(started).Milliseconds(), "error", err)
+	}()
 	var ids protocol.IDGen = protocol.NewULIDGen(now, nil)
 	if deps.IDs != nil {
 		ids = deps.IDs
 	}
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	requests := httpdiag.New(now, func() string { return ids.New(protocol.PrefixTrace) }, log)
 	wake := dispatch.NewSignal()
 	readWake := dispatch.NewSignal()
 	interactionWake := dispatch.NewSignal()
@@ -529,7 +537,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			_ = nativeUsage.sync(final)
 		}()
 	}
-	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir, NativeWorkers: native}, log)
+	runners := runnerapi.New(a, whois, secret, runnerapi.Config{ReleaseDir: releaseDir, NativeWorkers: native, Stopping: runCtx.Done()}, log)
 	upgradeController, err := prepareUpgradeController(cfg.Upgrades, a, front, background, ids, log, deps.UpgradeTickInterval)
 	if err != nil {
 		return err
@@ -616,9 +624,9 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			return fmt.Errorf("webhook listener: %w", err)
 		}
 		defer hookListener.Close()
-		hookServer = &http.Server{Handler: withFeishuCallback(owner.WebhookHandler(), feishuClient), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
+		hookServer = &http.Server{Handler: requests.Wrap(withFeishuCallback(owner.WebhookHandler(), feishuClient)), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
 	}
-	server := &http.Server{Handler: withFeishuCallback(serverHandler(runners.Handler(), owner.Handler()), feishuClient), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: requests.Wrap(withFeishuCallback(serverHandler(runners.Handler(), owner.Handler()), feishuClient)), ReadHeaderTimeout: 10 * time.Second}
 	// Shutdown waits for requests to finish; event streams never do.
 	server.RegisterOnShutdown(owner.EndStreams)
 
@@ -630,8 +638,6 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	}
 
 	// The workers stop with the process or when serving fails.
-	runCtx, stop := context.WithCancel(ctx)
-	defer stop()
 	var wg sync.WaitGroup
 	wg.Go(func() { nativeUsage.run(runCtx) })
 	if cfg.MainAgent != nil && cfg.MainAgent.extensionConsumer != nil {
@@ -689,11 +695,13 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		})
 	}
 	if front != nil {
-		wg.Go(func() { _ = front.Run(runCtx) })
+		wg.Go(func() { runWithShutdownLog(runCtx, now, log, "main_agent_close", func() { _ = front.Run(runCtx) }) })
 
 	}
 	if background != nil {
-		wg.Go(func() { background.Run(runCtx) })
+		wg.Go(func() {
+			runWithShutdownLog(runCtx, now, log, "background_agents_close", func() { background.Run(runCtx) })
+		})
 	}
 	wg.Go(func() { _ = d.Run(runCtx) })
 	wg.Go(func() { _ = readDispatch.Run(runCtx) })
@@ -703,7 +711,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	shutdownResult := make(chan error, 1)
 	wg.Go(func() {
 		<-runCtx.Done()
-		shutdownResult <- shutdownHTTP(context.WithoutCancel(runCtx), server, 10*time.Second, log)
+		shutdownResult <- shutdownHTTP(context.WithoutCancel(runCtx), server, 10*time.Second, log, requests)
 	})
 	if secure && tn != nil {
 		wg.Go(func() {
@@ -722,7 +730,10 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	// The first listener to stop stops the server, which ends the others.
 	err = <-served
 	stop()
+	shutdownStarted := now()
+	log.Info("server shutdown phase", "phase", "background_wait_started")
 	wg.Wait()
+	log.Info("server shutdown phase", "phase", "background_wait_finished", "elapsed_ms", now().Sub(shutdownStarted).Milliseconds())
 	shutdownErr := <-shutdownResult
 	select {
 	case backgroundErr := <-backgroundErrors:

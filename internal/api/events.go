@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
@@ -82,6 +83,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flusher.Flush()
+	httpdiag.Waiting(ctx)
 	heartbeat := time.NewTicker(s.cfg.Heartbeat)
 	defer heartbeat.Stop()
 	for {
@@ -165,6 +167,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-s.ending:
+			httpdiag.WaitStopped(ctx)
 			return
 		case <-changed:
 		case <-heartbeat.C:

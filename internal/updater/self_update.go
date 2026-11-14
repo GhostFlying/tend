@@ -103,7 +103,7 @@ func EnsureSelfUpdate(ctx context.Context, socket string, request SelfUpdateRequ
 	}
 	for {
 		if rejected := status.Observation.Rejection; rejected != nil && rejected.RequestID == request.Target.RequestID && rejected.UpgradeID == request.UpgradeID && rejected.ReleaseSetSHA256 == request.ReleaseSetSHA256 && rejected.InstanceID == status.Observation.InstanceID {
-			return status.Observation, errors.New("updater: preparation rejected before installer dispatch")
+			return status.Observation, errors.Join(errors.New("updater: preparation rejected before installer dispatch"), err)
 		}
 		r := status.Observation.Receipt
 		if err == nil && r != nil && r.RequestID == request.Target.RequestID && r.UpgradeID == request.UpgradeID && r.ReleaseSetSHA256 == request.ReleaseSetSHA256 && r.InstanceID == status.Observation.InstanceID && status.Observation.Process.SHA256 == r.Installed.SHA256 && status.Observation.SupervisedProcess.PID > 1 {

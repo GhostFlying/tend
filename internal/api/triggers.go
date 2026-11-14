@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/webhookauth"
@@ -120,7 +121,7 @@ func (s *Server) stageWebhookKey(w http.ResponseWriter, r *http.Request) {
 func (s *Server) WebhookHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /hooks/v1/{id}", s.receiveWebhook)
-	return mux
+	return httpdiag.Routes(mux)
 }
 func (s *Server) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/dispatch"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/messaging/feishu"
 )
 
@@ -71,5 +72,5 @@ func withFeishuCallback(next http.Handler, transport feishuTransport) http.Handl
 	mux := http.NewServeMux()
 	mux.Handle("/hooks/feishu", transport)
 	mux.Handle("/", next)
-	return mux
+	return httpdiag.Routes(mux)
 }

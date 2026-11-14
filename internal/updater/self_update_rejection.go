@@ -14,6 +14,8 @@ type selfRejection struct {
 	Format  int                           `json:"format"`
 	Request SelfUpdateRequest             `json:"request"`
 	Proof   protocol.UpdaterSelfRejection `json:"proof"`
+	// Diagnostic only; old receipts without it retain an unknown first cause.
+	Cause string `json:"cause,omitempty"`
 }
 
 func selfRejectionPath(cfg Config, requestID string) string {
@@ -58,7 +60,11 @@ func persistSelfRejection(cfg Config, r SelfUpdateRequest, now time.Time, cause 
 	if proof.RejectedAtMillis <= 0 {
 		return out, errors.Join(cause, errors.New("updater: rejection clock unavailable"))
 	}
-	if err := writeJSON(selfRejectionPath(cfg, r.Target.RequestID), selfRejection{Format: 1, Request: r, Proof: proof}); err != nil {
+	diagnostic := ""
+	if cause != nil {
+		diagnostic = cause.Error()
+	}
+	if err := writeJSON(selfRejectionPath(cfg, r.Target.RequestID), selfRejection{Format: 1, Request: r, Proof: proof, Cause: diagnostic}); err != nil {
 		return out, errors.Join(cause, err)
 	}
 	out.Observation.Rejection = &proof
