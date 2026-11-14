@@ -363,16 +363,30 @@ func (s *Store) VerifyOriginals(ctx context.Context, after string, limit int) (p
 		return result, err
 	}
 	defer rows.Close()
+	type item struct {
+		cursor   string
+		original preparedOriginal
+	}
+	// Materialize only this bounded page and return its connection before any
+	// value lookup. Concurrent verification must not recursively acquire a
+	// second reader while every pool connection holds an enumeration cursor.
+	var page []item
 	for rows.Next() {
-		var p preparedOriginal
-		var cursor string
-		if err = rows.Scan(&cursor, &p.Window.SHA256, &p.Window.Archive, &p.Window.Offset, &p.Window.Length); err != nil {
+		var row item
+		if err := rows.Scan(&row.cursor, &row.original.Window.SHA256, &row.original.Window.Archive, &row.original.Window.Offset, &row.original.Window.Length); err != nil {
 			return result, err
 		}
+		page = append(page, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return result, err
+	}
+	for _, row := range page {
 		if result.Checked == limit {
 			result.More = true
 			break
 		}
+		cursor, p := row.cursor, row.original
 		if strings.HasPrefix(cursor, "value:") {
 			id, e := strconv.ParseInt(strings.TrimPrefix(cursor, "value:"), 10, 64)
 			if e != nil {
@@ -394,7 +408,7 @@ func (s *Store) VerifyOriginals(ctx context.Context, after string, limit int) (p
 		result.Bytes += p.Window.Length
 		result.Next = cursor
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // OriginalStorageState is a consistent read for management and diagnostics.
