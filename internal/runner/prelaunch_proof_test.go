@@ -56,11 +56,7 @@ func TestOrcaBridgeConflictProofSurvivesRestartAndReleasesWithoutProvider(t *tes
 	if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
 		t.Fatal(err)
 	}
-	sockets, err := os.MkdirTemp("", "tnp-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(sockets) })
+	sockets := testkit.SocketDir(t)
 	calls := 0
 	workers := orca.NewWorkers(orca.WorkerOptions{Agent: protocol.AgentCodex, IDs: testkit.NewIDGen(clock, 1), Now: clock.Now, SocketDir: sockets, Client: &orca.Client{Exec: func(context.Context, string, []string) ([]byte, error) {
 		calls++

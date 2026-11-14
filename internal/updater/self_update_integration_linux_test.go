@@ -16,6 +16,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 // This opt-in fixture creates only its own units and children. It never targets
@@ -53,11 +54,7 @@ func testSelfUpdateSystemd(t *testing.T, intervening bool) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("", "tend-self-fixture-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := testkit.SocketDir(t)
 	fixed := filepath.Join(root, "updater")
 	if err = copyAtomic(old, fixed, 0o755); err != nil {
 		t.Fatal(err)

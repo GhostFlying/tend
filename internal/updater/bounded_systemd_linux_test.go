@@ -20,6 +20,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 func TestMain(m *testing.M) {
@@ -118,11 +119,7 @@ func runBoundedSystemdTakeoverFixture(t *testing.T, mutexHung bool, role string)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("", "tend-bounded-fixture-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := testkit.SocketDir(t)
 	stateDir := filepath.Join(root, "state")
 	if err := os.Mkdir(stateDir, 0o700); err != nil {
 		t.Fatal(err)

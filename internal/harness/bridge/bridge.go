@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // request is one call on the socket, one per connection.
@@ -63,6 +64,9 @@ type Server struct {
 func Listen(path, token string, tools []harness.ToolSpec, handle harness.ToolHandler) (*Server, error) {
 	if token == "" {
 		return nil, errors.New("bridge: a token is required")
+	}
+	if err := protocol.ValidateUnixSocketPath("bridge socket", path); err != nil {
+		return nil, err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("bridge: remove stale socket: %w", err)

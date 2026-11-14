@@ -8,6 +8,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"log/slog"
 	"net"
 	"net/http"
@@ -117,7 +118,7 @@ func testReleaseBundleSubmission(t *testing.T, complete bool) {
 	defer server.Close()
 	r.cfg.ServerURL = server.URL
 	r.c.http = server.Client()
-	socket := filepath.Join(t.TempDir(), "updater.sock")
+	socket := filepath.Join(testkit.SocketDir(t), "updater.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Skipf("unix socket: %v", err)
@@ -216,7 +217,7 @@ func TestNewMaintenanceAttemptClearsErrorsAndIgnoresOldDownloadFailure(t *testin
 			r := controlRunner(t)
 			r.cfg.Log = slog.Default()
 			r.cfg.UpdaterSocket = "unused"
-			r.cfg.UpdaterControlSocket = filepath.Join(t.TempDir(), "absent.sock")
+			r.cfg.UpdaterControlSocket = filepath.Join(testkit.SocketDir(t), "absent.sock")
 			r.cfg.UpdaterBundleDir = t.TempDir()
 			started, finish := make(chan struct{}), make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {

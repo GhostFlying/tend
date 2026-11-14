@@ -19,6 +19,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 // The exact old artifact is supplied privately. Historical state keeps its
@@ -60,11 +61,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("", "tend-cm-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := testkit.SocketDir(t)
 	stateDir := filepath.Join(root, "state")
 	if err := os.Mkdir(stateDir, 0o700); err != nil {
 		t.Fatal(err)

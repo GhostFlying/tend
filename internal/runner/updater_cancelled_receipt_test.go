@@ -55,7 +55,7 @@ func TestHeartbeatReportsNoStartForCancelledBatchOverPriorCommit(t *testing.T) {
 				state.Process.LaunchID = "foreign"
 				state.CommittedProof.Process = state.Process
 			}
-			socket := filepath.Join(t.TempDir(), "updater.sock")
+			socket := filepath.Join(testkit.SocketDir(t), "updater.sock")
 			ln, err := net.Listen("unix", socket)
 			if err != nil {
 				t.Skip(err)

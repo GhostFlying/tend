@@ -8,11 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // ServeLocal shares the existing private control socket with optional archive
 // commands. It creates no installer, credentials, or background timer.
 func ServeLocal(ctx context.Context, socket string, handler http.Handler) error {
+	if err := protocol.ValidateUnixSocketPath("control_socket", socket); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		return err
 	}

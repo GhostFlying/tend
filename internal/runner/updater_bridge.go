@@ -21,6 +21,9 @@ import (
 
 func (r *Runner) updaterListener() (net.Listener, error) {
 	path := r.cfg.UpdaterSocket
+	if err := protocol.ValidateUnixSocketPath("updater_socket", path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}

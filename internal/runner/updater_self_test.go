@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -23,7 +24,7 @@ func TestSelfUpdateCapabilityRefreshesThroughExistingStatusRead(t *testing.T) {
 	r.cfg.UpdaterSocket = "authority.sock"
 	r.cfg.UpdaterBundleDir = "bundles"
 	r.cfg.UpdaterInstanceID = "host"
-	path := filepath.Join(t.TempDir(), "control.sock")
+	path := filepath.Join(testkit.SocketDir(t), "control.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)

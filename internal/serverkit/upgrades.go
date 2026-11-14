@@ -57,6 +57,12 @@ func prepareUpgradeConfig(cfg *UpgradeConfig, dataDir string) error {
 		}
 		*p = v
 	}
+	if err := protocol.ValidateUnixSocketPath("upgrades.control_socket", cfg.ControlSocket); err != nil {
+		return err
+	}
+	if err := protocol.ValidateUnixSocketPath("upgrades.updater_socket", cfg.UpdaterSocket); err != nil {
+		return err
+	}
 	if cfg.DrainTimeout < 0 || cfg.RestartBudget < 0 || cfg.GrantDuration < 0 {
 		return errors.New("upgrade timeouts must not be negative")
 	}

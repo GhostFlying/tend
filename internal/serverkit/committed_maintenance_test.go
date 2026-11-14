@@ -30,6 +30,7 @@ import (
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/updater"
 )
@@ -108,11 +109,7 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 	// retained facts and the real production reopen keep their separate budgets.
 	setupCtx, setupCancel := context.WithTimeout(t.Context(), maintenanceAssemblySetupTimeout)
 	defer setupCancel()
-	root, err := os.MkdirTemp("", "tend-ma-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
+	root := testkit.SocketDir(t)
 	ledger := os.Getenv("TEND_MAINTENANCE_ASSEMBLY_LEDGER")
 	if ledger == "" {
 		t.Fatal("assembly child has no prepared ledger")

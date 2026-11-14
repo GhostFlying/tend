@@ -71,6 +71,11 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 		return err
 	}
 	defer release()
+	sockets, err := testkit.NewSocketDir()
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(sockets)
 	listener := options.Listener
 	if listener == nil {
 		addr := options.Listen
@@ -117,7 +122,7 @@ func Run(ctx context.Context, options Options, log *slog.Logger) error {
 		})
 	}
 	named := hostedConfiguration()
-	cfg := serverkit.Config{DataDir: root, LocalOwner: localOwner, Owners: []string{localOwner},
+	cfg := serverkit.Config{DataDir: root, ControlSocket: filepath.Join(sockets, "s"), LocalOwner: localOwner, Owners: []string{localOwner},
 		MainAgent: &serverkit.MainAgentConfig{Named: &named, BackgroundConcurrency: 4},
 		Repos:     []app.RepoConfig{{Repo: "sandbox-web", RemoteURL: "https://example.invalid/web.git"}, {Repo: "sandbox-service", RemoteURL: "https://example.invalid/service.git"}, {Repo: "sandbox-docs", RemoteURL: "https://example.invalid/docs.git"}},
 		Projects:  []app.ProjectConfig{{Name: "demo-web", Title: "界面体验", Repos: []string{"sandbox-web"}}, {Name: "demo-service", Title: "服务可靠性", Repos: []string{"sandbox-service"}}, {Name: "demo-docs", Title: "文档与交付", Repos: []string{"sandbox-docs"}}},

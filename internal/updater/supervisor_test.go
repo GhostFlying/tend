@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 type fakeProcess struct {
@@ -122,7 +123,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	h := &harness{boot: 1000, now: time.Unix(1000, 0), data: data}
-	h.cfg = Config{InstanceID: "runner-test", Role: "runner", StateDir: filepath.Join(root, "supervisor"), InitialBinary: old, LogPath: filepath.Join(root, "service.log"), Protocol: 1, StorageVersion: 8, DataFiles: []string{data}, HealthTimeoutSeconds: 10}
+	h.cfg = Config{InstanceID: "runner-test", Role: "runner", StateDir: filepath.Join(testkit.SocketDir(t), "supervisor"), InitialBinary: old, LogPath: filepath.Join(root, "service.log"), Protocol: 1, StorageVersion: 8, DataFiles: []string{data}, HealthTimeoutSeconds: 10}
 	sum, _ := hashFile(old)
 	h.p = &fakeProcess{next: 10, live: map[int]Identity{10: {PID: 10, StartTicks: 10, SHA256: sum, LaunchID: "original-runtime"}}}
 	h.a = &fakeAuthority{now: &h.boot}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -53,7 +53,7 @@ func TestDeploymentExecutionEntryUsesOnlyConfiguredRemoteRoute(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("controlled local upgrade configuration requires Linux")
 	}
-	root := t.TempDir()
+	root := testkit.SocketDir(t)
 	cfg := &UpgradeConfig{Instance: "logical-server-identity", UpdaterSocket: filepath.Join(root, "updater.sock"), ExecutionEntry: &protocol.DeploymentExecutionEntry{Transport: "tailscale_ssh", Target: "service.example.invalid", User: "operator", CLIPath: filepath.Join(root, "controlled-cli")}}
 	if err := prepareUpgradeConfig(cfg, root); err != nil {
 		t.Fatal(err)
@@ -80,11 +80,7 @@ func TestDeploymentExecutionEntryUsesOnlyConfiguredRemoteRoute(t *testing.T) {
 }
 
 func TestConfiguredDeploymentObservationMatchesFixedInstanceAndOmitsPrivateState(t *testing.T) {
-	dir, err := os.MkdirTemp("", "tend-observe-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := testkit.SocketDir(t)
 	socket := filepath.Join(dir, "supervisor.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
@@ -124,7 +120,7 @@ func TestConfiguredDeploymentObservationMatchesFixedInstanceAndOmitsPrivateState
 
 func TestDeploymentObservationUnavailable(t *testing.T) {
 	actual := protocol.ObservedServer{PID: 123, BinarySHA256: strings.Repeat("a", 64), ProcessInstanceID: "actual"}
-	for _, socket := range []string{"", filepath.Join(t.TempDir(), "absent.sock")} {
+	for _, socket := range []string{"", filepath.Join(testkit.SocketDir(t), "absent.sock")} {
 		got, err := readDeploymentObservation(context.Background(), actual, socket)
 		if err != nil || got.ProofStatus != "unavailable" || got.CommittedProof != nil || *got.ActualServer != actual {
 			t.Fatalf("unavailable: %+v %v", got, err)

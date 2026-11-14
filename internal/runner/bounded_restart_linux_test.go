@@ -14,6 +14,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -72,7 +73,7 @@ func TestBoundedRestartAdmissionUsesActualNewProcessAndGeneration(t *testing.T) 
 				state.Process.StartTicks++
 				state.CommittedProof.Process = state.Process
 			}
-			socket := filepath.Join(t.TempDir(), "fixed.sock")
+			socket := filepath.Join(testkit.SocketDir(t), "fixed.sock")
 			listener, err := net.Listen("unix", socket)
 			if err != nil {
 				t.Fatal(err)

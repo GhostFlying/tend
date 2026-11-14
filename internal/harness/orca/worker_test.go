@@ -228,11 +228,7 @@ func newWorkerFixture(t *testing.T) *workerFixture {
 	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	sockets, err := os.MkdirTemp("", "tw")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(sockets) })
+	sockets := testkit.SocketDir(t)
 	f := &workerFixture{t: t, orca: newLiveOrca(), dir: dir}
 	// Generic orchestration exercises the supported legacy TUI provider. Codex
 	// observations use managedCodexFixture with actual session/root evidence.

@@ -43,7 +43,7 @@ func TestHeartbeatCommittedSuccessorProof(t *testing.T) {
 			case "uncommitted":
 				state.CommittedProof = nil
 			}
-			socket := filepath.Join(t.TempDir(), "updater.sock")
+			socket := filepath.Join(testkit.SocketDir(t), "updater.sock")
 			ln, err := net.Listen("unix", socket)
 			if err != nil {
 				t.Skipf("unix socket unavailable: %v", err)
