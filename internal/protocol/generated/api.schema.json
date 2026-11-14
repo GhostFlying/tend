@@ -2321,6 +2321,9 @@
         "message_id": {
           "type": "string"
         },
+        "presentation": {
+          "$ref": "#/definitions/BackgroundPresentation"
+        },
         "source_count": {
           "type": "integer"
         },
@@ -2368,6 +2371,56 @@
         "created_at"
       ],
       "title": "BackgroundCheckin",
+      "type": "object"
+    },
+    "BackgroundPresentation": {
+      "additionalProperties": false,
+      "properties": {
+        "more": {
+          "type": "boolean"
+        },
+        "recipient": {
+          "$ref": "#/definitions/BackgroundRecipient"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/BackgroundSourcePreview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sources",
+        "more"
+      ],
+      "title": "BackgroundPresentation",
+      "type": "object"
+    },
+    "BackgroundRecipient": {
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/definitions/AgentIdentity"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "status"
+      ],
+      "title": "BackgroundRecipient",
       "type": "object"
     },
     "BackgroundSource": {
@@ -2441,6 +2494,37 @@
         "more"
       ],
       "title": "BackgroundSourcePage",
+      "type": "object"
+    },
+    "BackgroundSourcePreview": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "object_type": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "message_id",
+        "kind",
+        "summary"
+      ],
+      "title": "BackgroundSourcePreview",
       "type": "object"
     },
     "BackupCheckpoint": {
@@ -8192,6 +8276,9 @@
         },
         "message_id": {
           "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/definitions/BackgroundPresentation"
         },
         "source_count": {
           "type": "integer"

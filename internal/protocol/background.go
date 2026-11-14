@@ -9,13 +9,38 @@ type BackgroundBatch struct {
 
 // BackgroundBatchState is shared owner metadata; responsibility identity is projected by its caller.
 type BackgroundBatchState struct {
-	BatchID     string             `json:"batch_id"`
-	MessageID   string             `json:"message_id"`
-	Status      string             `json:"status"`
-	SourceCount int                `json:"source_count"`
-	CreatedAt   int64              `json:"created_at"`
-	FrozenAt    int64              `json:"frozen_at,omitempty"`
-	Checkin     *BackgroundCheckin `json:"checkin,omitempty"`
+	Presentation *BackgroundPresentation `json:"presentation,omitempty"`
+	BatchID      string                  `json:"batch_id"`
+	MessageID    string                  `json:"message_id"`
+	Status       string                  `json:"status"`
+	SourceCount  int                     `json:"source_count"`
+	CreatedAt    int64                   `json:"created_at"`
+	FrozenAt     int64                   `json:"frozen_at,omitempty"`
+	Checkin      *BackgroundCheckin      `json:"checkin,omitempty"`
+}
+
+// BackgroundPresentation describes retained facts, not delivery or execution authority.
+type BackgroundPresentation struct {
+	Recipient *BackgroundRecipient      `json:"recipient,omitempty"`
+	Sources   []BackgroundSourcePreview `json:"sources"`
+	More      bool                      `json:"more"`
+}
+
+// BackgroundRecipient comes from this message's frozen execution selection.
+// Status is the recorded native turn state, never inferred from the current owner.
+type BackgroundRecipient struct {
+	Identity    AgentIdentity `json:"identity"`
+	DisplayName string        `json:"display_name,omitempty"`
+	Status      string        `json:"status"`
+}
+
+type BackgroundSourcePreview struct {
+	Seq        int64  `json:"seq"`
+	MessageID  string `json:"message_id"`
+	Kind       string `json:"kind"`
+	Summary    string `json:"summary"`
+	ObjectType string `json:"object_type,omitempty"`
+	ObjectID   string `json:"object_id,omitempty"`
 }
 type BackgroundSource struct {
 	Seq          int64           `json:"seq"`

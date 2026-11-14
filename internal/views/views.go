@@ -460,6 +460,11 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 			return it, err
 		}
 		if err == nil {
+			presentation, err := backgroundPresentation(ctx, q, batch)
+			if err != nil {
+				return it, err
+			}
+			batch.Presentation = &presentation
 			it.Background = &batch
 		}
 	}

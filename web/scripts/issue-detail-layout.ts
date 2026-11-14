@@ -1128,6 +1128,31 @@ try {
             notice_type: "background_batch",
             body: "后台来源内容保持可读取。",
             created_at: new Date(now - 1).toISOString(),
+            background: {
+              batch_id: "hierarchy-batch",
+              message_id: "hierarchy-background-source",
+              status: "frozen",
+              source_count: 3,
+              created_at: now - 1,
+              presentation: {
+                recipient: {
+                  identity: { execution_environment_id: "hosted", local_id: "qingsong" },
+                  display_name: "青松",
+                  status: "starting",
+                },
+                sources: [
+                  {
+                    seq: 1,
+                    message_id: "hierarchy-original-one",
+                    kind: "issue.status_changed",
+                    summary: "后台来源内容保持可读取。",
+                    object_type: "issue",
+                    object_id: child.issue_id,
+                  },
+                ],
+                more: true,
+              },
+            },
           },
           items: [],
         },
@@ -1155,6 +1180,33 @@ try {
         "diagnostics does not occupy a standalone page header",
       );
       const source = detail.locator('[data-scroll-id="hierarchy-background-source"]');
+      let sourceReads = 0;
+      await page.route(
+        "**/api/v1/background/hierarchy-background-source/sources?*",
+        async (route) => {
+          sourceReads++;
+          if (sourceReads === 1) {
+            await route.fulfill({ status: 503, json: { error: { code: "unavailable" } } });
+            return;
+          }
+          const after = new URL(route.request().url()).searchParams.get("after");
+          await route.fulfill({
+            json: {
+              batch: { batch_id: "hierarchy-batch" },
+              sources: [
+                {
+                  seq: after === "2" ? 3 : 2,
+                  message_id: after === "2" ? "third-original" : "second-original",
+                  kind: after === "2" ? "task.completed" : "issue.status_changed",
+                  body: after === "2" ? "第三项任务完成原文。" : "工作状态调整的完整原文。",
+                },
+              ],
+              more: after !== "2",
+              next: after === "2" ? undefined : 2,
+            },
+          });
+        },
+      );
       const owner = detail.locator('[data-scroll-id="owner-one"]');
       const reply = detail.locator('[data-scroll-id="reply-one"]');
       const alignment = await detail.evaluate((node) => {
@@ -1178,9 +1230,23 @@ try {
         0,
       );
       assert.equal(await source.getAttribute("open"), null);
-      await source.locator("summary").click();
+      assert((await source.locator("summary").first().innerText()).includes("青松 · 3 项后台变化"));
+      assert.equal(sourceReads, 0, "collapsed notifications do not fetch originals");
+      await source.locator("summary").first().click();
       await source.getByText("后台来源内容保持可读取。", { exact: true }).waitFor();
-      await source.locator("summary").click();
+      await source.getByText("已安排，等待接收确认", { exact: true }).waitFor();
+      await source.getByRole("button", { name: "重新读取", exact: true }).click();
+      await source.getByRole("button", { name: "查看更多原始来源", exact: true }).click();
+      await source.getByText("任务完成 · 原始来源 3", { exact: true }).click();
+      await source.getByText("第三项任务完成原文。", { exact: true }).waitFor();
+      assert.equal(sourceReads, 3, "retry and pagination use their original source cursor");
+      assert.equal(
+        await source.getByRole("link", { name: "查看 Issue", exact: true }).getAttribute("href"),
+        `/issues/${child.issue_id}`,
+      );
+      assert.equal(await source.evaluate((node) => node.scrollWidth > node.clientWidth), false);
+      await page.screenshot({ path: join(output, `named-background-${width}.png`) });
+      await source.locator("summary").first().click();
       assert.equal(await source.getAttribute("open"), null);
       await owner.scrollIntoViewIfNeeded();
       assert(Math.abs((await owner.boundingBox())!.x - (await reply.boundingBox())!.x) < 1);
