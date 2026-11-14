@@ -30,11 +30,10 @@ const e2ePackage = "github.com/GhostFlying/tend/internal/e2e"
 func packageGroup(pkg string) string { return impact.Group(pkg) }
 
 func selectGroup(packages []string, group string) ([]string, error) {
-	switch group {
-	case "all":
+	if group == "all" {
 		return packages, nil
-	case "app", "api", "mainthread", "e2e", "other":
-	default:
+	}
+	if !slices.Contains(impact.Groups(), group) {
 		return nil, fmt.Errorf("unknown race group %q", group)
 	}
 	var result []string
@@ -308,7 +307,7 @@ func main() {
 	reportDir := flag.String("report-dir", "", "optional directory for native Go test JSON reports")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
 	planPath := flag.String("plan", "", "optional source-bound impact plan")
-	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, other")
+	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, serverkit, sandbox, runner, other")
 	flag.Parse()
 	if *shards == 0 {
 		*shards = max(1, min(4, runtime.GOMAXPROCS(0)/8))

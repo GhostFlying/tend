@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,7 +59,7 @@ esac
 	}
 	t.Setenv("PATH", directory)
 	t.Setenv("RECORD", record)
-	for _, group := range []string{"app", "other", "e2e", "api", "mainthread"} {
+	for _, group := range impact.Groups() {
 		pkg := "example/package"
 		if group == "app" {
 			pkg = appPackage
@@ -76,7 +77,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(commands), "-run ") != 8 || !strings.Contains(string(commands), "-count 1") || strings.Count("\n"+string(commands), "\nlist ") != 5 {
+	if strings.Count(string(commands), "-run ") != 8 || !strings.Contains(string(commands), "-count 1") || strings.Count("\n"+string(commands), "\nlist ") != len(impact.Groups()) {
 		t.Fatalf("discovery, isolated tests or shards missing: %s", commands)
 	}
 }

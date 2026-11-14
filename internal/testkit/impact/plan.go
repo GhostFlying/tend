@@ -34,9 +34,16 @@ type Plan struct {
 
 const module = "github.com/GhostFlying/tend/"
 
+// Groups returns the complete partition used by local and Actions race checks.
+// Heavy integration packages run independently instead of serializing other.
+func Groups() []string {
+	return []string{"app", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other"}
+}
+
 // Group is the same partition used by racecheck and the Actions matrix.
 func Group(pkg string) string {
-	for _, group := range []string{"app", "api", "mainthread", "e2e"} {
+	groups := Groups()
+	for _, group := range groups[:len(groups)-1] {
 		if pkg == module+"internal/"+group {
 			return group
 		}
@@ -149,7 +156,7 @@ func Select(files []string, packages []Package, forceFull bool) Plan {
 	if p.Full {
 		p.Web, p.Layout, p.Cross, p.Release = true, true, true, true
 		p.Packages = []string{"./..."}
-		p.Groups = []string{"app", "api", "mainthread", "e2e", "other"}
+		p.Groups = Groups()
 		p.QualityTargets = []string{"go-check"}
 		return explain(p)
 	}

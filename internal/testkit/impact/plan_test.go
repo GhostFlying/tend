@@ -1,10 +1,36 @@
 package impact
 
 import (
+	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestFullGroupsIsolateHeavyPackagesWithoutReducingCoverage(t *testing.T) {
+	want := []string{"app", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other"}
+	plan := Select(nil, nil, true)
+	if !slices.Equal(plan.Groups, want) {
+		t.Fatalf("full plan lost independent heavy groups: %v", plan.Groups)
+	}
+	for _, group := range want[:len(want)-1] {
+		if got := Group(module + "internal/" + group); got != group {
+			t.Fatalf("%s shares group %s", group, got)
+		}
+	}
+	if got := Group(module + "internal/new-package"); got != "other" {
+		t.Fatalf("new package lost full coverage: %s", got)
+	}
+	data, err := os.ReadFile("../../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matrix := regexp.MustCompile(`(?m)^        group: \[([^\]]+)\]$`).FindSubmatch(data)
+	if len(matrix) != 2 || !slices.Equal(strings.Split(string(matrix[1]), ", "), want) {
+		t.Fatalf("Actions and local full plan differ: %s", matrix)
+	}
+}
 
 func dependencyFixture() []Package {
 	return []Package{
@@ -27,7 +53,7 @@ func TestImplementationFollowsReverseProductionAndExternalTestImports(t *testing
 	if slices.Contains(p.Packages, module+"internal/unrelated") || p.Web || p.Release || p.Full {
 		t.Fatal("leaf change unnecessarily selected unrelated release or frontend work", p)
 	}
-	if !slices.Equal(p.Groups, []string{"api", "app", "e2e", "other"}) {
+	if !slices.Equal(p.Groups, []string{"api", "app", "e2e", "other", "sandbox"}) {
 		t.Fatal(p.Groups)
 	}
 }
@@ -83,14 +109,14 @@ func TestBroadOrUnknownInputsRetainCompleteValidation(t *testing.T) {
 	for _, file := range []string{"go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", "internal/protocol/request.go", "web/src/api/generated/api.ts", "internal/store/migrations/next.sql", "internal/testkit/impact/plan.go", "internal/testkit/testphase/context.go", "internal/release/manifest.go", "cmd/tend/main.go", "unknown.json", "docs/examples/tend-server.hujson", "internal/removed/last.go"} {
 		t.Run(file, func(t *testing.T) {
 			p := Select([]string{file}, dependencyFixture(), false)
-			if !p.Full || !p.Web || !p.Layout || !p.Cross || !p.Release || len(p.Groups) != 5 {
+			if !p.Full || !p.Web || !p.Layout || !p.Cross || !p.Release || !slices.Equal(p.Groups, Groups()) {
 				t.Fatal("unsafe incomplete plan", p)
 			}
 		})
 	}
 	for _, files := range [][]string{nil, {"docs/a.md"}} {
 		p := Select(files, nil, true)
-		if !p.Full || len(p.Groups) != 5 {
+		if !p.Full || !slices.Equal(p.Groups, Groups()) {
 			t.Fatal("explicit baseline lost complete checks", p)
 		}
 	}
