@@ -8,7 +8,7 @@ Refs: D25、D130；承接测试时间语义修复。本计划在实现前记录�
 
 ## 共享选择器
 
-1. 新增仅标准库的 impact 库与命令：读取确定的 Git base/head、工作区差异与文件内容指纹，输出临时 JSON 计划及每个包含/排除理由。PR 比较实际 base 与 checkout HEAD；本地缺省取 origin/main 的 merge-base，显式 CHECK_BASE 可覆盖；无法解析、未知文件类别或无法建立 Go 图时扩大为完整验证，不静默排除。
+1. 新增仅标准库的 impact 库与命令：读取确定的 Git base/head、工作区差异与文件内容指纹，输出临时 JSON 计划及每个包含/排除理由。PR 比较实际 base 与 checkout HEAD；本地缺省取 origin/main 的 merge-base，显式 CHECK_BASE 可覆盖；无法解析基线时明确失败，不把空结果当作排除计划；未知文件类别或无法建立 Go 图时扩大为完整验证，不静默排除。
 2. Go 实现改动使用 `go list -json ./...` 的 Imports、TestImports、XTestImports 建立反向闭包；测试文件改动至少执行所属包。新增包、测试和文件自动发现。跨组件契约通过反向测试导入和明确的核心边界规则保留；移除包、迁移、协议/生成、依赖及检查基础设施等广影响走全量。
 3. 纯文档执行差异校验；纯 Web 执行原类型/lint/单元/build 和所有 layout 组，不拖入后端 race/各架构发布构建。普通 Go 变更执行受影响包静态检查与原完整包级 race 根，保留受影响 API/mainthread/E2E/Sandbox；不凭目录排除跨层导入。main/release 和显式 full 始终完整兜底。
 4. 本地 make/check 与 Actions 影子诊断读取同一计划；Actions 正式执行仍完整覆盖。计划绑定 base/head/tree 与实际内容指纹；来源改变必须重新生成。只用临时工件与已有 Git/检查结果，不新增永久账本或审批步骤。
