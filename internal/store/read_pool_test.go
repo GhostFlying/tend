@@ -11,7 +11,7 @@ import (
 
 func TestReadPoolReusesConcurrentSnapshots(t *testing.T) {
 	s, _ := openTest(t)
-	limit := readPoolConnections()
+	limit := readConnections
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	mustExec(t, s, `INSERT INTO inbox (source, source_event_id, received_at) VALUES ('pool', 'snapshot', 0)`)
@@ -97,7 +97,7 @@ func TestReadPoolBoundsAndCancelsWaiters(t *testing.T) {
 	s, _ := openTest(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	limit := readPoolConnections()
+	limit := readConnections
 	release := make(chan struct{})
 	ready := make(chan struct{}, limit)
 	done := make(chan error, limit)
