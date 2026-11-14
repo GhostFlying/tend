@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 	"github.com/GhostFlying/tend/internal/testkit/testbudget"
 )
 
@@ -26,20 +27,7 @@ const appPackage = "github.com/GhostFlying/tend/internal/app"
 const e2ePackage = "github.com/GhostFlying/tend/internal/e2e"
 
 // CI groups partition go list output; new packages belong to other by default.
-func packageGroup(pkg string) string {
-	switch pkg {
-	case appPackage:
-		return "app"
-	case e2ePackage:
-		return "e2e"
-	case "github.com/GhostFlying/tend/internal/api":
-		return "api"
-	case "github.com/GhostFlying/tend/internal/mainthread":
-		return "mainthread"
-	default:
-		return "other"
-	}
-}
+func packageGroup(pkg string) string { return impact.Group(pkg) }
 
 func selectGroup(packages []string, group string) ([]string, error) {
 	switch group {
@@ -319,6 +307,7 @@ func main() {
 	count := flag.Int("count", 0, "repeat tests explicitly; 0 keeps Go native caching")
 	reportDir := flag.String("report-dir", "", "optional directory for native Go test JSON reports")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
+	planPath := flag.String("plan", "", "optional source-bound impact plan")
 	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, other")
 	flag.Parse()
 	if *shards == 0 {
@@ -337,6 +326,25 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	if *planPath != "" {
+		root, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		plan, err := impact.Read(ctx, root, *planPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if len(plan.Groups) == 0 || *group != "all" && !slices.Contains(plan.Groups, *group) {
+			fmt.Fprintln(os.Stderr, "race group is excluded by the impact plan")
+			os.Exit(2)
+		}
+		if !plan.Full {
+			packages = plan.Packages
+		}
+	}
 	if err := check(ctx, *goTool, *shards, *suiteShards, *count, *timeout, *group, *reportDir, packages); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

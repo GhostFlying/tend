@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/procx"
+	"github.com/GhostFlying/tend/internal/testkit/impact"
 	"github.com/GhostFlying/tend/internal/testkit/testbudget"
 )
 
@@ -130,6 +131,27 @@ func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isola
 	return parallel, isolated
 }
 
+// plannedTasks shares the CI package plan while retaining original group budgets.
+func plannedTasks(parallel, isolated []task, plan impact.Plan, path string) ([]task, []task) {
+	selectTasks := func(source []task) []task {
+		var selected []task
+		for _, t := range source {
+			include := t.name == "quality" || t.name == "web" && plan.Web || slices.Contains(plan.Groups, t.name)
+			if !include {
+				fmt.Printf("[check] %s excluded by impact plan\n", t.name)
+				continue
+			}
+			if t.name == "quality" {
+				t.args = []string{"impact-quality"}
+			}
+			t.env = environment(t.env, map[string]string{"TEST_PLAN": path})
+			selected = append(selected, t)
+		}
+		return selected
+	}
+	return selectTasks(parallel), selectTasks(isolated)
+}
+
 func runTask(ctx context.Context, t task) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -178,13 +200,31 @@ func schedule(ctx context.Context, jobs int, parallel, isolated []task, run func
 	return errors.Join(failures...)
 }
 
-func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string, count int) error {
+func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string, count int, mode, base string) error {
 	directory, err := os.MkdirTemp("", "tend-check-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(directory)
 	parallel, isolated := tasks(b, directory, goTool, pnpm, count)
+	if mode != "full" && mode != "affected" {
+		return fmt.Errorf("check mode must be affected or full")
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	plan, err := impact.Load(ctx, root, impact.Options{Base: base, Head: "HEAD", Go: goTool, Worktree: true, Full: mode == "full"})
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(directory, "impact.json")
+	if err := impact.Write(path, plan); err != nil {
+		return err
+	}
+	fmt.Printf("[check] impact full=%t base=%s head=%s packages=%d groups=%v reasons=%v\n", plan.Full, plan.Source.Base, plan.Source.Head, len(plan.Packages), plan.Groups, plan.Reasons)
+	parallel, isolated = plannedTasks(parallel, isolated, plan, path)
+
 	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t effective-cpus=%d serial-reason=%q\n",
 		b.jobs, b.shards, b.suiteShards, b.packages, b.procs, b.exclusiveE2E, cpus, reason)
 	return schedule(ctx, b.jobs, parallel, isolated, runTask)
@@ -197,6 +237,8 @@ func main() {
 	suiteShards := flag.Int("suite-shards", 0, "API, mainthread and E2E shards (0 selects by CPU)")
 	goTool := flag.String("go", "go", "Go executable")
 	pnpm := flag.String("pnpm", "pnpm", "pnpm executable")
+	mode := flag.String("mode", "affected", "validation mode: affected or full")
+	base := flag.String("base", "", "Git comparison base (default origin/main merge-base)")
 	count := flag.Int("count", 0, "repeat race tests explicitly; 0 keeps Go native caching")
 	flag.Parse()
 	cpus := runtime.GOMAXPROCS(0)
@@ -213,7 +255,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := check(ctx, b, cpus, *reason, *goTool, *pnpm, *count); err != nil {
+	if err := check(ctx, b, cpus, *reason, *goTool, *pnpm, *count, *mode, *base); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

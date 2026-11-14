@@ -8,6 +8,9 @@ TEST_TIMEOUT ?= 60m
 APP_TEST_SHARDS ?= 0
 TEST_SHARDS ?= 0
 CHECK_JOBS ?= 0
+CHECK_MODE ?= affected
+CHECK_BASE ?=
+TEST_PLAN ?=
 # Explicit multicore serial checks require a recorded operational reason.
 CHECK_SERIAL_REASON ?=
 export CHECK_SERIAL_REASON
@@ -22,7 +25,7 @@ WEB := web
 
 ## check: everything that must pass before a commit is merged
 check:
-	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -go "$(GO)" -pnpm "$(PNPM)"
+	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -mode "$(CHECK_MODE)" -base "$(CHECK_BASE)" -go "$(GO)" -pnpm "$(PNPM)"
 
 .PHONY: go-check
 ## go-check: static Go checks and executable interface coverage
@@ -42,7 +45,7 @@ staticcheck:
 	GOTOOLCHAIN=$$($(GO) env GOVERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PKGS)
 
 test:
-	$(GO) run ./internal/testkit/racecheck -go "$(GO)" -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -timeout $(TEST_TIMEOUT) -group $(TEST_GROUP) -report-dir "$(TEST_REPORT_DIR)" $(PKGS)
+	$(GO) run ./internal/testkit/racecheck -go "$(GO)" -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -timeout $(TEST_TIMEOUT) -group $(TEST_GROUP) -report-dir "$(TEST_REPORT_DIR)" -plan "$(TEST_PLAN)" $(PKGS)
 
 ## it: integration tests that need a real harness or tailnet
 it:
@@ -92,3 +95,12 @@ capability-check:
 ## ci-check: verify bounded CI cache retention
 ci-check:
 	node --test .github/scripts/*.test.cjs
+
+.PHONY: impact-quality test-plan
+## test-plan: show source-bound affected checks without executing them
+test-plan:
+	$(GO) run ./internal/testkit/impactcmd -base "$(CHECK_BASE)" -worktree
+
+## impact-quality: execute the existing static targets selected by the shared plan
+impact-quality:
+	$(GO) run ./internal/testkit/impactcmd -plan "$(TEST_PLAN)" -run quality
