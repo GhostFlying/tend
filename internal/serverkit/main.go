@@ -204,7 +204,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	readWake := dispatch.NewSignal()
 	interactionWake := dispatch.NewSignal()
 	webhookKeys := &webhookauth.Files{Dir: filepath.Join(dataDir, "webhook-keys")}
-	opts := []app.Option{app.WithExtensionValidator(extensions.ValidateNative), app.WithWebhookKeys(webhookKeys), app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
+	opts := []app.Option{app.WithLogger(log), app.WithExtensionValidator(extensions.ValidateNative), app.WithWebhookKeys(webhookKeys), app.WithNotifier(dispatch.Fanout{wake, readWake, interactionWake})}
 	if recovery := os.Getenv("TEND_FORWARD_RECOVERY_ID"); recovery != "" {
 		if cfg.Upgrades == nil || os.Getenv("TEND_FORWARD_RECOVERY_SOCKET") != cfg.Upgrades.UpdaterSocket {
 			return errors.New("forward recovery requires the fixed configured updater socket")
@@ -725,6 +725,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 			}
 		})
 	}
+	logServerProcess(log)
 	log.Info("tend-server running")
 	served := make(chan error, len(listeners))
 	for _, l := range listeners {

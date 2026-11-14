@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -636,7 +637,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		}
 
 		if v.Phase != "restored" {
-			available, err := anotherAvailableHost(ctx, tx.Q(), h.HostID, now)
+			available, hosts, err := inspectOtherUpgradeHosts(ctx, tx.Q(), h.HostID, now)
 			if err != nil {
 				return err
 			}
@@ -646,10 +647,13 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 					return err
 				}
 				if pending {
+					observeUpgradeHostDecision(ctx, x, *r, h.HostID, "awaiting_normal_ack", slog.LevelDebug, hosts)
 					return nil
 				}
+				observeUpgradeHostDecision(ctx, x, *r, h.HostID, "other_hosts_unavailable", slog.LevelWarn, hosts)
 				return attention("其他执行主机不可用，已暂停后续升级")
 			}
+			observeUpgradeHostDecision(ctx, x, *r, h.HostID, "other_host_available", slog.LevelDebug, hosts)
 		}
 		if v.Status == "queued" {
 			if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
@@ -747,30 +751,8 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 	return upgradeNotice(ctx, x, tx, *r, "upgrade_completed", "", fmt.Sprintf("升级 `%s` 已完成，所有执行主机恢复服务。", r.View.ReleaseID))
 }
 func anotherAvailableHost(ctx context.Context, q store.Querier, exclude string, now int64) (bool, error) {
-	hosts, err := store.ListActiveHosts(ctx, q)
-	if err != nil {
-		return false, err
-	}
-	for _, h := range hosts {
-		if h.HostID == exclude || h.Slots <= 0 {
-			continue
-		}
-		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				continue
-			}
-			return false, err
-		}
-		ctl, err := runnerControl(ctx, q, h.HostID, now)
-		if err != nil {
-			return false, err
-		}
-		if rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal && rt.Runtime.AppliedControlRevision == ctl.Revision {
-			return true, nil
-		}
-	}
-	return false, nil
+	available, _, err := inspectOtherUpgradeHosts(ctx, q, exclude, now)
+	return available, err
 }
 
 // anotherHostAwaitingNormal identifies only a bounded acknowledgment gap.

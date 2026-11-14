@@ -28,6 +28,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness/orca"
 	"github.com/GhostFlying/tend/internal/harness/remote"
 	"github.com/GhostFlying/tend/internal/harness/traex"
+	"github.com/GhostFlying/tend/internal/logging"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
@@ -101,6 +102,12 @@ type config struct {
 }
 
 func main() {
+	log, logErr := logging.NewText(os.Stderr, os.Getenv(logging.LevelEnv))
+	if logErr != nil {
+		fmt.Fprintln(os.Stderr, logErr)
+		os.Exit(2)
+	}
+	slog.SetDefault(log)
 	if len(os.Args) > 1 && os.Args[1] == "native-tui" {
 		fs := flag.NewFlagSet("native-tui", flag.ContinueOnError)
 		state := fs.String("state", "", "private run capability file")
@@ -136,6 +143,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == workerMCP {
 		os.Exit(runWorkerMCP(os.Args[2:]))
 	}
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		fmt.Fprintln(flag.CommandLine.Output(), logging.EnvironmentHelp)
+	}
 	path := flag.String("config", "", "configuration file (HuJSON)")
 	version := flag.String("version", "dev", "build version reported to tend")
 	flag.Parse()
@@ -144,7 +156,6 @@ func main() {
 	if releaseID := os.Getenv("TEND_UPDATER_RELEASE_ID"); releaseID != "" {
 		*version = releaseID
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, *path, *version, log); err != nil && !errors.Is(err, context.Canceled) {
