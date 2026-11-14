@@ -16,12 +16,13 @@ import (
 
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/netx"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 )
 
 func TestDefaultServerDoesNotInitializeNativeWorkers(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	directory := t.TempDir()
+	directory := prepareAssemblyData(t, time.Now)
+	ctx, finish := testphase.Context(t, t.Context(), "native workers disabled", time.Minute)
+	defer finish()
 	// A disabled broker must not require a usable CLI or central working directory.
 	t.Setenv("PATH", t.TempDir())
 	nativePath := filepath.Join(directory, "native-workers")

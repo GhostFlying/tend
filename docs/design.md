@@ -149,7 +149,7 @@ D225 修订 D11 的通用请求持久化方式，其他未另行修订的基线�
 | D126 | 旧账本一致性只读离线归档加新空业务账本，取代 D113 及 mandatory-message-context 部署计划中删除历史、不保留归档/恢复材料的安排。历史迁移不改写，archive reader 不走正常 store.Open 或服务循环；manifest 与原件独立校验，unknown 阻止切换。仅显式导入静态设置，新 deployment identity、runner journal/凭据隔离；已有新副作用后回退先对账。UI 先 Image Gen 设计、独立 xhigh review、用户确认再编码；分批 PR 不中途部署，完整后受控发布与真实 E2E。见 docs/issue-agent-design.md、docs/plans/issue-agent-refactor.md、docs/plans/offline-ledger-archive.md、docs/plans/archive-owner-api.md。 | P8 旧固定完整检查和交叉编译通过；正式 CLI 两项实际准入 finding 已修复并通过真实 red/green、定向 race/vet。最终修正组合检查/CI、线上归档切换及生产部署待完成 |
 | D128 | Issue manager 改为真实的 issue_manager task，由 main/owner 按 category 发布，runner 首次领取时原子更新具体负责人。每轮共用 claim/租约/槽位/journal，等待释放槽位；责任按 Issue 收尾/交接结束，不独立验收管理任务。Codex/Traex app-server 承载，main/consultation 保留 host。协议 2/1、配置格式 2、保留账本受控迁移，unknown 先对账。修订 D122 的本机 manager 执行位置及 D123 的 manager 库存/领取方式。详见 docs/plans/runner-issue-managers.md。 | 实施中，未发布 |
 | D129 | Issue 完整详情页统一负责人对话、当前进展、子项与交付，原执行及验收会话保持独立；摘要按 Issue revision 留存，活动／结果只读投影沿原账本。见 docs/plans/issue-detail-conversation.md。 | 已实现 |
-| D130 | App、API 和 mainthread 通用业务测试经独立测试辅助子包，每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录的新文件，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移、历史及重开库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md、docs/plans/ci-parallel-fixtures.md。 | 已实现 |
+| D130 | App、API、mainthread 和 serverkit 的非迁移功能测试经独立测试辅助子包，每进程通过真实迁移生成一次当前版本空库，只缓存关闭并确认无剩余 WAL 后的只读模板字节；每个夹具复制到独立目录的新文件，再走正常 store.Open，连接、原文件、时钟、ID 与配置初始化仍独立。迁移、历史及重开库测试保留真实建库路径，不维护第二份 schema，不削减 race 或分片覆盖。见 docs/plans/app-fixture-template.md、docs/plans/ci-parallel-fixtures.md。 | 已实现 |
 | D131 | 通信模型独立于原生 Agent 会话：Web IM/CLI 使用正式发布、来源端点、投递与阅读回执；legacy conversation/rollout 保留诊断。Agent 仅选回复输入，Tend 固定渠道地址；主动通知默认 Web 与已绑定 Telegram。Telegram 单 owner 私聊，先持久化后确认更新，unknown 不重发；消费证据即时推送，渠道 MarkRead 为可选能力。PR/CI 仅预留领域更新与按需唤醒接点，协议仍为 2/1。见 docs/plans/messaging-web-telegram.md。 | 已实现 |
 | D132 | Web 界面改版（修订 D70 的单对话加覆盖层布局与 D121 UI r5 的侧栏摘要）：路由驱动的页面与可分享路径，旧 query 链接改写；侧栏只做分组导航，手机四标签；角色化 token 与共享基础组件，由检查脚本约束；界面使用用户术语，不默认显示内部标识；路由级拆包与全页面巡检。不引入路由或 UI 依赖，History API 与原生 dialog/popover 已满足需求。业务合同、owner API 与 runner wire 不变。Issue 讨论以作者行头像标记主线、彩色强调标记重点、低权重合并事件与默认折叠过程标记背景，交付物不再占据主栏。见 docs/plans/web-ui-overhaul.md。 | 已实现 |
 
@@ -2174,3 +2174,10 @@ server停机只结束可重读的claim、消息、问题、日志等待及事件
 明确的自更新拒绝在现有私有拒绝凭据旁保留可丢弃的首次诊断，凭据格式本身不变，沿既有本机status Error返回；历史记录缺少原因仍为unknown，不作为拒绝证明新增条件。终态日志将历史last_error与当前错误区分。普通升级活动时沿现有已提交变化通知唤醒单一协调循环；runner控制或升级阶段真正改变时合并唤醒原心跳循环。相同状态与字节进度不自激，周期观察继续兜底，健康样本间隔、真实drain、ACK及安装提交不省略。
 
 计划见 `docs/plans/upgrade-shutdown-and-progress.md`。本变更不修改线上信封、协议版本、数据库schema或授权类型；旧私有拒绝记录仍可读，诊断原因不进入授权判断。
+
+
+## 功能测试的时间与初始化边界（D25、D130）
+
+业务时钟用于到期、租约与重试的语义断言；fixture 初始化和真实执行速度不构成这些语义的性能门槛。serverkit 非迁移功能用例复用真实迁移后关闭的独立数据库模板，准备阶段与功能动作分别记录有限 watchdog。Sandbox 的冷启动、seed 与保留数据重开仍走真实路径，启动 ready 后才开始后续场景预算；服务父 context 保留到真实 goroutine 完成清理。迁移、失败恢复和重开专门测试不使用模板替代。
+
+本地与 Actions 共用动态发现、race 与分片入口，默认 `TEST_COUNT=1`，保留编译/模块缓存；显式 `TEST_COUNT=0` 仅用于开发迭代，缓存命中不算实际执行证据。原生逐例 JSON 持久保存，CI 即使失败也上传。墙钟 watchdog 只用于有限防卡死和诊断；性能 SLA 必须另有环境契约。见 `docs/plans/test-time-semantics.md`。

@@ -11,9 +11,11 @@ CHECK_JOBS ?= 0
 # Explicit multicore serial checks require a recorded operational reason.
 CHECK_SERIAL_REASON ?=
 export CHECK_SERIAL_REASON
-TEST_COUNT ?= 0
+# Acceptance checks execute tests even when compiled objects are cached.
+# TEST_COUNT=0 explicitly opts into native result caching for local iteration.
+TEST_COUNT ?= 1
 TEST_GROUP ?= all
-TEST_REPORT_DIR ?=
+TEST_REPORT_DIR ?= .local/test-reports
 WEB := web
 
 .PHONY: check fmt-check vet staticcheck test it build gen web web-deps web-check

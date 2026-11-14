@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 )
 
 func TestServerRoutesRunnerFilesAndRPC(t *testing.T) {
@@ -240,18 +241,19 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 }
 
 func TestInjectedClockSetsOwnerSessionExpiry(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
+	now := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	data := prepareAssemblyData(t, func() time.Time { return now })
+	ctx, finish := testphase.Context(t, t.Context(), "owner session expiry", time.Minute)
+	defer finish()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	now := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
 	finished := errors.New("owner clock verified")
 	client := &http.Client{Transport: &http.Transport{}}
 	defer client.CloseIdleConnections()
-	err = Run(ctx, Config{DataDir: t.TempDir(), Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
+	err = Run(ctx, Config{DataDir: data, Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
 		Listeners: []net.Listener{listener},
 		WhoIs:     netx.Static{Identity: &netx.Identity{User: "test-owner"}},
 		Now:       func() time.Time { return now },

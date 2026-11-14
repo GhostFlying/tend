@@ -20,6 +20,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 	"path/filepath"
 )
 
@@ -71,9 +72,10 @@ func TestFeishuAssemblyUsesEffectiveLocalOwner(t *testing.T) {
 		t.Run(boundOwner, func(t *testing.T) {
 			now := time.Unix(2000000000, 0)
 			finished := errors.New("effective owner verified")
-			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-			defer cancel()
-			cfg := Config{DataDir: t.TempDir(), Listen: "127.0.0.1:0", LocalOwner: "local-owner", Owners: []string{"configured-owner"}, Feishu: &FeishuConfig{ReceiveMode: "http", AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_ASSEMBLY_SECRET", VerificationTokenEnv: "TEND_FEISHU_ASSEMBLY_TOKEN", EncryptKeyEnv: "TEND_FEISHU_ASSEMBLY_KEY"}}
+			data := prepareAssemblyData(t, func() time.Time { return now })
+			ctx, finish := testphase.Context(t, t.Context(), "effective Feishu owner", time.Minute)
+			defer finish()
+			cfg := Config{DataDir: data, Listen: "127.0.0.1:0", LocalOwner: "local-owner", Owners: []string{"configured-owner"}, Feishu: &FeishuConfig{ReceiveMode: "http", AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_ASSEMBLY_SECRET", VerificationTokenEnv: "TEND_FEISHU_ASSEMBLY_TOKEN", EncryptKeyEnv: "TEND_FEISHU_ASSEMBLY_KEY"}}
 			err := Run(ctx, cfg, []byte("isolated-assembly-secret"), Dependencies{
 				Now: func() time.Time { return now },
 				Initialize: func(ctx context.Context, rt *Runtime) error {
