@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ type selfRejection struct {
 	Request SelfUpdateRequest             `json:"request"`
 	Proof   protocol.UpdaterSelfRejection `json:"proof"`
 	// Diagnostic only; old receipts without it retain an unknown first cause.
-	Cause string `json:"cause,omitempty"`
+	Cause string `json:"-"`
 }
 
 func selfRejectionPath(cfg Config, requestID string) string {
@@ -36,6 +37,17 @@ func readSelfRejection(cfg Config, requestID string) (*selfRejection, error) {
 	}
 	if r.Format != 1 || r.Request.Target.RequestID != requestID || r.Proof.RequestID != requestID || r.Proof.InstanceID != cfg.InstanceID || r.Proof.UpgradeID != r.Request.UpgradeID || r.Proof.ReleaseSetSHA256 != r.Request.ReleaseSetSHA256 || r.Proof.RejectedAtMillis <= 0 {
 		return nil, errors.New("updater: invalid preparation rejection receipt")
+	}
+	// This optional sidecar cannot affect proof validity. Keeping format-1
+	// receipt bytes unchanged lets an older live supervisor read a rejection
+	// produced by the new standalone installer before supervisor replacement.
+	if diagnostic, err := privateFile(selfRejectionPath(cfg, requestID) + ".diagnostic.json"); err == nil && len(diagnostic) <= 17<<10 {
+		var detail struct {
+			Cause string `json:"cause"`
+		}
+		if json.Unmarshal(diagnostic, &detail) == nil {
+			r.Cause = detail.Cause
+		}
 	}
 	return &r, nil
 }
@@ -64,8 +76,14 @@ func persistSelfRejection(cfg Config, r SelfUpdateRequest, now time.Time, cause 
 	if cause != nil {
 		diagnostic = cause.Error()
 	}
-	if err := writeJSON(selfRejectionPath(cfg, r.Target.RequestID), selfRejection{Format: 1, Request: r, Proof: proof, Cause: diagnostic}); err != nil {
+	if err := writeJSON(selfRejectionPath(cfg, r.Target.RequestID), selfRejection{Format: 1, Request: r, Proof: proof}); err != nil {
 		return out, errors.Join(cause, err)
+	}
+	// First-failure diagnostics are best effort, never another authority gate.
+	if diagnostic != "" {
+		_ = writeJSON(selfRejectionPath(cfg, r.Target.RequestID)+".diagnostic.json", struct {
+			Cause string `json:"cause"`
+		}{Cause: diagnostic[:min(len(diagnostic), 16<<10)]})
 	}
 	out.Observation.Rejection = &proof
 	return out, cause
