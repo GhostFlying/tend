@@ -58,40 +58,37 @@ func CapabilityAgentsForHost(ctx context.Context, q store.Querier, host string, 
 			return nil, "", err
 		}
 		for _, agent := range inv.Agents {
-			v := protocol.AgentCapabilityView{Binding: agent.Binding, Categories: slices.Clone(agent.Categories), Purposes: slices.Clone(agent.Purposes), Identity: agent.Identity, AgentRevision: agent.Revision, Declared: slices.Clone(agent.Capabilities), Current: protocol.CapabilityMatch{State: "pending", Required: slices.Clone(agent.Capabilities), Reasons: []protocol.CapabilityReason{}, CheckedAtMillis: now}}
+			v := protocol.AgentCapabilityView{Binding: agent.Binding, Categories: slices.Clone(agent.Categories), Purposes: slices.Clone(agent.Purposes), Identity: agent.Identity, AgentRevision: agent.Revision, Declared: slices.Clone(agent.Capabilities), DeclarationState: declarationState(agent.Capabilities), ExecutorReadiness: executorReadiness(runtime, nil, now), Current: protocol.CapabilityMatch{State: "pending", Reasons: []protocol.CapabilityReason{}, CheckedAtMillis: now}}
 			v.DefinitionStatuses, err = definitions.statuses(ctx, q, agent.Capabilities)
 			if err != nil {
 				return nil, "", err
 			}
-			found := false
 			for _, executor := range executors {
 				if executor.Pin.Identity != agent.Identity || executor.Pin.Purpose != "" {
 					continue
 				}
 				p := executor.Pin
-				v.Pin = &p
-				v.Current = scheduler.ExecutorCapabilityMatch(executor, agent.Capabilities)
-				if reason := executorAvailabilityReason(runtime, p, now); reason != nil && v.Current.State == "eligible" {
-					v.SchedulingReason = reason
-					v.Current.State = "pending"
-					for i := range v.Current.Reasons {
-						v.Current.Reasons[i].State = "pending"
-						v.Current.Reasons[i].Reason = string(reason.Code)
-						v.Current.Reasons[i].Recovery = "restore ordinary availability of this same configured executor"
-					}
+				readiness := executorReadiness(runtime, &p, now)
+				// Managed extensions can expose multiple category pins. A ready
+				// ordinary pin is enough for this directory, never for a Task.
+				if v.Pin == nil || readiness.State == "ready" {
+					v.Pin, v.ExecutorReadiness = &p, readiness
+					v.SchedulingReason = executorAvailabilityReason(runtime, p, now)
 				}
-				found = true
-				break
-			}
-			if len(agent.Capabilities) == 0 {
-				v.Current.State = "pending"
-				v.Current.Reasons = []protocol.CapabilityReason{{State: "pending", Reason: "no_declaration", Recovery: "declare and register capabilities explicitly; category and model names grant none"}}
-			} else if !found {
-				v.Current.State = "pending"
-				for _, ref := range agent.Capabilities {
-					v.Current.Reasons = append(v.Current.Reasons, protocol.CapabilityReason{Capability: ref, State: "pending", Reason: "runner_or_adapter_unavailable", Recovery: "restore the same explicitly configured executor"})
+				if readiness.State == "ready" {
+					break
 				}
 			}
+			if !agent.Enabled {
+				v.ExecutorReadiness.State = "unavailable"
+				v.ExecutorReadiness.Reason = "agent_disabled"
+				v.ExecutorReadiness.Explanation = "the accepted Agent configuration is disabled"
+			}
+			if v.ExecutorReadiness.State == "ready" {
+				v.Current.State = "eligible"
+			}
+			// No Task was supplied. Declarations are inventory, not required
+			// capabilities; empty declarations never imply inability to work.
 			out = append(out, v)
 		}
 	}
@@ -255,7 +252,7 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 					v.State = "pending"
 				}
 			}
-			candidate := protocol.AgentCapabilityView{SchedulingReason: schedulingReason, Binding: p.Runtime, Categories: slices.Clone(executor.Categories), Purposes: []string{"worker_run"}, Identity: p.Identity, AgentRevision: p.AgentRevision, Declared: slices.Clone(executor.DeclaredCapabilities), Pin: &p, Current: m}
+			candidate := protocol.AgentCapabilityView{DeclarationState: declarationState(executor.DeclaredCapabilities), ExecutorReadiness: executorReadiness(runtime, &p, now), SchedulingReason: schedulingReason, Binding: p.Runtime, Categories: slices.Clone(executor.Categories), Purposes: []string{"worker_run"}, Identity: p.Identity, AgentRevision: p.AgentRevision, Declared: slices.Clone(executor.DeclaredCapabilities), Pin: &p, Current: m}
 			candidate.DefinitionStatuses, err = definitions.statuses(ctx, q, candidate.Declared)
 			if err != nil {
 				return v, err
@@ -271,10 +268,6 @@ func TaskCapabilities(ctx context.Context, q store.Querier, taskID string, versi
 		if eligible {
 			v.State = "eligible"
 		}
-	}
-	if len(refs) == 0 && spec.AgentSelection == nil {
-		v.State = "eligible"
-		v.Reasons = append(v.Reasons, "no_capability_constraints; existing legacy scheduling still applies")
 	}
 	slices.Sort(v.Reasons)
 	v.Reasons = slices.Compact(v.Reasons)
@@ -320,4 +313,32 @@ func executorAvailabilityReason(runtime store.HostRuntimeRow, pin protocol.RunEx
 		}
 	}
 	return nil
+}
+
+func declarationState(declared []protocol.CapabilityReference) string {
+	if len(declared) == 0 {
+		return "empty"
+	}
+	return "declared"
+}
+
+func executorReadiness(runtime store.HostRuntimeRow, pin *protocol.RunExecutionPin, now int64) protocol.ExecutorReadiness {
+	r := protocol.ExecutorReadiness{State: "unknown", Reason: "executor_not_observed", Explanation: "no ordinary executor matching the accepted configuration has been observed; capability declarations do not establish readiness", ObservedAtMillis: runtime.LastHeartbeatAt, CheckedAtMillis: now}
+	if runtime.LastHeartbeatAt == 0 {
+		r.Reason = "runner_not_observed"
+		return r
+	}
+	if !runtime.Online || now > 0 && now-runtime.LastHeartbeatAt >= 60000 {
+		r.State, r.Reason, r.Explanation = "unavailable", "runner_unavailable", "runner is offline or its heartbeat expired"
+		return r
+	}
+	if pin == nil {
+		return r
+	}
+	if reason := executorAvailabilityReason(runtime, *pin, now); reason != nil {
+		r.State, r.Reason, r.Explanation = "unavailable", "adapter_unavailable", reason.Message
+		return r
+	}
+	r.State, r.Reason, r.Explanation = "ready", "executor_observed", "ordinary executor observed ready; Task requirements, host, lease, slot and shared resource admission still apply; native capability tools are not verified"
+	return r
 }

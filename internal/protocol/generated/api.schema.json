@@ -279,6 +279,9 @@
         "current": {
           "$ref": "#/definitions/CapabilityMatch"
         },
+        "declaration_state": {
+          "type": "string"
+        },
         "declared": {
           "anyOf": [
             {
@@ -297,6 +300,9 @@
             "$ref": "#/definitions/CapabilityDefinitionStatus"
           },
           "type": "array"
+        },
+        "executor_readiness": {
+          "$ref": "#/definitions/ExecutorReadiness"
         },
         "identity": {
           "$ref": "#/definitions/AgentIdentity"
@@ -325,6 +331,8 @@
         }
       },
       "required": [
+        "declaration_state",
+        "executor_readiness",
         "runtime_binding_ref",
         "categories",
         "purposes",
@@ -6283,6 +6291,35 @@
       ],
       "title": "ExecutionState",
       "type": "string"
+    },
+    "ExecutorReadiness": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at_ms": {
+          "type": "integer"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "reason",
+        "explanation",
+        "observed_at_ms",
+        "checked_at_ms"
+      ],
+      "title": "ExecutorReadiness",
+      "type": "object"
     },
     "ExplainDecisionPayload": {
       "additionalProperties": false,

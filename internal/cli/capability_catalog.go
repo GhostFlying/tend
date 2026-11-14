@@ -370,6 +370,9 @@ func commandUsage(prefix []string) string {
 		fmt.Fprintf(&out, "  %s\n", command)
 	}
 	if name != "" {
+		if name == "agents capabilities list" || name == "agents capabilities show" || name == "task capability-explain" {
+			out.WriteString("\nFull JSON separates declaration_state (empty/declared), exact declared references and executor_readiness (ready/unavailable/unknown, reason, observation/check times). Empty declarations do not block ordinary work. Directory current.required is empty; current.state is eligible only for an observed ready ordinary executor, otherwise pending. Directory --capability filters declarations; --state filters current.state. Ready is not Task admission or native tool verification.\nTask capability-explain uses the requested role's frozen spec requirements: current is capability matching, scheduling_reason is separate admission, and the top-level state includes the actual scheduler constraints (host, lease, slot, resources and frozen pin). Use --after with the original filters and --limit for pages. Reads create no reservation or mutation; changed facts reject old cursors, so restart pagination.\n")
+		}
 		if name == "issue deployment-preparation" {
 			out.WriteString("\nRead-only deployment preparation for this Issue: the current fixed server, complete active hosts, runtime/control revisions, installation receipts and relevant blockers. The full response preserves source, observed_at, event sequence and explicit unknown or missing facts. Heartbeat and process observations do not substitute for installation receipts.\nUse: tend issue deployment-preparation <issue_id> [--json]. No target selector is required. Reading never refreshes a provider, schedules an upgrade or authorizes deployment. An interrupted read can be repeated; it creates no mutation request.\n")
 		}

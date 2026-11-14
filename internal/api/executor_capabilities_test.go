@@ -85,11 +85,15 @@ func TestCapabilityDeclarationRevisionCLIAndHTTPPreserveHistory(t *testing.T) {
 		execute(protocol.OpRunnerInventoryRegister, &expected, protocol.RegisterAgentInventoryPayload{Runtime: runtime, LocalRevision: revision, SnapshotID: fmt.Sprintf("declaration-%d", revision), PublicSHA256: hash, Projection: definition.Public()}, app.RegisterAgentInventory{})
 	}
 	register(1)
+	var empty protocol.AgentCapabilityView
+	if err := json.Unmarshal(c.run("agents", "capabilities", "show", "host-a", "cedar", "--json"), &empty); err != nil || empty.DeclarationState != "empty" || empty.ExecutorReadiness.State != "unknown" || empty.Current.State != "pending" || len(empty.Current.Required) != 0 {
+		t.Fatal("CLI conflated empty declarations and missing executor observations", empty, err)
+	}
 	cfg.Agents[0].Revision = 2
 	cfg.Agents[0].Capabilities = []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}
 	register(2)
 	var declared protocol.AgentCapabilityView
-	if err := json.Unmarshal(c.run("agents", "capabilities", "show", "host-a", "cedar", "--json"), &declared); err != nil || len(declared.DefinitionStatuses) != 1 || declared.DefinitionStatuses[0].CurrentDefinition == nil || declared.DefinitionStatuses[0].CurrentDefinition.State != "active" {
+	if err := json.Unmarshal(c.run("agents", "capabilities", "show", "host-a", "cedar", "--json"), &declared); err != nil || declared.DeclarationState != "declared" || declared.ExecutorReadiness.State != "unknown" || len(declared.Current.Required) != 0 || len(declared.DefinitionStatuses) != 1 || declared.DefinitionStatuses[0].CurrentDefinition == nil || declared.DefinitionStatuses[0].CurrentDefinition.State != "active" {
 		t.Fatal("active definition missing from CLI projection", declared, err)
 	}
 	c.run("capability", "put", "image_gen", "--revision", "1", "--data", `{"title":"Image generation","description":"Retained label","state":"retired","contract_version":1,"verification_policy":"declaration_v1"}`)
