@@ -41,6 +41,23 @@ func New(root string) (*Store, error) {
 	return &Store{root: root}, nil
 }
 
+// OpenStore opens an existing store without creating directories or syncing them.
+// Publication still goes through Put and its durable commit ordering.
+func OpenStore(root string) (*Store, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("blobstore: resolve root: %w", err)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, fmt.Errorf("blobstore: open root: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("blobstore: root is not a directory")
+	}
+	return &Store{root: root}, nil
+}
+
 // Path returns the path of a SHA256 object, rejecting non-content keys.
 func (s *Store) Path(hash string) (string, error) {
 	raw, err := hex.DecodeString(hash)
