@@ -66,6 +66,8 @@ type WritePhase string
 const (
 	WriteReviewedContext      WritePhase = "reviewed_context"
 	WriteApply                WritePhase = "apply"
+	WriteUsageQuotes          WritePhase = "usage_price_catalog"
+	WriteUsageProjection      WritePhase = "usage_projection"
 	WritePersistOutcome       WritePhase = "persist_outcome"
 	WriteAttention            WritePhase = "attention_reconcile"
 	WriteFollowup             WritePhase = "followup"
