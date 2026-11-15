@@ -157,6 +157,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 
 - Go 编译与 testing.TempDir 的根目录可按空间配置；真实 Unix IPC fixture 必须独立分配短真实路径并验证完整 pathname，不能依赖测试名或长数据根目录。Go 1.27 的 GOTMPDIR 同时影响两类临时文件。
 
+- 以事件和阶段描述准备、恢复与业务动作；watchdog 保持有限并用于卡死诊断，不把初始化耗时作为业务时间契约。真实业务到期与取消仍用注入时钟和原业务断言验证。
+
 ## 5. 提交规范
 
 - 格式：`<type>: <summary>`，不带 scope。例如 `feat: impl request dedup middleware`。

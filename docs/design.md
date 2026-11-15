@@ -2284,6 +2284,8 @@ host、slot、租约和共享资源准入；无额外能力要求也不能绕过
 
 Go 1.27 的 GOTMPDIR 同时影响编译与 testing.TempDir，后者包含描述性测试名。编译/数据应选择空间足够的卷；IPC fixture 用私有真实短目录，并按实际完整文件名校验字节长度，不依赖缩短 TMPDIR、软链接或移动生产默认路径。原 SocketDir 的通用 bridge 预留继续保留，新增 exact-leaf 分配用于独立控制地址。
 
+功能断言不以设备执行速度为业务 SLA。迁移、路由/恢复、真实 turn ready、原 wait 提交分别记录阶段，以实际事件交接；业务注入时钟、失败/unknown、取消和不重复副作用断言保留。阶段 watchdog 仅作有限防卡死，失败输出对象状态、连接池与可用堆栈，不重新发送业务输入。
+
 Refs: docs/plans/local-test-reliability.md。
 
 ## D245：报价新鲜度与受影响用量重估分离
