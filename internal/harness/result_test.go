@@ -188,3 +188,83 @@ func TestRestoreRejectsResultsTheServerWouldReject(t *testing.T) {
 		t.Fatal("restore skipped required deliverables")
 	}
 }
+
+func TestSubmittedPredeploymentResultUsesSchemaAndSurvivesRestart(t *testing.T) {
+	var root struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(ResultToolSpec.InputSchema, &root); err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(root.Properties["report"], &report); err != nil {
+		t.Fatal(err)
+	}
+	var stageSchema struct {
+		Required             []string `json:"required"`
+		AdditionalProperties bool     `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(report.Properties["predeployment"], &stageSchema); err != nil {
+		t.Fatal(err)
+	}
+	if stageSchema.AdditionalProperties || !slices.Equal(stageSchema.Required, []string{"delivery_id", "head_sha", "base_sha"}) {
+		t.Fatal("stage identity missing from published schema", stageSchema)
+	}
+	stage := &protocol.PredeploymentResult{DeliveryID: "registered-pr", HeadSHA: "observed-head", BaseSHA: "observed-base"}
+	args, err := json.Marshal(map[string]any{"report": protocol.ResultReport{Body: "Candidate checks only; installation has not started.", Predeployment: stage}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := WorkerSpec{StateDir: t.TempDir(), Spec: json.RawMessage(`{"deliverables":["report"]}`)}
+	r := Results{Spec: spec}
+	if got := r.Handle(t.Context(), ToolCall{Tool: ResultTool, Arguments: args}); !got.Success {
+		t.Fatal(got)
+	}
+	restored := Results{Spec: spec}
+	if err := restored.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	got := restored.Result()
+	if got == nil || got.Report == nil || !reflect.DeepEqual(got.Report.Predeployment, stage) || len(got.Report.Evidence) != 0 {
+		t.Fatal("stage was lost or became an upgrade claim", got)
+	}
+}
+
+func TestSubmittedOwnerReviewSurvivesRestart(t *testing.T) {
+	report := protocol.ResultReport{Body: "Independent review of the actual owner artifact.", ReviewedArtifactID: "original-owner-artifact", Verdict: protocol.VerdictPassed}
+	var root struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(ResultToolSpec.InputSchema, &root); err != nil {
+		t.Fatal(err)
+	}
+	var published struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(root.Properties["report"], &published); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"reviewed_artifact_id", "verdict"} {
+		if len(published.Properties[key]) == 0 {
+			t.Fatal("owner review field rejected by advertised schema", key)
+		}
+	}
+	args, err := json.Marshal(map[string]any{"report": report})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := WorkerSpec{StateDir: t.TempDir(), Spec: json.RawMessage(`{"deliverables":["report"]}`)}
+	r := Results{Spec: spec}
+	if got := r.Handle(t.Context(), ToolCall{Tool: ResultTool, Arguments: args}); !got.Success {
+		t.Fatal(got)
+	}
+	restored := Results{Spec: spec}
+	if err := restored.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.Result(); got == nil || got.Report == nil || !reflect.DeepEqual(*got.Report, report) {
+		t.Fatal("owner review lost exact original or verdict", got)
+	}
+}

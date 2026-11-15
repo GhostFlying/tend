@@ -28,6 +28,20 @@ func archiveTaskDeliveryForContinuation(ctx context.Context, x *Exec, tx *store.
 		return err
 	}
 	if duty.Status != "complete" && duty.Status != "report" && duty.Status != "ended" {
+		// A completed, independently checked stage is not a completed delivery.
+		// Continue the same Task while retaining its original frozen binding.
+		if source == task.TaskID && duty.Status == "executing" && upgrade == "" {
+			_, stage, err := taskPredeploymentResult(ctx, tx.Q(), task)
+			if err != nil {
+				return err
+			}
+			if stage != nil {
+				if _, err := acceptedPredeploymentResult(ctx, tx.Q(), task, stage); err != nil {
+					return err
+				}
+				return selfDeliveryEffectsReconciled(ctx, tx.Q(), task.TaskID, upgrade)
+			}
+		}
 		return protocol.Errorf(protocol.CodeInvalidTransition, "settle the previous delivery responsibility before continuing its Task")
 	}
 	if upgrade != "" {

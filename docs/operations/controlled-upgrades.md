@@ -319,3 +319,13 @@ legacy bootstrap 仅在可验证的非特权原子状态 writer 上使用目录�
 停机日志包含 `server shutdown phase`、`HTTP shutdown requests`、`HTTP shutdown active request` 及限量的 `HTTP request drained`。用规范化route、method、trace_id/request_id、request_kind、elapsed_ms、cancellation_source与各阶段时间区分只读等待、在途写入和后台关闭；原文件、URL参数及凭据不记录。空闲claim、消息/问题/日志长等待会返回当前事实，真正写入和文件传输仍继续排空。
 
 监督器终态日志的 `historical_error` 保留曾发生的错误，`error` 表示本次记录的新错误；以真实phase和回执判断终局。自更新明确拒绝的原身份status保留首次诊断原因，旧记录未保存时仍为unknown；不能用后来成功填补旧退出或拒绝原因。
+
+### 部署前阶段结果
+
+已绑定部署的同一 Task 在检查或必要新候选准备阶段，可用 `submit_result` 的报告字段 `predeployment` 保存真实阶段结果：
+
+```json
+{"report":{"body":"候选与检查结果；尚未安装。","predeployment":{"delivery_id":"registered-pr","head_sha":"<完整候选提交>","base_sha":"<完整候选基线>"}}}
+```
+
+提交仍包含实际仓库状态和正常原件。不要附加虚构 `upgrade:` 引用；这个阶段只接受候选独立验收，不完成部署责任。实际 Issue owner 自执行使用原 `issue update-delivery --data` 的 `action: submit_result`，`result.report` 支持同一字段，必须是实际执行 owner 的 Run。阶段验收完成后用原 `task continue`；已确定 merge 且未升级的旧候选，通过原 `issue update-delivery` 的 prepare/bind 接续有自己真实产物、独立审阅和检查的新候选，保留旧历史。原 frozen candidate、unknown、租约或版本不能用阶段结果绕过。最终真实安装后仍提交带唯一实际 `upgrade:<id>` 的最终报告并独立核验，再 complete。

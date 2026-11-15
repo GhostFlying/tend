@@ -336,12 +336,22 @@ type ReleasePayload struct {
 
 // ResultReport is a durable Markdown investigation or operation report.
 type ResultReport struct {
-	ReviewedArtifactID string              `json:"reviewed_artifact_id,omitempty"`
-	Verdict            Verdict             `json:"verdict,omitempty"`
-	SharedReview       *SharedReviewResult `json:"shared_review,omitempty"`
-	Body               string              `json:"body"`
-	Evidence           []string            `json:"evidence,omitempty"`
-	Uncertainties      []string            `json:"uncertainties,omitempty"`
+	// Predeployment identifies a candidate/check result, never an installation.
+	Predeployment      *PredeploymentResult `json:"predeployment,omitempty"`
+	ReviewedArtifactID string               `json:"reviewed_artifact_id,omitempty"`
+	Verdict            Verdict              `json:"verdict,omitempty"`
+	SharedReview       *SharedReviewResult  `json:"shared_review,omitempty"`
+	Body               string               `json:"body"`
+	Evidence           []string             `json:"evidence,omitempty"`
+	Uncertainties      []string             `json:"uncertainties,omitempty"`
+}
+
+// PredeploymentResult binds a stage result to an observed Issue candidate.
+// It grants no merge/deployment authority and cannot settle a delivery.
+type PredeploymentResult struct {
+	DeliveryID string `json:"delivery_id"`
+	HeadSHA    string `json:"head_sha"`
+	BaseSHA    string `json:"base_sha"`
 }
 
 // ArtifactFile identifies a durable immutable uploaded file.

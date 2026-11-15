@@ -14902,6 +14902,27 @@
       "title": "PlannerEntry",
       "type": "object"
     },
+    "PredeploymentResult": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "head_sha",
+        "base_sha"
+      ],
+      "title": "PredeploymentResult",
+      "type": "object"
+    },
     "PreparationChange": {
       "additionalProperties": false,
       "properties": {
@@ -15815,6 +15836,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "predeployment": {
+          "$ref": "#/definitions/PredeploymentResult"
         },
         "reviewed_artifact_id": {
           "type": "string"

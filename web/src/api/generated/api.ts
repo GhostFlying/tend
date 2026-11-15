@@ -2485,10 +2485,20 @@ export interface ArtifactMount {
 export interface ResultReport {
   body: string;
   evidence?: string[];
+  predeployment?: PredeploymentResult;
   reviewed_artifact_id?: string;
   shared_review?: SharedReviewResult;
   uncertainties?: string[];
   verdict?: Verdict;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PredeploymentResult".
+ */
+export interface PredeploymentResult {
+  base_sha: string;
+  delivery_id: string;
+  head_sha: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
