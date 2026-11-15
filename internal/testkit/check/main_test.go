@@ -83,7 +83,7 @@ func checkTaskBudgetsAndIsolation(t *testing.T) {
 	for _, cpus := range []int{2, 8, 16, 64} {
 		b, _ := capacity(cpus, 0, 0, 0)
 		directory := t.TempDir()
-		parallel, isolated := tasks(b, directory, "selected-go", "selected-pnpm", 1)
+		parallel, isolated := tasks(b, cpus, directory, "selected-go", "selected-pnpm", 1)
 		all := append(slices.Clone(parallel), isolated...)
 		names := make([]string, 0, len(all))
 		for _, task := range all {
@@ -215,7 +215,7 @@ func TestExplicitSerialBudgetRequiresReason(t *testing.T) {
 
 func TestImpactSelectionRetainsRequiredGroupsAndPrivatePlanWithoutWeb(t *testing.T) {
 	b, _ := capacity(64, 0, 0, 0)
-	parallel, isolated := tasks(b, t.TempDir(), "go", "pnpm", 1)
+	parallel, isolated := tasks(b, 8, t.TempDir(), "go", "pnpm", 1)
 	plan := impact.Plan{Groups: []string{"app", "e2e", "other"}}
 	parallel, isolated = plannedTasks(parallel, isolated, plan, "candidate-plan.json")
 	var got []string
@@ -240,5 +240,19 @@ func TestFullDiagnosticsDistinguishPatternsFromDiscoveredPackages(t *testing.T) 
 	}
 	if got := packageSummary(impact.Plan{Packages: []string{"example/a", "example/b"}}); got != "selected-packages=2" {
 		t.Fatal(got)
+	}
+}
+
+func TestExclusivePhaseReclaimsReleasedCPUs(t *testing.T) {
+	b, err := capacity(8, 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parallel, isolated := tasks(b, 8, t.TempDir(), "go", "pnpm", 1)
+	if len(isolated) != 1 {
+		t.Fatal(isolated)
+	}
+	if !slices.Contains(parallel[0].env, "GOMAXPROCS=2") || !slices.Contains(isolated[0].env, "GOMAXPROCS=4") {
+		t.Fatalf("parallel=%v exclusive=%v", parallel[0].env, isolated[0].env)
 	}
 }

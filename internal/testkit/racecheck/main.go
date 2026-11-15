@@ -214,7 +214,7 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 	if err != nil {
 		return err
 	}
-	env, peak, err := raceEnvironment(cpus, shards, suiteShards, selected, source)
+	_, peak, err := raceEnvironment(cpus, shards, suiteShards, selected, source)
 	if err != nil {
 		return err
 	}
@@ -222,6 +222,14 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 	fmt.Printf("[race] group=%s effective-cpus=%d app-shards=%d suite-shards=%d peak-processes=%d Go-package-parallel=%d GOMAXPROCS=%s inherited-package-limit=%t inherited-procs=%t\n",
 		group, cpus, shards, suiteShards, peak, parallel, testbudget.Value(env, "GOMAXPROCS"), explicit, strings.TrimSpace(testbudget.Value(source, "GOMAXPROCS")) != "")
 	others, isolated, app := packagePhases(selected)
+
+	// Sequential phases reclaim released execution capacity. An inherited parent
+	// budget remains authoritative; only absent standalone limits are filled.
+	phaseEnvironment := func(name string, processes int) ([]string, error) {
+		active, err := testbudget.GoEnvironment(source, parallel, testbudget.Procs(cpus, processes))
+		fmt.Printf("[race] phase=%s processes=%d GOMAXPROCS=%s\n", name, processes, testbudget.Value(active, "GOMAXPROCS"))
+		return active, err
+	}
 	type command struct {
 		name string
 		args []string
@@ -248,12 +256,16 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 		return commands, nil
 	}
 	runCommands := func(commands []command) error {
+		active, err := phaseEnvironment("shards", len(commands))
+		if err != nil {
+			return err
+		}
 		var wg sync.WaitGroup
 		results := make(chan error, len(commands))
 		for _, command := range commands {
 			wg.Go(func() {
 				fmt.Printf("race %s started\n", command.name)
-				err := run(ctx, env, report(command.name), goTool, command.args...)
+				err := run(ctx, active, report(command.name), goTool, command.args...)
 				fmt.Printf("race %s finished: %v\n", command.name, err)
 				results <- err
 			})
@@ -279,7 +291,11 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 		}
 	}
 	if len(unsharded) > 0 {
-		failures = append(failures, run(ctx, env, report("packages"), goTool, append(slices.Clone(args), orderPackages(unsharded, packageCosts)...)...))
+		active, err := phaseEnvironment("packages", min(parallel, len(unsharded)))
+		if err == nil {
+			err = run(ctx, active, report("packages"), goTool, append(slices.Clone(args), orderPackages(unsharded, packageCosts)...)...)
+		}
+		failures = append(failures, err)
 	}
 	// Standalone all-package checks retain an independent transport phase. The
 	// local scheduler additionally reserves the entire phase on small machines.

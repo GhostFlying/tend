@@ -103,7 +103,7 @@ func environment(source []string, values map[string]string) []string {
 	return testbudget.Environment(source, values)
 }
 
-func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isolated []task) {
+func tasks(b budget, cpus int, directory, goTool, pnpm string, count int) (parallel, isolated []task) {
 	base := environment(os.Environ(), map[string]string{
 		"MAKEFLAGS": "", "MFLAGS": "", "MAKEOVERRIDES": "",
 		"GO": goTool, "PNPM": pnpm,
@@ -123,6 +123,8 @@ func tasks(b budget, directory, goTool, pnpm string, count int) (parallel, isola
 	for _, group := range impact.Groups() {
 		t := task{group, []string{"test", "TEST_GROUP=" + group}, base}
 		if group == "e2e" && b.exclusiveE2E {
+			// This phase starts only after all parallel groups have joined.
+			t.env = environment(base, map[string]string{"GOMAXPROCS": strconv.Itoa(testbudget.Procs(cpus, b.suiteShards))})
 			isolated = append(isolated, t)
 		} else {
 			parallel = append(parallel, t)
@@ -157,7 +159,7 @@ func runTask(ctx context.Context, t task) error {
 		return err
 	}
 	start := time.Now()
-	fmt.Printf("[check] %s started at=%s\n", t.name, start.UTC().Format(time.RFC3339Nano))
+	fmt.Printf("[check] %s started at=%s GOMAXPROCS=%s GOFLAGS=%q suite-shards=%s\n", t.name, start.UTC().Format(time.RFC3339Nano), testbudget.Value(t.env, "GOMAXPROCS"), testbudget.Value(t.env, "GOFLAGS"), testbudget.Value(t.env, "TEST_SHARDS"))
 	cmd := exec.CommandContext(ctx, "make", t.args...)
 	cmd.Env, cmd.Stdout, cmd.Stderr = t.env, os.Stdout, os.Stderr
 	procx.Contain(cmd)
@@ -213,7 +215,7 @@ func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string,
 		return err
 	}
 	defer os.RemoveAll(directory)
-	parallel, isolated := tasks(b, directory, goTool, pnpm, count)
+	parallel, isolated := tasks(b, cpus, directory, goTool, pnpm, count)
 	if mode != "full" && mode != "affected" {
 		return fmt.Errorf("check mode must be affected or full")
 	}

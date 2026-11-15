@@ -200,8 +200,13 @@ esac
 		if args[0] == "list" {
 			continue
 		}
-		if parts[1] != "2" {
-			t.Fatal("concurrent shard phase omitted thread budget", line)
+		wantProcs := "2"
+		// Lists and the independent unsharded/E2E phases have no bulk peers.
+		if slices.Contains(args, "-list") || !slices.Contains(args, "-run") || args[len(args)-1] == e2ePackage {
+			wantProcs = "4"
+		}
+		if parts[1] != wantProcs {
+			t.Fatal("phase thread budget incorrect", line, wantProcs)
 		}
 		if slices.Contains(args, "-list") {
 			continue
