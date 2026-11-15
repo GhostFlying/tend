@@ -71,6 +71,31 @@ func TestUsagePriceRefreshOnlyRebuildsAffectedModels(t *testing.T) {
 	before, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
 	record(b, a) // Public directory order is not a rate or model selection change.
 	check(0)
+	// Provider descriptions are not retained pricing inputs. A successful
+	// retrieval still advances freshness and emits the ordinary usage change.
+	raw, err := json.Marshal(domain.UsagePrices{Data: []domain.UsagePriceModel{b, a}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var directory map[string]any
+	if err := json.Unmarshal(raw, &directory); err != nil {
+		t.Fatal(err)
+	}
+	directory["provider_description"] = "new descriptive metadata"
+	raw, err = json.Marshal(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changesBefore := usageNotifications(t, h)
+	h.clock.Advance(time.Second)
+	if err := h.app.RecordUsagePriceCatalog(t.Context(), raw); err != nil {
+		t.Fatal(err)
+	}
+	check(0)
+	if got := usageNotifications(t, h); got != changesBefore+1 {
+		t.Fatalf("successful quote retrieval lost ordinary freshness notification: before=%d after=%d", changesBefore, got)
+	}
+
 	record(b, a, model("unused/model", "0.9"))
 	check(0)
 	after, _ := projectionView(t, h, "total", 0, views.UsageFilter{})
