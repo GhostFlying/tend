@@ -24,7 +24,7 @@ func markCutoverRecovery(ctx context.Context, q store.Querier, r *store.UpgradeR
 		if err != nil {
 			return "", err
 		}
-		if c.NormalRevision != 0 || ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != r.View.UpgradeID || ctl.Revision != c.MaintenanceRevision || rt.Runtime.InstanceID != c.InstanceID || rt.Runtime.Generation != c.Generation || rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Mode != protocol.RunnerMaintenance || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
+		if c.NormalRevision != 0 || ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != r.View.UpgradeID || ctl.Revision != c.MaintenanceRevision || rt.Runtime.InstanceID != c.InstanceID || rt.Runtime.Generation != c.Generation || rt.Runtime.UpgradeID != r.View.UpgradeID || (rt.Runtime.Mode != protocol.RunnerMaintenance && rt.Runtime.Mode != protocol.RunnerReady) || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
 			return "server 重启后主机维护身份或控制代次已改变", nil
 		}
 		c.NormalRevision = ctl.Revision + 1
@@ -89,7 +89,7 @@ func awaitCutoverRunners(ctx context.Context, x *Exec, q store.Querier, r *store
 		if !c.Pending {
 			return false, "已恢复的原主机不再确认 fresh normal 控制", nil
 		}
-		if rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Mode != protocol.RunnerMaintenance || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
+		if rt.Runtime.UpgradeID != r.View.UpgradeID || (rt.Runtime.Mode != protocol.RunnerMaintenance && rt.Runtime.Mode != protocol.RunnerReady) || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
 			return false, "原主机尚未确认预期的 normal 控制", nil
 		}
 		x.observeDecision(ctx, slog.LevelDebug, "upgrade waiting for cutover runner acknowledgment",
