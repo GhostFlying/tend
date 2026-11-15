@@ -15,16 +15,32 @@ func initialIssueOwnerCandidates(ctx context.Context, q store.Querier) ([]schedu
 	if err != nil {
 		return nil, err
 	}
-	var out []scheduler.Candidate
+	var issues []protocol.Issue
+	var selectedIDs []string
 	for _, id := range ids {
 		issue, err := store.GetCanonicalIssue(ctx, q, id)
 		if err != nil {
 			return nil, err
 		}
-		choice := issue.OwnerSelection
-		if choice == nil {
-			continue
+		if issue.OwnerSelection != nil {
+			issues = append(issues, issue)
+			selectedIDs = append(selectedIDs, id)
 		}
+	}
+	if len(issues) == 0 {
+		return nil, nil
+	}
+	barriers, err := initialOwnerHandoffBlockers(ctx, q, issues)
+	if err != nil {
+		return nil, err
+	}
+	admission, err := store.IssueAdmissionFacts(ctx, q, selectedIDs)
+	if err != nil {
+		return nil, err
+	}
+	var out []scheduler.Candidate
+	for _, issue := range issues {
+		id, choice := issue.IssueID, issue.OwnerSelection
 		project, err := store.GetProject(ctx, q, issue.Plan.Project)
 		if err != nil {
 			return nil, err
@@ -44,14 +60,11 @@ func initialIssueOwnerCandidates(ctx context.Context, q store.Querier) ([]schedu
 		if needed {
 			c.AdmissionMessage = "Existing hosted ownership requires the backed-up manager migration: " + id
 		}
-		blockers, err := ManagerHandoffBlockers(ctx, q, id, issue.AssignmentEpoch+1)
-		if err != nil {
-			return nil, err
-		}
+		blockers := barriers[id]
 		if len(blockers) > 0 {
 			c.AdmissionMessage = "Previous Issue owner execution or receipts require reconciliation: " + blockers[0].ObjectID
 		}
-		if err := ApplyIssueAdmission(ctx, q, &c, id, false); err != nil {
+		if err := applyIssueAdmissionFacts(&c, id, false, admission); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

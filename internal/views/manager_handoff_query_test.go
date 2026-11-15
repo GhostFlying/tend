@@ -107,6 +107,23 @@ func TestManagerHandoffDeliveriesDeduplicateLogicalHistory(t *testing.T) {
 		if !reflect.DeepEqual(actual, expected) || !reflect.DeepEqual(actual, []string{"conversation-only", "event", "old-a", "repair"}) {
 			t.Fatalf("changed delivery blockers: got %v previous %v", actual, expected)
 		}
+		targets := []protocol.Issue{
+			{IssueControl: protocol.IssueControl{IssueID: issue, AssignmentEpoch: 1}},
+			{IssueControl: protocol.IssueControl{IssueID: other, AssignmentEpoch: 0}},
+		}
+		batch, err := initialOwnerHandoffBlockers(ctx, tx.Q(), targets)
+		if err != nil {
+			return err
+		}
+		for _, target := range targets {
+			single, err := ManagerHandoffBlockers(ctx, tx.Q(), target.IssueID, target.AssignmentEpoch+1)
+			if err != nil {
+				return err
+			}
+			if len(single) != len(batch[target.IssueID]) || len(single) > 0 && !reflect.DeepEqual(single, batch[target.IssueID]) {
+				t.Fatalf("batch changed logical/epoch delivery scope for %s: %+v / %+v", target.IssueID, batch[target.IssueID], single)
+			}
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
