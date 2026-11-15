@@ -153,6 +153,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
 - v0.1 §17.2 的故障场景对应的测试命名为 `TestFault_*`，便于对照检查。
 
+- 每个独占/顺序测试阶段重新核对实际活跃进程预算；继承的显式资源边界不被独立入口覆盖。阶段日志区分包模式、实际发现包数、缓存与本次执行，保留原终态/错误/cause。
+
 ## 5. 提交规范
 
 - 格式：`<type>: <summary>`，不带 scope。例如 `feat: impl request dedup middleware`。
