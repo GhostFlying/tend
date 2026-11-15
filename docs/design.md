@@ -2280,6 +2280,8 @@ host、slot、租约和共享资源准入；无额外能力要求也不能绕过
 
 检查器按实际顺序阶段重新分配有界线程，独占 E2E 使用前段释放的 CPU；独立 race 入口为包集合和实际 shard 集分别计算缺省值，显式 parent 预算保持权威。正式八组和 required CI 覆盖不减，原生缓存命中与新鲜执行分开报告。
 
+检查器在正常 SIGINT/SIGTERM/SIGHUP 取消中先通知 coordinator 收拢自己拥有的子组，保留有限退出窗口与最后清理；check 内命令继承其进程组以避免嵌套组逃逸，独立 race 命令才拥有并终止/等待其子进程组，记录 PID、实际退出和取消 cause。宿主强杀、外部父调度丢失与历史缺失退出证据仍可能 unknown；不为此增加通用 launcher 或永久账本。
+
 Refs: docs/plans/local-test-reliability.md。
 
 ## D245：报价新鲜度与受影响用量重估分离

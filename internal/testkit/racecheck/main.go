@@ -18,6 +18,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
+
+	"github.com/GhostFlying/tend/internal/procx"
 
 	"github.com/GhostFlying/tend/internal/testkit/impact"
 	"github.com/GhostFlying/tend/internal/testkit/testbudget"
@@ -74,14 +78,37 @@ func run(ctx context.Context, env []string, report, command string, args ...stri
 		defer func() { err = errors.Join(err, file.Close()) }()
 		cmd.Stdout = io.MultiWriter(os.Stdout, file)
 	}
-	return cmd.Run()
+	cleanup := containCommand(cmd, env)
+	defer cleanup()
+	started := time.Now()
+	err = cmd.Start()
+	if err == nil {
+		fmt.Printf("[race] command started pid=%d executable=%q\n", cmd.Process.Pid, command)
+		err = cmd.Wait()
+	}
+	fmt.Printf("[race] command finished process=%v elapsed=%s error=%v cause=%v\n", cmd.ProcessState, time.Since(started), err, context.Cause(ctx))
+	return err
 }
 
 func output(ctx context.Context, env []string, command string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Env = env
 	cmd.Stderr = os.Stderr
+	cleanup := containCommand(cmd, env)
+	defer cleanup()
 	return cmd.Output()
+}
+
+// Commands under check inherit its process group. Detaching them into nested
+// groups would let them survive an outer cancellation before the coordinator
+// could join them. Standalone invocations retain their own bounded cleanup.
+func containCommand(cmd *exec.Cmd, env []string) func() {
+	if testbudget.Value(env, testbudget.ProcessGroup) == "owned" {
+		cmd.WaitDelay = 5 * time.Second
+		return func() {}
+	}
+	procx.Contain(cmd)
+	return func() { procx.KillGroup(cmd) }
 }
 
 func roots(list string) []string {
@@ -195,6 +222,7 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 			return err
 		}
 	}
+	fmt.Printf("[race] build/test temporary root GOTMPDIR=%q TMPDIR=%q; IPC fixtures use independent short paths\n", os.Getenv("GOTMPDIR"), os.Getenv("TMPDIR"))
 	fmt.Printf("[race] test-count=%d native-result-cache=%t; cached package summaries are retained and are not fresh execution evidence\n", count, count == 0)
 	args := testArgs(timeout, count)
 	if reports != "" {
@@ -339,7 +367,7 @@ func main() {
 	if len(packages) == 0 {
 		packages = []string{"./..."}
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
 	if *planPath != "" {
 		root, err := os.Getwd()

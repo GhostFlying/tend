@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// ProcessGroup marks subprocesses contained by the local check coordinator.
+// Independent race entrypoints own their command groups instead.
+const ProcessGroup = "TEND_CHECK_PROCESS_GROUP"
+
 // Packages bounds concurrently executing Go packages within one check group.
 func Packages(cpus, jobs int) int {
 	cpus, jobs = max(1, cpus), max(1, jobs)
