@@ -11,7 +11,7 @@ import (
 )
 
 func TestProductionTextUpgradeDecisionRetainsNestedFacts(t *testing.T) {
-	h := serverNormalAckGap(t)
+	h := ordinaryServerNormalAckGap(t)
 	var out bytes.Buffer
 	log, err := logging.NewText(&out, "info")
 	if err != nil {

@@ -30,10 +30,26 @@ func diagnosticRecords(t *testing.T, out *bytes.Buffer) []map[string]any {
 	return records
 }
 
+// Ordinary availability diagnostics also apply to persisted batches whose
+// authorization predates cutover cohorts. Keep that historical fact explicit
+// rather than mistaking a new batch's first-ACK wait for a later host outage.
+func ordinaryServerNormalAckGap(t *testing.T) *harness {
+	t.Helper()
+	h := serverNormalAckGap(t)
+	r := upgradeRead(h)
+	r.CutoverRunners = nil
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		return tx.PutUpgrade(t.Context(), r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 func TestUpgradeUnavailableDecisionRetainsOriginalHostSnapshot(t *testing.T) {
 	for _, condition := range []string{"offline", "heartbeat_stale", "slots_not_positive", "control_mode_not_normal", "runtime_mode_not_normal"} {
 		t.Run(condition, func(t *testing.T) {
-			h := serverNormalAckGap(t)
+			h := ordinaryServerNormalAckGap(t)
 			var out bytes.Buffer
 			WithLogger(slog.New(slog.NewJSONHandler(&out, nil)))(h.app)
 			var before store.HostRuntimeRow
@@ -109,7 +125,7 @@ func TestUpgradeUnavailableDecisionRetainsOriginalHostSnapshot(t *testing.T) {
 }
 
 func TestUpgradeNormalAckDecisionIsDebugAndDoesNotPause(t *testing.T) {
-	h := serverNormalAckGap(t)
+	h := ordinaryServerNormalAckGap(t)
 	var out bytes.Buffer
 	WithLogger(slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})))(h.app)
 	deadline := upgradeRead(h).Deadline
