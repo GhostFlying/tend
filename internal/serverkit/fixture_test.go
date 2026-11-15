@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/testkit/storefixture"
 	"github.com/GhostFlying/tend/internal/testkit/testphase"
 )
@@ -26,4 +27,11 @@ func prepareAssemblyData(t *testing.T, now func() time.Time) string {
 		t.Fatal("close assembly fixture:", err)
 	}
 	return data
+}
+
+// Functional data can live on a spacious build/test volume. IPC must have its
+// own actual short pathname, including the default archive-control filename.
+func assemblySocket(t *testing.T) string {
+	t.Helper()
+	return testkit.SocketPath(t, "upgrades.sock")
 }

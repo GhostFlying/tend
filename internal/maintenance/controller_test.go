@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,7 @@ func fixture(t *testing.T) (*Controller, *fakeNative, Config, Options) {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{StateDir: dir, ControlSocket: filepath.Join(dir, "control.sock"), Workspace: dir, InstructionsFile: filepath.Join(dir, "instructions"), Backend: protocol.MaintenanceBackend{Agent: "codex", Socket: "/native.sock", Sandbox: "workspace-write", ApprovalPolicy: "never"}}
+	cfg := Config{StateDir: dir, ControlSocket: testkit.SocketPath(t, "control.sock"), Workspace: dir, InstructionsFile: filepath.Join(dir, "instructions"), Backend: protocol.MaintenanceBackend{Agent: "codex", Socket: "/native.sock", Sandbox: "workspace-write", ApprovalPolicy: "never"}}
 	if err := os.WriteFile(cfg.InstructionsFile, []byte("Maintain only the configured Tend workspace."), 0600); err != nil {
 		t.Fatal(err)
 	}

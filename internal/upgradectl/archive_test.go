@@ -28,7 +28,7 @@ func TestArchiveLocalCLIUsesPersistentGateHostCASAndExplicitCancellation(t *test
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 778)
 	st, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "active.db"), clock.Now)

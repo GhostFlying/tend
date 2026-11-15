@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"os"
@@ -56,7 +57,7 @@ func TestCommittedMaintenanceActualProcessHealthAndLinkReplay(t *testing.T) {
 	}
 	p := protocol.CommittedMaintenancePlan{MaintenanceID: "maintenance-health", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), PreparationRevision: prep.Revision, Previous: protocol.UpgradeBinding{UpgradeID: "previous-committed", InstanceID: "server", ProcessInstanceID: "old-launch", ArtifactSHA256: strings.Repeat("a", 64)}, Successor: protocol.UpgradeBinding{UpgradeID: "maintenance-health", InstanceID: "server", ProcessInstanceID: actual.LaunchID, ArtifactSHA256: actual.SHA256, ReleaseID: "successor", ManifestSHA256: strings.Repeat("b", 64)}}
 	a := app.New(db, ids, time.Now, app.WithCommittedMaintenanceStartup(p.MaintenanceID))
-	socket := filepath.Join(root, "updater.sock")
+	socket := testkit.SocketPath(t, "updater.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +92,7 @@ func TestCommittedMaintenanceActualProcessHealthAndLinkReplay(t *testing.T) {
 	go func() { defer close(done); _ = server.Serve(ln) }()
 	defer func() { _ = server.Close(); <-done }()
 	ready := false
-	c, err := New(Config{Instance: "server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: filepath.Join(root, "control.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "releases"), RecoveryReady: func(context.Context) error {
+	c, err := New(Config{Instance: "server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: testkit.SocketPath(t, "control.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "releases"), RecoveryReady: func(context.Context) error {
 		if !ready {
 			return errors.New("startup not ready")
 		}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"os"
@@ -236,7 +237,7 @@ func TestReceiptRecoveryChangedObservationsActualSuccessorStartup(t *testing.T) 
 		t.Setenv("TEND_BOUNDED_RECOVERY_REQUEST_ID", auth.RequestID)
 	}
 
-	socket := filepath.Join(root, "updater.sock")
+	socket := testkit.SocketPath(t, "updater.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +254,7 @@ func TestReceiptRecoveryChangedObservationsActualSuccessorStartup(t *testing.T) 
 	go func() { defer close(done); _ = server.Serve(ln) }()
 	defer func() { _ = server.Close(); <-done }()
 	a := app.New(db, ids, time.Now, app.WithCommittedMaintenanceStartup(source.Plan.MaintenanceID))
-	c, err := New(Config{Instance: "server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: filepath.Join(root, "control.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "releases")}, a, ids, func(context.Context) (app.ServerObservation, error) { return app.ServerObservation{}, nil }, nil)
+	c, err := New(Config{Instance: "server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: testkit.SocketPath(t, "control.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "releases")}, a, ids, func(context.Context) (app.ServerObservation, error) { return app.ServerObservation{}, nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

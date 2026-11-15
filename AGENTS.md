@@ -155,6 +155,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 
 - 每个独占/顺序测试阶段重新核对实际活跃进程预算；继承的显式资源边界不被独立入口覆盖。阶段日志区分包模式、实际发现包数、缓存与本次执行，保留原终态/错误/cause。
 
+- Go 编译与 testing.TempDir 的根目录可按空间配置；真实 Unix IPC fixture 必须独立分配短真实路径并验证完整 pathname，不能依赖测试名或长数据根目录。Go 1.27 的 GOTMPDIR 同时影响两类临时文件。
+
 ## 5. 提交规范
 
 - 格式：`<type>: <summary>`，不带 scope。例如 `feat: impl request dedup middleware`。

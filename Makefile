@@ -4,6 +4,9 @@ GO ?= go
 PNPM ?= pnpm
 STATICCHECK_VERSION ?= v0.8.2
 PKGS := ./...
+# Go 1.27 uses GOTMPDIR for both compilation and testing.TempDir. Choose a
+# volume with build capacity when overriding it; IPC fixtures allocate their
+# own short real directories and never depend on TMPDIR/GOTMPDIR being short.
 TEST_TIMEOUT ?= 60m
 APP_TEST_SHARDS ?= 0
 TEST_SHARDS ?= 0

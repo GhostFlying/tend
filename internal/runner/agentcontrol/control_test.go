@@ -42,7 +42,7 @@ func setup(t *testing.T) *fixture {
 	root := t.TempDir()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 81)
-	f := &fixture{t: t, ids: ids, socket: filepath.Join(root, "control.sock")}
+	f := &fixture{t: t, ids: ids, socket: testkit.SocketPath(t, "control.sock")}
 	f.config = agentconfig.Config{FormatVersion: 1, Runtimes: []agentconfig.RuntimeBinding{{ID: "worker", Revision: 1, Kind: agentconfig.AppServerWorker, ExecutableRef: privateMarker, DeclaredPurposes: []agentconfig.Purpose{agentconfig.WorkerRun}, Enabled: true}}, Agents: []agentconfig.AgentDefinition{{LocalID: "implement", Revision: 1, DisplayName: "Implement", RuntimeID: "worker", Categories: []string{"implementer"}, Purposes: []agentconfig.Purpose{agentconfig.WorkerRun}, Model: "requested-model", Effort: "high", Enabled: true}}}
 	f.options = agentcontrol.Options{Directory: filepath.Join(root, "registry"), EnvironmentID: "runner-a", Config: agentcontrol.Config{SourceFile: filepath.Join(root, privateMarker+".json"), Installations: []agentcontrol.Installation{{RuntimeID: "worker", ArtifactID: "artifact", ExpectedSHA256: "sha256:" + strings.Repeat("a", 64), AdapterID: "appserver", AdapterRevision: "1", LocalReference: privateMarker}}}, Registry: agentregistry.Options{Now: clock.Now, NewSnapshotID: func() string { return "snapshot-" + ids.New(protocol.PrefixRequest) }}}
 	f.write()

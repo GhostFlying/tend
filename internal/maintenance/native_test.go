@@ -3,6 +3,7 @@ package maintenance
 import (
 	"context"
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"os"
@@ -23,7 +24,7 @@ func TestNativeProtocolIdentityAndOrdinaryTools(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(dir)
-				socket := filepath.Join(dir, "native.sock")
+				socket := testkit.SocketPath(t, "native.sock")
 				listener, err := net.Listen("unix", socket)
 				if err != nil {
 					t.Fatal(err)

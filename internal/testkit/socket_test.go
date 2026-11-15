@@ -25,7 +25,7 @@ func TestSocketDirIgnoresLongAndSymlinkedTemporaryRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, first := range []string{long, alias} {
-		dir, err := shortSocketDir([]string{first, short})
+		dir, err := shortSocketDir([]string{first, short}, "control.sock")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,5 +101,46 @@ func TestSocketDirParallelCommunicationAndCleanup(t *testing.T) {
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Fatalf("socket fixture cleanup incomplete: %v", err)
 		}
+	}
+}
+
+func TestSocketPathValidatesActualLeafAndIgnoresGoTempRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket fixture")
+	}
+	short := SocketDir(t)
+	long := filepath.Join(short, strings.Repeat("d", 50-len(short)-1))
+	if err := os.Mkdir(long, 0700); err != nil {
+		t.Fatal(err)
+	}
+	leaf := strings.Repeat("x", 56) + ".sock"
+	dir, err := shortSocketDir([]string{long, short}, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if filepath.Dir(dir) != short {
+		t.Fatal("actual suffix did not select the fallback", dir)
+	}
+	listener, err := net.Listen("unix", filepath.Join(dir, leaf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+	for _, bad := range []string{"", ".", "..", "../outside.sock", "/absolute.sock", `nested\socket`} {
+		if _, err := shortSocketDir([]string{short}, bad); err == nil {
+			t.Fatal("invalid leaf accepted", bad)
+		}
+	}
+	t.Setenv("GOTMPDIR", t.TempDir())
+	path := SocketPath(t, "upgrades.sock")
+	listener, err = net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+	real, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil || real != filepath.Dir(path) {
+		t.Fatal("socket directory is not real", path, err)
 	}
 }

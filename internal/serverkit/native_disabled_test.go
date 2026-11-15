@@ -37,7 +37,7 @@ func TestDefaultServerDoesNotInitializeNativeWorkers(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{}}
 	defer client.CloseIdleConnections()
 	finished := errors.New("disabled native workers verified")
-	err = Run(ctx, Config{DataDir: directory, Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
+	err = Run(ctx, Config{ControlSocket: assemblySocket(t), DataDir: directory, Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
 		Listeners: []net.Listener{listener},
 		WhoIs:     netx.Static{Identity: &netx.Identity{User: "test-owner"}},
 		OpenSession: func(context.Context, SessionSpec) (harness.Session, error) {
