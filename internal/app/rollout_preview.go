@@ -224,7 +224,7 @@ func (a *App) authorizePreviewRunner(ctx context.Context, p protocol.Principal, 
 }
 
 // PollRolloutPreview is independent of leases, scheduling, and maintenance mode.
-func (a *App) PollRolloutPreview(ctx context.Context, p protocol.Principal, instance string) (*protocol.RolloutPreviewWork, error) {
+func (a *App) PollRolloutPreview(ctx context.Context, p protocol.Principal, instance string, stopping <-chan struct{}) (*protocol.RolloutPreviewWork, error) {
 	if err := a.authorizePreviewRunner(ctx, p, instance); err != nil {
 		return nil, err
 	}
@@ -236,6 +236,14 @@ func (a *App) PollRolloutPreview(ctx context.Context, p protocol.Principal, inst
 			return nil, err
 		}
 		b.mu.Lock()
+		// Stop only an idle read. Once selected, work is returned even if the
+		// shutdown signal arrives before the handler writes its response.
+		select {
+		case <-stopping:
+			b.mu.Unlock()
+			return nil, nil
+		default:
+		}
 		for i, cancelled := range b.cancelled {
 			if cancelled.InstanceID == instance && cancelled.HostID == p.Subject {
 				b.cancelled = append(b.cancelled[:i], b.cancelled[i+1:]...)
@@ -260,6 +268,8 @@ func (a *App) PollRolloutPreview(ctx context.Context, p protocol.Principal, inst
 		case <-ctx.Done():
 			return nil, nil
 		case <-changed:
+		case <-stopping:
+			return nil, nil
 		}
 	}
 }
