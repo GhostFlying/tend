@@ -11,3 +11,5 @@
 Refs: D245。
 
 复用现有slow-write observer补固定usage_prices.refresh operation和catalog/projection阶段；这些诊断不记录原始报价、token或凭据，失败不改变业务控制。
+
+审阅修正：固定阶段必须进入既有 Tx.ObservePhase allowlist。沿真实 store 写观察生命周期分别覆盖旧请求阶段与报价/投影阶段，在成功、callback失败、commit失败时保留实际阶段及inclusive时长、来源和连接释放，不让诊断静默丢弃。
