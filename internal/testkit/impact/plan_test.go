@@ -159,3 +159,13 @@ func TestRequiredAggregateRejectsSkippedMissingFailedAndCancelledWork(t *testing
 		}
 	}
 }
+
+func TestExplicitFullDoesNotMislabelUndiscoveredPackages(t *testing.T) {
+	p := Select([]string{"internal/app/app.go", "internal/e2e/manager_test.go"}, nil, true)
+	if len(p.Reasons) != 1 || p.Reasons[0] != "explicit full mode or main/release baseline" {
+		t.Fatalf("full intentionally skips graph discovery; misleading reasons: %v", p.Reasons)
+	}
+	if !p.Full || !slices.Equal(p.Packages, []string{"./..."}) || !slices.Equal(p.Groups, Groups()) {
+		t.Fatalf("full coverage changed: %+v", p)
+	}
+}

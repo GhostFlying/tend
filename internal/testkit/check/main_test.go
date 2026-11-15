@@ -233,3 +233,12 @@ func TestImpactSelectionRetainsRequiredGroupsAndPrivatePlanWithoutWeb(t *testing
 		t.Fatal("required peer omitted or unrelated group retained", got)
 	}
 }
+
+func TestFullDiagnosticsDistinguishPatternsFromDiscoveredPackages(t *testing.T) {
+	if got := packageSummary(impact.Select([]string{"internal/app/app.go"}, nil, true)); got != "package-patterns=[./...] graph-count=not-expanded" {
+		t.Fatal(got)
+	}
+	if got := packageSummary(impact.Plan{Packages: []string{"example/a", "example/b"}}); got != "selected-packages=2" {
+		t.Fatal(got)
+	}
+}
