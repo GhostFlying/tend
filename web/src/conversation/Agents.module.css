@@ -111,6 +111,7 @@
   text-overflow: ellipsis;
 }
 .tag svg,
+.menu svg,
 .returnLink svg {
   width: 14px;
   height: 14px;
@@ -126,6 +127,10 @@
   text-underline-offset: 3px;
 }
 .menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
   padding: 3px 7px;
   color: var(--caption);
 }

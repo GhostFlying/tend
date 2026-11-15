@@ -24,6 +24,7 @@ import { Chevron } from "../shell/icons.tsx";
 import { clock } from "../conversation/model.ts";
 import { groupActivityEvents, identifyActivityGroups } from "./activity.ts";
 import { IssueTurnRead } from "./turn.ts";
+import { activityTurnRows } from "./turnRows.ts";
 import { ActivityResultCard } from "./Results.tsx";
 import type { IssueReadingState } from "./reading.ts";
 import type { Issues } from "./data.ts";
@@ -539,7 +540,7 @@ function ActivityBlock({
   };
   return (
     <article className={styles.discussion} data-scroll-id={entry.id}>
-      {rows.map((row) => {
+      {activityTurnRows(rows, block).map((row) => {
         switch (row.kind) {
           case "owner":
             return (
@@ -608,19 +609,6 @@ function ActivityBlock({
             return null;
         }
       })}
-      {block.trigger.state === "processing" && !rows.some((row) => row.kind === "agent") && (
-        <AgentTurn
-          entry={{
-            kind: "agent",
-            key: block.trigger.message_id,
-            replyTo: block.trigger.message_id,
-            items: [],
-            state: "processing",
-            startedAt: Date.parse(block.trigger.created_at),
-          }}
-          currentIssueId={currentIssueId}
-        />
-      )}
       {items.some(
         (item) =>
           item.assistant_state && !["completed", "streaming"].includes(item.assistant_state),
