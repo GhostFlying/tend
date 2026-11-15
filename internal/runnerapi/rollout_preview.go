@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -15,10 +16,18 @@ func (s *Server) rolloutPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodGet {
-		result, err := s.app.PollRolloutPreview(r.Context(), p, r.URL.Query().Get("instance"))
+		httpdiag.Waiting(r.Context())
+		result, err := s.app.PollRolloutPreview(r.Context(), p, r.URL.Query().Get("instance"), s.cfg.Stopping)
 		if err != nil {
 			s.writeError(w, r, nil, err)
 			return
+		}
+		if result == nil {
+			select {
+			case <-s.cfg.Stopping:
+				httpdiag.WaitStopped(r.Context())
+			default:
+			}
 		}
 		writeJSON(w, http.StatusOK, result)
 		return

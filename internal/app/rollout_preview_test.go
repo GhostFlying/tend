@@ -50,7 +50,7 @@ func TestRolloutPreviewIsAnEphemeralReadOutsideMaintenanceAndLeases(t *testing.T
 		}
 		got <- result
 	}()
-	work, err := h.app.PollRolloutPreview(ctx, runner("linux-1"), "preview-instance")
+	work, err := h.app.PollRolloutPreview(ctx, runner("linux-1"), "preview-instance", nil)
 	if err != nil || work == nil || work.RunID != as.RunID || work.DeploymentID == "" {
 		t.Fatal(work, err)
 	}
@@ -92,13 +92,13 @@ func TestRolloutPreviewCancellationAndRestartNeverReplayBusinessWork(t *testing.
 	}()
 	pollCtx, stop := context.WithTimeout(t.Context(), 3*time.Second)
 	defer stop()
-	work, err := h.app.PollRolloutPreview(pollCtx, runner("linux-1"), "preview-instance")
+	work, err := h.app.PollRolloutPreview(pollCtx, runner("linux-1"), "preview-instance", nil)
 	if err != nil || work == nil {
 		t.Fatal(work, err)
 	}
 	cancel()
 	<-done
-	cancelled, err := h.app.PollRolloutPreview(pollCtx, runner("linux-1"), "preview-instance")
+	cancelled, err := h.app.PollRolloutPreview(pollCtx, runner("linux-1"), "preview-instance", nil)
 	if err != nil || cancelled == nil || !cancelled.Cancelled || cancelled.RequestID != work.RequestID {
 		t.Fatal(cancelled, err)
 	}
@@ -114,7 +114,7 @@ func TestRolloutPreviewCancellationAndRestartNeverReplayBusinessWork(t *testing.
 	if op := h.versionedHello("linux-1", next); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if _, err := h.app.PollRolloutPreview(pollCtx, runner("linux-1"), "preview-instance"); protocol.CodeOf(err) != protocol.CodeForbidden {
+	if _, err := h.app.PollRolloutPreview(pollCtx, runner("linux-1"), "preview-instance", nil); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("stale instance", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestRolloutPreviewRejectsOtherPrincipalsAndOldRunners(t *testing.T) {
 	if err != nil || result.State != "unsupported" {
 		t.Fatal(result, err)
 	}
-	if _, err := h.app.PollRolloutPreview(t.Context(), runner("linux-1"), "old-runner"); protocol.CodeOf(err) != protocol.CodeForbidden {
+	if _, err := h.app.PollRolloutPreview(t.Context(), runner("linux-1"), "old-runner", nil); protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal(err)
 	}
 }
@@ -174,7 +174,7 @@ func TestRolloutPreviewHistoricalManagerUsesActualNativeTurnFacts(t *testing.T) 
 		_, err := h.app.ReadRolloutPreview(ctx, owner, as.RunID, protocol.RolloutPreviewQuery{})
 		done <- err
 	}()
-	work, err := h.app.PollRolloutPreview(ctx, runner("linux-1"), "preview-instance")
+	work, err := h.app.PollRolloutPreview(ctx, runner("linux-1"), "preview-instance", nil)
 	if err != nil || work == nil {
 		t.Fatal(work, err)
 	}
@@ -186,5 +186,68 @@ func TestRolloutPreviewHistoricalManagerUsesActualNativeTurnFacts(t *testing.T) 
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRolloutPreviewShutdownPreservesPendingAndSelectedWork(t *testing.T) {
+	h, as := previewFixture(t)
+	// A real owner read enqueues work and closes this broker change event.
+	h.app.preview.mu.Lock()
+	enqueued := make(chan struct{})
+	h.app.preview.changed = enqueued
+	h.app.preview.mu.Unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	joined := make(chan struct{})
+	defer func() {
+		cancel()
+		select {
+		case <-joined:
+		case <-time.After(5 * time.Second):
+			t.Error("owner preview did not stop")
+		}
+	}()
+	result := make(chan protocol.RolloutPreview, 1)
+	go func() {
+		defer close(joined)
+		v, err := h.app.ReadRolloutPreview(ctx, owner, as.RunID, protocol.RolloutPreviewQuery{})
+		if err != nil {
+			t.Error(err)
+		}
+		result <- v
+	}()
+	select {
+	case <-enqueued:
+	case <-time.After(5 * time.Second):
+		t.Fatal("owner preview did not enqueue work")
+	}
+	stopping := make(chan struct{})
+	close(stopping)
+	if work, err := h.app.PollRolloutPreview(ctx, runner("linux-1"), "preview-instance", stopping); err != nil || work != nil {
+		t.Fatal("stopped idle poll consumed work", work, err)
+	}
+	h.app.preview.mu.Lock()
+	for _, pending := range h.app.preview.pending {
+		if pending.delivered {
+			t.Error("shutdown marked pending work delivered")
+		}
+	}
+	h.app.preview.mu.Unlock()
+	selectedStop := make(chan struct{})
+	work, err := h.app.PollRolloutPreview(ctx, runner("linux-1"), "preview-instance", selectedStop)
+	if err != nil || work == nil {
+		t.Fatal(work, err)
+	}
+	close(selectedStop)
+	reply := protocol.RolloutPreviewReply{RequestID: work.RequestID, InstanceID: work.InstanceID, Result: protocol.RolloutPreview{State: "ready", Generation: "after-stop"}}
+	if err := h.app.ReplyRolloutPreview(ctx, runner("linux-1"), reply); err != nil {
+		t.Fatal("shutdown discarded selected reply", err)
+	}
+	select {
+	case got := <-result:
+		if got.State != "ready" || got.Generation != "after-stop" {
+			t.Fatal(got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("selected work did not complete owner read")
 	}
 }

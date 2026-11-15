@@ -2290,6 +2290,13 @@ Go 1.27 的 GOTMPDIR 同时影响编译与 testing.TempDir，后者包含描述�
 
 Refs: docs/plans/local-test-reliability.md。
 
+## D244：替换排空、单次备份索引与原主机恢复
+
+可重读的空闲 rollout-preview GET 沿现有 stopping 信号结束，使 HTTP 停机排空。
+已选 work 和 reply、已接收业务写入保留真实完成，不因停止丢失或重放。
+
+见 `docs/plans/upgrade-replacement-efficiency.md`。
+
 ## D245：报价新鲜度与受影响用量重估分离
 
 成功抓取始终保存最新目录与抓取时间并通知；只按实际native模型选择结果失效用量投影。
