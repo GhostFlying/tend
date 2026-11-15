@@ -3275,6 +3275,40 @@ try {
       serviceWorkers: "block",
     });
     const page = await context.newPage();
+    let releaseConversation = () => {};
+    let conversationGate = new Promise<void>((resolve) => {
+      releaseConversation = resolve;
+    });
+    const conversationID = issue.conversation.conversation_id;
+    assert(conversationID, "the return fixture needs its actual Issue conversation");
+    const conversationPath = `/api/v1/agent-conversations/${encodeURIComponent(conversationID)}`;
+    await page.route(
+      (url) => url.pathname === conversationPath,
+      async (route) => {
+        const gate = conversationGate;
+        const response = await route.fetch();
+        await gate;
+        await route.fulfill({ response });
+      },
+    );
+    const finishConversation = async () => {
+      const response = page.waitForResponse(
+        (reply) => new URL(reply.url()).pathname === conversationPath,
+      );
+      releaseConversation();
+      await response;
+      await page
+        .getByRole("region", { name: "Issue 详情", exact: true })
+        .locator("textarea")
+        .waitFor({ state: "visible" });
+      // Observe the ready composer and its viewport before locating the reading point.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+    };
     try {
       await page.goto(`http://127.0.0.1:${address.port}/?issue=${issue.issue_id}`);
       const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
@@ -3283,6 +3317,11 @@ try {
       await detail.getByText("第二页内容", { exact: true }).waitFor();
       await more.click();
       await detail.getByText("第三页保留消息", { exact: true }).waitFor();
+      const scroller = detail.locator("[data-issue-scroll]");
+      const preparingHeight = await scroller.evaluate((node) => node.clientHeight);
+      await finishConversation();
+      const readyHeight = await scroller.evaluate((node) => node.clientHeight);
+      assert(readyHeight < preparingHeight, "the delayed composer did not resize the viewport");
       const taskLink = detail
         .getByRole("button", { name: "任务与验收记录 →", exact: true })
         .first();
@@ -3290,9 +3329,22 @@ try {
       const top = await detail.locator("[data-issue-scroll]").evaluate((node) => node.scrollTop);
       await taskLink.click();
       await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
+      conversationGate = new Promise<void>((resolve) => {
+        releaseConversation = resolve;
+      });
       await page.goBack();
       await detail.getByText("第三页保留消息", { exact: true }).waitFor({ state: "attached" });
-      await page.waitForTimeout(150);
+      await finishConversation();
+      assert.equal(await scroller.evaluate((node) => node.clientHeight), readyHeight);
+      await writeFile(
+        join(output, `third-page-return-${width}.json`),
+        JSON.stringify({
+          preparingHeight,
+          readyHeight,
+          before: top,
+          after: await scroller.evaluate((node) => node.scrollTop),
+        }),
+      );
       assert(
         Math.abs(
           (await detail.locator("[data-issue-scroll]").evaluate((node) => node.scrollTop)) - top,
@@ -3335,6 +3387,7 @@ try {
       );
       console.log(`PASS third continuation page task return ${width}`);
     } finally {
+      releaseConversation();
       await context.close();
       base.more = originalMore;
       thirdPage = false;
