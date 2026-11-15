@@ -14,13 +14,18 @@ import (
 
 // All Task/Run/approval/result transitions use commands. Provider and installer
 // observations are doubles at their external boundary, never fake completions.
-func predeploymentFixture(t *testing.T) (*harness, *protocol.RunnerRuntime, protocol.Issue, protocol.Assignment, protocol.IssueDeliveryCandidate, protocol.ArtifactPayload) {
+func predeploymentFixture(t *testing.T, hostScopes ...[]string) (*harness, *protocol.RunnerRuntime, protocol.Issue, protocol.Assignment, protocol.IssueDeliveryCandidate, protocol.ArtifactPayload) {
 	t.Helper()
 	h, r, i, as, old := liveReviewedDeliveryFixture(t)
-	i.Plan.PRPolicy.Deployment = &protocol.IssueDeploymentScope{ServerInstance: "server", HostIDs: []string{"linux-1"}}
+	hosts := []string{"linux-1"}
+	if len(hostScopes) > 0 {
+		hosts = make([]string, len(hostScopes[0]))
+		copy(hosts, hostScopes[0])
+	}
+	i.Plan.PRPolicy.Deployment = &protocol.IssueDeploymentScope{ServerInstance: "server", HostIDs: hosts}
 	i = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, i, "update", protocol.UpdateIssuePayload{Plan: i.Plan, ExpectedAssignmentEpoch: i.AssignmentEpoch}))
 	old.Deploy = true
-	old.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{"linux-1"}}
+	old.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: hosts}
 	old.DeploymentScope = "Install the current reviewed source on the retained server and host"
 	prepareLiveDeliveryForTest(t, h, i.IssueID, as.TaskID, old)
 	bindSelfCandidateForTest(t, h, i.IssueID, as.TaskID)

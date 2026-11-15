@@ -38,3 +38,12 @@ cfda 的原 R3–R6 触发路径已经修正，独立审阅又以三条 race 探
 2. R7：current_artifact_id 是生命周期指针，不能作为阶段存在的唯一证据。当前指针为空时，从本 Task/spec 的真实验收记录读取其原 immutable artifact；验证原 Task/Run/action/spec 和 typed stage，不修改历史或恢复数据库指针。真实 changes_required 等负面验收只允许修正准备，不当作 passed；当前调度、预算、owner contract/grant、no-upgrade/no-unknown及已确定 merge/lineage保护保持。
 3. R8：最终报告按当前冻结 candidate 的 delivery/head/base 与当前 spec 读取真实历史阶段及其独立验收。只接受精确相同候选的最近阶段，未通过阶段不回退到更老的 passed；不借其他 Task/spec/candidate。原唯一 upgrade、frozen授权、全部仓库 base/commit/无snapshot以及最终独立验收保持。已安装后的报告修正直接重用真实已验收的源码来源，不新增 predeployment、源码提交或伪造 Changed。
 4. 同时覆盖首次最终报告、负面验收后重报、重复负面修正、阶段负面后 main drift、明确未验收不能安装、原 accepted history 不被改写。provider/installer仍明确是外部边界替身；保留实际命令路径及旧失败 probe 原件。无新接口、DB迁移、强制解绑或旧Run补造。按实际 delta 定向 race及既有授权/安装回归，固定新提交后交同一 Maple 持续责任复查；完整门槛与原授权不变。
+
+## 原 Maple 第四轮 R10–R11 修正计划
+
+098e 的 R7–R9 原失败路径已修；本轮独立 probe 又确认 owner 连续报告可遮蔽阶段验收，以及已被候选入口支持的相同显式空 host 集合无法接续。098e 及其 CI 制品不安装，旧完整检查取消事实保持；本轮先写计划再修改。
+
+- R10：安装门槛从同 Task/current spec 的不可变 artifact 历史读取最近 typed stage，不再用可被普通 owner 进度报告覆盖的 current artifact 指针判断“从未有阶段”。最新阶段必须与当前冻结候选匹配，并保留它本身实际的独立验收/原冻结 waiver；更新未通过阶段不能回退到旧通过阶段，其他候选不能借用。没有任何适用阶段的历史合同保留原入口。准备修正的真实负面反馈来源、授权/lease/epoch、wholePR/CI、精确构建来源、唯一升级及写事务检查不变。新增真实启动的 self-bound owner 连续 submit_result 回归，验证隐藏前后读预检及实际 App 写入口拒绝，并验证没有阶段及真实 waiver 的正向预检；外部发布/安装仍为隔离边界替身。
+- R11：集合相等允许两个相同的显式空集合，保留 nil 非法候选入口与重复、缺少、额外主机、server/park 范围保护。复用原 fixture 的真实 stage/acceptance/continue/claim/review/prepare 链，参数化原 policy/candidate 范围验证 server-only 候选接续 API，不能宣称 server-only 物理安装或改变本 Issue 的固定两主机部署授权。
+
+先复用独立失败 probe 的实际前提验证这两项，再保留现有负面验收和安装授权回归；按真实 delta 在原 PR/原 Maple 持续 Task 集中复查，不新建 Task/Issue/worktree。完整本机检查、精确新 CI 和实际受控恢复/原业务交付门槛不变。

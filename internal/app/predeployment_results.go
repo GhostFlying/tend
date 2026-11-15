@@ -263,7 +263,7 @@ func sameDeploymentHosts(a, b []string) bool {
 	a, b = slices.Clone(a), slices.Clone(b)
 	slices.Sort(a)
 	slices.Sort(b)
-	return len(a) > 0 && len(slices.Compact(slices.Clone(a))) == len(a) && len(slices.Compact(slices.Clone(b))) == len(b) && slices.Equal(a, b)
+	return len(slices.Compact(slices.Clone(a))) == len(a) && len(slices.Compact(slices.Clone(b))) == len(b) && slices.Equal(a, b)
 }
 
 // Commit output already independently accepted for this exact candidate need

@@ -99,12 +99,33 @@ func acceptedStageForCandidate(ctx context.Context, q store.Querier, task store.
 	return protocol.ArtifactPayload{}, nil, nil
 }
 
+// Ordinary owner reports and negative verdicts can replace or clear the
+// lifecycle pointer. Installation retains the latest actual stage's quality
+// agreement even while the same owner records later progress reports.
+func latestInstallationStage(ctx context.Context, q store.Querier, task store.TaskRow) (string, *protocol.PredeploymentResult, error) {
+	artifacts, err := store.ListArtifactsByTask(ctx, q, task.TaskID)
+	if err != nil {
+		return "", nil, err
+	}
+	for n := len(artifacts) - 1; n >= 0; n-- {
+		id := artifacts[n].ArtifactID
+		_, stage, err := readPredeploymentArtifact(ctx, q, task, id)
+		if protocol.CodeOf(err) == protocol.CodeStaleRevision {
+			continue
+		}
+		if err != nil || stage != nil {
+			return id, stage, err
+		}
+	}
+	return "", nil, nil
+}
+
 func requireInstallationStage(ctx context.Context, q store.Querier, task store.TaskRow, candidate protocol.IssueDeliveryCandidate) error {
-	id, stage, rejected, err := preparationStage(ctx, q, task)
+	id, stage, err := latestInstallationStage(ctx, q, task)
 	if err != nil || stage == nil {
 		return err
 	}
-	if rejected || stage.DeliveryID != candidate.DeliveryID || stage.HeadSHA != candidate.HeadSHA || stage.BaseSHA != candidate.BaseSHA {
+	if stage.DeliveryID != candidate.DeliveryID || stage.HeadSHA != candidate.HeadSHA || stage.BaseSHA != candidate.BaseSHA {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "finish the candidate correction and bind its accepted stage before installation")
 	}
 	_, err = acceptedPredeploymentArtifact(ctx, q, task, id)
