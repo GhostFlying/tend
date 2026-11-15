@@ -247,7 +247,7 @@ func checkWithCPUs(ctx context.Context, cpus int, goTool string, shards, suiteSh
 		return err
 	}
 	parallel, explicit, _ := testbudget.PackageLimit(testbudget.Value(source, "GOFLAGS"), testbudget.Packages(cpus, 1))
-	fmt.Printf("[race] group=%s effective-cpus=%d app-shards=%d suite-shards=%d peak-processes=%d Go-package-parallel=%d GOMAXPROCS=%s inherited-package-limit=%t inherited-procs=%t\n",
+	fmt.Printf("[race] group=%s effective-cpus=%d app-shards=%d suite-shards=%d peak-planned-processes=%d Go-package-parallel=%d discovery-GOMAXPROCS=%s inherited-package-limit=%t inherited-procs=%t\n",
 		group, cpus, shards, suiteShards, peak, parallel, testbudget.Value(env, "GOMAXPROCS"), explicit, strings.TrimSpace(testbudget.Value(source, "GOMAXPROCS")) != "")
 	others, isolated, app := packagePhases(selected)
 
