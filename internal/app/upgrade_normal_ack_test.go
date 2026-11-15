@@ -65,6 +65,12 @@ func TestUpgradeRestoredHostMetadataWaitsForNormalAcknowledgment(t *testing.T) {
 	// This is the durable cut after a host has acknowledged normal and the
 	// coordinator clears its upgrade ID with one further control revision.
 	r := upgradeRead(h)
+	// This fixture jumps past runner installation after the helper's actual
+	// normal heartbeats. Materialize their consumed cutover state before
+	// isolating the later metadata-only acknowledgment gap.
+	for i := range r.CutoverRunners {
+		r.CutoverRunners[i].Pending = false
+	}
 	r.View.Hosts[0].Status = "completed"
 	r.View.Hosts[0].Phase = "restored"
 	ctl := upgradeCtl(h, "linux-1")
@@ -107,6 +113,12 @@ func TestUpgradeNormalAckWaitNeverTreatsUnavailableHostAsPending(t *testing.T) {
 	for _, kind := range []string{"offline", "stale-heartbeat", "zero-slots", "other-batch", "current-revision-maintenance", "control-maintenance"} {
 		t.Run(kind, func(t *testing.T) {
 			h := serverNormalAckGap(t)
+			// A real normal ACK ends this host's cutover wait. A later
+			// outage or changed observation must never acquire it again.
+			upgradeAck(h, "linux-2", protocol.RunnerNormal)
+			if v := upgradeTick(h, ServerObservation{}); v.Status != "running" || v.Hosts[0].Status != "queued" {
+				t.Fatal("first host should still be awaiting its normal ACK", v)
+			}
 			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 				rt, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-2")
 				if err != nil {

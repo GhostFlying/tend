@@ -24,12 +24,13 @@ func markCutoverRecovery(ctx context.Context, q store.Querier, r *store.UpgradeR
 		if err != nil {
 			return "", err
 		}
-		if c.NormalRevision != 0 || ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != r.View.UpgradeID || ctl.Revision != c.MaintenanceRevision || rt.Runtime.InstanceID != c.InstanceID || rt.Runtime.Generation != c.Generation || rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
+		if c.NormalRevision != 0 || ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != r.View.UpgradeID || ctl.Revision != c.MaintenanceRevision || rt.Runtime.InstanceID != c.InstanceID || rt.Runtime.Generation != c.Generation || rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Mode != protocol.RunnerMaintenance || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
 			return "server 重启后主机维护身份或控制代次已改变", nil
 		}
 		c.NormalRevision = ctl.Revision + 1
-		// An outage that occurs after recovery is not a cutover observation gap.
-		c.Pending = rt.Runtime.Mode == protocol.RunnerMaintenance && now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds()
+		// The same pre-stop ACK can become stale before normal is observed.
+		// Keep the exact cohort pending until the actual normal ACK arrives.
+		c.Pending = true
 		return "", nil
 	}
 	return "", nil
@@ -38,12 +39,16 @@ func markCutoverRecovery(ctx context.Context, q store.Querier, r *store.UpgradeR
 // Waiting preserves unavailable observations and never authorizes drain or
 // installation. TickUpgrade enforces the original stage and overall deadlines.
 func awaitCutoverRunners(ctx context.Context, x *Exec, q store.Querier, r *store.UpgradeRow, now int64) (bool, string, error) {
+	hasPending := false
+	for _, c := range r.CutoverRunners {
+		hasPending = hasPending || c.Pending
+	}
+	if !hasPending {
+		return false, "", nil
+	}
 	waiting := false
 	for i := range r.CutoverRunners {
 		c := &r.CutoverRunners[i]
-		if !c.Pending {
-			continue
-		}
 		if r.ServerProcess == "" || r.ServerHealthy < 2 || r.ServerPreviousHash == "" || r.ServerPreviousHash == r.ServerHash || c.NormalRevision != c.MaintenanceRevision+1 || r.Deadline <= now || upgradeBatchExpired(*r, now) {
 			return false, "server 重启后的主机恢复观察窗口无效或已到期", nil
 		}
@@ -79,6 +84,10 @@ func awaitCutoverRunners(ctx context.Context, x *Exec, q store.Querier, r *store
 		if fresh && rt.Runtime.Mode == protocol.RunnerNormal && rt.Runtime.AppliedControlRevision == c.NormalRevision && rt.Runtime.UpgradeID == "" {
 			c.Pending = false
 			continue
+		}
+		// A host that already recovered cannot re-enter the cutover wait.
+		if !c.Pending {
+			return false, "已恢复的原主机不再确认 fresh normal 控制", nil
 		}
 		if rt.Runtime.UpgradeID != r.View.UpgradeID || rt.Runtime.Mode != protocol.RunnerMaintenance || rt.Runtime.AppliedControlRevision != c.MaintenanceRevision {
 			return false, "原主机尚未确认预期的 normal 控制", nil
