@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,22 @@ func TestPlanKeepsBudgetOverridesButRejectsChangedBuildTags(t *testing.T) {
 	t.Setenv("GOFLAGS", "-tags=different -p=2")
 	if _, err := Read(t.Context(), root, path); err == nil {
 		t.Fatal("different build graph reused a stale plan")
+	}
+}
+
+func TestExplicitFullSkipsGraphDiscoveryWithoutMisleadingFallback(t *testing.T) {
+	root, _ := gitFixture(t)
+	if err := os.MkdirAll(filepath.Join(root, "internal", "new"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "new", "new.go"), []byte("package new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Load(t.Context(), root, Options{Worktree: true, Full: true, Go: "graph-must-not-be-invoked"})
+	if err != nil || !plan.Full || len(plan.Reasons) != 1 || plan.Reasons[0] != "explicit full mode or main/release baseline" {
+		t.Fatal(plan, err)
+	}
+	if !slices.Equal(plan.Packages, []string{"./..."}) || !slices.Equal(plan.Groups, Groups()) {
+		t.Fatal("full execution scope changed", plan)
 	}
 }
