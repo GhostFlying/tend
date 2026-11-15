@@ -212,7 +212,18 @@ func TestLiveDeliveryUpgradeUsesActualCurrentLease(t *testing.T) {
 				t.Fatal("the actual native start was not observed", command)
 			}
 			candidate.TargetSHA = strings.Repeat("c", 40)
-			observeDeliveryForTest(t, h, issue.IssueID, candidate, "merged", candidate.TargetSHA)
+			// Merging preserves the already verified head checks in this lease fixture.
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, candidate.DeliveryID)
+				if err != nil {
+					return err
+				}
+				row.Observation.State, row.Observation.MergeSHA = "merged", candidate.TargetSHA
+				row.Observation.TargetSHA, row.Observation.TargetContainsMerge = candidate.TargetSHA, true
+				return putDeliveryObservationForTest(tx, t.Context(), row)
+			}); err != nil {
+				t.Fatal(err)
+			}
 			switch scenario {
 			case "expired":
 				h.clock.Advance(2 * h.app.LeaseTTL())

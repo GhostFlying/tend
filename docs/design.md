@@ -2356,3 +2356,7 @@ idle claim 的已有预检可以利用当前已登记库存的类别集合，排
 最终部署结算显式拒绝阶段 artifact，仍要求最终报告引用真实 upgrade，及原独立验收、发布来源、实际安装/健康/normal ACK。仓库 artifact 的 base 保留原 workspace 起点，PR base 由阶段身份和真实 provider 观察单独校验；仓库提交必须匹配 PR head 且没有未提交快照。候选验收保留原安装 drain 边界，不在活跃升级目标占用 Run。CLI 的现有完整 JSON 结果输入与 worker submit_result 同步暴露阶段字段；读取/恢复仍沿原 Task 和不可变 artifact，不生成历史产物。
 
 阶段验收令 Task completed 时，prepare 仍拒绝替换未完成的 self-bound 部署，要求先 continue。保留已验收阶段、当前授权/代次与已确定 merge/lineage 的后续准备 Run 可以在 main 前进后领取；此项例外只用于调度，不更改实际升级入口的精确来源校验。部署 server/park 和完整无重复 host 集合保持一致，host 顺序无权限含义。真实无变化的阶段及最终报告保存 Changed=false；runner 仅对明确阶段或唯一 upgrade 报告的 ErrNoChanges 读取 Snapshot，最终服务端还要求同 Task 已验收阶段、精确仓库身份、当前冻结交付与真实唯一升级。普通 commit 结果不因此免除变化要求，也不把阶段证据当成实际安装。
+
+阶段的真实负面验收会清空生命周期的 current artifact 指针，但不删除阶段与原验收。准备修正从同 Task/spec 的最近真实验收恢复阶段来源，只允许继续修正；负面结论不算独立通过。最终安装报告被退回时，从当前冻结 delivery/head/base 对应的最近阶段读取原件及实际独立验收，不能借其他 Task/spec/候选或回退绕过更新的未通过阶段。相同唯一升级下可再次报告真实无变化源码，保留最终独立验收与结算要求。
+
+实际 CheckUpgradeStart 的读预检与 App StartUpgrade 写事务还要重新要求当前 whole-PR 审阅及精确候选检查，并验证所用阶段已经独立通过且匹配冻结候选；准备 Run 可领取不代表有安装许可。审阅关联失效、CI 失败/缺失/未知和负面阶段均不得写入升级。原 lease、授权、责任代次、精确安装来源、完整主机集合、唯一升级和无 unknown 校验继续执行。

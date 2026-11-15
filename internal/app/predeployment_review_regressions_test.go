@@ -126,7 +126,10 @@ func TestPredeploymentPreparationOfOriginalCandidateAfterMainAdvances(t *testing
 }
 
 func TestPredeploymentUnchangedInstallationRequiresIndependentStageAcceptance(t *testing.T) {
-	h, _, _, as, _, stage := predeploymentFixture(t)
+	h, _, issue, as, _, stage := predeploymentFixture(t)
+	original := *deliveryDutyForTest(t, h, issue.IssueID, as.TaskID).Candidate
+	stage.Report.Predeployment = &protocol.PredeploymentResult{DeliveryID: original.DeliveryID, HeadSHA: original.HeadSHA, BaseSHA: original.BaseSHA}
+	stage.Mounts[0].CommitSHA = original.HeadSHA
 	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, stage, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
