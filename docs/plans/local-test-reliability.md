@@ -18,3 +18,5 @@
 测试组负责 testkit 的 socket、check、racecheck、impact、testbudget、testphase，必要 Makefile/CI 入口，以及非升级业务的 e2e/serverkit/sandbox 测试。升级组负责 updater/upgradectl/blobstore 与升级专有测试，DB/观察器组负责 store/pricing、公共设计与规则文件。共享文件先交接，不同时编辑；本计划不修改公共 docs/design.md 或 AGENTS.md。
 
 为实际故障补确定性 RED/GREEN，验证完整地址字节、环境分离、阶段与取消语义、进程组清理、CPU 参数和准备调用次数；保留所有失败/未知和源身份。使用有界定向 race/vet 与脚本测试，不启动整轮 full、PR、CI、部署或 Tend 业务。设计片段随冻结候选交给集成者，Refs D243，延续 D236–D237 的隔离与覆盖约束。
+
+审阅修正：边界回归本身显式分配受控真实短根；不假定通用 SocketDir 长度小于50，也不从可能更长的 TMPDIR 算出负 Repeat。以合法48字节 TMPDIR 环境运行同一回归，保留完整文件名选择、真实通信和非法 leaf 拒绝。
