@@ -2274,6 +2274,12 @@ host、slot、租约和共享资源准入；无额外能力要求也不能绕过
 只增加服务端只读视图字段，不修改 runner 通信、存储、配置 hash 或调度策略。
 见 `docs/plans/capability-candidate-readiness.md`。
 
+## D243：真实短 IPC、事件阶段与测试执行责任
+
+显式 full 选择 ./... 包模式并主动跳过依赖图；日志展示模式与未展开状态，不把模式数当发现包数或添加无依据的 undiscovered 原因。此为诊断准确性修复，未改变覆盖。
+
+Refs: docs/plans/local-test-reliability.md。
+
 ## D245：报价新鲜度与受影响用量重估分离
 
 成功抓取始终保存最新目录与抓取时间并通知；只按实际native模型选择结果失效用量投影。

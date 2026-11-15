@@ -200,6 +200,13 @@ func schedule(ctx context.Context, jobs int, parallel, isolated []task, run func
 	return errors.Join(failures...)
 }
 
+func packageSummary(plan impact.Plan) string {
+	if plan.Full {
+		return fmt.Sprintf("package-patterns=%v graph-count=not-expanded", plan.Packages)
+	}
+	return fmt.Sprintf("selected-packages=%d", len(plan.Packages))
+}
+
 func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string, count int, mode, base string) error {
 	directory, err := os.MkdirTemp("", "tend-check-")
 	if err != nil {
@@ -222,7 +229,7 @@ func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string,
 	if err := impact.Write(path, plan); err != nil {
 		return err
 	}
-	fmt.Printf("[check] impact full=%t base=%s head=%s packages=%d groups=%v reasons=%v\n", plan.Full, plan.Source.Base, plan.Source.Head, len(plan.Packages), plan.Groups, plan.Reasons)
+	fmt.Printf("[check] impact full=%t base=%s head=%s %s groups=%v reasons=%v\n", plan.Full, plan.Source.Base, plan.Source.Head, packageSummary(plan), plan.Groups, plan.Reasons)
 	parallel, isolated = plannedTasks(parallel, isolated, plan, path)
 
 	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t effective-cpus=%d serial-reason=%q\n",

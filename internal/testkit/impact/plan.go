@@ -90,6 +90,10 @@ func localControlSource(file string) bool {
 func Select(files []string, packages []Package, forceFull bool) Plan {
 	p := Plan{Version: 1, Changed: slices.Clone(files), Full: forceFull}
 	slices.Sort(p.Changed)
+	if forceFull {
+		p.Reasons = []string{"explicit full mode or main/release baseline"}
+		return complete(p)
+	}
 	byDir := map[string]string{}
 	reverse := map[string][]string{}
 	for _, pkg := range packages {
@@ -146,19 +150,12 @@ func Select(files []string, packages []Package, forceFull bool) Plan {
 		p.Full = true
 		p.Reasons = append(p.Reasons, file+": unclassified input; retain complete validation")
 	}
-	if forceFull {
-		p.Reasons = append(p.Reasons, "explicit full mode or main/release baseline")
-	}
 	if len(files) == 0 {
 		p.Full = true
 		p.Reasons = append(p.Reasons, "no changed candidate: retain complete baseline validation")
 	}
 	if p.Full {
-		p.Web, p.Layout, p.Cross, p.Release = true, true, true, true
-		p.Packages = []string{"./..."}
-		p.Groups = Groups()
-		p.QualityTargets = []string{"go-check"}
-		return explain(p)
+		return complete(p)
 	}
 	seen := map[string]bool{}
 	for len(production) > 0 {
@@ -199,6 +196,15 @@ func Select(files []string, packages []Package, forceFull bool) Plan {
 	if len(p.Packages) == 0 && !p.Web {
 		p.Reasons = append(p.Reasons, "documentation only: diff validation; backend, browser and release jobs excluded")
 	}
+	return explain(p)
+}
+
+// complete records package patterns, not a graph-derived package count.
+func complete(p Plan) Plan {
+	p.Web, p.Layout, p.Cross, p.Release = true, true, true, true
+	p.Packages = []string{"./..."}
+	p.Groups = Groups()
+	p.QualityTargets = []string{"go-check"}
 	return explain(p)
 }
 
