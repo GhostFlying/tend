@@ -29,6 +29,7 @@ import (
 	"github.com/GhostFlying/tend/internal/runnerapi"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 	"github.com/GhostFlying/tend/internal/tools"
 )
 
@@ -242,6 +243,8 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 	}
 	waitOriginal := make(chan string, 1)
+	managerReady := make(chan string, 1)
+	var readyOnce sync.Once
 	waitFile := make(chan protocol.ArtifactFile, 1)
 	const waitFileBody = "Original check output before physical wait: 原始证据\n"
 	var recoveredWaitFiles atomic.Int64
@@ -249,6 +252,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	var rateFailed atomic.Bool
 	fake.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
 		attempts.Add(1)
+		readyOnce.Do(func() { managerReady <- th.ID() })
 		if loseStart && input.Repair && s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) != 0 {
 			failures <- "metadata repair started before original native receipts reconciled"
 			return "failed"
@@ -545,14 +549,17 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		t.Fatal(err)
 	}
 	if externalWait {
-		var original string
-		select {
-		case original = <-waitOriginal:
-		case failure := <-failures:
-			t.Fatal(failure)
-		case <-time.After(15 * time.Second):
-			t.Fatal("native owner did not register its wait")
+		// Admission starts real migration, thread recovery and runner routing.
+		// Registration gets its own watchdog only after the actual turn starts.
+		await := func(name string, watchdog time.Duration, event <-chan string) string {
+			value, err := testphase.Await(t, ctx, name, watchdog, event, failures)
+			if err != nil {
+				managerPhaseFailure(t, s, ctx, issue.IssueID, name, err)
+			}
+			return value
 		}
+		await("manager migration and native turn ready", 5*time.Minute, managerReady)
+		original := await("original external wait committed", 2*time.Minute, waitOriginal)
 		waitBusinessContinuity(t, "physical yield and history settle the original request", func() bool {
 			select {
 			case failure := <-failures:
