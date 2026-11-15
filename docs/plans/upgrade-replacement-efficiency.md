@@ -13,3 +13,5 @@
 Refs: D244（由唯一集成者在同批公共设计中写入）。
 
 实际回归：空preview HTTP请求在已发Stopping下退出；真实owner read先排入preview work，停机不取走pending，已选work在stop后仍完成reply；Linux inotify按本次文件打开/目录自身打开事件计数，每operation每历史清单读取一次且只初始化一个共享写仓，下一operation包含新checkpoint；已有parts/hash/prefix/restore/cancel用例保留。Cutover用真实Start、维护ACK与授权后推进注入时钟超过60秒，再通过两次server健康观察恢复normal；App重建、单台ACK、双台ACK、原期限、缺失/错代/错批/历史无cohort与原有普通offline负例均覆盖。
+
+增量核对：真实 cutover 仅 30 秒时，先验证 normal 已发但尚未 ACK 的实际行为，再推进到旧 heartbeat 的 60 秒边界；若观察窗口错误中断，只对首次授权冻结的原 cohort 追加恢复等待。原 stage/overall deadline、错代/错批/缺失/无 cohort 与实际恢复后再次离线的拒绝仍需覆盖；保留此前冻结提交及 RED/GREEN 原件。
