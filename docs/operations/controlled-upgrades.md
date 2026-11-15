@@ -329,3 +329,7 @@ legacy bootstrap 仅在可验证的非特权原子状态 writer 上使用目录�
 ```
 
 提交仍包含实际仓库状态和正常原件。不要附加虚构 `upgrade:` 引用；这个阶段只接受候选独立验收，不完成部署责任。实际 Issue owner 自执行使用原 `issue update-delivery --data` 的 `action: submit_result`，`result.report` 支持同一字段，必须是实际执行 owner 的 Run。阶段验收完成后用原 `task continue`；已确定 merge 且未升级的旧候选，通过原 `issue update-delivery` 的 prepare/bind 接续有自己真实产物、独立审阅和检查的新候选，保留旧历史。原 frozen candidate、unknown、租约或版本不能用阶段结果绕过。最终真实安装后仍提交带唯一实际 `upgrade:<id>` 的最终报告并独立核验，再 complete。
+
+阶段 acceptance 完成后必须先 continue，再 prepare/bind；不能因 Task 的阶段已 completed 而丢弃尚未履行的部署绑定。已验收阶段在 main 前进后可启动准备新候选的 Run，这项调度准入不授予旧候选安装新 main 的权限；正式安装仍核对当前来源、授权、完整主机集合及真实升级。相同完整主机集合的顺序不改变范围。
+
+仅报告阶段或真实安装结果、没有新源码变化时，保留实际 `Changed=false`，不要增加空提交或伪造变化。runner 的无变化采集会对明确阶段或唯一 upgrade 报告读取真实仓库状态；服务端仍完整验证 typed stage。最终无变化的 commit 结果只能精确复用同 Task 已独立验收阶段的全部已提交仓库身份，并匹配当前冻结候选/授权与真实唯一升级；普通 commit 结果、未验收阶段、不同提交或快照继续拒绝。阶段 artifact 本身仍不完成安装结算。

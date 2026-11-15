@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -207,11 +208,145 @@ func acceptedPredeploymentResult(ctx context.Context, q store.Querier, task stor
 	return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "the candidate stage requires its frozen independent acceptance")
 }
 
+// This is scheduling permission for a preparation Run, never installation
+// permission. The controlled upgrade boundary keeps its exact-source checks.
+func predeploymentPreparationCurrent(ctx context.Context, q store.Querier, issue protocol.Issue, duty protocol.IssueDeliveryDuty, taskID string, revision int64) (bool, error) {
+	task, err := store.GetTask(ctx, q, taskID)
+	if err != nil {
+		return false, err
+	}
+	_, stage, err := taskPredeploymentResult(ctx, q, task)
+	if err != nil || stage == nil || duty.Candidate == nil {
+		return false, err
+	}
+	observed, err := store.GetDeliveryObservation(ctx, q, issue.IssueID, duty.Candidate.DeliveryID)
+	if err != nil {
+		return false, err
+	}
+	o := observed.Observation
+	if o.ErrorKind == "" && !o.RefreshPending && o.State == "open" {
+		// The ordinary reviewed open-candidate path remains unchanged.
+		return false, nil
+	}
+	if duty.TaskID != taskID || duty.ExecutionTaskID != taskID || duty.Status != "executing" || duty.Revision != revision || duty.AssignmentEpoch != issue.AssignmentEpoch || !duty.Candidate.Deploy || duty.Candidate.Reconciliation != nil {
+		return false, protocol.Errorf(protocol.CodeStaleRevision, "retain the original deployment responsibility for preparation")
+	}
+	if err := store.DeliveryGrantValid(ctx, q, issue, duty); err != nil {
+		return false, err
+	}
+	if current, err := store.TaskOwnerContractCurrent(ctx, q, taskID); err != nil || !current {
+		if err != nil {
+			return false, err
+		}
+		return false, protocol.Errorf(protocol.CodeStaleRevision, "preparation requires the current Issue contract")
+	}
+	if _, err := acceptedPredeploymentResult(ctx, q, task, stage); err != nil {
+		return false, err
+	}
+	if err := selfDeliveryEffectsReconciled(ctx, q, taskID, ""); err != nil {
+		return false, err
+	}
+	if o.ErrorKind != "" || o.RefreshPending || o.CheckedAt == 0 || o.State != "merged" || o.MergeSHA == "" || !validDeliverySHA(o.TargetSHA) || o.LineageErrorKind != "" || !o.TargetContainsMerge || o.HeadSHA != duty.Candidate.HeadSHA || o.BaseSHA != duty.Candidate.BaseSHA {
+		return false, protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original merge before preparing its next candidate")
+	}
+	return true, nil
+}
+
+func sameDeploymentHosts(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return len(a) > 0 && len(slices.Compact(slices.Clone(a))) == len(a) && len(slices.Compact(slices.Clone(b))) == len(b) && slices.Equal(a, b)
+}
+
+// Commit output already independently accepted for this exact candidate need
+// not be manufactured again by its installation Run. Preserve Changed=false;
+// this exception cannot authorize an ordinary unchanged commit result.
+func unchangedDeliveryMountsAllowed(ctx context.Context, q store.Querier, runID string, result protocol.ArtifactPayload) (bool, error) {
+	if result.Report == nil {
+		return false, nil
+	}
+	if result.Report.Predeployment != nil {
+		// Submission still validates the complete typed stage, including the
+		// actual producing lease, frozen authority and recorded PR identity.
+		return true, nil
+	}
+	id, err := deliveryUpgradeReference(result.Report)
+	if err != nil {
+		return false, nil
+	}
+	run, err := store.GetRun(ctx, q, runID)
+	if err != nil {
+		return false, err
+	}
+	task, err := store.GetTask(ctx, q, run.TaskID)
+	if err != nil {
+		return false, err
+	}
+	accepted, stage, err := taskPredeploymentResult(ctx, q, task)
+	if err != nil || stage == nil {
+		return false, err
+	}
+	if _, err := acceptedPredeploymentResult(ctx, q, task, stage); err != nil {
+		return false, err
+	}
+	var issueID, source, raw, bound string
+	var revision int64
+	if err := q.QueryRowContext(ctx, `SELECT issue_id,source_task_id,duty_revision,candidate_json,upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&issueID, &source, &revision, &raw, &bound); err != nil {
+		return false, err
+	}
+	var frozen deliveryExecutionSnapshot
+	if err := json.Unmarshal([]byte(raw), &frozen); err != nil {
+		return false, err
+	}
+	issue, err := store.GetCanonicalIssue(ctx, q, issueID)
+	if err != nil {
+		return false, err
+	}
+	duty, err := store.GetIssueDeliveryDuty(ctx, q, issueID, source)
+	if err != nil {
+		return false, err
+	}
+	if source != task.TaskID || !frozen.Deploy || frozen.Deployment == nil || frozen.Reconciliation != nil || stage.DeliveryID != frozen.DeliveryID || stage.HeadSHA != frozen.HeadSHA || stage.BaseSHA != frozen.BaseSHA || duty.Status != "executing" || duty.ExecutionTaskID != task.TaskID || duty.Revision != revision || duty.AssignmentEpoch != issue.AssignmentEpoch || frozen.AssignmentEpoch != issue.AssignmentEpoch || !reflect.DeepEqual(duty.Candidate, &frozen.IssueDeliveryCandidate) || !reflect.DeepEqual(duty.Authorization, frozen.Authorization) {
+		return false, protocol.Errorf(protocol.CodeStaleRevision, "unchanged installation output requires its exact accepted candidate and frozen deployment")
+	}
+	if current, err := store.TaskOwnerContractCurrent(ctx, q, task.TaskID); err != nil || !current {
+		if err != nil {
+			return false, err
+		}
+		return false, protocol.Errorf(protocol.CodeStaleRevision, "installation output requires the current Issue contract")
+	}
+	if err := store.DeliveryGrantValid(ctx, q, issue, duty); err != nil {
+		return false, err
+	}
+	if bound != "" && bound != id {
+		return false, protocol.Errorf(protocol.CodeInvalidRequest, "retain the original controlled upgrade")
+	}
+	if _, err := deliveryUpgradeBinding(ctx, q, *frozen.Deployment, id, task.CreatedAt); err != nil {
+		return false, err
+	}
+	if len(result.Mounts) != len(accepted.Mounts) {
+		return false, protocol.Errorf(protocol.CodeInvalidRequest, "retain every accepted repository state")
+	}
+	byPath := make(map[string]protocol.ArtifactMount, len(accepted.Mounts))
+	for _, mount := range accepted.Mounts {
+		byPath[mount.Path] = mount
+	}
+	for _, mount := range result.Mounts {
+		original, ok := byPath[mount.Path]
+		if !ok || original.Repo != mount.Repo || original.BaseSHA != mount.BaseSHA || original.CommitSHA != mount.CommitSHA || original.SnapshotSHA != "" || mount.SnapshotSHA != "" {
+			return false, protocol.Errorf(protocol.CodeInvalidRequest, "installation output must retain the exact accepted committed state")
+		}
+		delete(byPath, mount.Path)
+	}
+	return true, nil
+}
+
 func mergedPredeploymentContinuation(ctx context.Context, q store.Querier, task store.TaskRow, frozen protocol.IssueDeliveryCandidate, observed protocol.DeliveryObservation, next *protocol.IssueDeliveryCandidate) error {
 	if observed.State != "merged" || observed.MergeSHA == "" || observed.LineageErrorKind != "" || !observed.TargetContainsMerge || observed.HeadSHA != frozen.HeadSHA || observed.BaseSHA != frozen.BaseSHA || next == nil || next.DeliveryID == frozen.DeliveryID || next.BaseSHA != observed.TargetSHA || next.TargetSHA != observed.TargetSHA || next.ProviderState != "open" {
 		return protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original merge and current main before continuing its candidate")
 	}
-	if !next.Deploy || next.Deployment == nil || frozen.Deployment == nil || next.Deployment.ServerInstance != frozen.Deployment.ServerInstance || next.Deployment.ParkIdleManagers != frozen.Deployment.ParkIdleManagers || !reflect.DeepEqual(next.Deployment.HostIDs, frozen.Deployment.HostIDs) {
+	if !next.Deploy || next.Deployment == nil || frozen.Deployment == nil || next.Deployment.ServerInstance != frozen.Deployment.ServerInstance || next.Deployment.ParkIdleManagers != frozen.Deployment.ParkIdleManagers || !sameDeploymentHosts(next.Deployment.HostIDs, frozen.Deployment.HostIDs) {
 		return protocol.Errorf(protocol.CodeForbidden, "candidate continuation must retain the complete original deployment scope")
 	}
 	_, stage, err := taskPredeploymentResult(ctx, q, task)
