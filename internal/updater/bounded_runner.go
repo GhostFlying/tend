@@ -857,6 +857,7 @@ func backupBoundedRunnerDataContext(ctx context.Context, cfg Config, op *Operati
 		return err
 	}
 	files := make([]BackupFile, 0, len(paths))
+	snapshot := newBackupSnapshot(cfg, op)
 	for i, path := range paths {
 		file := BackupFile{Path: path, Name: fmt.Sprintf("data-%03d", i)}
 		info, err := os.Lstat(path)
@@ -876,7 +877,7 @@ func backupBoundedRunnerDataContext(ctx context.Context, cfg Config, op *Operati
 		if err != nil {
 			return err
 		}
-		if err := persistBackupFile(ctx, cfg, op, &file, path); err != nil {
+		if err := snapshot.persistBackupFile(ctx, &file, path); err != nil {
 			return err
 		}
 		files = append(files, file)

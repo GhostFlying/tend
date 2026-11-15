@@ -2295,6 +2295,12 @@ Refs: docs/plans/local-test-reliability.md。
 可重读的空闲 rollout-preview GET 沿现有 stopping 信号结束，使 HTTP 停机排空。
 已选 work 和 reply、已接收业务写入保留真实完成，不因停止丢失或重放。
 
+每次冷备份只扫描一次已有 checkpoint 集合并建立按 source/prefix 的索引，
+操作之间重新读取；冻结清单只解析一次。共享写仓保留持久发布，对象读取使用
+已有真实仓且不创建目录或进行发布同步。完整 hash/prefix/parts、源文件身份、
+旧进程已停止、备份与恢复验证及 manifest/state 发布顺序不变。
+回归核实际打开/同步入口次数，不声明设备耗时 SLA。
+
 见 `docs/plans/upgrade-replacement-efficiency.md`。
 
 ## D245：报价新鲜度与受影响用量重估分离

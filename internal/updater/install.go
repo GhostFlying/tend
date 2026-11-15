@@ -112,6 +112,7 @@ func backupDataContext(ctx context.Context, cfg Config, op *Operation) error {
 		return err
 	}
 	files := make([]BackupFile, 0)
+	snapshot := newBackupSnapshot(cfg, op)
 	for i, p := range paths {
 		name := backupName(i)
 		f := BackupFile{Path: p, Name: name}
@@ -132,7 +133,7 @@ func backupDataContext(ctx context.Context, cfg Config, op *Operation) error {
 		if err != nil {
 			return err
 		}
-		if err := persistBackupFile(ctx, cfg, op, &f, p); err != nil {
+		if err := snapshot.persistBackupFile(ctx, &f, p); err != nil {
 			return err
 		}
 		if err := copyBackupContents(ctx, cfg, op.BackupDir, f, io.Discard); err != nil {

@@ -4,13 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -39,7 +37,7 @@ func backupParts(cfg Config, f BackupFile) ([]protocol.BackupObjectPart, error) 
 	if f.ObjectSHA256 != f.SHA256 {
 		return nil, errors.New("updater: invalid shared backup object")
 	}
-	s, err := backupObjectStore(cfg)
+	s, err := openBackupObjectStore(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +65,7 @@ func copyBackupContents(ctx context.Context, cfg Config, dir string, f BackupFil
 		if err != nil {
 			return err
 		}
-		s, err := backupObjectStore(cfg)
+		s, err := openBackupObjectStore(cfg)
 		if err != nil {
 			return err
 		}
@@ -154,86 +152,27 @@ func appendBackupOriginal(cfg Config, path string) bool {
 	return false
 }
 
-// priorBackupFile reads actual immutable checkpoint manifests. It never creates
-// a parent checkpoint dependency: the selected file's flat parts are copied.
-func priorBackupFile(ctx context.Context, cfg Config, op *Operation, source string) (BackupFile, string, bool, error) {
-	type candidate struct {
-		file BackupFile
-		dir  string
-		at   int64
-	}
-	var candidates []candidate
-	for _, root := range []string{"backups", "maintenance-backups"} {
-		entries, err := os.ReadDir(filepath.Join(cfg.StateDir, root))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return BackupFile{}, "", false, err
-		}
-		for _, entry := range entries {
-			if err := ctx.Err(); err != nil {
-				return BackupFile{}, "", false, err
-			}
-			dir := filepath.Join(cfg.StateDir, root, entry.Name())
-			if dir == op.BackupDir {
-				continue
-			}
-			record, err := readCheckpoint(cfg, dir)
-			// An unreadable checkpoint is not evidence that a prefix can be reused.
-			// Retention independently protects its unknown references.
-			if err != nil {
-				continue
-			}
-			for _, f := range record.Files {
-				if f.Path == source && f.Existed && sharedBackupFile(f) {
-					candidates = append(candidates, candidate{f, dir, record.CreatedAtMillis})
-				}
-			}
-		}
-	}
-	if len(candidates) == 0 {
-		return BackupFile{}, "", false, nil
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].at != candidates[j].at {
-			return candidates[i].at > candidates[j].at
-		}
-		return candidates[i].dir > candidates[j].dir
-	})
-	c := candidates[0]
-	return c.file, c.dir, true, nil
-}
-
-func reuseBackupPrefix(ctx context.Context, cfg Config, op *Operation, f *BackupFile, source string) (bool, error) {
+func (b *backupSnapshot) reuseBackupPrefix(ctx context.Context, f *BackupFile, source string) (bool, error) {
+	cfg, op := b.cfg, b.op
 	// Retrying an already materialized checkpoint preserves its exact manifest
 	// references even if other checkpoints have since appeared or disappeared.
-	raw, err := os.ReadFile(filepath.Join(op.BackupDir, "files.json"))
-	if err == nil {
-		var prior []BackupFile
-		if err := json.Unmarshal(raw, &prior); err != nil {
+	if err := b.loadFrozen(); err != nil {
+		return false, err
+	}
+	if saved, ok := b.frozen[source]; ok {
+		if saved.Name != f.Name || saved.SHA256 != f.SHA256 || saved.Mode != f.Mode || !saved.Existed {
+			return false, errors.New("updater: frozen backup source changed")
+		}
+		if err := copyBackupContents(ctx, cfg, op.BackupDir, saved, io.Discard); err != nil {
 			return false, err
 		}
-		for _, saved := range prior {
-			if saved.Path != source {
-				continue
-			}
-			if saved.Name != f.Name || saved.SHA256 != f.SHA256 || saved.Mode != f.Mode || !saved.Existed {
-				return false, errors.New("updater: frozen backup source changed")
-			}
-			if err := copyBackupContents(ctx, cfg, op.BackupDir, saved, io.Discard); err != nil {
-				return false, err
-			}
-			*f = saved
-			return true, nil
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return false, err
+		*f = saved
+		return true, nil
 	}
 	if !appendBackupOriginal(cfg, source) {
 		return false, nil
 	}
-	prior, dir, found, err := priorBackupFile(ctx, cfg, op, source)
+	prior, dir, found, err := b.priorBackupFile(ctx, source)
 	if err != nil || !found {
 		return false, err
 	}
@@ -275,7 +214,7 @@ func reuseBackupPrefix(ctx context.Context, cfg Config, op *Operation, f *Backup
 		f.ObjectParts = append([]protocol.BackupObjectPart(nil), prior.ObjectParts...)
 		return true, nil
 	}
-	s, err := backupObjectStore(cfg)
+	s, err := b.objectStore()
 	if err != nil {
 		return false, err
 	}

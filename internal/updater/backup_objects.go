@@ -15,14 +15,19 @@ func backupObjectStore(cfg Config) (*blobstore.Store, error) {
 	return blobstore.New(filepath.Join(cfg.StateDir, "backup-objects"))
 }
 
+func openBackupObjectStore(cfg Config) (*blobstore.Store, error) {
+	return blobstore.OpenStore(filepath.Join(cfg.StateDir, "backup-objects"))
+}
+
 // persistBackupFile keeps mutable ledger snapshots local to their checkpoint;
 // immutable original/spool bytes share the existing content-addressed facility.
-func persistBackupFile(ctx context.Context, cfg Config, op *Operation, f *BackupFile, source string) error {
+func (b *backupSnapshot) persistBackupFile(ctx context.Context, f *BackupFile, source string) error {
+	cfg, op := b.cfg, b.op
 	if configuredOriginal(cfg, source) && cfg.StateDir != "" {
-		if reused, err := reuseBackupPrefix(ctx, cfg, op, f, source); reused || err != nil {
+		if reused, err := b.reuseBackupPrefix(ctx, f, source); reused || err != nil {
 			return err
 		}
-		s, err := backupObjectStore(cfg)
+		s, err := b.objectStore()
 		if err != nil {
 			return err
 		}
@@ -65,7 +70,7 @@ func backupFilePath(cfg Config, directory string, f BackupFile) (string, error) 
 		if f.ObjectSHA256 != f.SHA256 || !configuredOriginal(cfg, f.Path) || cfg.StateDir == "" {
 			return "", errors.New("updater: invalid shared backup object")
 		}
-		s, err := backupObjectStore(cfg)
+		s, err := openBackupObjectStore(cfg)
 		if err != nil {
 			return "", err
 		}
