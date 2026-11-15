@@ -94,6 +94,11 @@ func reviewNextPredeploymentForTest(t *testing.T, h *harness, r *protocol.Runner
 
 func TestFault_PredeploymentResultContinuesMergedDeliveryWithoutInventingInstallation(t *testing.T) {
 	h, r, i, as, next, stage := predeploymentFixture(t)
+	workspace, workspaceAssignment, commit := predeploymentGitWorkspace(t, as)
+	stage.Mounts = commit.Mounts
+	next.HeadSHA = commit.Mounts[0].CommitSHA
+	stage.Report.Predeployment.HeadSHA = next.HeadSHA
+	observeDeliveryForTest(t, h, i.IssueID, next, "open", "")
 	original := deliveryDutyForTest(t, h, i.IssueID, as.TaskID)
 	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, stage, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal("stage blocked by absent upgrade", op)
@@ -141,9 +146,7 @@ func TestFault_PredeploymentResultContinuesMergedDeliveryWithoutInventingInstall
 		t.Fatal("old merged binding not archived")
 	}
 	bindSelfCandidateForTest(t, h, i.IssueID, as.TaskID)
-	final := testArtifact(h.task(as.TaskID).WorkspaceName)
-	final.Mounts[0].BaseSHA = next.BaseSHA
-	final.Mounts[0].CommitSHA = next.HeadSHA
+	final := unchangedInstallationWorkspace(t, workspace, workspaceAssignment, current.RunID)
 	final.Report = &protocol.ResultReport{Body: "Final deployment requires its actual upgrade"}
 	expectWorkCode(t, h.runAs(current, protocol.OpRunsSubmitArtifact, final, SubmitArtifact{}), protocol.CodeInvalidRequest)
 	final.Report.Evidence = []string{"upgrade:invented"}
@@ -160,6 +163,19 @@ func TestFault_PredeploymentResultContinuesMergedDeliveryWithoutInventingInstall
 		t.Fatal(err)
 	}
 	final.Report.Evidence = []string{"upgrade:" + batch.View.UpgradeID}
+	for _, scenario := range []string{"commit", "snapshot", "base"} {
+		invalid := final
+		invalid.Mounts = append([]protocol.ArtifactMount(nil), final.Mounts...)
+		switch scenario {
+		case "commit":
+			invalid.Mounts[0].CommitSHA = strings.Repeat("a", 40)
+		case "snapshot":
+			invalid.Mounts[0].SnapshotSHA = strings.Repeat("a", 40)
+		case "base":
+			invalid.Mounts[0].BaseSHA = strings.Repeat("a", 40)
+		}
+		expectWorkCode(t, h.runAs(current, protocol.OpRunsSubmitArtifact, invalid, SubmitArtifact{}), protocol.CodeInvalidRequest)
+	}
 	if op := h.runAs(current, protocol.OpRunsSubmitArtifact, final, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

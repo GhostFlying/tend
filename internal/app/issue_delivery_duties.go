@@ -191,6 +191,13 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 					return Outcome{Result: d}, nil
 				}
 			} else {
+				if d.ExecutionTaskID == d.TaskID {
+					if _, stage, err := taskPredeploymentResult(ctx, tx.Q(), task); err != nil {
+						return Outcome{}, err
+					} else if stage != nil {
+						return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "continue the accepted predeployment Task before preparing its next candidate")
+					}
+				}
 				var busy bool
 				if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r LEFT JOIN leases l USING(run_id) WHERE r.task_id=? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR l.status<>'released')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, task.TaskID, task.TaskID).Scan(&busy); err != nil {
 					return Outcome{}, err
@@ -686,6 +693,12 @@ func deliveryTaskCurrent(ctx context.Context, q store.Querier, task string) (boo
 			}
 			return batch.View.Status == "completed", nil
 		}
+	}
+	if preparing, err := predeploymentPreparationCurrent(ctx, q, i, d, task, revision); preparing || err != nil {
+		if err != nil && (protocol.CodeOf(err) == protocol.CodeForbidden || protocol.CodeOf(err) == protocol.CodeStaleRevision || protocol.CodeOf(err) == protocol.CodeInvalidTransition || protocol.CodeOf(err) == protocol.CodeUnknownOutcome) {
+			return false, nil
+		}
+		return preparing, err
 	}
 	_, err = deliveryExecutionAuthorized(ctx, q, i, protocol.IssueDeliveryAuthorization{TaskID: source, Revision: revision})
 	if err != nil && (protocol.CodeOf(err) == protocol.CodeForbidden || protocol.CodeOf(err) == protocol.CodeStaleRevision || protocol.CodeOf(err) == protocol.CodeInvalidRequest || protocol.CodeOf(err) == protocol.CodeUnknownOutcome || protocol.CodeOf(err) == protocol.CodeInvalidTransition || errors.Is(err, store.ErrNotFound)) {

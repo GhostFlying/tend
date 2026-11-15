@@ -390,7 +390,20 @@ func checkAcceptanceFiles(ctx context.Context, q store.Querier, rc runContext, f
 // checkResult validates required deliverables and immutable uploaded manifests.
 func checkResultDeliverables(ctx context.Context, q store.Querier, spec domain.Spec, runID string, p protocol.ArtifactPayload) error {
 	if spec.RequiresDelivery(domain.DeliveryCommit) {
-		if err := checkArtifactMounts(spec.Workspace, p.Mounts); err != nil {
+		changed := slices.ContainsFunc(p.Mounts, func(m protocol.ArtifactMount) bool { return m.Changed })
+		unchanged := false
+		if !changed {
+			var err error
+			unchanged, err = unchangedDeliveryMountsAllowed(ctx, q, runID, p)
+			if err != nil {
+				return err
+			}
+		}
+		check := checkArtifactMounts
+		if unchanged {
+			check = checkArtifactMountState
+		}
+		if err := check(spec.Workspace, p.Mounts); err != nil {
 			return err
 		}
 	} else if len(p.Mounts) > 0 {

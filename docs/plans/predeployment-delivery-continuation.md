@@ -18,3 +18,14 @@
 worker submit_result -> runs.submit_artifact -> typed 阶段验证/真实 artifact -> 原独立 acceptance -> tasks.continue -> issues.update_delivery prepare/bind -> 最终真实升级结果 -> 独立 acceptance -> complete。Issue owner 自执行仍只登记本人的实际 Run，不冒充 worker。
 
 新增业务回归从真实获准/bound 和真实 merge 观察开始，覆盖 main 检查失败后新候选阶段登记、独立验收、同 Task 接续与最终结算防线；原 unknown/版本/权限/升级保护回归保留。根据实际协议 delta 同步 schema/CLI/tool 输入和文档；动态 submit_result 同时补齐 ResultReport 已有的 reviewed_artifact_id/verdict，确保真实 owner 产物能沿原审阅责任报告独立结论；不增加依赖、无 DB 手改或通用迁移。先定向 race，再必要 make check 和完整 PR CI；Maple 持续责任独立审阅真实增量。现有诊断候选的原件及验证直接引用，不重复其已完成诊断。
+
+## 原 Maple 第二轮 R3–R6 修正计划
+
+829 候选的独立审阅已实际复现三个缺口，另确认主机集合比较错误；全绿 CI 未覆盖这些边界。旧全量本地检查已取消并确认退出，保留部分检查、取消原因和缺失最终 receipt 的事实；829 及其同树 CI 制品不安装。
+
+- R3：独立阶段验收令 Task completed，但 deployment duty 仍 executing。该状态的 prepare 必须拒绝并要求先 continue，不能走旧终态替换分支清空 binding 或缩小部署范围；原最终已结算执行的替换能力保留。
+- R4：只在原 self-bound、已独立验收的阶段、当前授权/代次、无 upgrade/unknown、旧 merge 与当前 target lineage 已确定的情况下，允许领取准备新候选的后续 Run。该例外仅放在调度准入；安装仍走原 deliveryExecutionAuthorized / deliveryDeploymentSource，不给旧候选安装更新 main 的权限。回归同时证明可 claim 与旧安装权限仍被拒，覆盖 unknown/未验收/升级阻断。
+- R5：阶段及最终报告可以记录真实但未变化的仓库状态。runner 只在报告明确为 typed stage 或有唯一 upgrade 引用、Collect 返回 ErrNoChanges 时读取 Snapshot，保留真实 Changed=false；服务端 typed stage 仍完整验证。最终未变化的 commit 结果须精确复用同 Task 已独立验收阶段的全部仓库身份，并匹配当前冻结候选/授权与真实唯一 upgrade，不泛化放宽普通 commit Task。新增真实 gitws Prepare/Collect/Snapshot 的阶段→continue→最终报告→验收/结算链及 runner 补检，覆盖无 grant、未验收、不同 SHA/快照、伪造 upgrade 和普通任务拒绝。
+- R6：完整 host 范围按集合比较，副本排序或集合验证均可；不改变输入数组，重复、缺少、额外主机仍拒绝。
+
+先按原审阅 probe 的实际触发状态编写回归、修正并定向 race 验证，再固定实际新候选、必要完整检查与精确 CI，并在同 Maple Task 按 delta 复查。保留旧轮 verdict/失败，不新建 Task/Issue/worktree，不安装旧候选，也不为通过检查增加无业务必要的源码提交或伪造 Changed。

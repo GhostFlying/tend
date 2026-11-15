@@ -765,6 +765,16 @@ func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignmen
 	}
 	if requiresDelivery(as, "commit") {
 		git, err := execution.Workspaces.Collect(runCtx, as)
+		if errors.Is(err, ErrNoChanges) && deliveryStateReport(artifact.Report) {
+			if snapshots, ok := execution.Workspaces.(interface {
+				Snapshot(context.Context, protocol.Assignment) (protocol.ArtifactPayload, error)
+			}); ok {
+				// Preserve the actual unchanged state. The server independently
+				// validates the candidate stage or the accepted installation
+				// output and its real upgrade; this grants no delivery authority.
+				git, err = snapshots.Snapshot(runCtx, as)
+			}
+		}
 		if err != nil {
 			return stopped(failed(reasonFor(err, "collect_failed"), err))
 		}
@@ -787,6 +797,25 @@ func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignmen
 		return failed("missing_files", errors.New("worker did not submit required files"))
 	}
 	return r.finish(ctx, as, journal.PhaseSubmitting, protocol.OpRunsSubmitArtifact, artifact)
+}
+
+func deliveryStateReport(report *protocol.ResultReport) bool {
+	if report == nil || strings.TrimSpace(report.Body) == "" {
+		return false
+	}
+	if report.Predeployment != nil {
+		return true
+	}
+	count := 0
+	for _, evidence := range report.Evidence {
+		if strings.HasPrefix(evidence, "upgrade:") {
+			if strings.TrimSpace(strings.TrimPrefix(evidence, "upgrade:")) == "" {
+				return false
+			}
+			count++
+		}
+	}
+	return count == 1
 }
 
 // waitUntilWanted holds a run whose task is paused or under human control
