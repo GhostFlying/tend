@@ -351,7 +351,7 @@ func (t *Tx) ObservePhase(phase WritePhase) func() {
 		return func() {}
 	}
 	switch phase {
-	case WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan, WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
+	case WriteUsageQuotes, WriteUsageProjection, WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan, WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
 	default:
 		return func() {}
 	}

@@ -2318,4 +2318,5 @@ Refs: docs/plans/local-test-reliability.md。
 失效trigger，并按共享model→context→current索引定位受影响请求。目录、dirty、现有投影
 及刷新水位在同一事务提交，失败保留上次有效报价，不增加报价历史或产品缓存。
 原慢写样本的精确历史成本仍unknown；验证以重建身份数和真实估价契约为准，不把本地
-样例耗时当生产倍率。计划见 `docs/plans/usage-price-refresh-scope.md`。
+样例耗时当生产倍率。固定 catalog/projection 阶段进入实际观察白名单，成功与失败事务均保留真实计时。
+计划见 `docs/plans/usage-price-refresh-scope.md`。

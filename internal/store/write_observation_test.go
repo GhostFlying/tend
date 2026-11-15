@@ -186,6 +186,15 @@ func TestWriteObservationPanicReleasesConnection(t *testing.T) {
 }
 
 func TestWriteObservationLifecycleAndInclusivePhases(t *testing.T) {
+	writeObservationLifecycle(t, WritePersistOutcome, WriteAttention)
+}
+
+func TestWriteObservationUsagePhasesLifecycle(t *testing.T) {
+	writeObservationLifecycle(t, WriteUsageQuotes, WriteUsageProjection)
+}
+
+func writeObservationLifecycle(t *testing.T, parentPhase, childPhase WritePhase) {
+	t.Helper()
 	for _, outcome := range []string{"success", "callback_error", "commit_error"} {
 		t.Run(outcome, func(t *testing.T) {
 			s, _ := openTest(t)
@@ -199,9 +208,9 @@ func TestWriteObservationLifecycleAndInclusivePhases(t *testing.T) {
 			failure := errors.New("private callback error must not enter observation")
 			source := WriteSource{Operation: "test.operation", RequestID: "test-request", TraceID: "test-trace"}
 			err := s.Write(WithWriteSource(t.Context(), source), func(tx *Tx) error {
-				end := tx.ObservePhase(WritePersistOutcome)
+				end := tx.ObservePhase(parentPhase)
 				defer end()
-				child := tx.ObservePhase(WriteAttention)
+				child := tx.ObservePhase(childPhase)
 				child()
 				child()
 				switch outcome {
@@ -219,7 +228,7 @@ func TestWriteObservationLifecycleAndInclusivePhases(t *testing.T) {
 				t.Fatalf("observations = %d, want 1", len(observations))
 			}
 			o := observations[0]
-			if o.Source != source || len(o.Phases) != 2 || o.Phases[0].Phase != WriteAttention || o.Phases[0].Duration != time.Millisecond || o.Phases[1].Phase != WritePersistOutcome || o.Phases[1].Duration != 3*time.Millisecond {
+			if o.Source != source || len(o.Phases) != 2 || o.Phases[0].Phase != childPhase || o.Phases[0].Duration != time.Millisecond || o.Phases[1].Phase != parentPhase || o.Phases[1].Duration != 3*time.Millisecond {
 				t.Fatalf("inclusive phases/source = %+v", o)
 			}
 			if o.Callback == 0 || (outcome == "callback_error") != (o.Rollback > 0 && o.Commit == 0) {
