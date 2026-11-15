@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -61,7 +62,7 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	plan := protocol.ForwardRecoveryPlan{RecoveryID: "forward-201", RequestID: ids.New(protocol.PrefixRequest), LinkRequestID: ids.New(protocol.PrefixRequest), OriginalRequestID: original.StartRequestID, OriginalLedger: original.View, LedgerRevision: 8, Original: protocol.UpgradeBinding{UpgradeID: "old-201", InstanceID: "server", ProcessInstanceID: "old-launch", ReleaseID: "old-release", ManifestSHA256: original.ManifestSHA256, ArtifactSHA256: original.ServerHash}}
 	plan.Successor = protocol.UpgradeBinding{UpgradeID: plan.RecoveryID, InstanceID: "server", ProcessInstanceID: actual.LaunchID, ReleaseID: "new-release", ArtifactSHA256: actual.SHA256, ManifestSHA256: strings.Repeat("c", 64)}
 	a := app.New(db, ids, time.Now, app.WithForwardRecoveryStartup(plan.RecoveryID))
-	socket := filepath.Join(root, "updater.sock")
+	socket := testkit.SocketPath(t, "updater.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +82,7 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	go func() { defer close(done); _ = server.Serve(ln) }()
 	defer func() { _ = server.Close(); <-done }()
 	ready := false
-	c, err := New(Config{Instance: "server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: filepath.Join(root, "control.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "releases"), RecoveryReady: func(context.Context) error {
+	c, err := New(Config{Instance: "server", ProcessInstance: actual.LaunchID, BinarySHA256: actual.SHA256, ControlSocket: testkit.SocketPath(t, "control.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "releases"), RecoveryReady: func(context.Context) error {
 		if !ready {
 			return errors.New("startup still initializing")
 		}
@@ -110,7 +111,7 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	if err != nil || health.Healthy || !health.ServerConfirmed {
 		t.Fatal("legacy terminal fixture did not reproduce stale count", health, err)
 	}
-	legacy, err := New(Config{Instance: "server", ProcessInstance: original.ServerProcess, BinarySHA256: original.ServerHash, ControlSocket: filepath.Join(root, "legacy.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "legacy-releases")}, a, ids, func(context.Context) (app.ServerObservation, error) {
+	legacy, err := New(Config{Instance: "server", ProcessInstance: original.ServerProcess, BinarySHA256: original.ServerHash, ControlSocket: testkit.SocketPath(t, "legacy.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "legacy-releases")}, a, ids, func(context.Context) (app.ServerObservation, error) {
 		return app.ServerObservation{Healthy: true, MainDrained: false}, nil
 	}, nil)
 	if err != nil {

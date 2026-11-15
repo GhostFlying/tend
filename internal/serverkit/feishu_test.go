@@ -75,7 +75,7 @@ func TestFeishuAssemblyUsesEffectiveLocalOwner(t *testing.T) {
 			data := prepareAssemblyData(t, func() time.Time { return now })
 			ctx, finish := testphase.Context(t, t.Context(), "effective Feishu owner", time.Minute)
 			defer finish()
-			cfg := Config{DataDir: data, Listen: "127.0.0.1:0", LocalOwner: "local-owner", Owners: []string{"configured-owner"}, Feishu: &FeishuConfig{ReceiveMode: "http", AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_ASSEMBLY_SECRET", VerificationTokenEnv: "TEND_FEISHU_ASSEMBLY_TOKEN", EncryptKeyEnv: "TEND_FEISHU_ASSEMBLY_KEY"}}
+			cfg := Config{ControlSocket: assemblySocket(t), DataDir: data, Listen: "127.0.0.1:0", LocalOwner: "local-owner", Owners: []string{"configured-owner"}, Feishu: &FeishuConfig{ReceiveMode: "http", AppID: "app", TenantKey: "tenant", AppSecretEnv: "TEND_FEISHU_ASSEMBLY_SECRET", VerificationTokenEnv: "TEND_FEISHU_ASSEMBLY_TOKEN", EncryptKeyEnv: "TEND_FEISHU_ASSEMBLY_KEY"}}
 			err := Run(ctx, cfg, []byte("isolated-assembly-secret"), Dependencies{
 				Now: func() time.Time { return now },
 				Initialize: func(ctx context.Context, rt *Runtime) error {

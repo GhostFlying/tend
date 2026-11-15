@@ -136,7 +136,7 @@ func TestInjectedAssemblyRunsHooksAndReturnsBackgroundFailure(t *testing.T) {
 	}
 	configured, initialized := false, false
 	sentinel := errors.New("injected background failure")
-	err = Run(t.Context(), Config{DataDir: t.TempDir()}, []byte("isolated-test-secret"), Dependencies{
+	err = Run(t.Context(), Config{ControlSocket: assemblySocket(t), DataDir: t.TempDir()}, []byte("isolated-test-secret"), Dependencies{
 		Listeners: []net.Listener{listener},
 		OpenTelegram: func(*app.App, string, *slog.Logger) (TelegramClient, error) {
 			t.Fatal("disabled Telegram must not open a transport")
@@ -200,7 +200,7 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 				client.prepareErr = sentinel
 			}
 			initialized := false
-			err = Run(t.Context(), Config{DataDir: t.TempDir(), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
+			err = Run(t.Context(), Config{ControlSocket: assemblySocket(t), DataDir: t.TempDir(), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
 				Listeners: []net.Listener{listener},
 				OpenTelegram: func(a *app.App, token string, log *slog.Logger) (TelegramClient, error) {
 					if a == nil || token != "isolated-token" || log == nil {
@@ -253,7 +253,7 @@ func TestInjectedClockSetsOwnerSessionExpiry(t *testing.T) {
 	finished := errors.New("owner clock verified")
 	client := &http.Client{Transport: &http.Transport{}}
 	defer client.CloseIdleConnections()
-	err = Run(ctx, Config{DataDir: data, Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
+	err = Run(ctx, Config{ControlSocket: assemblySocket(t), DataDir: data, Owners: []string{"test-owner"}}, []byte("isolated-test-secret"), Dependencies{
 		Listeners: []net.Listener{listener},
 		WhoIs:     netx.Static{Identity: &netx.Identity{User: "test-owner"}},
 		Now:       func() time.Time { return now },

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"os"
@@ -24,7 +25,7 @@ func upgradeServer(t *testing.T, handler http.HandlerFunc) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +187,7 @@ func TestFault_MaintenanceUpgradeRetainsNativeAndFencesAdmission(t *testing.T) {
 	active := c.Status().Active
 	b := protocol.UpgradeBinding{UpgradeID: "install", InstanceID: "maintenance", ProcessInstanceID: "candidate", ReleaseID: "release", ManifestSHA256: strings.Repeat("a", 64), ArtifactSHA256: strings.Repeat("b", 64)}
 	c.cfg.InstanceID = b.InstanceID
-	c.cfg.UpdaterSocket = filepath.Join(t.TempDir(), "control.sock")
+	c.cfg.UpdaterSocket = testkit.SocketPath(t, "control.sock")
 	c.state.Upgrade = &protocol.MaintenanceUpgrade{ID: b.UpgradeID, ReleaseID: b.ReleaseID, ManifestSHA256: b.ManifestSHA256, ArtifactSHA256: b.ArtifactSHA256, Phase: "submitting"}
 	grant, err := c.authorizeUpgrade(context.Background(), b)
 	if err != nil || !grant.Allowed {

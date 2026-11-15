@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +69,7 @@ func TestNativeMaintenanceSharedDaemon(t *testing.T) {
 				}
 			}))
 			defer model.Close()
-			socket := filepath.Join(root, "native.sock")
+			socket := testkit.SocketPath(t, "native.sock")
 			args := []string{"app-server", "--listen", "unix://" + socket, "-c", `model_provider="probe"`, "-c", `model="probe-model"`, "-c", `model_providers.probe.name="probe"`, "-c", `model_providers.probe.base_url="` + model.URL + `/v1"`, "-c", `model_providers.probe.wire_api="responses"`, "-c", `model_providers.probe.requires_openai_auth=false`}
 			for _, feature := range []string{"hooks", "plugins", "apps", "memories", "browser_use", "computer_use", "image_generation", "code_mode_host", "in_app_updates"} {
 				args = append(args, "-c", "features."+feature+"=false")
@@ -357,7 +358,7 @@ func TestFault_NativeProviderFailureAllowsExplicitBackendAdoption(t *testing.T) 
 				http.Error(w, `{"error":{"message":"deterministic invalid request","type":"invalid_request_error"}}`, http.StatusBadRequest)
 			}))
 			defer model.Close()
-			socket := filepath.Join(root, "native.sock")
+			socket := testkit.SocketPath(t, "native.sock")
 			args := []string{"app-server", "--listen", "unix://" + socket, "-c", `model_provider="probe"`, "-c", `model="probe-model"`, "-c", `model_providers.probe.name="probe"`, "-c", `model_providers.probe.base_url="` + model.URL + `/v1"`, "-c", `model_providers.probe.wire_api="responses"`, "-c", `model_providers.probe.requires_openai_auth=false`}
 			for _, feature := range []string{"hooks", "plugins", "apps", "memories", "browser_use", "computer_use", "image_generation", "code_mode_host", "in_app_updates"} {
 				args = append(args, "-c", "features."+feature+"=false")

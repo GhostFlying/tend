@@ -3,6 +3,7 @@ package maintenance
 import (
 	"context"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,7 @@ func TestMaintenanceShutdownClosesOwnedLoopsWithoutStartingAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(socketDir)
-	c.cfg.ControlSocket = filepath.Join(socketDir, "control.sock")
+	c.cfg.ControlSocket = testkit.SocketPath(t, "control.sock")
 	token := filepath.Join(cfg.StateDir, "token")
 	if err := os.WriteFile(token, []byte("synthetic-owner"), 0600); err != nil {
 		t.Fatal(err)

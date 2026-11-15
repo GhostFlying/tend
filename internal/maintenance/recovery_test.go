@@ -3,6 +3,7 @@ package maintenance
 import (
 	"context"
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"os"
@@ -51,7 +52,7 @@ func TestFault_MaintenanceCachedCreationConnectionReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "n.sock")
+	socket := testkit.SocketPath(t, "n.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

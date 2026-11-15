@@ -5,9 +5,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,8 +15,7 @@ import (
 )
 
 func TestBackupCLIUsesTypedControlAndSavedPreview(t *testing.T) {
-	dir := t.TempDir()
-	socket := filepath.Join(dir, "updater.sock")
+	socket := testkit.SocketPath(t, "updater.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

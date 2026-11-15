@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -93,7 +94,7 @@ func testController(t *testing.T) (*Controller, *fakeBackend) {
 	root := t.TempDir()
 	sum := sha256.Sum256([]byte("server"))
 	f := &fakeBackend{view: protocol.UpgradeView{UpgradeID: "batch", Revision: 1, Status: "running", Phase: "server_draining"}}
-	c, err := New(Config{Instance: "server", ProcessInstance: "current-process", BinarySHA256: hex.EncodeToString(sum[:]), ControlSocket: filepath.Join(root, "control.sock"), UpdaterSocket: filepath.Join(root, "updater.sock"), ReleaseDir: filepath.Join(root, "releases"), Interval: time.Hour}, f, protocol.NewULIDGen(time.Now, nil), func(context.Context) (app.ServerObservation, error) {
+	c, err := New(Config{Instance: "server", ProcessInstance: "current-process", BinarySHA256: hex.EncodeToString(sum[:]), ControlSocket: testkit.SocketPath(t, "control.sock"), UpdaterSocket: testkit.SocketPath(t, "updater.sock"), ReleaseDir: filepath.Join(root, "releases"), Interval: time.Hour}, f, protocol.NewULIDGen(time.Now, nil), func(context.Context) (app.ServerObservation, error) {
 		return app.ServerObservation{Healthy: true, MainDrained: true}, nil
 	}, nil)
 	if err != nil {

@@ -3,10 +3,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -98,7 +98,7 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestLocalUpgradeLostAnswerNeverReplaysBlindly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

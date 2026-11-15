@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"io"
 	"net"
 	"net/http"
@@ -137,7 +138,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 	})
 	remote := httptest.NewServer(handler)
 	defer remote.Close()
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -632,7 +633,7 @@ func TestCapabilityDoctorReportsPendingLocalReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -895,7 +896,7 @@ func TestCapabilityLocalRepositoryBindingPreservesIdentityAndRevision(t *testing
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "control.sock")
+	socket := testkit.SocketPath(t, "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

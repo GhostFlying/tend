@@ -120,7 +120,7 @@ func newControlContinuationFixture(t *testing.T) *controlContinuationFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	socket := filepath.Join(root, "authority.sock")
+	socket := testkit.SocketPath(t, "authority.sock")
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {

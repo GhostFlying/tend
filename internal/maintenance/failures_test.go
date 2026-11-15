@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -149,7 +150,7 @@ func TestFault_MaintenancePersistenceFailureIsVisibleAndExits(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	c.cfg.ControlSocket = filepath.Join(root, "control.sock")
+	c.cfg.ControlSocket = testkit.SocketPath(t, "control.sock")
 	token := filepath.Join(cfg.StateDir, "token")
 	if err := os.WriteFile(token, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
