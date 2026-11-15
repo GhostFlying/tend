@@ -1410,6 +1410,41 @@ try {
         .getByText("尚无可查看的执行步骤，公开回复会显示在下方。", { exact: true })
         .waitFor();
       await page.screenshot({ path: join(output, `public-process-active-${width}.png`) });
+      // Same trigger: preserve the user's open disclosure and focus as real items arrive.
+      await emptyProcess.focus();
+      await emptyProcess.evaluate((node) => node.setAttribute("data-original-process", "true"));
+      const streamingTool = {
+        ...savedTools.find((item) => item.tool)!,
+        message_id: "first-live-tool",
+        seq: 2,
+        tool: { ...savedTools.find((item) => item.tool)!.tool!, status: "running" as const },
+      };
+      block.items = [streamingTool];
+      publish();
+      const liveTool = detail.locator('[data-tool-item="first-live-tool"]');
+      await liveTool.waitFor();
+      assert.equal(await emptyProcess.getAttribute("data-original-process"), "true");
+      assert.equal(await emptyProcess.getAttribute("aria-expanded"), "true");
+      assert(await emptyProcess.evaluate((node) => document.activeElement === node));
+      assert(await liveTool.isVisible(), "first running tool becomes visible without reopening");
+      block.items.push({
+        message_id: "first-public-reply",
+        seq: 3,
+        author: "main_agent",
+        kind: "message",
+        reply_to: block.trigger.message_id,
+        created_at: block.trigger.created_at,
+        body: "同一回合的公开进展。",
+        assistant_state: "streaming",
+        assistant_revision: 1,
+      });
+      publish();
+      await detail.getByText("同一回合的公开进展。", { exact: true }).waitFor();
+      assert.equal(await emptyProcess.getAttribute("data-original-process"), "true");
+      assert.equal(await emptyProcess.getAttribute("aria-expanded"), "true");
+      assert(await liveTool.isVisible());
+      await page.screenshot({ path: join(output, `process-first-live-item-${width}.png`) });
+      console.log(`PASS continuous empty → running tool → public reply ${width}`);
       await emptyProcess.click();
       block.items = publicReplies;
       if (previousState === undefined) delete block.trigger.state;
@@ -1419,8 +1454,35 @@ try {
       await page.route("**/api/v1/messages/*/associations?*", (route) =>
         route.fulfill({ json: associationItem.associations }),
       );
-      const associationControl = tags.getByRole("button", { name: "修改 Issue 关联", exact: true });
+      const associationControl = detail
+        .locator(`[data-scroll-id="${associationItem.message_id}"]`)
+        .getByRole("button", { name: "修改 Issue 关联", exact: true });
+      await associationControl.scrollIntoViewIfNeeded();
       assert.match(await associationControl.innerText(), /关联 Issue/);
+      const associationGeometry = await associationControl.evaluate((node) => {
+        const icon = node.querySelector("svg")!.getBoundingClientRect();
+        const button = node.getBoundingClientRect();
+        return {
+          icon: { width: icon.width, height: icon.height },
+          button: { width: button.width, height: button.height },
+          display: getComputedStyle(node).display,
+          direction: getComputedStyle(node).flexDirection,
+          alignment: getComputedStyle(node).alignItems,
+        };
+      });
+      await writeFile(
+        join(output, `association-geometry-${width}.json`),
+        JSON.stringify(associationGeometry, null, 2),
+      );
+      assert.equal(associationGeometry.icon.width, 14);
+      assert.equal(associationGeometry.icon.height, 14);
+      assert(associationGeometry.button.height <= 36, "association action remains compact");
+      assert(associationGeometry.button.width < 140, "association action is horizontal");
+      assert(["flex", "inline-flex"].includes(associationGeometry.display));
+      assert.equal(associationGeometry.direction, "row");
+      assert.equal(associationGeometry.alignment, "center");
+      await associationControl.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(output, `association-trigger-${width}.png`) });
       await associationControl.click();
       const associationDialog = page.getByRole("dialog", { name: "修改 Issue 关联", exact: true });
       await associationDialog.getByText(/你保存的归属会锁定/).waitFor();

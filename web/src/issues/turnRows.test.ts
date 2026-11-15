@@ -1,0 +1,69 @@
+import { expect, test } from "vitest";
+import type { IssueTranscriptBlock } from "../api/generated/api.ts";
+import { buildTranscriptEntries } from "../conversation/transcriptBlocks.ts";
+import { activityTurnRows } from "./turnRows.ts";
+
+const trigger = {
+  seq: 1,
+  message_id: "original-trigger",
+  author: "owner",
+  kind: "message",
+  created_at: "2026-01-01T00:00:00Z",
+  state: "processing" as const,
+};
+const block: IssueTranscriptBlock = { position: 1, trigger, items: [], more: false };
+const first = {
+  seq: 2,
+  message_id: "first-tool",
+  author: "main_agent",
+  kind: "message",
+  created_at: trigger.created_at,
+  reply_to: trigger.message_id,
+  tool: {
+    name: "read",
+    status: "running" as const,
+    turn_id: "original-turn",
+    updated_at: trigger.created_at,
+  },
+};
+
+test("the original trigger retains its reply identity from empty process to tools and prose", () => {
+  const reply = (value: IssueTranscriptBlock) =>
+    activityTurnRows(buildTranscriptEntries([value]), value).filter((row) => row.kind === "agent");
+  const empty = reply(block);
+  const tool = reply({ ...block, items: [first] });
+  const prose = reply({
+    ...block,
+    items: [
+      first,
+      {
+        message_id: "reply",
+        seq: 3,
+        kind: "message",
+        author: "main_agent",
+        reply_to: trigger.message_id,
+        created_at: trigger.created_at,
+        body: "Public reply",
+      },
+    ],
+  });
+  expect(empty).toHaveLength(1);
+  expect(tool[0]?.key).toBe(empty[0]?.key);
+  expect(prose[0]?.key).toBe(empty[0]?.key);
+  expect(tool[0]?.items).toEqual([first]);
+  expect(activityTurnRows([], { ...block, trigger: { ...trigger, state: "replied" } })).toEqual([]);
+});
+
+test("a placeholder precedes continuation and does not consume later groups' identities", () => {
+  const more = { kind: "block-more" as const, key: "more", block };
+  expect(activityTurnRows([more], block).map((row) => row.kind)).toEqual(["agent", "block-more"]);
+  const one = { kind: "agent" as const, key: "first", replyTo: trigger.message_id, items: [first] };
+  const two = { ...one, key: "second" };
+  const rows = activityTurnRows([one, two, more], block);
+  expect(rows[1]).toBe(two);
+  expect(rows[2]).toBe(more);
+  expect(rows[0]?.key).not.toBe(one.key);
+  expect(
+    activityTurnRows([], { ...block, trigger: { ...trigger, message_id: "other" } })[0]?.key,
+  ).not.toBe(rows[0]?.key);
+});
