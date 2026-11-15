@@ -97,8 +97,8 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	// A continuing owner also records predeployment checks and their originals.
 	// Only an explicit upgrade claim binds a batch; recording those facts must
 	// not require an installation, clear one, or settle delivery responsibility.
-	if slices.ContainsFunc(p.Result.Report.Evidence, func(e string) bool { return strings.HasPrefix(e, "upgrade:") }) {
-		if err := bindDeliveryUpgradeArtifact(ctx, tx, task, *p.Result); err != nil {
+	if p.Result.Report.Predeployment != nil || slices.ContainsFunc(p.Result.Report.Evidence, func(e string) bool { return strings.HasPrefix(e, "upgrade:") }) {
+		if err := bindDeliveryUpgradeArtifact(ctx, tx, task, *p.Result, runID, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
 	}

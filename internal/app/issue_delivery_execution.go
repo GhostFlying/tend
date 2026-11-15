@@ -10,10 +10,13 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-// The existing report evidence carries a typed reference without changing the
-// runner wire shape. Bind it atomically with the artifact before its accept
-// action can race the controlled updater's first maintenance tick.
-func bindDeliveryUpgradeArtifact(ctx context.Context, tx *store.Tx, task store.TaskRow, artifact protocol.ArtifactPayload) error {
+// Final reports retain their actual upgrade reference. Candidate stages are
+// explicitly separate and cannot bind or settle an installation. Bind a real
+// upgrade atomically before acceptance can race the first maintenance tick.
+func bindDeliveryUpgradeArtifact(ctx context.Context, tx *store.Tx, task store.TaskRow, artifact protocol.ArtifactPayload, runID string, now int64) error {
+	if artifact.Report != nil && artifact.Report.Predeployment != nil {
+		return validatePredeploymentResult(ctx, tx.Q(), task, artifact, runID, now)
+	}
 	var raw, bound string
 	err := tx.Q().QueryRowContext(ctx, `SELECT candidate_json,upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&raw, &bound)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -83,6 +86,15 @@ func deliveryAcceptanceReady(ctx context.Context, q store.Querier, task string) 
 	available, err := deliveryTargetAvailable(ctx, q, task)
 	if err != nil || !available {
 		return false, err
+	}
+	if taskRow, err := store.GetTask(ctx, q, task); err != nil {
+		return false, err
+	} else if _, stage, err := taskPredeploymentResult(ctx, q, taskRow); err != nil {
+		return false, err
+	} else if stage != nil {
+		// Independent acceptance judges this candidate stage. The original
+		// deployment duty remains executing and requires a later final report.
+		return true, nil
 	}
 	if id == "" {
 		return false, nil

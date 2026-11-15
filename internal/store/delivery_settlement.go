@@ -84,6 +84,19 @@ func DeliveryDeploymentSettlement(ctx context.Context, q Querier, taskID string,
 		return v, err
 	}
 	v.ArtifactID = task.CurrentArtifactID
+	if task.CurrentArtifactID != "" {
+		artifact, err := GetArtifact(ctx, q, task.CurrentArtifactID)
+		if err != nil {
+			return v, err
+		}
+		var payload protocol.ArtifactPayload
+		if err := json.Unmarshal([]byte(artifact.RefJSON), &payload); err != nil {
+			return v, err
+		}
+		if payload.Report != nil && payload.Report.Predeployment != nil {
+			return fail("predeployment_result", protocol.CodeInvalidTransition, "candidate checks cannot settle a deployment; its final upgrade report is required")
+		}
+	}
 	if task.Lifecycle != protocol.TaskCompleted && task.Kind != protocol.TaskKindIssueManager {
 		return fail("execution_not_completed", protocol.CodeInvalidTransition, "the original deployment execution must finish independent acceptance")
 	}

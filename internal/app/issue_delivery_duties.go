@@ -184,7 +184,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, err
 			}
 			if d.ExecutionTaskID == d.TaskID && !task.Lifecycle.Terminal() {
-				if err := refreshSelfDeliveryCandidate(ctx, x, tx, issue, d, p); err != nil {
+				if err := refreshSelfDeliveryCandidate(ctx, x, tx, issue, &d, p); err != nil {
 					return Outcome{}, err
 				}
 				if sameDeliveryCandidate(d.Candidate, p.Candidate) {

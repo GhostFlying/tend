@@ -24,6 +24,15 @@ var ResultToolSpec = ToolSpec{
     "report":{
       "type":"object",
       "properties":{
+        "reviewed_artifact_id":{"type":"string","description":"Exact original owner artifact independently reviewed by this report."},
+        "verdict":{"type":"string","enum":["passed","changes_required","blocked","inconclusive"]},
+        "predeployment":{
+          "type":"object",
+          "description":"Candidate/check stage only; does not claim deployment. Must match the observed Issue PR and submitted repository commits. Do not include an upgrade reference.",
+          "properties":{"delivery_id":{"type":"string"},"head_sha":{"type":"string"},"base_sha":{"type":"string"}},
+          "required":["delivery_id","head_sha","base_sha"],
+          "additionalProperties":false
+        },
         "body":{"type":"string","description":"The readable final report, including enough original background and questions to understand the conclusions, impact, remaining uncertainty and next action without the old chat. Supporting files and evidence may provide technical detail."},
         "evidence":{"type":"array","items":{"type":"string"}},
         "uncertainties":{"type":"array","items":{"type":"string"}},

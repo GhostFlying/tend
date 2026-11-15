@@ -2346,3 +2346,11 @@ D246 增补：关联文字入口的 SVG 明确为 14px 并横向对齐。process
 ### D246 补充：初始候选的只读排除边界
 
 idle claim 的已有预检可以利用当前已登记库存的类别集合，排除本主机明确不可能领取的未物化初始 owner。该集合包含不可用 Agent，宁可保守进入 writer，不用临时可用性跳过工作；无库存、未协商命名执行或选择信息异常保持原路径。pending manager 维护、receipt-only action、停止交接及到期等待不受该排除影响。非空可能性仍在原写事务完整校验，读结果不授予执行权，也不跨请求保存。
+
+### D247：部署前阶段结果与同 Task 候选接续
+
+已获准的部署任务在合入后可能遇到 main 检查失败并产生必要的新候选。阶段结果通过可选 `report.predeployment` 明确给出 delivery_id/head_sha/base_sha，并随真实提交 Run 和仓库状态保存；候选身份必须与该 Issue 的交付观察一致、保留原 self-bound 部署责任及授权，且没有未对账的升级或未知外部操作。新增字段是可选扩展，旧请求仍按原最终部署报告规则处理；没有阶段标记的部署结果仍须真实唯一 upgrade 引用。
+
+独立验收可以评价该阶段结果，但阶段完成不结算部署。其同目标 Task 可 continue，保留原冻结交付；当旧 PR 已确定 merged、当前 target 包含该 merge 且新 PR 的 base/target 匹配该观测 main 时，原 prepare 路径在当前 Task CAS/epoch、实际新阶段验收、whole-PR 审阅及候选检查约束下归档旧 binding，再接续新候选。旧冻结快照、Run、拒绝、合入和未完成交付事实保留，不提供强制解绑或结束目标的捷径。
+
+最终部署结算显式拒绝阶段 artifact，仍要求最终报告引用真实 upgrade，及原独立验收、发布来源、实际安装/健康/normal ACK。仓库 artifact 的 base 保留原 workspace 起点，PR base 由阶段身份和真实 provider 观察单独校验；仓库提交必须匹配 PR head 且没有未提交快照。候选验收保留原安装 drain 边界，不在活跃升级目标占用 Run。CLI 的现有完整 JSON 结果输入与 worker submit_result 同步暴露阶段字段；读取/恢复仍沿原 Task 和不可变 artifact，不生成历史产物。

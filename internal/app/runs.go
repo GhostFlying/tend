@@ -183,7 +183,7 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := checkResultDeliverables(ctx, tx.Q(), spec, rc.run.RunID, p); err != nil {
 		return Outcome{}, err
 	}
-	if err := bindDeliveryUpgradeArtifact(ctx, tx, rc.task, p); err != nil {
+	if err := bindDeliveryUpgradeArtifact(ctx, tx, rc.task, p, rc.run.RunID, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	slices.SortFunc(p.Mounts, func(a, b protocol.ArtifactMount) int { return strings.Compare(a.Path, b.Path) })
