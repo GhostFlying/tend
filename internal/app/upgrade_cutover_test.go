@@ -82,7 +82,7 @@ func TestUpgradeCutoverWaitKeepsOriginalDeadlines(t *testing.T) {
 }
 
 func TestUpgradeCutoverWaitRejectsChangedOrMissingCohort(t *testing.T) {
-	for _, kind := range []string{"missing-runtime", "missing-host", "zero-slots", "other-batch", "instance", "generation", "control", "legacy-no-cohort"} {
+	for _, kind := range []string{"missing-runtime", "missing-host", "zero-slots", "other-batch", "instance", "generation", "control", "runtime-normal", "legacy-no-cohort"} {
 		t.Run(kind, func(t *testing.T) {
 			h := staleCutoverFleet(t)
 			before := upgradeRead(h)
@@ -109,6 +109,8 @@ func TestUpgradeCutoverWaitRejectsChangedOrMissingCohort(t *testing.T) {
 					return err
 				}
 				switch kind {
+				case "runtime-normal":
+					rt.Runtime.Mode = protocol.RunnerNormal
 				case "other-batch":
 					rt.Runtime.UpgradeID = "another-batch"
 				case "instance":
