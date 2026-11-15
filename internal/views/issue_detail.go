@@ -13,7 +13,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.IssueView) error {
+func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.IssueView, facts executionFacts) error {
 	p, err := store.IssueProgress(ctx, q, out.IssueID, out.Revision)
 	if err != nil {
 		return err
@@ -21,10 +21,6 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 	out.Progress = p
 	if out.Historical {
 		return nil
-	}
-	facts, err := readExecutionFacts(ctx, q)
-	if err != nil {
-		return err
 	}
 	out.QueueReason, out.Pause, err = facts.issueAdmissionProgress(ctx, q, out.Issue)
 	if err != nil {

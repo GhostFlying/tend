@@ -20,7 +20,7 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 		if err != nil {
 			return out, err
 		}
-		return out, issueDetailMetadata(ctx, q, &out)
+		return out, issueDetailMetadata(ctx, q, &out, executionFacts{})
 	}
 	out.Issue, err = store.GetCanonicalIssue(ctx, q, id)
 	if err != nil {
@@ -43,6 +43,12 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 			return out, err
 		}
 		out.ResponsibilityRuns = append(out.ResponsibilityRuns, responsibility)
+	}
+	// Reuse this read's scheduling snapshot throughout the detail projection.
+	// Never retain it across calls or use it to authorize a mutation.
+	facts, err := readExecutionFacts(ctx, q)
+	if err != nil {
+		return out, err
 	}
 	manager, e := store.CurrentIssueManagerTask(ctx, q, id)
 	if errors.Is(e, store.ErrNotFound) {
@@ -76,10 +82,6 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 			out.Manager.Agent = &identity
 		}
 		if task.Lifecycle == protocol.TaskQueued {
-			facts, e := readExecutionFacts(ctx, q)
-			if e != nil {
-				return out, e
-			}
 			if candidate, ok := facts.candidates[task.TaskID]; ok {
 				out.Manager.QueueReason = facts.waitReason(candidate)
 			}
@@ -87,7 +89,11 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	} else if !errors.Is(e, store.ErrNotFound) {
 		return out, e
 	}
-	current, err := Issue(ctx, q, id)
+	item, err := store.GetIssue(ctx, q, id)
+	if err != nil {
+		return out, err
+	}
+	current, err := issueWithExecutionFacts(ctx, q, item, facts)
 	if err != nil {
 		return out, err
 	}
@@ -131,7 +137,8 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 			return out, err
 		}
 	}
-	page, err := Attentions(ctx, q, AttentionFilter{ResponsibleIssueID: id, Status: "open", ActionableOnly: true, IncludeArchived: true})
+	reader := attentionReader{execution: &facts}
+	page, err := reader.list(ctx, q, AttentionFilter{ResponsibleIssueID: id, Status: "open", ActionableOnly: true, IncludeArchived: true})
 	if err != nil {
 		return out, err
 	}
@@ -140,7 +147,7 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 	if err != nil {
 		return out, err
 	}
-	return out, issueDetailMetadata(ctx, q, &out)
+	return out, issueDetailMetadata(ctx, q, &out, facts)
 }
 
 type CanonicalIssueFilter struct {
