@@ -19,7 +19,7 @@ import (
 
 func TestHostedCodexEnvironmentPreservesOriginalBinding(t *testing.T) {
 	root := t.TempDir()
-	s, err := store.Open(t.Context(), filepath.Join(root, "ledger.db"), time.Now)
+	s, err := openAssemblyLedger(t, t.Context(), filepath.Join(root, "ledger.db"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestHostedCodexEnvironmentPreservesOriginalBinding(t *testing.T) {
 
 func TestHostedManagedRecoveryDoesNotReopenMissingBaseConfig(t *testing.T) {
 	root := t.TempDir()
-	ledger, err := store.Open(t.Context(), filepath.Join(root, "ledger.db"), time.Now)
+	ledger, err := openAssemblyLedger(t, t.Context(), filepath.Join(root, "ledger.db"), time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

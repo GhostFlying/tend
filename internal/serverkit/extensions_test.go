@@ -21,7 +21,7 @@ func TestHostedExtensionFailureDoesNotBlockUnrelatedConversation(t *testing.T) {
 	root := t.TempDir()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 845)
-	ledger, err := store.Open(t.Context(), filepath.Join(root, "ledger.db"), clock.Now)
+	ledger, err := openAssemblyLedger(t, t.Context(), filepath.Join(root, "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

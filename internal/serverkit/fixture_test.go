@@ -1,6 +1,8 @@
 package serverkit
 
 import (
+	"context"
+	"github.com/GhostFlying/tend/internal/store"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,4 +36,11 @@ func prepareAssemblyData(t *testing.T, now func() time.Time) string {
 func assemblySocket(t *testing.T) string {
 	t.Helper()
 	return testkit.SocketPath(t, "upgrades.sock")
+}
+
+func openAssemblyLedger(t *testing.T, parent context.Context, path string, now func() time.Time) (*store.Store, error) {
+	t.Helper()
+	ctx, finish := testphase.Context(t, parent, "assembly ledger", 10*time.Minute)
+	defer finish()
+	return assemblyFixture.Open(ctx, path, now)
 }

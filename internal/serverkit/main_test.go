@@ -136,7 +136,7 @@ func TestInjectedAssemblyRunsHooksAndReturnsBackgroundFailure(t *testing.T) {
 	}
 	configured, initialized := false, false
 	sentinel := errors.New("injected background failure")
-	err = Run(t.Context(), Config{ControlSocket: assemblySocket(t), DataDir: t.TempDir()}, []byte("isolated-test-secret"), Dependencies{
+	err = Run(t.Context(), Config{ControlSocket: assemblySocket(t), DataDir: prepareAssemblyData(t, time.Now)}, []byte("isolated-test-secret"), Dependencies{
 		Listeners: []net.Listener{listener},
 		OpenTelegram: func(*app.App, string, *slog.Logger) (TelegramClient, error) {
 			t.Fatal("disabled Telegram must not open a transport")
@@ -200,7 +200,7 @@ func TestInjectedTelegramPreparationAndLifecycle(t *testing.T) {
 				client.prepareErr = sentinel
 			}
 			initialized := false
-			err = Run(t.Context(), Config{ControlSocket: assemblySocket(t), DataDir: t.TempDir(), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
+			err = Run(t.Context(), Config{ControlSocket: assemblySocket(t), DataDir: prepareAssemblyData(t, time.Now), Telegram: &TelegramConfig{TokenEnv: "TEND_TEST_TELEGRAM_TOKEN"}}, []byte("isolated-test-secret"), Dependencies{
 				Listeners: []net.Listener{listener},
 				OpenTelegram: func(a *app.App, token string, log *slog.Logger) (TelegramClient, error) {
 					if a == nil || token != "isolated-token" || log == nil {
