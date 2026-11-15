@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -58,13 +60,47 @@ func (a *App) preflightClaim(ctx context.Context, p protocol.Principal, env *pro
 		err = q.QueryRowContext(ctx, `SELECT
 		 EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.state IN ('pending','assigned','retiring')
 		 AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.task_id=m.task_id AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')))
-		 OR EXISTS(SELECT 1 FROM issue_controls i WHERE i.state='active' AND i.assignment_state='active'
-		 AND i.work_status IN ('todo','in_progress','in_review') AND i.owner_selection_json<>''
-		 AND NOT EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=i.issue_id AND m.state IN ('pending','assigned')))
+		 OR EXISTS(SELECT 1 FROM plan_actions a JOIN issue_manager_tasks m USING(task_id)
+		 WHERE a.kind='coordinate' AND a.status='pending' AND json_extract(a.trigger_json,'$.receipt_only')=1)
 		 OR EXISTS(SELECT 1 FROM run_pause_handoffs WHERE stopped=1 AND continuation_action_id IS NULL AND successor_run_id IS NULL)
 		 OR EXISTS(SELECT 1 FROM run_external_waits WHERE status='waiting' AND next_check_at<=?)`, a.now().UnixMilli()).Scan(&potential)
-		noWork = !potential
+		if err != nil || potential {
+			return err
+		}
+		potential, err = initialOwnerPotentialForHost(ctx, q, p.Subject, payload.Runtime)
+		noWork = err == nil && !potential
 		return err
 	})
 	return noWork, err
+}
+
+// Initial selection can use only categories declared in the current inventory.
+// Ignore availability here: this is an upper bound, never allocation authority.
+func initialOwnerPotentialForHost(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) (bool, error) {
+	choices, err := store.FollowupIDs(ctx, q, `SELECT i.owner_selection_json FROM issue_controls i WHERE i.state='active' AND i.assignment_state='active' AND i.work_status IN ('todo','in_progress','in_review') AND i.owner_selection_json<>'' AND NOT EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=i.issue_id AND m.state IN ('pending','assigned'))`)
+	if err != nil || len(choices) == 0 {
+		return false, err
+	}
+	if !runtimeSupportsAgentExecution(runtime) {
+		return true, nil
+	}
+	inventory, err := store.GetAgentInventory(ctx, q, host)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, raw := range choices {
+		var selection *protocol.IssueOwnerSelection
+		if json.Unmarshal([]byte(raw), &selection) != nil || selection == nil || selection.CategoryID == "" {
+			return true, nil
+		}
+		for _, agent := range inventory.Projection.Agents {
+			if slices.Contains(agent.Categories, selection.CategoryID) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
