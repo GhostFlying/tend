@@ -17,6 +17,10 @@ func Issue(ctx context.Context, q store.Querier, id string) (protocol.WorkItemVi
 	if err != nil {
 		return protocol.WorkItemView{}, err
 	}
+	return issueWithExecutionFacts(ctx, q, w, facts)
+}
+
+func issueWithExecutionFacts(ctx context.Context, q store.Querier, w protocol.WorkItem, facts executionFacts) (protocol.WorkItemView, error) {
 	factsSeq, err := store.LatestEventSeq(ctx, q)
 	if err != nil {
 		return protocol.WorkItemView{}, err

@@ -113,6 +113,10 @@ func (reader *attentionReader) read(ctx context.Context, q store.Querier, id str
 	return v, nil
 }
 func Attentions(ctx context.Context, q store.Querier, f AttentionFilter) (protocol.AttentionPage, error) {
+	return (&attentionReader{}).list(ctx, q, f)
+}
+
+func (reader *attentionReader) list(ctx context.Context, q store.Querier, f AttentionFilter) (protocol.AttentionPage, error) {
 	if f.Limit < 1 || f.Limit > 100 {
 		f.Limit = 50
 	}
@@ -148,7 +152,6 @@ func Attentions(ctx context.Context, q store.Querier, f AttentionFilter) (protoc
 		ids = ids[:f.Limit]
 		page.Next = ids[len(ids)-1]
 	}
-	reader := attentionReader{}
 	for _, id := range ids {
 		v, e := reader.read(ctx, q, id)
 		if e != nil {
