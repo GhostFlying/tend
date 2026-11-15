@@ -43,3 +43,9 @@
 最小后续改动：initial owner 候选仍逐个读取 canonical aggregate 并校验当前/历史一致性，但把同一次扫描中重复的四类旧执行/交接屏障查询及 IssueAdmissionFacts 查询按全部候选批量读取。每个 Issue 保留自身下一代次、全部阻塞类别、租约、旧事件和未决投递条件；不按主机猜测排除，不改变预检、materialize 或最终分配事务的选择/授权逻辑，不跨调用缓存。原单 Issue 屏障接口保持，作为混合 Issue/代次/状态对照回归的独立 oracle。
 
 用混合 unknown/原生回执/投递去重/未停 Run/未释放 lease/未应用事件验证逐 Issue 等价，并用查询次数验证一次批量扫描不会按候选数量重复准备复杂 SQL。原回执、handoff、准入业务契约及原沙盒/最终本机检查继续保留，不放宽 watchdog。
+
+## 空 claim 的只读类别排除
+
+批量候选后的原完整场景单跑 exit0，功能504.03秒；此前自动并发整体仍失败，不能用单跑替代。当前只读快照确认六个未物化初始候选均为 planner 类别，主机当前库存只有 manager/reviewer 类别；原全局 potential 判断仍使空 claim 占用 writer。为修复这条已证实故障链，在已有只读预检中仅排除“当前库存没有任何 Agent 声明所需类别”的初始候选。类别匹配只作保守上界，不依据暂时 availability、slots、model 或 capability 推断不能领取；无库存、未协商 named execution、无效/空选择均返回原写路径。已有 Run 原身份、普通 implement/accept、manager maintenance、停止交接、到期 external wait 及 receipt-only pending action 保留原保守路径。实际选择、授权、租约与 unknown 核对仍在最终写事务，不缓存读结果。
+
+回归用明确占用 writer 的屏障证明未匹配初始候选仍能完成 idle 响应，释放后改为匹配选择能真实领取；定向覆盖 maintenance/receipt-only/unknown 与暂停恢复原契约。之后直接运行最终自动预算 make check，而非只重复单跑或放宽 watchdog。
