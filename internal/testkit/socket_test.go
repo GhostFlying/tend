@@ -108,12 +108,22 @@ func TestSocketPathValidatesActualLeafAndIgnoresGoTempRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix socket fixture")
 	}
-	short := SocketDir(t)
-	long := filepath.Join(short, strings.Repeat("d", 50-len(short)-1))
+	// A general socket directory may consume most of the address budget.
+	// Use a real controlled root; neither test filename depends on TMPDIR.
+	short, err := os.MkdirTemp("/tmp", "tr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	short, err = filepath.EvalSymlinks(short)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := filepath.Join(short, strings.Repeat("d", 80))
 	if err := os.Mkdir(long, 0700); err != nil {
 		t.Fatal(err)
 	}
-	leaf := strings.Repeat("x", 56) + ".sock"
+	leaf := strings.Repeat("x", 32) + ".sock"
 	dir, err := shortSocketDir([]string{long, short}, leaf)
 	if err != nil {
 		t.Fatal(err)
