@@ -864,6 +864,7 @@ try {
               nodes.map((node) => {
                 const el = node as HTMLElement;
                 return {
+                  disclosure: el.dataset.disclosure === "true",
                   width: el.getBoundingClientRect().width,
                   height: el.getBoundingClientRect().height,
                   parentWidth: el.parentElement!.getBoundingClientRect().width,
@@ -872,7 +873,7 @@ try {
             );
           for (const line of lines)
             assert(
-              line.height <= 28 && line.width <= line.parentWidth + 1,
+              line.height <= (line.disclosure ? 36 : 28) && line.width <= line.parentWidth + 1,
               `${path}: squeezed or overflowing status line ${JSON.stringify(line)}`,
             );
         }

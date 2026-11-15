@@ -287,6 +287,26 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			if err := json.Unmarshal([]byte(body), &facts); err != nil {
 				return out, err
 			}
+			if r.kind == "issue.manager_claimed" {
+				var task string
+				if err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(c.reason_json,'$.manager_task'),'') FROM events e JOIN issue_control_revisions c ON c.issue_id=e.object_id AND c.revision=e.object_version WHERE e.event_seq=?`, r.seq).Scan(&task); err != nil {
+					return out, err
+				}
+				if task != "" {
+					var run string
+					err := q.QueryRowContext(ctx, `SELECT run_id FROM runs WHERE task_id=? AND role='issue_manager' ORDER BY created_at,run_id LIMIT 1`, task).Scan(&run)
+					if err != nil && !errors.Is(err, sql.ErrNoRows) {
+						return out, err
+					}
+					if run != "" {
+						name, e := runActivityAuthor(ctx, q, run, "Agent 身份未记录")
+						if e != nil {
+							return out, e
+						}
+						entry.Title = name + " 已接手"
+					}
+				}
+			}
 			if r.kind == "run.recovery" {
 				entry.Title = recoveryActivityTitle(facts.Kind)
 			}
@@ -410,7 +430,10 @@ func issueActivityAuthor(ctx context.Context, q store.Querier, raw string, at in
 		return runActivityAuthor(ctx, q, actor.Subject, fallback)
 	case protocol.PrincipalRunner:
 		// Hosts have no display-name field in the current catalog projection.
-		return "执行主机", nil
+		if actor.Subject != "" {
+			return actor.Subject, nil
+		}
+		return "主机身份未记录", nil
 	default:
 		return "tend", nil
 	}

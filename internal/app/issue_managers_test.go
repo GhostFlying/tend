@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -48,6 +49,27 @@ func TestManagerSelectionAndClaimFreezeResponsibilityWithoutWorkspace(t *testing
 	}
 	if h.count("workspaces") != 0 || h.count("workspace_runs") != 0 || h.count("acceptances") != 0 {
 		t.Fatal("manager acquired worker artifacts")
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		activity, err := views.IssueActivity(t.Context(), tx.Q(), i.IssueID, 0)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, entry := range activity.Items {
+			if entry.Kind == "issue.manager_claimed" {
+				found = true
+				if entry.Author != "linux-1" || !strings.Contains(entry.Title, "linux-1/alpha") || !strings.Contains(entry.Title, "已接手") {
+					t.Fatalf("claim attribution lost: %+v", entry)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("claim activity missing")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	before := h.count("runs")
 	replay := h.exec(runner("linux-1"), claim, Claim{})

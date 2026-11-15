@@ -39,5 +39,5 @@ export function AssigneeName({
     pendingCategoryDisplay(pendingCategoryID, categories.value?.items ?? []) ??
     pendingManagerDisplay(manager, categories.value?.items ?? []);
   const name = assigneeDisplay(assignee, names.get(assignee.ref), pendingName);
-  return <span>{initial ? Array.from(name)[0] : name}</span>;
+  return <span title={name}>{initial ? Array.from(name)[0] : name}</span>;
 }

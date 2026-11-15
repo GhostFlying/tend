@@ -1386,6 +1386,59 @@ try {
       await trigger.click();
       block.items = savedTools;
       publish();
+      // D246: a tool-free historical turn still explains its public process.
+      block.items = savedTools.filter((item) => !item.tool);
+      publish();
+      await trigger.getByText("查看过程", { exact: false }).waitFor();
+      await trigger.click();
+      await detail
+        .getByText("这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。", {
+          exact: true,
+        })
+        .waitFor();
+      await page.screenshot({ path: join(output, `public-process-empty-${width}.png`) });
+      await trigger.click();
+      const publicReplies = block.items;
+      const previousState = block.trigger.state;
+      block.items = [];
+      block.trigger.state = "processing";
+      publish();
+      await detail.getByRole("status").filter({ hasText: "思考中" }).waitFor();
+      const emptyProcess = detail.locator("[data-trace-trigger]");
+      await emptyProcess.click();
+      await detail
+        .getByText("尚无可查看的执行步骤，公开回复会显示在下方。", { exact: true })
+        .waitFor();
+      await page.screenshot({ path: join(output, `public-process-active-${width}.png`) });
+      await emptyProcess.click();
+      block.items = publicReplies;
+      if (previousState === undefined) delete block.trigger.state;
+      else block.trigger.state = previousState;
+      publish();
+      const associationItem = block.items![0]!;
+      await page.route("**/api/v1/messages/*/associations?*", (route) =>
+        route.fulfill({ json: associationItem.associations }),
+      );
+      const associationControl = tags.getByRole("button", { name: "修改 Issue 关联", exact: true });
+      assert.match(await associationControl.innerText(), /关联 Issue/);
+      await associationControl.click();
+      const associationDialog = page.getByRole("dialog", { name: "修改 Issue 关联", exact: true });
+      await associationDialog.getByText(/你保存的归属会锁定/).waitFor();
+      await associationDialog.getByRole("checkbox", { name: "明确不属于任何 Issue" }).check();
+      await page.screenshot({ path: join(output, `message-association-${width}.png`) });
+      await associationDialog.getByRole("button", { name: "保存关联", exact: true }).click();
+      await associationDialog.waitFor({ state: "hidden" });
+      const correction = writes.findLast(
+        (write) => write.operation === "conversation.set_issue_associations",
+      );
+      assert(correction);
+      assert.equal(correction.target.id, associationItem.message_id);
+      assert.equal(correction.expected_control_revision, 1);
+      assert.equal((correction.payload as { disposition: string }).disposition, "unassigned");
+      await page.unroute("**/api/v1/messages/*/associations?*");
+      block.items = savedTools;
+      publish();
+      console.log(`PASS public process and explicit association ${width}`);
       const events = detail.locator("[data-event-group]");
       assert.equal(await events.count(), 1);
       const scrollIds = await detail
@@ -1964,7 +2017,7 @@ try {
     };
     await alignedFooter();
 
-    await detail.getByText(/由 (青竹|负责人 Agent) 更新/).waitFor();
+    await detail.getByText(/由 (青竹 · hosted\/qingzhu|hosted\/qingzhu) 更新/).waitFor();
     await detail.getByText(/执行 Agent 已交付成果/).waitFor();
     assert.equal(
       await detail.getByText("native-manager-not-for-the-landing-page", { exact: true }).count(),
@@ -2238,7 +2291,9 @@ try {
     traceReply.body = savedBody!;
     traceReply.assistant_revision!++;
     publish();
-    await traceToggle.waitFor({ state: "detached" });
+    await toolToggle.waitFor({ state: "detached" });
+    await traceToggle.waitFor();
+    if ((await traceToggle.getAttribute("aria-expanded")) === "true") await traceToggle.click();
 
     // A stable activity ID can grow while streaming without changing ledger order.
     const reply = activity.items![0]!.block!.items![0]!;
@@ -2249,9 +2304,10 @@ try {
     const turn = detail.locator('[data-scroll-id="conversation-one"]');
     await turn.getByRole("button", { name: "展开全文", exact: true }).click();
     const scroller = detail.locator("[data-issue-scroll]");
-    await scroller.evaluate((node) => {
-      node.scrollTop = node.scrollHeight;
-    });
+    await scroller.hover();
+    await page.mouse.wheel(0, -100000);
+    await page.waitForFunction(() => document.querySelector("[data-issue-scroll]")!.scrollTop < 10);
+    await page.mouse.wheel(0, 100000);
     await page.waitForFunction(() => {
       const n = document.querySelector("[data-issue-scroll]")!;
       return n.scrollHeight - n.scrollTop - n.clientHeight < 10;
@@ -2474,7 +2530,9 @@ try {
     delete issue.progress;
     publish();
     await detail.getByText("负责人尚未更新进展", { exact: true }).waitFor();
-    assert.equal(await detail.getByRole("button", { name: "查看并决定", exact: true }).count(), 0);
+    await detail
+      .getByRole("button", { name: "查看并决定", exact: true })
+      .waitFor({ state: "detached" });
     issue.progress = progressValue;
     publish();
     await detail.getByRole("textbox", { name: "消息", exact: true }).fill("模拟本机队列保存失败");
@@ -2791,9 +2849,10 @@ try {
     exact: true,
   });
   if (await previousPrompt.count()) await previousPrompt.click();
-  await quietIssue.locator("[data-issue-scroll]").evaluate((node) => {
-    node.scrollTop = 0;
-  });
+  const quietScroll = quietIssue.locator("[data-issue-scroll]");
+  await quietIssue.locator('[data-scroll-id="recent-fact-19"]').scrollIntoViewIfNeeded();
+  await quietScroll.hover();
+  await quietPage.mouse.wheel(0, -10000);
   await quietIssue.locator('[data-scroll-id="earlier-fact"]').waitFor();
   assert.equal(
     await quietIssue.getByRole("button", { name: "有新进展 · 到最新 ↓", exact: true }).count(),

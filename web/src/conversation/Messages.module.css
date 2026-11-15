@@ -186,3 +186,8 @@
 .agent:has([data-issue-context="true"]) {
   gap: var(--space-1);
 }
+
+.traceTrigger[data-trace-trigger] {
+  flex: none;
+  white-space: nowrap;
+}

@@ -20,7 +20,7 @@ func TestIssueConversationAuthor(t *testing.T) {
 		`CREATE TABLE issue_manager_tasks(task_id TEXT,pin_json TEXT)`,
 		`CREATE TABLE agent_inventory_versions(host_id TEXT,local_revision INTEGER,projection_json TEXT)`,
 		`INSERT INTO agent_inventory_versions VALUES('host',7,'{"agents":[{"identity":{"local_id":"implementer"},"display_name":"Cedar"}]}'),('host',8,'{"agents":[{"identity":{"local_id":"implementer"},"display_name":"Renamed Agent"}]}')`,
-		`INSERT INTO run_agent_executions VALUES('original-run','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":7}'),('new-run','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":8}'),('missing-inventory','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":6}')`,
+		`INSERT INTO run_agent_executions VALUES('original-run','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":7}'),('new-run','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":8}'),('empty-pin','{}'),('missing-inventory','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":6}')`,
 		`INSERT INTO runs VALUES('original-run','manager-task','issue_manager'),('legacy-run','legacy-task','issue_manager'),('missing-inventory','manager-task','issue_manager')`,
 		`INSERT INTO issue_manager_tasks VALUES('manager-task','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":8}'),('legacy-task','{"identity":{"execution_environment_id":"host","local_id":"implementer"},"inventory_revision":7}')`,
 	} {
@@ -29,14 +29,15 @@ func TestIssueConversationAuthor(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ name, snapshot, want string }{
-		{"runner frozen name", `{"runner_run_id":"original-run","identity":{"execution_environment_id":"host","local_id":"implementer"},"definition":{"display_name":""}}`, "Cedar"},
-		{"new execution renamed", `{"runner_run_id":"new-run","identity":{"execution_environment_id":"host","local_id":"implementer"}}`, "Renamed Agent"},
-		{"legacy manager pin", `{"runner_run_id":"legacy-run","identity":{"execution_environment_id":"host","local_id":"implementer"}}`, "Cedar"},
+		{"runner frozen name", `{"runner_run_id":"original-run","identity":{"execution_environment_id":"host","local_id":"implementer"},"definition":{"display_name":""}}`, "Cedar · host/implementer"},
+		{"new execution renamed", `{"runner_run_id":"new-run","identity":{"execution_environment_id":"host","local_id":"implementer"}}`, "Renamed Agent · host/implementer"},
+		{"legacy manager pin", `{"runner_run_id":"legacy-run","identity":{"execution_environment_id":"host","local_id":"implementer"}}`, "Cedar · host/implementer"},
 		{"missing original inventory does not use current manager", `{"runner_run_id":"missing-inventory","identity":{"execution_environment_id":"host","local_id":"implementer"}}`, "host/implementer"},
 		{"unknown run", `{"runner_run_id":"unknown","identity":{"execution_environment_id":"retired-host","local_id":"retired-agent"}}`, "retired-host/retired-agent"},
 		{"hosted frozen name", `{"definition":{"display_name":"Hosted Agent"},"runner_run_id":"new-run"}`, "Hosted Agent"},
 		{"legacy hosted reference", `{"identity":{"execution_environment_id":"hosted","local_id":"legacy"}}`, "hosted/legacy"},
-		{"empty legacy snapshot", `{}`, "负责人"},
+		{"empty legacy snapshot", `{}`, "Agent 身份未记录"},
+		{"legacy empty pin", `{"runner_run_id":"empty-pin"}`, "Agent 身份未记录"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := db.ExecContext(t.Context(), `INSERT INTO hosted_executions VALUES(?,?,1)`, tc.name, tc.snapshot); err != nil {
@@ -58,7 +59,7 @@ func TestIssueConversationAuthor(t *testing.T) {
 			}
 		})
 	}
-	if got, err := issueConversationAuthor(t.Context(), db, "missing"); err != nil || got != "负责人" {
+	if got, err := issueConversationAuthor(t.Context(), db, "missing"); err != nil || got != "Agent 身份未记录" {
 		t.Fatalf("unbound author=%q, err=%v", got, err)
 	}
 }
