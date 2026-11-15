@@ -88,6 +88,9 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 			// acknowledged control instead of creating a metadata-only ACK gap.
 			continue
 		}
+		if reason, err := markCutoverRecovery(ctx, tx.Q(), r, h.HostID, ctl, now); reason != "" || err != nil {
+			return reason, err
+		}
 		ctl.Revision++
 		ctl.Mode = protocol.RunnerNormal
 		ctl.Authorization = nil

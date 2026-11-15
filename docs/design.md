@@ -2301,6 +2301,12 @@ Refs: docs/plans/local-test-reliability.md。
 旧进程已停止、备份与恢复验证及 manifest/state 发布顺序不变。
 回归核实际打开/同步入口次数，不声明设备耗时 SLA。
 
+首次成功 server 安装授权冻结覆盖的 host、instance、generation 和维护控制版本；
+真实替换后恢复 normal 时记录对应新控制版本，对此时已陈旧的原 cohort 观察等待真实新鲜 normal ACK。
+等待期间观察继续不可用，不授予 drain/安装权限，不续 stage/overall 期限；身份、代次、
+控制、主机缺失或到期仍按原拒绝与 attention 处理。已恢复后的新离线不获得宽限。
+可选 cohort 留在原批业务状态内，历史无字段批次不回填、不迁移或重放。
+
 见 `docs/plans/upgrade-replacement-efficiency.md`。
 
 ## D245：报价新鲜度与受影响用量重估分离

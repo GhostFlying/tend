@@ -556,6 +556,16 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 
 func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.UpgradeRow, attention func(string) error) error {
 	now := x.Now.UnixMilli()
+	waiting, reason, err := awaitCutoverRunners(ctx, x, tx.Q(), r, now)
+	if err != nil {
+		return err
+	}
+	if reason != "" {
+		return attention(reason)
+	}
+	if waiting {
+		return nil
+	}
 	for i := range r.Hosts {
 		h := &r.Hosts[i]
 		v := &r.View.Hosts[i]

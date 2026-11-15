@@ -174,6 +174,7 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "server candidate changed")
 	}
 	cutoff := capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis+r.RestartMillis) - r.RestartMillis
+	var cohort []store.UpgradeCutoverRunner
 	for _, h := range r.Hosts {
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
 		if err != nil {
@@ -189,6 +190,7 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		// The runner reports a server-time lower bound for its conservative
 		// local deadline, accounting for the full grant response RTT. Reserve
 		// the entire restart budget before allowing the old process to stop.
+		cohort = append(cohort, store.UpgradeCutoverRunner{HostID: h.HostID, InstanceID: rt.Runtime.InstanceID, Generation: rt.Runtime.Generation, MaintenanceRevision: ctl.Revision})
 		coveredUntil := min(ctl.Authorization.DeadlineMillis, rt.Runtime.AuthorizationDeadlineMillis)
 		cutoff = min(cutoff, coveredUntil-r.RestartMillis)
 	}
@@ -196,6 +198,7 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")
 	}
 	if r.ServerGrantDeadline == 0 {
+		r.CutoverRunners = cohort
 		r.ServerGrantDeadline = cutoff
 		r.ServerProcess = b.ProcessInstanceID
 		r.Deadline = capUpgradeDeadline(&r, cutoff+r.RestartMillis)
