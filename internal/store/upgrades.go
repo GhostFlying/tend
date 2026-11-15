@@ -20,6 +20,7 @@ type UpgradeManagerPark struct {
 // UpgradeRow keeps transition inputs and receipts alongside the public view.
 // Restoration receipts use phase rolled_back or cancelled (replacement never started).
 type UpgradeRow struct {
+	CutoverRunners              []UpgradeCutoverRunner   `json:"cutover_runners,omitempty"`
 	ServerCancellationConfirmed bool                     `json:"server_cancellation_confirmed,omitempty"`
 	ServerUpdaterAuthorized     bool                     `json:"server_updater_authorized,omitempty"`
 	SupervisorThenRunners       bool                     `json:"supervisor_then_runners,omitempty"`
@@ -50,6 +51,18 @@ type UpgradeRow struct {
 	GrantMillis                 int64                    `json:"grant_ms"`
 	Hosts                       []UpgradeHost            `json:"hosts"`
 }
+
+// UpgradeCutoverRunner freezes the pre-stop cohort and the normal control
+// issued after this server replacement. Pending never denotes availability.
+type UpgradeCutoverRunner struct {
+	HostID              string `json:"host_id"`
+	InstanceID          string `json:"instance_id"`
+	Generation          int64  `json:"generation"`
+	MaintenanceRevision int64  `json:"maintenance_revision"`
+	NormalRevision      int64  `json:"normal_revision,omitempty"`
+	Pending             bool   `json:"pending,omitempty"`
+}
+
 type UpgradeHost struct {
 	CancellationConfirmed bool                          `json:"cancellation_confirmed,omitempty"`
 	Configuration         *protocol.RunnerConfiguration `json:"configuration,omitempty"`
