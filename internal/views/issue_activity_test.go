@@ -40,10 +40,10 @@ func TestIssueActivityAuthor(t *testing.T) {
 		{"main", `{"kind":"main_agent"}`, "主 Agent"},
 		{"other Issue manager", `{"kind":"background_agent","conversation_id":"other-issue","thread":"original-thread"}`, "体验负责人"},
 		{"unknown manager", `{"kind":"background_agent","conversation_id":"missing"}`, "负责人 Agent"},
-		{"named run", `{"kind":"run","subject":"run"}`, "独立验收员"},
-		{"manager frozen inventory", `{"kind":"run","subject":"manager-run","role":"issue_manager"}`, "独立验收员"},
+		{"named run", `{"kind":"run","subject":"run"}`, "独立验收员 · host/review"},
+		{"manager frozen inventory", `{"kind":"run","subject":"manager-run","role":"issue_manager"}`, "独立验收员 · host/review"},
 		{"legacy run", `{"kind":"run","subject":"missing"}`, "执行 Agent"},
-		{"runner", `{"kind":"runner","subject":"host"}`, "执行主机"},
+		{"runner", `{"kind":"runner","subject":"host"}`, "host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := issueActivityAuthor(t.Context(), db, tc.actor, 20)

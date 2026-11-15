@@ -194,7 +194,7 @@ export function MessageTags({
             setOpen(true);
           }}
         >
-          ···
+          <Tag /> 关联 Issue
         </button>
         {item.return_link && (
           <button
@@ -216,7 +216,14 @@ export function MessageTags({
           aria-label="修改 Issue 关联"
         >
           <h3>关联 Issue</h3>
-          <p>关联用于汇集上下文，不代表授权或完成。</p>
+          <p>
+            选择这条消息属于哪些 Issue，便于在对应 Issue 中查阅上下文和原始资料。修改会通知相关
+            Issue 核对变化。
+          </p>
+          <p>
+            你保存的归属会锁定，Agent
+            不能覆盖；可在此再次修改。关联不会转交负责人、授予执行权限或标记完成，也不会把排队或已撤回的消息变成新指令。
+          </p>
           <input
             autoFocus
             type="search"

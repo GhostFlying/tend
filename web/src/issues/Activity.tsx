@@ -17,8 +17,6 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { noOutbox } from "../queue/sendQueue.ts";
-import { LiveStatus } from "../ui/LiveStatus.tsx";
-import { conversationStatus } from "../ui/activityStatus.ts";
 import { AgentTurn, OwnerMessage, OutgoingRow, SystemMessage } from "../conversation/Messages.tsx";
 import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/transcriptBlocks.ts";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
@@ -577,7 +575,7 @@ function ActivityBlock({
                   <span className={styles.avatar} aria-hidden="true">
                     {Array.from(entry.author || "Agent")[0]}
                   </span>
-                  {entry.author} <small>负责人</small>
+                  {entry.author || "Agent 身份未记录"}
                   <time dateTime={row.items[0]?.created_at} title={row.items[0]?.created_at}>
                     {clock(Date.parse(row.items[0]?.created_at ?? block.trigger.created_at))}
                   </time>
@@ -611,8 +609,16 @@ function ActivityBlock({
         }
       })}
       {block.trigger.state === "processing" && !rows.some((row) => row.kind === "agent") && (
-        <LiveStatus
-          status={conversationStatus([], "processing", Date.parse(block.trigger.created_at))}
+        <AgentTurn
+          entry={{
+            kind: "agent",
+            key: block.trigger.message_id,
+            replyTo: block.trigger.message_id,
+            items: [],
+            state: "processing",
+            startedAt: Date.parse(block.trigger.created_at),
+          }}
+          currentIssueId={currentIssueId}
         />
       )}
       {items.some(

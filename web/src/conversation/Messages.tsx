@@ -174,51 +174,55 @@ export function AgentTurn({
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status}>
-        {!!tools.length && (
-          <button
-            type="button"
-            data-trace-trigger
-            className={styles.traceTrigger}
-            aria-expanded={traceOpen}
-            aria-controls={`${prefix}-trace`}
-            onClick={(event) => {
-              event.currentTarget.focus();
-              if (!traceOpen) setVisibleStart(Math.max(0, tools.length - 12));
-              setTraceOpen(!traceOpen);
-            }}
-          >
-            查看过程 · {tools.length} 步 <Chevron />
-          </button>
-        )}
+        <button
+          type="button"
+          data-trace-trigger
+          className={styles.traceTrigger}
+          aria-expanded={traceOpen}
+          aria-controls={`${prefix}-trace`}
+          onClick={(event) => {
+            event.currentTarget.focus();
+            if (!traceOpen) setVisibleStart(Math.max(0, tools.length - 12));
+            setTraceOpen(!traceOpen);
+          }}
+        >
+          查看过程{tools.length ? ` · ${tools.length} 步` : ""} <Chevron />
+        </button>
       </LiveStatus>
       {tools
         .flatMap((item) => item.choices ?? [])
         .map((choice) => (
           <ChoiceCard key={choice.choice_id} choice={choice} />
         ))}
-      {!!tools.length && (
-        <div data-trace id={`${prefix}-trace`} hidden={!traceOpen} className={styles.trace}>
-          {visibleStart > 0 && (
-            <button
-              type="button"
-              className={styles.traceTrigger}
-              onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
-            >
-              显示更早 {visibleStart} 步
-            </button>
-          )}
-          {tools.map((item, index) => (
-            <AgentItem
-              key={item.message_id}
-              item={item}
-              hidden={index < visibleStart}
-              hideChoices
-              id={`${prefix}-item-${item.message_id}`}
-              onToolOpenChange={() => {}}
-            />
-          ))}
-        </div>
-      )}
+      <div data-trace id={`${prefix}-trace`} hidden={!traceOpen} className={styles.trace}>
+        <p>这里展示已公开的执行步骤和回复，不包含模型的隐藏推理。</p>
+        {!tools.length && (
+          <p>
+            {status.active
+              ? "尚无可查看的执行步骤，公开回复会显示在下方。"
+              : "这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。"}
+          </p>
+        )}
+        {visibleStart > 0 && (
+          <button
+            type="button"
+            className={styles.traceTrigger}
+            onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
+          >
+            显示更早 {visibleStart} 步
+          </button>
+        )}
+        {tools.map((item, index) => (
+          <AgentItem
+            key={item.message_id}
+            item={item}
+            hidden={index < visibleStart}
+            hideChoices
+            id={`${prefix}-item-${item.message_id}`}
+            onToolOpenChange={() => {}}
+          />
+        ))}
+      </div>
       {entry.items
         .filter((item) => !item.tool)
         .map((item) => (

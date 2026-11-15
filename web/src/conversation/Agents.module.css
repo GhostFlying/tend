@@ -129,13 +129,6 @@
   padding: 3px 7px;
   color: var(--caption);
 }
-.tags .menu {
-  opacity: 0;
-}
-.tags:hover .menu,
-.tags:focus-within .menu {
-  opacity: 1;
-}
 .editor {
   width: min(430px, calc(100vw - 24px));
   max-height: 80dvh;

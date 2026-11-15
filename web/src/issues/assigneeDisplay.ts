@@ -23,5 +23,12 @@ export function assigneeDisplay(
   displayName?: string,
   pendingName?: string,
 ): string {
-  return pendingName ?? (assignee.kind === "owner" ? "你" : displayName || "负责人 Agent");
+  return (
+    pendingName ??
+    (assignee.kind === "owner"
+      ? "你"
+      : displayName
+        ? `${displayName} · ${assignee.ref}`
+        : assignee.ref || "Agent 身份未记录")
+  );
 }

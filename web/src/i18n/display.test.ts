@@ -10,6 +10,8 @@ test("commit hashes use seven characters without changing the original", () => {
 });
 test("responsibility uses catalog names without leaking raw references", () => {
   expect(assigneeDisplay({ kind: "owner", ref: "owner" })).toBe("你");
-  expect(assigneeDisplay({ kind: "agent", ref: "hosted/manager" })).toBe("负责人 Agent");
-  expect(assigneeDisplay({ kind: "agent", ref: "hosted/manager" }, "清竹")).toBe("清竹");
+  expect(assigneeDisplay({ kind: "agent", ref: "hosted/manager" })).toBe("hosted/manager");
+  expect(assigneeDisplay({ kind: "agent", ref: "hosted/manager" }, "清竹")).toBe(
+    "清竹 · hosted/manager",
+  );
 });
