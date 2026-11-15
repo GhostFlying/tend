@@ -29,3 +29,12 @@ worker submit_result -> runs.submit_artifact -> typed 阶段验证/真实 artifa
 - R6：完整 host 范围按集合比较，副本排序或集合验证均可；不改变输入数组，重复、缺少、额外主机仍拒绝。
 
 先按原审阅 probe 的实际触发状态编写回归、修正并定向 race 验证，再固定实际新候选、必要完整检查与精确 CI，并在同 Maple Task 按 delta 复查。保留旧轮 verdict/失败，不新建 Task/Issue/worktree，不安装旧候选，也不为通过检查增加无业务必要的源码提交或伪造 Changed。
+
+## 原 Maple 第三轮 R7–R9 修正计划
+
+cfda 的原 R3–R6 触发路径已经修正，独立审阅又以三条 race 探针证实了负面验收回路和实际安装门槛的缺口。本轮在编辑前补充方案；cfda full 已取消并确认进程退出，996 个 pass 事件与 child -15/1753.497秒的正常取消 receipt 保留，不算全量通过。cfda/c6d 制品不安装。
+
+1. R9：在实际 CheckUpgradeStart 与 App StartUpgrade 共用的最终验证边界，重新要求当前 duty 所贡献的 whole-PR 审阅和精确 PR head 的必要检查；保留原无 PR policy 的历史手动合同。准备阶段有真实未通过验收，或阶段候选不等于当前冻结候选时，不能借准备 Run 安装。许可、当前 lease/Issue epoch、原 Source、完整 targets 与最终写事务检查保持。回归直接调用实际 App StartUpgrade，而不仅检查 preflight；审阅 unlink、CI失败/缺失/unknown、负面 stage 均无批次，合法准备仍可用。
+2. R7：current_artifact_id 是生命周期指针，不能作为阶段存在的唯一证据。当前指针为空时，从本 Task/spec 的真实验收记录读取其原 immutable artifact；验证原 Task/Run/action/spec 和 typed stage，不修改历史或恢复数据库指针。真实 changes_required 等负面验收只允许修正准备，不当作 passed；当前调度、预算、owner contract/grant、no-upgrade/no-unknown及已确定 merge/lineage保护保持。
+3. R8：最终报告按当前冻结 candidate 的 delivery/head/base 与当前 spec 读取真实历史阶段及其独立验收。只接受精确相同候选的最近阶段，未通过阶段不回退到更老的 passed；不借其他 Task/spec/candidate。原唯一 upgrade、frozen授权、全部仓库 base/commit/无snapshot以及最终独立验收保持。已安装后的报告修正直接重用真实已验收的源码来源，不新增 predeployment、源码提交或伪造 Changed。
+4. 同时覆盖首次最终报告、负面验收后重报、重复负面修正、阶段负面后 main drift、明确未验收不能安装、原 accepted history 不被改写。provider/installer仍明确是外部边界替身；保留实际命令路径及旧失败 probe 原件。无新接口、DB迁移、强制解绑或旧Run补造。按实际 delta 定向 race及既有授权/安装回归，固定新提交后交同一 Maple 持续责任复查；完整门槛与原授权不变。

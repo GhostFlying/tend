@@ -146,7 +146,7 @@ func TestFault_PredeploymentResultContinuesMergedDeliveryWithoutInventingInstall
 		t.Fatal("old merged binding not archived")
 	}
 	bindSelfCandidateForTest(t, h, i.IssueID, as.TaskID)
-	final := unchangedInstallationWorkspace(t, workspace, workspaceAssignment, current.RunID)
+	final := unchangedInstallationWorkspace(t, workspace, workspaceAssignment, current)
 	final.Report = &protocol.ResultReport{Body: "Final deployment requires its actual upgrade"}
 	expectWorkCode(t, h.runAs(current, protocol.OpRunsSubmitArtifact, final, SubmitArtifact{}), protocol.CodeInvalidRequest)
 	final.Report.Evidence = []string{"upgrade:invented"}
@@ -178,6 +178,31 @@ func TestFault_PredeploymentResultContinuesMergedDeliveryWithoutInventingInstall
 	}
 	if op := h.runAs(current, protocol.OpRunsSubmitArtifact, final, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
+	}
+	for correction := 0; correction < 2; correction++ {
+		accept, ok := h.claimInputRun(r)
+		if !ok || accept.Role != protocol.RoleAccept || accept.TaskID != as.TaskID {
+			t.Fatal("missing final report acceptance", accept)
+		}
+		if op := h.submitVerdict(accept.RunID, protocol.VerdictChangesRequired); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if h.task(as.TaskID).CurrentArtifactID != "" {
+			t.Fatal("negative verdict did not clear the lifecycle pointer")
+		}
+		repair, ok := h.claimInputRun(r)
+		if !ok || repair.TaskID != as.TaskID || repair.Feedback == nil || repair.Feedback.Verdict != protocol.VerdictChangesRequired {
+			t.Fatal("missing real final report feedback", repair)
+		}
+		// Recollect the actual unchanged workspace in each report-only Run.
+		state := unchangedInstallationWorkspace(t, workspace, workspaceAssignment, repair)
+		state.Report = &protocol.ResultReport{Body: "Corrected actual installation evidence; source unchanged", Evidence: []string{"upgrade:" + batch.View.UpgradeID}}
+		if op := h.runAs(repair, protocol.OpRunsSubmitArtifact, state, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+			t.Fatal("historical accepted stage lost after negative final acceptance", op)
+		}
+		if h.count("upgrades") != 1 || h.count("issue_delivery_execution_history") != 1 {
+			t.Fatal("report correction repeated installation or rewrote delivery history")
+		}
 	}
 	acceptStageForTest(t, h, r, as.TaskID)
 	if op := updateDeliveryForTest(t, h, i.IssueID, protocol.UpdateIssueDeliveryPayload{Action: "complete", TaskID: as.TaskID, UpgradeID: batch.View.UpgradeID, IssueControlPayload: protocol.IssueControlPayload{Reason: "Settle only the final actual independently verified installation"}}); op.Status != protocol.OpSucceeded {

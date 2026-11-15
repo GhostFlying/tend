@@ -60,9 +60,12 @@ func predeploymentGitWorkspace(t *testing.T, as protocol.Assignment) (*gitws.Wor
 	return ws, as, artifact
 }
 
-func unchangedInstallationWorkspace(t *testing.T, ws *gitws.Workspaces, as protocol.Assignment, runID string) protocol.ArtifactPayload {
+func unchangedInstallationWorkspace(t *testing.T, ws *gitws.Workspaces, prepared protocol.Assignment, as protocol.Assignment) protocol.ArtifactPayload {
 	t.Helper()
-	as.RunID = runID
+	// Keep the actual repair Run identity/spec; only the external Git fixture
+	// resource replaces the database-only test workspace location.
+	as.Workspace = prepared.Workspace
+	as.MountDirectories = true
 	if _, err := ws.Prepare(t.Context(), as); err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -171,25 +173,28 @@ func acceptedPredeploymentResult(ctx context.Context, q store.Querier, task stor
 	if stage == nil {
 		return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "the new candidate requires its actual predeployment result")
 	}
-	artifact, err := store.GetArtifact(ctx, q, task.CurrentArtifactID)
+	return acceptedPredeploymentArtifact(ctx, q, task, task.CurrentArtifactID)
+}
+
+func acceptedPredeploymentArtifact(ctx context.Context, q store.Querier, task store.TaskRow, artifactID string) (protocol.IssueEvidence, error) {
+	_, stage, err := readPredeploymentArtifact(ctx, q, task, artifactID)
 	if err != nil {
 		return protocol.IssueEvidence{}, err
 	}
-	run, err := store.GetRun(ctx, q, artifact.RunID)
-	if err != nil {
-		return protocol.IssueEvidence{}, err
-	}
-	action, err := store.GetAction(ctx, q, run.ActionID)
-	if err != nil {
-		return protocol.IssueEvidence{}, err
-	}
-	if artifact.TaskID != task.TaskID || task.Kind != protocol.TaskKindIssueManager && action.TargetSpecVersion != task.SpecVersion {
-		return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeStaleRevision, "predeployment artifact belongs to another agreement")
+	if stage == nil {
+		return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "the candidate requires a real typed stage")
 	}
 	if task.Kind == protocol.TaskKindIssueManager {
-		return store.CompletedTaskEvidence(ctx, q, task.TaskID, "Independent candidate stage review")
+		passed, err := store.OwnerResultEvidence(ctx, q, artifactID)
+		if err != nil {
+			return protocol.IssueEvidence{}, err
+		}
+		if !passed {
+			return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "the actual owner stage needs its independent review")
+		}
+		return protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceResult, Reference: artifactID}, nil
 	}
-	accs, err := store.ListAcceptances(ctx, q, task.TaskID, task.CurrentArtifactID)
+	accs, err := store.ListAcceptances(ctx, q, task.TaskID, artifactID)
 	if err != nil {
 		return protocol.IssueEvidence{}, err
 	}
@@ -203,7 +208,7 @@ func acceptedPredeploymentResult(ctx context.Context, q store.Querier, task stor
 		return protocol.IssueEvidence{}, err
 	}
 	if policy != nil && !policy.Required {
-		return protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceResult, Reference: task.CurrentArtifactID}, nil
+		return protocol.IssueEvidence{Kind: protocol.WorkItemEvidenceResult, Reference: artifactID}, nil
 	}
 	return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "the candidate stage requires its frozen independent acceptance")
 }
@@ -215,7 +220,7 @@ func predeploymentPreparationCurrent(ctx context.Context, q store.Querier, issue
 	if err != nil {
 		return false, err
 	}
-	_, stage, err := taskPredeploymentResult(ctx, q, task)
+	stageID, stage, rejected, err := preparationStage(ctx, q, task)
 	if err != nil || stage == nil || duty.Candidate == nil {
 		return false, err
 	}
@@ -240,8 +245,10 @@ func predeploymentPreparationCurrent(ctx context.Context, q store.Querier, issue
 		}
 		return false, protocol.Errorf(protocol.CodeStaleRevision, "preparation requires the current Issue contract")
 	}
-	if _, err := acceptedPredeploymentResult(ctx, q, task, stage); err != nil {
-		return false, err
+	if !rejected {
+		if _, err := acceptedPredeploymentArtifact(ctx, q, task, stageID); err != nil {
+			return false, err
+		}
 	}
 	if err := selfDeliveryEffectsReconciled(ctx, q, taskID, ""); err != nil {
 		return false, err
@@ -283,20 +290,20 @@ func unchangedDeliveryMountsAllowed(ctx context.Context, q store.Querier, runID 
 	if err != nil {
 		return false, err
 	}
-	accepted, stage, err := taskPredeploymentResult(ctx, q, task)
-	if err != nil || stage == nil {
-		return false, err
-	}
-	if _, err := acceptedPredeploymentResult(ctx, q, task, stage); err != nil {
-		return false, err
-	}
 	var issueID, source, raw, bound string
 	var revision int64
 	if err := q.QueryRowContext(ctx, `SELECT issue_id,source_task_id,duty_revision,candidate_json,upgrade_id FROM issue_delivery_executions WHERE task_id=?`, task.TaskID).Scan(&issueID, &source, &revision, &raw, &bound); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, err
 	}
 	var frozen deliveryExecutionSnapshot
 	if err := json.Unmarshal([]byte(raw), &frozen); err != nil {
+		return false, err
+	}
+	accepted, stage, err := acceptedStageForCandidate(ctx, q, task, frozen.IssueDeliveryCandidate)
+	if err != nil || stage == nil {
 		return false, err
 	}
 	issue, err := store.GetCanonicalIssue(ctx, q, issueID)

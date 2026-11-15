@@ -182,6 +182,22 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	if c.ServerInstance != frozen.Deployment.ServerInstance {
 		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "controlled server is outside the approved scope")
 	}
+	// Preparation admission is not proof of current installation quality.
+	// Both preflight and the actual StartUpgrade write recheck this boundary;
+	// earlier lease/scope/source checks keep their original failure semantics.
+	if _, policy, err := store.EffectiveIssuePRPolicy(ctx, q, current); err != nil {
+		return nil, err
+	} else if policy != nil {
+		if err := store.RequireDeliveryDutyReview(ctx, q, current, d); err != nil {
+			return nil, err
+		}
+		if err := store.RequireDeliveryChecks(ctx, q, current, frozen.IssueDeliveryCandidate); err != nil {
+			return nil, err
+		}
+	}
+	if err := requireInstallationStage(ctx, q, task, frozen.IssueDeliveryCandidate); err != nil {
+		return nil, err
+	}
 	return &frozen.IssueDeliveryCandidate, nil
 }
 
