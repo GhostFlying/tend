@@ -17,3 +17,5 @@ Refs: D244（由唯一集成者在同批公共设计中写入）。
 增量核对：真实 cutover 仅 30 秒时，先验证 normal 已发但尚未 ACK 的实际行为，再推进到旧 heartbeat 的 60 秒边界；若观察窗口错误中断，只对首次授权冻结的原 cohort 追加恢复等待。原 stage/overall deadline、错代/错批/缺失/无 cohort 与实际恢复后再次离线的拒绝仍需覆盖；保留此前冻结提交及 RED/GREEN 原件。
 
 审阅修正：维护控制的实际 runner 在资源对账后会报告 ready；原 cohort 与 pending 等待均接受 maintenance/ready 两种合法观察，仍固定原批、实例、代次与控制版本。新增回归使用真实 runner 控制应用、资源维护与 runtimeObservation，再交给 App 的真实 Hello/heartbeat、Start/授权、替换健康与 normal ACK 路径，不只预置维护观察。
+
+组合全量修正：旧普通可用性诊断用例必须明确区分历史无 cohort 行与当前真实 cutover 等待；保留原 Text/JSON 快照、失败谓词和原期限断言。新 cutover 的实际等待、正常 ACK 与拒绝各记有界分级诊断，包含已经读取的主机、运行/控制身份、失败谓词及原预算；不把等待声明为可用，不改变授权、恢复和 drain 条件。回归从真实 Start/维护 ACK/授权/替换健康观察进入，并覆盖原主机首次 ACK 前 offline/stale 仅等待、错误身份/控制和实际恢复后再失联仍拒绝。

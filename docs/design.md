@@ -2307,6 +2307,8 @@ Refs: docs/plans/local-test-reliability.md。
 等待期间观察继续不可用，不授予 drain/安装权限，不续 stage/overall 期限；身份、代次、
 控制、主机缺失或到期仍按原拒绝与 attention 处理。已恢复后的新离线不获得宽限；其他成员尚在等待也不能遮蔽已恢复成员的后续失联。
 可选 cohort 留在原批业务状态内，历史无字段批次不回填、不迁移或重放。
+Cutover 等待与实际 ACK 使用 DEBUG、拒绝使用 WARN，记录当次已读主机/运行/控制身份、
+失败谓词及原期限；观察缺失不伪造字段，等待不声明可用。普通无 cohort 可用性快照契约保留。
 
 见 `docs/plans/upgrade-replacement-efficiency.md`。
 
