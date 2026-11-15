@@ -337,3 +337,5 @@ legacy bootstrap 仅在可验证的非特权原子状态 writer 上使用目录�
 阶段验收要求修改时，沿原 Task 自动生成的修正 action 继续，保留其真实负面反馈；不要把 Task 的空 current artifact 指针当作阶段丢失，也不要将该负面验收视作安装通过。main 已前进时，只要原授权/责任、已知 merge 关系和无升级/unknown 条件仍成立，可以准备修正；实际安装另须通过当前 whole-PR 审阅、精确候选 CI、阶段验收与全部原安装检查。
 
 最终安装报告的验收若要求补充说明或证据，可以在同一 Task/真实唯一升级下修正报告并保留 Changed=false。服务端依据冻结候选和当前 spec 找到最近阶段的真实已验收仓库来源，不依赖已被生命周期清空的 current artifact，不接受其他候选、未经通过的新阶段、不同 base/commit 或未提交快照。不得重新声明已安装结果为 predeployment 或制造源码变化；最终独立验收与 complete 的实际安装证据要求保持。
+
+owner 在阶段之后继续登记普通进度，不会替代该阶段的独立验收。安装读预检和实际写入口都读取当前 Task/spec 的最近持久阶段及其真实质量约定，不能靠覆盖 current artifact 指针放行未通过阶段；后来的未通过阶段也不能借旧阶段通过。相同显式空 host 集合的 server-only 候选可正常接续，仍须保持原 server/park/完整 scope；候选入口不接受 nil，其他交付的固定完整主机授权保持。
