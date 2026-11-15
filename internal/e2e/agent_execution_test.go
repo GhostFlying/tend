@@ -271,7 +271,15 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 			t.Fatalf("restart changed original run configuration: first=%+v resumed=%+v", first, resumed)
 		}
 		close(gate)
-		eventually(t, "independent acceptance completed", func() bool { return s.task(created.TaskID).Lifecycle == protocol.TaskCompleted })
+		eventually(t, "independent acceptance completed", func() bool { return s.task(created.TaskID).Lifecycle == protocol.TaskCompleted }, func() {
+			observation := acceptanceTimeoutSnapshot(s.store, filepath.Join(f.home, "journal.db"), created.TaskID)
+			raw, err := json.Marshal(observation)
+			if err != nil {
+				t.Logf("acceptance timeout observation encoding failed: %v", err)
+				return
+			}
+			t.Logf("acceptance timeout observation: %s", raw)
+		})
 		mu.Lock()
 		observedStarts := append([]harness.WorkerSpec(nil), starts...)
 		observedFactories := append([]*testkit.Workers(nil), reviewFactories...)

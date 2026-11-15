@@ -504,7 +504,7 @@ func (n *node) stop() {
 	n.cancel = nil
 }
 
-func eventually(t *testing.T, what string, cond func() bool) {
+func eventually(t *testing.T, what string, cond func() bool, onTimeout ...func()) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -512,6 +512,9 @@ func eventually(t *testing.T, what string, cond func() bool) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	for _, observe := range onTimeout {
+		observe()
 	}
 	t.Fatalf("timed out waiting until %s", what)
 }
