@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"math/big"
+	"reflect"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -41,6 +42,13 @@ func ParseUsagePrices(raw []byte) (UsagePrices, error) {
 	var c UsagePrices
 	err := json.Unmarshal(raw, &c)
 	return c, err
+}
+
+// SameModelQuote compares the actual selection used for one native model. A
+// directory reorder is irrelevant unless it changes first-match selection;
+// exact duplicates, case ambiguity and unique-slug resolution keep their order.
+func (c UsagePrices) SameModelQuote(other UsagePrices, model string) bool {
+	return reflect.DeepEqual(c.model(model), other.model(model))
 }
 
 // EstimateUsagePrice prefers an exact catalog ID, then a unique case-insensitive

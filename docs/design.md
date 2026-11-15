@@ -2273,3 +2273,13 @@ retained pin 保留原配置与拒绝事实，不改变选择、租约、资源�
 host、slot、租约和共享资源准入；无额外能力要求也不能绕过普通限制。
 只增加服务端只读视图字段，不修改 runner 通信、存储、配置 hash 或调度策略。
 见 `docs/plans/capability-candidate-readiness.md`。
+
+## D245：报价新鲜度与受影响用量重估分离
+
+成功抓取始终保存最新目录与抓取时间并通知；只按实际native模型选择结果失效用量投影。
+沿既有exact、casefold、唯一slug与歧义规则比较选中模型及费率；目录顺序与未使用项变化
+不会无差别重建全部历史贡献，重复exact项仍保留first-match顺序。追加迁移移除全量报价
+失效trigger，并按共享model→context→current索引定位受影响请求。目录、dirty、现有投影
+及刷新水位在同一事务提交，失败保留上次有效报价，不增加报价历史或产品缓存。
+原慢写样本的精确历史成本仍unknown；验证以重建身份数和真实估价契约为准，不把本地
+样例耗时当生产倍率。计划见 `docs/plans/usage-price-refresh-scope.md`。

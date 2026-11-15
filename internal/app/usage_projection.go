@@ -50,6 +50,7 @@ const expandUsageOverlapSQL = `WITH RECURSIVE affected(legacy_seq) AS (
  ) WHERE true ON CONFLICT(source,request_id) DO NOTHING`
 
 func refreshUsageProjection(ctx context.Context, tx *store.Tx, changed ...func() error) error {
+	defer tx.ObservePhase(store.WriteUsageProjection)()
 	var pending, overlap bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_usage_dirty),EXISTS(SELECT 1 FROM token_usage_overlap_dirty)`).Scan(&pending, &overlap); err != nil {
 		return err
