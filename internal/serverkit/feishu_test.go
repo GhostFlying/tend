@@ -18,7 +18,6 @@ import (
 
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/testkit/testphase"
 	"path/filepath"
@@ -131,7 +130,7 @@ func TestFeishuAssemblyUsesEffectiveLocalOwner(t *testing.T) {
 func TestFeishuDefaultWebSocketPreparationDoesNotConnect(t *testing.T) {
 	t.Setenv("TEND_FEISHU_CONFIG_SECRET", "isolated-secret")
 	clock := testkit.NewClock()
-	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
+	db, err := openAssemblyLedger(t, t.Context(), filepath.Join(t.TempDir(), "ledger.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
