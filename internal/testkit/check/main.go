@@ -106,7 +106,8 @@ func environment(source []string, values map[string]string) []string {
 func tasks(b budget, cpus int, directory, goTool, pnpm string, count int) (parallel, isolated []task) {
 	base := environment(os.Environ(), map[string]string{
 		"MAKEFLAGS": "", "MFLAGS": "", "MAKEOVERRIDES": "",
-		"GO": goTool, "PNPM": pnpm,
+		testbudget.ProcessGroup: "owned",
+		"GO":                    goTool, "PNPM": pnpm,
 		"GOFLAGS":         strings.TrimSpace(os.Getenv("GOFLAGS") + " -p=" + strconv.Itoa(b.packages)),
 		"GOMAXPROCS":      strconv.Itoa(b.procs),
 		"APP_TEST_SHARDS": strconv.Itoa(b.shards),
@@ -162,12 +163,16 @@ func runTask(ctx context.Context, t task) error {
 	fmt.Printf("[check] %s started at=%s GOMAXPROCS=%s GOFLAGS=%q suite-shards=%s\n", t.name, start.UTC().Format(time.RFC3339Nano), testbudget.Value(t.env, "GOMAXPROCS"), testbudget.Value(t.env, "GOFLAGS"), testbudget.Value(t.env, "TEST_SHARDS"))
 	cmd := exec.CommandContext(ctx, "make", t.args...)
 	cmd.Env, cmd.Stdout, cmd.Stderr = t.env, os.Stdout, os.Stderr
-	procx.Contain(cmd)
-	err := cmd.Run()
+	containTask(cmd)
+	err := cmd.Start()
+	if err == nil {
+		fmt.Printf("[check] %s process started pid=%d\n", t.name, cmd.Process.Pid)
+		err = cmd.Wait()
+	}
 	procx.KillGroup(cmd)
 	finished := time.Now()
 	elapsed := finished.Sub(start)
-	fmt.Printf("[check] %s finished in %s: %v at=%s elapsed=%s\n", t.name, elapsed.Round(time.Second), err, finished.UTC().Format(time.RFC3339Nano), elapsed)
+	fmt.Printf("[check] %s finished in %s: %v at=%s elapsed=%s process=%v cause=%v\n", t.name, elapsed.Round(time.Second), err, finished.UTC().Format(time.RFC3339Nano), elapsed, cmd.ProcessState, context.Cause(ctx))
 	return err
 }
 
@@ -262,7 +267,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	if err := check(ctx, b, cpus, *reason, *goTool, *pnpm, *count, *mode, *base); err != nil {
 		fmt.Fprintln(os.Stderr, err)
