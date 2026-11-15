@@ -67,7 +67,17 @@ func TestManagerControlHistoryUsesActualExecutionFacts(t *testing.T) {
 		if err := db.Read(ctx, func(tx *store.ReadTx) error {
 			var err error
 			blockers, err = ManagerHandoffBlockers(ctx, tx.Q(), issue, 2)
-			return err
+			if err != nil {
+				return err
+			}
+			batch, err := initialOwnerHandoffBlockers(ctx, tx.Q(), []protocol.Issue{{IssueControl: protocol.IssueControl{IssueID: issue, AssignmentEpoch: 1}}, {IssueControl: protocol.IssueControl{IssueID: other, AssignmentEpoch: 0}}})
+			if err != nil {
+				return err
+			}
+			if len(batch[other]) != 0 || len(batch[issue]) != len(blockers) || len(blockers) > 0 && !reflect.DeepEqual(batch[issue], blockers) {
+				t.Fatalf("batch changed actual execution or settled history: %+v / %+v", batch, blockers)
+			}
+			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
