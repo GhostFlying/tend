@@ -42,21 +42,8 @@ func selfDeliveryEffectsReconciled(ctx context.Context, q store.Querier, task, b
 }
 
 func taskPredeploymentResult(ctx context.Context, q store.Querier, task store.TaskRow) (protocol.ArtifactPayload, *protocol.PredeploymentResult, error) {
-	var payload protocol.ArtifactPayload
-	if task.CurrentArtifactID == "" {
-		return payload, nil, nil
-	}
-	artifact, err := store.GetArtifact(ctx, q, task.CurrentArtifactID)
-	if err != nil {
-		return payload, nil, err
-	}
-	if err := json.Unmarshal([]byte(artifact.RefJSON), &payload); err != nil {
-		return payload, nil, err
-	}
-	if payload.Report == nil {
-		return payload, nil, nil
-	}
-	return payload, payload.Report.Predeployment, nil
+	_, payload, stage, err := persistentPredeploymentResult(ctx, q, task)
+	return payload, stage, err
 }
 
 func validatePredeploymentResult(ctx context.Context, q store.Querier, task store.TaskRow, artifact protocol.ArtifactPayload, runID string, now int64) error {
@@ -173,7 +160,14 @@ func acceptedPredeploymentResult(ctx context.Context, q store.Querier, task stor
 	if stage == nil {
 		return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "the new candidate requires its actual predeployment result")
 	}
-	return acceptedPredeploymentArtifact(ctx, q, task, task.CurrentArtifactID)
+	id, _, original, err := persistentPredeploymentResult(ctx, q, task)
+	if err != nil {
+		return protocol.IssueEvidence{}, err
+	}
+	if original == nil || *original != *stage {
+		return protocol.IssueEvidence{}, protocol.Errorf(protocol.CodeInvalidTransition, "retain the actual current delivery stage and its quality agreement")
+	}
+	return acceptedPredeploymentArtifact(ctx, q, task, id)
 }
 
 func acceptedPredeploymentArtifact(ctx context.Context, q store.Querier, task store.TaskRow, artifactID string) (protocol.IssueEvidence, error) {

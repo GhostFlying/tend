@@ -149,20 +149,32 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	return out, err
 }
 
+// A later progress report cannot change the immutable stage actually reviewed.
+// Only the current result or the active delivery's latest stage is applicable.
+func ownerReviewTarget(ctx context.Context, q store.Querier, issue protocol.Issue, task store.TaskRow, id string) (string, error) {
+	if id != task.CurrentArtifactID {
+		stageID, _, stage, err := persistentPredeploymentResult(ctx, q, task)
+		if err != nil {
+			return "", err
+		}
+		if stage == nil || id != stageID {
+			return "", protocol.Errorf(protocol.CodeInvalidRequest, "reviewer evidence must bind the current owner result or its actual active stage")
+		}
+	}
+	var producer string
+	err := q.QueryRowContext(ctx, `SELECT a.run_id FROM issue_owner_results o JOIN artifacts a USING(artifact_id) WHERE o.issue_id=? AND o.artifact_id=? AND a.task_id=?`, issue.IssueID, id, task.TaskID).Scan(&producer)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", protocol.Errorf(protocol.CodeNotFound, "the actual owner artifact is required")
+	}
+	return producer, err
+}
+
 // An explicit independent requirement may be satisfied by a real reviewer Task
 // inspecting this immutable owner artifact. Never copy a verdict from another
 // result or claim the owner's continuing Task has finished.
 func bindIssueOwnerResultAcceptance(ctx context.Context, _ *Exec, tx *store.Tx, issue protocol.Issue, p protocol.UpdateIssueDeliveryPayload) error {
 	task, err := store.GetTask(ctx, tx.Q(), p.TaskID)
 	if err != nil {
-		return err
-	}
-	var artifact, producer string
-	err = tx.Q().QueryRowContext(ctx, `SELECT o.artifact_id,a.run_id FROM issue_owner_results o JOIN artifacts a USING(artifact_id) WHERE o.issue_id=? AND o.artifact_id=?`, issue.IssueID, task.CurrentArtifactID).Scan(&artifact, &producer)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return protocol.Errorf(protocol.CodeNotFound, "the actual owner artifact is required")
-		}
 		return err
 	}
 	var reviewTask, reviewRun, reviewedArtifact, verdict, evidence string
@@ -176,8 +188,13 @@ func bindIssueOwnerResultAcceptance(ctx context.Context, _ *Exec, tx *store.Tx, 
 	var binding struct {
 		ArtifactID string `json:"reviewed_artifact_id"`
 	}
-	if err := json.Unmarshal([]byte(evidence), &binding); err != nil || binding.ArtifactID != artifact {
+	if err := json.Unmarshal([]byte(evidence), &binding); err != nil || binding.ArtifactID == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "reviewer evidence must bind reviewed_artifact_id to this actual owner result")
+	}
+	artifact := binding.ArtifactID
+	producer, err := ownerReviewTarget(ctx, tx.Q(), issue, task, artifact)
+	if err != nil {
+		return err
 	}
 	primary, err := store.GetTaskIssueOwner(ctx, tx.Q(), reviewTask)
 	if err != nil {
@@ -217,13 +234,6 @@ func bindIssueOwnerResultReview(ctx context.Context, tx *store.Tx, issue protoco
 	if err != nil {
 		return err
 	}
-	var original, producer string
-	if err := tx.Q().QueryRowContext(ctx, `SELECT o.artifact_id,a.run_id FROM issue_owner_results o JOIN artifacts a USING(artifact_id) WHERE o.issue_id=? AND o.artifact_id=?`, issue.IssueID, task.CurrentArtifactID).Scan(&original, &producer); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return protocol.Errorf(protocol.CodeNotFound, "the actual owner artifact is required")
-		}
-		return err
-	}
 	review, err := store.GetArtifact(ctx, tx.Q(), p.ReviewerArtifactID)
 	if err != nil {
 		return errNotFound(err, "the original independent review report is unavailable")
@@ -232,8 +242,13 @@ func bindIssueOwnerResultReview(ctx context.Context, tx *store.Tx, issue protoco
 	if err := json.Unmarshal([]byte(review.RefJSON), &report); err != nil {
 		return err
 	}
-	if report.Report == nil || report.Report.ReviewedArtifactID != original || report.Report.Verdict != protocol.VerdictPassed || strings.TrimSpace(report.Report.Body) == "" {
+	if report.Report == nil || report.Report.ReviewedArtifactID == "" || report.Report.Verdict != protocol.VerdictPassed || strings.TrimSpace(report.Report.Body) == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "the reviewer report must explicitly pass this exact reviewed_artifact_id")
+	}
+	original := report.Report.ReviewedArtifactID
+	producer, err := ownerReviewTarget(ctx, tx.Q(), issue, task, original)
+	if err != nil {
+		return err
 	}
 	policy, err := store.TaskAcceptancePolicy(ctx, tx.Q(), review.TaskID)
 	if err != nil {

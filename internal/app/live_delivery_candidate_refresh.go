@@ -66,17 +66,22 @@ func refreshSelfDeliveryCandidate(ctx context.Context, x *Exec, tx *store.Tx, is
 		return err
 	}
 	if o.State == "merged" {
-		_, stage, err := taskPredeploymentResult(ctx, tx.Q(), task)
+		stageID, _, _, err := persistentPredeploymentResult(ctx, tx.Q(), task)
 		if err != nil {
 			return err
 		}
-		basis, err := acceptedPredeploymentResult(ctx, tx.Q(), task, stage)
+		basis, err := acceptedPredeploymentArtifact(ctx, tx.Q(), task, stageID)
 		if err != nil {
 			return err
 		}
-		duty.ArtifactID, duty.AcceptanceID = task.CurrentArtifactID, ""
+		duty.ArtifactID, duty.AcceptanceID = stageID, ""
+		var artifact, acceptance any = stageID, nil
 		if basis.Kind == protocol.WorkItemEvidenceAcceptance {
-			duty.AcceptanceID = basis.Reference
+			duty.ArtifactID, duty.AcceptanceID = "", basis.Reference
+			artifact, acceptance = nil, basis.Reference
+		}
+		if _, err := tx.Exec(ctx, `UPDATE issue_delivery_duties SET artifact_id=?,acceptance_id=? WHERE issue_id=? AND task_id=?`, artifact, acceptance, issue.IssueID, task.TaskID); err != nil {
+			return err
 		}
 	}
 	return nil
