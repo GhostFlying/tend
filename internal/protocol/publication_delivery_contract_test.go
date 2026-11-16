@@ -21,6 +21,7 @@ func TestPublicationAndDeliveryInputContracts(t *testing.T) {
 		p     UpdateIssueDeliveryPayload
 		field string
 	}{
+		{UpdateIssueDeliveryPayload{Action: "recover_preparation", TaskID: "original"}, "expected_task_control_revision"},
 		{UpdateIssueDeliveryPayload{Action: "bind", TaskID: "original", ExecutionTaskID: "same"}, "expected_task_control_revision"},
 		{UpdateIssueDeliveryPayload{Action: "complete", TaskID: "original", ExecutionRunID: "old"}, "execution_task_id"},
 	} {
@@ -62,7 +63,7 @@ func TestPublicationAndDeliveryInputContracts(t *testing.T) {
 		}
 	}
 	branches := doc.Definitions["UpdateIssueDeliveryPayload"]["anyOf"].([]any)
-	if len(branches) != 7 {
+	if len(branches) != 8 {
 		t.Fatal("actions missing", branches)
 	}
 }

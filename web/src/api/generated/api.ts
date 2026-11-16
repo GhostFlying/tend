@@ -294,6 +294,12 @@ export type UpdateIssueDeliveryPayload1 =
     }
   | {
       /**
+       * Uses task_id, expected_task_control_revision. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "recover_preparation";
+    }
+  | {
+      /**
        * Uses task_id, execution_task_id, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
        */
       action: "bind";
@@ -7537,6 +7543,9 @@ export interface UpdateSharedDeliveryReviewPayload {
   delivery_id: string;
   dispositions?: SharedReviewDisposition[];
   expected_assignment_epoch: number;
+  expected_base_sha?: string;
+  expected_head_sha?: string;
+  expected_requirements_digest?: string;
   expected_review_revision?: number;
   expected_source_revision?: number;
   reason?: string;

@@ -145,6 +145,11 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
+			if p.ExpectedHeadSHA != "" || p.ExpectedBaseSHA != "" || p.ExpectedRequirementsDigest != "" {
+				if p.ExpectedHeadSHA != o.Observation.HeadSHA || p.ExpectedBaseSHA != o.Observation.BaseSHA || p.ExpectedRequirementsDigest != digest {
+					return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "review candidate or requirements changed; read the current shared review before binding its actual reviewer")
+				}
+			}
 			if p.ReviewerRole != "" && p.ReviewerRole != protocol.RoleAccept {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "reviewer_role must be accept or omitted for a report task")
 			}
@@ -158,6 +163,17 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			if err != nil {
 				return Outcome{}, err
+			}
+			// A completed report already declares its actual candidate. Never
+			// silently bind it to a provider snapshot refreshed in the meantime.
+			if round.ArtifactID != "" && round.ReviewerRole != protocol.RoleAccept {
+				binding := r
+				binding.HeadSHA, binding.BaseSHA, binding.RequirementsDigest = o.Observation.HeadSHA, o.Observation.BaseSHA, digest
+				frozen := round
+				frozen.HeadSHA, frozen.BaseSHA, frozen.Requirements = binding.HeadSHA, binding.BaseSHA, digest
+				if _, _, _, err := readSharedReviewResult(ctx, tx.Q(), binding, frozen); err != nil {
+					return Outcome{}, err
+				}
 			}
 			waitingEvidence := false
 			if len(r.Rounds) > 0 {
@@ -255,6 +271,33 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				r.Status = "waiting"
 			}
 
+		case "wait":
+			if p.ExpectedReviewRevision == nil || *p.ExpectedReviewRevision != r.Revision {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "wait requires the current expected_review_revision")
+			}
+			if r.Status != "reviewing" || len(r.Rounds) == 0 || r.Rounds[len(r.Rounds)-1].Result != nil {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "wait requires an unresolved frozen review without a quality conclusion")
+			}
+			last := r.Rounds[len(r.Rounds)-1]
+			task := last.TaskID
+			if last.SupplementTaskID != "" {
+				task = last.SupplementTaskID
+			}
+			if err := stoppedTaskRecoveryReady(ctx, tx.Q(), task, false); err != nil {
+				return Outcome{}, err
+			}
+			if last.ReviewerRole == protocol.RoleAccept {
+				if _, _, _, err := readSharedAcceptanceResult(ctx, tx.Q(), r, &last); err == nil {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "record the actual acceptance instead of replacing its conclusion with waiting")
+				} else if protocol.CodeOf(err) != protocol.CodeInvalidTransition && !errors.Is(err, errAcceptanceReviewEvidence) {
+					return Outcome{}, err
+				}
+			} else if _, _, _, err := readSharedReviewResult(ctx, tx.Q(), r, last); err == nil {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "record the actual review report instead of replacing its conclusion with waiting")
+			} else if protocol.CodeOf(err) != protocol.CodeInvalidTransition && protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+				return Outcome{}, err
+			}
+			r.Status = "waiting"
 		case "authorize_recheck":
 			if x.Principal.Kind != protocol.PrincipalOwner || x.coordinationExecution != nil {
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only an independent authenticated external user may authorize an additional review round")
@@ -394,7 +437,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			r.Dispositions = slices.Clone(p.Dispositions)
 		default:
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review action must be link, unlink, start, record, correct, supplement, resolve, assess, recheck or authorize_recheck")
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "review action must be link, unlink, start, record, wait, correct, supplement, resolve, assess, recheck or authorize_recheck")
 		}
 	}
 	if len(r.Rounds) == 0 {

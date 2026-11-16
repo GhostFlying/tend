@@ -132,9 +132,19 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 		if !allowed[p.IssueID] {
 			return protocol.Errorf(protocol.CodeForbidden, "checks require an associated Issue")
 		}
+		if strings.Contains(p.TargetID, "://") || strings.TrimSpace(p.TargetID) != p.TargetID || strings.ContainsAny(p.TargetID, " \t\r\n") {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "checks.target_id must be this Issue's registered delivery_id, not a CI or pull request URL; read the Issue deliveries")
+		}
 		_, err := store.GetDeliveryObservation(ctx, q, p.IssueID, p.TargetID)
-		return err
+		return errNotFound(err, "checks.target_id delivery_id %q does not exist in this Issue; read the Issue deliveries", p.TargetID)
 	case "review":
+		var exists bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_delivery_reviews WHERE review_id=?)`, p.TargetID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return protocol.Errorf(protocol.CodeNotFound, "review.target_id review_id %q does not exist", p.TargetID)
+		}
 		var linked bool
 		err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_delivery_review_links WHERE review_id=? AND issue_id IN (SELECT work_item_id FROM task_work_item_owners WHERE task_id=? UNION SELECT issue_id FROM issue_manager_tasks WHERE task_id=?))`, p.TargetID, run.TaskID, run.TaskID).Scan(&linked)
 		if err != nil {
@@ -147,18 +157,21 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 	case "answer":
 		d, err := store.GetDecision(ctx, q, p.TargetID)
 		if err != nil {
-			return err
+			return errNotFound(err, "answer.target_id decision_id %q does not exist", p.TargetID)
 		}
 		return allowedTask(d.TaskID)
 	case "task":
 		if p.TargetID == run.TaskID {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "execution cannot wait for its own Task")
 		}
+		if _, err := store.GetTask(ctx, q, p.TargetID); err != nil {
+			return errNotFound(err, "task.target_id task_id %q does not exist", p.TargetID)
+		}
 		return allowedTask(p.TargetID)
 	case "upgrade":
 		_, err := store.GetUpgrade(ctx, q, p.TargetID)
 		if err != nil {
-			return err
+			return errNotFound(err, "upgrade.target_id upgrade_id %q does not exist", p.TargetID)
 		}
 		if run.Role == protocol.RoleIssueManager {
 			return nil

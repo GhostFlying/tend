@@ -20195,6 +20195,20 @@
         {
           "properties": {
             "action": {
+              "const": "recover_preparation",
+              "description": "Uses task_id, expected_task_control_revision. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "task_id",
+            "expected_task_control_revision"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
               "const": "bind",
               "description": "Uses task_id, execution_task_id, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
               "type": "string"
@@ -20419,6 +20433,15 @@
         },
         "expected_assignment_epoch": {
           "type": "integer"
+        },
+        "expected_base_sha": {
+          "type": "string"
+        },
+        "expected_head_sha": {
+          "type": "string"
+        },
+        "expected_requirements_digest": {
+          "type": "string"
         },
         "expected_review_revision": {
           "type": "integer"

@@ -320,7 +320,7 @@ func finishOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, run store.Run
 		return nil, err
 	}
 	var current bool
-	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_issue_responsibilities WHERE run_id=? AND issue_id=? AND assignment_epoch=? AND issue_revision=? AND agent_ref=?)`, run.RunID, issue.IssueID, issue.AssignmentEpoch, issue.Revision, issue.Assignee.Ref).Scan(&current); err != nil {
+	if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_issue_responsibilities r WHERE run_id=? AND issue_id=? AND assignment_epoch=? AND agent_ref=? AND r.issue_revision<=? AND NOT EXISTS(SELECT 1 FROM issue_control_revisions v WHERE v.issue_id=r.issue_id AND v.revision>r.issue_revision AND v.revision<=? AND v.operation<>'issues.update_progress'))`, run.RunID, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, issue.Revision, issue.Revision).Scan(&current); err != nil {
 		return nil, err
 	}
 	if !current || issue.State != protocol.IssueActive || issue.AssignmentState != "active" {
@@ -422,5 +422,62 @@ func settleCancelledOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()
 	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issue, previous, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "reason": "The task and all of its execution attempts are cancelled and settled"}, "issue.cancelled")
+	return out.Events, err
+}
+
+// A generated carrier settles one artifact, while its Task may continue the
+// same goal. Only our exact untouched acceptance closure grants readmission;
+// human changes, cancellation and responsibility transfers retain their gates.
+func readmitOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task string) ([]Event, error) {
+	contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), task)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil || contract.ReviewIssueID == "" {
+		return nil, err
+	}
+	issue, err := store.GetCanonicalIssue(ctx, tx.Q(), contract.ReviewIssueID)
+	if err != nil {
+		return nil, err
+	}
+	if issue.State != protocol.IssueClosed || issue.AssignmentState != "active" || issue.Closure == nil || issue.Closure.Kind != protocol.WorkItemClosureCompleted || len(issue.Closure.Evidence) != 1 {
+		return nil, nil
+	}
+	plan, err := json.Marshal(issue.Plan)
+	if err != nil || string(plan) != contract.ReviewPlanJSON {
+		return nil, err
+	}
+	evidence := issue.Closure.Evidence[0]
+	if evidence.Kind != protocol.WorkItemEvidenceAcceptance {
+		return nil, nil
+	}
+	var original bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM acceptances a JOIN run_issue_responsibilities r USING(run_id) JOIN issue_control_revisions v ON v.issue_id=r.issue_id AND v.revision=? WHERE a.acceptance_id=? AND a.task_id=? AND a.verdict='passed' AND r.issue_id=? AND r.assignment_epoch=? AND r.agent_ref=? AND v.operation=? AND json_extract(v.actor_json,'$.kind')='run' AND json_extract(v.actor_json,'$.subject')=a.run_id AND json_extract(v.reason_json,'$.acceptance_id')=a.acceptance_id)`, issue.Revision, evidence.Reference, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, protocol.OpAcceptancesSubmit).Scan(&original); err != nil || !original {
+		return nil, err
+	}
+	current, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), task)
+	if err != nil || !current {
+		return nil, err
+	}
+	for ancestor := issue.ParentIssueID; ancestor != ""; {
+		parent, err := store.GetCanonicalIssue(ctx, tx.Q(), ancestor)
+		if err != nil {
+			return nil, err
+		}
+		if parent.State != protocol.IssueActive || parent.AssignmentState != "active" {
+			return nil, nil
+		}
+		ancestor = parent.ParentIssueID
+	}
+	previous := issue.Revision
+	issue.IssueControl, err = domain.ReopenIssueControl(issue.IssueControl)
+	if err != nil {
+		return nil, err
+	}
+	issue.Revision++
+	issue.Closure = nil
+	issue.WorkStatus = protocol.IssueTodo
+	issue.TodoAt, issue.TodoRevision, issue.UpdatedAt = x.Now.UnixMilli(), issue.Revision, x.Now.UnixMilli()
+	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issue, previous, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "previous_acceptance_id": evidence.Reference}, "issue.review_readmitted")
 	return out.Events, err
 }

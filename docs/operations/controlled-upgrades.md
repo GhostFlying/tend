@@ -343,3 +343,6 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 普通 owner 进度也不会影响 prepare 和独立质量绑定：审阅报告明确指向原阶段 artifact，prepare 继续使用该原件及真实独立结论，保存的 duty 来源不能变成后续普通报告。无需为找回 current 指针而重复提交或重复审阅阶段。
 
 同一 Task 的旧交付已正式 complete/report/ended 并归档后，其阶段只属于旧责任，不再阻挡下一份合法责任；未履行的候选接续不能据此排除阶段。真正 complete 后仍先 task continue，保留原执行和结算原件；已结束历史的原件缺失应先对账。当前责任的新阶段仍须通过原独立要求，不能用普通报告遮蔽。本规则不授权结束尚待履行的现场交付来解锁安装。
+
+
+旧运行版本已 self-bind、但没有任何真实 upgrade 或 typed predeployment stage 的交付，若原执行已停止且租约/外部操作回执已收敛，可在当前 Issue revision/epoch 下用 `issue update-delivery` 的 `action: recover_preparation`，携带原 `task_id`、当前 `expected_task_control_revision` 和明确 `reason`。它归档旧绑定，恢复相同 Task 的准备责任，保留候选与全部历史；不完成交付、不授予新安装。随后通过原 Task 的真实结果、独立验收、继续与 prepare/bind 进入当前候选。保留工作区所有权不代表活动 writer。已有真实升级、未结外部动作、变化的责任/授权或 typed stage 必须走原对账/候选续行路径，不能用此入口重放升级或清理 unknown。

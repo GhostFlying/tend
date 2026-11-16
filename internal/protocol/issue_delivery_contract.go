@@ -14,6 +14,7 @@ func deliveryActions() []deliveryActionFields {
 		{"submit_result", []string{"result"}, []string{"run_id", "independent_acceptance"}},
 		{"prepare", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
 		{"resume", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
+		{"recover_preparation", []string{"task_id", "expected_task_control_revision"}, nil},
 		{"bind", []string{"task_id", "execution_task_id", "expected_task_control_revision"}, []string{"acceptance_id", "reviewer_artifact_id"}},
 		{"report", []string{"task_id"}, []string{"acceptance_id", "reviewer_artifact_id"}},
 		{"end", []string{"task_id"}, []string{"acceptance_id", "reviewer_artifact_id"}},
@@ -47,7 +48,7 @@ func (p UpdateIssueDeliveryPayload) ValidateInput() error {
 		}
 		return nil
 	}
-	return Errorf(CodeInvalidRequest, "action must be submit_result, prepare, resume, bind, report, end or complete")
+	return Errorf(CodeInvalidRequest, "action must be submit_result, prepare, resume, recover_preparation, bind, report, end or complete")
 }
 
 func (UpdateIssueDeliveryPayload) JSONSchemaConstraints() map[string]any {
