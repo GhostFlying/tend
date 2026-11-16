@@ -429,6 +429,13 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 	}
+	// Freeze one random order for all eligibility checks and the final choice in
+	// this claim. Existing run replay above never draws again; retained pins in
+	// the scheduler ignore this order. Filtering a uniform permutation also
+	// leaves the eligible subset uniformly ordered.
+	x.shuffleExecutors(len(executors), func(i, j int) {
+		executors[i], executors[j] = executors[j], executors[i]
+	})
 	continuations, err := views.HostContinuations(ctx, q, host.HostID, x.Now.UnixMilli())
 	if err != nil {
 		return Outcome{}, err

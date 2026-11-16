@@ -49,10 +49,12 @@ type Candidate struct {
 	// It never replaces the task requirements or its frozen owner pins.
 	ExecutionFilter *protocol.RunExecutionPin
 	// AcceptanceWaived comes only from the server-frozen task policy.
-	AcceptanceWaived            bool
-	QuestionHandoff             bool
-	HandoffPin                  *protocol.RunExecutionPin
-	OwnerResponsibilityChanged  bool
+	AcceptanceWaived           bool
+	QuestionHandoff            bool
+	HandoffPin                 *protocol.RunExecutionPin
+	OwnerResponsibilityChanged bool
+	// PreviousPin is the latest actual execution of this Task role and spec.
+	PreviousPin                 *protocol.RunExecutionPin
 	OwnerPin                    *protocol.RunExecutionPin
 	OwnerAgentRevision          uint64
 	OwnerRuntimeRevision        uint64

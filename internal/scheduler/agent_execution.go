@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"cmp"
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -17,7 +16,9 @@ type Executor struct {
 }
 
 // SelectExecution checks the current role. Future reviewer availability does
-// not reserve capacity or prevent implementation from starting.
+// not reserve capacity or prevent implementation from starting. New allocations
+// follow the caller-supplied order, randomized once at the claim boundary.
+// Read-only callers can use any order to explain eligibility without drawing.
 func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 	if c.HandoffPin != nil {
 		if h.ConcurrencyBlocked[c.HandoffPin.Runtime.RuntimeID] {
@@ -75,20 +76,14 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 			}
 			return nil, "original manager execution is unavailable"
 		}
-		var selected *protocol.RunExecutionPin
 		for _, e := range h.Executors {
 			if h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || e.Pin.Purpose != "issue_manager" || !slices.Contains(e.Categories, c.Manager.CategoryID) || c.Manager.AgentID != "" && c.Manager.AgentID != e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID {
 				continue
 			}
-			if selected == nil || e.Pin.Identity.LocalID < selected.Identity.LocalID {
-				p := e.Pin
-				selected = &p
-			}
+			pin := e.Pin
+			return &pin, ""
 		}
-		if selected == nil {
-			return nil, "no available issue-manager category candidate"
-		}
-		return selected, ""
+		return nil, "no available issue-manager category candidate"
 	}
 	if c.AgentSelection == nil {
 		return nil, ""
@@ -100,10 +95,25 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 	if c.Kind == protocol.ActionAccept {
 		role = c.AgentSelection.Acceptance
 	}
+	retained := c.OwnerPin
+	if c.Kind == protocol.ActionAccept {
+		retained = c.ReviewOwnerPin
+	}
+	// A task without a separate owner contract still retains its actual prior
+	// role execution for this spec. Explicit owner contracts remain authoritative.
+	prior := retained == nil && c.PreviousPin != nil
+	if prior {
+		retained = c.PreviousPin
+	}
 	matches := func(e Executor, r protocol.AgentRequirement, accept bool) bool {
-		retained := c.OwnerPin
-		if accept {
-			retained = c.ReviewOwnerPin
+		if prior {
+			original, observed := *retained, e.Pin
+			original.SnapshotID, observed.SnapshotID = "", ""
+			original.InventoryRevision, observed.InventoryRevision = 0, 0
+			original.PublicSHA256, observed.PublicSHA256 = "", ""
+			if original != observed {
+				return false
+			}
 		}
 		if e.Continuation && (retained == nil || *retained != e.Pin) {
 			return false
@@ -123,20 +133,14 @@ func SelectExecution(h Host, c Candidate) (*protocol.RunExecutionPin, string) {
 		return ExecutorCapabilityMatch(e, r.RequiredCapabilities).State == "eligible" && e.Pin.Purpose != "issue_manager" && (r.AgentID == "" || r.AgentID == e.Pin.Identity.ExecutionEnvironmentID+"/"+e.Pin.Identity.LocalID) && r.MatchesProfile(e.Pin.Profile) && e.Pin.Identity.ExecutionEnvironmentID == h.ID && slices.Contains(e.Categories, r.CategoryID) && (r.RuntimeID == "" || r.RuntimeID == e.Pin.Runtime.RuntimeID) && (c.WorkspaceBackendID == "" || c.WorkspaceBackendID == e.Pin.BackendID) && (c.Mounts <= 1 || e.Pin.BackendID == "git") && (!accept || c.AcceptanceProfile == nil || *c.AcceptanceProfile == e.Pin.Profile)
 	}
 	executors := append(slices.Clone(h.Executors), h.Continuations...)
-	slices.SortFunc(executors, func(a, b Executor) int {
-		if n := cmp.Compare(a.Pin.Identity.LocalID, b.Pin.Identity.LocalID); n != 0 {
-			return n
-		}
-		if n := cmp.Compare(a.Pin.Runtime.RuntimeID, b.Pin.Runtime.RuntimeID); n != 0 {
-			return n
-		}
-		return cmp.Compare(a.Pin.BackendID, b.Pin.BackendID)
-	})
 	for _, e := range executors {
 		if c.ExecutionFilter != nil && *c.ExecutionFilter != e.Pin || h.ConcurrencyBlocked[e.Pin.Runtime.RuntimeID] || !matches(e, role, c.Kind == protocol.ActionAccept) {
 			continue
 		}
 		pin := e.Pin
+		if prior {
+			pin = *retained
+		}
 		return &pin, ""
 	}
 	if len(RequiredCapabilities(c)) > 0 {
