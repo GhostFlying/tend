@@ -216,6 +216,24 @@ func TestFault_PredeploymentResultContinuesMergedDeliveryWithoutInventingInstall
 	if h.count("tasks") < 1 || h.count("issue_delivery_execution_history") != 1 || deliveryDutyForTest(t, h, i.IssueID, as.TaskID).Status != "complete" {
 		t.Fatal("delivery history or final settlement lost")
 	}
+	// A real final settlement starts a later responsibility only through
+	// continuation; its old stage must leave the active provenance chain.
+	if op := continueTaskForTest(t, h, as.TaskID, "Continue after the actual installation was settled"); op.Status != protocol.OpSucceeded {
+		t.Fatal("settled delivery did not retain normal continuation", op)
+	}
+	if h.count("issue_delivery_execution_history") != 2 || h.count("issue_delivery_executions") != 0 {
+		t.Fatal("settled execution was not archived before the later responsibility")
+	}
+	continued := h.task(as.TaskID)
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		_, _, stage, err := persistentPredeploymentResult(t.Context(), tx.Q(), continued)
+		if stage != nil {
+			t.Fatal("settled stage leaked into later responsibility", stage)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPredeploymentResultRejectsMismatchedOrUncertainExecution(t *testing.T) {

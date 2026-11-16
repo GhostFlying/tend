@@ -2362,3 +2362,7 @@ idle claim 的已有预检可以利用当前已登记库存的类别集合，排
 实际 CheckUpgradeStart 的读预检与 App StartUpgrade 写事务还要重新要求当前 whole-PR 审阅及精确候选检查，并验证所用阶段已经独立通过且匹配冻结候选；准备 Run 可领取不代表有安装许可。审阅关联失效、CI 失败/缺失/未知和负面阶段均不得写入升级。原 lease、授权、责任代次、精确安装来源、完整主机集合、唯一升级和无 unknown 校验继续执行。
 
 持续 owner 的普通进度报告可以替换 current artifact，但不能擦除已登记 typed stage 的质量约定。安装边界从同 Task/current spec 的不可变历史读取最近阶段，再要求其候选与冻结交付一致并有实际独立通过或原冻结 waiver；更新未通过阶段不能借更老通过阶段放行。无适用阶段的历史合同仍沿原入口。完整 host 范围按集合比较包括相同显式空集，保留候选入口对 nil 的拒绝以及重复、缺少、额外主机和 server/park 校验；server-only 候选接续 API 不意味着扩大其他 Issue 的实际部署授权。
+
+D247 的阶段来源统一返回同 Task/current spec 的原 artifact ID、payload 和候选身份。准备、实际质量绑定、继续、最终来源及安装共用该持久链；普通 owner 进度及生命周期指针不擦除阶段。真实独立报告或验收以明确 reviewed_artifact_id 绑定当前结果或当前责任最近阶段，原身份、passed、冻结政策和不可覆盖结论约束保持。候选刷新同时原子更新 duty 的真实 artifact/acceptance 列及 JSON，不能以普通报告替代实际通过阶段。
+
+已 complete/report/ended 的 execution_history 原归档 artifact 在 store 定义的创建顺序中划定已结束责任边界，只读取其后阶段；executing 的候选接续归档不切断未履行责任。边界原件缺失保持 unknown，不能按墙钟、忽略不匹配候选或改写历史放行。真实 settled duty 仍须先沿原 Task continue 归档再开始后续责任；不增加直接重开、强制解绑或迁移能力。新责任中新建阶段仍保留其实际独立要求。

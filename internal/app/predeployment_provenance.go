@@ -40,23 +40,63 @@ func readPredeploymentArtifact(ctx context.Context, q store.Querier, task store.
 	return payload, payload.Report.Predeployment, nil
 }
 
-// A negative verdict clears the lifecycle pointer, not the original evidence.
-// Only its real Task/spec acceptance supplies a preparation repair source.
-func preparationStage(ctx context.Context, q store.Querier, task store.TaskRow) (string, *protocol.PredeploymentResult, bool, error) {
-	id := task.CurrentArtifactID
-	if id == "" {
-		accs, err := store.ListAcceptances(ctx, q, task.TaskID, "")
-		if err != nil {
-			return "", nil, false, err
+// The immutable stage and its quality agreement belong to the continuing
+// delivery, not to the lifecycle's replaceable current-artifact pointer.
+func persistentPredeploymentResult(ctx context.Context, q store.Querier, task store.TaskRow) (string, protocol.ArtifactPayload, *protocol.PredeploymentResult, error) {
+	artifacts, err := store.ListArtifactsByTask(ctx, q, task.TaskID)
+	if err != nil {
+		return "", protocol.ArtifactPayload{}, nil, err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT artifact_id FROM issue_delivery_execution_history WHERE task_id=? AND json_extract(duty_json,'$.status') IN ('complete','report','ended')`, task.TaskID)
+	if err != nil {
+		return "", protocol.ArtifactPayload{}, nil, err
+	}
+	boundaries := map[string]bool{}
+	for rows.Next() {
+		var id *string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return "", protocol.ArtifactPayload{}, nil, err
 		}
-		for n := len(accs) - 1; n >= 0; n-- {
-			if accs[n].SpecVersion == task.SpecVersion {
-				id = accs[n].ArtifactID
-				break
-			}
+		if id == nil {
+			rows.Close()
+			return "", protocol.ArtifactPayload{}, nil, protocol.Errorf(protocol.CodeUnknownOutcome, "the settled delivery's original artifact is unavailable")
+		}
+		boundaries[*id] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return "", protocol.ArtifactPayload{}, nil, err
+	}
+	// Creation order is the store's artifact ordering contract. Do not use
+	// wall-clock cutoffs: several real transitions can have the same time.
+	first := 0
+	for n, artifact := range artifacts {
+		if boundaries[artifact.ArtifactID] {
+			first = n + 1
+			delete(boundaries, artifact.ArtifactID)
 		}
 	}
-	_, stage, err := readPredeploymentArtifact(ctx, q, task, id)
+	if len(boundaries) != 0 {
+		return "", protocol.ArtifactPayload{}, nil, protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the settled delivery's original artifact before using a later stage")
+	}
+	for n := len(artifacts) - 1; n >= first; n-- {
+		id := artifacts[n].ArtifactID
+		payload, stage, err := readPredeploymentArtifact(ctx, q, task, id)
+		if protocol.CodeOf(err) == protocol.CodeStaleRevision {
+			continue
+		}
+		if err != nil || stage != nil {
+			return id, payload, stage, err
+		}
+	}
+	return "", protocol.ArtifactPayload{}, nil, nil
+}
+
+// A negative verdict permits correction work, never installation.
+func preparationStage(ctx context.Context, q store.Querier, task store.TaskRow) (string, *protocol.PredeploymentResult, bool, error) {
+	id, _, stage, err := persistentPredeploymentResult(ctx, q, task)
 	if err != nil || stage == nil {
 		return id, stage, false, err
 	}
@@ -76,52 +116,19 @@ func preparationStage(ctx context.Context, q store.Querier, task store.TaskRow) 
 // candidate, not whichever artifact happens to be the current task pointer.
 // An unaccepted matching stage must not fall back to an older passed one.
 func acceptedStageForCandidate(ctx context.Context, q store.Querier, task store.TaskRow, candidate protocol.IssueDeliveryCandidate) (protocol.ArtifactPayload, *protocol.PredeploymentResult, error) {
-	artifacts, err := store.ListArtifactsByTask(ctx, q, task.TaskID)
-	if err != nil {
-		return protocol.ArtifactPayload{}, nil, err
+	id, payload, stage, err := persistentPredeploymentResult(ctx, q, task)
+	if err != nil || stage == nil {
+		return payload, stage, err
 	}
-	for n := len(artifacts) - 1; n >= 0; n-- {
-		payload, stage, err := readPredeploymentArtifact(ctx, q, task, artifacts[n].ArtifactID)
-		if protocol.CodeOf(err) == protocol.CodeStaleRevision {
-			continue
-		}
-		if err != nil {
-			return payload, stage, err
-		}
-		if stage == nil || stage.DeliveryID != candidate.DeliveryID || stage.HeadSHA != candidate.HeadSHA || stage.BaseSHA != candidate.BaseSHA {
-			continue
-		}
-		if _, err := acceptedPredeploymentArtifact(ctx, q, task, artifacts[n].ArtifactID); err != nil {
-			return payload, stage, err
-		}
-		return payload, stage, nil
+	if stage.DeliveryID != candidate.DeliveryID || stage.HeadSHA != candidate.HeadSHA || stage.BaseSHA != candidate.BaseSHA {
+		return payload, stage, protocol.Errorf(protocol.CodeInvalidTransition, "the latest stage must match the frozen delivery candidate")
 	}
-	return protocol.ArtifactPayload{}, nil, nil
-}
-
-// Ordinary owner reports and negative verdicts can replace or clear the
-// lifecycle pointer. Installation retains the latest actual stage's quality
-// agreement even while the same owner records later progress reports.
-func latestInstallationStage(ctx context.Context, q store.Querier, task store.TaskRow) (string, *protocol.PredeploymentResult, error) {
-	artifacts, err := store.ListArtifactsByTask(ctx, q, task.TaskID)
-	if err != nil {
-		return "", nil, err
-	}
-	for n := len(artifacts) - 1; n >= 0; n-- {
-		id := artifacts[n].ArtifactID
-		_, stage, err := readPredeploymentArtifact(ctx, q, task, id)
-		if protocol.CodeOf(err) == protocol.CodeStaleRevision {
-			continue
-		}
-		if err != nil || stage != nil {
-			return id, stage, err
-		}
-	}
-	return "", nil, nil
+	_, err = acceptedPredeploymentArtifact(ctx, q, task, id)
+	return payload, stage, err
 }
 
 func requireInstallationStage(ctx context.Context, q store.Querier, task store.TaskRow, candidate protocol.IssueDeliveryCandidate) error {
-	id, stage, err := latestInstallationStage(ctx, q, task)
+	id, _, stage, err := persistentPredeploymentResult(ctx, q, task)
 	if err != nil || stage == nil {
 		return err
 	}

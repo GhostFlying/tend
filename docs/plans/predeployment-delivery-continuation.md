@@ -47,3 +47,19 @@ cfda 的原 R3–R6 触发路径已经修正，独立审阅又以三条 race 探
 - R11：集合相等允许两个相同的显式空集合，保留 nil 非法候选入口与重复、缺少、额外主机、server/park 范围保护。复用原 fixture 的真实 stage/acceptance/continue/claim/review/prepare 链，参数化原 policy/candidate 范围验证 server-only 候选接续 API，不能宣称 server-only 物理安装或改变本 Issue 的固定两主机部署授权。
 
 先复用独立失败 probe 的实际前提验证这两项，再保留现有负面验收和安装授权回归；按真实 delta 在原 PR/原 Maple 持续 Task 集中复查，不新建 Task/Issue/worktree。完整本机检查、精确新 CI 和实际受控恢复/原业务交付门槛不变。
+
+## 原 Maple 第五轮 R12–R13 修正计划
+
+0e5d 的 R10–R11 原路径已修；独立审阅又证明普通报告后的 prepare/来源绑定仍依赖 current 指针，并且安装历史扫描跨过了已正式结束的旧交付。本轮沿同一持久阶段来源链统一修正，不以 end 解开现场 Task40，也不迁移历史或扩大范围。
+
+1. 所有阶段读取共用同 Task/current spec 的持久原件解析，返回实际 artifact ID、payload 和 typed stage；普通报告及生命周期空指针不擦除阶段。准备/验收、继续、claim、最终无变化来源与安装均复用该来源，最新未通过不回退旧通过，最新不匹配候选不能忽略。prepare 刷新使用原阶段 ID/实际验收，并原子更新 duty 的真实 artifact/acceptance 来源列，不能仅修改 JSON 或绑定普通进度报告。
+2. 以已有 execution_history 中 status=complete/report/ended 的真实归档 artifact 为已结束责任边界，在 store 已定义的 artifact 创建顺序中只读取其后的阶段。仍 executing 的候选接续归档不能切断未履行责任或移除阶段要求。边界原件缺失或不属于本 Task 时明确保留 unknown，不以时间戳、调用者断言或简单忽略不匹配候选放行。该读取不新增接口/迁移/强制解绑，也不改已归档数据。
+3. 复用原失败 probe 的真实 owner native 启动、候选 wholePR/check 和实际 prepare 对照，增加普通报告后成功且 duty 指向原阶段/实际验收的断言；真实必需独立审阅路径也保留。已结束旧stage→真实后续结果→新prepare/新批准/bind→安装预检的成对回归排除旧责任，随后新增当前 required stage 并用普通报告遮蔽必须仍拒绝实际安装，防止 R10 回归。保留同一注入时钟下的创建顺序，不能用 sleep/时间偏移掩盖边界。
+
+先新增/修正并运行当前源码针对性 race 与既有授权回归，固定候选后交原 Maple 持续责任复查。全部旧失败、未完 CI/全检、Task40 旧 duty/grant/真实merge80与完整两主机范围保留；不安装旧包，最终完整门槛和实际受控恢复不豁免。
+
+R12 的必需独立审阅分支还要验证 reviewer_artifact/acceptance 的实际 target：现有绑定入口也默认 current artifact，普通报告之后无法绑定已实际审阅的 stage。将原独立报告/验收中的明确 reviewed_artifact_id 解析为原件，仅允许当前结果或当前未结束责任内的最近阶段，且必须属于本 owner Task/Issue；原独立身份、passed、冻结政策和不可改写结论校验保持。prepare 可在同事务附上这个真实审阅并保存真实 stage 来源，不补造 verdict，也不允许绑定已结束旧阶段。
+
+自检补充：持久阶段读取不能把已真正 complete/report/ended 的 terminal Task 候选替换误当成“阶段已完成但部署未履行”。该终态 guard 仅适用于未结清 duty；真实阶段→最终安装报告/独立验收→complete 后保留原受支持的后续 prepare 路径。未完成的首轮针对检查已取消并 join，child -15/约148.7秒与正常 receipt 保留，不算通过；补真实结算后的 prepare 回归后再运行最终源码检查。
+
+自检修正：真实 complete 后的 duty 在入口明确保持 settled，直接 prepare 原本不合法；必须先 tasks.continue 归档原执行再产生下一责任。attempt3 的新增断言错误地要求直接 prepare，通过实际失败确认这一前提错误。撤回相应多余终态 guard 改动，回归改为真实 complete→continue→确认历史边界及无适用旧阶段；不新增“已结算 duty 直接重开”能力。保留 attempt3 exit1/419.989秒与 legacy3 exit0/283.495秒原件。
