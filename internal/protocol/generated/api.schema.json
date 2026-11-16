@@ -18975,6 +18975,35 @@
       "title": "TaskReviewTarget",
       "type": "object"
     },
+    "TaskSelectionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_execution": {
+          "$ref": "#/definitions/ExecutionProfile"
+        },
+        "actor": {
+          "$ref": "#/definitions/Principal"
+        },
+        "agent_selection": {
+          "$ref": "#/definitions/TaskAgentSelection"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "owner_pin": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "request_id"
+      ],
+      "title": "TaskSelectionSource",
+      "type": "object"
+    },
     "TaskSummary": {
       "additionalProperties": false,
       "properties": {
@@ -23036,6 +23065,9 @@
     },
     "TaskReviewTarget": {
       "$ref": "#/definitions/TaskReviewTarget"
+    },
+    "TaskSelectionSource": {
+      "$ref": "#/definitions/TaskSelectionSource"
     },
     "TokenUsageSample": {
       "$ref": "#/definitions/TokenUsageSample"

@@ -133,6 +133,54 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 	}
 }
 
+func TestMainOwnerTaskSelectionCitationCannotBecomeHumanAssignment(t *testing.T) {
+	e, call := mainOwnerFixture(t)
+	runtime := &protocol.RunnerRuntime{InstanceID: "selection-test", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+	issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}, protocol.Target{Type: "host", ID: "host-a"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, app.Hello{})
+	create, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Work selection", Project: "default", Intent: "Express work requirements", Stages: []protocol.IssueStage{}}})
+	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "issue"}, Payload: create})
+	if err != nil || response.Operation == nil || response.Operation.Error != nil {
+		t.Fatal(response, err)
+	}
+	var issue protocol.Issue
+	if err := json.Unmarshal(response.Operation.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	var message string
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT message_id FROM main_turns WHERE request_id=?`, call.ExecutionID).Scan(&message)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	selection := protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "planner", AgentID: "executor/selected", RuntimeID: "runtime", Model: "chosen-model", Effort: "high"}, Acceptance: protocol.AgentRequirement{CategoryID: "planner"}}
+	one := int64(1)
+	taskID := e.ids.New(protocol.PrefixTask)
+	payload, _ := json.Marshal(protocol.CreateIssueTaskPayload{TaskID: taskID, ExpectedAssignmentEpoch: issue.AssignmentEpoch, IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: message, ExpectedSourceRevision: &one}, Title: "Compatible legacy model filters", Spec: protocol.OwnerTaskSpec{Goal: "Produce a report", Acceptance: []string{"Read the report"}, Deliverables: []string{"report"}, AgentSelection: &selection, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary", Mounts: []protocol.OwnerTaskMount{}}}})
+	response, err = ownerToolInvoke(t, e, call, "issues.create_task", protocol.OwnerToolArguments{EffectSeq: 2, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: payload})
+	if err != nil || response.Operation == nil || response.Operation.Error != nil {
+		t.Fatal(response, err)
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		raw, err := store.GetSpec(t.Context(), tx.Q(), taskID, 1)
+		if err != nil {
+			return err
+		}
+		var spec struct {
+			AgentSelection  *protocol.TaskAgentSelection  `json:"agent_selection"`
+			SelectionSource *protocol.TaskSelectionSource `json:"selection_source"`
+		}
+		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+			return err
+		}
+		if spec.SelectionSource == nil || spec.SelectionSource.Actor.Kind != protocol.PrincipalMainAgent || !spec.AgentSelection.Equal(selection) || !spec.SelectionSource.AgentSelection.Equal(selection) {
+			t.Fatal("owner authority/citation forged human assignment or lost old filters", raw)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMainOwnerCatalogMatchesOwnerAndRejectsOtherActors(t *testing.T) {
 	e, call := mainOwnerFixture(t)
 	g := e.server.MainOwnerTools()

@@ -58,6 +58,13 @@ func exportSchema(raw json.RawMessage) json.RawMessage {
 					out[k] = expand(x, path)
 				}
 			}
+			if props, ok := out["properties"].(map[string]any); ok {
+				for key, value := range props {
+					if field, ok := value.(map[string]any); ok && field["readOnly"] == true {
+						delete(props, key)
+					}
+				}
+			}
 			if alternatives, ok := out["anyOf"].([]any); ok && out["properties"] != nil {
 				// A required-only disjunction changes validation, not argument
 				// types. Keep the common object once: duplicating it in every

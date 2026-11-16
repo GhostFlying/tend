@@ -25,6 +25,19 @@ type TaskAgentSelection struct {
 	Acceptance     AgentRequirement `json:"acceptance,omitzero"`
 }
 
+// TaskSelectionSource is server-frozen attribution, never an authorization
+// supplied by the task author. A cited message does not change Actor.
+type TaskSelectionSource struct {
+	Actor               Principal           `json:"actor"`
+	RequestID           string              `json:"request_id"`
+	AgentSelection      *TaskAgentSelection `json:"agent_selection,omitempty"`
+	AcceptanceExecution *ExecutionProfile   `json:"acceptance_execution,omitempty"`
+	HostID              string              `json:"host_id,omitempty"`
+	// OwnerPin identifies a system-derived self-execution binding, separately
+	// from the author's input filters above.
+	OwnerPin string `json:"owner_pin,omitempty"`
+}
+
 func (s TaskAgentSelection) Validate() error { return s.ValidateForAcceptance(true) }
 
 // ValidateForAcceptance only omits an unused reviewer selector after the app

@@ -2426,3 +2426,32 @@ runner 的业务 wire fixture 复用现有不可变空库模板，分别打开�
 私有观察器默认展示按 Issue/manager/Task/Attention 原件身份和字段白名单计算的真实增量；无新输入直接简短返回，不重新展开旧完整快照。精确 included 集合、不可变 SHA 和可见 ACK 约束保持，最终发布正文和附件仍以实际消息原件回读为证。一个已经成功停用的原观察器身份，即使保留的历史 policy 仍 enabled，也不能从晚到 inbound、saved ACK 或旧定时入口重新获得采集/恢复权限；只读展示和内存内 ACK 折叠继续可用。停止、policy、checkpoint 和旧失败记录均保留。
 
 私有部署证据在原有部署前读取中、任何有意配置改变之前只采样一次真实配置文件哈希及另行来源标记的非秘密字段；baseline 原件不可覆盖。部署后用同一文件清单、原始 Start 时间和 baseline SHA 生成逐配置/Agent/group 差异，不比较可变 state、请求与回执流水。当前允许有意变化仅为两个 watcher 周期改为六小时、实际 watcher unit 的可执行文件选择以及 fleet CLI 路径/版本元数据；其余配置、Agent、slots、模型、effort、登录、groups、debug 应保留。未知和读失败如实保留，此证明直接复用于既有安装证明，不增加审批、重复部署、独立重审或重新包装证据；旧部署缺少 pre-Start 采样的事实不被补写。
+
+## D250：普通工作选择面与真实选择来源
+
+普通模型为新任务的实现与独立验收提供 category_id / required_capabilities；新责任提供
+工作 category，implementation 与 implementation-economy 仍按难度/成本判断。
+工具发现同时覆盖 named Main/Issue owner、MCP 的同一 named 定义及 owner 类型目录；
+不展示 agent/runtime/model/effort、acceptance_execution 或 create 的 legacy manager/
+assignee 旁路。真实 host/OS/labels/workspace 约束保留，host 仅用于真实资源要求。
+同一 Agent 仍可并发；匹配、slot、租约及共享资源准入保持原规则。本决策不统一
+category/capability、不改变首次候选排序算法或私有 Agent 配置。
+
+发现面不是有效 wire 的授权或校验边界。认证人类 owner 的完整 API/CLI 继续接受明确
+指派；旧模型 callback 和 owner_call 原始 JSON 的原有效过滤仍完整执行，不默默忽略、
+重解释成人类意图或改成随机选择。故没有收紧协议请求或改变默认执行语义，runner
+继续协议 4/3，不新增通信适配器。若以后拒绝旧有效模型过滤，必须另行进行 N/N−1
+升级/适配/退役，不能把本轮投影当作完成协议退役。
+
+每个新 Task spec 版本由服务端冻结 selection_source：真实 Actor、原 request、作者
+输入的选择与 acceptance_execution/host，以及另行标记的系统 owner pin。被委托
+owner authority 的 Main/owner 仍是 Agent 作者；引用人类 source_message_id 或自行填写
+provenance 不构成人类明确指派。认证 owner 输入才记录 owner 作者；引用消息的实际
+内容/版本继续作为材料，不自动证明其中包含具体指派。既有 Issue owner 选择沿用
+不可变控制 revision 的真实 actor/source 记录。没有来源的旧历史保持没有来源。
+
+归属元数据不参与工作合同等价比较，不能仅靠改元数据创建 spec/重试；它不进入
+runner worker wire 或审阅要求 digest。系统先冻结作者输入，再由 prepareOwnerExecution
+补齐现有 owner 身份，避免把系统 pin 误记为模型硬指定。新版本保留旧版本的原件；
+continue/失败恢复/unknown 对账继续沿原执行身份，不建立新选择。完整调用路径、
+兼容限制和验证见 [实施计划](plans/task-work-requirements.md)。

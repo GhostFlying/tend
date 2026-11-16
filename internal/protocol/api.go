@@ -5,6 +5,7 @@ package protocol
 // included through them.
 func APITypes() []any {
 	return []any{
+		TaskSelectionSource{},
 		BackupPolicy{}, BackupFile{}, BackupCheckpoint{}, BackupObject{}, BackupPreview{}, BackupVerification{}, BackupRestoreProof{}, BackupPruneRequest{}, BackupPruneState{}, BackupStatus{}, DiagnosticLogProtection{},
 		NativeRolloutChunk{}, NativeRolloutArchiveReceipt{}, OriginalMigration{}, OriginalImport{}, OriginalStorageStatus{}, OriginalMigrationResult{}, OriginalImportResult{}, OriginalVerification{},
 		MessageProcessingReceipt{}, LogicalTurnState{}, ContinueTaskPayload{}, TaskExecutionContext{}, TaskResultReference{}, TaskReviewTarget{}, ResumeExternalWaitPayload{}, WaitExternalPayload{}, ExternalWait{}, YieldExternalWaitPayload{}, SessionStopPayload{}, SessionContinuation{},

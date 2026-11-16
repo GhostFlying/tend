@@ -86,6 +86,9 @@ func (CreateTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 
 // createTask shares persistence without expanding the legacy entry's authority.
 func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload, canonical *canonicalTaskCreateContext) (Outcome, error) {
+	if canonical == nil {
+		freezeTaskSelectionSource(x, &p.Spec)
+	}
 	if p.Title == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "title is required")
 	}
@@ -337,6 +340,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "manager responsibility changes require an issue manager handoff")
 	}
 	if p.Spec != nil {
+		freezeTaskSelectionSource(x, p.Spec)
 		contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), row.TaskID)
 		if err == nil {
 			issue, err := store.GetCanonicalIssue(ctx, tx.Q(), contract.IssueID)

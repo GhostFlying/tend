@@ -18,15 +18,16 @@ const DefaultMaxImplementAttempts = 3
 
 // Spec is the content of one immutable task spec version.
 type Spec struct {
-	ReviewArtifactID    string                       `json:"review_artifact_id,omitempty"`
-	ReviewDeliveryID    string                       `json:"review_delivery_id,omitempty"`
-	AgentSelection      *protocol.TaskAgentSelection `json:"agent_selection,omitempty"`
-	AcceptanceExecution *protocol.ExecutionProfile   `json:"acceptance_execution,omitempty"`
-	Observation         *protocol.ObservationScope   `json:"observation,omitempty"`
-	Goal                string                       `json:"goal"`
-	Scope               string                       `json:"scope,omitempty"`
-	Constraints         []string                     `json:"constraints,omitempty"`
-	Acceptance          []string                     `json:"acceptance"`
+	SelectionSource     *protocol.TaskSelectionSource `json:"selection_source,omitempty"`
+	ReviewArtifactID    string                        `json:"review_artifact_id,omitempty"`
+	ReviewDeliveryID    string                        `json:"review_delivery_id,omitempty"`
+	AgentSelection      *protocol.TaskAgentSelection  `json:"agent_selection,omitempty"`
+	AcceptanceExecution *protocol.ExecutionProfile    `json:"acceptance_execution,omitempty"`
+	Observation         *protocol.ObservationScope    `json:"observation,omitempty"`
+	Goal                string                        `json:"goal"`
+	Scope               string                        `json:"scope,omitempty"`
+	Constraints         []string                      `json:"constraints,omitempty"`
+	Acceptance          []string                      `json:"acceptance"`
 	// Delivery preserves the legacy commit-only wire representation.
 	Delivery string `json:"delivery"`
 	// Deliverables lists required outputs; absent means legacy Delivery.

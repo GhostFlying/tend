@@ -41,3 +41,24 @@ tend issue request "$REQUEST_ID"
 仅进行定向验证和 TS 类型/生成器检查。没有页面布局/交互、UI 请求、真实模型、真实业务数据或部署；正式组合仍须独立 review、规定 CLI、唯一 make check、CI 与最终整体真实 E2E。
 
 候选定向验证已完成：API/CLI/App/schema 的选定 race 回归通过，相关五包 vet 通过；提交 schema 一致性、TS typecheck 与类型生成器测试通过。schema 增量保留原有全部定义，旧定义仅 APIResponse 新增可选 current_issue；唯一 Web 文件是生成类型。上述定向证据只覆盖原候选；候选独立预审随后通过，正式组合完整检查与 CI 尚未进行。
+
+## D250：普通工作输入与明确指派
+
+普通新 Task 的 `spec.agent_selection.implementation` 和需要时的 `acceptance` 各使用
+`category_id`、`required_capabilities: [{capability_id, definition_revision}]`。例如：
+
+```json
+{"implementation":{"category_id":"implementation"},"acceptance":{"category_id":"formal-review"}}
+```
+
+普通模型的 named/MCP/owner 类型发现不展示具体 Agent、runtime、model、effort 或
+`acceptance_execution`。人类明确指派通过认证 owner CLI/API 的完整输入：
+`issue create-task` / `update-task --file`（或 `--data`）仍接受原 `agent_selection`
+过滤与 `acceptance_execution`；Issue 的 create/set-status/request-owner 仍接受原
+具体身份输入。原有效旧 callback 也继续执行其过滤，不静默丢弃。
+真实 workspace/host/OS/labels 要求继续生效，不为偏好 provider 复制当前主机。
+
+Task 读取的 spec.selection_source 是服务端冻结的真实作者、输入过滤及系统 owner
+pin；不可通过提交这份元数据或引用 source_message_id 把模型选择声明成人类指派。
+旧历史没有该字段时保持未知。继续/重试/恢复沿原 Task 与 pin，对账 unknown 后再
+决定合法下一步。完整选择面边界见 [D250 计划](task-work-requirements.md)。

@@ -569,6 +569,7 @@ export interface TendAPI {
   TaskPage?: TaskPage;
   TaskResultReference?: TaskResultReference;
   TaskReviewTarget?: TaskReviewTarget;
+  TaskSelectionSource?: TaskSelectionSource;
   TokenUsageSample?: TokenUsageSample;
   TokenUsageView?: TokenUsageView;
   ToolSpec?: ToolSpec;
@@ -7105,6 +7106,18 @@ export interface ConversationImageInput {
 export interface TaskPage {
   next?: string;
   tasks: TaskSummary[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "TaskSelectionSource".
+ */
+export interface TaskSelectionSource {
+  acceptance_execution?: ExecutionProfile;
+  actor: Principal;
+  agent_selection?: TaskAgentSelection;
+  host_id?: string;
+  owner_pin?: string;
+  request_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
