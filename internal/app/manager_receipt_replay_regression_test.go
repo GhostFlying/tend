@@ -172,34 +172,24 @@ func TestFault_QueuedReceiptHonorsOriginalRecoveryBudget(t *testing.T) {
 
 func TestFault_ReceiptStartupBackoffRetainsWakeDeadline(t *testing.T) {
 	h := hostedManagerHarness(t)
-	c := createConsultationFixture(t, h)
-	op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{ConversationID: c.ID, Body: "original question"}, nil), SubmitMessage{})
-	if op.Error != nil {
-		t.Fatal(op)
-	}
-	d, _, ok, err := h.app.NextDelivery(t.Context(), store.ConversationDestination(c.ID))
-	if err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	turn := startHostedReview(t, h, c.ID, d)
+	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	conversation := "issue:" + issue.IssueID
+	turn, _ := startHostedIssueReview(t, h, issue)
 	if err := h.app.AwaitNativeReceipts(t.Context(), turn.ThreadID); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.app.SettleOpenTurns(t.Context(), turn.ThreadID); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Unknown}); err != nil {
-		t.Fatal(err)
-	}
-	if pending, err := h.app.DeferAgentReceiptRead(t.Context(), c.ID); err != nil || !pending {
+	if pending, err := h.app.DeferAgentReceiptRead(t.Context(), conversation); err != nil || !pending {
 		t.Fatal(pending, err)
 	}
 	h.clock.Advance(2 * time.Second)
-	_, _, attachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), c.ID)
+	_, _, attachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), conversation)
 	if err != nil || !attachment.Reconciliation {
 		t.Fatal(attachment, err)
 	}
-	if err := h.app.DeferAgentStartupAttachment(t.Context(), c.ID, attachment); err != nil {
+	if err := h.app.DeferAgentStartupAttachment(t.Context(), conversation, attachment); err != nil {
 		t.Fatal(err)
 	}
 	h.clock.Advance(28 * time.Second)
