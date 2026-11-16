@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
@@ -277,8 +278,19 @@ func TestEventuallyTimeoutDiagnosticsPrecedeCleanup(t *testing.T) {
 	cmd.Env = append(os.Environ(), "TEND_TEST_TIMEOUT_DIAGNOSTIC_CHILD=1")
 	raw, err := cmd.CombinedOutput()
 	text := string(raw)
-	snapshot, failure, cleanup := strings.Index(text, "diagnostic child snapshot"), strings.Index(text, "timed out waiting until original failure marker"), strings.Index(text, "diagnostic child cleanup")
-	if err == nil || ctx.Err() != nil || snapshot < 0 || failure < snapshot || cleanup < failure || strings.Count(text, "diagnostic child snapshot") != 1 {
+	snapshot := strings.Index(text, "diagnostic child snapshot")
+	failure := strings.Index(text, "waiting until original failure marker:")
+	const finishedMarker = `test phase="original failure marker" finished`
+	finished := strings.Index(text, finishedMarker)
+	cleanup := strings.Index(text, "diagnostic child cleanup")
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || ctx.Err() != nil ||
+		snapshot < 0 || failure <= snapshot || finished <= failure || cleanup <= finished ||
+		strings.Count(text, "diagnostic child snapshot") != 1 || strings.Count(text, finishedMarker) != 1 || strings.Count(text, "diagnostic child cleanup") != 1 {
 		t.Fatalf("lost original timeout/observation order: %v %s", err, text)
+	}
+	cause := "test phase original failure marker exceeded 15s watchdog: " + context.DeadlineExceeded.Error()
+	if !strings.Contains(text[failure:finished], cause) || !strings.Contains(text[finished:cleanup], "cause="+cause) {
+		t.Fatalf("lost original timeout cause: %s", text)
 	}
 }
