@@ -210,3 +210,55 @@ func TestFault_ReceiptStartupBackoffRetainsWakeDeadline(t *testing.T) {
 		t.Fatal("deadline crossed during scan lost its timer wake", delay, err)
 	}
 }
+
+func TestFault_CompactStartupBackoffRetainsWakeDeadline(t *testing.T) {
+	h := hostedManagerHarness(t)
+	c := createConsultationFixture(t, h)
+	selected, named, err := h.app.NamedHostedSelection(t.Context(), c.ID)
+	if err != nil || !named {
+		t.Fatal(selected, named, err)
+	}
+	request, compact, thread := startupCompact(t, h, c.ID, "unknown", &selected)
+	// Restore the persisted delivery left by a process that stopped after
+	// native admission, before it could settle the compact's outbox receipt.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='sending',next_attempt_at=0 WHERE request_id=?`, request)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.app = New(h.store, h.ids, h.clock.Now)
+	_, _, attachment, err := h.app.HostedRuntimeStartupSelection(t.Context(), c.ID)
+	if err != nil || !attachment.Reconciliation || attachment.RequestID != request || attachment.NativeCompactThread() != thread {
+		t.Fatal("restart lost the original compact attachment", attachment, err)
+	}
+	if err := h.app.DeferAgentStartupAttachment(t.Context(), c.ID, attachment); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := h.app.AgentStartupAttachmentAllowed(t.Context(), attachment); err != nil || allowed {
+		t.Fatal("compact attachment ignored its own startup backoff", allowed, err)
+	}
+	delay, err := h.app.BackgroundDelay(t.Context(), h.clock.Now())
+	if err != nil || delay != 30*time.Second {
+		t.Fatalf("compact backoff wake=%s, want 30s: %v", delay, err)
+	}
+	h.clock.Advance(delay)
+	if allowed, err := h.app.AgentStartupAttachmentAllowed(t.Context(), attachment); err != nil || !allowed {
+		t.Fatal("original compact did not become serviceable at its timer", allowed, err)
+	}
+	if state, err := h.app.CompactState(t.Context(), compact); err != nil || state != "unknown" {
+		t.Fatal("timer fabricated compact completion", state, err)
+	}
+	if h.count("agent_compactions") != 1 || h.count("main_turns") != 0 || h.count("native_turn_receipts_pending") != 0 {
+		t.Fatal("compact attachment replayed work or fabricated a native turn")
+	}
+	if err := h.app.DeferAgentStartupAttachment(t.Context(), c.ID, attachment); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.CompleteNativeCompact(t.Context(), c.ID, thread, "original-compact-item"); err != nil {
+		t.Fatal(err)
+	}
+	if delay, err := h.app.BackgroundDelay(t.Context(), h.clock.Now()); err != nil || delay != 0 {
+		t.Fatal("completed compact retained an obsolete startup timer", delay, err)
+	}
+}

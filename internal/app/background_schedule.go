@@ -31,7 +31,9 @@ UNION ALL SELECT MIN(json_extract(s.body_json,'$.next_attempt_at'))
  AND json_extract(s.body_json,'$.next_attempt_at')>? AND (a.attention_id IS NULL OR a.status<>'open')
  AND (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=o.request_id)
  OR EXISTS(SELECT 1 FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE h.execution_id=o.request_id AND (t.status IN ('starting','started','unknown')
- OR EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=json_extract(h.private_snapshot,'$.runner_run_id') AND e.applied=0))))
+ OR EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=json_extract(h.private_snapshot,'$.runner_run_id') AND e.applied=0)))
+ OR EXISTS(SELECT 1 FROM agent_compactions c WHERE o.operation='conversation.compact' AND o.destination='background_thread:'||c.conversation_id
+ AND json_extract(o.payload_json,'$.operation_id')=c.operation_id AND c.status IN ('starting','running','unknown')))
 )`, boundary, boundary, boundary, boundary).Scan(&next)
 	})
 	if err != nil || !next.Valid {
