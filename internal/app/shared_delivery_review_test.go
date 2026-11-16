@@ -550,7 +550,7 @@ func TestSharedDeliveryNarrowAcceptanceNeedsOriginalReviewerEvidence(t *testing.
 	sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
 	r := sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: source, AcceptanceID: acceptance}))
 	expectWorkCode(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}), protocol.CodeInvalidRequest)
-	if r.Valid || r.Status != "reviewing" || len(r.Rounds) != 1 || r.Rounds[0].AcceptanceID != acceptance {
+	if r.Valid || r.Status != "reviewing" || len(r.Rounds) != 1 || r.Rounds[0].AcceptanceID != acceptance || r.Rounds[0].ReviewerRole != "" {
 		t.Fatal(r)
 	}
 	// A focused real report from the original reviewer can supply missing scope
