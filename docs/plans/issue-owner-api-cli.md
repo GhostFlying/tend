@@ -62,3 +62,9 @@ Task 读取的 spec.selection_source 是服务端冻结的真实作者、输入�
 pin；不可通过提交这份元数据或引用 source_message_id 把模型选择声明成人类指派。
 旧历史没有该字段时保持未知。继续/重试/恢复沿原 Task 与 pin，对账 unknown 后再
 决定合法下一步。完整选择面边界见 [D250 计划](task-work-requirements.md)。
+
+咨询转为新责任使用 `tend conversation promote <conversation_id> --file promotion.json`，
+新 Issue 的 JSON 提供 `manager: {category_id: <work-category>, reason: <text>}` 以及 plan
+和真实 source_message_id/expected_source_revision。这里沿用兼容 manager 键，不需要
+特殊 issue-manager 类别；普通模型只发现工作类别与原因。existing_issue_id 的来源共享
+保留已有责任，不重新选择 owner。认证 owner 的完整旧 manager/assignee 输入仍有效。

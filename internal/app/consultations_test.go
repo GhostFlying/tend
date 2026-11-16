@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,6 +19,48 @@ func createConsultationFixture(t *testing.T, h *harness) protocol.AgentConversat
 		t.Fatal(op, c)
 	}
 	return c
+}
+
+func TestConsultationPromotionCreatesIssueWithRequestedWorkCategory(t *testing.T) {
+	for _, category := range []string{"investigation", "implementation-economy"} {
+		t.Run(category, func(t *testing.T) {
+			h := hostedManagerHarness(t)
+			inventoryCategory(t, h, category, 0, "active")
+			// The new Issue must not need the historical manager category.
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				_, err := store.GetAgentCategory(t.Context(), tx.Q(), protocol.DefaultIssueManagerCategory)
+				if !errors.Is(err, store.ErrNotFound) {
+					t.Fatalf("fixture must omit issue-manager: %v", err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			c := createConsultationFixture(t, h)
+			intent, turn, principal := consultationTurn(t, h, c, "Please investigate this goal as a continuing responsibility")
+			payload := protocol.PromoteConsultationPayload{
+				IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: intent, ExpectedSourceRevision: rev(h.associations(intent).ContentRevision)},
+				Plan:                 protocol.IssuePlan{Title: "Investigate the requested goal", Project: "default", Intent: "Produce the requested report"},
+				Manager:              &protocol.RequestIssueManagerPayload{CategoryID: category, Reason: "Work requirements from the consultation"},
+			}
+			if h.count("issue_controls") != 0 {
+				t.Fatal("fixture pre-created the target Issue")
+			}
+			env := h.env("conversation.promote", protocol.Target{Type: "conversation", ID: c.ID}, payload, nil)
+			command := HostedCoordinationCommand{Command: PromoteConsultation{}, ExecutionID: turn.RequestID, EffectSeq: 1}
+			issue := canonicalLifecycleIssue(t, h.exec(principal, env, command))
+			if issue.OwnerSelection == nil || issue.OwnerSelection.CategoryID != category || issue.OwnerSelection.AgentID != "" || h.count("issue_controls") != 1 {
+				t.Fatal("promotion lost work requirements or fixed an executor", issue)
+			}
+			stored := canonicalTaskIssue(t, h, issue.IssueID)
+			if stored.OwnerSelection == nil || stored.OwnerSelection.CategoryID != category {
+				t.Fatal("actual canonical Issue did not retain the category", stored)
+			}
+			if replay := h.exec(principal, env, command); replay.Error == nil || replay.Error.Code != protocol.CodeDuplicateEffect || h.count("issue_controls") != 1 {
+				t.Fatal("retry duplicated the responsibility", replay)
+			}
+		})
+	}
 }
 func consultationTurn(t *testing.T, h *harness, c protocol.AgentConversation, text string) (string, store.MainTurn, protocol.Principal) {
 	t.Helper()

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -17,6 +18,63 @@ func (workRequirementsOwner) Specs() []protocol.OwnerToolSpec {
 		out = append(out, protocol.OwnerToolSpec{Name: "owner_" + m.name, Capability: ownerMutationOperation(m)})
 	}
 	return out
+}
+
+func assertPromotionWorkCategory(t *testing.T, root map[string]any) {
+	t.Helper()
+	props := root["properties"].(map[string]any)
+	if props["assignee"] != nil {
+		t.Fatal("promotion advertises concrete assignment")
+	}
+	manager, ok := props["manager"].(map[string]any)
+	if !ok {
+		t.Fatal("promotion lost its only work-category input")
+	}
+	fields := manager["properties"].(map[string]any)
+	if len(fields) != 2 || fields["category_id"] == nil || fields["reason"] == nil {
+		t.Fatal("promotion must express work category/reason without identity or transaction guesses", manager)
+	}
+	for _, name := range []string{"category_id", "reason"} {
+		if !slices.Contains(manager["required"].([]any), any(name)) {
+			t.Fatal("incomplete work selector", manager)
+		}
+	}
+	required, _ := root["required"].([]any)
+	if slices.Contains(required, any("manager")) {
+		t.Fatal("sharing with an existing Issue must not reselect its owner")
+	}
+}
+
+func TestConsultationPromotionDiscoveryRetainsWorkCategory(t *testing.T) {
+	for _, spec := range NamedSpecs(agentconfig.Consultation) {
+		if spec.Name != "consultation_promote" {
+			continue
+		}
+		var root map[string]any
+		if err := json.Unmarshal(spec.InputSchema, &root); err != nil {
+			t.Fatal(err)
+		}
+		assertPromotionWorkCategory(t, planningSchemaAt(t, root, "payload"))
+		s := &Service{owner: workRequirementsOwner{}}
+		catalog, err := s.ownerCatalog(ownerCatalogArgs{SchemaType: "PromoteConsultationPayload"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(catalog.(map[string]any)["schema"].(json.RawMessage), &root); err != nil {
+			t.Fatal(err)
+		}
+		assertPromotionWorkCategory(t, root)
+		var wire map[string]any
+		if err := json.Unmarshal([]byte(argumentSchema(protocol.PromoteConsultationPayload{})), &wire); err != nil {
+			t.Fatal(err)
+		}
+		legacy := wire["definitions"].(map[string]any)["RequestIssueManagerPayload"].(map[string]any)
+		if legacy["properties"].(map[string]any)["agent_id"] == nil || wire["properties"].(map[string]any)["assignee"] == nil {
+			t.Fatal("promotion discovery narrowed legacy wire")
+		}
+		return
+	}
+	t.Fatal("consultation_promote is missing from Consultation purpose")
 }
 func (workRequirementsOwner) Call(context.Context, protocol.OwnerToolCall) (any, error) {
 	panic("discovery must not execute a mutation")

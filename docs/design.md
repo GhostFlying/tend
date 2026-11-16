@@ -2431,9 +2431,12 @@ runner 的业务 wire fixture 复用现有不可变空库模板，分别打开�
 
 普通模型为新任务的实现与独立验收提供 category_id / required_capabilities；新责任提供
 工作 category，implementation 与 implementation-economy 仍按难度/成本判断。
-工具发现同时覆盖 named Main/Issue owner、MCP 的同一 named 定义及 owner 类型目录；
+工具发现同时覆盖 named Main/Issue owner/Consultation、MCP 的同一 named 定义及 owner 类型目录；
 不展示 agent/runtime/model/effort、acceptance_execution 或 create 的 legacy manager/
-assignee 旁路。真实 host/OS/labels/workspace 约束保留，host 仅用于真实资源要求。
+assignee 旁路。consultation_promote 没有 owner 替代字段，保留兼容 manager 键，
+仅展示 category_id/reason；新 Issue 使用实际工作 category，已有 Issue 的来源共享
+保留原责任。旧有效 manager/assignee 和省略字段的默认语义仍由原业务入口处理。
+真实 host/OS/labels/workspace 约束保留，host 仅用于真实资源要求。
 同一 Agent 仍可并发；匹配、slot、租约及共享资源准入保持原规则。本决策不统一
 category/capability、不改变首次候选排序算法或私有 Agent 配置。
 

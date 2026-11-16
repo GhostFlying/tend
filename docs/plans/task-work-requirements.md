@@ -57,7 +57,8 @@ AgentRequirement、owner/self-execution 的输入补齐，以及设计文档；�
 `agent_selection` 的 category / required_capabilities，不新增平行调度合同。
 `hostedMutationSchema`、Main 的同名 owner 工具和 `owner_capabilities schema_type`
 同时投影所有可写选择类型：去掉 agent/runtime/model/effort、acceptance_execution，
-以及 create 的 assignee/legacy manager 旁路。真实 requirements.host_id、OS、labels、
+以及 Issue create 的 assignee/legacy manager 旁路。consultation promotion 保留
+manager.category_id/reason，避免删除该入口唯一的工作类别通道。真实 requirements.host_id、OS、labels、
 workspace 保留，说明只用于实际资源要求。旧请求仍完整校验/执行其硬过滤条件，
 不静默丢弃；通用 owner_call 的原始 JSON 也保留这一兼容性。发现面不是授权边界，
 不能声称从此无法通过旧 wire 发送硬过滤。
@@ -85,3 +86,27 @@ owner pin、资源限制，并复用/补查既有 continuation/slot/capability �
 并行边界：PR332 的实际 delta 由 owner 跟进；本项不改 scheduler、候选排序/随机、
 共享资源准入。共享 docs/design.md 仅新增 D250；AgentRequirement 所在文件仅新增
 来源类型，不删除或改变匹配字段。实际合入后核新 main 和最终 diff 再补查。
+
+## F1 修正：保留咨询转新责任的工作类别通道
+
+原候选的独立验收指出：CreateIssuePayload 有 owner.category_id 替代 manager，
+PromoteConsultationPayload 却没有。把两者一起删除 manager 导致 Consultation 发现面
+无法指定工作 category，省略后按旧语义固定回落 issue-manager；未登记该旧类别时
+真实 promotion 返回 not_found。接受此缺陷，保留原验收 changes_required 与复现原件。
+
+本次只修正发现投影：PromoteConsultationPayload 保留 manager 字段，将其投影为
+category_id/reason（复用 IssueOwnerRequest 的类别/原因结构并隐藏 agent_id），
+不暴露新责任不需要的 replace、epoch、source 或具体 Agent。新建责任应提供该类别；
+existing_issue_id 的来源共享仍使用已有责任，不要求重新选择类别。CreateIssuePayload
+继续使用 owner.category_id，隐藏其 legacy manager/assignee。底层 wire、CLI 完整输入、
+旧 manager.agent_id/省略 manager 的既有语义和系统 pin 均不改变，不新增协议适配。
+
+回归补齐 NamedSpecs(Consultation) 和 owner 类型发现；通过真实 consultation、认证
+owner 消息、HostedCoordinationCommand、PromoteConsultation、canonical Issue 创建，
+验证 investigation 与 implementation-economy 到达最终 OwnerSelection，不依赖注册
+issue-manager。另保留独立验收原 overlay 复现，修复后验证其发现面断言。
+
+验证采用原完整候选检查（已由独立验收核验原件）的有界复用，加本轮 tools/app 等
+实际反向依赖的增量 make check 和新鲜定向 race；原任务总 diff 仍以任务起始提交为
+基线，本轮增量检查单独标明前候选基线与证据身份。若影响计划要求完整兜底或发现
+新失败，遵守其实际选择，不将旧完整检查描述为新候选的重新全量执行。

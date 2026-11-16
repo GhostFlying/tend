@@ -3,11 +3,48 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
+
+func TestConsultationPromotionCLIWorkCategoryAndLegacyInputs(t *testing.T) {
+	for _, mode := range []string{"work_category", "legacy_manager_agent", "legacy_assignee"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFakeServer(t)
+			te := newTestEnv(t, f.srv.URL)
+			version := int64(3)
+			payload := protocol.PromoteConsultationPayload{
+				IssueSourceReference: protocol.IssueSourceReference{SourceMessageID: "msg_original", ExpectedSourceRevision: &version},
+				Plan:                 protocol.IssuePlan{Title: "Investigate", Project: "default", Intent: "Produce a report"},
+				Manager:              &protocol.RequestIssueManagerPayload{CategoryID: "investigation", Reason: "Work from the consultation"},
+			}
+			if mode == "legacy_manager_agent" {
+				payload.Manager.AgentID = "environment/investigator"
+			} else if mode == "legacy_assignee" {
+				payload.Manager = nil
+				payload.Assignee = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: "environment/investigator"}
+			}
+			body, _ := json.Marshal(payload)
+			if code := te.main("conversation", "promote", "consultation-id", "--data", string(body), "--dry-run"); code != exitOK {
+				t.Fatal(code, te.errOut.String())
+			}
+			var env protocol.Envelope
+			if err := json.Unmarshal(te.out.Bytes(), &env); err != nil {
+				t.Fatal(err)
+			}
+			var got protocol.PromoteConsultationPayload
+			if err := json.Unmarshal(env.Payload, &got); err != nil {
+				t.Fatal(err)
+			}
+			if env.Operation != "conversation.promote" || env.Target.ID != "consultation-id" || !reflect.DeepEqual(got, payload) || len(f.requests) != 0 {
+				t.Fatal("CLI changed valid promotion input or sent a request", te.out.String())
+			}
+		})
+	}
+}
 
 func TestConversationHandoffOwnerAndPrepareOnly(t *testing.T) {
 	for _, prepare := range []bool{false} {
