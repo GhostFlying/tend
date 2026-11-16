@@ -122,6 +122,10 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	var events []Event
 	var evidence []protocol.IssueEvidence
 	switch p.Action {
+	case "recover_preparation":
+		if err := recoverDeliveryPreparation(ctx, x, tx, issue, &d, p); err != nil {
+			return Outcome{}, err
+		}
 	case "bind":
 		if err := bindLiveDeliveryTask(ctx, tx, issue, d, p); err != nil {
 			return Outcome{}, err
@@ -513,7 +517,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		d.Status = "complete"
 	default:
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery action must be submit_result, prepare, resume, bind, report, end or complete")
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery action must be submit_result, prepare, resume, recover_preparation, bind, report, end or complete")
 	}
 	d.Revision++
 	d.Reason, d.Evidence = p.Reason, evidence

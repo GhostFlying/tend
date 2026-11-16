@@ -66,7 +66,7 @@ type UpdateIssueDeliveryPayload struct {
 	ExecutionRunID              string `json:"execution_run_id,omitempty"`
 	ExecutionDutyRevision       int64  `json:"execution_duty_revision,omitempty"`
 	ExpectedTaskControlRevision *int64 `json:"expected_task_control_revision,omitempty"`
-	// submit_result, prepare, resume, bind, report, end, complete.
+	// submit_result, prepare, resume, recover_preparation, bind, report, end, complete.
 	Action    string                  `json:"action"`
 	Candidate *IssueDeliveryCandidate `json:"candidate,omitempty"`
 	UpgradeID string                  `json:"upgrade_id,omitempty"`

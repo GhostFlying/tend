@@ -219,11 +219,14 @@ type SharedDeliveryReviewPage struct {
 type UpdateSharedDeliveryReviewPayload struct {
 	ReviewerRole RunRole `json:"reviewer_role,omitempty"`
 	IssueControlPayload
-	ExpectedReviewRevision *int64                    `json:"expected_review_revision,omitempty"`
-	DeliveryID             string                    `json:"delivery_id"`
-	Action                 string                    `json:"action"`
-	TaskID                 string                    `json:"task_id,omitempty"`
-	ReviewerTaskID         string                    `json:"reviewer_task_id,omitempty"`
-	AcceptanceID           string                    `json:"acceptance_id,omitempty"`
-	Dispositions           []SharedReviewDisposition `json:"dispositions,omitempty"`
+	ExpectedHeadSHA            string                    `json:"expected_head_sha,omitempty"`
+	ExpectedBaseSHA            string                    `json:"expected_base_sha,omitempty"`
+	ExpectedRequirementsDigest string                    `json:"expected_requirements_digest,omitempty"`
+	ExpectedReviewRevision     *int64                    `json:"expected_review_revision,omitempty"`
+	DeliveryID                 string                    `json:"delivery_id"`
+	Action                     string                    `json:"action"`
+	TaskID                     string                    `json:"task_id,omitempty"`
+	ReviewerTaskID             string                    `json:"reviewer_task_id,omitempty"`
+	AcceptanceID               string                    `json:"acceptance_id,omitempty"`
+	Dispositions               []SharedReviewDisposition `json:"dispositions,omitempty"`
 }

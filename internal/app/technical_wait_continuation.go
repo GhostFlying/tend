@@ -21,7 +21,7 @@ func agentTechnicalWait(ctx context.Context, q store.Querier, d store.DecisionRo
 	if err := json.Unmarshal([]byte(d.AnswerJSON), &answer); err != nil {
 		return false, err
 	}
-	if answer.OwnerSubject != "" || answer.Actor == nil || answer.Continuation == nil || answer.Continuation.Mode != protocol.DecisionWait || d.AnsweredMessageID == "" {
+	if answer.Actor == nil || answer.Continuation == nil || answer.Continuation.Mode != protocol.DecisionWait || d.AnsweredMessageID == "" {
 		return false, nil
 	}
 	actor := answer.Actor

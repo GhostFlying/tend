@@ -2366,3 +2366,14 @@ idle claim 的已有预检可以利用当前已登记库存的类别集合，排
 D247 的阶段来源统一返回同 Task/current spec 的原 artifact ID、payload 和候选身份。准备、实际质量绑定、继续、最终来源及安装共用该持久链；普通 owner 进度及生命周期指针不擦除阶段。真实独立报告或验收以明确 reviewed_artifact_id 绑定当前结果或当前责任最近阶段，原身份、passed、冻结政策和不可覆盖结论约束保持。候选刷新同时原子更新 duty 的真实 artifact/acceptance 列及 JSON，不能以普通报告替代实际通过阶段。
 
 已 complete/report/ended 的 execution_history 原归档 artifact 在 store 定义的创建顺序中划定已结束责任边界，只读取其后阶段；executing 的候选接续归档不切断未履行责任。边界原件缺失保持 unknown，不能按墙钟、忽略不匹配候选或改写历史放行。真实 settled duty 仍须先沿原 Task continue 归档再开始后续责任；不增加直接重开、强制解绑或迁移能力。新责任中新建阶段仍保留其实际独立要求。
+
+
+## D248：持续责任的正常恢复与可靠性验证
+
+R8–R18 的业务恢复保留原 Task、执行与审阅历史，不以协调状态伪造质量或安装结果。共享审阅开始/复查可携带读取到的 head/base/requirements 摘要，在事务内与实际 provider 候选核对；已完成的报告绑定其真实候选。原轮次的实际执行停止、资源和外部操作回执收敛后，可通过 `wait` 在精确 review revision 下释放无质量结论的协调状态。已有实际结论必须正常 record，同一 reviewer Task 追加真实 Run 继续，不清除旧轮次。
+
+未启动的旧部署自绑定可通过 `recover_preparation` 归档并恢复准备责任，使用当前 Issue/Task 控制版本与实际授权；任何真实升级、pending/unknown 外部动作、活动 writer/租约、变化的责任及已有 typed stage 都继续原恢复语义。仅保留同 Task 的静态工作区占用不等于活动 writer，也不要求伪造工作区释放。该入口不完成交付、不产生新批准或新来源；原执行归档后，真实提交与独立验收再沿现有 prepare/bind 进入当前候选。
+
+持续 Task 的新 artifact 可重新准入其先前自动关闭的审阅载体。依据不可变关闭版本的实际 acceptance 操作、actor、原验收身份、相同计划及责任判断来源；关闭前纯进度更新不改变审阅责任。人类后续修改、暂停、取消、backlog 和已结束祖先保留门禁，旧验收与关闭快照不改写。技术等待依据实际 actor、来源消息和当前责任分类，代理传输的 owner_subject 不覆盖真实 actor。外部等待错误目标返回具体字段及合法业务 ID 的确定输入错误，不以 internal 触发原请求循环重试。
+
+验证从实际失败入口驱动到原业务动作恢复，明确区分真实内部转换、外部 provider/安装替身和历史 fixture。最终来源独立审阅、完整本地验证、必要 CI、合入与实际安装各自保留证据；辅助观察和配置采样不引入新的业务审批。实施见 `docs/plans/continuous-reliability-business-recovery.md`。

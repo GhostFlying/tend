@@ -269,7 +269,7 @@ func TestStoppedResponsibilityAdoptionRejectsUnprovedTransfers(t *testing.T) {
 }
 
 func TestTechnicalWaitSourceAndScopeBoundaries(t *testing.T) {
-	for _, scenario := range []string{"main_supervisor", "human_answer", "unknown_actor", "other_issue"} {
+	for _, scenario := range []string{"main_supervisor", "main_owner_subject", "human_answer", "unknown_actor", "other_issue"} {
 		t.Run(scenario, func(t *testing.T) {
 			h := hostedManagerHarness(t)
 			issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
@@ -297,7 +297,7 @@ func TestTechnicalWaitSourceAndScopeBoundaries(t *testing.T) {
 					t.Fatal(err)
 				}
 				a := readAttentionForTest(t, h, id)
-				if scenario == "main_supervisor" {
+				if scenario == "main_supervisor" || scenario == "main_owner_subject" {
 					if op := hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "attention", ID: id}, rev(a.Responsibility.Revision), protocol.HandleAttentionPayload{ExpectedAssignmentEpoch: a.Responsibility.AssignmentEpoch, Reason: "Escalate the existing technical dependency"}, HandleAttention{Escalate: true}); op.Status != protocol.OpSucceeded {
 						t.Fatal(op)
 					}
@@ -310,6 +310,16 @@ func TestTechnicalWaitSourceAndScopeBoundaries(t *testing.T) {
 				seq := int64(1)
 				if op := hostedEffect(t, h, principal, turn, seq, protocol.Target{Type: "attention", ID: id}, rev(a.Responsibility.Revision), p, HandleAttention{}); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
+				}
+			}
+			if scenario == "main_owner_subject" {
+				// Retain the historical transport owner attribution alongside the
+				// actual Main Agent actor and its real agent-authored answer.
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE decisions SET answer_json=json_set(answer_json,'$.owner_subject','transport-owner') WHERE decision_id=?`, q.DecisionID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
 				}
 			}
 			if scenario == "unknown_actor" {
@@ -328,7 +338,7 @@ func TestTechnicalWaitSourceAndScopeBoundaries(t *testing.T) {
 			v := f.view(t)
 			cmd := ResumeDecisionContinuation{FromMessage: true}
 			op, err := h.app.Execute(t.Context(), principal, h.env(cmd.Operation(), protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.ResumeDecisionContinuationPayload{ExpectedRevision: v.Revision}, rev(v.TaskControlRevision)), HostedCoordinationCommand{Command: cmd, ExecutionID: turn.RequestID, EffectSeq: 2})
-			if scenario == "main_supervisor" {
+			if scenario == "main_supervisor" || scenario == "main_owner_subject" {
 				if err != nil || op.Status != protocol.OpSucceeded {
 					t.Fatal("actual main supervisor could not release its Agent wait", op, err)
 				}

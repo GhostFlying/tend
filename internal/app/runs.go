@@ -233,6 +233,13 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err != nil {
 		return Outcome{}, err
 	}
+	if !fenced && d.Task.Lifecycle == protocol.TaskAwaitingAcceptance {
+		reviewEvents, err := readmitOwnerReview(ctx, x, tx, rc.task.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, reviewEvents...)
+	}
 	return Outcome{Result: map[string]any{"artifact_id": artifactID, "task": newTaskResult(d.Task, actions)}, Events: events}, nil
 }
 
