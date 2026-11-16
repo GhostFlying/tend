@@ -171,6 +171,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 - 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`）按实际影响选择，main/release 保持完整覆盖及交叉编译；required check 校验来源绑定的计划及全部必要结果。
 - 每个 PR 合并前都要经过独立 review：在 PR 分支上运行 `codex review --base main -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`。review 意见由提交者逐条判断：确实的缺陷和值得做的改进在合并前修掉；过度防御的意见（为假设性场景加防护、超出本次范围的扩展）可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。合入前确认本地影响计划、独立 review 和必要 CI 均覆盖最终候选/基线；候选或基线变更后重新计算影响并评估已有证据，修改较大时重新 review。不增加永久检查账本或额外审批步骤。
 - 历史保持纯线性：GitHub 仓库只允许 rebase & merge，禁止 merge commit 和 squash；`main` 禁止直接 push 和 force push。PR 合并前先 rebase 到最新的 `main`。
+- PR 来源标记：仅当 PR 由真实的 Tend 受管 Issue/Task 推进产出时，给该 PR 添加 GitHub label `tend`。是否受管以实际的 Issue/Task 上下文为准，不凭目录名、分支名或 GitHub 作者账号判断；外部维护（如 Codex 直接维护）、人类直接提交的 PR 以及其他仓库的 PR 都不标记。
+- `tend` label 不存在时用 `gh label create tend` 创建一次，已存在则直接复用，不重复创建、不改动其他 label。新建 PR 可在 `gh pr create` 时带 `--label tend`；已开放的真实受管 PR 经原负责人确认后用 `gh pr edit --add-label tend` 补标，并用 `gh pr view` 读回。label 只用于来源辨识，不构成审阅或合入授权。
 - 远程：GitHub，公开仓库。
 - git 身份使用仓库或全局已有配置，不添加 agent、bot 或工具作为作者或 co-author。
 - 不提交生成的二进制、数据库文件、`.env`、`.local/`，也不提交 `spikes/` 产生的输出。
