@@ -18,6 +18,9 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	}
 	action := args[0]
 	fs := newFlags(e, kind+" "+action)
+	if kind == "conversation" && action == "promote" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{kind, action})); fs.PrintDefaults() }
+	}
 	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
 	data := fs.String("data", "", "JSON payload; retained message input includes its original message_id")
 	file := fs.String("file", "", "JSON payload file or - for stdin")

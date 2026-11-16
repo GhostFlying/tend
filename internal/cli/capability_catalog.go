@@ -355,6 +355,9 @@ func commandUsage(prefix []string) string {
 	}
 	slices.Sort(names)
 	var out strings.Builder
+	if name == "conversation" || name == "conversation promote" {
+		out.WriteString("\nConsultation promotion: for a new Issue, provide manager: {category_id: <work-category>, reason: <text>} with the plan and exact source_message_id/expected_source_revision. Ordinary work selects a category without a concrete Agent; the compatible manager key does not require a special issue-manager category. With existing_issue_id, retain its existing responsibility and supply its current revision/assignment epoch and selected sources. The complete authenticated owner JSON still accepts legacy manager.agent_id and assignee; no valid wire fields are discarded.\n")
+	}
 	prefixName := "tend"
 	if name != "" {
 		if name == "worker-close" {
