@@ -2,11 +2,13 @@ package protocol
 
 // IssueProgress is a manager's assessment, separate from execution facts.
 type IssueProgress struct {
-	Summary       string        `json:"summary"`
-	NextStep      string        `json:"next_step"`
-	IssueRevision int64         `json:"issue_revision"`
-	UpdatedAt     int64         `json:"updated_at"`
-	UpdatedBy     IssueAssignee `json:"updated_by"`
+	Historical       bool          `json:"historical,omitempty"`
+	HistoricalReason string        `json:"historical_reason,omitempty"`
+	Summary          string        `json:"summary"`
+	NextStep         string        `json:"next_step"`
+	IssueRevision    int64         `json:"issue_revision"`
+	UpdatedAt        int64         `json:"updated_at"`
+	UpdatedBy        IssueAssignee `json:"updated_by"`
 }
 
 type UpdateIssueProgressPayload struct {

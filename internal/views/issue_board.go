@@ -113,7 +113,7 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		if err != nil {
 			return out, err
 		}
-		out.Items = append(out.Items, protocol.IssueSummary{IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
+		out.Items = append(out.Items, protocol.IssueSummary{EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
 	}
 	return out, nil
 }
@@ -156,7 +156,7 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 	if err != nil {
 		return card, err
 	}
-	card.Progress, err = store.IssueProgress(ctx, q, issue.IssueID, issue.Revision)
+	card.Progress, err = issueProgressProjection(ctx, q, issue)
 	if err != nil {
 		return card, err
 	}

@@ -87,7 +87,7 @@ func TestInitialOwnerHandoffBatchKeepsLeaseReceiptAndEventBarriers(t *testing.T)
 		for _, n := range queries.batches {
 			calls += n
 		}
-		if calls != 4 {
+		if calls != 1 {
 			t.Fatalf("candidate barriers prepared %d queries for two Issues", calls)
 		}
 		if _, err := initialOwnerHandoffBlockers(ctx, queries, nil); err != nil {

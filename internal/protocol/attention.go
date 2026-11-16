@@ -74,6 +74,8 @@ type HandleAttentionPayload struct {
 	Reason                  string                      `json:"reason"`
 }
 type AttentionView struct {
+	Historical       bool   `json:"historical,omitempty"`
+	HistoricalReason string `json:"historical_reason,omitempty"`
 	Attention
 	IssueTitle  string                `json:"issue_title,omitempty"`
 	IssueIntent string                `json:"issue_intent,omitempty"`

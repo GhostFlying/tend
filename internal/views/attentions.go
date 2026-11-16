@@ -110,6 +110,9 @@ func (reader *attentionReader) read(ctx context.Context, q store.Querier, id str
 		}
 		v.Choice = &d
 	}
+	if err := attentionApplicability(ctx, q, &v); err != nil {
+		return v, err
+	}
 	return v, nil
 }
 func Attentions(ctx context.Context, q store.Querier, f AttentionFilter) (protocol.AttentionPage, error) {

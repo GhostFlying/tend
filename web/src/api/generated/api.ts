@@ -739,6 +739,8 @@ export interface AttentionView {
   created_at: number;
   decision?: DecisionView;
   decision_id?: string;
+  historical?: boolean;
+  historical_reason?: string;
   issue_id?: string;
   issue_intent?: string;
   issue_title?: string;
@@ -970,6 +972,7 @@ export interface IssueView {
   deadlines?: IssueDeadline[];
   delivery_duties?: IssueDeliveryDuty[];
   depends_on: string[] | null;
+  effective_work_status?: IssueWorkStatus;
   historical?: boolean;
   issue_id: string;
   manager?: IssueManagerView;
@@ -1532,6 +1535,8 @@ export interface IssueStage {
  * via the `definition` "IssueProgress".
  */
 export interface IssueProgress {
+  historical?: boolean;
+  historical_reason?: string;
   issue_revision: number;
   next_step: string;
   summary: string;
@@ -5611,6 +5616,7 @@ export interface IssueSummary {
   assignment_epoch: number;
   assignment_state: string;
   board?: IssueBoardCard;
+  effective_work_status?: IssueWorkStatus;
   execution?: ExecutionCounts;
   issue_id: string;
   owner_selection?: IssueOwnerSelection;

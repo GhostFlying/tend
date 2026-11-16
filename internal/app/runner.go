@@ -1298,6 +1298,13 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 			return res, protocol.Errorf(protocol.CodeInvalidRequest, "event %d is malformed", e.Seq)
 		}
 	}
+	// Attribute this validated batch to its actual original business position.
+	// Empty batches clear an enclosing event cursor instead of inheriting it.
+	var firstSequence int64
+	if len(events) > 0 {
+		firstSequence = events[0].Seq
+	}
+	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, runID, firstSequence), protocol.OpRunnerEvents)
 	bodies := make([][]byte, 0, len(events))
 	for _, event := range events {
 		bodies = append(bodies, event.Body)

@@ -103,6 +103,9 @@ type WorkerSpec struct {
 	// new thread with the full brief (D61). A harness may keep more than
 	// an ID here, such as how to find an agent that outlives the worker.
 	Thread string
+	// ThreadToolsetHash is executor-owned identity for the persisted native tool
+	// schema. It is not inferred from the current handler or supplied by a model.
+	ThreadToolsetHash string
 	// OnThread, when set, is called with the worker's thread once it
 	// exists and before the worker's first turn, so that the thread can be
 	// recorded before any work happens in it, and again whenever the

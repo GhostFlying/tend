@@ -123,7 +123,32 @@ func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.
 	if process == "" {
 		process = ids.New(protocol.PrefixLaunch)
 	}
-	return upgradectl.New(upgradectl.Config{RecoveryReady: func(ctx context.Context) error {
+	return upgradectl.New(upgradectl.Config{HealthDiagnostics: func(ctx context.Context) *protocol.UpgradeHealthDiagnostics {
+		components := map[string]upgradeReadyComponent{}
+		if front != nil {
+			components["main_thread"] = front
+		}
+		if background != nil {
+			components["issue_managers"] = background
+		}
+		facts := upgradeComponentHealth(ctx, time.Now, components)
+		started := time.Now()
+		uncertain, err := a.AgentCompactionsUncertain(ctx)
+		facts.PhaseMillis["agent_compactions"] = max(0, time.Since(started).Milliseconds())
+		component := protocol.UpgradeHealthComponent{Name: "agent_compactions"}
+		if err == nil {
+			ready := !uncertain
+			component.Ready = &ready
+		}
+		if err != nil || uncertain {
+			failed := false
+			facts.ServiceReady = &failed
+			component.Failure = "agent_compaction_reconciliation_pending"
+			facts.Failures = append(facts.Failures, component.Failure)
+		}
+		facts.Components = append(facts.Components, component)
+		return facts
+	}, RecoveryReady: func(ctx context.Context) error {
 		if _, err := a.CurrentUpgrade(ctx); err != nil {
 			return err
 		}

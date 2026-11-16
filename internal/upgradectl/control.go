@@ -34,6 +34,7 @@ type Backend interface {
 	ServerUpgradeHealth(context.Context, protocol.UpgradeBinding) (protocol.UpgradeHealth, error)
 }
 type Config struct {
+	HealthDiagnostics         func(context.Context) *protocol.UpgradeHealthDiagnostics
 	ReleaseHTTP               *http.Client
 	InspectExecutableSource   func(string) (release.SourceIdentity, error)
 	ObserveUpdater            func(context.Context, string) (updater.SelfUpdateStatus, error)
@@ -401,15 +402,8 @@ func (c *Controller) Handler() http.Handler {
 					if binding.InstanceID != c.cfg.Instance || binding.ProcessInstanceID != c.cfg.ProcessInstance || binding.ArtifactSHA256 != c.cfg.BinarySHA256 {
 						err = errors.New("upgradectl: health belongs to another process")
 					} else {
-						health, healthErr := c.app.ServerUpgradeHealth(r.Context(), binding)
-						err = healthErr
-						if healthErr == nil {
-							observed, observeErr := c.observe(r.Context())
-							if observeErr != nil || !observed.Healthy || !observed.MainDrained {
-								health.Healthy = false
-							}
-							value = health
-						}
+						health, healthErr := c.normalHealth(r.Context(), binding, r.URL.Query().Get("diagnostics") == "1")
+						value, err = health, healthErr
 					}
 				}
 			default:

@@ -26,7 +26,7 @@
   "agents": {"mode": "independent"},
   "bundled_skills": true,
   "auto_sync": true,
-  "interval_seconds": 60
+  "interval_seconds": 21600
 }
 ```
 
@@ -91,7 +91,7 @@ tend codex-env reconcile worker --request-id ORIGINAL_REQUEST_ID
 tend codex-env watch disable --revision 1
 ```
 
-watch 使用用户 systemd 服务；enable/disable 管理它自己的 revision，status 返回该值。`watch run` 是前台同步进程入口。只同步 enabled 且 auto_sync 未关闭的环境，默认每 60 秒检查选中内容；没有变化不发布新快照，也不调用模型。同步失败保留有效快照，状态给出原因；超时或退出不明时先 reconcile 原请求，不自动换请求重放未知操作。
+watch 使用用户 systemd 服务；enable/disable 管理它自己的 revision，status 返回该值。`watch run` 是前台同步进程入口。只同步 enabled 且 auto_sync 未关闭的环境，默认每六小时完整单向同步所选 skills/plugins，下一次时间从本轮完成后计算；包内修改也在下一轮传播。每轮直接复制、验证，不另做变化探测或预览。内容相同复用已有快照，不调用模型。显式 `sync` 立即同步。已有显式周期继续生效，部署时需单独调整。同步失败保留有效快照，状态给出原因；超时或退出不明时先 reconcile 原请求，不自动换请求重放未知操作。
 
 用户服务保存启用时的工具 PATH，确保非交互进程能找到本机 Codex。`rollback` 设置 sync_held，避免下一轮自动同步立即撤销人工回退；显式 sync 或环境 update 解除该暂停。禁用 watch 保留环境和当前快照。enable 在任何外部操作前的预检失败记为明确失败，允许后续 disable；已可能发出的 systemd 操作仍按原请求对账。
 

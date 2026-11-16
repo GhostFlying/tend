@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestIdleClaimUnmatchedInitialOwnerDoesNotAcquireWriter(t *testing.T) {
 			host    string
 			runtime *protocol.RunnerRuntime
 		}{{"linux-1", nil}, {"missing-inventory", r}} {
-			potential, err := initialOwnerPotentialForHost(t.Context(), tx.Q(), unknown.host, unknown.runtime)
+			potential, err := h.app.initialOwnerClaimPossible(t.Context(), tx.Q(), unknown.host, unknown.runtime)
 			if err != nil {
 				return err
 			}
@@ -132,4 +133,56 @@ func TestInitialOwnerPreflightRetainsPendingReceiptAndManagerMaintenance(t *test
 		t.Fatal(err)
 	}
 	check(false)
+}
+
+func TestIdleClaimSkipsUnmatchedOwnerDefinitionsWithoutWriter(t *testing.T) {
+	for _, mismatch := range []string{"category", "agent"} {
+		t.Run(mismatch, func(t *testing.T) {
+			h, runtime := managerClaimHarness(t)
+			issue := createCanonicalOwnerTestIssue(t, h)
+			category, agent := protocol.DefaultIssueManagerCategory, ""
+			if mismatch == "category" {
+				category = "unmatched-manager"
+				inventoryCategory(t, h, category, 0, "active")
+			} else {
+				agent = "linux-1/another-agent"
+			}
+			request := protocol.RequestIssueManagerPayload{CategoryID: category, AgentID: agent, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Record an explicitly selected owner"}
+			issue = canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, request, rev(issue.Revision)), RequestIssueManager{}))
+			env := h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil)
+			func() {
+				entered, release := make(chan struct{}), make(chan struct{})
+				done := make(chan error, 1)
+				go func() {
+					done <- h.store.Write(t.Context(), func(*store.Tx) error { close(entered); <-release; return nil })
+				}()
+				<-entered
+				defer func() {
+					close(release)
+					if err := <-done; err != nil {
+						t.Error(err)
+					}
+				}()
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				op, err := h.app.Execute(ctx, runner("linux-1"), env, Claim{})
+				if err != nil || op.Status != protocol.OpSucceeded || string(op.Result) != `{"assignment":null}` {
+					t.Fatal("unmatched owner poll attempted occupied writer", op, err)
+				}
+			}()
+			if h.count("runs") != 0 || h.count("tasks") != 0 {
+				t.Fatal("idle preflight allocated an execution")
+			}
+			request.CategoryID, request.AgentID = protocol.DefaultIssueManagerCategory, "linux-1/alpha"
+			issue = canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, request, rev(issue.Revision)), RequestIssueManager{}))
+			op := h.exec(runner("linux-1"), env, Claim{})
+			var claimed claimResult
+			if err := json.Unmarshal(op.Result, &claimed); err != nil {
+				t.Fatal(err)
+			}
+			if claimed.Assignment.Manager == nil || claimed.Assignment.Execution == nil || claimed.Assignment.Manager.IssueID != issue.IssueID || claimed.Assignment.Execution.Identity.LocalID != "alpha" {
+				t.Fatal("fresh matching selection was skipped", op, claimed)
+			}
+		})
+	}
 }

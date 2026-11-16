@@ -96,7 +96,14 @@ func (a *HTTPAuthority) Authorize(ctx context.Context, b Binding) (Grant, error)
 }
 func (a *HTTPAuthority) Health(ctx context.Context, b Binding) (Health, error) {
 	var h Health
-	err := a.request(ctx, a.cfg.HealthURL, b, &h)
+	endpoint, err := url.Parse(a.cfg.HealthURL)
+	if err != nil {
+		return h, err
+	}
+	query := endpoint.Query()
+	query.Set("diagnostics", "1")
+	endpoint.RawQuery = query.Encode()
+	err = a.request(ctx, endpoint.String(), b, &h)
 	return h, err
 }
 

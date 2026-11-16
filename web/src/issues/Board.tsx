@@ -669,14 +669,16 @@ const BoardCard = memo(function BoardCard({
           {responsibilityLabel(item)}
         </Badge>
       </div>
-      {!["closed", "cancelled"].includes(item.state) && b?.progress?.next_step && (
-        <p
-          className={styles.pending}
-          title={`负责人记录于 Issue 版本 ${b.progress.issue_revision}`}
-        >
-          下一步 · {b.progress.next_step}
-        </p>
-      )}
+      {!["closed", "cancelled"].includes(item.state) &&
+        !b?.progress?.historical &&
+        b?.progress?.next_step && (
+          <p
+            className={styles.pending}
+            title={`负责人记录于 Issue 版本 ${b.progress.issue_revision}`}
+          >
+            下一步 · {b.progress.next_step}
+          </p>
+        )}
       {!!b?.children?.total && (
         <ChildProgress id={item.issue_id} summary={b.children} onSelect={onSelect} />
       )}

@@ -15,7 +15,7 @@ import (
 func TestFault_StrictWorkerResumeDoesNotCreateReplacement(t *testing.T) {
 	ws, servers := fakeWorkers(t)
 	ws.opts.StrictResume = true
-	_, err := ws.Start(t.Context(), harness.WorkerSpec{Role: protocol.RoleImplement, Thread: "original", OnThread: func(string) error {
+	_, err := ws.Start(t.Context(), harness.WorkerSpec{Role: protocol.RoleImplement, Thread: "original", ThreadToolsetHash: WorkerToolsetHash(harness.WorkerSpec{Role: protocol.RoleImplement}), OnThread: func(string) error {
 		t.Error("failed resume changed the recorded thread")
 		return nil
 	}})
@@ -73,7 +73,7 @@ func TestDirectWorkerRecordsNativeIdentityWithoutShorteningExecution(t *testing.
 func TestStoppedTaskSessionMissingStartsFreshWithRebuiltContext(t *testing.T) {
 	ws, servers := fakeWorkers(t)
 	ws.opts.StrictResume = true
-	w, err := ws.Start(t.Context(), harness.WorkerSpec{RunID: "new", Role: protocol.RoleImplement, Thread: "original", Spec: json.RawMessage(`{"goal":"original issue","scope":"CURRENT_RECONSTRUCTED_CONTEXT"}`), SessionContinuation: &protocol.SessionContinuation{RunID: "stopped", ThreadID: "original"}})
+	w, err := ws.Start(t.Context(), harness.WorkerSpec{RunID: "new", Role: protocol.RoleImplement, Thread: "original", ThreadToolsetHash: WorkerToolsetHash(harness.WorkerSpec{Role: protocol.RoleImplement}), Spec: json.RawMessage(`{"goal":"original issue","scope":"CURRENT_RECONSTRUCTED_CONTEXT"}`), SessionContinuation: &protocol.SessionContinuation{RunID: "stopped", ThreadID: "original"}})
 	if err != nil {
 		t.Fatal(err)
 	}

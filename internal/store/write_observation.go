@@ -106,7 +106,7 @@ type WriteObservation struct {
 	// identify all writers that occupied the connection during this wait.
 	ActiveWriter         *ActiveWriteSnapshot
 	WaitFailureSampledAt time.Time
-	// ContextState is captured at an ErrTxDone failure boundary. It describes
+	// ContextState is captured at the failing write boundary. It describes
 	// cancellation state without replacing the returned error or claiming cause.
 	ContextState          string
 	Total                 time.Duration
@@ -281,7 +281,7 @@ func (c *writeCall) setLiveStage(stage string) {
 }
 
 func (c *writeCall) failedContext(ctx context.Context, err error) {
-	if c == nil || !errors.Is(err, sql.ErrTxDone) {
+	if c == nil || err == nil {
 		return
 	}
 	switch ctx.Err() {

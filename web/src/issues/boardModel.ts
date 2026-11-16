@@ -10,8 +10,9 @@ export const boardColumns: readonly { id: IssueWorkStatus; label: string }[] = [
 ];
 
 export const workStatus = (
-  item: Pick<IssueSummary, "board" | "state" | "work_status">,
+  item: Pick<IssueSummary, "board" | "state" | "work_status" | "effective_work_status">,
 ): IssueWorkStatus =>
+  item.effective_work_status ??
   item.board?.status ??
   (item.state === "closed"
     ? "done"
@@ -50,7 +51,7 @@ export function responsibilityLabel(item: IssueSummary): string {
   if (execution !== "暂无执行") return execution;
   if (item.state === "paused") return "Issue 已暂停";
   if (board?.children?.running) return "子 Issue 正在推进";
-  if (board?.progress?.next_step) return "继续推进";
+  if (board?.progress?.next_step && !board.progress.historical) return "继续推进";
   return "待确认下一步";
 }
 

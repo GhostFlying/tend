@@ -14,7 +14,8 @@ import (
 )
 
 func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.IssueView, facts executionFacts) error {
-	p, err := store.IssueProgress(ctx, q, out.IssueID, out.Revision)
+	out.EffectiveWorkStatus = out.BoardStatus()
+	p, err := issueProgressProjection(ctx, q, out.Issue)
 	if err != nil {
 		return err
 	}

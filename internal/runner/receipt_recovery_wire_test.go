@@ -44,7 +44,7 @@ func TestReceiptRecoveryWorkerGiveUpWireRetriesUntilOwnerCancel(t *testing.T) {
 	ctx := t.Context()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 19)
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "server.db"), clock.Now)
+	db, err := wireLedgerFixture.Open(ctx, filepath.Join(t.TempDir(), "server.db"), clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,8 +2,9 @@ package protocol
 
 // IssueSummary describes canonical responsibility, never a legacy facade row.
 type IssueSummary struct {
-	Board     *IssueBoardCard  `json:"board,omitempty"`
-	Execution *ExecutionCounts `json:"execution,omitempty"`
+	EffectiveWorkStatus IssueWorkStatus  `json:"effective_work_status,omitempty"`
+	Board               *IssueBoardCard  `json:"board,omitempty"`
+	Execution           *ExecutionCounts `json:"execution,omitempty"`
 	IssueControl
 	Revision int64  `json:"revision"`
 	Title    string `json:"title"`
@@ -45,18 +46,19 @@ type IssueSourceReview struct {
 }
 
 type IssueView struct {
-	QueueReason        *QueueWaitReason          `json:"queue_reason,omitempty"`
-	Pause              *IssuePauseProgress       `json:"pause,omitempty"`
-	Children           *IssueChildProgress       `json:"children,omitempty"`
-	DeliveryDuties     []IssueDeliveryDuty       `json:"delivery_duties,omitempty"`
-	OwnershipPolicy    string                    `json:"ownership_policy,omitempty"`
-	ResponsibilityRuns []ExecutionResponsibility `json:"responsibility_runs,omitempty"`
-	Manager            *IssueManagerView         `json:"manager,omitempty"`
-	Progress           *IssueProgress            `json:"progress,omitempty"`
-	Conversation       *IssueConversationBinding `json:"conversation,omitempty"`
-	Ancestors          []IssueAncestor           `json:"ancestors,omitempty"`
-	Attentions         *AttentionPage            `json:"attentions,omitempty"`
-	Deadlines          []IssueDeadline           `json:"deadlines,omitempty"`
+	EffectiveWorkStatus IssueWorkStatus           `json:"effective_work_status,omitempty"`
+	QueueReason         *QueueWaitReason          `json:"queue_reason,omitempty"`
+	Pause               *IssuePauseProgress       `json:"pause,omitempty"`
+	Children            *IssueChildProgress       `json:"children,omitempty"`
+	DeliveryDuties      []IssueDeliveryDuty       `json:"delivery_duties,omitempty"`
+	OwnershipPolicy     string                    `json:"ownership_policy,omitempty"`
+	ResponsibilityRuns  []ExecutionResponsibility `json:"responsibility_runs,omitempty"`
+	Manager             *IssueManagerView         `json:"manager,omitempty"`
+	Progress            *IssueProgress            `json:"progress,omitempty"`
+	Conversation        *IssueConversationBinding `json:"conversation,omitempty"`
+	Ancestors           []IssueAncestor           `json:"ancestors,omitempty"`
+	Attentions          *AttentionPage            `json:"attentions,omitempty"`
+	Deadlines           []IssueDeadline           `json:"deadlines,omitempty"`
 	Issue
 	Historical      bool                       `json:"historical,omitempty"`
 	ContextRevision int64                      `json:"context_revision,omitempty"`

@@ -19,7 +19,11 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 		if v.Board != nil {
 			fmt.Fprintf(w, "  Current responsibility: %d open actions; %d need the human owner\n", v.Board.AttentionCount, v.Board.OwnerAttentionCount)
 			if v.Board.Progress != nil && v.Board.Progress.NextStep != "" {
-				fmt.Fprintf(w, "  Next step (assessment at revision %d): %s\n", v.Board.Progress.IssueRevision, v.Board.Progress.NextStep)
+				label := "Next step"
+				if v.Board.Progress.Historical {
+					label = "Historical next step"
+				}
+				fmt.Fprintf(w, "  %s (assessment at revision %d): %s\n", label, v.Board.Progress.IssueRevision, v.Board.Progress.NextStep)
 			}
 		}
 		if v.Board != nil && v.Board.Children != nil {
@@ -44,7 +48,11 @@ func printIssueView(e *Env, v protocol.IssueView) error {
 		printIssueChildren(out, v.IssueID, v.Children)
 	}
 	if v.Progress != nil {
-		fmt.Fprintf(out, "Current result: %s\nNext step: %s\n", v.Progress.Summary, v.Progress.NextStep)
+		if v.Progress.Historical {
+			fmt.Fprintf(out, "Historical assessment (revision %d; %s): %s\nHistorical next step: %s\n", v.Progress.IssueRevision, v.Progress.HistoricalReason, v.Progress.Summary, v.Progress.NextStep)
+		} else {
+			fmt.Fprintf(out, "Current result: %s\nNext step: %s\n", v.Progress.Summary, v.Progress.NextStep)
+		}
 		if v.Progress.IssueRevision != v.Revision {
 			fmt.Fprintln(out, "Progress describes an earlier Issue revision; recheck the current evidence.")
 		}
