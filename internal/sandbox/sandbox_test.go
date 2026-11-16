@@ -108,9 +108,13 @@ func (c *webClient) operation(id, name string, target protocol.Target, revision 
 }
 func waitFor(t *testing.T, ctx context.Context, label string, check func() bool) {
 	t.Helper()
+	// Name each observable transition without replacing or extending the
+	// scenario's original watchdog. Failed HTTP/DB reads retain the active phase.
+	ctx, finish := testphase.Context(t, ctx, label, 10*time.Minute)
+	defer finish()
 	for !check() {
 		if !delay(ctx, 150*time.Millisecond) {
-			t.Fatalf("timed out: %s", label)
+			t.Fatalf("waiting for %s: %v", label, context.Cause(ctx))
 		}
 	}
 }

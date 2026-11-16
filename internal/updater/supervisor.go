@@ -194,6 +194,7 @@ func (s *Supervisor) save() error {
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
+	s.observeOperationPhase()
 	if receipt := operationRollbackReceipt(s.state); receipt != nil {
 		s.state.RollbackProof = &RollbackProof{Binding: receipt.Binding, Version: s.state.Current, Process: s.state.Process}
 		s.state.CommittedProof = nil
@@ -814,7 +815,19 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 	if err := s.ensureHealthWindow(op); err != nil {
 		return err
 	}
-	defer func() { result = s.finishHealthRead(op, result) }()
+	facts := &protocol.UpgradeHealthDiagnostics{PhaseMillis: map[string]int64{}}
+	observedAt := s.opts.Now()
+	defer func() {
+		result = s.finishHealthRead(op, result)
+		facts.PhaseMillis["health_total"] = max(0, s.opts.Now().Sub(observedAt).Milliseconds())
+		if result != nil {
+			facts.FailureCause = result.Error()
+		}
+		op.LastHealth, op.LastHealthAt = facts, s.opts.Now()
+		if saveErr := s.save(); saveErr != nil {
+			result = errors.Join(result, saveErr)
+		}
+	}()
 	readCtx, cancel, err := s.healthReadContext(ctx, op)
 	if err != nil {
 		return err
@@ -833,12 +846,46 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 		}
 		return errors.New("updater: original owned candidate exited; independent bounded replacement required")
 	}
+	processAt := s.opts.Now()
+	id, processErr := s.opts.Process.Inspect(ctx, op.CandidateProcess.PID)
+	running := processErr == nil && id == op.CandidateProcess && id.SHA256 == op.Candidate.Artifact.SHA256
+	facts.PhaseMillis["process_inspection"] = max(0, s.opts.Now().Sub(processAt).Milliseconds())
+	if processErr == nil || errors.Is(processErr, ErrNotRunning) {
+		alive := processErr == nil
+		facts.ProcessAlive = &alive
+		facts.ProcessIdentityMatched = &running
+	}
+	if errors.Is(processErr, ErrNotRunning) {
+		facts.Failures = append(facts.Failures, "candidate_not_running")
+	} else if processErr != nil {
+		facts.Failures = append(facts.Failures, "candidate_process_observation_unavailable")
+	} else if !running {
+		facts.Failures = append(facts.Failures, "candidate_process_identity_mismatch")
+	}
 	if s.opts.Authority == nil {
+		facts.Failures = append(facts.Failures, "authority_unavailable")
 		return errors.New("updater: authority unavailable")
 	}
+	authorityAt := s.opts.Now()
 	h, err := s.opts.Authority.Health(ctx, op.Binding)
+	facts.PhaseMillis["authority_read"] = max(0, s.opts.Now().Sub(authorityAt).Milliseconds())
 	if err != nil {
+		facts.Failures = append(facts.Failures, "authority_read_failed")
 		return err
+	}
+	mergeHealthDiagnostics(facts, h.Diagnostics)
+	matched, confirmed, healthy := h.Binding == op.Binding, h.ServerConfirmed, h.Healthy
+	facts.AuthorityIdentityMatched = &matched
+	facts.ServerConfirmed = &confirmed
+	facts.InstallationHealthy = &healthy
+	if !matched {
+		facts.Failures = append(facts.Failures, "authority_binding_mismatch")
+	}
+	if !confirmed || h.ServerRevision <= 0 {
+		facts.Failures = append(facts.Failures, "server_confirmation_missing")
+	}
+	if !healthy {
+		facts.Failures = append(facts.Failures, "installation_health_not_confirmed")
 	}
 	if h.Binding != op.Binding || !h.ServerConfirmed || h.ServerRevision <= 0 {
 		return errors.New("updater: candidate health is not server-confirmed")
@@ -849,14 +896,15 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 			return err
 		}
 	}
-	id, processErr := s.opts.Process.Inspect(ctx, op.CandidateProcess.PID)
-	running := processErr == nil && id == op.CandidateProcess && id.SHA256 == op.Candidate.Artifact.SHA256
 	if processErr != nil && !errors.Is(processErr, ErrNotRunning) {
 		return processErr
 	}
 	if running && h.Healthy && op.Configuration != nil {
+		configurationAt := s.opts.Now()
 		sum, err := configurationDigestContext(ctx, s.cfg.ServiceConfig)
+		facts.PhaseMillis["configuration_verification"] = max(0, s.opts.Now().Sub(configurationAt).Milliseconds())
 		if err != nil || sum != op.Configuration.Target.SHA256 {
+			facts.Failures = append(facts.Failures, "candidate_configuration_mismatch")
 			return errors.New("updater: candidate configuration changed before commitment")
 		}
 	}

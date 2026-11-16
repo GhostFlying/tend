@@ -565,7 +565,7 @@ export function IssueDetails({
                   data-expanded={progressExpanded || !issue.progress?.summary}
                 >
                   <div className={styles.sectionHead}>
-                    <h2>当前进展</h2>
+                    <h2>{issue.progress?.historical ? "历史进展" : "当前进展"}</h2>
                     <Button
                       variant="link"
                       disabled={!editable}
@@ -580,7 +580,18 @@ export function IssueDetails({
                     <p className={styles.muted}>负责人尚未更新进展</p>
                   )}
                   <div className={styles.progressDetails}>
-                    {issue.progress?.next_step && <p>下一步：{issue.progress.next_step}</p>}
+                    {issue.progress?.historical && (
+                      <p className={styles.muted}>
+                        此记录属于先前责任或状态，当前 Issue 状态以页首为准。记录版本：
+                        {issue.progress.issue_revision}。
+                      </p>
+                    )}
+                    {issue.progress?.next_step && (
+                      <p>
+                        {issue.progress.historical ? "当时下一步" : "下一步"}：
+                        {issue.progress.next_step}
+                      </p>
+                    )}
                     <p className={styles.muted}>
                       {execution}
                       {issue.progress && (

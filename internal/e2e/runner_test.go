@@ -33,6 +33,7 @@ import (
 	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/testkit/issuefixture"
 	"github.com/GhostFlying/tend/internal/testkit/storefixture"
+	"github.com/GhostFlying/tend/internal/testkit/testphase"
 )
 
 const (
@@ -315,6 +316,8 @@ type network struct {
 	lose map[string]int
 	// before runs before delivery and is configured before starting the node.
 	before func(*http.Request) error
+	// request observes the exact operation before delivery; set before start.
+	request func(string)
 }
 
 func (n *network) loseNext(op string, times int) {
@@ -368,6 +371,9 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 		Operation string `json:"operation"`
 	}
 	_ = json.Unmarshal(body, &env)
+	if n.request != nil {
+		n.request(env.Operation)
+	}
 	n.mu.Lock()
 	down := n.down
 	drop := n.drop[env.Operation] > 0
@@ -506,17 +512,66 @@ func (n *node) stop() {
 
 func eventually(t *testing.T, what string, cond func() bool, onTimeout ...func()) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	ctx, finish := testphase.Context(t, t.Context(), what, 15*time.Second)
+	defer finish()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
 		if cond() {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			for _, observe := range onTimeout {
+				observe()
+			}
+			t.Fatalf("waiting until %s: %v", what, context.Cause(ctx))
+		case <-poll.C:
+		}
 	}
-	for _, observe := range onTimeout {
-		observe()
+}
+
+// observeHeartbeats returns a counter of actual heartbeat requests. A later
+// request also proves the previous synchronous response was applied by runner.
+func observeHeartbeats(n *node) *atomic.Int64 {
+	count := new(atomic.Int64)
+	n.net.request = func(operation string) {
+		if operation == protocol.OpRunnerHeartbeat {
+			count.Add(1)
+		}
 	}
-	t.Fatalf("timed out waiting until %s", what)
+	return count
+}
+
+// renewAcrossBusinessTime crosses three full TTLs, advancing only after each
+// real renewal and its runner-side response. Fixture/IO time cannot expire the
+// lease, while missing renewals, fencing or changed run identity still fail.
+func renewAcrossBusinessTime(t *testing.T, n *node, clock *testkit.Clock, ttl time.Duration, heartbeats *atomic.Int64, stopped int) {
+	t.Helper()
+	original := n.workers.Started()[0].RunID
+	for round := 1; round <= 6; round++ {
+		before := heartbeats.Load()
+		clock.Advance(ttl / 2)
+		want := clock.Now().Add(ttl).UnixMilli()
+		eventually(t, fmt.Sprintf("short lease renewal %d is persisted and acknowledged", round), func() bool {
+			if n.srv.runState(protocol.RoleImplement) == protocol.RunUnknown || len(n.workers.Stopped()) != stopped {
+				t.Fatal("runner lost its lease or fenced its worker during renewal", round)
+			}
+			var lease store.LeaseRow
+			err := n.srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				lease, err = store.GetLeaseByRun(t.Context(), tx.Q(), original)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return lease.Status == "active" && lease.ExpiresAt >= want && heartbeats.Load() >= before+2
+		})
+	}
+	if got := n.srv.count(`SELECT COUNT(*) FROM runs WHERE role='implement'`); got != 1 {
+		t.Fatalf("renewal replaced original implementation: %d runs", got)
+	}
 }
 
 // passing implements with two events and accepts with a passing verdict.
@@ -864,12 +919,12 @@ func holdFor(t *testing.T, d time.Duration, what string, bad func() bool) {
 }
 
 // TestHealthyRunnerKeepsShortLease holds a worker across several renewal
-// cycles. The runner fences a quarter TTL early, so a short TTL leaves the
-// race detector on a busy machine too little slack. Four seconds still
-// requires TTL-adaptive heartbeats rather than the default 15-second interval.
+// cycles using acknowledged events and injected business time. The short TTL
+// still requires adaptive heartbeats rather than the default 15-second interval.
 func TestHealthyRunnerKeepsShortLease(t *testing.T) {
 	const leaseTTL = 4 * time.Second
-	srv := newServer(t, leaseTTL)
+	clock := testkit.NewClock()
+	srv := newServer(t, leaseTTL, clock.Now)
 	hold := make(chan struct{})
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleImplement {
@@ -877,13 +932,12 @@ func TestHealthyRunnerKeepsShortLease(t *testing.T) {
 		}
 		return passing(spec)
 	})
+	heartbeats := observeHeartbeats(n)
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
-	holdFor(t, 3*leaseTTL, "a healthy runner lost its lease or fenced its worker", func() bool {
-		return srv.runState(protocol.RoleImplement) == protocol.RunUnknown || len(n.workers.Stopped()) > 0
-	})
+	renewAcrossBusinessTime(t, n, clock, leaseTTL, heartbeats, 0)
 	close(hold)
 	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 }
@@ -1067,9 +1121,10 @@ func TestFinalEventsSurviveUploadFailure(t *testing.T) {
 }
 
 func TestRestartKeepsShortLease(t *testing.T) {
-	// Keep the same real-time renewal budget as the healthy-runner case.
+	// Restart retains the original run/thread across acknowledged renewals.
 	const leaseTTL = 4 * time.Second
-	srv := newServer(t, leaseTTL)
+	clock := testkit.NewClock()
+	srv := newServer(t, leaseTTL, clock.Now)
 	first, second := make(chan struct{}), make(chan struct{})
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		switch {
@@ -1080,16 +1135,24 @@ func TestRestartKeepsShortLease(t *testing.T) {
 		}
 		return testkit.WorkerScript{Gate: second}
 	})
+	heartbeats := observeHeartbeats(n)
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
+	firstStart := n.workers.Started()[0]
+	original, err := n.runningJournal().Run(t.Context(), firstStart.RunID)
+	if err != nil || original.Thread == "" {
+		t.Fatal("first worker has no durable thread", original, err)
+	}
 	n.stop()
 	n.start()
 	eventually(t, "the worker resumes", func() bool { return len(n.workers.Started()) == 2 })
-	holdFor(t, 3*leaseTTL, "the restarted runner let its short lease lapse", func() bool {
-		return srv.runState(protocol.RoleImplement) == protocol.RunUnknown || len(n.workers.Stopped()) > 1
-	})
+	resumed := n.workers.Started()[1]
+	if resumed.RunID != firstStart.RunID || resumed.Attempt != firstStart.Attempt+1 || resumed.Thread != original.Thread {
+		t.Fatal("restart changed the original run or lost its thread", firstStart, resumed)
+	}
+	renewAcrossBusinessTime(t, n, clock, leaseTTL, heartbeats, 1)
 	close(second)
 	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 }

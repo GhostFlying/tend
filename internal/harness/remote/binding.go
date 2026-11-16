@@ -152,6 +152,9 @@ func (b *Broker) resolveContinuationHello(ctx context.Context, run string, hello
 	}
 	raw, err := os.ReadFile(b.bindingPath(parent))
 	var pin nativeBinding
+	if err == nil && (json.Unmarshal(raw, &pin) != nil || pin.Pending || pin.RunID != parent || pin.Cwd != hello.Cwd) {
+		return hello, errors.New("continuation predecessor native binding requires reconciliation")
+	}
 	if err == nil && json.Unmarshal(raw, &pin) == nil && !pin.Pending && pin.RunID == parent && pin.Cwd == hello.Cwd && pin.Thread == hello.ThreadID && pin.Thread != "" {
 		return hello, b.bindQuestionHello(ctx, run, hello)
 	}

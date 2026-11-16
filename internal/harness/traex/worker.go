@@ -169,6 +169,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 			return &restoredVerdictWorker{events: events, result: harness.WorkerResult{Verdict: verdicts.Verdict()}}, nil
 		}
 	}
+	var toolsetErr error
+	spec, toolsetErr = prepareWorkerToolset(spec)
+	if toolsetErr != nil {
+		return nil, toolsetErr
+	}
 	profile := harness.WorkerProfile(spec, ws.opts.Model, ws.opts.Effort, ws.opts.Acceptance)
 	opts := ws.opts.Session
 	opts.Dir = spec.Dir
@@ -232,31 +237,15 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	cfg := harness.ThreadConfig{LegacyRawUsage: spec.LegacyRawUsage,
 		EnvironmentID: ws.opts.EnvironmentID, Cwd: spec.Dir, Model: profile.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
-		Tools:                 []harness.ToolSpec{harness.ResultToolSpec}, OnToolCall: results.Handle,
+		Tools:                 workerTools(spec), OnToolCall: results.Handle,
 	}
 	if spec.Role == protocol.RoleAccept {
-		cfg.Tools = []harness.ToolSpec{harness.VerdictToolFor(spec)}
 		cfg.OnToolCall = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
 			if c.Tool == harness.VerdictTool {
 				return verdicts.Handle(ctx, c)
 			}
 			return results.Handle(ctx, c)
 		}
-	}
-	if harness.HasObservation(spec) {
-		cfg.Tools = append(cfg.Tools, harness.ReadObservationToolSpec)
-	}
-	if spec.ReadContext != nil {
-		cfg.Tools = append(cfg.Tools, harness.ReadContextToolSpec)
-	}
-	if spec.DownloadFile != nil {
-		cfg.Tools = append(cfg.Tools, harness.DownloadFileToolSpec)
-	}
-	if spec.WaitExternal != nil {
-		cfg.Tools = append(cfg.Tools, harness.WaitExternalToolSpec)
-	}
-	if spec.AskOwner != nil {
-		cfg.Tools = append(cfg.Tools, questionTool(spec))
 	}
 	th, err := ws.thread(startupCtx, s, spec, cfg)
 	if err != nil {
@@ -277,6 +266,10 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 				return nil, err
 			}
 		}
+	}
+	if err := saveWorkerToolset(spec, th.ID()); err != nil {
+		release(err)
+		return nil, err
 	}
 	if spec.OnThread != nil {
 		if err := spec.OnThread(th.ID()); err != nil {
@@ -516,8 +509,9 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 		if err == nil {
 			return th, nil
 		}
-		optionalContinuation := spec.RetainedResume == nil && spec.OptionalHistory()
-		if ctx.Err() != nil || ws.opts.StrictResume && !optionalContinuation || !errors.Is(err, harness.ErrRejected) {
+		previous, original := spec.StoppedPredecessor()
+		optionalContinuation := spec.RetainedResume == nil && previous != "" && original == spec.Thread
+		if ctx.Err() != nil || !optionalContinuation || !errors.Is(err, harness.ErrRejected) {
 			return nil, err
 		}
 		if log := ws.opts.Session.Log; log != nil {
@@ -563,4 +557,27 @@ func questionTool(spec harness.WorkerSpec) harness.ToolSpec {
 		return harness.SupervisorQuestionTool(spec.QuestionContext)
 	}
 	return harness.OwnerQuestionTool(spec.QuestionContext)
+}
+
+func workerTools(spec harness.WorkerSpec) []harness.ToolSpec {
+	tools := []harness.ToolSpec{harness.ResultToolSpec}
+	if spec.Role == protocol.RoleAccept {
+		tools = []harness.ToolSpec{harness.VerdictToolFor(spec)}
+	}
+	if harness.HasObservation(spec) {
+		tools = append(tools, harness.ReadObservationToolSpec)
+	}
+	if spec.ReadContext != nil {
+		tools = append(tools, harness.ReadContextToolSpec)
+	}
+	if spec.DownloadFile != nil {
+		tools = append(tools, harness.DownloadFileToolSpec)
+	}
+	if spec.WaitExternal != nil {
+		tools = append(tools, harness.WaitExternalToolSpec)
+	}
+	if spec.AskOwner != nil {
+		tools = append(tools, questionTool(spec))
+	}
+	return tools
 }

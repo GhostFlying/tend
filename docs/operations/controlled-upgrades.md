@@ -264,6 +264,8 @@ server、runner 和 updater 的进程入口统一接受 `TEND_LOG_LEVEL=debug|in
 
 server 日志中的 `upgrade control step` 关联原 `upgrade_id`、`request_id`、步骤、耗时、阶段/整体期限及剩余时间；`upgrade phase changed` 与 `upgrade host phase changed` 记录转换和原因。updater 的 `updater operation changed` 记录实际持久阶段、进程身份、健康计数与首次或变化的错误。重复健康轮询不重复写阶段日志。
 
+`tend-updater status --config "$UPDATER_CONFIG"` 返回操作的 `phase_timings`、`last_health_at` 和 `last_health`，保留原批次的阶段转换及最近一次检查。诊断分别呈现进程存活与身份、权威绑定、server 确认、服务 ready、主会话排空、组件失败原因及检查阶段耗时；未观察到的事实省略，不冒充 false。服务 ready 不代表已经排空，恢复业务后 `main_drained=false` 可以与 ready 同时成立。`healthy` 仍使用原有安装门槛，不因诊断字段而放宽。健康 authority 只在调用方显式请求 `diagnostics=1` 时追加诊断，旧严格客户端继续收到原响应；新 updater 同时接受旧 authority 缺少诊断的响应。历史超时不据此改写为某个唯一已知原因。
+
 普通自身交接记录 `self-update installer dispatch recorded`、`self-update dispatch command returned`、`self-update installer entered`、阶段持久化和 `self-update installer returned`。用其中的 unit 名读系统日志，例如 `journalctl --user --unit "$INSTALLER_UNIT"`；自动 installer 的 stdout/stderr 明确交给 journal。派发命令退出码只证明该命令的结果，installer 返回也不等于新监督器完成接管，最终仍读原请求的状态、准确进程和提交回执。进程被终止且缺退出证据时继续记为 unknown，不能重建一个成功退出码。
 
 定位当前服务日志时先读取真实运行进程及其监督器配置，不以某个旧日志文件的 mtime 推断服务没有运行。受控启动的分段日志位于配置 `state_dir` 下的 `diagnostic-logs`，以真实 launch ID 关联原件；固定 `log_path` 在旧文件仍存在时未必指向本轮分段。保留原日志、journal 单元信息与状态/回执，再解释缺口，不通过轮转、清空或重发安装消除故障现场。分享日志前移除凭据。

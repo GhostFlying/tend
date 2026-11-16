@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { IssueSummary } from "../api/generated/api.ts";
-import { responsibilityLabel } from "./boardModel.ts";
+import { responsibilityLabel, workStatus } from "./boardModel.ts";
 
 const issue = (patch: Partial<IssueSummary> = {}): IssueSummary => ({
   issue_id: "issue",
@@ -63,4 +63,23 @@ test("actual unresolved and active execution facts remain visible alongside hist
   expect(responsibilityLabel(item)).toBe("Issue 已暂停");
   item.state = "cancelled";
   expect(responsibilityLabel(item)).toBe("Issue 已取消");
+});
+
+test("terminal and reopened projections preserve historical next steps without making them current", () => {
+  const item = issue({ state: "closed", effective_work_status: "done" });
+  expect(workStatus(item)).toBe("done");
+  item.state = "active";
+  item.effective_work_status = "backlog";
+  item.board!.progress = {
+    summary: "Not installed",
+    next_step: "Install old release",
+    issue_revision: 73,
+    updated_at: 1,
+    updated_by: item.assignee,
+    historical: true,
+    historical_reason: "issue_reopened",
+  };
+  expect(responsibilityLabel(item)).toBe("待确认下一步");
+  item.board!.execution.unknown = 1;
+  expect(responsibilityLabel(item)).toBe("执行结果待核对");
 });

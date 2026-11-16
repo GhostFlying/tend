@@ -24,6 +24,13 @@ type Template struct {
 // returning. Only the first caller's prepare function is used; initialization
 // failures are retained rather than retried by another test.
 func (f *Template) Copy(ctx context.Context, destination string, prepare func(context.Context, string) error) error {
+	// Reject an occupied destination before paying for a cold migration. The
+	// later O_EXCL remains the authority if another creator races this check.
+	if _, err := os.Lstat(destination); err == nil {
+		return fmt.Errorf("database fixture destination exists: %w", os.ErrExist)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect database fixture destination: %w", err)
+	}
 	f.once.Do(func() { f.data, f.err = build(ctx, prepare) })
 	if f.err != nil {
 		return f.err

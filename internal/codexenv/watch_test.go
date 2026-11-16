@@ -94,7 +94,7 @@ func TestAutomaticSyncRetriesKnownFailureButReconcilesPendingIdentity(t *testing
 			dir, _ := s.directory(p.ID)
 			before, _ := loadRecord(filepath.Join(dir, "state.json"))
 			s.Validate = func(context.Context, Profile, string) error { return nil }
-			s.Now = func() time.Time { return time.Unix(183, 0) }
+			s.Now = func() time.Time { return time.Unix(123+21601, 0) }
 			if err := s.SyncAutomatic(t.Context(), p.ID); err != nil {
 				t.Fatal(err)
 			}

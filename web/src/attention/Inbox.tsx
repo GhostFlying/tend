@@ -187,7 +187,7 @@ export function Inbox({
                 </Button>
                 <div className={styles.rowMeta}>
                   <Badge>{kindLabel(item.kind)}</Badge>
-                  <span>{statusLabel(item.status)}</span>
+                  <span>{item.historical ? "历史提示" : statusLabel(item.status)}</span>
                   <time
                     dateTime={new Date(item.created_at).toISOString()}
                     title={new Date(item.created_at).toLocaleString("zh-CN")}
@@ -434,7 +434,8 @@ function AttentionForm({
         </section>
       )}
       <p className={`${styles.muted} ${styles.detailMeta}`}>
-        <Badge>{kindLabel(a.kind)}</Badge> <span>·</span> <span>{statusLabel(a.status)}</span>
+        <Badge>{kindLabel(a.kind)}</Badge> <span>·</span>{" "}
+        <span>{a.historical ? "历史提示" : statusLabel(a.status)}</span>
       </p>
       {a.kind === "decision" && (
         <>
@@ -481,7 +482,14 @@ function AttentionForm({
           <p>{a.title}</p>
         </>
       )}
-      {a.kind === "information" && <p>{a.title}</p>}
+      {a.kind === "information" && (
+        <>
+          {a.historical && (
+            <p className={styles.muted}>原责任或状态已结束，此提示保留为历史记录。</p>
+          )}
+          <p>{a.title}</p>
+        </>
+      )}
       {a.source_message_id && <AttentionOriginalMessage id={a.source_message_id} />}
       {a.kind === "action" && (
         <label>

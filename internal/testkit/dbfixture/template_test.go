@@ -2,6 +2,7 @@ package dbfixture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,27 @@ import (
 	"sync/atomic"
 	"testing"
 )
+
+func TestOccupiedDestinationDoesNotBuildTemplate(t *testing.T) {
+	var template Template
+	destination := filepath.Join(t.TempDir(), "existing.db")
+	if err := os.WriteFile(destination, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepare := func(_ context.Context, _ string) error {
+		t.Fatal("rejected destination triggered expensive preparation")
+		return nil
+	}
+	if err := template.Copy(t.Context(), destination, prepare); !errors.Is(err, os.ErrExist) {
+		t.Fatal("occupied destination not rejected", err)
+	}
+	// Rejection must not poison or initialize the reusable template.
+	if err := template.Copy(t.Context(), filepath.Join(t.TempDir(), "fresh.db"), func(_ context.Context, path string) error {
+		return os.WriteFile(path, []byte("fresh independent fixture"), 0o600)
+	}); err != nil {
+		t.Fatal("occupied destination affected later independent copy", err)
+	}
+}
 
 func TestCopyRequiresCheckpointedWAL(t *testing.T) {
 	for _, wal := range []string{"", "committed pages"} {

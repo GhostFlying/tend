@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func TestQuestionHandoffRebindsOnlyItsStoppedPredecessor(t *testing.T) {
 	state := workerState{Kind: "central-traex", RunID: "old", Thread: "native-session", Cwd: "/workspace", ProviderID: "folder:original", StateDir: "old-state", ExecutorStopped: true, BriefRecorded: true}
 	spec := harness.WorkerSpec{RunID: "new", Dir: state.Cwd, ProviderID: state.ProviderID, StateDir: "new-state", QuestionContinuation: &protocol.QuestionContinuation{RunID: "old"}}
+	state.ToolsetHash = traex.WorkerToolsetHash(spec)
 	for _, invalid := range []string{"", "running", "other-run", "other-cwd", "pending-brief", "unknown"} {
 		pin := state
 		switch invalid {

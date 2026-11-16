@@ -43,6 +43,7 @@ type Workers struct {
 	runs map[string]*execution
 }
 type workerState struct {
+	ToolsetHash     string `json:"toolset_hash,omitempty"`
 	StateDir        string `json:"state_dir"`
 	ProviderID      string `json:"provider_id"`
 	Kind            string `json:"kind"`
@@ -124,11 +125,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 		var e error
 		spec.Thread, e = rebindQuestionThread(spec)
 		if e != nil {
-			if spec.RetainedResume == nil && spec.OptionalHistory() {
-				spec.Thread = ""
-			} else {
-				return nil, e
-			}
+			return nil, e
 		}
 	}
 	ws.mu.Lock()
@@ -161,6 +158,10 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 	if ex.state.RunID != spec.RunID || ex.state.Cwd != spec.Dir || ex.state.ProviderID != spec.ProviderID || ex.state.StateDir != spec.StateDir {
 		ex.mu.Unlock()
 		return nil, errors.New("original native execution binding differs")
+	}
+	if ex.state.Thread != "" && ex.state.ToolsetHash != traex.WorkerToolsetHash(spec) {
+		ex.mu.Unlock()
+		return nil, fmt.Errorf("%w: native tool schema changed or is unknown; settle the original Run before a normal Task session continuation", harness.ErrRetainedResumePending)
 	}
 	ex.ownerHeld = false
 	threadID, stopped := ex.state.Thread, ex.state.ExecutorStopped
@@ -227,9 +228,11 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 	}
 	ex.spec = spec
 	nativeThread := ex.state.Thread
+	toolsetHash := ex.state.ToolsetHash
 	reuseUnstarted := !ex.state.BriefRecorded
 	ex.mu.Unlock()
 	spec.Thread = nativeThread
+	spec.ThreadToolsetHash = toolsetHash
 	// Native paths in responses belong to the central broker's filesystem.
 	// The server persists and collects them; the runner never opens those paths.
 	spec.OnUsageSource = nil
@@ -237,6 +240,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (worker h
 	spec.OnThread = func(id string) error {
 		ex.mu.Lock()
 		ex.state.Thread = id
+		ex.state.ToolsetHash = traex.WorkerToolsetHash(spec)
 		ex.state.ExecutorStopped = false
 		state := ex.state
 		ex.mu.Unlock()
@@ -382,6 +386,9 @@ func (ws *Workers) open(ctx context.Context, spec harness.WorkerSpec) (*executio
 		}
 	} else {
 		state = workerState{Kind: "central-traex", RunID: spec.RunID, Cwd: spec.Dir, ProviderID: spec.ProviderID, StateDir: spec.StateDir}
+	}
+	if state.Thread != "" && state.ToolsetHash != traex.WorkerToolsetHash(spec) {
+		return nil, fmt.Errorf("%w: original native tool schema changed or is unknown", harness.ErrRetainedResumePending)
 	}
 	lifetime, stop := context.WithCancel(spec.Lifetime)
 	ex := &execution{state: state, spec: spec, ctx: lifetime, stop: stop, closed: make(chan struct{}), frontendReady: make(chan struct{}), executorDone: make(chan struct{})}
@@ -724,6 +731,14 @@ func rebindQuestionThread(spec harness.WorkerSpec) (string, error) {
 	previous, _ := spec.StoppedPredecessor()
 	if state.RunID != previous || !state.ExecutorStopped || state.BriefPending || state.Reconcile || state.Thread == "" || state.Cwd != spec.Dir || state.ProviderID != spec.ProviderID {
 		return "", errors.New("question predecessor is not safely stopped in the original environment")
+	}
+	if state.ToolsetHash == "" || state.ToolsetHash != traex.WorkerToolsetHash(spec) {
+		if spec.RetainedResume != nil {
+			return "", fmt.Errorf("%w: retained native tool schema differs", harness.ErrRetainedResumePending)
+		}
+		// No successor native input was admitted. Keep the original stopped Run's
+		// binding and rollout and rebuild this Run from its complete current Brief.
+		return "", nil
 	}
 	state.RunID = spec.RunID
 	state.StateDir = spec.StateDir

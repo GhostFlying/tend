@@ -2215,6 +2215,12 @@
         "decision_id": {
           "type": "string"
         },
+        "historical": {
+          "type": "boolean"
+        },
+        "historical_reason": {
+          "type": "string"
+        },
         "issue_id": {
           "type": "string"
         },
@@ -10993,6 +10999,12 @@
     "IssueProgress": {
       "additionalProperties": false,
       "properties": {
+        "historical": {
+          "type": "boolean"
+        },
+        "historical_reason": {
+          "type": "string"
+        },
         "issue_revision": {
           "type": "integer"
         },
@@ -11341,6 +11353,9 @@
         "board": {
           "$ref": "#/definitions/IssueBoardCard"
         },
+        "effective_work_status": {
+          "$ref": "#/definitions/IssueWorkStatus"
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionCounts"
         },
@@ -11619,6 +11634,9 @@
               "type": "null"
             }
           ]
+        },
+        "effective_work_status": {
+          "$ref": "#/definitions/IssueWorkStatus"
         },
         "historical": {
           "type": "boolean"

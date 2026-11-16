@@ -23,20 +23,46 @@ type UpgradeGrant struct {
 // Health must come from the configured authority, not the candidate's own
 // unauthenticated HTTP server. Sequence identifies distinct accepted heartbeats.
 type UpgradeHealth struct {
-	BoundedRecoveryAuthorizationID string         `json:"bounded_recovery_authorization_id,omitempty"`
-	JournalVersion                 int64          `json:"journal_version,omitempty"`
-	Binding                        UpgradeBinding `json:"binding"`
-	ServerConfirmed                bool           `json:"server_confirmed"`
-	ServerRevision                 int64          `json:"server_revision"`
-	Healthy                        bool           `json:"healthy"`
-	HeartbeatSequence              uint64         `json:"heartbeat_sequence"`
-	NewWorkAccepted                bool           `json:"new_work_accepted"`
-	RollbackSafe                   bool           `json:"rollback_safe"`
+	Diagnostics                    *UpgradeHealthDiagnostics `json:"diagnostics,omitempty"`
+	BoundedRecoveryAuthorizationID string                    `json:"bounded_recovery_authorization_id,omitempty"`
+	JournalVersion                 int64                     `json:"journal_version,omitempty"`
+	Binding                        UpgradeBinding            `json:"binding"`
+	ServerConfirmed                bool                      `json:"server_confirmed"`
+	ServerRevision                 int64                     `json:"server_revision"`
+	Healthy                        bool                      `json:"healthy"`
+	HeartbeatSequence              uint64                    `json:"heartbeat_sequence"`
+	NewWorkAccepted                bool                      `json:"new_work_accepted"`
+	RollbackSafe                   bool                      `json:"rollback_safe"`
 	// AdmissionFenced promises that this candidate cannot accept new work until
 	// its supervisor publishes an irreversible committed receipt. ControlRevision
 	// binds that promise to the host control observed in the same transaction.
 	AdmissionFenced bool  `json:"admission_fenced"`
 	ControlRevision int64 `json:"control_revision"`
+}
+
+// UpgradeHealthDiagnostics is observational, never installation authority.
+// Nil facts mean that phase was not observed, not that the condition failed.
+// Authorities return it only when the caller opts in with diagnostics=1, so
+// older strict clients keep their existing response contract.
+type UpgradeHealthDiagnostics struct {
+	ProcessAlive             *bool                    `json:"process_alive,omitempty"`
+	ProcessIdentityMatched   *bool                    `json:"process_identity_matched,omitempty"`
+	AuthorityIdentityMatched *bool                    `json:"authority_identity_matched,omitempty"`
+	ServerConfirmed          *bool                    `json:"server_confirmed,omitempty"`
+	ServiceReady             *bool                    `json:"service_ready,omitempty"`
+	MainDrained              *bool                    `json:"main_drained,omitempty"`
+	InstallationHealthy      *bool                    `json:"installation_healthy,omitempty"`
+	AuthorityHealthy         *bool                    `json:"authority_healthy,omitempty"`
+	Components               []UpgradeHealthComponent `json:"components,omitempty"`
+	Failures                 []string                 `json:"failures,omitempty"`
+	PhaseMillis              map[string]int64         `json:"phase_ms,omitempty"`
+	FailureCause             string                   `json:"failure_cause,omitempty"`
+}
+type UpgradeHealthComponent struct {
+	Name    string `json:"name"`
+	Ready   *bool  `json:"ready,omitempty"`
+	Drained *bool  `json:"drained,omitempty"`
+	Failure string `json:"failure,omitempty"`
 }
 
 // UpgradeStartRequest is accepted only over the service user's local control socket.

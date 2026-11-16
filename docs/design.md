@@ -2377,3 +2377,46 @@ R8–R18 的业务恢复保留原 Task、执行与审阅历史，不以协调状
 持续 Task 的新 artifact 可重新准入其先前自动关闭的审阅载体。依据不可变关闭版本的实际 acceptance 操作、actor、原验收身份、相同计划及责任判断来源；关闭前纯进度更新不改变审阅责任。人类后续修改、暂停、取消、backlog 和已结束祖先保留门禁，旧验收与关闭快照不改写。技术等待依据实际 actor、来源消息和当前责任分类，代理传输的 owner_subject 不覆盖真实 actor。外部等待错误目标返回具体字段及合法业务 ID 的确定输入错误，不以 internal 触发原请求循环重试。
 
 验证从实际失败入口驱动到原业务动作恢复，明确区分真实内部转换、外部 provider/安装替身和历史 fixture。最终来源独立审阅、完整本地验证、必要 CI、合入与实际安装各自保留证据；辅助观察和配置采样不引入新的业务审批。实施见 `docs/plans/continuous-reliability-business-recovery.md`。
+
+### 调度读取、写入诊断与历史读模型
+
+#### 调度读取与具体 Agent 的空领取
+
+调度候选、原回执与 handoff 屏障按同一事务内的 Issue/epoch 批量读取。未物化的普通负责人候选读取当前选择、项目权重和类别；历史 hosted 责任保留原迁移检查。不同 expected epoch 的 handoff 分组读取，不将旧 receipt-only 责任代次替换成继任者代次。空列表不构建调度事实。空领取的只读预检可以用当前已存库存与具名执行器排除不匹配的类别或 Agent；库存/协商缺失、运行时声明改变、待维护 manager、receipt-only、停止交接与已到期外部等待保守进入原写路径。预检不分配资源，不向最终 Claim 传递授权事实，写事务仍重新读取并验证实际业务与资源状态。
+
+#### 写入取消与回执原身份
+
+写诊断独立记录 connection_wait、BEGIN、callback、commit 及各失败边界的 context 状态。原错误类别和当时客户端取消/期限状态分别保留，不能用 context 状态替换已知输入拒绝或提交错误；提交成功后的取消不回写为失败。累计并发等待不是墙钟时间。原事件与 ACK 按 Run/sequence 或原 native request 身份结清，连接排队期限结束不删除原件，也不授权重放未知外部业务。
+
+#### 当前终态与历史评估
+
+Issue 读视图增加 effective_work_status，用终态控制派生 done/cancelled，raw work_status 仍保留。负责人 progress 在责任变更、后续终态或关闭后重开后标记为 historical，并保留原 revision、作者和文本；历史 revision 读取不混入当前终态。信息 Attention 根据当前责任路径和已知终态事实标记历史，原 status 不变；无冻结 revision 且相同时间戳的适用性保留不确定。真正未结的 action、decision、BlocksClose 与 unknown 事实仍可见，读投影不完成、撤销或重开任何业务。Web/CLI 对旧评估使用历史标签，不将旧下一步作为重开后的当前进展。
+
+#### 固定 SQL 生命周期取舍
+
+是否引入 Store 拥有的跨事务固定 prepared statement，依据去重后的完整业务场景评估，不用局部微基准倍数替代业务收益。当前 handoff 完整调用树仅占 CPU 样本 1.81%，本轮保留直接查询与可维护微基准，不新增双池准备、绑定与关闭生命周期。其他路径的 parser 总成本仍保留为调查事实，不宣称统一缓存问题已解决。
+
+#### Run 事件诊断来源
+
+RecordRunEvents 对已验证的原调用与批次记录固定 runner.events、实际 Run 和批次首事件序号；空批次使用零，避免继承不相关外层 cursor。HTTP 入口携带已验证的原 request/trace，内部调用保留外层诊断身份。元数据仅用于追查，不保存原文或凭据、不产生新的请求档案或重试授权。历史匿名取消无法逐次关联补交时仍为 unknown，新增身份不补造过去的收据事实。
+
+### 执行环境与健康观察
+
+R4：Codex 环境 watcher 默认每六小时对既有 allowlist 内 skills/plugins 执行一次完整单向同步，下次到期时间从本轮完成后计算。自动路径直接调用既有 sync，不再用 sourceStamp 比较预判变化或为候选 ID 额外执行 plan；publish 原有 sourceStamp 前后校验仍是全体输入暂存完整性检查，完整复制及双份字节校验保留。包内修改在下一轮传播，显式 sync 立即执行；内容相同复用内容寻址快照。保留清单选择、源只读、回滚 hold、活动执行 pin 和原 pending request 对账；不增加安装清单、增量游标、事件监听或跨进程缓存。旧显式 interval 不随默认值自动改变。
+
+R12：worker 原生线程在创建后记录完整工具定义（schema 与 description）的身份，复用前与当前 handler 契约比较。本 Run 的旧身份未知或不一致时，保留原 Task/Run/native binding/rollout 并返回待对账，不启动进程、不 resume 旧 schema。只有正常业务链给出的已停止前序 Run 且无未结/unknown/brief-pending native 状态时，才丢弃可选旧会话历史，用完整当前 Brief 和持久材料索引创建新线程；匹配身份继续复用。不把 session 可选性变成角色限制或新增人工审批，不让未知 native start 伪装成缺失历史。现有主会话 hash/handoff 继续沿用。新 App 回归通过正常 RecordSessionStop、同回执重读、Task continue 和实际 claim 验证同 Task、新 Run、已停止前序和原报告索引；native 测试再验证旧 schema 不 resume 且新会话有当前完整 Brief/工具。
+
+R14：升级安装仍使用原 healthy、精确 binding、server 确认、不同心跳、配置及排空门槛。新增可选诊断分开呈现进程存活/身份、权威身份、server 确认、authority 原始健康、安装聚合健康、服务 ready、MainDrained、逐组件失败及阶段耗时；未实际观察的字段省略，不能以零值 false 伪造事实。服务 ready 不替代排空，恢复业务后 ready 与未排空可同时成立。仅新 updater 通过 diagnostics=1 请求扩展响应，旧严格客户端不收到新字段，新 updater 接受旧 authority 缺少诊断的响应；不改变 runner 协议版本。组件诊断仅在该请求发生时计算，有独立短预算，不增加普通 tick 查询，也不让诊断失败改变原安装判断。updater state 保存最近健康观察和实际观测的阶段边界；旧记录不补造历史开始时间，原 health deadline/unknown/安装身份不变。历史 false/超时不据新字段反推唯一原因。
+
+
+### 测试时间与原生终态证据
+
+测试保留原有完整 race、独立验收、重放、安全及真实到期断言。非到期目标的 named Agent reload/restart/独立验收场景注入业务时钟；短租约健康及重启场景保持原四秒 TTL，通过真实服务端续期和 runner 后续心跳请求确认前一同步回执已经处理后，再推进半个 TTL，累计跨越三个 TTL。正常掉线后的真实到期和 fencing 故障场景仍独立验证。E2E 及沙盒的既有等待以可观察转换命名，沿用原父级有限 watchdog，准备和 IO 时间不被解释成业务期限。历史 Orca 十五秒和并行短租约失败没有被原件捕获的唯一首个未完成转换仍为 unknown；新的正确回归不追认旧结果。
+
+runner 的业务 wire fixture 复用现有不可变空库模板，分别打开独立数据库、连接及原文件目录，避免每例重复执行全部冷迁移。迁移、journal 和显式 retained reopen 继续走真实打开路径。模板首先拒绝已占用目标，再准备迁移；最终独占创建仍防止并发覆盖。现有重包分组、动态根发现、反向依赖及测试导入影响选择继续生效；验证基础设施改动触发完整兜底，正式 PR CI 必需覆盖不降级。
+
+现有 make check 在原测试报告目录下保存临时调用级原子阶段及整体终态 JSON，并保留该轮来源绑定的影响计划。阶段记录实际 PID、原生数字退出值和进程结果、取消 cause、开始/结束以及所属进程清理完成；未启动的工作不填写退出码，取消不能转成成功。最终检查仍须由实际逐例 JSON、必要组及候选/基线共同证明，退出零本身不代表独立审阅 verdict。该记录不是永久门禁账本，也不增加另一套通用 Agent 启动入口。旧包装器缺失的历史外层数字退出值保持 unknown。
+
+私有观察器默认展示按 Issue/manager/Task/Attention 原件身份和字段白名单计算的真实增量；无新输入直接简短返回，不重新展开旧完整快照。精确 included 集合、不可变 SHA 和可见 ACK 约束保持，最终发布正文和附件仍以实际消息原件回读为证。一个已经成功停用的原观察器身份，即使保留的历史 policy 仍 enabled，也不能从晚到 inbound、saved ACK 或旧定时入口重新获得采集/恢复权限；只读展示和内存内 ACK 折叠继续可用。停止、policy、checkpoint 和旧失败记录均保留。
+
+私有部署证据在原有部署前读取中、任何有意配置改变之前只采样一次真实配置文件哈希及另行来源标记的非秘密字段；baseline 原件不可覆盖。部署后用同一文件清单、原始 Start 时间和 baseline SHA 生成逐配置/Agent/group 差异，不比较可变 state、请求与回执流水。当前允许有意变化仅为两个 watcher 周期改为六小时、实际 watcher unit 的可执行文件选择以及 fleet CLI 路径/版本元数据；其余配置、Agent、slots、模型、effort、登录、groups、debug 应保留。未知和读失败如实保留，此证明直接复用于既有安装证明，不增加审批、重复部署、独立重审或重新包装证据；旧部署缺少 pre-Start 采样的事实不被补写。

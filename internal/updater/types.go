@@ -61,33 +61,45 @@ type Version struct {
 }
 type BackupFile = protocol.BackupFile
 type Operation struct {
-	HealthWindow          *HealthWindow        `json:"health_window,omitempty"`
-	LaunchExit            *LaunchExitProof     `json:"launch_exit,omitempty"`
-	Configuration         *StagedConfiguration `json:"configuration,omitempty"`
-	RollbackAuthorization *Health              `json:"rollback_authorization,omitempty"`
-	CandidateNotStarted   bool                 `json:"candidate_not_started,omitempty"`
-	BoundedSourceOwned    bool                 `json:"bounded_source_supervised,omitempty"`
-	ID                    string               `json:"id"`
-	Kind                  string               `json:"kind"`
-	Binding               Binding              `json:"binding"`
-	Previous              Version              `json:"previous"`
-	Candidate             Version              `json:"candidate"`
-	PreviousProcess       Identity             `json:"previous_process"`
-	CandidateProcess      Identity             `json:"candidate_process"`
-	LaunchID              string               `json:"launch_id"`
-	Phase                 string               `json:"phase"`
-	Grant                 *Grant               `json:"grant,omitempty"`
-	GrantBootID           string               `json:"grant_boot_id,omitempty"`
-	GrantDeadlineMillis   int64                `json:"grant_deadline_millis,omitempty"`
-	Backups               []BackupFile         `json:"backups,omitempty"`
-	BackupDir             string               `json:"backup_dir,omitempty"`
-	HealthCount           int                  `json:"health_count"`
-	LastHealthSequence    uint64               `json:"last_health_sequence"`
-	Irreversible          bool                 `json:"irreversible"`
-	CancelRequested       bool                 `json:"cancel_requested"`
-	StartedAt             time.Time            `json:"started_at"`
-	HealthStartedAt       time.Time            `json:"health_started_at"`
-	LastError             string               `json:"last_error,omitempty"`
+	PhaseTimings          []OperationPhaseTiming             `json:"phase_timings,omitempty"`
+	LastHealth            *protocol.UpgradeHealthDiagnostics `json:"last_health,omitempty"`
+	LastHealthAt          time.Time                          `json:"last_health_at,omitzero"`
+	HealthWindow          *HealthWindow                      `json:"health_window,omitempty"`
+	LaunchExit            *LaunchExitProof                   `json:"launch_exit,omitempty"`
+	Configuration         *StagedConfiguration               `json:"configuration,omitempty"`
+	RollbackAuthorization *Health                            `json:"rollback_authorization,omitempty"`
+	CandidateNotStarted   bool                               `json:"candidate_not_started,omitempty"`
+	BoundedSourceOwned    bool                               `json:"bounded_source_supervised,omitempty"`
+	ID                    string                             `json:"id"`
+	Kind                  string                             `json:"kind"`
+	Binding               Binding                            `json:"binding"`
+	Previous              Version                            `json:"previous"`
+	Candidate             Version                            `json:"candidate"`
+	PreviousProcess       Identity                           `json:"previous_process"`
+	CandidateProcess      Identity                           `json:"candidate_process"`
+	LaunchID              string                             `json:"launch_id"`
+	Phase                 string                             `json:"phase"`
+	Grant                 *Grant                             `json:"grant,omitempty"`
+	GrantBootID           string                             `json:"grant_boot_id,omitempty"`
+	GrantDeadlineMillis   int64                              `json:"grant_deadline_millis,omitempty"`
+	Backups               []BackupFile                       `json:"backups,omitempty"`
+	BackupDir             string                             `json:"backup_dir,omitempty"`
+	HealthCount           int                                `json:"health_count"`
+	LastHealthSequence    uint64                             `json:"last_health_sequence"`
+	Irreversible          bool                               `json:"irreversible"`
+	CancelRequested       bool                               `json:"cancel_requested"`
+	StartedAt             time.Time                          `json:"started_at"`
+	HealthStartedAt       time.Time                          `json:"health_started_at"`
+	LastError             string                             `json:"last_error,omitempty"`
+}
+
+// OperationPhaseTiming records observed transitions. A zero EnteredAt on an
+// older operation preserves the fact that its original phase start is unknown.
+type OperationPhaseTiming struct {
+	Phase         string    `json:"phase"`
+	EnteredAt     time.Time `json:"entered_at,omitzero"`
+	ExitedAt      time.Time `json:"exited_at,omitzero"`
+	ElapsedMillis *int64    `json:"elapsed_ms,omitempty"`
 }
 
 // TerminalReceipt fences delayed requests after the single active operation moves on.

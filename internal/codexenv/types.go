@@ -195,7 +195,7 @@ func defaults(p Profile) Profile {
 		p.Agents.Mode = "independent"
 	}
 	if p.IntervalSeconds == 0 {
-		p.IntervalSeconds = 60
+		p.IntervalSeconds = 6 * 60 * 60
 	}
 	if p.SourceHome != "" && p.AuthSource == "" {
 		p.AuthSource = filepath.Join(p.SourceHome, "auth.json")

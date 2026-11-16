@@ -28,7 +28,7 @@ WEB := web
 
 ## check: everything that must pass before a commit is merged
 check:
-	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -mode "$(CHECK_MODE)" -base "$(CHECK_BASE)" -go "$(GO)" -pnpm "$(PNPM)"
+	$(GO) run ./internal/testkit/check -jobs $(CHECK_JOBS) -shards $(APP_TEST_SHARDS) -suite-shards $(TEST_SHARDS) -count $(TEST_COUNT) -mode "$(CHECK_MODE)" -base "$(CHECK_BASE)" -report-dir "$(TEST_REPORT_DIR)" -go "$(GO)" -pnpm "$(PNPM)"
 
 .PHONY: go-check
 ## go-check: static Go checks and executable interface coverage

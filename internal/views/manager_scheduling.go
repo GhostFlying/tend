@@ -38,6 +38,40 @@ func IssueManagerCandidatesObserved(ctx context.Context, q store.Querier, observ
 	if err != nil {
 		return nil, err
 	}
+	tasks := make([]string, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, row.manager.TaskID)
+	}
+	receipts, err := managerReceiptsPending(ctx, q, tasks)
+	if err != nil {
+		return nil, err
+	}
+	// Receipt-only history can coexist with a successor at another epoch.
+	// Batch equal epoch boundaries without substituting a successor's scope.
+	type handoffScope struct {
+		issue string
+		epoch int64
+	}
+	groups := map[int64]map[string]int64{}
+	for _, row := range rows {
+		m := row.manager
+		if m.HandoffID != "" {
+			if groups[m.ExpectedEpoch] == nil {
+				groups[m.ExpectedEpoch] = map[string]int64{}
+			}
+			groups[m.ExpectedEpoch][m.IssueID] = m.ExpectedEpoch
+		}
+	}
+	handoffs := map[handoffScope][]protocol.IssueBlocker{}
+	for epoch, group := range groups {
+		blockers, err := managerHandoffBlockersBatch(ctx, q, group)
+		if err != nil {
+			return nil, err
+		}
+		for issue, items := range blockers {
+			handoffs[handoffScope{issue, epoch}] = items
+		}
+	}
 	for _, row := range rows {
 		a, t, m := row.action, row.task, row.manager
 		var contract protocol.IssueManagerSpec
@@ -61,11 +95,7 @@ func IssueManagerCandidatesObserved(ctx context.Context, q store.Querier, observ
 		}
 		occupied := row.occupied
 		if m.HandoffID != "" && !receipt.ReceiptOnly {
-			blockers, err := ManagerHandoffBlockers(ctx, q, m.IssueID, m.ExpectedEpoch)
-			if err != nil {
-				return nil, err
-			}
-			occupied = occupied || len(blockers) > 0
+			occupied = occupied || len(handoffs[handoffScope{m.IssueID, m.ExpectedEpoch}]) > 0
 		}
 		if receipt.ReceiptOnly {
 			t.Lifecycle = protocol.TaskQueued
@@ -84,10 +114,7 @@ func IssueManagerCandidatesObserved(ctx context.Context, q store.Querier, observ
 		if policy {
 			ownershipPolicy = protocol.IssueOwnerPolicy
 		}
-		pending, err := ManagerReceiptPending(ctx, q, m)
-		if err != nil {
-			return nil, err
-		}
+		pending := receipts[m.TaskID]
 		candidate := scheduler.Candidate{ManagerAuthorizationInvalid: !receipt.ReceiptOnly && !valid, Manager: &protocol.IssueManagerSpec{AgentID: contract.AgentID, OwnershipPolicy: ownershipPolicy, ReceiptOnly: receipt.ReceiptOnly, IssueID: m.IssueID, CategoryID: m.CategoryID, ExpectedAssignmentEpoch: m.ExpectedEpoch}, ManagerPin: m.Pin, ActionID: a.ActionID, TaskID: t.TaskID, Kind: a.Kind, Status: a.Status, Generation: a.Generation, TargetSpecVersion: 1, SpecVersion: 1, CreatedAt: a.CreatedAt, Lifecycle: t.Lifecycle, Control: t.ControlMode, Block: t.BlockReason, Rating: t.Rating, Weight: row.weight, DependenciesDone: true, WorkspaceOccupied: occupied || (pending && !receipt.ReceiptOnly)}
 		if previous, err := store.PendingPausePredecessor(ctx, q, candidate.ActionID); err != nil {
 			return nil, err

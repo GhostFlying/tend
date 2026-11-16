@@ -25,22 +25,29 @@ func (s *Service) Watch(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		for _, status := range all {
-			p := status.Profile
-			if status.Deleted || !p.Enabled || (p.AutoSync != nil && !*p.AutoSync) || s.now().Before(next[p.ID]) {
-				continue
-			}
-			next[p.ID] = s.now().Add(time.Duration(p.IntervalSeconds) * time.Second)
-			if err = s.SyncAutomatic(ctx, p.ID); err != nil && ctx.Err() != nil {
-				return ctx.Err()
-			}
+		if err := s.syncDue(ctx, all, next); err != nil {
+			return err
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
 		}
 	}
+}
+func (s *Service) syncDue(ctx context.Context, all []Status, next map[string]time.Time) error {
+	for _, status := range all {
+		p := status.Profile
+		if status.Deleted || !p.Enabled || (p.AutoSync != nil && !*p.AutoSync) || s.now().Before(next[p.ID]) {
+			continue
+		}
+		if err := s.SyncAutomatic(ctx, p.ID); err != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		next[p.ID] = s.now().Add(time.Duration(p.IntervalSeconds) * time.Second)
+	}
+	return nil
 }
 func (s *Service) SyncAutomatic(ctx context.Context, id string) error {
 	status, err := s.Read(id)
@@ -58,23 +65,10 @@ func (s *Service) SyncAutomatic(ctx context.Context, id string) error {
 		_, err = s.Execute(ctx, Request{Action: "reconcile", ID: id, RequestID: pending})
 		return err
 	}
-	stamp, err := sourceStamp(ctx, status.Profile)
-	if err != nil {
-		s.recordFailure(ctx, id, err)
-		return err
-	}
-	if stamp == status.SourceStamp {
-		return nil
-	}
-	preview, err := s.inspect(ctx, Request{Action: "plan", ID: id})
-	if err != nil {
-		s.recordFailure(ctx, id, err)
-		return err
-	}
 	// A known validation failure can be retried on the next scheduled interval.
 	// Pending requests above always retain their original identity instead.
 	interval := int64(status.Profile.IntervalSeconds)
-	requestID := "auto-" + digest([]byte(fmt.Sprintf("%s:%d:%s:%d", id, status.Revision, preview.Candidate.ID, s.now().Unix()/interval)))
+	requestID := "auto-" + digest([]byte(fmt.Sprintf("%s:%d:%s:%d", id, status.Revision, status.Latest, s.now().Unix()/interval)))
 	_, err = s.Execute(ctx, Request{Action: "sync", ID: id, RequestID: requestID, ExpectedRevision: status.Revision})
 	return err
 }

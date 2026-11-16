@@ -47,7 +47,7 @@ func TestNamedExecutionResumeKeepsRequestedThreadModelEffortAndInstructions(t *t
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(context.Canceled)
 	profile := &protocol.ExecutionProfile{Model: "original-model", Effort: "high"}
-	w, err := ws.Start(ctx, harness.WorkerSpec{Role: protocol.RoleImplement, Dir: "/w", Attempt: 2, Thread: "th_original", Spec: json.RawMessage(`{"goal":"work"}`), FrozenExecution: profile, RoleInstructions: "ORIGINAL_PRIVATE_ROLE"})
+	w, err := ws.Start(ctx, harness.WorkerSpec{Role: protocol.RoleImplement, Dir: "/w", Attempt: 2, Thread: "th_original", ThreadToolsetHash: WorkerToolsetHash(harness.WorkerSpec{Role: protocol.RoleImplement}), Spec: json.RawMessage(`{"goal":"work"}`), FrozenExecution: profile, RoleInstructions: "ORIGINAL_PRIVATE_ROLE"})
 	if err != nil {
 		t.Fatal(err)
 	}

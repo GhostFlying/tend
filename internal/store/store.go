@@ -154,6 +154,7 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 	defer func() { s.finishWriteObservation(observation, err) }()
 	conn, err := s.write.Conn(ctx)
 	if err != nil {
+		observation.failedContext(ctx, err)
 		observation.endStage("")
 		s.failedWriteWait(observation)
 		return fmt.Errorf("store: begin write: %w", err)
@@ -166,6 +167,7 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 	s.acquiredWrite(observation)
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
+		observation.failedContext(ctx, err)
 		observation.endStage("")
 		return fmt.Errorf("store: begin write: %w", err)
 	}

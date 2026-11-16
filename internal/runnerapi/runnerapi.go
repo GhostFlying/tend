@@ -456,6 +456,7 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 		if err := decodeStrict(env.Payload, &pl); err != nil {
 			return protocol.Operation{}, err
 		}
+		ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: env.TraceID})
 		res, err := s.app.RecordRunEvents(ctx, p, env.Target.ID, pl.Events)
 		if err != nil {
 			return protocol.Operation{}, err

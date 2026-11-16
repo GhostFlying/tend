@@ -227,6 +227,7 @@ func TestWorkerContinuesItsThread(t *testing.T) {
 	})
 	onThread, thread, seen := recordThread(t, servers)
 	spec := harness.WorkerSpec{Role: protocol.RoleImplement, Dir: "/w", Spec: json.RawMessage(`{"goal":"g"}`), Attempt: 2, Thread: "th_old", OnThread: onThread}
+	spec.ThreadToolsetHash = WorkerToolsetHash(spec)
 	if _, err := ws.Start(context.Background(), spec); err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +247,9 @@ func TestFault_ThreadResumeFailsFallsBackToBrief(t *testing.T) {
 	ws, servers := fakeWorkers(t)
 	onThread, thread, seen := recordThread(t, servers)
 	spec := harness.WorkerSpec{Role: protocol.RoleImplement, Dir: "/w", Spec: json.RawMessage(`{"goal":"g"}`), Attempt: 2, Thread: "th_old", OnThread: onThread}
+	spec.ThreadToolsetHash = WorkerToolsetHash(spec)
+	spec.RunID = "new"
+	spec.SessionContinuation = &protocol.SessionContinuation{RunID: "stopped", ThreadID: spec.Thread}
 	if _, err := ws.Start(context.Background(), spec); err != nil {
 		t.Fatal(err)
 	}

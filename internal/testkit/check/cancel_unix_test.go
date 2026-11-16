@@ -13,6 +13,7 @@ import (
 func TestRunTaskCancellationStopsItsProcessGroup(t *testing.T) {
 	directory := t.TempDir()
 	ready, late := filepath.Join(directory, "ready"), filepath.Join(directory, "late")
+	reports := t.TempDir()
 	script := "#!/bin/sh\n(sleep 1; printf leaked >\"$LATE\") &\nprintf ready >\"$READY\"\nwait\n"
 	if err := os.WriteFile(filepath.Join(directory, "make"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -22,7 +23,7 @@ func TestRunTaskCancellationStopsItsProcessGroup(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- runTask(ctx, task{name: "fixture", env: environment(os.Environ(), map[string]string{"READY": ready, "LATE": late})})
+		done <- runTaskReport(ctx, task{name: "fixture", env: environment(os.Environ(), map[string]string{"READY": ready, "LATE": late})}, reports)
 	}()
 	for {
 		if _, err := os.Stat(ready); err == nil {
@@ -43,6 +44,10 @@ func TestRunTaskCancellationStopsItsProcessGroup(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancelled command did not finish")
+	}
+	terminal := readReceipt(t, reports, "fixture")
+	if terminal.PID == 0 || terminal.ExitCode == nil || *terminal.ExitCode == 0 || terminal.Outcome != "cancelled" || terminal.Cause == "" || !terminal.CleanupCompleted {
+		t.Fatal("cancellation receipt fabricated success or lost cleanup", terminal)
 	}
 	time.Sleep(1200 * time.Millisecond)
 	if _, err := os.Stat(late); !os.IsNotExist(err) {

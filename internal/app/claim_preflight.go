@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -67,39 +68,52 @@ func (a *App) preflightClaim(ctx context.Context, p protocol.Principal, env *pro
 		if err != nil || potential {
 			return err
 		}
-		potential, err = initialOwnerPotentialForHost(ctx, q, p.Subject, payload.Runtime)
+		potential, err = a.initialOwnerClaimPossible(ctx, q, p.Subject, payload.Runtime)
 		noWork = err == nil && !potential
 		return err
 	})
 	return noWork, err
 }
 
-// Initial selection can use only categories declared in the current inventory.
-// Ignore availability here: this is an upper bound, never allocation authority.
-func initialOwnerPotentialForHost(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) (bool, error) {
-	choices, err := store.FollowupIDs(ctx, q, `SELECT i.owner_selection_json FROM issue_controls i WHERE i.state='active' AND i.assignment_state='active' AND i.work_status IN ('todo','in_progress','in_review') AND i.owner_selection_json<>'' AND NOT EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=i.issue_id AND m.state IN ('pending','assigned'))`)
-	if err != nil || len(choices) == 0 {
+// initialOwnerClaimPossible checks only whether a named executor could match an
+// admitted definition. It never skips maintenance for a materialized manager,
+// allocates resources, or carries this observation into the claim transaction.
+func (a *App) initialOwnerClaimPossible(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) (bool, error) {
+	raw, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT i.owner_selection_json FROM issue_controls i WHERE i.state='active' AND i.assignment_state='active' AND i.work_status IN ('todo','in_progress','in_review') AND i.owner_selection_json<>'' AND NOT EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=i.issue_id AND m.state IN ('pending','assigned'))`)
+	if err != nil || len(raw) == 0 {
 		return false, err
 	}
-	if !runtimeSupportsAgentExecution(runtime) {
+	if !runtimeSupportsAgentExecution(runtime) || !slices.Contains(runtime.Capabilities, protocol.CapabilityIssueManager) {
 		return true, nil
 	}
-	inventory, err := store.GetAgentInventory(ctx, q, host)
+	observed, err := store.GetHostRuntime(ctx, q, host)
 	if errors.Is(err, store.ErrNotFound) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	for _, raw := range choices {
+	if !slices.Equal(runtime.AgentExecutors, observed.Runtime.AgentExecutors) || !slices.Equal(runtime.Capabilities, observed.Runtime.Capabilities) {
+		return true, nil
+	}
+	if _, err := store.GetAgentInventory(ctx, q, host); errors.Is(err, store.ErrNotFound) {
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+	executors, err := hostExecutors(ctx, q, host, a.now().UnixMilli())
+	if err != nil {
+		return false, err
+	}
+	h := scheduler.Host{ID: host, Executors: executors, IssueOwners: slices.Contains(runtime.Capabilities, protocol.CapabilityIssueOwner)}
+	for _, body := range raw {
 		var selection *protocol.IssueOwnerSelection
-		if json.Unmarshal([]byte(raw), &selection) != nil || selection == nil || selection.CategoryID == "" {
+		if json.Unmarshal([]byte(body), &selection) != nil || selection == nil {
 			return true, nil
 		}
-		for _, agent := range inventory.Projection.Agents {
-			if slices.Contains(agent.Categories, selection.CategoryID) {
-				return true, nil
-			}
+		c := scheduler.Candidate{Manager: &protocol.IssueManagerSpec{CategoryID: selection.CategoryID, AgentID: selection.AgentID, OwnershipPolicy: selection.OwnershipPolicy}}
+		if pin, _ := scheduler.SelectExecution(h, c); pin != nil {
+			return true, nil
 		}
 	}
 	return false, nil

@@ -52,7 +52,10 @@ func TestEndToEnd_NamedReusedWorkspaceChecksCurrentRole(t *testing.T) {
 	}
 }
 func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.RuntimeKind, reuseMode string) {
-	s := newServer(t, time.Minute)
+	// This contract covers frozen selection/restart and independent acceptance,
+	// not lease expiry while local registry and CLI fixtures perform IO.
+	clock := testkit.NewClock()
+	s := newServer(t, time.Minute, clock.Now)
 	f := newInventoryProcess(t, s)
 	reviewOwner := newOwnerCLI(t, filepath.Join(t.TempDir(), "owner"))
 	reviewOwner.run("", "login", "--server", s.startAPI())

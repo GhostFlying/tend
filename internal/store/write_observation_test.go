@@ -58,7 +58,7 @@ func TestWriteObservationCancelledPoolWait(t *testing.T) {
 		t.Fatalf("observations = %d, want 1", len(observations))
 	}
 	o := observations[0]
-	if o.Stage != "connection_wait" || o.Outcome != "cancelled" || o.ConnectionWait != time.Millisecond || o.Begin != 0 || o.Callback != 0 {
+	if o.Stage != "connection_wait" || o.Outcome != "cancelled" || o.ContextState != "cancelled" || o.ConnectionWait != time.Millisecond || o.Begin != 0 || o.Callback != 0 {
 		t.Fatalf("pool observation = %+v", o)
 	}
 	if o.Caller == "" {
@@ -99,7 +99,7 @@ func TestWriteObservationCancelledBeginAfterConnection(t *testing.T) {
 		t.Fatalf("observations = %d, want 1", len(observations))
 	}
 	o := observations[0]
-	if o.Stage != "begin_immediate" || o.Outcome != "cancelled" || o.ConnectionWait != time.Millisecond || o.Begin != time.Millisecond || o.Callback != 0 {
+	if o.Stage != "begin_immediate" || o.Outcome != "cancelled" || o.ContextState != "cancelled" || o.ConnectionWait != time.Millisecond || o.Begin != time.Millisecond || o.Callback != 0 {
 		t.Fatalf("BEGIN observation = %+v", o)
 	}
 }
@@ -367,7 +367,7 @@ func TestWriteObservationTimeoutSnapshotsCurrentWriter(t *testing.T) {
 	ids := map[uint64]bool{}
 	for range waiters {
 		o := <-observations
-		if o.Stage != "connection_wait" || o.Outcome != "deadline_exceeded" || o.Begin != 0 || o.Callback != 0 || o.Commit != 0 || o.Rollback != 0 {
+		if o.Stage != "connection_wait" || o.Outcome != "deadline_exceeded" || o.ContextState != "deadline_exceeded" || o.Begin != 0 || o.Callback != 0 || o.Commit != 0 || o.Rollback != 0 {
 			t.Fatalf("timeout stages = %+v", o)
 		}
 		if o.Source.RunID != "wait-run" || o.Source.EventSequence != 14 || o.Source.RequestID != "wait-request" || o.Source.TraceID != "wait-trace" || o.DeadlineAt.IsZero() || o.StartedAt.IsZero() || o.FinishedAt.Before(o.DeadlineAt) {
@@ -521,5 +521,21 @@ func TestWriteObservationWaiterSeesRollbackCleanup(t *testing.T) {
 				t.Fatalf("observer ran before connection release: %+v", owner)
 			}
 		})
+	}
+}
+
+func TestWriteObservationRetainsCallbackErrorWhenClientAlsoCancels(t *testing.T) {
+	s, _ := openTest(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var observation WriteObservation
+	s.observer = &writeObserver{now: stepDiagnosticClock(nil), slow: time.Hour, observe: func(o WriteObservation) { observation = o }}
+	rejected := errors.New("known input rejection")
+	err := s.Write(ctx, func(*Tx) error { cancel(); return rejected })
+	if !errors.Is(err, rejected) || errors.Is(err, context.Canceled) {
+		t.Fatalf("original rejection replaced by cancellation: %v", err)
+	}
+	if observation.Outcome != "error" || observation.ContextState != "cancelled" || observation.Stage != "callback" || observation.Commit != 0 {
+		t.Fatalf("callback cause and client cancellation conflated: %+v", observation)
 	}
 }

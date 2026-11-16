@@ -156,6 +156,16 @@ func plannedTasks(parallel, isolated []task, plan impact.Plan, path string) ([]t
 }
 
 func runTask(ctx context.Context, t task) error {
+	return runTaskReport(ctx, t, "")
+}
+
+func runTaskReport(ctx context.Context, t task, reports string) (err error) {
+	value := receipt{Phase: t.name, Started: time.Now(), Outcome: "not_started"}
+	defer func() {
+		value.Finished = time.Now()
+		value.Error, value.Cause = errorText(err), errorText(context.Cause(ctx))
+		err = errors.Join(err, writeReceipt(reports, value))
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -164,12 +174,33 @@ func runTask(ctx context.Context, t task) error {
 	cmd := exec.CommandContext(ctx, "make", t.args...)
 	cmd.Env, cmd.Stdout, cmd.Stderr = t.env, os.Stdout, os.Stderr
 	containTask(cmd)
-	err := cmd.Start()
+	err = cmd.Start()
 	if err == nil {
+		value.PID, value.Outcome = cmd.Process.Pid, "running"
 		fmt.Printf("[check] %s process started pid=%d\n", t.name, cmd.Process.Pid)
-		err = cmd.Wait()
+		if receiptErr := writeReceipt(reports, value); receiptErr != nil {
+			procx.KillGroup(cmd)
+			err = errors.Join(receiptErr, cmd.Wait())
+		} else {
+			err = cmd.Wait()
+		}
 	}
 	procx.KillGroup(cmd)
+	value.CleanupCompleted = true
+	if cmd.ProcessState != nil {
+		code := cmd.ProcessState.ExitCode()
+		value.ExitCode = &code
+		value.NativeResult = cmd.ProcessState.String()
+	}
+	switch {
+	case ctx.Err() != nil:
+		value.Outcome = "cancelled"
+		err = errors.Join(err, context.Cause(ctx))
+	case err != nil:
+		value.Outcome = "failed"
+	default:
+		value.Outcome = "passed"
+	}
 	finished := time.Now()
 	elapsed := finished.Sub(start)
 	fmt.Printf("[check] %s finished in %s: %v at=%s elapsed=%s process=%v cause=%v\n", t.name, elapsed.Round(time.Second), err, finished.UTC().Format(time.RFC3339Nano), elapsed, cmd.ProcessState, context.Cause(ctx))
@@ -214,7 +245,21 @@ func packageSummary(plan impact.Plan) string {
 	return fmt.Sprintf("selected-packages=%d", len(plan.Packages))
 }
 
-func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string, count int, mode, base string) error {
+func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string, count int, mode, base, reports string) (err error) {
+	started := time.Now()
+	defer func() {
+		if ctx.Err() != nil {
+			err = errors.Join(err, context.Cause(ctx))
+		}
+		code, outcome := 0, "passed"
+		if err != nil {
+			code, outcome = 1, "failed"
+		}
+		if ctx.Err() != nil {
+			outcome = "cancelled"
+		}
+		err = errors.Join(err, writeReceipt(reports, receipt{Phase: "check", Started: started, Finished: time.Now(), ExitCode: &code, Outcome: outcome, Error: errorText(err), Cause: errorText(context.Cause(ctx)), CleanupCompleted: true}))
+	}()
 	directory, err := os.MkdirTemp("", "tend-check-")
 	if err != nil {
 		return err
@@ -233,6 +278,9 @@ func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string,
 		return err
 	}
 	path := filepath.Join(directory, "impact.json")
+	if reports != "" {
+		path = filepath.Join(reports, "impact.json")
+	}
 	if err := impact.Write(path, plan); err != nil {
 		return err
 	}
@@ -241,7 +289,9 @@ func check(ctx context.Context, b budget, cpus int, reason, goTool, pnpm string,
 
 	fmt.Printf("[check] jobs=%d app-shards=%d suite-shards=%d Go-package-parallel=%d GOMAXPROCS=%d isolated-e2e=%t effective-cpus=%d serial-reason=%q\n",
 		b.jobs, b.shards, b.suiteShards, b.packages, b.procs, b.exclusiveE2E, cpus, reason)
-	return schedule(ctx, b.jobs, parallel, isolated, runTask)
+	return schedule(ctx, b.jobs, parallel, isolated, func(ctx context.Context, t task) error {
+		return runTaskReport(ctx, t, reports)
+	})
 }
 
 func main() {
@@ -253,6 +303,7 @@ func main() {
 	pnpm := flag.String("pnpm", "pnpm", "pnpm executable")
 	mode := flag.String("mode", "affected", "validation mode: affected or full")
 	base := flag.String("base", "", "Git comparison base (default origin/main merge-base)")
+	reportRoot := flag.String("report-dir", "", "optional directory for atomic check phase and terminal receipts")
 	count := flag.Int("count", 0, "repeat race tests explicitly; 0 keeps Go native caching")
 	flag.Parse()
 	cpus := runtime.GOMAXPROCS(0)
@@ -267,9 +318,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	reports, err := receiptDirectory(*reportRoot)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if reports != "" {
+		fmt.Printf("[check] atomic phase and terminal receipts=%s\n", reports)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	if err := check(ctx, b, cpus, *reason, *goTool, *pnpm, *count, *mode, *base); err != nil {
+	if err := check(ctx, b, cpus, *reason, *goTool, *pnpm, *count, *mode, *base, reports); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
