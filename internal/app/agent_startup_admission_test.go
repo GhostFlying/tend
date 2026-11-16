@@ -75,7 +75,9 @@ func TestAgentStartupRejectedInputPreservesExplicitPendingReceipt(t *testing.T) 
 	h := newHarness(t)
 	delivery, turn := rejectedStartupInput(t, h, true)
 	for range domain.DefaultAgentRecoveryPolicy().MaxAttempts {
-		if err := h.app.DeferAgentStartup(t.Context(), "main"); err != nil {
+		// This is the ordinary input's startup hold, not repeated failures of
+		// the separately selected original receipt reader.
+		if err := h.app.DeferAgentStartupAttachment(t.Context(), "main", AgentStartupAttachment{RequestID: delivery.RequestID}); err != nil {
 			t.Fatal(err)
 		}
 		h.clock.Advance(31 * time.Second)
