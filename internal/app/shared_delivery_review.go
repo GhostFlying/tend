@@ -164,9 +164,9 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
-			// A completed report already declares its actual candidate. Never
-			// silently bind it to a provider snapshot refreshed in the meantime.
-			if round.ArtifactID != "" && round.ReviewerRole != protocol.RoleAccept {
+			// A completed report already declares its actual candidate. Explicit
+			// acceptance imports retain their original evidence/supplement path.
+			if round.ArtifactID != "" && round.AcceptanceID == "" && round.ReviewerRole != protocol.RoleAccept {
 				binding := r
 				binding.HeadSHA, binding.BaseSHA, binding.RequirementsDigest = o.Observation.HeadSHA, o.Observation.BaseSHA, digest
 				frozen := round
