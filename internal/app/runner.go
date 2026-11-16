@@ -398,7 +398,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	managerCandidates, err := views.IssueManagerCandidatesObserved(ctx, q, tx.ObservePhase)
+	managerCandidates, err := views.IssueManagerCandidatesObservedAt(ctx, q, tx.ObservePhase, x.Now.UnixMilli())
 	if err != nil {
 		return Outcome{}, err
 	}

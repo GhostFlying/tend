@@ -28,7 +28,7 @@ func Queue(ctx context.Context, q store.Querier, o scheduler.Order) ([]protocol.
 	if err != nil {
 		return nil, err
 	}
-	managers, err := views.IssueManagerCandidates(ctx, q)
+	managers, err := views.IssueManagerCandidatesObservedAt(ctx, q, nil, o.Now)
 	if err != nil {
 		return nil, err
 	}

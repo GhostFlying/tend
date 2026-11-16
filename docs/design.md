@@ -2478,3 +2478,12 @@ runner.claim 在应用层注入均匀随机排列，每次新 claim 事务只排
 载体，不提升通信协议版本。公共工具需求接口、category/capability 合并与生产
 Agent instructions 属于各自责任。实施与故障回归见
 [首次公平分配计划](plans/fair-first-assignment.md)。
+
+
+## D251：原生命令阶段与有界回执恢复
+
+原生 `item_completed` 是通知类型，不保证一个命令进程已经结束。同一 `commandExecution` 在 `backgrounded` 后可以使用原 item ID 报告真正的 `completed`、`failed` 或 `declined`。rollout 保留两个不可变原件，允许相同命令、工作目录、进程和其他固定字段的这一次阶段推进；重复通知仍幂等，真实终态内容或执行身份的冲突继续拒绝。普通消息、原生 turn 与其他稳定事件不因此放宽。退出码本身不覆盖原生运行状态。
+
+回执读取不受更新输入的启动失败预算牵连；但同一原输入的回执 attachment 确实失败时，必须复用自身有限重试、退避及 Attention。持久状态标识该失败来自 receipt recovery；原有状态在一次真实恢复失败后归入正确责任。attachment 启动、到期判断和待领取协调动作均尊重这一边界，不能在旧事件未变时持续创建 Run。未知业务请求、未 ACK 原事件及原执行身份保持，正式处理原 Attention 后继续同 Task，不能以新载体关闭成功替代旧事实结清。
+
+详见 `docs/plans/manager-receipt-replay.md`。本决策不增加通信必填字段、改变有效 worker 输入或更换原生执行身份，无协议代次变化，也不新增通用请求账本。
