@@ -16,6 +16,16 @@ func IssueManagerCandidates(ctx context.Context, q store.Querier) ([]scheduler.C
 // IssueManagerCandidatesObserved exposes fixed inclusive diagnostic boundaries
 // without logging queries or retained Issue/specification bodies.
 func IssueManagerCandidatesObserved(ctx context.Context, q store.Querier, observe func(store.WritePhase) func()) ([]scheduler.Candidate, error) {
+	return issueManagerCandidatesObserved(ctx, q, observe, nil)
+}
+
+// IssueManagerCandidatesObservedAt also fences an already queued receipt action
+// against its original attachment's backoff using the caller's injected clock.
+func IssueManagerCandidatesObservedAt(ctx context.Context, q store.Querier, observe func(store.WritePhase) func(), now int64) ([]scheduler.Candidate, error) {
+	return issueManagerCandidatesObserved(ctx, q, observe, &now)
+}
+
+func issueManagerCandidatesObserved(ctx context.Context, q store.Querier, observe func(store.WritePhase) func(), now *int64) ([]scheduler.Candidate, error) {
 	end := func() {}
 	if observe != nil {
 		end = observe(store.WriteClaimManagerBuild)
@@ -98,6 +108,13 @@ func IssueManagerCandidatesObserved(ctx context.Context, q store.Querier, observ
 			occupied = occupied || len(handoffs[handoffScope{m.IssueID, m.ExpectedEpoch}]) > 0
 		}
 		if receipt.ReceiptOnly {
+			blocked, err := managerReceiptRecoveryHeld(ctx, q, m, now)
+			if err != nil {
+				return nil, err
+			}
+			if blocked {
+				continue
+			}
 			t.Lifecycle = protocol.TaskQueued
 			t.ControlMode = protocol.ControlManaged
 			t.BlockReason = protocol.BlockNone

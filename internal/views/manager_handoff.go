@@ -125,7 +125,30 @@ func managerReceiptPending(ctx context.Context, q store.Querier, m store.IssueMa
 }
 
 func ManagerReceiptDue(ctx context.Context, q store.Querier, m store.IssueManagerTask, now int64) (bool, error) {
+	blocked, err := managerReceiptRecoveryHeld(ctx, q, m, &now)
+	if err != nil || blocked {
+		return false, err
+	}
 	var due bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND ((t.status IN ('starting','started','unknown') AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)) OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id AND p.next_reconcile_at<=?))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0)`, m.IssueID, m.AssignmentEpoch, now, m.TaskID).Scan(&due)
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND ((t.status IN ('starting','started','unknown') AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)) OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id AND p.next_reconcile_at<=?))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0)`, m.IssueID, m.AssignmentEpoch, now, m.TaskID).Scan(&due)
 	return due, err
+}
+
+func managerReceiptRecoveryHeld(ctx context.Context, q store.Querier, m store.IssueManagerTask, now *int64) (bool, error) {
+	// Only failures of this original receipt attachment consume its budget.
+	// A newer unadmitted input's startup hold cannot suppress native recovery.
+	deadline := int64(0)
+	if now != nil {
+		deadline = *now
+	}
+	var blocked bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id
+ JOIN events s ON s.event_seq=(SELECT MAX(event_seq) FROM events WHERE object_type='agent_startup' AND object_id=t.request_id AND kind='conversation.startup_state')
+ LEFT JOIN attentions a ON a.attention_id=json_extract(s.body_json,'$.attention_id')
+ WHERE h.issue_id=? AND h.assignment_epoch=? AND json_extract(s.body_json,'$.receipt_recovery')=1
+ AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)
+ OR EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=json_extract(h.private_snapshot,'$.runner_run_id') AND e.applied=0))
+ AND (a.status='open' OR (? AND json_extract(s.body_json,'$.next_attempt_at')>?)))`, m.IssueID, m.AssignmentEpoch, now != nil, deadline).Scan(&blocked)
+	return blocked, err
 }

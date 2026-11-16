@@ -286,8 +286,11 @@ func TestToolUsesJoinTheConversation(t *testing.T) {
 		// A command moved to the background ends later.
 		th.UseTool(turn, "item_4", harness.ToolUse{Name: "shell", Input: "make", Status: protocol.ToolRunning})
 		th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: turn, ItemID: "item_4", ItemType: "commandExecution",
+			Raw:  json.RawMessage(`{"id":"item_4","type":"commandExecution","command":"make","processId":"process","status":"backgrounded","exitCode":0,"aggregatedOutput":"building"}`),
 			Tool: &harness.ToolUse{Name: "shell", Input: "make", Output: "building", Status: protocol.ToolRunning}})
-		th.UseTool(turn, "item_4", harness.ToolUse{Name: "shell", Input: "make", Output: "built", Status: protocol.ToolCompleted})
+		th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: turn, ItemID: "item_4", ItemType: "commandExecution",
+			Raw:  json.RawMessage(`{"id":"item_4","type":"commandExecution","command":"make","processId":"process","status":"completed","exitCode":0,"aggregatedOutput":"built"}`),
+			Tool: &harness.ToolUse{Name: "shell", Input: "make", Output: "built", Status: protocol.ToolCompleted}})
 		th.Say(turn, "item_3", "Nothing to do.")
 		return "completed"
 	}

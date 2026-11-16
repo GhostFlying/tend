@@ -15,10 +15,11 @@ import (
 // Startup attempts are local attachment failures, not native or outbox deliveries.
 // Their append-only state uses the original input's identity across restarts.
 type agentStartupState struct {
-	Attempts      int64  `json:"attempts"`
-	FirstFailedAt int64  `json:"first_failed_at"`
-	NextAttemptAt int64  `json:"next_attempt_at"`
-	AttentionID   string `json:"attention_id,omitempty"`
+	Attempts        int64  `json:"attempts"`
+	FirstFailedAt   int64  `json:"first_failed_at"`
+	NextAttemptAt   int64  `json:"next_attempt_at"`
+	AttentionID     string `json:"attention_id,omitempty"`
+	ReceiptRecovery bool   `json:"receipt_recovery,omitempty"`
 }
 
 // AgentStartupAttachment identifies what the chosen runtime will attach to.
@@ -49,8 +50,14 @@ func readAgentStartupState(ctx context.Context, q store.Querier, request string)
 }
 
 func agentStartupAttachmentAllowed(ctx context.Context, q store.Querier, attachment AgentStartupAttachment, now int64) (bool, error) {
-	if attachment.Reconciliation || attachment.RequestID == "" {
+	if attachment.RequestID == "" {
 		return true, nil
+	}
+	if attachment.Reconciliation {
+		state, err := readAgentStartupState(ctx, q, attachment.RequestID)
+		if err != nil || !state.ReceiptRecovery {
+			return err == nil, err
+		}
 	}
 	allowed, _, err := agentStartupInputAllowed(ctx, q, attachment.RequestID, now)
 	return allowed, err
@@ -180,14 +187,24 @@ func (a *App) DeferAgentStartupAttachment(ctx context.Context, conversation stri
 			return err
 		}
 		now := a.now()
+		receiptChanged := attachment.Reconciliation && !state.ReceiptRecovery
+		if receiptChanged {
+			state.ReceiptRecovery = true
+		}
 		if state.AttentionID != "" {
 			attention, err := store.GetAttention(ctx, tx.Q(), state.AttentionID)
 			if err != nil || attention.Status == "open" {
+				if err == nil && receiptChanged {
+					return a.writeAgentStartupState(ctx, tx, head.RequestID, state)
+				}
 				return err
 			}
-			state = agentStartupState{}
+			state = agentStartupState{ReceiptRecovery: attachment.Reconciliation}
 		}
 		if state.NextAttemptAt > now.UnixMilli() {
+			if receiptChanged {
+				return a.writeAgentStartupState(ctx, tx, head.RequestID, state)
+			}
 			return nil
 		}
 		if state.Attempts == 0 {
