@@ -33,3 +33,5 @@ Refs: D248；保留既有 D247 的阶段与安装约束。新增 owner 协调动
 R8 独立审阅纠正：预绑定验收缺少 whole-PR 证据后，原审阅者的补充报告仍属于同轮实际质量来源。先以正常验收、补充报告和 wait 入口保存负面回归，再让 record/wait 共用有效轮次解析；覆盖补充 changes_requested 的记录与 disposition 门槛、passed/blocked/inconclusive、无质量结果的正常接续，以及活动执行和未结副作用。原验收、失败、unknown 和审阅历史不改写。
 
 保留旧请求省略 reviewer_role、通过实际 acceptance_id 导入验收的合同。普通 completed report 的当前候选预校验只读取报告来源，不能把窄验收当作报告而阻止其原审阅者补充入口；实际验收 ID、候选、独立性和最终质量判断继续使用原校验。组合验证须包含该旧路径以及错误/缺失质量的普通报告拒绝。
+
+冻结轮次的结果来源还须独立于 reviewer Task 的后续 lifecycle/current artifact。先用普通报告和补充报告的真实完成、释放、continue、wait 顺序保存负面回归；再按原 Task/spec/implement generation/已绑定 Run 及真实完成事实读取不可变原件，拒绝混入下一代结果或猜测缺失来源。无需新增状态机或迁移，保留原候选、质量、角色、身份、代次与未知副作用约束。

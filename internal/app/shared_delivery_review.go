@@ -578,12 +578,9 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 	if err != nil {
 		return nil, "", "", err
 	}
-	artifactID := round.ArtifactID
-	if artifactID == "" && (t.SpecVersion != round.SpecVersion || t.Lifecycle != protocol.TaskCompleted || t.CurrentArtifactID == "") {
-		return nil, "", "", protocol.Errorf(protocol.CodeInvalidTransition, "the bound review task has not completed under its frozen agreement")
-	}
-	if artifactID == "" {
-		artifactID = t.CurrentArtifactID
+	artifactID, err := frozenSharedReviewArtifact(ctx, q, t, round)
+	if err != nil {
+		return nil, "", "", err
 	}
 	a, err := store.GetArtifact(ctx, q, artifactID)
 	if err != nil {
@@ -597,7 +594,7 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 	if err != nil {
 		return nil, "", "", err
 	}
-	if a.TaskID != round.TaskID || action.TargetSpecVersion != round.SpecVersion || round.ImplementGeneration > 0 && action.Generation != round.ImplementGeneration || round.RunID != "" && round.RunID != a.RunID && round.AcceptanceID == "" {
+	if a.TaskID != round.TaskID || runRow.TaskID != round.TaskID || action.TaskID != round.TaskID || action.TargetSpecVersion != round.SpecVersion || round.ImplementGeneration > 0 && action.Generation != round.ImplementGeneration || round.RunID != "" && round.RunID != a.RunID && round.AcceptanceID == "" {
 		return nil, "", "", protocol.Errorf(protocol.CodeInvalidTransition, "the report must come from this round's frozen Task execution")
 	}
 	var artifact protocol.ArtifactPayload
@@ -648,6 +645,41 @@ func readSharedReviewResult(ctx context.Context, q store.Querier, r protocol.Sha
 		return nil, "", "", protocol.Errorf(protocol.CodeForbidden, "review artifact was produced by a different reviewer")
 	}
 	return result, run, a.ArtifactID, nil
+}
+
+// Task continuation can replace current_artifact_id. Resolve a prebound report
+// through its immutable execution, never through a newer Task generation.
+func frozenSharedReviewArtifact(ctx context.Context, q store.Querier, task store.TaskRow, round protocol.SharedDeliveryReviewRound) (string, error) {
+	if round.ArtifactID != "" {
+		return round.ArtifactID, nil
+	}
+	if round.ImplementGeneration == 0 && round.RunID == "" {
+		return "", protocol.Errorf(protocol.CodeUnknownOutcome, "the frozen review execution identity is missing; retain its original evidence before recovery")
+	}
+	const frozen = ` FROM artifacts f JOIN runs r ON r.run_id=f.run_id JOIN plan_actions a ON a.action_id=r.action_id WHERE f.task_id=? AND r.task_id=f.task_id AND a.task_id=f.task_id AND a.target_spec_version=? AND (?=0 OR a.generation=?) AND (?='' OR r.run_id=?)`
+	args := []any{round.TaskID, round.SpecVersion, round.ImplementGeneration, round.ImplementGeneration, round.RunID, round.RunID}
+	// The existing completion fact distinguishes an actual result from a
+	// retained stale submission. Current-completed historical rows keep their
+	// original contract, still restricted by the full immutable tuple.
+	current := task.Lifecycle == protocol.TaskCompleted && task.SpecVersion == round.SpecVersion
+	ids, err := store.FollowupIDs(ctx, q, `SELECT f.artifact_id`+frozen+` AND (EXISTS(SELECT 1 FROM events e WHERE e.object_type='task' AND e.object_id=f.task_id AND e.kind='task.completed' AND json_extract(e.body_json,'$.artifact_id')=f.artifact_id AND json_extract(e.body_json,'$.spec_version')=a.target_spec_version) OR (? AND f.artifact_id=?)) LIMIT 2`, append(args, current, task.CurrentArtifactID)...)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		var submitted bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1`+frozen+`)`, args...).Scan(&submitted); err != nil {
+			return "", err
+		}
+		if submitted {
+			return "", protocol.Errorf(protocol.CodeUnknownOutcome, "the frozen report's completion is unconfirmed; retain its original result")
+		}
+		return "", protocol.Errorf(protocol.CodeInvalidTransition, "the frozen review execution has not produced its immutable report")
+	}
+	if len(ids) != 1 {
+		return "", protocol.Errorf(protocol.CodeUnknownOutcome, "multiple immutable results match the frozen review execution; reconcile their original identities")
+	}
+	return ids[0], nil
 }
 
 func validateSharedReviewResult(result *protocol.SharedReviewResult, r protocol.SharedDeliveryReview, round protocol.SharedDeliveryReviewRound) error {
