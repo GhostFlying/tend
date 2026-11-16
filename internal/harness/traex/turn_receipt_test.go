@@ -87,3 +87,15 @@ func TestRetainedNativeReceiptDecodesOriginalWithoutExecutionAuthority(t *testin
 		}
 	}
 }
+
+func TestRetainedNativeReceiptIgnoresNonMessageContentShape(t *testing.T) {
+	raw := json.RawMessage(`{"id":"original","status":"interrupted","items":[{"type":"userMessage","id":"source","content":[{"type":"text","text":"exact input"}]},{"type":"reasoning","id":"thought","content":["native reasoning text"]},{"type":"agentMessage","id":"reply","text":"exact output"}]}`)
+	receipt, err := DecodeRetainedTurnReceipt(raw)
+	if err != nil || receipt.ID != "original" || receipt.Status != "interrupted" || string(receipt.Raw) != string(raw) || len(receipt.Items) != 2 || receipt.Items[0].Text != "exact input" || receipt.Items[1].Text != "exact output" {
+		t.Fatal("non-message content blocked the actual original receipt", receipt, err)
+	}
+	bad := json.RawMessage(`{"id":"original","status":"interrupted","items":[{"type":"userMessage","id":"source","content":["invalid text block"]}]}`)
+	if _, err := DecodeRetainedTurnReceipt(bad); err == nil {
+		t.Fatal("invalid user content lost its original validation")
+	}
+}

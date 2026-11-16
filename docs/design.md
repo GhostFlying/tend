@@ -2482,7 +2482,7 @@ Agent instructions 属于各自责任。实施与故障回归见
 
 ## D251：原生命令阶段与有界回执恢复
 
-原生 `item_completed` 是通知类型，不保证一个命令进程已经结束。同一 `commandExecution` 在 `backgrounded` 后可以使用原 item ID 报告真正的 `completed`、`failed` 或 `declined`。rollout 保留两个不可变原件，允许相同命令、工作目录、进程和其他固定字段的这一次阶段推进；重复通知仍幂等，真实终态内容或执行身份的冲突继续拒绝。普通消息、原生 turn 与其他稳定事件不因此放宽。退出码本身不覆盖原生运行状态。
+原生 `item_completed` 是通知类型，不保证一个命令进程已经结束。同一 `commandExecution` 在 `backgrounded` 后可以使用原 item ID 报告真正的 `completed`、`failed` 或 `declined`。rollout 保留两个不可变原件，允许相同命令、工作目录、进程和其他固定字段的这一次阶段推进；重复通知仍幂等，真实终态内容或执行身份的冲突继续拒绝。普通消息、原生 turn 与其他稳定事件不因此放宽。退出码本身不覆盖原生运行状态。 原生历史仅按用户消息的类型解码文本块；reasoning 等其他 item 的同名 content 字段不套用该结构，完整原件仍保留。格式错误的用户消息继续拒绝。
 
 回执读取不受更新输入的启动失败预算牵连；但同一原输入的回执 attachment 确实失败时，必须复用自身有限重试、退避及 Attention。持久状态标识该失败来自 receipt recovery；原有状态在一次真实恢复失败后归入正确责任。attachment 启动、到期判断和待领取协调动作均尊重这一边界，不能在旧事件未变时持续创建 Run。回执启动退避的独立到期时间加入后台 deadline，涵盖原生 turn 及没有 main turn 的未决手动 compact；compact 期限仅匹配原操作与原会话，完成后退出唤醒候选。即使扫描跨过到期点，系统仍安排下一次唤醒，不等待无关账本变化。未知业务请求、未 ACK 原事件及原执行身份保持，正式处理原 Attention 后继续同 Task，不能以新载体关闭成功替代旧事实结清。
 

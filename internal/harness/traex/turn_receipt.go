@@ -55,13 +55,11 @@ type nativeReceiptTurn struct {
 	Status string          `json:"status"`
 	Error  json.RawMessage `json:"error"`
 	Items  []struct {
-		ID       string `json:"id"`
-		ClientID string `json:"clientId"`
-		Type     string `json:"type"`
-		Text     string `json:"text"`
-		Content  []struct {
-			Text string `json:"text"`
-		} `json:"content"`
+		ID       string          `json:"id"`
+		ClientID string          `json:"clientId"`
+		Type     string          `json:"type"`
+		Text     string          `json:"text"`
+		Content  json.RawMessage `json:"content"`
 	} `json:"items"`
 }
 
@@ -86,7 +84,15 @@ func DecodeRetainedTurnReceipt(raw json.RawMessage) (harness.TurnReceipt, error)
 		ev := harness.Event{Kind: harness.EventItemCompleted, TurnID: turn.ID, ItemID: item.ID, ItemType: item.Type, Text: item.Text}
 		if item.Type == harness.ItemUserMessage {
 			ev.Text = ""
-			for _, part := range item.Content {
+			var content []struct {
+				Text string `json:"text"`
+			}
+			if len(item.Content) != 0 {
+				if err := json.Unmarshal(item.Content, &content); err != nil {
+					return harness.TurnReceipt{}, fmt.Errorf("decode native user content: %w", err)
+				}
+			}
+			for _, part := range content {
 				ev.Text += part.Text
 			}
 			receipt.Items = append(receipt.Items, ev)
