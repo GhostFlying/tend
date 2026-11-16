@@ -2458,3 +2458,23 @@ runner worker wire 或审阅要求 digest。系统先冻结作者输入，再由
 补齐现有 owner 身份，避免把系统 pin 误记为模型硬指定。新版本保留旧版本的原件；
 continue/失败恢复/unknown 对账继续沿原执行身份，不建立新选择。完整调用路径、
 兼容限制和验证见 [实施计划](plans/task-work-requirements.md)。
+
+## D249：首次执行器选择遵循随机候选顺序，续接保留真实身份
+
+runner.claim 在应用层注入均匀随机排列，每次新 claim 事务只排列一次当前 host
+的执行器。纯 scheduler 对 owner 和普通 Task 取消 local_id 字典序抢先，按输入
+顺序选择第一个满足工作要求与真实资源准入的执行器。Pick、资格判断与最终 pin
+持久化共用同一排列；读取解释不抽签。已有 run_id 重试先恢复实际 assignment。
+
+新责任在该 host 的合格执行器中等概率。runner 拉取竞争继续决定领取 host，
+本决策不定义跨 runner 的全局均匀概率或 slot 权重，不使用展示任务计数替代资源
+准入，也不增加每 Agent 独占锁。显式指派和 manager、owner、reviewer、问题/暂停
+交接的原 pin 优先。缺少独立 owner contract 的普通 Task 从同一 Task、职责和 spec
+的最近实际 Run 恢复 pin；已授权 workspace start-over 不继承被丢弃 host 的 pin。
+改变 spec 的显式合同更新仍是新选择边界。原执行不可用时等待原事实恢复，不以
+随机化更换身份。run、pin、责任与 lease 沿既有事务原子提交，未提交不形成责任。
+
+这是 server 内部策略修改，没有新增 wire 字段、收紧 runner 通信要求或改变恢复
+载体，不提升通信协议版本。公共工具需求接口、category/capability 合并与生产
+Agent instructions 属于各自责任。实施与故障回归见
+[首次公平分配计划](plans/fair-first-assignment.md)。

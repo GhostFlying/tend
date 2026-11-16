@@ -95,6 +95,18 @@ func ApplyIssueDependencies(ctx context.Context, q store.Querier, candidates []s
 			c.HandoffPin = pin
 		}
 
+		if c.NamedExecutionAssigned {
+			role := protocol.RoleImplement
+			if c.Kind == protocol.ActionAccept {
+				role = protocol.RoleAccept
+			}
+			pin, err := store.PreviousTaskExecution(ctx, q, c.TaskID, c.SpecVersion, role)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			c.PreviousPin = pin
+		}
+
 		scope, err := store.ResolveTaskIssueScope(ctx, q, c.TaskID)
 		if err != nil {
 			return err

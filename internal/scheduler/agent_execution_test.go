@@ -198,3 +198,62 @@ func TestCapabilityDeclarationSelectionKeepsBothRoleAndFrozenCandidateConstraint
 		t.Fatal("empty required introduced a label gate", pin, reason)
 	}
 }
+
+func TestExecutionOrderCannotBypassAdmissionOrReplaceRetainedRoles(t *testing.T) {
+	original := protocol.RunExecutionPin{Identity: protocol.AgentIdentity{ExecutionEnvironmentID: "host", LocalID: "beta"}, AgentRevision: 1, Runtime: protocol.AgentRuntimeReference{RuntimeID: "worker", Revision: 1}, SnapshotID: "old", InventoryRevision: 1, PublicSHA256: "old", BackendID: "git"}
+	other := original
+	other.Identity.LocalID = "alpha"
+	observed := original
+	observed.SnapshotID, observed.PublicSHA256, observed.InventoryRevision = "new", "new", 2
+	h := Host{ID: "host", Executors: []Executor{{Pin: other, Categories: []string{"implementation"}}, {Pin: observed, Categories: []string{"implementation"}}}}
+	c := Candidate{Kind: protocol.ActionImplement, PreviousPin: &original, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementation"}}}
+	assertPin := func(want *protocol.RunExecutionPin) {
+		t.Helper()
+		got, reason := SelectExecution(h, c)
+		if want == nil {
+			if got != nil || reason == "" {
+				t.Fatal("unavailable original was replaced", got, reason)
+			}
+			return
+		}
+		if got == nil || *got != *want || reason != "" {
+			t.Fatal(got, reason, want)
+		}
+	}
+	assertPin(&original)
+	// Full pin constraints include runtime, backend, profile and extensions.
+	for _, mutate := range []func(*protocol.RunExecutionPin){
+		func(p *protocol.RunExecutionPin) { p.AgentRevision++ },
+		func(p *protocol.RunExecutionPin) { p.Runtime.RuntimeID = "other" },
+		func(p *protocol.RunExecutionPin) { p.BackendID = "orca" },
+		func(p *protocol.RunExecutionPin) { p.Profile.Model = "other" },
+		func(p *protocol.RunExecutionPin) { p.Extensions.ReleaseID = "other" },
+	} {
+		h.Executors[1].Pin = observed
+		mutate(&h.Executors[1].Pin)
+		assertPin(nil)
+	}
+	h.Executors[1].Pin = observed
+	h.ConcurrencyBlocked = map[string]bool{"worker": true}
+	assertPin(nil)
+	h.ConcurrencyBlocked = nil
+	h.ContinuationsSupported = true
+	assertPin(nil)
+	h.Continuations = []Executor{{Continuation: true, Pin: original, Categories: []string{"implementation"}}}
+	assertPin(&original)
+	c.AgentSelection.Implementation.RuntimeID = "other"
+	assertPin(nil)
+	c.AgentSelection.Implementation.RuntimeID = ""
+	c.AgentSelection.Implementation.RequiredCapabilities = []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}
+	assertPin(nil)
+	c.AgentSelection.Implementation.RequiredCapabilities = nil
+	c.WorkspaceBackendID = "orca"
+	assertPin(nil)
+	c.WorkspaceBackendID = ""
+	c.ExecutionFilter = &other
+	assertPin(nil)
+	c.ExecutionFilter = nil
+	// A real owner contract takes precedence over legacy run history.
+	c.OwnerPin = &other
+	assertPin(&other)
+}

@@ -40,3 +40,18 @@ func (t *Tx) BindWorkspaceBackend(ctx context.Context, id, backend string) error
 	}
 	return nil
 }
+
+// PreviousTaskExecution reads the actual most recent pin for one unchanged role
+// agreement. A new spec or a different task/role is a new selection boundary.
+func PreviousTaskExecution(ctx context.Context, q Querier, task string, spec int64, role protocol.RunRole) (*protocol.RunExecutionPin, error) {
+	var id string
+	if err := q.QueryRowContext(ctx, `SELECT r.run_id FROM runs r
+ JOIN plan_actions a USING(action_id) JOIN run_agent_executions e USING(run_id)
+ WHERE r.task_id=? AND a.target_spec_version=? AND r.role=?
+ AND NOT EXISTS (SELECT 1 FROM abandoned_workspaces w
+ WHERE w.task_id=r.task_id AND w.host_id=r.host_id)
+ ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1`, task, spec, role).Scan(&id); err != nil {
+		return nil, notFound(err, "previous task execution")
+	}
+	return GetRunExecution(ctx, q, id)
+}

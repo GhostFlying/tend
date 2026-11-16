@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,11 +67,12 @@ type Exec struct {
 	Env              *protocol.Envelope
 	Principal        protocol.Principal
 	// Actor preserves the actual caller when owner authority is delegated.
-	Actor      *protocol.Principal
-	actorAgent *protocol.AgentIdentity
-	TraceID    string
-	Now        time.Time
-	IDs        protocol.IDGen
+	Actor            *protocol.Principal
+	actorAgent       *protocol.AgentIdentity
+	TraceID          string
+	Now              time.Time
+	IDs              protocol.IDGen
+	shuffleExecutors func(int, func(int, int))
 	// LeaseTTL is the lease duration of runs allocated by this request.
 	LeaseTTL time.Duration
 	// WaitPerHour is what an hour in the queue adds to an action's score
@@ -147,6 +149,7 @@ type App struct {
 	observeDeployment          func(context.Context) (protocol.ObservedDeployment, error)
 	store                      *store.Store
 	ids                        protocol.IDGen
+	shuffleExecutors           func(int, func(int, int))
 	now                        func() time.Time
 	notifier                   Notifier
 	usageWake                  chan struct{}
@@ -166,9 +169,15 @@ func WithNotifier(n Notifier) Option {
 	return func(a *App) { a.notifier = n }
 }
 
+// WithExecutorShuffle injects the random permutation used by fresh claims.
+// The function must produce a uniform permutation and be safe for concurrent use.
+func WithExecutorShuffle(shuffle func(int, func(int, int))) Option {
+	return func(a *App) { a.shuffleExecutors = shuffle }
+}
+
 // New returns an App.
 func New(s *store.Store, ids protocol.IDGen, now func() time.Time, opts ...Option) *App {
-	a := &App{deploymentIdentityInit: make(chan struct{}, 1), agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), scheduling: NewBroadcast(), logs: NewBroadcast()}
+	a := &App{deploymentIdentityInit: make(chan struct{}, 1), agentRecoveryPolicy: domain.DefaultAgentRecoveryPolicy(), store: s, ids: ids, now: now, shuffleExecutors: rand.Shuffle, leaseTTL: DefaultLeaseTTL, waitPer: DefaultWaitPerHour, hostLost: DefaultHostLostAfter, usageWake: make(chan struct{}, 1), changes: NewBroadcast(), scheduling: NewBroadcast(), logs: NewBroadcast()}
 	for _, o := range opts {
 		o(a)
 	}
@@ -211,7 +220,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not handled here", env.Operation)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{log: a.log, configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{log: a.log, configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, shuffleExecutors: a.shuffleExecutors, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	x.requestDomain = domain
 	if delegated, ok := cmd.(ownerExecutionCommand); ok {
 		x = delegated.adapted(x)

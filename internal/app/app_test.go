@@ -35,7 +35,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { s.Close() })
 	ids := testkit.NewIDGen(clock, 42)
-	h := &harness{t: t, app: New(s, ids, clock.Now), store: s, clock: clock, ids: ids}
+	h := &harness{t: t, app: New(s, ids, clock.Now, WithExecutorShuffle(func(int, func(int, int)) {})), store: s, clock: clock, ids: ids}
 	h.syncConfig(testConfig())
 	h.seeded = map[string]int{}
 	for _, table := range []string{"events", "inbox", "outbox", "tasks", "plan_actions", "runs"} {

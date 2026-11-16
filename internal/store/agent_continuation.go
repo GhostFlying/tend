@@ -76,6 +76,26 @@ func RequiredAgentExecutions(ctx context.Context, q Querier, host string) ([]pro
 	if err != nil {
 		return nil, err
 	}
+	// Unchanged ordinary Task roles also retain their actual selected executor.
+	// Start from live Tasks, then their indexed task/role runs, rather than
+	// retaining every historical pin or depending on a still-open producer Run.
+	ordinary, err := FollowupIDs(ctx, q, `SELECT e.pin_json FROM tasks t
+ CROSS JOIN (SELECT 'implement' AS role UNION ALL SELECT 'accept') roles
+ JOIN runs r ON r.run_id=(SELECT previous.run_id FROM runs previous
+ JOIN plan_actions a ON a.action_id=previous.action_id
+ JOIN run_agent_executions p ON p.run_id=previous.run_id
+ WHERE previous.task_id=t.task_id AND previous.role=roles.role
+ AND a.target_spec_version=t.spec_version
+ AND NOT EXISTS (SELECT 1 FROM abandoned_workspaces w
+ WHERE w.task_id=previous.task_id AND w.host_id=previous.host_id)
+ ORDER BY previous.created_at DESC,previous.rowid DESC LIMIT 1)
+ JOIN run_agent_executions e USING(run_id)
+ WHERE t.kind='execution' AND t.lifecycle NOT IN ('completed','cancelled','failed')
+ AND r.host_id=?`, host)
+	if err != nil {
+		return nil, err
+	}
+	raw = append(raw, ordinary...)
 	tasks, err := FollowupIDs(ctx, q, `SELECT c.task_id FROM task_execution_contracts c JOIN issue_controls i ON i.issue_id=c.issue_id JOIN tasks t USING(task_id) WHERE c.agent_ref LIKE ? ESCAPE '\' AND c.assignment_epoch=i.assignment_epoch AND c.agent_ref=i.assignee_ref AND i.assignment_state='active' AND i.state IN ('active','paused','cancelling') AND t.lifecycle NOT IN ('completed','cancelled','failed')`, strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(host)+"/%")
 	if err != nil {
 		return nil, err
