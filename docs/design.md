@@ -2374,6 +2374,8 @@ R8–R18 的业务恢复保留原 Task、执行与审阅历史，不以协调状
 
 窄验收之后的原审阅者补充报告通过同一有效轮次解析供 record 与 wait 读取，实际停止和质量判断都对应补充执行。可用的 passed、changes_requested、blocked 或 inconclusive 必须正常记录；补充 finding 未处置不能通过 waiting 绕到 recheck。仅无可用质量结果且实际执行与副作用已收敛时可等待，原窄验收和空质量轮次保持不变。
 
+开始时尚无 artifact 的报告按冻结 Task/spec/implement generation/已绑定 Run 查找唯一不可变原件，并沿既有 task.completed 事实确认原完成；当前仍完成的历史记录保留原合同。Task 后续 continue、当前 artifact 或生命周期变化不改写该来源。缺执行身份、多个匹配或完成未知不能改猜 current/latest；原候选、身份、角色和质量校验继续作用于找到的旧轮次，后代结果须另行绑定真实 recheck。
+
 省略 reviewer_role 且指定实际 acceptance_id 的旧验收导入合同保留，缺 whole-PR 证据仍沿原补充路径，不把窄验收提升为通过，也不把它错误解释成普通完成报告而拒绝绑定。普通完成报告仍在开始前核对当前完整候选；验收导入的实际 ID、冻结候选和最终证据校验不变。
 
 未启动的旧部署自绑定可通过 `recover_preparation` 归档并恢复准备责任，使用当前 Issue/Task 控制版本与实际授权；任何真实升级、pending/unknown 外部动作、活动 writer/租约、变化的责任及已有 typed stage 都继续原恢复语义。仅保留同 Task 的静态工作区占用不等于活动 writer，也不要求伪造工作区释放。该入口不完成交付、不产生新批准或新来源；原执行归档后，真实提交与独立验收再沿现有 prepare/bind 进入当前候选。
