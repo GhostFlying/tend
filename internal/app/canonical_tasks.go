@@ -122,6 +122,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		}
 		spec.Workspace = domain.Workspace{Mode: domain.WorkspaceReuse, SourceTaskID: current.Plan.DefaultWorkspaceTaskID, IncludeExistingChanges: spec.Workspace.IncludeExistingChanges}
 	}
+	freezeTaskSelectionSource(x, &spec)
 	if _, err := prepareOwnerExecution(ctx, x, tx.Q(), current, &spec); err != nil {
 		return Outcome{}, err
 	}

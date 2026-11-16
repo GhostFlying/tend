@@ -11,6 +11,42 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
+func TestIssueTaskCLIWorkRequirementsAndExplicitHumanFilters(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "human_filters"}[explicit], func(t *testing.T) {
+			f := newFakeServer(t)
+			te := newTestEnv(t, f.srv.URL)
+			selection := protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementation", RequiredCapabilities: []protocol.CapabilityReference{{CapabilityID: "image_gen", DefinitionRevision: 1}}}, Acceptance: protocol.AgentRequirement{CategoryID: "formal-review"}}
+			payload := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: 2, TaskID: te.IDs.New(protocol.PrefixTask), Title: "Explicit work", Spec: protocol.OwnerTaskSpec{Goal: "Produce result", Acceptance: []string{"Verify result"}, Deliverables: []string{"report"}, AgentSelection: &selection, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary", Mounts: []protocol.OwnerTaskMount{}}, Requirements: protocol.OwnerTaskRequirements{HostID: "resource-host", OS: "linux", Labels: []string{"resource-label"}}}}
+			if explicit {
+				selection.Implementation.AgentID = "resource-host/worker"
+				selection.Implementation.RuntimeID = "native"
+				selection.Implementation.Model = "model"
+				selection.Implementation.Effort = "high"
+				payload.Spec.AcceptanceExecution = &protocol.ExecutionProfile{Model: "review", Effort: "xhigh"}
+			}
+			input, _ := json.Marshal(payload)
+			if code := te.main("issue", "create-task", "wi_target", "--revision", "3", "--epoch", "2", "--data", string(input), "--dry-run"); code != exitOK {
+				t.Fatal(code, te.errOut.String())
+			}
+			var env protocol.Envelope
+			if err := json.Unmarshal(te.out.Bytes(), &env); err != nil {
+				t.Fatal(err)
+			}
+			var got protocol.CreateIssueTaskPayload
+			if err := json.Unmarshal(env.Payload, &got); err != nil {
+				t.Fatal(err)
+			}
+			if !got.Spec.AgentSelection.Equal(selection) || got.Spec.Requirements.HostID != "resource-host" || got.Spec.Requirements.OS != "linux" || len(got.Spec.Requirements.Labels) != 1 || (got.Spec.AcceptanceExecution == nil) != !explicit {
+				t.Fatal("CLI silently discarded valid selection/resource input", string(env.Payload))
+			}
+			if len(f.requests) != 0 {
+				t.Fatal("explicit original controls caused network calls")
+			}
+		})
+	}
+}
+
 func TestIssueCLIOriginalEnvelopeDryRunAndReplay(t *testing.T) {
 	f := newFakeServer(t)
 	te := newTestEnv(t, f.srv.URL)

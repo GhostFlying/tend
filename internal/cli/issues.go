@@ -62,15 +62,15 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 
 	action := args[0]
 	fs := newFlags(e, "issue "+action)
-	if action == "create" || action == "set-acceptance-policy" {
+	if action == "create" || action == "set-acceptance-policy" || action == "create-task" || action == "update-task" || action == "request-owner" || action == "set-status" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
 	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
 	statusFlag := fs.String("status", "", "explicit Issue work status; backlog records only, todo permits runner claim")
 	categoryFlag := fs.String("category", "", "owner capability category selected when moving to todo")
-	agentFlag := fs.String("agent", "", "optional environment/local owner identity with --category")
+	agentFlag := fs.String("agent", "", "explicit authenticated human assignment: environment/local identity with --category; ordinary model work selects only category/capability")
 	asJSON := fs.Bool("json", false, "print the complete structured result")
-	data := fs.String("data", "", "inline JSON payload; retained create-task input includes task_id")
+	data := fs.String("data", "", "inline JSON payload; create-task includes task_id and spec.agent_selection category_id/required_capabilities for each role; explicit owner filters agent_id/runtime_id/model/effort and acceptance_execution remain supported; source_message_id is a citation, not human assignment authority")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
 	request := fs.String("request-id", "", "reuse the original request identity with its original revision, epoch and payload")
 	revision := fs.Int64("revision", -1, "expected control revision; first requests may read the current value")

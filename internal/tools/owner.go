@@ -54,8 +54,8 @@ func (s *Service) NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 				}
 			}
 		}
-		out = append(out, harness.ToolSpec{Name: "owner_capabilities", Description: "Discover the complete actual owner business, administration and diagnostic catalog. Filter/after/limit page names; name returns one exact invocation schema. schema_type returns a canonical owner API type schema; use filter to discover type names. Read this before invoking an unfamiliar capability. No write or external probe.", InputSchema: exportSchema(json.RawMessage(argumentSchema(ownerCatalogArgs{})))})
-		out = append(out, harness.ToolSpec{Name: "owner_call", Description: "Invoke one concrete registered owner capability discovered with owner_capabilities. Use its exact name and arguments. Same authority and domain rules as owner UI/CLI, actual actor is main Agent. Positive effect_seq identifies each new mutation; preserve original_envelope only for exact receipt replay. path/query preserve all pagination and selectors. Unknown outcomes require original request reconciliation.", InputSchema: exportSchema(json.RawMessage(argumentSchema(ownerInvokeArgs{})))})
+		out = append(out, harness.ToolSpec{Name: "owner_capabilities", Description: "Discover the complete actual owner business, administration and diagnostic catalog. Filter/after/limit page names; name returns one exact invocation schema. schema_type returns an owner API type schema (writable work selectors use the ordinary model projection; historical output types remain complete); use filter to discover type names. Read this before invoking an unfamiliar capability. No write or external probe.", InputSchema: exportSchema(json.RawMessage(argumentSchema(ownerCatalogArgs{})))})
+		out = append(out, harness.ToolSpec{Name: "owner_call", Description: "Invoke one concrete registered owner capability discovered with owner_capabilities. Use its exact name and arguments. Same authority and domain rules as owner UI/CLI, actual actor is main Agent. New work uses category/required_capabilities; source_message_id is a citation, never proof of human assignment. Legacy wire filters remain effective and Agent-authored. Positive effect_seq identifies each new mutation; preserve original_envelope only for exact receipt replay. path/query preserve all pagination and selectors. Unknown outcomes require original request reconciliation.", InputSchema: exportSchema(json.RawMessage(argumentSchema(ownerInvokeArgs{})))})
 	}
 	return out
 }
@@ -168,6 +168,10 @@ func (s *Service) ownerCatalog(args ownerCatalogArgs) (any, error) {
 		}
 		defs := root["definitions"].(map[string]any)
 		if args.SchemaType != "" {
+			switch args.SchemaType {
+			case "AgentRequirement", "TaskAgentSelection", "OwnerTaskSpec", "OwnerTaskRequirements", "CreateIssueTaskPayload", "UpdateIssueTaskPayload", "IssueOwnerRequest", "RequestIssueManagerPayload", "CreateIssuePayload", "SetIssueStatusPayload", "PromoteConsultationPayload":
+				projectWorkRequirementDefinitions(root)
+			}
 			body, ok := defs[args.SchemaType].(map[string]any)
 			if !ok {
 				return nil, protocol.Errorf(protocol.CodeNotFound, "owner API type does not exist")

@@ -11,6 +11,7 @@ var specSchema = `{
   "type": "object",
   "description": "What the task must achieve. Immutable once created; changes make a new version.",
   "properties": {
+    "selection_source": {"type":"object","readOnly":true,"description":"Server-frozen actual selection author and system pin; never a caller authorization."},
     "goal": {"type": "string", "description": "The outcome, in the owner's terms."},
     "scope": {"type": "string", "description": "Optional plain-text description of the work boundary, as one string. Use constraints for a list of requirements; keep detailed designs in implementation_context."},
     "implementation_context": {"type":"string","description":"Detailed design or investigation input. Retain the original evidence and distinguish proposed approaches from verified results so an independent reviewer can assess the actual outcome."},

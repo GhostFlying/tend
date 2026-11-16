@@ -55,6 +55,9 @@ func prepareOwnerExecution(ctx context.Context, x *Exec, q store.Querier, issue 
 		selection.Implementation.Effort = a.RequestedEffort
 		spec.AgentSelection = &selection
 		spec.Requirements.HostID = parts[0]
+		if spec.SelectionSource != nil {
+			spec.SelectionSource.OwnerPin = issue.Assignee.Ref
+		}
 		return &a, nil
 	}
 	return nil, protocol.Errorf(protocol.CodeNotFound, "Issue owner is absent from its registered inventory")

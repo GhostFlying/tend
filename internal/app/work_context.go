@@ -23,6 +23,7 @@ func workerSpec(spec domain.Spec, role protocol.RunRole) (json.RawMessage, error
 		}
 	}
 	spec.AgentSelection = nil
+	spec.SelectionSource = nil
 	spec.AcceptanceExecution = nil
 	var b strings.Builder
 	b.WriteString(spec.Scope)
