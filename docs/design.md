@@ -2372,6 +2372,8 @@ D247 的阶段来源统一返回同 Task/current spec 的原 artifact ID、paylo
 
 R8–R18 的业务恢复保留原 Task、执行与审阅历史，不以协调状态伪造质量或安装结果。共享审阅开始/复查可携带读取到的 head/base/requirements 摘要，在事务内与实际 provider 候选核对；已完成的报告绑定其真实候选。原轮次的实际执行停止、资源和外部操作回执收敛后，可通过 `wait` 在精确 review revision 下释放无质量结论的协调状态。已有实际结论必须正常 record，同一 reviewer Task 追加真实 Run 继续，不清除旧轮次。
 
+窄验收之后的原审阅者补充报告通过同一有效轮次解析供 record 与 wait 读取，实际停止和质量判断都对应补充执行。可用的 passed、changes_requested、blocked 或 inconclusive 必须正常记录；补充 finding 未处置不能通过 waiting 绕到 recheck。仅无可用质量结果且实际执行与副作用已收敛时可等待，原窄验收和空质量轮次保持不变。
+
 未启动的旧部署自绑定可通过 `recover_preparation` 归档并恢复准备责任，使用当前 Issue/Task 控制版本与实际授权；任何真实升级、pending/unknown 外部动作、活动 writer/租约、变化的责任及已有 typed stage 都继续原恢复语义。仅保留同 Task 的静态工作区占用不等于活动 writer，也不要求伪造工作区释放。该入口不完成交付、不产生新批准或新来源；原执行归档后，真实提交与独立验收再沿现有 prepare/bind 进入当前候选。
 
 持续 Task 的新 artifact 可重新准入其先前自动关闭的审阅载体。依据不可变关闭版本的实际 acceptance 操作、actor、原验收身份、相同计划及责任判断来源；关闭前纯进度更新不改变审阅责任。人类后续修改、暂停、取消、backlog 和已结束祖先保留门禁，旧验收与关闭快照不改写。技术等待依据实际 actor、来源消息和当前责任分类，代理传输的 owner_subject 不覆盖真实 actor。外部等待错误目标返回具体字段及合法业务 ID 的确定输入错误，不以 internal 触发原请求循环重试。
