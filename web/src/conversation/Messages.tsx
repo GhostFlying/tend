@@ -152,7 +152,9 @@ export function AgentTurn({
     entry.startedAt ?? null,
     entry.endedAt !== undefined
       ? entry.endedAt
-      : entry.done?.tookMs !== undefined && entry.startedAt != null
+      : entry.done?.tookMs !== undefined &&
+          entry.startedAt !== undefined &&
+          entry.startedAt !== null
         ? entry.startedAt + entry.done.tookMs
         : null,
   );
