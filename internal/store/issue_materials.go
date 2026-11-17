@@ -62,13 +62,20 @@ const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?1,'$.i
  OR EXISTS(SELECT 1 FROM issue_manager_tasks o WHERE o.task_id=f.task_id AND o.issue_id=json_extract(?1,'$.reader_issue_id')))))
  AND (json_extract(?1,'$.upload_task_id')='' OR EXISTS(SELECT 1 FROM runs producer JOIN runs consumer ON consumer.run_id=json_extract(?1,'$.upload_run_id') WHERE producer.run_id=f.run_id AND producer.task_id=f.task_id AND ` + compatibleFileProducerSQL + `))
  AND (?2='' OR f.file_id=?2)),
+ owner_originals_scope(id) AS (
+ SELECT f.file_id FROM deliverable_files f
+ JOIN issue_manager_tasks producer ON producer.task_id=f.task_id
+ JOIN runs r ON r.run_id=f.run_id AND r.task_id=f.task_id AND r.role='issue_manager'
+ JOIN background_refs ref ON ref.id=f.file_id AND ref.locator=f.file_id
+ WHERE producer.issue_id=json_extract(?1,'$.reader_issue_id') AND ref.issue_id=producer.issue_id),
  files_scope(id) AS (
  SELECT a.file_id FROM conversation_message_attachments a WHERE a.message_id IN (SELECT id FROM messages_scope)
  UNION SELECT json_extract(f.value,'$.file_id') FROM artifacts a,json_each(a.ref_json,'$.files') f WHERE a.artifact_id IN (SELECT id FROM artifacts_scope)
  UNION SELECT json_extract(f.value,'$.file_id') FROM acceptances a,json_each(a.files_json) f WHERE (a.task_id IN (SELECT id FROM tasks_scope) OR a.artifact_id IN (SELECT id FROM artifacts_scope))
  UNION SELECT json_extract(f.value,'$.file_id') FROM task_specs s,json_each(s.body_json,'$.inputs') f WHERE s.task_id IN (SELECT id FROM tasks_scope) AND (?2='' OR instr(s.body_json,?2)>0)
  UNION SELECT id FROM background_refs
- UNION SELECT id FROM uploads_scope) `
+ UNION SELECT id FROM uploads_scope
+ UNION SELECT id FROM owner_originals_scope) `
 
 func materialArgs(scope MaterialScope) (string, string, error) {
 	ids, err := json.Marshal(struct {
@@ -255,14 +262,15 @@ func MaterialMessageSource(ctx context.Context, q Querier, scope MaterialScope, 
 }
 
 // MaterialUploadFile reads a confirmed upload in the caller's own Task or
-// owner Issue. Context locators alone never publish an unfinished foreign file.
+// owner Issue. A structured same-Issue source may publish its owner's original;
+// text mentions and references to another Issue's raw upload grant no access.
 func MaterialUploadFile(ctx context.Context, q Querier, scope MaterialScope, fileID string) (DeliverableFileRow, error) {
 	ids, files, err := materialArgs(scope)
 	if err != nil {
 		return DeliverableFileRow{}, err
 	}
 	var id string
-	if err = q.QueryRowContext(ctx, materialScopeSQL+`SELECT id FROM uploads_scope WHERE id=?3`, ids, files, fileID).Scan(&id); err != nil {
+	if err = q.QueryRowContext(ctx, materialScopeSQL+`SELECT id FROM uploads_scope WHERE id=?3 UNION SELECT id FROM owner_originals_scope WHERE id=?3`, ids, files, fileID).Scan(&id); err != nil {
 		return DeliverableFileRow{}, notFound(err, "uploaded file "+fileID)
 	}
 	return GetDeliverableFile(ctx, q, id)

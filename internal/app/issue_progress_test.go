@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -8,6 +9,49 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
 )
+
+func TestIdenticalIssueProgressDoesNotCreateAnotherOwnerWake(t *testing.T) {
+	h := hostedManagerHarness(t)
+	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	p := protocol.UpdateIssueProgressPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Summary: "Checking the current candidate", NextStep: "Wait for the existing check"}
+	write := func(p protocol.UpdateIssueProgressPayload) protocol.Operation {
+		t.Helper()
+		i := canonicalTaskIssue(t, h, issue.IssueID)
+		return h.exec(owner, h.env("issues.update_progress", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(i.Revision)), UpdateIssueProgress{})
+	}
+	first := write(p)
+	if first.Status != protocol.OpSucceeded {
+		t.Fatal(first)
+	}
+	before := canonicalTaskIssue(t, h, issue.IssueID)
+	counts := map[string]int{}
+	for _, table := range []string{"events", "outbox", "issue_progress_revisions", "issue_control_revisions"} {
+		counts[table] = h.count(table)
+	}
+	p.Summary = "  " + p.Summary + "  "
+	second := write(p)
+	var original, current protocol.IssueProgress
+	if json.Unmarshal(first.Result, &original) != nil || json.Unmarshal(second.Result, &current) != nil || current != original || second.Status != protocol.OpSucceeded {
+		t.Fatal("repeated progress lost its original fact", first, second)
+	}
+	if canonicalTaskIssue(t, h, issue.IssueID).Revision != before.Revision {
+		t.Fatal("unchanged progress advanced the Issue revision")
+	}
+	for table, count := range counts {
+		if h.count(table) != count {
+			t.Fatal("unchanged progress produced a new fact or wake", table)
+		}
+	}
+	p.Summary = "Check failed; original external outcome remains unknown"
+	p.NextStep = "Reconcile the original operation"
+	if op := write(p); op.Status != protocol.OpSucceeded || h.count("issue_progress_revisions") != counts["issue_progress_revisions"]+1 {
+		t.Fatal("a real failure/unknown update disappeared", op)
+	}
+	stale := h.exec(owner, h.env("issues.update_progress", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(before.Revision)), UpdateIssueProgress{})
+	if stale.Error == nil || stale.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("deduplication bypassed current revision checks", stale)
+	}
+}
 
 func TestHostedIssueProgressUsesExactManagerScope(t *testing.T) {
 	h := hostedManagerHarness(t)

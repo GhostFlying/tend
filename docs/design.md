@@ -2504,6 +2504,15 @@ Category report 审阅从同 Task/spec/generation 的真实 Run 冻结 execution
 补写 spec.agent_id 或替换 Task 合同。历史显式命名预绑定仍可用；原件、独立性、候选
 和正式执行要求继续核验，record 只读取原不可变报告。
 
+同 Issue owner 已确认上传的续审原件，可由该 Issue 背景的结构化 `source=file_id`
+正式关联，再经已有上下文文件元数据/字节入口读取；保留上传 Task/Run、hash 和背景版本。
+仅正文提及不形成发布，其他 Issue 的私有上传、实施者未提交的 trace/rollout 不因引用而公开。
+正式实现/验证文件仍经 artifact/files 或会话附件提交，不扩通用 ACL 或跨 Issue 私有权限。
+
+重复提交同一作者、相同摘要与下一步的进度，在校验现行 revision/epoch 和权限后返回原进度，
+不追加版本、事件或唤醒；真实内容或作者变化保留原进度事件链，失败、unknown 不作特别过滤。
+owner 的冲突/head/base/delta 与验证安排只由 prompt 提示，不新增暂停或审批门槛。
+
 业务状态的写入仍由 App/domain 的单事务负责。Agent 提交业务决定，代码校验身份、
 归属、明确授权、并发版本和实际执行事实。注意事项责任投影仅重新计算相关 Issue
 及其祖先；无关命令不扫描整棵责任树。辅助故障不自动扩大到整个项目。

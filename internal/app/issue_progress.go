@@ -57,6 +57,13 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	} else if x.Actor != nil && x.actorAgent != nil {
 		author = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: x.actorAgent.ExecutionEnvironmentID + "/" + x.actorAgent.LocalID}
 	}
+	prior, err := store.IssueProgress(ctx, tx.Q(), issue.IssueID, issue.Revision)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if prior != nil && prior.Summary == strings.TrimSpace(p.Summary) && prior.NextStep == strings.TrimSpace(p.NextStep) && prior.UpdatedBy == author {
+		return Outcome{NoEffect: true, Result: *prior}, nil
+	}
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()
 	progress := protocol.IssueProgress{Summary: strings.TrimSpace(p.Summary), NextStep: strings.TrimSpace(p.NextStep), IssueRevision: issue.Revision, UpdatedAt: issue.UpdatedAt, UpdatedBy: author}
