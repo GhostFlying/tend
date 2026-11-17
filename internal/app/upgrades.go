@@ -186,6 +186,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if !rt.Online || rt.LastHeartbeatAt <= x.Now.Add(-RunnerOfflineAfter).UnixMilli() || !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) || rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater) || !upgradeStartAdmission(control, rt.Runtime) || rt.Runtime.AppliedControlRevision != control.Revision || rt.Runtime.ConfirmedCancelledUpgradeID != control.CancelledUpgradeID || h.Slots <= 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s is offline, incompatible, or unavailable for rolling upgrade", h.HostID)
 		}
+		if control.Mode == protocol.RunnerMaintenance && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityMaintenanceHandoff) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "candidate server does not support maintenance handoff")
+		}
 		artifact, ok := releaseArtifact(c.Manifest, "runner", h.OS, h.Arch)
 		_, configurationTarget := c.RunnerConfigurations[h.HostID]
 		if needsSelfUpdate(r) && (!r.SupervisorThenRunners || configurationTarget) && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {

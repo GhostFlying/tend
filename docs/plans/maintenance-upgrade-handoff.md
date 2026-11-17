@@ -38,3 +38,12 @@
 - 本地 `make check` 按影响计划，指定独立 codex review，最终候选及基线必要 CI；
   建立带 tend 来源标签的受管 PR，按保护规则 rebase & merge。
 - 本地转换和测试替身不证明生产安装；本次不启动实际升级，不接管旧账本操作。
+
+## 独立审阅修正
+
+首轮 reviewer 用旧基线的 server 接续代码复现：协议兼容的旧候选会忽略每 host 的
+交接来源，并在 server 提交后恢复 normal。采纳该缺陷；在原 capability 探测边界读取
+绑定实际 server SHA 的 `maintenance-upgrade-handoff-v1` 能力，维护交接必须有该证明。
+普通 normal 起点保留无此能力的旧候选路径。拒绝必须在创建批次和改 host 控制之前，
+并补本机 Controller 透传、缺失/错误证明拒绝、原维护未改动及真实能力输出回归。
+首轮本地 make check 的已通过阶段保留；因候选需修正主动中止剩余阶段，不记为通过。

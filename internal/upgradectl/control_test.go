@@ -497,7 +497,7 @@ func TestUpgradeManagerParkRejectsOldCandidateBeforeAdmission(t *testing.T) {
 	// The exact same old bundle still follows its original non-opt-in path.
 	req.ParkIdleManagers = false
 	req.RequestID = c.ids.New(protocol.PrefixRequest)
-	if _, err := c.Start(t.Context(), req); err != nil || len(f.commands) != 1 || called != 1 {
+	if _, err := c.Start(t.Context(), req); err != nil || len(f.commands) != 1 || called != 2 {
 		t.Fatal("legacy start changed", len(f.commands), called, err)
 	}
 }
@@ -520,5 +520,37 @@ func TestUpgradeManagerParkRejectsUnauthorizedProbeBeforeExecution(t *testing.T)
 	view, err := c.Start(t.Context(), req)
 	if err != nil || view.UpgradeID != req.UpgradeID || probes != 0 || len(f.commands) != 0 {
 		t.Fatal("recorded replay probed or admitted again", view, err, probes)
+	}
+}
+
+func TestUpgradePassesOnlyVerifiedMaintenanceHandoffSupport(t *testing.T) {
+	for _, proof := range []string{"valid", "missing", "wrong-sha", "probe-failed"} {
+		t.Run(proof, func(t *testing.T) {
+			c, f := testController(t)
+			c.cfg.InspectServerCapabilities = func(_ context.Context, _ string, sha string) (release.ServerCapabilities, error) {
+				report := release.ServerCapabilities{BinarySHA256: sha, Capabilities: []string{release.ServerCapabilityMaintenanceHandoff}}
+				switch proof {
+				case "missing":
+					report.Capabilities = nil
+				case "wrong-sha":
+					report.BinarySHA256 = strings.Repeat("f", 64)
+				case "probe-failed":
+					return report, errors.New("candidate probe failed")
+				}
+				return report, nil
+			}
+			req := protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "handoff-proof", Release: testBundle(t)}
+			if _, err := c.Start(t.Context(), req); err != nil {
+				t.Fatal(err)
+			}
+			caps := f.commands[0].(app.StartUpgrade).ServerCapabilities
+			found := false
+			for _, capability := range caps {
+				found = found || capability == release.ServerCapabilityMaintenanceHandoff
+			}
+			if found != (proof == "valid") {
+				t.Fatal("unverified target support reached admission", caps)
+			}
+		})
 	}
 }

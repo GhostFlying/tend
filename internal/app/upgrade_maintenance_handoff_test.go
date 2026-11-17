@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -42,6 +43,7 @@ func assertHandoffBlocksClaim(t *testing.T, h *harness, host string) {
 
 func TestUpgradeMaintenanceHandoffPreservesAdmissionAndWork(t *testing.T) {
 	h, c := upgradeHarness(t)
+	c.ServerCapabilities = []string{release.ServerCapabilityMaintenanceHandoff}
 	// An immutable implementation result leaves its independent acceptance queued.
 	task := h.createReportTask("original result", temporaryReportSpec())
 	rt := upgradeAck(h, "linux-1", protocol.RunnerNormal)
@@ -131,6 +133,7 @@ func TestUpgradeMaintenanceHandoffTimeoutAndCancelRestore(t *testing.T) {
 	for _, action := range []string{"cancel", "timeout"} {
 		t.Run(action, func(t *testing.T) {
 			h, c := upgradeHarness(t)
+			c.ServerCapabilities = []string{release.ServerCapabilityMaintenanceHandoff}
 			enterUpgradeMaintenance(t, h, "linux-1", protocol.RunnerReady)
 			if op := startTestUpgrade(h, "handoff-recovery", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
@@ -161,6 +164,7 @@ func TestUpgradeMaintenanceHandoffRejectsUnconfirmedOrOwnedControl(t *testing.T)
 	for _, kind := range []string{"stale-ack", "stale-runtime", "wrong-runtime-upgrade", "other-upgrade", "installation-grant"} {
 		t.Run(kind, func(t *testing.T) {
 			h, c := upgradeHarness(t)
+			c.ServerCapabilities = []string{release.ServerCapabilityMaintenanceHandoff}
 			rt := enterUpgradeMaintenance(t, h, "linux-1", protocol.RunnerReady)
 			switch kind {
 			case "stale-ack":
@@ -206,6 +210,7 @@ func TestUpgradeMaintenanceHandoffRejectsUnconfirmedOrOwnedControl(t *testing.T)
 
 func TestUpgradeMaintenanceHandoffSameHashCompletesAndResumesQueuedWork(t *testing.T) {
 	h, c := upgradeHarness(t)
+	c.ServerCapabilities = []string{release.ServerCapabilityMaintenanceHandoff}
 	c.ServerHash = strings.Repeat("a", 64)
 	c.Manifest.Artifacts[0].SHA256 = c.ServerHash
 	c.Manifest.Artifacts[1].SHA256 = c.ServerHash
@@ -255,6 +260,7 @@ func TestUpgradeMaintenanceHandoffCandidateCommitAndRollback(t *testing.T) {
 	for _, outcome := range []string{"commit", "rollback"} {
 		t.Run(outcome, func(t *testing.T) {
 			h, c := upgradeHarness(t)
+			c.ServerCapabilities = []string{release.ServerCapabilityMaintenanceHandoff}
 			c.ServerHash = strings.Repeat("a", 64)
 			c.Manifest.Artifacts[0].SHA256 = c.ServerHash
 			for _, host := range []string{"linux-1", "linux-2"} {
@@ -341,5 +347,25 @@ func TestUpgradeMaintenanceHandoffCandidateCommitAndRollback(t *testing.T) {
 				t.Fatal("queued business did not recover")
 			}
 		})
+	}
+}
+
+func TestUpgradeMaintenanceHandoffRequiresTargetServerSupport(t *testing.T) {
+	h, c := upgradeHarness(t)
+	enterUpgradeMaintenance(t, h, "linux-1", protocol.RunnerReady)
+	before := upgradeCtl(h, "linux-1")
+	if op := startTestUpgrade(h, "unsupported-handoff", c); op.Status != protocol.OpFailed || op.Error.Code != protocol.CodeInvalidTransition {
+		t.Fatal(op)
+	}
+	if !reflect.DeepEqual(before, upgradeCtl(h, "linux-1")) || h.count("upgrades") != 0 {
+		t.Fatal("unsupported target changed original maintenance")
+	}
+	// An older compatible server still accepts the original normal-start path.
+	if op := h.exec(owner, h.env("hosts.maintenance", protocol.Target{Type: "host", ID: "linux-1"}, protocol.HostMaintenancePayload{Mode: protocol.RunnerNormal}, rev(before.Revision)), HostMaintenance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	if op := startTestUpgrade(h, "normal-old-candidate", c); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
 	}
 }
