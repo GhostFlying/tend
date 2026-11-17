@@ -59,6 +59,13 @@ func TestFault_NormalManagerReceiptDeadlineReleasesOnlyActualClosedProcess(t *te
 				var result any = map[string]any{}
 				switch env.Operation {
 				case protocol.OpManagerNativeClaim:
+					var claim protocol.ManagerNativeClaimPayload
+					if err := json.Unmarshal(env.Payload, &claim); err != nil {
+						t.Error(err)
+					}
+					if claim.AcknowledgeOnly {
+						break
+					}
 					claims++
 					result = protocol.ManagerNativeRequest{ID: "original-native-close", Method: "close", Payload: json.RawMessage(`{}`)}
 				case protocol.OpManagerNativeReply:

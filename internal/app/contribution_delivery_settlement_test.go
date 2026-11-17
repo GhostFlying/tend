@@ -38,7 +38,7 @@ func contributionSettlementFixture(t *testing.T, deploy bool) (*harness, protoco
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		t.Fatal(err)
 	}
-	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{Title: "Execute the complete shared PR", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise explicitly required independent review"}, Title: "Execute the complete shared PR", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if created.Status != protocol.OpSucceeded {
 		t.Fatal(created)
 	}
@@ -96,12 +96,14 @@ func completeContributionTaskForTest(t *testing.T, h *harness, runtime *protocol
 	if op := h.runAs(impl, protocol.OpRunsSubmitArtifact, artifact, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	accept, ok := h.claimInputRun(runtime)
-	if !ok || accept.TaskID != impl.TaskID || accept.Role != protocol.RoleAccept {
-		t.Fatal("original independent acceptance", accept)
-	}
-	if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
+	if h.task(impl.TaskID).Lifecycle == protocol.TaskAwaitingAcceptance {
+		accept, ok := h.claimInputRun(runtime)
+		if !ok || accept.TaskID != impl.TaskID || accept.Role != protocol.RoleAccept {
+			t.Fatal("original independent acceptance", accept)
+		}
+		if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
 	}
 	resource := h.resourceForTask(impl.TaskID)
 	if !h.releaseResource(impl.TaskID, resource.WorkspaceID) {

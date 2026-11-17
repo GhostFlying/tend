@@ -105,6 +105,12 @@ func TestLiveSelfDeliveryRefreshRollsBackOnInvalidFacts(t *testing.T) {
 				p.ExpectedTaskControlRevision = rev(h.task(as.TaskID).ControlRevision + 1)
 				code = protocol.CodeStaleRevision
 			case "missing-new-review":
+				issue = canonicalTaskIssue(t, h, issue.IssueID)
+				policy := protocol.SetIssueAcceptancePolicyPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, IndependentAcceptanceRequest: protocol.IndependentAcceptanceRequest{Required: true, Reason: "Require review of the replacement candidate"}}
+				if op := h.exec(owner, h.env("issues.set_acceptance_policy", protocol.Target{Type: "issue", ID: issue.IssueID}, policy, rev(issue.Revision)), SetIssueAcceptancePolicy{}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				issue = canonicalTaskIssue(t, h, issue.IssueID)
 				candidate.HeadSHA = strings.Repeat("e", 40)
 				observeDeliveryForTest(t, h, issue.IssueID, candidate, "open", "")
 				code = protocol.CodeInvalidTransition

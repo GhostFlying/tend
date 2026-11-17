@@ -53,7 +53,7 @@ func (a *App) ManagerRetainedToolResult(ctx context.Context, current, origin, th
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var output, state, tool, input string
 		var success bool
-		err := tx.Q().QueryRowContext(ctx, `SELECT u.native_result_output,u.native_result_success,u.native_delivery_status,u.tool,u.input FROM runs current JOIN runs origin ON origin.task_id=current.task_id AND origin.rowid<current.rowid JOIN conversation_tool_uses u ON u.native_run_id=origin.run_id WHERE current.run_id=? AND origin.run_id=? AND current.role='issue_manager' AND origin.role='issue_manager' AND u.thread_id=? AND u.turn_id=? AND u.item_id=?`, current, origin, thread, turn, call).Scan(&output, &success, &state, &tool, &input)
+		err := tx.Q().QueryRowContext(ctx, `SELECT u.native_result_output,u.native_result_success,u.native_delivery_status,u.tool,u.input FROM runs current JOIN runs origin ON origin.task_id=current.task_id AND origin.rowid<=current.rowid JOIN conversation_tool_uses u ON u.native_run_id=origin.run_id WHERE current.run_id=? AND origin.run_id=? AND current.role='issue_manager' AND origin.role='issue_manager' AND u.thread_id=? AND u.turn_id=? AND u.item_id=?`, current, origin, thread, turn, call).Scan(&output, &success, &state, &tool, &input)
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,13 @@ func (a *App) ManagerClosingAttachment(ctx context.Context, run, method, thread 
 			return err
 		}
 		if !closing {
-			return sql.ErrNoRows
+			closing, err = managerHistoryActive(ctx, tx.Q(), run)
+			if err != nil {
+				return err
+			}
+			if !closing {
+				return sql.ErrNoRows
+			}
 		}
 		raw, err = store.NativeThread(ctx, tx.Q(), run)
 		if err != nil {
@@ -123,7 +129,8 @@ func managerRunClosing(ctx context.Context, q store.Querier, run string) (bool, 
 }
 
 // currentManagerTaskRead reconstructs one known rejected read, never a tool
-// handler or external effect. A historical Run cannot restore current authority.
+// handler or external effect. A lease-free attachment retains only the current
+// responsibility's scoped read authority; it cannot execute another tool.
 func currentManagerTaskRead(ctx context.Context, q store.Querier, run, tool, input string) (string, error) {
 	target := store.NativeTaskReadTarget(tool, input)
 	if target == "" {
@@ -145,7 +152,14 @@ func currentManagerTaskRead(ctx context.Context, q store.Querier, run, tool, inp
 	if err != nil {
 		return "", err
 	}
-	if current.TaskID != m.TaskID || m.State != "assigned" || issue.AssignmentEpoch != m.AssignmentEpoch || issue.AssignmentState != "active" || r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
+	readable := m.State == "assigned" && r.ObservedState != protocol.RunFinished && r.ObservedState != protocol.RunFailed
+	if !readable {
+		readable, err = managerHistoryActive(ctx, q, run)
+		if err != nil {
+			return "", err
+		}
+	}
+	if current.TaskID != m.TaskID || !readable || issue.AssignmentEpoch != m.AssignmentEpoch || issue.AssignmentState != "active" {
 		return "", protocol.Errorf(protocol.CodeForbidden, "historical tool result grants no current Issue read authority")
 	}
 	if _, err := store.GetTask(ctx, q, target); err != nil {

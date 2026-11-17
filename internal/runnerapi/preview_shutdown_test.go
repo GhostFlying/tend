@@ -13,7 +13,7 @@ import (
 
 func TestShutdownEndsIdleRolloutPreviewPoll(t *testing.T) {
 	e := newEnv(t, time.Millisecond)
-	runtime := &protocol.RunnerRuntime{InstanceID: "preview-shutdown", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRolloutPreview}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "preview-shutdown", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRolloutPreview}}
 	e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "linux-1", protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}))
 	stopping := make(chan struct{})
 	close(stopping)

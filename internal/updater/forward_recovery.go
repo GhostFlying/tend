@@ -446,10 +446,7 @@ func (s *Supervisor) recoveryCheck(ctx context.Context, r *ForwardRecovery) erro
 	r.Epoch = h.Epoch
 	r.LastSequence = h.Sequence
 	r.HealthCount++
-	if r.HealthCount == 1 {
-		r.FirstSequence = h.Sequence
-		return s.save()
-	}
+	r.FirstSequence = h.Sequence
 	if s.state.CommittedProof != nil {
 		s.state.ProofHistory = append(s.state.ProofHistory, *s.state.CommittedProof)
 	}

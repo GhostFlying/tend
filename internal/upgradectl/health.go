@@ -20,9 +20,20 @@ func (c *Controller) normalHealth(ctx context.Context, binding protocol.UpgradeB
 	started = c.cfg.Now()
 	observed, observeErr := c.observe(ctx)
 	localMillis := max(0, c.cfg.Now().Sub(started).Milliseconds())
-	if observeErr != nil || !observed.Healthy || !observed.MainDrained {
+	if observeErr != nil || !observed.Healthy {
 		health.Healthy = false
 	}
+	// Draining authorizes replacement of the previous process. It is not a
+	// readiness requirement for the new process or its optional model sessions.
+	readyAt := c.cfg.Now()
+	var readinessErr error
+	if c.cfg.RecoveryReady != nil {
+		readinessErr = c.cfg.RecoveryReady(ctx)
+		if readinessErr != nil {
+			health.Healthy = false
+		}
+	}
+	readinessMillis := max(0, c.cfg.Now().Sub(readyAt).Milliseconds())
 	if !diagnostics {
 		health.Diagnostics = nil
 		return health, nil
@@ -62,19 +73,12 @@ func (c *Controller) normalHealth(ctx context.Context, binding protocol.UpgradeB
 		if !observed.Healthy {
 			facts.Failures = append(facts.Failures, "local_service_unhealthy")
 		}
-		if !observed.MainDrained {
-			facts.Failures = append(facts.Failures, "main_not_drained")
-		}
 	}
-	// Ready is a distinct component fact. It never substitutes for MainDrained.
-	if facts.ServiceReady == nil && c.cfg.RecoveryReady != nil && diagnosticCtx.Err() == nil {
-		readyAt := c.cfg.Now()
-		readyErr := c.cfg.RecoveryReady(diagnosticCtx)
-		facts.ServiceReady = healthFact(readyErr == nil)
-		facts.PhaseMillis["service_readiness"] = max(0, c.cfg.Now().Sub(readyAt).Milliseconds())
-		if readyErr != nil {
-			facts.Failures = append(facts.Failures, "startup_components_not_ready")
-		}
+	// Optional session diagnostics do not redefine installation readiness.
+	facts.ServiceReady = healthFact(readinessErr == nil && observeErr == nil && observed.Healthy)
+	facts.PhaseMillis["service_readiness"] = readinessMillis
+	if readinessErr != nil {
+		facts.Failures = append(facts.Failures, "startup_components_not_ready")
 	}
 	if diagnosticCtx.Err() != nil {
 		facts.Failures = append(facts.Failures, "component_observation_budget_exhausted")

@@ -776,7 +776,7 @@ func (s *Supervisor) checkBoundedRunner(ctx context.Context) error {
 	}
 	op.LastHealthSequence = health.HeartbeatSequence
 	op.HealthCount++
-	if op.HealthCount >= 2 {
+	if op.HealthCount >= 1 {
 		s.state.Current = op.Candidate
 		s.state.Process = op.CandidateProcess
 		op.Irreversible = true

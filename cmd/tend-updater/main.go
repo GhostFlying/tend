@@ -67,6 +67,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if args[0] == "self-update" {
 		return runSelfUpdate(ctx, args[1:], out)
 	}
+	if args[0] == "external-recover" {
+		return runExternalRecovery(ctx, args[1:], out)
+	}
 	if args[0] == "bounded" {
 		return runBounded(ctx, args[1:], out)
 	}

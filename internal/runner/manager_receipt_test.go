@@ -163,6 +163,15 @@ func TestManagerReceiptNativeUsesRestrictedResolverAndDriver(t *testing.T) {
 		mark("http-request", &env)
 		var result any = map[string]any{}
 		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
 			index := claims.Add(1) - 1
 			if index >= int64(len(commands)) {
 				t.Error("reader did not finish after its close")

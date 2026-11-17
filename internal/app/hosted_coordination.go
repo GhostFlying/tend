@@ -132,8 +132,8 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 			if err != nil {
 				return errNotFound(err, "Issue does not exist")
 			}
-			if x.Env.Target.Type != "issue" || target.AcceptancePolicy == nil || target.AcceptancePolicy.Creator.SourceIssueID != current.IssueID {
-				return protocol.Errorf(protocol.CodeForbidden, "only the original creating responsibility may decide acceptance")
+			if x.Env.Target.Type != "issue" || target.AcceptancePolicy == nil || target.IssueID != current.IssueID && target.AcceptancePolicy.Creator.SourceIssueID != current.IssueID {
+				return protocol.Errorf(protocol.CodeForbidden, "only the current or creating responsibility may decide acceptance")
 			}
 		case "issues.create":
 			var p protocol.CreateIssuePayload

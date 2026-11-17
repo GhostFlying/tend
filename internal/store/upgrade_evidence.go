@@ -76,7 +76,7 @@ func DeliveryUpgradeEvidence(ctx context.Context, q Querier, target protocol.Iss
 	if err != nil {
 		return nil, err
 	}
-	if r.ServerProcess == "" || r.ServerHealthy < 2 {
+	if r.ServerProcess == "" || r.ServerHealthy < 1 {
 		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "controlled delivery requires verified installed server identity and health")
 	}
 	proof, err := UpgradeInstallationEvidence(ctx, q, id, checkedAt)

@@ -61,6 +61,7 @@ type Version struct {
 }
 type BackupFile = protocol.BackupFile
 type Operation struct {
+	SupersededUpgradeID   string                             `json:"superseded_upgrade_id,omitempty"`
 	PhaseTimings          []OperationPhaseTiming             `json:"phase_timings,omitempty"`
 	LastHealth            *protocol.UpgradeHealthDiagnostics `json:"last_health,omitempty"`
 	LastHealthAt          time.Time                          `json:"last_health_at,omitzero"`
@@ -117,9 +118,11 @@ type RollbackProof struct {
 
 // CommittedProof retains the original upgrade across same-version restarts.
 type CommittedProof struct {
-	Binding Binding  `json:"binding"`
-	Version Version  `json:"version"`
-	Process Identity `json:"process"`
+	SupersededUpgradeID string   `json:"superseded_upgrade_id,omitempty"`
+	ExternalRecovery    bool     `json:"external_recovery,omitempty"`
+	Binding             Binding  `json:"binding"`
+	Version             Version  `json:"version"`
+	Process             Identity `json:"process"`
 }
 type State struct {
 	DiagnosticLogProtections map[string]string                                 `json:"diagnostic_log_protections,omitempty"`

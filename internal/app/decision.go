@@ -92,8 +92,8 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
 	}
-	if d.Task.Lifecycle == protocol.TaskCancelled {
-		ownerEvents, err := settleCancelledOwnerReview(ctx, x, tx, d.Task.ID)
+	if d.Task.Lifecycle == protocol.TaskCancelled || d.Task.Lifecycle == protocol.TaskCompleted && d.CancelOpenActions {
+		ownerEvents, err := settleUnusedOwnerReview(ctx, x, tx, d.Task.ID)
 		if err != nil {
 			return nil, nil, err
 		}

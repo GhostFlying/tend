@@ -11,7 +11,7 @@ import (
 
 func TestUpgradeServerStopGrantReservesConservativeRestartCoverage(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "coverage", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "coverage", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})
@@ -164,7 +164,7 @@ func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
 
 func TestUpgradeServerRollbackRestoresMainAndAllowsCancellation(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "server-rollback", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "server-rollback", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	old := strings.Repeat("a", 64)
@@ -201,7 +201,7 @@ func TestUpgradeHostConfigFrozenUntilBatchEnds(t *testing.T) {
 	other := cfg.Hosts[0]
 	other.HostID = "linux-2"
 	cfg.Hosts = append(cfg.Hosts, other)
-	if op := startTestUpgrade(h, "freeze", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "freeze", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	if op := h.syncConfig(cfg); op.Status != protocol.OpSucceeded {
@@ -233,7 +233,7 @@ func TestUpgradeManifestCannotInventInstalledVersion(t *testing.T) {
 				c.Manifest.Storage.RunnerJournal.Max++
 				c.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
 			}
-			if op := startTestUpgrade(h, "metadata", c); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "metadata", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			v := upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: c.ServerHash})
@@ -270,14 +270,14 @@ func TestUpgradeRetiredHostWithOpenRunCannotEscapePreflight(t *testing.T) {
 	if op := h.syncConfig(cfg); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := startTestUpgrade(h, "retired-host", c); op.Status != protocol.OpFailed {
+	if op := startPreparedTestUpgrade(h, "retired-host", c); op.Status != protocol.OpFailed {
 		t.Fatal("upgrade omitted an unfinished retired-host run", op)
 	}
 }
 
 func TestUpgradeCancelledIdentityCannotOverwriteHistory(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "history", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "history", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	r := upgradeRead(h)
@@ -371,22 +371,22 @@ func TestUpgradeCancelMarksStagedSupervisorsAfterAttentionReleasedControl(t *tes
 
 func TestUpgradeWaitsForCancellationReceiptsBeforeNextBatch(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "cancel-first", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "cancel-first", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	r := upgradeRead(h)
 	if op := h.exec(owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: r.View.UpgradeID}, map[string]string{"action": "cancel"}, rev(r.View.Revision)), ControlUpgrade{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := startTestUpgrade(h, "too-early", c); op.Status != protocol.OpFailed {
+	if op := startPreparedTestUpgrade(h, "too-early", c); op.Status != protocol.OpFailed {
 		t.Fatal("overwrote unacknowledged cancellation", op)
 	}
 	upgradeAck(h, "linux-1", protocol.RunnerNormal)
-	if op := startTestUpgrade(h, "one-receipt", c); op.Status != protocol.OpFailed {
+	if op := startPreparedTestUpgrade(h, "one-receipt", c); op.Status != protocol.OpFailed {
 		t.Fatal("ignored other host's staged operation", op)
 	}
 	upgradeAck(h, "linux-2", protocol.RunnerNormal)
-	if op := startTestUpgrade(h, "both-receipts", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "both-receipts", c); op.Status != protocol.OpSucceeded {
 		t.Fatal("next batch blocked after confirmed cancellation", op)
 	}
 	ids, err := h.app.ListCancelledServerUpgrades(t.Context())

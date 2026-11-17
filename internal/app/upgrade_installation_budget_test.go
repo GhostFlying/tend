@@ -10,7 +10,7 @@ import (
 
 func TestFault_UpgradeCoverageReservesRestartOutsideInstallation(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "installation-budget", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "installation-budget", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})

@@ -562,10 +562,7 @@ func (s *Supervisor) maintenanceCheck(ctx context.Context, m *CommittedMaintenan
 	m.Epoch = h.Epoch
 	m.LastSequence = h.Sequence
 	m.HealthCount++
-	if m.HealthCount == 1 {
-		m.FirstSequence = h.Sequence
-		return s.save()
-	}
+	m.FirstSequence = h.Sequence
 	if s.state.CommittedProof != nil {
 		s.state.ProofHistory = append(s.state.ProofHistory, *s.state.CommittedProof)
 	}

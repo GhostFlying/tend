@@ -21,7 +21,7 @@ type Adapter struct {
 }
 type Registry struct {
 	Current  int64     `json:"current"`
-	Previous int64     `json:"previous"`
+	Minimum  int64     `json:"minimum"`
 	Adapters []Adapter `json:"adapters"`
 }
 
@@ -34,7 +34,7 @@ func Check(root string, current int64) error {
 	if err := json.Unmarshal(data, &registry); err != nil {
 		return err
 	}
-	if registry.Current != current || registry.Previous != current-1 {
+	if registry.Current != current || registry.Minimum < current-1 || registry.Minimum > current {
 		return fmt.Errorf("runner compatibility registry window differs from protocol constants")
 	}
 	declared := map[string]Adapter{}
@@ -42,7 +42,7 @@ func Check(root string, current int64) error {
 		if _, ok := declared[a.ID]; ok {
 			return fmt.Errorf("duplicate adapter %s", a.ID)
 		}
-		if a.Protocol < current-1 || a.Protocol >= current || a.RemoveIn != a.Protocol+2 || current >= a.RemoveIn {
+		if a.Protocol < registry.Minimum || a.Protocol >= current || a.RemoveIn != a.Protocol+2 || current >= a.RemoveIn {
 			return fmt.Errorf("expired or invalid adapter %s", a.ID)
 		}
 		if _, err := os.Stat(filepath.Join(root, a.Test)); err != nil {

@@ -3,7 +3,6 @@ package tools
 import (
 	"encoding/json"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -28,14 +27,11 @@ func TestCreatorAcceptancePolicyNamedToolExplainsChoiceWithoutCreatorInput(t *te
 			if spec.Name == "issues_create" {
 				foundCreate = true
 				policy := planningSchemaAt(t, root, "payload", "independent_acceptance")
-				if !slices.Contains(policy["required"].([]any), any("required")) || !strings.Contains(spec.Description, "read-only") {
+				if !slices.Contains(policy["required"].([]any), any("required")) {
 					t.Fatal(spec.Description, policy)
 				}
 			} else {
 				foundPolicy = true
-				if !strings.Contains(spec.Description, "future tasks") || !strings.Contains(spec.Description, "workers") {
-					t.Fatal(spec.Description)
-				}
 			}
 		}
 		if !foundCreate || !foundPolicy {

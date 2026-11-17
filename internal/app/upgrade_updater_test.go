@@ -52,15 +52,15 @@ func selfUpgradeObservation(row store.UpgradeRow, instance, childLaunch, childHa
 func TestSelfUpgradeRequiresBothLocalAndRunnerCapability(t *testing.T) {
 	h, c := selfUpgradeFixture(t)
 	selfUpgradeHosts(t, h, false)
-	if op := startTestUpgrade(h, "no-local-capability", c); op.Error == nil {
+	if op := startPreparedTestUpgrade(h, "no-local-capability", c); op.Error == nil {
 		t.Fatal("new release silently skipped server updater")
 	}
 	c.ServerUpdaterSupported = true
-	if op := startTestUpgrade(h, "no-runner-capability", c); op.Error == nil {
+	if op := startPreparedTestUpgrade(h, "no-runner-capability", c); op.Error == nil {
 		t.Fatal("new release silently skipped runner updater")
 	}
 	selfUpgradeHosts(t, h, true)
-	if op := startTestUpgrade(h, "self-first", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "self-first", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)
@@ -85,7 +85,7 @@ func TestSelfUpgradeProofBindsRequestPlatformAndActualProcesses(t *testing.T) {
 	h, c := selfUpgradeFixture(t)
 	selfUpgradeHosts(t, h, true)
 	c.ServerUpdaterSupported = true
-	if op := startTestUpgrade(h, "self-proof", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "self-proof", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)
@@ -119,7 +119,7 @@ func TestSelfUpgradeRetryRetainsUnresolvedSupervisorPhase(t *testing.T) {
 	h, c := selfUpgradeFixture(t)
 	selfUpgradeHosts(t, h, true)
 	c.ServerUpdaterSupported = true
-	if op := startTestUpgrade(h, "retry-self", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "retry-self", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	h.clock.Advance(7 * time.Minute)
@@ -140,7 +140,7 @@ func TestSelfUpgradeCancelWaitsForOriginalHandoffAndAcceptsLateReceipt(t *testin
 	h, c := selfUpgradeFixture(t)
 	selfUpgradeHosts(t, h, true)
 	c.ServerUpdaterSupported = true
-	if op := startTestUpgrade(h, "cancel-self", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "cancel-self", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)
@@ -174,7 +174,7 @@ func TestSelfUpgradeExpiredUndispatchedBatchCanBeCancelled(t *testing.T) {
 	h, c := selfUpgradeFixture(t)
 	selfUpgradeHosts(t, h, true)
 	c.ServerUpdaterSupported = true
-	if op := startTestUpgrade(h, "expired-no-dispatch", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "expired-no-dispatch", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	h.clock.Advance(21 * time.Minute)
@@ -199,7 +199,7 @@ func TestSelfUpgradeDefiniteRejectionAllowsCancelAfterDeadline(t *testing.T) {
 	h, c := selfUpgradeFixture(t)
 	selfUpgradeHosts(t, h, true)
 	c.ServerUpdaterSupported = true
-	if op := startTestUpgrade(h, "rejected-handoff", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "rejected-handoff", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	r := upgradeRead(h)
@@ -241,7 +241,7 @@ func TestSelfUpgradeConfigurationKeepsUntargetedHostsOutsideProofScope(t *testin
 	raw, _ := json.Marshal(c.ReleaseSet)
 	c.ReleaseSetSize = int64(len(raw))
 	c.ReleaseSetSHA256 = strings.Repeat("f", 64)
-	if op := startTestUpgrade(h, "config-self", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "config-self", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)

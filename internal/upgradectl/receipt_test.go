@@ -51,3 +51,35 @@ func TestTickCollectsRollbackOnlyForThisRunningProcess(t *testing.T) {
 		})
 	}
 }
+
+func TestTickCollectsDurableCommitForCurrentProcess(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "external"}[external], func(t *testing.T) {
+			c, f := testController(t)
+			version := updater.Version{ReleaseID: "new", ManifestSHA256: strings.Repeat("b", 64), Artifact: release.Artifact{SHA256: c.cfg.BinarySHA256}}
+			process := updater.Identity{PID: 12, StartTicks: 2, LaunchID: c.cfg.ProcessInstance, SHA256: c.cfg.BinarySHA256}
+			binding := updater.Binding{UpgradeID: "original-installation", InstanceID: c.cfg.Instance, ProcessInstanceID: process.LaunchID, ReleaseID: version.ReleaseID, ManifestSHA256: version.ManifestSHA256, ArtifactSHA256: version.Artifact.SHA256}
+			state := updater.State{InstanceID: c.cfg.Instance, Current: version, Process: process, CommittedProof: &updater.CommittedProof{Binding: binding, Version: version, Process: process, ExternalRecovery: external, SupersededUpgradeID: "old-batch"}}
+			listener, err := net.Listen("unix", c.cfg.UpdaterSocket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/status" {
+					t.Errorf("unexpected mutation: %s %s", r.Method, r.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode(updater.ControlResponse{State: state})
+			})}
+			done := make(chan struct{})
+			go func() { defer close(done); _ = server.Serve(listener) }()
+			defer func() { _ = server.Close(); <-done }()
+			if err := c.tick(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			receipt := f.observation.UpdaterReceipt
+			if receipt == nil || receipt.Binding != binding || !receipt.CommittedConfirmed || receipt.ExternalRecovery != external || receipt.SupersededUpgradeID != "old-batch" {
+				t.Fatal("durable proof lost before admission reconciliation", receipt)
+			}
+		})
+	}
+}

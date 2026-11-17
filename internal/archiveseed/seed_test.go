@@ -60,7 +60,7 @@ func TestStaticSeedCreatesEmptyLedgerAndRejectsOldOwnerAndRunnerIdentity(t *test
 		}
 	}
 	execute("config.sync", protocol.Target{Type: "config"}, cfg, app.SyncConfig{})
-	execute(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "runner-a"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "old", Generation: 1, Sequence: 1, Protocol: protocol.PreviousRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.PreviousRunnerProtocol, Mode: protocol.RunnerNormal}}, app.Hello{})
+	execute(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "runner-a"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "old", Generation: 1, Sequence: 1, Protocol: protocol.MinimumRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.MinimumRunnerProtocol, Mode: protocol.RunnerNormal}}, app.Hello{})
 	execute("tasks.create", protocol.Target{Type: "task"}, map[string]any{"title": "old pending intent", "spec": domain.Spec{Goal: "Historical task never restored", Acceptance: []string{"Evidence"}, Deliverables: []string{domain.DeliveryReport}, Workspace: domain.Workspace{Mode: domain.WorkspaceTemporary}}}, app.CreateTask{})
 	if err = oldStore.Write(t.Context(), func(tx *store.Tx) error {
 		if err := tx.InsertAgentCategory(t.Context(), protocol.AgentCategory{CategoryID: "implementer", Revision: 4, Title: "Implementation", Description: "Static role category", State: "active"}, "old-category-request"); err != nil {
@@ -220,7 +220,7 @@ func TestStaticSeedCreatesEmptyLedgerAndRejectsOldOwnerAndRunnerIdentity(t *test
 	runners := runnerapi.New(newApp, runnerIdentity, newSecret, runnerapi.Config{}, logger).Handler()
 	rpc := func(token, run string) int {
 		t.Helper()
-		payload, err := json.Marshal(protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "fresh-runner", Generation: 1, Sequence: 1, Protocol: protocol.PreviousRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.PreviousRunnerProtocol, Mode: protocol.RunnerNormal}})
+		payload, err := json.Marshal(protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "fresh-runner", Generation: 1, Sequence: 1, Protocol: protocol.MinimumRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.MinimumRunnerProtocol, Mode: protocol.RunnerNormal}})
 		if err != nil {
 			t.Fatal(err)
 		}

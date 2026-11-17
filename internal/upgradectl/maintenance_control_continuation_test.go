@@ -106,7 +106,7 @@ func newControlContinuationFixture(t *testing.T) *controlContinuationFixture {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		rt := &protocol.RunnerRuntime{InstanceID: host, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: mode, AppliedControlRevision: revision, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
+		rt := &protocol.RunnerRuntime{InstanceID: host, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: mode, AppliedControlRevision: revision, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
 		f.execute(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: host}, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: host}, protocol.HelloPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: rt}, nil, app.Hello{})
 	}
 	if err := f.db.Write(t.Context(), func(tx *store.Tx) error {

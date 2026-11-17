@@ -8,19 +8,31 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 func TestManagerReceiptBackoffBoundsRequestsAndPreservesEnvelope(t *testing.T) {
 	for _, failure := range []string{"http_500_unknown", "http_409_unknown", "transport"} {
 		t.Run(failure, func(t *testing.T) {
+			clock := testkit.NewClock()
+			j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer j.Close()
 			synctest.Test(t, func(t *testing.T) {
 				env := protocol.Envelope{RequestID: "original-reply", TraceID: "original-trace", Operation: protocol.OpManagerNativeReply, Target: protocol.Target{Type: "run", ID: "original-run"}, Payload: json.RawMessage(`{"id":"original-close","last_sequence":19}`)}
+				if err := j.PutRequest(t.Context(), journal.Request{RunID: "original-run", Envelope: env}); err != nil {
+					t.Fatal(err)
+				}
 				original, err := json.Marshal(env)
 				if err != nil {
 					t.Fatal(err)
@@ -31,6 +43,13 @@ func TestManagerReceiptBackoffBoundsRequestsAndPreservesEnvelope(t *testing.T) {
 					raw, err := io.ReadAll(req.Body)
 					if err != nil {
 						return nil, err
+					}
+					var sent protocol.Envelope
+					if err := json.Unmarshal(raw, &sent); err != nil {
+						return nil, err
+					}
+					if sent.Operation == protocol.OpManagerNativeClaim {
+						return managerReceiptHTTPResponse(http.StatusOK, rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
 					}
 					if !bytes.Equal(raw, original) || req.Header.Get(headerRun) != "original-run" || req.Header.Get("Authorization") != "Bearer original-token" {
 						t.Error("receipt retry changed its original envelope or identity")
@@ -48,7 +67,7 @@ func TestManagerReceiptBackoffBoundsRequestsAndPreservesEnvelope(t *testing.T) {
 					}
 					return managerReceiptHTTPResponse(http.StatusOK, rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
 				})}
-				r := New(Config{ServerURL: "http://runner.invalid", HTTPClient: client, Now: time.Now, Log: slog.New(slog.DiscardHandler)})
+				r := New(Config{Journal: j, IDs: testkit.NewIDGen(clock, 1), ServerURL: "http://runner.invalid", HTTPClient: client, Now: time.Now, Log: slog.New(slog.DiscardHandler)})
 				done := make(chan error, 1)
 				go func() {
 					done <- r.sendManagerReceipt(t.Context(), protocol.Assignment{RunID: "original-run", RunToken: "original-token"}, &env)
@@ -79,6 +98,12 @@ func TestManagerReceiptBackoffBoundsRequestsAndPreservesEnvelope(t *testing.T) {
 func TestManagerReceiptBackoffCancellationAndLongConfiguredDelay(t *testing.T) {
 	for _, cancelWait := range []bool{false, true} {
 		t.Run(map[bool]string{false: "long_delay", true: "cancel_wait"}[cancelWait], func(t *testing.T) {
+			clock := testkit.NewClock()
+			j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer j.Close()
 			synctest.Test(t, func(t *testing.T) {
 				var attempts atomic.Int64
 				client := &http.Client{Transport: uploadRoundTripper(func(req *http.Request) (*http.Response, error) {
@@ -89,7 +114,7 @@ func TestManagerReceiptBackoffCancellationAndLongConfiguredDelay(t *testing.T) {
 					}
 					return managerReceiptHTTPResponse(http.StatusOK, rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
 				})}
-				r := New(Config{ServerURL: "http://runner.invalid", HTTPClient: client, Now: time.Now, RetryDelay: 2 * time.Minute, Log: slog.New(slog.DiscardHandler)})
+				r := New(Config{Journal: j, IDs: testkit.NewIDGen(clock, 1), ServerURL: "http://runner.invalid", HTTPClient: client, Now: time.Now, RetryDelay: 2 * time.Minute, Log: slog.New(slog.DiscardHandler)})
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				done := make(chan error, 1)

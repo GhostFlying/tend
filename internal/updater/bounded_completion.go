@@ -18,7 +18,7 @@ func (s *Supervisor) completeUnestablishedBoundedFence(ctx context.Context, a Ma
 	}
 	r := m.Receipt
 	if r.MaintenanceID != p.MaintenanceID || r.RequestID != p.RequestID || r.Previous != p.Previous || r.Successor != p.Successor || r.Process != m.Process || r.Epoch == "" || r.Epoch != m.Epoch ||
-		r.FirstSequence == 0 || r.FirstSequence != m.FirstSequence || r.SecondSequence <= r.FirstSequence || r.SecondSequence != m.LastSequence || r.Generation == 0 || r.Generation > s.state.Generation {
+		r.FirstSequence == 0 || r.FirstSequence != m.FirstSequence || r.SecondSequence < r.FirstSequence || r.SecondSequence != m.LastSequence || r.Generation == 0 || r.Generation > s.state.Generation {
 		return false, nil
 	}
 	matches := func(auth protocol.BoundedMaintenanceAuthorization) bool {

@@ -285,7 +285,7 @@ func TestCreatorPolicyHostedSourceIsServerFrozen(t *testing.T) {
 	}
 }
 
-func TestCreatorPolicyChildAssigneeCannotReplaceCreatingResponsibility(t *testing.T) {
+func TestResponsibleAgentCanChangeOptionalReviewChoice(t *testing.T) {
 	h := hostedManagerHarness(t)
 	parent := assignHostedManager(t, h, policyIssue(t, h, true))
 	turn, creator := startHostedIssueReview(t, h, parent)
@@ -317,11 +317,11 @@ func TestCreatorPolicyChildAssigneeCannotReplaceCreatingResponsibility(t *testin
 	change.ExpectedAssignmentEpoch = child.AssignmentEpoch
 	change.Required = false
 	env := h.env("issues.set_acceptance_policy", protocol.Target{Type: "issue", ID: child.IssueID}, change, rev(child.Revision))
-	if _, err := h.app.Execute(t.Context(), assignee, env, HostedCoordinationCommand{Command: SetIssueAcceptancePolicy{}, ExecutionID: workerTurn.RequestID, EffectSeq: 1}); protocol.CodeOf(err) != protocol.CodeForbidden {
-		t.Fatal("the current assignee inherited creator authority", err)
+	if op, err := h.app.Execute(t.Context(), assignee, env, HostedCoordinationCommand{Command: SetIssueAcceptancePolicy{}, ExecutionID: workerTurn.RequestID, EffectSeq: 1}); err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal("responsible Agent could not revise optional review", op, err)
 	}
-	if !canonicalTaskIssue(t, h, child.IssueID).AcceptancePolicy.Required {
-		t.Fatal("a rejected assignee changed the policy")
+	if canonicalTaskIssue(t, h, child.IssueID).AcceptancePolicy.Required {
+		t.Fatal("optional review remained mandatory")
 	}
 }
 
@@ -631,6 +631,160 @@ func TestCreatorPolicyWaiverDoesNotRestoreRevokedInputAuthority(t *testing.T) {
 			t.Fatal("waived snapshot was not retained", policy)
 		}
 		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHumanIssueReviewSurvivesResponsibleAgentEndorsement(t *testing.T) {
+	h := hostedManagerHarness(t)
+	issue := assignHostedManager(t, h, policyIssue(t, h, true))
+	turn, principal := startHostedIssueReview(t, h, issue)
+	change := protocol.SetIssueAcceptancePolicyPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, IndependentAcceptanceRequest: protocol.IndependentAcceptanceRequest{Required: true, Reason: "Retain the human review requirement"}}
+	op := hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "issue", ID: issue.IssueID}, rev(issue.Revision), change, SetIssueAcceptancePolicy{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	if issue.AcceptancePolicy.DecidedBy.Kind != "owner" {
+		t.Fatal("Agent endorsement erased the human requirement", issue.AcceptancePolicy)
+	}
+	change.Required = false
+	change.Reason = "Agent prefers self-check"
+	env := h.env("issues.set_acceptance_policy", protocol.Target{Type: "issue", ID: issue.IssueID}, change, rev(issue.Revision))
+	op, err := h.app.Execute(t.Context(), principal, env, HostedCoordinationCommand{Command: SetIssueAcceptancePolicy{}, ExecutionID: turn.RequestID, EffectSeq: 2})
+	if protocol.CodeOf(err) != protocol.CodeForbidden && (op.Error == nil || op.Error.Code != protocol.CodeForbidden) {
+		t.Fatal("Agent waived the human requirement", op, err)
+	}
+}
+
+func TestRegressionServerCancelRequiresDurableCommit(t *testing.T) {
+	h, c := upgradeHarness(t)
+	if op := startPreparedTestUpgrade(h, "probe-cancel", c); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})
+	for _, host := range []string{"linux-1", "linux-2"} {
+		upgradeAck(h, host, protocol.RunnerMaintenance)
+	}
+	b := protocol.UpgradeBinding{UpgradeID: "probe-cancel", ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: c.ServerHash, InstanceID: c.ServerInstance, ProcessInstanceID: "new-server"}
+	if g, err := h.app.ServerUpgradeAuthorize(t.Context(), b); err != nil || !g.Allowed {
+		t.Fatal(g, err)
+	}
+	upgradeTick(h, ServerObservation{InstanceID: c.ServerInstance, ProcessInstanceID: b.ProcessInstanceID, BinarySHA256: c.ServerHash, Healthy: true})
+	before := upgradeRead(h)
+	if before.ServerCommitted != nil || before.View.Phase != "server_checking" {
+		t.Fatal("bad setup", before)
+	}
+	op, err := h.app.Execute(t.Context(), owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: b.UpgradeID}, map[string]string{"action": "cancel"}, rev(before.View.Revision)), ControlUpgrade{})
+	if err == nil && op.Status == protocol.OpSucceeded {
+		t.Fatalf("cancel released uncommitted candidate: phase=%s, paused=%v, control=%+v", upgradeRead(h).View.Phase, func() bool { v, _ := h.app.UpgradePausesMain(t.Context()); return v }(), upgradeCtl(h, "linux-1"))
+	}
+}
+func TestRegressionAgentIssueRequirementIsInherited(t *testing.T) {
+	h := hostedManagerHarness(t)
+	source, delivery := h.say("Investigate with independent review")
+	turn := startHostedReview(t, h, "main", delivery)
+	payload := delegationPayload(source)
+	payload.ExpectedSourceRevision = rev(1)
+	payload.IndependentAcceptance = &protocol.IndependentAcceptanceRequest{Required: true, Reason: "The responsible Agent chooses independent review"}
+	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "issue"}, nil, payload, CanonicalOwnerIssueCommand{Action: "create"})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var issue protocol.Issue
+	if err := json.Unmarshal(op.Result, &issue); err != nil {
+		t.Fatal(err)
+	}
+	issue = admitExistingIssueFixture(t, h, issue)
+	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Inherited review requirement", Spec: testSpec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if created.Status != protocol.OpSucceeded {
+		t.Fatal(created)
+	}
+	var result struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(created.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	task := result.TaskID
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		policy, err := store.TaskAcceptancePolicy(t.Context(), tx.Q(), task)
+		if err == nil && (policy == nil || !policy.Required) {
+			t.Errorf("explicit Agent Issue review was discarded: Issue=%+v Task=%+v", issue.AcceptancePolicy, policy)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestRegressionEnableOptionalReviewCreatesUsableReviewer(t *testing.T) {
+	h, r, issue := issueOwnerHarness(t)
+	if op := policyChange(t, h, issue, false); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	spec := testSpec
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
+	input := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Optional review", Spec: spec}
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, input, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var task struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(op.Result, &task); err != nil {
+		t.Fatal(err)
+	}
+	change := protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Now request independent review"}}
+	op = h.exec(owner, h.env("issues.update_task", taskTarget(task.TaskID), change, rev(h.task(task.TaskID).ControlRevision)), CanonicalOwnerTaskUpdate{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	as := ownerWorkerClaim(t, h, r, protocol.RoleImplement)
+	if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	accept := ownerWorkerClaim(t, h, r, protocol.RoleAccept)
+	if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if h.task(task.TaskID).Lifecycle != protocol.TaskCompleted {
+		t.Fatal("requested review did not complete the original task")
+	}
+}
+
+func TestRegressionDatabaseOnlyHistoryRemainsAttachable(t *testing.T) {
+	h, _, _, as, _ := reviewManagerAssignment(t)
+	event := protocol.ManagerNativeEvent{Sequence: 1, Body: json.RawMessage(`{"thread_id":"native","native":{"Kind":"request_usage"}}`)}
+	if op := h.runAs(as, protocol.OpManagerNativeEvent, event, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original process exited", LastSequence: 1}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending`) != 0 {
+		t.Fatal("fixture unexpectedly has a native receipt")
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		m, err := store.GetIssueManagerTask(t.Context(), tx.Q(), as.TaskID)
+		if err != nil {
+			return err
+		}
+		pending, err := views.ManagerReceiptPending(t.Context(), tx.Q(), m)
+		if err != nil {
+			return err
+		}
+		original, err := managerHistoryRun(t.Context(), tx.Q(), as.TaskID)
+		if err != nil {
+			return err
+		}
+		t.Logf("pending=%v history=%q run=%+v", pending, original, h.run(as.RunID))
+		if pending && original == "" {
+			t.Error("database-only replay lost every eligible transport")
+		}
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}

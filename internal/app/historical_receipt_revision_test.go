@@ -9,67 +9,6 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func postCaptureReceiptReader(t *testing.T) (*harness, protocol.Assignment, store.MainTurn) {
-	t.Helper()
-	h, runtime, original, command := parkUpgradeFixture(t)
-	delivery, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+original.Manager.ConversationID)
-	if err != nil || !ok {
-		t.Fatal(delivery, ok, err)
-	}
-	turn := startHostedReview(t, h, original.Manager.ConversationID, delivery)
-	issue := canonicalTaskIssue(t, h, original.Manager.IssueID)
-	dependency := createCanonicalTaskForTest(t, h, issue)
-	if op := h.exec(owner, h.env("control.set_mode", taskTarget(dependency), protocol.SetControlModePayload{Mode: protocol.ControlPaused}, rev(h.task(dependency).ControlRevision)), SetControlMode{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	wait := waitForTask(t, h, original, dependency, 0)
-	if op := startTestUpgrade(h, "post-capture-reader", command); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	if op := h.runAs(original, protocol.OpRunsYieldExternalWait, protocol.YieldExternalWaitPayload{WaitID: wait.WaitID, ThreadID: turn.ThreadID}, YieldExternalWait{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	upgradeTick(h, ServerObservation{})
-	reader := reviewClaimManager(t, h, runtime)
-	return h, reader, turn
-}
-
-func TestUpgradeManagerParkClosesPostCaptureReaderAfterRestart(t *testing.T) {
-	h, reader, turn := postCaptureReceiptReader(t)
-	batch := upgradeRead(h)
-	if len(batch.ManagerParks) != 2 || batch.ManagerParks[1].RunID != reader.RunID || batch.ManagerParks[1].LeaseID != reader.LeaseID {
-		t.Fatal("new reader lacks a physical teardown binding", batch.ManagerParks)
-	}
-	closeID := batch.ManagerParks[1].CloseRequestID
-	turn.Status, turn.NativeReconciled = store.TurnInterrupted, true
-	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	h.app = New(h.store, h.ids, h.clock.Now)
-	if allowed, err := h.app.UpgradeParkReceiptRead(t.Context(), reader.Manager.ConversationID, reader.RunID); err != nil || !allowed {
-		t.Fatal("settled reader cannot reattach for teardown", allowed, err)
-	}
-	if allowed, err := h.app.UpgradeParkReceiptRead(t.Context(), "main", reader.RunID); err != nil || allowed {
-		t.Fatal("reader crossed the original conversation", allowed, err)
-	}
-	if _, err := h.app.QueueManagerNative(t.Context(), reader.RunID, "turn", json.RawMessage(`{}`)); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
-		t.Fatal("teardown restored business authority", err)
-	}
-	upgradeTick(h, ServerObservation{})
-	batch = upgradeRead(h)
-	if batch.ManagerParks[1].CloseRequestID != closeID || batch.View.ManagerParks[1].Phase != "closing" || h.lease(reader.RunID).Status != store.LeaseActive {
-		t.Fatal("settlement fabricated physical exit", batch.View.ManagerParks)
-	}
-	parkCloseForTest(t, h, reader)
-	upgradeTick(h, ServerObservation{})
-	if h.run(reader.RunID).ObservedState != protocol.RunFinished || h.lease(reader.RunID).Status != store.LeaseReleased || upgradeRead(h).View.ManagerParks[1].Phase != "parked" {
-		t.Fatal("reader slot did not close through original protocol")
-	}
-	if h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=? AND method='close' AND request_id=?`, reader.RunID, closeID) != 1 {
-		t.Fatal("physical close identity changed")
-	}
-}
-
 func TestLegacyReceiptRetainsAdmittedConversation(t *testing.T) {
 	h, _, _, as, _ := reviewManagerAssignment(t)
 	message, delivery := h.say("Original shared source admitted into the manager context")
@@ -171,48 +110,16 @@ func TestTaskUploadRecoveryPreservesAcceptanceProducer(t *testing.T) {
 	}
 }
 
-func TestUpgradeManagerParkRetainsPostCaptureUnknownClose(t *testing.T) {
-	h, reader, turn := postCaptureReceiptReader(t)
-	turn.Status, turn.NativeReconciled = store.TurnInterrupted, true
-	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	upgradeTick(h, ServerObservation{})
-	closeID := upgradeRead(h).ManagerParks[1].CloseRequestID
-	claimed := h.runAs(reader, protocol.OpManagerNativeClaim, map[string]any{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
-	var request protocol.ManagerNativeRequest
-	if claimed.Status != protocol.OpSucceeded || json.Unmarshal(claimed.Result, &request) != nil || request.ID != closeID {
-		t.Fatal(claimed, request)
-	}
-	if op := h.runAs(reader, protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: closeID, Error: "Physical close requires original independent reconciliation"}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	h.app = New(h.store, h.ids, h.clock.Now)
-	for range 2 {
-		upgradeTick(h, ServerObservation{})
-	}
-	batch := upgradeRead(h)
-	if batch.ManagerParks[1].CloseRequestID != closeID || batch.View.ManagerParks[1].Phase != "waiting_receipts" || h.lease(reader.RunID).Status != store.LeaseActive || h.run(reader.RunID).ObservedState == protocol.RunFinished {
-		t.Fatal("lost close reply released or replaced the physical execution", batch.View.ManagerParks)
-	}
-	if h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=? AND method='close'`, reader.RunID) != 1 {
-		t.Fatal("uncertain close was issued again")
-	}
-	if allowed, err := h.app.UpgradeParkReceiptRead(t.Context(), reader.Manager.ConversationID, reader.RunID); err != nil || !allowed {
-		t.Fatal("original close lost read-only reconciliation", allowed, err)
-	}
-}
-
 func TestUpgradeManagerParkDistinguishesObservedTerminalFromLocalInterruption(t *testing.T) {
-	h, _, next, turn, _, command := historicalParkFixture(t)
+	h, next, turn, _, command := historicalParkFixture(t)
 	if err := h.app.SettleOpenTurns(t.Context(), turn.ThreadID); err != nil {
 		t.Fatal(err)
 	}
-	if op := startTestUpgrade(h, "observed-terminal", command); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "observed-terminal", command); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
-	if upgradeRead(h).View.ManagerParks[0].Phase != "waiting_receipts" {
+	if pending, err := h.app.NativeReceiptPending(t.Context(), turn.RequestID); err != nil || !pending {
 		t.Fatal("local cleanup invented an observed native terminal")
 	}
 	turn.Status = store.TurnInterrupted
@@ -222,7 +129,7 @@ func TestUpgradeManagerParkDistinguishesObservedTerminalFromLocalInterruption(t 
 		}
 	}
 	upgradeTick(h, ServerObservation{})
-	if upgradeRead(h).View.ManagerParks[0].Phase != "closing" {
+	if len(upgradeRead(h).View.ManagerParks) != 0 {
 		t.Fatal("known native terminal was blocked by incomplete presentation")
 	}
 	if pending, err := h.app.NativeReceiptPending(t.Context(), turn.RequestID); err != nil || !pending {

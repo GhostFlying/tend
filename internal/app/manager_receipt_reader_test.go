@@ -13,11 +13,11 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestManagerReceiptReaderRetainsSupportedProtocol2AndRejectsRetired1(t *testing.T) {
-	for _, version := range []int64{1, protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol, protocol.CurrentRunnerProtocol + 1} {
+func TestManagerReceiptReaderRequiresCurrentProtocolAndNativeCapability(t *testing.T) {
+	for _, version := range []int64{protocol.MinimumRunnerProtocol - 1, protocol.CurrentRunnerProtocol, protocol.CurrentRunnerProtocol + 1} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			runtime := &protocol.RunnerRuntime{Protocol: version, Capabilities: []string{protocol.CapabilityManagerReceiptReader}}
-			want := version == protocol.PreviousRunnerProtocol || version == protocol.CurrentRunnerProtocol
+			want := version == protocol.MinimumRunnerProtocol || version == protocol.CurrentRunnerProtocol
 			if got := supportsManagerReceiptReader(runtime); got != want {
 				t.Fatalf("receipt-reader protocol %d eligible=%v, want %v", version, got, want)
 			}
@@ -113,29 +113,24 @@ func TestFault_ManagerReceiptReaderReleasesOnlyProvedClosedTransport(t *testing.
 	if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 {
 		t.Fatal("receipt-reader admission fabricated a native terminal receipt")
 	}
-	oldRuntime := runtime
-	oldRuntime.Capabilities = slices.DeleteFunc(slices.Clone(runtime.Capabilities), func(capability string) bool { return capability == protocol.CapabilityManagerReceiptReader })
-	oldClaim := h.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: &oldRuntime, WorkspaceProtocol: 1}, nil), Claim{})
-	if string(oldClaim.Result) != `{"assignment":null}` {
-		t.Fatal("old runner claimed the new strictly read-only responsibility", oldClaim)
+	if reader, ok := h.claimInputRun(&runtime); ok {
+		t.Fatal("history read consumed a business Run", reader)
 	}
-	reader := reviewClaimManager(t, h, &runtime)
-	if reader.RunID == as.RunID || reader.TaskID != as.TaskID || reader.Manager == nil || !reader.Manager.ReceiptOnly || !reader.Manager.RequireReceiptReader || !reflect.DeepEqual(reader.Execution, beforePin) {
-		t.Fatal("reader did not retain the original frozen responsibility", reader)
+	selection, named, err := h.app.HostedRuntimeSelection(t.Context(), as.Manager.ConversationID)
+	if err != nil || !named || selection.RunnerRunID != as.RunID || !selection.RequireReceiptReader {
+		t.Fatal("lost original history identity", selection, err)
 	}
-	runtime.Sequence++
-	recovery := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: &runtime, WorkspaceProtocol: 1}, nil), Hello{})
-	var recovered protocol.HelloResult
-	if recovery.Status != protocol.OpSucceeded || json.Unmarshal(recovery.Result, &recovered) != nil || len(recovered.Reassigned) != 1 || !recovered.Reassigned[0].Manager.RequireReceiptReader || recovered.Reassigned[0].RunID != reader.RunID {
-		t.Fatal("Hello lost strict reader assignment", recovery, recovered)
+	if _, err := h.app.QueueManagerNative(t.Context(), as.RunID, "turn", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("history reader started native work")
 	}
-	if _, err := h.app.QueueManagerNative(t.Context(), reader.RunID, "turn", json.RawMessage(`{}`)); protocol.CodeOf(err) != protocol.CodeForbidden {
-		t.Fatal("receipt reader could start new native business", err)
-	}
-	oldRuntime.Sequence++
-	hello, err := h.app.Execute(t.Context(), protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: &oldRuntime, WorkspaceProtocol: 1}, nil), Hello{})
-	if err == nil && hello.Status == protocol.OpSucceeded {
-		t.Fatal("downgraded runner recovered a strict reader with its ordinary business probe")
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		pin, e := store.GetRunExecution(t.Context(), tx.Q(), as.RunID)
+		if !reflect.DeepEqual(pin, beforePin) {
+			t.Fatal("original executor changed")
+		}
+		return e
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if again, err := h.app.Execute(t.Context(), owner, env, ReconcileManagerRun{}); err != nil || again.Status != protocol.OpFailed || protocol.CodeOf(again.Error) != protocol.CodeStaleRevision {
 		t.Fatal("same admission request changed its result", again, err)
@@ -212,64 +207,66 @@ func TestManagerReceiptReaderRetainsAllFences(t *testing.T) {
 	}
 }
 
-func TestFault_ManagerReceiptReaderKeepsNegotiationAcrossNonterminalReads(t *testing.T) {
+// Repeated reads keep the original business pending set and never acquire a Run.
+func TestManagerHistoryReadsUseOriginalRunAcrossLostReplies(t *testing.T) {
 	h, original, pending := stoppedRetainedManager(t)
-	payload := receiptReaderPayload(t, h, original)
-	env := h.env(protocol.OpReconcileManagerRun, taskTarget(original.TaskID), payload, rev(h.task(original.TaskID).ControlRevision))
-	if op := h.exec(owner, env, ReconcileManagerRun{}); op.Status != protocol.OpSucceeded {
+	p := receiptReaderPayload(t, h, original)
+	if op := h.exec(owner, h.env(protocol.OpReconcileManagerRun, taskTarget(original.TaskID), p, rev(h.task(original.TaskID).ControlRevision)), ReconcileManagerRun{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	runs := h.count("runs")
+	var turn store.MainTurn
 	var runtime protocol.RunnerRuntime
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		r, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
-		runtime = r.Runtime
-		return err
+		var e error
+		turn, e = store.GetMainTurn(t.Context(), tx.Q(), pending)
+		if e != nil {
+			return e
+		}
+		rt, e := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+		runtime = rt.Runtime
+		return e
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for attempt := 0; attempt < 2; attempt++ {
-		reader := reviewClaimManager(t, h, &runtime)
-		if !reader.Manager.RequireReceiptReader {
-			t.Fatal("successor lost strict reader contract")
-		}
-		selection, named, err := h.app.HostedRuntimeSelection(t.Context(), reader.Manager.ConversationID)
-		if err != nil || !named || !selection.RequireReceiptReader {
-			t.Fatal("hosted receipt selection lost negotiated contract", selection, err)
-		}
-		close, err := h.app.QueueManagerNative(t.Context(), reader.RunID, "close", json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.runAs(reader, protocol.OpManagerNativeClaim, map[string]any{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
-		if op := h.runAs(reader, protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: close}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
-		}
-		if h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 {
-			t.Fatal("closing a reader fabricated a native business terminal")
-		}
-		old := runtime
-		old.Capabilities = slices.DeleteFunc(slices.Clone(runtime.Capabilities), func(capability string) bool { return capability == protocol.CapabilityManagerReceiptReader })
-		claim := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: &old, WorkspaceProtocol: 1}, nil), Claim{})
-		if string(claim.Result) != `{"assignment":null}` {
-			t.Fatal("a subsequent unknown receipt generation lost its negotiated reader requirement", attempt, claim)
-		}
-		if h.countWhere(`SELECT COUNT(*) FROM plan_actions WHERE task_id=? AND status='pending' AND json_extract(trigger_json,'$.receipt_reader_request_id')=?`, original.TaskID, env.RequestID) != 1 {
-			t.Fatal("subsequent reader did not retain its original request identity")
+	identity := turn.MessageID
+	if repair, err := h.app.IsRepairExecution(t.Context(), pending); err != nil {
+		t.Fatal(err)
+	} else if repair {
+		identity = pending
+	}
+	payload, _ := json.Marshal(map[string]string{"thread_id": turn.ThreadID, "message_id": identity, "turn_id": turn.TurnID})
+	id, err := h.app.QueueManagerNative(t.Context(), original.RunID, "find", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		runtime.Sequence++
+		response, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &runtime})
+		if err != nil || len(response.HistoryReads) != 1 || response.HistoryReads[0].ID != id || response.HistoryReads[0].RunID != original.RunID {
+			t.Fatal(response, err)
 		}
 	}
-	// This unit fixture supplies the original terminal ledger fact only to check
-	// expiration of the negotiated scope; the reader command never clears it.
+	runtime.Sequence++
+	result := json.RawMessage(`{"Found":false}`)
+	response, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &runtime, HistoryReplies: []protocol.ManagerHistoryReply{{ID: id, Result: result}}})
+	if err != nil || len(response.HistoryAcknowledged) != 1 {
+		t.Fatal(response, err)
+	}
+	reply, ready, err := h.app.ManagerNativeResult(t.Context(), original.RunID, id)
+	if err != nil || !ready || string(reply.Result) != string(result) {
+		t.Fatal(reply, ready, err)
+	}
+	if h.count("runs") != runs || h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 {
+		t.Fatal("read changed original business facts")
+	}
 	resolveRetainedBusinessReceipt(t, h, pending)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		trigger, err := managerReceiptReaderTrigger(t.Context(), tx.Q(), original.TaskID)
-		var fields map[string]json.RawMessage
-		if err == nil {
-			err = json.Unmarshal([]byte(trigger), &fields)
+		run, e := managerHistoryRun(t.Context(), tx.Q(), original.TaskID)
+		if run != "" {
+			t.Fatal("settled receipt still owns a history reader")
 		}
-		if err == nil && (string(fields["receipt_only"]) != "true" || len(fields["receipt_reader_request_id"]) != 0) {
-			t.Fatal("an unrelated future receipt inherited the completed reader requirement", trigger)
-		}
-		return err
+		return e
 	}); err != nil {
 		t.Fatal(err)
 	}

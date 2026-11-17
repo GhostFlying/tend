@@ -41,20 +41,20 @@ func parkUpgradeFixture(t *testing.T) (*harness, *protocol.RunnerRuntime, protoc
 	}); err != nil {
 		t.Fatal(err)
 	}
-	c := StartUpgrade{ServerCapabilities: []string{release.ServerCapabilityManagerPark}, ParkIdleManagers: true, Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: runtime.JournalVersion}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	c := StartUpgrade{ServerCapabilities: []string{release.ServerCapabilityManagerPark}, ParkIdleManagers: true, Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: runtime.JournalVersion}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
 	return h, runtime, as, c
 }
 
 func TestUpgradeManagerParkClosesBeforeDrainAndResumesNewRun(t *testing.T) {
 	h, runtime, as, c := parkUpgradeFixture(t)
-	if op := startTestUpgrade(h, "park-one", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "park-one", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	batch := upgradeRead(h)
 	if len(batch.ManagerParks) != 1 || batch.ManagerParks[0].RunID != as.RunID {
 		t.Fatal(batch)
 	}
-	if op := startTestUpgrade(h, "park-two", c); op.Status != protocol.OpFailed {
+	if op := startPreparedTestUpgrade(h, "park-two", c); op.Status != protocol.OpFailed {
 		t.Fatal("second window", op)
 	}
 	// Start was accepted without synchronously issuing native close or finishing self.
@@ -103,7 +103,7 @@ func TestUpgradeManagerParkUnknownDoesNotQueueClose(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if op := startTestUpgrade(h, "park-unknown", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "park-unknown", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true})
@@ -129,7 +129,7 @@ func TestUpgradeManagerParkCompletesServerUpgradeBeforeContinuation(t *testing.T
 	// This release replaces the server and exactly retains both installed runner
 	// artifacts. Normal matching-version guards still decide whether to skip.
 	c.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
-	if op := startTestUpgrade(h, "park-success", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "park-success", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: false})
@@ -148,7 +148,7 @@ func TestUpgradeManagerParkCompletesServerUpgradeBeforeContinuation(t *testing.T
 	}
 	observed := ServerObservation{InstanceID: c.ServerInstance, ProcessInstanceID: binding.ProcessInstanceID, BinarySHA256: c.ServerHash, Healthy: true, MainDrained: true}
 	upgradeTick(h, observed)
-	h.clock.Advance(5 * time.Second)
+	observed.UpdaterReceipt = committedServerForTest(binding)
 	if v := upgradeTick(h, observed); v.Phase != "runners" {
 		t.Fatal(v)
 	}
@@ -189,7 +189,7 @@ func TestUpgradeManagerParkWaitsForActualInitiatingTurn(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 	turn := startHostedReview(t, h, as.Manager.ConversationID, delivery)
-	if op := startTestUpgrade(h, "park-active-turn", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "park-active-turn", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: false})
@@ -216,7 +216,7 @@ func TestUpgradeManagerParkWaitsForActualInitiatingTurn(t *testing.T) {
 
 func TestUpgradeManagerParkFailedCloseKeepsOriginalResponsibility(t *testing.T) {
 	h, _, as, c := parkUpgradeFixture(t)
-	if op := startTestUpgrade(h, "park-unknown-close", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "park-unknown-close", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: false})
@@ -244,7 +244,7 @@ func TestUpgradeManagerParkFailedCloseKeepsOriginalResponsibility(t *testing.T) 
 
 func TestUpgradeManagerParkCancelledUnknownClosePreservesRequest(t *testing.T) {
 	h, _, as, c := parkUpgradeFixture(t)
-	if op := startTestUpgrade(h, "review-first", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "review-first", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
@@ -263,7 +263,7 @@ func TestUpgradeManagerParkCancelledUnknownClosePreservesRequest(t *testing.T) {
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerNormal)
 	}
-	if op := startTestUpgrade(h, "review-second", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "review-second", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
@@ -288,7 +288,7 @@ func TestUpgradeManagerParkTerminalUnknownNativeRequestBlocksDrain(t *testing.T)
 	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &native) != nil || native.ID != id {
 		t.Fatal(op)
 	}
-	if op := startTestUpgrade(h, "review-unknown-start", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "review-unknown-start", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})
@@ -316,7 +316,7 @@ func TestUpgradeManagerParkRestartAllowsOnlyCapturedReceiptAttachment(t *testing
 	if op := h.runAs(as, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: 1, Body: json.RawMessage(`{}`)}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := startTestUpgrade(h, "review-restart", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "review-restart", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
@@ -416,7 +416,7 @@ func TestUpgradeManagerParkBusyRestartRestoresOriginalReceiptOnlySelection(t *te
 		t.Fatal(ok, err)
 	}
 	turn := startHostedReview(t, h, as.Manager.ConversationID, delivery)
-	if op := startTestUpgrade(h, "busy-attachment-restart", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "busy-attachment-restart", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
@@ -443,7 +443,7 @@ func TestUpgradeManagerParkSerializesAllAttachmentClosesWithWindow(t *testing.T)
 	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := startTestUpgrade(h, "teardown-owned-by-window", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "teardown-owned-by-window", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	original := upgradeRead(h).ManagerParks[0].CloseRequestID
@@ -521,7 +521,7 @@ func TestUpgradeManagerParkSerializesAllAttachmentClosesWithWindow(t *testing.T)
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerNormal)
 	}
-	if op := startTestUpgrade(h, "teardown-following-window", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "teardown-following-window", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{})
@@ -534,7 +534,7 @@ func TestUpgradeManagerParkCancelRestoresOnlyUnattemptedOrRejectedClose(t *testi
 	for _, rejected := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unattempted", true: "explicitly-rejected"}[rejected], func(t *testing.T) {
 			h, _, as, c := parkUpgradeFixture(t)
-			if op := startTestUpgrade(h, "known-not-closed", c); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "known-not-closed", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			if rejected {

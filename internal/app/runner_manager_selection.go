@@ -24,6 +24,13 @@ func runnerManagerSelection(ctx context.Context, q store.Querier, m store.IssueM
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return hostedconfig.Selection{}, false, err
 	}
+	if run == "" {
+		run, err = managerHistoryRun(ctx, q, m.TaskID)
+		if err != nil {
+			return hostedconfig.Selection{}, false, err
+		}
+		strict, receiptOnly = run != "", run != ""
+	}
 	closing, err := managerRunClosing(ctx, q, run)
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
@@ -124,7 +131,10 @@ func runnerReceiptSelection(ctx context.Context, q store.Querier, issue string) 
 	var task string
 	err := q.QueryRowContext(ctx, `SELECT r.task_id FROM issue_manager_tasks m JOIN runs r USING(task_id) JOIN leases l USING(run_id) JOIN plan_actions a ON a.action_id=r.action_id WHERE m.issue_id=? AND l.status='active' AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND json_extract(a.trigger_json,'$.receipt_only')=1 ORDER BY r.created_at LIMIT 1`, issue).Scan(&task)
 	if errors.Is(err, sql.ErrNoRows) {
-		return hostedconfig.Selection{}, false, nil
+		err = q.QueryRowContext(ctx, `SELECT r.task_id FROM issue_manager_tasks m JOIN runs r USING(task_id) WHERE m.issue_id=? AND r.observed_state IN ('finished','failed') AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity AND EXISTS(SELECT 1 FROM hosted_executions h JOIN native_turn_receipts_pending p ON p.request_id=h.execution_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=r.run_id) ORDER BY r.created_at LIMIT 1`, issue).Scan(&task)
+		if errors.Is(err, sql.ErrNoRows) {
+			return hostedconfig.Selection{}, false, nil
+		}
 	}
 	if err != nil {
 		return hostedconfig.Selection{}, false, err
@@ -145,8 +155,14 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 	var trigger string
 	err := q.QueryRowContext(ctx, `SELECT r.run_id,a.trigger_json FROM issue_manager_tasks m JOIN runs r USING(task_id) JOIN leases l USING(run_id) JOIN plan_actions a ON a.action_id=r.action_id WHERE m.issue_id=? AND m.assignment_epoch=? AND l.status='active' AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') ORDER BY r.created_at DESC LIMIT 1`, selected.IssueID, selected.AssignmentEpoch).Scan(&run, &trigger)
 	if errors.Is(err, sql.ErrNoRows) {
-		selected.RunnerRunID = ""
-		return nil
+		var task string
+		if err := q.QueryRowContext(ctx, `SELECT task_id FROM issue_manager_tasks WHERE issue_id=? AND assignment_epoch=?`, selected.IssueID, selected.AssignmentEpoch).Scan(&task); err != nil {
+			return err
+		}
+		run, err = managerHistoryRun(ctx, q, task)
+		selected.RunnerRunID = run
+		selected.ReceiptOnly, selected.RequireReceiptReader = run != "", run != ""
+		return err
 	}
 	if err != nil {
 		return err

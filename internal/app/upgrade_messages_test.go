@@ -15,7 +15,7 @@ func TestUpgradePreservesQueuedOwnerMessagesAndFinishesExistingTurn(t *testing.T
 	if err := h.app.PutMainTurn(t.Context(), running); err != nil {
 		t.Fatal(err)
 	}
-	if op := startTestUpgrade(h, "upgrade-messages", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "upgrade-messages", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	request := h.env("conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{Body: "preserve this queued owner message"}, nil)

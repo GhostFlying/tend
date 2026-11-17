@@ -42,10 +42,10 @@ type preCollectionHello struct {
 }
 
 func TestUsageCollectionNegotiationPreservesStrictSupportedPeers(t *testing.T) {
-	for _, version := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
+	for _, version := range []int64{protocol.MinimumRunnerProtocol, protocol.CurrentRunnerProtocol} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			e := newEnv(t, time.Millisecond)
-			runtime := &protocol.RunnerRuntime{InstanceID: "collection-compat", Generation: 1, Sequence: 1, Protocol: version, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: version, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityNativeUsage}}
+			runtime := &protocol.RunnerRuntime{InstanceID: "collection-compat", Generation: 1, Sequence: 1, Protocol: version, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: version, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityNativeUsage}}
 			raw := e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "linux-1", protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}))
 			var old preCollectionHello
 			decoder := json.NewDecoder(bytes.NewReader(raw))

@@ -60,13 +60,13 @@ func TestFault_ManagerLateClosePreservesStoppedRunAfterBusinessSettles(t *testin
 					t.Fatal(err)
 				}
 			}
-			beforeAction := h.countWhere(`SELECT COUNT(*) FROM plan_actions WHERE task_id=?`, as.TaskID)
+			beforeRuns := h.countWhere(`SELECT COUNT(*) FROM runs WHERE task_id=?`, as.TaskID)
 			env := h.env(protocol.OpManagerNativeReply, runTarget(as.RunID), protocol.ManagerNativeReply{ID: closeID, Result: json.RawMessage(`null`), LastSequence: 0}, nil)
 			op, err := h.app.Execute(ctx, runPrincipal(as.RunID, as.Role), env, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
 			if err != nil || op.Status != protocol.OpSucceeded {
 				t.Fatalf("late close on physically stopped run: operation=%+v err=%v", op, err)
 			}
-			if !reflect.DeepEqual(before, h.run(as.RunID)) || h.countWhere(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='released'`, as.RunID) != 1 || h.countWhere(`SELECT COUNT(*) FROM plan_actions WHERE task_id=?`, as.TaskID) != beforeAction {
+			if !reflect.DeepEqual(before, h.run(as.RunID)) || h.countWhere(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='released'`, as.RunID) != 1 || h.countWhere(`SELECT COUNT(*) FROM runs WHERE task_id=?`, as.TaskID) != beforeRuns {
 				t.Fatal("late close transitioned or replaced original responsibility")
 			}
 			if h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND run_id=? AND status='completed' AND COALESCE(json_extract(result_json,'$.error'),'')=''`, closeID, as.RunID) != 1 {

@@ -107,6 +107,15 @@ func (a *HTTPAuthority) Health(ctx context.Context, b Binding) (Health, error) {
 	return h, err
 }
 
+func (a *HTTPAuthority) InstallationReadiness(ctx context.Context, binding Binding) (protocol.InstallationReadiness, error) {
+	var ready protocol.InstallationReadiness
+	if a.cfg.AuthoritySocket == "" {
+		return ready, errors.New("updater: external recovery requires a private readiness socket")
+	}
+	err := a.request(ctx, "http://localhost/updater/readiness", binding, &ready)
+	return ready, err
+}
+
 func (a *HTTPAuthority) RecoveryHealth(ctx context.Context, p protocol.ForwardRecoveryPlan) (protocol.RecoveryHealth, error) {
 	var h protocol.RecoveryHealth
 	if a.cfg.AuthoritySocket == "" {

@@ -484,7 +484,7 @@ func (s *Server) claim(ctx context.Context, p protocol.Principal, env *protocol.
 	if err := json.Unmarshal(env.Payload, &original); err != nil {
 		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "claim payload is malformed")
 	}
-	adapted, err := protocol.AdaptRunnerClaim(*env)
+	adapted, err := protocol.ValidateRunnerClaim(*env)
 	if err != nil {
 		return protocol.Operation{}, err
 	}

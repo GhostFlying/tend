@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"time"
 
@@ -76,8 +75,8 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if c.ParkIdleManagers && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityManagerPark) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "candidate does not support manager park")
 	}
-	if c.Manifest.Protocol.Max < protocol.CurrentRunnerProtocol || c.Manifest.Protocol.Max > protocol.CurrentRunnerProtocol+1 || c.Manifest.Protocol.Min != max(0, c.Manifest.Protocol.Max-1) {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release must support exactly its current and previous protocol")
+	if c.Manifest.Protocol.Max < protocol.CurrentRunnerProtocol || c.Manifest.Protocol.Max > protocol.CurrentRunnerProtocol+1 || c.Manifest.Protocol.Min != max(protocol.MinimumRunnerProtocol, c.Manifest.Protocol.Max-1) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release must support the current installation protocol floor")
 	}
 	if !release.ValidID(x.Env.Target.ID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid upgrade identity")
@@ -140,9 +139,6 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		busy[h.HostID] = n
 	}
 	slices.SortStableFunc(hosts, func(a, b store.HostRow) int { return cmp.Compare(busy[a.HostID], busy[b.HostID]) })
-	if len(hosts) < 2 {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "rolling upgrades require another online execution host")
-	}
 	sourceCommit := ""
 	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
 		sourceCommit = source.Commit
@@ -234,22 +230,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 				continue
 			}
 			found = true
-			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
-			if err != nil {
-				return Outcome{}, err
-			}
-			ctl.Revision++
-			ctl.Mode = protocol.RunnerMaintenance
-			ctl.UpgradeID = r.View.UpgradeID
-			ctl.ReleaseID = r.View.ReleaseID
-			ctl.Upgrade = nil
-			ctl.Authorization = nil
-			ctl.CancelledUpgradeID = ""
-			if err := tx.PutHostControl(ctx, h.HostID, ctl, x.Now.UnixMilli()); err != nil {
-				return Outcome{}, err
-			}
-			r.View.Hosts[i].Status = "running"
-			r.View.Hosts[i].Phase = "draining"
+
 		}
 		if !found {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "configuration host is not active")
@@ -276,18 +257,17 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, err
 		}
 	}
-	if c.ParkIdleManagers {
-		r.ParkIdleManagers = true
-		if err := captureUpgradeManagers(ctx, x, tx, &r); err != nil {
-			return Outcome{}, err
-		}
+	r.ParkIdleManagers = c.ParkIdleManagers
+	r.InstallPhase, r.View.Phase = r.View.Phase, "preparing"
+	if err := prepareUpgradeHosts(ctx, x, tx, &r); err != nil {
+		return Outcome{}, err
 	}
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
 	}
-	notice := fmt.Sprintf("开始升级至 `%s`。先等待主会话完成当前回复，再逐台更新执行主机。", r.View.ReleaseID)
+	notice := fmt.Sprintf("准备升级至 `%s`。先下发并校验发布包，准备期间继续接单。", r.View.ReleaseID)
 	if len(c.RunnerConfigurations) > 0 {
-		notice = "已暂停目标主机的新任务领取；等待当前运行与待确认操作结束后应用配置。"
+		notice = "正在向目标主机准备配置更新；准备完成后进入短维护窗口。"
 	}
 	if err := upgradeNotice(ctx, x, tx, r, "upgrade_started", "", notice); err != nil {
 		return Outcome{}, err
@@ -361,11 +341,18 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 	}
 	r, err := store.LatestUpgrade(ctx, tx.Q())
 	if errors.Is(err, store.ErrNotFound) {
-		return Outcome{NoEffect: true}, nil
+		recovered, e := recordExternalRecoveries(ctx, x, tx, nil, c.Observation)
+		events = append(events, recovered...)
+		return Outcome{Events: events, NoEffect: len(events) == 0}, e
 	}
 	if err != nil {
 		return Outcome{}, err
 	}
+	recovered, err := recordExternalRecoveries(ctx, x, tx, &r, c.Observation)
+	if err != nil {
+		return Outcome{}, err
+	}
+	events = append(events, recovered...)
 	if r.View.Status != "running" && r.View.Status != "attention" {
 		return Outcome{Result: r.View, Events: events, NoEffect: len(events) == 0}, nil
 	}
@@ -419,7 +406,15 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 			return Outcome{}, err
 		}
 	} else {
-		parkReady, err := advanceManagerParks(ctx, x, tx, &r)
+		wasPreparing := r.View.Phase == "preparing"
+		prepared, err := advanceUpgradePreparation(ctx, x, tx, &r)
+		if err != nil {
+			return Outcome{}, err
+		}
+		parkReady := false
+		if prepared && !wasPreparing {
+			parkReady, err = advanceManagerParks(ctx, x, tx, &r)
+		}
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -556,16 +551,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 
 func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.UpgradeRow, attention func(string) error) error {
 	now := x.Now.UnixMilli()
-	waiting, reason, err := awaitCutoverRunners(ctx, x, tx.Q(), r, now)
-	if err != nil {
-		return err
-	}
-	if reason != "" {
-		return attention(reason)
-	}
-	if waiting {
-		return nil
-	}
+
 	for i := range r.Hosts {
 		h := &r.Hosts[i]
 		v := &r.View.Hosts[i]
@@ -646,25 +632,6 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			}
 		}
 
-		if v.Phase != "restored" {
-			available, hosts, err := inspectOtherUpgradeHosts(ctx, tx.Q(), h.HostID, now)
-			if err != nil {
-				return err
-			}
-			if !available {
-				pending, err := anotherHostAwaitingNormal(ctx, tx.Q(), h.HostID, *r, now)
-				if err != nil {
-					return err
-				}
-				if pending {
-					observeUpgradeHostDecision(ctx, x, *r, h.HostID, "awaiting_normal_ack", slog.LevelDebug, hosts)
-					return nil
-				}
-				observeUpgradeHostDecision(ctx, x, *r, h.HostID, "other_hosts_unavailable", slog.LevelWarn, hosts)
-				return attention("其他执行主机不可用，已暂停后续升级")
-			}
-			observeUpgradeHostDecision(ctx, x, *r, h.HostID, "other_host_available", slog.LevelDebug, hosts)
-		}
 		if v.Status == "queued" {
 			if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 				return attention("等待升级的主机离线")
@@ -677,13 +644,6 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				v.Phase = "skipped"
 				r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 				continue
-			}
-			available, err := anotherAvailableHost(ctx, tx.Q(), h.HostID, now)
-			if err != nil {
-				return err
-			}
-			if !available {
-				return nil
 			}
 			if ctl.Mode != protocol.RunnerNormal || rt.Runtime.Mode != protocol.RunnerNormal || rt.Runtime.AppliedControlRevision != ctl.Revision {
 				return nil
@@ -726,13 +686,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		}
 		if v.Phase == "draining" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
 			ctl.Revision++
-			ctl.Upgrade = &protocol.RunnerUpgradeTarget{Configuration: h.Configuration, ManifestPath: "/runner/v1/releases/" + r.View.UpgradeID + "/manifest", ManifestSHA256: r.ManifestSHA256, ManifestSize: r.ManifestSize, ArtifactBasePath: "/runner/v1/releases/" + r.View.UpgradeID + "/artifacts/"}
-			if r.ReleaseSet != nil {
-				if needsSelfUpdate(*r) {
-					ctl.Upgrade.Updater = &protocol.UpdaterSelfTarget{RequestID: r.StartRequestID, ExpiresAtMillis: r.View.OverallDeadlineMillis}
-				}
-				ctl.Upgrade.ReleaseSet = &protocol.ReleaseSetTarget{Path: "/runner/v1/releases/" + r.View.UpgradeID + "/set", SHA256: r.ReleaseSetSHA256, Size: r.ReleaseSetSize}
-			}
+			ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 				return err
 			}
@@ -740,15 +694,16 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		}
 		return nil
 	}
-	if needsSelfUpdate(*r) {
+	{
 		for _, h := range r.Hosts {
 			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 			if err != nil {
 				return err
 			}
-			if ctl.Upgrade != nil {
+			if ctl.Mode == protocol.RunnerNormal && ctl.UpgradeID == r.View.UpgradeID {
 				ctl.Revision++
 				ctl.Upgrade = nil
+				ctl.UpgradeID, ctl.ReleaseID = "", ""
 				if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 					return err
 				}
@@ -759,51 +714,6 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 	r.View.Phase = "completed"
 	r.Deadline = 0
 	return upgradeNotice(ctx, x, tx, *r, "upgrade_completed", "", fmt.Sprintf("升级 `%s` 已完成，所有执行主机恢复服务。", r.View.ReleaseID))
-}
-func anotherAvailableHost(ctx context.Context, q store.Querier, exclude string, now int64) (bool, error) {
-	available, _, err := inspectOtherUpgradeHosts(ctx, q, exclude, now)
-	return available, err
-}
-
-// anotherHostAwaitingNormal identifies only a bounded acknowledgment gap.
-// It never makes the host available to authorize installation or start drain.
-func anotherHostAwaitingNormal(ctx context.Context, q store.Querier, exclude string, batch store.UpgradeRow, now int64) (bool, error) {
-	hosts, err := store.ListActiveHosts(ctx, q)
-	if err != nil {
-		return false, err
-	}
-	for _, h := range hosts {
-		if h.HostID == exclude || h.Slots <= 0 {
-			continue
-		}
-		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || rt.Runtime.UpgradeID != batch.View.UpgradeID {
-			continue
-		}
-		ctl, err := runnerControl(ctx, q, h.HostID, now)
-		if err != nil {
-			return false, err
-		}
-		observationOnly := ctl.Upgrade == nil
-		if ctl.Upgrade != nil && ctl.Upgrade.Updater != nil {
-			for _, target := range batch.Hosts {
-				if target.HostID == h.HostID && runnerSelfMatches(batch, target, rt.Runtime) {
-					observationOnly = true
-					break
-				}
-			}
-		}
-		if ctl.Mode == protocol.RunnerNormal && observationOnly && (ctl.UpgradeID == "" || ctl.UpgradeID == batch.View.UpgradeID) && rt.Runtime.AppliedControlRevision < ctl.Revision {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // UpgradePausesMain gates new foreground turns throughout server replacement.
@@ -846,7 +756,7 @@ func upgradePausesMain(ctx context.Context, q store.Querier) (bool, error) {
 	if r.View.Status == "attention" && (r.ServerProcess == "" || r.ServerRollback != nil) {
 		return false, nil
 	}
-	return (r.View.Status == "running" || r.View.Status == "attention") && r.View.Phase != "runners", nil
+	return (r.View.Status == "running" || r.View.Status == "attention") && r.View.Phase != "runners" && r.View.Phase != "preparing", nil
 }
 
 func (a *App) CurrentUpgrade(ctx context.Context) (protocol.UpgradeView, error) {

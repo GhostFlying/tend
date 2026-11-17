@@ -54,7 +54,7 @@ func TestPredeploymentOwnerProgressRetainsPersistentStageGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			hash, runnerHash := strings.Repeat("e", 64), strings.Repeat("f", 64)
-			manifest := release.Manifest{Format: 1, ReleaseID: "owner-stage-gate", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 1, Max: 9999}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: hash}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: runnerHash}}}
+			manifest := release.Manifest{Format: 1, ReleaseID: "owner-stage-gate", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 1, Max: 9999}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: hash}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: runnerHash}}}
 			command := StartUpgrade{DeliveryTaskID: as.TaskID, ServerInstance: "server", ServerHash: hash, Manifest: manifest, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ArtifactSources: map[string]release.SourceIdentity{hash: {Commit: merged}}}
 			rejected := scenario == "unaccepted" || scenario == "new-unaccepted-after-waived"
 			check := func() {

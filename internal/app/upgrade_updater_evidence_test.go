@@ -29,7 +29,7 @@ func TestSelfConfigurationUntargetedCapability(t *testing.T) {
 	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-2"), protocol.HeartbeatPayload{Runtime: &rt}); err != nil {
 		t.Fatal(err)
 	}
-	if op := startTestUpgrade(h, "config-untargeted-capability", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "config-untargeted-capability", c); op.Error != nil {
 		t.Fatalf("untargeted linux-2 blocked linux-1 configuration maintenance: %v", op.Error)
 	}
 }

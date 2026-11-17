@@ -162,13 +162,8 @@ func (m *Manager) migrateOneThread(ctx context.Context, s harness.Session, sourc
 		return nil, errors.New("mainthread: native continuation must be reconciled before handoff")
 	}
 
-	// Startup schema recovery uses this same path without deliverHandoff. Keep
-	// the original binding until its native compaction has been reconciled.
-	if blocked, err := m.app.AgentCompactUncertain(ctx, m.cfg.ConversationID); err != nil {
-		return nil, err
-	} else if blocked {
-		return nil, errors.New("mainthread: native compact must be reconciled before handoff")
-	}
+	// A pending compaction concerns the old execution context. Its original
+	// record remains available, but a fresh context can read the durable index.
 	if requestID != "" {
 		old, ok, err := m.app.GetHandoff(ctx, requestID)
 		if err != nil {

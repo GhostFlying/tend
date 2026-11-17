@@ -28,7 +28,7 @@ func reconcileCompletedRunner(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		(ctl.UpgradeID != "" && ctl.UpgradeID != r.View.UpgradeID) || (rt.Runtime.UpgradeID != "" && rt.Runtime.UpgradeID != r.View.UpgradeID) {
 		return nil
 	}
-	if h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 2 && committedMatches(*r, *h, h.Committed, rt.Runtime) {
+	if h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 1 && committedMatches(*r, *h, h.Committed, rt.Runtime) {
 		return nil
 	}
 	if h.HealthInstance != rt.Runtime.InstanceID {
@@ -39,11 +39,11 @@ func reconcileCompletedRunner(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		h.Healthy = 0
 		return nil
 	}
-	if rt.Runtime.Sequence > h.LastSequence && rt.LastHeartbeatAt-h.LastHealthyAt >= 7500 {
+	if rt.Runtime.Sequence > h.LastSequence {
 		h.Healthy++
 		h.LastSequence, h.LastHealthyAt = rt.Runtime.Sequence, rt.LastHeartbeatAt
 	}
-	if h.Healthy >= 2 {
+	if h.Healthy >= 1 {
 		proof := *rt.Runtime.UpdaterReceipt
 		h.Committed = &proof
 	}

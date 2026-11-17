@@ -255,6 +255,13 @@ func RequireDeliveryDutyReview(ctx context.Context, q Querier, i protocol.Issue,
 	if d.Candidate == nil {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "delivery candidate is missing")
 	}
+	policy, err := TaskAcceptancePolicy(ctx, q, d.TaskID)
+	if err != nil {
+		return err
+	}
+	if (i.AcceptancePolicy == nil || !i.AcceptancePolicy.Required) && (policy == nil || !policy.Required) {
+		return nil
+	}
 	if err := RequireSharedDeliveryReview(ctx, q, i, *d.Candidate); err != nil {
 		return err
 	}

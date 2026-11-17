@@ -12,7 +12,7 @@ func TestUpgradeLateServerHealthReconcilesWithoutRenewingAuthority(t *testing.T)
 	for _, action := range []string{"retry", "cancel"} {
 		t.Run(action, func(t *testing.T) {
 			h, c := upgradeHarness(t)
-			if op := startTestUpgrade(h, "late-server", c); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "late-server", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})
@@ -29,7 +29,7 @@ func TestUpgradeLateServerHealthReconcilesWithoutRenewingAuthority(t *testing.T)
 				t.Fatal(v)
 			}
 			o := ServerObservation{InstanceID: b.InstanceID, ProcessInstanceID: b.ProcessInstanceID, BinarySHA256: b.ArtifactSHA256, Healthy: true, MainDrained: true}
-			for _, invalid := range []string{"instance", "process", "hash", "unhealthy", "busy"} {
+			for _, invalid := range []string{"instance", "process", "hash", "unhealthy"} {
 				bad := o
 				switch invalid {
 				case "instance":
@@ -40,8 +40,6 @@ func TestUpgradeLateServerHealthReconcilesWithoutRenewingAuthority(t *testing.T)
 					bad.BinarySHA256 = strings.Repeat("e", 64)
 				case "unhealthy":
 					bad.Healthy = false
-				case "busy":
-					bad.MainDrained = false
 				}
 				upgradeTick(h, bad)
 				if upgradeRead(h).ServerHealthy != 0 {
@@ -53,10 +51,10 @@ func TestUpgradeLateServerHealthReconcilesWithoutRenewingAuthority(t *testing.T)
 			if upgradeRead(h).ServerHealthy != 1 {
 				t.Fatal("duplicate health counted")
 			}
-			h.clock.Advance(5 * time.Second)
+			o.UpdaterReceipt = committedServerForTest(b)
 			v := upgradeTick(h, o)
 			after := upgradeRead(h)
-			if v.Status != "attention" || v.Phase != "runners" || after.ServerHealthy != 2 || after.ServerGrantDeadline != before.ServerGrantDeadline || after.Deadline != before.Deadline {
+			if v.Status != "attention" || v.Phase != "runners" || after.ServerHealthy != 1 || after.ServerGrantDeadline != before.ServerGrantDeadline || after.Deadline != before.Deadline {
 				t.Fatal("late health did not reconcile with fixed authority", after)
 			}
 			if paused, err := h.app.UpgradePausesMain(t.Context()); err != nil || paused {

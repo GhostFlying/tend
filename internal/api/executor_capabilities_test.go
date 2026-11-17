@@ -64,7 +64,7 @@ func TestCapabilityDeclarationRevisionCLIAndHTTPPreserveHistory(t *testing.T) {
 		t.Fatal(code, op)
 	}
 	cfg := agentconfig.Config{FormatVersion: 1, CapabilityVersion: 1, Runtimes: []agentconfig.RuntimeBinding{{ID: "runtime", Revision: 1, Kind: agentconfig.OrcaWorker, CLI: "codex", ExecutableRef: "orca", DeclaredPurposes: []agentconfig.Purpose{agentconfig.WorkerRun}, Enabled: true}}, Agents: []agentconfig.AgentDefinition{{LocalID: "cedar", Revision: 1, DisplayName: "Cedar", RuntimeID: "runtime", Categories: []string{"worker"}, Purposes: []agentconfig.Purpose{agentconfig.WorkerRun}, Model: "model", Enabled: true}}}
-	runtime := &protocol.RunnerRuntime{InstanceID: "declarations", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, JournalVersion: 19, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityAgentExecution, protocol.CapabilityExecutorDeclarations}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "declarations", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, JournalVersion: 19, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityAgentExecution, protocol.CapabilityExecutorDeclarations}}
 	execute := func(operation string, revision *int64, payload any, command app.Command) {
 		t.Helper()
 		env := e.envelope(operation, protocol.Target{Type: "host", ID: "host-a"}, revision, payload)

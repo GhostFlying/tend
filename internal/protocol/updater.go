@@ -88,6 +88,8 @@ type UpgradeChangeRequest struct {
 // The authenticated reporting runtime must match CurrentProcessInstanceID and
 // CurrentSHA256; Binding still identifies the original installation candidate.
 type UpdaterReceipt struct {
+	SupersededUpgradeID      string         `json:"superseded_upgrade_id,omitempty"`
+	ExternalRecovery         bool           `json:"external_recovery,omitempty"`
 	Binding                  UpgradeBinding `json:"binding"`
 	Phase                    string         `json:"phase"`
 	CurrentProcessInstanceID string         `json:"current_process_instance_id"`

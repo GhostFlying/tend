@@ -7,33 +7,8 @@ import (
 
 	"github.com/GhostFlying/tend/internal/logging"
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestProductionTextUpgradeDecisionRetainsNestedFacts(t *testing.T) {
-	h := ordinaryServerNormalAckGap(t)
-	var out bytes.Buffer
-	log, err := logging.NewText(&out, "info")
-	if err != nil {
-		t.Fatal(err)
-	}
-	WithLogger(log)(h.app)
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		r, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-2")
-		if err != nil {
-			return err
-		}
-		r.Online = false
-		return tx.PutHostRuntime(t.Context(), "linux-2", r)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	upgradeTick(h, ServerObservation{})
-	t.Log(out.String())
-	if !strings.Contains(out.String(), "heartbeat_age_ms") || !strings.Contains(out.String(), "applied_control_revision") {
-		t.Fatal("production text handler lost nested host facts")
-	}
-}
 func TestCanonicalIssueTransitionsUseDefaultInfo(t *testing.T) {
 	h := newHarness(t)
 	var out bytes.Buffer

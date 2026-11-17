@@ -70,6 +70,17 @@ func TestFault_ManagerStoppedFactPrecedesBlockedCloseAfterRetain(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		var result any = map[string]any{}
@@ -141,6 +152,17 @@ func TestFault_ManagerCompletedCloseSurvivesStoppedAttempt(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
+		}
 		if !sameManagerReceiptEnvelope(env, closeEnv) {
 			t.Error("cancelled attempt changed original close or entered native work", env)
 		}
@@ -172,6 +194,17 @@ func TestFault_ManagerStopACKRetainsOriginalUnknownClose(t *testing.T) {
 		if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
 			t.Error(err)
 			return
+		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
 		}
 		switch env.Operation {
 		case protocol.OpManagerNativeStopped:

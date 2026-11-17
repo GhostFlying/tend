@@ -194,7 +194,7 @@ func createCanonicalOwnerIssueWithAssignment(ctx context.Context, x *Exec, tx *s
 			depends = []string{}
 		}
 		slices.Sort(depends)
-		required := p.IndependentAcceptance == nil || p.IndependentAcceptance.Required
+		required := p.IndependentAcceptance != nil && p.IndependentAcceptance.Required
 		var selection *protocol.IssueOwnerSelection
 		if p.Manager != nil {
 			selection = &protocol.IssueOwnerSelection{CategoryID: p.Manager.CategoryID, AgentID: p.Manager.AgentID}

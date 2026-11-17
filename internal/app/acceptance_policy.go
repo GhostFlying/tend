@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -51,12 +50,12 @@ func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue p
 		return nil, err
 	}
 	standing := issue.AcceptancePolicy
-	humanRequired := !review && standing != nil && standing.Required && !defaulted && (standing.DecidedBy.OwnerSubject != "" || standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
-	if humanRequired && input == nil {
+	humanRequired := !review && standing != nil && standing.Required && !defaulted && (standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
+	if standing != nil && !defaulted && !review && input == nil {
 		policy := *standing
 		return &policy, nil
 	}
-	required := humanRequired || spec.AgentSelection != nil && spec.AgentSelection.Acceptance.CategoryID != ""
+	required := standing != nil && standing.Required && !defaulted
 	if standing != nil && !standing.Required {
 		required = false
 	}
@@ -91,7 +90,21 @@ func taskAcceptancePolicy(ctx context.Context, x *Exec, q store.Querier, issue p
 	} else if x.Principal.Kind == protocol.PrincipalOwner {
 		p.DecidedBy = protocol.AcceptancePolicyCreator{Kind: "owner", OwnerSubject: x.Principal.Subject}
 	}
+	if humanRequired && agentReviewDecision(x) {
+		p.DecidedBy = humanReviewDecider(standing)
+	}
 	return p, nil
+}
+
+func agentReviewDecision(x *Exec) bool {
+	return x.coordinationExecution != nil || x.actorAgent != nil || x.Principal.Kind != protocol.PrincipalOwner
+}
+
+func humanReviewDecider(p *protocol.IssueAcceptancePolicy) protocol.AcceptancePolicyCreator {
+	if p.DecidedBy.Kind != "" {
+		return p.DecidedBy
+	}
+	return p.Creator
 }
 
 // The review target is explicit business context, never a category exemption.
@@ -136,7 +149,7 @@ func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequ
 	} else {
 		return nil, protocol.Errorf(protocol.CodeForbidden, "Issue creator identity is unavailable")
 	}
-	p := &protocol.IssueAcceptancePolicy{Required: true, Creator: creator, DecidedBy: creator, RequestID: x.Env.RequestID, IssueRevision: 1, Reason: "Retain independent acceptance by default"}
+	p := &protocol.IssueAcceptancePolicy{Required: false, Creator: creator, DecidedBy: creator, RequestID: x.Env.RequestID, IssueRevision: 1, Reason: "The responsible Agent decides whether independent review is useful"}
 	if input != nil {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(x.Env.Payload, &fields); err != nil {
@@ -160,8 +173,35 @@ func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequ
 	return p, nil
 }
 
-// SetIssueAcceptancePolicy changes future work only. Current assignees and
-// worker credentials cannot replace the immutable creator authority.
+func updateTaskReviewChoice(ctx context.Context, x *Exec, tx *store.Tx, task store.TaskRow, spec domain.Spec, input *protocol.IndependentAcceptanceRequest) error {
+	primary, err := store.GetTaskIssueOwner(ctx, tx.Q(), task.TaskID)
+	if err != nil {
+		return err
+	}
+	issue, err := store.GetCanonicalIssue(ctx, tx.Q(), primary)
+	if err != nil {
+		return err
+	}
+	previous, err := store.TaskAcceptancePolicy(ctx, tx.Q(), task.TaskID)
+	if err != nil {
+		return err
+	}
+	humanRequired := previous != nil && previous.Required && humanReviewDecider(previous).Kind == "owner"
+	if humanRequired && !input.Required && agentReviewDecision(x) {
+		return protocol.Errorf(protocol.CodeForbidden, "an explicit human Task review requirement cannot be waived by an Agent")
+	}
+	policy, err := taskAcceptancePolicy(ctx, x, tx.Q(), issue, spec, input)
+	if err != nil {
+		return err
+	}
+	if humanRequired && agentReviewDecision(x) {
+		policy.DecidedBy = humanReviewDecider(previous)
+	}
+	return tx.UpdateTaskAcceptancePolicy(ctx, task.TaskID, task.ControlRevision+1, policy, x.Now.UnixMilli())
+}
+
+// SetIssueAcceptancePolicy records the responsible Agent's review choice.
+// Explicit human requirements cannot be waived by an Agent or worker.
 type SetIssueAcceptancePolicy struct{}
 
 func (SetIssueAcceptancePolicy) Operation() string { return "issues.set_acceptance_policy" }
@@ -198,8 +238,18 @@ func (SetIssueAcceptancePolicy) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, err
 	}
 	topMain := x.coordinationExecution != nil && x.coordinationExecution.Selection.Purpose == agentconfig.Main && current.ParentIssueID == ""
-	if x.Principal.Kind != protocol.PrincipalOwner && !topMain && !reflect.DeepEqual(actual.Creator, current.AcceptancePolicy.Creator) {
-		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only the original Issue creator may decide independent acceptance")
+	responsible := x.coordinationExecution != nil && x.coordinationExecution.IssueID == current.IssueID
+	creator := actual.Creator.Agent != nil && current.AcceptancePolicy.Creator.Agent != nil && *actual.Creator.Agent == *current.AcceptancePolicy.Creator.Agent
+	if x.Principal.Kind != protocol.PrincipalOwner && !topMain && !responsible && !creator {
+		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "only the responsible Agent or owner may decide independent acceptance")
+	}
+	standing := current.AcceptancePolicy
+	humanRequired := standing.Required && (standing.DecidedBy.Kind == "owner" || standing.DecidedBy.Kind == "" && standing.Creator.Kind == "owner")
+	if humanRequired && !actual.Required && agentReviewDecision(x) {
+		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "an explicit human review requirement cannot be waived by an Agent")
+	}
+	if humanRequired && agentReviewDecision(x) {
+		actual.DecidedBy = humanReviewDecider(standing)
 	}
 	actual.Creator = current.AcceptancePolicy.Creator
 	actual.IssueRevision = current.Revision + 1

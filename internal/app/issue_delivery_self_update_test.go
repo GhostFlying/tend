@@ -175,6 +175,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), pausedBatch) }); err != nil {
 		t.Fatal(err)
 	}
+	prepareTestUpgrade(h)
 	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerMaintenance)
@@ -195,7 +196,7 @@ func TestDeliveryApprovedWorkerMergesAndSelfUpdatesThroughControlledUpgrade(t *t
 	}
 	current := ServerObservation{InstanceID: "server", ProcessInstanceID: binding.ProcessInstanceID, BinarySHA256: upgrade.ServerHash, Commit: merged, Healthy: true, MainDrained: true}
 	upgradeTick(h, current)
-	h.clock.Advance(5 * time.Second)
+	current.UpdaterReceipt = committedServerForTest(binding)
 	upgradeTick(h, current)
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerNormal)
@@ -341,7 +342,7 @@ func TestDeliveryDeploymentCannotSettleFromUnrelatedOrUnverifiedUpgrade(t *testi
 			case "server-instance":
 				batch.ServerInstance = "other"
 			case "server-health":
-				batch.ServerHealthy = 1
+				batch.ServerHealthy = 0
 			case "server-process":
 				batch.ServerProcess = ""
 			case "host-set":

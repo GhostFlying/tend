@@ -10,7 +10,7 @@ import (
 
 func TestUpgradeLostServerGrantRestoresOnlyWithNoStartProof(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "lost-grant", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "lost-grant", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	old := ServerObservation{MainDrained: true, Healthy: true, ProcessInstanceID: "old-server", BinarySHA256: strings.Repeat("a", 64), InstanceID: "server"}
@@ -123,7 +123,7 @@ func TestUpgradeRunnerAttentionWaitsForNoStartReceipt(t *testing.T) {
 
 func TestUpgradeProgressCountsWholeDownloadedBundle(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "bytes", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "bytes", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	total := c.ManifestSize

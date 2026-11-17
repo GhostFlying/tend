@@ -144,7 +144,7 @@ func (c linkForwardRecovery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 	if err != nil {
 		return Outcome{}, err
 	}
-	if proof.Original != r.Plan.Original || proof.Successor != r.Plan.Successor || proof.RequestID != r.Plan.RequestID || proof.Process != r.Process || proof.Generation == 0 || proof.Epoch == "" || proof.FirstSequence == 0 || proof.SecondSequence <= proof.FirstSequence {
+	if proof.Original != r.Plan.Original || proof.Successor != r.Plan.Successor || proof.RequestID != r.Plan.RequestID || proof.Process != r.Process || proof.Generation == 0 || proof.Epoch == "" || proof.FirstSequence == 0 || proof.SecondSequence < proof.FirstSequence {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "exact independent forward commit receipt required")
 	}
 	if r.Linked {

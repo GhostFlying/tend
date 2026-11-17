@@ -46,11 +46,8 @@ func TestHealthDeadlineSurvivesReopenAndAllowsOnlyOriginalLateHealth(t *testing.
 	timeout := h.s.Status().Operation.HealthWindow.TimedOutAtMillis
 	h.reopen(t)
 	h.a.unconfirmed = false
-	if err := h.s.Step(t.Context()); err == nil {
-		t.Fatal("one late sample fabricated commitment")
-	}
 	if err := h.s.Step(t.Context()); err != nil {
-		t.Fatal("two real late samples cannot reconcile original candidate", err)
+		t.Fatal("late readiness cannot reconcile original candidate", err)
 	}
 	after := h.s.Status()
 	if after.Operation.Phase != "committed" || after.Operation.Binding != original.Operation.Binding || after.Process != original.Process || after.Operation.HealthWindow.DeadlineMillis != window.DeadlineMillis || after.Operation.HealthWindow.DeadlineMono != window.DeadlineMono || after.Operation.HealthWindow.TimedOutAtMillis != timeout || h.p.starts != 1 || h.p.stops != 1 {

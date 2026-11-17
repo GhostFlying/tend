@@ -46,6 +46,10 @@ func (m *managerTestResolver) Observe(context.Context) ([]protocol.AgentExecutor
 func (m *managerTestResolver) Resolve(context.Context, protocol.RunExecutionPin) (runner.ResolvedExecution, error) {
 	return runner.ResolvedExecution{}, errors.New("manager cannot execute a worker contract")
 }
+func (m *managerTestResolver) ResolveManagerReceipt(ctx context.Context, p protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	return m.ResolveManager(ctx, p)
+}
+
 func (m *managerTestResolver) ResolveManager(_ context.Context, p protocol.RunExecutionPin) (runner.ManagerExecution, error) {
 	if p != m.pin {
 		return runner.ManagerExecution{}, errors.New("manager pin changed")
@@ -492,19 +496,19 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 					return nil, ctx.Err()
 				}
 				defer func() { waitFile <- file }()
-				principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: selected.RunnerRunID, Role: protocol.RoleIssueManager}
-				context, err := s.app.ReadRunContext(ctx, principal, protocol.IssueMaterialsQuery{Kind: "files", ID: file.FileID})
-				if err != nil || len(context.Materials.Files) != 1 || context.Materials.Files[0].ArtifactFile != file {
-					return nil, fmt.Errorf("history successor lost original file metadata: %v", err)
+				oldRun := protocol.Principal{Kind: protocol.PrincipalRun, Subject: selected.RunnerRunID, Role: protocol.RoleIssueManager}
+				if _, err := s.app.ReadRunContext(ctx, oldRun, protocol.IssueMaterialsQuery{Kind: "overview"}); protocol.CodeOf(err) != protocol.CodeForbidden {
+					return nil, fmt.Errorf("closed Run regained business authority: %v", err)
 				}
-				metadata, reader, err := s.app.OpenRunContextFile(ctx, principal, file.FileID)
+				principal := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner"}
+				metadata, reader, err := s.app.OpenDeliverableFile(ctx, principal, file.FileID)
 				if err != nil {
 					return nil, err
 				}
 				body, readErr := io.ReadAll(reader)
 				closeErr := reader.Close()
 				if readErr != nil || closeErr != nil || string(body) != waitFileBody || metadata.ArtifactFile != file {
-					return nil, fmt.Errorf("history successor changed original bytes: %v %v", readErr, closeErr)
+					return nil, fmt.Errorf("retained file changed: %v %v", readErr, closeErr)
 				}
 				recoveredWaitFiles.Add(1)
 			}
@@ -575,7 +579,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			t.Fatal("physical wait replayed business instead of handing off original history", fake.HistoryReads(), len(fake.Starts()))
 		}
 		if archiveMode == "external_wait_migrated" {
-			if s.count(`SELECT COUNT(*) FROM main_thread_handoffs WHERE phase='committed'`) != 1 || fake.Resumed() == 0 {
+			if s.count(`SELECT COUNT(*) FROM main_thread_handoffs WHERE phase='committed'`) != 1 || fake.HistoryReads() == 0 {
 				t.Fatal("fixture did not migrate the retained original thread", fake.Resumed())
 			}
 			waitBusinessContinuity(t, "history reader releases its physical carrier and pool", func() bool {
@@ -661,7 +665,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				t.Fatal(failure)
 			default:
 			}
-			return s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND observed_state='finished'`) == 1 && s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) == 0
+			return s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND (observed_state='finished' OR (? AND observed_state='failed'))`, loseStart) == 1 && s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) == 0
 		})
 		if archive != nil {
 			archive.released.Store(true)
@@ -742,11 +746,11 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			if s.count(`SELECT COUNT(*) FROM issue_controls WHERE issue_id=? AND state='closed'`, issue.IssueID) == 1 && s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=? AND state='completed'`, issue.IssueID) == 1 {
 				break
 			}
-		} else if s.count(`SELECT COUNT(*) FROM issue_manager_tasks m JOIN tasks t USING(task_id) WHERE m.issue_id=? AND m.state='assigned' AND t.lifecycle='waiting'`, issue.IssueID) == 1 && (!recoverRate || continuations.Load() == 1) && s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND observed_state='finished'`) > 0 && s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) == 0 && s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) == 0 && s.count(`SELECT COUNT(*) FROM outbox WHERE destination LIKE 'background_thread:%' AND status IN ('pending','sending','unknown')`) == 0 {
+		} else if s.count(`SELECT COUNT(*) FROM issue_manager_tasks m JOIN tasks t USING(task_id) WHERE m.issue_id=? AND m.state='assigned' AND t.lifecycle='waiting'`, issue.IssueID) == 1 && (!recoverRate || continuations.Load() == 1) && s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND (observed_state='finished' OR (? AND observed_state='failed'))`, loseStart) > 0 && s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) == 0 && s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) == 0 && s.count(`SELECT COUNT(*) FROM outbox WHERE destination LIKE 'background_thread:%' AND status IN ('pending','sending','unknown')`) == 0 {
 			break
 		}
 	}
-	if s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND observed_state='finished'`) < 1 || s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) != 0 || (!delivery && s.count(`SELECT COUNT(*) FROM workspaces`) != 0) {
+	if s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND (observed_state='finished' OR (? AND observed_state='failed'))`, loseStart) < 1 || s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) != 0 || (!delivery && s.count(`SELECT COUNT(*) FROM workspaces`) != 0) {
 		t.Fatal("manager did not release its execution resources")
 	}
 	if archiveMode != "" && (s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 || s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager'`) != 1) {

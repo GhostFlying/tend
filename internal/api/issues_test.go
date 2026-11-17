@@ -110,7 +110,7 @@ func issueWorkerCommand(t *testing.T, e *env, p protocol.Principal, target proto
 }
 func issueClaimWorker(t *testing.T, e *env) protocol.Assignment {
 	t.Helper()
-	runtime := &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+	runtime := &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
 	_ = e.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		old, err := store.GetHostRuntime(t.Context(), tx.Q(), "host-a")
 		if err == nil {

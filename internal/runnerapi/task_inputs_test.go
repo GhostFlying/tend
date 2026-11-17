@@ -39,7 +39,7 @@ func TestOriginalTaskInputDownloadsWithOnlyRunCredentials(t *testing.T) {
 	if op, err := e.app.Execute(context.Background(), owner, env, app.CreateTask{}); err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatalf("create: %+v %v", op, err)
 	}
-	runtime := &protocol.RunnerRuntime{InstanceID: "capable-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityTaskInputs}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "capable-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityTaskInputs}}
 	e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "", protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}))
 	claim := func() *protocol.Assignment {
 		return e.claim(e.envelope(protocol.OpRunnerClaim, "", protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: runtime}))

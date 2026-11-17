@@ -203,7 +203,7 @@ func (e *env) envelope(op, targetID string, payload any) *protocol.Envelope {
 					e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "linux-1", protocol.HelloPayload{WorkspaceProtocol: 1}))
 				}
 			}
-			runtime := protocol.RunnerRuntime{InstanceID: "fixture-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+			runtime := protocol.RunnerRuntime{InstanceID: "fixture-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
 			_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
 				old, err := store.GetHostRuntime(context.Background(), tx.Q(), "linux-1")
 				if err == nil {

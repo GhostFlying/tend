@@ -162,19 +162,19 @@ func TestDeliveryTargetBindsOneStartRejectsOldSourceAndFencesNextBaseline(t *tes
 	}
 	old := upgrade
 	old.ArtifactSources = map[string]release.SourceIdentity{old.ServerHash: {Commit: strings.Repeat("b", 40)}}
-	expectWorkCode(t, startTestUpgrade(h, "old-source", old), protocol.CodeInvalidRequest)
+	expectWorkCode(t, startPreparedTestUpgrade(h, "old-source", old), protocol.CodeInvalidRequest)
 	modified := upgrade
 	modified.ArtifactSources = map[string]release.SourceIdentity{modified.ServerHash: {Commit: merged, Modified: true}}
-	expectWorkCode(t, startTestUpgrade(h, "modified-source", modified), protocol.CodeInvalidRequest)
+	expectWorkCode(t, startPreparedTestUpgrade(h, "modified-source", modified), protocol.CodeInvalidRequest)
 	if h.count("upgrades") != 0 {
 		t.Fatal("old main installed")
 	}
-	if op := startTestUpgrade(h, "first-upgrade", upgrade); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "first-upgrade", upgrade); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	second := upgrade
 	second.DeliveryTaskID = waiting.execution
-	expectWorkCode(t, startTestUpgrade(h, "second-upgrade", second), protocol.CodeInvalidTransition)
+	expectWorkCode(t, startPreparedTestUpgrade(h, "second-upgrade", second), protocol.CodeInvalidTransition)
 	if h.count("upgrades") != 1 || deliveryRunCount(t, h, waiting.execution) != 0 {
 		t.Fatal("parallel start acquired another target")
 	}
@@ -260,7 +260,7 @@ func TestDeliveryTargetRejectsProviderQueryIssuedBeforeAnotherInstallation(t *te
 	old := assignments[0]
 	// A local operator's separate batch may finish while the provider read is
 	// still in flight. Its late response cannot become post-installation proof.
-	if op := startTestUpgrade(h, "other-installation", upgrade); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "other-installation", upgrade); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	batch := upgradeRead(h)
@@ -311,7 +311,7 @@ func TestDeliveryTargetRejectsProviderQueryIssuedBeforeAnotherInstallation(t *te
 func TestDeliveryLegacyMaintenanceDoesNotAttributeModifiedBuildToExactCommit(t *testing.T) {
 	h, upgrade := upgradeHarness(t)
 	upgrade.ArtifactSources = map[string]release.SourceIdentity{upgrade.ServerHash: {Commit: strings.Repeat("c", 40), Modified: true}}
-	if op := startTestUpgrade(h, "legacy-modified", upgrade); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "legacy-modified", upgrade); op.Status != protocol.OpSucceeded {
 		t.Fatal("legacy operator permission changed", op)
 	}
 	if batch := upgradeRead(h); batch.View.SourceCommit != "" {

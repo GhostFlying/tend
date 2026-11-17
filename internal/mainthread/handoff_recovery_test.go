@@ -255,19 +255,17 @@ func TestStartupMissingSourceUsesSummaryAndHistoryReference(t *testing.T) {
 	}
 }
 
-func TestStartupUncertainSourceResumeNeverCreatesReplacement(t *testing.T) {
+func TestChangedToolsetRebuildsWithoutResumingOldSource(t *testing.T) {
 	f := newHandoffFixture(t)
 	f.saveSummary(t)
-	f.session.resumeErr = map[string]error{f.source.ID(): errors.New("native resume response lost")}
-	if _, err := f.e.m.openManagedThread(context.Background(), f.session); err == nil {
-		t.Fatal("uncertain source resume treated as missing source")
+	f.session.resumeErr = map[string]error{f.source.ID(): errors.New("obsolete native resume is unavailable")}
+	next, err := f.e.m.openManagedThread(t.Context(), f.session)
+	if err != nil || next.ID() == f.source.ID() {
+		t.Fatal(next, err)
 	}
 	starts, forks, _ := f.session.counts()
-	if starts != 1 || forks != 0 {
-		t.Fatal("uncertain source resume spawned replacement or summary")
+	if starts != 2 || forks != 0 {
+		t.Fatal("rebuild used a model summary or extra session", starts, forks)
 	}
-	binding, _, _ := f.e.app.MainThreadBinding(context.Background(), "main")
-	if binding.ThreadID != f.source.ID() {
-		t.Fatal("uncertain source resume changed authority")
-	}
+	assertCurrentRecoveredThread(t, f, next)
 }

@@ -41,8 +41,9 @@ export function IssueDefinition({
     (category) => category.state === "active",
   );
   const connection = useStore(client.connection);
-  const [independentAcceptance, setIndependentAcceptance] = useState(true);
-  const [acceptanceReason, setAcceptanceReason] = useState("创建者要求独立核对任务结果");
+  const [independentAcceptance, setIndependentAcceptance] = useState(false);
+  const [acceptanceReason, setAcceptanceReason] =
+    useState("由责任 Agent 按任务需要决定是否独立审阅");
   const [title, setTitle] = useState(baseline?.plan.title ?? "");
   const [project, setProject] = useState(
     baseline?.plan.project ?? parent?.plan.project ?? "default",
@@ -93,8 +94,10 @@ export function IssueDefinition({
     if (request.operation === "issues.create") {
       setAssignee(shownAssignee);
       const creation = payload as CreateIssuePayload;
-      setIndependentAcceptance(creation.independent_acceptance?.required ?? true);
-      setAcceptanceReason(creation.independent_acceptance?.reason ?? "创建者要求独立核对任务结果");
+      setIndependentAcceptance(creation.independent_acceptance?.required ?? false);
+      setAcceptanceReason(
+        creation.independent_acceptance?.reason ?? "由责任 Agent 按任务需要决定是否独立审阅",
+      );
     }
     // Capture a newly restored request once, before a later receipt can clear it.
     setRestored(request);

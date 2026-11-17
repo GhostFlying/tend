@@ -75,6 +75,13 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
+	wake := make(chan struct{}, 1)
+	requestStep := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/backup/") {
@@ -207,6 +214,9 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 			response.Error = err.Error()
 		}
 		_ = json.NewEncoder(w).Encode(response)
+		if err == nil {
+			requestStep()
+		}
 	})
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 30 * time.Second}
 	stopped := make(chan struct{})
@@ -214,13 +224,15 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 		defer close(stopped)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		requestStep()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = s.Step(ctx)
+			case <-wake:
 			}
+			_ = s.advance(ctx)
 		}
 	}()
 	defer func() { cancel(); _ = server.Close(); <-stopped }()
@@ -267,4 +279,36 @@ func CallSocket(ctx context.Context, socket string, operation string, request Co
 		return response.State, errors.New(response.Error)
 	}
 	return response.State, nil
+}
+
+// Advance durable local phases immediately. A phase waiting on an external
+// observation is polled by Serve; phase transitions themselves add no sleep.
+func (s *Supervisor) advance(ctx context.Context) error {
+	for ctx.Err() == nil {
+		before := s.installationPhase()
+		if err := s.Step(ctx); err != nil {
+			return err
+		}
+		if before == s.installationPhase() {
+			return nil
+		}
+	}
+	return ctx.Err()
+}
+
+func (s *Supervisor) installationPhase() [4]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var phase [4]string
+	if op := s.state.Operation; op != nil {
+		phase[0] = op.ID
+		phase[1] = op.Phase
+	}
+	if maintenance := s.state.Maintenance; maintenance != nil {
+		phase[2] = maintenance.Phase
+	}
+	if recovery := s.state.Recovery; recovery != nil {
+		phase[3] = recovery.Phase
+	}
+	return phase
 }

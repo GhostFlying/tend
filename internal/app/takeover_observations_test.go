@@ -61,14 +61,9 @@ func TestTakeoverObservationFromHistoricalEventReadsActualEventProvenance(t *tes
 	_, created := h.createTask(owner, createTaskPayload{Title: "legacy takeover", Spec: testSpec})
 	as, _, _ := h.claim("linux-1")
 	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE runs SET protocol=3 WHERE run_id=?`, as.RunID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(protocol.TakeoverPayload{Reason: "retained legacy observation"})
-	env := &protocol.Envelope{RequestID: h.ids.New(protocol.PrefixRequest), Operation: protocol.OpRunsReportTakeover, Target: protocol.Target{Type: "run", ID: as.RunID}, Payload: raw}
+	requestID := h.ids.New(protocol.PrefixRequest)
+	raw, _ := json.Marshal(protocol.TakeoverPayload{ObservationID: protocol.TakeoverObservationFromHistoricalEvent(as.RunID, requestID), Reason: "retained historical observation"})
+	env := &protocol.Envelope{RequestID: requestID, Operation: protocol.OpRunsReportTakeover, Target: protocol.Target{Type: "run", ID: as.RunID}, Payload: raw}
 	principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: as.RunID, Role: as.Role}
 	if op, err := h.app.Execute(t.Context(), principal, env, ReportTakeover{}); err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatal(op, err)

@@ -142,35 +142,12 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 			return err
 		}
 		if receipt {
+			// Pending history is observational. A terminal Run with a proven
+			// close is read through heartbeats; without that proof it remains
+			// unknown. Neither case creates a new coordinate action or lease.
 			if retiring && m.State != "retiring" {
 				if _, err = tx.Exec(ctx, `UPDATE issue_manager_tasks SET state='retiring' WHERE task_id=?`, id); err != nil {
 					return err
-				}
-			}
-			due, err := views.ManagerReceiptDue(ctx, tx.Q(), m, x.Now.UnixMilli())
-			if err != nil {
-				return err
-			}
-			if due {
-				var queued bool
-				if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM plan_actions WHERE task_id=? AND kind='coordinate' AND status IN ('pending','dispatched') AND json_extract(trigger_json,'$.receipt_only')=1)`, id).Scan(&queued); err != nil {
-					return err
-				}
-				if !queued {
-					var generation int64
-					if err = tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0)+1 FROM plan_actions WHERE task_id=?`, id).Scan(&generation); err != nil {
-						return err
-					}
-					if err = insertManagerAction(ctx, x, tx, id, generation); err != nil {
-						return err
-					}
-					trigger, err := managerReceiptReaderTrigger(ctx, tx.Q(), id)
-					if err != nil {
-						return err
-					}
-					if _, err = tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=? WHERE task_id=? AND generation=? AND kind='coordinate'`, trigger, id, generation); err != nil {
-						return err
-					}
 				}
 			}
 			continue

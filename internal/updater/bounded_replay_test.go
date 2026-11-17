@@ -16,6 +16,11 @@ func TestBoundedServerRecordedReplayDoesNotRenewExpiredAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	boundedHistoryAdvance(h, auth.ExpiresAtMillis-h.now.UnixMilli()+1)
+	// Let supervision record the expired deadline before comparing a replay.
+	// Serving the control socket now advances local phases immediately.
+	if err := h.s.Step(t.Context()); err == nil {
+		t.Fatal("expired authority advanced the installation")
+	}
 	root := t.TempDir()
 	planFile, authFile := filepath.Join(root, "plan.json"), filepath.Join(root, "authorization.json")
 	if err := writeJSON(planFile, CommittedHandoffPlan{Maintenance: p}); err != nil {

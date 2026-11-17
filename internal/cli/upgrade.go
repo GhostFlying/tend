@@ -24,6 +24,11 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 		return runServerCapabilities(ctx, e, args[1:])
 	}
 	if len(args) > 0 && args[0] == "recover" {
+		for _, arg := range args[1:] {
+			if arg == "--release" || strings.HasPrefix(arg, "--release=") {
+				return runExternalRecovery(ctx, e, args[1:])
+			}
+		}
 		return runForwardRecovery(ctx, e, args[1:])
 	}
 	action := "start"

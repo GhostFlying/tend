@@ -1,1 +1,1 @@
-{"current":4,"previous":3,"adapters":[{"id":"runner-v3","protocol":3,"remove_in":5,"file":"internal/protocol/runner_v3.go","test":"internal/protocol/runner_v3_test.go"}]}
+{"current":5,"minimum":5,"adapters":[]}

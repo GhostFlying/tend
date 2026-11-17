@@ -20,7 +20,7 @@ func TestObservationEndpointAuthenticatesRunAndHost(t *testing.T) {
 	if op, err := e.app.Execute(t.Context(), owner, env, app.CreateTask{}); err != nil || op.Status != protocol.OpSucceeded {
 		t.Fatalf("create %v %+v", err, op)
 	}
-	rt := &protocol.RunnerRuntime{InstanceID: "observation", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerObservation}}
+	rt := &protocol.RunnerRuntime{InstanceID: "observation", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerObservation}}
 	e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "", protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: rt}))
 	as := e.claim(e.envelope(protocol.OpRunnerClaim, "", protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: rt}))
 	if as == nil {

@@ -298,40 +298,7 @@ func TestAgentInventorySameLocalIdentityOnDifferentHosts(t *testing.T) {
 	}
 }
 
-func TestAgentInventoryOldV3LostDeliveryUsesActualSnapshotBeforeRegistrationCAS(t *testing.T) {
-	h, r, p, hash := inventorySetup(t)
-	r.Protocol = 3
-	r.ProtocolMin = 3
-	r.ProtocolMax = 3
-	r.Sequence++
-	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	original := inventoryRequest(h, r, p, hash, 1, 0, "snapshot-original")
-	one := h.exec(runner("linux-1"), original, RegisterAgentInventory{})
-	if one.Status != protocol.OpSucceeded {
-		t.Fatal(one)
-	}
-	// An unmodified old wire client asks only about its original transport ID.
-	status, err := h.app.ReadAgentInventory(t.Context(), runner("linux-1"), protocol.AgentInventoryStatusPayload{Runtime: r, RequestID: original.RequestID})
-	if err != nil || status.RequestState != "not_recorded" || status.Current == nil || status.Current.SnapshotID != "snapshot-original" {
-		t.Fatal(status, err)
-	}
-	before := h.count("agent_inventory_versions")
-	replay := h.exec(runner("linux-1"), original, RegisterAgentInventory{})
-	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, one.Result) || h.count("agent_inventory_versions") != before {
-		t.Fatal("old CAS prevented actual snapshot recovery", replay)
-	}
-	next := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 2, 1, "snapshot-later"), RegisterAgentInventory{})
-	if next.Status != protocol.OpSucceeded {
-		t.Fatal(next)
-	}
-	replay = h.exec(runner("linux-1"), original, RegisterAgentInventory{})
-	if replay.Status != protocol.OpSucceeded || !bytes.Equal(replay.Result, one.Result) || h.count("agent_inventory_versions") != before+1 {
-		t.Fatal("later catalog hid actual original registration", replay)
-	}
-}
-func TestAgentInventoryV4MatchesHistoricalSnapshotWithoutRequestID(t *testing.T) {
+func TestAgentInventoryMatchesHistoricalSnapshotWithoutRequestID(t *testing.T) {
 	h, r, p, hash := inventorySetup(t)
 	one := h.exec(runner("linux-1"), inventoryRequest(h, r, p, hash, 1, 0, "snapshot-original"), RegisterAgentInventory{})
 	if one.Status != protocol.OpSucceeded {

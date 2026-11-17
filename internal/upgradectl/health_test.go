@@ -15,7 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestUpgradeHealthDiagnosticsPreservesDrainGateAndLegacyContract(t *testing.T) {
+func TestUpgradeHealthSeparatesInstallationFromSessionDrain(t *testing.T) {
 	c, _ := testController(t)
 	ready := true
 	clock := time.Unix(1000, 0)
@@ -40,11 +40,11 @@ func TestUpgradeHealthDiagnosticsPreservesDrainGateAndLegacyContract(t *testing.
 	}
 	out := read("?diagnostics=1")
 	var value protocol.UpgradeHealth
-	if out.Code != http.StatusOK || json.Unmarshal(out.Body.Bytes(), &value) != nil || value.Healthy || !value.ServerConfirmed {
-		t.Fatal("diagnostics weakened initial install gate", out.Body.String())
+	if out.Code != http.StatusOK || json.Unmarshal(out.Body.Bytes(), &value) != nil || !value.Healthy || !value.ServerConfirmed {
+		t.Fatal("session drain blocked a healthy installation", out.Body.String())
 	}
 	facts := value.Diagnostics
-	if facts == nil || facts.ServiceReady == nil || !*facts.ServiceReady || facts.MainDrained == nil || *facts.MainDrained || facts.AuthorityHealthy == nil || !*facts.AuthorityHealthy || facts.PhaseMillis["server_authority"] <= 0 || len(facts.Failures) == 0 {
+	if facts == nil || facts.ServiceReady == nil || !*facts.ServiceReady || facts.MainDrained == nil || *facts.MainDrained || facts.AuthorityHealthy == nil || !*facts.AuthorityHealthy || facts.PhaseMillis["server_authority"] <= 0 || len(facts.Failures) != 0 {
 		t.Fatal("ready/drain/authority facts were conflated", facts)
 	}
 	// Original binding mismatch remains rejected before the authority executes.

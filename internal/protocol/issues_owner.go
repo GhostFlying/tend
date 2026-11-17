@@ -156,10 +156,11 @@ type CreateIssueTaskPayload struct {
 // UpdateIssueTaskPayload revises an existing independent task agreement under
 // its task control revision and the primary issue's current assignment epoch.
 type UpdateIssueTaskPayload struct {
-	ExpectedAssignmentEpoch int64           `json:"expected_assignment_epoch"`
-	Spec                    *OwnerTaskSpec  `json:"spec,omitempty"`
-	Rating                  *Rating         `json:"rating,omitempty"`
-	Relations               *[]TaskRelation `json:"relations,omitempty"`
+	IndependentAcceptance   *IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
+	ExpectedAssignmentEpoch int64                         `json:"expected_assignment_epoch"`
+	Spec                    *OwnerTaskSpec                `json:"spec,omitempty"`
+	Rating                  *Rating                       `json:"rating,omitempty"`
+	Relations               *[]TaskRelation               `json:"relations,omitempty"`
 }
 
 // OwnerTaskInput selects an original; all identity metadata is server-frozen.

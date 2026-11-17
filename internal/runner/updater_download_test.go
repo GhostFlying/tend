@@ -85,7 +85,7 @@ func testReleaseBundleSubmission(t *testing.T, complete bool) {
 	artifact := []byte("runner binary fixture")
 	sum := sha256.Sum256(artifact)
 	artifactSHA := hex.EncodeToString(sum[:])
-	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
+	manifest := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "bin/runner", Size: int64(len(artifact)), SHA256: artifactSHA}}}
 	if complete {
 		a := manifest.Artifacts[0]
 		a.Role, a.Path = "server", "bin/server"
@@ -157,7 +157,7 @@ func testReleaseBundleSubmission(t *testing.T, complete bool) {
 	})}
 	go supervisor.Serve(listener)
 	defer supervisor.Close()
-	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: manifestSHA, ManifestSize: int64(len(raw)), ArtifactBasePath: "/artifacts/"}}
+	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerNormal, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{PrepareOnly: true, ManifestPath: "/manifest", ManifestSHA256: manifestSHA, ManifestSize: int64(len(raw)), ArtifactBasePath: "/artifacts/"}}
 	if complete {
 		sum := sha256.Sum256(setRaw)
 		control.Upgrade.ReleaseSet = &protocol.ReleaseSetTarget{Path: "/set", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(setRaw))}
@@ -168,9 +168,23 @@ func testReleaseBundleSubmission(t *testing.T, complete bool) {
 	if err := r.downloadAndSubmit(t.Context(), control); err != nil {
 		t.Fatal(err)
 	}
+	if submitted != 0 || r.upgradePhase != "prepared" {
+		t.Fatal("preparation attempted installation")
+	}
+	server.Close() // Installation uses only the prepared local bytes.
+	control.Revision++
+	control.Mode, control.Upgrade.PrepareOnly = protocol.RunnerMaintenance, false
+	if err := r.applyControl(t.Context(), &control, r.cfg.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := r.downloadAndSubmit(t.Context(), control); err != nil {
 		t.Fatal(err)
 	}
+	if err := r.downloadAndSubmit(t.Context(), control); err != nil {
+		t.Fatal(err)
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
 	if submitted != 1 {
@@ -184,7 +198,7 @@ func TestReleaseBundleRejectsPreviousJournalOnlyBeforeArtifacts(t *testing.T) {
 	body := []byte("candidate")
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
-	manifest := release.Manifest{Format: 1, ReleaseID: "previous-only", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion - 1, Max: journal.CurrentVersion - 1}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: int64(len(body)), SHA256: digest}}}
+	manifest := release.Manifest{Format: 1, ReleaseID: "previous-only", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 0, Max: 99}, RunnerJournal: release.Range{Min: journal.CurrentVersion - 1, Max: journal.CurrentVersion - 1}}, Artifacts: []release.Artifact{{Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: int64(len(body)), SHA256: digest}}}
 	raw, _ := json.Marshal(manifest)
 	hash := sha256.Sum256(raw)
 	var artifacts atomic.Int32
@@ -199,7 +213,7 @@ func TestReleaseBundleRejectsPreviousJournalOnlyBeforeArtifacts(t *testing.T) {
 	defer server.Close()
 	r.cfg.ServerURL = server.URL
 	r.c.http = server.Client()
-	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: manifest.ReleaseID, Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: hex.EncodeToString(hash[:]), ManifestSize: int64(len(raw)), ArtifactBasePath: "/artifacts/"}}
+	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerNormal, UpgradeID: "batch", ReleaseID: manifest.ReleaseID, Upgrade: &protocol.RunnerUpgradeTarget{PrepareOnly: true, ManifestPath: "/manifest", ManifestSHA256: hex.EncodeToString(hash[:]), ManifestSize: int64(len(raw)), ArtifactBasePath: "/artifacts/"}}
 	if err := r.applyControl(t.Context(), &control, r.cfg.Now(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -228,12 +242,12 @@ func TestNewMaintenanceAttemptClearsErrorsAndIgnoresOldDownloadFailure(t *testin
 			defer server.Close()
 			r.cfg.ServerURL = server.URL
 			r.c.http = server.Client()
-			c := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: strings.Repeat("a", 64), ManifestSize: 1}}
+			c := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerNormal, UpgradeID: "batch", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{PrepareOnly: true, ManifestPath: "/manifest", ManifestSHA256: strings.Repeat("a", 64), ManifestSize: 1}}
 			if err := r.applyControl(t.Context(), &c, r.cfg.Now(), true); err != nil {
 				t.Fatal(err)
 			}
 			r.resourceReconciled = true
-			r.confirmedRuntime = protocol.RunnerRuntime{Mode: protocol.RunnerReady, AppliedControlRevision: 1, UpgradeID: "batch"}
+			r.confirmedRuntime = protocol.RunnerRuntime{Mode: protocol.RunnerNormal, AppliedControlRevision: 1, UpgradeID: "batch"}
 			r.maybeUpgrade(t.Context())
 			select {
 			case <-started:
@@ -248,7 +262,7 @@ func TestNewMaintenanceAttemptClearsErrorsAndIgnoresOldDownloadFailure(t *testin
 					t.Fatal("failed download not observed", view, err)
 				}
 			}
-			for _, next := range []protocol.RunnerControl{{Revision: 2, Mode: protocol.RunnerNormal}, {Revision: 3, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", ReleaseID: "release"}} {
+			for _, next := range []protocol.RunnerControl{{Revision: 2, Mode: protocol.RunnerNormal}, {Revision: 3, Mode: protocol.RunnerNormal, UpgradeID: "batch", ReleaseID: "release"}} {
 				if err := r.applyControl(t.Context(), &next, r.cfg.Now(), false); err != nil {
 					t.Fatal(err)
 				}

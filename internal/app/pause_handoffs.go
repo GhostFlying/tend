@@ -65,6 +65,9 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	if rc.run.Role == protocol.RoleIssueManager {
+		if err := recordManagerPhysicalStop(ctx, x, tx, rc.run.RunID); err != nil {
+			return Outcome{}, err
+		}
 		if err := settleStoppedManagerRequests(ctx, tx, rc.run.RunID); err != nil {
 			return Outcome{}, err
 		}

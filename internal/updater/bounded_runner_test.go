@@ -457,7 +457,7 @@ func TestBoundedRunnerExtensionKeepsOriginalLaunchAndRecoveryAuthority(t *testin
 	if len(state.Bounded.Audit) == 0 || state.Bounded.Audit[len(state.Bounded.Audit)-1].PreviousWindow == nil {
 		t.Fatal("extension erased the previous expired window")
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		if err := boundedRunnerTestStep(t, h); err != nil {
 			t.Fatal(err)
 		}

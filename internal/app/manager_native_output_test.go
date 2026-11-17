@@ -81,7 +81,7 @@ func TestManagerDeliveredToolResultSharesOnlyEquivalentOutput(t *testing.T) {
 
 func rejectedManagerTaskRead(t *testing.T) (*harness, protocol.Assignment, protocol.Assignment, string) {
 	t.Helper()
-	h, runtime, issue, as, _ := reviewManagerAssignment(t)
+	h, _, issue, as, _ := reviewManagerAssignment(t)
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Original read target", Spec: testSpec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -127,11 +127,10 @@ func rejectedManagerTaskRead(t *testing.T) (*harness, protocol.Assignment, proto
 	body := mustJSON(t, map[string]any{"thread_id": "native", "call": call})
 	h.runAs(as, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: 2, Body: body}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent})
 	h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original process exited", LastSequence: 2}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
-	reader := reviewClaimManager(t, h, runtime)
-	if reader.TaskID != as.TaskID {
-		t.Fatal("recovery changed original responsibility", reader)
+	if h.countWhere(`SELECT COUNT(*) FROM runs WHERE task_id=?`, as.TaskID) != 1 {
+		t.Fatal("history allocated another execution")
 	}
-	return h, as, reader, created.TaskID
+	return h, as, as, created.TaskID
 }
 
 func TestRejectedNativeTaskReadRebuildsCurrentScopedBusinessView(t *testing.T) {

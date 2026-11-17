@@ -11,7 +11,7 @@ func TestUpgradeNewBindingClearsConfirmedPreviousCancellation(t *testing.T) {
 	for _, serverChange := range []bool{false, true} {
 		t.Run(map[bool]string{false: "runner-binding", true: "server-binding"}[serverChange], func(t *testing.T) {
 			h, c := upgradeHarness(t)
-			if op := startTestUpgrade(h, "old", c); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "old", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			old := upgradeRead(h)
@@ -24,7 +24,7 @@ func TestUpgradeNewBindingClearsConfirmedPreviousCancellation(t *testing.T) {
 					t.Fatal("missing previous cancellation")
 				}
 			}
-			if op := startTestUpgrade(h, "new", c); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "new", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			// Preserve the completed cancellation until this batch actually binds.
@@ -48,8 +48,8 @@ func TestUpgradeNewBindingClearsConfirmedPreviousCancellation(t *testing.T) {
 				if second.UpgradeID != "new" || second.CancelledUpgradeID != "" {
 					t.Fatal("fleet binding kept old cancellation", second)
 				}
-			} else if second.CancelledUpgradeID != "old" || second.UpgradeID != "" {
-				t.Fatal("unbound host marker was cleared", second)
+			} else if second.CancelledUpgradeID != "old" || second.UpgradeID != "new" {
+				t.Fatal("preparation lost the old cancellation marker", second)
 			}
 		})
 	}

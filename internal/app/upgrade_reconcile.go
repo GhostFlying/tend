@@ -46,7 +46,7 @@ func reconcilePausedCandidates(ctx context.Context, x *Exec, tx *store.Tx, r *st
 }
 
 func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *store.UpgradeRow, o ServerObservation) (string, error) {
-	if !selfUpdateMatches(*r, r.ServerHash, o.Updater) || r.ServerProcess == "" || o.ProcessInstanceID != r.ServerProcess || o.BinarySHA256 != r.ServerHash || !o.Healthy || !o.MainDrained || (o.InstanceID != "" && o.InstanceID != r.ServerInstance) {
+	if !selfUpdateMatches(*r, r.ServerHash, o.Updater) || r.ServerProcess == "" || o.ProcessInstanceID != r.ServerProcess || o.BinarySHA256 != r.ServerHash || !o.Healthy || (o.InstanceID != "" && o.InstanceID != r.ServerInstance) {
 		r.ServerHealthy = 0
 		return "", nil
 	}
@@ -71,25 +71,26 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 	}
 	now := x.Now.UnixMilli()
 	r.View.Phase = "server_checking"
-	if now-r.ServerHealthAt >= 5000 {
-		r.ServerHealthy++
-		r.ServerHealthAt = now
-	}
-	if r.ServerHealthy < 2 {
-		return "", nil
+	r.ServerHealthy = 1
+	r.ServerHealthAt = now
+	// Readiness is not commitment. Keep admission closed until the local
+	// supervisor has durably committed this exact replacement.
+	if r.ServerPreviousHash != "" && r.ServerPreviousHash != r.ServerHash {
+		if !serverCommittedMatches(*r, o.UpdaterReceipt, o) {
+			return "", nil
+		}
+		proof := *o.UpdaterReceipt
+		r.ServerCommitted = &proof
 	}
 	for _, h := range r.Hosts {
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 		if err != nil {
 			return "", err
 		}
-		if ctl.Mode == protocol.RunnerNormal && ctl.Authorization == nil && ctl.Upgrade == nil && ctl.UpgradeID == "" && ctl.ReleaseID == "" {
+		if ctl.Mode == protocol.RunnerNormal && ctl.Authorization == nil && ((ctl.Upgrade == nil && ctl.UpgradeID == "" && ctl.ReleaseID == "") || (r.View.Status == "running" && ctl.Upgrade != nil && ctl.Upgrade.PrepareOnly && ctl.UpgradeID == r.View.UpgradeID)) {
 			// Retaining the server never drained these hosts. Preserve their
 			// acknowledged control instead of creating a metadata-only ACK gap.
 			continue
-		}
-		if reason, err := markCutoverRecovery(ctx, tx.Q(), r, h.HostID, ctl, now); reason != "" || err != nil {
-			return reason, err
 		}
 		ctl.Revision++
 		ctl.Mode = protocol.RunnerNormal
@@ -150,7 +151,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		v.Phase = "checking"
 		admitted := h.Committed != nil && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal
 		healthy := runnerConfigurationMatches(*h, rt.Runtime) && fresh && (admitted || ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.Mode == protocol.RunnerReady && runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0)
-		if healthy && rt.Runtime.Sequence > h.LastSequence && rt.LastHeartbeatAt-h.LastHealthyAt >= 7500 {
+		if healthy && rt.Runtime.Sequence > h.LastSequence {
 			h.Healthy++
 			h.LastSequence = rt.Runtime.Sequence
 			h.LastHealthyAt = rt.LastHeartbeatAt
@@ -158,7 +159,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		if !healthy {
 			h.Healthy = 0
 		}
-		if healthy && h.Healthy >= 2 && committedMatches(*r, *h, rt.Runtime.UpdaterReceipt, rt.Runtime) {
+		if healthy && h.Healthy >= 1 && committedMatches(*r, *h, rt.Runtime.UpdaterReceipt, rt.Runtime) {
 			proof := *rt.Runtime.UpdaterReceipt
 			h.Committed = &proof
 			if ctl.Mode != protocol.RunnerNormal {

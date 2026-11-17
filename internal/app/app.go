@@ -38,9 +38,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
-	diagnostics                   []executionDiagnostic
 	diagnosticEvents              []Event
-	log                           *slog.Logger
 	repeatedPhysicalStop          bool
 	configuredOwner               string
 	associationDisplayOnly        bool // Keep narration bookkeeping separate from owner authority.
@@ -220,7 +218,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not handled here", env.Operation)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{log: a.log, configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, shuffleExecutors: a.shuffleExecutors, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, shuffleExecutors: a.shuffleExecutors, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	x.requestDomain = domain
 	if delegated, ok := cmd.(ownerExecutionCommand); ok {
 		x = delegated.adapted(x)
@@ -554,7 +552,7 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 		}
 	}
 	endAttention := tx.ObservePhase(store.WriteAttention)
-	attentionErr := reconcileAttentionResponsibilities(ctx, x, tx)
+	attentionErr := reconcileAttentionResponsibilities(ctx, x, tx, out.Events)
 	endAttention()
 	if attentionErr != nil {
 		return attentionErr

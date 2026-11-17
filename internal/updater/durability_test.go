@@ -14,7 +14,6 @@ func TestCommitProofRequiresSuccessfulDurableWrite(t *testing.T) {
 			h := newHarness(t)
 			h.upgrade(t)
 			h.until(t, "checking")
-			h.step(t)
 			h.s.writeState = func(path string, state State) error {
 				if which == "after-rename" {
 					if err := writeJSON(path, state); err != nil {

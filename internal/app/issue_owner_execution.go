@@ -184,11 +184,17 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 		_, err := tx.Exec(ctx, `INSERT INTO creator_task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,created_at,execution_pin_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, now, rawPin)
 		return nil, err
 	}
+	contract := store.TaskOwnerContract{TaskID: task, IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, AgentRef: issue.Assignee.Ref, AgentRevision: int64(agent.Revision), RuntimeID: agent.Binding.RuntimeID, RuntimeRevision: int64(agent.Binding.Revision), Model: agent.RequestedModel, Effort: agent.RequestedEffort}
+	return recordOwnerReviewContract(ctx, x, tx, issue, contract, spec, rawPin, now)
+}
+
+func createOwnerReviewIssue(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue, task string, spec domain.Spec) (protocol.Issue, []Event, error) {
+	now := x.Now.UnixMilli()
 	review := protocol.Issue{IssueControl: protocol.IssueControl{IssueID: x.IDs.New(protocol.PrefixWorkItem), ParentIssueID: issue.IssueID, State: protocol.IssueActive, WorkStatus: protocol.IssueBacklog, Assignee: issue.Assignee, AssignmentEpoch: 1, AssignmentState: "active"}, Revision: 1,
 		Plan: protocol.IssuePlan{Title: "Review: " + spec.Goal, Project: issue.Plan.Project, Intent: "Independently evaluate the frozen task agreement and its submitted artifact", Scope: "Acceptance of task " + task, CompletionCriteria: []string{"Record an independent verdict against the exact artifact and task spec"}, Stages: []protocol.IssueStage{}}, DependsOn: []string{}, CreatedAt: now, UpdatedAt: now}
 	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, review, 0, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "role": protocol.RoleAccept}, "issue.created")
 	if err != nil {
-		return nil, err
+		return protocol.Issue{}, nil, err
 	}
 	review.WorkStatus = protocol.IssueTodo
 	review.TodoAt = now
@@ -196,18 +202,11 @@ func recordOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 	review.Revision = 2
 	admitted, err := saveCanonicalOwnerDefinition(ctx, x, tx, review, 1, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "role": protocol.RoleAccept}, "issue.status_changed")
 	if err != nil {
-		return nil, err
+		return protocol.Issue{}, nil, err
 	}
 	out.Events = append(out.Events, admitted.Events...)
 
-	reviewPlan, err := json.Marshal(review.Plan)
-	if err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,created_at,execution_pin_json,review_admission_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, task, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, agent.Revision, agent.Binding.RuntimeID, agent.Binding.Revision, agent.RequestedModel, agent.RequestedEffort, review.IssueID, string(reviewPlan), now, rawPin, review.Revision); err != nil {
-		return nil, err
-	}
-	return out.Events, nil
+	return review, out.Events, nil
 }
 
 func claimOwnerExecution(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, pin *protocol.RunExecutionPin) ([]Event, error) {
@@ -370,9 +369,9 @@ func finishOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, run store.Run
 	return out.Events, err
 }
 
-// Cancelling a task also withdraws its generated bounded review, once every
-// physical execution is settled. Human changes to that child require review.
-func settleCancelledOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task string) ([]Event, error) {
+// A cancelled task or withdrawn optional review settles its generated review
+// once physical execution is settled. Changed child scopes remain independent.
+func settleUnusedOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task string) ([]Event, error) {
 	contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), task)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
@@ -424,7 +423,7 @@ func settleCancelledOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task
 	}
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()
-	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issue, previous, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "reason": "The task and all of its execution attempts are cancelled and settled"}, "issue.cancelled")
+	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issue, previous, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "reason": "The original task no longer needs this generated review and its executions are settled"}, "issue.cancelled")
 	return out.Events, err
 }
 
@@ -483,4 +482,53 @@ func readmitOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task string)
 	issue.TodoAt, issue.TodoRevision, issue.UpdatedAt = x.Now.UnixMilli(), issue.Revision, x.Now.UnixMilli()
 	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issue, previous, canonicalOwnerIssueSource{}, map[string]any{"task_id": task, "previous_acceptance_id": evidence.Reference}, "issue.review_readmitted")
 	return out.Events, err
+}
+
+// Adding review preserves the original implementation contract and pin. Only
+// the newly requested review responsibility is created in this transaction.
+func enableOwnerReview(ctx context.Context, x *Exec, tx *store.Tx, task string, spec domain.Spec) ([]Event, error) {
+	contract, err := store.GetTaskOwnerContract(ctx, tx.Q(), task)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil || contract.ReviewIssueID != "" {
+		return nil, err
+	}
+	current, err := store.TaskOwnerContractCurrent(ctx, tx.Q(), task)
+	if err != nil {
+		return nil, err
+	}
+	if !current {
+		return nil, protocol.Errorf(protocol.CodeStaleRevision, "review requires the original active Issue responsibility")
+	}
+	issue, err := store.GetCanonicalIssue(ctx, tx.Q(), contract.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	var created int64
+	var raw string
+	if err := tx.Q().QueryRowContext(ctx, `SELECT created_at,COALESCE(execution_pin_json,'') FROM creator_task_owner_contracts WHERE task_id=?`, task).Scan(&created, &raw); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM creator_task_owner_contracts WHERE task_id=?`, task); err != nil {
+		return nil, err
+	}
+	var rawPin any
+	if raw != "" {
+		rawPin = raw
+	}
+	return recordOwnerReviewContract(ctx, x, tx, issue, contract, spec, rawPin, created)
+}
+
+func recordOwnerReviewContract(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue, c store.TaskOwnerContract, spec domain.Spec, rawPin any, created int64) ([]Event, error) {
+	review, events, err := createOwnerReviewIssue(ctx, x, tx, issue, c.TaskID, spec)
+	if err != nil {
+		return nil, err
+	}
+	reviewPlan, err := json.Marshal(review.Plan)
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO task_owner_contracts(task_id,issue_id,assignment_epoch,agent_ref,agent_revision,runtime_id,runtime_revision,model,effort,review_issue_id,review_plan_json,created_at,execution_pin_json,review_admission_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.TaskID, c.IssueID, c.AssignmentEpoch, c.AgentRef, c.AgentRevision, c.RuntimeID, c.RuntimeRevision, c.Model, c.Effort, review.IssueID, string(reviewPlan), created, rawPin, review.Revision)
+	return events, err
 }

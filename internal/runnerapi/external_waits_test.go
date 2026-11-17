@@ -27,7 +27,7 @@ func TestManagerExternalWaitHTTPKeepsOriginalIdentityAndReceipts(t *testing.T) {
 		return op
 	}
 	execute(app.PutAgentCategory{}, protocol.Target{Type: "category", ID: "execution"}, protocol.PutAgentCategoryPayload{Title: "Execution", State: "active"}, new(int64))
-	runtime := &protocol.RunnerRuntime{InstanceID: "wait-http", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager, protocol.CapabilityExternalWaits}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "wait-http", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityAgentInventory, protocol.CapabilityAgentExecution, protocol.CapabilityIssueManager, protocol.CapabilityExternalWaits}}
 	e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "linux-1", protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}))
 	directory, err := agentconfig.Validate("linux-1", agentconfig.Config{FormatVersion: 2,
 		Runtimes: []agentconfig.RuntimeBinding{{ID: "native", Revision: 1, Kind: agentconfig.AppServerWorker, CLI: "codex", ExecutableRef: "private-installation", DeclaredPurposes: []agentconfig.Purpose{agentconfig.WorkerRun, agentconfig.IssueManager}, Enabled: true}},

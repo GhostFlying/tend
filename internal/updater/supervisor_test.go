@@ -353,22 +353,17 @@ func TestExclusiveSupervisorAndImmutableRequestIdentity(t *testing.T) {
 	}
 }
 
-func TestHealthNeedsTwoDistinctServerHeartbeats(t *testing.T) {
+func TestReadyCandidateCommitsWithoutWaitingForAnotherHeartbeat(t *testing.T) {
 	h := newHarness(t)
 	h.upgrade(t)
 	h.until(t, "checking")
 	h.step(t)
-	if h.s.Status().Operation.HealthCount != 1 {
-		t.Fatal("first heartbeat was not counted")
+	if h.s.Status().Operation.HealthCount != 1 || h.s.Status().Operation.Phase != "committed" {
+		t.Fatal("actual readiness did not commit the candidate")
 	}
-	h.a.sequence-- // The bridge returns the same accepted heartbeat again.
-	h.step(t)
-	if h.s.Status().Operation.HealthCount != 1 || h.s.Status().Operation.Phase != "checking" {
-		t.Fatal("repeated heartbeat committed the candidate")
-	}
-	h.step(t)
-	if h.s.Status().Operation.Phase != "committed" {
-		t.Fatal("distinct second heartbeat did not commit")
+	h.reopen(t)
+	if CommittedReceipt(h.s.Status()) == nil || h.p.starts != 1 || h.p.stops != 1 {
+		t.Fatal("commit did not survive restart or repeated physical installation")
 	}
 }
 func TestGrantCannotSurviveDifferentBoot(t *testing.T) {

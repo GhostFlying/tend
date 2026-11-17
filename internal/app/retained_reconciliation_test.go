@@ -52,8 +52,8 @@ func retainedHello(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, he
 }
 
 func TestRetainedReconciliationNegotiatesWithoutChangingOriginalRun(t *testing.T) {
-	for _, wire := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
-		t.Run(map[int64]string{protocol.PreviousRunnerProtocol: "previous", protocol.CurrentRunnerProtocol: "current"}[wire], func(t *testing.T) {
+	for _, wire := range []int64{protocol.CurrentRunnerProtocol} {
+		t.Run("current", func(t *testing.T) {
 			h, original := retainedHelloFixture(t)
 			beforeRun, beforeLease := h.run(original.RunID), h.lease(original.RunID)
 			var beforePin *protocol.RunExecutionPin
@@ -107,7 +107,7 @@ func TestRetainedReconciliationLegacyRemainsFailClosed(t *testing.T) {
 	for _, mode := range []string{"without-capability", "unsupported-protocol"} {
 		rt := retainedHelloRuntime(t, h, mode == "unsupported-protocol")
 		if mode == "unsupported-protocol" {
-			rt.Protocol = protocol.PreviousRunnerProtocol - 1
+			rt.Protocol = protocol.MinimumRunnerProtocol - 1
 		}
 		op, err := retainedHello(t, h, rt, protocol.HeldRun{RunID: original.RunID, LeaseID: original.LeaseID, Observed: protocol.RunRunning})
 		want := protocol.CodeUnknownOutcome
@@ -202,7 +202,7 @@ func TestRetainedReconciliationRejectsOldLeaseAndHonorsExplicitStop(t *testing.T
 }
 
 func TestRetainedReconciliationHeartbeatDoesNotRenewOriginalLease(t *testing.T) {
-	for _, wire := range []int64{protocol.CurrentRunnerProtocol, protocol.PreviousRunnerProtocol} {
+	for _, wire := range []int64{protocol.CurrentRunnerProtocol, protocol.MinimumRunnerProtocol} {
 		t.Run(string(rune('0'+wire)), func(t *testing.T) {
 			h, as := retainedHelloFixture(t)
 			runtime := retainedHelloRuntime(t, h, true)

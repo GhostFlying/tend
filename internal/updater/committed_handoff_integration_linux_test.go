@@ -402,7 +402,7 @@ func runCommittedHandoffFixture(t *testing.T, interrupted, failed bool, recovery
 		if e != nil {
 			t.Fatal(e)
 		}
-		if committed.Maintenance.Receipt == nil || committed.Maintenance.HealthCount < 2 || committed.Maintenance.Receipt.SecondSequence <= committed.Maintenance.Receipt.FirstSequence || committed.Process == child || committed.CommittedProof == nil || committed.CommittedProof.Binding != p.Maintenance.Successor {
+		if committed.Maintenance.Receipt == nil || committed.Maintenance.HealthCount < 1 || committed.Maintenance.Receipt.SecondSequence < committed.Maintenance.Receipt.FirstSequence || committed.Process == child || committed.CommittedProof == nil || committed.CommittedProof.Binding != p.Maintenance.Successor {
 			t.Fatal("missing actual successor proof")
 		}
 		ledger := exec.CommandContext(ctx, cli, "updater", "maintenance", "ledger", "--socket", socket, "--maintenance-id", p.Maintenance.MaintenanceID, "--json")

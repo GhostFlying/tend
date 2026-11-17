@@ -327,7 +327,7 @@ func TestRetainedRunContinuationRejectsMutatedReplay(t *testing.T) {
 }
 
 func TestRetainedRunContinuationNegotiatesStrictVerdictForBothWireVersions(t *testing.T) {
-	for _, wire := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
+	for _, wire := range []int64{protocol.MinimumRunnerProtocol, protocol.CurrentRunnerProtocol} {
 		for _, strict := range []bool{false, true} {
 			t.Run(fmt.Sprintf("wire-%d/strict-%t", wire, strict), func(t *testing.T) {
 				h, as, rt := ordinaryRetainedRunFixture(t)

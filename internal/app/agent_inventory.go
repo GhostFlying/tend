@@ -219,5 +219,5 @@ func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, inpu
 
 		return nil
 	})
-	return protocol.AdaptRunnerInventoryStatus(input.Runtime, result), err
+	return result, err
 }

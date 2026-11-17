@@ -342,6 +342,7 @@ func TestControlRunShutsDownOwnedSocket(t *testing.T) {
 
 func TestServerReadinessCannotBeReplacedByHistoricalHealth(t *testing.T) {
 	c, _ := testController(t)
+	c.cfg.RecoveryReady = func(context.Context) error { return errors.New("storage unavailable") }
 	c.observe = func(context.Context) (app.ServerObservation, error) {
 		return app.ServerObservation{Healthy: true, MainDrained: false}, nil
 	}
@@ -351,7 +352,7 @@ func TestServerReadinessCannotBeReplacedByHistoricalHealth(t *testing.T) {
 	c.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/updater/health", bytes.NewReader(raw)))
 	var health protocol.UpgradeHealth
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &health) != nil || health.Healthy {
-		t.Fatal("historical health bypassed current native readiness")
+		t.Fatal("historical health bypassed current storage readiness")
 	}
 }
 

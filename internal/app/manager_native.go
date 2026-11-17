@@ -368,6 +368,9 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if last != p.LastSequence {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "native events must be acknowledged before stop")
 		}
+		if err := tx.RecordManagerPhysicalClose(ctx, run, x.Env.RequestID, p.LastSequence, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
 		return finishStoppedManager(ctx, x, tx, run, p.Reason, p.LastSequence)
 	case protocol.OpManagerNativeEvent:
 		var p protocol.ManagerNativeEvent
@@ -513,8 +516,12 @@ func (a *App) QueueManagerNative(ctx context.Context, run, method string, payloa
 			if err != nil {
 				return err
 			}
-			if r.Role != protocol.RoleIssueManager || r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed {
-				return protocol.Errorf(protocol.CodeInvalidTransition, "native observation requires a running transport")
+			history, err := managerHistoryActive(ctx, tx.Q(), run)
+			if err != nil {
+				return err
+			}
+			if r.Role != protocol.RoleIssueManager || (r.ObservedState == protocol.RunFinished || r.ObservedState == protocol.RunFailed) && !(history && method == "find") {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "native observation requires a live transport or original receipt reader")
 			}
 			return nil
 		})
@@ -794,7 +801,7 @@ func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64
 }
 
 // finishStoppedManager releases physical capacity while retaining uncertain
-// business receipts for a new, read-only reconciliation run.
+// business receipts for history reads against the original execution.
 func finishStoppedManager(ctx context.Context, x *Exec, tx *store.Tx, run, reason string, lastSequence int64) (Outcome, error) {
 	if v, err := store.GetExternalWait(ctx, tx.Q(), run); err != nil {
 		return Outcome{}, err
@@ -908,4 +915,13 @@ func closedIssueReceiptOperation(operation string) bool {
 		return true
 	}
 	return false
+}
+
+// All runner-confirmed stop paths share the original event cursor and close fact.
+func recordManagerPhysicalStop(ctx context.Context, x *Exec, tx *store.Tx, run string) error {
+	var last int64
+	if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&last); err != nil {
+		return err
+	}
+	return tx.RecordManagerPhysicalClose(ctx, run, x.Env.RequestID, last, x.Now.UnixMilli())
 }

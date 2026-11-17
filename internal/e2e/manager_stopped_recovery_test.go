@@ -289,16 +289,14 @@ func recoverStoppedManagerHTTP(t *testing.T, s *server, j *journal.Journal, as p
 	if options.settled {
 		return
 	}
-	// Claim only the original manager Task's automatically derived receipt-only
-	// action. Its fake native history can read the original turn, never run it.
-	runtime.InstanceID, runtime.Generation, runtime.Sequence = "original-receipt-reader", 3, 1
-	s.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, app.Hello{})
-	claimed := s.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, app.Claim{})
-	var next struct{ Assignment *protocol.Assignment }
-	if err := json.Unmarshal(claimed.Result, &next); err != nil || next.Assignment == nil || next.Assignment.TaskID != as.TaskID || next.Assignment.RunID == as.RunID || next.Assignment.Manager == nil || !next.Assignment.Manager.ReceiptOnly {
-		t.Fatal("original receipt-only transport was not derived after physical release", claimed, err)
+	reader := as
+	manager := *as.Manager
+	manager.ReceiptOnly, manager.RequireReceiptReader = true, true
+	reader.Manager = &manager
+	driveManagerReceiptHistory(t, s, &as, &reader, business, "stopped-recovery", turn, "completed")
+	if s.count(`SELECT COUNT(*) FROM runs`) != 1 || s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) != 0 {
+		t.Fatal("historical receipts created another execution")
 	}
-	driveManagerReceiptHistory(t, s, &as, next.Assignment, business, "stopped-recovery", turn, "completed")
 	if s.count(`SELECT COUNT(*) FROM tasks`) != 1 || s.count(`SELECT COUNT(*) FROM main_turns`) != 2 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != 3 {
 		t.Fatal("receipt recovery rebuilt business work or changed original event history")
 	}

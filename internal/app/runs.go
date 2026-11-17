@@ -129,7 +129,7 @@ func (ReportTakeover) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	// The Run retains its original negotiated protocol across host upgrades.
-	adapted, err := protocol.AdaptRunnerTakeover(*x.Env, rc.run.Protocol)
+	adapted, err := protocol.ValidateRunnerTakeover(*x.Env, rc.run.Protocol)
 	if err != nil {
 		return Outcome{}, err
 	}
