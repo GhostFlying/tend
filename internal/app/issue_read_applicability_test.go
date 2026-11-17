@@ -95,6 +95,19 @@ func TestIssueReadApplicabilityFollowsNormalCloseCancelAndReopen(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			p.ExpectedAssignmentEpoch = issue.AssignmentEpoch
+			if op := h.exec(owner, h.env("issues.update_progress", target, p, rev(issue.Revision)), UpdateIssueProgress{}); op.Status != protocol.OpSucceeded {
+				t.Fatal("fresh assessment after reopen failed", op)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				current, err := views.CanonicalIssue(t.Context(), tx.Q(), issue.IssueID, 0)
+				if err == nil && (current.Progress == nil || current.Progress.Historical || current.Progress.IssueRevision <= endedRevision || current.Progress.NextStep != p.NextStep) {
+					t.Fatal("identical fresh assessment remained historical", current.Progress)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
 }

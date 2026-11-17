@@ -61,7 +61,9 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
-	if prior != nil && prior.Summary == strings.TrimSpace(p.Summary) && prior.NextStep == strings.TrimSpace(p.NextStep) && prior.UpdatedBy == author {
+	// An intervening Issue revision can reopen or transfer responsibility.
+	// Preserve that fresh assessment even when its words and author repeat.
+	if prior != nil && prior.IssueRevision == issue.Revision && prior.Summary == strings.TrimSpace(p.Summary) && prior.NextStep == strings.TrimSpace(p.NextStep) && prior.UpdatedBy == author {
 		return Outcome{NoEffect: true, Result: *prior}, nil
 	}
 	issue.Revision++

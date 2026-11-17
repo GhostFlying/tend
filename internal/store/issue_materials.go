@@ -73,7 +73,11 @@ const materialScopeSQL = `WITH scope(id) AS (SELECT value FROM json_each(?1,'$.i
  UNION SELECT json_extract(f.value,'$.file_id') FROM artifacts a,json_each(a.ref_json,'$.files') f WHERE a.artifact_id IN (SELECT id FROM artifacts_scope)
  UNION SELECT json_extract(f.value,'$.file_id') FROM acceptances a,json_each(a.files_json) f WHERE (a.task_id IN (SELECT id FROM tasks_scope) OR a.artifact_id IN (SELECT id FROM artifacts_scope))
  UNION SELECT json_extract(f.value,'$.file_id') FROM task_specs s,json_each(s.body_json,'$.inputs') f WHERE s.task_id IN (SELECT id FROM tasks_scope) AND (?2='' OR instr(s.body_json,?2)>0)
- UNION SELECT id FROM background_refs
+ UNION SELECT ref.id FROM background_refs ref WHERE
+ EXISTS(SELECT 1 FROM conversation_attachments c WHERE c.file_id=ref.id)
+ OR EXISTS(SELECT 1 FROM deliverable_files f WHERE f.file_id=ref.id AND (
+ EXISTS(SELECT 1 FROM artifacts a,json_each(a.ref_json,'$.files') entry WHERE a.task_id=f.task_id AND json_extract(entry.value,'$.file_id')=f.file_id)
+ OR EXISTS(SELECT 1 FROM acceptances a,json_each(a.files_json) entry WHERE a.task_id=f.task_id AND a.run_id=f.run_id AND json_extract(entry.value,'$.file_id')=f.file_id)))
  UNION SELECT id FROM uploads_scope
  UNION SELECT id FROM owner_originals_scope) `
 
