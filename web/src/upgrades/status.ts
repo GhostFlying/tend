@@ -16,6 +16,7 @@ export const batchPhases: Record<string, string> = {
 };
 export const hostPhases: Record<string, string> = {
   queued: "等待更新",
+  reconnecting: "等待主机重连与控制确认",
   draining: "排空中",
   ready: "已排空",
   installing: "安装中",
