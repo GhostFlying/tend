@@ -1458,6 +1458,15 @@ try {
         .getByText("公开过程读取失败，已保存的讨论仍可阅读。", { exact: false })
         .waitFor();
       assert(await detail.getByText("同一回合的公开进展。", { exact: true }).isVisible());
+      await detail
+        .getByText("公开过程暂不可读取，请使用上方的重读入口。", { exact: true })
+        .waitFor();
+      assert.equal(
+        await detail
+          .getByText("尚未记录可查看的公开执行步骤，公开回复会显示在下方。", { exact: true })
+          .count(),
+        0,
+      );
       block.process = { items: [streamingTool], more: false, started_at: now - 5000 };
       await detail.getByRole("button", { name: "重新读取公开过程", exact: true }).click();
       await liveTool.waitFor();
