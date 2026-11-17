@@ -65,8 +65,8 @@ func (c HostedCoordinationCommand) Authorize(ctx context.Context, x *Exec, q sto
 		if current.AssignmentState != "active" || current.AssignmentEpoch != execution.AssignmentEpoch || current.Assignee.Kind != protocol.IssueAssigneeAgent || current.Assignee.Ref != hostedconfig.IdentityRef(execution.Selection.Identity) {
 			return protocol.Errorf(protocol.CodeForbidden, "assignment no longer permits this coordination execution")
 		}
-		if current.State == protocol.IssueClosed && !closedIssueReceiptOperation(c.Operation()) {
-			return protocol.Errorf(protocol.CodeForbidden, "closed responsibility permits only its admitted turn receipts")
+		if (current.State == protocol.IssueClosed || current.State == protocol.IssueCancelled) && !terminalIssueReceiptOperation(c.Operation()) {
+			return protocol.Errorf(protocol.CodeForbidden, "terminal responsibility permits only its admitted turn receipts")
 		}
 		if current.State == protocol.IssueCancelling && !cancellationSettlementOperation(c.Operation()) {
 			return protocol.Errorf(protocol.CodeForbidden, "cancelling responsibility permits settlement only")

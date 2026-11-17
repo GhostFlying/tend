@@ -318,8 +318,8 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 		// its supervisor. This records a receipt without reopening execution or
 		// creating a new decision or a close-blocking obligation.
 		execution := x.coordinationExecution
-		closedReceipt := issue.State == protocol.IssueClosed && execution != nil && execution.Selection.Purpose == agentconfig.IssueManager && execution.IssueID == issue.IssueID && !p.BlocksClose && oneOf(p.Kind, "action", "information")
-		if (issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled) && !closedReceipt {
+		terminalReceipt := (issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled) && execution != nil && execution.Selection.Purpose == agentconfig.IssueManager && execution.IssueID == issue.IssueID && !p.BlocksClose && oneOf(p.Kind, "action", "information")
+		if (issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled) && !terminalReceipt {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "terminal Issue cannot raise a new obligation")
 		}
 	}

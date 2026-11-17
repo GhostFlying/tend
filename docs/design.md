@@ -2570,5 +2570,7 @@ server 提交不释放这些 host，后续串行 runner 排空直接使用当前
 issue.cancelling 背景收尾消息或为闲置 manager 新领取一轮。仍有子责任、交付、承诺、
 业务问题、执行资源或 unknown 时保留 cancelling 和原收尾通道；看板仍拒绝未结终态。
 已知活动 manager 的 Run/lease 不作为新增总门槛，也不因业务终态伪造物理停止；
-现有 retiring/native close/receipt 消费独立保留。无 wire/schema 变更。
+现有 retiring/native close/receipt 消费独立保留。closed/cancelled 均允许原已准入 turn
+在原身份、epoch、thread 和有效 lease 下完成安全回执、最终报告及 commit，继续拒绝
+新业务操作；终态非阻塞信息/动作仅作为原 turn 回执。无 wire/schema 变更。
 路径与验证边界见 docs/plans/settled-issue-cancellation.md。
