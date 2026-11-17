@@ -328,7 +328,7 @@ func TestIssueOwnerHTTPSourceShareReadAndTerminalSettlement(t *testing.T) {
 	issue = issueHTTP(t, e, token, e.envelope("issues.cancel", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
 	pending := view.SourceReviews[0]
 	view = issueDetailHTTP(t, e, token, issue.IssueID)
-	issue = issueHTTP(t, e, token, e.envelope("issues.finish_cancel", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends this scope"}, ExpectedContextRevision: &view.ContextRevision, SourceDispositions: []protocol.IssueSourceDisposition{{MessageID: pending.MessageID, ContentRevision: pending.ContentRevision, AssociationRevision: pending.AssociationRevision, Reason: "Owner reviewed source and ends scope"}}}))
+	issue = issueHTTP(t, e, token, e.envelope("issues.review_sources", protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, protocol.IssueEndpointPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends this scope"}, ExpectedContextRevision: &view.ContextRevision, SourceDispositions: []protocol.IssueSourceDisposition{{MessageID: pending.MessageID, ContentRevision: pending.ContentRevision, AssociationRevision: pending.AssociationRevision, Reason: "Owner reviewed source and ends scope"}}}))
 	if issue.State != protocol.IssueCancelled || len(issueDetailHTTP(t, e, token, issue.IssueID).SourceReviews) != 0 {
 		t.Fatal(issue)
 	}

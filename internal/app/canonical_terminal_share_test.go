@@ -26,7 +26,7 @@ func queuedTerminalShareFixture(t *testing.T, terminal string) (*harness, protoc
 		issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
 	}
 	endpoint := canonicalLifecycleSourceEndpoint(t, h, issue, source.MessageID)
-	action := "finish_cancel"
+	action := "review_sources"
 	if terminal == "closed" {
 		action = "close"
 		endpoint.Closure = canonicalLifecycleClosure(issue, protocol.WorkItemClosureCompleted).Closure

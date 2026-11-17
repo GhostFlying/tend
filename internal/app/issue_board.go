@@ -72,14 +72,7 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 		}
 		// With no unsettled work, record cancellation intent and its observed
 		// settlement in one atomic revision, using the same domain transitions.
-		next := current
-		if next.State != protocol.IssueCancelling {
-			next.IssueControl, err = domain.BeginIssueCancellation(current.IssueControl)
-			if err != nil {
-				return Outcome{}, err
-			}
-		}
-		next.IssueControl, err = domain.FinishIssueCancellation(next.IssueControl, facts)
+		next, err := finishSettledIssueCancellation(current, facts)
 		if err != nil {
 			return Outcome{}, err
 		}

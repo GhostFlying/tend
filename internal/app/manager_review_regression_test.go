@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -489,6 +490,7 @@ func closeCancellationRound(t *testing.T, h *harness, as protocol.Assignment) {
 
 func TestManagerRetainsRestrictedAuthorityUntilCancellationSettles(t *testing.T) {
 	h, _, issue, as := cancellationManager(t)
+	child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, canonicalOwnerIssueCreate{Plan: issue.Plan, ParentIssueID: issue.IssueID, ExpectedParentRevision: rev(issue.Revision)}, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	turn, _ := startHostedIssueReview(t, h, issue)
 	principal := runPrincipal(as.RunID, protocol.RoleIssueManager)
 	principal.Thread = turn.ThreadID
@@ -502,6 +504,10 @@ func TestManagerRetainsRestrictedAuthorityUntilCancellationSettles(t *testing.T)
 	_, err := h.app.Execute(t.Context(), principal, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{}, rev(issue.Revision)), HostedCoordinationCommand{Command: CanonicalOwnerTaskCreate{}, ExecutionID: turn.RequestID, EffectSeq: 2})
 	if protocol.CodeOf(err) != protocol.CodeForbidden {
 		t.Fatal("cancelling manager could create more work", err)
+	}
+	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "cancel", protocol.IssueControlPayload{ExpectedAssignmentEpoch: child.AssignmentEpoch, Reason: "Cancel child responsibility"}))
+	if child.State != protocol.IssueCancelled {
+		t.Fatal(child)
 	}
 	if op := hostedEffect(t, h, principal, turn, 2, protocol.Target{Type: "issue", ID: issue.IssueID}, nil, hostedReviewPayload(t, h, issue), ReviewHostedIssueContext{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -532,38 +538,75 @@ func TestManagerRetainsRestrictedAuthorityUntilCancellationSettles(t *testing.T)
 	}
 }
 
-func TestManagerWaitingCancellationWakesAndReclaimsItsPinnedRunner(t *testing.T) {
-	h, runtime, issue, as := cancellationManager(t)
-	// Account for the first round's batch before its confirmed native close.
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE background_batches SET status='frozen' WHERE work_item_id=?`, issue.IssueID); err != nil {
-			return err
+func TestManagerWaitingCancellationUsesEndpointFacts(t *testing.T) {
+	for _, entry := range []string{"cancel", "set_status"} {
+		for _, unsettled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/unsettled=%t", entry, unsettled), func(t *testing.T) {
+				h, runtime, issue, as := cancellationManager(t)
+				if unsettled {
+					issue = addCancellationCommitment(t, h, issue)
+				}
+				// The first round is consumed and actually closed through the native reply.
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					if _, err := tx.Exec(t.Context(), `UPDATE background_batches SET status='frozen' WHERE work_item_id=?`, issue.IssueID); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='delivered' WHERE destination=?`, "background_thread:"+as.Manager.ConversationID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				closeCancellationRound(t, h, as)
+				issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "pause", protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
+				beforeRevision := issue.Revision
+				beforeRuns := h.count("runs")
+				actions := h.count("plan_actions")
+				var payload any = protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel this responsibility"}
+				if entry == "set_status" {
+					payload = protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueWorkCancelled}
+				}
+				op := canonicalLifecycleControl(t, h, issue, entry, payload)
+				if unsettled && entry == "set_status" {
+					expectWorkCode(t, op, protocol.CodeInvalidTransition)
+					if actual := canonicalTaskIssue(t, h, issue.IssueID); actual.Revision != beforeRevision || actual.State != protocol.IssuePaused {
+						t.Fatal(actual)
+					}
+					return
+				}
+				issue = canonicalLifecycleIssue(t, op)
+				expected := protocol.IssueCancelled
+				if unsettled {
+					expected = protocol.IssueCancelling
+				}
+				if issue.State != expected || issue.Revision != beforeRevision+1 {
+					t.Fatal(issue)
+				}
+				sources := h.countWhere(`SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE s.kind='issue.cancelling' AND b.work_item_id=?`, issue.IssueID)
+				if unsettled {
+					next := reviewClaimManager(t, h, runtime)
+					if sources != 1 || next.TaskID != as.TaskID || next.Execution == nil || next.Manager.ReceiptOnly || *next.Execution != *as.Execution {
+						t.Fatal("cancellation lost the responsible execution", sources, as, next)
+					}
+					return
+				}
+				claim := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil), Claim{})
+				var result struct {
+					Assignment *protocol.Assignment `json:"assignment"`
+				}
+				if err := json.Unmarshal(claim.Result, &result); err != nil || claim.Status != protocol.OpSucceeded || result.Assignment != nil {
+					t.Fatal(claim, err)
+				}
+				if sources != 0 || h.count("runs") != beforeRuns || h.count("plan_actions") != actions {
+					t.Fatal("settled cancellation created another model round")
+				}
+			})
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE outbox SET status='delivered' WHERE destination=?`, "background_thread:"+as.Manager.ConversationID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
 	}
-	closeCancellationRound(t, h, as)
-	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "pause", protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Pause this Issue"}))
-	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel and finish the existing responsibility"}))
-	if issue.State != protocol.IssueCancelling {
-		t.Fatal(issue)
-	}
-	next := reviewClaimManager(t, h, runtime)
-	if next.TaskID != as.TaskID || next.Execution == nil || next.Manager.ReceiptOnly || *next.Execution != *as.Execution {
-		t.Fatal("cancellation replaced the responsible execution", as, next)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var sources int
-		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM background_sources s JOIN background_batches b USING(batch_id) WHERE s.kind='issue.cancelling' AND b.work_item_id=?`, issue.IssueID).Scan(&sources); err != nil {
-			return err
-		}
-		if sources != 1 {
-			t.Fatal("owner cancellation was not durably delivered", sources)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+}
+
+func addCancellationCommitment(t *testing.T, h *harness, issue protocol.Issue) protocol.Issue {
+	t.Helper()
+	plan := issue.Plan
+	plan.FollowOns = append(plan.FollowOns, protocol.IssueFollowOn{FollowOnID: "report", Kind: protocol.WorkItemFollowOnCommitment, Text: "Deliver the existing report", Source: "Owner request", Status: protocol.WorkItemFollowOnOpen})
+	return canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "update", protocol.UpdateIssuePayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Plan: plan}))
 }

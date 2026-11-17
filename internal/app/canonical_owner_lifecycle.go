@@ -156,6 +156,13 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		if err == nil {
 			taskEvents, err = cancelCanonicalPrimaryTasks(ctx, x, tx, current.IssueID)
 		}
+		if err == nil {
+			var facts domain.IssueLifecycleFacts
+			facts, err = canonicalOwnerEndpointFacts(ctx, tx.Q(), next)
+			if err == nil && len(domain.IssueEndpointBlockers(facts)) == 0 {
+				next, err = finishSettledIssueCancellation(next, facts)
+			}
+		}
 	case "reopen":
 		reopenManager, err = prepareIssueReopen(ctx, x, tx, current, common.canonicalOwnerIssueSource)
 		if err != nil {
@@ -269,7 +276,11 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	projection := protocol.WorkItem{IssuePlan: next.Plan, Closure: next.Closure}
 	freezeIssueCurrentEvidence(&projection, x.Env.RequestID)
 	next.Plan, next.Closure = projection.IssuePlan, projection.Closure
-	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, common.canonicalOwnerIssueSource, reason, canonicalLifecycleEvent(action))
+	event := canonicalLifecycleEvent(action)
+	if action == "cancel" && next.State == protocol.IssueCancelled {
+		event = "issue.cancelled"
+	}
+	out, err := saveCanonicalOwnerDefinition(ctx, x, tx, next, current.Revision, common.canonicalOwnerIssueSource, reason, event)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -284,12 +295,29 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 	}
 	// Canonical save increments context revision through 0043. Review the ended C
 	// share at that final revision; do not mark a shared logical/native turn done.
-	if endpoint != nil {
+	if endpoint != nil || next.State == protocol.IssueCancelled {
 		if err = recordCanonicalEndpointContextReviews(ctx, tx, next.IssueID); err != nil {
 			return Outcome{}, err
 		}
 	}
 	return out, nil
+}
+
+// finishSettledIssueCancellation shares the atomic endpoint transition between
+// ordinary cancellation and the owner board. Physical manager retirement still
+// consumes the original native close and resource receipts separately.
+func finishSettledIssueCancellation(current protocol.Issue, facts domain.IssueLifecycleFacts) (protocol.Issue, error) {
+	next := current
+	var err error
+	if next.State != protocol.IssueCancelling {
+		next.IssueControl, err = domain.BeginIssueCancellation(next.IssueControl)
+		if err != nil {
+			return current, err
+		}
+	}
+	next.IssueControl, err = domain.FinishIssueCancellation(next.IssueControl, facts)
+	next.Closure = nil
+	return next, err
 }
 
 func canonicalLifecycleEvent(action string) string {

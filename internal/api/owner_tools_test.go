@@ -128,7 +128,7 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(response, err)
 	}
-	if err := json.Unmarshal(response.Operation.Result, &issue); err != nil || issue.State != protocol.IssueCancelling {
+	if err := json.Unmarshal(response.Operation.Result, &issue); err != nil || issue.State != protocol.IssueCancelled {
 		t.Fatal(issue, err)
 	}
 }

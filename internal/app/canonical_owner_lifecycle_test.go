@@ -28,8 +28,7 @@ func TestCanonicalLifecycleOwnerEmptyIssueCancellationEndsAtBaselineZero(t *test
 	h := newHarness(t)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
-	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "No remaining work"}}))
-	if issue.State != protocol.IssueCancelled || issue.Closure != nil || issue.Revision != 3 {
+	if issue.State != protocol.IssueCancelled || issue.Closure != nil || issue.Revision != 2 {
 		t.Fatal(issue)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -93,7 +92,7 @@ func TestCanonicalLifecycleIssueEndpointDoesNotStopSharedMainOrOtherIssue(t *tes
 	}
 	payload := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends this issue while main continues"}, ExpectedContextRevision: rev(contextRevision), SourceDispositions: []canonicalOwnerSourceDisposition{{MessageID: source, ContentRevision: associations.ContentRevision, AssociationRevision: associations.Revision, Reason: "This issue has no remaining action from this source"}}}
 	beforeOutbox := h.count("outbox")
-	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", payload))
+	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "review_sources", payload))
 	if h.count("outbox") != beforeOutbox {
 		t.Fatal("endpoint queued a main/native stop")
 	}
@@ -263,12 +262,12 @@ func TestCanonicalLifecycleSourceDispositionRejectsChangedVersionsAtomically(t *
 				payload.ExpectedContextRevision = rev(canonicalLifecycleContextRevision(t, h, issue.IssueID))
 			}
 			before := canonicalGuardBusinessSnapshot(t, h)
-			expectWorkCode(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", payload), protocol.CodeStaleRevision)
+			expectWorkCode(t, canonicalLifecycleControl(t, h, issue, "review_sources", payload), protocol.CodeStaleRevision)
 			if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
 				t.Fatal("stale disposition leaked source/history changes")
 			}
 			fresh := canonicalLifecycleSourceEndpoint(t, h, issue, source.MessageID)
-			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", fresh))
+			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "review_sources", fresh))
 			if issue.State != protocol.IssueCancelled {
 				t.Fatal(issue)
 			}
@@ -294,7 +293,6 @@ func TestCanonicalLifecycleRejectedParentEndpointRollsBackSourceDisposition(t *t
 		t.Fatal("later child blocker leaked earlier source disposition")
 	}
 	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}))
-	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch, Reason: "Owner ends child"}}))
 	if child.State != protocol.IssueCancelled {
 		t.Fatal(child)
 	}
@@ -346,7 +344,6 @@ func TestCanonicalLifecycleCompletionDependencyRequiresAchievedEndpoint(t *testi
 			issue = admitExistingIssueFixture(t, h, issue)
 			if endpoint == "cancelled" {
 				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: prerequisite.AssignmentEpoch}))
-				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: prerequisite.AssignmentEpoch, Reason: "Owner cancels prerequisite"}}))
 			} else {
 				prerequisite = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, prerequisite, "close", canonicalLifecycleClosure(prerequisite, protocol.IssueClosureKind(endpoint))))
 			}
@@ -567,25 +564,24 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 			if op := h.associate(owner, source.MessageID, child.IssueID); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
+			parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch}))
 			if childState == "cancelled" {
 				child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}))
 			}
 			endpoint := canonicalLifecycleSourceEndpoint(t, h, child, source.MessageID)
-			action := "finish_cancel"
+			action := "review_sources"
 			if childState == "closed" {
 				action = "close"
 				endpoint.Closure = canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted).Closure
 			}
 			child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, action, endpoint))
 			terminal := child
-			parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch}))
 			report.Body = "Completed child report has additional facts"
 			report.Status = protocol.AssistantCompleted
 			op = h.exec(mainAgent, h.env("conversation.record_agent_message", protocol.Target{Type: "conversation"}, report, nil), RecordAgentMessage{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			parentFinish := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Owner finishes parent cancellation"}}
 			before := canonicalGuardBusinessSnapshot(t, h)
 			expectWorkCode(t, canonicalLifecycleControl(t, h, child, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: child.AssignmentEpoch}), protocol.CodeInvalidTransition)
 			if !bytes.Equal(before, canonicalGuardBusinessSnapshot(t, h)) {
@@ -593,7 +589,7 @@ func TestCanonicalLifecycleCancellingParentAllowsTerminalChildSourceReview(t *te
 			}
 			// Late source interpretation is ordinary owner judgment, not a
 			// cancellation gate. Preserve the child history for optional review.
-			parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", parentFinish))
+			parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Finish parent after child settlement"}}))
 			if parent.State != protocol.IssueCancelled {
 				t.Fatal("late child narration required a source-review ceremony", parent)
 			}
@@ -655,8 +651,8 @@ func TestCanonicalLifecycleTerminalSourceReviewCanSettleNamedBatches(t *testing.
 	cp := canonicalOwnerIssueCreate{Plan: parent.Plan, ParentIssueID: parent.IssueID, ExpectedParentRevision: rev(parent.Revision)}
 	child := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, cp, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	child = admitExistingIssueFixture(t, h, child)
-	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted)))
 	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch}))
+	child = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, child, "close", canonicalLifecycleClosure(child, protocol.WorkItemClosureCompleted)))
 	first, turn := startReviewTurn(t, h)
 	op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, protocol.SubmitMessagePayload{Body: "A second source for the ended scope"}, nil), SubmitMessage{})
 	if op.Status != protocol.OpAccepted {
@@ -696,8 +692,7 @@ func TestCanonicalLifecycleTerminalSourceReviewCanSettleNamedBatches(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	finish := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Finish parent without a source-review ceremony"}}
-	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", finish))
+	parent = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, parent, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Finish parent after child settlement"}}))
 	if parent.State != protocol.IssueCancelled {
 		t.Fatal("partial source interpretation became a cancellation gate", parent)
 	}
