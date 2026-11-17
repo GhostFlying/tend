@@ -242,6 +242,11 @@ const server = createServer(async (req, res) => {
           },
     );
   }
+  if (p.startsWith("/api/v1/conversation/blocks/")) {
+    const id = decodeURIComponent(p.slice("/api/v1/conversation/blocks/".length));
+    const block = activity.items?.find((entry) => entry.block?.trigger.message_id === id)?.block;
+    if (block) return json(block);
+  }
   if (p === "/api/v1/session")
     return json({
       token: "fixture",
