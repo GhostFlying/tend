@@ -267,7 +267,10 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 	defer ticker.Stop()
 	for {
 		state, err := readState(filepath.Join(cfg.StateDir, "state.json"))
-		if err == nil && state.InstanceID == cfg.InstanceID && state.Operation != nil && state.Operation.ID == record.RequestID && state.Operation.Phase == "committed" && state.Current == record.Target && state.Process.LaunchID == record.LaunchID {
+		// A normal process restart can replace the transient operation after
+		// installation. Its durable receipt still binds the original recovery.
+		proof := CommittedReceipt(state)
+		if err == nil && state.InstanceID == cfg.InstanceID && state.Current == record.Target && proof != nil && proof.ExternalRecovery && proof.Binding.UpgradeID == record.RequestID && proof.Binding.ProcessInstanceID == record.LaunchID {
 			err := advance("complete")
 			return record, err
 		}
