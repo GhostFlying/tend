@@ -38,7 +38,7 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 	if negotiated != r.Protocol {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner protocol does not match negotiation")
 	}
-	if r.InstanceID == "" || len(r.InstanceID) > 128 || r.Sequence < 1 || r.Generation < 1 || r.Protocol < protocol.PreviousRunnerProtocol || r.Protocol > protocol.CurrentRunnerProtocol || r.ProtocolMin > r.Protocol || r.ProtocolMax < r.Protocol || r.ProtocolMin < 0 || r.PendingClaims < 0 || r.PendingOperations < 0 || !slices.Contains([]string{protocol.RunnerNormal, protocol.RunnerMaintenance, protocol.RunnerReady}, r.Mode) {
+	if r.InstanceID == "" || len(r.InstanceID) > 128 || r.Sequence < 1 || r.Generation < 1 || r.Protocol < protocol.MinimumRunnerProtocol || r.Protocol > protocol.CurrentRunnerProtocol || r.ProtocolMin > r.Protocol || r.ProtocolMax < r.Protocol || r.ProtocolMin < 0 || r.PendingClaims < 0 || r.PendingOperations < 0 || !slices.Contains([]string{protocol.RunnerNormal, protocol.RunnerMaintenance, protocol.RunnerReady}, r.Mode) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid or unsupported runner runtime")
 	}
 	return nil

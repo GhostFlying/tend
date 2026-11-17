@@ -20,8 +20,8 @@ func TestUpgradeRetryWaitsForPendingCandidateCancellation(t *testing.T) {
 	if op := h.exec(runner(b.InstanceID), h.env("runner.upgrade_authorize", protocol.Target{Type: "host", ID: b.InstanceID}, b, rev(ctl.Revision)), AuthorizeRunnerUpgrade{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	// The other host drops offline while the bound candidate remains staged.
-	h.clock.Advance(61 * time.Second)
+	// The original candidate deadline expires while it remains staged.
+	h.clock.Advance(time.UnixMilli(upgradeRead(h).Deadline).Sub(h.clock.Now()) + time.Millisecond)
 	upgradeAck(h, b.InstanceID, protocol.RunnerReady)
 	v := upgradeTick(h, ServerObservation{})
 	if v.Status != "attention" {

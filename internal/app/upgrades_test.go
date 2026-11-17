@@ -37,7 +37,35 @@ func upgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+}
+
+// startPreparedTestUpgrade models downloads acknowledged through actual heartbeats.
+// Tests of the preparation boundary use startTestUpgrade directly.
+func startPreparedTestUpgrade(h *harness, id string, c StartUpgrade) protocol.Operation {
+	h.t.Helper()
+	op := startTestUpgrade(h, id, c)
+	if op.Status != protocol.OpSucceeded {
+		return op
+	}
+	prepareTestUpgrade(h)
+	return op
+}
+func prepareTestUpgrade(h *harness) {
+	h.t.Helper()
+	batch := upgradeRead(h)
+	for i, host := range batch.Hosts {
+		if batch.View.Hosts[i].Status == "skipped" {
+			continue
+		}
+		runtime := upgradeAck(h, host.HostID, protocol.RunnerNormal)
+		runtime.Sequence++
+		runtime.UpgradePhase = "prepared"
+		if _, err := h.app.RuntimeHeartbeat(h.t.Context(), runner(host.HostID), protocol.HeartbeatPayload{Runtime: &runtime}); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	upgradeTick(h, ServerObservation{})
 }
 func startTestUpgrade(h *harness, id string, c StartUpgrade) protocol.Operation {
 	h.t.Helper()
@@ -98,9 +126,12 @@ func upgradeTick(h *harness, o ServerObservation) protocol.UpgradeView {
 	}
 	return v
 }
+func committedServerForTest(b protocol.UpgradeBinding) *protocol.UpdaterReceipt {
+	return &protocol.UpdaterReceipt{Phase: "committed", CommittedConfirmed: true, Binding: b, CurrentSHA256: b.ArtifactSHA256, CurrentProcessInstanceID: b.ProcessInstanceID}
+}
 func upgradeToRunners(h *harness, c StartUpgrade) protocol.UpgradeBinding {
 	h.t.Helper()
-	if op := startTestUpgrade(h, "upgrade-one", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "upgrade-one", c); op.Status != protocol.OpSucceeded {
 		h.t.Fatal(op)
 	}
 	if v := upgradeTick(h, ServerObservation{MainDrained: false}); v.Phase != "server_draining" {
@@ -127,7 +158,7 @@ func upgradeToRunners(h *harness, c StartUpgrade) protocol.UpgradeBinding {
 	if v := upgradeTick(h, o); v.Phase != "server_checking" {
 		h.t.Fatal("duplicate observation counted twice", v)
 	}
-	h.clock.Advance(5 * time.Second)
+	o.UpdaterReceipt = &protocol.UpdaterReceipt{Phase: "committed", CommittedConfirmed: true, Binding: b, CurrentSHA256: b.ArtifactSHA256, CurrentProcessInstanceID: b.ProcessInstanceID}
 	if v := upgradeTick(h, o); v.Phase != "runners" {
 		h.t.Fatal(v)
 	}
@@ -182,7 +213,7 @@ func TestUpgradePreflightRejectsUnsafeFleet(t *testing.T) {
 				}
 				c.Manifest.Protocol = release.Range{Min: 1, Max: 2}
 			}
-			op := startTestUpgrade(h, "rejected", c)
+			op := startPreparedTestUpgrade(h, "rejected", c)
 			if op.Status != protocol.OpFailed {
 				t.Fatalf("accepted %s: %+v", kind, op)
 			}
@@ -194,10 +225,10 @@ func TestUpgradePreflightRejectsUnsafeFleet(t *testing.T) {
 }
 func TestUpgradeSingleUnfinishedAndFixedServerGrant(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "one", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "one", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if op := startTestUpgrade(h, "two", c); op.Status != protocol.OpFailed {
+	if op := startPreparedTestUpgrade(h, "two", c); op.Status != protocol.OpFailed {
 		t.Fatal("overlapping batch", op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true})
@@ -363,7 +394,7 @@ func TestUpgradeServerFirstRestorationAndNoDatabaseRollback(t *testing.T) {
 func TestUpgradeDrainTimeoutResumesMainWithoutDiscardingFacts(t *testing.T) {
 	h, c := upgradeHarness(t)
 	c.DrainMillis = 1000
-	if op := startTestUpgrade(h, "timed-out", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "timed-out", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	paused, err := h.app.UpgradePausesMain(t.Context())
@@ -408,12 +439,12 @@ func TestUpgradeCancelRestoresOnlyConfirmedUnswitchedRunners(t *testing.T) {
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerNormal)
 	}
-	if op := startTestUpgrade(h, "after-ack", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "after-ack", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 }
 
-func TestUpgradeRetainedHostOfflinePreventsCandidateAuthorization(t *testing.T) {
+func TestUpgradeUnavailableOtherHostDoesNotBlockPreparedCandidate(t *testing.T) {
 	h, c := upgradeHarness(t)
 	upgradeToRunners(h, c)
 	upgradeTick(h, ServerObservation{})
@@ -427,26 +458,15 @@ func TestUpgradeRetainedHostOfflinePreventsCandidateAuthorization(t *testing.T) 
 
 	env := h.env("runner.upgrade_authorize", protocol.Target{Type: "host", ID: "linux-1"}, b, rev(ctl.Revision))
 	op := h.exec(runner("linux-1"), env, AuthorizeRunnerUpgrade{})
-	var denied protocol.UpgradeGrant
-	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &denied) != nil || denied.Allowed {
-		t.Fatal("authorized while retained host offline", op)
-	}
-	if r := upgradeRead(h); r.Hosts[0].CandidateInstance != "" || r.Hosts[0].GrantDeadline != 0 {
-		t.Fatal("denied authorization changed candidate")
-	}
-	upgradeAck(h, "linux-2", protocol.RunnerNormal)
-	op = h.exec(runner("linux-1"), env, AuthorizeRunnerUpgrade{})
 	var allowed protocol.UpgradeGrant
 	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &allowed) != nil || !allowed.Allowed {
-		t.Fatal("same request ID did not recover after retained host returned", op)
+		t.Fatal("unrelated offline host blocked candidate", op)
 	}
-	h.clock.Advance(61 * time.Second)
-	upgradeAck(h, "linux-1", protocol.RunnerReady)
-	if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
-		t.Fatalf("retained-host loss must pause and notify: %+v", v)
+	if r := upgradeRead(h); r.Hosts[0].CandidateInstance != b.ProcessInstanceID || r.Hosts[0].GrantDeadline == 0 {
+		t.Fatal("candidate identity not retained")
 	}
-	if ctl := upgradeCtl(h, "linux-1"); ctl.Mode != protocol.RunnerMaintenance {
-		t.Fatal("unknown candidate gate released", ctl)
+	if v := upgradeTick(h, ServerObservation{}); v.Status != "running" {
+		t.Fatal("unrelated host paused current installation", v)
 	}
 
 }
@@ -460,7 +480,7 @@ func TestUpgradeChoosesIdleRunnerBeforeBusyRunner(t *testing.T) {
 	if _, ok := h.claimWith("linux-1", h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: h.worker("linux-1"), WorkspaceProtocol: 1, Runtime: rt}, nil)); !ok {
 		t.Fatal("missing active run")
 	}
-	if op := startTestUpgrade(h, "idle-first", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "idle-first", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	// This release has an unchanged server, so only runner ordering is exercised.
@@ -481,7 +501,7 @@ func TestUpgradeActiveRunCoverageIsFixedAcrossHeartbeats(t *testing.T) {
 	if !ok {
 		t.Fatal("missing run")
 	}
-	if op := startTestUpgrade(h, "active-coverage", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "active-coverage", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true})
@@ -501,6 +521,8 @@ func TestUpgradeActiveRunCoverageIsFixedAcrossHeartbeats(t *testing.T) {
 	if lease.ExpiresAt < g.DeadlineMillis {
 		t.Fatal("persisted lease shorter than restart coverage")
 	}
+	latest := upgradeAck(h, "linux-1", protocol.RunnerMaintenance)
+	*rt = latest
 	rt.Sequence++
 	rt.Mode = protocol.RunnerMaintenance
 	rt.AppliedControlRevision = ctl.Revision
@@ -518,7 +540,7 @@ func TestUpgradeActiveRunCoverageIsFixedAcrossHeartbeats(t *testing.T) {
 
 func TestUpgradeExpiredServerGrantCannotBeExtendedByRetry(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "expired-grant", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "expired-grant", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true})

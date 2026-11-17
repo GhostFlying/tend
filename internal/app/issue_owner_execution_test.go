@@ -124,7 +124,7 @@ func createOwnerExecution(t *testing.T, h *harness, issue protocol.Issue, implem
 	spec := testSpec
 	spec.ImplementationContext = "PRIVATE_OWNER_IMPLEMENTATION_DESIGN"
 	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: implementation}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}
-	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Execute own responsibility", Spec: spec}
+	payload := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Execute own responsibility", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise explicit independent review"}}
 	op, err := h.app.Execute(t.Context(), owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, payload, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if err != nil {
 		return protocol.Operation{Status: protocol.OpFailed, Error: protocol.Errorf(protocol.CodeOf(err), "execution rejected")}

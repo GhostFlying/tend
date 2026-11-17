@@ -149,25 +149,10 @@ func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.
 		facts.Components = append(facts.Components, component)
 		return facts
 	}, RecoveryReady: func(ctx context.Context) error {
-		if _, err := a.CurrentUpgrade(ctx); err != nil {
-			return err
-		}
-		if front != nil {
-			if err := front.RecoveryReadiness(ctx); err != nil {
-				return err
-			}
-		}
-		if background != nil {
-			if err := background.RecoveryReadiness(ctx); err != nil {
-				return err
-			}
-		}
-		if uncertain, err := a.AgentCompactionsUncertain(ctx); err != nil {
-			return err
-		} else if uncertain {
-			return errors.New("agent compaction needs reconciliation")
-		}
-		return nil
+		// The control listener and migrated ledger are the installation boundary.
+		// Native sessions recover lazily and cannot prevent installing their fix.
+		_, err := a.CurrentUpgrade(ctx)
+		return err
 	}, Instance: cfg.Instance, ProcessInstance: process, BinarySHA256: sum, ControlSocket: cfg.ControlSocket, UpdaterSocket: cfg.UpdaterSocket, ReleaseDir: cfg.ReleaseDir, DrainMillis: time.Duration(cfg.DrainTimeout).Milliseconds(), RestartMillis: time.Duration(cfg.RestartBudget).Milliseconds(), GrantMillis: time.Duration(cfg.GrantDuration).Milliseconds(), Interval: interval, Changes: a.SchedulingChanges().Wait}, a, ids, func(ctx context.Context) (app.ServerObservation, error) {
 		var agents []upgradeDrainer
 		if front != nil {
@@ -176,7 +161,7 @@ func prepareUpgradeController(cfg *UpgradeConfig, a *app.App, front *mainthread.
 		if background != nil {
 			agents = append(agents, background)
 		}
-		drained, err := allAgentsDrained(ctx, a, agents...)
+		drained, err := allAgentsDrained(ctx, agents...)
 		if err != nil {
 			return app.ServerObservation{}, err
 		}
@@ -188,13 +173,12 @@ type upgradeDrainer interface {
 	UpgradeDrainStatus(context.Context) (bool, error)
 }
 
-func allAgentsDrained(ctx context.Context, a *app.App, agents ...upgradeDrainer) (bool, error) {
+func allAgentsDrained(ctx context.Context, agents ...upgradeDrainer) (bool, error) {
 	for _, agent := range agents {
 		drained, err := agent.UpgradeDrainStatus(ctx)
 		if err != nil || !drained {
 			return false, err
 		}
 	}
-	uncertain, err := a.AgentCompactionsUncertain(ctx)
-	return !uncertain && err == nil, err
+	return true, nil
 }

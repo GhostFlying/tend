@@ -22,7 +22,7 @@ func liveReviewedDeliveryFixture(t *testing.T) (*harness, *protocol.RunnerRuntim
 	if err := json.Unmarshal(raw, &input); err != nil {
 		t.Fatal(err)
 	}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{Title: "Continue the same complete delivery", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: input}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise explicitly required independent review"}, Title: "Continue the same complete delivery", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: input}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

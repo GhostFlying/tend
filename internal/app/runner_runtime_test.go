@@ -12,7 +12,7 @@ import (
 )
 
 func testRuntime(instance string) *protocol.RunnerRuntime {
-	return &protocol.RunnerRuntime{InstanceID: instance, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
+	return &protocol.RunnerRuntime{InstanceID: instance, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
 }
 func (h *harness) versionedHello(host string, r *protocol.RunnerRuntime) protocol.Operation {
 	// A fake process allocates its durable generation when first registered.

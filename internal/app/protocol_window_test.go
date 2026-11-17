@@ -8,14 +8,14 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func TestProtocolFourAdmitsThreeAndRejectsTwoBeforeAllocation(t *testing.T) {
-	for _, version := range []int64{2, 3, 4} {
+func TestCurrentProtocolRejectsRetiredAndFutureBeforeAllocation(t *testing.T) {
+	for _, version := range []int64{0, 1, 2, 3, 4, protocol.CurrentRunnerProtocol, protocol.CurrentRunnerProtocol + 1} {
 		t.Run(strconv.FormatInt(version, 10), func(t *testing.T) {
 			h := newHarness(t)
 			runtime := testRuntime("protocol-window")
 			runtime.Protocol, runtime.ProtocolMin, runtime.ProtocolMax = version, version, version
 			op := h.versionedHello("linux-1", runtime)
-			if version == 2 {
+			if version != protocol.CurrentRunnerProtocol {
 				if op.Status != protocol.OpFailed || protocol.CodeOf(op.Error) != protocol.CodeInvalidRequest || h.count("runs") != 0 {
 					t.Fatal("retired communication was admitted", op)
 				}

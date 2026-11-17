@@ -136,7 +136,7 @@ func (h *harness) env(op string, target protocol.Target, payload any, revision *
 					h.hello(target.ID)
 				}
 			}
-			current := protocol.RunnerRuntime{InstanceID: "fixture-" + target.ID, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+			current := protocol.RunnerRuntime{InstanceID: "fixture-" + target.ID, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
 			if err := h.store.Read(context.Background(), func(tx *store.ReadTx) error {
 				old, e := store.GetHostRuntime(context.Background(), tx.Q(), target.ID)
 				if e == nil {

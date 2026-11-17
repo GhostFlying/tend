@@ -106,10 +106,10 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 		}
 	}
 	stateFormat.Store(4)
-	// Real terminal health remains false even if drainer readiness changes.
+	// Installation readiness does not inherit historical drain or sample gates.
 	health, err := a.ServerUpgradeHealth(ctx, plan.Original)
-	if err != nil || health.Healthy || !health.ServerConfirmed {
-		t.Fatal("legacy terminal fixture did not reproduce stale count", health, err)
+	if err != nil || !health.Healthy || !health.ServerConfirmed {
+		t.Fatal("installation readiness inherited a historical gate", health, err)
 	}
 	legacy, err := New(Config{Instance: "server", ProcessInstance: original.ServerProcess, BinarySHA256: original.ServerHash, ControlSocket: testkit.SocketPath(t, "legacy.sock"), UpdaterSocket: socket, ReleaseDir: filepath.Join(root, "legacy-releases")}, a, ids, func(context.Context) (app.ServerObservation, error) {
 		return app.ServerObservation{Healthy: true, MainDrained: false}, nil
@@ -121,8 +121,8 @@ func TestRecoveryHealthWithActualProcessAndLegacyTerminal(t *testing.T) {
 	legacyOut := httptest.NewRecorder()
 	legacy.Handler().ServeHTTP(legacyOut, httptest.NewRequest(http.MethodPost, "/updater/health", bytes.NewReader(legacyBody)))
 	var legacyHealth protocol.UpgradeHealth
-	if legacyOut.Code != http.StatusOK || json.Unmarshal(legacyOut.Body.Bytes(), &legacyHealth) != nil || legacyHealth.Healthy || !legacyHealth.ServerConfirmed {
-		t.Fatal("production legacy handler did not reproduce the terminal blocker", legacyOut.Body.String())
+	if legacyOut.Code != http.StatusOK || json.Unmarshal(legacyOut.Body.Bytes(), &legacyHealth) != nil || !legacyHealth.Healthy || !legacyHealth.ServerConfirmed {
+		t.Fatal("local health inherited an unrelated drain gate", legacyOut.Body.String())
 	}
 	post := func(path string, input any) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(input)

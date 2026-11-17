@@ -9,7 +9,7 @@ import (
 
 func TestFault_UpgradeBatchDeadlinePersistsAcrossStageAndRetry(t *testing.T) {
 	h, c := upgradeHarness(t)
-	if op := startTestUpgrade(h, "bounded-batch", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "bounded-batch", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	original := upgradeRead(h)
@@ -54,7 +54,7 @@ func TestFault_UpgradeBatchDeadlinePersistsAcrossStageAndRetry(t *testing.T) {
 func TestFault_UpgradeRestartCoverageCannotOutliveBatch(t *testing.T) {
 	h, c := upgradeHarness(t)
 	c.DrainMillis = (30 * time.Minute).Milliseconds()
-	if op := startTestUpgrade(h, "deadline-coverage", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "deadline-coverage", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	r := upgradeRead(h)

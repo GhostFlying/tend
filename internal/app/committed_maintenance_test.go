@@ -210,7 +210,7 @@ func TestCommittedMaintenanceRejectsPreparationAndReceiptMismatch(t *testing.T) 
 	if _, err := h.app.RegisterCommittedMaintenance(ctx, p, process); err != nil {
 		t.Fatal(err)
 	}
-	proof := protocol.CommittedMaintenanceReceipt{MaintenanceID: p.MaintenanceID, RequestID: p.RequestID, Previous: p.Previous, Successor: p.Successor, Process: process, Generation: 1, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 1}
+	proof := protocol.CommittedMaintenanceReceipt{MaintenanceID: p.MaintenanceID, RequestID: p.RequestID, Previous: p.Previous, Successor: p.Successor, Process: process, Generation: 1, Epoch: process.LaunchID, FirstSequence: 1, SecondSequence: 0}
 	if _, err := h.app.LinkCommittedMaintenance(ctx, proof); protocol.CodeOf(err) != protocol.CodeConflictPayload {
 		t.Fatal("one repeated health sample accepted", err)
 	}

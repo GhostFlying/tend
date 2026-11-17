@@ -223,6 +223,8 @@ func explain(p Plan) Plan {
 	}
 	if p.Web {
 		p.Decisions["web"] = "selected: complete type, lint, format, unit and web build checks"
+	} else if p.Cross || p.Release {
+		p.Decisions["web"] = "selected: build embedded assets for executable validation; unrelated frontend tests excluded"
 	}
 	if p.Layout {
 		p.Decisions["layout"] = "selected: both existing browser regression groups"
@@ -239,7 +241,7 @@ func explain(p Plan) Plan {
 
 // Required maps stable aggregate job names to the current plan's requirements.
 func (p Plan) Required() map[string]bool {
-	return map[string]bool{"quality": true, "race": len(p.Groups) > 0, "web": p.Web, "layout": p.Layout, "cross": p.Cross, "release-build": p.Release, "release-assemble": p.Release}
+	return map[string]bool{"quality": true, "race": len(p.Groups) > 0, "web": p.Web || p.Cross || p.Release, "layout": p.Layout, "cross": p.Cross, "release-build": p.Release, "release-assemble": p.Release}
 }
 
 // VerifyResults distinguishes planned exclusions from missing or failed work.

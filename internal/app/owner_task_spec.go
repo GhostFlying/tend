@@ -57,7 +57,7 @@ func (CanonicalOwnerTaskUpdate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reopen the primary issue before revising its task agreement")
 	}
-	payload := updateIntentPayload{Rating: p.Rating, Relations: p.Relations}
+	payload := updateIntentPayload{Rating: p.Rating, Relations: p.Relations, IndependentAcceptance: p.IndependentAcceptance}
 	if p.Spec != nil {
 		var delivery bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_delivery_executions WHERE task_id=?)`, x.Env.Target.ID).Scan(&delivery); err != nil {

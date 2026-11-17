@@ -14,7 +14,7 @@ import (
 // This test uses only the pre-existing delivery messages and commands. It is
 // retains the opaque payload across both supported runner generations.
 func TestIssueDeliveryObserverPreservesSupportedRunnerProtocols(t *testing.T) {
-	for _, version := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
+	for _, version := range []int64{protocol.MinimumRunnerProtocol, protocol.CurrentRunnerProtocol} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			e := newEnv(t, time.Millisecond)
 			owner := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner", Client: "test-owner"}

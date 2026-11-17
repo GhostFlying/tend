@@ -21,7 +21,7 @@ func acceptanceSharedReviewFixture(t *testing.T) (*harness, *protocol.RunnerRunt
 	}
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	spec := protocol.OwnerTaskSpec{Goal: "Deliver the complete shared PR", Acceptance: []string{"Independent whole PR review"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}, Observation: &protocol.ObservationScope{WorkItemIDs: []string{issue.IssueID}}}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{Title: "Whole PR", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{Title: "Whole PR", IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Review the entire PR"}, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

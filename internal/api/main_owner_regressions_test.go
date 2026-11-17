@@ -26,7 +26,7 @@ func TestMainOwnerRegressionMainAttentionDoesNotWakeItself(t *testing.T) {
 func TestMainOwnerRegressionNamedTypedAnswerUsesOwnerAuthority(t *testing.T) {
 	e, call := mainOwnerFixture(t)
 	task := e.task("Worker needing a decision")
-	rt := &protocol.RunnerRuntime{InstanceID: "question-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
+	rt := &protocol.RunnerRuntime{InstanceID: "question-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance}}
 	runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}
 	issueWorkerCommand(t, e, runner, protocol.Target{Type: "host", ID: "host-a"}, protocol.HelloPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: rt}, app.Hello{})
 	claimed := issueWorkerCommand(t, e, runner, protocol.Target{Type: "host", ID: "host-a"}, protocol.ClaimPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: rt}, app.Claim{})

@@ -424,7 +424,7 @@ func TestHistoricalDeliverySettlementRejectsUnprovedOrReplacedFacts(t *testing.T
 				case "server_instance":
 					batch.ServerInstance = "other"
 				case "server_health":
-					batch.ServerHealthy = 1
+					batch.ServerHealthy = 0
 				case "server_process":
 					batch.ServerProcess = ""
 				case "hosts":

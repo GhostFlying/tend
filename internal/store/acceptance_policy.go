@@ -11,8 +11,8 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-// TaskAcceptancePolicy reads only the immutable creation snapshot. Changes to an
-// Issue's current policy never change already admitted work.
+// TaskAcceptancePolicy reads the Task's current explicit review choice. Changing
+// an Issue default does not silently rewrite an existing Task agreement.
 func TaskAcceptancePolicy(ctx context.Context, q Querier, task string) (*protocol.IssueAcceptancePolicy, error) {
 	return readAcceptancePolicy(ctx, q, `SELECT policy_json FROM task_acceptance_policies WHERE task_id=?`, task)
 }
@@ -50,5 +50,17 @@ func (t *Tx) FreezeTaskAcceptancePolicy(ctx context.Context, task string, p *pro
 		return err
 	}
 	_, err = t.Exec(ctx, `INSERT INTO task_acceptance_policies(task_id,policy_json) VALUES(?,?)`, task, string(raw))
+	return err
+}
+
+func (t *Tx) UpdateTaskAcceptancePolicy(ctx context.Context, task string, revision int64, p *protocol.IssueAcceptancePolicy, now int64) error {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	if _, err := t.Exec(ctx, `INSERT INTO task_review_choices(task_id,control_revision,request_id,previous_policy_json,policy_json,created_at) VALUES(?,?,?,(SELECT policy_json FROM task_acceptance_policies WHERE task_id=?),?,?)`, task, revision, p.RequestID, task, string(raw), now); err != nil {
+		return err
+	}
+	_, err = t.Exec(ctx, `INSERT INTO task_acceptance_policies(task_id,policy_json) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET policy_json=excluded.policy_json`, task, string(raw))
 	return err
 }

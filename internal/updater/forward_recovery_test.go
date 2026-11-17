@@ -182,7 +182,6 @@ func TestForwardRecoveryRejectsCASReplayAndReadinessFailures(t *testing.T) {
 	}
 	h.step(t)
 	h.step(t)
-	h.step(t) // first healthy sample
 	a.fail = true
 	if err := h.s.Step(context.Background()); err == nil {
 		t.Fatal("transport failure counted")
@@ -191,7 +190,6 @@ func TestForwardRecoveryRejectsCASReplayAndReadinessFailures(t *testing.T) {
 	if h.s.Status().Recovery.HealthCount != 0 {
 		t.Fatal("transport failure retained health count")
 	}
-	h.step(t)
 	a.unready = true
 	if err := h.s.Step(context.Background()); err == nil {
 		t.Fatal("unready counted")
@@ -200,7 +198,7 @@ func TestForwardRecoveryRejectsCASReplayAndReadinessFailures(t *testing.T) {
 	h.step(t)
 	h.step(t)
 	if h.s.Status().Recovery.Phase != "successor_committed" {
-		t.Fatal("two real later samples did not commit")
+		t.Fatal("ready successor did not commit")
 	}
 }
 func TestForwardRecoveryDurabilityFailureFencesProcessEffects(t *testing.T) {
@@ -228,10 +226,6 @@ func TestForwardRecoveryRenameAcknowledgementLossDoesNotRepeatEffects(t *testing
 	authorizeForward(t, h, p)
 	h.step(t)
 	h.step(t)
-	h.step(t)
-	if h.s.Status().Recovery.HealthCount != 1 {
-		t.Fatal("expected first readiness sample")
-	}
 	h.s.writeState = func(path string, state State) error {
 		if err := writeJSON(path, state); err != nil {
 			return err
@@ -290,31 +284,15 @@ func TestForwardRecoveryUnknownStopCannotSignalAgainOrLaunch(t *testing.T) {
 	}
 }
 
-func TestForwardRecoveryHealthCannotCombineEpochsOrRepeatedSequences(t *testing.T) {
-	h, p, a := forwardFixture(t)
+func TestForwardRecoveryCommitsFirstReadySuccessorWithoutHeartbeatDelay(t *testing.T) {
+	h, p, _ := forwardFixture(t)
 	authorizeForward(t, h, p)
 	h.step(t)
 	h.step(t)
 	h.step(t)
-	a.sequence = 0
-	if err := h.s.Step(context.Background()); err == nil {
-		t.Fatal("repeated sequence counted")
-	}
-	if h.s.Status().Recovery.HealthCount != 0 {
-		t.Fatal("duplicate sequence did not clear count")
-	}
-	h.step(t)
-	a.epoch = "different-server-epoch"
-	if err := h.s.Step(context.Background()); err == nil {
-		t.Fatal("different epoch combined with prior sample")
-	}
-	if h.s.Status().Recovery.Receipt != nil {
-		t.Fatal("wrong epoch produced receipt")
-	}
-	h.step(t)
-	h.step(t)
-	if h.s.Status().Recovery.Receipt == nil || h.s.Status().Recovery.Receipt.Epoch != a.epoch {
-		t.Fatal("two independent new epoch samples did not commit")
+	receipt := h.s.Status().Recovery.Receipt
+	if receipt == nil || receipt.FirstSequence != receipt.SecondSequence || h.p.starts != 1 {
+		t.Fatal("first actual readiness did not commit", receipt)
 	}
 }
 

@@ -333,6 +333,9 @@ func settleExternalWaitStopped(ctx context.Context, x *Exec, tx *store.Tx, r sto
 		}
 	}
 	if r.Role == protocol.RoleIssueManager {
+		if err := recordManagerPhysicalStop(ctx, x, tx, r.RunID); err != nil {
+			return Outcome{}, err
+		}
 		if err := settleStoppedManagerRequests(ctx, tx, r.RunID); err != nil {
 			return Outcome{}, err
 		}

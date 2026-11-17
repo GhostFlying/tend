@@ -1,6 +1,6 @@
 # 受控升级操作
 
-实现依据 D82–D85。自动安装目前支持 Linux；其他平台可以构建，但不会执行进程替换。发布由固定 Go 更新器执行，模型不参与停止、替换或恢复进程。
+实现依据 D82–D85、D252。自动安装目前支持 Linux；其他平台可以构建，但不会执行进程替换。发布由固定 Go 更新器执行，模型不参与停止、替换或恢复进程。
 
 ## 信任边界与故障模型
 
@@ -12,7 +12,10 @@
 
 ## 首次接入
 
-无版本旧 runner 不具备控制接口，首次接入不能伪装为自动升级。先确认主会话没有活动 turn、每台 runner 没有活跃或未知 run、未交付结果、未确认领取或工作目录操作；保存原始程序、配置和匹配数据备份。先安装支持协议 1 的 server，再逐台安装支持协议 1 的 runner。新 server 仍接收 legacy0；新 runner 不向旧 server 静默回退。
+协议 5 首次采用整套冷切换，不提供旧协议滚动互通：先停止旧接单与真实执行，
+归档数据库、原件、runner journal 和 updater 状态，保留配置及节点身份；安装完整
+发布集并初始化新的业务数据，不自动重放旧任务。归档不等于删除原件，也不等于
+旧 unknown 已解决。已有协议 5 集群后续普通更新保留业务数据并执行必要迁移。
 
 server 配置增加 `upgrades`，包含 `instance`（逻辑服务名，默认 `server`）、`control_socket`、`updater_socket`、`release_dir`；可配置 `drain_timeout`（默认 `6m`）、`restart_budget`（默认 `120s`）、`grant_duration`（默认 `300s`）。新批次另持久保存二十分钟整体截止；阶段与 grant 均不能超过整体剩余预算，retry 不续期，到期后只对账或取消再另开批次。历史批次没有整体字段时仍按原分段期限对账。这些是本机私有路径，配置不提交仓库。
 
@@ -33,7 +36,7 @@ runner 配置同时增加 `updater_socket`（自己的 authority socket）、`up
 
 先运行 `tend-updater serve --config "$UPDATER_CONFIG"`，再以 `bootstrap --config "$UPDATER_CONFIG" --pid "$SERVICE_PID"` 收养已确认空闲的进程。更新器验证实际程序、进程启动身份和参数，并保存初始版本；每个配置只能由一个 updater 持有。
 
-本期不提供绕过排空的人工 `restart`。该命令会明确拒绝；意外退出后的同版本恢复只重启已证实退出的进程，不向运行中服务发送停止信号。
+普通 `restart` 仍要求协调停止。旧升级实现自身失效时，使用下述新发布中的外部恢复入口；正常自动升级不自行获得强制终止权限。
 
 ## 发布与执行
 
@@ -100,9 +103,9 @@ tend upgrade start --socket "$SERVER_CONTROL_SOCKET" \
 
 也可用 server updater 的 `upgrade --config "$UPDATER_CONFIG" --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID"`，它同样进入受 format 2 约束的 server 批次协调接口。CLI 会先输出 request ID；不确定回执先读状态，不要换 ID 重发。相同请求重试必须保留批次、发布和 request ID。`--dry-run` 只展示请求，缺省选包仍显示空 release，既不访问 GitHub，也不启动下载或升级。
 
-准入拒绝未结束批次、离线或不兼容主机、无 updater 能力、无法读取的存储以及仍依赖退役协议的 run。server 等当前主会话结束；期间 owner 消息继续持久入队。随后固定本轮现有 run 的维护授权并等待 runner 确认，确认剩余覆盖足够才允许停 server。普通心跳不延长这次固定授权。runner 用完整请求往返耗时和本地保守折扣确认覆盖期限；停止授权的截止时间再扣除整个 server 重启预算。获取授权后暂停过久的 updater 不得停止服务。
+准入拒绝未结束批次、离线或不兼容主机、无 updater 能力、无法读取的存储以及仍依赖退役协议的 run。server 先缓存全部产物，各目标 runner 经现有认证链路下载并校验；preparing 期间继续接单。全部准备完成后，server 等当前主会话结束；期间 owner 消息继续持久入队。随后固定本轮现有 run 的维护授权并等待 runner 确认，确认剩余覆盖足够才允许停 server。普通心跳不延长这次固定授权。runner 用完整请求往返耗时和本地保守折扣确认覆盖期限；停止授权的截止时间再扣除整个 server 重启预算。获取授权后暂停过久的 updater 不得停止服务。
 
-新 server 健康后恢复领取并按空闲优先逐台维护 runner。维护只等待当前 run 与交付/资源操作，不等待整项任务：后续验收仍在原工作目录排队。替换期间保留另一台可接单主机。候选以维护状态启动，确认配置、journal、provider 和服务端握手。两次不同的健康心跳只允许本机 updater 提交；server 收到持久提交证明后才恢复领取；相同 runner 哈希跳过替换。
+新 server 健康后恢复领取并按空闲优先逐台维护 runner。维护只等待当前 run 与交付/资源操作，不等待整项任务：后续验收仍在原工作目录排队。单 runner 也可更新。维护期间只使用已校验的缓存，不再联网下载。候选以维护状态启动，确认实际进程、程序哈希、配置、journal、provider 和服务端握手；首次真实就绪即可由本机 updater 持久提交。server 与 runner 都在确认对应提交证明后恢复接单；相同组件哈希跳过替换。模型会话、摘要和业务历史对账不阻塞安装提交。
 
 ```sh
 tend upgrade status --socket "$SERVER_CONTROL_SOCKET" --json
@@ -128,7 +131,7 @@ tend upgrade cancel --socket "$SERVER_CONTROL_SOCKET" \
 
 取消后会对账尚未安装的本地 updater 操作；下一批升级要等各主机心跳确认取消，避免遗留 staged 操作。已经完成的主机不因历史授权过期阻止后续主机重试。旧进程已停止且持久阶段确认候选尚未启动时，授权过期会恢复旧进程；候选启动结果未知时仍须对账。
 
-候选在阶段超时后恢复健康，仍会按原进程身份、程序哈希和两次健康观察进行对账。确认后的 server 恢复主会话和 runner 领取，确认后的 runner 恢复接单；批次继续保持暂停，不自动安装下一台。读取更新后的 revision，再选择 retry 或 cancel。此过程不续签停止授权、不重做安装。恢复旧版后的自动同版本重启会保留回退证明，并将其绑定到已确认的新进程。
+候选在阶段超时后恢复健康，仍会按原进程身份、程序哈希和实际就绪证明进行对账。确认后的 server 恢复主会话和 runner 领取，确认后的 runner 恢复接单；批次继续保持暂停，不自动安装下一台。读取更新后的 revision，再选择 retry 或 cancel。此过程不续签停止授权、不重做安装。恢复旧版后的自动同版本重启会保留回退证明，并将其绑定到已确认的新进程。
 
 提交证明同样沿已确认的同版本重启保留原候选身份，避免恢复后的新进程被误认为无关安装。选择回退后，updater 必须持久保存绑定 control revision 的 admission fence，停止仍存活候选前再次核对；无法确认则保持待处理。已持久提交的版本不可恢复旧数据，取消也不能绕过提交或回退证明。
 
@@ -136,7 +139,7 @@ tend upgrade cancel --socket "$SERVER_CONTROL_SOCKET" \
 
 停止授权已提交但回执丢失时，updater 可能仍停在 staged。批次暂停后，协调器通过 staged 比较交换取消；完整持久 cancelled 证明与当前旧进程匹配后，恢复未执行替换的服务。本批次保留暂停，取消后以新批次重新升级。该证明表示替换未开始，不表示执行过数据库回退。已进入 stopping 或后续阶段的操作不会通过此路径解除维护，继续原有进程对账。
 
-演练需要核对实际 PID、程序哈希、批次和 run 身份，以及两台主机之间没有重叠维护。每次测试只清理本次创建的 Orca workspace 与临时目录，先确认 run 释放，保留任务账本和交付证据。
+演练需要核对实际 PID、程序哈希、批次和 run 身份，以及各实例停止、启动、就绪和提交的实际边界。每次测试只清理本次创建的 Orca workspace 与临时目录，先确认 run 释放，保留任务账本和交付证据。
 
 ## Runner 进程代次文件
 
@@ -213,8 +216,8 @@ tend upgrade start --release "$RELEASE_DIR" --upgrade-id "$BATCH_ID" \
 
 配置批次跳过 server 重启，在创建批次的事务内冻结指定主机 claim。其余主机保持正常，
 目标等待所有 run、未确认领取及资源/交付操作完成。旧进程报告实际加载的原配置哈希；
-server 授权后，updater 停旧进程、备份数据、原子应用配置并启动相同程序。新进程报告
-实际解析字节的哈希，server 确认 required provider、两次不同健康心跳，updater 再
+server 授权后，updater 停旧进程、保存原配置、原子应用配置并启动相同程序。相同存储版本不复制整库；有存储迁移才备份受影响数据。新进程报告
+实际解析字节的哈希，server 确认 required provider 和实际就绪，updater 再
 持久提交。服务端恢复 normal 并收到确认后批次完成。验收须独立读回配置、PID/实例、
 server 侧 online/normal/provider，真实对象访问需另有明确目标与授权。
 
@@ -254,7 +257,7 @@ completed 批次标签不能替代实际进程、配置、健康、committed rec
 
 完整发布集的构建、下载暂存、实际基线核对、备份和所需操作输入应尽量在发起批次前准备。已接纳批次沿原整体/阶段期限推进，不把人工准备耗时补成新的 deadline；恢复前先核对剩余时间是否足以完成尚未执行的步骤。固定期限不是每步重新获得的完整窗口。
 
-同哈希 server 也记录准确进程和两次实际健康观测；独立维护批次后续供正式交付引用时不能省略这些证明。同哈希 runner 完成既有 updater 核实后，把恢复正常与清除本轮元数据放在一次控制更新中，仍等待真实正常 ACK 才推进下一主机。真实替换或配置变化继续走完整排空、安装、健康和恢复路径。串行主机、下载、排空和心跳等待要分别计时，不能把一个已部分安装的批次当成全新部署的耗时基准。
+同哈希 server 也记录准确进程和实际就绪证明；独立维护批次后续供正式交付引用时不能省略这些证明。同哈希 runner 完成既有 updater 核实后，把恢复正常与清除本轮元数据放在一次控制更新中，仍等待真实正常 ACK 才推进下一主机。真实替换或配置变化继续走完整排空、安装、健康和恢复路径。串行主机、下载、排空和心跳等待要分别计时，不能把一个已部分安装的批次当成全新部署的耗时基准。
 
 server、runner 和 updater 的进程入口统一接受 `TEND_LOG_LEVEL=debug|info|warn|error`，空值为 `info`，`verbose` 是 `debug` 的别名；非法值明确报配置错误并停止启动，不静默降级。稳定性调查期可在原服务环境文件中设置 `TEND_LOG_LEVEL=verbose`，下一次正常受控启动生效；不为调高日志重复未知升级。该设置只改变诊断级别，沿用 stderr、现有监督器分段与轮转，不改变凭据、业务身份、授权、期限或状态。普通 owner CLI 的业务 JSON 输出不受影响。
 
@@ -272,32 +275,8 @@ server 日志中的 `upgrade control step` 关联原 `upgrade_id`、`request_id`
 
 ## 普通 updater 自身交接与旧节点 bootstrap（D200）
 
-本轮源码实现不自动部署。首次接入旧节点时，使用新包中的独立 updater installer；
-它直接核验 systemd user manager、固定配置、旧进程、监督锁和原服务，不依赖旧 RPC。
-旧二进制必须有绑定实际 SHA-256 的 private `UpdaterExitEvidence`，其 exit_policy 为
-`retains-managed-child`，state_write_policy 为 `atomic-intent-before-effects`，并包含来源、review 依据和固定有效期。KillMode=process
-不能替代这份旧实现的退出行为证据。正常新 updater 的同一锁持有者可以提供对应能力。
-
-先准备 private JSON seed，request 包含 target.request_id、target.expires_at_millis、
-upgrade_id、release 和 release_set_sha256；另给出固定 unit、updater_binary、
-exit_evidence。request_id 是有效 Tend request ID；所有路径来自本机配置，不改 unit 或凭据。
-
-```sh
-tend updater self-update plan --installer "$NEW_UPDATER" \
-  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$UPDATER_CONFIG" \
-  --plan "$SELF_UPDATE_PLAN" --json
-tend updater self-update apply --installer "$NEW_UPDATER" \
-  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$UPDATER_CONFIG" \
-  --plan "$SELF_UPDATE_PLAN" --json
-tend updater self-update status --installer "$NEW_UPDATER" \
-  --installer-sha256 "$NEW_UPDATER_SHA256" --config "$UPDATER_CONFIG" --json
-```
-
-plan 只解析并持久保存事实供复核，不停止进程。apply 必须从目标 unit 之外运行；
-同一个原计划可再次 apply 对账 stopping/installing，已经发出的 stop/start 不重复发送。
-starting 表示启动已发出且仍待收养证明，不表示升级成功。status 把 journal 与实际
-socket 观测分开，旧 updater 不支持或 socket 不可用时明确报告未观测。首次部署的
-server/runner 能力接入仍须按部署计划逐台完成；旧服务不会因 updater 已替换就获得新 wire 能力。
+正常更新中的 updater 自身交接沿原服务和监督锁进行，尽量保留正在运行的服务。
+旧 updater 或其安装状态无法工作时，使用独立外部恢复，不要求旧 RPC 或旧状态可解析。
 
 普通升级自动把 installer 固定为独立 systemd user transient unit。旧 updater 退出时
 保持服务 PID，安装器取得同一监督锁，原子替换固定 executable 并启动新 updater。
@@ -309,14 +288,15 @@ server/runner 能力接入仍须按部署计划逐台完成；旧服务不会因
 
 监督器准备明确失败且 installer 尚未派发时，按原请求持久保存 rejection 证明。`self-update status --plan <original-plan>` 可在响应丢失或重启后恢复该证明；业务批次取得证明后可取消并另开批次。无法确认派发结果仍是 unknown，不由超时或缺少 journal 推导拒绝。
 
-legacy bootstrap 仅在可验证的非特权原子状态 writer 上使用目录写围栏；直接业务数据文件不能与 updater 状态文件共用该目录。交接日志位于私有 `self-update` 子目录。旧 writer 停止且原监督锁已取得后恢复原权限；停止未知时保留围栏与原计划供对账，不通过恢复写权限冒充完成。
+旧 bootstrap 工具只用于已有可核验退出约定的监督器。故障恢复的默认路径见下节，
+不用给失效旧实现补一份退出能力声明才能安装修复。
 
 
 ### 安装窗口与停机诊断
 
 普通新批次以 `grant_duration` 为安装额度，runner重启覆盖另包含 `restart_budget` 的预留，并受既有维护上限与原整体截止约束。实际server授权还会按runner报告的保守截止缩短；读取 `remaining_ms` 和原截止，不把配置额度当作保证剩余时间。已发批次或授权不会因再次观察而续期。
 
-协调器和runner在实际状态变化时及时观察/ACK，周期心跳仍兜底；提速不跳过排空、不同健康样本和安装回执。耗时对比须使用同样的替换范围，不能将已有部分组件安装的批次当作全量性能基线。
+协调器和runner在实际状态变化时及时观察/ACK，周期心跳仍兜底；提速不跳过必要停止、实际就绪和持久安装回执。耗时对比须使用同样的替换范围，不能将已有部分组件安装的批次当作全量性能基线。
 
 停机日志包含 `server shutdown phase`、`HTTP shutdown requests`、`HTTP shutdown active request` 及限量的 `HTTP request drained`。用规范化route、method、trace_id/request_id、request_kind、elapsed_ms、cancellation_source与各阶段时间区分只读等待、在途写入和后台关闭；原文件、URL参数及凭据不记录。空闲claim、消息/问题/日志长等待会返回当前事实，真正写入和文件传输仍继续排空。
 
@@ -348,3 +328,38 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 
 
 旧运行版本已 self-bind、但没有任何真实 upgrade 或 typed predeployment stage 的交付，若原执行已停止且租约/外部操作回执已收敛，可在当前 Issue revision/epoch 下用 `issue update-delivery` 的 `action: recover_preparation`，携带原 `task_id`、当前 `expected_task_control_revision` 和明确 `reason`。它归档旧绑定，恢复相同 Task 的准备责任，保留候选与全部历史；不完成交付、不授予新安装。随后通过原 Task 的真实结果、独立验收、继续与 prepare/bind 进入当前候选。保留工作区所有权不代表活动 writer。已有真实升级、未结外部动作、变化的责任/授权或 typed stage 必须走原对账/候选续行路径，不能用此入口重放升级或清理 unknown。
+
+
+## 外部强制恢复与最短停机（D252）
+
+在目标实例的 systemd user unit 之外运行新发布中的 CLI。完整本地发布集必须包含
+匹配平台的新 updater；CLI 从清单固定其哈希，installer 在停止前验证整个发布集。
+这个入口直接使用本机服务管理器，不访问旧 Tend/updater 的 RPC。
+
+```sh
+"$NEW_TEND" upgrade recover --release "$RELEASE_DIR" --config "$UPDATER_CONFIG" --force --dry-run
+"$NEW_TEND" upgrade recover --release "$RELEASE_DIR" --config "$UPDATER_CONFIG" --force
+"$NEW_TEND" upgrade recover --release "$RELEASE_DIR" --config "$UPDATER_CONFIG" --status
+```
+
+需要指定服务时加 `--unit "$UPDATER_UNIT"`。可显式指定 `--request-id`；缺省身份由
+固定实例、配置和发布摘要决定。回复丢失先查 status，重试沿同一参数和身份。status
+读取持久恢复记录，不能把进程正在启动当作已提交。相同身份已经提交后不会再安装。
+
+准备阶段在服务运行时完成产物缓存、配置和兼容性检查。切换仅含：停止固定实例的
+服务 cgroup（包括子进程）、确认实际退出、取得原监督锁、必要的数据快照/迁移、
+原子替换和启动、私有就绪握手及持久提交。无需等旧服务的正常 drain 超时；拒绝
+停止的进程由显式 force 终止。只复制发生存储转换的数据，纯二进制更新不复制业务
+数据库或不可变原件，不在停机窗口下载、构建、运行测试或调用模型。
+
+旧 updater 状态及 self-update/handoff 启动 journal 原样归档，即使无法解析也不阻止新安装。
+本地阶段完成后立即推进；只有等待实际外部就绪时才轮询，不在每个持久化阶段之间固定停顿。
+存储不可读、候选不兼容、
+无法确认目标进程退出或无法取得原锁时仍停止推进。配置和凭据沿用原固定配置。
+新服务的实际进程/产物/协议/存储就绪由共同监督路径提交。回执关联明确被替代的
+升级 ID；它只结束该旧批次并解除被替换实例自身的升级控制，旧回执不能取消后来
+创建的升级。其他节点仍需其自身的正常对账或外部恢复，不能借本机 force 解锁。
+
+业务请求、原 Run、外部动作和 unknown 都保留。session 和历史收据读取在安装之后
+按原身份恢复；不通过清空业务记录或重发原动作来让更新显示成功。实际停机时间应
+取服务停止至就绪提交的记录，准备和事后对账另计。源码测试结果不代表实际部署。

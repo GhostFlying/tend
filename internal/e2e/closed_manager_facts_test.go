@@ -69,7 +69,7 @@ func closedRepairToolFacts(t *testing.T, options closedManagerRecoveryOptions) {
 		return op
 	}
 	host := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}
-	runtime := &protocol.RunnerRuntime{InstanceID: "closed-facts-fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, JournalVersion: journal.CurrentVersion, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityAgentInventory, protocol.CapabilityRetainedReconciliation}}
+	runtime := &protocol.RunnerRuntime{InstanceID: "closed-facts-fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, JournalVersion: journal.CurrentVersion, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityAgentInventory, protocol.CapabilityRetainedReconciliation}}
 	execute(host, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil, app.Hello{})
 	zero := int64(0)
 	execute(owner, "categories.put", protocol.Target{Type: "category", ID: protocol.DefaultIssueManagerCategory}, protocol.PutAgentCategoryPayload{Title: "Managers", State: "active"}, &zero, app.PutAgentCategory{})

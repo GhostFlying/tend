@@ -11,10 +11,10 @@
 - 持久记录是业务上下文的来源。所有角色和任务都必须支持从系统记录重建完整业务上下文，交给全新的 session 正常接手；不能依赖旧会话的隐含记忆。
 - Session 复用只是节省 token 的优化，不是正确性或执行前提。条件合适时优先复用；新 session 是正常路径，不需要额外审批，不因不能复用而阻塞工作。已有未知外部操作仍沿原身份对账，不能借新会话重放。
 - 同一协作目标持续复用 Task，实际执行追加 Run，并保留各次不可变结果。阶段结果、rebase、等待或 session 更换不自动产生新 Task；独立目标才新建。
-- Issue owner 可直接调查、实现和自测，自主决定协作方式。审阅挂在原 Issue 和 PR 下，不为审阅或增量确认另建子 Issue；实现收敛后独立审阅，后续按实际影响补查。
+- Issue owner 可直接调查、实现和自测，自主决定协作及是否审阅，可调整自身安排。明确的用户、仓库和外部平台审阅要求仍执行。审阅挂在原 Issue 和 PR 下，不为审阅或增量确认另建子 Issue；后续按实际影响补查。
 - 外部等待由系统保存条件并观察；实际停止后归还 slot，不用模型 sleep/poll 占位，也不把机器等待变成人工审批。来源理解融入正常推进，不另设核对手续门槛。
 
-Refs: D219–D224；统一计划见 `docs/plans/issue-lifecycle-efficiency.md`。
+Refs: D219–D224、D252；统一重构见 `docs/plans/autonomous-execution.md`。
 
 Agent 的能力约束由其配置的 category / capability 决定；主 Agent、Issue owner、
 实现、审阅和交付是责任分工，不是额外的能力白名单。不得仅因角色名称禁止调查、
@@ -131,6 +131,7 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 14. **公开仓库，不暴露本地信息**：代码、文档、注释和 commit message 中不出现本地绝对路径、用户名、主机名或 ssh 别名、IP、tailnet 名称、账号标识和内部系统地址。机器相关的信息放在 `.local/`（已 ignore）；需要提到时用通用描述或环境变量。
 15. **先写计划**：非平凡的功能在编码前先在 `docs/plans/` 写计划；设计变化在同一个 commit 里更新 `docs/design.md`，并引用决策编号。
 16. **协议 breaking change 与退役**：server / runner 通信发生不兼容变更时必须递增协议版本，不能只改程序版本、任务 spec 或存储 schema。每代支持 N 和 N−1；提升到 N+1 的同一变更必须实现 N+1、保留 N 的适配与兼容测试、删除 N−1 的通信适配，并增加拒绝 N−1 的测试。删除/重命名字段、改变类型、增加必填条件、收紧旧有效请求校验或改变默认语义都必须评估为 breaking change。
+   D252 首次冷切换例外：协议 5 的最低版本为 5，整套停止、归档并替换，不保留旧代在线通信；后续升级恢复上述 N/N−1 规则。
 17. **兼容代码有期限**：旧协议适配集中放置，登记 ID、适配协议、退役版本及关联代码/测试，代码用 `tend:compat` 标记引用登记。`make check` 必须拒绝过期适配器或登记不一致；开发者在协议升级 PR 中删除代码并更新设计及发布元信息，不通过删除标记或延后期限逃避退役。通信适配退役不删除已提交迁移、历史任务或产物；旧持久化格式需先迁移或保留专用历史读取。发布前必须确认主机及未结束 run/待对账操作不再依赖已退役协议。
 
 
@@ -146,8 +147,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 
 ## 4. 测试
 
-- `make check` 默认按实际 diff、Go 生产/测试反向依赖与跨组件契约选择受影响验证；`CHECK_BASE=<ref>` 指定基线，`make test-plan` 查看选择理由。纯文档不运行无关业务测试，纯 Web 保留完整 Web 和 CI 浏览器验证，Go 改动保留受影响包全部动态发现的 race 根。协议、迁移、依赖、构建/验证基础设施、未知输入及 main/release 使用完整兜底；`CHECK_MODE=full` 可显式选择全量。PR CI 暂时继续原完整覆盖，影响计划仅作影子对照，不参与排除或 required check；必要 job 的缺失、失败、取消或跳过仍不通过。Refs: `docs/plans/affected-validation.md`。
-- 允许本地检查尚未结束时先 commit、push 并创建 PR，让完整 PR CI 与本地受影响验证并行；描述如实标注计划、实际执行、缓存、排除理由与待完成项。合入前本地与 CI 的必要验证必须覆盖最终候选和基线；来源改变重新判断适用性，不机械重复不变候选。本地及 PR CI 默认保留 Go 原生结果缓存（`TEST_COUNT=0`）；需要新鲜回归、性能测量或实际逐例执行证明时显式 `TEST_COUNT=1`。JSON 原件区分 cached 与本次执行，缓存命中不算本次重新执行或性能测量。
+- `make check` 默认按实际 diff、Go 生产/测试反向依赖与跨组件契约选择受影响验证；`CHECK_BASE=<ref>` 指定基线，`make test-plan` 查看选择理由。纯文档不运行无关业务测试，纯 Web 保留完整 Web 和 CI 浏览器验证，Go 改动保留受影响包全部动态发现的 race 根。协议、迁移、依赖、构建/验证基础设施、未知输入及 main/release 使用完整兜底；`CHECK_MODE=full` 可显式选择全量。PR CI 使用绑定最终来源的同一影响计划选择作业；只有计划明确排除的 job 可以跳过，必要 job 的缺失、失败、取消或跳过仍不通过。Refs: `docs/plans/affected-validation.md`。
+- 允许本地检查尚未结束时先 commit、push 并创建 PR，让 PR CI 与本地受影响验证并行；描述如实标注计划、实际执行、缓存、排除理由与待完成项。合入前本地与 CI 的必要验证必须覆盖最终候选和基线；来源改变重新判断适用性，不机械重复不变候选。本地及 PR CI 默认保留 Go 原生结果缓存（`TEST_COUNT=0`）；需要新鲜回归、性能测量或实际逐例执行证明时显式 `TEST_COUNT=1`。JSON 原件区分 cached 与本次执行，缓存命中不算本次重新执行或性能测量。
 - 完整本地检查复用 `make check` 的有效 CPU 自动预算（`CHECK_JOBS=0`），不要在外部启动器无理由固定为串行。多 CPU 下显式 `CHECK_JOBS=1` 必须设置 `CHECK_SERIAL_REASON` 记录原因，例行资源例外由执行者据实际预算决定，无需另索审批。八 CPU 的默认预算是两组并行、App/suite 各两片、子进程 GOMAXPROCS=2、包并行=1，E2E 独占；其他容量自动调整。启动时核对预算行，用阶段起止时间核实重叠。长检查向现有协调者报告当前 phase、原逐例日志中的 case 与 elapsed，不新增巡检计时器、不自动重跑；不删除功能/安全断言、不关闭 race。业务时间用注入时钟，fixture 初始化与功能阶段分开，wall-clock 只作可诊断的有限防卡死边界；性能 SLA 需明确环境。见 `docs/plans/test-time-semantics.md`。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
@@ -167,7 +168,7 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 - body 用英文详细描述这次做了什么、为什么这样做、引入了哪些约束；涉及设计决策时引用编号（如 `Refs: D17`），涉及计划项时引用编号（如 `Plan: B3`）。
 - body 不写跑了哪些测试、多少测试、测试结果；检查进展与结果记录在 PR 描述中，合入前须满足第 4 节的测试门槛。
 - 每个 commit 是一个可以独立构建和测试的原子变更；允许按第 4 节的并行流程在提交后完成检查，重构和行为变化分开提交。
-- 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`）暂时保持每 PR 全量及交叉编译，影子计划不削减作业；main/release 同样完整兜底。是否启用受影响 CI 另行决定。
+- 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`）按实际影响选择，main/release 保持完整覆盖及交叉编译；required check 校验来源绑定的计划及全部必要结果。
 - 每个 PR 合并前都要经过独立 review：在 PR 分支上运行 `codex review --base main -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`。review 意见由提交者逐条判断：确实的缺陷和值得做的改进在合并前修掉；过度防御的意见（为假设性场景加防护、超出本次范围的扩展）可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。合入前确认本地影响计划、独立 review 和必要 CI 均覆盖最终候选/基线；候选或基线变更后重新计算影响并评估已有证据，修改较大时重新 review。不增加永久检查账本或额外审批步骤。
 - 历史保持纯线性：GitHub 仓库只允许 rebase & merge，禁止 merge commit 和 squash；`main` 禁止直接 push 和 force push。PR 合并前先 rebase 到最新的 `main`。
 - 远程：GitHub，公开仓库。

@@ -135,7 +135,7 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 
 func TestMainOwnerTaskSelectionCitationCannotBecomeHumanAssignment(t *testing.T) {
 	e, call := mainOwnerFixture(t)
-	runtime := &protocol.RunnerRuntime{InstanceID: "selection-test", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+	runtime := &protocol.RunnerRuntime{InstanceID: "selection-test", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
 	issueWorkerCommand(t, e, protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "host-a"}, protocol.Target{Type: "host", ID: "host-a"}, protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1}, app.Hello{})
 	create, _ := json.Marshal(protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Work selection", Project: "default", Intent: "Express work requirements", Stages: []protocol.IssueStage{}}})
 	response, err := ownerToolInvoke(t, e, call, "issues.create", protocol.OwnerToolArguments{EffectSeq: 1, Target: protocol.Target{Type: "issue"}, Payload: create})

@@ -44,6 +44,38 @@ func (m *Manager) openManagedThread(ctx context.Context, s harness.Session) (har
 	m.maintenanceBlocked = needsHandoff
 	m.mu.Unlock()
 	defer func() { m.mu.Lock(); m.maintenanceBlocked = false; m.mu.Unlock() }()
+	if needsHandoff && !environmentResumeOnly(s) {
+		// The durable ledger, rather than a successful resume of an obsolete
+		// tool menu, supplies the next session's context. An unresolved send
+		// still belongs to its original thread and must not be replayed.
+		pending, err := m.app.UncertainNativeTurns(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(pending) != 0 {
+			reader, ok := s.(harness.ThreadHistoryReader)
+			if !ok {
+				return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "original native history reader is unavailable")
+			}
+			readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			original, err := reader.ReadThreadHistory(readCtx, id)
+			if err != nil {
+				return nil, err
+			}
+			if err := m.reconcileNativeReceipts(readCtx, original); err != nil {
+				return nil, err
+			}
+			pending, err = m.app.UncertainNativeTurns(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if len(pending) != 0 {
+				return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "original native requests require receipt reconciliation")
+			}
+		}
+		return m.migrateThread(ctx, s, &historyReference{id: id, path: binding.RolloutPath}, hash, "")
+	}
 	th, err := s.ResumeThread(ctx, id, m.threadConfig())
 	if err != nil {
 		if environmentResumeOnly(s) || !errors.Is(err, harness.ErrRejected) {

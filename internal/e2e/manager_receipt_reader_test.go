@@ -15,12 +15,14 @@ import (
 	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/contextbuilder"
 	"github.com/GhostFlying/tend/internal/harness"
-	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/hostedconfig"
 	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/tools"
+	"path/filepath"
 )
 
 type receiptHistorySession struct {
@@ -102,16 +104,15 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 			if err != nil || op.Status != protocol.OpSucceeded {
 				t.Fatal(op, err)
 			}
-			claimed := s.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: f.runtime, WorkspaceProtocol: 1}, app.Claim{})
-			var result struct{ Assignment *protocol.Assignment }
-			if err := json.Unmarshal(claimed.Result, &result); err != nil || result.Assignment == nil {
-				t.Fatal(claimed, err)
+			reader := *old
+			manager := *old.Manager
+			manager.ReceiptOnly, manager.RequireReceiptReader = true, true
+			reader.Manager = &manager
+			beforeRuns := s.count(`SELECT COUNT(*) FROM runs`)
+			driveManagerReceiptHistory(t, s, old, &reader, f.business, f.instance, "original-turn", status)
+			if s.count(`SELECT COUNT(*) FROM runs`) != beforeRuns || s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) != 0 {
+				t.Fatal("history reading allocated a business Run or lease")
 			}
-			reader := result.Assignment
-			if reader.TaskID != old.TaskID || reader.RunID == old.RunID || reader.Manager == nil || !reader.Manager.ReceiptOnly || !reader.Manager.RequireReceiptReader {
-				t.Fatal("new transport is not the original responsibility's read-only reader", reader)
-			}
-			driveManagerReceiptHistory(t, s, old, reader, f.business, f.instance, "original-turn", status)
 			if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, old.RunID) != 19 || s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 {
 				t.Fatal("receipt reading changed the old cursor or published repair output")
 			}
@@ -144,67 +145,29 @@ func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.A
 	var wg sync.WaitGroup
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
-	var sequence atomic.Int64
-	var forbidden atomic.Int64
-	principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: reader.RunID, Role: reader.Role}
-	report := func(op string, p any) error {
-		raw, _ := json.Marshal(p)
-		res, err := s.app.Execute(run, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: op, Target: protocol.Target{Type: "run", ID: reader.RunID}, Payload: raw}, app.ManagerNativeCommand{OperationName: op})
-		if err != nil {
-			return err
-		}
-		if res.Error != nil {
-			return res.Error
-		}
-		return nil
+	j, err := journal.Open(ctx, filepath.Join(t.TempDir(), "journal.db"), s.now)
+	if err != nil {
+		t.Fatal(err)
 	}
-	driver := &coordination.Driver{Session: native, Profile: reader.Execution.Profile, RequireReceiptReader: reader.Manager.RequireReceiptReader, Emit: func(_ context.Context, e coordination.Event) error {
-		raw, _ := json.Marshal(e)
-		return report(protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence.Add(1), Body: raw})
-	}}
+	defer j.Close()
+	var generation int64
+	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+		current, err := store.GetHostRuntime(ctx, tx.Q(), "linux-1")
+		generation = current.Runtime.Generation
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range generation {
+		if _, err := j.NextProcessGeneration(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolver := &historyOnlyResolver{pin: *old.Execution, session: native}
+	rr := runner.New(runner.Config{ServerURL: s.url, HostID: "linux-1", HostToken: hostToken, Journal: j, Executions: resolver, Now: s.now, IDs: s.ids, Log: log, RequestTimeout: time.Second, HeartbeatInterval: 10 * time.Millisecond, RetryDelay: 10 * time.Millisecond})
 	wg.Go(func() {
-		for run.Err() == nil {
-			raw, _ := json.Marshal(map[string]any{})
-			op, err := s.app.Execute(run, principal, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeClaim, Target: protocol.Target{Type: "run", ID: reader.RunID}, Payload: raw}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
-			if err != nil || op.Error != nil {
-				if run.Err() == nil {
-					t.Error("native reader claim", op, err)
-				}
-				return
-			}
-			var request protocol.ManagerNativeRequest
-			if err := json.Unmarshal(op.Result, &request); err != nil {
-				t.Error(err)
-				return
-			}
-			if request.ID == "" {
-				select {
-				case <-run.Done():
-					return
-				case <-time.After(5 * time.Millisecond):
-				}
-				continue
-			}
-			if request.Method != "resume" && request.Method != "find" && request.Method != "usage" && request.Method != "close" && !(request.Method == "models" && !reader.Manager.RequireReceiptReader) {
-				forbidden.Add(1)
-			}
-			value, handleErr := driver.Handle(run, request.Method, request.Payload)
-			reply := protocol.ManagerNativeReply{ID: request.ID, LastSequence: sequence.Load()}
-			if handleErr != nil {
-				reply.Error = handleErr.Error()
-				reply.Rejected = errors.Is(handleErr, harness.ErrRejected)
-			} else {
-				reply.Result, _ = json.Marshal(value)
-			}
-			if err := report(protocol.OpManagerNativeReply, reply); err != nil {
-				if run.Err() == nil {
-					t.Error(err)
-				}
-				return
-			}
-			if request.Method == "close" {
-				return
-			}
+		if err := rr.Run(run); err != nil && run.Err() == nil {
+			t.Error(err)
 		}
 	})
 	cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
@@ -224,7 +187,7 @@ func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.A
 		cancel()
 		wg.Wait()
 		if t.Failed() {
-			t.Logf("reader resumes=%d histories=%d reads=%d forbidden=%d logs:\n%s", native.resumes.Load(), native.histories.Load(), native.thread.reads.Load(), forbidden.Load(), logs.String())
+			t.Logf("reader resumes=%d histories=%d reads=%d forbidden=%d logs:\n%s", native.resumes.Load(), native.histories.Load(), native.thread.reads.Load(), resolver.business.Load(), logs.String())
 		}
 	}()
 	eventually(t, "original history was read", func() bool { return native.thread.reads.Load() > 0 })
@@ -237,7 +200,34 @@ func driveManagerReceiptHistory(t *testing.T, s *server, old, reader *protocol.A
 	}
 	cancel()
 	wg.Wait()
-	if forbidden.Load() != 0 || native.resumes.Load() != 0 || native.histories.Load() != 1 {
-		t.Fatal("receipt reader started new work or changed original thread", forbidden.Load(), native.resumes.Load(), native.histories.Load())
+	if resolver.business.Load() != 0 || native.resumes.Load() != 0 || native.histories.Load() < 1 {
+		t.Fatal("receipt reader started new work or changed original thread", resolver.business.Load(), native.resumes.Load(), native.histories.Load())
 	}
+}
+
+// The current executor is intentionally unavailable for new business. Only its
+// frozen native history can be opened, through the actual runner heartbeat.
+type historyOnlyResolver struct {
+	pin      protocol.RunExecutionPin
+	session  *receiptHistorySession
+	business atomic.Int64
+}
+
+func (r *historyOnlyResolver) Refresh(context.Context) error { return nil }
+func (r *historyOnlyResolver) Observe(context.Context) ([]protocol.AgentExecutor, error) {
+	return nil, nil
+}
+func (r *historyOnlyResolver) Resolve(context.Context, protocol.RunExecutionPin) (runner.ResolvedExecution, error) {
+	r.business.Add(1)
+	return runner.ResolvedExecution{}, errors.New("business unavailable")
+}
+func (r *historyOnlyResolver) ResolveManager(context.Context, protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	r.business.Add(1)
+	return runner.ManagerExecution{}, errors.New("business unavailable")
+}
+func (r *historyOnlyResolver) ResolveManagerReceipt(_ context.Context, p protocol.RunExecutionPin) (runner.ManagerExecution, error) {
+	if p != r.pin {
+		return runner.ManagerExecution{}, errors.New("original pin changed")
+	}
+	return runner.ManagerExecution{Profile: p.Profile, Open: func(context.Context, string) (harness.Session, error) { return r.session, nil }}, nil
 }

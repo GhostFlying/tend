@@ -1321,10 +1321,10 @@ func (n *node) crashedClaimPayload(worker protocol.WorkerKind) json.RawMessage {
 	if err != nil {
 		n.t.Fatal(err)
 	}
-	rt := &protocol.RunnerRuntime{InstanceID: "crashed-fixture", Generation: generation, Sequence: 1, Protocol: protocol.PreviousRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.PreviousRunnerProtocol, Mode: protocol.RunnerNormal}
+	rt := &protocol.RunnerRuntime{InstanceID: "crashed-fixture", Generation: generation, Sequence: 1, Protocol: protocol.MinimumRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.MinimumRunnerProtocol, Mode: protocol.RunnerNormal}
 	n.srv.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{Worker: worker, Runtime: rt}, app.Hello{})
 	rt.Sequence++
-	raw, err := json.Marshal(protocol.ClaimPayload{Worker: worker, Runtime: rt})
+	raw, err := json.Marshal(protocol.ClaimPayload{RunID: n.srv.ids.New(protocol.PrefixRun), Worker: worker, Runtime: rt})
 	if err != nil {
 		n.t.Fatal(err)
 	}

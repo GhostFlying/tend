@@ -53,7 +53,7 @@ func TestNamedManagerReadsDescendantResultsWithoutControl(t *testing.T) {
 	}
 	execute(protocol.Principal{Kind: protocol.PrincipalSystem}, app.AcceptHostedConfiguration{Prepared: prepared}, protocol.Target{Type: "hosted_configuration"}, map[string]any{"revision": prepared.Revision(), "hash": prepared.Hash()}, new(int64(0)))
 	e.svc.app = app.New(e.store, ids, clock.Now, app.WithHostedConfiguration(prepared))
-	execute(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, app.Hello{}, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}}, nil)
+	execute(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, app.Hello{}, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &protocol.RunnerRuntime{InstanceID: "fixture", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}}, nil)
 	if err := e.store.Write(t.Context(), func(tx *store.Tx) error {
 		return tx.UpsertProject(t.Context(), store.ProjectRow{Project: "private-project", Title: "Unrelated project", Weight: 1}, clock.Now().UnixMilli())
 	}); err != nil {

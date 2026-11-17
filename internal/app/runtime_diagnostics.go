@@ -7,27 +7,12 @@ import (
 	"log/slog"
 
 	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 )
 
 // WithLogger uses the caller's existing handler, level and output lifecycle.
 // An App without a logger produces no additional diagnostic output.
 func WithLogger(log *slog.Logger) Option {
 	return func(a *App) { a.log = log }
-}
-
-type executionDiagnostic struct {
-	level   slog.Level
-	message string
-	attrs   []any
-}
-
-// observeDecision retains only values read by the current command. They are
-// emitted after the write finishes, so diagnostics cannot hold its transaction.
-func (x *Exec) observeDecision(ctx context.Context, level slog.Level, message string, attrs ...any) {
-	if x.log != nil && x.log.Enabled(ctx, level) {
-		x.diagnostics = append(x.diagnostics, executionDiagnostic{level, message, attrs})
-	}
 }
 
 func (a *App) logExecution(ctx context.Context, x *Exec, operation protocol.Operation, err error) {
@@ -52,9 +37,6 @@ func (a *App) logExecution(ctx context.Context, x *Exec, operation protocol.Oper
 	}
 	if x.Env.ExpectedControlRevision != nil {
 		attrs = append(attrs, "expected_control_revision", *x.Env.ExpectedControlRevision)
-	}
-	for _, d := range x.diagnostics {
-		a.log.Log(ctx, d.level, d.message, append(append([]any{}, attrs...), d.attrs...)...)
 	}
 	if operation.Error != nil || err != nil {
 		code := protocol.CodeInternal
@@ -98,104 +80,4 @@ func (a *App) logExecution(ctx context.Context, x *Exec, operation protocol.Oper
 		}
 		a.log.Log(ctx, level, "app state transition", fields...)
 	}
-}
-
-type upgradeHostAvailability struct {
-	HostID           string                      `json:"host_id"`
-	Slots            int64                       `json:"slots"`
-	Runtime          *upgradeRuntimeAvailability `json:"runtime,omitempty"`
-	Control          *upgradeControlAvailability `json:"control,omitempty"`
-	FailedPredicates []string                    `json:"failed_predicates"`
-}
-
-type upgradeRuntimeAvailability struct {
-	Online                 bool   `json:"online"`
-	LastHeartbeatMillis    int64  `json:"last_heartbeat_ms"`
-	HeartbeatAgeMillis     int64  `json:"heartbeat_age_ms"`
-	HeartbeatLimitMillis   int64  `json:"heartbeat_limit_ms"`
-	InstanceID             string `json:"instance_id"`
-	Mode                   string `json:"mode"`
-	AppliedControlRevision int64  `json:"applied_control_revision"`
-	UpgradeID              string `json:"upgrade_id"`
-	PendingClaims          int64  `json:"pending_claims"`
-	PendingOperations      int64  `json:"pending_operations"`
-}
-
-type upgradeControlAvailability struct {
-	Mode      string `json:"mode"`
-	Revision  int64  `json:"revision"`
-	UpgradeID string `json:"upgrade_id"`
-}
-
-// inspectOtherUpgradeHosts retains the exact predicates and the short-circuit
-// reads used by the existing rolling-host decision. In particular, zero-slot
-// and missing-runtime hosts do not trigger extra control or runtime queries.
-func inspectOtherUpgradeHosts(ctx context.Context, q store.Querier, exclude string, now int64) (bool, []upgradeHostAvailability, error) {
-	hosts, err := store.ListActiveHosts(ctx, q)
-	if err != nil {
-		return false, nil, err
-	}
-	var observations []upgradeHostAvailability
-	for _, h := range hosts {
-		if h.HostID == exclude {
-			continue
-		}
-		o := upgradeHostAvailability{HostID: h.HostID, Slots: h.Slots, FailedPredicates: []string{}}
-		if h.Slots <= 0 {
-			o.FailedPredicates = append(o.FailedPredicates, "slots_not_positive")
-			observations = append(observations, o)
-			continue
-		}
-		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				o.FailedPredicates = append(o.FailedPredicates, "runtime_missing")
-				observations = append(observations, o)
-				continue
-			}
-			return false, observations, err
-		}
-		ctl, err := runnerControl(ctx, q, h.HostID, now)
-		if err != nil {
-			return false, observations, err
-		}
-		o.Runtime = &upgradeRuntimeAvailability{Online: rt.Online, LastHeartbeatMillis: rt.LastHeartbeatAt, HeartbeatAgeMillis: now - rt.LastHeartbeatAt, HeartbeatLimitMillis: RunnerOfflineAfter.Milliseconds(), InstanceID: rt.Runtime.InstanceID, Mode: rt.Runtime.Mode, AppliedControlRevision: rt.Runtime.AppliedControlRevision, UpgradeID: rt.Runtime.UpgradeID, PendingClaims: rt.Runtime.PendingClaims, PendingOperations: rt.Runtime.PendingOperations}
-		o.Control = &upgradeControlAvailability{Mode: ctl.Mode, Revision: ctl.Revision, UpgradeID: ctl.UpgradeID}
-		if !rt.Online {
-			o.FailedPredicates = append(o.FailedPredicates, "offline")
-		}
-		if now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
-			o.FailedPredicates = append(o.FailedPredicates, "heartbeat_stale")
-		}
-		if ctl.Mode != protocol.RunnerNormal {
-			o.FailedPredicates = append(o.FailedPredicates, "control_mode_not_normal")
-		}
-		if rt.Runtime.Mode != protocol.RunnerNormal {
-			o.FailedPredicates = append(o.FailedPredicates, "runtime_mode_not_normal")
-		}
-		if rt.Runtime.AppliedControlRevision != ctl.Revision {
-			o.FailedPredicates = append(o.FailedPredicates, "control_revision_unacknowledged")
-		}
-		observations = append(observations, o)
-		if len(o.FailedPredicates) == 0 {
-			return true, observations, nil
-		}
-	}
-	return false, observations, nil
-}
-
-// TextHandler invokes String while JSONHandler keeps the typed array. Both
-// formats retain the same allowlisted values rather than pointer addresses.
-type upgradeHostFacts []upgradeHostAvailability
-
-func (facts upgradeHostFacts) String() string {
-	raw, err := json.Marshal(facts)
-	if err != nil {
-		return "host facts unavailable"
-	}
-	return string(raw)
-}
-
-func observeUpgradeHostDecision(ctx context.Context, x *Exec, batch store.UpgradeRow, target, decision string, level slog.Level, hosts []upgradeHostAvailability) {
-	x.observeDecision(ctx, level, "upgrade host availability decision", "upgrade_id", batch.View.UpgradeID, "upgrade_revision", batch.View.Revision, "upgrade_phase", batch.View.Phase, "target_host_id", target, "decision", decision, "observed_at_ms", x.Now.UnixMilli(), "stage_deadline_ms", batch.Deadline, "stage_remaining_ms", max(0, batch.Deadline-x.Now.UnixMilli()), "overall_deadline_ms", batch.View.OverallDeadlineMillis, "other_hosts", upgradeHostFacts(hosts))
 }

@@ -162,7 +162,7 @@ func newHistoricalHostedDelivery(t *testing.T) *historicalHostedDelivery {
 	_ = json.Unmarshal(op.Result, &f.issue)
 	op = f.execute(t, f.owner, app.HostedIssueAssignment{Finish: true}, protocol.Target{Type: "issue", ID: f.issue.IssueID}, protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: f.issue.AssignmentEpoch, HandoffID: f.issue.PendingHandoffID, Reason: "No prior manager"}, &f.issue.Revision)
 	_ = json.Unmarshal(op.Result, &f.issue)
-	runtime := protocol.RunnerRuntime{InstanceID: "fixture-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerObservation}}
+	runtime := protocol.RunnerRuntime{InstanceID: "fixture-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityWorkerObservation}}
 	runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}
 	f.execute(t, runner, app.Hello{}, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: &runtime}, nil)
 	create := func(authorization *protocol.IssueDeliveryAuthorization, spec protocol.OwnerTaskSpec) string {

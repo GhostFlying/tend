@@ -13,13 +13,13 @@ import (
 // This test deliberately uses only the released opaque event shape. It is also
 // executed unchanged against the fixed pre-identity handler with a Go overlay.
 func TestNativeIdentityOpaqueEventsRemainCompatible(t *testing.T) {
-	for _, wire := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
+	for _, wire := range []int64{protocol.MinimumRunnerProtocol, protocol.CurrentRunnerProtocol} {
 		t.Run(string(rune('0'+wire)), func(t *testing.T) {
 			e := newEnv(t, time.Millisecond)
 			e.createTask()
 			var claim protocol.ClaimPayload
 			if wire > 0 {
-				runtime := &protocol.RunnerRuntime{InstanceID: "identity-compat", Generation: 1, Sequence: 1, Protocol: wire, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: wire, Mode: protocol.RunnerNormal}
+				runtime := &protocol.RunnerRuntime{InstanceID: "identity-compat", Generation: 1, Sequence: 1, Protocol: wire, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: wire, Mode: protocol.RunnerNormal}
 				e.mustOK(asHost(), e.envelope(protocol.OpRunnerHello, "", protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}))
 				runtime.Sequence++
 				claim = protocol.ClaimPayload{WorkspaceProtocol: 1, Runtime: runtime}

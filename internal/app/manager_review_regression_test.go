@@ -118,9 +118,9 @@ func TestFault_ManagerStoppedEventsRetainOriginalReplayAndToolResult(t *testing.
 	t.Cleanup(func() { _ = reopened.Close() })
 	h.store = reopened
 	h.app = New(reopened, h.ids, h.clock.Now)
-	reader := reviewClaimManager(t, h, runtime)
-	if reader.Manager == nil || !reader.Manager.ReceiptOnly || reader.TaskID != as.TaskID {
-		t.Fatal("old events did not create a pinned receipt reader", reader)
+	reader := as
+	if h.countWhere(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='active'`, as.RunID) != 0 {
+		t.Fatal("database replay retained a lease")
 	}
 	events, err := h.app.ManagerReplayEvents(t.Context(), reader.RunID, 0)
 	if err != nil || len(events) != 2 || events[0].RunID != as.RunID || events[0].Sequence != 1 || events[1].Sequence != 2 {

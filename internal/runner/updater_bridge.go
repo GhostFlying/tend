@@ -106,6 +106,8 @@ func (r *Runner) updaterHandler() http.Handler {
 			operation = "runner.upgrade_authorize"
 		case "/updater/health":
 			operation = "runner.upgrade_health"
+		case "/updater/readiness":
+			operation = "installation.readiness"
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -127,6 +129,24 @@ func (r *Runner) updaterHandler() http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(q.Context(), 10*time.Second)
 		defer cancel()
+		if operation == "installation.readiness" {
+			if binding.ProcessInstanceID != r.instanceID || binding.ArtifactSHA256 != r.cfg.Build.BinarySHA256 {
+				http.Error(w, "candidate mismatch", http.StatusConflict)
+				return
+			}
+			version, err := r.cfg.Journal.InstallationVersion(ctx)
+			if err != nil {
+				http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			control, err := r.cfg.Journal.Control(ctx)
+			if err != nil {
+				http.Error(w, "control unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(protocol.InstallationReadiness{SupersededUpgradeID: control.UpgradeID, Binding: binding, Ready: version > 0, Protocol: protocol.CurrentRunnerProtocol, StorageVersion: version})
+			return
+		}
 		if operation == "runner.upgrade_health" {
 			// These local comparisons reject wrong candidates early. The server remains
 			// authoritative about admission, sequence, lease state and rollback safety.

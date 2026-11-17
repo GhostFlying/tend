@@ -8,7 +8,7 @@ import (
 )
 
 func TestSessionStopMetadataNegotiatedForSupportedAssignments(t *testing.T) {
-	for _, version := range []int64{3, 4} {
+	for _, version := range []int64{protocol.CurrentRunnerProtocol} {
 		t.Run(strconv.FormatInt(version, 10), func(t *testing.T) {
 			h := newHarness(t)
 			runtime := testRuntime("session-stop-negotiation")

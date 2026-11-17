@@ -62,6 +62,7 @@ type ReleaseSetTarget struct {
 }
 
 type RunnerUpgradeTarget struct {
+	PrepareOnly      bool                 `json:"prepare_only,omitempty"`
 	Updater          *UpdaterSelfTarget   `json:"updater,omitempty"`
 	ReleaseSet       *ReleaseSetTarget    `json:"release_set,omitempty"`
 	Configuration    *RunnerConfiguration `json:"configuration,omitempty"`

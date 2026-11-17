@@ -49,7 +49,7 @@ func TestReviewThreadRegistrationFailureMustDetachPublishedThread(t *testing.T) 
 	}
 }
 
-func TestReviewStartupHandoffWaitsForCompactReconciliation(t *testing.T) {
+func TestStartupHandoffPreservesOldCompactionWithoutBlockingFreshContext(t *testing.T) {
 	for _, status := range []string{"starting", "running", "unknown"} {
 		t.Run(status, func(t *testing.T) {
 			f := newHandoffFixture(t)
@@ -59,16 +59,15 @@ func TestReviewStartupHandoffWaitsForCompactReconciliation(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.e.m.openManagedThread(t.Context(), f.session); err == nil {
-				t.Fatal("startup migrated an unresolved native compact")
+			target, err := f.e.m.openManagedThread(t.Context(), f.session)
+			if err != nil || target.ID() == f.source.ID() {
+				t.Fatal("old compaction blocked fresh context", err)
 			}
 			binding, ok, err := f.e.app.MainThreadBinding(t.Context(), "main")
-			if err != nil || !ok || binding.ThreadID != f.source.ID() {
-				t.Fatalf("startup lost the original compact thread: %+v, %v", binding, err)
+			if err != nil || !ok || binding.ThreadID != target.ID() {
+				t.Fatal(binding, err)
 			}
-			if _, pending, err := f.e.app.PendingHandoff(t.Context(), "main"); err != nil || pending {
-				t.Fatalf("startup prepared a handoff across unresolved compact: pending=%t err=%v", pending, err)
-			}
+
 			if err := f.e.app.RecordRolloutEvent(t.Context(), "main", f.source.ID(), "native-compact-turn", "native-compact-item", string(harness.EventItemCompleted), json.RawMessage(`{"id":"native-compact-item","type":"contextCompaction"}`)); err != nil {
 				t.Fatal(err)
 			}

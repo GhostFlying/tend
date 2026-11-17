@@ -94,6 +94,16 @@ func (s *handoffTestSession) StartThread(ctx context.Context, cfg harness.Thread
 	s.mu.Unlock()
 	return wrapped, nil
 }
+func (s *handoffTestSession) ReadThreadHistory(ctx context.Context, id string) (harness.Thread, error) {
+	s.mu.Lock()
+	cached := s.threads[id]
+	s.mu.Unlock()
+	if cached != nil {
+		return cached, nil
+	}
+	return s.Session.(harness.ThreadHistoryReader).ReadThreadHistory(ctx, id)
+}
+
 func (s *handoffTestSession) ResumeThread(ctx context.Context, id string, cfg harness.ThreadConfig) (harness.Thread, error) {
 	s.mu.Lock()
 	cached := s.threads[id]

@@ -1,9 +1,12 @@
 package runner
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,7 +25,7 @@ import (
 // Exercise the real control/readiness producer and RPC path. Only the updater
 // process and server replacement health are external fixture boundaries; this
 // test stops at the first authorized runner drain, without installing a binary.
-func TestUpgradeCutoverAcceptsActualReadyRunnerHeartbeats(t *testing.T) {
+func TestSingleRunnerPreparesFromServerBeforeCutover(t *testing.T) {
 	ctx := t.Context()
 	clock := testkit.NewClock()
 	ids := testkit.NewIDGen(clock, 31)
@@ -43,13 +46,14 @@ func TestUpgradeCutoverAcceptsActualReadyRunnerHeartbeats(t *testing.T) {
 			t.Fatal(cmd.Operation(), op, err)
 		}
 	}
-	hosts := []string{"cutover-a", "cutover-b"}
+	hosts := []string{"cutover-a"}
 	config := app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "repo", RemoteURL: "https://example.com/repo.git"}}}
 	for _, host := range hosts {
 		config.Hosts = append(config.Hosts, app.HostConfig{HostID: host, OS: "linux", Arch: "amd64", Slots: 1, Repos: []string{"repo"}, TokenHash: runnerapi.HashToken("test-host-secret"), Nodes: []string{"tag:tend-runner"}})
 	}
 	execute(protocol.Target{Type: "config"}, config, app.SyncConfig{}, nil)
-	api := runnerapi.New(a, netx.Static{Identity: &netx.Identity{Node: "test-node", Tags: []string{"tag:tend-runner"}}}, []byte("test-server-secret"), runnerapi.Config{}, slog.New(slog.DiscardHandler))
+	releaseRoot := t.TempDir()
+	api := runnerapi.New(a, netx.Static{Identity: &netx.Identity{Node: "test-node", Tags: []string{"tag:tend-runner"}}}, []byte("test-server-secret"), runnerapi.Config{ReleaseDir: releaseRoot}, slog.New(slog.DiscardHandler))
 	server := httptest.NewServer(api.Handler())
 	defer server.Close()
 	var fleet []*Runner
@@ -74,7 +78,29 @@ func TestUpgradeCutoverAcceptsActualReadyRunnerHeartbeats(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	candidate := app.StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "ready-cutover-release", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: schema, Max: schema}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	candidate := app.StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "ready-cutover-release", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: schema, Max: schema}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	bundleDir := filepath.Join(releaseRoot, "ready-cutover")
+	if err := os.MkdirAll(bundleDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for i := range candidate.Manifest.Artifacts {
+		artifact := &candidate.Manifest.Artifacts[i]
+		body := []byte("fixture executable for " + artifact.Role)
+		artifact.SHA256 = fmt.Sprintf("%x", sha256.Sum256(body))
+		artifact.Size = int64(len(body))
+		if err := os.WriteFile(filepath.Join(bundleDir, artifact.Path), body, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := json.Marshal(candidate.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "manifest.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	candidate.ManifestSize, candidate.ManifestSHA256 = int64(len(raw)), fmt.Sprintf("%x", sha256.Sum256(raw))
+	candidate.ServerHash = candidate.Manifest.Artifacts[0].SHA256
 	zero := int64(0)
 	execute(protocol.Target{Type: "upgrade", ID: "ready-cutover"}, map[string]string{"release_id": candidate.Manifest.ReleaseID}, candidate, &zero)
 	tick := func(observation app.ServerObservation) protocol.UpgradeView {
@@ -84,6 +110,18 @@ func TestUpgradeCutoverAcceptsActualReadyRunnerHeartbeats(t *testing.T) {
 			t.Fatal(err)
 		}
 		return v
+	}
+	for _, r := range fleet {
+		r.heartbeat(ctx)
+		r.heartbeat(ctx)
+		r.wg.Wait()
+		r.heartbeat(ctx)
+		if r.upgradePhase != "prepared" || r.control.Mode != protocol.RunnerNormal {
+			t.Fatal("preparation did not preserve admission", r.upgradePhase, r.control)
+		}
+	}
+	if v := tick(app.ServerObservation{}); v.Phase != "server_draining" {
+		t.Fatal(v)
 	}
 	if v := tick(app.ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)}); v.Phase != "server_ready" {
 		t.Fatal("server did not request actual maintenance ACKs", v)
@@ -107,23 +145,23 @@ func TestUpgradeCutoverAcceptsActualReadyRunnerHeartbeats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clock.Advance(70 * time.Second)
+	clock.Advance(time.Second)
 	if _, err := a.SweepRunnerPresence(ctx); err != nil {
 		t.Fatal(err)
 	}
 	healthy := app.ServerObservation{InstanceID: "server", ProcessInstanceID: binding.ProcessInstanceID, BinarySHA256: candidate.ServerHash, MainDrained: true, Healthy: true}
 	tick(healthy)
-	clock.Advance(5 * time.Second)
+	healthy.UpdaterReceipt = &protocol.UpdaterReceipt{Binding: binding, Phase: "committed", CommittedConfirmed: true, CurrentSHA256: binding.ArtifactSHA256, CurrentProcessInstanceID: binding.ProcessInstanceID}
 	if v := tick(healthy); v.Status != "running" || v.Phase != "runners" {
 		t.Fatal("actual ready cohort rejected on restoring normal", v)
 	}
-	if v := tick(app.ServerObservation{}); v.Status != "running" || v.Hosts[0].Status != "queued" || v.Hosts[1].Status != "queued" {
+	if v := tick(app.ServerObservation{}); v.Status != "running" || v.Hosts[0].Status != "queued" {
 		t.Fatal("old ready ACK rejected while waiting for actual normal", v)
 	}
 	for i, r := range fleet {
 		r.heartbeat(ctx) // Send retained ready and receive the new normal control.
 		r.heartbeat(ctx) // Produce and send the actual new normal acknowledgment.
-		if v := tick(app.ServerObservation{}); v.Status != "running" || i == 0 && v.Hosts[0].Status != "queued" || i == 1 && v.Hosts[0].Phase != "draining" {
+		if v := tick(app.ServerObservation{}); v.Status != "running" || v.Hosts[0].Phase != "draining" {
 			t.Fatal("actual normal ACKs did not gate the first runner drain", i, v)
 		}
 	}

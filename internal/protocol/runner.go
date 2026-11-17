@@ -202,8 +202,9 @@ type AssignedMount struct {
 
 // HeartbeatPayload renews the leases of the runs a runner holds.
 type HeartbeatPayload struct {
-	Runtime *RunnerRuntime `json:"runtime,omitempty"`
-	Runs    []LeaseRef     `json:"runs"`
+	HistoryReplies []ManagerHistoryReply `json:"history_replies,omitempty"`
+	Runtime        *RunnerRuntime        `json:"runtime,omitempty"`
+	Runs           []LeaseRef            `json:"runs"`
 }
 
 // LeaseRef names a run and the lease the runner holds for it.
@@ -215,10 +216,12 @@ type LeaseRef struct {
 // HeartbeatResult reports, per run, whether the lease was renewed and what
 // tend wants the run to do.
 type HeartbeatResult struct {
-	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
-	Control            *RunnerControl    `json:"control,omitempty"`
-	LeaseTTLMillis     int64             `json:"lease_ttl_ms"`
-	Runs               []LeaseState      `json:"runs"`
+	HistoryReads        []ManagerHistoryRead `json:"history_reads,omitempty"`
+	HistoryAcknowledged []string             `json:"history_acknowledged,omitempty"`
+	RetainedExecutions  []RunExecutionPin    `json:"retained_executions,omitempty"`
+	Control             *RunnerControl       `json:"control,omitempty"`
+	LeaseTTLMillis      int64                `json:"lease_ttl_ms"`
+	Runs                []LeaseState         `json:"runs"`
 }
 
 // LeaseState is the outcome of renewing one lease. A lease that is no

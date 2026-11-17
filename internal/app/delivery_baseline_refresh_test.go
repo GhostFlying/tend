@@ -58,7 +58,7 @@ func TestServerDeliveryBaselineRefreshWakesMergedSharedJob(t *testing.T) {
 				// baseline transition without introducing a second install model.
 				upgrade.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
 				upgrade.Manifest.Storage.RunnerJournal.Max = 9
-				if op := startTestUpgrade(h, "new-baseline", upgrade); op.Status != protocol.OpSucceeded {
+				if op := startPreparedTestUpgrade(h, "new-baseline", upgrade); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
 				var settled protocol.UpgradeView

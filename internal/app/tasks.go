@@ -297,12 +297,13 @@ func createTask(ctx context.Context, x *Exec, tx *store.Tx, p createTaskPayload,
 type UpdateIntent struct{}
 
 type updateIntentPayload struct {
-	Relations       *[]protocol.TaskRelation `json:"relations,omitempty"`
-	Spec            *domain.Spec             `json:"spec,omitempty"`
-	Rating          *protocol.Rating         `json:"rating,omitempty"`
-	Project         *string                  `json:"project,omitempty"`
-	SourceMessageID string                   `json:"source_message_id,omitempty"`
-	CommitSeq       int64                    `json:"commit_seq,omitempty"`
+	IndependentAcceptance *protocol.IndependentAcceptanceRequest `json:"independent_acceptance,omitempty"`
+	Relations             *[]protocol.TaskRelation               `json:"relations,omitempty"`
+	Spec                  *domain.Spec                           `json:"spec,omitempty"`
+	Rating                *protocol.Rating                       `json:"rating,omitempty"`
+	Project               *string                                `json:"project,omitempty"`
+	SourceMessageID       string                                 `json:"source_message_id,omitempty"`
+	CommitSeq             int64                                  `json:"commit_seq,omitempty"`
 }
 
 // Operation implements Command.
@@ -322,7 +323,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
-	if p.Spec == nil && p.Rating == nil && p.Project == nil && p.Relations == nil {
+	if p.Spec == nil && p.Rating == nil && p.Project == nil && p.Relations == nil && p.IndependentAcceptance == nil {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "spec, rating, project or relations is required")
 	}
 	expected, err := requireRevision(x.Env)
@@ -369,6 +370,25 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		return Outcome{}, commandDiagnostic(protocol.CodeStaleRevision, "task control revision changed; read the original Task before updating its agreement", map[string]any{"task_id": row.TaskID, "current_control_revision": row.ControlRevision, "expected_control_revision": expected, "spec_version": row.SpecVersion, "recovery_tool": "tasks_read"})
 	}
 	merged := domain.Decision{Task: task}
+	var reviewEvents []Event
+	if p.IndependentAcceptance != nil {
+		if x.Env.Operation != "issues.update_task" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "change review through the responsible Issue's task update")
+		}
+		if err := updateTaskReviewChoice(ctx, x, tx, row, current, p.IndependentAcceptance); err != nil {
+			return Outcome{}, err
+		}
+		if p.IndependentAcceptance.Required {
+			reviewSpec := current
+			if p.Spec != nil {
+				reviewSpec = *p.Spec
+			}
+			reviewEvents, err = enableOwnerReview(ctx, x, tx, row.TaskID, reviewSpec)
+			if err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
 	var pendingResource *store.WorkspaceRow
 	var detachedResource *store.WorkspaceRow
 	if p.Spec != nil {
@@ -510,6 +530,15 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			}
 		}
 	}
+	if p.IndependentAcceptance != nil {
+		d, err := domain.ChangeAcceptanceRequirement(merged.Task, p.IndependentAcceptance.Required)
+		if err != nil {
+			return Outcome{}, err
+		}
+		merged.Task = d.Task
+		merged.Events = append(merged.Events, d.Events...)
+		merged.CancelOpenActions = merged.CancelOpenActions || d.CancelOpenActions
+	}
 	if p.Spec != nil && merged.Task.SpecVersion != row.SpecVersion {
 		spec, err := json.Marshal(p.Spec)
 		if err != nil {
@@ -541,6 +570,7 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			Body: map[string]any{"workspace_id": detachedResource.WorkspaceID, "source_task_id": detachedResource.SourceTaskID, "previous_spec_version": row.SpecVersion, "spec_version": merged.Task.SpecVersion}})
 	}
 	events = append(events, backlinks...)
+	events = append(events, reviewEvents...)
 	if err := validateCanonicalTaskDependencies(ctx, tx.Q()); err != nil {
 		return Outcome{}, err
 	}

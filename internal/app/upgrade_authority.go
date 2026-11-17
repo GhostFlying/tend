@@ -62,13 +62,6 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if ctl.UpgradeID != b.UpgradeID || ctl.Mode != protocol.RunnerMaintenance || ctl.Upgrade == nil || rt.Runtime.Mode != protocol.RunnerReady || rt.Runtime.AppliedControlRevision != ctl.Revision || rt.Runtime.PendingClaims != 0 || rt.Runtime.PendingOperations != 0 || len(rt.Runtime.Blockers) != 0 || n != 0 || !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 			return Outcome{Result: protocol.UpgradeGrant{Binding: b}, NoEffect: true}, nil
 		}
-		available, err := anotherAvailableHost(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
-		if err != nil {
-			return Outcome{}, err
-		}
-		if !available {
-			return Outcome{Result: protocol.UpgradeGrant{Binding: b}, NoEffect: true}, nil
-		}
 		if h.GrantDeadline == 0 {
 			h.CandidateInstance = b.ProcessInstanceID
 			h.GrantDeadline = capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis)
@@ -139,7 +132,7 @@ func (a *App) RunnerUpgradeHealth(ctx context.Context, p protocol.Principal, b p
 			health.ServerConfirmed = runnerCandidateMatches(r, h, rt.Runtime) && rt.Runtime.Build.BinarySHA256 == b.ArtifactSHA256 && rt.Online && a.now().UnixMilli()-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
 			health.AdmissionFenced = health.ServerConfirmed && h.Committed == nil && !committedMatches(r, h, rt.Runtime.UpdaterReceipt, rt.Runtime) && rt.Runtime.InstanceID == h.CandidateInstance && ctl.UpgradeID == r.View.UpgradeID && rt.Runtime.UpgradeID == r.View.UpgradeID && ctl.Mode == protocol.RunnerMaintenance && rt.Runtime.AppliedControlRevision == ctl.Revision
 			admitted := h.Committed != nil && ctl.Mode == protocol.RunnerNormal && rt.Runtime.Mode == protocol.RunnerNormal
-			health.Healthy = runnerConfigurationMatches(h, rt.Runtime) && health.ServerConfirmed && h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 2 && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Runtime.AppliedControlRevision == ctl.Revision && (admitted || runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && rt.Runtime.Mode == protocol.RunnerReady)
+			health.Healthy = runnerConfigurationMatches(h, rt.Runtime) && health.ServerConfirmed && h.HealthInstance == rt.Runtime.InstanceID && h.Healthy >= 1 && installedRunnerMatches(rt.Runtime, r.Manifest) && rt.Runtime.AppliedControlRevision == ctl.Revision && (admitted || runs == 0 && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && rt.Runtime.Mode == protocol.RunnerReady)
 			health.HeartbeatSequence = uint64(max(0, rt.Runtime.Sequence))
 			// Once claims are enabled, an old journal is never restored, even if no
 			// claim was observed yet: a request may already be in flight.
@@ -174,7 +167,6 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "server candidate changed")
 	}
 	cutoff := capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis+r.RestartMillis) - r.RestartMillis
-	var cohort []store.UpgradeCutoverRunner
 	for _, h := range r.Hosts {
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
 		if err != nil {
@@ -190,7 +182,6 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		// The runner reports a server-time lower bound for its conservative
 		// local deadline, accounting for the full grant response RTT. Reserve
 		// the entire restart budget before allowing the old process to stop.
-		cohort = append(cohort, store.UpgradeCutoverRunner{HostID: h.HostID, InstanceID: rt.Runtime.InstanceID, Generation: rt.Runtime.Generation, MaintenanceRevision: ctl.Revision})
 		coveredUntil := min(ctl.Authorization.DeadlineMillis, rt.Runtime.AuthorizationDeadlineMillis)
 		cutoff = min(cutoff, coveredUntil-r.RestartMillis)
 	}
@@ -198,7 +189,6 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")
 	}
 	if r.ServerGrantDeadline == 0 {
-		r.CutoverRunners = cohort
 		r.ServerGrantDeadline = cutoff
 		r.ServerProcess = b.ProcessInstanceID
 		r.Deadline = capUpgradeDeadline(&r, cutoff+r.RestartMillis)
@@ -238,7 +228,7 @@ func (a *App) ServerUpgradeHealth(ctx context.Context, b protocol.UpgradeBinding
 		}
 		h.ServerRevision = r.View.Revision
 		h.ServerConfirmed = r.ServerHealthy > 0
-		h.Healthy = r.ServerHealthy >= 2
+		h.Healthy = r.ServerHealthy >= 1
 		h.HeartbeatSequence = uint64(max(0, a.now().UnixMilli()))
 		// The new server may acknowledge owner/runner writes immediately. Never
 		// claim a pre-upgrade ledger is safe once the candidate has answered.
@@ -357,7 +347,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if r.ServerUpdaterAuthorized && !selfUpdateMatches(r, r.ServerHash, r.View.ServerUpdater) && !selfUpdateRejected(r, r.ServerInstance, r.View.ServerUpdater) {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server supervisor handoff must reconcile before cancellation")
 		}
-		if r.ServerProcess != "" && r.ServerHealthy < 2 && r.ServerRollback == nil {
+		if r.ServerProcess != "" && r.ServerRollback == nil && (r.ServerHealthy < 1 || r.ServerPreviousHash != "" && r.ServerPreviousHash != r.ServerHash && !serverCommittedMatches(r, r.ServerCommitted, ServerObservation{BinarySHA256: r.ServerHash, ProcessInstanceID: r.ServerProcess})) {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server replacement must reconcile before cancellation")
 		}
 
@@ -366,7 +356,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			if err != nil {
 				return Outcome{}, err
 			}
-			if h.CandidateInstance != "" && h.Rollback == nil && (!committedMatches(r, h, h.Committed, rt.Runtime) || h.HealthInstance != rt.Runtime.InstanceID || h.Healthy < 2 || !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || !installedRunnerMatches(rt.Runtime, r.Manifest)) {
+			if h.CandidateInstance != "" && h.Rollback == nil && (!committedMatches(r, h, h.Committed, rt.Runtime) || h.HealthInstance != rt.Runtime.InstanceID || h.Healthy < 1 || !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || !installedRunnerMatches(rt.Runtime, r.Manifest)) {
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "candidate commitment must reconcile before cancellation")
 			}
 			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())

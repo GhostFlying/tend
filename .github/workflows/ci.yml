@@ -14,7 +14,45 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      race: ${{ steps.select.outputs.race }}
+      groups: ${{ steps.select.outputs.groups }}
+      web: ${{ steps.select.outputs.web }}
+      web_checks: ${{ steps.select.outputs.web_checks }}
+      layout: ${{ steps.select.outputs.layout }}
+      cross: ${{ steps.select.outputs.cross }}
+      release: ${{ steps.select.outputs.release_build }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        id: go
+        with:
+          role: quality
+      - name: select source-bound validation
+        id: select
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
+          FULL_BASELINE: ${{ github.event_name != 'pull_request' }}
+        run: |
+          mkdir -p .local
+          full=()
+          if [ "$FULL_BASELINE" = true ]; then full=(-full); fi
+          go run ./internal/testkit/impactcmd -base "$BASE_REF" "${full[@]}" -output .local/validation-plan.json -github-output
+      - name: retain validation plan
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-plan
+          path: .local/validation-plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
   quality:
+    needs: plan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -24,28 +62,14 @@ jobs:
         id: go
         with:
           role: quality
-      - name: compare affected plan without reducing CI coverage
-        continue-on-error: true
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
-          FULL_BASELINE: ${{ github.event_name != 'pull_request' }}
-        run: |
-          mkdir -p .local
-          full=()
-          if [ "$FULL_BASELINE" = true ]; then full=(-full); fi
-          go run ./internal/testkit/impactcmd -base "$BASE_REF" "${full[@]}" -output .local/affected-shadow.json
-      - name: retain affected-plan comparison
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: affected-plan-shadow
-          path: .local/affected-shadow.json
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
+          name: validation-plan
+          path: .local
       - name: static checks and capability coverage
-        run: make ci-check capability-check protocol-check fmt-check vet staticcheck
+        run: go run ./internal/testkit/impactcmd -plan .local/validation-plan.json -run quality
       - name: release publication recovery checks
+        if: ${{ needs.plan.outputs.release == 'true' }}
         run: python3 -m unittest discover -s .github/scripts -p '*_test.py'
       - name: publish main build snapshot
         if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.go.outputs.build-hit != 'true' }}
@@ -56,22 +80,31 @@ jobs:
 
   race:
     name: race (${{ matrix.group }})
+    needs: plan
+    if: ${{ needs.plan.outputs.race == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        group: [app, api, mainthread, e2e, serverkit, sandbox, runner, other]
+        group: ${{ fromJSON(needs.plan.outputs.groups) }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-go
         id: go
         with:
           role: ${{ matrix.group }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
+          path: .local
       - name: race tests
         env:
           APP_TEST_SHARDS: 4
           TEST_GROUP: ${{ matrix.group }}
           TEST_COUNT: 0
+          TEST_PLAN: .local/validation-plan.json
           TEST_REPORT_DIR: ${{ runner.temp }}/race-reports
         run: make test
       - name: retain native test events, including failures
@@ -90,6 +123,8 @@ jobs:
           key: ${{ steps.go.outputs.build-key }}
 
   web:
+    needs: plan
+    if: ${{ needs.plan.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -102,7 +137,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: web checks and build
+        if: ${{ needs.plan.outputs.web_checks == 'true' }}
         run: make web-check
+      - name: build embedded assets for executable validation
+        if: ${{ needs.plan.outputs.web_checks != 'true' }}
+        run: make web
       - uses: actions/upload-artifact@v4
         with:
           name: web-app
@@ -112,7 +151,8 @@ jobs:
 
   layout:
     name: layout (${{ matrix.group }})
-    needs: web
+    needs: [plan, web]
+    if: ${{ needs.plan.outputs.layout == 'true' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -144,7 +184,8 @@ jobs:
         run: pnpm --dir web exec node scripts/layout-groups.ts "$LAYOUT_GROUP"
 
   cross:
-    needs: web
+    needs: [plan, web]
+    if: ${{ needs.plan.outputs.cross == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -168,7 +209,8 @@ jobs:
           key: ${{ steps.go.outputs.build-key }}
 
   release-build:
-    needs: web
+    needs: [plan, web]
+    if: ${{ needs.plan.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -198,7 +240,8 @@ jobs:
           retention-days: 7
 
   release-assemble:
-    needs: release-build
+    needs: [plan, release-build]
+    if: ${{ needs.plan.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -224,16 +267,29 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Keep the existing required check name while rejecting every incomplete job.
+  # Required jobs must succeed; only the immutable plan may exclude a job.
   check:
     if: ${{ always() }}
-    needs: [quality, race, web, layout, cross, release-build, release-assemble]
+    needs: [plan, quality, race, web, layout, cross, release-build, release-assemble]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        with:
+          role: check
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
+          path: .local
       - name: require all checks
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+        run: |
+          echo "$RESULTS" | jq -e '.plan.result == "success"'
+          echo "$RESULTS" > .local/validation-results.json
+          go run ./internal/testkit/impactcmd -plan .local/validation-plan.json -verify-results .local/validation-results.json
 
   release-publish:
     needs: check

@@ -2,7 +2,6 @@ package impact
 
 import (
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -26,9 +25,8 @@ func TestFullGroupsIsolateHeavyPackagesWithoutReducingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	matrix := regexp.MustCompile(`(?m)^        group: \[([^\]]+)\]$`).FindSubmatch(data)
-	if len(matrix) != 2 || !slices.Equal(strings.Split(string(matrix[1]), ", "), want) {
-		t.Fatalf("Actions and local full plan differ: %s", matrix)
+	if !strings.Contains(string(data), "group: ${{ fromJSON(needs.plan.outputs.groups) }}") {
+		t.Fatal("Actions does not consume the tested impact plan")
 	}
 }
 
@@ -167,5 +165,27 @@ func TestExplicitFullDoesNotMislabelUndiscoveredPackages(t *testing.T) {
 	}
 	if !p.Full || !slices.Equal(p.Packages, []string{"./..."}) || !slices.Equal(p.Groups, Groups()) {
 		t.Fatalf("full coverage changed: %+v", p)
+	}
+}
+
+func TestGoExecutableChangeBuildsWebWithoutUnrelatedFrontendTests(t *testing.T) {
+	packages := append(dependencyFixture(), Package{ImportPath: module + "cmd/tend", Dir: "cmd/tend", Imports: []string{module + "internal/leaf"}})
+	p := Select([]string{"internal/leaf/work.go"}, packages, false)
+	if !p.Cross || !p.Required()["web"] || p.Web || p.Layout {
+		t.Fatal("cross build lost embedded assets or selected unrelated frontend tests", p)
+	}
+	results := map[string]string{}
+	for job, required := range p.Required() {
+		results[job] = "skipped"
+		if required {
+			results[job] = "success"
+		}
+	}
+	if err := p.VerifyResults(results); err != nil {
+		t.Fatal(err)
+	}
+	results["web"] = "skipped"
+	if err := p.VerifyResults(results); err == nil {
+		t.Fatal("missing embedded build accepted")
 	}
 }

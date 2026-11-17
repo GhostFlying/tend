@@ -15,7 +15,7 @@ func selfUpdaterOnlyReady(t *testing.T) (*harness, StartUpgrade, ServerObservati
 	c.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
 	c.ReleaseSet.Artifacts[1].SHA256 = c.Manifest.Artifacts[1].SHA256
 	c.Manifest.Storage.RunnerJournal.Max = 9
-	if op := startTestUpgrade(h, "updater-only", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "updater-only", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)
@@ -24,10 +24,6 @@ func selfUpdaterOnlyReady(t *testing.T) (*harness, StartUpgrade, ServerObservati
 	if v := upgradeTick(h, o); v.Phase != "server_draining" {
 		t.Fatal(v)
 	}
-	if v := upgradeTick(h, o); v.Phase != "server_checking" {
-		t.Fatal(v)
-	}
-	h.clock.Advance(5 * time.Second)
 	if v := upgradeTick(h, o); v.Phase != "runners" {
 		t.Fatal(v)
 	}

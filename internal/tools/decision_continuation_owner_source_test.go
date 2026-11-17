@@ -67,7 +67,7 @@ func TestDecisionContinuationManagerCallbackRequiresUnwithdrawnOwnerSource(t *te
 			if err := json.Unmarshal(op.Result, &issue); err != nil {
 				t.Fatal(err)
 			}
-			runtime := &protocol.RunnerRuntime{InstanceID: "question-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs}}
+			runtime := &protocol.RunnerRuntime{InstanceID: "question-runner", Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal, Capabilities: []string{protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityWorkerQuestions, protocol.CapabilityQuestionHandoffs}}
 			runner := protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}
 			execute(runner, app.Hello{}, protocol.Target{Type: "host", ID: "linux-1"}, protocol.HelloPayload{WorkspaceProtocol: 1, Runtime: runtime}, nil)
 			op = execute(owner, app.CanonicalOwnerTaskCreate{}, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Original worker", Spec: protocol.OwnerTaskSpec{Goal: "Implement the bounded change", Acceptance: []string{"The original answer is followed"}, Deliverables: []string{"report"}, Workspace: protocol.OwnerTaskWorkspace{Mode: "temporary"}}}, &issue.Revision)

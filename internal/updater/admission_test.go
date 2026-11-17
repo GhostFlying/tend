@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
-func TestUnhealthyCandidateResetSurvivesUpdaterRestart(t *testing.T) {
+func TestUnhealthyCandidateCanCommitAfterReadinessRecovers(t *testing.T) {
 	h := newHarness(t)
 	h.upgrade(t)
 	h.until(t, "checking")
-	h.step(t)
 	h.a.unhealthy = true
 	h.step(t)
 	h.reopen(t)
@@ -21,12 +20,8 @@ func TestUnhealthyCandidateResetSurvivesUpdaterRestart(t *testing.T) {
 	}
 	h.a.unhealthy = false
 	h.step(t)
-	if h.s.Status().Operation.Phase == "committed" {
-		t.Fatal("candidate committed after only one healthy observation following reset")
-	}
-	h.step(t)
 	if h.s.Status().Operation.Phase != "committed" {
-		t.Fatal("candidate did not commit after two consecutive healthy observations")
+		t.Fatal("candidate did not commit when actual readiness recovered")
 	}
 }
 

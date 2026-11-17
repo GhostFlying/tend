@@ -305,7 +305,7 @@ func TestDeliveryGitHubMergedSourceRejectsPreMergeBaseBuild(t *testing.T) {
 			for _, a := range upgrade.Manifest.Artifacts {
 				upgrade.ArtifactSources[a.SHA256] = release.SourceIdentity{Commit: c.BaseSHA}
 			}
-			expectWorkCode(t, startTestUpgrade(h, "reject-pre-merge-base", upgrade), protocol.CodeInvalidRequest)
+			expectWorkCode(t, startPreparedTestUpgrade(h, "reject-pre-merge-base", upgrade), protocol.CodeInvalidRequest)
 			if h.count("upgrades") != 0 {
 				t.Fatal("pre-merge build installed")
 			}
@@ -313,7 +313,7 @@ func TestDeliveryGitHubMergedSourceRejectsPreMergeBaseBuild(t *testing.T) {
 			for _, a := range upgrade.Manifest.Artifacts {
 				upgrade.ArtifactSources[a.SHA256] = release.SourceIdentity{Commit: c.TargetSHA}
 			}
-			if op := startTestUpgrade(h, "correct-merged-source", upgrade); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "correct-merged-source", upgrade); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 		})
@@ -396,7 +396,7 @@ func TestDeliveryOpenTargetDriftFencesAnswerTaskClaimAndStart(t *testing.T) {
 			case "start", "merge-base":
 				upgrade.DeliveryTaskID = task
 				upgrade.ArtifactSources = map[string]release.SourceIdentity{upgrade.ServerHash: {Commit: c.TargetSHA}}
-				expectWorkCode(t, startTestUpgrade(h, "drifted-start", upgrade), protocol.CodeStaleRevision)
+				expectWorkCode(t, startPreparedTestUpgrade(h, "drifted-start", upgrade), protocol.CodeStaleRevision)
 			}
 			if h.count("upgrades") != 0 {
 				t.Fatal("drift installed release")
@@ -441,7 +441,7 @@ func TestDeliveryDeferSurvivesPrepareProviderAndBaselineDrift(t *testing.T) {
 					c.TargetSHA = strings.Repeat("e", 40)
 					reportGitHubCandidate(t, h, i.IssueID, c, true)
 				case "baseline":
-					if op := startTestUpgrade(h, "another-installation", upgrade); op.Status != protocol.OpSucceeded {
+					if op := startPreparedTestUpgrade(h, "another-installation", upgrade); op.Status != protocol.OpSucceeded {
 						t.Fatal(op)
 					}
 					batch := upgradeRead(h)

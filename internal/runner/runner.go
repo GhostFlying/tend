@@ -185,11 +185,13 @@ type Runner struct {
 	heartbeatWake  chan struct{}
 	helloGate      chan struct{}
 
-	mu      sync.Mutex
-	ttl     time.Duration
-	ttlWake chan struct{} // closed when the TTL changes
-	active  map[string]*active
-	wg      sync.WaitGroup
+	mu             sync.Mutex
+	ttl            time.Duration
+	ttlWake        chan struct{} // closed when the TTL changes
+	active         map[string]*active
+	historyReading map[string]bool
+	historyResults map[string]protocol.ManagerHistoryReply
+	wg             sync.WaitGroup
 
 	inventoryMu                     sync.Mutex
 	usageDiscovery                  *nativeusage.Discovery
@@ -256,7 +258,7 @@ func New(cfg Config) *Runner {
 	}
 	return &Runner{previewWake: make(chan struct{}, 1), archiveWake: make(chan struct{}, 1), archiveLocks: map[string]*archiveSourceLock{},
 		cfg:                  cfg,
-		runnerProtocol:       protocol.PreviousRunnerProtocol,
+		runnerProtocol:       protocol.MinimumRunnerProtocol,
 		bootstrapMaintenance: cfg.InitialMaintenance,
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},
@@ -997,7 +999,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	env, err := r.newEnvelope(protocol.OpRunnerHeartbeat, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HeartbeatPayload{Runs: refs, Runtime: runtime})
+	env, err := r.newEnvelope(protocol.OpRunnerHeartbeat, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HeartbeatPayload{Runs: refs, Runtime: runtime, HistoryReplies: r.historyReplies()})
 	if err != nil {
 		return
 	}
@@ -1015,6 +1017,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	if err := json.Unmarshal(op.Result, &res); err != nil {
 		return
 	}
+	r.acceptHistoryReads(ctx, res.HistoryReads, res.HistoryAcknowledged)
 	r.acceptRetained(res.RetainedExecutions)
 	r.setTTL(res.LeaseTTLMillis)
 	if err := r.applyControl(ctx, res.Control, sent, false); err != nil {

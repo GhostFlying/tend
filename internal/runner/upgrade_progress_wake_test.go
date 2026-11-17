@@ -87,7 +87,7 @@ func TestUpgradeProgressCannotRedispatchFailedDownload(t *testing.T) {
 	r.cfg.UpdaterSocket = filepath.Join(testkit.SocketDir(t), "service.sock")
 	r.cfg.UpdaterControlSocket = filepath.Join(testkit.SocketDir(t), "supervisor.sock")
 	r.cfg.UpdaterBundleDir = t.TempDir()
-	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance, UpgradeID: "original", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{ManifestPath: "/manifest", ManifestSHA256: strings.Repeat("a", 64), ManifestSize: 1}}
+	control := protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerNormal, UpgradeID: "original", ReleaseID: "release", Upgrade: &protocol.RunnerUpgradeTarget{PrepareOnly: true, ManifestPath: "/manifest", ManifestSHA256: strings.Repeat("a", 64), ManifestSize: 1}}
 	var downloads atomic.Int32
 	repeated, reported := make(chan struct{}, 1), make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {

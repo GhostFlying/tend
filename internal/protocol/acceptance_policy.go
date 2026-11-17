@@ -1,6 +1,6 @@
 package protocol
 
-// IndependentAcceptanceRequest is a creator's explicit policy for future tasks.
+// IndependentAcceptanceRequest records an explicit review choice.
 // Creator identity and request provenance are supplied by the server.
 type IndependentAcceptanceRequest struct {
 	Required bool   `json:"required"`
@@ -15,8 +15,8 @@ type AcceptancePolicyCreator struct {
 	SourceIssueID string         `json:"source_issue_id,omitempty"`
 }
 
-// IssueAcceptancePolicy is frozen in each Issue revision and new task agreement.
-// Its absence means the existing requirement for independent acceptance.
+// IssueAcceptancePolicy records authenticated review choice and provenance.
+// Active Task changes are audited separately from historical results.
 type IssueAcceptancePolicy struct {
 	Required      bool                    `json:"required"`
 	Reason        string                  `json:"reason"`

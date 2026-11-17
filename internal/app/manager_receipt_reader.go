@@ -32,17 +32,6 @@ func isProvedManagerReceiptReader(ctx context.Context, q store.Querier, action s
 	return reader, err
 }
 
-// Keep the original negotiated responsibility across read failures, but do not
-// attach it to unrelated receipts after its exact original pending set clears.
-func managerReceiptReaderTrigger(ctx context.Context, q store.Querier, task string) (string, error) {
-	var raw string
-	err := q.QueryRowContext(ctx, `SELECT a.trigger_json FROM plan_actions a WHERE a.task_id=? AND COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'' AND EXISTS(SELECT 1 FROM json_each(a.trigger_json,'$.receipt_reader_pending_request_ids') source JOIN native_turn_receipts_pending pending ON pending.request_id=source.value) ORDER BY a.generation DESC LIMIT 1`, task).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return `{"receipt_only":true}`, nil
-	}
-	return raw, err
-}
-
 func filterManagerReceiptReaders(ctx context.Context, q store.Querier, candidates []scheduler.Candidate, runtime *protocol.RunnerRuntime) ([]scheduler.Candidate, error) {
 	if supportsManagerReceiptReader(runtime) {
 		return candidates, nil
@@ -158,24 +147,6 @@ func admitManagerReceiptReader(ctx context.Context, x *Exec, tx *store.Tx, s pro
 	if _, err := tx.Exec(ctx, `UPDATE tasks SET lifecycle='waiting',control_revision=control_revision+1,updated_at=? WHERE task_id=? AND control_revision=?`, x.Now.UnixMilli(), s.TaskID, s.TaskRevision); err != nil {
 		return Outcome{}, err
 	}
-	var generation int64
-	if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0)+1 FROM plan_actions WHERE task_id=? AND kind='coordinate'`, s.TaskID).Scan(&generation); err != nil {
-		return Outcome{}, err
-	}
-	if err := insertManagerAction(ctx, x, tx, s.TaskID, generation); err != nil {
-		return Outcome{}, err
-	}
-	trigger, err := json.Marshal(map[string]any{"receipt_only": true, "receipt_reader_request_id": x.Env.RequestID, "receipt_reader_original_run_id": s.RunID, "receipt_reader_pending_request_ids": requests})
-	if err != nil {
-		return Outcome{}, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=? WHERE task_id=? AND kind='coordinate' AND generation=?`, string(trigger), s.TaskID, generation); err != nil {
-		return Outcome{}, err
-	}
-	var actionID string
-	if err := tx.Q().QueryRowContext(ctx, `SELECT action_id FROM plan_actions WHERE task_id=? AND kind='coordinate' AND generation=?`, s.TaskID, generation).Scan(&actionID); err != nil {
-		return Outcome{}, err
-	}
-	result := map[string]any{"task_id": s.TaskID, "run_id": s.RunID, "lease_id": s.LeaseID, "task_revision": s.TaskRevision + 1, "mode": "read_receipts", "observed": protocol.RunFailed, "responsibility": "receipt_reading", "reader_action_id": actionID, "reader_generation": generation, "pending_request_ids": requests, "close_request_id": s.CloseRequestID, "close_result_sha256": s.CloseResultSHA256, "stopped_request_id": s.StoppedRequestID, "stopped_payload_sha256": s.StoppedPayloadSHA256}
+	result := map[string]any{"task_id": s.TaskID, "run_id": s.RunID, "lease_id": s.LeaseID, "task_revision": s.TaskRevision + 1, "mode": "read_receipts", "observed": protocol.RunFailed, "responsibility": "receipt_reading", "pending_request_ids": requests, "close_request_id": s.CloseRequestID, "close_result_sha256": s.CloseResultSHA256, "stopped_request_id": s.StoppedRequestID, "stopped_payload_sha256": s.StoppedPayloadSHA256}
 	return Outcome{Result: result, Events: []Event{{ObjectType: "task", ObjectID: s.TaskID, ObjectVersion: s.TaskRevision + 1, Kind: "task.manager_receipt_reader_requested", Body: result}}}, nil
 }

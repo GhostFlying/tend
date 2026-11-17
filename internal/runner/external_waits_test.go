@@ -188,6 +188,14 @@ func TestExternalWaitLostNativeCloseReplyReconcilesOriginalReceipt(t *testing.T)
 			_ = json.NewEncoder(w).Encode(rpcResponse{Error: protocol.Errorf(protocol.CodeForbidden, "the original native close already released this lease")})
 			return
 		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil || !ack.AcknowledgeOnly || len(ack.AcknowledgedIDs) != 1 || ack.AcknowledgedIDs[0] != "original-close" {
+				t.Error("incorrect receipt acknowledgement", ack, err)
+			}
+			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+			return
+		}
 		if env.Operation != closeEnvelope.Operation || env.RequestID != closeEnvelope.RequestID || string(env.Payload) != string(closeEnvelope.Payload) {
 			t.Error("recovery changed the original native receipt", env)
 		}

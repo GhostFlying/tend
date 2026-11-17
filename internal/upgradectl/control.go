@@ -396,6 +396,11 @@ func (c *Controller) Handler() http.Handler {
 				if err = decode(r, &plan); err == nil {
 					value, err = c.recoveryHealth(r.Context(), plan)
 				}
+			case "/updater/readiness":
+				var binding protocol.UpgradeBinding
+				if err = decode(r, &binding); err == nil {
+					value, err = c.installationReadiness(r.Context(), binding)
+				}
 			case "/updater/health":
 				var binding protocol.UpgradeBinding
 				if err = decode(r, &binding); err == nil {
@@ -482,7 +487,7 @@ func (c *Controller) rollbackReceipt(ctx context.Context) *protocol.UpdaterRecei
 		receipt = updater.CancelledReceipt(response, view.UpgradeID)
 	}
 	if receipt == nil {
-		receipt = updater.RollbackReceipt(response)
+		receipt = updater.ProcessReceipt(response)
 	}
 	if receipt == nil || receipt.Binding.InstanceID != c.cfg.Instance || receipt.CurrentProcessInstanceID != c.cfg.ProcessInstance || receipt.CurrentSHA256 != c.cfg.BinarySHA256 {
 		return nil

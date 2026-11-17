@@ -381,3 +381,28 @@ func TestOriginalMessageRemainsActiveUntilNativeStop(t *testing.T) {
 		t.Fatal(state, err)
 	}
 }
+
+func TestReviewToolsetChangeReconcilesAvailableOriginalReceipt(t *testing.T) {
+	f := newHandoffFixture(t)
+	message := f.e.say("Finish the original request after reconnect")
+	d, _, ok, err := f.e.app.NextDelivery(t.Context(), app.MainThreadDestination)
+	if err != nil || !ok {
+		t.Fatal(d, ok, err)
+	}
+	rec := store.MainTurn{RequestID: d.RequestID, MessageID: message, ThreadID: f.source.ID(), TurnID: "original-native", Status: store.TurnStarted}
+	if err := f.e.app.PutMainTurn(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.app.SettleOpenTurns(t.Context(), rec.ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.app.FinishDelivery(t.Context(), d, app.DeliveryResult{Outcome: app.Unknown}); err != nil {
+		t.Fatal(err)
+	}
+	reader := &receiptThread{Thread: f.source, found: true, receipt: harness.TurnReceipt{ID: rec.TurnID, Status: "interrupted", Raw: json.RawMessage(`{"id":"original-native","status":"interrupted","items":[]}`)}}
+	f.session.threads[f.source.ID()] = reader
+	_, err = f.e.m.openManagedThread(t.Context(), f.session)
+	if reader.known == "" {
+		t.Fatalf("available original receipt was never read; startup error: %v", err)
+	}
+}

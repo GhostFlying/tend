@@ -101,6 +101,7 @@ func TestFault_ContinuousDeliveryRepairsReviewsInstallsAndSettlesSameTask(t *tes
 	if op := h.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, request, command); op.Status != protocol.OpSucceeded {
 		t.Fatal("exact reviewed source could not start normal installation", op)
 	}
+	prepareTestUpgrade(h)
 	final := unchangedInstallationWorkspace(t, workspace, prepared, installation)
 	final.Report = &protocol.ResultReport{Body: "Actual single controlled installation and exact unchanged repository source", Evidence: []string{"upgrade:continuous-install"}}
 	if op := h.runAs(installation, protocol.OpRunsSubmitArtifact, final, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
@@ -158,6 +159,7 @@ func completeContinuousInstallation(t *testing.T, h *harness, c StartUpgrade, id
 	}
 	current := ServerObservation{InstanceID: binding.InstanceID, ProcessInstanceID: binding.ProcessInstanceID, BinarySHA256: binding.ArtifactSHA256, Commit: commit, Healthy: true, MainDrained: true}
 	current.Updater = selfProof(binding.InstanceID, current.ProcessInstanceID, current.BinarySHA256)
+	current.UpdaterReceipt = committedServerForTest(binding)
 	upgradeTick(h, current)
 	h.clock.Advance(5 * time.Second)
 	upgradeTick(h, current)

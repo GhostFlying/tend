@@ -34,12 +34,14 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	r.mu.Lock()
 	confirmed := r.confirmedRuntime
 	r.mu.Unlock()
-	if err != nil || observation.Mode != protocol.RunnerReady || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.Mode != protocol.RunnerReady || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
+	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && control.Mode == protocol.RunnerNormal
+	ready := observation != nil && observation.Mode == protocol.RunnerReady && confirmed.Mode == protocol.RunnerReady
+	if err != nil || !preparing && !ready || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
 		r.updaterMu.Unlock()
 		return
 	}
 	r.mu.Lock()
-	waiting := r.upgradePhase == "updater_ready" && control.Upgrade.Updater != nil && !control.Upgrade.Updater.Authorized
+	waiting := preparing && r.upgradePhase == "prepared" || r.upgradePhase == "updater_ready" && control.Upgrade.Updater != nil && !control.Upgrade.Updater.Authorized
 	submitted := r.upgradePhase == "submitted" || r.upgradePhase == "updater_verified"
 	r.mu.Unlock()
 	// Reporting progress is not another execution trigger. Keep the ordinary
@@ -91,6 +93,10 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 		if !r.updateUpgradeAttempt(control, func() {}) {
 			return errors.New("upgrade attempt changed")
 		}
+		if target.PrepareOnly {
+			r.updateUpgradeAttempt(control, func() { r.upgradePhase = "prepared"; r.upgradeError = "" })
+			return nil
+		}
 		bundle, err := release.Load(dir)
 		if err != nil {
 			return err
@@ -132,6 +138,9 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 			return errors.New("existing complete release set differs")
 		}
 		return submit()
+	}
+	if !target.PrepareOnly {
+		return errors.New("runner: release must be prepared before entering maintenance")
 	}
 	if _, err := os.Lstat(dir); err == nil {
 		return errors.New("existing release bundle is invalid")
@@ -356,7 +365,8 @@ func (r *Runner) submitConfiguredUpdater(ctx context.Context, id, dir, digest st
 func (r *Runner) updateUpgradeAttempt(control protocol.RunnerControl, update func()) bool {
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
-	if r.control.Revision != control.Revision || r.control.UpgradeID != control.UpgradeID || r.control.Mode != protocol.RunnerMaintenance {
+	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && r.control.Mode == protocol.RunnerNormal
+	if r.control.Revision != control.Revision || r.control.UpgradeID != control.UpgradeID || r.control.Mode != protocol.RunnerMaintenance && !preparing {
 		return false
 	}
 	r.mu.Lock()

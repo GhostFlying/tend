@@ -127,7 +127,7 @@ func (c linkCommittedMaintenance) Apply(ctx context.Context, x *Exec, tx *store.
 	if err != nil {
 		return Outcome{}, err
 	}
-	if proof.Previous != row.Plan.Previous || proof.Successor != row.Plan.Successor || proof.RequestID != row.Plan.RequestID || proof.Process != row.Process || proof.Generation == 0 || proof.Epoch != row.Process.LaunchID || proof.FirstSequence == 0 || proof.SecondSequence <= proof.FirstSequence {
+	if proof.Previous != row.Plan.Previous || proof.Successor != row.Plan.Successor || proof.RequestID != row.Plan.RequestID || proof.Process != row.Process || proof.Generation == 0 || proof.Epoch != row.Process.LaunchID || proof.FirstSequence == 0 || proof.SecondSequence < proof.FirstSequence {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "exact independent committed maintenance receipt required")
 	}
 	if row.Linked {

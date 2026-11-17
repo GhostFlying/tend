@@ -46,7 +46,7 @@ func TestSelfUpdateSameBinaryStillSubmitsConfiguration(t *testing.T) {
 	hash := sha256.Sum256(data)
 	sha := hex.EncodeToString(hash[:])
 	r.cfg.Build.BinarySHA256 = sha
-	m := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 1, Max: 999}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}}
+	m := release.Manifest{Format: 1, ReleaseID: "release", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 1, Max: 999}, RunnerJournal: release.Range{Min: journal.CurrentVersion, Max: journal.CurrentVersion}}}
 	for _, role := range []string{"server", "runner"} {
 		m.Artifacts = append(m.Artifacts, release.Artifact{Role: role, OS: "linux", Arch: "amd64", Path: role, Size: int64(len(data)), SHA256: sha})
 	}

@@ -18,7 +18,7 @@ func TestDecisionContinuationTypedWaitRequiresExplicitAdmission(t *testing.T) {
 }
 
 func decisionContinuationCompatibility(t *testing.T, typed bool) {
-	for _, wire := range []int64{protocol.PreviousRunnerProtocol, protocol.CurrentRunnerProtocol} {
+	for _, wire := range []int64{protocol.MinimumRunnerProtocol, protocol.CurrentRunnerProtocol} {
 		for _, answerFirst := range []bool{false, true} {
 			t.Run(fmt.Sprintf("wire-%d/answer-first-%t", wire, answerFirst), func(t *testing.T) {
 				h := newHarness(t)

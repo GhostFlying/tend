@@ -62,7 +62,7 @@ func TestUpdaterOnlyRecoveryRequiresExactCommittedWriter(t *testing.T) {
 		"proof process":        func(s *State) { s.CommittedProof.Process.StartTicks++ },
 		"receipt process":      func(s *State) { s.Maintenance.Receipt.Process.StartTicks++ },
 		"receipt binding":      func(s *State) { s.Maintenance.Receipt.Successor.ProcessInstanceID = "foreign" },
-		"receipt sequences":    func(s *State) { s.Maintenance.Receipt.SecondSequence = s.Maintenance.Receipt.FirstSequence },
+		"receipt sequences":    func(s *State) { s.Maintenance.Receipt.SecondSequence = 0 },
 		"receipt epoch":        func(s *State) { s.Maintenance.Receipt.Epoch = "foreign" },
 		"current artifact":     func(s *State) { s.Current.Artifact.SHA256 = strings.Repeat("f", 64) },
 		"proof version":        func(s *State) { s.CommittedProof.Version.StorageVersion++ },

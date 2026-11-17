@@ -18,3 +18,11 @@ func committedMatches(r store.UpgradeRow, h store.UpgradeHost, receipt *protocol
 func runnerCandidateMatches(r store.UpgradeRow, h store.UpgradeHost, rt protocol.RunnerRuntime) bool {
 	return rt.InstanceID == h.CandidateInstance || committedMatches(r, h, rt.UpdaterReceipt, rt)
 }
+
+func serverCommittedMatches(r store.UpgradeRow, receipt *protocol.UpdaterReceipt, observation ServerObservation) bool {
+	return receipt != nil && receipt.Phase == "committed" && receipt.CommittedConfirmed && !receipt.RollbackConfirmed &&
+		bindingMatches(r, receipt.Binding) && receipt.Binding.InstanceID == r.ServerInstance &&
+		r.ServerProcess != "" && receipt.Binding.ProcessInstanceID == r.ServerProcess &&
+		receipt.Binding.ArtifactSHA256 == r.ServerHash && receipt.CurrentSHA256 == r.ServerHash &&
+		observation.BinarySHA256 == r.ServerHash && receipt.CurrentProcessInstanceID == observation.ProcessInstanceID
+}

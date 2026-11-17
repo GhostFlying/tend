@@ -17266,6 +17266,9 @@
         "manifest_size": {
           "type": "integer"
         },
+        "prepare_only": {
+          "type": "boolean"
+        },
         "release_set": {
           "$ref": "#/definitions/ReleaseSetTarget"
         },
@@ -20441,6 +20444,9 @@
         "expected_assignment_epoch": {
           "type": "integer"
         },
+        "independent_acceptance": {
+          "$ref": "#/definitions/IndependentAcceptanceRequest"
+        },
         "rating": {
           "$ref": "#/definitions/Rating"
         },
@@ -20551,11 +20557,17 @@
         "current_sha256": {
           "type": "string"
         },
+        "external_recovery": {
+          "type": "boolean"
+        },
         "phase": {
           "type": "string"
         },
         "rollback_confirmed": {
           "type": "boolean"
+        },
+        "superseded_upgrade_id": {
+          "type": "string"
         }
       },
       "required": [

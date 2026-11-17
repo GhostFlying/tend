@@ -317,6 +317,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("local POST /archive/prepare", "archive prepare", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/cancel", "archive cancel", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/host", "archive host", "--socket", "{socket}", "--revision", "2", "--host", "sample", "--json"),
+		binding("local EXEC upgrade recover", "upgrade recover", "--release", "{release}", "--config", "{config}", "--force", "--dry-run"),
 		binding("local GET /upgrades/recovery/status", "upgrade recover status", "--socket", "{socket}", "--ledger-socket", "{socket}", "--recovery-id", "forward", "--json"),
 		binding("local GET /status", "upgrade recover status", "--socket", "{socket}", "--json"),
 		binding("local POST /recovery/plan", "upgrade recover plan", "--socket", "{socket}", "--plan", "{recovery}", "--request-id", "{request}", "--upgrade-id", "original", "--recovery-id", "forward", "--json"),
@@ -355,6 +356,12 @@ func commandUsage(prefix []string) string {
 	}
 	slices.Sort(names)
 	var out strings.Builder
+	if name == "upgrade" || name == "upgrade recover" {
+		out.WriteString("\nIndependent local recovery: tend upgrade recover --release <complete-bundle> --config <fixed-updater-config> --force [--unit <service>] [--request-id <original-id>]. Uses the selected release's installer and does not require the old service or updater socket. --status reads the same durable recovery record; --dry-run prints the pinned invocation. Keep identical release, config and request identity after an interrupted reply.\n")
+	}
+	if name == "issue update-task" {
+		out.WriteString("\nThe responsible Agent may change independent_acceptance: {required: false, reason: <text>} on an active Task using its current revision and Issue epoch. Explicit human requirements remain binding. Withdrawal retains the original artifact and does not create a passing verdict.\n")
+	}
 	if name == "conversation" || name == "conversation promote" {
 		out.WriteString("\nConsultation promotion: for a new Issue, provide manager: {category_id: <work-category>, reason: <text>} with the plan and exact source_message_id/expected_source_revision. Ordinary work selects a category without a concrete Agent; the compatible manager key does not require a special issue-manager category. With existing_issue_id, retain its existing responsibility and supply its current revision/assignment epoch and selected sources. The complete authenticated owner JSON still accepts legacy manager.agent_id and assignee; no valid wire fields are discarded.\n")
 	}
@@ -440,7 +447,7 @@ func commandUsage(prefix []string) string {
 
 	if name == "issue" || name == "issue create" || name == "issue create-task" || name == "issue set-acceptance-policy" {
 		out.WriteString("\nIndependent acceptance: issue create accepts independent_acceptance: {required: true|false, reason: <text>}. A read-only investigation may use false and must still submit a legal durable report. Creator identity is server-frozen. issue create-task accepts the same independent_acceptance object for the new Task. The responsible Agent chooses self-check or independent review for ordinary work; an explicit human requirement remains binding. An explicit independent review records spec.review_artifact_id for an immutable readable original or spec.review_delivery_id for this Issue's registered PR, with a report deliverable. It reports once and does not recursively inherit the reviewed object's independent requirement. An explicit independent_acceptance.required=true on that review itself still requests its additional real acceptance; ordinary spec.inputs and categories do not waive any requirement. Existing Tasks retain their original frozen policy, and the current phase does not wait for an otherwise unused future reviewer.\n")
-		out.WriteString("tend issue set-acceptance-policy <issue_id> --revision <revision> --epoch <epoch> --data '{\"required\":false,\"reason\":\"A bounded investigation needs no separate review\"}'\nIssue policy changes affect future tasks only; a worker cannot rewrite its existing frozen policy. Use --dry-run to save the original Envelope; unknown results require reconciliation and identical --request-id/payload/control values, never a new request. Read issue show/task show --json for creator and frozen task policy.\n")
+		out.WriteString("tend issue set-acceptance-policy <issue_id> --revision <revision> --epoch <epoch> --data '{\"required\":false,\"reason\":\"A bounded investigation needs no separate review\"}'\nIssue defaults affect future tasks only. The responsible Agent can change an active task with issue update-task --data independent_acceptance; explicit human requirements remain binding. Use --dry-run to save the original Envelope; unknown results require reconciliation and identical --request-id/payload/control values, never a new request. Read issue show/task show --json for creator and current task review choice.\n")
 	}
 	if name == "issue" || name == "issue update" {
 		out.WriteString("\nOrdinary Issue edits and source changes notify the responsible owner through coalesced events. The owner decides whether work changed and explicitly revises, pauses or continues affected work. Existing Task specs remain immutable; a source digest change alone does not invalidate admission or results. Optional continue_existing assessments retain expected_context_revision and task_dispositions with task_id, spec_version, expected_control_revision and reason as historical assessments, not a normal execution prerequisite.\n")

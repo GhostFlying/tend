@@ -61,7 +61,7 @@ func TestPublicCapabilityCoverageRejectsMissingAndNewEntries(t *testing.T) {
 // Local operator interfaces are checked against their actual source registrations.
 // Updater authorization/health callbacks are executor-only, not operator commands.
 func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
-	expected := map[string]bool{protocol.LocalServerCapabilities: true}
+	expected := map[string]bool{protocol.LocalServerCapabilities: true, "local EXEC upgrade recover": true}
 	for _, action := range []string{"check", "audit", "pause", "resume", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
 		expected["local POST /maintenance/"+action] = true
 	}
@@ -92,6 +92,7 @@ func TestPublicCapabilityLocalControlCoverage(t *testing.T) {
 	// these executor callbacks retain its complete plan and authority checks.
 	// Ordinary self-update is dispatched by the coordinator and independently
 	// installed through the pinned EXEC interface above, never a generic CLI RPC.
+	internal["/updater/readiness"] = "local installer process and storage readiness"
 	internal["/self-update/apply"] = "ordinary upgrade coordinator self-update request"
 	internal["/self-update/status"] = "ordinary upgrade coordinator process evidence"
 	internal["/bounded/authorize"] = "independent bounded installer authorization"

@@ -19,7 +19,7 @@ func TestMaintenanceRetainedServerRecordsUsableInstallationEvidence(t *testing.T
 	c.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
 	c.ReleaseSet.Artifacts[1].SHA256 = c.Manifest.Artifacts[1].SHA256
 	c.Manifest.Storage.RunnerJournal.Max = 9
-	if op := startTestUpgrade(h, "retained-maintenance", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "retained-maintenance", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	initial := upgradeRead(h)
@@ -27,16 +27,8 @@ func TestMaintenanceRetainedServerRecordsUsableInstallationEvidence(t *testing.T
 	o.Updater = selfUpgradeObservation(initial, c.ServerInstance, o.ProcessInstanceID, c.ServerHash)
 	upgradeTick(h, o) // The current supervisor's exact receipt permits draining.
 	v := upgradeTick(h, o)
-	if v.Phase != "server_checking" || upgradeRead(h).ServerHealthy != 1 {
+	if v.Phase != "runners" || upgradeRead(h).ServerHealthy != 1 {
 		t.Fatalf("independent maintenance skipped actual server proof: %+v", v)
-	}
-	upgradeTick(h, o)
-	if upgradeRead(h).ServerHealthy != 1 {
-		t.Fatal("one health sample was counted twice")
-	}
-	h.clock.Advance(5 * time.Second)
-	if v := upgradeTick(h, o); v.Phase != "runners" {
-		t.Fatal(v)
 	}
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerNormal)
@@ -66,7 +58,7 @@ func TestMaintenanceRetainedServerRecordsUsableInstallationEvidence(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if final := upgradeRead(h); final.View.OverallDeadlineMillis != initial.View.OverallDeadlineMillis || final.ServerHealthy != 2 || h.count("upgrades") != 1 {
+	if final := upgradeRead(h); final.View.OverallDeadlineMillis != initial.View.OverallDeadlineMillis || final.ServerHealthy != 1 || h.count("upgrades") != 1 {
 		t.Fatal("proof changed authority or repeated the installation", final)
 	}
 }
@@ -79,7 +71,7 @@ func retainedMaintenanceFixture(t *testing.T) (*harness, ServerObservation) {
 	c.Manifest.Artifacts[1].SHA256 = strings.Repeat("a", 64)
 	c.ReleaseSet.Artifacts[1].SHA256 = c.Manifest.Artifacts[1].SHA256
 	c.Manifest.Storage.RunnerJournal.Max = 9
-	if op := startTestUpgrade(h, "retained-maintenance", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "retained-maintenance", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	o := ServerObservation{InstanceID: c.ServerInstance, MainDrained: true, Healthy: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "retained-server", Commit: c.ReleaseSet.Commit}
@@ -96,8 +88,6 @@ func TestMaintenanceRetainedServerPreservesNormalControls(t *testing.T) {
 	for _, host := range []string{"linux-1", "linux-2"} {
 		before[host] = upgradeCtl(h, host)
 	}
-	upgradeTick(h, o)
-	h.clock.Advance(5 * time.Second)
 	if v := upgradeTick(h, o); v.Phase != "runners" {
 		t.Fatal(v)
 	}
@@ -151,7 +141,7 @@ func TestMaintenanceRetainedServerReconcilesExpiredObservation(t *testing.T) {
 			h.clock.Advance(5 * time.Second)
 			v := upgradeTick(h, o)
 			after := upgradeRead(h)
-			if v.Status != "attention" || v.Phase != "runners" || after.ServerHealthy != 2 || after.Deadline != pinned.Deadline || v.OverallDeadlineMillis != pinned.View.OverallDeadlineMillis {
+			if v.Status != "attention" || v.Phase != "runners" || after.ServerHealthy != 1 || after.Deadline != pinned.Deadline || v.OverallDeadlineMillis != pinned.View.OverallDeadlineMillis {
 				t.Fatal("read reconciliation resumed or renewed the expired operation", after)
 			}
 			for _, host := range []string{"linux-1", "linux-2"} {

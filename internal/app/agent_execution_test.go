@@ -422,7 +422,7 @@ func TestNamedOwnerStartOverChecksCurrentRoleOnReplacementHost(t *testing.T) {
 	register("linux-2", nextRuntime, nextProjection, false)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	spec := protocol.OwnerTaskSpec{Goal: "Complete named work", Acceptance: []string{"Independent verification"}, Delivery: "commit", Workspace: protocol.OwnerTaskWorkspace{Mounts: []protocol.OwnerTaskMount{{Repo: "tend"}}}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}}
-	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Named owner task", Spec: spec, Rating: protocol.RatingP1}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Named owner task", IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Require the selected independent reviewer"}, Spec: spec, Rating: protocol.RatingP1}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if created.Status != protocol.OpSucceeded {
 		t.Fatal(created)
 	}

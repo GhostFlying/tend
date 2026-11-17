@@ -31,6 +31,17 @@ func TestFault_ManagerOptionalStopCannotStarveReleasingTail(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
+		}
 		if env.Operation == protocol.OpRunsRecordSessionStop {
 			mu.Lock()
 			optional = append(optional, env)
@@ -126,6 +137,17 @@ func TestFault_ManagerOptionalStopCannotStarveInitialNativeStop(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
+		}
 		if env.Operation == protocol.OpRunsRecordSessionStop {
 			mu.Lock()
 			saved := env
@@ -186,6 +208,17 @@ func TestFault_ManagerOptionalStopPreservesCallerCancellation(t *testing.T) {
 		if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
 			t.Error(err)
 			return
+		}
+		if env.Operation == protocol.OpManagerNativeClaim {
+			var ack protocol.ManagerNativeClaimPayload
+			if err := json.Unmarshal(env.Payload, &ack); err != nil {
+				t.Error(err)
+				return
+			}
+			if ack.AcknowledgeOnly {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+				return
+			}
 		}
 		if env.Operation != protocol.OpRunsRecordSessionStop {
 			t.Error("cancelled runner continued mandatory delivery", env.Operation)

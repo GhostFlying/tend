@@ -30,7 +30,7 @@ func configurationUpgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 
 func TestConfigurationMaintenanceAdmissionAndHealth(t *testing.T) {
 	h, c := configurationUpgradeHarness(t)
-	if op := startTestUpgrade(h, "config-one", c); op.Status != protocol.OpSucceeded {
+	if op := startPreparedTestUpgrade(h, "config-one", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	if upgradeRead(h).View.Phase != "runners" || upgradeCtl(h, "linux-1").Mode != protocol.RunnerMaintenance || upgradeCtl(h, "linux-2").Mode != protocol.RunnerNormal {
@@ -118,7 +118,7 @@ func TestConfigurationMaintenanceRejectsUnnegotiatedOrChangedBinaries(t *testing
 				c.RunnerConfigurations["missing"] = c.RunnerConfigurations["linux-1"]
 				delete(c.RunnerConfigurations, "linux-1")
 			}
-			op := startTestUpgrade(h, "bad-config", c)
+			op := startPreparedTestUpgrade(h, "bad-config", c)
 			if op.Status == protocol.OpSucceeded {
 				t.Fatal("invalid configuration accepted")
 			}

@@ -104,7 +104,7 @@ func execute(ctx context.Context, base, head string, worktree, full bool, output
 		if err != nil {
 			return err
 		}
-		if _, err = fmt.Fprintf(file, "groups=%s\n", encoded); err != nil {
+		if _, err = fmt.Fprintf(file, "groups=%s\nweb_checks=%t\n", encoded, p.Web); err != nil {
 			return err
 		}
 	}

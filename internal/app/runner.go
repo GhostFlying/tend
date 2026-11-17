@@ -1195,6 +1195,10 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 		if err != nil {
 			return err
 		}
+		res.HistoryReads, res.HistoryAcknowledged, err = a.managerHistoryExchange(ctx, q, host.HostID, payload.HistoryReplies)
+		if err != nil {
+			return err
+		}
 		if payload.Runtime != nil {
 			c, err := runnerControl(ctx, q, host.HostID, now.UnixMilli())
 			if err != nil {
@@ -1284,6 +1288,9 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 	})
 	if err == nil && changed {
 		a.notifyChange()
+	}
+	if err == nil && len(payload.HistoryReplies) > 0 {
+		a.changes.Notify()
 	}
 	return res, err
 }

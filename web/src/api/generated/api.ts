@@ -1212,8 +1212,10 @@ export interface UpdaterReceipt {
   committed_confirmed: boolean;
   current_process_instance_id: string;
   current_sha256: string;
+  external_recovery?: boolean;
   phase: string;
   rollback_confirmed: boolean;
+  superseded_upgrade_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -2117,6 +2119,7 @@ export interface RunnerUpgradeTarget {
   manifest_path: string;
   manifest_sha256: string;
   manifest_size: number;
+  prepare_only?: boolean;
   release_set?: ReleaseSetTarget;
   updater?: UpdaterSelfTarget;
 }
@@ -7548,6 +7551,7 @@ export interface UpdateIssueProgressPayload1 {
  */
 export interface UpdateIssueTaskPayload {
   expected_assignment_epoch: number;
+  independent_acceptance?: IndependentAcceptanceRequest;
   rating?: Rating;
   relations?: TaskRelation[];
   spec?: OwnerTaskSpec;

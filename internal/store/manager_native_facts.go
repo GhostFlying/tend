@@ -155,12 +155,18 @@ func (t *Tx) CompleteManagerNative(ctx context.Context, run, id, method, payload
 		_, err := t.Exec(ctx, `UPDATE runs SET native_turn_id=? WHERE run_id=?`, turn, run)
 		return err
 	case "close":
-		_, err := t.Exec(ctx, `UPDATE runs SET native_close_id=?,native_close_sequence=?,native_closed_at=?,native_close_activity=native_activity WHERE run_id=?`, id, reply.LastSequence, when, run)
-		return err
+		return t.RecordManagerPhysicalClose(ctx, run, id, reply.LastSequence, when)
 	case "tool_result":
 		return t.PutManagerToolResult(ctx, run, id, payload, true, when)
 	}
 	return nil
+}
+
+// RecordManagerPhysicalClose records the acknowledged physical stop independently
+// of business completion and keeps the first proof for the current activity.
+func (t *Tx) RecordManagerPhysicalClose(ctx context.Context, run, id string, sequence, when int64) error {
+	_, err := t.Exec(ctx, `UPDATE runs SET native_close_id=?,native_close_sequence=?,native_closed_at=?,native_close_activity=native_activity WHERE run_id=? AND (native_closed_at=0 OR native_close_activity<>native_activity)`, id, sequence, when, run)
+	return err
 }
 
 // ManagerNativeClose is a physical execution fact, independent of RPC history.

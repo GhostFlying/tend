@@ -60,7 +60,7 @@ func captureUpgradeManager(ctx context.Context, x *Exec, tx *store.Tx, batch *st
 // bindUpgradeReceiptReader is part of the real Claim transaction, so a reader
 // admitted after initial capture cannot outlive its window's physical teardown.
 func bindUpgradeReceiptReader(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, lease store.LeaseRow) error {
-	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT upgrade_id FROM upgrades u WHERE u.status IN ('running','attention') AND json_extract(u.state_json,'$.park_idle_managers')=1 AND EXISTS(SELECT 1 FROM json_each(u.state_json,'$.hosts') h WHERE json_extract(h.value,'$.host_id')=?)`, run.HostID)
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT upgrade_id FROM upgrades u WHERE u.status IN ('running','attention') AND json_extract(u.state_json,'$.view.phase')<>'preparing' AND json_extract(u.state_json,'$.park_idle_managers')=1 AND EXISTS(SELECT 1 FROM json_each(u.state_json,'$.hosts') h WHERE json_extract(h.value,'$.host_id')=?)`, run.HostID)
 	if err != nil {
 		return err
 	}

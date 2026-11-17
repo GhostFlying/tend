@@ -199,8 +199,8 @@ func (s *Supervisor) save() error {
 		s.state.RollbackProof = &RollbackProof{Binding: receipt.Binding, Version: s.state.Current, Process: s.state.Process}
 		s.state.CommittedProof = nil
 	}
-	if op := s.state.Operation; op != nil && op.Kind == "upgrade" && op.Phase == "committed" && op.Irreversible && s.state.Current == op.Candidate {
-		s.state.CommittedProof = &CommittedProof{Binding: op.Binding, Version: s.state.Current, Process: s.state.Process}
+	if op := s.state.Operation; op != nil && (op.Kind == "upgrade" || op.Kind == "recover") && op.Phase == "committed" && op.Irreversible && s.state.Current == op.Candidate {
+		s.state.CommittedProof = &CommittedProof{SupersededUpgradeID: op.SupersededUpgradeID, ExternalRecovery: op.Kind == "recover", Binding: op.Binding, Version: s.state.Current, Process: s.state.Process}
 		s.state.RollbackProof = nil
 	}
 	if op := s.state.Operation; op != nil && op.Kind == "upgrade" && done(op) {
@@ -629,7 +629,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		if err := s.grantValid(op); err != nil {
 			return s.recoverUnlaunched(ctx, op)
 		}
-		if op.Kind == "upgrade" {
+		if op.Kind == "upgrade" && op.Previous.StorageVersion != op.Candidate.StorageVersion {
 			op.BackupDir = filepath.Join(s.cfg.StateDir, "backups", op.ID)
 			if err := backupDataContext(ctx, s.cfg, op); err != nil {
 				return err
@@ -667,6 +667,9 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 	case "launch_exited":
 		return errors.New("updater: owned candidate exited; independent bounded replacement required")
 	case "checking":
+		if op.Kind == "recover" {
+			return s.checkExternalInstallation(ctx, op)
+		}
 		return s.check(ctx, op)
 	case "rollback_stopping":
 		if err := s.stopRollbackCandidate(ctx, op); err != nil {
@@ -679,7 +682,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		if op.Irreversible || s.hasCommittedProof(op) || (!noLaunch && (op.RollbackAuthorization == nil || !validRollbackAuthorization(op, *op.RollbackAuthorization))) {
 			return errors.New("updater: restore lacks persistent admission fence")
 		}
-		if !noLaunch {
+		if !noLaunch && op.BackupDir != "" {
 			if err := restoreData(s.cfg, op); err != nil {
 				return err
 			}
@@ -911,13 +914,10 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 	if running && h.Healthy && h.HeartbeatSequence > op.LastHealthSequence {
 		op.HealthCount++
 		op.LastHealthSequence = h.HeartbeatSequence
-		if op.HealthCount >= 2 {
-			s.state.Current = op.Candidate
-			s.state.Process = op.CandidateProcess
-			op.Irreversible = true
-			op.Phase = "committed"
-		}
-		return s.save()
+		// Identity and readiness are already confirmed by the candidate's
+		// authority. Waiting for another periodic heartbeat adds downtime without
+		// proving that the service will stay healthy after admission resumes.
+		return s.commitCandidate(op)
 	}
 	if (!h.Healthy || !running) && op.HealthCount != 0 {
 		op.HealthCount = 0
@@ -936,6 +936,37 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 		return errors.New("updater: candidate requires coordinator reconciliation; rollback safety unconfirmed")
 	}
 	return nil
+}
+
+func (s *Supervisor) commitCandidate(op *Operation) error {
+	s.state.Current, s.state.Process = op.Candidate, op.CandidateProcess
+	op.Irreversible, op.Phase = true, "committed"
+	return s.save()
+}
+
+func (s *Supervisor) checkExternalInstallation(ctx context.Context, op *Operation) error {
+	authority, ok := s.opts.Authority.(interface {
+		InstallationReadiness(context.Context, Binding) (protocol.InstallationReadiness, error)
+	})
+	if !ok {
+		return errors.New("updater: local installation readiness unavailable")
+	}
+	actual, err := s.opts.Process.Inspect(ctx, op.CandidateProcess.PID)
+	if err != nil {
+		return err
+	}
+	if actual != op.CandidateProcess {
+		return ErrUnknown
+	}
+	ready, err := authority.InstallationReadiness(ctx, op.Binding)
+	if err != nil {
+		return err
+	}
+	if !ready.Ready || ready.Binding != op.Binding || ready.Protocol != op.Candidate.Protocol || ready.StorageVersion != op.Candidate.StorageVersion {
+		return errors.New("updater: candidate installation is not ready")
+	}
+	op.SupersededUpgradeID = ready.SupersededUpgradeID
+	return s.commitCandidate(op)
 }
 func (s *Supervisor) monitor(ctx context.Context) error {
 	if s.state.Current.Binary == "" {

@@ -29,7 +29,7 @@ func TestAutomaticDeploymentRetainedFleetReachesFormalCompletion(t *testing.T) {
 			if independent {
 				c.DeliveryTaskID = ""
 			}
-			if op := startTestUpgrade(h, "original-complete-fleet", c); op.Status != protocol.OpSucceeded {
+			if op := startPreparedTestUpgrade(h, "original-complete-fleet", c); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			initial := upgradeRead(h)

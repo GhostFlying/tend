@@ -196,7 +196,7 @@ func runHandoffSystemdFixture(t *testing.T, interrupted bool) {
 	var manifest release.Manifest
 	_ = json.Unmarshal(raw, &manifest)
 	manifest.Artifacts[0].Role = "server"
-	manifest.Protocol = release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}
+	manifest.Protocol = release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}
 	manifest.Storage.ServerSchema = release.Range{Min: 26, Max: schema}
 	if err := writeJSON(filepath.Join(dir, "manifest.json"), manifest); err != nil {
 		t.Fatal(err)

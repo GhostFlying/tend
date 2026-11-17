@@ -2,8 +2,10 @@ package protocol
 
 // CurrentRunnerProtocol is the current server/runner communication generation.
 // Version zero denotes runners predating explicit negotiation.
-const CurrentRunnerProtocol int64 = 4
-const PreviousRunnerProtocol int64 = CurrentRunnerProtocol - 1
+const CurrentRunnerProtocol int64 = 5
+
+// Protocol 5 is an explicitly coordinated cold cutover (D229).
+const MinimumRunnerProtocol int64 = 5
 
 const (
 	RunnerNormal                      = "normal"

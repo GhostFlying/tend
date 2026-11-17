@@ -24,7 +24,7 @@ func TestUpgradeCompleteSetRequiresNegotiationAndPinsDownloads(t *testing.T) {
 	}
 	sum := sha256.Sum256(raw)
 	c.ReleaseSet, c.ReleaseSetSHA256, c.ReleaseSetSize = &s, hex.EncodeToString(sum[:]), int64(len(raw))
-	if op := startTestUpgrade(h, "needs-bootstrap", c); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+	if op := startPreparedTestUpgrade(h, "needs-bootstrap", c); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
 		t.Fatal("complete release silently accepted old download capability", op)
 	}
 	for _, host := range []string{"linux-1", "linux-2"} {

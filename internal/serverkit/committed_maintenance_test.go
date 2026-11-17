@@ -345,8 +345,8 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			}
 			mark("first-health-returned")
 			t.Logf("assembly first_health ready=%v sequence=%d failures=%v", health.Ready, health.Sequence, health.Failures)
-			if health.Ready || health.Sequence != 0 || !health.Registered || !health.Fenced {
-				return fmt.Errorf("real startup readiness ignored uncertain compaction: %+v", health)
+			if !health.Ready || health.Sequence == 0 || !health.Registered || !health.Fenced {
+				return fmt.Errorf("installation readiness depends on unrelated uncertain compaction: %+v", health)
 			}
 			mark("archive-status")
 			var archive protocol.ArchiveOnlineStatus
@@ -355,24 +355,6 @@ func testCommittedMaintenanceProductionAssembly(t *testing.T, receiptRecovery bo
 			}
 			if !archive.Preparation.Prepared || archive.ActiveOwnerRequests != 0 || !archive.HostedDrained {
 				return fmt.Errorf("real mainthread prepared drain: %+v", archive)
-			}
-			mark("resolve-startup-fact")
-			// The injected external completion resolves only the seeded startup fact.
-			// Production readiness, managers, and all retained business rows stay real.
-			if err := r.Store.Write(ctx, func(tx *store.Tx) error {
-				_, err := tx.Exec(ctx, `UPDATE agent_compactions SET status='completed' WHERE operation_id='startup-compaction'`)
-				return err
-			}); err != nil {
-				return err
-			}
-			for ctx.Err() == nil {
-				if err := request(http.MethodPost, "/updater/maintenance/health", plan, &health); err == nil && health.Ready {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
 			}
 			mark("ready-health-returned")
 			first := health

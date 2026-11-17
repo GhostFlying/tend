@@ -14,7 +14,7 @@ func fixture(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	files := map[string]string{"runner_compat.json": `{"current":1,"previous":0,"adapters":[{"id":"legacy","protocol":0,"remove_in":2,"file":"internal/protocol/legacy.go","test":"internal/protocol/legacy_test.go"}]}`, "legacy.go": "// tend:compat legacy protocol=0 remove=2\n", "legacy_test.go": "package protocol\n"}
+	files := map[string]string{"runner_compat.json": `{"current":1,"minimum":0,"adapters":[{"id":"legacy","protocol":0,"remove_in":2,"file":"internal/protocol/legacy.go","test":"internal/protocol/legacy_test.go"}]}`, "legacy.go": "// tend:compat legacy protocol=0 remove=2\n", "legacy_test.go": "package protocol\n"}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -32,7 +32,7 @@ func TestCompatibilityExpiryAndMarkers(t *testing.T) {
 	}
 	path := filepath.Join(root, "internal/protocol/runner_compat.json")
 	body, _ := os.ReadFile(path)
-	body = []byte(strings.ReplaceAll(strings.ReplaceAll(string(body), `"current":1`, `"current":2`), `"previous":0`, `"previous":1`))
+	body = []byte(strings.ReplaceAll(strings.ReplaceAll(string(body), `"current":1`, `"current":2`), `"minimum":0`, `"minimum":1`))
 	os.WriteFile(path, body, 0600)
 	if err := Check(root, 2); err == nil {
 		t.Fatal("expired adapter accepted")

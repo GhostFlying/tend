@@ -102,18 +102,14 @@ func TestSelfCancelledBatchClearsCompletedObservationTarget(t *testing.T) {
 	}
 	upgradeAck(h, "linux-1", protocol.RunnerNormal)
 	upgradeAck(h, "linux-2", protocol.RunnerNormal)
-	if op := startTestUpgrade(h, "second-batch", c); op.Error != nil {
+	if op := startPreparedTestUpgrade(h, "second-batch", c); op.Error != nil {
 		t.Fatal(op)
 	}
 	row := upgradeRead(h)
 	o.Updater = selfUpgradeObservation(row, "server", o.ProcessInstanceID, o.BinarySHA256)
 	upgradeTick(h, o)
-	if v := upgradeTick(h, o); v.Phase != "server_checking" {
-		t.Fatal("new batch skipped its own server verification", v)
-	}
-	h.clock.Advance(5 * time.Second)
 	if v := upgradeTick(h, o); v.Phase != "runners" {
-		t.Fatal("new batch did not obtain two spaced server samples", v)
+		t.Fatal("new batch did not accept its own verified server observation", v)
 	}
 	upgradeTick(h, o)
 	if ctl = upgradeCtl(h, "linux-1"); ctl.UpgradeID != row.View.UpgradeID || ctl.Upgrade != nil {

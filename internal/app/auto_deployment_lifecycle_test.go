@@ -88,7 +88,7 @@ func autoDeploymentLifecycleFixture(t *testing.T, manual bool, sourceBacked ...b
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
 		t.Fatal(err)
 	}
-	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{Title: "Continue this reviewed delivery", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	created := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise explicitly required independent review"}, Title: "Continue this reviewed delivery", ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
 	if created.Status != protocol.OpSucceeded {
 		t.Fatal(created)
 	}
@@ -136,7 +136,7 @@ func autoDeploymentLifecycleFixture(t *testing.T, manual bool, sourceBacked ...b
 		t.Fatal(err)
 	}
 	serverHash, runnerHash := strings.Repeat("e", 64), strings.Repeat("f", 64)
-	manifest := release.Manifest{Format: 1, ReleaseID: "authorized-release", Protocol: release.Range{Min: protocol.PreviousRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: schema, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: runtime.JournalVersion}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: serverHash}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: runnerHash}}}
+	manifest := release.Manifest{Format: 1, ReleaseID: "authorized-release", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: schema, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: runtime.JournalVersion}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: serverHash}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: runnerHash}}}
 	manifestHash := strings.Repeat("d", 64)
 	set := &release.Set{Format: 2, ReleaseID: manifest.ReleaseID, Commit: candidate.TargetSHA, OS: "linux", Arch: "amd64", ManifestSHA256: manifestHash, Artifacts: append([]release.Artifact{}, manifest.Artifacts...)}
 	for _, role := range []string{"updater", "cli"} {

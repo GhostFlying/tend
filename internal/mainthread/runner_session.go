@@ -56,6 +56,15 @@ func (t *runnerTransport) Call(ctx context.Context, method string, input, output
 		attachmentStopped = t.attachment.Done()
 	}
 
+	if method == "close" {
+		ended, err := t.app.ManagerRunEnded(ctx, t.run)
+		if err != nil {
+			return err
+		}
+		if ended {
+			return nil
+		}
+	}
 	if method == "models" || method == "resume" {
 		var thread string
 		if request, ok := input.(coordination.Request); ok {
@@ -75,10 +84,10 @@ func (t *runnerTransport) Call(ctx context.Context, method string, input, output
 	t.mu.Lock()
 	streamEnded := t.streamEnded
 	t.mu.Unlock()
-	if streamEnded && method != "close" {
+	if streamEnded && method != "close" && method != "find" {
 		return fmt.Errorf("%w: native event transport ended; only retained closing metadata is available", harness.ErrRejected)
 	}
-	ended, err := t.app.ManagerRunEnded(ctx, t.run)
+	ended, err := t.app.ManagerTransportEnded(ctx, t.run)
 	if err != nil {
 		return err
 	}
@@ -127,7 +136,7 @@ func (t *runnerTransport) awaitReply(ctx context.Context, method, id string, out
 			}
 			return nil
 		}
-		ended, err := t.app.ManagerRunEnded(ctx, t.run)
+		ended, err := t.app.ManagerTransportEnded(ctx, t.run)
 		if err != nil {
 			return err
 		}
@@ -164,7 +173,7 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coor
 			return nil, err
 		}
 		if len(events) == 0 {
-			ended, err := t.app.ManagerRunEnded(ctx, t.run)
+			ended, err := t.app.ManagerTransportEnded(ctx, t.run)
 			if err != nil {
 				return nil, err
 			}
@@ -181,6 +190,10 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coor
 			}
 		}
 		if len(events) > 0 {
+			physicalEnded, err := t.app.ManagerRunEnded(ctx, t.run)
+			if err != nil {
+				return nil, err
+			}
 			out := make([]coordination.Event, 0, len(events))
 			for _, e := range events {
 				var item coordination.Event
@@ -191,7 +204,7 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coor
 				item.Sequence = t.sequence
 				item.SourceRunID = e.RunID
 				item.SourceSequence = e.Sequence
-				item.Historical = e.RunID != t.run
+				item.Historical = e.RunID != t.run || physicalEnded
 				if item.Disconnected && !item.Historical {
 					t.mu.Lock()
 					t.streamEnded = true

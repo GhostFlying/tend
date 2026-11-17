@@ -138,7 +138,7 @@ func (e *env) exec(p protocol.Principal, op string, target protocol.Target, payl
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(b, &fields)
 		if len(fields["runtime"]) == 0 || string(fields["runtime"]) == "null" {
-			runtime := protocol.RunnerRuntime{InstanceID: "fixture-" + p.Subject, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.PreviousRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
+			runtime := protocol.RunnerRuntime{InstanceID: "fixture-" + p.Subject, Generation: 1, Sequence: 1, Protocol: protocol.CurrentRunnerProtocol, ProtocolMin: protocol.MinimumRunnerProtocol, ProtocolMax: protocol.CurrentRunnerProtocol, Mode: protocol.RunnerNormal}
 			_ = e.store.Read(context.Background(), func(tx *store.ReadTx) error {
 				old, err := store.GetHostRuntime(context.Background(), tx.Q(), p.Subject)
 				if err == nil {

@@ -190,7 +190,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	if reuseMode != "" {
 		spec.AgentSelection.Implementation.Model = "implement-old"
 	}
-	payload, err := json.Marshal(protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "named work", Spec: spec})
+	payload, err := json.Marshal(protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise independent acceptance"}, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "named work", Spec: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 		reviewOwner.run("", "issue", "update", issue.IssueID, "--data", string(changed))
 		followSpec.Workspace = protocol.OwnerTaskWorkspace{}
 	}
-	createFollow, err := json.Marshal(protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: currentIssue.AssignmentEpoch, Title: "followup uses retained workspace", Spec: followSpec, UseDefaultWorkspace: reuseMode == "default"})
+	createFollow, err := json.Marshal(protocol.CreateIssueTaskPayload{IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Exercise independent acceptance"}, ExpectedAssignmentEpoch: currentIssue.AssignmentEpoch, Title: "followup uses retained workspace", Spec: followSpec, UseDefaultWorkspace: reuseMode == "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
