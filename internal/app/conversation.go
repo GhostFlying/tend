@@ -1036,13 +1036,31 @@ func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 	var seq int64
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		u = store.ToolUseRow{MessageID: x.IDs.New(protocol.PrefixMessage), ThreadID: x.Principal.Thread, TurnID: p.TurnID, ItemID: p.ItemID}
+		u = store.ToolUseRow{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, "native-tool:"+x.Principal.Thread, p.TurnID+"/"+p.ItemID), ThreadID: x.Principal.Thread, TurnID: p.TurnID, ItemID: p.ItemID}
 		if seq, err = tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: u.MessageID, Author: "main_agent",
 			ReplyTo: p.ReplyTo, RequestID: x.Env.RequestID, CreatedAt: now}); err != nil {
 			return Outcome{}, err
 		}
 	case err != nil:
 		return Outcome{}, err
+	case u.ThreadID != x.Principal.Thread:
+		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native tool belongs to another session")
+	case u.Tool == "":
+		// A callback result can arrive before the named native event. Enrich its
+		// original row even when already terminal, without taking back its result.
+		u.Tool, u.Input = p.Tool, p.Input
+		if _, err = tx.Exec(ctx, `UPDATE conversation_messages SET author='main_agent',reply_to=CASE WHEN COALESCE(reply_to,'')='' THEN ? ELSE reply_to END WHERE message_id=?`, p.ReplyTo, u.MessageID); err != nil {
+			return Outcome{}, err
+		}
+		if u.Status != "" && u.Status != string(protocol.ToolRunning) {
+			if err = tx.PutToolUse(ctx, u); err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}, Events: []Event{{ObjectType: "message", ObjectID: u.MessageID, Kind: "conversation.tool_use", Body: map[string]any{"status": u.Status}}}}, nil
+		}
+		if seq, err = store.GetConversationSeq(ctx, tx.Q(), u.MessageID); err != nil {
+			return Outcome{}, err
+		}
 	case u.Status != string(protocol.ToolRunning) && (u.Status != string(protocol.ToolInterrupted) || p.Status == protocol.ToolRunning):
 		// A late start does not take back a finished use; a result that
 		// arrives after the use was settled as interrupted still counts.

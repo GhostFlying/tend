@@ -56,12 +56,21 @@ func (s *Server) conversationBlock(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid block cursor"))
 		return
 	}
+	processAfter, processErr := intParam(r.URL.Query().Get("process_after"))
+	if processErr != nil || processAfter < 0 || after < 0 {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid process or block cursor"))
+		return
+	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 		out, err := views.TranscriptBlock(r.Context(), q, r.PathValue("id"), after, 50)
 		if err != nil {
 			return out, err
 		}
-		return views.OwnerIssueTranscriptBlock(r.Context(), q, out)
+		projected, err := views.OwnerIssueTranscriptBlock(r.Context(), q, out)
+		if err == nil && processAfter > 0 && !out.NoticeOnly {
+			projected.Process, err = views.IssuePublicProcess(r.Context(), q, out.Trigger.MessageID, processAfter, 50)
+		}
+		return projected, err
 	})
 }
 

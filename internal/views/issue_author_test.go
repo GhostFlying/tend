@@ -14,7 +14,8 @@ func TestIssueConversationAuthor(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	for _, statement := range []string{
 		`CREATE TABLE hosted_executions(execution_id TEXT,private_snapshot TEXT,created_at INTEGER)`,
-		`CREATE TABLE main_turns(request_id TEXT,message_id TEXT)`,
+		`CREATE TABLE main_turns(request_id TEXT,message_id TEXT,created_at INTEGER DEFAULT 0)`,
+		`CREATE TABLE messaging_messages(message_id TEXT,execution_id TEXT)`,
 		`CREATE TABLE run_agent_executions(run_id TEXT,pin_json TEXT)`,
 		`CREATE TABLE runs(run_id TEXT,task_id TEXT,role TEXT)`,
 		`CREATE TABLE issue_manager_tasks(task_id TEXT,pin_json TEXT)`,
@@ -43,14 +44,14 @@ func TestIssueConversationAuthor(t *testing.T) {
 			if _, err := db.ExecContext(t.Context(), `INSERT INTO hosted_executions VALUES(?,?,1)`, tc.name, tc.snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(t.Context(), `INSERT INTO main_turns VALUES(?,?)`, tc.name, tc.name); err != nil {
+			if _, err := db.ExecContext(t.Context(), `INSERT INTO main_turns(request_id,message_id) VALUES(?,?)`, tc.name, tc.name); err != nil {
 				t.Fatal(err)
 			}
 			// A later handoff on the same trigger must not relabel its original author.
 			if _, err := db.ExecContext(t.Context(), `INSERT INTO hosted_executions VALUES(?, '{"definition":{"display_name":"Successor"}}',2)`, tc.name+"-successor"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(t.Context(), `INSERT INTO main_turns VALUES(?,?)`, tc.name+"-successor", tc.name); err != nil {
+			if _, err := db.ExecContext(t.Context(), `INSERT INTO main_turns(request_id,message_id) VALUES(?,?)`, tc.name+"-successor", tc.name); err != nil {
 				t.Fatal(err)
 			}
 			got, err := issueConversationAuthor(t.Context(), db, tc.name)
@@ -58,6 +59,19 @@ func TestIssueConversationAuthor(t *testing.T) {
 				t.Fatalf("author=%q, err=%v, want %q", got, err, tc.want)
 			}
 		})
+	}
+	for _, statement := range []string{
+		`INSERT INTO messaging_messages VALUES('notify','runner frozen name'),('unavailable-publication','missing-execution')`,
+		`INSERT INTO main_turns(request_id,message_id) VALUES('new execution renamed','notify'),('new execution renamed','unavailable-publication')`,
+	} {
+		if _, err := db.ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, want := range map[string]string{"notify": "Cedar · host/implementer", "unavailable-publication": "Agent 身份未记录"} {
+		if got, err := issueConversationAuthor(t.Context(), db, id); err != nil || got != want {
+			t.Fatalf("publication author=%q err=%v want=%q", got, err, want)
+		}
 	}
 	if got, err := issueConversationAuthor(t.Context(), db, "missing"); err != nil || got != "Agent 身份未记录" {
 		t.Fatalf("unbound author=%q, err=%v", got, err)

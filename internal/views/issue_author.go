@@ -12,7 +12,7 @@ import (
 // display name. Resolve its original Run's inventory, never today's assignee.
 func issueConversationAuthor(ctx context.Context, q store.Querier, trigger string) (string, error) {
 	var name, fallback, run string
-	err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(h.private_snapshot,'$.definition.display_name'),''),COALESCE(json_extract(h.private_snapshot,'$.identity.execution_environment_id')||'/'||json_extract(h.private_snapshot,'$.identity.local_id'),'Agent 身份未记录'),COALESCE(json_extract(h.private_snapshot,'$.runner_run_id'),'') FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE t.message_id=? ORDER BY h.created_at,h.execution_id LIMIT 1`, trigger).Scan(&name, &fallback, &run)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(h.private_snapshot,'$.definition.display_name'),''),COALESCE(json_extract(h.private_snapshot,'$.identity.execution_environment_id')||'/'||json_extract(h.private_snapshot,'$.identity.local_id'),'Agent 身份未记录'),COALESCE(json_extract(h.private_snapshot,'$.runner_run_id'),'') FROM hosted_executions h WHERE h.execution_id=COALESCE(NULLIF((SELECT execution_id FROM messaging_messages WHERE message_id=?),''),(SELECT request_id FROM main_turns WHERE message_id=? ORDER BY created_at,request_id LIMIT 1))`, trigger, trigger).Scan(&name, &fallback, &run)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "Agent 身份未记录", nil
 	}

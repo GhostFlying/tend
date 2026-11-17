@@ -1403,11 +1403,11 @@ try {
       block.items = [];
       block.trigger.state = "processing";
       publish();
-      await detail.getByRole("status").filter({ hasText: "思考中" }).waitFor();
+      await detail.getByRole("status").filter({ hasText: "处理中" }).waitFor();
       const emptyProcess = detail.locator("[data-trace-trigger]");
       await emptyProcess.click();
       await detail
-        .getByText("尚无可查看的执行步骤，公开回复会显示在下方。", { exact: true })
+        .getByText("尚未记录可查看的公开执行步骤，公开回复会显示在下方。", { exact: true })
         .waitFor();
       await page.screenshot({ path: join(output, `public-process-active-${width}.png`) });
       // Same trigger: preserve the user's open disclosure and focus as real items arrive.
@@ -1419,7 +1419,10 @@ try {
         seq: 2,
         tool: { ...savedTools.find((item) => item.tool)!.tool!, status: "running" as const },
       };
-      block.items = [streamingTool];
+      // Native-producer regressions prove this projection is populated by real
+      // events. This browser case checks its rendered, still-unpublished shape.
+      block.process = { items: [streamingTool], more: false, started_at: now - 5000 };
+      assert.equal(block.items.length, 0);
       publish();
       const liveTool = detail.locator('[data-tool-item="first-live-tool"]');
       await liveTool.waitFor();
@@ -1447,6 +1450,7 @@ try {
       console.log(`PASS continuous empty → running tool → public reply ${width}`);
       await emptyProcess.click();
       block.items = publicReplies;
+      delete block.process;
       if (previousState === undefined) delete block.trigger.state;
       else block.trigger.state = previousState;
       publish();

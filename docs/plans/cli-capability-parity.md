@@ -50,7 +50,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/conversation/attachments/{id}` | `attachment download` | 原文件、--out；SHA256 校验 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/conversation/attachments/{id}/download-url` | `attachment url` | inline | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/conversation/attachments/{id}/metadata` | `attachment metadata` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/conversation/blocks/{id}` | `conversation block` | after | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/conversation/blocks/{id}` | `conversation block` | after、process-after（独立公开工具游标） | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/conversation/handoff` | `conversation handoff` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/conversation/images/{id}` | `image show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/conversation/images/{id}/content` | `image download` | 原文件、--out；SHA256 校验 | Web | CLI/HTTP；读取无写入 |

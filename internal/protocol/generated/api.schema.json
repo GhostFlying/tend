@@ -11524,6 +11524,9 @@
         "position": {
           "type": "integer"
         },
+        "process": {
+          "$ref": "#/definitions/IssueTurnProcess"
+        },
         "trigger": {
           "$ref": "#/definitions/IssueConversationItem"
         }
@@ -11569,6 +11572,42 @@
         "event_seq"
       ],
       "title": "IssueTranscriptPage",
+      "type": "object"
+    },
+    "IssueTurnProcess": {
+      "additionalProperties": false,
+      "properties": {
+        "ended_at": {
+          "type": "integer"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueConversationItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "started_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "more"
+      ],
+      "title": "IssueTurnProcess",
       "type": "object"
     },
     "IssueView": {

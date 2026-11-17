@@ -150,9 +150,11 @@ export function AgentTurn({
     entry.items,
     entry.state,
     entry.startedAt ?? null,
-    entry.done?.tookMs !== undefined && entry.startedAt !== undefined
-      ? entry.startedAt + entry.done.tookMs
-      : null,
+    entry.endedAt !== undefined
+      ? entry.endedAt
+      : entry.done?.tookMs !== undefined && entry.startedAt != null
+        ? entry.startedAt + entry.done.tookMs
+        : null,
   );
   const tools = entry.items.filter((item) => item.tool);
   const processing = groupedProcessing(entry.items);
@@ -199,7 +201,7 @@ export function AgentTurn({
         {!tools.length && (
           <p>
             {status.active
-              ? "尚无可查看的执行步骤，公开回复会显示在下方。"
+              ? "尚未记录可查看的公开执行步骤，公开回复会显示在下方。"
               : "这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。"}
           </p>
         )}

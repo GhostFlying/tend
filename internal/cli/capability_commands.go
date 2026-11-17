@@ -78,7 +78,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "conversation history", Route: "/api/v1/conversation?conversation_id={id}", Queries: "before after limit"},
 	{Name: "conversation queue", Route: "/api/v1/conversation/queue", Queries: "conversation=conversation_id category after"},
 	{Name: "conversation transcript", Route: "/api/v1/conversation/transcript", Queries: "conversation=conversation_id before"},
-	{Name: "conversation block", Route: "/api/v1/conversation/blocks/{id}", Queries: "after"},
+	{Name: "conversation block", Route: "/api/v1/conversation/blocks/{id}", Queries: "after process-after=process_after"},
 	{Name: "conversation context-index", Route: "/api/v1/agent-conversations/{id}/context-index", Queries: "section after limit", JSONDefault: true},
 	{Name: "conversation rollout", Route: "/api/v1/agent-conversations/{id}/rollout", Queries: "after turn=turn_id thread=thread_id"},
 	{Name: "conversation window", Route: "/api/v1/agent-conversations/{id}/rollout/{seq}", Queries: "offset"},
@@ -209,7 +209,16 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		if slices.Contains([]string{"all", "finished", "latest", "inline", "include_archived", "actionable_only"}, param) {
 			qbools[param] = fs.Bool(flag, false, "enable "+param)
 		} else {
-			qstrings[param] = fs.String(flag, "", "server query parameter "+param)
+			help := "server query parameter " + param
+			if cmd.Name == "conversation block" {
+				switch param {
+				case "after":
+					help = "transcript reply next_seq; independent of public process cursor"
+				case "process_after":
+					help = "public process.next arrival cursor; reads original tools without publishing deferred replies"
+				}
+			}
+			qstrings[param] = fs.String(flag, "", help)
 		}
 	}
 	payloadHelp := "complete JSON payload"

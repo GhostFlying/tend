@@ -41,7 +41,7 @@ export function buildTranscriptEntries(blocks: readonly TranscriptBlock[]): Tran
         key: `${block.position}:${entry.key}`,
       })),
     );
-    if (block.more) entries.push({ kind: "block-more", key: `${block.position}:more`, block });
+    if (block.more || block.process?.more) entries.push({ kind: "block-more", key: `${block.position}:more`, block });
   }
   return entries;
 }

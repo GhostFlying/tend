@@ -11,7 +11,7 @@ import (
 // Business transitions, authorization and results never belong in this set.
 func RefreshKind(kind string) bool {
 	switch kind {
-	case "token_usage.changed", "storage.originals_changed", "host.runtime_changed":
+	case "token_usage.changed", "storage.originals_changed", "host.runtime_changed", "conversation.process_changed":
 		return true
 	}
 	return false
