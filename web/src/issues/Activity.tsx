@@ -597,6 +597,7 @@ function ActivityBlock({
                 </div>
                 <AgentTurn
                   entry={row}
+                  processUnavailable={!!processBlock.process?.error}
                   currentIssueId={currentIssueId}
                   proseClassName={!expanded && long ? styles.replyClamp : undefined}
                 />

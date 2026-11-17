@@ -140,7 +140,9 @@ export function AgentTurn({
   entry,
   proseClassName,
   currentIssueId,
+  processUnavailable = false,
 }: {
+  processUnavailable?: boolean;
   entry: Extract<Entry, { kind: "agent" }>;
   proseClassName?: string | undefined;
   currentIssueId?: string;
@@ -202,9 +204,11 @@ export function AgentTurn({
         <p>这里展示已公开的执行步骤和回复，不包含模型的隐藏推理。</p>
         {!tools.length && (
           <p>
-            {status.active
-              ? "尚未记录可查看的公开执行步骤，公开回复会显示在下方。"
-              : "这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。"}
+            {processUnavailable
+              ? "公开过程暂不可读取，请使用上方的重读入口。"
+              : status.active
+                ? "尚未记录可查看的公开执行步骤，公开回复会显示在下方。"
+                : "这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。"}
           </p>
         )}
         {visibleStart > 0 && (

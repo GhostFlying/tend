@@ -34,14 +34,13 @@ export function LiveStatus({ status, children }: { status: ActivityStatus; child
             : activitySummary(status, clock.observedLive ? clock.now : NaN)}
       </span>
       {children}
-      {!!children &&
-        !status.active &&
-        status.startedAt !== null &&
-        (status.endedAt !== null || clock.observedLive) && (
-          <span className={styles.timer}>
-            · 用时 {elapsedLabel((status.endedAt ?? clock.now) - status.startedAt)}
-          </span>
-        )}
+      {!!children && !status.active && (
+        <span className={styles.timer}>
+          {status.startedAt !== null && status.endedAt !== null
+            ? `· 用时 ${elapsedLabel(status.endedAt - status.startedAt)}`
+            : "· 用时未知"}
+        </span>
+      )}
       {status.active && status.startedAt !== null && (
         <span className={styles.timer} aria-hidden="true">
           {elapsedLabel(clock.now - status.startedAt)}
