@@ -83,11 +83,15 @@ test("public process feeds the live trace without publishing prose or duplicatin
     activityTurnRows(buildTranscriptEntries([settled]), settled).find((row) => row.kind === "agent")
       ?.items,
   ).toEqual([first]);
+  const paged = { ...value, process: { ...value.process!, more: true, next: 7 } };
+  expect(buildTranscriptEntries([paged]).some((row) => row.kind === "block-more")).toBe(false);
+  expect(activityTurnRows(buildTranscriptEntries([paged]), paged).at(-1)?.kind).toBe("block-more");
+  const both = { ...paged, more: true, next_seq: 5 };
   expect(
-    buildTranscriptEntries([{ ...value, process: { ...value.process!, more: true, next: 7 } }]).at(
-      -1,
-    )?.kind,
-  ).toBe("block-more");
+    activityTurnRows(buildTranscriptEntries([both]), both).filter(
+      (row) => row.kind === "block-more",
+    ),
+  ).toHaveLength(1);
 });
 
 test("earlier deferred tools keep arrival order ahead of later callback transcript rows", () => {

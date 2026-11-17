@@ -6,6 +6,7 @@ import type {
   IssueTranscriptBlock as TranscriptBlock,
 } from "../api/generated/api.ts";
 import { ConversationQueue } from "./queueView.ts";
+import { buildTranscriptEntries } from "./transcriptBlocks.ts";
 function item(id: string, seq: number, author = "owner"): ConversationItem {
   return { message_id: id, seq, author, kind: "message", created_at: "2026-01-01T00:00:00Z" };
 }
@@ -16,6 +17,50 @@ const event = (it: ConversationItem): LedgerEvent => ({
   object_id: it.message_id,
   created_at: "2026-01-01T00:00:00Z",
   item: it,
+});
+test("the ordinary conversation continues replies without offering unsupported process pages", async () => {
+  const trigger = { ...item("background", 1), state: "processing" as const };
+  const process = {
+    items: Array.from({ length: 50 }, (_, n) => item(`tool${n}`, n + 1, "main_agent")),
+    more: true,
+    next: 50,
+  };
+  let ordinaryMore = false;
+  const calls: string[] = [];
+  const q = new ConversationQueue({
+    async get<T>(path: string): Promise<T> {
+      const block: TranscriptBlock = { position: 1, trigger, items: [], process, more: false };
+      if (path.includes("/blocks/")) {
+        calls.push(path);
+        return { ...block, items: [item("last-reply", 3, "main_agent")] } as T;
+      }
+      if (path.includes("/transcript"))
+        return {
+          blocks: [{ ...block, more: ordinaryMore, next_seq: 2 }],
+          more: false,
+          event_seq: ordinaryMore ? 2 : 1,
+        } as T;
+      return { enabled: true, items: [], total: 0, event_seq: 1 } as T;
+    },
+  });
+  q.start();
+  try {
+    await q.refresh();
+    const continuations = () =>
+      buildTranscriptEntries(q.state.get().blocks).filter((entry) => entry.kind === "block-more");
+    expect(continuations()).toEqual([]);
+    expect(calls).toEqual([]);
+    ordinaryMore = true;
+    await q.refresh();
+    const more = continuations();
+    expect(more).toHaveLength(1);
+    await q.moreBlock(more[0]!.block);
+    expect(calls).toEqual(["/api/v1/conversation/blocks/background?after=2"]);
+    expect(q.state.get().blocks[0]?.items?.map((row) => row.message_id)).toEqual(["last-reply"]);
+    expect(continuations()).toEqual([]);
+  } finally {
+    q.stop();
+  }
 });
 test("queue counts and pagination do not depend on the transcript page", async () => {
   const all: IssueConversationQueueEntry[] = Array.from({ length: 120 }, (_, n) => ({
