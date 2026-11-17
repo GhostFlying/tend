@@ -2574,3 +2574,16 @@ issue.cancelling 背景收尾消息或为闲置 manager 新领取一轮。仍有
 在原身份、epoch、thread 和有效 lease 下完成安全回执、最终报告及 commit，继续拒绝
 新业务操作；终态非阻塞信息/动作仅作为原 turn 回执。无 wire/schema 变更。
 路径与验证边界见 docs/plans/settled-issue-cancellation.md。
+
+## D255：server 提交后的目标 runner 重连等待
+
+server 替换可能超过 runner 心跳的新鲜窗口。持久提交后，queued 目标仍报告原批次、
+原程序的维护状态且尚未 ACK 新控制时，滚动升级公开 reconnecting 并等待当前目标。
+仅接受 server 提交后恢复的 normal 控制，或 D253 保留的本批次 maintenance 控制；
+有安装候选、授权、其他目标或不同程序观察时不套用该等待。旧观察不证明在线、
+就绪或停止授权。真实 ACK 后仍沿原排空、安装、持久提交和恢复确认推进。
+
+等待不改变 control revision，不发新 grant，不刷新当前阶段或整体 deadline；
+到期进入既有 attention/对账出口。已确认恢复后再离线仍暂停。只检查当前串行目标，
+不新增全 fleet 在线门槛或固定健康样本。没有新增 wire 字段或收紧旧请求，通信
+版本不变。真实转换回归与边界见 docs/plans/server-upgrade-runner-reconnect.md。

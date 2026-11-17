@@ -649,6 +649,13 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		}
 
 		if v.Status == "queued" {
+			if awaitingServerReconnect(*r, *h, ctl, rt.Runtime) {
+				// Server replacement can outlast presence freshness. Wait for
+				// this target's restored control ACK under the existing deadline;
+				// the old maintenance observation cannot authorize a runner stop.
+				v.Phase = "reconnecting"
+				return nil
+			}
 			if !rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 				return attention("等待升级的主机离线")
 			}
@@ -746,6 +753,17 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 	r.View.Phase = "completed"
 	r.Deadline = 0
 	return upgradeNotice(ctx, x, tx, *r, "upgrade_completed", "", fmt.Sprintf("升级 `%s` 已完成，所有执行主机恢复服务。", r.View.ReleaseID))
+}
+
+func awaitingServerReconnect(r store.UpgradeRow, h store.UpgradeHost, ctl protocol.RunnerControl, rt protocol.RunnerRuntime) bool {
+	if r.ServerCommitted == nil || h.CandidateInstance != "" || h.GrantDeadline != 0 ||
+		rt.Build.BinarySHA256 != h.PreviousHash || rt.UpgradeID != r.View.UpgradeID ||
+		(rt.Mode != protocol.RunnerMaintenance && rt.Mode != protocol.RunnerReady) ||
+		rt.AppliedControlRevision >= ctl.Revision || ctl.Upgrade != nil || ctl.Authorization != nil {
+		return false
+	}
+	return ctl.Mode == protocol.RunnerNormal && ctl.UpgradeID == "" && ctl.ReleaseID == "" ||
+		h.MaintenanceHandoff && ctl.Mode == protocol.RunnerMaintenance && ctl.UpgradeID == r.View.UpgradeID && ctl.ReleaseID == r.View.ReleaseID
 }
 
 // UpgradePausesMain gates new foreground turns throughout server replacement.
