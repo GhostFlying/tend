@@ -8,8 +8,10 @@ export function activityTurnRows(
 ): TranscriptEntry[] {
   const key = `${block.position}:reply:${block.trigger.message_id}`;
   const withProcess = (row: Extract<TranscriptEntry, { kind: "agent" }>) => {
-    const items = new Map(row.items.map((item) => [item.message_id, item]));
-    for (const item of block.process?.items ?? []) items.set(item.message_id, item);
+    // Process sequence is its own arrival order. Starting with transcript
+    // callbacks would move later callbacks ahead of earlier deferred tools.
+    const items = new Map((block.process?.items ?? []).map((item) => [item.message_id, item]));
+    for (const item of row.items) if (!items.has(item.message_id)) items.set(item.message_id, item);
     return {
       ...row,
       key,

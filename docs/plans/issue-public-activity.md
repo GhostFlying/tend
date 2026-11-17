@@ -27,3 +27,7 @@ Issue owner 正在后台处理时，用户应看到原执行的公开工具步�
 ## 读取与刷新
 
 `tend conversation block <message-id> --json` 保留普通 `items/more/next_seq`，并返回独立 `process.items/more/next` 及持久开始/结束毫秒时间。继续普通回复用 `--after <next_seq>`，继续公开工具用 `--process-after <process.next>`；二者可同时传入。读取和重连均无业务副作用，不等于通知发布或接受结果。工具变化使用现有合并刷新机制的 `conversation.process_changed` 通知，按原 trigger 合并且不唤醒模型；无新工具、批次或永久刷新历史。
+
+## 独立审阅后的同链修正
+
+真实 Codex 审阅及定向故障复现发现：callback 以 main_agent+跨会话 reply_to 插入会触发历史 conversation_inherit trigger，必须保持 producing Issue 会话；公开工具原件读取失败只能使 process 不可用，原讨论仍可读且应有显式错误/重读入口；工具去重必须沿 process arrival 顺序，不能先插入较晚 callback；整轮结束还须遵循持久消息处理状态，恢复等待中的原责任不能因某次 native turn 已结束而停表。补充这些真实回归，同一审阅 Task 按修正 delta 复核。原失败和旧候选完整检查的中止记录保留，不记作通过；已通过且未变化的证据按实际源码影响评估复用。

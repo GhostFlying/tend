@@ -4371,6 +4371,7 @@ export interface ToolUseView {
  */
 export interface IssueTurnProcess {
   ended_at?: number;
+  error?: string;
   items: IssueConversationItem[] | null;
   more: boolean;
   next?: number;

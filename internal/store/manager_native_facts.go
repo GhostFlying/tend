@@ -60,7 +60,7 @@ func (t *Tx) putManagerToolResult(ctx context.Context, run, command, payload, st
 		if err = t.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT message_id FROM main_tool_sources WHERE native_key=?),(SELECT message_id FROM main_turns WHERE thread_id=? AND turn_id=? ORDER BY created_at,request_id LIMIT 1),'')`, p.ThreadID+"/"+p.TurnID+"/"+p.CallID, p.ThreadID, p.TurnID).Scan(&source); err != nil {
 			return err
 		}
-		_, err = t.InsertMessage(ctx, MessageRow{MessageID: u.MessageID, ConversationID: conversation, Author: "main_agent", Kind: "tool_use", ReplyTo: source, CreatedAt: when})
+		_, err = t.InsertMessage(ctx, MessageRow{MessageID: u.MessageID, ConversationID: conversation, Author: "agent", Kind: "tool_use", ReplyTo: source, CreatedAt: when})
 		if err != nil {
 			return err
 		}
