@@ -89,6 +89,20 @@ func TestBackgroundPublicProcessReadsActualProducerBeforePublication(t *testing.
 			if terminal == store.TurnCompleted && h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE body='private until batch disposition'`) != 0 {
 				t.Fatal("silent check-in published prose")
 			}
+			for _, reconciled := range []bool{false, true} {
+				h.clock.Advance(30 * time.Second)
+				turn.NativeReconciled = reconciled
+				if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+					t.Fatal(err)
+				}
+				if got := read(0); got.StartedAt != final.StartedAt || got.EndedAt != final.EndedAt {
+					t.Fatalf("late terminal receipt changed historical duration: before=%+v after=%+v", final, got)
+				}
+			}
+			h.app = New(h.store, h.ids, h.clock.Now, WithFollowups(true))
+			if got := read(0); got.EndedAt != final.EndedAt {
+				t.Fatal("history reopen changed the confirmed end", got)
+			}
 		})
 	}
 }

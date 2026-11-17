@@ -2,7 +2,7 @@
 
 ## 业务起点与终点
 
-Issue owner 正在后台处理时，用户应看到原执行的公开工具步骤；主动通知应显示发布它的冻结 Agent 身份。终点是历史作者准确、运行中过程可读、空态与整轮用时诚实，并保留通知与静默 check-in 的原发布语义。合入后由统一部署责任验证生产业务，本修复不自行部署。
+Issue owner 正在后台处理时，用户应看到原执行的公开工具步骤；主动通知应显示发布它的冻结 Agent 身份。终点是历史作者准确、运行中过程可读、空态与整轮用时诚实，并保留通知与静默 check-in 的原发布语义。按最新用户调整，本代码责任以必要验证、真实独立审阅和受保护合入完成；本轮全部部署和生产验收责任已取消。设计依据为 D256。
 
 ## 已核实调用链与决策
 
@@ -22,7 +22,7 @@ Issue owner 正在后台处理时，用户应看到原执行的公开工具步�
 2. 只读 process 投影、独立分页与时间，覆盖 frozen 工具、callback 先到、重复/倒序/late 事件、终态不复活、结清/失败/重连和历史读取。必须从真实 producer 构造，不向 block fixture 塞 items 冒充恢复。
 3. UI 使用 process 事实展示工具并去重，空态和时间未知诚实。使用现有 Web 测试及 Playwright 渲染验证（Browser plugin not available）。同步 CLI block 的 process cursor、帮助与能力说明。
 4. 按实际影响运行检查；协议类型为 owner 读取的新增可选字段，runner 通信不变。保留必要全量兜底、独立 `codex review`（指定模型/effort）、最终候选与基线 CI，带 tend label 的 PR 保护规则 rebase & merge。
-5. 保存原件与生产验证步骤，交统一部署责任。
+5. 保存检查、失败复现与独立审阅原件；受保护合入即完成本代码责任，不承担发布或生产验收。
 
 ## 读取与刷新
 
@@ -31,3 +31,19 @@ Issue owner 正在后台处理时，用户应看到原执行的公开工具步�
 ## 独立审阅后的同链修正
 
 真实 Codex 审阅及定向故障复现发现：callback 以 main_agent+跨会话 reply_to 插入会触发历史 conversation_inherit trigger，必须保持 producing Issue 会话；公开工具原件读取失败只能使 process 不可用，原讨论仍可读且应有显式错误/重读入口；工具去重必须沿 process arrival 顺序，不能先插入较晚 callback；整轮结束还须遵循持久消息处理状态，恢复等待中的原责任不能因某次 native turn 已结束而停表。补充这些真实回归，同一审阅 Task 按修正 delta 复核。原失败和旧候选完整检查的中止记录保留，不记作通过；已通过且未变化的证据按实际源码影响评估复用。
+
+## 正式第 1 轮审阅后的修正计划
+
+真实 round 复核确认前四项已修复，另有两项同链 P2，采用下列有界修正：
+
+1. 通用 `Chat → Transcript → ConversationQueue.moreBlock` 只支持普通回复的 `after`，不展示公开 process。共享 `buildTranscriptEntries` 仅为普通 `more` 生成继续读取；由已实现 `process_after` 的 Issue `activityTurnRows` 单独追加 process 继续读取。用真实 Queue + builder 回归确认 process-only 页没有无效按钮，普通回复仍能继续；用现有 Playwright 通用会话及 Issue 页面验证渲染边界。Browser plugin not available。
+2. `main_turns.updated_at` 是可重复更新的记录时间，不是稳定结束事实。只读投影继续从原 turn 取开始时间并检查活跃 native turn；结束改取持久 `conversation.message_state` 中本次处理区间的首个终态转换（replied/processed/failed/interrupted）。重复或迟到的终态记录不延长该区间，新的 queued/accepted/processing/unknown 状态开始新区间；恢复等待或缺少已确认终态时保留无结束时间。不改业务写入、迁移、runner 协议或原失败事实。
+3. 使用真实 App 后台轮次及注入时钟覆盖重复终态、native reconciliation 的重复记录、晚到终态、重新读取历史与新处理区间，保留恢复等待计时回归。先运行针对性 fresh race、实际消费者测试与渲染验证，再依影响计划执行必要检查与当前候选 CI；同一独立 reviewer Task 只按实际差异复核。
+
+本地影响计划以已完整审阅且有最终 CI 的 `2b091400` 为差异基线，验证本轮新增源码及其反向依赖；此前未变范围保留原始通过/失败及补验组合证据，不能把旧完整命令改记为通过。PR CI 仍以实际 PR 基线完整计算并满足全部必需作业。实际已有单 CPU 子进程下多组并行的 watchdog 失败记录，本轮本地协调者采用两组并行、App 八片的有界预算，启动时记录真实线程和包预算；不降低断言或原测试 watchdog。
+
+两项失败仍可继续原讨论/其他普通分页，不触发工具重放；处理后从原消息及 cursor 恢复。当前已有的原始检查、完整命令失败及后续通过复现均保留，不能被新结果覆盖。
+
+## 合入前基线同步
+
+另两项独立修复合入后，同步最新 main；仅设计文档追加位置冲突，保留既有 D254/D255，将本功能编号顺延为 D256。业务源码自动重放；比较修正前候选与同步后候选，结合当前基线 CI 和原 reviewer 的实际差异复核评估既有检查，不机械重复不变范围。部署取消决定不变。

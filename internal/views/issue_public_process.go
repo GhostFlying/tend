@@ -25,23 +25,32 @@ func IssuePublicProcess(ctx context.Context, q store.Querier, message string, af
 
 func issuePublicProcess(ctx context.Context, q store.Querier, message string, after int64, limit int) (*protocol.IssueTurnProcess, error) {
 	out := &protocol.IssueTurnProcess{Items: []protocol.IssueConversationItem{}}
-	var start, end sql.NullInt64
-	if err := q.QueryRowContext(ctx, `SELECT MIN(created_at),CASE WHEN SUM(status IN ('starting','started'))=0 THEN MAX(updated_at) END FROM main_turns WHERE message_id=?`, message).Scan(&start, &end); err != nil {
+	var start sql.NullInt64
+	var active int
+	if err := q.QueryRowContext(ctx, `SELECT MIN(created_at),COUNT(CASE WHEN status IN ('starting','started') THEN 1 END) FROM main_turns WHERE message_id=?`, message).Scan(&start, &active); err != nil {
 		return nil, err
 	}
-	out.StartedAt, out.EndedAt = start.Int64, end.Int64
+	out.StartedAt = start.Int64
 	var state string
-	var stateAt int64
-	err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(body_json,'$.state'),''),created_at FROM events WHERE object_type='message' AND object_id=? AND kind='conversation.message_state' ORDER BY event_seq DESC LIMIT 1`, message).Scan(&state, &stateAt)
+	var end sql.NullInt64
+	err := q.QueryRowContext(ctx, `WITH states AS (
+ SELECT event_seq,created_at,COALESCE(json_extract(body_json,'$.state'),'') AS state
+ FROM events WHERE object_type='message' AND object_id=? AND kind='conversation.message_state')
+ SELECT state,(SELECT created_at FROM states
+ WHERE state IN ('replied','processed','failed','interrupted') AND event_seq>COALESCE(
+ (SELECT MAX(event_seq) FROM states WHERE state NOT IN ('replied','processed','failed','interrupted')),0)
+ ORDER BY event_seq LIMIT 1)
+ FROM states ORDER BY event_seq DESC LIMIT 1`, message).Scan(&state, &end)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	// A completed native attempt does not end the responsibility while its
-	// durable source remains processing, for example during rate-limit recovery.
-	if state == "processing" || state == "queued" {
-		out.EndedAt = 0
-	} else if out.EndedAt > 0 && stateAt > out.EndedAt {
-		out.EndedAt = stateAt
+	// Record updates and repeated terminal receipts are not new end facts.
+	// A recovery or uncertain source stays open until a confirmed transition.
+	if active == 0 && end.Valid {
+		switch protocol.MessageState(state) {
+		case protocol.MessageReplied, protocol.MessageProcessed, protocol.MessageFailed, protocol.MessageInterrupted:
+			out.EndedAt = end.Int64
+		}
 	}
 	rows, err := q.QueryContext(ctx, `SELECT r.seq,r.thread_id,r.turn_id,r.item_id,r.tool_json,r.status,r.created_at,b.status
  FROM background_replies r JOIN background_batches b USING(batch_id)
