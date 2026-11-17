@@ -48,3 +48,13 @@ conversation、epoch、有效 lease 和未结束原 turn，不准入新业务或
 扩展原 closed 安全回执测试到 owner cancel、manager cancel 和 board cancel，实际
 执行 review_context→final reply→review_context→commit，并保留错误身份拒绝、
 终态无新 task/reopen/context fact、Run/lease 未伪造停止等断言。
+
+## 完整验证发现的取消回归前置条件
+
+`TestRunnerStopsCancelledRun` 在多次真实 race 执行中于 worker 启动前超时，尚未
+发送 tasks.cancel。该用例以真实时钟运行 400ms 租约，调度/初始化耗时可能先使
+租约失效，也可能把租约到期误当显式取消的效果；这不是本用例要测的到期行为。
+server 与 runner 已共用可注入 Now：复用 testkit.Clock 且不推进业务时间，保留
+400ms 租约和原 worker-start/stop、RunFailed 断言。显式取消仍须真实完成停止和
+释放，wall-clock watchdog 保持有限且不改；到期行为继续由既有推进时钟回归负责。
+修改前后的失败/通过逐例原件与执行参数分别保留，不将原完整检查改记通过。
