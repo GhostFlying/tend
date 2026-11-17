@@ -2,11 +2,13 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
+	"testing"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/views"
-	"testing"
 )
 
 func TestIssueAdmissionRegressionLegacyWorkerResumesAfterTodo(t *testing.T) {
@@ -209,41 +211,44 @@ func TestIssueAdmissionRegressionReopenPreservesOwnerPolicy(t *testing.T) {
 	}
 }
 
-func TestIssueAdmissionRegressionCancelAfterPauseHandoffClaimsSettlement(t *testing.T) {
-	h, r := pendingIssueOwnerHarness(t)
-	r.Capabilities = append(r.Capabilities, protocol.CapabilityPauseHandoffs)
-	i := issueAdmissionStatus(t, h, createBacklogTestIssue(t, h), protocol.IssueTodo, &protocol.IssueOwnerRequest{CategoryID: "implementer"})
-	as := admissionClaim(t, h, r)
-	i = issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
-	paused := h.run(as.RunID)
-	if op := h.runAs(*as, protocol.OpRunsYieldPause, protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff}, YieldPause{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	op := h.exec(owner, h.env("issues.cancel", protocol.Target{Type: "issue", ID: i.IssueID}, protocol.IssueControlPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Cancel stopped work"}, rev(i.Revision)), CanonicalOwnerIssueCommand{Action: "cancel"})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	next := admissionClaim(t, h, r)
-	if next == nil {
-		var status string
-		h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(t.Context(), `SELECT status FROM plan_actions WHERE action_id=?`, as.ActionID).Scan(&status)
+func TestIssueAdmissionRegressionCancelAfterPauseHandoffUsesEndpointFacts(t *testing.T) {
+	for _, unsettled := range []bool{false, true} {
+		t.Run(fmt.Sprint(unsettled), func(t *testing.T) {
+			h, r := pendingIssueOwnerHarness(t)
+			r.Capabilities = append(r.Capabilities, protocol.CapabilityPauseHandoffs)
+			i := issueAdmissionStatus(t, h, createBacklogTestIssue(t, h), protocol.IssueTodo, &protocol.IssueOwnerRequest{CategoryID: "implementer"})
+			if unsettled {
+				i = addCancellationCommitment(t, h, i)
+			}
+			as := admissionClaim(t, h, r)
+			i = issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
+			paused := h.run(as.RunID)
+			if op := h.runAs(*as, protocol.OpRunsYieldPause, protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff}, YieldPause{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			op := h.exec(owner, h.env("issues.cancel", protocol.Target{Type: "issue", ID: i.IssueID}, protocol.IssueControlPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Cancel stopped work"}, rev(i.Revision)), CanonicalOwnerIssueCommand{Action: "cancel"})
+			if op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			next := admissionClaim(t, h, r)
+			if unsettled {
+				if next == nil || next.Role != protocol.RoleIssueManager || next.RunID == as.RunID || next.TaskID != as.TaskID || next.PauseContinuation != nil {
+					t.Fatal("cancel did not retain required settlement", next)
+				}
+			} else if next != nil || admissionCurrent(t, h, i.IssueID).State != protocol.IssueCancelled {
+				t.Fatal("settled cancellation claimed another model round", next)
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var published bool
+				err := tx.Q().QueryRowContext(t.Context(), `SELECT continuation_action_id IS NOT NULL FROM run_pause_handoffs WHERE run_id=?`, as.RunID).Scan(&published)
+				if published {
+					t.Fatal("cancel published a business pause continuation")
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
 		})
-		t.Fatalf("cancel cannot claim settlement coordination: old action=%s; issue state=%s", status, admissionCurrent(t, h, i.IssueID).State)
-	}
-
-	if next.Role != protocol.RoleIssueManager || next.RunID == as.RunID || next.TaskID != as.TaskID || next.PauseContinuation != nil {
-		t.Fatal("cancel resumed business work instead of settlement", next)
-	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var published bool
-		err := tx.Q().QueryRowContext(t.Context(), `SELECT continuation_action_id IS NOT NULL FROM run_pause_handoffs WHERE run_id=?`, as.RunID).Scan(&published)
-		if published {
-			t.Fatal("cancel published a business pause continuation")
-		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 
