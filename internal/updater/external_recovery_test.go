@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
@@ -19,6 +20,38 @@ type externalTestAuthority struct{}
 
 func (a *externalTestAuthority) InstallationReadiness(_ context.Context, binding Binding) (protocol.InstallationReadiness, error) {
 	return protocol.InstallationReadiness{Binding: binding, Ready: true, Protocol: 2, StorageVersion: 9}, nil
+}
+
+type restartingExternalManager struct{ *externalTestManager }
+
+func (m *restartingExternalManager) Start(ctx context.Context, unit externalRecoveryUnit, config string) error {
+	if err := m.externalTestManager.Start(ctx, unit, config); err != nil {
+		return err
+	}
+	state := m.h.s.Status()
+	delete(m.h.p.live, state.Process.PID)
+	for range 3 {
+		if err := m.h.s.Step(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestExternalRecoveryCompletesAfterCommittedProcessRestart(t *testing.T) {
+	h, request, base := externalFixture(t)
+	manager := &restartingExternalManager{base}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	record, err := externalRecovery(ctx, h.cfg, request, manager)
+	state := h.s.Status()
+	proof := CommittedReceipt(state)
+	if proof == nil || !proof.ExternalRecovery || proof.Binding.UpgradeID != request.RequestID || state.Process.LaunchID == proof.Binding.ProcessInstanceID {
+		t.Fatal("restart lost the original installation proof", proof)
+	}
+	if err != nil || record.Phase != "complete" || base.stops != 1 || base.starts != 1 {
+		t.Fatalf("committed recovery did not reconcile after restart: record=%+v err=%v stops=%d starts=%d", record, err, base.stops, base.starts)
+	}
 }
 func (*externalTestAuthority) Authorize(context.Context, Binding) (Grant, error) {
 	return Grant{}, errors.New("old server is unavailable")
