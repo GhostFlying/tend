@@ -69,7 +69,6 @@ func TestIssueReadApplicabilityFollowsNormalCloseCancelAndReopen(t *testing.T) {
 				issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "close", canonicalLifecycleClosure(issue, protocol.WorkItemClosureCompleted)))
 			} else {
 				issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
-				issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "No pending work"}}))
 			}
 			expected := protocol.IssueDone
 			if end == "cancel" {
