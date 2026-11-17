@@ -174,6 +174,9 @@ func newIssueAcceptancePolicy(x *Exec, input *protocol.IndependentAcceptanceRequ
 }
 
 func updateTaskReviewChoice(ctx context.Context, x *Exec, tx *store.Tx, task store.TaskRow, spec domain.Spec, input *protocol.IndependentAcceptanceRequest) error {
+	if err := spec.ValidateForAcceptance(input.Required); err != nil {
+		return err
+	}
 	primary, err := store.GetTaskIssueOwner(ctx, tx.Q(), task.TaskID)
 	if err != nil {
 		return err

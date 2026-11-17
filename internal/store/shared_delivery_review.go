@@ -259,7 +259,12 @@ func RequireDeliveryDutyReview(ctx context.Context, q Querier, i protocol.Issue,
 	if err != nil {
 		return err
 	}
-	if (i.AcceptancePolicy == nil || !i.AcceptancePolicy.Required) && (policy == nil || !policy.Required) {
+	// The Issue policy is a default for future work. Existing tasks retain their
+	// own review choice; only historical tasks without one inherit that default.
+	if policy == nil {
+		policy = i.AcceptancePolicy
+	}
+	if policy == nil || !policy.Required {
 		return nil
 	}
 	if err := RequireSharedDeliveryReview(ctx, q, i, *d.Candidate); err != nil {

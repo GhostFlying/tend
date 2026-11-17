@@ -48,39 +48,8 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	if err := supported(); err != nil {
 		return nil, err
 	}
-	if cfg.InstanceID == "" || len(cfg.InstanceID) > 256 || cfg.Role != "server" && cfg.Role != "runner" && cfg.Role != "maintainer" || !filepath.IsAbs(cfg.StateDir) || !filepath.IsAbs(cfg.InitialBinary) || !filepath.IsAbs(cfg.LogPath) {
-		return nil, errors.New("updater: invalid service configuration")
-	}
-	if cfg.ServiceConfig != "" {
-		if cfg.Role != "runner" || !filepath.IsAbs(cfg.ServiceConfig) || filepath.Clean(cfg.ServiceConfig) != cfg.ServiceConfig {
-			return nil, errors.New("updater: invalid fixed service configuration path")
-		}
-		found := false
-		for i, arg := range cfg.Args {
-			if (arg == "-config" || arg == "--config") && i+1 < len(cfg.Args) && cfg.Args[i+1] == cfg.ServiceConfig {
-				found = true
-			}
-		}
-		if !found {
-			return nil, errors.New("updater: service configuration must match managed arguments")
-		}
-		for _, p := range append(append([]string{}, cfg.EnvFiles...), cfg.DataFiles...) {
-			if p == cfg.ServiceConfig {
-				return nil, errors.New("updater: configuration overlaps data or credentials")
-			}
-		}
-	}
-	seen := map[string]bool{}
-	for _, p := range cfg.DataFiles {
-		if !filepath.IsAbs(p) || filepath.Clean(p) != p || seen[p] {
-			return nil, errors.New("updater: invalid or duplicate data file")
-		}
-		seen[p] = true
-		for _, env := range cfg.EnvFiles {
-			if p == env {
-				return nil, errors.New("updater: credentials cannot be rollback data")
-			}
-		}
+	if err := validateServiceConfig(cfg); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, err
@@ -1158,4 +1127,43 @@ func (s *Supervisor) observeCurrent(ctx context.Context, expected Identity) (Ide
 	s.verifiedProcess = full
 	s.observedProcess = again
 	return full, nil
+}
+
+// validateServiceConfig is shared by ordinary startup and pre-stop installation.
+func validateServiceConfig(cfg Config) error {
+	if cfg.InstanceID == "" || len(cfg.InstanceID) > 256 || cfg.Role != "server" && cfg.Role != "runner" && cfg.Role != "maintainer" || !filepath.IsAbs(cfg.StateDir) || !filepath.IsAbs(cfg.InitialBinary) || !filepath.IsAbs(cfg.LogPath) {
+		return errors.New("updater: invalid service configuration")
+	}
+	if cfg.ServiceConfig != "" {
+		if cfg.Role != "runner" || !filepath.IsAbs(cfg.ServiceConfig) || filepath.Clean(cfg.ServiceConfig) != cfg.ServiceConfig {
+			return errors.New("updater: invalid fixed service configuration path")
+		}
+		found := false
+		for i, arg := range cfg.Args {
+			if (arg == "-config" || arg == "--config") && i+1 < len(cfg.Args) && cfg.Args[i+1] == cfg.ServiceConfig {
+				found = true
+			}
+		}
+		if !found {
+			return errors.New("updater: service configuration must match managed arguments")
+		}
+		for _, p := range append(append([]string{}, cfg.EnvFiles...), cfg.DataFiles...) {
+			if p == cfg.ServiceConfig {
+				return errors.New("updater: configuration overlaps data or credentials")
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, p := range cfg.DataFiles {
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p || seen[p] {
+			return errors.New("updater: invalid or duplicate data file")
+		}
+		seen[p] = true
+		for _, env := range cfg.EnvFiles {
+			if p == env {
+				return errors.New("updater: credentials cannot be rollback data")
+			}
+		}
+	}
+	return nil
 }

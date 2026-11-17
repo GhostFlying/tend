@@ -92,7 +92,15 @@ func applyDecision(ctx context.Context, x *Exec, tx *store.Tx, prev store.TaskRo
 	for _, e := range d.Events {
 		events = append(events, Event{ObjectType: "task", ObjectID: d.Task.ID, ObjectVersion: d.Task.ControlRevision, Kind: e.Kind, Body: e.Body})
 	}
-	if d.Task.Lifecycle == protocol.TaskCancelled || d.Task.Lifecycle == protocol.TaskCompleted && d.CancelOpenActions {
+	settleUnusedReview := d.Task.Lifecycle == protocol.TaskCancelled
+	if d.Task.Lifecycle == protocol.TaskCompleted {
+		policy, err := store.TaskAcceptancePolicy(ctx, tx.Q(), d.Task.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		settleUnusedReview = policy != nil && !policy.Required
+	}
+	if settleUnusedReview {
 		ownerEvents, err := settleUnusedOwnerReview(ctx, x, tx, d.Task.ID)
 		if err != nil {
 			return nil, nil, err

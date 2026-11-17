@@ -49,6 +49,9 @@ type externalRecoveryManager interface {
 
 func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryRequest, manager externalRecoveryManager) (ExternalRecoveryRecord, error) {
 	var record ExternalRecoveryRecord
+	if err := validateServiceConfig(cfg); err != nil {
+		return record, err
+	}
 	if (!request.Force && !request.Status) || !filepath.IsAbs(request.ConfigFile) || !filepath.IsAbs(cfg.StateDir) || cfg.AuthoritySocket == "" || cfg.Role != "server" && cfg.Role != "runner" {
 		return record, errors.New("updater: external recovery requires --force, the fixed config and a private readiness socket")
 	}
@@ -142,16 +145,18 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 		return record, nil
 	}
 	if record.Phase == "prepared" {
-		storage := cfg.StorageVersion
+		// The bootstrap config is not the installed schema. When the old state
+		// is unreadable, retain selected data and let the candidate verify it.
+		storage := int64(0)
 		if old, err := readState(filepath.Join(cfg.StateDir, "state.json")); err == nil && old.InstanceID == cfg.InstanceID {
-			storage = max(storage, old.Current.StorageVersion)
+			storage = old.Current.StorageVersion
 		}
 		readable := bundle.Manifest.Storage.ServerSchema
 		if cfg.Role == "runner" {
 			readable = bundle.Manifest.Storage.RunnerJournal
 		}
-		if !readable.Contains(storage) {
-			return record, errors.New("updater: candidate cannot read configured storage")
+		if storage > 0 && !readable.Contains(storage) {
+			return record, errors.New("updater: candidate cannot read the installed storage")
 		}
 		if err := advance("stopping"); err != nil {
 			return record, err
@@ -198,21 +203,21 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 		if err := archiveRecoveryStartupJournals(cfg, record.Archive); err != nil {
 			return record, err
 		}
-		storage := cfg.StorageVersion
+		storage := int64(0)
 		if old, err := readState(archive); err == nil && old.InstanceID == cfg.InstanceID {
-			storage = max(storage, old.Current.StorageVersion)
+			storage = old.Current.StorageVersion
 		}
 		range_ := bundle.Manifest.Storage.ServerSchema
 		if cfg.Role == "runner" {
 			range_ = bundle.Manifest.Storage.RunnerJournal
 		}
-		if !range_.Contains(storage) {
-			return record, errors.New("updater: candidate cannot read configured storage")
+		if storage > 0 && !range_.Contains(storage) {
+			return record, errors.New("updater: candidate cannot read the installed storage")
 		}
 		op := &Operation{ID: record.RequestID, Kind: "recover", Phase: "backed_up", Candidate: record.Target, LaunchID: record.LaunchID, Irreversible: true, StartedAt: time.Now()}
 		op.Binding = Binding{UpgradeID: record.RequestID, InstanceID: cfg.InstanceID, ProcessInstanceID: record.LaunchID, ReleaseID: record.Target.ReleaseID, ManifestSHA256: record.Target.ManifestSHA256, ArtifactSHA256: artifact.SHA256}
 		if storage != record.Target.StorageVersion {
-			op.BackupDir = filepath.Join(record.Archive, "data")
+			op.BackupDir = filepath.Join(cfg.StateDir, "backups", record.RequestID)
 			if err := backupDataContext(ctx, cfg, op); err != nil {
 				return record, err
 			}

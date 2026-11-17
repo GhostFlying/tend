@@ -2088,6 +2088,8 @@ try {
         name: "要求独立 Agent 验收任务结果",
         exact: true,
       });
+      assert(!(await policyChoice.isChecked()));
+      await policyChoice.check();
       assert(await policyChoice.isChecked());
       await policyChoice.uncheck();
       await discoveryForm

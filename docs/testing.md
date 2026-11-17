@@ -37,3 +37,10 @@ D252 的退役与承接：
 unknown 的故障测试。提示词文案测试只检查必要能力/输入契约，不逐字固定表达。
 发布复用验证过的不可变产物；下载、构建和测试全部在停机前，安装只验证实际目标。
 Go 修改需要交叉编译时，CI 单独构建嵌入资源；没有 Web 影响时不运行前端单测或浏览器回归。
+
+完整发布的 L3 强制恢复：先构建并解压当前平台的完整 format 2 发布包，再设置
+`TEND_TEST_RECOVERY_BUNDLE="$RELEASE_DIR"`，运行
+`go test -tags=integration ./internal/updater -run '^TestExternalRecoveryCompleteRelease$' -count=1`。
+用例只管理自己创建的 systemd user unit；故意破坏旧状态与启动 journal、令旧进程
+忽略 TERM，验证实际 CLI/installer/updater/server、原数据保留、持久提交、重试身份和
+owner API 就绪。旧单独 stop/restart fixture 由这条完整发布流程承接。

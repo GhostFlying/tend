@@ -145,8 +145,8 @@ func TestExternalRecoveryUsesNewSupervisorWithUnreadableOldState(t *testing.T) {
 			if err != nil || string(archived) != string(original) {
 				t.Fatal("original evidence changed", err)
 			}
-			if record.BackupDir != "" {
-				t.Fatal("binary-only recovery copied the ledger")
+			if record.BackupDir == "" {
+				t.Fatal("unknown installed schema was treated as a proven binary-only replacement")
 			}
 			state := h.s.Status()
 			if state.Operation.Kind != "recover" || state.Operation.Phase != "committed" || h.p.starts != 1 || manager.stops != 1 || manager.starts != 1 {
@@ -200,6 +200,52 @@ func TestExternalRecoveryArchivesUnreadableStartupJournals(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(record.Archive, name))
 			if err != nil || string(raw) != string(original) {
 				t.Fatal("original startup journal was not retained", err)
+			}
+		})
+	}
+}
+
+func TestExternalRecoveryRejectsInvalidConfigurationBeforeStopping(t *testing.T) {
+	h, request, manager := externalFixture(t)
+	cfg := h.cfg
+	cfg.Role = "server"
+	cfg.ServiceConfig = request.ConfigFile
+	original, err := os.ReadFile(filepath.Join(cfg.StateDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := externalRecovery(t.Context(), cfg, request, manager); err == nil {
+		t.Fatal("invalid supervisor configuration was accepted")
+	}
+	after, err := os.ReadFile(filepath.Join(cfg.StateDir, "state.json"))
+	if err != nil || string(original) != string(after) || manager.stops != 0 || manager.starts != 0 {
+		t.Fatal("configuration error crossed the stop boundary", err)
+	}
+}
+
+func TestExternalRecoveryUsesInstalledStorageInsteadOfBootstrapConfig(t *testing.T) {
+	for _, storage := range []int64{0, 8, 9} {
+		t.Run(map[int64]string{0: "unknown", 8: "migration", 9: "binary-only"}[storage], func(t *testing.T) {
+			h, request, manager := externalFixture(t)
+			h.cfg.StorageVersion = 7
+			if err := writeJSON(request.ConfigFile, h.cfg); err != nil {
+				t.Fatal(err)
+			}
+			if storage > 0 {
+				state := h.s.Status()
+				state.Current.StorageVersion = storage
+				if err := writeJSON(h.s.statePath(), state); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(h.s.statePath(), []byte("unreadable old state"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			record, err := externalRecovery(t.Context(), h.cfg, request, manager)
+			if err != nil || record.Phase != "complete" {
+				t.Fatal(record, err)
+			}
+			if (record.BackupDir == "") != (storage == 9) {
+				t.Fatal("snapshot choice did not preserve unknown installed storage", record)
 			}
 		})
 	}
