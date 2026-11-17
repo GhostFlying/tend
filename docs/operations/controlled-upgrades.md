@@ -106,7 +106,8 @@ tend upgrade start --socket "$SERVER_CONTROL_SOCKET" \
 准入拒绝未结束批次、离线或不兼容主机、无 updater 能力、无法读取的存储以及仍依赖退役协议的 run。server 先缓存全部产物，各目标 runner 经现有认证链路下载并校验；原本 normal 的主机在 preparing 期间继续接单。
 已通过 `host maintenance` 停止接单的主机可直接使用同一 `upgrade start` 入口交接，
 无需先恢复 normal：必须在线、新鲜确认当前 control revision，且没有其他升级目标或
-固定安装授权。新批次同事务接管维护责任并提升 control revision，准备包时继续保留
+固定安装授权；目标 server 必须经实际候选能力探测确认支持交接。缺少支持的旧发布
+仍可从 normal 启动，但不能接管临时维护；拒绝不改变原维护。新批次同事务接管维护责任并提升 control revision，准备包时继续保留
 维护，既有 Run 可继续执行；PrepareOnly 不授予安装权限。server 提交后这些主机也
 保持维护，直到自身 runner 提交或同哈希安全跳过并收到 normal ACK。准入失败保留
 原临时维护；接管后的失败、超时或取消沿既有恢复路径释放已确认未替换的进程，

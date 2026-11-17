@@ -2544,6 +2544,8 @@ Session 是执行上下文缓存。工具表变化时从持久账本与原件引
 
 正式 StartUpgrade 在同一事务接管已新鲜确认的独立临时维护：控制无其他 upgrade、
 准备目标或固定安装授权，runtime 的 revision / upgrade 身份及维护能力匹配。
+目标 server 必须经绑定实际候选 SHA 的能力探测声明 maintenance-upgrade-handoff-v1，
+否则拒绝且保留原临时维护，避免协议兼容的旧 server 忽略来源后重新开放领取。
 每 host 持久保存 maintenance_handoff 来源，准备控制提升 revision 并绑定新批次，
 保持 maintenance；PrepareOnly 可在维护中下载和校验，既有 Run 继续运行且无安装权限。
 server 提交不释放这些 host，后续串行 runner 排空直接使用当前维护 ACK。

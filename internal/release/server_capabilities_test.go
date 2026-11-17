@@ -24,7 +24,7 @@ func TestManagerParkServerCapabilitiesBindActualExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(body)
-	if err := report.Validate(hex.EncodeToString(sum[:])); err != nil || !report.Supports(ServerCapabilityManagerPark) || !report.Supports(ServerCapabilityOperationRecovery) {
+	if err := report.Validate(hex.EncodeToString(sum[:])); err != nil || !report.Supports(ServerCapabilityManagerPark) || !report.Supports(ServerCapabilityOperationRecovery) || !report.Supports(ServerCapabilityMaintenanceHandoff) {
 		t.Fatal(report, err)
 	}
 	report.Capabilities = append(report.Capabilities, ServerCapabilityManagerPark)

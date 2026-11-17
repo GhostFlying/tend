@@ -220,16 +220,18 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		return protocol.UpgradeView{}, errors.New("upgradectl: standalone updater bootstrap required before a complete upgrade")
 	}
 	command.ServerUpdaterSupported = true
-	var capabilities release.ServerCapabilities
-	if r.ParkIdleManagers {
-		path, err := release.RegularPath(bundle.Dir, server.Path)
-		if err != nil {
-			return protocol.UpgradeView{}, err
-		}
-		capabilities, err = c.cfg.InspectServerCapabilities(ctx, path, server.SHA256)
-		if err != nil || capabilities.Validate(server.SHA256) != nil || !capabilities.Supports(release.ServerCapabilityManagerPark) {
-			return protocol.UpgradeView{}, errors.New("upgradectl: candidate lacks verified manager park support")
-		}
+	path, err := release.RegularPath(bundle.Dir, server.Path)
+	if err != nil {
+		return protocol.UpgradeView{}, err
+	}
+	capabilities, probeErr := c.cfg.InspectServerCapabilities(ctx, path, server.SHA256)
+	if probeErr != nil || capabilities.Validate(server.SHA256) != nil {
+		// Old normal-start candidates remain valid without optional capabilities.
+		// The admitting transaction requires verified support for any handoff.
+		capabilities = release.ServerCapabilities{}
+	}
+	if r.ParkIdleManagers && !capabilities.Supports(release.ServerCapabilityManagerPark) {
+		return protocol.UpgradeView{}, errors.New("upgradectl: candidate lacks verified manager park support")
 	}
 	command.ServerCapabilities = capabilities.Capabilities
 	step = "admit"
