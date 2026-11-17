@@ -44,3 +44,42 @@ func TestIssueBoardHTTPStatusReceiptsCountsAndSettings(t *testing.T) {
 		t.Fatal(status, settings)
 	}
 }
+
+func TestIssueCancellationHTTPSettledEntryPoints(t *testing.T) {
+	for _, action := range []string{"cancel", "set_status"} {
+		t.Run(action, func(t *testing.T) {
+			e := newEnv(t)
+			e.configure()
+			token := e.login(protocol.ScopeOwner)
+			issue := createOwnerIssueHTTP(t, e, token, "")
+			var payload any = protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel settled Issue"}
+			if action == "set_status" {
+				payload = protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueWorkCancelled}
+			}
+			// Both real HTTP producers retain revision and epoch fences.
+			staleEpoch := protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch + 1}
+			if action == "set_status" {
+				payload = protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: staleEpoch.ExpectedAssignmentEpoch, Status: protocol.IssueWorkCancelled}
+			} else {
+				payload = staleEpoch
+			}
+			status, response := e.op(token, e.envelope("issues."+action, protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, payload))
+			if status != http.StatusOK || response.Operation == nil || response.Operation.Error == nil || response.Operation.Error.Code != protocol.CodeStaleRevision {
+				t.Fatal(status, response)
+			}
+			if action == "set_status" {
+				payload = protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueWorkCancelled}
+			} else {
+				payload = protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel settled Issue"}
+			}
+			cancelled := issueHTTP(t, e, token, e.envelope("issues."+action, protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, payload))
+			if cancelled.State != protocol.IssueCancelled || cancelled.Revision != issue.Revision+1 || cancelled.Closure != nil {
+				t.Fatal(cancelled)
+			}
+			status, response = e.op(token, e.envelope("issues."+action, protocol.Target{Type: "issue", ID: issue.IssueID}, &issue.Revision, payload))
+			if status != http.StatusOK || response.Operation == nil || response.Operation.Error == nil || response.Operation.Error.Code != protocol.CodeStaleRevision {
+				t.Fatal(status, response)
+			}
+		})
+	}
+}

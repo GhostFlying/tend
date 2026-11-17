@@ -154,13 +154,20 @@ func TestIssueBoardAgentStatusPreservesEarlierExternalWake(t *testing.T) {
 }
 
 func TestIssueBoardOwnerEndpointPreservesActiveNativeTurn(t *testing.T) {
-	for _, status := range []protocol.IssueWorkStatus{protocol.IssueDone, protocol.IssueWorkCancelled} {
-		t.Run(string(status), func(t *testing.T) {
+	for _, entry := range []struct {
+		action string
+		status protocol.IssueWorkStatus
+	}{{"set_status", protocol.IssueDone}, {"set_status", protocol.IssueWorkCancelled}, {"cancel", protocol.IssueWorkCancelled}} {
+		t.Run(entry.action+"/"+string(entry.status), func(t *testing.T) {
 			h := hostedManagerHarness(t)
 			issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 			turn, _ := startHostedIssueReview(t, h, issue)
-			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}))
-			if issue.BoardStatus() != status {
+			var payload any = protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: entry.status}
+			if entry.action == "cancel" {
+				payload = protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel settled responsibility"}
+			}
+			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, entry.action, payload))
+			if issue.BoardStatus() != entry.status {
 				t.Fatal("explicit owner endpoint required a separate source review", issue)
 			}
 			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -181,11 +188,18 @@ func TestIssueBoardOwnerEndpointPreservesActiveNativeTurn(t *testing.T) {
 }
 
 func TestIssueBoardOwnerEndpointKeepsRunnerResourcesUntilStopped(t *testing.T) {
-	for _, status := range []protocol.IssueWorkStatus{protocol.IssueDone, protocol.IssueWorkCancelled} {
-		t.Run(string(status), func(t *testing.T) {
+	for _, entry := range []struct {
+		action string
+		status protocol.IssueWorkStatus
+	}{{"set_status", protocol.IssueDone}, {"set_status", protocol.IssueWorkCancelled}, {"cancel", protocol.IssueWorkCancelled}} {
+		t.Run(entry.action+"/"+string(entry.status), func(t *testing.T) {
 			h, _, issue, as, _ := reviewManagerAssignment(t)
 			before := h.run(as.RunID)
-			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}))
+			var payload any = protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: entry.status}
+			if entry.action == "cancel" {
+				payload = protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel settled responsibility"}
+			}
+			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, entry.action, payload))
 			if actual := h.run(as.RunID); actual.ObservedState != before.ObservedState || actual.ObservedState == protocol.RunFinished {
 				t.Fatal("Issue endpoint released a running owner", actual)
 			}

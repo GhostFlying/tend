@@ -2561,3 +2561,14 @@ server 提交不释放这些 host，后续串行 runner 排空直接使用当前
 沿原安全恢复规则释放可确认未替换的进程，未知候选不释放、不重放。整体和阶段期限
 均沿用原固定额度。没有新增 runner wire 字段或收紧旧有效请求，不提升协议版本。
 业务路径与回归边界见 docs/plans/maintenance-upgrade-handoff.md。
+
+## D254：普通 Issue 取消复用已结清终态
+
+普通 `issues.cancel` 在原 revision/assignment epoch 约束的事务内取消本树 primary
+执行后，与看板/CLI `set-status(cancelled)` 复用 endpoint facts 和 Begin/Finish
+领域转换。无未结义务时一次 revision 保存 cancelled，只发终态事件，不生成
+issue.cancelling 背景收尾消息或为闲置 manager 新领取一轮。仍有子责任、交付、承诺、
+业务问题、执行资源或 unknown 时保留 cancelling 和原收尾通道；看板仍拒绝未结终态。
+已知活动 manager 的 Run/lease 不作为新增总门槛，也不因业务终态伪造物理停止；
+现有 retiring/native close/receipt 消费独立保留。无 wire/schema 变更。
+路径与验证边界见 docs/plans/settled-issue-cancellation.md。
