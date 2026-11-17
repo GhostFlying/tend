@@ -122,12 +122,18 @@ func TestRunnerClosingTailRetainedBeforeAttachment(t *testing.T) {
 	if err != nil || op.Error != nil {
 		t.Fatal(op, err)
 	}
-	s := coordination.New(ctx, &runnerTransport{app: e.app, run: "receipt-reader-run", origins: map[int64]managerEventOrigin{}})
+	tr := &startupRunnerTransport{runnerTransport: &runnerTransport{app: e.app, run: "receipt-reader-run", origins: map[int64]managerEventOrigin{}}, processed: make(chan struct{})}
+	s := coordination.New(ctx, tr)
 	defer func() { cancel(); <-s.Done() }()
 	select {
-	case <-s.Done():
+	case <-tr.processed:
 	case <-ctx.Done():
-		t.Fatal("original event stream did not end", ctx.Err())
+		t.Fatal("original event tail was not retained", ctx.Err())
+	}
+	select {
+	case <-s.Done():
+		t.Fatal("history connection ended before consuming its tail")
+	default:
 	}
 	th, err := e.m.openThread(ctx, s)
 	if err != nil {

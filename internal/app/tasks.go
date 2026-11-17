@@ -375,14 +375,14 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		if x.Env.Operation != "issues.update_task" {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "change review through the responsible Issue's task update")
 		}
-		if err := updateTaskReviewChoice(ctx, x, tx, row, current, p.IndependentAcceptance); err != nil {
+		reviewSpec := current
+		if p.Spec != nil {
+			reviewSpec = *p.Spec
+		}
+		if err := updateTaskReviewChoice(ctx, x, tx, row, reviewSpec, p.IndependentAcceptance); err != nil {
 			return Outcome{}, err
 		}
 		if p.IndependentAcceptance.Required {
-			reviewSpec := current
-			if p.Spec != nil {
-				reviewSpec = *p.Spec
-			}
 			reviewEvents, err = enableOwnerReview(ctx, x, tx, row.TaskID, reviewSpec)
 			if err != nil {
 				return Outcome{}, err

@@ -789,3 +789,110 @@ func TestRegressionDatabaseOnlyHistoryRemainsAttachable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReviewEnableRequiresReviewerSelection(t *testing.T) {
+	h, _, issue := issueOwnerHarness(t)
+	spec := testSpec
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer"}}
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "No reviewer selector", Spec: spec}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var task taskResult
+	if err := json.Unmarshal(op.Result, &task); err != nil {
+		t.Fatal(err)
+	}
+	change := protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: true, Reason: "Add a reviewer"}}
+	op = h.exec(owner, h.env("issues.update_task", taskTarget(task.TaskID), change, rev(h.task(task.TaskID).ControlRevision)), CanonicalOwnerTaskUpdate{})
+	if op.Status == protocol.OpSucceeded {
+		t.Fatal("enabled review although stored spec fails ValidateForAcceptance(true):", spec.ValidateForAcceptance(true))
+	}
+}
+
+func TestDeliveryReviewRetainsTaskChoiceAfterIssueDefaultChanges(t *testing.T) {
+	for _, required := range []bool{false, true} {
+		name := "self-check"
+		if required {
+			name = "independent-review"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := hostedManagerHarness(t)
+			issue := policyIssue(t, h, required)
+			task := createCanonicalTaskForTest(t, h, issue)
+			issue = canonicalTaskIssue(t, h, issue.IssueID)
+			if !required {
+				choice := protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "Owner selects self-check for this task"}}
+				if op := h.exec(owner, h.env("issues.update_task", taskTarget(task), choice, rev(h.task(task).ControlRevision)), CanonicalOwnerTaskUpdate{}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			check := func() {
+				t.Helper()
+				err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					current, err := store.GetCanonicalIssue(t.Context(), tx.Q(), issue.IssueID)
+					if err != nil {
+						return err
+					}
+					policy, err := store.TaskAcceptancePolicy(t.Context(), tx.Q(), task)
+					if err != nil {
+						return err
+					}
+					if policy == nil || policy.Required != required {
+						t.Fatalf("Task review choice changed: %+v", policy)
+					}
+					return store.RequireDeliveryDutyReview(t.Context(), tx.Q(), current, protocol.IssueDeliveryDuty{TaskID: task, Candidate: &protocol.IssueDeliveryCandidate{DeliveryID: "pr-original"}})
+				})
+				if required {
+					if protocol.CodeOf(err) != protocol.CodeInvalidTransition {
+						t.Fatalf("required Task lost its review gate: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("self-check Task acquired a review gate: %v", err)
+				}
+			}
+			check()
+			if op := policyChange(t, h, canonicalTaskIssue(t, h, issue.IssueID), !required); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			check()
+		})
+	}
+}
+
+func TestReviewWithdrawnBeforeResultSettlesGeneratedResponsibility(t *testing.T) {
+	h, r, issue := issueOwnerHarness(t)
+	op := createOwnerExecution(t, h, issue, "implementer")
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var task taskResult
+	if err := json.Unmarshal(op.Result, &task); err != nil {
+		t.Fatal(err)
+	}
+	as := ownerWorkerClaim(t, h, r, protocol.RoleImplement)
+	change := protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "Owner withdraws optional review"}}
+	op = h.exec(owner, h.env("issues.update_task", taskTarget(task.TaskID), change, rev(h.task(task.TaskID).ControlRevision)), CanonicalOwnerTaskUpdate{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	op = h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if h.task(task.TaskID).Lifecycle != protocol.TaskCompleted {
+		t.Fatal("task not completed", h.task(task.TaskID))
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		c, err := store.GetTaskOwnerContract(t.Context(), tx.Q(), task.TaskID)
+		if err != nil {
+			return err
+		}
+		child, err := store.GetCanonicalIssue(t.Context(), tx.Q(), c.ReviewIssueID)
+		if err == nil && child.State != protocol.IssueCancelled {
+			t.Errorf("unused review child still %s/%s", child.State, child.WorkStatus)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

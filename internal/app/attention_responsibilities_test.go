@@ -875,3 +875,28 @@ func TestResponsibilityIntermediateAgentHandoffInvalidatesOldEscalation(t *testi
 		t.Error("old escalated route can still resolve without new intermediate supervisor")
 	}
 }
+
+func TestResumeNotifiesEntireAffectedAttentionScope(t *testing.T) {
+	h := hostedManagerHarness(t)
+	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "pause", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Wait"}))
+	for range 101 {
+		problemAttention(t, h, issue)
+	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	_ = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "resume", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Resume pending work"}))
+	// Unrelated subsequent business writes used to drain the remaining batch.
+	createCanonicalOwnerTestIssue(t, h)
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var pending int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT count(*) FROM attention_responsibilities WHERE origin_issue_id=? AND notified_revision<revision`, issue.IssueID).Scan(&pending); err != nil {
+			return err
+		}
+		if pending != 0 {
+			t.Errorf("%d problems still have no wake after scope resume and later write", pending)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
