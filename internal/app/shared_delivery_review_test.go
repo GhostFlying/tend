@@ -282,10 +282,13 @@ func TestSharedDeliveryReviewRequiresIndependentIssueTarget(t *testing.T) {
 	}
 }
 
-func createSharedReviewerTaskForTest(t *testing.T, h *harness, issue string) string {
+func createSharedReviewerTaskForTest(t *testing.T, h *harness, issue string, requirement ...protocol.AgentRequirement) string {
 	t.Helper()
 	i := canonicalTaskIssue(t, h, issue)
 	spec := protocol.OwnerTaskSpec{Goal: "Review the complete linked PR candidate using the repository convention", Acceptance: []string{"Submit exact candidate, requirements, repository check and findings in report.shared_review"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "reviewer", AgentID: "linux-1/beta"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}}
+	if len(requirement) > 0 {
+		spec.AgentSelection.Implementation = requirement[0]
+	}
 	payload := protocol.CreateIssueTaskPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Title: "Whole PR formal review", Spec: spec}
 	payload.IndependentAcceptance = &protocol.IndependentAcceptanceRequest{Required: false, Reason: "The original reviewer produces the immutable formal report; no separate review-of-review is needed"}
 	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue}, payload, rev(i.Revision)), CanonicalOwnerTaskCreate{})
@@ -305,6 +308,12 @@ func executeSharedReviewForTest(t *testing.T, h *harness, runtime *protocol.Runn
 	if !ok || run.TaskID != task || run.Execution == nil || run.Execution.Identity.LocalID != "beta" {
 		t.Fatal(run)
 	}
+	submitSharedReviewForTest(t, h, run, review, verdict)
+}
+
+func submitSharedReviewForTest(t *testing.T, h *harness, run protocol.Assignment, review protocol.SharedDeliveryReview, verdict string) {
+	t.Helper()
+	task := run.TaskID
 	if op := h.runAs(run, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}

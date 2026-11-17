@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -510,19 +511,9 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 		}
 		out.Reviewer = pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID
 	} else {
-		if spec.AgentSelection == nil || spec.AgentSelection.Implementation.AgentID == "" {
-			return out, protocol.Errorf(protocol.CodeInvalidRequest, "shared review requires an explicitly named reviewer task")
-		}
-		out.Reviewer = spec.AgentSelection.Implementation.AgentID
-		if !spec.RequiresDelivery("report") {
-			return out, protocol.Errorf(protocol.CodeInvalidRequest, "reviewer must submit an immutable report artifact")
-		}
-		if t.Lifecycle == protocol.TaskCompleted && t.CurrentArtifactID != "" {
-			artifact, err := store.GetArtifact(ctx, q, t.CurrentArtifactID)
-			if err != nil {
-				return out, err
-			}
-			out.RunID, out.ArtifactID = artifact.RunID, artifact.ArtifactID
+		out, err = bindSharedReportExecution(ctx, q, t, spec)
+		if err != nil {
+			return out, err
 		}
 	}
 	requirements, err := store.SharedReviewExecutionRequirements(ctx, q, r)
@@ -570,6 +561,68 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 			}
 		}
 	}
+	// Running report work may yield and resume on a successor Run within the
+	// same execution generation. Freeze its selected identity/profile now;
+	// freeze the exact producing Run when the immutable report is available.
+	if acceptance == "" && out.ArtifactID == "" {
+		out.RunID = ""
+	}
+	return out, nil
+}
+
+// A category expresses the work; only an actual Run pin establishes its reviewer.
+// Keep named prebinding for existing callers that start before scheduling.
+func bindSharedReportExecution(ctx context.Context, q store.Querier, task store.TaskRow, spec domain.Spec) (protocol.SharedDeliveryReviewRound, error) {
+	out := protocol.SharedDeliveryReviewRound{TaskID: task.TaskID, SpecVersion: task.SpecVersion, ImplementGeneration: task.ImplementGeneration}
+	if spec.AgentSelection == nil || !spec.RequiresDelivery("report") {
+		return out, protocol.Errorf(protocol.CodeInvalidRequest, "reviewer must submit an immutable report artifact")
+	}
+	out.Reviewer = spec.AgentSelection.Implementation.AgentID
+	if task.Lifecycle == protocol.TaskCompleted && task.CurrentArtifactID != "" {
+		artifact, err := store.GetArtifact(ctx, q, task.CurrentArtifactID)
+		if err != nil {
+			return out, err
+		}
+		if artifact.TaskID != task.TaskID {
+			return out, protocol.Errorf(protocol.CodeInvalidTransition, "the review report must belong to its original Task")
+		}
+		out.RunID, out.ArtifactID = artifact.RunID, artifact.ArtifactID
+	} else {
+		ids, err := store.FollowupIDs(ctx, q, `SELECT r.run_id FROM runs r JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND a.task_id=r.task_id AND r.role='implement' AND a.target_spec_version=? AND a.generation=? ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1`, task.TaskID, task.SpecVersion, task.ImplementGeneration)
+		if err != nil {
+			return out, err
+		}
+		if len(ids) > 0 {
+			out.RunID = ids[0]
+		}
+	}
+	if out.RunID == "" {
+		if out.Reviewer == "" {
+			return out, protocol.Errorf(protocol.CodeInvalidTransition, "the category reviewer has no actual Run for the current Task execution; wait for selection and retain the original Task")
+		}
+		return out, nil
+	}
+	run, err := store.GetRun(ctx, q, out.RunID)
+	if err != nil {
+		return out, err
+	}
+	action, err := store.GetAction(ctx, q, run.ActionID)
+	if err != nil {
+		return out, err
+	}
+	if run.TaskID != task.TaskID || run.Role != protocol.RoleImplement || action.TaskID != task.TaskID || action.TargetSpecVersion != task.SpecVersion || action.Generation != task.ImplementGeneration {
+		return out, protocol.Errorf(protocol.CodeInvalidTransition, "the reviewer Run must match the current Task, spec and generation")
+	}
+	pin, err := store.GetRunExecution(ctx, q, out.RunID)
+	if err != nil {
+		return out, err
+	}
+	actual := pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID
+	if out.Reviewer != "" && out.Reviewer != actual {
+		return out, protocol.Errorf(protocol.CodeForbidden, "the actual reviewer must match the Task's explicit identity")
+	}
+	out.Reviewer = actual
+	out.ReviewerProfile = &pin.Profile
 	return out, nil
 }
 
