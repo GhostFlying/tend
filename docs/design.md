@@ -2498,6 +2498,12 @@ Agent instructions 属于各自责任。实施与故障回归见
 保存审计事实和控制版本。免除自选审阅后直接依据已有 Artifact 完成，不生成虚假的
 验收结论。已存在的验收结果和不可变成果保留。
 
+Category report 审阅从同 Task/spec/generation 的真实 Run 冻结 execution pin 中的 reviewer 和 profile；
+运行中报告沿同一 generation 保留正式等待交接的后继 Run；已完成报告绑定其原 artifact.RunID。
+尚未实际选人时保留未登记状态，不能要求 Agent
+补写 spec.agent_id 或替换 Task 合同。历史显式命名预绑定仍可用；原件、独立性、候选
+和正式执行要求继续核验，record 只读取原不可变报告。
+
 业务状态的写入仍由 App/domain 的单事务负责。Agent 提交业务决定，代码校验身份、
 归属、明确授权、并发版本和实际执行事实。注意事项责任投影仅重新计算相关 Issue
 及其祖先；无关命令不扫描整棵责任树。辅助故障不自动扩大到整个项目。

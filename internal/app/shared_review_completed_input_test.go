@@ -13,7 +13,7 @@ func TestSharedReviewCompletedInputPreflightRetainsActualReportChecks(t *testing
 		t.Run(input, func(t *testing.T) {
 			h, runtime, issue, source, candidate, _ := sharedReviewFixture(t)
 			linked := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
-			task := createSharedReviewerTaskForTest(t, h, issue.IssueID)
+			task := createSharedReviewerTaskForTest(t, h, issue.IssueID, protocol.AgentRequirement{CategoryID: "reviewer"})
 			if input == "coordination_only" {
 				run, ok := h.claimInputRun(runtime)
 				if !ok || run.TaskID != task {
