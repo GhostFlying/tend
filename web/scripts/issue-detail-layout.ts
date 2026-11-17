@@ -1447,6 +1447,18 @@ try {
       assert.equal(await emptyProcess.getAttribute("aria-expanded"), "true");
       assert(await liveTool.isVisible());
       await page.screenshot({ path: join(output, `process-first-live-item-${width}.png`) });
+      block.process = { items: [], more: false, error: "公开过程读取失败，已保存的讨论仍可阅读。" };
+      publish();
+      await detail
+        .getByText("公开过程读取失败，已保存的讨论仍可阅读。", { exact: false })
+        .waitFor();
+      assert(await detail.getByText("同一回合的公开进展。", { exact: true }).isVisible());
+      block.process = { items: [streamingTool], more: false, started_at: now - 5000 };
+      await detail.getByRole("button", { name: "重新读取公开过程", exact: true }).click();
+      await liveTool.waitFor();
+      await detail
+        .getByRole("button", { name: "重新读取公开过程", exact: true })
+        .waitFor({ state: "hidden" });
       console.log(`PASS continuous empty → running tool → public reply ${width}`);
       await emptyProcess.click();
       block.items = publicReplies;

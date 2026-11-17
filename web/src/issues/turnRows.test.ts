@@ -89,3 +89,18 @@ test("public process feeds the live trace without publishing prose or duplicatin
     )?.kind,
   ).toBe("block-more");
 });
+
+test("earlier deferred tools keep arrival order ahead of later callback transcript rows", () => {
+  const earlier = { ...first, message_id: "early", seq: 91 };
+  const callback = { ...first, message_id: "callback", seq: 50 };
+  const value: IssueTranscriptBlock = {
+    ...block,
+    items: [callback],
+    process: { items: [earlier, { ...callback, seq: 92 }], more: false },
+  };
+  const rows = activityTurnRows(buildTranscriptEntries([value]), value);
+  expect(rows.find((row) => row.kind === "agent")?.items.map((item) => item.message_id)).toEqual([
+    "early",
+    "callback",
+  ]);
+});

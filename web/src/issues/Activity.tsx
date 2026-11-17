@@ -541,6 +541,19 @@ function ActivityBlock({
   };
   return (
     <article className={styles.discussion} data-scroll-id={entry.id}>
+      {processBlock.process?.error && (
+        <p role="status" className={styles.error}>
+          {processBlock.process.error}
+          <button
+            onClick={() => {
+              if (!opened) setOpened(true);
+              else void continuation.refresh();
+            }}
+          >
+            重新读取公开过程
+          </button>
+        </p>
+      )}
       {activityTurnRows(rows, processBlock).map((row) => {
         switch (row.kind) {
           case "owner":

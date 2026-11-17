@@ -64,6 +64,7 @@ type IssueConversationQueuePage struct {
 // IssueTurnProcess is a read-only public tool projection. Its cursor belongs to
 // background arrival order, independently of transcript message sequence.
 type IssueTurnProcess struct {
+	Error     string                  `json:"error,omitempty"`
 	Items     []IssueConversationItem `json:"items"`
 	More      bool                    `json:"more"`
 	Next      int64                   `json:"next,omitempty"`

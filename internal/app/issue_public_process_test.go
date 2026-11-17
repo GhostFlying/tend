@@ -2,6 +2,9 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,11 +121,90 @@ func TestManagerCallbackFirstEnrichesOriginalToolWithoutRevivingResult(t *testin
 		if err != nil {
 			return err
 		}
+		if m.ConversationID != as.Manager.ConversationID {
+			t.Fatalf("callback crossed producing conversation: got %q want %q", m.ConversationID, as.Manager.ConversationID)
+		}
 		if u.Tool != "issues_read" || u.Input != "{}" || u.Status != "failed" || u.Output != "confirmed failure" || m.ReplyTo != source || m.Author != "main_agent" {
 			t.Fatal("callback metadata/result lost", u, m)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPublicProcessRecoveryKeepsWholeResponsibilityClock(t *testing.T) {
+	h := newHarness(t)
+	rec := failedRecoveryTurn(t, h)
+	h.clock.Advance(30 * time.Second)
+	read := func() *protocol.IssueTurnProcess {
+		t.Helper()
+		var p *protocol.IssueTurnProcess
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			var err error
+			p, err = views.IssuePublicProcess(t.Context(), tx.Q(), rec.MessageID, 0, 50)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if p := read(); p == nil || p.EndedAt != 0 || p.StartedAt == 0 {
+		t.Fatal("recovery waiting ended the whole turn", p)
+	}
+	op := h.exec(owner, h.env("conversation.interrupt_reply", protocol.Target{Type: "message", ID: rec.MessageID}, protocol.InterruptReplyPayload{MessageID: rec.MessageID}, nil), InterruptReply{})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	if p := read(); p.EndedAt != h.clock.Now().UnixMilli() {
+		t.Fatal("terminal source lost its actual end", p)
+	}
+}
+
+func TestPublicProcessOriginalFailureKeepsDiscussionAndCanRetry(t *testing.T) {
+	h := newHarness(t)
+	w := h.createWork(workPlan())
+	h.followup(w, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli()})
+	_, turn := h.startBackground()
+	output := strings.Repeat("public result", 2048)
+	op := h.exec(mainAgent, h.env("conversation.record_tool_use", protocol.Target{Type: "conversation"}, recordToolUsePayload{ReplyTo: turn.MessageID, TurnID: turn.TurnID, ItemID: "large", Tool: "exec_command", Input: `{}`, Output: output, Status: protocol.ToolCompleted}, nil), RecordToolUse{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	path, err := h.store.FileStore().Path(strings.Repeat("0", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	originals := filepath.Dir(filepath.Dir(path))
+	unavailable := originals + "-unavailable"
+	if err := os.Rename(originals, unavailable); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Rename(unavailable, originals) })
+	read := func() protocol.IssueTranscriptBlock {
+		t.Helper()
+		var result protocol.IssueTranscriptBlock
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			block, err := views.TranscriptBlock(t.Context(), tx.Q(), turn.MessageID, 0, 50)
+			if err != nil {
+				return err
+			}
+			result, err = views.OwnerIssueTranscriptBlock(t.Context(), tx.Q(), block)
+			return err
+		}); err != nil {
+			t.Fatal("optional process hid readable discussion", err)
+		}
+		return result
+	}
+	failed := read()
+	if failed.Trigger.MessageID != turn.MessageID || failed.Process == nil || failed.Process.Error == "" {
+		t.Fatal("missing original was silently empty", failed)
+	}
+	if err := os.Rename(unavailable, originals); err != nil {
+		t.Fatal(err)
+	}
+	recovered := read()
+	if recovered.Process.Error != "" || len(recovered.Process.Items) != 1 || recovered.Process.Items[0].Tool.Output != output {
+		t.Fatal("original recovery did not restore process", recovered.Process)
 	}
 }
