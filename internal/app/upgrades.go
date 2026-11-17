@@ -183,7 +183,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if err != nil {
 			return Outcome{}, err
 		}
-		if !rt.Online || rt.LastHeartbeatAt <= x.Now.Add(-RunnerOfflineAfter).UnixMilli() || !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) || rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater) || control.Mode != protocol.RunnerNormal || rt.Runtime.Mode != protocol.RunnerNormal || rt.Runtime.AppliedControlRevision != control.Revision || rt.Runtime.ConfirmedCancelledUpgradeID != control.CancelledUpgradeID || h.Slots <= 0 {
+		if !rt.Online || rt.LastHeartbeatAt <= x.Now.Add(-RunnerOfflineAfter).UnixMilli() || !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) || rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater) || !upgradeStartAdmission(control, rt.Runtime) || rt.Runtime.AppliedControlRevision != control.Revision || rt.Runtime.ConfirmedCancelledUpgradeID != control.CancelledUpgradeID || h.Slots <= 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s is offline, incompatible, or unavailable for rolling upgrade", h.HostID)
 		}
 		artifact, ok := releaseArtifact(c.Manifest, "runner", h.OS, h.Arch)
@@ -218,7 +218,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 				configuration = &target
 			}
 		}
-		r.Hosts = append(r.Hosts, store.UpgradeHost{Configuration: configuration, HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256, TargetHash: artifact.SHA256})
+		r.Hosts = append(r.Hosts, store.UpgradeHost{MaintenanceHandoff: control.Mode == protocol.RunnerMaintenance && (len(c.RunnerConfigurations) == 0 || configurationTarget), Configuration: configuration, HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256, TargetHash: artifact.SHA256})
 		r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "queued", Phase: "queued", CurrentVersion: rt.Runtime.Build.Version, TargetVersion: c.Manifest.ReleaseID, ProtocolVersion: rt.Runtime.Protocol, TotalBytes: totalBytes})
 	}
 	if len(c.RunnerConfigurations) > 0 {
@@ -265,7 +265,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
 	}
-	notice := fmt.Sprintf("准备升级至 `%s`。先下发并校验发布包，准备期间继续接单。", r.View.ReleaseID)
+	notice := fmt.Sprintf("准备升级至 `%s`。先下发并校验发布包，原本正常的主机准备期间继续接单，临时维护主机保持停止接单。", r.View.ReleaseID)
 	if len(c.RunnerConfigurations) > 0 {
 		notice = "正在向目标主机准备配置更新；准备完成后进入短维护窗口。"
 	}
@@ -274,6 +274,19 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	return Outcome{Result: r.View, Events: []Event{upgradeEvent(r)}}, nil
 }
+
+// Acknowledged standalone maintenance transfers admission responsibility in the
+// start transaction. Another upgrade or fixed installation grant is never adopted.
+func upgradeStartAdmission(control protocol.RunnerControl, runtime protocol.RunnerRuntime) bool {
+	if control.Mode == protocol.RunnerNormal {
+		return runtime.Mode == protocol.RunnerNormal
+	}
+	if control.UpgradeID != "" || control.Upgrade != nil || control.Authorization != nil || control.ReleaseID != "" || runtime.UpgradeID != "" {
+		return false
+	}
+	return control.Mode == protocol.RunnerMaintenance && slices.Contains(runtime.Capabilities, protocol.CapabilityRunnerMaintenance) && (runtime.Mode == protocol.RunnerMaintenance || runtime.Mode == protocol.RunnerReady)
+}
+
 func releaseArtifact(m release.Manifest, role, os, arch string) (release.Artifact, bool) {
 	for _, a := range m.Artifacts {
 		if a.Role == role && a.OS == os && a.Arch == arch {
@@ -640,12 +653,28 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				if !installedRunnerMatches(rt.Runtime, r.Manifest) {
 					return attention("当前 runner 的协议或 journal 版本与发布清单不一致")
 				}
+				if h.MaintenanceHandoff && ctl.UpgradeID == r.View.UpgradeID {
+					if v.Phase != "handoff_restored" {
+						ctl.Revision++
+						ctl.Mode, ctl.Upgrade, ctl.Authorization = protocol.RunnerNormal, nil, nil
+						ctl.UpgradeID, ctl.ReleaseID = "", ""
+						if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+							return err
+						}
+						v.Phase = "handoff_restored"
+						return nil
+					}
+				}
+				if h.MaintenanceHandoff && (rt.Runtime.Mode != protocol.RunnerNormal || ctl.Mode != protocol.RunnerNormal || rt.Runtime.AppliedControlRevision != ctl.Revision) {
+					return nil
+				}
 				v.Status = "skipped"
 				v.Phase = "skipped"
 				r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 				continue
 			}
-			if ctl.Mode != protocol.RunnerNormal || rt.Runtime.Mode != protocol.RunnerNormal || rt.Runtime.AppliedControlRevision != ctl.Revision {
+			maintained := h.MaintenanceHandoff && ctl.UpgradeID == r.View.UpgradeID && ctl.Mode == protocol.RunnerMaintenance && (rt.Runtime.Mode == protocol.RunnerMaintenance || rt.Runtime.Mode == protocol.RunnerReady) && rt.Runtime.UpgradeID == r.View.UpgradeID
+			if rt.Runtime.AppliedControlRevision != ctl.Revision || !maintained && (ctl.Mode != protocol.RunnerNormal || rt.Runtime.Mode != protocol.RunnerNormal) {
 				return nil
 			}
 			ctl.Revision++

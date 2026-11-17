@@ -103,7 +103,14 @@ tend upgrade start --socket "$SERVER_CONTROL_SOCKET" \
 
 也可用 server updater 的 `upgrade --config "$UPDATER_CONFIG" --release "$RELEASE_DIR" --upgrade-id "$UPGRADE_ID"`，它同样进入受 format 2 约束的 server 批次协调接口。CLI 会先输出 request ID；不确定回执先读状态，不要换 ID 重发。相同请求重试必须保留批次、发布和 request ID。`--dry-run` 只展示请求，缺省选包仍显示空 release，既不访问 GitHub，也不启动下载或升级。
 
-准入拒绝未结束批次、离线或不兼容主机、无 updater 能力、无法读取的存储以及仍依赖退役协议的 run。server 先缓存全部产物，各目标 runner 经现有认证链路下载并校验；preparing 期间继续接单。全部准备完成后，server 等当前主会话结束；期间 owner 消息继续持久入队。随后固定本轮现有 run 的维护授权并等待 runner 确认，确认剩余覆盖足够才允许停 server。普通心跳不延长这次固定授权。runner 用完整请求往返耗时和本地保守折扣确认覆盖期限；停止授权的截止时间再扣除整个 server 重启预算。获取授权后暂停过久的 updater 不得停止服务。
+准入拒绝未结束批次、离线或不兼容主机、无 updater 能力、无法读取的存储以及仍依赖退役协议的 run。server 先缓存全部产物，各目标 runner 经现有认证链路下载并校验；原本 normal 的主机在 preparing 期间继续接单。
+已通过 `host maintenance` 停止接单的主机可直接使用同一 `upgrade start` 入口交接，
+无需先恢复 normal：必须在线、新鲜确认当前 control revision，且没有其他升级目标或
+固定安装授权。新批次同事务接管维护责任并提升 control revision，准备包时继续保留
+维护，既有 Run 可继续执行；PrepareOnly 不授予安装权限。server 提交后这些主机也
+保持维护，直到自身 runner 提交或同哈希安全跳过并收到 normal ACK。准入失败保留
+原临时维护；接管后的失败、超时或取消沿既有恢复路径释放已确认未替换的进程，
+未知候选保留原批次维护等待真实回执。全部准备完成后，server 等当前主会话结束；期间 owner 消息继续持久入队。随后固定本轮现有 run 的维护授权并等待 runner 确认，确认剩余覆盖足够才允许停 server。普通心跳不延长这次固定授权。runner 用完整请求往返耗时和本地保守折扣确认覆盖期限；停止授权的截止时间再扣除整个 server 重启预算。获取授权后暂停过久的 updater 不得停止服务。
 
 新 server 健康后恢复领取并按空闲优先逐台维护 runner。维护只等待当前 run 与交付/资源操作，不等待整项任务：后续验收仍在原工作目录排队。单 runner 也可更新。维护期间只使用已校验的缓存，不再联网下载。候选以维护状态启动，确认实际进程、程序哈希、配置、journal、provider 和服务端握手；首次真实就绪即可由本机 updater 持久提交。server 与 runner 都在确认对应提交证明后恢复接单；相同组件哈希跳过替换。模型会话、摘要和业务历史对账不阻塞安装提交。
 

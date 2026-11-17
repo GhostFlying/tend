@@ -74,12 +74,16 @@ func TestReleaseDownloadRequiresSameOriginExactBytesAndDigest(t *testing.T) {
 func TestReleaseBundleVerifiedBeforeIdempotentUpdaterSubmission(t *testing.T) {
 	for _, complete := range []bool{false, true} {
 		t.Run(fmt.Sprint("complete=", complete), func(t *testing.T) {
-			testReleaseBundleSubmission(t, complete)
+			testReleaseBundleSubmission(t, complete, false)
 		})
 	}
 }
 
-func testReleaseBundleSubmission(t *testing.T, complete bool) {
+func TestMaintenanceHandoffPreparesWhileExistingWorkIsBusy(t *testing.T) {
+	testReleaseBundleSubmission(t, false, true)
+}
+
+func testReleaseBundleSubmission(t *testing.T, complete, maintenance bool) {
 	r := controlRunner(t)
 	r.cfg.UpdaterBundleDir = t.TempDir()
 	artifact := []byte("runner binary fixture")
@@ -162,10 +166,30 @@ func testReleaseBundleSubmission(t *testing.T, complete bool) {
 		sum := sha256.Sum256(setRaw)
 		control.Upgrade.ReleaseSet = &protocol.ReleaseSetTarget{Path: "/set", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(setRaw))}
 	}
+	if maintenance {
+		control.Mode = protocol.RunnerMaintenance
+	}
 	if err := r.applyControl(t.Context(), &control, r.cfg.Now(), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.downloadAndSubmit(t.Context(), control); err != nil {
+	if maintenance {
+		// A local executor keeps the runtime in maintenance rather than ready.
+		r.active["existing"] = nil
+		r.resourceReconciled = true
+		observation, err := r.runtimeObservation(t.Context())
+		if err != nil || observation.Mode != protocol.RunnerMaintenance {
+			t.Fatalf("busy runtime: %+v %v", observation, err)
+		}
+		r.confirmedRuntime = *observation
+		r.cfg.UpdaterSocket = socket
+		r.cfg.Log = slog.Default()
+		r.maybeUpgrade(t.Context())
+		r.wg.Wait()
+		if !r.maintenance() {
+			t.Fatal("preparation released the admission gate")
+		}
+		delete(r.active, "existing")
+	} else if err := r.downloadAndSubmit(t.Context(), control); err != nil {
 		t.Fatal(err)
 	}
 	if submitted != 0 || r.upgradePhase != "prepared" {

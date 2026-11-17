@@ -24,7 +24,7 @@ func runnerUpgradeTarget(batch store.UpgradeRow, host store.UpgradeHost, prepare
 }
 
 // Preparation uses the normal authenticated distribution channel while runners
-// continue accepting work. No stop or installer authority is granted here.
+// retain their admission mode. No stop or installer authority is granted here.
 func prepareUpgradeHosts(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow) error {
 	batch.Deadline = batch.View.OverallDeadlineMillis
 	for i, host := range batch.Hosts {
@@ -66,7 +66,7 @@ func advanceUpgradePreparation(ctx context.Context, x *Exec, tx *store.Tx, batch
 			return false, err
 		}
 		observed := runtime.Runtime
-		if !runtime.Online || now-runtime.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || observed.AppliedControlRevision != control.Revision || observed.UpgradeID != batch.View.UpgradeID || observed.Mode != protocol.RunnerNormal {
+		if !runtime.Online || now-runtime.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || observed.AppliedControlRevision != control.Revision || observed.UpgradeID != batch.View.UpgradeID || (control.Mode == protocol.RunnerNormal && observed.Mode != protocol.RunnerNormal || control.Mode == protocol.RunnerMaintenance && observed.Mode != protocol.RunnerMaintenance && observed.Mode != protocol.RunnerReady) {
 			ready = false
 			continue
 		}

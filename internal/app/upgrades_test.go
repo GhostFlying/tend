@@ -58,7 +58,7 @@ func prepareTestUpgrade(h *harness) {
 		if batch.View.Hosts[i].Status == "skipped" {
 			continue
 		}
-		runtime := upgradeAck(h, host.HostID, protocol.RunnerNormal)
+		runtime := upgradeAck(h, host.HostID, upgradeCtl(h, host.HostID).Mode)
 		runtime.Sequence++
 		runtime.UpgradePhase = "prepared"
 		if _, err := h.app.RuntimeHeartbeat(h.t.Context(), runner(host.HostID), protocol.HeartbeatPayload{Runtime: &runtime}); err != nil {
