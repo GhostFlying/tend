@@ -710,12 +710,12 @@ func authorizeRunnerCoordination(ctx context.Context, q store.Querier, p protoco
 	}
 	if !allowed {
 		settlement := false
-		if len(operations) == 1 && closedIssueReceiptOperation(operations[0]) {
+		if len(operations) == 1 && terminalIssueReceiptOperation(operations[0]) {
 			issue, err := store.GetCanonicalIssue(ctx, q, e.IssueID)
 			if err != nil {
 				return err
 			}
-			settlement = issue.State == protocol.IssueClosed && issue.AssignmentEpoch == e.AssignmentEpoch
+			settlement = (issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled) && issue.AssignmentEpoch == e.AssignmentEpoch
 		}
 		if !settlement {
 			return protocol.Errorf(protocol.CodeForbidden, "receipt-only manager cannot initiate business operations")
@@ -906,10 +906,10 @@ func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.
 	return store.IssueManagerAuthorizationValid(ctx, q, r.TaskID)
 }
 
-// These receipts can settle only the same admitted turn after its Issue closes.
+// These receipts can settle only the same admitted turn after its Issue ends.
 // HostedCoordinationCommand still checks thread, execution, assignment and turn
 // identity; no new admission, task, delegation or lifecycle mutation is allowed.
-func closedIssueReceiptOperation(operation string) bool {
+func terminalIssueReceiptOperation(operation string) bool {
 	switch operation {
 	case "issues.review_context", "conversation.reply", "conversation.publish", "conversation.notify", "conversation.commit_turn", "attentions.create":
 		return true

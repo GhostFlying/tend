@@ -36,3 +36,15 @@ finish_cancel，unknown 沿原身份对账，cancelled 仅观察原进程收尾�
 (gpt-6.1-sol/xhigh)，最终候选/基线所需 CI 后按保护规则 rebase 合入。
 PR 使用 tend 来源标签。提供 merge 和生产验收步骤给统一部署责任，本 Issue 不部署。
 不改变 wire/schema，不新增状态机或账本。
+
+## 独立审阅修正：已准入 turn 的终态回执
+
+PR339-P2-001 的真实 owner/manager cancel→review_context 对照证实：快速 cancelled
+保留了 Run/lease，却被仅接受 closed 的原 turn 安全回执鉴权挡住。修正复用既有
+closed 回执白名单，统一接受 closed/cancelled；继续校原 Run、execution、thread、
+conversation、epoch、有效 lease 和未结束原 turn，不准入新业务或新的执行。
+同步 hosted coordination 的终态操作限制与终态非阻塞 action/information 例外，
+避免仅放行外层而内层拒绝或让非 runner hosted manager 绕过终态限制。
+扩展原 closed 安全回执测试到 owner cancel、manager cancel 和 board cancel，实际
+执行 review_context→final reply→review_context→commit，并保留错误身份拒绝、
+终态无新 task/reopen/context fact、Run/lease 未伪造停止等断言。
