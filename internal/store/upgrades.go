@@ -54,6 +54,7 @@ type UpgradeRow struct {
 }
 
 type UpgradeHost struct {
+	MaintenanceHandoff    bool                          `json:"maintenance_handoff,omitempty"`
 	CancellationConfirmed bool                          `json:"cancellation_confirmed,omitempty"`
 	Configuration         *protocol.RunnerConfiguration `json:"configuration,omitempty"`
 	Committed             *protocol.UpdaterReceipt      `json:"committed,omitempty"`

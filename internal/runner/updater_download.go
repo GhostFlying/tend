@@ -34,7 +34,7 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	r.mu.Lock()
 	confirmed := r.confirmedRuntime
 	r.mu.Unlock()
-	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && control.Mode == protocol.RunnerNormal
+	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && (control.Mode == protocol.RunnerNormal || control.Mode == protocol.RunnerMaintenance)
 	ready := observation != nil && observation.Mode == protocol.RunnerReady && confirmed.Mode == protocol.RunnerReady
 	if err != nil || !preparing && !ready || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
 		r.updaterMu.Unlock()

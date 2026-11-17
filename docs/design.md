@@ -2539,3 +2539,17 @@ Session 是执行上下文缓存。工具表变化时从持久账本与原件引
 测试采用 L0–L3 分类，见 [测试分层](testing.md)。PR CI 根据绑定源码的真实影响
 计划执行必要作业，main/release 和协议、迁移、工具链等广影响保留全量。未知影响
 扩大验证；必要作业缺失、跳过、失败或取消均不算成功。安装过程不运行测试或构建。
+
+## D253：临时维护直接交接升级并连续关闭准入
+
+正式 StartUpgrade 在同一事务接管已新鲜确认的独立临时维护：控制无其他 upgrade、
+准备目标或固定安装授权，runtime 的 revision / upgrade 身份及维护能力匹配。
+每 host 持久保存 maintenance_handoff 来源，准备控制提升 revision 并绑定新批次，
+保持 maintenance；PrepareOnly 可在维护中下载和校验，既有 Run 继续运行且无安装权限。
+server 提交不释放这些 host，后续串行 runner 排空直接使用当前维护 ACK。
+同哈希跳过也必须显式恢复并收到新 normal ACK；安装仍以原提交证明和健康检查恢复。
+
+正常起点保留在线准备语义。准入拒绝不改变原维护；接管后的失败、超时、取消和回滚
+沿原安全恢复规则释放可确认未替换的进程，未知候选不释放、不重放。整体和阶段期限
+均沿用原固定额度。没有新增 runner wire 字段或收紧旧有效请求，不提升协议版本。
+业务路径与回归边界见 docs/plans/maintenance-upgrade-handoff.md。

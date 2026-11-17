@@ -87,6 +87,16 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		if err != nil {
 			return "", err
 		}
+		if h.MaintenanceHandoff && r.View.Status == "running" && ctl.UpgradeID == r.View.UpgradeID {
+			// The original maintenance host stays fenced until its own runner
+			// commits, is safely skipped, or the batch enters explicit recovery.
+			ctl.Revision++
+			ctl.Mode, ctl.Authorization, ctl.Upgrade = protocol.RunnerMaintenance, nil, nil
+			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+				return "", err
+			}
+			continue
+		}
 		if ctl.Mode == protocol.RunnerNormal && ctl.Authorization == nil && ((ctl.Upgrade == nil && ctl.UpgradeID == "" && ctl.ReleaseID == "") || (r.View.Status == "running" && ctl.Upgrade != nil && ctl.Upgrade.PrepareOnly && ctl.UpgradeID == r.View.UpgradeID)) {
 			// Retaining the server never drained these hosts. Preserve their
 			// acknowledged control instead of creating a metadata-only ACK gap.
