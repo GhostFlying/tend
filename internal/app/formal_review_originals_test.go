@@ -53,6 +53,10 @@ func TestFormalReviewReadsSameIssueOwnerOriginalAndContinuesTask(t *testing.T) {
 		if err != nil || len(page.Materials.Files) != 1 || page.Materials.Files[0].ArtifactFile != file {
 			t.Fatal("formal owner original missing from reviewer context", page, err)
 		}
+		listed, err := h.app.ReadRunContext(t.Context(), p, protocol.IssueMaterialsQuery{Kind: "files"})
+		if err != nil || len(listed.Materials.Files) != 2 {
+			t.Fatal("a private text reference poisoned the formal file index", listed, err)
+		}
 		metadata, body, err := h.app.OpenRunContextFile(t.Context(), p, file.FileID)
 		if err != nil {
 			t.Fatal(err)

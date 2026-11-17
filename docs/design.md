@@ -2508,9 +2508,11 @@ Category report 审阅从同 Task/spec/generation 的真实 Run 冻结 execution
 正式关联，再经已有上下文文件元数据/字节入口读取；保留上传 Task/Run、hash 和背景版本。
 仅正文提及不形成发布，其他 Issue 的私有上传、实施者未提交的 trace/rollout 不因引用而公开。
 正式实现/验证文件仍经 artifact/files 或会话附件提交，不扩通用 ACL 或跨 Issue 私有权限。
+背景中的私有未发布引用不进入文件列表，不因其无法解析而阻断其他正式原件；精确读取仍拒绝。
 
-重复提交同一作者、相同摘要与下一步的进度，在校验现行 revision/epoch 和权限后返回原进度，
+同一 Issue 版本上连续重复提交同一作者、相同摘要与下一步的进度，在校验现行 revision/epoch 和权限后返回原进度，
 不追加版本、事件或唤醒；真实内容或作者变化保留原进度事件链，失败、unknown 不作特别过滤。
+中间发生 Issue 版本变化时保留新评估，不能把重开或责任变更后的进度当历史重复。
 owner 的冲突/head/base/delta 与验证安排只由 prompt 提示，不新增暂停或审批门槛。
 
 业务状态的写入仍由 App/domain 的单事务负责。Agent 提交业务决定，代码校验身份、
