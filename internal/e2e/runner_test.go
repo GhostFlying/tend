@@ -761,7 +761,9 @@ func TestFault_RunnerRestartContinuesWorkerThread(t *testing.T) {
 }
 
 func TestRunnerStopsCancelledRun(t *testing.T) {
-	srv := newServer(t, 400*time.Millisecond)
+	// Cancellation must stop the worker independently of lease expiry.
+	clock := testkit.NewClock()
+	srv := newServer(t, 400*time.Millisecond, clock.Now)
 	n := newNode(t, srv, func(harness.WorkerSpec) testkit.WorkerScript { return testkit.WorkerScript{Gate: make(chan struct{})} })
 	n.start()
 	task := srv.createTask()
