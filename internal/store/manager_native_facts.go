@@ -55,7 +55,12 @@ func (t *Tx) putManagerToolResult(ctx context.Context, run, command, payload, st
 			return err
 		}
 		u = ToolUseRow{MessageID: protocol.NativeObjectID(protocol.PrefixMessage, "native-tool:"+p.ThreadID, p.TurnID+"/"+p.CallID), ThreadID: p.ThreadID, TurnID: p.TurnID, ItemID: p.CallID}
-		_, err = t.InsertMessage(ctx, MessageRow{MessageID: u.MessageID, ConversationID: conversation, Author: "agent", Kind: "tool_use", CreatedAt: when})
+		var source string
+		// The callback's immutable source wins over the native turn's trigger.
+		if err = t.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT message_id FROM main_tool_sources WHERE native_key=?),(SELECT message_id FROM main_turns WHERE thread_id=? AND turn_id=? ORDER BY created_at,request_id LIMIT 1),'')`, p.ThreadID+"/"+p.TurnID+"/"+p.CallID, p.ThreadID, p.TurnID).Scan(&source); err != nil {
+			return err
+		}
+		_, err = t.InsertMessage(ctx, MessageRow{MessageID: u.MessageID, ConversationID: conversation, Author: "main_agent", Kind: "tool_use", ReplyTo: source, CreatedAt: when})
 		if err != nil {
 			return err
 		}
@@ -114,6 +119,16 @@ func (t *Tx) putManagerToolResult(ctx context.Context, run, command, payload, st
 		return err
 	}
 	_, err = t.Exec(ctx, `UPDATE conversation_tool_uses SET native_run_id=?,native_delivery_id=?,native_delivery_status=?,native_result_output=?,native_result_success=? WHERE message_id=?`, run, command, state, produced, p.ToolResult.Success, u.MessageID)
+	if err != nil {
+		return err
+	}
+	var source string
+	if err = t.Q().QueryRowContext(ctx, `SELECT COALESCE(reply_to,'') FROM conversation_messages WHERE message_id=?`, u.MessageID).Scan(&source); err != nil {
+		return err
+	}
+	if source != "" {
+		_, err = t.InsertEvent(ctx, EventRow{ObjectType: "message", ObjectID: source, Kind: "conversation.process_changed", CreatedAt: when})
+	}
 	return err
 }
 

@@ -67,3 +67,25 @@ test("a placeholder precedes continuation and does not consume later groups' ide
     activityTurnRows([], { ...block, trigger: { ...trigger, message_id: "other" } })[0]?.key,
   ).not.toBe(rows[0]?.key);
 });
+
+test("public process feeds the live trace without publishing prose or duplicating a settled tool", () => {
+  const value: IssueTranscriptBlock = {
+    ...block,
+    process: { items: [first], more: false, started_at: 1000, ended_at: 9000 },
+  };
+  const rows = activityTurnRows(buildTranscriptEntries([value]), value);
+  const live = rows.find((row) => row.kind === "agent");
+  expect(live?.items).toEqual([first]);
+  expect(live?.startedAt).toBe(1000);
+  expect(live?.endedAt).toBe(9000);
+  const settled = { ...value, items: [first], trigger: { ...trigger, state: "replied" as const } };
+  expect(
+    activityTurnRows(buildTranscriptEntries([settled]), settled).find((row) => row.kind === "agent")
+      ?.items,
+  ).toEqual([first]);
+  expect(
+    buildTranscriptEntries([{ ...value, process: { ...value.process!, more: true, next: 7 } }]).at(
+      -1,
+    )?.kind,
+  ).toBe("block-more");
+});

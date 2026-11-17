@@ -102,6 +102,9 @@ func OwnerIssueTranscriptBlock(ctx context.Context, q store.Querier, v protocol.
 	}
 	out.Trigger = trigger[0]
 	out.Items, err = OwnerIssueMessages(ctx, q, v.Items)
+	if err == nil && !v.NoticeOnly {
+		out.Process, err = IssuePublicProcess(ctx, q, v.Trigger.MessageID, 0, 50)
+	}
 	return out, err
 }
 func OwnerIssueTranscript(ctx context.Context, q store.Querier, v protocol.TranscriptPage) (protocol.IssueTranscriptPage, error) {

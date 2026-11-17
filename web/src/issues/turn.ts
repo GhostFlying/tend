@@ -12,11 +12,32 @@ export class IssueTurnRead {
       get: async <T>(path: string, signal?: AbortSignal) => {
         let block = await api.get<IssueTranscriptBlock>(path, signal);
         const items = new Map((block.items ?? []).map((item) => [item.message_id, item]));
-        for (let i = 1; i < this.pages && block.more && !signal?.aborted; i++) {
-          block = await api.get<IssueTranscriptBlock>(`${path}&after=${block.next_seq}`, signal);
+        const processItems = new Map(
+          (block.process?.items ?? []).map((item) => [item.message_id, item]),
+        );
+        let after = block.next_seq ?? 0;
+        let processAfter = block.process?.next ?? 0;
+        for (
+          let i = 1;
+          i < this.pages && (block.more || block.process?.more) && !signal?.aborted;
+          i++
+        ) {
+          block = await api.get<IssueTranscriptBlock>(
+            `${path}&after=${after}&process_after=${processAfter}`,
+            signal,
+          );
           for (const item of block.items ?? []) items.set(item.message_id, item);
+          for (const item of block.process?.items ?? []) processItems.set(item.message_id, item);
+          after = block.next_seq ?? after;
+          processAfter = block.process?.next ?? processAfter;
         }
-        return { ...block, items: [...items.values()] } as T;
+        return {
+          ...block,
+          items: [...items.values()],
+          ...(block.process
+            ? { process: { ...block.process, items: [...processItems.values()] } }
+            : {}),
+        } as T;
       },
     });
     this.state = this.read.state;

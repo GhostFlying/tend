@@ -50,7 +50,8 @@ export type Entry =
       key: string;
       replyTo: string;
       items: ConversationItem[];
-      startedAt?: number;
+      startedAt?: number | null;
+      endedAt?: number | null;
       state?: MessageState;
       /** Set once the turn is over: when it ended and how long it took. */
       done?: { at: number; tookMs?: number };

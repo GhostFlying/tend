@@ -443,7 +443,7 @@ func (a *App) NativeItemSources(ctx context.Context, threadID, turnID, itemID st
 		if err != nil {
 			return err
 		}
-		replyTo, found = row.ReplyTo, true
+		replyTo, found = row.ReplyTo, row.ReplyTo != ""
 		rows, err := tx.Q().QueryContext(ctx, `SELECT s.source_id FROM conversation_reply_sources s JOIN conversation_messages m ON m.message_id=s.source_id WHERE s.reply_id=? ORDER BY m.seq`, id)
 		if err != nil {
 			return err

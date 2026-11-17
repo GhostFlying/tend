@@ -2587,3 +2587,9 @@ server 替换可能超过 runner 心跳的新鲜窗口。持久提交后，queue
 到期进入既有 attention/对账出口。已确认恢复后再离线仍暂停。只检查当前串行目标，
 不新增全 fleet 在线门槛或固定健康样本。没有新增 wire 字段或收紧旧请求，通信
 版本不变。真实转换回归与边界见 docs/plans/server-upgrade-runner-reconnect.md。
+
+### D249：Issue 历史 publication 作者与公开工具过程
+
+主动通知以 `messaging_messages.execution_id` 关联原 publication execution，读取其冻结选择与 Run inventory；没有历史身份时保留未知，不以当前 assignee 或目录补猜。普通 trigger 保留原 turn 关联。
+
+Issue block 的 `process` 是原 background batch/thread/turn 的只读公开工具投影，具有独立 arrival cursor（`process_after`）与持久整轮时间。它读取 deferred tool 和实际 callback/正式 ToolUse，保持结清前后工具身份并按原序分页；不读取 reasoning、不发布 deferred prose、不改变静默 check-in 或通知语义。工具结果先到时只补全后到的真实名称、参数和 source，已确认结果与终态不可被 late start 覆盖。公开过程读取失败不影响业务执行或回执。缺少公开事实或时间时明确显示未知；用户原动作和恢复出口见 `docs/plans/issue-public-activity.md`。新增字段仅扩展 owner 读取视图，server/runner 通信协议不变。

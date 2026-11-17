@@ -8,6 +8,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestReviewNamedMainCanonicalPublication(t *testing.T) {
@@ -551,5 +552,37 @@ func TestMessagingFormalReplyCannotTargetOwnPublication(t *testing.T) {
 	}
 	if h.count("messaging_messages") != count {
 		t.Fatal("invalid target created another publication")
+	}
+}
+
+func TestIssueActivityNotificationUsesActualPublicationExecution(t *testing.T) {
+	h := hostedManagerHarness(t)
+	issue := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	turn, principal := startHostedIssueReview(t, h, issue)
+	op := hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, protocol.MessagingPublication{Body: "Independent progress notification"}, PublishCommunication{Notify: true})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	id := messageID(t, op)
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		page, err := views.IssueActivity(t.Context(), tx.Q(), issue.IssueID, 0)
+		if err != nil {
+			return err
+		}
+		for _, entry := range page.Items {
+			if entry.Block != nil && entry.Block.Trigger.MessageID == id {
+				if entry.Author == "Agent 身份未记录" || entry.Author == "" {
+					t.Fatal("real notify lost its publication author", entry)
+				}
+				if entry.Block.Trigger.MessageID == turn.MessageID {
+					t.Fatal("notification incorrectly reused input block")
+				}
+				return nil
+			}
+		}
+		t.Fatal("actual notification is absent from activity")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

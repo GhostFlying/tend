@@ -30,3 +30,33 @@ test("loaded continuation replies refresh and expose newly appended pages", asyn
   expect((read.state.get().value as IssueTranscriptBlock).more).toBe(false);
   read.close();
 });
+
+test("process arrival pagination is independent of reply seq and rereads mutable steps", async () => {
+  const calls: string[] = [];
+  let status = "running";
+  const read = new IssueTurnRead({
+    get: async <T>(path: string) => {
+      calls.push(path);
+      const url = new URL(path, "https://example.test");
+      const after = Number(url.searchParams.get("process_after"));
+      return {
+        trigger: { message_id: "trigger" },
+        items: [],
+        more: false,
+        process: {
+          items: [{ message_id: `tool-${after}`, tool: { status } }],
+          more: after === 0,
+          next: after ? undefined : 37,
+          started_at: 1000,
+        },
+      } as T;
+    },
+  });
+  await read.open("trigger");
+  expect(calls.at(-1)).toContain("after=0&process_after=37");
+  expect(read.state.get().value?.process?.items).toHaveLength(2);
+  status = "completed";
+  await read.refresh();
+  expect(read.state.get().value?.process?.items?.[0]?.tool?.status).toBe("completed");
+  read.close();
+});

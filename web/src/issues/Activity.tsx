@@ -500,6 +500,7 @@ function ActivityBlock({
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const [depth, setDepth] = useEntryState(`activity-depth:${entry.id}`, 2);
   const block = entry.block!;
+  const processBlock = opened && extra.value && !extra.error ? extra.value : block;
   useEffect(() => {
     if (opened) void continuation.open(block.trigger.message_id, depth);
   }, [opened, block, continuation, depth]);
@@ -540,7 +541,7 @@ function ActivityBlock({
   };
   return (
     <article className={styles.discussion} data-scroll-id={entry.id}>
-      {activityTurnRows(rows, block).map((row) => {
+      {activityTurnRows(rows, processBlock).map((row) => {
         switch (row.kind) {
           case "owner":
             return (

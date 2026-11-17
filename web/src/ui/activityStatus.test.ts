@@ -22,7 +22,7 @@ describe("live activity status", () => {
       ["tool", "apply_patch", "正在修改文件"],
       ["webSearch", "", "正在搜索网页"],
       ["tool", "issues_read", "正在调用 查看 Issue"],
-      ["unknown", "", "思考中"],
+      ["unknown", "", "处理中"],
     ])
       expect(stageLabel(type!, name!)).toBe(label);
   });
@@ -104,4 +104,10 @@ it("does not fabricate run time from child lifecycles in a newest window", () =>
   expect(rooted.startedAt).toBe(Date.parse(root.created_at));
   expect(rooted.endedAt).toBe(null);
   expect(activitySummary(rooted, NaN)).toContain("用时未知");
+});
+
+it("keeps missing terminal timing unknown and does not infer thinking from empty tools", () => {
+  expect(conversationStatus([], "processing", null).label).toBe("处理中");
+  expect(activitySummary(conversationStatus([], "failed", 1000), 100000)).toContain("用时未知");
+  expect(conversationStatus([], "processing", null).startedAt).toBe(null);
 });

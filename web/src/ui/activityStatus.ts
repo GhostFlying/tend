@@ -23,7 +23,7 @@ export function stageLabel(type: string, name = ""): string {
   if (/^(grep|rg)$|search_code|code_search/.test(key)) return "正在搜索代码";
   if (type === "fileChange" || /^(edit|write|multi_edit)$|apply_patch/.test(key))
     return "正在修改文件";
-  return name ? `正在调用 ${toolLabel(name)}` : "思考中";
+  return name ? `正在调用 ${toolLabel(name)}` : "处理中";
 }
 
 export function elapsedLabel(milliseconds: number): string {
@@ -45,7 +45,7 @@ export function terminalLabel(state: string): string {
 }
 
 export function activitySummary(status: ActivityStatus, now: number): string {
-  const endedAt = status.endedAt ?? (Number.isFinite(now) ? now : null);
+  const endedAt = status.endedAt ?? (status.active && Number.isFinite(now) ? now : null);
   const elapsed =
     status.startedAt === null || endedAt === null
       ? " · 用时未知"
@@ -56,7 +56,7 @@ export function activitySummary(status: ActivityStatus, now: number): string {
 export function conversationStatus(
   items: readonly IssueConversationItem[],
   state?: string,
-  startedAt: number | null = null,
+  startedAt: number | null | undefined = undefined,
   endedAt: number | null = null,
 ): ActivityStatus {
   const latest = items.at(-1);
@@ -74,10 +74,12 @@ export function conversationStatus(
   return {
     active,
     label: active
-      ? stageLabel(latest?.tool ? "tool" : latest?.body ? "text" : "reasoning", latest?.tool?.name)
+      ? latest?.tool?.status === "running" || latest?.body
+        ? stageLabel(latest.tool ? "tool" : "text", latest.tool?.name)
+        : "处理中"
       : terminalLabel(terminal),
     steps: items.filter((item) => item.tool).length,
-    startedAt: startedAt ?? timestamp(items[0]?.created_at),
+    startedAt: startedAt === undefined ? timestamp(items[0]?.created_at) : startedAt,
     endedAt,
     tone: active
       ? "normal"

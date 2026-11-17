@@ -113,6 +113,9 @@ func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 	if err == nil && b.Status != "pending" && b.Status != "frozen" {
 		err = publishBackgroundReplies(ctx, x, tx, b, b.Status)
 	}
+	if err == nil {
+		out.Events = []Event{{ObjectType: "message", ObjectID: b.MessageID, Kind: "conversation.process_changed"}}
+	}
 	return true, out, err
 }
 

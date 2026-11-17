@@ -4220,6 +4220,7 @@ export interface IssueTranscriptBlock {
   next_seq?: number;
   notice_only?: boolean;
   position: number;
+  process?: IssueTurnProcess;
   trigger: IssueConversationItem;
 }
 /**
@@ -4363,6 +4364,17 @@ export interface ToolUseView {
   status: ToolStatus;
   turn_id: string;
   updated_at: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueTurnProcess".
+ */
+export interface IssueTurnProcess {
+  ended_at?: number;
+  items: IssueConversationItem[] | null;
+  more: boolean;
+  next?: number;
+  started_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
