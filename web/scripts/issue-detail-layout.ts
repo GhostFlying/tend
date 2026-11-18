@@ -430,7 +430,7 @@ const server = createServer(async (req, res) => {
                         {
                           ...block.items![0]!,
                           reply_to: historicalMessageID,
-                          body: "[GitHub #123](https://github.com/example/repo/issues/123) 与 T123。文件包括 `T123.txt`、`T123/src/main.go` 和 `logs/case-T123-results.txt`、`logs/session A/T123 - results.txt`。单独引用 `t123`。",
+                          body: `[旧回复链接](/issues/T123?message=${historicalReplyID}) [GitHub #123](https://github.com/example/repo/issues/123) 与 T123。文件包括 \`T123.txt\`、\`T123/src/main.go\` 和 \`logs/case-T123-results.txt\`、\`logs/session A/T123 - results.txt\`。单独引用 \`t123\`。`,
                         },
                       ],
                     },
@@ -870,6 +870,38 @@ async function verifyShortNumbers() {
           await detail.getByText("历史回合第三页的确切回复。", { exact: true }).count(),
           1,
         );
+        const originalURL = `/issues/T123?message=${historicalMessageID}`;
+        await page.goto(`${base}${originalURL}`);
+        const replyLink = detail.getByRole("link", { name: "旧回复链接", exact: true });
+        await replyLink.waitFor();
+        const entryKey = await page.evaluate(() => {
+          document.documentElement.dataset.historyProbe = "same-document";
+          return history.state.tendRoute.key as number;
+        });
+        await replyLink.click();
+        await page.waitForURL(`**/issues/T123?message=${historicalReplyID}`);
+        assert.equal(
+          await page.evaluate(() => document.documentElement.dataset.historyProbe),
+          "same-document",
+        );
+        assert.notEqual(await page.evaluate(() => history.state.tendRoute.key), entryKey);
+        await replyIsVisible();
+        await detail.getByRole("button", { name: "继续读取本轮消息", exact: true }).click();
+        const fourthReply = detail.getByText("历史回合第四页的回复。", { exact: true });
+        await fourthReply.waitFor();
+        await page.goBack();
+        await page.waitForURL(`**${originalURL}`);
+        await replyLink.waitFor();
+        await fourthReply.waitFor({ state: "detached" });
+        assert.equal(await page.evaluate(() => history.state.tendRoute.key), entryKey);
+        await page.goForward();
+        await page.waitForURL(`**/issues/T123?message=${historicalReplyID}`);
+        await fourthReply.waitFor();
+        assert.equal(
+          await detail.getByText("历史回合第三页的确切回复。", { exact: true }).count(),
+          1,
+        );
+        console.log(`PASS same-Issue historical link, continuation and Back/Forward (${width}px)`);
         await page.goto(`${base}/issues/${issue.issue_id}?message=${historicalToolID}`);
         await page.waitForURL(`**/issues/T123?message=${historicalToolID}`);
         await page.waitForFunction((id) => {

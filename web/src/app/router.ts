@@ -320,7 +320,7 @@ export function startRouter() {
 }
 const entryValues = new Map<number, Map<string, Store<unknown>>>();
 /** Small view preferences belong to the history entry, not to mounted pages. */
-export function useEntryState<T>(name: string, initial: T) {
+export function entryStore<T>(name: string, initial: T) {
   startRouter();
   let values = entryValues.get(current.key);
   if (!values) {
@@ -332,8 +332,12 @@ export function useEntryState<T>(name: string, initial: T) {
     store = new Store<unknown>(current.state?.[name] ?? initial);
     values.set(name, store);
   }
-  const selected = store;
-  return [useStore(selected) as T, (next: T) => selected.set(next)] as const;
+  return { key: current.key, store: store as Store<T> };
+}
+
+export function useEntryState<T>(name: string, initial: T) {
+  const { store: selected } = entryStore(name, initial);
+  return [useStore(selected), (next: T) => selected.set(next)] as const;
 }
 
 export function useRoute(): Route {

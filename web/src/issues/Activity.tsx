@@ -9,7 +9,7 @@ import {
 import { EventNotification } from "./EventNotification.tsx";
 import { MessageReceipts, ReceiptDetails } from "./MessageReceipts.tsx";
 import { ExternalSourceMessage } from "../conversation/SourceDetails.tsx";
-import { useEntryState } from "../app/router.ts";
+import { entryStore, useEntryState } from "../app/router.ts";
 import {
   Component,
   useCallback,
@@ -294,23 +294,20 @@ export function IssueActivity({
   const cancelContinuation = useCallback((trigger: string) => {
     if (pagination.current?.trigger === trigger) pagination.current = null;
   }, []);
-  const [continuations, setContinuations] = useEntryState<Record<string, IssueTranscriptBlock>>(
-    `activity-continuations:${issue.issue_id}`,
-    {},
-  );
-  const [writeContinuations] = useState(() => setContinuations);
-  const continuationCache = useRef(continuations);
+  const { key: historyEntry, store: continuationStore } = entryStore<
+    Record<string, IssueTranscriptBlock>
+  >(`activity-continuations:${issue.issue_id}`, {});
+  const continuations = useStore(continuationStore);
   const rememberContinuation = useCallback(
     (block: IssueTranscriptBlock, explicit: boolean) => {
       if (explicit && pagination.current?.trigger === block.trigger.message_id)
         pagination.current.ready = true;
-      continuationCache.current = {
-        ...continuationCache.current,
+      continuationStore.set({
+        ...continuationStore.get(),
         [block.trigger.message_id]: block,
-      };
-      writeContinuations(continuationCache.current);
+      });
     },
-    [writeContinuations],
+    [continuationStore],
   );
   const transcript = useMemo(
     () =>
@@ -615,7 +612,7 @@ export function IssueActivity({
         const entry = group[0]!;
         return entry.block ? (
           <ActivityBlock
-            key={entry.id}
+            key={`${historyEntry}:${entry.id}`}
             entry={entry}
             processReads={readable ? processReads : undefined}
             targetMessage={
