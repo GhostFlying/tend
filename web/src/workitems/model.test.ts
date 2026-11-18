@@ -139,8 +139,15 @@ describe("work-item presentation", () => {
   test.each(["short", "all"] as const)(
     "short references keep filenames and paths intact (%s)",
     (mode) => {
-      const files = "T123.txt T123/src/main.go src/T123 T123\\code.ts t123.文档";
+      const files =
+        "T123.txt T123/src/main.go src/T123 T123\\code.ts t123.文档 " +
+        "logs/case-T123-results.txt case-t123-results.txt logs/case-T123-results logs/staff@team-T123 C:\\logs\\T123-report.txt";
       expect(splitWorkItemIds(files, mode)).toEqual([files]);
+      expect(splitWorkItemIds("按-T123-跟进", mode)).toEqual([
+        "按-",
+        { workItemId: "T123" },
+        "-跟进",
+      ]);
       expect(splitWorkItemIds("Check T123. Then (t456), please.", mode)).toEqual([
         "Check ",
         { workItemId: "T123" },

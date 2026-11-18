@@ -400,13 +400,13 @@ const server = createServer(async (req, res) => {
                       trigger: {
                         ...block.trigger,
                         message_id: historicalMessageID,
-                        body: "历史消息中的 t123、裸数字 123 和 #123。文件包括 T123.txt 和 T123/src/main.go。",
+                        body: "历史消息中的 t123、裸数字 123 和 #123。文件包括 T123.txt、T123/src/main.go 和 logs/case-T123-results.txt。",
                       },
                       items: [
                         {
                           ...block.items![0]!,
                           reply_to: historicalMessageID,
-                          body: "[GitHub #123](https://github.com/example/repo/issues/123) 与 T123。文件包括 `T123.txt` 和 `T123/src/main.go`。",
+                          body: "[GitHub #123](https://github.com/example/repo/issues/123) 与 T123。文件包括 `T123.txt`、`T123/src/main.go` 和 `logs/case-T123-results.txt`、`logs/session A/T123 - results.txt`。单独引用 `t123`。",
                         },
                       ],
                     },
@@ -763,11 +763,23 @@ async function verifyShortNumbers() {
         const original = detail.locator(`[data-scroll-id="${historicalMessageID}"]`);
         await original.getByRole("link", { name: "T123", exact: true }).waitFor();
         assert.equal(await original.getByRole("link").count(), 1);
-        for (const filename of ["T123.txt", "T123/src/main.go"]) {
+        for (const filename of [
+          "T123.txt",
+          "T123/src/main.go",
+          "logs/case-T123-results.txt",
+          "logs/session A/T123 - results.txt",
+        ]) {
           const code = detail.locator("code").filter({ hasText: filename });
           await code.waitFor();
           assert.equal(await code.getByRole("link").count(), 0);
         }
+        assert.equal(
+          await detail
+            .locator("code")
+            .getByRole("link", { name: "T123", exact: true })
+            .getAttribute("href"),
+          "/issues/T123",
+        );
         assert.match((await original.textContent())!, /裸数字 123 和 #123/);
         assert.equal(await original.getByRole("link").getAttribute("href"), "/issues/T123");
         assert.equal(

@@ -11,6 +11,7 @@ import { createElement, Fragment, memo, useMemo, useState, type ReactNode } from
 import { splitTaskIds } from "./model.ts";
 import styles from "./Markdown.module.css";
 import { IssueLink, IssueRef } from "../issues/IssueRef.tsx";
+import { shortIssueCode } from "../issues/identity.ts";
 import { splitWorkItemIds } from "../workitems/model.ts";
 import { TaskRef } from "./TaskRef.tsx";
 
@@ -132,7 +133,11 @@ function render(
           <code key={keys.next++}>
             {stack.some(({ token }) => token.tag === "a")
               ? token.content
-              : withTaskRefs(token.content, keys)}
+              : withTaskRefs(
+                  token.content,
+                  keys,
+                  shortIssueCode(token.content.trim()) ? "all" : "legacy",
+                )}
           </code>,
         );
         break;
@@ -228,10 +233,10 @@ function element(token: Token, children: ReactNode[], key: number): ReactNode {
   return createElement(token.tag, props, ...children);
 }
 
-function withTaskRefs(text: string, keys: Keys): ReactNode[] {
+function withTaskRefs(text: string, keys: Keys, mode: "all" | "legacy" = "all"): ReactNode[] {
   return splitTaskIds(text).map((part) =>
     typeof part === "string" ? (
-      splitWorkItemIds(part, "all").map((run) =>
+      splitWorkItemIds(part, mode).map((run) =>
         typeof run === "string" ? run : <IssueRef key={keys.next++} id={run.workItemId} />,
       )
     ) : (
