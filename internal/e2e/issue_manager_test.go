@@ -595,14 +595,14 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	}
 	if urgent {
 		defer close(releaseUrgent)
+		original, err := testphase.Await(t, ctx, "urgent original native turn ready", 2*time.Minute, activeSteer, failures)
+		if err != nil {
+			managerPhaseFailure(t, s, ctx, issue.IssueID, "urgent original native turn ready", err)
+		}
+		// Runner admission and native startup can take longer than delivery
+		// once the original turn is active. Give each phase its own watchdog.
 		watch, stop := context.WithTimeout(ctx, 15*time.Second)
 		defer stop()
-		var original nativeSteer
-		select {
-		case original = <-activeSteer:
-		case <-watch.Done():
-			t.Fatal("original native turn did not start")
-		}
 		waitFor := func(check func() bool) error {
 			for {
 				wake := s.app.Changes().Wait()
