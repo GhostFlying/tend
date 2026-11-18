@@ -77,7 +77,7 @@ func TestProgressApplicabilityTracksAssignmentWithoutHidingActions(t *testing.T)
 		t.Fatal(err)
 	}
 	if err := db.Read(ctx, func(tx *store.ReadTx) error {
-		p, err := issueProgressProjection(ctx, tx.Q(), issue)
+		p, err := issueProgressProjection(ctx, tx.Q(), issue, true)
 		if err != nil {
 			return err
 		}

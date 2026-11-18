@@ -63,6 +63,15 @@ func TestIssueDeliveryProgressFollowsObservedCandidate(t *testing.T) {
 
 	snapshot := &protocol.DeliverySnapshot{State: "open", HeadSHA: "old", BaseSHA: "base", TargetSHA: "tip", Mergeability: "conflicting", CI: &protocol.DeliveryCI{HeadSHA: "old", State: "pending"}}
 	record(snapshot, "")
+	// A result observed before this feature had no public candidate snapshot.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE events SET body_json=json_remove(body_json,'$.delivery_progress')
+ WHERE object_type='work_item' AND object_id=? AND kind='work_item.delivery_changed'`, issue.IssueID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	record(snapshot, "")
 	delivery, _, _ := read()
 	conflict := delivery.Observation.LastConflict
 	if conflict == nil || conflict.HeadSHA != "old" || conflict.TargetSHA != "tip" ||
@@ -84,13 +93,30 @@ func TestIssueDeliveryProgressFollowsObservedCandidate(t *testing.T) {
 		delivery.Observation.ErrorKind != "timeout" {
 		t.Fatalf("a failed read replaced conflict evidence: %+v", delivery)
 	}
+	epoch := issue.AssignmentEpoch
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: epoch}))
+	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "reopen", canonicalOwnerControl{ExpectedAssignmentEpoch: epoch}))
+	delivery, reopenedProgress, _ := read()
+	if issue.AssignmentEpoch != epoch || delivery.ConflictProgress != nil || reopenedProgress.HistoricalReason != "issue_reopened" {
+		t.Fatalf("a new responsibility cycle carried over an old action: %+v %+v", delivery, reopenedProgress)
+	}
 	binding.ConflictAction = "working"
 	if op := update(&binding, "Resolving the conflict"); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	delivery, _, _ = read()
+	delivery, published, _ := read()
 	if p := delivery.ConflictProgress; p == nil || p.Delivery.ConflictAction != "working" {
 		t.Fatalf("missing conflict work: %+v", p)
+	}
+
+	snapshot.TargetSHA, snapshot.Mergeability = "advanced-tip", "unknown"
+	record(snapshot, "")
+	snapshot.TargetSHA, snapshot.Mergeability = "tip", "conflicting"
+	record(snapshot, "")
+	delivery, _, _ = read()
+	if delivery.Observation.LastConflict.Revision == conflict.Revision || delivery.ConflictProgress != nil {
+		t.Fatalf("returning to an earlier baseline revived the previous action: %+v", delivery)
 	}
 
 	snapshot.HeadSHA, snapshot.BaseSHA, snapshot.Mergeability = "new", "tip", "mergeable"
@@ -104,10 +130,20 @@ func TestIssueDeliveryProgressFollowsObservedCandidate(t *testing.T) {
 	if progress == nil || !progress.Historical || progress.HistoricalReason != "delivery_candidate_changed" {
 		t.Fatalf("old candidate progress is still current: %+v", progress)
 	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		past, err := views.CanonicalIssue(t.Context(), tx.Q(), issue.IssueID, published.IssueRevision)
+		if err == nil && (past.Progress == nil || past.Progress.Historical || past.Progress.Delivery.HeadSHA != "old") {
+			t.Fatalf("the historical Issue revision changed after the provider moved: %+v", past.Progress)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var oldCI, oldProgress, newCandidate bool
 	for _, item := range history.Items {
 		if d := item.Delivery; d != nil {
-			oldCI = oldCI || d.Observation.HeadSHA == "old" && d.Observation.CI.HeadSHA == "old"
+			oldCI = oldCI || item.Kind == "work_item.delivery_candidate_retired" && d.Observation.HeadSHA == "old" &&
+				d.Observation.CI != nil && d.Observation.CI.HeadSHA == "old"
 			newCandidate = newCandidate || d.Observation.HeadSHA == "new"
 		}
 		oldProgress = oldProgress || item.Progress != nil && item.Progress.Summary == "Race checks are running on the old candidate"
@@ -117,5 +153,13 @@ func TestIssueDeliveryProgressFollowsObservedCandidate(t *testing.T) {
 	}
 	if op := update(&binding, "Late progress"); op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
 		t.Fatalf("accepted action against old candidate: %+v", op)
+	}
+	binding.ConflictAction, binding.ConflictRevision = "", 0
+	if op := update(&binding, "Correct the original summary"); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	_, edited, _ := read()
+	if !edited.Historical || edited.Delivery.HeadSHA != "old" {
+		t.Fatalf("editing historical progress reinterpreted it as current: %+v", edited)
 	}
 }

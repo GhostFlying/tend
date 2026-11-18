@@ -598,6 +598,9 @@ export function IssueDetails({
                         <CandidateIdentity candidate={issue.progress.delivery} />
                       </p>
                     ) : null}
+                    {issue.progress?.historical && !issue.progress.delivery && !ended ? (
+                      <p className={styles.muted}>历史进展</p>
+                    ) : null}
                     {issue.progress?.summary ? (
                       <Expandable
                         text={issue.progress.summary}

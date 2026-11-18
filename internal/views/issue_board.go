@@ -156,7 +156,7 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 	if err != nil {
 		return card, err
 	}
-	card.Progress, err = issueProgressProjection(ctx, q, issue)
+	card.Progress, err = issueProgressProjection(ctx, q, issue, true)
 	if err != nil {
 		return card, err
 	}
