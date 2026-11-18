@@ -22,6 +22,7 @@ func MessageControl(ctx context.Context, q Querier, id string) (protocol.Message
 func (t *Tx) WithdrawMessage(ctx context.Context, id string, revision, now int64) error {
 	result, err := t.Exec(ctx, `UPDATE conversation_message_controls SET withdrawn_at=?, revision=revision+1
  WHERE message_id=? AND revision=? AND withdrawn_at=0
+ AND NOT EXISTS(SELECT 1 FROM issue_owner_consumed_inputs i WHERE i.source_message_id=conversation_message_controls.message_id)
  AND EXISTS(SELECT 1 FROM outbox WHERE (destination='main_thread' OR destination LIKE 'background_thread:%') AND operation='main_thread.handle_message' AND json_extract(payload_json,'$.message_id')=? AND status='pending')
  AND NOT EXISTS(SELECT 1 FROM main_turns WHERE message_id=? AND status<>'rejected') AND NOT EXISTS(SELECT 1 FROM main_turns t JOIN conversation_return_links l ON l.message_id=t.message_id WHERE l.source_message_id=conversation_message_controls.message_id AND t.status<>'rejected')`, now, id, revision, id, id)
 	if err != nil {
@@ -67,6 +68,7 @@ func ConversationQueue(ctx context.Context, q Querier, category string, after in
 	}
 	if category != "withdrawn" {
 		filter += ` AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('completed','interrupted','failed','unknown'))`
+		filter += ` AND NOT ` + IssueOwnerConsumptionMatchesOutbox
 	}
 	author := issueQueueAuthor(id, category)
 	filter += ` AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?` + author + `)`
@@ -212,7 +214,7 @@ func ConversationActive(ctx context.Context, q Querier, category string, session
 	}
 	author := issueQueueAuthor(id, category)
 	var r ConversationQueueRow
-	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?`+author+`) ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
+	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') AND (t.status='started' OR NOT `+IssueOwnerConsumptionMatchesOutbox+`) AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?`+author+`) ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
 	if err == sql.ErrNoRows {
 		err = q.QueryRowContext(ctx, `SELECT r.message_id,o.seq,'sending',COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),'started' FROM agent_recoveries r JOIN conversation_messages cm ON cm.message_id=r.message_id JOIN outbox o ON o.request_id=r.active_request_id LEFT JOIN conversation_message_controls c ON c.message_id=r.message_id WHERE r.conversation_id=? AND r.status IN ('waiting','starting','running') AND o.status IN ('pending','sending')`+author+` ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
 		if err == sql.ErrNoRows {

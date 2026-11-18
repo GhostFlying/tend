@@ -49,7 +49,10 @@ func IssueEventNotification(ctx context.Context, q store.Querier, issue string, 
  COALESCE((SELECT MIN(e.created_at) FROM events e
    WHERE e.object_type='message' AND e.object_id=m.message_id AND e.kind='conversation.message_state'
    AND json_extract(e.body_json,'$.state')='processing'),0),
- COALESCE(t.status,''),COALESCE(l.status,''),COALESCE(l.reason,'')
+ COALESCE(t.status,''),COALESCE(l.status,''),COALESCE(NULLIF(l.reason,''),(
+   SELECT r.reason FROM logical_turn_executions e JOIN agent_recoveries r ON r.root_request_id=e.request_id
+   WHERE e.logical_turn_id=l.logical_turn_id AND r.status='waiting' AND r.reason<>''
+   ORDER BY r.updated_at DESC,r.root_request_id LIMIT 1),'')
  FROM matches m
  LEFT JOIN main_turns t ON t.request_id=(SELECT n.request_id FROM main_turns n
    WHERE n.message_id=m.message_id ORDER BY n.created_at DESC,n.rowid DESC LIMIT 1)

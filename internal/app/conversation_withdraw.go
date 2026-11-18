@@ -43,7 +43,8 @@ func (WithdrawMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		}
 		return Outcome{}, err
 	}
-	if err := restoreWithdrawnRecovery(ctx, x, tx, id); err != nil {
+	a := App{ids: x.IDs, followupsEnabled: x.FollowupsEnabled}
+	if err := a.restoreDisplacedRecovery(ctx, tx, id, "was withdrawn", x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	c, err = store.MessageControl(ctx, tx.Q(), id)

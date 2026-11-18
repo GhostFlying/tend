@@ -77,7 +77,7 @@ func (a *App) PendingAgentConversations(ctx context.Context) ([]string, error) {
 	var ids []string
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT c.conversation_id FROM agent_conversations c JOIN outbox o ON o.destination='background_thread:'||c.conversation_id WHERE (o.status='sending' OR (o.status='pending' AND o.next_attempt_at<=?)) AND (o.operation<>'main_thread.handle_event' OR EXISTS(SELECT 1 FROM work_items w WHERE w.work_item_id=c.work_item_id AND (w.status<>'closed' OR EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=w.work_item_id)))) ORDER BY c.conversation_id`, a.now().UnixMilli())
+		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT c.conversation_id FROM agent_conversations c JOIN outbox o ON o.destination='background_thread:'||c.conversation_id WHERE (o.status='sending' OR (o.status='pending' AND o.next_attempt_at<=? AND `+store.PendingOutboxServiceable+`)) AND (o.operation<>'main_thread.handle_event' OR EXISTS(SELECT 1 FROM work_items w WHERE w.work_item_id=c.work_item_id AND (w.status<>'closed' OR EXISTS(SELECT 1 FROM issue_controls ci WHERE ci.issue_id=w.work_item_id)))) ORDER BY c.conversation_id`, a.now().UnixMilli())
 		if err != nil {
 			return err
 		}

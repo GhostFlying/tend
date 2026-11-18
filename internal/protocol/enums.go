@@ -141,6 +141,8 @@ const (
 	MessageQueued MessageState = "queued"
 	// MessageAccepted: native accepted steer input, consumption is not yet witnessed.
 	MessageAccepted MessageState = "accepted"
+	// MessageConsumed: the original was read in an Issue owner's native turn through urgent delivery.
+	MessageConsumed MessageState = "consumed"
 	// MessageProcessed: consumption and turn completion are witnessed, without a reply.
 	MessageProcessed MessageState = "processed"
 	// MessageProcessing: the main agent's turn for it is running.

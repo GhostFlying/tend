@@ -206,6 +206,7 @@ export type AssistantState = "streaming" | "completed" | "interrupted" | "failed
 export type MessageState =
   | "queued"
   | "accepted"
+  | "consumed"
   | "processed"
   | "processing"
   | "replied"
@@ -4270,6 +4271,7 @@ export interface IssueConversationItem {
   background?: IssueBackgroundBatch;
   body?: string;
   choices?: WorkItemChoice[];
+  consumed_issue_owner_steer?: IssueOwnerSteerView;
   control?: MessageControl;
   conversation_id?: string;
   created_at: string;
@@ -4342,6 +4344,28 @@ export interface IssueBackgroundBatch {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueOwnerSteerView".
+ */
+export interface IssueOwnerSteerView {
+  accepted_at?: number;
+  assignment_epoch: number;
+  issue_id: string;
+  message_id: string;
+  native_item_id?: string;
+  native_request_id?: string;
+  reason?: string;
+  revokes_source_message_id?: string;
+  run_id: string;
+  sender: Principal;
+  source_message_id: string;
+  source_revision: number;
+  status: string;
+  task_id: string;
+  thread_id: string;
+  turn_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "MessageControl".
  */
 export interface MessageControl {
@@ -4366,28 +4390,6 @@ export interface ConversationImage {
   media_type: string;
   name: string;
   size: number;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueOwnerSteerView".
- */
-export interface IssueOwnerSteerView {
-  accepted_at?: number;
-  assignment_epoch: number;
-  issue_id: string;
-  message_id: string;
-  native_item_id?: string;
-  native_request_id?: string;
-  reason?: string;
-  revokes_source_message_id?: string;
-  run_id: string;
-  sender: Principal;
-  source_message_id: string;
-  source_revision: number;
-  status: string;
-  task_id: string;
-  thread_id: string;
-  turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5886,6 +5888,7 @@ export interface ConversationItem {
   background?: BackgroundBatch;
   body?: string;
   choices?: WorkItemChoice[];
+  consumed_issue_owner_steer?: IssueOwnerSteerView;
   control?: MessageControl;
   conversation_id?: string;
   created_at: string;

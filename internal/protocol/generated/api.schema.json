@@ -4705,6 +4705,9 @@
           },
           "type": "array"
         },
+        "consumed_issue_owner_steer": {
+          "$ref": "#/definitions/IssueOwnerSteerView"
+        },
         "control": {
           "$ref": "#/definitions/MessageControl"
         },
@@ -9105,6 +9108,9 @@
           },
           "type": "array"
         },
+        "consumed_issue_owner_steer": {
+          "$ref": "#/definitions/IssueOwnerSteerView"
+        },
         "control": {
           "$ref": "#/definitions/MessageControl"
         },
@@ -12825,6 +12831,7 @@
       "enum": [
         "queued",
         "accepted",
+        "consumed",
         "processed",
         "processing",
         "replied",

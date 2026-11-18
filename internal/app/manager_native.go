@@ -198,6 +198,14 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				if steerReason != "" {
 					rejection = "Urgent message was fenced before native execution"
 				}
+			} else if p.Method == "turn" {
+				consumed, err := pendingManagerTurnInputConsumed(ctx, tx.Q(), run, p.Payload)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if consumed {
+					rejection = "This Issue input version was already consumed through urgent delivery"
+				}
 			}
 			if rejection != "" {
 				raw, err := json.Marshal(protocol.ManagerNativeReply{ID: p.ID, Error: rejection, Rejected: true})
@@ -494,6 +502,19 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		return Outcome{ProjectionOnly: projectionOnly, Result: map[string]any{"ack": p.Sequence}}, err
 	}
 	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager transport operation")
+}
+
+// pendingManagerTurnInputConsumed only fences an ordinary input about to be
+// released to its native runner. A previously released command is reconciled
+// independently, even if the urgent receipt has since arrived.
+func pendingManagerTurnInputConsumed(ctx context.Context, q store.Querier, run string, payload json.RawMessage) (bool, error) {
+	var consumed bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions h
+ JOIN main_turns t ON t.request_id=h.execution_id JOIN outbox o ON o.request_id=t.request_id
+ WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.status='starting'
+ AND t.thread_id=json_extract(?,'$.thread_id') AND t.message_id=json_extract(?,'$.input.UserMessageID')
+ AND `+store.IssueOwnerConsumptionMatchesOutbox+`)`, run, string(payload), string(payload)).Scan(&consumed)
+	return consumed, err
 }
 
 // A caller timing out cannot authorize another physical close. Preserve the

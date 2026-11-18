@@ -230,3 +230,56 @@ func TestIssueEventNotificationDoesNotGuessCoalescedMembership(t *testing.T) {
 		t.Fatal("missing exact flushed notification", exact)
 	}
 }
+
+func TestIssueEventNotificationShowsRetainedRateLimitWait(t *testing.T) {
+	f := newUrgentQueueFixture(t)
+	ctx := t.Context()
+	finishHostedReview(t, f.harness, f.turn)
+	var position int64
+	if err := f.store.Write(ctx, func(tx *store.Tx) error {
+		x := &Exec{IDs: f.ids, Now: f.clock.Now(), Env: &protocol.Envelope{}}
+		id := f.ids.New(protocol.PrefixEvent)
+		source := f.ids.New(protocol.PrefixMessage)
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: source, ConversationID: f.conversation, Author: "system", Body: "Review returned", CreatedAt: x.Now.UnixMilli()}); err != nil {
+			return err
+		}
+		var err error
+		position, err = tx.InsertEvent(ctx, store.EventRow{EventID: id, Source: "test", ObjectType: "issue", ObjectID: f.issue.IssueID, Kind: "issue.delivery_review_changed", BodyJSON: `{}`, CreatedAt: x.Now.UnixMilli()})
+		if err != nil {
+			return err
+		}
+		return appendBackgroundSource(ctx, x, tx, "rate-limited-review", f.issue.IssueID, source, id, "issue.delivery_review_changed", nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d, _, claimed, err := f.app.NextDelivery(ctx, store.ConversationDestination(f.conversation))
+	if err != nil || !claimed || d.Operation != OpHandleEvent {
+		t.Fatal(d, claimed, err)
+	}
+	turn := startHostedReview(t, f.harness, f.conversation, d)
+	turn.Status = store.TurnFailed
+	turn.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}
+	if err := f.app.PutMainTurn(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.FinishDelivery(ctx, d, DeliveryResult{Outcome: Delivered}); err != nil {
+		t.Fatal(err)
+	}
+	recovery, found, err := f.app.AgentRecovery(ctx, turn.RequestID)
+	if err != nil || !found || recovery.Status != "waiting" || recovery.Reason == "" {
+		t.Fatal(recovery, found, err)
+	}
+	if err := f.store.Read(ctx, func(tx *store.ReadTx) error {
+		page, err := views.IssueEventNotification(ctx, tx.Q(), f.issue.IssueID, position, 0)
+		if err != nil || len(page.Notifications) != 1 {
+			t.Fatal(page, err)
+		}
+		n := page.Notifications[0]
+		if n.Reason != recovery.Reason || n.Delivery != "received" || n.NativeStatus != "failed" || n.MessageID != turn.MessageID {
+			t.Fatal(n, recovery)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -15,6 +15,7 @@ import type {
   IssueActivityPage,
   IssueDeliveryView,
   IssueConversationQueueEntry,
+  IssueConversationItem,
   IssueEventNotificationPage,
   IssueTranscriptBlock,
   IssueResultPage,
@@ -193,10 +194,10 @@ const activity: IssueActivityPage = {
     },
   ],
 };
-const publish = (kind = "issue.progress_updated") => {
+const publish = (kind = "issue.progress_updated", item?: IssueConversationItem) => {
   for (const s of streams)
     s.write(
-      `id: ${++seq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: seq, object_type: kind.startsWith("work_item.") ? "work_item" : "issue", object_id: issue.issue_id, kind, created_at: new Date().toISOString() })}\n\n`,
+      `id: ${++seq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: seq, object_type: item ? "message" : kind.startsWith("work_item.") ? "work_item" : "issue", object_id: item?.message_id ?? issue.issue_id, kind, created_at: new Date().toISOString(), item })}\n\n`,
     );
 };
 const server = createServer(async (req, res) => {
@@ -643,6 +644,7 @@ try {
       };
       let current = original;
       let ownerItems: IssueConversationQueueEntry[] = [];
+      let urgentOriginal: IssueTranscriptBlock | undefined;
       let backgroundRequested = false;
       let interruptedMessage: string | undefined;
       const issueConversation = issue.conversation!.conversation_id!;
@@ -764,6 +766,17 @@ try {
                 created_at: now,
                 delivery: original,
               },
+              ...(urgentOriginal
+                ? [
+                    {
+                      id: "urgent-original",
+                      position: 1100,
+                      kind: "conversation",
+                      created_at: now,
+                      block: urgentOriginal,
+                    },
+                  ]
+                : []),
             ],
           },
         }),
@@ -872,6 +885,53 @@ try {
       await composer.getByRole("button", { name: "加入队列", exact: true }).waitFor();
       await ownerQueue.screenshot({ path: join(output, `owner-queue-mixed-${width}.png`) });
       assert.equal(await page.getByText(/后台事项 · 3/).count(), 0);
+      const ordinary = ownerItems[0]!;
+      const urgentInput = {
+        ...ordinary.item,
+        message_id: "urgent-queued-source",
+        seq: 5,
+        body: "已通过急件读取的原用户消息",
+        state: "queued" as const,
+      };
+      ownerItems = [ordinary, { ...ordinary, position: 5, item: urgentInput }];
+      publish();
+      await ownerQueue.getByText("待处理 · 2", { exact: true }).waitFor();
+      assert.equal(await ownerQueue.getByRole("button", { name: "撤回" }).count(), 2);
+      urgentOriginal = {
+        position: 5,
+        more: false,
+        trigger: {
+          ...urgentInput,
+          state: "consumed",
+          consumed_issue_owner_steer: {
+            message_id: "urgent-canonical-receipt",
+            issue_id: issue.issue_id,
+            assignment_epoch: 2,
+            task_id: "urgent-target-task",
+            run_id: "urgent-target-run",
+            thread_id: "urgent-target-thread",
+            turn_id: "urgent-target-turn",
+            source_message_id: urgentInput.message_id,
+            source_revision: 1,
+            sender: { kind: "owner" },
+            status: "consumed",
+            native_item_id: "proof-native-user-item",
+          },
+        },
+        items: [],
+      };
+      ownerItems = [ordinary];
+      publish("conversation.message_state", urgentOriginal.trigger);
+      await ownerQueue.getByText("待处理 · 1", { exact: true }).waitFor();
+      assert.equal(await ownerQueue.getByRole("button", { name: "撤回" }).count(), 1);
+      assert.equal(await ownerQueue.getByText(urgentInput.body, { exact: true }).count(), 0);
+      const delivered = page.locator('[data-scroll-id="urgent-queued-source"]');
+      await delivered.getByText(urgentInput.body, { exact: true }).waitFor();
+      await delivered.getByText("负责人已在原生回合读取急件", { exact: true }).waitFor();
+      await delivered.getByText("急件回执", { exact: true }).click();
+      await delivered.getByText("proof-native-user-item", { exact: true }).waitFor();
+      await delivered.screenshot({ path: join(output, `owner-queue-urgent-receipt-${width}.png`) });
+      console.log(`PASS urgent consumption receipt and actual owner queue ${width}`);
       await stop.click();
       await stop.waitFor({ state: "hidden" });
       assert.equal(interruptedMessage, backgroundItems[0]!.item.message_id);

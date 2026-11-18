@@ -478,6 +478,19 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 		}
 	}
 	if ownerInput {
+		if r.Author == "owner" && r.ConversationID != "main" {
+			receipt, err := store.ConsumedIssueOwnerInput(ctx, q, r.MessageID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return it, err
+			}
+			if err == nil {
+				it.ConsumedIssueOwnerSteer = &receipt.IssueOwnerSteerView
+				switch it.State {
+				case protocol.MessageQueued, protocol.MessageAccepted, protocol.MessageFailed, protocol.MessageUnknown:
+					it.State = protocol.MessageConsumed
+				}
+			}
+		}
 		var steer protocol.MainSteerView
 		err := q.QueryRowContext(ctx, `SELECT status,thread_id,turn_id,native_item_id,reason FROM main_steers s WHERE message_id=? AND NOT (status='waiting' AND EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=s.request_id AND t.status<>'rejected'))`, r.MessageID).Scan(&steer.Status, &steer.ThreadID, &steer.TurnID, &steer.NativeItemID, &steer.Reason)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
