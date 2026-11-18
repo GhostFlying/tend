@@ -331,6 +331,8 @@ export function IssueBoard({
             />
           </div>
           <div
+            // A layout switch must not inherit the previous layout's pending scroll.
+            key={mobile ? "mobile-columns" : "desktop-columns"}
             ref={columns}
             className={styles.columns}
             data-cancelled-expanded={cancelledExpanded}
