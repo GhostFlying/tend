@@ -71,9 +71,11 @@ UNION ALL SELECT n.issue_id,2,'old_manager_run',r.run_id FROM needed n
  JOIN runs r USING(task_id)
  WHERE r.observed_state IN ('starting','running','waiting','interrupted','unknown')
  OR EXISTS(SELECT 1 FROM leases l WHERE l.run_id=r.run_id AND l.status<>'released')
-UNION ALL SELECT DISTINCT n.issue_id,3,'old_manager_events',r.run_id FROM needed n
- JOIN issue_manager_tasks m ON m.issue_id=n.issue_id AND COALESCE(m.assignment_epoch,m.expected_epoch)<n.next_epoch
- JOIN runs r USING(task_id) JOIN manager_native_events e USING(run_id) WHERE e.applied=0
+-- Keep native history behind the candidate Issue and original Run lookups.
+UNION ALL SELECT n.issue_id,3,'old_manager_events',r.run_id FROM needed n
+ CROSS JOIN issue_manager_tasks m ON m.issue_id=n.issue_id AND COALESCE(m.assignment_epoch,m.expected_epoch)<n.next_epoch
+ CROSS JOIN runs r ON r.task_id=m.task_id
+ WHERE EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
 ORDER BY 1,2,4`
 
 // ManagerReceiptPending keeps the original executor available for read-only
