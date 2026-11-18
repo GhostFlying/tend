@@ -149,23 +149,6 @@ func checkCompletionReportPublication(ctx context.Context, q store.Querier, issu
 		}
 		return nil
 	}
-	if p.ReplyTo != "" {
-		var input, agreement bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messaging_messages WHERE message_id=?1 AND direction='input'),
-			EXISTS(SELECT 1 FROM issue_completion_reports WHERE source_message_id=?1)`, p.ReplyTo).Scan(&input, &agreement); err != nil {
-			return err
-		}
-		if input {
-			if !agreement {
-				return nil
-			}
-			// The original agreement can be a fresh question for this execution
-			// or historical material in another Issue's background batch.
-			if admitted, err := mainExecutionSourceAdmitted(ctx, q, turn.RequestID, p.ReplyTo); err != nil || admitted {
-				return err
-			}
-		}
-	}
 	if len(issues) == 0 {
 		var err error
 		issues, err = store.FollowupIDs(ctx, q, `SELECT work_item_id FROM message_work_items WHERE message_id=?1 AND active=1
@@ -186,8 +169,30 @@ func checkCompletionReportPublication(ctx context.Context, q store.Querier, issu
 		WHERE (r.published_message_id IS NULL OR c.state='closed') AND scope.value IN (SELECT value FROM json_each(r.issue_ids_json)))`, string(raw)).Scan(&grouped); err != nil {
 		return err
 	}
-	if grouped {
-		return protocol.Errorf(protocol.CodeInvalidTransition, "the original owner request has one combined completion report; record ordinary progress on the Issue, reply to a user question, or notify with the basis and reason for a separate requested update or material change")
+	if !grouped {
+		return nil
 	}
-	return nil
+	if p.ReplyTo != "" {
+		var userInput, urgent bool
+		// Routed urgent notices carry the original owner input to a specific
+		// Issue execution. Their native consumption is recorded separately.
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messaging_messages m JOIN conversation_messages c USING(message_id)
+			WHERE m.message_id=?1 AND m.direction='input' AND c.author='owner'),
+			EXISTS(SELECT 1 FROM issue_owner_steers WHERE message_id=?1 AND execution_id=?2
+			AND thread_id=?3 AND turn_id=?4 AND status='consumed' AND native_item_id<>'')`,
+			p.ReplyTo, turn.RequestID, turn.ThreadID, turn.TurnID).Scan(&userInput, &urgent); err != nil {
+			return err
+		}
+		if urgent {
+			return nil
+		}
+		if userInput {
+			// Any older input, including the agreement itself, may be retained
+			// as historical context for a different execution.
+			if admitted, err := mainExecutionSourceAdmitted(ctx, q, turn.RequestID, p.ReplyTo); err != nil || admitted {
+				return err
+			}
+		}
+	}
+	return protocol.Errorf(protocol.CodeInvalidTransition, "the original owner request has one combined completion report; record ordinary progress on the Issue, reply to a user question, or notify with the basis and reason for a separate requested update or material change")
 }
