@@ -3508,6 +3508,9 @@
         "issue_id": {
           "type": "string"
         },
+        "notice_restored": {
+          "type": "boolean"
+        },
         "owner_turn": {
           "type": "string"
         },
@@ -7389,6 +7392,9 @@
         },
         "next_reminder_at_ms": {
           "type": "integer"
+        },
+        "notice_restored": {
+          "type": "boolean"
         },
         "observed_base": {
           "type": "string"

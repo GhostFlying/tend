@@ -19,6 +19,12 @@ import (
 )
 
 func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing.T) {
+	for _, mode := range []string{"reply-source", "reply-batch", "notify-source", "notify-unrelated"} {
+		t.Run(mode, func(t *testing.T) { testOwnerCIContinuation(t, mode) })
+	}
+}
+
+func testOwnerCIContinuation(t *testing.T, mode string) {
 	h, rt := managerClaimHarness(t)
 	ref := protocol.IssueDelivery{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}
 	payload := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Wait for CI", Project: "default", Intent: "Decide on the current candidate", Deliveries: []protocol.IssueDelivery{ref}}}
@@ -147,7 +153,19 @@ func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing
 					t.Fatalf("wrong owner source: %+v", page)
 				}
 				reply := protocol.CoordinationReply{Body: "The original candidate CI failed. Inspect the failure before integration.", Purpose: "progress", ReplyTo: turn.MessageID}
-				op = hostedEffect(t, h, principal, turn, 1, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, reply, CoordinationReply{})
+				if mode == "reply-source" {
+					reply.ReplyTo = f.SourceMessage
+				}
+				target := protocol.Target{Type: "logical_turn", ID: turn.RequestID}
+				if mode == "notify-source" || mode == "notify-unrelated" {
+					notice := protocol.MessagingPublication{Body: reply.Body, Purpose: "progress", Reason: "Report verified work"}
+					if mode == "notify-source" {
+						notice.SourceMessageIDs = []string{f.SourceMessage}
+					}
+					op = hostedEffect(t, h, principal, turn, 1, target, nil, notice, PublishCommunication{Notify: true})
+				} else {
+					op = hostedEffect(t, h, principal, turn, 1, target, nil, reply, CoordinationReply{})
+				}
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
@@ -168,6 +186,28 @@ func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing
 	if f.State != "missing" {
 		t.Fatalf("original wake is missing: %+v", f)
 	}
+	// A settled report on this Issue with no PR candidate is independent of this CI wait.
+	rollbackReport := errors.New("restore prior reports")
+	err = h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if err := tx.InsertArtifact(t.Context(), "report-artifact", as.TaskID, as.RunID, "result", `{}`, "digest", h.clock.Now().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO issue_delivery_duties(issue_id,task_id,event_id,status,body_json,artifact_id) VALUES(?,?,?,'report','{}','report-artifact')`, issue.IssueID, as.TaskID, f.SourceEvent); err != nil {
+			return err
+		}
+		got, err := views.OwnerCIContinuation(t.Context(), tx.Q(), as.TaskID, as.RunID)
+		if err != nil {
+			return err
+		}
+		if got.State != "missing" {
+			t.Errorf("unrelated historical report suppressed missing CI: %+v", got)
+		}
+		return rollbackReport
+	})
+	if !errors.Is(err, rollbackReport) {
+		t.Fatal(err)
+	}
+
 	// With the same missing source, independent real control facts veto repair.
 	// Roll each injected state back to keep the original obligation and identity.
 	for _, hold := range []struct {
@@ -227,6 +267,13 @@ func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing
 			t.Fatal(op)
 		}
 	}
+	// A lost client receipt can be reconstructed from the original wait before
+	// the maintenance Agent records its own acknowledgement.
+	check()
+	if v := controller.Status().Cases[0]; v.Intervention == "" || v.Status != "awaiting_verification" {
+		t.Fatal("restoration receipt was not reconciled", v)
+	}
+
 	if _, err := controller.Command(t.Context(), "intervene", protocol.MaintenanceRequest{RequestID: h.env("maintenance.command", protocol.Target{}, struct{}{}, nil).RequestID, ExpectedRevision: controller.Status().Revision, CaseID: cases[0].ID, Reason: "Original resume-wait returned the same notified source " + f.SourceMessage}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +284,26 @@ func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing
 	if got := read(); got.State != "notified" || got.OwnerTurn != "" {
 		t.Fatal("notification fabricated consumption", got)
 	}
+	// If the agent loses its reply and the repaired source later disappears, the
+	// original wait still proves the restoration and must not permit replay.
+	rollback := errors.New("restore effective reminder")
+	err = h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM background_sources WHERE message_id=? AND event_id=?`, f.SourceMessage, f.SourceEvent); err != nil {
+			return err
+		}
+		v, err := views.OwnerCIContinuation(t.Context(), tx.Q(), as.TaskID, as.RunID)
+		if err != nil {
+			return err
+		}
+		if !v.NoticeRestored || v.State != "unverified" {
+			t.Errorf("original intervention was lost: %+v", v)
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatal(err)
+	}
+
 	rt.Sequence++
 	if op := h.versionedHello("linux-1", rt); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -247,6 +314,12 @@ func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing
 	}
 	drain(true)
 	check()
+	if mode == "notify-unrelated" {
+		if v := controller.Status().Cases[0]; v.Status != "awaiting_verification" || v.Verification != "" || read().State == "processed" {
+			t.Fatal("unattributed notice completed the CI obligation", v)
+		}
+		return
+	}
 	if s := controller.Status(); s.Cases[0].Status != "resolved" || s.Cases[0].Verification == "" || s.Cases[0].Intervention == "" || len(s.Pending) != 0 || native.starts != 1 {
 		t.Fatal("owner outcome not verified", s.Cases)
 	}

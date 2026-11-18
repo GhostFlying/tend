@@ -15,7 +15,7 @@
 
 ## 小时审计与同链介入
 
-`last_audit` 记录入队时间。每次审计收到上次已完成后的 Issue 变化（同一 Issue 合并到最新观测，包括 owner Task、状态、修订与任务数）以及待复核的 case ID，各最多 32 项。`more` 标示还有其他项，下次审计继续。只有原生 turn 返回完成才更新 `last_audit_completed` 和 `audited_through`。失败、中断、未知回执与控制器重启都保留原变化。离开默认列表只表示超出探针当前可见范围。
+`last_audit` 记录入队时间。系统定时器和 `maintenance audit --scheduled` 对相同 UTC 小时只入队一次，显式手动审计可单独发起。每次审计收到上次已完成后的 Issue 变化（同一 Issue 合并到最新观测，包括 owner Task、状态、修订与任务数）以及待复核的 case ID，各最多 32 项。`more` 标示还有其他项，下次审计继续。只有原生 turn 返回完成才更新 `last_audit_completed` 和 `audited_through`。失败、中断、未知回执与控制器重启都保留原变化。清单带上次成功采集时间和采集错误；采集缺失或服务离线时，空清单不证明业务无变化。离开默认列表只表示超出探针当前可见范围。
 
 维护 Agent 或本机操作者可按原对象登记已核实的同链故障。`subject.json` 包含 `issue_id`、`task_id`、`run_id`、适用时的 `wait_id`、证据定位 `evidence` 和应验证的业务事实 `expected`。诊断 code 与这些原对象身份确定唯一 case。写入回执带回 `case_id`，重复观测或更换会话继续读取该案。
 
@@ -32,7 +32,7 @@ tend task ci-continuation "$OWNER_TASK" "$ORIGINAL_RUN" --json
 tend task resume-wait "$OWNER_TASK" --revision "$TASK_REVISION" --data '{"wait_id":"<original wait>","reason":"Restore the original CI source","restore_ci_notice":true}'
 ```
 
-只在原 case 和业务授权仍有效、诊断读回 `missing` 时调用恢复命令。服务端在同一事务内重新验证条件并将原消息与原事件交回同一 owner。写入回执丢失时使用原身份点查。原 owner 收到来源时显示 `notified`；owner 实际读取来源、完成具有该来源处置依据的正式 turn 后显示 `processed` 并自动核销。这个范围止于 owner 处理 CI 结果；合并、部署和其他外部操作仍沿各自授权与回执核验。
+只在原 case 和业务授权仍有效、诊断读回 `missing` 时调用恢复命令。服务端在同一事务内重新验证条件并将原消息与原事件交回同一 owner。恢复事实与原等待在同一事务保存。写入回执丢失时使用原身份点查；修复后的提醒再次不可见时保留待核，继续复用原介入记录。原 owner 收到来源时显示 `notified`；owner 实际读取来源并正式回复或发布明确引用该来源的通知，在此 turn 完成后显示 `processed` 并自动核销。这个范围止于 owner 处理 CI 结果；合并、部署和其他外部操作仍沿各自授权与回执核验。
 
 ## 配置与观察
 

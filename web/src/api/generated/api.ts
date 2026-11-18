@@ -3120,6 +3120,7 @@ export interface CIContinuation {
   delivery_id: string;
   head: string;
   issue_id: string;
+  notice_restored?: boolean;
   owner_turn?: string;
   result: string;
   run_id: string;
@@ -3995,6 +3996,7 @@ export interface ExternalWait {
   issue_id?: string;
   kind: string;
   next_reminder_at_ms: number;
+  notice_restored?: boolean;
   observed_base?: string;
   observed_head?: string;
   observed_revision?: number;

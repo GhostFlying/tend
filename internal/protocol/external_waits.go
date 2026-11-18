@@ -21,8 +21,9 @@ type WaitExternalPayload struct {
 
 // ExternalWait keeps machine waiting separate from unknown physical execution.
 type ExternalWait struct {
-	SourceEvent   string `json:"source_event,omitempty"`
-	SourceMessage string `json:"source_message,omitempty"`
+	NoticeRestored bool   `json:"notice_restored,omitempty"`
+	SourceEvent    string `json:"source_event,omitempty"`
+	SourceMessage  string `json:"source_message,omitempty"`
 	WaitExternalPayload
 	WaitID               string `json:"wait_id"`
 	RunID                string `json:"run_id"`
@@ -45,19 +46,20 @@ type ExternalWait struct {
 
 // CIContinuation describes a single original Issue-owner wait and the source of its wake.
 type CIContinuation struct {
-	IssueID       string `json:"issue_id"`
-	TaskID        string `json:"task_id"`
-	RunID         string `json:"run_id"`
-	WaitID        string `json:"wait_id"`
-	DeliveryID    string `json:"delivery_id"`
-	Head          string `json:"head"`
-	Base          string `json:"base,omitempty"`
-	Target        string `json:"target,omitempty"`
-	Result        string `json:"result"`
-	SourceEvent   string `json:"source_event,omitempty"`
-	SourceMessage string `json:"source_message,omitempty"`
-	OwnerTurn     string `json:"owner_turn,omitempty"`
-	State         string `json:"state"`
+	NoticeRestored bool   `json:"notice_restored,omitempty"`
+	IssueID        string `json:"issue_id"`
+	TaskID         string `json:"task_id"`
+	RunID          string `json:"run_id"`
+	WaitID         string `json:"wait_id"`
+	DeliveryID     string `json:"delivery_id"`
+	Head           string `json:"head"`
+	Base           string `json:"base,omitempty"`
+	Target         string `json:"target,omitempty"`
+	Result         string `json:"result"`
+	SourceEvent    string `json:"source_event,omitempty"`
+	SourceMessage  string `json:"source_message,omitempty"`
+	OwnerTurn      string `json:"owner_turn,omitempty"`
+	State          string `json:"state"`
 }
 
 // ResumeExternalWaitPayload resumes judgment from the original wait. It does

@@ -167,6 +167,7 @@ func (c *Controller) Check(ctx context.Context, p Probe) error {
 			c.upsert(protocol.MaintenanceCase{ID: "owner-api", Source: "owner-api", Code: "observation_unavailable", Evidence: "tend doctor", Fingerprint: digest(err.Error())}, now)
 		}
 	} else {
+		c.state.LastSnapshotAt = now
 		c.recordChanges(changes)
 		c.state.CICursor = cursor
 		if checkCI {

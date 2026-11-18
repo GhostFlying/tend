@@ -52,7 +52,7 @@ func (c *Controller) recordChanges(changes []protocol.MaintenanceChange) {
 }
 
 func (c *Controller) auditChanges() *protocol.MaintenanceAudit {
-	a := &protocol.MaintenanceAudit{Through: c.state.AuditedThrough}
+	a := &protocol.MaintenanceAudit{Since: c.state.AuditedThrough, Through: c.state.AuditedThrough, SnapshotAt: c.state.LastSnapshotAt, ObservationError: c.state.LastError, CIError: c.state.CIError}
 	for _, v := range c.state.Changes {
 		if v.Sequence > a.Through {
 			a.Changes = append(a.Changes, v)
@@ -94,13 +94,21 @@ func (c *Controller) report(req protocol.MaintenanceRequest) error {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "report requires a diagnostic code, original Issue/Task/Run, evidence, expected recovery and diagnosis")
 	}
 	id := subjectID(req.CaseID, *s)
-	for _, v := range c.state.Cases {
-		if v.ID == id {
-			return nil
-		}
-	}
 	now := c.opts.Now().Unix()
-	c.state.Cases = append(c.state.Cases, protocol.MaintenanceCase{ID: id, Code: req.CaseID, Source: s.IssueID, Subject: s, Observed: true, Fingerprint: id, Reason: req.Reason, Evidence: s.Evidence, Status: "open", FirstSeen: now, LastSeen: now})
+	for i := range c.state.Cases {
+		v := &c.state.Cases[i]
+		if v.ID != id {
+			continue
+		}
+		if v.Subject.Expected != s.Expected {
+			return protocol.Errorf(protocol.CodeConflictPayload, "original case has a different recovery expectation")
+		}
+		v.LastSeen = now
+		v.Evidence = s.Evidence
+		return nil
+	}
+	original := *s
+	c.state.Cases = append(c.state.Cases, protocol.MaintenanceCase{ID: id, Code: req.CaseID, Source: s.IssueID, Subject: &original, Observed: true, Fingerprint: id, Reason: req.Reason, Evidence: s.Evidence, Status: "open", FirstSeen: now, LastSeen: now})
 	// If the reporting turn handles the case itself, its disposition consumes this notice.
 	c.enqueue("case " + id)
 	return nil
@@ -120,6 +128,16 @@ func (c *Controller) observeCI(f protocol.CIContinuation, now int64) {
 		v := &c.state.Cases[i]
 		if v.ID != id {
 			continue
+		}
+		if f.NoticeRestored && v.Intervention == "" {
+			v.Intervention = ciRestorationReceipt(s)
+			if v.Status != "deferred" && v.Status != "resolved" {
+				v.Status = "awaiting_verification"
+			}
+			c.consumeCaseNotice(id)
+		}
+		if v.Status == "deferred" && v.Intervention != "" && v.DeferUntil <= now {
+			v.Status = "awaiting_verification"
 		}
 		if f.State == "processed" && f.OwnerTurn != "" {
 			v.Verification = "Original owner turn " + f.OwnerTurn + " processed event " + f.SourceEvent + " for " + f.Head + " (" + f.Result + ")"
@@ -147,4 +165,8 @@ func (c *Controller) observeCI(f protocol.CIContinuation, now int64) {
 
 func (c *Controller) consumeCaseNotice(id string) {
 	c.state.Pending = slices.DeleteFunc(c.state.Pending, func(reason string) bool { return reason == "case "+id })
+}
+
+func ciRestorationReceipt(s protocol.MaintenanceSubject) string {
+	return "Original wait " + s.WaitID + " records its restored notification; read " + s.Evidence
 }

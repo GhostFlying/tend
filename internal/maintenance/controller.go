@@ -56,6 +56,13 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 	case "check":
 		c.state.CheckRequested = true
 	case "audit":
+		if req.ScheduledAudit {
+			hour := c.opts.Now().UTC().Format("2006-01-02T15")
+			if c.state.ScheduledHour >= hour {
+				break
+			}
+			c.state.ScheduledHour = hour
+		}
 		c.state.Failure = nil
 		c.enqueue(action)
 		c.state.LastAudit = c.opts.Now().Unix()
@@ -118,6 +125,9 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 				break
 			}
 			if v.Intervention != "" && v.Intervention != req.Reason {
+				if v.Code == ciCaseCode && v.Intervention == ciRestorationReceipt(*v.Subject) {
+					break
+				}
 				err = protocol.Errorf(protocol.CodeConflictPayload, "reconcile the original intervention")
 				break
 			}
