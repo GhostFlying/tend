@@ -31,6 +31,7 @@ export function boardColumnStatus(item: Parameters<typeof workStatus>[0]): Issue
 }
 
 export const waitingExternalLabel = "等待外部条件";
+const pausedExecutionLabel = "执行已暂停";
 
 export function executionLabel(counts?: ExecutionCounts): string {
   if (!counts) return "暂无执行";
@@ -40,9 +41,9 @@ export function executionLabel(counts?: ExecutionCounts): string {
   if (counts.running) return `${counts.running} 项运行中`;
   if (counts.accepting) return "独立验收中";
   if (counts.recovering || counts.starting) return "执行准备中";
-  if (counts.waiting_external) return waitingExternalLabel;
   if (counts.queued) return "任务排队中";
-  if (counts.paused) return "执行已暂停";
+  if (counts.waiting_external) return waitingExternalLabel;
+  if (counts.paused) return pausedExecutionLabel;
   if (counts.idle) return "任务待安排";
   return "暂无执行";
 }
@@ -55,13 +56,20 @@ export function responsibilityLabel(item: IssueSummary): string {
   if (item.assignment_state !== "active") return "Agent 交接中";
   const board = item.board;
   const counts = board?.execution;
-  const withRunning = (label: string) =>
-    counts?.running ? `${label} · ${counts.running} 项运行中` : label;
-  if (counts?.unknown) return withRunning("执行结果待核对");
-  if (board?.owner_attention_count || counts?.waiting_owner) return withRunning("等待你处理");
-  if (board?.attention_count || counts?.waiting_supervisor) return withRunning("等待 Agent 处理");
-  const execution = executionLabel(board?.execution);
-  if (execution !== "暂无执行") return execution;
+  const summarize = (label: string, includeRunning = false) => {
+    const labels = [label];
+    if (includeRunning && counts?.running) labels.push(`${counts.running} 项运行中`);
+    if (counts?.waiting_external && label !== waitingExternalLabel)
+      labels.push(waitingExternalLabel);
+    if (counts?.paused && label !== pausedExecutionLabel) labels.push(pausedExecutionLabel);
+    return labels.join(" · ");
+  };
+  if (counts?.unknown) return summarize("执行结果待核对", true);
+  if (board?.owner_attention_count || counts?.waiting_owner) return summarize("等待你处理", true);
+  if (board?.attention_count || counts?.waiting_supervisor)
+    return summarize("等待 Agent 处理", true);
+  const execution = executionLabel(counts);
+  if (execution !== "暂无执行") return summarize(execution);
   if (item.state === "paused") return "Issue 已暂停";
   if (board?.children?.running) return "子 Issue 正在推进";
   if (board?.progress?.next_step && !board.progress.historical) return "继续推进";

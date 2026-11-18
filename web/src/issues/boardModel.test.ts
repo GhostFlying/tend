@@ -97,9 +97,24 @@ test("running and external waiting come from execution even when review is queue
   board.owner_attention_count = 0;
   board.execution.running = 0;
   board.execution.waiting_external = 1;
+  expect(responsibilityLabel(item)).toBe("任务排队中 · 等待外部条件");
+  board.execution.queued = 0;
   expect(responsibilityLabel(item)).toBe("等待外部条件");
   board.execution.waiting_external = 0;
   board.execution.queued = 2;
   expect(responsibilityLabel(item)).toBe("任务排队中");
   expect(workStatus(item)).toBe("in_review");
+});
+
+test("concurrent activity keeps confirmed external waits and pauses visible", () => {
+  const item = issue();
+  const counts = item.board!.execution;
+  counts.running = 1;
+  counts.waiting_external = 1;
+  expect(responsibilityLabel(item)).toBe("1 项运行中 · 等待外部条件");
+  counts.running = 0;
+  counts.waiting_external = 0;
+  counts.queued = 1;
+  counts.paused = 1;
+  expect(responsibilityLabel(item)).toBe("任务排队中 · 执行已暂停");
 });
