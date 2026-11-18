@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +59,27 @@ func TestBackgroundPublicProcessReadsActualProducerBeforePublication(t *testing.
 			}
 			if h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=?`, turn.MessageID) != 0 {
 				t.Fatal("read published deferred tool or prose")
+			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				ctx := t.Context()
+				origin, err := views.OwnerIssueMessage(ctx, tx.Q(), turn.MessageID)
+				if err != nil {
+					return err
+				}
+				id := second.Items[0].MessageID
+				got, err := views.OwnerIssueAnchor(ctx, tx.Q(), origin.ConversationID, id)
+				if err != nil || got.MessageID != id || got.ReplyTo != turn.MessageID || got.ConversationID != origin.ConversationID || got.Tool != nil || got.Body != "" {
+					return fmt.Errorf("public tool anchor = %+v: %w", got, err)
+				}
+				if _, err := views.OwnerIssueAnchor(ctx, tx.Q(), origin.ConversationID+"-other", id); !errors.Is(err, store.ErrNotFound) {
+					return fmt.Errorf("anchor lookup escaped its conversation: %v", err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=?`, turn.MessageID) != 0 {
+				t.Fatal("anchor lookup published a deferred record")
 			}
 			// A new App/session reads the same durable source without replaying it.
 			h.app = New(h.store, h.ids, h.clock.Now, WithFollowups(true))

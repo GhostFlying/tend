@@ -89,6 +89,9 @@ func (s *Server) ownerMessage(w http.ResponseWriter, r *http.Request) {
 			state, err := store.MessageState(r.Context(), q, id)
 			return map[string]string{"message_id": id, "state": state}, err
 		}
+		if conversation := r.URL.Query().Get("conversation_id"); conversation != "" {
+			return views.OwnerIssueAnchor(r.Context(), q, conversation, id)
+		}
 		return views.OwnerIssueMessage(r.Context(), q, id)
 	})
 }

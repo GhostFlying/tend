@@ -1,5 +1,5 @@
 -- The grouped display column includes both doing and review. Ungrouped
--- API and CLI readers retain the exact separate entries from 0136.
+-- API and CLI readers retain the exact entries from the separate projection.
 CREATE TABLE issue_board_grouped_stage_entries (
  issue_id TEXT PRIMARY KEY REFERENCES issue_controls(issue_id),
  status TEXT NOT NULL CHECK(status IN ('backlog','todo','in_progress','done','cancelled')),

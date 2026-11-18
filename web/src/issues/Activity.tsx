@@ -295,16 +295,16 @@ export function IssueActivity({
     if (pagination.current?.trigger === trigger) pagination.current = null;
   }, []);
   const { key: historyEntry, store: continuationStore } = entryStore<
-    Record<string, IssueTranscriptBlock>
+    Record<string, { block: IssueTranscriptBlock; depth: number }>
   >(`activity-continuations:${issue.issue_id}`, {});
   const continuations = useStore(continuationStore);
   const rememberContinuation = useCallback(
-    (block: IssueTranscriptBlock, explicit: boolean) => {
+    (block: IssueTranscriptBlock, depth: number, explicit: boolean) => {
       if (explicit && pagination.current?.trigger === block.trigger.message_id)
         pagination.current.ready = true;
       continuationStore.set({
         ...continuationStore.get(),
-        [block.trigger.message_id]: block,
+        [block.trigger.message_id]: { block, depth },
       });
     },
     [continuationStore],
@@ -313,7 +313,7 @@ export function IssueActivity({
     () =>
       buildTranscriptEntries(
         rows.flatMap((entry) =>
-          entry.block ? [continuations[entry.block.trigger.message_id] ?? entry.block] : [],
+          entry.block ? [continuations[entry.block.trigger.message_id]?.block ?? entry.block] : [],
         ),
       ),
     [rows, continuations],
@@ -385,7 +385,7 @@ export function IssueActivity({
     const node = scroll.current;
     if (node && pagination.current?.ready) {
       const boundary = pagination.current;
-      const block = continuations[boundary.trigger];
+      const block = continuations[boundary.trigger]?.block;
       pagination.current = null;
       cancelAnimationFrame(dataFrame.current);
       dataFrame.current = requestAnimationFrame(() => {
@@ -483,6 +483,7 @@ export function IssueActivity({
     loadingEarlier,
     earlier,
   ]);
+  const conversationID = issue.conversation?.conversation_id;
   const anchorRead = useMemo(
     () =>
       new WorkItemRead<IssueConversationItem | null>({
@@ -490,16 +491,23 @@ export function IssueActivity({
           try {
             return await client.get<T>(path, signal);
           } catch (error) {
+            if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 403))
+              throw error;
+            if (error.status === 403 || !conversationID) return null as T;
+          }
+          try {
+            const query = new URLSearchParams({ conversation_id: conversationID });
+            return await client.get<T>(`${path}?${query}`, signal);
+          } catch (error) {
             if (error instanceof ApiError && (error.status === 404 || error.status === 403))
               return null as T;
             throw error;
           }
         },
       }),
-    [client],
+    [client, conversationID],
   );
   const anchor = useStore(anchorRead.state).value;
-  const conversationID = issue.conversation?.conversation_id;
   useEffect(() => {
     if (!targetMessage || !conversationID) return;
     void anchorRead.open(`/api/v1/messages/${encodeURIComponent(targetMessage)}`);
@@ -618,7 +626,14 @@ export function IssueActivity({
             targetMessage={
               entry.block.trigger.message_id === scopedAnchor?.reply_to ? targetMessage : undefined
             }
+            processTarget={
+              entry.block.trigger.message_id === scopedAnchor?.reply_to &&
+              (scopedAnchor?.kind === "tool_use" || scopedAnchor?.tool)
+                ? targetMessage
+                : undefined
+            }
             scrollTarget={targetMessage}
+            restored={continuations[entry.block.trigger.message_id]}
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
@@ -711,7 +726,9 @@ class ProcessLayout extends Component<ProcessLayoutProps> {
 function ActivityBlock({
   entry,
   targetMessage,
+  processTarget,
   scrollTarget,
+  restored,
   rows,
   onContinuation,
   onPagination,
@@ -726,10 +743,12 @@ function ActivityBlock({
   entry: IssueActivityEntry;
   processReads?: IssueProcessReads | undefined;
   targetMessage?: string | undefined;
+  processTarget?: string | undefined;
   scrollTarget?: string | undefined;
+  restored?: { block: IssueTranscriptBlock; depth: number } | undefined;
   currentIssueId: string;
   rows: TranscriptEntry[];
-  onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
+  onContinuation(block: IssueTranscriptBlock, depth: number, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
   onPaginationCancel(trigger: string): void;
   onProcessSnapshot(node: HTMLDivElement): ProcessScrollPosition | null;
@@ -744,6 +763,7 @@ function ActivityBlock({
   const explicit = useRef(false);
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const [depth, setDepth] = useEntryState(`activity-depth:${entry.id}`, 2);
+  const [restoredDepth] = useState(() => restored?.depth ?? 0);
   const block = entry.block!;
   const urgent = Boolean(block.trigger.issue_owner_steer);
   const replyAuthor = urgent ? undefined : entry.author;
@@ -817,6 +837,13 @@ function ActivityBlock({
     if (process.value && process.value.depth > savedProcessDepth)
       saveProcessDepth(process.value.depth);
   }, [process.value, savedProcessDepth, saveProcessDepth]);
+  useEffect(() => {
+    if (!processTarget || process.error) return;
+    const value = process.value;
+    if (!value) requestProcess();
+    else if (value.more && !value.items.some((item) => item.message_id === processTarget))
+      requestProcess(value.depth + 1);
+  }, [processTarget, process.error, process.value, requestProcess]);
   const processBlock = readable
     ? process.value
       ? {
@@ -826,11 +853,19 @@ function ActivityBlock({
       : block
     : (opened || targetMessage) && extra.value && !extra.error
       ? extra.value
-      : block;
+      : (restored?.block ?? block);
   useEffect(() => {
-    if (opened || (targetMessage && (block.more || block.process?.more)))
-      void continuation.open(block.trigger.message_id, depth, targetMessage);
-  }, [opened, block, continuation, depth, targetMessage]);
+    if (
+      opened ||
+      (targetMessage &&
+        (readable ? !processTarget && block.more : block.more || block.process?.more))
+    )
+      void continuation.open(
+        block.trigger.message_id,
+        Math.max(depth, restoredDepth),
+        targetMessage,
+      );
+  }, [opened, block, continuation, depth, restoredDepth, targetMessage, readable, processTarget]);
   useEffect(
     () => () => {
       continuation.close();
@@ -844,10 +879,18 @@ function ActivityBlock({
       onPaginationCancel(block.trigger.message_id);
     }
     if (extra.value && !extra.error) {
-      onContinuation(extra.value, explicit.current);
+      onContinuation(extra.value, Math.max(continuation.depth(), restoredDepth), explicit.current);
       explicit.current = false;
     }
-  }, [extra.value, extra.error, onContinuation, onPaginationCancel, block.trigger.message_id]);
+  }, [
+    extra.value,
+    extra.error,
+    continuation,
+    restoredDepth,
+    onContinuation,
+    onPaginationCancel,
+    block.trigger.message_id,
+  ]);
   const items = rows.flatMap((row) =>
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
@@ -866,7 +909,7 @@ function ActivityBlock({
       void continuation.refresh();
       return;
     }
-    setDepth(continuation.nextDepth(opened ? depth + 1 : depth));
+    setDepth(continuation.nextDepth(Math.max(opened ? depth + 1 : depth, restoredDepth + 1)));
     if (!opened) setOpened(true);
   };
   const displayRows = activityTurnRows(rows, processBlock, readable);

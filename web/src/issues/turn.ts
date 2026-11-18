@@ -74,6 +74,9 @@ export class IssueTurnRead {
   nextDepth(requested: number): number {
     return Math.max(requested, this.loadedPages + 1);
   }
+  depth(): number {
+    return this.loadedPages;
+  }
   more(): Promise<void> {
     this.pages = this.nextDepth(this.pages + 1);
     return this.read.refresh();

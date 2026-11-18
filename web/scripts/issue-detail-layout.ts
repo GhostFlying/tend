@@ -47,6 +47,7 @@ let shortIdentityOutage: { failed: boolean; recovery: Promise<void> } | undefine
 const historicalMessageID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const historicalReplyID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
 const historicalToolID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+const deferredToolID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FB0";
 const historicalProcess = {
   started_at: now - 1,
   ended_at: now,
@@ -251,13 +252,21 @@ const server = createServer(async (req, res) => {
   }
   if (
     shortNumbers &&
-    [historicalMessageID, historicalReplyID, historicalToolID].some(
+    [historicalMessageID, historicalReplyID, historicalToolID, deferredToolID].some(
       (id) => p === `/api/v1/messages/${id}`,
     )
   ) {
     const message_id = p.split("/").at(-1)!;
+    if (
+      message_id === deferredToolID &&
+      u.searchParams.get("conversation_id") !== issue.conversation!.conversation_id
+    )
+      return json({ error: { code: "not_found", message: "Not published yet" } }, 404);
     return json({
       message_id,
+      ...(message_id === historicalToolID || message_id === deferredToolID
+        ? { kind: "tool_use" }
+        : {}),
       conversation_id: issue.conversation!.conversation_id,
       ...(message_id !== historicalMessageID ? { reply_to: historicalMessageID } : {}),
     });
@@ -268,7 +277,19 @@ const server = createServer(async (req, res) => {
     return json({
       ...fixture,
       trigger: { ...fixture.trigger, message_id: historicalMessageID },
-      process: historicalProcess,
+      process:
+        u.searchParams.get("projection") === "readable"
+          ? {
+              started_at: historicalProcess.started_at,
+              ended_at: historicalProcess.ended_at,
+              has_tools: true,
+            }
+          : u.searchParams.get("process_after") === "14"
+            ? {
+                ...historicalProcess,
+                items: [{ ...historicalProcess.items[0]!, message_id: deferredToolID }],
+              }
+            : { ...historicalProcess, more: true, next: 14 },
       more: after < 150,
       next_seq: after + 50,
       items:
@@ -411,6 +432,7 @@ const server = createServer(async (req, res) => {
           u.searchParams.has("before")
             ? {
                 event_seq: seq,
+                readable: true,
                 more: false,
                 items: [
                   {
@@ -420,7 +442,11 @@ const server = createServer(async (req, res) => {
                       ...block,
                       more: true,
                       next_seq: 50,
-                      process: historicalProcess,
+                      process: {
+                        started_at: historicalProcess.started_at,
+                        ended_at: historicalProcess.ended_at,
+                        has_tools: true,
+                      },
                       trigger: {
                         ...block.trigger,
                         message_id: historicalMessageID,
@@ -439,6 +465,7 @@ const server = createServer(async (req, res) => {
               }
             : {
                 event_seq: seq,
+                readable: true,
                 more: true,
                 next_before: 20,
                 items: Array.from({ length: 15 }, (_, index) => ({
@@ -902,6 +929,36 @@ async function verifyShortNumbers() {
           1,
         );
         console.log(`PASS same-Issue historical link, continuation and Back/Forward (${width}px)`);
+        await page.goto(`${base}${originalURL}`);
+        await replyLink.click();
+        await replyIsVisible();
+        await page.goBack();
+        await replyLink.waitFor();
+        let resumeRead = () => {};
+        const readGate = new Promise<void>((resolve) => {
+          resumeRead = resolve;
+        });
+        const blockPath = `/api/v1/conversation/blocks/${historicalMessageID}`;
+        await page.route(`**${blockPath}?*`, async (route) => {
+          if (new URL(route.request().url()).searchParams.get("after") === "100") await readGate;
+          await route.continue();
+        });
+        try {
+          const pendingPage = page.waitForRequest((request) => {
+            const url = new URL(request.url());
+            return url.pathname === blockPath && url.searchParams.get("after") === "100";
+          });
+          await page.goForward();
+          await pendingPage;
+          await replyIsVisible();
+          await detail.getByRole("button", { name: "继续读取本轮消息", exact: true }).click();
+          resumeRead();
+          await fourthReply.waitFor();
+        } finally {
+          resumeRead();
+          await page.unroute(`**${blockPath}?*`);
+        }
+        console.log(`PASS first continuation during restored page revalidation (${width}px)`);
         await page.goto(`${base}/issues/${issue.issue_id}?message=${historicalToolID}`);
         await page.waitForURL(`**/issues/T123?message=${historicalToolID}`);
         await page.waitForFunction((id) => {
@@ -916,6 +973,14 @@ async function verifyShortNumbers() {
         await linkedTrace.click();
         await linkedTool.waitFor({ state: "visible" });
         console.log(`PASS short-code historical public process anchor (${width}px)`);
+        const processContinuation = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return url.pathname === blockPath && url.searchParams.get("process_after") === "14";
+        });
+        await page.goto(`${base}/issues/${issue.issue_id}?message=${deferredToolID}`);
+        await processContinuation;
+        await detail.locator(`[data-tool-item="${deferredToolID}"]`).waitFor();
+        console.log(`PASS scoped deferred tool anchor before publication (${width}px)`);
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");
         const composer = detail.getByRole("textbox", { name: "消息", exact: true });
