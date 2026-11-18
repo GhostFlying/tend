@@ -151,17 +151,18 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 }
 
 type CanonicalIssueFilter struct {
-	Board         bool
-	BoardStatus   protocol.IssueWorkStatus
-	AssigneeKind  protocol.IssueAssigneeKind
-	AssigneeRef   string
-	ReadRoot      string
-	Project       string
-	ParentID      *string
-	State         protocol.IssueState
-	IncludeClosed bool
-	After         string
-	Limit         int
+	Board          bool
+	BoardStatus    protocol.IssueWorkStatus
+	WaitingOnOwner string
+	AssigneeKind   protocol.IssueAssigneeKind
+	AssigneeRef    string
+	ReadRoot       string
+	Project        string
+	ParentID       *string
+	State          protocol.IssueState
+	IncludeClosed  bool
+	After          string
+	Limit          int
 }
 
 // CanonicalIssues never adopts old plans that lack canonical controls.

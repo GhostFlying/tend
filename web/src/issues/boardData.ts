@@ -8,6 +8,7 @@ export interface BoardFilter {
   project?: string;
   assignee?: IssueAssignee;
   includeClosed?: boolean;
+  waitingOnMe?: boolean;
 }
 
 export function boardPagePath(filter: BoardFilter, status: IssueWorkStatus): string {
@@ -23,6 +24,7 @@ export function boardPagePath(filter: BoardFilter, status: IssueWorkStatus): str
     query.set("assignee_ref", filter.assignee.ref);
   }
   if (filter.includeClosed) query.set("include_closed", "true");
+  if (filter.waitingOnMe) query.set("waiting_on_me", "true");
   return `/api/v1/issues?${query}`;
 }
 

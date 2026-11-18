@@ -18,8 +18,8 @@ func (s *Server) deadline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (s *Server) nextActions(w http.ResponseWriter, r *http.Request) {
-	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.NextActions(r.Context(), q, r.URL.Query().Get("kind"), r.URL.Query().Get("issue_id"))
+	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
+		return views.OwnerNextActions(r.Context(), q, r.URL.Query().Get("kind"), r.URL.Query().Get("issue_id"), p.Subject)
 	})
 }
 func (s *Server) plannerEntry(w http.ResponseWriter, r *http.Request) {

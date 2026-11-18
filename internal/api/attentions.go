@@ -29,7 +29,12 @@ func (s *Server) attentions(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Limit = n
 	}
-	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) { return views.Attentions(r.Context(), q, f) })
+	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
+		if r.Pattern == "GET /api/v1/inbox" && f.Recipient == "owner" {
+			f.OwnerSubject = p.Subject
+		}
+		return views.Attentions(r.Context(), q, f)
+	})
 }
 func (s *Server) attention(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {

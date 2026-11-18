@@ -774,7 +774,7 @@ func TestCapabilityEveryRegisteredLeafAndAliasCanShowHelpWithoutArguments(t *tes
 }
 
 func TestCapabilityIssueFiltersRejectUnsupportedCombinationsBeforeHTTP(t *testing.T) {
-	for _, flags := range [][]string{{"--board", "--parent", "sample"}, {"--board-status", "in_progress"}, {"--board", "--assignee-kind", "agent"}, {"--board", "--assignee-ref", "sample"}, {"--assignee-kind", "agent", "--assignee-ref", "sample"}} {
+	for _, flags := range [][]string{{"--board", "--parent", "sample"}, {"--board-status", "in_progress"}, {"--waiting-on-me"}, {"--board", "--assignee-kind", "agent"}, {"--board", "--assignee-ref", "sample"}, {"--assignee-kind", "agent", "--assignee-ref", "sample"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			f := newFakeServer(t)
 			env := newTestEnv(t, f.srv.URL)
@@ -792,13 +792,13 @@ func TestCapabilityIssueFiltersRejectUnsupportedCombinationsBeforeHTTP(t *testin
 	f := newFakeServer(t)
 	f.on("GET /api/v1/issues", func(w http.ResponseWriter, r *http.Request, _ []byte) {
 		query := r.URL.Query()
-		if query.Get("board") != "true" || query.Get("board_status") != "in_progress" || query.Get("assignee_kind") != "agent" || query.Get("assignee_ref") != "agent-one" {
+		if query.Get("board") != "true" || query.Get("waiting_on_me") != "true" || query.Get("after") != "next-issue" || query.Get("limit") != "1" || query.Get("board_status") != "in_progress" || query.Get("assignee_kind") != "agent" || query.Get("assignee_ref") != "agent-one" {
 			t.Error("valid board filters changed", query)
 		}
 		json.NewEncoder(w).Encode(protocol.IssuePage{})
 	})
 	env := newTestEnv(t, f.srv.URL)
-	if code := env.main("issue", "list", "--board", "--board-status", "in_progress", "--assignee-kind", "agent", "--assignee-ref", "agent-one", "--json"); code != 0 {
+	if code := env.main("issue", "list", "--board", "--waiting-on-me", "--board-status", "in_progress", "--assignee-kind", "agent", "--assignee-ref", "agent-one", "--limit", "1", "--after", "next-issue", "--json"); code != 0 {
 		t.Fatal(code, env.errOut)
 	}
 }

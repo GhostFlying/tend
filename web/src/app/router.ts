@@ -35,6 +35,7 @@ export type IssueFilters = {
   project?: string;
   assignee?: string;
   closed?: boolean;
+  waitingOnMe?: boolean;
 };
 export type DiagnosticFilters = {
   tab?: "schedules" | "events";
@@ -181,6 +182,7 @@ export function parse(input: string | URL): Route {
         ...(query.get("project") ? { project: query.get("project")! } : {}),
         ...(query.get("assignee") ? { assignee: query.get("assignee")! } : {}),
         ...(query.has("closed") ? { closed: query.get("closed") !== "false" } : {}),
+        ...(query.get("waitingOnMe") === "true" ? { waitingOnMe: true } : {}),
       };
     return { page } as Route;
   }
@@ -219,6 +221,7 @@ export function href(route: Route): string {
   if (route.page === "rollout" && route.source) query.set("source", route.source);
   if (route.page === "rollout" && route.record) query.set("record", route.record);
   if (route.page === "issues") {
+    if (route.waitingOnMe) query.set("waitingOnMe", "true");
     for (const key of ["view", "project", "assignee", "closed"] as const) {
       if (route[key] !== undefined && route[key] !== "") query.set(key, String(route[key]));
     }

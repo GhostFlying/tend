@@ -151,7 +151,7 @@ func flushIssueStatusNotice(ctx context.Context, x *Exec, tx *store.Tx, id strin
 }
 
 func issueStatusLabel(status protocol.IssueWorkStatus) string {
-	return map[protocol.IssueWorkStatus]string{protocol.IssueBacklog: "待安排", protocol.IssueTodo: "待推进", protocol.IssueInProgress: "进行中", protocol.IssueInReview: "待检查", protocol.IssueDone: "已完成", protocol.IssueWorkCancelled: "已取消"}[status]
+	return map[protocol.IssueWorkStatus]string{protocol.IssueBacklog: "待安排", protocol.IssueTodo: "待推进", protocol.IssueInProgress: "进行中", protocol.IssueInReview: "审阅中", protocol.IssueDone: "已完成", protocol.IssueWorkCancelled: "已取消"}[status]
 }
 
 type SetIssueNotificationSettings struct{}

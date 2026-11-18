@@ -4,7 +4,7 @@ export const boardColumns: readonly { id: IssueWorkStatus; label: string }[] = [
   { id: "backlog", label: "待安排" },
   { id: "todo", label: "待推进" },
   { id: "in_progress", label: "进行中" },
-  { id: "in_review", label: "待检查" },
+  { id: "in_review", label: "审阅中" },
   { id: "done", label: "已完成" },
   { id: "cancelled", label: "已取消" },
 ];

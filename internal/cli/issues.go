@@ -80,6 +80,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	project := fs.String("project", "", "issue project filter")
 	board := fs.Bool("board", false, "use the global board projection, including direct child progress and activity previews")
 	boardStatus := fs.String("board-status", "", "board work status")
+	waitingOnMe := fs.Bool("waiting-on-me", false, "only Issues linked to actions in your Inbox (requires --board)")
 	assigneeKind := fs.String("assignee-kind", "", "owner or agent filter")
 	assigneeRef := fs.String("assignee-ref", "", "exact assignee identity")
 	parent := fs.String("parent", "", "list direct children of this issue")
@@ -100,8 +101,8 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if *board && *parent != "" {
 			return usagef("the global board contains root Issues; parent filtering requires a non-board list")
 		}
-		if (*boardStatus != "" || *assigneeKind != "" || *assigneeRef != "") && !*board {
-			return usagef("board-status and assignee filters require --board")
+		if (*waitingOnMe || *boardStatus != "" || *assigneeKind != "" || *assigneeRef != "") && !*board {
+			return usagef("waiting-on-me, board-status and assignee filters require --board")
 		}
 		if (*assigneeKind != "") != (*assigneeRef != "") {
 			return usagef("assignee-kind and assignee-ref must be supplied together")
@@ -123,6 +124,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		}
 		if *boardStatus != "" {
 			query.Set("board_status", *boardStatus)
+		}
+		if *waitingOnMe {
+			query.Set("waiting_on_me", "true")
 		}
 		if *assigneeKind != "" {
 			query.Set("assignee_kind", *assigneeKind)
