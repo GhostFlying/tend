@@ -119,8 +119,8 @@ export function splitWorkItemIds(
 ): (string | { workItemId: string })[] {
   const patterns = {
     legacy: /(?<![0-9A-Za-z_/])wi_[0-7][0-9A-HJKMNP-TV-Z]{25}(?![0-9A-Za-z_])/g,
-    short: /(?<![0-9A-Za-z_/])[Tt][1-9][0-9]*(?![0-9A-Za-z_])/g,
-    all: /(?<![0-9A-Za-z_/])(?:[Tt][1-9][0-9]*|wi_[0-7][0-9A-HJKMNP-TV-Z]{25})(?![0-9A-Za-z_])/g,
+    short: /(?<![0-9A-Za-z_/\\])[Tt][1-9][0-9]*(?![0-9A-Za-z_/\\]|\.[\p{L}\p{N}_])/gu,
+    all: /(?<![0-9A-Za-z_/\\])[Tt][1-9][0-9]*(?![0-9A-Za-z_/\\]|\.[\p{L}\p{N}_])|(?<![0-9A-Za-z_/])wi_[0-7][0-9A-HJKMNP-TV-Z]{25}(?![0-9A-Za-z_])/gu,
   };
   const pattern = patterns[mode];
   const out: (string | { workItemId: string })[] = [];

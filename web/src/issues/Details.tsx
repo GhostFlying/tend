@@ -185,9 +185,10 @@ export function IssueDetails({
     const savedTop = pendingScrollTop.current;
     if (!loaded || !node || savedTop === null) return;
     pendingScrollTop.current = null;
+    if (message) return;
     node.scrollTo({ top: savedTop });
     reading.saveTop(node.scrollTop);
-  }, [loaded, reading]);
+  }, [loaded, message, reading]);
   const editable =
     !!issue && ["active", "paused"].includes(issue.state) && issue.assignment_state === "active";
   const close = () => {

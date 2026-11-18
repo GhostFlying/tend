@@ -136,6 +136,20 @@ describe("work-item presentation", () => {
       ]),
     ]).toEqual([]);
   });
+  test.each(["short", "all"] as const)(
+    "short references keep filenames and paths intact (%s)",
+    (mode) => {
+      const files = "T123.txt T123/src/main.go src/T123 T123\\code.ts t123.文档";
+      expect(splitWorkItemIds(files, mode)).toEqual([files]);
+      expect(splitWorkItemIds("Check T123. Then (t456), please.", mode)).toEqual([
+        "Check ",
+        { workItemId: "T123" },
+        ". Then (",
+        { workItemId: "t456" },
+        "), please.",
+      ]);
+    },
+  );
   test("references recognize only complete work-item IDs at text boundaries", () => {
     const id = workItemID;
     expect(splitWorkItemIds(`继续 ${id}。`)).toEqual(["继续 ", { workItemId: id }, "。"]);

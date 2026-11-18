@@ -42,6 +42,7 @@ let pagedRevision = 0;
 let pagedChildren = false;
 let pagedActivity = false;
 let shortNumbers = false;
+let shortAnchorResults: Promise<void> | undefined;
 let shortIdentityOutage: { failed: boolean; recovery: Promise<void> } | undefined;
 const historicalMessageID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const historicalReplyID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
@@ -399,13 +400,13 @@ const server = createServer(async (req, res) => {
                       trigger: {
                         ...block.trigger,
                         message_id: historicalMessageID,
-                        body: "历史消息中的 t123、裸数字 123 和 #123。",
+                        body: "历史消息中的 t123、裸数字 123 和 #123。文件包括 T123.txt 和 T123/src/main.go。",
                       },
                       items: [
                         {
                           ...block.items![0]!,
                           reply_to: historicalMessageID,
-                          body: "[GitHub #123](https://github.com/example/repo/issues/123) 与 T123",
+                          body: "[GitHub #123](https://github.com/example/repo/issues/123) 与 T123。文件包括 `T123.txt` 和 `T123/src/main.go`。",
                         },
                       ],
                     },
@@ -467,7 +468,11 @@ const server = createServer(async (req, res) => {
         );
       return json(activity);
     }
-    if (p.endsWith("/results"))
+    if (p.endsWith("/results")) {
+      if (shortAnchorResults && p === `/api/v1/issues/${issue.issue_id}/results`) {
+        await shortAnchorResults;
+        if (res.destroyed) return;
+      }
       return json(
         u.searchParams.has("after")
           ? {
@@ -483,6 +488,7 @@ const server = createServer(async (req, res) => {
             }
           : { ...results, more: true, next: "older" },
       );
+    }
     if (p.endsWith("/context"))
       return json({ issue_id: current.issue_id, revision: 1, sources: [], facts: [], more: false });
     if (p.endsWith("/deliveries"))
@@ -757,6 +763,11 @@ async function verifyShortNumbers() {
         const original = detail.locator(`[data-scroll-id="${historicalMessageID}"]`);
         await original.getByRole("link", { name: "T123", exact: true }).waitFor();
         assert.equal(await original.getByRole("link").count(), 1);
+        for (const filename of ["T123.txt", "T123/src/main.go"]) {
+          const code = detail.locator("code").filter({ hasText: filename });
+          await code.waitFor();
+          assert.equal(await code.getByRole("link").count(), 0);
+        }
         assert.match((await original.textContent())!, /裸数字 123 和 #123/);
         assert.equal(await original.getByRole("link").getAttribute("href"), "/issues/T123");
         assert.equal(
@@ -782,17 +793,41 @@ async function verifyShortNumbers() {
             }),
           { times: 1 },
         );
-        const failedAnchor = page.waitForResponse(
-          (response) => response.url().endsWith(historicalReplyID) && response.status() === 503,
+        let releaseResults = () => {};
+        shortAnchorResults = new Promise<void>((resolve) => {
+          releaseResults = resolve;
+        });
+        const resultsResponse = page.waitForResponse((response) =>
+          response.url().endsWith(`/issues/${issue.issue_id}/results`),
         );
-        await page.goto(`${base}/issues/${issue.issue_id}?message=${historicalReplyID}`);
-        await failedAnchor;
-        await page.waitForURL(`**/issues/T123?message=${historicalReplyID}`);
-        await detail.getByText("历史回合第三页的确切回复。").waitFor();
-        await page.waitForFunction((id) => {
-          const rect = document.querySelector(`[data-scroll-id="${id}"]`)?.getBoundingClientRect();
-          return !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
-        }, historicalReplyID);
+        const replyIsVisible = () =>
+          page.waitForFunction((id) => {
+            const rect = document
+              .querySelector(`[data-scroll-id="${id}"]`)
+              ?.getBoundingClientRect();
+            return !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+          }, historicalReplyID);
+        try {
+          const failedAnchor = page.waitForResponse(
+            (response) => response.url().endsWith(historicalReplyID) && response.status() === 503,
+          );
+          await page.goto(`${base}/issues/${issue.issue_id}?message=${historicalReplyID}`);
+          await failedAnchor;
+          await page.waitForURL(`**/issues/T123?message=${historicalReplyID}`);
+          await detail.getByText("历史回合第三页的确切回复。").waitFor();
+          await replyIsVisible();
+        } finally {
+          releaseResults();
+          shortAnchorResults = undefined;
+        }
+        await (await resultsResponse).finished();
+        await page.evaluate(
+          () =>
+            new Promise<void>((done) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => done())),
+            ),
+        );
+        await replyIsVisible();
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");
         const composer = detail.getByRole("textbox", { name: "消息", exact: true });
@@ -815,58 +850,88 @@ async function verifyShortNumbers() {
         await result.click();
         await page.waitForURL("**/issues/T123");
         await detail.getByText(issue.plan.title, { exact: true }).first().waitFor();
-        let available = false;
-        const lateCodeURL = "/api/v1/issues/T124?projection=identity";
-        await page.route(`**${lateCodeURL}`, (route) =>
-          route.fulfill(
-            available
-              ? { json: { issue_id: child.issue_id, short_code: "T124", title: child.plan.title } }
-              : { status: 404, json: { error: { code: "not_found", message: "Issue not found" } } },
-          ),
-        );
-        await page.route("**/api/v1/messaging/messages?*", (route) =>
-          route.fulfill({
-            json: {
-              items: [
-                {
-                  message_id: "issue-reference-before-creation",
-                  sequence: 1,
-                  body: "See T124",
-                  author: "owner",
-                  direction: "input",
-                  created_at: now,
-                  processing: "processed",
-                  issue_ids: [],
-                  attachments: [],
-                  source_message_ids: [],
-                  channel_id: "web",
-                  conversation_id: "main",
-                  content_revision: 1,
-                },
-              ],
-              more: false,
-              next: 1,
-            },
-          }),
-        );
-        const initialMiss = page.waitForResponse(
-          (response) => response.url().endsWith(lateCodeURL) && response.status() === 404,
-        );
-        await navigate(page, "/");
-        await page.getByText("See T124", { exact: true }).waitFor();
-        await initialMiss;
-        available = true;
-        child.short_code = "T124";
-        try {
-          assert.equal(
-            await page.evaluate(async (url) => (await fetch(url)).status, lateCodeURL),
-            200,
+        for (const inflight of [false, true]) {
+          await page.goto(`${base}/issues/T123`);
+          await detail.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
+          const code = inflight ? "T125" : "T124";
+          let available = false;
+          let releaseInitial = () => {};
+          const initialGate = new Promise<void>((resolve) => {
+            releaseInitial = resolve;
+          });
+          const lateCodeURL = `/api/v1/issues/${code}?projection=identity`;
+          await page.route(`**${lateCodeURL}`, async (route) => {
+            if (available) {
+              await route.fulfill({
+                json: { issue_id: child.issue_id, short_code: code, title: child.plan.title },
+              });
+            } else {
+              await initialGate;
+              await route.fulfill({
+                status: 404,
+                json: { error: { code: "not_found", message: "Issue not found" } },
+              });
+            }
+          });
+          await page.route("**/api/v1/messaging/messages?*", (route) =>
+            route.fulfill({
+              json: {
+                items: [
+                  {
+                    message_id: "issue-reference-before-creation",
+                    sequence: 1,
+                    body: `See ${code}`,
+                    author: "owner",
+                    direction: "input",
+                    created_at: now,
+                    processing: "processed",
+                    issue_ids: [],
+                    attachments: [],
+                    source_message_ids: [],
+                    channel_id: "web",
+                    conversation_id: "main",
+                    content_revision: 1,
+                  },
+                ],
+                more: false,
+                next: 1,
+              },
+            }),
           );
-          await navigate(page, "/issues/T124");
-          await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
-          assert.equal(new URL(page.url()).pathname, "/issues/T124");
-        } finally {
-          delete child.short_code;
+          const initialRequest = page.waitForRequest((request) =>
+            request.url().endsWith(lateCodeURL),
+          );
+          const initialMiss = page.waitForResponse(
+            (response) => response.url().endsWith(lateCodeURL) && response.status() === 404,
+          );
+          try {
+            await navigate(page, "/");
+            await page.getByText(`See ${code}`, { exact: true }).waitFor();
+            await initialRequest;
+            if (!inflight) {
+              releaseInitial();
+              await initialMiss;
+            }
+            available = true;
+            child.short_code = code;
+            assert.equal(
+              await page.evaluate(async (url) => (await fetch(url)).status, lateCodeURL),
+              200,
+            );
+            await navigate(page, `/issues/${code}`);
+            if (inflight) {
+              await page.getByRole("heading", { name: "正在读取 Issue", exact: true }).waitFor();
+              releaseInitial();
+              await initialMiss;
+            }
+            await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
+            assert.equal(new URL(page.url()).pathname, `/issues/${code}`);
+          } finally {
+            releaseInitial();
+            delete child.short_code;
+            await page.unroute(`**${lateCodeURL}`);
+            await page.unroute("**/api/v1/messaging/messages?*");
+          }
         }
         assert.equal(await page.locator("vite-error-overlay").count(), 0);
         assert.deepEqual(errors, []);

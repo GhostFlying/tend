@@ -61,8 +61,8 @@ export function useIssueIdentity(
     const { read } = entry;
     const value = read.state.get().value;
     const firstUser = ++entry.users === 1;
-    if ((firstUser && !value) || (recheckMissing && value === "missing"))
-      void read.open(`/api/v1/issues/${encodeURIComponent(id)}?projection=identity`);
+    const shouldRead = recheckMissing ? !value || value === "missing" : firstUser && !value;
+    if (shouldRead) void read.open(`/api/v1/issues/${encodeURIComponent(id)}?projection=identity`);
     return () => {
       if (--entry.users !== 0) return;
       const last = read.state.get().value;
