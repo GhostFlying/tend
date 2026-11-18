@@ -1,3 +1,4 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { useEffect, useRef, useState } from "react";
 import type {
   BackgroundSourcePage,
@@ -6,7 +7,7 @@ import type {
   TriggerSchedulePage,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
-import { back, Link, navigate, type DiagnosticFilters } from "../app/router.ts";
+import { back, navigate, type DiagnosticFilters } from "../app/router.ts";
 import { Badge, Button, EmptyState, Input, Select } from "../ui/index.ts";
 import {
   labels,
@@ -123,9 +124,9 @@ export function Diagnostics({
       <header className={styles.header}>
         <div>
           {filters.issue && (
-            <Link to={{ page: "issue", id: filters.issue }} className={styles.back}>
+            <IssueLink id={filters.issue} className={styles.back}>
               ‹ 返回 Issue
-            </Link>
+            </IssueLink>
           )}
           <h1>诊断</h1>
           <p>查看触发、分发与处理的完整记录</p>
@@ -249,7 +250,7 @@ export function Diagnostics({
                       >
                         {row.title || row.issue_title}
                       </button>
-                      <Link to={{ page: "issue", id: row.issue_id }}>{row.issue_title}</Link>
+                      <IssueLink id={row.issue_id}>{row.issue_title}</IssueLink>
                     </td>
                     <td data-label="来源">{scheduleLabel(row)}</td>
                     <td data-label="调度状态">
@@ -320,7 +321,7 @@ export function Diagnostics({
               <dl>
                 <dt>所属 Issue</dt>
                 <dd>
-                  <Link to={{ page: "issue", id: selected.issue_id }}>{selected.issue_title}</Link>
+                  <IssueLink id={selected.issue_id}>{selected.issue_title}</IssueLink>
                 </dd>
                 <dt>调度类型</dt>
                 <dd>{scheduleLabel(selected)}</dd>
@@ -394,8 +395,7 @@ function EventDetails({ event }: { event: TriggerEvent }) {
     <>
       <h2>{event.title}</h2>
       <p>
-        <Link to={{ page: "issue", id: event.issue_id }}>{event.issue_title}</Link> ·{" "}
-        {labels[event.source]}
+        <IssueLink id={event.issue_id}>{event.issue_title}</IssueLink> · {labels[event.source]}
       </p>
       <div className={styles.statuses}>
         <Badge tone={tone(event.status)}>{labels[event.status] ?? event.status}</Badge>
@@ -491,7 +491,7 @@ function EventDetails({ event }: { event: TriggerEvent }) {
         <p role="status">{copyStatus}</p>
         <p className={styles.muted}>已保留记录的时间点按实际事实展示，未记录的历史阶段不会补造。</p>
       </details>
-      <Link to={{ page: "issue", id: event.issue_id }}>打开 Issue →</Link>
+      <IssueLink id={event.issue_id}>打开 Issue →</IssueLink>
     </>
   );
 }

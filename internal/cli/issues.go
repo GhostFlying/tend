@@ -70,7 +70,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "issue "+action)
 	if help := issueCommandHelp(action); help != "" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
-	} else if action == "create" || action == "set-acceptance-policy" || action == "create-task" || action == "update-task" || action == "request-owner" || action == "set-status" || action == "update-delivery" {
+	} else if action == "list" || action == "create" || action == "set-acceptance-policy" || action == "create-task" || action == "update-task" || action == "request-owner" || action == "set-status" || action == "update-delivery" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
 	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
@@ -91,6 +91,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	epoch := fs.Int64("epoch", -1, "expected assignment epoch; first requests may read the current value")
 	reason := fs.String("reason", "", "reason retained in the operation record")
 	dry := fs.Bool("dry-run", false, "print the complete original Envelope without sending it")
+	search := fs.String("search", "", "Issue title, T-prefixed short number or prefix, or exact bare number")
 	project := fs.String("project", "", "issue project filter")
 	board := fs.Bool("board", false, "use the global board projection, including direct child progress and activity previews")
 	boardStatus := fs.String("board-status", "", "board work status (display column with --group-review)")
@@ -137,6 +138,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			return usagef("issue list takes no ID and at most one of --roots/--parent")
 		}
 		query := url.Values{"limit": {strconv.Itoa(*limit)}}
+		if *search != "" {
+			query.Set("search", *search)
+		}
 		if *board {
 			query.Set("board", "true")
 		}

@@ -84,7 +84,8 @@ export type Route =
   | {
       page: "im" | "chat" | "more" | "inbox" | "tasks" | "repos" | "hosts" | "settings" | "archive";
     }
-  | { page: "conversation" | "attention" | "issue" | "upgrade"; id: string }
+  | { page: "conversation" | "attention" | "upgrade"; id: string }
+  | { page: "issue"; id: string; message?: string }
   | { page: "task"; id: string; from?: string }
   | ({ page: "usage" } & UsageFilters)
   | { page: "rollout"; id: string; run: string; from?: string; record?: string; source?: "logs" }
@@ -161,7 +162,15 @@ export function parse(input: string | URL): Route {
       }
       if (page === "task")
         return { page, id, ...(query.get("from") ? { from: query.get("from")! } : {}) };
-      return { page: page as "conversation" | "attention" | "issue" | "upgrade", id };
+      if (page === "issue") {
+        const anchor = query.get("message") ?? query.get("message_id") ?? url.hash.slice(1);
+        return {
+          page,
+          id,
+          ...(/^msg_[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(anchor) ? { message: anchor } : {}),
+        };
+      }
+      return { page: page as "conversation" | "attention" | "upgrade", id };
     }
     if (url.pathname !== path) continue;
     if (page === "usage") {
@@ -216,6 +225,7 @@ export function href(route: Route): string {
       if (route[field]) query.set(field, route[field]!);
     }
   }
+  if (route.page === "issue" && route.message) query.set("message", route.message);
   if ((route.page === "task" || route.page === "rollout") && route.from)
     query.set("from", route.from);
   if (route.page === "rollout" && route.source) query.set("source", route.source);
@@ -240,13 +250,18 @@ export function legacyURL(input: string | URL): string | null {
   if (
     url.pathname === "/usage" ||
     url.pathname === "/diagnostics" ||
-    url.pathname.startsWith("/diagnostics/events/")
+    url.pathname.startsWith("/diagnostics/events/") ||
+    url.pathname.startsWith("/issues/")
   )
     return null;
   const issue = url.searchParams.get("issue");
   const task = url.searchParams.get("task");
   if (task) return href({ page: "task", id: task, ...(issue ? { from: issue } : {}) });
-  if (issue) return href({ page: "issue", id: issue });
+  if (issue) {
+    url.searchParams.delete("issue");
+    url.searchParams.delete("work_item");
+    return href({ page: "issue", id: issue }) + url.search + url.hash;
+  }
   if (url.searchParams.has("work_item")) {
     url.searchParams.delete("work_item");
     return url.pathname + url.search + url.hash;
@@ -357,6 +372,18 @@ export function navigate(
   );
   publish();
 }
+/** Replace the alias without creating a new history entry or losing the reading position. */
+export function canonicalizeIssueLocation(alias: string, shortCode: string) {
+  const url = new URL(window.location.href);
+  const route = parse(url);
+  if (route.page !== "issue" || route.id !== alias) return;
+  const path = href({ page: "issue", id: shortCode });
+  if (url.pathname === path) return;
+  window.history.replaceState(window.history.state, "", path + url.search + url.hash);
+  preserving = true;
+  publish();
+}
+
 export function back(fallback: Route | string) {
   startRouter();
   if (current.previous !== undefined && saved.has(current.previous)) window.history.back();

@@ -41,6 +41,8 @@ let thirdPage = false;
 let pagedRevision = 0;
 let pagedChildren = false;
 let pagedActivity = false;
+let shortNumbers = false;
+const historicalMessageID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
 let sharedReviews: SharedDeliveryReviewPage = { items: [], more: false };
 let reportDownload: string | undefined;
 const streams = new Set<ServerResponse>();
@@ -290,6 +292,14 @@ const server = createServer(async (req, res) => {
       },
       configured: true,
     });
+  if (p === "/api/v1/issues" && shortNumbers && u.searchParams.has("search")) {
+    const term = u.searchParams.get("search")?.toLowerCase();
+    const match = ["t12", "t123", "123", "发布流程"].includes(term ?? "");
+    return json({
+      items: match ? [{ ...issue, title: issue.plan.title, project: "sample" }] : [],
+      more: false,
+    });
+  }
   if (p === "/api/v1/issues")
     return json({
       ...(pagedChildren && u.searchParams.get("parent_id") === issue.issue_id
@@ -312,8 +322,60 @@ const server = createServer(async (req, res) => {
     });
   if (p.startsWith("/api/v1/issues/")) {
     const current = p.includes(child.issue_id) ? child : issue;
+    if (shortNumbers && u.searchParams.get("projection") === "identity")
+      return json({
+        issue_id: current.issue_id,
+        short_code: current.short_code,
+        title: current.plan.title,
+      });
     if (p.endsWith("/delivery-reviews")) return json(sharedReviews);
     if (p.endsWith("/activity")) {
+      if (shortNumbers) {
+        const original = activity.items![0]!;
+        const block = original.block!;
+        return json(
+          u.searchParams.has("before")
+            ? {
+                event_seq: seq,
+                more: false,
+                items: [
+                  {
+                    ...original,
+                    position: 1,
+                    block: {
+                      ...block,
+                      trigger: {
+                        ...block.trigger,
+                        message_id: historicalMessageID,
+                        body: "历史消息中的 t123、裸数字 123 和 #123。",
+                      },
+                      items: [
+                        {
+                          ...block.items![0]!,
+                          reply_to: historicalMessageID,
+                          body: "[GitHub #123](https://github.com/example/repo/issues/123) 与 T123",
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }
+            : {
+                event_seq: seq,
+                more: true,
+                next_before: 20,
+                items: Array.from({ length: 15 }, (_, index) => ({
+                  id: `recent-short-code-${index}`,
+                  position: 20 + index,
+                  kind: "issue.updated",
+                  title: `更新 ${index}`,
+                  author: "system",
+                  created_at: now,
+                })),
+              },
+        );
+      }
+
       if (activityDelay) await new Promise((resolve) => setTimeout(resolve, activityDelay));
       if (pagedActivity && u.searchParams.has("before") && holdEarlier) {
         earlierStarted();
@@ -595,6 +657,97 @@ await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
+async function closeFixture() {
+  await browser.close();
+  for (const stream of streams) stream.end();
+  server.closeAllConnections();
+  await new Promise<void>((done) => server.close(() => done()));
+}
+
+async function verifyShortNumbers() {
+  shortNumbers = true;
+  issue.short_code = "T123";
+  const base = `http://127.0.0.1:${(address as { port: number }).port}`;
+  try {
+    for (const width of [1440, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 844 },
+        serviceWorkers: "block",
+        permissions: ["clipboard-read", "clipboard-write"],
+      });
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(10_000);
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        await page.goto(
+          `${base}/issues/${issue.issue_id}?view=conversation#${historicalMessageID}`,
+        );
+        await page.waitForURL(`**/issues/T123?view=conversation#${historicalMessageID}`);
+        const detail = page.getByRole("region", { name: "Issue 详情" });
+        const original = detail.locator(`[data-scroll-id="${historicalMessageID}"]`);
+        await original.getByRole("link", { name: "T123", exact: true }).waitFor();
+        assert.equal(await original.getByRole("link").count(), 1);
+        assert.match((await original.textContent())!, /裸数字 123 和 #123/);
+        assert.equal(await original.getByRole("link").getAttribute("href"), "/issues/T123");
+        assert.equal(
+          await detail.getByRole("link", { name: "GitHub #123" }).getAttribute("href"),
+          "https://github.com/example/repo/issues/123",
+        );
+        await page.waitForFunction((id) => {
+          const rect = document.querySelector(`[data-scroll-id="${id}"]`)?.getBoundingClientRect();
+          return !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+        }, historicalMessageID);
+        await page.getByRole("button", { name: "更多 Issue 操作" }).click();
+        await page.getByRole("menuitem", { name: "复制 Issue 链接" }).click();
+        assert.equal(
+          await page.evaluate(() => navigator.clipboard.readText()),
+          `${base}/issues/T123?view=conversation#${historicalMessageID}`,
+        );
+        await page.goto(`${base}/issues/t123?keep=1#section`);
+        await page.waitForURL("**/issues/T123?keep=1#section");
+        const composer = detail.getByRole("textbox", { name: "消息", exact: true });
+        await composer.fill("参见 t12");
+        const suggestion = detail.getByRole("button", { name: "T123 发布流程整理" });
+        await suggestion.waitFor();
+        await page.screenshot({ path: join(output!, `issue-short-code-composer-${width}.png`) });
+        await composer.press("ArrowDown");
+        await detail.locator('[data-selected="true"]').and(suggestion).waitFor();
+        await composer.press("Enter");
+        assert.equal(await composer.inputValue(), "参见 T123 ");
+        await composer.fill("T:发布流程");
+        await suggestion.click();
+        assert.equal(await composer.inputValue(), "T123 ");
+        await page.goto(`${base}/issues`);
+        await page.getByRole("searchbox", { name: "查找 Issue" }).fill("123");
+        const result = page.getByRole("link", { name: "T123 发布流程整理" });
+        await result.waitFor();
+        assert.equal(await result.getAttribute("href"), "/issues/T123");
+        await result.click();
+        await page.waitForURL("**/issues/T123");
+        await detail.getByText(issue.plan.title, { exact: true }).first().waitFor();
+        assert.equal(await page.locator("vite-error-overlay").count(), 0);
+        assert.deepEqual(errors, []);
+        console.log(`PASS short-code navigation, history, copy, search and composer (${width}px)`);
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
+    delete issue.short_code;
+    shortNumbers = false;
+  }
+}
+
+if (process.argv.includes("--short-numbers-only")) {
+  try {
+    await verifyShortNumbers();
+  } finally {
+    await closeFixture();
+  }
+  process.exit(0);
+}
+
 try {
   {
     const context = await browser.newContext({ serviceWorkers: "block" });
@@ -1440,6 +1593,7 @@ try {
     }
   }
 
+  await verifyShortNumbers();
   for (const width of [1440, 390]) {
     const context = await browser.newContext({
       viewport: { width, height: 844 },
@@ -4988,8 +5142,5 @@ try {
     }
   }
 } finally {
-  await browser.close();
-  for (const s of streams) s.end();
-  server.closeAllConnections();
-  await new Promise<void>((done) => server.close(() => done()));
+  await closeFixture();
 }

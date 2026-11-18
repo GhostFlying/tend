@@ -1,3 +1,4 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { actorLabel } from "./actorLabel.ts";
 import { taskLook } from "../tasks/status.ts";
 import { WorkItemRead } from "../workitems/live.ts";
@@ -214,9 +215,9 @@ export function Inbox({
                     {relativeTime(item.created_at, now)}
                   </time>
                   {item.issue_id && (
-                    <Link to={{ page: "issue", id: item.issue_id }} title={item.issue_id}>
+                    <IssueLink id={item.issue_id} title={item.issue_id}>
                       查看 Issue →
-                    </Link>
+                    </IssueLink>
                   )}
                 </div>
               </article>

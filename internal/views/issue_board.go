@@ -31,8 +31,9 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "assignee kind is required")
 	}
 	// Board scope always means roots, even when another filter is present.
-	base := ` FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.parent_issue_id IS NULL`
-	args := []any{}
+	base := ` FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id JOIN issue_short_numbers n ON n.issue_id=c.issue_id WHERE c.parent_issue_id IS NULL`
+	searchSQL, args := issueSearch(f.Search)
+	base += searchSQL
 	if f.ReadRoot != "" {
 		base += ` AND c.issue_id=?`
 		args = append(args, f.ReadRoot)
@@ -131,7 +132,7 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 			return out, err
 		}
 		card.PullRequests = boardPullRequests(issue.Plan.Deliveries, pullRequests[id])
-		out.Items = append(out.Items, protocol.IssueSummary{EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
+		out.Items = append(out.Items, protocol.IssueSummary{ShortCode: issue.ShortCode, EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
 	}
 	return out, nil
 }

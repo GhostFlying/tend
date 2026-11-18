@@ -3,7 +3,8 @@ import type { IssueReadingState } from "./reading.ts";
 import { Button, Badge, Menu } from "../ui/index.ts";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import { issueHandoffCommand } from "./actions.ts";
-import { navigate } from "../app/router.ts";
+import { href, navigate } from "../app/router.ts";
+import { notify } from "../app/notice.ts";
 import { Chevron, More } from "../shell/icons.tsx";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -13,7 +14,7 @@ import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { Sheet } from "../ui/Modal.tsx";
 import { AttentionDetails } from "../attention/Inbox.tsx";
-import { Markdown } from "../conversation/Markdown.tsx";
+import { copyText, Markdown } from "../conversation/Markdown.tsx";
 import { MessageAttachments } from "../conversation/Attachments.tsx";
 import { MessageImages } from "../conversation/Images.tsx";
 import { ConversationSessionProvider } from "../conversation/session.tsx";
@@ -55,6 +56,7 @@ type Panel =
   | "resume";
 export function IssueDetails({
   id,
+  message,
   connection,
   reading,
   onBack,
@@ -62,6 +64,7 @@ export function IssueDetails({
   onTask,
 }: {
   id: string;
+  message?: string | undefined;
   connection: Connection;
   reading: IssueReadingState;
   onBack(): void;
@@ -252,7 +255,12 @@ export function IssueDetails({
       {!!issue.ancestors?.length && (
         <section>
           <h2>上级 Issue</h2>
-          <Button variant="link" onClick={() => onSelect(issue.ancestors!.at(-1)!.issue_id)}>
+          <Button
+            variant="link"
+            onClick={() =>
+              onSelect(issue.ancestors!.at(-1)!.short_code ?? issue.ancestors!.at(-1)!.issue_id)
+            }
+          >
             {issue.ancestors.at(-1)!.title} →
           </Button>
         </section>
@@ -400,11 +408,17 @@ export function IssueDetails({
             Issues
           </Button>
           {issue?.ancestors?.map((parent) => (
-            <Button key={parent.issue_id} onClick={() => onSelect(parent.issue_id)}>
+            <Button
+              key={parent.issue_id}
+              onClick={() => onSelect(parent.short_code ?? parent.issue_id)}
+            >
               / {parent.title}
             </Button>
           ))}
-          <span>/ {issue?.plan.title ?? "正在读取"}</span>
+          <span>
+            / {issue?.short_code && `${issue.short_code} · `}
+            {issue?.plan.title ?? "正在读取"}
+          </span>
         </nav>
         <span className={styles.spacer} />
         <Button className={styles.sideToggle} onClick={() => setSide(true)}>
@@ -417,6 +431,24 @@ export function IssueDetails({
             icon
             align="end"
             items={[
+              ...(issue.short_code
+                ? [
+                    {
+                      id: "copy-link",
+                      label: "复制 Issue 链接",
+                      onSelect: () => {
+                        const url = new URL(window.location.href);
+                        url.pathname = href({ page: "issue", id: issue.short_code! });
+                        void copyText(url.href).then((ok) =>
+                          notify(
+                            ok ? "已复制 Issue 链接" : "复制 Issue 链接失败",
+                            ok ? "info" : "warn",
+                          ),
+                        );
+                      },
+                    },
+                  ]
+                : []),
               {
                 id: "definition",
                 label: "编辑定义",
@@ -737,6 +769,7 @@ export function IssueDetails({
                 </div>
                 <ConversationSessionProvider conversation={conversation} connection={connection}>
                   <IssueActivity
+                    targetMessage={message}
                     issue={issue}
                     reads={reads}
                     reading={reading}
@@ -1094,7 +1127,7 @@ function ChildIssues({
             variant="ghost"
             className={styles.child}
             key={child.issue_id}
-            onClick={() => onSelect(child.issue_id)}
+            onClick={() => onSelect(child.short_code ?? child.issue_id)}
           >
             <span>{child.title}</span>
             <span className={styles.muted}>

@@ -1,3 +1,5 @@
+import { useIssueSuggestions } from "../conversation/IssueSuggestions.tsx";
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { MessagingDelivery, MessagingMessage, MessagingTrace } from "../api/generated/api.ts";
@@ -68,6 +70,12 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
   const [details, setDetails] = useState<MessagingMessage | null>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const suggestions = useIssueSuggestions(
+    value.text,
+    input,
+    (text) => draft.write(text),
+    Boolean(queue && value.loaded && !saving && connection.status !== "not-owner"),
+  );
   const following = useRef(true);
   const olderAnchor = useRef<{ height: number; top: number } | null>(null);
   const [atEnd, setAtEnd] = useState(true);
@@ -377,9 +385,9 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
               {(m.issue_ids ?? []).length > 0 && !m.interaction && (
                 <div className={styles.links}>
                   {(m.issue_ids ?? []).map((id) => (
-                    <Link key={id} to={{ page: "issue", id }}>
+                    <IssueLink key={id} id={id}>
                       查看相关 Issue
-                    </Link>
+                    </IssueLink>
                   ))}
                 </div>
               )}
@@ -522,7 +530,9 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
               void send();
             }}
           >
+            {suggestions.list}
             <Textarea
+              {...suggestions.attributes}
               ref={input}
               aria-label="发消息给 Tend"
               placeholder="发消息给 Tend…"
@@ -538,8 +548,14 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
                   warn: setError,
                 })
               }
-              onChange={(e) => draftState({ text: e.target.value })}
+              onChange={(e) => {
+                draftState({ text: e.target.value });
+                suggestions.update(e.target, true);
+              }}
+              onSelect={(e) => suggestions.update(e.currentTarget)}
               onKeyDown={(e) => {
+                suggestions.onKeyDown(e);
+                if (e.defaultPrevented) return;
                 if (
                   e.key === "Enter" &&
                   !e.shiftKey &&

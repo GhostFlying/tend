@@ -48,6 +48,7 @@ func GetCanonicalIssue(ctx context.Context, q Querier, id string) (protocol.Issu
 		return current, err
 	}
 	current.Revision, current.Plan, current.Closure = plan.Revision, plan.IssuePlan, plan.Closure
+	current.ShortCode = plan.ShortCode
 	current.CreatedAt, current.UpdatedAt = plan.CreatedAt, plan.UpdatedAt
 	current.DependsOn = []string{}
 	rows, err := q.QueryContext(ctx, `SELECT depends_on FROM issue_dependencies WHERE issue_id=? ORDER BY depends_on`, id)
@@ -100,7 +101,7 @@ func GetCanonicalIssueRevision(ctx context.Context, q Querier, id string, revisi
 	if err != nil {
 		return protocol.Issue{}, err
 	}
-	out := protocol.Issue{AcceptancePolicy: snapshot.AcceptancePolicy, IssueControl: snapshot.Control, Revision: revision, Plan: plan.IssuePlan, Closure: plan.Closure, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt, DependsOn: []string{}}
+	out := protocol.Issue{ShortCode: plan.ShortCode, AcceptancePolicy: snapshot.AcceptancePolicy, IssueControl: snapshot.Control, Revision: revision, Plan: plan.IssuePlan, Closure: plan.Closure, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt, DependsOn: []string{}}
 	for _, edge := range snapshot.Dependencies {
 		if edge.IssueID != id {
 			return protocol.Issue{}, fmt.Errorf("store: issue dependency snapshot identity mismatch")

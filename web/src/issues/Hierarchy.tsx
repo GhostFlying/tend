@@ -87,7 +87,7 @@ function IssueNode({
             />
           </button>
           <div className={styles.treeName}>
-            <button onClick={() => onSelect(item.issue_id)}>{item.title}</button>
+            <button onClick={() => onSelect(item.short_code ?? item.issue_id)}>{item.title}</button>
             {depth === 0 && item.parent_issue_id && (
               <small className={styles.muted}>存在上级 Issue</small>
             )}

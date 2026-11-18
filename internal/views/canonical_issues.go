@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -164,6 +165,7 @@ type CanonicalIssueFilter struct {
 	AssigneeKind   protocol.IssueAssigneeKind
 	AssigneeRef    string
 	ReadRoot       string
+	Search         string
 	Project        string
 	ParentID       *string
 	State          protocol.IssueState
@@ -188,8 +190,11 @@ func CanonicalIssues(ctx context.Context, q store.Querier, f CanonicalIssueFilte
 		return canonicalIssueBoard(ctx, q, f)
 	}
 
-	query := `SELECT c.issue_id FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.issue_id>?`
+	query := `SELECT c.issue_id FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id JOIN issue_short_numbers n ON n.issue_id=c.issue_id WHERE c.issue_id>?`
 	args := []any{f.After}
+	searchSQL, searchArgs := issueSearch(f.Search)
+	query += searchSQL
+	args = append(args, searchArgs...)
 	if f.ReadRoot != "" {
 		query += ` AND c.issue_id IN (WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT i.issue_id FROM issue_controls i JOIN tree p ON i.parent_issue_id=p.id) SELECT id FROM tree)`
 		args = append(args, f.ReadRoot)
@@ -235,10 +240,27 @@ func CanonicalIssues(ctx context.Context, q store.Querier, f CanonicalIssueFilte
 		if err != nil {
 			return out, err
 		}
-		out.Items = append(out.Items, protocol.IssueSummary{EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Execution: &counts})
+		out.Items = append(out.Items, protocol.IssueSummary{ShortCode: issue.ShortCode, EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Execution: &counts})
 	}
 	if out.More && len(ids) > 0 {
 		out.Next = ids[len(ids)-1]
 	}
 	return out, nil
+}
+
+func issueSearch(input string) (string, []any) {
+	term := strings.TrimSpace(input)
+	if term == "" {
+		return "", nil
+	}
+	if digits, prefixed := protocol.IssueNumberInput(term, true); digits != "" {
+		if prefixed {
+			return " AND (CAST(n.number AS TEXT) LIKE ? OR instr(lower(json_extract(w.body_json,'$.title')),lower(?))>0)", []any{digits + "%", term}
+		}
+		return " AND n.number=?", []any{digits}
+	}
+	if protocol.ValidID(protocol.PrefixWorkItem, term) {
+		return " AND c.issue_id=?", []any{term}
+	}
+	return " AND instr(lower(json_extract(w.body_json,'$.title')),lower(?))>0", []any{term}
 }

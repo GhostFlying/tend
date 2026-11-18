@@ -54,6 +54,7 @@ type ProcessScrollPosition = ScrollAnchor | "end";
 
 export function IssueActivity({
   issue,
+  targetMessage,
   reads,
   reading,
   results,
@@ -63,6 +64,7 @@ export function IssueActivity({
   scroll,
 }: {
   issue: IssueView;
+  targetMessage?: string | undefined;
   reads: Issues;
   reading: IssueReadingState;
   results: IssueResult[];
@@ -477,6 +479,42 @@ export function IssueActivity({
     state.value?.more,
     state.value?.next_before,
     state.error,
+    error,
+    loadingEarlier,
+    earlier,
+  ]);
+  const located = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!targetMessage) {
+      located.current = undefined;
+      return;
+    }
+    if (located.current === targetMessage) return;
+    const root = scroll.current;
+    const target = root?.querySelector<HTMLElement>(`[data-scroll-id="${targetMessage}"]`);
+    if (target && root) {
+      const frame = requestAnimationFrame(() => {
+        if (!target.isConnected) return;
+        located.current = targetMessage;
+        reading.pauseFollowing();
+        following.current = false;
+        correctScroll(root, () => target.scrollIntoView({ block: "center" }));
+        readingAnchor.current = captureAnchor(root);
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+    if (state.value?.more && !state.loading && !state.error && !error && !loadingEarlier) {
+      const frame = requestAnimationFrame(() => void earlier());
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [
+    targetMessage,
+    scroll,
+    rows,
+    transcript,
+    reading,
+    correctScroll,
+    state,
     error,
     loadingEarlier,
     earlier,

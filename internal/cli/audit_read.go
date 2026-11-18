@@ -19,8 +19,10 @@ func runDetailShow(ctx context.Context, e *Env, name, route string, args []strin
 	asJSON := fs.Bool("json", false, "print JSON")
 	fields := fs.String("fields", "", "comma-separated top-level JSON fields")
 	revision := int64(-1)
+	var identityOnly bool
 	if name == "issue show" {
 		fs.Int64Var(&revision, "revision", -1, "historical Issue revision")
+		fs.BoolVar(&identityOnly, "identity", false, "show only the current internal ID, permanent short code and title")
 	}
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -31,6 +33,9 @@ func runDetailShow(ctx context.Context, e *Env, name, route string, args []strin
 	}
 	if revision == 0 || revision < -1 {
 		return usagef("revision must be positive when provided")
+	}
+	if identityOnly && revision > 0 {
+		return usagef("--identity shows current identity and cannot be combined with --revision")
 	}
 	var selected []string
 	fs.Visit(func(f *flag.Flag) {
@@ -46,7 +51,9 @@ func runDetailShow(ctx context.Context, e *Env, name, route string, args []strin
 		selected[i] = field
 	}
 	path := expandCommandRoute(route, []string{"id"}, pos)
-	if revision > 0 {
+	if identityOnly {
+		path += "?projection=identity"
+	} else if revision > 0 {
 		path += "?revision=" + strconv.FormatInt(revision, 10)
 	}
 	c, err := e.client(protocol.ScopeOwner)
@@ -54,6 +61,17 @@ func runDetailShow(ctx context.Context, e *Env, name, route string, args []strin
 		return err
 	}
 	o := owner{e: e, c: c}
+	if identityOnly && len(selected) == 0 {
+		var identity protocol.IssueIdentity
+		if err := c.do(ctx, "GET", path, nil, &identity); err != nil {
+			return err
+		}
+		if *asJSON {
+			return o.printJSON(identity)
+		}
+		_, err := fmt.Fprintf(e.Stdout, "%s  %s  %s\n", identity.ShortCode, identity.IssueID, identity.Title)
+		return err
+	}
 	if name == "issue show" && len(selected) == 0 {
 		var view protocol.IssueView
 		if err := c.do(ctx, "GET", path, nil, &view); err != nil {
@@ -130,9 +148,11 @@ Present null, empty and unknown values are preserved. Omit it for full output.
 `
 	switch name {
 	case "issue show":
-		return `Usage: tend issue show <issue-id> [--json] [--revision <issue-revision>] [--fields <keys>]
+		return `Usage: tend issue show <issue-id|short-code|number> [--json] [--identity | --revision <issue-revision>] [--fields <keys>]
 
-Read one Issue. Use --revision for a historical Issue revision.
+Read one Issue by internal ID, permanent short code such as T123, or bare number.
+Use --identity for only the current internal ID, short code and title.
+Use --revision for a historical Issue revision.
 ` + fieldsHelp + `
 Common audit fields: issue_id, revision, assignment_epoch, effective_work_status,
 manager, responsibility_runs, tasks, progress, depends_on, delivery_duties.

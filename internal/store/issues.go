@@ -11,33 +11,37 @@ import (
 // GetIssue reads the current aggregate.
 func GetIssue(ctx context.Context, q Querier, id string) (protocol.WorkItem, error) {
 	var raw string
-	if err := q.QueryRowContext(ctx, `SELECT body_json FROM work_items WHERE work_item_id=?`, id).Scan(&raw); err != nil {
+	var number int64
+	if err := q.QueryRowContext(ctx, `SELECT w.body_json,n.number FROM work_items w JOIN issue_short_numbers n ON n.issue_id=w.work_item_id WHERE w.work_item_id=?`, id).Scan(&raw, &number); err != nil {
 		return protocol.WorkItem{}, notFound(err, "work item "+id)
 	}
 	var w protocol.WorkItem
 	err := json.Unmarshal([]byte(raw), &w)
+	w.ShortCode = protocol.IssueShortCode(number)
 	return w, err
 }
 
 // GetIssueRevision reads an immutable historical revision.
 func GetIssueRevision(ctx context.Context, q Querier, id string, revision int64) (protocol.WorkItem, error) {
 	var raw string
-	if err := q.QueryRowContext(ctx, `SELECT body_json FROM work_item_revisions WHERE work_item_id=? AND revision=?`, id, revision).Scan(&raw); err != nil {
+	var number int64
+	if err := q.QueryRowContext(ctx, `SELECT r.body_json,n.number FROM work_item_revisions r JOIN issue_short_numbers n ON n.issue_id=r.work_item_id WHERE r.work_item_id=? AND r.revision=?`, id, revision).Scan(&raw, &number); err != nil {
 		return protocol.WorkItem{}, notFound(err, "work item revision")
 	}
 	var w protocol.WorkItem
 	err := json.Unmarshal([]byte(raw), &w)
+	w.ShortCode = protocol.IssueShortCode(number)
 	return w, err
 }
 
 // ListIssues returns the ledger, optionally filtered by project and status.
 func ListIssues(ctx context.Context, q Querier, project, status string) ([]protocol.WorkItem, error) {
-	return queryIssues(ctx, q, `SELECT body_json FROM work_items WHERE (?='' OR project=?) AND (?='' OR status=?) ORDER BY updated_at DESC,work_item_id`, project, project, status, status)
+	return queryIssues(ctx, q, `SELECT body_json,n.number FROM work_items w JOIN issue_short_numbers n ON n.issue_id=w.work_item_id WHERE (?='' OR project=?) AND (?='' OR status=?) ORDER BY updated_at DESC,work_item_id`, project, project, status, status)
 }
 
 // ListTaskIssues returns all responsibilities covered by a shared task.
 func ListTaskIssues(ctx context.Context, q Querier, taskID string) ([]protocol.WorkItem, error) {
-	return queryIssues(ctx, q, `SELECT body_json FROM work_items WHERE work_item_id IN (SELECT work_item_id FROM work_item_task_links WHERE task_id=?) ORDER BY work_item_id`, taskID)
+	return queryIssues(ctx, q, `SELECT body_json,n.number FROM work_items w JOIN issue_short_numbers n ON n.issue_id=w.work_item_id WHERE work_item_id IN (SELECT work_item_id FROM work_item_task_links WHERE task_id=?) ORDER BY work_item_id`, taskID)
 }
 func queryIssues(ctx context.Context, q Querier, query string, args ...any) ([]protocol.WorkItem, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
@@ -49,12 +53,14 @@ func queryIssues(ctx context.Context, q Querier, query string, args ...any) ([]p
 	for rows.Next() {
 		var raw string
 		var w protocol.WorkItem
-		if err := rows.Scan(&raw); err != nil {
+		var number int64
+		if err := rows.Scan(&raw, &number); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(raw), &w); err != nil {
 			return nil, err
 		}
+		w.ShortCode = protocol.IssueShortCode(number)
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -71,6 +77,8 @@ func (t *Tx) SaveIssue(ctx context.Context, w protocol.WorkItem, expected int64,
 
 // saveIssueProjection is shared only with the canonical aggregate saver.
 func (t *Tx) saveIssueProjection(ctx context.Context, w protocol.WorkItem, expected int64, reason any) error {
+	// Short codes are a separate immutable projection, including for historical reads.
+	w.ShortCode = ""
 	raw, err := json.Marshal(w)
 	if err != nil {
 		return err

@@ -72,6 +72,7 @@ type IssueBlocker struct {
 // Issue is the canonical aggregate shared by owner API and coordination.
 // Legacy ledger identities remain opaque; the public identity is issue_id.
 type Issue struct {
+	ShortCode        string                 `json:"short_code,omitempty"`
 	AcceptancePolicy *IssueAcceptancePolicy `json:"acceptance_policy,omitempty"`
 	IssueControl
 	Revision  int64         `json:"revision"`

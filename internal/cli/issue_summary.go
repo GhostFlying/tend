@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -14,9 +15,9 @@ import (
 
 func printIssuePage(e *Env, p protocol.IssuePage) error {
 	w := tabwriter.NewWriter(e.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ISSUE\tTITLE\tSTATE\tOWNER")
+	fmt.Fprintln(w, "ISSUE\tINTERNAL ID\tTITLE\tSTATE\tOWNER")
 	for _, v := range p.Items {
-		fmt.Fprintf(w, "%s\t%s\t%s / %s\t%s\n", v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s / %s\t%s\n", v.ShortCode, v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
 		execution := v.Execution
 		if v.Board != nil {
 			execution = &v.Board.Execution
@@ -74,7 +75,10 @@ func printIssueExecution(out io.Writer, counts protocol.ExecutionCounts) {
 
 func printIssueView(e *Env, v protocol.IssueView) error {
 	out := e.Stdout
-	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", v.IssueID, v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
+	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", cmp.Or(v.ShortCode, v.IssueID), v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
+	if v.ShortCode != "" {
+		fmt.Fprintf(out, "Internal ID: %s\n", v.IssueID)
+	}
 	if v.Manager != nil {
 		fmt.Fprintf(out, "Owner session: %s; task: %s\n", v.Manager.State, v.Manager.TaskID)
 		printRunObservation(out, v.Manager.Observation)

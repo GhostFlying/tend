@@ -36,15 +36,7 @@ with tend operation submit --file original-envelope.json.
 func issueCommandHelp(action string) string {
 	switch action {
 	case "show":
-		return `Usage: tend issue show <issue-id> [--json] [--revision <issue-revision>]
-
-Read one Issue. --json includes depends_on, the complete list of explicit
-Issue IDs this Issue depends on for completion. It also includes revision,
-assignment_epoch, parent_issue_id when set, and recorded progress.
-Use --revision to inspect a historical Issue revision.
-
-  ` + issueShowExample + ` | jq '.depends_on // []'
-`
+		return auditReadHelp("issue show")
 	case "set-dependencies", "dependencies":
 		alias := ""
 		if action == "dependencies" {

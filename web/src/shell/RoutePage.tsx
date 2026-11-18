@@ -1,6 +1,22 @@
-import { Component, lazy, Suspense, useLayoutEffect, useRef, type ReactNode } from "react";
+import { shortIssueCode, useIssueIdentity } from "../issues/identity.ts";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import type { Connection } from "../api/client.ts";
-import { back, href, navigate, restorePage, type Route } from "../app/router.ts";
+import {
+  back,
+  canonicalizeIssueLocation,
+  href,
+  navigate,
+  restorePage,
+  type Route,
+} from "../app/router.ts";
 import { useServices } from "../app/services.tsx";
 const Diagnostics = lazy(() =>
   import("../diagnostics/Diagnostics.tsx").then((m) => ({ default: m.Diagnostics })),
@@ -76,6 +92,48 @@ export class RouteErrorBoundary extends Component<RouteBoundaryProps, RouteBound
   }
 }
 
+function IssueRoute({
+  alias,
+  message,
+  connection,
+  reading,
+}: {
+  alias: string;
+  message: string | undefined;
+  connection: Connection;
+  reading: IssueReadingStates;
+}) {
+  const { openIssue, openTask } = useServices();
+  const identity = useIssueIdentity(alias);
+  const code = identity && identity !== "missing" ? identity.short_code : "";
+  const id = identity && identity !== "missing" ? identity.issue_id : alias;
+  useEffect(() => {
+    if (code) canonicalizeIssueLocation(alias, code);
+  }, [alias, code]);
+  if (shortIssueCode(alias) && !code) {
+    return (
+      <section className={styles.page}>
+        <PageHeader
+          title={identity === "missing" ? "无法读取 Issue" : "正在读取 Issue"}
+          onBack={() => back({ page: "issues" })}
+        />
+      </section>
+    );
+  }
+  return (
+    <IssueDetails
+      key={id}
+      id={id}
+      message={message}
+      connection={connection}
+      reading={reading.get(id)}
+      onBack={() => back({ page: "issues" })}
+      onSelect={openIssue}
+      onTask={openTask}
+    />
+  );
+}
+
 export function RoutePage({
   route,
   connection,
@@ -85,7 +143,7 @@ export function RoutePage({
   connection: Connection;
   reading: IssueReadingStates;
 }) {
-  const { openIssue, openTask } = useServices();
+  const { openIssue } = useServices();
   const outlet = useRef<HTMLDivElement>(null);
   const identity = href(route);
   useLayoutEffect(() => {
@@ -114,14 +172,11 @@ export function RoutePage({
       break;
     case "issue":
       content = (
-        <IssueDetails
-          key={route.id}
-          id={route.id}
+        <IssueRoute
+          alias={route.id}
+          message={route.message}
           connection={connection}
-          reading={reading.get(route.id)}
-          onBack={() => back({ page: "issues" })}
-          onSelect={openIssue}
-          onTask={openTask}
+          reading={reading}
         />
       );
       break;

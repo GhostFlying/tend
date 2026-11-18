@@ -1,3 +1,4 @@
+import { useIssueSuggestions } from "./IssueSuggestions.tsx";
 // The message box. A message goes into the outbox with what the owner saw
 // when writing it: the reply it answers and the last item shown (v0.1
 // §6.2). While a reply is in progress and nothing is written, the send
@@ -64,6 +65,12 @@ export function Composer({
   const interrupt = useMemo(() => new Interrupt(client), [client]);
   const pending = useStore(interrupt.state);
   const blocked = queue === null || connection.status === "not-owner" || !loaded;
+  const suggestions = useIssueSuggestions(
+    draft,
+    textarea,
+    (text) => composerDraft.write(text),
+    !blocked && !persisting,
+  );
   const body = draft.trim();
   const reply = latestReply(conversation.items);
   const owner = queueState.pages.owner;
@@ -177,6 +184,8 @@ export function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    suggestions.onKeyDown(e);
+    if (e.defaultPrevented) return;
     // Enter sends on a keyboard; on a touch screen it starts a new line.
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touch) {
       e.preventDefault();
@@ -268,11 +277,17 @@ export function Composer({
           ))}
         </ul>
       )}
+      {suggestions.list}
       <textarea
+        {...suggestions.attributes}
         ref={textarea}
         rows={2}
         value={draft}
-        onChange={(e) => composerDraft.write(e.target.value)}
+        onChange={(e) => {
+          composerDraft.write(e.target.value);
+          suggestions.update(e.target, true);
+        }}
+        onSelect={(e) => suggestions.update(e.currentTarget)}
         onKeyDown={onKeyDown}
         onPaste={(event) => {
           pasteAttachments(event, {

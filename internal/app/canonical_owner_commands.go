@@ -409,6 +409,13 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 	if err := tx.SaveCanonicalIssue(ctx, next, expected, store.IssueRevisionProvenance{AdmissionDefinition: true, RequestDomain: x.RequestDomain(), Actor: actor, RequestID: x.Env.RequestID, SourceMessageID: source.SourceMessageID, CoordinationExecutionID: x.coordinationID, EffectSeq: x.coordinationEffectSeq, Reason: reason}); err != nil {
 		return Outcome{}, err
 	}
+	if expected == 0 {
+		shortCode, err := store.IssueShortCode(ctx, tx.Q(), next.IssueID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		next.ShortCode = shortCode
+	}
 	if expected > 0 && ((next.BoardStatus() == protocol.IssueBacklog && previous.BoardStatus() != protocol.IssueBacklog) || (next.State == protocol.IssuePaused && previous.State != protocol.IssuePaused)) {
 		if err := recordIssuePause(ctx, x, tx, next); err != nil {
 			return Outcome{}, err

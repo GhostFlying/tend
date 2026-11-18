@@ -289,7 +289,7 @@ func NamedSpecs(purpose agentconfig.Purpose) []harness.ToolSpec {
 		}
 		out = append(out, harness.ToolSpec{Name: "attentions_read", Description: "Read the same original decision/answer and attention identity used by owner Inbox.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedAttentionReadArgs{})))})
 	}
-	out = append(out, harness.ToolSpec{Name: "issues_read", Description: "Read an Issue and its primary execution/completion facts; managers are limited to their Issue and descendants.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedReadArgs{})))})
+	out = append(out, harness.ToolSpec{Name: "issues_read", Description: "Read an Issue and its primary execution/completion facts; managers are limited to their Issue and descendants. Use short_code in human references and /issues/<short_code> links, and issue_id for tool inputs.", InputSchema: exportSchema(json.RawMessage(argumentSchema(hostedReadArgs{})))})
 	out = append(out, harness.ToolSpec{Name: "agents_hosted_list", Description: "Read accepted hosted identities, roles and configuration revision. Private instructions and local credentials are not exposed.", InputSchema: exportSchema(json.RawMessage(argumentSchema(turnReadArgs{})))})
 	if purpose == agentconfig.IssueManager {
 		out = append(out, harness.ToolSpec{Name: "download_file", Description: "Download an Issue attachment or evidence file by file_id to the runner private directory, verifying original size and SHA256. Returns only the runner-local path.", InputSchema: json.RawMessage(`{"type":"object","properties":{"file_id":{"type":"string"}},"required":["file_id"],"additionalProperties":false}`)})
