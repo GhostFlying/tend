@@ -41,9 +41,10 @@ func Deadlines(ctx context.Context, q store.Querier, issue string) ([]protocol.I
 const (
 	plannerAttentionJoinSQL = ` LEFT JOIN attentions a ON a.attention_id=json_extract(p.body_json,'$.attention_id')
  LEFT JOIN attention_responsibilities r ON r.attention_id=a.attention_id`
-	ownerPlannerRecipientSQL = `(CASE WHEN a.attention_id IS NULL
- THEN json_extract(p.body_json,'$.responsible') IN ('owner', ?)
- ELSE ` + ownerAttentionRecipientSQL + ` END)`
+	// Informational links and unrouted records do not override the action's recipient.
+	ownerPlannerRecipientSQL = `(CASE WHEN r.attention_id IS NOT NULL AND ` + actionableAttentionSQL + `
+ THEN ` + ownerAttentionRecipientSQL + `
+ ELSE json_extract(p.body_json,'$.responsible') IN ('owner', ?) END)`
 )
 
 func NextActions(ctx context.Context, q store.Querier, kind, issue string) (protocol.NextActionPage, error) {
@@ -57,7 +58,7 @@ func OwnerNextActions(ctx context.Context, q store.Querier, kind, issue, owner s
  AND (p.kind<>'user_action' OR COALESCE(r.recipient_kind,'owner')='owner')`
 	args := []any{kind, kind, issue, issue}
 	if owner != "" {
-		query += ` AND (p.kind<>'user_action' OR ` + ownerPlannerRecipientSQL + `)`
+		query += ` AND p.kind='user_action' AND ` + ownerPlannerRecipientSQL
 		args = append(args, owner, owner)
 	}
 	rows, err := q.QueryContext(ctx, query+` ORDER BY p.kind,p.rank=0,p.rank,p.entry_id`, args...)

@@ -853,7 +853,7 @@ test("canonical global reads invalidate before the selected-chat filter and stop
   const chats = live.directChats.openList();
   await api.answer("/api/v1/issues/issue-one", { issue_id: "issue-one", revision: 1 });
   await api.answer("/api/v1/inbox", { items: [], more: false });
-  await api.answer("/api/v1/next-actions", { items: [], deadlines: [] });
+  await api.answer("/api/v1/next-actions?owner_only=true", { items: [], deadlines: [] });
   await api.answer("/api/v1/agent-conversations", { items: [] });
   await Promise.all([issue, inbox, next, chats]);
   live.apply(
@@ -862,13 +862,13 @@ test("canonical global reads invalidate before the selected-chat filter and stop
   expect(api.pending()).toEqual([
     "/api/v1/issues/issue-one",
     "/api/v1/inbox",
-    "/api/v1/next-actions",
+    "/api/v1/next-actions?owner_only=true",
     "/api/v1/agent-conversations?search=&status=&projection=issues",
   ]);
   expect(live.conversation.get().items).toEqual([]);
   await api.answer("/api/v1/issues/issue-one", { issue_id: "issue-one", revision: 2 });
   await api.answer("/api/v1/inbox", { items: [], more: false });
-  await api.answer("/api/v1/next-actions", {
+  await api.answer("/api/v1/next-actions?owner_only=true", {
     items: [
       { entry_id: "server-order-first", rank: 9 },
       { entry_id: "server-order-second", rank: 1 },

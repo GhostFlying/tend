@@ -200,6 +200,17 @@ func TestPlannerDeadlineCLIRealHTTPAndGeneratedViews(t *testing.T) {
 	if status := e.do("GET", "/api/v1/next-actions?issue_id="+issue.IssueID, token, nil, &next); status != http.StatusOK || len(next.Items) != 1 || len(next.Deadlines) != 1 || next.Deadlines[0].DeadlineID != d.DeadlineID {
 		t.Fatal(status, next)
 	}
+	// The opt-in owner list uses the real CLI and HTTP dispatch. The original
+	// general list above retains its existing query and response.
+	stdout.Reset()
+	stderr.Reset()
+	if code := cli.Main(t.Context(), env, []string{"next-action", "list", "--owner-only", "--issue", issue.IssueID}); code != 0 {
+		t.Fatal(code, stdout.String(), stderr.String())
+	}
+	var personal protocol.NextActionPage
+	if err := json.Unmarshal(stdout.Bytes(), &personal); err != nil || len(personal.Items) != 1 || personal.Items[0].EntryID != next.Items[0].EntryID {
+		t.Fatal(err, personal)
+	}
 	detail := issueDetailHTTP(t, e, token, issue.IssueID)
 	if len(detail.Deadlines) != 1 || detail.Attentions == nil {
 		t.Fatal("detail lost shared identities", detail)

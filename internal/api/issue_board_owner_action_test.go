@@ -66,7 +66,7 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	first := createAttention(running.IssueID, "action", "Check the draft")
 	second := createAttention(running.IssueID, "action", "Review the evidence")
 	createAttention(later.IssueID, "action", "Read the second result")
-	createAttention(system.IssueID, "information", "System queue has changed")
+	notice := createAttention(system.IssueID, "information", "System queue has changed")
 	internal := createAttention(system.IssueID, "decision", "Internal Agent question")
 	other := createAttention(outsider.IssueID, "action", "Assigned to the other owner")
 	createAttention(child.IssueID, "action", "Read the child decision")
@@ -75,6 +75,8 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	putPlanner(review.IssueID, "", ownerLogin, "user_action", "blocked")
 	putPlanner(system.IssueID, internal.AttentionID, ownerLogin, "user_action", "open")
 	putPlanner(system.IssueID, "", ownerLogin, "issue_priority", "open")
+	legacyAction := putPlanner(system.IssueID, "", "本人", "user_action", "open")
+	linkedOther := putPlanner(system.IssueID, notice.AttentionID, otherLogin, "user_action", "open")
 	putPlanner(outsider.IssueID, "", otherLogin, "user_action", "open")
 
 	// Seed the current routing snapshots independently of the HTTP reads. Owner
@@ -102,6 +104,22 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
+	const actionsPath = "/api/v1/next-actions?kind=user_action&issue_id="
+	var listing protocol.NextActionPage
+	if code := e.do("GET", actionsPath+system.IssueID, token, nil, &listing); code != http.StatusOK ||
+		!slices.ContainsFunc(listing.Items, func(entry protocol.PlannerEntry) bool { return entry.EntryID == legacyAction.EntryID }) {
+		t.Fatal("the general list must retain legacy free-text responsibility", code, listing)
+	}
+	if code := e.do("GET", actionsPath+system.IssueID+"&owner_only=true", token, nil, &listing); code != http.StatusOK || len(listing.Items) != 0 {
+		t.Fatal("an informational link must not infer owner responsibility", code, listing)
+	}
+	e.peer.set(netx.Identity{User: otherLogin})
+	if code := e.do("GET", actionsPath+system.IssueID+"&owner_only=true", otherSession.Token, nil, &listing); code != http.StatusOK ||
+		len(listing.Items) != 1 || listing.Items[0].EntryID != linkedOther.EntryID {
+		t.Fatal("the explicitly named owner must retain the linked planner action", code, listing)
+	}
+	e.peer.set(netx.Identity{User: ownerLogin})
 
 	const boardPath = "/api/v1/issues?board=true&waiting_on_me=true"
 	page := func(bearer, query string) protocol.IssuePage {
@@ -165,6 +183,9 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	e.peer.set(netx.Identity{User: otherLogin})
 	if got := page(otherSession.Token, "&board_status=backlog"); !slices.Equal(ids(got), []string{outsider.IssueID}) {
 		t.Fatal("explicit owner routing did not match the other owner", got)
+	}
+	if got := page(otherSession.Token, "&board_status=in_progress"); !slices.Contains(ids(got), system.IssueID) {
+		t.Fatal("the named owner's board must include the action linked to the notice", got)
 	}
 	e.peer.set(netx.Identity{User: ownerLogin})
 	for _, a := range []protocol.Attention{first, second} {

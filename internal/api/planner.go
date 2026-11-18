@@ -18,8 +18,17 @@ func (s *Server) deadline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (s *Server) nextActions(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	raw := query.Get("owner_only")
+	if query.Has("owner_only") && raw != "true" && raw != "false" {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "owner_only must be a boolean"))
+		return
+	}
 	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
-		return views.OwnerNextActions(r.Context(), q, r.URL.Query().Get("kind"), r.URL.Query().Get("issue_id"), p.Subject)
+		if raw == "true" {
+			return views.OwnerNextActions(r.Context(), q, query.Get("kind"), query.Get("issue_id"), p.Subject)
+		}
+		return views.NextActions(r.Context(), q, query.Get("kind"), query.Get("issue_id"))
 	})
 }
 func (s *Server) plannerEntry(w http.ResponseWriter, r *http.Request) {

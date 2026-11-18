@@ -51,10 +51,10 @@ export class AttentionData {
   }
 
   openNext(kind?: string, issueID?: string): Promise<void> {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ owner_only: "true" });
     if (kind) query.set("kind", kind);
     if (issueID) query.set("issue_id", issueID);
-    return this.next.open(`/api/v1/next-actions${query.size ? `?${query}` : ""}`);
+    return this.next.open(`/api/v1/next-actions?${query}`);
   }
 
   openDeadlines(issueID?: string): Promise<void> {
