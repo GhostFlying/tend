@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf16"
@@ -93,36 +94,105 @@ func publishCompletedIssues(ctx context.Context, x *Exec, tx *store.Tx, source s
 	if err != nil || len(ids) == 0 {
 		return err
 	}
-	var body strings.Builder
+	// Keep prose brief while giving every member its own result and exact
+	// evidence locators. Implied membership and titles cannot identify proof.
 	const introduction = "约定的工作已全部完成。"
-	body.WriteString(introduction)
-	// Even a long agreement yields one text part on every configured channel.
-	// UTF-8 byte length overestimates the UTF-16 units in the introduction.
-	memberBudget := (feishuTextPartLimit-len(introduction))/len(ids) - 2
+	proseBudget := max(48, min(320, feishuTextPartLimit/len(ids)))
+	var members [][]string
+	var sections []string
 	for _, id := range ids {
 		issue, err := store.GetCanonicalIssue(ctx, tx.Q(), id)
 		if err != nil {
 			return err
 		}
-		// Linked Issues retain the full result and original supporting evidence.
-		text := reportExcerpt(issue.Plan.Title, memberBudget/3) + "\n" + issue.Closure.Reason
-		if evidence := issue.Closure.Evidence; len(evidence) > 0 && evidence[0].Summary != issue.Closure.Reason {
-			text += "\n" + evidence[0].Summary
-		}
-		body.WriteString("\n\n" + reportExcerpt(text, memberBudget))
+		lines := completionReportMember(issue, proseBudget)
+		members = append(members, lines)
+		sections = append(sections, strings.Join(lines, "\n"))
 	}
+	body := introduction + "\n\n" + strings.Join(sections, "\n\n")
 	id := x.IDs.New(protocol.PrefixMessage)
+	parts := publicationTextParts{
+		telegram: completionReportParts(introduction, members, id, messagingTextPartLimit),
+		feishu:   completionReportParts(introduction, members, id, feishuTextPartLimit),
+	}
 	// A system summary carries no actor authority and originates in Main even
 	// when the closing write came from one of the individual Issue owners.
-	if _, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: "main", MessageID: id, Author: "system", Body: body.String(), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
+	if _, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: "main", MessageID: id, Author: "system", Body: body, RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return err
 	}
-	pub := protocol.MessagingPublication{MessageID: id, Body: body.String(), Reason: "Requested combined Issue result", Purpose: "final", SourceMessageIDs: []string{source}, IssueIDs: ids}
-	if err := registerCommunicationPublication(ctx, x, tx, id, pub, ""); err != nil {
+	pub := protocol.MessagingPublication{MessageID: id, Body: body, Reason: "Requested combined Issue result", Purpose: "final", SourceMessageIDs: []string{source}, IssueIDs: ids}
+	if err := registerCommunicationPublication(ctx, x, tx, id, pub, "", parts); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `UPDATE issue_completion_reports SET published_message_id=? WHERE source_message_id=? AND published_message_id IS NULL`, id, source)
 	return err
+}
+
+func completionReportMember(issue protocol.Issue, proseBudget int) []string {
+	title := reportExcerpt(issue.Plan.Title, proseBudget/3)
+	result := issue.Closure.Reason
+	if evidence := issue.Closure.Evidence; len(evidence) > 0 && evidence[0].Summary != result {
+		result += "\n" + evidence[0].Summary
+	}
+	lines := []string{title + "（" + issue.IssueID + "）\n" + reportExcerpt(result, proseBudget) + "\n依据"}
+	seen := make(map[string]bool)
+	for _, evidence := range issue.Closure.Evidence {
+		refs := []string{evidence.Reference}
+		if evidence.Observation != nil {
+			refs = append(refs, evidence.Observation.URL)
+		}
+		for _, ref := range refs {
+			if ref != "" && !seen[ref] {
+				lines = append(lines, ref)
+				seen[ref] = true
+			}
+		}
+	}
+	return lines
+}
+
+// Keep each member together when possible and split large sections between
+// whole references. An individual reference longer than an entire transport
+// message remains verbatim in the original report, addressable by its ID.
+func completionReportParts(introduction string, members [][]string, messageID string, limit int) []string {
+	sections := []string{introduction}
+	for member, lines := range members {
+		display := slices.Clone(lines)
+		for i, line := range display {
+			if reportTextUnits(line) > limit {
+				display[i] = fmt.Sprintf("完整引用见原报告 %s，第%d项第%d条依据。", messageID, member+1, i)
+			}
+		}
+		sections = append(sections, packReportText(display, "\n", limit)...)
+	}
+	return packReportText(sections, "\n\n", limit)
+}
+
+func packReportText(blocks []string, separator string, limit int) []string {
+	var parts []string
+	start, used := 0, 0
+	separatorUnits := reportTextUnits(separator)
+	for i, block := range blocks {
+		size := reportTextUnits(block)
+		if i > start {
+			if used+separatorUnits+size > limit {
+				parts = append(parts, strings.Join(blocks[start:i], separator))
+				start, used = i, 0
+			} else {
+				used += separatorUnits
+			}
+		}
+		used += size
+	}
+	return append(parts, strings.Join(blocks[start:], separator))
+}
+
+func reportTextUnits(s string) int {
+	units := 0
+	for _, r := range s {
+		units += utf16.RuneLen(r)
+	}
+	return units
 }
 
 func reportExcerpt(s string, limit int) string {

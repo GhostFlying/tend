@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -17,12 +19,12 @@ func setReportForTest(t *testing.T, h *harness, source string, linked, members [
 	}
 }
 
-func closeReportMember(t *testing.T, h *harness, issue protocol.Issue, source string, kind protocol.IssueClosureKind, reason string) {
+func closeReportMember(t *testing.T, h *harness, issue protocol.Issue, source string, kind protocol.IssueClosureKind, reason string) protocol.Issue {
 	t.Helper()
 	p := canonicalLifecycleSourceEndpoint(t, h, issue, source)
 	p.Closure = canonicalLifecycleClosure(issue, kind).Closure
 	p.Closure.Reason = reason
-	canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "close", p))
+	return canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "close", p))
 }
 
 func TestCombinedIssueReportPublishesOnceFromCurrentClosures(t *testing.T) {
@@ -70,6 +72,126 @@ func TestCombinedIssueReportPublishesOnceFromCurrentClosures(t *testing.T) {
 	reply, err := h.app.MessagingMessage(t.Context(), messageID(t, op))
 	if err != nil || reply.ConversationID != "main" || reply.ReplyTo != msg.MessageID {
 		t.Fatal(reply, err)
+	}
+}
+
+func TestCombinedIssueReportMemberReferencesReachIM(t *testing.T) {
+	h := newHarness(t)
+	bindIMTelegram(t, h)
+	bindFeishuFixture(t, h)
+	const members = 50
+	issues := make([]protocol.Issue, members)
+	var ids []string
+	for i := range issues {
+		issues[i] = createCanonicalOwnerTestIssue(t, h)
+		ids = append(ids, issues[i].IssueID)
+	}
+	source, _ := h.say("Send the changes and their evidence together when all are complete.")
+	setReportForTest(t, h, source, ids, ids)
+	for i, issue := range issues {
+		result := fmt.Sprintf("已验证第%d项。", i+1) + strings.Repeat("结果已核实。🟢", 150)
+		issues[i] = closeReportMember(t, h, issue, source, protocol.WorkItemClosureCompleted, result)
+	}
+	report := h.associations(source).CompletionReport.PublishedMessageID
+	for _, destination := range []string{MessagingDestination, FeishuDestination} {
+		t.Run(destination, func(t *testing.T) {
+			var sent []string
+			for {
+				delivery, _, ok, err := h.app.NextDelivery(t.Context(), destination)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !ok {
+					break
+				}
+				var message, body string
+				receipt := DeliveryResult{Outcome: Delivered}
+				if destination == MessagingDestination {
+					var part MessagingPart
+					if err := json.Unmarshal(delivery.Payload, &part); err != nil {
+						t.Fatal(err)
+					}
+					if err := h.app.ValidateMessagingPart(t.Context(), part); err != nil {
+						t.Fatal(err)
+					}
+					message, body = part.MessageID, part.Body
+					receipt.ExternalMessageID = int64(len(sent) + 100)
+				} else {
+					var part FeishuPart
+					if err := json.Unmarshal(delivery.Payload, &part); err != nil {
+						t.Fatal(err)
+					}
+					if err := h.app.ValidateFeishuPart(t.Context(), part); err != nil {
+						t.Fatal(err)
+					}
+					message, body = part.MessageID, part.Body
+					receipt.ExternalMessageReference = fmt.Sprintf("im-%d", len(sent))
+				}
+				limit := messagingTextPartLimit
+				if destination == FeishuDestination {
+					limit = feishuTextPartLimit
+				}
+				if size := reportTextUnits(body); size == 0 || size > limit {
+					t.Fatalf("sent %d text units with limit %d", size, limit)
+				}
+				if message != report {
+					t.Fatalf("received a different publication %q", message)
+				}
+				sent = append(sent, body)
+				if err := h.app.FinishDelivery(t.Context(), delivery, receipt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, issue := range issues {
+				ref := issue.Closure.Evidence[0].Reference
+				found := false
+				for _, body := range sent {
+					if strings.Contains(body, issue.IssueID) && strings.Contains(body, ref) && strings.Contains(body, fmt.Sprintf("已验证第%d项。", i+1)) {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("channel lost result or intact references for %s (%s)", issue.IssueID, ref)
+				}
+			}
+			if len(sent) < 2 {
+				t.Fatal("expected multiple parts for a large report")
+			}
+		})
+	}
+}
+
+func TestCombinedIssueReportKeepsLongEvidenceReferences(t *testing.T) {
+	const issueID = "wi_member"
+	const reportID = "msg_original"
+	url := "https://example.org/" + strings.Repeat("p", 900)
+	oversized := "https://example.org/" + strings.Repeat("q", feishuTextPartLimit)
+	observation := &protocol.DeliveryObservation{DeliverySnapshot: protocol.DeliverySnapshot{URL: oversized}}
+	issue := protocol.Issue{IssueID: issueID, Plan: protocol.IssuePlan{Title: "Changes ready"}, Closure: &protocol.IssueClosure{
+		Reason: strings.Repeat("变更🟢", 60),
+		Evidence: []protocol.IssueEvidence{
+			{Kind: protocol.WorkItemEvidenceDelivery, Reference: "verified-candidate", Summary: "Observed", Observation: observation},
+			{Kind: protocol.WorkItemEvidenceDelivery, Reference: url, Summary: "Second check"},
+		},
+	}}
+	member := completionReportMember(issue, 120)
+	original := strings.Join(member, "\n")
+	if !strings.Contains(original, oversized) || !strings.Contains(original, "verified-candidate") || !strings.Contains(original, url) {
+		t.Fatal("original report lost its evidence")
+	}
+	parts := completionReportParts("已完成", [][]string{member}, reportID, feishuTextPartLimit)
+	body := strings.Join(parts, "\n")
+	if !strings.Contains(body, url) || !strings.Contains(body, "verified-candidate") || !strings.Contains(body, reportID) || strings.Contains(body, strings.Repeat("q", 5)) {
+		t.Fatal("a reference was cut or lost its original locator", body)
+	}
+	for _, part := range parts {
+		if reportTextUnits(part) > feishuTextPartLimit {
+			t.Fatal("reference part exceeds channel capacity")
+		}
+	}
+	telegram := completionReportParts("已完成", [][]string{member}, reportID, messagingTextPartLimit)
+	if len(telegram) != 1 || !strings.Contains(telegram[0], oversized) || !strings.Contains(telegram[0], url) {
+		t.Fatal("unnecessarily fragmented or replaced evidence on the larger channel")
 	}
 }
 

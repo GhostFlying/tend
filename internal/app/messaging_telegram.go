@@ -232,7 +232,7 @@ func (a *App) RejectTelegramInput(ctx context.Context, u TelegramInbox, reason s
 			if _, err := tx.Exec(ctx, `INSERT INTO messaging_messages(message_id,direction,channel_id,purpose,reason) VALUES(?,'notification','telegram','final',?)`, id, reason); err != nil {
 				return err
 			}
-			if err := queueCommunication(ctx, x, tx, id, "telegram", bot, chat, 0, protocol.MessagingPublication{Body: body, Purpose: "final", Reason: reason}); err != nil {
+			if err := queueCommunication(ctx, x, tx, id, "telegram", bot, chat, 0, protocol.MessagingPublication{Body: body, Purpose: "final", Reason: reason}, nil); err != nil {
 				return err
 			}
 			if err := communicationEvent(ctx, x, tx, id, "messaging.published"); err != nil {

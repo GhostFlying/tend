@@ -280,12 +280,19 @@ func publishExistingCommunication(ctx context.Context, x *Exec, tx *store.Tx, id
 	if err := validatePublication(p); err != nil {
 		return err
 	}
-	return registerCommunicationPublication(ctx, x, tx, id, p, execution)
+	return registerCommunicationPublication(ctx, x, tx, id, p, execution, publicationTextParts{})
+}
+
+// A structured report can freeze its own text boundaries for each IM. All
+// other publications use the channel's normal splitter.
+type publicationTextParts struct {
+	telegram []string
+	feishu   []string
 }
 
 // Internal notices already satisfy their business command's bounds. Transport
 // splitting must not tighten an existing worker or owner request contract.
-func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.MessagingPublication, execution string) error {
+func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.MessagingPublication, execution string, parts publicationTextParts) error {
 	channel := "web"
 	var bot, chat, external int64
 	direction := "notification"
@@ -345,11 +352,11 @@ func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx
 		}
 	}
 	if p.ReplyTo != "" {
-		if err = queueCommunication(ctx, x, tx, id, channel, bot, chat, external, p); err != nil {
+		if err = queueCommunication(ctx, x, tx, id, channel, bot, chat, external, p, nil); err != nil {
 			return err
 		}
 	} else {
-		if err = queueCommunication(ctx, x, tx, id, "web", 0, 0, 0, p); err != nil {
+		if err = queueCommunication(ctx, x, tx, id, "web", 0, 0, 0, p, parts.telegram); err != nil {
 			return err
 		}
 		var status string
@@ -360,10 +367,10 @@ func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx
 			bot = 0
 			chat = 0
 		}
-		if err = queueCommunication(ctx, x, tx, id, "telegram", bot, chat, 0, p); err != nil {
+		if err = queueCommunication(ctx, x, tx, id, "telegram", bot, chat, 0, p, parts.telegram); err != nil {
 			return err
 		}
-		if err = queueFeishuCommunication(ctx, x, tx, id, p); err != nil {
+		if err = queueFeishuCommunication(ctx, x, tx, id, p, parts.feishu); err != nil {
 			return err
 		}
 	}
@@ -385,11 +392,15 @@ type MessagingPart struct {
 	Kind            string `json:"kind"`
 }
 
-func queueCommunication(ctx context.Context, x *Exec, tx *store.Tx, id, channel string, bot, chat, reply int64, p protocol.MessagingPublication) error {
+const messagingTextPartLimit = 4000
+
+func queueCommunication(ctx context.Context, x *Exec, tx *store.Tx, id, channel string, bot, chat, reply int64, p protocol.MessagingPublication, texts []string) error {
 	if channel == "feishu" {
-		return queueFeishuCommunication(ctx, x, tx, id, p)
+		return queueFeishuCommunication(ctx, x, tx, id, p, texts)
 	}
-	texts := splitCommunication(p.Body, 4000)
+	if texts == nil {
+		texts = splitCommunication(p.Body, messagingTextPartLimit)
+	}
 	parts := make([]MessagingPart, 0, len(texts)+len(p.Attachments))
 	for _, body := range texts {
 		parts = append(parts, MessagingPart{Body: body, Kind: "text"})
@@ -803,5 +814,5 @@ func registerSystemCommunication(ctx context.Context, x *Exec, tx *store.Tx, id,
 	if err != nil {
 		return err
 	}
-	return registerCommunicationPublication(ctx, x, tx, id, protocol.MessagingPublication{Body: message.Body, Purpose: "final", Reason: reason}, "")
+	return registerCommunicationPublication(ctx, x, tx, id, protocol.MessagingPublication{Body: message.Body, Purpose: "final", Reason: reason}, "", publicationTextParts{})
 }

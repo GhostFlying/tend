@@ -232,7 +232,7 @@ type FeishuPart struct {
 
 const feishuTextPartLimit = 1000
 
-func queueFeishuCommunication(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.MessagingPublication) error {
+func queueFeishuCommunication(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.MessagingPublication, parts []string) error {
 	b, err := readFeishuBinding(ctx, tx.Q())
 	if err != nil {
 		return err
@@ -264,7 +264,9 @@ func queueFeishuCommunication(ctx context.Context, x *Exec, tx *store.Tx, id str
 			body = p.Body + "\n\n" + body
 		}
 	}
-	parts := splitCommunication(body, feishuTextPartLimit)
+	if parts == nil {
+		parts = splitCommunication(body, feishuTextPartLimit)
+	}
 	for n, body := range parts {
 		state := "queued"
 		if !b.Enabled || b.RuntimeHealth == "disabled" || !sourceCurrent {
