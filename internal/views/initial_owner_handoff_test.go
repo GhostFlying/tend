@@ -3,6 +3,8 @@ package views
 import (
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -35,7 +37,7 @@ func TestInitialOwnerHandoffBatchKeepsLeaseReceiptAndEventBarriers(t *testing.T)
 			{"old-settled", issue, "finished", "released", 1, 0},
 			{"old-events", issue, "finished", "", 1, 2},
 			{"old-applied", issue, "finished", "", 1, 1},
-			{"new-epoch", issue, "unknown", "", 2, 0},
+			{"new-epoch", issue, "unknown", "", 2, 1},
 			{"other-active", other, "unknown", "", 1, 0},
 		} {
 			if err := tx.InsertTask(ctx, store.TaskRow{TaskID: v.id, Kind: protocol.TaskKindIssueManager, Title: v.id, Lifecycle: protocol.TaskCompleted, ControlMode: protocol.ControlManaged, ControlRevision: 1, SpecVersion: 1, Rating: protocol.RatingP2, BlockReason: protocol.BlockNone, CreatedAt: 1, UpdatedAt: 1}); err != nil {
@@ -112,6 +114,61 @@ func TestInitialOwnerHandoffBatchKeepsLeaseReceiptAndEventBarriers(t *testing.T)
 		want := []protocol.IssueBlocker{{Code: "old_manager_execution", ObjectID: "native-receipt"}, {Code: "old_manager_run", ObjectID: "old-active"}, {Code: "old_manager_run", ObjectID: "old-lease"}, {Code: "old_manager_events", ObjectID: "old-events"}}
 		if !reflect.DeepEqual(batch[issue], want) || !reflect.DeepEqual(batch[other], []protocol.IssueBlocker{{Code: "old_manager_run", ObjectID: "other-active"}}) {
 			t.Fatalf("lost or invented receipt/lease/event/epoch barriers: %+v", batch)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for seq := 1; seq <= 2; seq++ {
+		usageResolverWrite(t, db, func(tx *store.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id='old-events' AND seq=?`, seq)
+			return err
+		})
+		if err := db.Read(ctx, func(tx *store.ReadTx) error {
+			blockers, err := ManagerHandoffBlockers(ctx, tx.Q(), issue, 2)
+			if err != nil {
+				return err
+			}
+			pending := slices.Contains(blockers, protocol.IssueBlocker{Code: "old_manager_events", ObjectID: "old-events"})
+			if pending != (seq < 2) {
+				t.Fatalf("old Run event barrier after applying sequence %d: %v", seq, blockers)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestManagerHandoffLooksUpOriginalRunsUnappliedEvents(t *testing.T) {
+	ctx := t.Context()
+	db := newUsageResolverStore(t)
+	if err := db.Read(ctx, func(tx *store.ReadTx) error {
+		rows, err := tx.Q().QueryContext(ctx, "EXPLAIN QUERY PLAN "+managerHandoffBatchSQL, `{"new-issue":2}`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				return err
+			}
+			plan = append(plan, detail)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		// A new Issue must not walk unrelated manager tasks or native event history.
+		for _, lookup := range []string{"issue_manager_tasks_handoff (issue_id=?", "manager_native_events_unapplied (run_id=?)"} {
+			if !slices.ContainsFunc(plan, func(detail string) bool {
+				return strings.HasPrefix(detail, "SEARCH ") && strings.Contains(detail, lookup)
+			}) {
+				t.Fatalf("missing scoped lookup %q in:\n%s", lookup, strings.Join(plan, "\n"))
+			}
 		}
 		return nil
 	}); err != nil {
