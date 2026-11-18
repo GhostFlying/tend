@@ -213,6 +213,13 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
+  if (shortNumbers && p === "/api/v1/messaging/events") {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write(`event: start\ndata: ${JSON.stringify({ event_seq: seq })}\n\n`);
+    streams.add(res);
+    req.on("close", () => streams.delete(res));
+    return;
+  }
   if (p === "/report-download" && reportDownload !== undefined) {
     res.writeHead(200, {
       "Content-Type": "application/octet-stream",
@@ -766,7 +773,20 @@ async function verifyShortNumbers() {
           await page.evaluate(() => navigator.clipboard.readText()),
           `${base}/issues/T123?view=conversation#${historicalMessageID}`,
         );
-        await page.goto(`${base}/issues/t123?message=${historicalReplyID}`);
+        await page.route(
+          `**/api/v1/messages/${historicalReplyID}`,
+          (route) =>
+            route.fulfill({
+              status: 503,
+              json: { error: { code: "internal", message: "Temporarily unavailable" } },
+            }),
+          { times: 1 },
+        );
+        const failedAnchor = page.waitForResponse(
+          (response) => response.url().endsWith(historicalReplyID) && response.status() === 503,
+        );
+        await page.goto(`${base}/issues/${issue.issue_id}?message=${historicalReplyID}`);
+        await failedAnchor;
         await page.waitForURL(`**/issues/T123?message=${historicalReplyID}`);
         await detail.getByText("历史回合第三页的确切回复。").waitFor();
         await page.waitForFunction((id) => {
@@ -795,6 +815,59 @@ async function verifyShortNumbers() {
         await result.click();
         await page.waitForURL("**/issues/T123");
         await detail.getByText(issue.plan.title, { exact: true }).first().waitFor();
+        let available = false;
+        const lateCodeURL = "/api/v1/issues/T124?projection=identity";
+        await page.route(`**${lateCodeURL}`, (route) =>
+          route.fulfill(
+            available
+              ? { json: { issue_id: child.issue_id, short_code: "T124", title: child.plan.title } }
+              : { status: 404, json: { error: { code: "not_found", message: "Issue not found" } } },
+          ),
+        );
+        await page.route("**/api/v1/messaging/messages?*", (route) =>
+          route.fulfill({
+            json: {
+              items: [
+                {
+                  message_id: "issue-reference-before-creation",
+                  sequence: 1,
+                  body: "See T124",
+                  author: "owner",
+                  direction: "input",
+                  created_at: now,
+                  processing: "processed",
+                  issue_ids: [],
+                  attachments: [],
+                  source_message_ids: [],
+                  channel_id: "web",
+                  conversation_id: "main",
+                  content_revision: 1,
+                },
+              ],
+              more: false,
+              next: 1,
+            },
+          }),
+        );
+        const initialMiss = page.waitForResponse(
+          (response) => response.url().endsWith(lateCodeURL) && response.status() === 404,
+        );
+        await navigate(page, "/");
+        await page.getByText("See T124", { exact: true }).waitFor();
+        await initialMiss;
+        available = true;
+        child.short_code = "T124";
+        try {
+          assert.equal(
+            await page.evaluate(async (url) => (await fetch(url)).status, lateCodeURL),
+            200,
+          );
+          await navigate(page, "/issues/T124");
+          await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
+          assert.equal(new URL(page.url()).pathname, "/issues/T124");
+        } finally {
+          delete child.short_code;
+        }
         assert.equal(await page.locator("vite-error-overlay").count(), 0);
         assert.deepEqual(errors, []);
         console.log(`PASS short-code navigation, history, copy, search and composer (${width}px)`);

@@ -1,3 +1,5 @@
+import { ApiError } from "../api/client.ts";
+import { WorkItemRead } from "../workitems/live.ts";
 import {
   CandidateIdentity,
   candidateLabel,
@@ -484,29 +486,35 @@ export function IssueActivity({
     loadingEarlier,
     earlier,
   ]);
-  const [anchor, setAnchor] = useState<{ message: string; trigger?: string | undefined }>();
+  const anchorRead = useMemo(
+    () =>
+      new WorkItemRead<IssueConversationItem | null>({
+        async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+          try {
+            return await client.get<T>(path, signal);
+          } catch (error) {
+            if (error instanceof ApiError && (error.status === 404 || error.status === 403))
+              return null as T;
+            throw error;
+          }
+        },
+      }),
+    [client],
+  );
+  const anchor = useStore(anchorRead.state).value;
   const conversationID = issue.conversation?.conversation_id;
   useEffect(() => {
     if (!targetMessage || !conversationID) return;
-    const controller = new AbortController();
-    void client
-      .get<IssueConversationItem>(
-        `/api/v1/messages/${encodeURIComponent(targetMessage)}`,
-        controller.signal,
-      )
-      .then((item) => {
-        if (
-          !controller.signal.aborted &&
-          item.message_id === targetMessage &&
-          item.conversation_id === conversationID &&
-          !item.control?.withdrawn_at
-        )
-          setAnchor({ message: targetMessage, trigger: item.reply_to });
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, [client, conversationID, targetMessage]);
-  const scopedAnchor = anchor?.message === targetMessage ? anchor : undefined;
+    void anchorRead.open(`/api/v1/messages/${encodeURIComponent(targetMessage)}`);
+    return () => anchorRead.close();
+  }, [anchorRead, conversationID, targetMessage]);
+  const scopedAnchor =
+    anchor &&
+    anchor.message_id === targetMessage &&
+    anchor.conversation_id === conversationID &&
+    !anchor.control?.withdrawn_at
+      ? anchor
+      : null;
   const located = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!targetMessage) {
@@ -530,7 +538,8 @@ export function IssueActivity({
     if (
       scopedAnchor &&
       !rows.some(
-        (row) => row.block?.trigger.message_id === (scopedAnchor.trigger ?? scopedAnchor.message),
+        (row) =>
+          row.block?.trigger.message_id === (scopedAnchor.reply_to ?? scopedAnchor.message_id),
       ) &&
       state.value?.more &&
       !state.loading &&
@@ -608,7 +617,7 @@ export function IssueActivity({
             entry={entry}
             processReads={readable ? processReads : undefined}
             targetMessage={
-              entry.block.trigger.message_id === scopedAnchor?.trigger ? targetMessage : undefined
+              entry.block.trigger.message_id === scopedAnchor?.reply_to ? targetMessage : undefined
             }
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}

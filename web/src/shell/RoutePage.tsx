@@ -104,7 +104,11 @@ function IssueRoute({
   reading: IssueReadingStates;
 }) {
   const { openIssue, openTask } = useServices();
-  const { value: identity, error: identityError } = useIssueIdentity(alias);
+  const {
+    value: identity,
+    error: identityError,
+    loading: identityLoading,
+  } = useIssueIdentity(alias, { recheckMissing: true });
   const code = identity && identity !== "missing" ? identity.short_code : "";
   const id = identity && identity !== "missing" ? identity.issue_id : alias;
   useEffect(() => {
@@ -115,10 +119,10 @@ function IssueRoute({
       <section className={styles.page}>
         <PageHeader
           title={
-            identity === "missing"
-              ? "未找到 Issue"
-              : identityError
-                ? "暂时无法读取 Issue，正在重试"
+            identityError
+              ? "暂时无法读取 Issue，正在重试"
+              : identity === "missing" && !identityLoading
+                ? "未找到 Issue"
                 : "正在读取 Issue"
           }
           onBack={() => back({ page: "issues" })}
