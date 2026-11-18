@@ -35,8 +35,8 @@ func (f executionFacts) issueOwnerExecution(ctx context.Context, q store.Querier
 			return execution, err
 		}
 	}
-	if f.ownerActions[m.TaskID] {
-		return &protocol.TaskExecutionView{State: protocol.ExecutionQueued, Role: protocol.RoleIssueManager}, nil
+	if state, pending := f.ownerActions[m.TaskID]; pending {
+		return &protocol.TaskExecutionView{State: state, Role: protocol.RoleIssueManager}, nil
 	}
 	return nil, nil
 }
