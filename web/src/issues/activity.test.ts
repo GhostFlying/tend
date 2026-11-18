@@ -298,3 +298,16 @@ test("merged and split groups claim unique identities with original-member prior
   const combined = identifyActivityGroups([[a, b, c, d]], identities);
   expect(new Set(combined.map((group) => group.key)).size).toBe(combined.length);
 });
+
+test.each([
+  "run.unknown",
+  "run.lost",
+  "run.recovery",
+  "issue.paused",
+  "issue.cancelled",
+  "attention.changed",
+])("keeps %s visible between routine updates", async (kind) => {
+  const { groupActivityEvents } = await import("./activity.ts");
+  const rows = [entry("before", 1), { ...entry("incident", 2), kind }, entry("after", 3)];
+  expect(groupActivityEvents(rows)).toEqual(rows.map((row) => [row]));
+});

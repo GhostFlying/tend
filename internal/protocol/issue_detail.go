@@ -32,6 +32,7 @@ type IssueAncestor struct {
 
 // IssueActivityEntry keeps stable ledger order while its transcript streams.
 type IssueActivityEntry struct {
+	Progress   *IssueProgress        `json:"progress,omitempty"`
 	ID         string                `json:"id"`
 	Position   int64                 `json:"position"`
 	Kind       string                `json:"kind"`

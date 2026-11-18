@@ -100,7 +100,7 @@ export function OutgoingRow({
             </Button>
           </>
         )}
-        {message.state === "sent" && `已送达 · ${clock(message.createdAt)}`}
+        {message.state === "sent" && `已入账 · ${clock(message.createdAt)}`}
         {message.state === "unknown" && (
           <>
             {message.uploads?.length && !message.attachmentsFrozen

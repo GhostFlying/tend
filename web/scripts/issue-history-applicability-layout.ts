@@ -27,6 +27,7 @@ const issue: IssueView = {
   updated_at: now,
   plan: { title: "已完成的发布", project: "sample", intent: "完成既定发布", stages: [] },
   tasks: [],
+  closure: { kind: "completed", reason: "源码已合入。生产部署由另一责任承接。" },
   progress: {
     summary: "尚未安装所选版本。".repeat(20),
     next_step: "安装先前选定的版本",
@@ -129,6 +130,10 @@ try {
     });
     await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
     await page.getByRole("heading", { name: "历史进展", exact: true }).waitFor();
+    await page
+      .getByRole("region", { name: "收尾结论" })
+      .getByText(issue.closure!.reason, { exact: true })
+      .waitFor();
     const progress = page.locator("[data-issue-progress]");
     const expand = progress.getByRole("button", { name: "展开全文", exact: true });
     const expanded = await expand.isVisible();
@@ -173,6 +178,17 @@ try {
     });
     await context.close();
   }
+  issue.state = "cancelled";
+  issue.effective_work_status = "cancelled";
+  issue.cancellation_reason = "已撤销本轮部署责任。";
+  delete issue.closure;
+  delete issue.progress;
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+  await page.getByRole("heading", { name: "取消原因" }).waitFor();
+  await page.getByText(issue.cancellation_reason, { exact: true }).waitFor();
+  assert.equal(await page.getByText("负责人尚未更新进展").count(), 0);
+  await page.close();
   assert(
     writes.every((operation) => operation === "attentions.present"),
     "reading changed business state",
