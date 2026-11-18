@@ -246,7 +246,7 @@ const server = createServer(async (req, res) => {
     return json({
       ...fixture,
       trigger: { ...fixture.trigger, message_id: historicalMessageID },
-      more: after < 100,
+      more: after < 150,
       next_seq: after + 50,
       items:
         after < 100
@@ -254,10 +254,10 @@ const server = createServer(async (req, res) => {
           : [
               {
                 ...fixture.items![0]!,
-                message_id: historicalReplyID,
-                seq: 151,
+                message_id: after === 100 ? historicalReplyID : "historical-fourth-page-reply",
+                seq: after + 51,
                 reply_to: historicalMessageID,
-                body: "历史回合第三页的确切回复。",
+                body: after === 100 ? "历史回合第三页的确切回复。" : "历史回合第四页的回复。",
               },
             ],
     });
@@ -840,6 +840,12 @@ async function verifyShortNumbers() {
             ),
         );
         await replyIsVisible();
+        await detail.getByRole("button", { name: "继续读取本轮消息", exact: true }).click();
+        await detail.getByText("历史回合第四页的回复。", { exact: true }).waitFor();
+        assert.equal(
+          await detail.getByText("历史回合第三页的确切回复。", { exact: true }).count(),
+          1,
+        );
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");
         const composer = detail.getByRole("textbox", { name: "消息", exact: true });

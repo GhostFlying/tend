@@ -5,6 +5,8 @@ import { WorkItemRead } from "../workitems/live.ts";
 /** Re-read every opened continuation page so mutable replies keep advancing. */
 export class IssueTurnRead {
   private pages = 2;
+  private loadedPages = 0;
+  private trigger?: string | undefined;
   private throughMessage?: string | undefined;
   readonly read: WorkItemRead<IssueTranscriptBlock>;
   readonly state: WorkItemRead<IssueTranscriptBlock>["state"];
@@ -22,9 +24,13 @@ export class IssueTurnRead {
         );
         let after = block.next_seq ?? 0;
         let processAfter = block.process?.next ?? 0;
-        for (let i = 1; !signal?.aborted; i++) {
+        let loadedPages = 1;
+        while (!signal?.aborted) {
           const findingMessage = throughMessage && block.more && !items.has(throughMessage);
-          if (!findingMessage && !(i < this.pages && (block.more || block.process?.more))) break;
+          const readingMore =
+            loadedPages < Math.max(this.pages, this.loadedPages) &&
+            (block.more || block.process?.more);
+          if (!findingMessage && !readingMore) break;
           const previousAfter = after;
           const previousProcessAfter = processAfter;
           block = await api.get<IssueTranscriptBlock>(
@@ -36,7 +42,9 @@ export class IssueTurnRead {
           after = block.next_seq ?? after;
           processAfter = block.process?.next ?? processAfter;
           if (after === previousAfter && processAfter === previousProcessAfter) break;
+          loadedPages++;
         }
+        if (!signal?.aborted) this.loadedPages = Math.max(this.loadedPages, loadedPages);
         return {
           ...block,
           items: [...items.values()],
@@ -49,14 +57,21 @@ export class IssueTurnRead {
     this.state = this.read.state;
   }
   open(trigger: string, pages = 2, throughMessage?: string): Promise<void> {
+    if (trigger !== this.trigger) {
+      this.trigger = trigger;
+      this.loadedPages = 0;
+    }
     this.pages = pages;
     this.throughMessage = throughMessage;
     return this.read.open(
       `/api/v1/conversation/blocks/${encodeURIComponent(trigger)}?projection=${this.readable ? "readable" : "issues"}`,
     );
   }
+  nextDepth(requested: number): number {
+    return Math.max(requested, this.loadedPages + 1);
+  }
   more(): Promise<void> {
-    this.pages++;
+    this.pages = this.nextDepth(this.pages + 1);
     return this.read.refresh();
   }
   refresh(): Promise<void> {
@@ -64,5 +79,7 @@ export class IssueTurnRead {
   }
   close(): void {
     this.read.close();
+    this.trigger = undefined;
+    this.loadedPages = 0;
   }
 }
