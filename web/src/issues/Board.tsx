@@ -101,6 +101,7 @@ export function IssueBoard({
   const columns = useRef<HTMLDivElement>(null);
   const desktopScroll = useRef({ left: 0, top: 0 });
   const mobileScrollTops = useRef(new Map<IssueWorkStatus, number>());
+  const tabScrollTarget = useRef<IssueWorkStatus | null>(null);
   const focusBeforeLayoutChange = useRef<string | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
@@ -131,7 +132,8 @@ export function IssueBoard({
     const scroller = columns.current;
     if (scroller) {
       const index = boardColumns.findIndex(({ id }) => id === status);
-      scroller.scrollLeft = columnOffset(scroller, index);
+      const left = columnOffset(scroller, index);
+      if (Math.abs(scroller.scrollLeft - left) > 1) scroller.scrollLeft = left;
     }
   };
   const restoreMobileColumn = useEffectEvent(() => scrollToColumn(mobileColumn));
@@ -361,6 +363,7 @@ export function IssueBoard({
               label="工作状态"
               value={mobileColumn}
               onChange={(status) => {
+                tabScrollTarget.current = status;
                 scrollToColumn(status);
                 setMobileColumn(status);
               }}
@@ -385,6 +388,8 @@ export function IssueBoard({
             role="region"
             aria-label="看板列"
             tabIndex={mobile ? undefined : 0}
+            onPointerDownCapture={() => (tabScrollTarget.current = null)}
+            onWheelCapture={() => (tabScrollTarget.current = null)}
             onScroll={({ currentTarget }) => {
               // CSS can change the grid before React receives the breakpoint event.
               if (window.matchMedia(mobileBoardQuery).matches !== mobile) return;
@@ -393,6 +398,11 @@ export function IssueBoard({
                   left: currentTarget.scrollLeft,
                   top: currentTarget.scrollTop,
                 };
+                return;
+              }
+              // A swipe can still be settling after a newer tab selection.
+              if (tabScrollTarget.current !== null) {
+                scrollToColumn(tabScrollTarget.current);
                 return;
               }
               const stride = columnOffset(currentTarget, 1);
