@@ -12,6 +12,7 @@ import {
   useState,
   type DragEventHandler,
   type ReactNode,
+  type UIEventHandler,
 } from "react";
 import type {
   IssueAssignee,
@@ -98,6 +99,8 @@ export function IssueBoard({
   });
   const mobileTabs = useRef<HTMLDivElement>(null);
   const columns = useRef<HTMLDivElement>(null);
+  const desktopScroll = useRef({ left: 0, top: 0 });
+  const mobileScrollTops = useRef(new Map<IssueWorkStatus, number>());
   const focusBeforeLayoutChange = useRef<string | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
@@ -148,10 +151,18 @@ export function IssueBoard({
   useLayoutEffect(() => {
     const previousFocus = focusBeforeLayoutChange.current;
     focusBeforeLayoutChange.current = null;
-    if (!active || view !== "board") return;
-    if (mobile) restoreMobileColumn();
     const scroller = columns.current;
-    if (!scroller || previousFocus === null || document.activeElement !== document.body) return;
+    if (!active || view !== "board" || !scroller) return;
+    if (mobile) {
+      restoreMobileColumn();
+      boardColumns.forEach(({ id }, index) => {
+        const top = mobileScrollTops.current.get(id);
+        if (top !== undefined) (scroller.children[index] as HTMLElement).scrollTop = top;
+      });
+    } else {
+      scroller.scrollTo(desktopScroll.current);
+    }
+    if (previousFocus === null || document.activeElement !== document.body) return;
     const control = previousFocus
       ? scroller.querySelector<HTMLButtonElement>(
           `[data-board-focus="${CSS.escape(previousFocus)}"]:enabled`,
@@ -374,18 +385,21 @@ export function IssueBoard({
             role="region"
             aria-label="看板列"
             tabIndex={mobile ? undefined : 0}
-            onScroll={
-              mobile
-                ? ({ currentTarget }) => {
-                    // The desktop grid can scroll before React sees the breakpoint change.
-                    if (!window.matchMedia(mobileBoardQuery).matches) return;
-                    const stride = columnOffset(currentTarget, 1);
-                    const index = Math.round(currentTarget.scrollLeft / stride);
-                    const status = boardColumns[index]?.id;
-                    if (status) setMobileColumn(status);
-                  }
-                : undefined
-            }
+            onScroll={({ currentTarget }) => {
+              // CSS can change the grid before React receives the breakpoint event.
+              if (window.matchMedia(mobileBoardQuery).matches !== mobile) return;
+              if (!mobile) {
+                desktopScroll.current = {
+                  left: currentTarget.scrollLeft,
+                  top: currentTarget.scrollTop,
+                };
+                return;
+              }
+              const stride = columnOffset(currentTarget, 1);
+              const index = Math.round(currentTarget.scrollLeft / stride);
+              const status = boardColumns[index]?.id;
+              if (status) setMobileColumn(status);
+            }}
           >
             {boardColumns.map(({ id, label }) => (
               <BoardColumn
@@ -398,6 +412,14 @@ export function IssueBoard({
                 closed={closed}
                 collapsed={!mobile && id === "cancelled" && !cancelledExpanded}
                 onToggle={!mobile && id === "cancelled" ? toggleCancelled : undefined}
+                onScroll={
+                  mobile
+                    ? ({ currentTarget }) => {
+                        if (window.matchMedia(mobileBoardQuery).matches)
+                          mobileScrollTops.current.set(id, currentTarget.scrollTop);
+                      }
+                    : undefined
+                }
                 onDragOver={(event) => {
                   if (dragged.current && online) {
                     event.preventDefault();
@@ -617,6 +639,7 @@ function BoardColumn({
   closed,
   collapsed,
   onToggle,
+  onScroll,
   children,
   ...drag
 }: {
@@ -628,6 +651,7 @@ function BoardColumn({
   closed: boolean;
   collapsed: boolean;
   onToggle?: (() => void) | undefined;
+  onScroll?: UIEventHandler<HTMLElement> | undefined;
   children(item: IssueSummary): ReactNode;
   onDragOver: DragEventHandler;
   onDrop: DragEventHandler;
@@ -643,6 +667,7 @@ function BoardColumn({
       data-collapsed={collapsed}
       data-over={over}
       aria-label={`${label}列`}
+      onScroll={onScroll}
       {...drag}
     >
       <h2>

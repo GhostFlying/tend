@@ -232,6 +232,10 @@
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-soft);
 }
+.children button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
 .childrenHead {
   display: flex;
   flex-wrap: wrap;
