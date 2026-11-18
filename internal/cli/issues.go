@@ -93,7 +93,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	dry := fs.Bool("dry-run", false, "print the complete original Envelope without sending it")
 	search := fs.String("search", "", "Issue title, T-prefixed short number or prefix, or exact bare number")
 	project := fs.String("project", "", "issue project filter")
-	board := fs.Bool("board", false, "use the global board projection, including direct child progress and activity previews")
+	board := fs.Bool("board", false, "list the global board by most recent stage entry, with child progress and activity previews")
 	boardStatus := fs.String("board-status", "", "board work status (display column with --group-review)")
 	groupReview := fs.Bool("group-review", false, "include review Issues in the in_progress display column (requires --board)")
 	waitingOnMe := fs.Bool("waiting-on-me", false, "only Issues linked to actions in your Inbox (requires --board)")

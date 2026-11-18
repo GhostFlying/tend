@@ -32,6 +32,9 @@ func printIssuePage(e *Env, p protocol.IssuePage, showShortCodes bool) error {
 			printIssueExecution(w, *execution)
 		}
 		if v.Board != nil {
+			if v.Board.StageEntryBasis == protocol.IssueStageEntryCreationFallback {
+				fmt.Fprintln(w, "  Sorted by Issue creation time because the stage entry was not recorded.")
+			}
 			fmt.Fprintf(w, "  Current responsibility: %d open actions; %d need the human owner\n", v.Board.AttentionCount, v.Board.OwnerAttentionCount)
 			if v.Board.Progress != nil && v.Board.Progress.NextStep != "" {
 				label := "Next step"

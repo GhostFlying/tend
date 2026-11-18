@@ -5951,6 +5951,8 @@ export interface IssueBoardCard {
   pull_requests?: IssueBoardPullRequest[];
   queue_reason?: QueueWaitReason;
   retained_execution?: boolean;
+  stage_entered_at?: number;
+  stage_entry_basis?: string;
   stage_title?: string;
   stages_done: number;
   stages_total: number;
