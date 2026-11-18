@@ -3,10 +3,12 @@ package harness
 import (
 	"context"
 	"errors"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 // ErrSteerUnsupported accompanies a definite rejection by an older executor.
-var ErrSteerUnsupported = errors.New("harness: current-turn steer is unsupported")
+var ErrSteerUnsupported = errors.New(protocol.ManagerSteerUnsupported)
 
 // TurnSteerer accepts real user input in an existing active turn. The expected
 // turn is a mandatory fence: implementations must never start another turn.

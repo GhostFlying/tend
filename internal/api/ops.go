@@ -27,7 +27,7 @@ var ownerCommands = commandMap(
 	app.MessagingCommand{Action: "send"}, app.MessagingCommand{Action: "reply"}, app.MessagingCommand{Action: "notify"}, app.MessagingCommand{Action: "read"}, app.MessagingCommand{Action: "bind"}, app.MessagingCommand{Action: "unbind"},
 	app.CanonicalOwnerIssueCommand{Action: "set_status"}, app.SetIssueNotificationSettings{},
 	app.IssueFollowupCommand{Action: "create"}, app.IssueFollowupCommand{Action: "update"}, app.IssueFollowupCommand{Action: "pause"}, app.IssueFollowupCommand{Action: "resume"}, app.IssueFollowupCommand{Action: "cancel"}, app.IssueFollowupCommand{Action: "trigger"}, app.IssueRefreshDelivery{},
-	app.SendRunMessage{}, app.InjectSource{}, app.CreateConsultation{}, app.PromoteConsultation{},
+	app.SendRunMessage{}, app.SteerIssueOwner{}, app.InjectSource{}, app.CreateConsultation{}, app.PromoteConsultation{},
 	app.IssueDeadlineCommand{}, app.IssueDeadlineCommand{Cancel: true}, app.PutPlannerEntry{},
 	app.AttentionCommand{Action: "create"}, app.AttentionCommand{Action: "update"}, app.AttentionCommand{Action: "respond"}, app.AttentionCommand{Action: "confirm"}, app.AttentionCommand{Action: "withdraw"}, app.AttentionCommand{Action: "present"},
 	app.ReuseIssue{}, app.SetIssueAcceptancePolicy{}, app.UpdateIssueDelivery{}, app.ReviewIssueDelivery{}, app.UpdateIssueProgress{}, app.CanonicalOwnerIssueCommand{Action: "create"}, app.CanonicalOwnerIssueCommand{Action: "update"},

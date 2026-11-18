@@ -16,7 +16,7 @@ import (
 // It never interrupts a tool, creates a turn, or takes the session down.
 func (m *Manager) steerOne(ctx context.Context, th harness.Thread, a *turn) error {
 	if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
-		return nil
+		return m.steerIssueOwner(ctx, th, a)
 	}
 	repair, err := m.app.IsRepairExecution(ctx, a.requestID)
 	if err != nil || repair {

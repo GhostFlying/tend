@@ -18,14 +18,14 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	}
 	action := args[0]
 	fs := newFlags(e, kind+" "+action)
-	if kind == "conversation" && action == "promote" {
+	if kind == "conversation" && (action == "promote" || action == "steer-owner") {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{kind, action})); fs.PrintDefaults() }
 	}
 	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
 	data := fs.String("data", "", "JSON payload; retained message input includes its original message_id")
 	file := fs.String("file", "", "JSON payload file or - for stdin")
 	request := fs.String("request-id", "", "original request identity for an identical retry")
-	revision := fs.Int64("revision", -1, "original task control revision (run message only)")
+	revision := fs.Int64("revision", -1, "expected control revision for a Run message or Issue owner steer")
 	after := fs.Int64("after", 0, "message sequence cursor")
 	reason := fs.String("reason", "", "reason retained in the operation record")
 	dry := fs.Bool("dry-run", false, "print original Envelope without sending")
@@ -97,6 +97,12 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 		}
 		operation = protocol.OpRunsSendMessage
 		target = protocol.Target{Type: "run", ID: pos[0]}
+	case "conversation steer-owner":
+		if len(pos) != 1 || *revision < 1 {
+			return usagef("conversation steer-owner requires Issue ID and --revision; payload names the original source and active owner Run")
+		}
+		operation = protocol.OpIssueOwnerSteer
+		target = protocol.Target{Type: "issue", ID: pos[0]}
 	case "conversation consult":
 		if len(pos) != 0 {
 			return usagef("conversation consult takes its registered agent_ref and title in the JSON payload")
@@ -135,8 +141,8 @@ func runDirectConversation(ctx context.Context, e *Env, kind string, args []stri
 	if *identity != "" && operation != "conversation.consult" {
 		return usagef("--id is only valid for consultation creation")
 	}
-	if operation != protocol.OpRunsSendMessage && *revision != -1 {
-		return usagef("revision is only valid for a run supplement")
+	if operation != protocol.OpRunsSendMessage && operation != protocol.OpIssueOwnerSteer && *revision != -1 {
+		return usagef("revision is only valid for a Run supplement or Issue owner steer")
 	}
 	allocateIdentity := *request == ""
 	if *request == "" {

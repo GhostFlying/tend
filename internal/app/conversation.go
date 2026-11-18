@@ -766,6 +766,11 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 		if err := tx.PutMainTurn(ctx, m, now); err != nil {
 			return err
 		}
+		if m.Status != store.TurnStarted && m.Status != store.TurnStarting {
+			if err := settleIssueOwnerSteers(ctx, tx, a.ids, m.RequestID, "", now); err != nil {
+				return err
+			}
+		}
 		var pendingReceipt bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM native_turn_receipts_pending WHERE request_id=?)`, m.RequestID).Scan(&pendingReceipt); err != nil {
 			return err

@@ -478,6 +478,11 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 				}
 			}
 
+			if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
+				if err := m.app.ConsumeIssueOwnerSteer(ctx, m.cfg.ConversationID, th.ID(), ev.TurnID, ev.Text, ev.ItemID); err != nil {
+					return err
+				}
+			}
 			if err := m.consumeSteer(ctx, th.ID(), ev.TurnID, ev.Text, ev.ItemID); err != nil {
 				return err
 			}

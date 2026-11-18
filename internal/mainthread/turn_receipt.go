@@ -125,6 +125,11 @@ func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, r
 			continue
 		}
 		if message.ItemType == harness.ItemUserMessage {
+			if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
+				if err := m.app.ConsumeIssueOwnerSteer(ctx, m.cfg.ConversationID, th.ID(), rec.TurnID, message.Text, message.ItemID); err != nil {
+					return err
+				}
+			}
 			if message.ItemID != "" {
 				matches, err := m.app.MessagingNativeInputMatches(ctx, rec.RequestID, message.Text)
 				if err != nil {

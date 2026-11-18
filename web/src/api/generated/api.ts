@@ -4244,6 +4244,7 @@ export interface IssueConversationItem {
   decision?: DecisionChoice;
   host_id?: string;
   images?: ConversationImage[];
+  issue_owner_steer?: IssueOwnerSteerView;
   kind: string;
   message_id: string;
   notice_type?: string;
@@ -4333,6 +4334,28 @@ export interface ConversationImage {
   media_type: string;
   name: string;
   size: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueOwnerSteerView".
+ */
+export interface IssueOwnerSteerView {
+  accepted_at?: number;
+  assignment_epoch: number;
+  issue_id: string;
+  message_id: string;
+  native_item_id?: string;
+  native_request_id?: string;
+  reason?: string;
+  revokes_source_message_id?: string;
+  run_id: string;
+  sender: Principal;
+  source_message_id: string;
+  source_revision: number;
+  status: string;
+  task_id: string;
+  thread_id: string;
+  turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5793,6 +5816,7 @@ export interface ConversationItem {
   decision?: DecisionChoice;
   host_id?: string;
   images?: ConversationImage[];
+  issue_owner_steer?: IssueOwnerSteerView;
   kind: string;
   message_id: string;
   notice_type?: string;

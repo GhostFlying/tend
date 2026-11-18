@@ -1148,6 +1148,9 @@ func endRun(ctx context.Context, x *Exec, tx *store.Tx, run store.RunRow, to pro
 	}
 	now := x.Now.UnixMilli()
 	if run.Role == protocol.RoleIssueManager {
+		if err := settleIssueOwnerSteers(ctx, tx, x.IDs, "", run.RunID, now); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO native_turn_receipts_pending(request_id) SELECT t.request_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.status IN ('starting','started','unknown') ON CONFLICT(request_id) DO NOTHING`, run.RunID); err != nil {
 			return err
 		}

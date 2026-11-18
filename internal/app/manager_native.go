@@ -112,6 +112,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 		}
+		if p.Method == "steer" {
+			if err := bindIssueOwnerSteerRequest(ctx, tx, run, p); err != nil {
+				return Outcome{}, err
+			}
+		}
 		payload, err := tx.RetainJSON(ctx, string(p.Payload))
 		if err != nil {
 			return Outcome{}, err
@@ -187,6 +192,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				}
 				if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error='Manager was fenced before native execution',completion_rejected=1,runner_acked=1 WHERE request_id=?`, string(raw), p.ID); err != nil {
 					return Outcome{}, err
+				}
+				if p.Method == "steer" {
+					if err := recordIssueOwnerSteerRPC(ctx, tx, x.IDs, run, p.ID, "rejected", "owner_fenced", x.Now.UnixMilli()); err != nil {
+						return Outcome{}, err
+					}
 				}
 				changed = true
 				continue
@@ -305,6 +315,20 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status=?,result_json=?,completion_error=?,completion_rejected=? WHERE run_id=? AND request_id=?`, completionStatus, result, p.Error, p.Rejected, run, p.ID)
 		if err != nil {
 			return Outcome{}, err
+		}
+		if method == "steer" {
+			status, reason := "accepted", "waiting_safe_boundary"
+			switch {
+			case p.Rejected && p.Error == protocol.ManagerSteerUnsupported:
+				status, reason = "unsupported", "executor_unsupported"
+			case p.Rejected:
+				status, reason = "rejected", "native_rejected"
+			case p.Error != "":
+				status, reason = "unknown", "native_outcome_unknown"
+			}
+			if err := recordIssueOwnerSteerRPC(ctx, tx, x.IDs, run, p.ID, status, reason, x.Now.UnixMilli()); err != nil {
+				return Outcome{}, err
+			}
 		}
 		if method == "close" && p.Error == "" {
 			if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {

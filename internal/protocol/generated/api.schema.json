@@ -4727,6 +4727,9 @@
           },
           "type": "array"
         },
+        "issue_owner_steer": {
+          "$ref": "#/definitions/IssueOwnerSteerView"
+        },
         "kind": {
           "type": "string"
         },
@@ -9084,6 +9087,9 @@
           },
           "type": "array"
         },
+        "issue_owner_steer": {
+          "$ref": "#/definitions/IssueOwnerSteerView"
+        },
         "kind": {
           "type": "string"
         },
@@ -10805,6 +10811,74 @@
         "category_id"
       ],
       "title": "IssueOwnerSelection",
+      "type": "object"
+    },
+    "IssueOwnerSteerView": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_at": {
+          "type": "integer"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "native_item_id": {
+          "type": "string"
+        },
+        "native_request_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revokes_source_message_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sender": {
+          "$ref": "#/definitions/Principal"
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "issue_id",
+        "assignment_epoch",
+        "task_id",
+        "run_id",
+        "thread_id",
+        "turn_id",
+        "source_message_id",
+        "source_revision",
+        "sender",
+        "status"
+      ],
+      "title": "IssueOwnerSteerView",
       "type": "object"
     },
     "IssuePRPolicy": {

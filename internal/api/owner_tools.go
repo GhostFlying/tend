@@ -109,6 +109,10 @@ func (g *OwnerTools) Specs() []protocol.OwnerToolSpec {
 			out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Stage a private webhook credential by opaque webhook_key_ref already held in private server storage. Use path.id for the new reference. Never pass credential bytes in body, content_base64 or model arguments; initial private bytes are staged through the owner's secure CLI key-file path.", InputSchema: privateInput})
 			continue
 		}
+		if capability == protocol.OpIssueOwnerSteer {
+			out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Route an exact admitted owner original to the current Issue owner's live native turn. Target the Issue with its current revision and supply run_id, expected_assignment_epoch, source_message_id, expected_source_revision and optional revokes_source_message_id for an earlier owner original linked to that Issue. Preserve the returned message_id. Read its original message for the durable status. Acceptance is separate from consumption. Unknown is never resent.", InputSchema: input})
+			continue
+		}
 		out = append(out, protocol.OwnerToolSpec{Name: ownerToolName(capability), Capability: capability, Description: "Owner capability: " + capability + ". Operations use target, expected_control_revision, payload and positive effect_seq. HTTP reads use exact path parameters and query (including pagination); HTTP writes use body or content_base64/content_type and effect_seq. The normal owner validation applies; read the business object on unknown outcomes; retain actual action identity and never blindly repeat an external side effect.", InputSchema: input})
 	}
 	return out

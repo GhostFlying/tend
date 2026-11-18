@@ -2606,3 +2606,11 @@ server 替换可能超过 runner 心跳的新鲜窗口。持久提交后，queue
 Issue block 的 `process` 是原 background batch/thread/turn 的只读公开工具投影，具有独立 arrival cursor（`process_after`）与持久整轮时间。它读取 deferred tool 和实际 callback/正式 ToolUse，保持结清前后工具身份并按原序分页；不读取 reasoning、不发布 deferred prose、不改变静默 check-in 或通知语义。工具结果先到时只补全后到的真实名称、参数和 source，已确认结果与终态不可被 late start 覆盖。公开过程读取失败不影响业务执行或回执。缺少公开事实或时间时明确显示未知；用户原动作和恢复出口见 `docs/plans/issue-public-activity.md`。新增字段仅扩展 owner 读取视图，server/runner 通信协议不变。 process 原件失败通过 `process.error` 限定在过程入口，讨论继续可读并提供原读取重试。工具去重沿 process 原到达顺序；整轮结束同时遵循持久消息处理状态，恢复等待不因单次 native attempt 结束而停表。callback 源引用与 producing conversation 分别保存，避免历史继承 trigger 改写回执会话。
 
 公开 process 的继续读取仅由实现其独立 cursor 的 Issue activity 消费者提供；通用会话继续使用普通回复分页，不暴露无法推进的 process-only 按钮。整轮结束取本次处理区间首个已确认的持久消息终态转换，不使用可重复写入的 `main_turns.updated_at`。新处理或不确定状态开启新区间；恢复等待、仍有活跃 native turn 或缺少终态事实时不推测结束。重复/晚到终态和历史重读不改变已确认用时。此节原编号与既有 D249 冲突，同步最新 main 后独立编号为 D256，既有 D249、D254 和 D255 保持原义。
+
+## D257：Issue 负责人当前回合的紧急投递
+
+`issues.steer_owner` 以明确的 Issue revision、assignment epoch、owner Run 和原始
+owner source 为输入。当前回合经 runner 的原生 steer 入口接收，紧急投递保留单独的
+接收、消费及未知回执。明确撤销在待发紧急通知中优先，保留原授权及已发送尝试。
+投递不变更领域权限，不启动新回合，不打断执行中的工具，不重发未知调用。
+见 [Issue owner urgent delivery](plans/issue-owner-urgent.md)。

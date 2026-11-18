@@ -128,6 +128,8 @@ func businessRecovery(env protocol.Envelope) string {
 		command = "run messages " + env.Target.ID + " --json"
 	case "conversation.inject_source":
 		command = "source show " + payload.MessageID + " --json"
+	case protocol.OpIssueOwnerSteer:
+		command = "message original " + payload.MessageID + " --json"
 	case "conversation.handoff":
 		command = "conversation handoff --status --json"
 	case "issues.create_task":

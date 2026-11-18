@@ -443,6 +443,10 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				if callErr != nil {
 					reply.Error = "Native coordinator operation failed"
 					reply.Rejected = errors.Is(callErr, harness.ErrRejected)
+					if command.Method == "steer" && errors.Is(callErr, harness.ErrSteerUnsupported) {
+						reply.Error = harness.ErrSteerUnsupported.Error()
+						reply.Rejected = true
+					}
 				} else {
 					reply.Result, err = json.Marshal(result)
 					if err != nil {
