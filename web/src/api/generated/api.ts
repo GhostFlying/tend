@@ -476,6 +476,7 @@ export interface TendAPI {
   IssueFollowupPage?: IssueFollowupPage;
   IssueFollowupPayload?: IssueFollowupPayload;
   IssueHandoffPrompt?: IssueHandoffPrompt;
+  IssueIdentity?: IssueIdentity;
   IssueManagerView?: IssueManagerView;
   IssueMaterialFile?: IssueMaterialFile;
   IssueMaterials?: IssueMaterials;
@@ -1023,6 +1024,7 @@ export interface IssueView {
   queue_reason?: QueueWaitReason;
   responsibility_runs?: ExecutionResponsibility[];
   revision: number;
+  short_code?: string;
   source_reviews?: IssueSourceReview[];
   state: IssueState;
   tasks?: IssueTaskSummary[];
@@ -1067,6 +1069,7 @@ export interface AgentIdentity {
  */
 export interface IssueAncestor {
   issue_id: string;
+  short_code?: string;
   state: IssueState;
   title: string;
 }
@@ -1105,6 +1108,7 @@ export interface IssueChildProgress {
 export interface IssueChildSummary {
   execution: ExecutionCounts;
   issue_id: string;
+  short_code?: string;
   status: IssueWorkStatus;
   title: string;
 }
@@ -4797,6 +4801,7 @@ export interface Issue {
   pending_handoff_id?: string;
   plan: IssuePlan;
   revision: number;
+  short_code?: string;
   state: IssueState;
   todo_at?: number;
   todo_revision?: number;
@@ -5115,6 +5120,15 @@ export interface IssueHandoffPrompt {
   task_id?: string;
   title: string;
   watermark: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueIdentity".
+ */
+export interface IssueIdentity {
+  issue_id: string;
+  short_code: string;
+  title: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5591,6 +5605,7 @@ export interface WorkItem {
   report_follow_on_decision?: boolean;
   revision: number;
   scope?: string;
+  short_code?: string;
   stages: IssueStage[] | null;
   status: WorkItemStatus;
   title: string;
@@ -5913,6 +5928,7 @@ export interface IssueSummary {
   pending_handoff_id?: string;
   project: string;
   revision: number;
+  short_code?: string;
   state: IssueState;
   title: string;
   todo_at?: number;

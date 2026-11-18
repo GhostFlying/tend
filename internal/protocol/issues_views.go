@@ -1,7 +1,15 @@
 package protocol
 
+// IssueIdentity is the stable human and internal identity of an Issue.
+type IssueIdentity struct {
+	IssueID   string `json:"issue_id"`
+	ShortCode string `json:"short_code"`
+	Title     string `json:"title"`
+}
+
 // IssueSummary describes canonical responsibility, never a legacy facade row.
 type IssueSummary struct {
+	ShortCode           string           `json:"short_code,omitempty"`
 	EffectiveWorkStatus IssueWorkStatus  `json:"effective_work_status,omitempty"`
 	Board               *IssueBoardCard  `json:"board,omitempty"`
 	Execution           *ExecutionCounts `json:"execution,omitempty"`

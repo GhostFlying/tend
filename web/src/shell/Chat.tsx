@@ -1,4 +1,4 @@
-import { Link } from "../app/router.ts";
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { Menu } from "../ui/Menu.tsx";
 import { MainPending } from "../attention/MainPending.tsx";
 import type { AttentionPage } from "../api/generated/api.ts";
@@ -67,9 +67,9 @@ export function Chat({
         </span>
         <span className={styles.spacer} />
         {conversation?.workItemID && (
-          <Link className={styles.issueLink} to={{ page: "issue", id: conversation.workItemID }}>
+          <IssueLink className={styles.issueLink} id={conversation.workItemID}>
             Issue
-          </Link>
+          </IssueLink>
         )}
         <Menu
           label="更多"

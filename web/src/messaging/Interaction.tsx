@@ -1,5 +1,5 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import type { MessagingInteraction, MessagingMessage } from "../api/generated/api.ts";
-import { Link } from "../app/router.ts";
 import { Button } from "../ui/Button.tsx";
 import styles from "./Messaging.module.css";
 
@@ -43,9 +43,9 @@ export function Interaction({
       <h2>{i.question}</h2>
       {i.context && <p className={styles.context}>{i.context}</p>}
       {i.issue_id && (
-        <Link className={styles.related} to={{ page: "issue", id: i.issue_id }}>
+        <IssueLink className={styles.related} id={i.issue_id}>
           查看相关 Issue
-        </Link>
+        </IssueLink>
       )}
       {i.state === "open" ? (
         <>

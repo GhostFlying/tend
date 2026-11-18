@@ -62,6 +62,7 @@ export function ChildProgress({
   const items = view
     ? (state.value?.items ?? []).map((item) => ({
         issue_id: item.issue_id,
+        short_code: item.short_code,
         title: item.title,
         status: workStatus(item),
         execution: item.execution,
@@ -90,7 +91,7 @@ export function ChildProgress({
               className={styles.child}
               data-active={!!activity}
               data-board-focus={`${id}:child:${item.issue_id}`}
-              onClick={() => onSelect(item.issue_id)}
+              onClick={() => onSelect(item.short_code ?? item.issue_id)}
             >
               <span aria-hidden>{item.status === "done" ? "✓" : activity ? "◉" : "○"}</span>
               <span>{item.title}</span>

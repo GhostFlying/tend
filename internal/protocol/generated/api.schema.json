@@ -8207,6 +8207,9 @@
         "revision": {
           "type": "integer"
         },
+        "short_code": {
+          "type": "string"
+        },
         "state": {
           "$ref": "#/definitions/IssueState"
         },
@@ -8456,6 +8459,9 @@
       "additionalProperties": false,
       "properties": {
         "issue_id": {
+          "type": "string"
+        },
+        "short_code": {
           "type": "string"
         },
         "state": {
@@ -8727,6 +8733,9 @@
           "$ref": "#/definitions/ExecutionCounts"
         },
         "issue_id": {
+          "type": "string"
+        },
+        "short_code": {
           "type": "string"
         },
         "status": {
@@ -10729,6 +10738,27 @@
       "title": "IssueHandoffPrompt",
       "type": "object"
     },
+    "IssueIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "short_code": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "short_code",
+        "title"
+      ],
+      "title": "IssueIdentity",
+      "type": "object"
+    },
     "IssueManagerAssignment": {
       "additionalProperties": false,
       "properties": {
@@ -11938,6 +11968,9 @@
         "revision": {
           "type": "integer"
         },
+        "short_code": {
+          "type": "string"
+        },
         "state": {
           "$ref": "#/definitions/IssueState"
         },
@@ -12300,6 +12333,9 @@
         },
         "revision": {
           "type": "integer"
+        },
+        "short_code": {
+          "type": "string"
         },
         "source_reviews": {
           "items": {
@@ -23038,6 +23074,9 @@
         "scope": {
           "type": "string"
         },
+        "short_code": {
+          "type": "string"
+        },
         "stages": {
           "anyOf": [
             {
@@ -23733,6 +23772,9 @@
     },
     "IssueHandoffPrompt": {
       "$ref": "#/definitions/IssueHandoffPrompt"
+    },
+    "IssueIdentity": {
+      "$ref": "#/definitions/IssueIdentity"
     },
     "IssueManagerView": {
       "$ref": "#/definitions/IssueManagerView"

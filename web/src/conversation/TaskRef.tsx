@@ -1,3 +1,4 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { Link, useRoute } from "../app/router.ts";
 // A task ID in a reply, shown as a chip with the task's current title and
 // status (D72). It opens the task's details. An ID tend does not know
@@ -44,15 +45,11 @@ export function TaskRef({ taskId }: { taskId: string }) {
         <span className={styles.title}>{task.title}</span>
       </Link>
       {task.primary_issue_id && (
-        <Link
-          className={styles.chip}
-          to={{ page: "issue", id: task.primary_issue_id }}
-          title={task.primary_issue_id}
-        >
+        <IssueLink className={styles.chip} id={task.primary_issue_id} title={task.primary_issue_id}>
           <span className={styles.title}>
             所属 Issue：{task.primary_issue_title || "所属 Issue"}
           </span>
-        </Link>
+        </IssueLink>
       )}
     </>
   );

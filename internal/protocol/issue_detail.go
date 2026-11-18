@@ -46,9 +46,10 @@ type IssueConversationBinding struct {
 }
 
 type IssueAncestor struct {
-	IssueID string     `json:"issue_id"`
-	Title   string     `json:"title"`
-	State   IssueState `json:"state"`
+	ShortCode string     `json:"short_code,omitempty"`
+	IssueID   string     `json:"issue_id"`
+	Title     string     `json:"title"`
+	State     IssueState `json:"state"`
 }
 
 // IssueActivityEntry keeps stable ledger order while its transcript streams.

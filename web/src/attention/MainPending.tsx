@@ -1,3 +1,4 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { Link } from "../app/router.ts";
 import { useInboxCount } from "./useInboxCount.ts";
 import { AttentionActionTime } from "./ActionTime.tsx";
@@ -29,10 +30,10 @@ export function MainPending({ summary }: { summary: ReadState<AttentionPage> }) 
           <AttentionActionTime item={item} />
         </small>
         {item.issue_id && (
-          <Link className={styles.issue} to={{ page: "issue", id: item.issue_id }}>
+          <IssueLink className={styles.issue} id={item.issue_id}>
             所属 Issue：
             {item.issue_title || "所属 Issue 名称暂不可用"}
-          </Link>
+          </IssueLink>
         )}
       </div>
       <Link className={styles.action} to={{ page: "attention", id: item.attention_id }}>

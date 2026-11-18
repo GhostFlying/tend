@@ -324,6 +324,13 @@ func saveIssue(ctx context.Context, tx *store.Tx, w protocol.WorkItem, expected 
 	if err := tx.SaveIssue(ctx, w, expected, reason); err != nil {
 		return Outcome{}, err
 	}
+	if expected == 0 {
+		shortCode, err := store.IssueShortCode(ctx, tx.Q(), w.WorkItemID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		w.ShortCode = shortCode
+	}
 	if err := tx.EnsureCompletionReviews(ctx, w.WorkItemID); err != nil {
 		return Outcome{}, err
 	}

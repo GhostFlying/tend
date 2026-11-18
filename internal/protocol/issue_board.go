@@ -93,6 +93,7 @@ type IssueChildProgress struct {
 }
 
 type IssueChildSummary struct {
+	ShortCode string          `json:"short_code,omitempty"`
 	IssueID   string          `json:"issue_id"`
 	Title     string          `json:"title"`
 	Status    IssueWorkStatus `json:"status"`

@@ -51,6 +51,7 @@ func TestCanonicalIssueCurrentAndHistoryShareOneRevision(t *testing.T) {
 	s, path := openFreshTest(t)
 	root := canonicalIssueFixture("wi_00000000000000000000000001")
 	saveCanonicalFixture(t, s, root, 0)
+	root.ShortCode = "T1"
 	child := canonicalIssueFixture("wi_00000000000000000000000002")
 	child.ParentIssueID = root.IssueID
 	saveCanonicalFixture(t, s, child, 0)
@@ -66,6 +67,7 @@ func TestCanonicalIssueCurrentAndHistoryShareOneRevision(t *testing.T) {
 		t.Fatalf("history=%+v, want %+v", got, root)
 	}
 	original := canonicalIssueFixture(root.IssueID)
+	original.ShortCode = root.ShortCode
 	if got := readCanonicalFixture(t, s, root.IssueID, 1); !reflect.DeepEqual(got, original) {
 		t.Fatalf("old history changed: %+v", got)
 	}
@@ -103,6 +105,7 @@ func TestCanonicalIssueLegacySaveCannotMutateAdoptedIdentity(t *testing.T) {
 	s, _ := openTest(t)
 	issue := canonicalIssueFixture("wi_00000000000000000000000003")
 	saveCanonicalFixture(t, s, issue, 0)
+	issue.ShortCode = "T1"
 	err := s.Write(t.Context(), func(tx *Tx) error {
 		projection, err := GetIssue(t.Context(), tx.Q(), issue.IssueID)
 		if err != nil {

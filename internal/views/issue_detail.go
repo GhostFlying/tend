@@ -76,7 +76,7 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 		if err != nil {
 			return err
 		}
-		out.Ancestors = append(out.Ancestors, protocol.IssueAncestor{IssueID: parent.IssueID, Title: parent.Plan.Title, State: parent.State})
+		out.Ancestors = append(out.Ancestors, protocol.IssueAncestor{ShortCode: parent.ShortCode, IssueID: parent.IssueID, Title: parent.Plan.Title, State: parent.State})
 		id = parent.ParentIssueID
 	}
 	slices.Reverse(out.Ancestors)

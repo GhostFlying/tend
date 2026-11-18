@@ -1,3 +1,4 @@
+import { IssueLookup } from "./Lookup.tsx";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { Sheet } from "../ui/Modal.tsx";
 import { navigate, useRoute, type IssueFilters } from "../app/router.ts";
@@ -376,6 +377,9 @@ export function IssueBoard({
           筛选
         </Button>
       </PageHeader>
+      <div className={styles.lookup}>
+        <IssueLookup />
+      </div>
       <div className={styles.toolbar}>
         {!filterOpen && filterControls}
         {waitingOnMeControl}
@@ -846,8 +850,9 @@ const BoardCard = memo(function BoardCard({
         variant="ghost"
         className={styles.cardTitle}
         data-board-focus={`${item.issue_id}:title`}
-        onClick={() => onSelect(item.issue_id)}
+        onClick={() => onSelect(item.short_code ?? item.issue_id)}
       >
+        {item.short_code && <small>{item.short_code} </small>}
         {item.title}
       </Button>
       <div className={styles.cardFooter}>

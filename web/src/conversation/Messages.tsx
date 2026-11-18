@@ -1,3 +1,4 @@
+import { IssueReferences } from "../issues/References.tsx";
 import { ExternalSourceMessage } from "./SourceDetails.tsx";
 import { MessageTags } from "./MessageTags.tsx";
 import { notify } from "../app/notice.ts";
@@ -51,7 +52,11 @@ export function OwnerMessage({
       ) : (
         !!item.images?.length && <MessageImages images={item.images} />
       )}
-      {item.body && <div className={styles.bubble}>{item.body}</div>}
+      {item.body && (
+        <div className={styles.bubble}>
+          <IssueReferences text={item.body} />
+        </div>
+      )}
       {presentation === "chat" && <MessageTags item={item} />}
       {item.recovery && (
         <div className={styles.state} role="status">
@@ -98,7 +103,11 @@ export function OutgoingRow({
     <div className={styles.user} data-scroll-id={`outbox:${requestId}`}>
       {!!message.uploads?.length && <OutgoingAttachments uploads={message.uploads} />}
       {!!images.length && <OutgoingImages images={images} />}
-      {message.body && <div className={styles.bubble}>{message.body}</div>}
+      {message.body && (
+        <div className={styles.bubble}>
+          <IssueReferences text={message.body} />
+        </div>
+      )}
       <div className={styles.state} data-state={message.state}>
         {message.state === "sending" &&
           (message.uploads?.length && !message.attachmentsFrozen ? "正在上传附件…" : "发送中…")}

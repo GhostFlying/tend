@@ -13,6 +13,7 @@ import (
 func (s *Server) issues(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := views.CanonicalIssueFilter{Project: query.Get("project"), State: protocol.IssueState(query.Get("state")), IncludeClosed: query.Get("include_closed") == "true", After: query.Get("after"), Limit: 50}
+	filter.Search = query.Get("search")
 	filter.Board = query.Get("board") == "true"
 	filter.BoardStatus = protocol.IssueWorkStatus(query.Get("board_status"))
 	filter.GroupReview = query.Get("group_review") == "true"
@@ -67,7 +68,18 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 		revision = value
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.CanonicalIssue(r.Context(), q, r.PathValue("id"), revision)
+		id, err := store.ResolveIssueLookup(r.Context(), q, r.PathValue("id"))
+		if err != nil {
+			return nil, err
+		}
+		if r.URL.Query().Get("projection") == "identity" {
+			if revision != 0 {
+				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "identity projection does not accept a revision")
+			}
+			identity, err := store.IssueIdentity(r.Context(), q, id)
+			return identity, err
+		}
+		return views.CanonicalIssue(r.Context(), q, id, revision)
 	})
 }
 

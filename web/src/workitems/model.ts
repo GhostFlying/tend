@@ -113,8 +113,16 @@ export function parallelStages(stages: readonly IssueStage[]): ReadonlySet<strin
       .map((s) => s.stage_id),
   );
 }
-export function splitWorkItemIds(text: string): (string | { workItemId: string })[] {
-  const pattern = /(?<![0-9A-Za-z_])wi_[0-7][0-9A-HJKMNP-TV-Z]{25}(?![0-9A-Za-z_])/g;
+export function splitWorkItemIds(
+  text: string,
+  mode: "legacy" | "short" | "all" = "legacy",
+): (string | { workItemId: string })[] {
+  const patterns = {
+    legacy: /(?<![0-9A-Za-z_/])wi_[0-7][0-9A-HJKMNP-TV-Z]{25}(?![0-9A-Za-z_])/g,
+    short: /(?<![0-9A-Za-z_/])[Tt][1-9][0-9]*(?![0-9A-Za-z_])/g,
+    all: /(?<![0-9A-Za-z_/])(?:[Tt][1-9][0-9]*|wi_[0-7][0-9A-HJKMNP-TV-Z]{25})(?![0-9A-Za-z_])/g,
+  };
+  const pattern = patterns[mode];
   const out: (string | { workItemId: string })[] = [];
   let last = 0;
   for (const match of text.matchAll(pattern)) {

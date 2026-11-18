@@ -1,3 +1,4 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BackgroundSourcePage,
@@ -58,7 +59,7 @@ function SourceLink({ source }: { source: BackgroundSourcePreview }) {
   if (source.object_type === "task" && source.object_id)
     return <Link to={{ page: "task", id: source.object_id }}>查看任务</Link>;
   if (source.object_type === "issue" && source.object_id)
-    return <Link to={{ page: "issue", id: source.object_id }}>查看 Issue</Link>;
+    return <IssueLink id={source.object_id}>查看 Issue</IssueLink>;
   return null;
 }
 

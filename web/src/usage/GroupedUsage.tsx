@@ -1,3 +1,4 @@
+import { IssueLink } from "../issues/IssueRef.tsx";
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type {
   TokenUsageTotals,
@@ -396,9 +397,9 @@ export function GroupedUsage({ subject }: { subject: string }) {
             {selectedIssue && (
               <p className={styles.breadcrumb}>
                 {selectedIssue.path?.map((i) => (
-                  <Link key={i.id} to={{ page: "issue", id: i.id }}>
+                  <IssueLink key={i.id} id={i.id}>
                     {i.id} {i.title}
-                  </Link>
+                  </IssueLink>
                 ))}
               </p>
             )}
@@ -609,9 +610,9 @@ function ExecutionDetail({
       {!!a.issue_path?.length && a.issue_path.at(-1)?.id !== selectedIssueID && (
         <p className={styles.breadcrumb}>
           {a.issue_path.map((issue) => (
-            <Link key={issue.id} to={{ page: "issue", id: issue.id }}>
+            <IssueLink key={issue.id} id={issue.id}>
               {issue.id} {issue.title}
-            </Link>
+            </IssueLink>
           ))}
         </p>
       )}

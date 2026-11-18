@@ -10,7 +10,7 @@ import type { Token } from "markdown-it";
 import { createElement, Fragment, memo, useMemo, useState, type ReactNode } from "react";
 import { splitTaskIds } from "./model.ts";
 import styles from "./Markdown.module.css";
-import { IssueRef } from "../issues/IssueRef.tsx";
+import { IssueLink, IssueRef } from "../issues/IssueRef.tsx";
 import { splitWorkItemIds } from "../workitems/model.ts";
 import { TaskRef } from "./TaskRef.tsx";
 
@@ -121,10 +121,20 @@ function render(
         add(...render(token.children ?? [], keys, files, fileScope));
         break;
       case "text":
-        add(...withTaskRefs(token.content, keys));
+        add(
+          ...(stack.some(({ token }) => token.tag === "a")
+            ? [token.content]
+            : withTaskRefs(token.content, keys)),
+        );
         break;
       case "code_inline":
-        add(<code key={keys.next++}>{withTaskRefs(token.content, keys)}</code>);
+        add(
+          <code key={keys.next++}>
+            {stack.some(({ token }) => token.tag === "a")
+              ? token.content
+              : withTaskRefs(token.content, keys)}
+          </code>,
+        );
         break;
       case "softbreak":
         add("\n");
@@ -180,7 +190,16 @@ function element(token: Token, children: ReactNode[], key: number): ReactNode {
       if (typeof window !== "undefined" && URL.canParse(String(href), window.location.href)) {
         const url = new URL(String(href), window.location.href);
         const target = legacyURL(url) ?? url.pathname + url.search + url.hash;
-        if (url.origin === window.location.origin && parse(target).page !== "missing")
+        const route = parse(target);
+        if (url.origin === window.location.origin && route.page === "issue") {
+          const destination = new URL(target, url);
+          return (
+            <IssueLink key={key} id={route.id} suffix={destination.search + destination.hash}>
+              {children}
+            </IssueLink>
+          );
+        }
+        if (url.origin === window.location.origin && route.page !== "missing")
           return (
             <Link key={key} to={target}>
               {children}
@@ -212,7 +231,7 @@ function element(token: Token, children: ReactNode[], key: number): ReactNode {
 function withTaskRefs(text: string, keys: Keys): ReactNode[] {
   return splitTaskIds(text).map((part) =>
     typeof part === "string" ? (
-      splitWorkItemIds(part).map((run) =>
+      splitWorkItemIds(part, "all").map((run) =>
         typeof run === "string" ? run : <IssueRef key={keys.next++} id={run.workItemId} />,
       )
     ) : (

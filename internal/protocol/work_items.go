@@ -21,6 +21,7 @@ type IssuePlan struct {
 
 // WorkItem is the current ledger revision, with immutable historical snapshots.
 type WorkItem struct {
+	ShortCode string `json:"short_code,omitempty"`
 	IssuePlan
 	WorkItemID string         `json:"work_item_id"`
 	Revision   int64          `json:"revision"`

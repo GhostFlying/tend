@@ -90,17 +90,19 @@ func (facts executionFacts) issueCounts(ctx context.Context, q store.Querier, is
 }
 
 func issueChildren(ctx context.Context, q store.Querier, parent string, facts executionFacts) (*protocol.IssueChildProgress, error) {
-	rows, err := q.QueryContext(ctx, `SELECT c.issue_id,COALESCE(json_extract(w.body_json,'$.title'),''),`+issueBoardStatusSQL+` FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id WHERE c.parent_issue_id=? ORDER BY c.issue_id`, parent)
+	rows, err := q.QueryContext(ctx, `SELECT c.issue_id,n.number,COALESCE(json_extract(w.body_json,'$.title'),''),`+issueBoardStatusSQL+` FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id JOIN issue_short_numbers n ON n.issue_id=c.issue_id WHERE c.parent_issue_id=? ORDER BY c.issue_id`, parent)
 	if err != nil {
 		return nil, err
 	}
 	var items []protocol.IssueChildSummary
 	for rows.Next() {
 		var item protocol.IssueChildSummary
-		if err := rows.Scan(&item.IssueID, &item.Title, &item.Status); err != nil {
+		var number int64
+		if err := rows.Scan(&item.IssueID, &number, &item.Title, &item.Status); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
+		item.ShortCode = protocol.IssueShortCode(number)
 		items = append(items, item)
 	}
 	err = rows.Err()
