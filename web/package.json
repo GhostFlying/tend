@@ -35,6 +35,7 @@
     "test:ui-tour": "node scripts/layout-fixture.ts scripts/ui-tour.ts",
     "test:inbox-badge": "node scripts/layout-fixture.ts scripts/inbox-badge-layout.ts",
     "test:agent-directory": "node scripts/layout-fixture.ts scripts/agent-directory-layout.ts",
+    "test:reconnect-diagnostics": "node scripts/layout-fixture.ts scripts/reconnect-diagnostics-layout.ts",
     "test:conversation-reads": "node scripts/layout-fixture.ts scripts/hidden-conversation-reads.ts"
   },
   "dependencies": {

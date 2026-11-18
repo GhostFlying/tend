@@ -1,3 +1,4 @@
+import { useEffect, useId, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import styles from "./ConnectionBadge.module.css";
 import { StatusDot, type Tone } from "./StatusDot.tsx";
@@ -9,14 +10,12 @@ const look: Record<Connection["status"], { tone: Tone; label: string }> = {
   "not-owner": { tone: "err", label: "不是 owner" },
 };
 
-function describe(c: Connection): string {
-  switch (c.status) {
+function describe(connection: Exclude<Connection, { status: "offline" }>): string {
+  switch (connection.status) {
     case "online":
-      return c.login ? `已登录：${c.login}` : "已连接";
-    case "offline":
-      return `${c.reason}，正在重连`;
+      return connection.login ? `已登录：${connection.login}` : "已连接";
     case "not-owner":
-      return c.reason;
+      return connection.reason;
     case "connecting":
       return "正在按这台设备的 tailnet 身份登录";
   }
@@ -30,11 +29,76 @@ export function ConnectionBadge({
   connection: Connection;
   compact?: boolean;
 }) {
+  if (connection.status === "offline") {
+    return <ReconnectBadge reason={connection.reason} compact={compact} />;
+  }
   const { tone, label } = look[connection.status];
   return (
     <span className={styles.badge} title={describe(connection)} role="status" aria-label={label}>
       <StatusDot tone={tone} />
       {compact ? <span className={styles.hidden}>{label}</span> : label}
+    </span>
+  );
+}
+
+type OpenBy = "hover" | "focus" | "activation";
+
+function ReconnectBadge({ reason, compact }: { reason: string | undefined; compact: boolean }) {
+  const { tone, label } = look.offline;
+  const id = useId();
+  const root = useRef<HTMLSpanElement>(null);
+  const [openBy, setOpenBy] = useState<OpenBy | null>(null);
+  const open = openBy !== null;
+  const detail = reason?.trim();
+
+  useEffect(() => {
+    if (!open) return;
+    function dismissOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenBy(null);
+    }
+    function dismissOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpenBy(null);
+    }
+    document.addEventListener("keydown", dismissOnEscape);
+    document.addEventListener("pointerdown", dismissOutside);
+    return () => {
+      document.removeEventListener("keydown", dismissOnEscape);
+      document.removeEventListener("pointerdown", dismissOutside);
+    };
+  }, [open]);
+
+  return (
+    <span
+      ref={root}
+      className={styles.anchor}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") setOpenBy((current) => current ?? "hover");
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse") {
+          setOpenBy((current) => (current === "hover" ? null : current));
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={`${styles.badge} ${styles.trigger}`}
+        aria-label={label}
+        aria-expanded={open}
+        aria-controls={id}
+        aria-describedby={id}
+        onFocus={(event) => {
+          if (event.currentTarget.matches(":focus-visible")) setOpenBy("focus");
+        }}
+        onBlur={() => setOpenBy((current) => (current === "hover" ? current : null))}
+        onClick={() => setOpenBy((current) => (current === "activation" ? null : "activation"))}
+      >
+        <StatusDot tone={tone} />
+        {compact ? null : label}
+      </button>
+      <span id={id} className={styles.panelPosition} hidden={!open}>
+        <span className={styles.panel}>{detail ? `浏览器观察：${detail}` : "原因未知"}</span>
+      </span>
     </span>
   );
 }

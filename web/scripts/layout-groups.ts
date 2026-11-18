@@ -13,6 +13,7 @@ export const layoutGroups: Record<string, string[]> = {
     "test:agent-directory",
     "test:delivery-refresh",
     "test:navigation-layout",
+    "test:reconnect-diagnostics",
   ],
   "2": [
     "test:issue-detail-layout",
