@@ -104,6 +104,17 @@ func TestIssueCLIRealHTTPRecoversBusinessIdentityAfterLostResponses(t *testing.T
 	if err := json.Unmarshal(stdout.Bytes(), &recorded); err != nil || recorded.IssueID != original.Target.ID || reads != beforeReads+1 || len(ids) != 1 {
 		t.Fatalf("original committed request was not reconciled read-only: %+v err=%v reads=%d ids=%v", recorded, err, reads, ids)
 	}
+	for _, example := range [][]string{
+		{"issue", "show", strings.TrimPrefix(recorded.ShortCode, "T"), "--identity"},
+		{"issue", "list", "--search", "CLI intent"},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := cli.Main(t.Context(), env, example); code != 0 ||
+			!strings.Contains(stdout.String(), recorded.ShortCode) || !strings.Contains(stdout.String(), recorded.IssueID) {
+			t.Fatalf("Issue lookup %v exit=%d out=%s err=%s", example, code, &stdout, &stderr)
+		}
+	}
 	stdout.Reset()
 	stderr.Reset()
 	if code := cli.Main(t.Context(), env, []string{"operation", "submit", "--data", string(envelopes[0])}); code != 0 {

@@ -21,6 +21,7 @@ import {
 } from "react";
 import type {
   IssueActivityEntry,
+  IssueConversationItem,
   IssueResult,
   IssueView,
   IssueTranscriptBlock,
@@ -483,6 +484,29 @@ export function IssueActivity({
     loadingEarlier,
     earlier,
   ]);
+  const [anchor, setAnchor] = useState<{ message: string; trigger?: string | undefined }>();
+  const conversationID = issue.conversation?.conversation_id;
+  useEffect(() => {
+    if (!targetMessage || !conversationID) return;
+    const controller = new AbortController();
+    void client
+      .get<IssueConversationItem>(
+        `/api/v1/messages/${encodeURIComponent(targetMessage)}`,
+        controller.signal,
+      )
+      .then((item) => {
+        if (
+          !controller.signal.aborted &&
+          item.message_id === targetMessage &&
+          item.conversation_id === conversationID &&
+          !item.control?.withdrawn_at
+        )
+          setAnchor({ message: targetMessage, trigger: item.reply_to });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [client, conversationID, targetMessage]);
+  const scopedAnchor = anchor?.message === targetMessage ? anchor : undefined;
   const located = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!targetMessage) {
@@ -503,12 +527,23 @@ export function IssueActivity({
       });
       return () => cancelAnimationFrame(frame);
     }
-    if (state.value?.more && !state.loading && !state.error && !error && !loadingEarlier) {
+    if (
+      scopedAnchor &&
+      !rows.some(
+        (row) => row.block?.trigger.message_id === (scopedAnchor.trigger ?? scopedAnchor.message),
+      ) &&
+      state.value?.more &&
+      !state.loading &&
+      !state.error &&
+      !error &&
+      !loadingEarlier
+    ) {
       const frame = requestAnimationFrame(() => void earlier());
       return () => cancelAnimationFrame(frame);
     }
   }, [
     targetMessage,
+    scopedAnchor,
     scroll,
     rows,
     transcript,
@@ -572,6 +607,9 @@ export function IssueActivity({
             key={entry.id}
             entry={entry}
             processReads={readable ? processReads : undefined}
+            targetMessage={
+              entry.block.trigger.message_id === scopedAnchor?.trigger ? targetMessage : undefined
+            }
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
@@ -663,6 +701,7 @@ class ProcessLayout extends Component<ProcessLayoutProps> {
 
 function ActivityBlock({
   entry,
+  targetMessage,
   rows,
   onContinuation,
   onPagination,
@@ -676,6 +715,7 @@ function ActivityBlock({
 }: {
   entry: IssueActivityEntry;
   processReads?: IssueProcessReads | undefined;
+  targetMessage?: string | undefined;
   currentIssueId: string;
   rows: TranscriptEntry[];
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
@@ -773,12 +813,13 @@ function ActivityBlock({
           process: { ...block.process, items: process.value.items, more: false },
         }
       : block
-    : opened && extra.value && !extra.error
+    : (opened || targetMessage) && extra.value && !extra.error
       ? extra.value
       : block;
   useEffect(() => {
-    if (opened) void continuation.open(block.trigger.message_id, depth);
-  }, [opened, block, continuation, depth]);
+    if (opened || (targetMessage && block.more))
+      void continuation.open(block.trigger.message_id, depth, targetMessage);
+  }, [opened, block, continuation, depth, targetMessage]);
   useEffect(
     () => () => {
       continuation.close();

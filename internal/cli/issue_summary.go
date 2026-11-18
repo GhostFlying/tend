@@ -13,11 +13,17 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func printIssuePage(e *Env, p protocol.IssuePage) error {
+func printIssuePage(e *Env, p protocol.IssuePage, showShortCodes bool) error {
 	w := tabwriter.NewWriter(e.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ISSUE\tINTERNAL ID\tTITLE\tSTATE\tOWNER")
+	if showShortCodes {
+		fmt.Fprint(w, "SHORT CODE\t")
+	}
+	fmt.Fprintln(w, "ISSUE\tTITLE\tSTATE\tOWNER")
 	for _, v := range p.Items {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s / %s\t%s\n", v.ShortCode, v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
+		if showShortCodes {
+			fmt.Fprintf(w, "%s\t", v.ShortCode)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s / %s\t%s\n", v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
 		execution := v.Execution
 		if v.Board != nil {
 			execution = &v.Board.Execution
@@ -73,10 +79,14 @@ func printIssueExecution(out io.Writer, counts protocol.ExecutionCounts) {
 	}
 }
 
-func printIssueView(e *Env, v protocol.IssueView) error {
+func printIssueView(e *Env, v protocol.IssueView, showShortCode bool) error {
 	out := e.Stdout
-	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", cmp.Or(v.ShortCode, v.IssueID), v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
-	if v.ShortCode != "" {
+	displayID := v.IssueID
+	if showShortCode {
+		displayID = cmp.Or(v.ShortCode, v.IssueID)
+	}
+	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", displayID, v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
+	if showShortCode && v.ShortCode != "" {
 		fmt.Fprintf(out, "Internal ID: %s\n", v.IssueID)
 	}
 	if v.Manager != nil {

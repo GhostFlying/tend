@@ -80,7 +80,7 @@ func runDetailShow(ctx context.Context, e *Env, name, route string, args []strin
 		if *asJSON {
 			return o.printJSON(view)
 		}
-		return printIssueView(e, view)
+		return printIssueView(e, view, pos[0] != view.IssueID)
 	}
 
 	var raw json.RawMessage

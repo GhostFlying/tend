@@ -181,7 +181,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if *asJSON {
 			return o.printJSON(page)
 		}
-		return printIssuePage(e, page)
+		return printIssuePage(e, page, *search != "")
 	case "reuse-status":
 		if len(pos) != 1 {
 			return usagef("issue reuse-status takes one original Issue ID")
