@@ -1771,6 +1771,14 @@ async function checkBoardColumnWidths() {
         assert(box && box.width >= 238, `${status} card width at ${width}px`);
       };
       if (mobile) {
+        const resizeBoard = async (width: number, height: number) => {
+          await page.setViewportSize({ width, height });
+          await page.waitForFunction(
+            (desktop) =>
+              document.querySelector('[aria-label="看板列"]')!.hasAttribute("tabindex") === desktop,
+            width > 760,
+          );
+        };
         const waitForHorizontalScrollToSettle = () =>
           board.evaluate(async (element) => {
             let lastOffset = element.scrollLeft;
@@ -1835,14 +1843,8 @@ async function checkBoardColumnWidths() {
         const doneTab = page.getByRole("tab", { name: /^已完成/, selected: true });
         await doneTab.waitFor();
         await waitForCardInViewport("done");
-        await page.setViewportSize({ width: 844, height: 390 });
-        await page.waitForFunction(
-          () => document.querySelector('[aria-label="看板列"]')!.getAttribute("tabindex") === "0",
-        );
-        await page.setViewportSize({ width, height: 844 });
-        await page.waitForFunction(
-          () => !document.querySelector('[aria-label="看板列"]')!.hasAttribute("tabindex"),
-        );
+        await resizeBoard(844, 390);
+        await resizeBoard(width, 844);
         await waitForHorizontalScrollToSettle();
         await waitForCardInViewport("done");
         assert(await doneTab.isVisible(), "the selected status survives rotating the viewport");
@@ -1863,6 +1865,38 @@ async function checkBoardColumnWidths() {
         await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
         await waitForCardInViewport("cancelled");
         await minimumWidth("cancelled");
+
+        const backlogTab = page.getByRole("tab", { name: /^待安排/ });
+        const backlogTitle = card("backlog").getByRole("button", {
+          name: samples[0][2],
+          exact: true,
+        });
+        await backlogTab.click();
+        await waitForCardInViewport("backlog");
+        await backlogTab.focus();
+        const cardHasFocus = () =>
+          backlogTitle.evaluate((button) => button === document.activeElement);
+        for (let step = 0; step < 5 && !(await cardHasFocus()); step++) {
+          await page.keyboard.press("Tab");
+        }
+        assert(await cardHasFocus(), "Tab reaches the card title");
+        for (const viewport of [
+          { width: 844, height: 390 },
+          { width, height: 844 },
+        ]) {
+          await resizeBoard(viewport.width, viewport.height);
+          await waitForHorizontalScrollToSettle();
+          assert(await cardHasFocus(), `the card retains focus at ${viewport.width}px`);
+          await waitForCardInViewport("backlog");
+        }
+        await page.screenshot({ path: join(output, "board-card-focus-390.png") });
+        await resizeBoard(844, 390);
+        await card("todo").getByRole("button", { name: samples[1][2], exact: true }).focus();
+        await resizeBoard(width, 844);
+        assert(
+          await backlogTab.evaluate((tab) => tab === document.activeElement),
+          "focus moves to the current column tab if the former card is inactive",
+        );
       } else {
         for (const [status] of samples) {
           await card(status).waitFor();
