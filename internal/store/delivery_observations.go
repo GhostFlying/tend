@@ -165,7 +165,9 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		observation.State = "unknown"
 	}
 	previous := prior.Observation
-	replaced := observation.ErrorKind == "" && deliveryCandidateMoved(previous, observation)
+	// A partial provider response may confirm the candidate even when lineage
+	// proof fails. A read with no snapshot retains the previous candidate.
+	replaced := deliveryCandidateMoved(previous, observation)
 	fact := DeliveryObservationFactRow{
 		FactRevision: prior.FactRevision + 1, ChangedRevision: prior.ChangedRevision,
 		PreviousState: prior.PreviousState, PreviousErrorKind: prior.PreviousErrorKind,
@@ -179,8 +181,8 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		}
 	}
 	observation.LastConflict = previous.LastConflict
-	if observation.ErrorKind == "" && (replaced || observation.State == "closed" ||
-		observation.State == "merged" || observation.Mergeability == "mergeable") {
+	if replaced || observation.State == "closed" ||
+		observation.State == "merged" || observation.Mergeability == "mergeable" {
 		fact.ConflictEnded = true
 	}
 	if observation.ErrorKind == "" && observation.State == "open" && observation.Mergeability == "conflicting" &&

@@ -195,30 +195,42 @@ func TestIssueCandidateHistorySurvivesOverlappingRefreshes(t *testing.T) {
 		}
 		return query
 	}
-	record := func(query *ServerDeliveryQuery, head string) {
-		t.Helper()
-		snapshot := &protocol.DeliverySnapshot{
+	snapshot := func(head string) *protocol.DeliverySnapshot {
+		return &protocol.DeliverySnapshot{
 			State: "open", HeadSHA: head, BaseSHA: "base", TargetSHA: "tip",
 			CI: &protocol.DeliveryCI{HeadSHA: head, State: "running"},
 		}
-		if err := h.app.RecordServerDelivery(t.Context(), query.ID, snapshot, ""); err != nil {
+	}
+	record := func(query *ServerDeliveryQuery, s *protocol.DeliverySnapshot) {
+		t.Helper()
+		if err := h.app.RecordServerDelivery(t.Context(), query.ID, s, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	record(claim(), "first")
+	record(claim(), snapshot("first"))
 	h.clock.Advance(6 * time.Minute)
 	second := claim()
 	refresh := protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, DeliveryID: ref.DeliveryID}
 	if op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: issue.IssueID}, refresh, rev(issue.Revision)), IssueRefreshDelivery{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	record(second, "second")
+	record(second, snapshot("second"))
 	h.clock.Advance(6 * time.Minute)
-	record(claim(), "third")
+	third := snapshot("third")
+	third.State, third.MergeSHA, third.LineageErrorKind = "merged", "merge", "timeout"
+	record(claim(), third)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		activity, err := views.IssueActivity(t.Context(), tx.Q(), issue.IssueID, 0)
 		if err != nil {
 			return err
+		}
+		deliveries, err := views.CanonicalIssueDeliveries(t.Context(), tx.Q(), issue.IssueID)
+		if err != nil {
+			return err
+		}
+		current := deliveries.Items[0].Observation
+		if current.HeadSHA != "third" || current.ErrorKind != "timeout" || current.TargetContainsMerge {
+			t.Fatalf("candidate identity and lineage proof were mixed: %+v", current)
 		}
 		retired := map[string]int{}
 		for _, item := range activity.Items {
