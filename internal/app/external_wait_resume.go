@@ -82,6 +82,10 @@ func (ResumeExternalWait) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 		if err = appendBackgroundSource(ctx, x, tx, "work_item:"+fact.IssueID, fact.IssueID, fact.SourceMessage, fact.SourceEvent, "task.external_wait_ready", raw); err != nil {
 			return Outcome{}, err
 		}
+		v.NoticeRestored = true
+		if err := tx.PutExternalWait(ctx, *v, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
 		fact, err = views.OwnerCIContinuation(ctx, tx.Q(), task.TaskID, runID)
 		if err != nil {
 			return Outcome{}, err

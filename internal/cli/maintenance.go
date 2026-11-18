@@ -43,6 +43,7 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	upgradeID := fs.String("upgrade-id", "", "original planned component upgrade ID")
 	data := fs.String("data", "", "backend JSON for config or original Issue/Task/Run and evidence JSON for report")
 	file := fs.String("file", "", "backend or reported subject JSON file, or - for stdin")
+	scheduled := fs.Bool("scheduled", false, "coalesce timer audits within the current UTC hour")
 	dry := fs.Bool("dry-run", false, "print the complete command for review and replay")
 	asJSON := fs.Bool("json", true, "print full structured output")
 	pos, err := parse(fs, args[1:])
@@ -51,6 +52,9 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	}
 	if len(pos) != 0 || !filepath.IsAbs(*socket) {
 		return usagef("maintenance requires an absolute --socket and no positional arguments")
+	}
+	if *scheduled && action != "audit" {
+		return usagef("--scheduled is only valid for audit")
 	}
 	if *revision < -1 {
 		return usagef("revision must be nonnegative")
@@ -79,7 +83,7 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 		}
 		return printCapabilityValue(e, value, *asJSON)
 	}
-	input := protocol.MaintenanceRequest{RequestID: *request, ExpectedRevision: *revision, CaseID: *id, Reason: *reason, Verification: *verification, Until: *until, Mode: *mode, SessionID: *session}
+	input := protocol.MaintenanceRequest{ScheduledAudit: *scheduled, RequestID: *request, ExpectedRevision: *revision, CaseID: *id, Reason: *reason, Verification: *verification, Until: *until, Mode: *mode, SessionID: *session}
 	input.ReleaseDir = *releaseDir
 	if input.ReleaseDir != "" {
 		input.ReleaseDir, err = filepath.Abs(input.ReleaseDir)

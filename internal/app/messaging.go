@@ -632,14 +632,16 @@ func communicationReplyInput(ctx context.Context, q store.Querier, id string) er
 	var direction string
 	err := q.QueryRowContext(ctx, `SELECT direction FROM messaging_messages WHERE message_id=?`, id).Scan(&direction)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Batches and routed urgent notices have no external endpoint. Classify
+		// Batches, admitted CI wake sources and routed urgent notices have no external endpoint. Classify
 		// the input here so an unconsumed notice cannot fall back to a generic
 		// notification. communicationSourceAllowed checks actual admission.
 		var webInput bool
 		if err := q.QueryRowContext(ctx, `SELECT EXISTS(
  SELECT 1 FROM background_batches b JOIN conversation_messages m USING(message_id)
  WHERE b.message_id=?1 AND m.author='system'
- ) OR EXISTS(SELECT 1 FROM issue_owner_steers WHERE message_id=?1)`, id).Scan(&webInput); err != nil {
+ ) OR EXISTS(SELECT 1 FROM issue_owner_steers WHERE message_id=?1)
+ OR EXISTS(SELECT 1 FROM background_sources WHERE message_id=?1 AND kind='task.external_wait_ready'
+   AND cancelled_at=0 AND json_extract(data_json,'$.kind')='checks')`, id).Scan(&webInput); err != nil {
 			return err
 		}
 		if webInput {

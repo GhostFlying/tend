@@ -38,10 +38,14 @@ type MaintenanceChange struct {
 }
 
 type MaintenanceAudit struct {
-	Through int64               `json:"through"`
-	Changes []MaintenanceChange `json:"changes,omitempty"`
-	Recheck []string            `json:"recheck,omitempty"`
-	More    bool                `json:"more,omitempty"`
+	Since            int64               `json:"since"`
+	SnapshotAt       int64               `json:"snapshot_at,omitempty"`
+	ObservationError string              `json:"observation_error,omitempty"`
+	CIError          string              `json:"ci_error,omitempty"`
+	Through          int64               `json:"through"`
+	Changes          []MaintenanceChange `json:"changes,omitempty"`
+	Recheck          []string            `json:"recheck,omitempty"`
+	More             bool                `json:"more,omitempty"`
 }
 
 type MaintenanceCase struct {
@@ -88,6 +92,8 @@ type MaintenanceSession struct {
 }
 
 type MaintenanceStatus struct {
+	LastSnapshotAt     int64                        `json:"last_snapshot_at,omitempty"`
+	ScheduledHour      string                       `json:"scheduled_hour,omitempty"`
 	RecheckedAfter     string                       `json:"rechecked_after,omitempty"`
 	CompletedAudit     *MaintenanceAudit            `json:"completed_audit,omitempty"`
 	LastCICheck        int64                        `json:"last_ci_check,omitempty"`
@@ -141,6 +147,7 @@ type MaintenanceOverview struct {
 }
 
 type MaintenanceRequest struct {
+	ScheduledAudit   bool                `json:"scheduled_audit,omitempty"`
 	Subject          *MaintenanceSubject `json:"subject,omitempty"`
 	Verification     string              `json:"verification,omitempty"`
 	TurnID           string              `json:"turn_id,omitempty"`

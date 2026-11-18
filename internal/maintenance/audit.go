@@ -38,7 +38,7 @@ func Audit(ctx context.Context, cfg Config, opts Options) error {
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&s); err != nil {
 			return err
 		}
-		input := protocol.MaintenanceRequest{RequestID: opts.ID(), ExpectedRevision: s.Revision}
+		input := protocol.MaintenanceRequest{ScheduledAudit: true, RequestID: opts.ID(), ExpectedRevision: s.Revision}
 		raw, err := json.Marshal(input)
 		if err != nil {
 			return err
@@ -62,7 +62,7 @@ func Audit(ctx context.Context, cfg Config, opts Options) error {
 		return fmt.Errorf("maintenance: independent audit cannot acquire controller ownership: %w", err)
 	}
 	defer c.Close()
-	if _, err := c.Command(ctx, "audit", protocol.MaintenanceRequest{RequestID: opts.ID(), ExpectedRevision: c.Status().Revision}); err != nil {
+	if _, err := c.Command(ctx, "audit", protocol.MaintenanceRequest{ScheduledAudit: true, RequestID: opts.ID(), ExpectedRevision: c.Status().Revision}); err != nil {
 		return err
 	}
 	for {

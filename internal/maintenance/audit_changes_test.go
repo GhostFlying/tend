@@ -66,7 +66,7 @@ func TestMaintenanceReportedCaseSurvivesRestartAndRechecksIntervention(t *testin
 	subject.Evidence = "second reading"
 	command(t, c, "report", report)
 	s := c.Status()
-	if len(s.Cases) != 1 || len(s.Pending) != 1 {
+	if len(s.Cases) != 1 || len(s.Pending) != 1 || s.Cases[0].Subject.Evidence != "original observation" || s.Cases[0].Evidence != "second reading" {
 		t.Fatal(s)
 	}
 	id := s.Cases[0].ID
@@ -102,5 +102,27 @@ func TestMaintenanceReportedCaseSurvivesRestartAndRechecksIntervention(t *testin
 	command(t, d, "resolve", protocol.MaintenanceRequest{CaseID: id, Reason: "original work verified", Verification: "owner processed original evidence"})
 	if d.Status().Cases[1].Verification == "" {
 		t.Fatal(d.Status())
+	}
+}
+
+func TestMaintenanceHourlyTimerRetriesAcrossRestart(t *testing.T) {
+	c, n, cfg, opts := fixture(t)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	c.lock = nil
+	for range 2 {
+		if err := Audit(t.Context(), cfg, opts); err != nil {
+			t.Fatal(err)
+		}
+		n.complete, n.busy = true, false
+	}
+	d, err := Open(t.Context(), cfg, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if s := d.Status(); n.started != 1 || s.Active != nil || len(s.Pending) != 0 || s.LastAuditCompleted == 0 {
+		t.Fatal("duplicate timer occurrence started maintenance twice or lost original completion", n.started, s)
 	}
 }
