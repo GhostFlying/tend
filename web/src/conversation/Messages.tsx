@@ -199,6 +199,7 @@ export function ChatReplies({ items }: { items: readonly ConversationItem[] }) {
 
 export function AgentTurn({
   entry,
+  targetMessage,
   proseClassName,
   currentIssueId,
   processUnavailable = false,
@@ -216,6 +217,7 @@ export function AgentTurn({
     | undefined;
   processUnavailable?: boolean;
   entry: Extract<Entry, { kind: "agent" }>;
+  targetMessage?: string | undefined;
   proseClassName?: string | undefined;
   currentIssueId?: string;
 }) {
@@ -234,9 +236,15 @@ export function AgentTurn({
     process,
   );
   const tools = entry.items.filter((item) => item.tool);
+  const targetTool = targetMessage
+    ? tools.findIndex((item) => item.message_id === targetMessage)
+    : -1;
   const processing = groupedProcessing(entry.items);
   const [localTraceOpen, setTraceOpen] = useState(false);
   const traceOpen = process?.open ?? localTraceOpen;
+  const [dismissedAnchor, setDismissedAnchor] = useState<string>();
+  const revealAnchor = targetTool >= 0 && dismissedAnchor !== targetMessage;
+  const traceExpanded = traceOpen || revealAnchor;
   const wasActive = useRef(status.active);
   useLayoutEffect(() => {
     if (!process && wasActive.current && !status.active) {
@@ -257,6 +265,7 @@ export function AgentTurn({
   // Keep that window as later pages and tool updates arrive.
   if (ready && visibleStart === null) setVisibleStart(initialVisibleStart);
   const firstVisible = visibleStart ?? initialVisibleStart;
+  const firstVisibleTool = revealAnchor ? Math.min(firstVisible, targetTool) : firstVisible;
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status}>
@@ -264,13 +273,16 @@ export function AgentTurn({
           type="button"
           data-trace-trigger
           className={styles.traceTrigger}
-          aria-expanded={traceOpen}
+          aria-expanded={traceExpanded}
           aria-controls={`${prefix}-trace`}
           onClick={(event) => {
             event.currentTarget.focus();
-            if (!traceOpen && !process) setVisibleStart(initialVisibleStart);
-            if (process) process.toggle();
-            else setTraceOpen(!traceOpen);
+            const nextOpen = !traceExpanded;
+            if (nextOpen && !process) setVisibleStart(initialVisibleStart);
+            setDismissedAnchor(nextOpen ? undefined : targetMessage);
+            if (process) {
+              if (process.open !== nextOpen) process.toggle();
+            } else setTraceOpen(nextOpen);
           }}
         >
           查看过程{tools.length ? ` · ${tools.length} 步` : ""} <Chevron />
@@ -281,7 +293,7 @@ export function AgentTurn({
         .map((choice) => (
           <ChoiceCard key={choice.choice_id} choice={choice} />
         ))}
-      <div data-trace id={`${prefix}-trace`} hidden={!traceOpen} className={styles.trace}>
+      <div data-trace id={`${prefix}-trace`} hidden={!traceExpanded} className={styles.trace}>
         <p>这里展示已公开的执行步骤和回复，不包含模型的隐藏推理。</p>
         {!process && !tools.length && (
           <p>
@@ -292,20 +304,20 @@ export function AgentTurn({
                 : "这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。"}
           </p>
         )}
-        {firstVisible > 0 && (
+        {firstVisibleTool > 0 && (
           <button
             type="button"
             className={styles.traceTrigger}
-            onClick={() => setVisibleStart(Math.max(0, firstVisible - 12))}
+            onClick={() => setVisibleStart(Math.max(0, firstVisibleTool - 12))}
           >
-            显示更早 {firstVisible} 步
+            显示更早 {firstVisibleTool} 步
           </button>
         )}
         {tools.map((item, index) => (
           <AgentItem
             key={item.message_id}
             item={item}
-            hidden={index < firstVisible}
+            hidden={index < firstVisibleTool}
             hideChoices
             id={`${prefix}-item-${item.message_id}`}
             onToolOpenChange={() => {}}

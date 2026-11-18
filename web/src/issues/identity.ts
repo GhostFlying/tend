@@ -22,18 +22,22 @@ function identityEntry(client: ApiClient, id: string): Entry {
   }
   let entry = entries.get(id);
   if (!entry) {
-    const read = new WorkItemRead<Identity>({
-      async get<T>(path: string, signal?: AbortSignal): Promise<T> {
-        try {
-          const issue = await client.get<IssueIdentity>(path, signal);
-          if (issue.short_code && !signal?.aborted) rememberIssueIdentity(client, issue);
-          return (issue.short_code ? issue : "missing") as T;
-        } catch (error) {
-          if (error instanceof ApiError && error.status === 404) return "missing" as T;
-          throw error;
-        }
+    const read: WorkItemRead<Identity> = new WorkItemRead(
+      {
+        async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+          try {
+            const issue = await client.get<IssueIdentity>(path, signal);
+            if (issue.short_code && !signal?.aborted) rememberIssueIdentity(client, issue);
+            return (issue.short_code ? issue : "missing") as T;
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 404) return "missing" as T;
+            throw error;
+          }
+        },
       },
-    });
+      // An in-flight negative lookup cannot displace a confirmed permanent mapping.
+      (value) => (value === "missing" ? (read.state.get().value ?? value) : value),
+    );
     entry = { read, users: 0 };
     entries.set(id, entry);
   }

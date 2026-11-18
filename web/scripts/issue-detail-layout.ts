@@ -46,6 +46,26 @@ let shortAnchorResults: Promise<void> | undefined;
 let shortIdentityOutage: { failed: boolean; recovery: Promise<void> } | undefined;
 const historicalMessageID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const historicalReplyID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
+const historicalToolID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+const historicalProcess = {
+  started_at: now - 1,
+  ended_at: now,
+  more: false,
+  items: Array.from({ length: 14 }, (_, index): IssueConversationItem => ({
+    message_id: index === 0 ? historicalToolID : `short-code-process-${index}`,
+    seq: 40 + index,
+    kind: "message",
+    author: "main_agent",
+    reply_to: historicalMessageID,
+    created_at: new Date(now).toISOString(),
+    tool: {
+      name: "issues_read",
+      status: "completed",
+      turn_id: "short-code-history",
+      updated_at: new Date(now).toISOString(),
+    },
+  })),
+};
 let sharedReviews: SharedDeliveryReviewPage = { items: [], more: false };
 let reportDownload: string | undefined;
 const streams = new Set<ServerResponse>();
@@ -231,13 +251,15 @@ const server = createServer(async (req, res) => {
   }
   if (
     shortNumbers &&
-    [`/api/v1/messages/${historicalMessageID}`, `/api/v1/messages/${historicalReplyID}`].includes(p)
+    [historicalMessageID, historicalReplyID, historicalToolID].some(
+      (id) => p === `/api/v1/messages/${id}`,
+    )
   ) {
     const message_id = p.split("/").at(-1)!;
     return json({
       message_id,
       conversation_id: issue.conversation!.conversation_id,
-      ...(message_id === historicalReplyID ? { reply_to: historicalMessageID } : {}),
+      ...(message_id !== historicalMessageID ? { reply_to: historicalMessageID } : {}),
     });
   }
   if (shortNumbers && p === `/api/v1/conversation/blocks/${historicalMessageID}`) {
@@ -246,6 +268,7 @@ const server = createServer(async (req, res) => {
     return json({
       ...fixture,
       trigger: { ...fixture.trigger, message_id: historicalMessageID },
+      process: historicalProcess,
       more: after < 150,
       next_seq: after + 50,
       items:
@@ -397,6 +420,7 @@ const server = createServer(async (req, res) => {
                       ...block,
                       more: true,
                       next_seq: 50,
+                      process: historicalProcess,
                       trigger: {
                         ...block.trigger,
                         message_id: historicalMessageID,
@@ -846,6 +870,20 @@ async function verifyShortNumbers() {
           await detail.getByText("历史回合第三页的确切回复。", { exact: true }).count(),
           1,
         );
+        await page.goto(`${base}/issues/${issue.issue_id}?message=${historicalToolID}`);
+        await page.waitForURL(`**/issues/T123?message=${historicalToolID}`);
+        await page.waitForFunction((id) => {
+          const target = document.querySelector(`[data-tool-item="${id}"]`);
+          const bounds = target?.getBoundingClientRect();
+          return !!bounds && bounds.height > 0 && bounds.top >= 0 && bounds.bottom <= innerHeight;
+        }, historicalToolID);
+        const linkedTool = detail.locator(`[data-tool-item="${historicalToolID}"]`);
+        const linkedTrace = detail.locator("[data-trace-trigger]");
+        await linkedTrace.click();
+        await linkedTool.waitFor({ state: "hidden" });
+        await linkedTrace.click();
+        await linkedTool.waitFor({ state: "visible" });
+        console.log(`PASS short-code historical public process anchor (${width}px)`);
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");
         const composer = detail.getByRole("textbox", { name: "消息", exact: true });
@@ -868,17 +906,22 @@ async function verifyShortNumbers() {
         await result.click();
         await page.waitForURL("**/issues/T123");
         await detail.getByText(issue.plan.title, { exact: true }).first().waitFor();
-        for (const inflight of [false, true]) {
+        for (const [variant, code] of [
+          ["cached", "T124"],
+          ["inflight", "T125"],
+          ["confirmed", "T126"],
+        ] as const) {
           await page.goto(`${base}/issues/T123`);
           await detail.getByRole("heading", { name: issue.plan.title, exact: true }).waitFor();
-          const code = inflight ? "T125" : "T124";
           let available = false;
+          let aliasReads = 0;
           let releaseInitial = () => {};
           const initialGate = new Promise<void>((resolve) => {
             releaseInitial = resolve;
           });
           const lateCodeURL = `/api/v1/issues/${code}?projection=identity`;
           await page.route(`**${lateCodeURL}`, async (route) => {
+            aliasReads++;
             if (available) {
               await route.fulfill({
                 json: { issue_id: child.issue_id, short_code: code, title: child.plan.title },
@@ -926,18 +969,34 @@ async function verifyShortNumbers() {
             await navigate(page, "/");
             await page.getByText(`See ${code}`, { exact: true }).waitFor();
             await initialRequest;
-            if (!inflight) {
+            if (variant === "cached") {
               releaseInitial();
               await initialMiss;
             }
             available = true;
             child.short_code = code;
-            assert.equal(
-              await page.evaluate(async (url) => (await fetch(url)).status, lateCodeURL),
-              200,
-            );
-            await navigate(page, `/issues/${code}`);
-            if (inflight) {
+            if (variant === "confirmed") {
+              await navigate(page, `/issues/${child.issue_id}`);
+              await detail.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
+              await page.waitForURL(`**/issues/${code}`);
+              releaseInitial();
+              await (await initialMiss).finished();
+              await page.evaluate(
+                () =>
+                  new Promise<void>((done) =>
+                    requestAnimationFrame(() => requestAnimationFrame(() => done())),
+                  ),
+              );
+              assert.equal(aliasReads, 1);
+              console.log(`PASS short-code confirmed identity outlasts delayed 404 (${width}px)`);
+            } else {
+              assert.equal(
+                await page.evaluate(async (url) => (await fetch(url)).status, lateCodeURL),
+                200,
+              );
+              await navigate(page, `/issues/${code}`);
+            }
+            if (variant === "inflight") {
               await page.getByRole("heading", { name: "正在读取 Issue", exact: true }).waitFor();
               releaseInitial();
               await initialMiss;
