@@ -133,9 +133,13 @@ export function IssueBoard({
     if (active && mobile && view === "board") restoreMobileColumn();
   }, [active, mobile, view]);
   useLayoutEffect(() => {
-    mobileTabs.current
-      ?.querySelector('[aria-selected="true"]')
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const tabStrip = mobileTabs.current;
+    const selectedTab = tabStrip?.querySelector<HTMLButtonElement>('[aria-selected="true"]');
+    if (!active || !mobile || !selectedTab) return;
+    if (tabStrip?.contains(document.activeElement) && document.activeElement !== selectedTab) {
+      selectedTab.focus({ preventScroll: true });
+    }
+    selectedTab.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [active, mobile, mobileColumn, view]);
   const actions = useBoardActions();
   const move = (item: IssueSummary, status: IssueWorkStatus) => {
