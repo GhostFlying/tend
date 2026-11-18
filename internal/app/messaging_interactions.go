@@ -835,7 +835,7 @@ func (c telegramInteraction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (
 			_, err = tx.Exec(ctx, `INSERT INTO messaging_interaction_messages(message_id,interaction_id) VALUES(?,?)`, id, i.ID)
 		}
 		if err == nil {
-			err = queueCommunication(ctx, x, tx, id, "telegram", c.Inbox.BotID, c.Chat, c.External, protocol.MessagingPublication{Body: body, Purpose: "interaction_prompt"})
+			err = queueCommunication(ctx, x, tx, id, "telegram", c.Inbox.BotID, c.Chat, c.External, protocol.MessagingPublication{Body: body, Purpose: "interaction_prompt"}, nil)
 		}
 		if err == nil {
 			err = communicationEvent(ctx, x, tx, id, "messaging.published")
