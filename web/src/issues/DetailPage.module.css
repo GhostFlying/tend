@@ -220,14 +220,20 @@
   padding: var(--space-1) 0;
 }
 .milestone {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: var(--space-3);
   color: var(--label-2);
   font-size: var(--text-caption);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.milestoneLine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   min-height: 36px;
 }
-.milestone > span {
+.milestoneLine > span {
   flex: 1;
 }
 .milestone time {

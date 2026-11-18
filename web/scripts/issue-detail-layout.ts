@@ -830,6 +830,10 @@ try {
       await event.getByText("送达 · Agent 已接收通知", { exact: true }).waitFor();
       await event.getByText("等待原因 · 等待原审阅报告关联", { exact: true }).waitFor();
       await event.getByText("结算 · 等待澄清", { exact: true }).waitFor();
+      const eventHeading = await event.locator("[data-activity-event-heading]").boundingBox();
+      const openNotice = await readNotice.boundingBox();
+      assert(eventHeading && openNotice && openNotice.y >= eventHeading.y + eventHeading.height);
+      assert(eventHeading.width >= openNotice.width && eventHeading.width > 200);
       await event.screenshot({ path: join(output, `owner-queue-event-notification-${width}.png`) });
 
       ownerItems = [
