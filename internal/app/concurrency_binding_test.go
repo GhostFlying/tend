@@ -160,6 +160,12 @@ func TestConcurrencyRunBindingPreservesProofWithoutPromotingOnIncompleteFeedback
 	promotedAt := h.clock.Now()
 	h.clock.Advance(-743 * time.Millisecond)
 	reportConcurrencyEvent(t, h, second, 2, protocol.ConcurrencyFeedback{
+		Kind: "success", SessionID: "second-native", TurnID: "prior-window-success",
+	})
+	if s := observeConcurrencyGroup(t, h); s.Group.SuccessfulTurns != 0 || s.LastSample != promotedAt.UnixMilli() {
+		t.Fatalf("a late receipt from the previous window must not become success proof: %+v", s)
+	}
+	reportConcurrencyEvent(t, h, second, 3, protocol.ConcurrencyFeedback{
 		Kind: "congestion", SessionID: "second-native", TurnID: "turn-2",
 		Failure: &protocol.AgentFailure{HTTPStatus: 429},
 	})
@@ -168,7 +174,7 @@ func TestConcurrencyRunBindingPreservesProofWithoutPromotingOnIncompleteFeedback
 		t.Fatalf("late congestion failed to keep the cursor and start cooldown: %+v", state)
 	}
 	h.clock.Set(promotedAt.Add(10 * time.Second))
-	reportConcurrencyEvent(t, h, second, 3, protocol.ConcurrencyFeedback{
+	reportConcurrencyEvent(t, h, second, 4, protocol.ConcurrencyFeedback{
 		Kind: "congestion", SessionID: "second-native", TurnID: "turn-3",
 		Failure: &protocol.AgentFailure{Code: "server_overloaded"},
 	})

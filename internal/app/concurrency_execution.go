@@ -333,7 +333,7 @@ func (a *App) RecordHostedConcurrencyEvent(ctx context.Context, request string, 
 		return recordConcurrencyFeedback(ctx, tx, source, event, a.now().UnixMilli())
 	})
 }
-func concurrencyRunFeedback(ctx context.Context, tx *store.Tx, run store.RunRow, e protocol.RunEvent, now int64) error {
+func concurrencyRunFeedback(ctx context.Context, tx *store.Tx, run store.RunRow, e protocol.RunEvent, receivedAt, observedAt int64) error {
 	if e.Kind != "worker.concurrency" {
 		return nil
 	}
@@ -380,7 +380,7 @@ func concurrencyRunFeedback(ctx context.Context, tx *store.Tx, run store.RunRow,
 	if f.Kind == "running" && state == "reserved" {
 		state = "running"
 	}
-	if err := putConcurrencyExecution(ctx, tx, source, state, now); err != nil {
+	if err := putConcurrencyExecutionObserved(ctx, tx, source, state, receivedAt, observedAt); err != nil {
 		return err
 	}
 	if f.Kind == "running" {
@@ -389,7 +389,7 @@ func concurrencyRunFeedback(ctx context.Context, tx *store.Tx, run store.RunRow,
 	if f.Attempt == "" {
 		f.Attempt = "run"
 	}
-	return recordConcurrencyFeedback(ctx, tx, source, f, now)
+	return recordConcurrencyFeedbackObserved(ctx, tx, source, f, receivedAt, observedAt)
 }
 
 func (a *App) updateConcurrencyWaiting(ctx context.Context, tx *store.Tx) error {

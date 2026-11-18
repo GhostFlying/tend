@@ -610,6 +610,10 @@ WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurren
 
 // RecordConcurrencyFeedback only consumes typed, identity-bound native facts.
 func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protocol.ConcurrencySource, f protocol.ConcurrencyFeedback, now int64) error {
+	return recordConcurrencyFeedbackObserved(ctx, tx, source, f, now, now)
+}
+
+func recordConcurrencyFeedbackObserved(ctx context.Context, tx *store.Tx, source protocol.ConcurrencySource, f protocol.ConcurrencyFeedback, receivedAt, observedAt int64) error {
 	if f.Kind != "success" && !domain.ConcurrencyCongestion(f.Failure) {
 		return nil
 	}
@@ -632,7 +636,7 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 	source.TurnID = f.TurnID
 	source.Attempt = f.Attempt
 	source.OccurredAt = f.OccurredAt
-	source.ReceivedAt = now
+	source.ReceivedAt = receivedAt
 	if f.Kind != "success" {
 		source.Kind = "congestion"
 		source.Code = f.Failure.Code
@@ -651,7 +655,7 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 	if err != nil {
 		return err
 	}
-	res, err := tx.Exec(ctx, `INSERT OR IGNORE INTO concurrency_feedback(feedback_id,group_id,received_at,source_json) VALUES(?,?,?,?)`, key, id, now, string(raw))
+	res, err := tx.Exec(ctx, `INSERT OR IGNORE INTO concurrency_feedback(feedback_id,group_id,received_at,source_json) VALUES(?,?,?,?)`, key, id, receivedAt, string(raw))
 	if err != nil {
 		return err
 	}
@@ -667,16 +671,18 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 	if err != nil {
 		return err
 	}
-	if err := refreshConcurrencyLoad(ctx, tx, &s, now); err != nil {
+	if err := refreshConcurrencyLoad(ctx, tx, &s, observedAt); err != nil {
 		return err
 	}
-	// Preserve the raw receipt in feedback history. The controller applies
-	// this new fact at its monotonic sample cursor inside the transaction.
-	now = s.LastSample
 	if source.Kind == "success" {
-		s.Successes = append(s.Successes, now)
-		s.Group.SuccessfulTurns = int64(len(s.Successes))
+		if receivedAt >= s.Group.ObservationSince {
+			s.Successes = append(s.Successes, receivedAt)
+			s.Group.SuccessfulTurns = int64(len(s.Successes))
+		}
 	} else {
+		// New congestion takes effect at the observation cursor. The original
+		// receipt remains the source timestamp used in the feedback ledger.
+		now := s.LastSample
 		before := s.Group.Current
 		if s.Congested(now) {
 			reason := "congestion"

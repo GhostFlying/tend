@@ -1333,9 +1333,10 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 	}
 	ctx = staged
 
+	now := a.now().UnixMilli()
 	changed, wakeQueued := false, false
 	err = a.write(ctx, func(tx *store.Tx) error {
-		now := a.now().UnixMilli()
+		observedAt := a.now().UnixMilli()
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
 			return errNotFound(err, "run %s does not exist", runID)
@@ -1357,7 +1358,7 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				continue
 			}
 			res.Accepted++
-			if err := concurrencyRunFeedback(ctx, tx, run, e, now); err != nil {
+			if err := concurrencyRunFeedback(ctx, tx, run, e, now, observedAt); err != nil {
 				return err
 			}
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
