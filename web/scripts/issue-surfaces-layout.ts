@@ -1917,9 +1917,14 @@ async function checkBoardColumnWidths() {
           `the focused tab fits within the viewport: ${JSON.stringify(tabBox)}`,
         );
         await page.screenshot({ path: join(output, "board-touch-390.png") });
+        const reviewOffset = await board.evaluate((element) => element.scrollLeft);
         await page.keyboard.press("ArrowRight");
         const doneTab = page.getByRole("tab", { name: /^已完成/, selected: true });
         await doneTab.waitFor();
+        await waitForCardInViewport("done");
+        await board.evaluate((element, left) => (element.scrollLeft = left), reviewOffset);
+        await waitForScrollToSettle();
+        assert(await doneTab.isVisible(), "a delayed swipe offset cannot override the tab choice");
         await waitForCardInViewport("done");
         await resizeBoard(844, 390);
         await resizeBoard(width, 844);
