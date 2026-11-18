@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -15,7 +16,7 @@ import (
 func OwnerCIContinuation(ctx context.Context, q store.Querier, taskID, runID string) (protocol.CIContinuation, error) {
 	f := protocol.CIContinuation{TaskID: taskID, State: "unverified"}
 	if runID == "latest" {
-		err := q.QueryRowContext(ctx, `SELECT run_id FROM run_external_waits WHERE task_id=? ORDER BY rowid DESC LIMIT 1`, taskID).Scan(&runID)
+		err := q.QueryRowContext(ctx, `SELECT run_id FROM run_external_waits WHERE task_id=? AND status='continued' AND json_extract(body_json,'$.kind')='checks' AND json_extract(body_json,'$.wake_reason') GLOB 'checks_*' ORDER BY rowid DESC LIMIT 1`, taskID).Scan(&runID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return f, nil
 		}
@@ -92,6 +93,13 @@ func OwnerCIContinuation(ctx context.Context, q store.Querier, taskID, runID str
 	if m.State != "assigned" || issue.AssignmentState != "active" || issue.AssignmentEpoch != m.AssignmentEpoch || issue.State != protocol.IssueActive || issue.Assignee.Kind != protocol.IssueAssigneeAgent || issue.WorkStatus == protocol.IssueBacklog {
 		return f, nil
 	}
+	admission := scheduler.Candidate{DependenciesDone: true}
+	if err := ApplyIssueAdmission(ctx, q, &admission, w.IssueID, false); err != nil {
+		return f, err
+	}
+	if !admission.DependenciesDone {
+		return f, nil
+	}
 	task, err := store.GetTask(ctx, q, taskID)
 	if err != nil || task.Lifecycle.Terminal() || task.ControlMode != protocol.ControlManaged {
 		return f, err
@@ -131,10 +139,12 @@ func OwnerCIContinuation(ctx context.Context, q store.Querier, taskID, runID str
         EXISTS(SELECT 1 FROM outbox o WHERE o.destination=? AND o.status IN ('pending','sending','unknown')
           AND (o.status<>'pending' OR NOT `+store.IssueOwnerConsumptionMatchesOutbox+`)) OR
         EXISTS(SELECT 1 FROM background_sources WHERE message_id=? AND event_id=?) OR
-        EXISTS(SELECT 1 FROM issue_delivery_duties WHERE issue_id=? AND status IN ('awaiting_owner','authorized','executing','deferred','ended','complete','report')
-          AND json_extract(body_json,'$.candidate.delivery_id')=?) OR
+        EXISTS(SELECT 1 FROM issue_delivery_duties WHERE issue_id=? AND json_extract(body_json,'$.candidate.delivery_id')=?
+          AND (status IN ('awaiting_owner','authorized','executing','deferred') OR (status IN ('ended','complete','report')
+           AND json_extract(body_json,'$.candidate.head_sha')=? AND json_extract(body_json,'$.candidate.base_sha')=?
+           AND json_extract(body_json,'$.candidate.target_sha')=?))) OR
         EXISTS(SELECT 1 FROM agent_recoveries r JOIN runner_coordination_executions e ON r.root_request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND r.status IN ('waiting','starting','running','unknown','blocked','exhausted'))`,
-		taskID, taskID, taskID, taskID, taskID, w.IssueID, taskID, w.IssueID, store.ConversationDestination(m.ConversationID), w.SourceMessage, w.SourceEvent, w.IssueID, w.TargetID, w.IssueID, m.AssignmentEpoch).Scan(&held)
+		taskID, taskID, taskID, taskID, taskID, w.IssueID, taskID, w.IssueID, store.ConversationDestination(m.ConversationID), w.SourceMessage, w.SourceEvent, w.IssueID, w.TargetID, f.Head, f.Base, f.Target, w.IssueID, m.AssignmentEpoch).Scan(&held)
 	if err != nil || held {
 		return f, err
 	}

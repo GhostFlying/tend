@@ -25,7 +25,7 @@ tend maintenance intervene --id "$CASE_ID" --reason "$ORIGINAL_ACTION_RECEIPT"
 tend maintenance resolve --id "$CASE_ID" --reason "$DIAGNOSIS" --verification "$OWNER_READBACK"
 ```
 
-`intervene` 记录已使用的正常入口及其回执，状态为 `awaiting_verification`。对于自动识别的 CI 接续，原 owner 已随等待保存同一候选的终态、事件和来源消息。程序复用原探针取得的 owner Task，每个补查周期最多轮转 8 个点查，包括已登记 case 的原 Run。队列、运行中的 owner、有效提醒、原生回执待对账、控制暂停和明确延后都保持静默。历史等待缺少来源、候选或基线变化、无法确认处置时继续保留未知。
+`intervene` 记录已使用的正常入口及其回执，状态为 `awaiting_verification`。对于自动识别的 CI 接续，原 owner 已随等待保存同一候选的终态、事件和来源消息。程序复用原探针取得的 owner Task，每个补查周期最多轮转 8 个点查。自动发现定位各 Task 最近一次因 checks 终态而接续的等待，已登记 case 按原 Run 继续复查。更早的其他 CI 等待可由原 Run 定向核实。队列、运行中的 owner、有效提醒、原生回执待对账、父级或本级准入暂停、未完成的依赖和明确延后都保持静默。已结束的交付处置按原 head/base/target 核对。历史等待缺少来源、候选或基线变化、无法确认处置时继续保留未知。
 
 ```sh
 tend task ci-continuation "$OWNER_TASK" "$ORIGINAL_RUN" --json
