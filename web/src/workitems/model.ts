@@ -123,9 +123,22 @@ export function splitWorkItemIds(
     all: /(?<![0-9A-Za-z_/\\])[Tt][1-9][0-9]*(?![0-9A-Za-z_/\\]|\.[\p{L}\p{N}_])|(?<![0-9A-Za-z_/])wi_[0-7][0-9A-HJKMNP-TV-Z]{25}(?![0-9A-Za-z_])/gu,
   };
   const pattern = patterns[mode];
+  // A hyphen may separate prose or run through a file name. Keep the entire
+  // token available so a short code inside a path cannot become a link.
+  const fileWords = mode === "legacy" ? undefined : text.matchAll(/[\p{L}\p{N}_~.+@%/\\-]+/gu);
+  const fileMarker = /[/\\]|[\p{L}\p{N}_-]\.[\p{L}\p{N}_]/u;
+  let word = fileWords?.next().value;
+  let isFileWord = word !== undefined && fileMarker.test(word[0]);
   const out: (string | { workItemId: string })[] = [];
   let last = 0;
   for (const match of text.matchAll(pattern)) {
+    if (!match[0].startsWith("wi_")) {
+      while (word && word.index + word[0].length <= match.index) {
+        word = fileWords?.next().value;
+        isFileWord = word !== undefined && fileMarker.test(word[0]);
+      }
+      if (isFileWord && word && word.index <= match.index) continue;
+    }
     if (match.index > last) out.push(text.slice(last, match.index));
     out.push({ workItemId: match[0] });
     last = match.index + match[0].length;
