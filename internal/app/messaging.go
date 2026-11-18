@@ -114,14 +114,23 @@ func communicationRoute(ctx context.Context, x *Exec, tx *store.Tx, reply string
 	q := tx.Q()
 	var conversation string
 	var completionReport bool
-	err := q.QueryRowContext(ctx, `SELECT c.conversation_id, EXISTS(SELECT 1 FROM issue_completion_reports
-		WHERE source_message_id=m.message_id OR published_message_id=m.message_id)
-		FROM messaging_messages m JOIN conversation_messages c USING(message_id) WHERE m.message_id=?`, reply).Scan(&conversation, &completionReport)
+	// Follow actual quotes and input corrections through Main's discussion.
+	// A cited source on an unrelated publication, or an Issue owner's own
+	// answer, does not transfer that message's responsibility to Main.
+	err := q.QueryRowContext(ctx, `WITH RECURSIVE quoted(id) AS (
+		SELECT ?1 UNION
+		SELECT COALESCE(NULLIF(m.correction_of,''),NULLIF(m.reply_to,'')) FROM quoted
+		JOIN messaging_messages m ON m.message_id=quoted.id JOIN conversation_messages c USING(message_id)
+		WHERE c.conversation_id='main' AND (m.correction_of<>'' OR m.reply_to<>'')
+		AND (m.direction='input' OR EXISTS(SELECT 1 FROM main_turns t JOIN conversation_messages original ON original.message_id=t.message_id
+			WHERE t.request_id=m.execution_id AND original.conversation_id='main'))
+	)
+	SELECT c.conversation_id, EXISTS(SELECT 1 FROM quoted JOIN issue_completion_reports r
+		ON r.source_message_id=quoted.id OR r.published_message_id=quoted.id)
+	FROM messaging_messages m JOIN conversation_messages c USING(message_id) WHERE m.message_id=?1`, reply).Scan(&conversation, &completionReport)
 	if err != nil {
 		return "", errNotFound(err, "reply target is not a communication message")
 	}
-	// One coordinator handles questions about the original agreement or its
-	// combined result, including after the user narrows it to one Issue.
 	if completionReport {
 		return "main", nil
 	}

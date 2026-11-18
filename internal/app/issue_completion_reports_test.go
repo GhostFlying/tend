@@ -73,6 +73,46 @@ func TestCombinedIssueReportPublishesOnceFromCurrentClosures(t *testing.T) {
 	}
 }
 
+func TestCombinedIssueReportContinuedDiscussionRoutesToMain(t *testing.T) {
+	h := newHarness(t)
+	a, b := createCanonicalOwnerTestIssue(t, h), createCanonicalOwnerTestIssue(t, h)
+	source, _ := h.say("Report these two together.")
+	ids := []string{a.IssueID, b.IssueID}
+	setReportForTest(t, h, source, ids, ids)
+	closeReportMember(t, h, a, source, protocol.WorkItemClosureCompleted, "First result")
+	closeReportMember(t, h, b, source, protocol.WorkItemClosureCompleted, "Second result")
+	report := h.associations(source).CompletionReport.PublishedMessageID
+	ask := func(quoted string) protocol.Operation {
+		t.Helper()
+		return h.exec(owner, h.env("messaging.reply", protocol.Target{Type: "message", ID: quoted}, protocol.MessagingInput{Body: "Can you expand on both results?"}, nil), MessagingCommand{Action: "reply"})
+	}
+	question := messageID(t, ask(report))
+	var request string
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return tx.Q().QueryRowContext(t.Context(), `SELECT request_id FROM outbox WHERE destination='main_thread' AND json_extract(payload_json,'$.message_id')=?`, question).Scan(&request)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turn := store.MainTurn{RequestID: request, MessageID: question, ThreadID: mainAgent.Thread, TurnID: "report-discussion", Status: store.TurnStarted}
+	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
+		t.Fatal(err)
+	}
+	p := protocol.MessagingPublication{Body: "Here is what changed in both Issues.", ReplyTo: question, IssueIDs: ids}
+	env := h.env("conversation.publish", protocol.Target{Type: "logical_turn", ID: request}, p, nil)
+	env.ParentRequestID = request
+	answer := messageID(t, h.exec(mainAgent, env, PublishCommunication{}))
+	h.app = New(h.store, h.ids, h.clock.Now, WithFollowups(true))
+	followup, err := h.app.MessagingMessage(t.Context(), messageID(t, ask(answer)))
+	if err != nil || followup.ConversationID != "main" || followup.ReplyTo != answer {
+		t.Fatal("follow-up lost its coordinator or quoted answer", followup, err)
+	}
+	// An independent notification can cite the report for evidence without
+	// becoming a reply in its conversation.
+	notice := protocol.MessagingPublication{Body: "Two other responsibilities to consider.", SourceMessageIDs: []string{report}, IssueIDs: ids}
+	op := h.exec(owner, h.env("messaging.notify", protocol.Target{Type: "message"}, notice, nil), MessagingCommand{Action: "notify"})
+	expectWorkCode(t, ask(messageID(t, op)), protocol.CodeInvalidRequest)
+}
+
 func TestCombinedIssueReportChangesAndNoncompletion(t *testing.T) {
 	for _, mode := range []string{"replace", "cancel", "declined", "unlink"} {
 		t.Run(mode, func(t *testing.T) {
@@ -88,8 +128,15 @@ func TestCombinedIssueReportChangesAndNoncompletion(t *testing.T) {
 				if report := h.associations(source).CompletionReport; report == nil || report.PublishedMessageID == "" {
 					t.Fatal("replacement did not assess already completed members")
 				}
+				op := h.exec(owner, h.env("messaging.reply", protocol.Target{Type: "message", ID: source}, protocol.MessagingInput{Body: "Which result did we agree on?"}, nil), MessagingCommand{Action: "reply"})
+				msg, err := h.app.MessagingMessage(t.Context(), messageID(t, op))
+				if err != nil || msg.ConversationID != "main" || msg.ReplyTo != source {
+					t.Fatal(msg, err)
+				}
 			case "cancel":
 				setReportForTest(t, h, source, ids, []string{})
+				op := h.exec(owner, h.env("messaging.reply", protocol.Target{Type: "message", ID: source}, protocol.MessagingInput{Body: "Continue."}, nil), MessagingCommand{Action: "reply"})
+				expectWorkCode(t, op, protocol.CodeInvalidRequest)
 				closeReportMember(t, h, b, source, protocol.WorkItemClosureCompleted, "Original B")
 			case "declined":
 				closeReportMember(t, h, b, source, protocol.WorkItemClosureDeclined, "Member cannot deliver as promised")
