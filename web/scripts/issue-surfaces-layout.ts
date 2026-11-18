@@ -1967,6 +1967,36 @@ async function checkBoardColumnWidths() {
           "the restored column is accessible",
         );
         await page.screenshot({ path: join(output, "board-rotation-390.png") });
+        const doneTitle = card("done").getByRole("button", { name: samples[4][2], exact: true });
+        const doneTitleHasFocus = () =>
+          doneTitle.evaluate((button) => button === document.activeElement);
+        await doneTab.focus();
+        for (let step = 0; step < 5 && !(await doneTitleHasFocus()); step++) {
+          await page.keyboard.press("Tab");
+        }
+        const doneTitleInsideBoard = () =>
+          doneTitle.evaluate((button) => {
+            const board = button.closest('[aria-label="看板列"]')!;
+            const clip = board.getBoundingClientRect();
+            const title = button.getBoundingClientRect();
+            return (
+              title.left >= clip.left && title.right <= clip.right && title.bottom <= clip.bottom
+            );
+          });
+        assert(await doneTitleHasFocus(), "Tab reaches the visible card title");
+        assert(
+          await doneTitleInsideBoard(),
+          "the focused title is visible before switching layouts",
+        );
+        for (const size of [
+          { width: 844, height: 390 },
+          { width, height: 844 },
+        ]) {
+          await resizeBoard(size.width, size.height);
+          assert(await doneTitleHasFocus(), `the same title retains focus at ${size.width}px`);
+          assert(await doneTitleInsideBoard(), `the focused title is visible at ${size.width}px`);
+        }
+        await doneTab.focus();
         await swipe(40, 350, 320, 0);
         await reviewTab.waitFor();
         await waitForScrollToSettle();

@@ -102,7 +102,10 @@ export function IssueBoard({
   const desktopScroll = useRef({ left: 0, top: 0 });
   const mobileScrollTops = useRef(new Map<IssueWorkStatus, number>());
   const tabScrollTarget = useRef<IssueWorkStatus | null>(null);
-  const focusBeforeLayoutChange = useRef<string | null>(null);
+  const boardFocus = useRef<{ control: Element; reveal: boolean; trackScroll: boolean } | null>(
+    null,
+  );
+  const focusBeforeLayoutChange = useRef<{ key: string; reveal: boolean } | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
   const [childViews, setChildViews] = useState(() => new Map<string, ExpandedChildView>());
@@ -137,13 +140,36 @@ export function IssueBoard({
     }
   };
   const restoreMobileColumn = useEffectEvent(() => scrollToColumn(mobileColumn));
+  const trackFocusScroll = () => {
+    if (boardFocus.current) boardFocus.current.trackScroll = true;
+  };
+  const beginBoardScroll = () => {
+    tabScrollTarget.current = null;
+    trackFocusScroll();
+  };
+  const updateFocusVisibility = () => {
+    const scroller = columns.current;
+    const focus = boardFocus.current;
+    if (!scroller || !focus?.trackScroll || document.activeElement !== focus.control) return;
+    const boardBounds = scroller.getBoundingClientRect();
+    const controlBounds = focus.control.getBoundingClientRect();
+    focus.reveal =
+      controlBounds.right > boardBounds.left &&
+      controlBounds.left < boardBounds.left + scroller.clientWidth &&
+      controlBounds.bottom > boardBounds.top &&
+      controlBounds.top < boardBounds.top + scroller.clientHeight;
+  };
   useLayoutEffect(() => {
     const media = window.matchMedia(mobileBoardQuery);
     const update = () => {
       const focused = document.activeElement;
+      const current = boardFocus.current;
       focusBeforeLayoutChange.current =
         focused && columns.current?.contains(focused)
-          ? (focused.getAttribute("data-board-focus") ?? "")
+          ? {
+              key: focused.getAttribute("data-board-focus") ?? "",
+              reveal: current?.control === focused ? current.reveal : true,
+            }
           : null;
       setMobile(media.matches);
     };
@@ -165,13 +191,15 @@ export function IssueBoard({
       scroller.scrollTo(desktopScroll.current);
     }
     if (previousFocus === null || document.activeElement !== document.body) return;
-    const control = previousFocus
+    const control = previousFocus.key
       ? scroller.querySelector<HTMLButtonElement>(
-          `[data-board-focus="${CSS.escape(previousFocus)}"]:enabled`,
+          `[data-board-focus="${CSS.escape(previousFocus.key)}"]:enabled`,
         )
       : null;
     if (control && !control.closest("[inert]") && control.getClientRects().length) {
-      control.focus({ preventScroll: true });
+      // Automatic restoration must not change whether the user scrolled away from focus.
+      boardFocus.current = { control, reveal: previousFocus.reveal, trackScroll: false };
+      control.focus({ preventScroll: !previousFocus.reveal });
     } else if (mobile) {
       mobileTabs.current
         ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
@@ -388,11 +416,18 @@ export function IssueBoard({
             role="region"
             aria-label="看板列"
             tabIndex={mobile ? undefined : 0}
-            onPointerDownCapture={() => (tabScrollTarget.current = null)}
-            onWheelCapture={() => (tabScrollTarget.current = null)}
+            onPointerDownCapture={beginBoardScroll}
+            onWheelCapture={beginBoardScroll}
+            onKeyDownCapture={trackFocusScroll}
+            onBlurCapture={() => (boardFocus.current = null)}
+            onFocusCapture={({ target }) => {
+              if (boardFocus.current?.control !== target)
+                boardFocus.current = { control: target, reveal: true, trackScroll: true };
+            }}
             onScroll={({ currentTarget }) => {
               // CSS can change the grid before React receives the breakpoint event.
               if (window.matchMedia(mobileBoardQuery).matches !== mobile) return;
+              updateFocusVisibility();
               if (!mobile) {
                 desktopScroll.current = {
                   left: currentTarget.scrollLeft,
@@ -425,8 +460,9 @@ export function IssueBoard({
                 onScroll={
                   mobile
                     ? ({ currentTarget }) => {
-                        if (window.matchMedia(mobileBoardQuery).matches)
-                          mobileScrollTops.current.set(id, currentTarget.scrollTop);
+                        if (!window.matchMedia(mobileBoardQuery).matches) return;
+                        mobileScrollTops.current.set(id, currentTarget.scrollTop);
+                        updateFocusVisibility();
                       }
                     : undefined
                 }
