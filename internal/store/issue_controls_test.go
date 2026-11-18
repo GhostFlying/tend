@@ -157,6 +157,7 @@ func TestFault_CanonicalIssueAggregateSaveRollsBackEveryPhase(t *testing.T) {
 			saveCanonicalFixture(t, s, dependency, 0)
 			issue.DependsOn = []string{previousDependency.IssueID}
 			saveCanonicalFixture(t, s, issue, 0)
+			issue.ShortCode = "T3"
 			mustExec(t, s, `CREATE TRIGGER fail_issue_save `+phase.trigger+` BEGIN SELECT RAISE(ABORT,'injected issue save fault'); END`)
 			next := issue
 			next.Revision, next.UpdatedAt = 2, 2

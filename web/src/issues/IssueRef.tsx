@@ -16,7 +16,7 @@ export function IssueLink({
   children: ReactNode;
 }) {
   const code = shortCode || shortIssueCode(id);
-  const identity = useIssueIdentity(code ? "" : id);
+  const { value: identity } = useIssueIdentity(code ? "" : id);
   const canonical = code || (identity && identity !== "missing" ? identity.short_code : id);
   return (
     <Link to={href({ page: "issue", id: canonical }) + suffix} {...props}>
@@ -27,7 +27,7 @@ export function IssueLink({
 
 /** Candidate aliases remain readable as text until Tend confirms the Issue. */
 export function IssueRef({ id }: { id: string }) {
-  const issue = useIssueIdentity(id);
+  const { value: issue } = useIssueIdentity(id);
   if (!issue || issue === "missing") return <>{id}</>;
   return (
     <Link className={styles.chip} to={{ page: "issue", id: issue.short_code }} title={issue.title}>

@@ -22,7 +22,8 @@ func IssueIdentity(ctx context.Context, q Querier, id string) (protocol.IssueIde
 	var out protocol.IssueIdentity
 	var number int64
 	err := q.QueryRowContext(ctx, `SELECT w.work_item_id,n.number,COALESCE(json_extract(w.body_json,'$.title'),'')
-		FROM work_items w JOIN issue_short_numbers n ON n.issue_id=w.work_item_id WHERE w.work_item_id=?`, id).Scan(&out.IssueID, &number, &out.Title)
+		FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id
+		JOIN issue_short_numbers n ON n.issue_id=c.issue_id WHERE c.issue_id=?`, id).Scan(&out.IssueID, &number, &out.Title)
 	if err != nil {
 		return out, notFound(err, "Issue "+id)
 	}
