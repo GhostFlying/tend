@@ -15,7 +15,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 
 ## Issue 子责任进展（D146）
 
-`issue list --board --waiting-on-me` 按当前已认证 owner 的 Inbox 行动筛选。可组合工作状态、项目和负责人筛选，并用返回的 `next` 作为后续 `--after`。重读同一查询没有写入副作用。
+`issue list --board --waiting-on-me` 按当前已认证 owner 的 Inbox 行动筛选。可组合工作状态、项目和负责人筛选，并用返回的 `next` 作为后续 `--after`。重读同一查询没有写入副作用。`--group-review` 应用顶层 Web 看板的展示分组，`--board-status in_progress` 同时返回真实状态为 in_review 的卡片。
 
 `issue list --board` 和 `issue show <id>` 提供直接子 Issue 总数、完成数、取消数、实际执行数和最多两项活动优先预览；`--json` 保留完整结构。没有子 Issue 时省略摘要。`issue list --parent <id> --include-closed --limit 50 --after <cursor>` 查看全部直接子 Issue 与各自的执行事实；父自身的 execution 不包含子 Issue 或负责人协调任务。读取不写状态。`issue set-status` 的 request_id、revision、epoch、dry-run 与原请求重放语义保持不变。
 
@@ -240,7 +240,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 ```sh
 tend help conversation
 tend issue list --board --board-status in_progress --json
-tend issue list --board --waiting-on-me --limit 50 --json
+tend issue list --board --group-review --waiting-on-me --limit 50 --json
 tend issue set-status "$ISSUE_ID" --data '{"status":"in_review"}'
 tend issue notifications set --data '{"delay_minutes":5}' --dry-run > original.json
 tend request replay --file original.json

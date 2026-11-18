@@ -51,6 +51,7 @@ export function issueBoardFixture(request: string | undefined, value: unknown): 
   if (url.pathname !== "/api/v1/issues" || url.searchParams.get("board") !== "true") return value;
   const page = value as IssuePage;
   if (!Array.isArray(page.items)) return value;
+  const groupReview = url.searchParams.get("group_review") === "true";
   const statuses: IssueWorkStatus[] = [
     "backlog",
     "todo",
@@ -76,11 +77,15 @@ export function issueBoardFixture(request: string | undefined, value: unknown): 
         attention_count: 0,
       },
     }));
+  const displayStatus = (item: (typeof all)[number]) =>
+    groupReview && item.board.status === "in_review" ? "in_progress" : item.board.status;
   return {
     ...page,
-    items: all.filter((item) => item.board.status === url.searchParams.get("board_status")),
+    items: all.filter((item) => displayStatus(item) === url.searchParams.get("board_status")),
     counts: Object.fromEntries(
-      statuses.map((status) => [status, all.filter((item) => item.board.status === status).length]),
+      statuses
+        .filter((status) => !groupReview || status !== "in_review")
+        .map((status) => [status, all.filter((item) => displayStatus(item) === status).length]),
     ),
     assignees: all.map((item) => item.assignee),
     facts_seq: 1,

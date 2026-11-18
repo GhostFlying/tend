@@ -15,6 +15,11 @@ func (s *Server) issues(w http.ResponseWriter, r *http.Request) {
 	filter := views.CanonicalIssueFilter{Project: query.Get("project"), State: protocol.IssueState(query.Get("state")), IncludeClosed: query.Get("include_closed") == "true", After: query.Get("after"), Limit: 50}
 	filter.Board = query.Get("board") == "true"
 	filter.BoardStatus = protocol.IssueWorkStatus(query.Get("board_status"))
+	filter.GroupReview = query.Get("group_review") == "true"
+	if raw := query.Get("group_review"); query.Has("group_review") && (raw != "false" && raw != "true" || filter.GroupReview && !filter.Board) {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "group_review must be a boolean and requires board=true when enabled"))
+		return
+	}
 	filter.AssigneeKind = protocol.IssueAssigneeKind(query.Get("assignee_kind"))
 	filter.AssigneeRef = query.Get("assignee_ref")
 	if filter.State != "" && !slices.Contains([]protocol.IssueState{protocol.IssueActive, protocol.IssuePaused, protocol.IssueCancelling, protocol.IssueCancelled, protocol.IssueClosed}, filter.State) {

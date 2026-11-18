@@ -29,8 +29,9 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	active := func() protocol.Issue {
 		return move(admitOwnerIssueHTTP(t, e, token, createOwnerIssueHTTP(t, e, token, "")), protocol.IssueInProgress)
 	}
-	running, later := active(), active()
+	running := active()
 	review := move(active(), protocol.IssueInReview)
+	later := active()
 	system := active()
 	e.peer.set(netx.Identity{User: otherLogin})
 	outsider := createOwnerIssueHTTP(t, e, otherSession.Token, "")
@@ -133,6 +134,28 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	if next := page(token, "&board_status=in_progress&limit=1&after="+firstPage.Next); next.More || !slices.Equal(ids(next), []string{later.IssueID}) {
 		t.Fatal("second page lost a match", next)
 	}
+	const groupedColumn = "&group_review=true&board_status=in_progress&limit=1"
+	wanted := []struct {
+		id     string
+		status protocol.IssueWorkStatus
+	}{{running.IssueID, protocol.IssueInProgress}, {review.IssueID, protocol.IssueInReview}, {later.IssueID, protocol.IssueInProgress}}
+	cursor := ""
+	for index, expected := range wanted {
+		grouped := page(token, groupedColumn+cursor)
+		if !slices.Equal(ids(grouped), []string{expected.id}) || grouped.Counts[protocol.IssueInProgress] != 3 || len(grouped.Counts) != 5 {
+			t.Fatalf("page %d: grouped count or membership changed: %+v", index, grouped)
+		}
+		if item := grouped.Items[0]; item.EffectiveWorkStatus != expected.status || item.Board == nil || item.Board.Status != expected.status {
+			t.Fatal("grouped display rewrote the persisted status", item)
+		}
+		if grouped.More != (index < len(wanted)-1) {
+			t.Fatal("grouped continuation is incomplete", grouped)
+		}
+		cursor = "&after=" + grouped.Next
+	}
+	if code := e.do("GET", boardPath+"&group_review=true&board_status=in_review", token, nil, nil); code != http.StatusBadRequest {
+		t.Fatal("grouped read exposed the removed column", code)
+	}
 	if got := page(token, "&board_status=in_review"); !slices.Equal(ids(got), []string{review.IssueID}) {
 		t.Fatal("the personal planner action must keep its review column", got)
 	}
@@ -152,6 +175,9 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	}
 	if got := page(token, "&board_status=in_progress"); !slices.Equal(ids(got), []string{later.IssueID}) || got.Counts[protocol.IssueInProgress] != 1 {
 		t.Fatal("completed actions kept their former Issue, including a planner duplicate", got)
+	}
+	if got := page(token, "&group_review=true&board_status=in_progress"); !slices.Equal(ids(got), []string{review.IssueID, later.IssueID}) {
+		t.Fatal("grouped refresh retained a completed action or lost a genuine review card", got)
 	}
 	if got := page(token, "&project=missing"); len(got.Items) != 0 || got.More || got.Counts[protocol.IssueInReview] != 0 {
 		t.Fatal("project filters must apply before counting matches", got)

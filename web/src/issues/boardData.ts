@@ -14,6 +14,7 @@ export interface BoardFilter {
 export function boardPagePath(filter: BoardFilter, status: IssueWorkStatus): string {
   const query = new URLSearchParams({
     board: "true",
+    group_review: "true",
     parent_id: "",
     board_status: status,
     limit: "25",

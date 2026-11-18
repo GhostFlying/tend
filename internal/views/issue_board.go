@@ -12,11 +12,20 @@ const issueBoardStatusSQL = `CASE c.state WHEN 'closed' THEN 'done' WHEN 'cancel
 
 func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueFilter) (protocol.IssuePage, error) {
 	out := protocol.IssuePage{Items: []protocol.IssueSummary{}, Counts: map[protocol.IssueWorkStatus]int{}, Assignees: []protocol.IssueAssignee{}}
-	for _, status := range protocol.IssueWorkStatusValues() {
-		out.Counts[status] = 0
-	}
 	if f.BoardStatus != "" && !slices.Contains(protocol.IssueWorkStatusValues(), f.BoardStatus) {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid board status")
+	}
+	statusSQL := issueBoardStatusSQL
+	if f.GroupReview {
+		if f.BoardStatus == protocol.IssueInReview {
+			return out, protocol.Errorf(protocol.CodeInvalidRequest, "in_review is included in the in_progress display column")
+		}
+		statusSQL = `CASE (` + issueBoardStatusSQL + `) WHEN 'in_review' THEN 'in_progress' ELSE (` + issueBoardStatusSQL + `) END`
+	}
+	for _, status := range protocol.IssueWorkStatusValues() {
+		if !f.GroupReview || status != protocol.IssueInReview {
+			out.Counts[status] = 0
+		}
 	}
 	if f.AssigneeRef != "" && f.AssigneeKind != protocol.IssueAssigneeOwner && f.AssigneeKind != protocol.IssueAssigneeAgent {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "assignee kind is required")
@@ -64,7 +73,7 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		base += ` AND c.issue_id IN (` + ownerActionIssueIDsSQL + `)`
 		args = append(args, f.WaitingOnOwner, f.WaitingOnOwner, f.WaitingOnOwner)
 	}
-	rows, err = q.QueryContext(ctx, `SELECT `+issueBoardStatusSQL+`,COUNT(*)`+base+` GROUP BY `+issueBoardStatusSQL, args...)
+	rows, err = q.QueryContext(ctx, `SELECT `+statusSQL+`,COUNT(*)`+base+` GROUP BY `+statusSQL, args...)
 	if err != nil {
 		return out, err
 	}
@@ -83,7 +92,7 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		return out, err
 	}
 	if f.BoardStatus != "" {
-		base += ` AND ` + issueBoardStatusSQL + `=?`
+		base += ` AND ` + statusSQL + `=?`
 		args = append(args, f.BoardStatus)
 	}
 	base += ` AND c.issue_id>? ORDER BY c.issue_id LIMIT ?`

@@ -1,13 +1,15 @@
 import type { ExecutionCounts, IssueSummary, IssueWorkStatus } from "../api/generated/api.ts";
 
-export const boardColumns: readonly { id: IssueWorkStatus; label: string }[] = [
+export const issueWorkStatuses: readonly { id: IssueWorkStatus; label: string }[] = [
   { id: "backlog", label: "待安排" },
   { id: "todo", label: "待推进" },
   { id: "in_progress", label: "进行中" },
-  { id: "in_review", label: "审阅中" },
+  { id: "in_review", label: "待检查" },
   { id: "done", label: "已完成" },
   { id: "cancelled", label: "已取消" },
 ];
+
+export const boardColumns = issueWorkStatuses.filter(({ id }) => id !== "in_review");
 
 export const workStatus = (
   item: Pick<IssueSummary, "board" | "state" | "work_status" | "effective_work_status">,
@@ -21,7 +23,12 @@ export const workStatus = (
       : item.work_status || "todo");
 
 export const workStatusLabel = (status: IssueWorkStatus) =>
-  boardColumns.find((column) => column.id === status)?.label ?? status;
+  issueWorkStatuses.find((column) => column.id === status)?.label ?? status;
+
+export function boardColumnStatus(item: Parameters<typeof workStatus>[0]): IssueWorkStatus {
+  const status = workStatus(item);
+  return status === "in_review" ? "in_progress" : status;
+}
 
 export function executionLabel(counts?: ExecutionCounts): string {
   if (!counts) return "暂无执行";

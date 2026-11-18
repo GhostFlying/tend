@@ -50,6 +50,7 @@ test("project and assignee filters always retain top-level scope", () => {
   expect(Object.fromEntries(url.searchParams)).toMatchObject({
     parent_id: "",
     board: "true",
+    group_review: "true",
     board_status: "done",
     assignee_ref: "hosted/manager",
     include_closed: "true",
