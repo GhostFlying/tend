@@ -436,15 +436,15 @@ func TestFault_ConsultationPromotionRetainsSelectedManagerSource(t *testing.T) {
 	t.Fatalf("consultation accepted outside source %s (want rejection), manager source %s, associations %+v", outside, source, h.associations(outside))
 }
 
-func TestManagerBoardOmitsCoordinationAndStatusDoesNotSelfWake(t *testing.T) {
+func TestManagerBoardCountsCoordinationAndStatusDoesNotSelfWake(t *testing.T) {
 	h, _, issue, as, _ := reviewManagerAssignment(t)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		page, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true})
 		if err != nil {
 			return err
 		}
-		if len(page.Items) != 1 || page.Items[0].Board == nil || page.Items[0].Board.Execution != (protocol.ExecutionCounts{}) {
-			t.Fatal("manager counted as a delivery task on board", page)
+		if len(page.Items) != 1 || page.Items[0].Board == nil || page.Items[0].Board.Execution != (protocol.ExecutionCounts{Starting: 1}) {
+			t.Fatal("newly claimed manager must appear as one starting execution", page)
 		}
 		return nil
 	}); err != nil {

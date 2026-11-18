@@ -1534,10 +1534,14 @@ async function captureS4() {
       directChildren.forEach((row) => (row.state = "active"));
       issueRows.splice(0, issueRows.length, ...allRows);
       parent.board!.children = defaultChildren;
+      const previousExecution = parent.board!.execution;
+      parent.board!.execution = { ...previousExecution, running: 1, waiting_external: 1 };
       await page.goto(`http://127.0.0.1:${address.port}/issues`);
       const card = page.locator('[data-issue-id="issue-root"]');
       await card.getByText("子 Issue · 0/3 已完成", { exact: true }).waitFor();
       await card.getByText("1 项执行中", { exact: true }).waitFor();
+      await card.getByText("1 项运行中 · 等待外部条件", { exact: true }).waitFor();
+      parent.board!.execution = previousExecution;
       const waitingChild = card.getByRole("button", { name: /核对发布步骤/ });
       await waitingChild.getByText("等待外部条件", { exact: true }).waitFor();
       assert.equal(
