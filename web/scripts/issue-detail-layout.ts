@@ -43,6 +43,7 @@ let pagedChildren = false;
 let pagedActivity = false;
 let shortNumbers = false;
 const historicalMessageID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
+const historicalReplyID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
 let sharedReviews: SharedDeliveryReviewPage = { items: [], more: false };
 let reportDownload: string | undefined;
 const streams = new Set<ServerResponse>();
@@ -219,6 +220,39 @@ const server = createServer(async (req, res) => {
     res.end(reportDownload);
     return;
   }
+  if (
+    shortNumbers &&
+    [`/api/v1/messages/${historicalMessageID}`, `/api/v1/messages/${historicalReplyID}`].includes(p)
+  ) {
+    const message_id = p.split("/").at(-1)!;
+    return json({
+      message_id,
+      conversation_id: issue.conversation!.conversation_id,
+      ...(message_id === historicalReplyID ? { reply_to: historicalMessageID } : {}),
+    });
+  }
+  if (shortNumbers && p === `/api/v1/conversation/blocks/${historicalMessageID}`) {
+    const after = Number(u.searchParams.get("after") ?? 0);
+    const fixture = activity.items![0]!.block!;
+    return json({
+      ...fixture,
+      trigger: { ...fixture.trigger, message_id: historicalMessageID },
+      more: after < 100,
+      next_seq: after + 50,
+      items:
+        after < 100
+          ? []
+          : [
+              {
+                ...fixture.items![0]!,
+                message_id: historicalReplyID,
+                seq: 151,
+                reply_to: historicalMessageID,
+                body: "历史回合第三页的确切回复。",
+              },
+            ],
+    });
+  }
   if (p === "/api/v1/conversation/blocks/owner-one" && continuationBlock) {
     if (continuationDelay) await new Promise((resolve) => setTimeout(resolve, continuationDelay));
     if (continuationFailure)
@@ -344,6 +378,8 @@ const server = createServer(async (req, res) => {
                     position: 1,
                     block: {
                       ...block,
+                      more: true,
+                      next_seq: 50,
                       trigger: {
                         ...block.trigger,
                         message_id: historicalMessageID,
@@ -704,6 +740,13 @@ async function verifyShortNumbers() {
           await page.evaluate(() => navigator.clipboard.readText()),
           `${base}/issues/T123?view=conversation#${historicalMessageID}`,
         );
+        await page.goto(`${base}/issues/t123?message=${historicalReplyID}`);
+        await page.waitForURL(`**/issues/T123?message=${historicalReplyID}`);
+        await detail.getByText("历史回合第三页的确切回复。").waitFor();
+        await page.waitForFunction((id) => {
+          const rect = document.querySelector(`[data-scroll-id="${id}"]`)?.getBoundingClientRect();
+          return !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+        }, historicalReplyID);
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");
         const composer = detail.getByRole("textbox", { name: "消息", exact: true });

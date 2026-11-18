@@ -75,6 +75,14 @@ func TestIssueDeliveryMigrationPreservesClosedAcceptedHistoryWithoutApprovals(t 
 		if err := json.Unmarshal([]byte(original), &saved); err != nil {
 			return err
 		}
+		var controlRaw string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT snapshot_json FROM issue_control_revisions WHERE issue_id=? AND revision=?`, i.IssueID, i.Revision).Scan(&controlRaw); err != nil {
+			return err
+		}
+		var snapshot protocol.IssueControlSnapshot
+		if err := json.Unmarshal([]byte(controlRaw), &snapshot); err != nil {
+			return err
+		}
 		d, err := GetIssueDeliveryDuty(ctx, tx.Q(), i.IssueID, "task_old")
 		if err != nil {
 			return err
@@ -85,7 +93,7 @@ func TestIssueDeliveryMigrationPreservesClosedAcceptedHistoryWithoutApprovals(t 
 		if err := tx.Q().QueryRowContext(ctx, `SELECT lifecycle,spec_version,control_revision,current_artifact_id FROM tasks WHERE task_id=?`, "task_old").Scan(&task.Lifecycle, &task.SpecVersion, &task.ControlRevision, &task.CurrentArtifactID); err != nil {
 			return err
 		}
-		if saved.Status != protocol.WorkItemClosed || saved.Closure.Reason != i.Closure.Reason || task.Lifecycle != protocol.TaskCompleted || task.SpecVersion != 1 || task.ControlRevision != 1 || task.CurrentArtifactID != "art_old" || d.Status != "preparing" || d.Candidate != nil || d.AttentionID != "" || d.AcceptanceID != "acc_old" {
+		if snapshot.Control.State != protocol.IssueClosed || saved.Status != protocol.WorkItemClosed || saved.Closure.Reason != i.Closure.Reason || task.Lifecycle != protocol.TaskCompleted || task.SpecVersion != 1 || task.ControlRevision != 1 || task.CurrentArtifactID != "art_old" || d.Status != "preparing" || d.Candidate != nil || d.AttentionID != "" || d.AcceptanceID != "acc_old" {
 			t.Fatal(saved, task, d)
 		}
 		for _, table := range []string{"attentions", "decisions", "issue_delivery_executions", "issue_delivery_answers"} {
