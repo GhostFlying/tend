@@ -3,8 +3,8 @@ import { expect, test, vi } from "vitest";
 import type { IssueConversationItem } from "../api/generated/api.ts";
 import { BackgroundNotice, backgroundHeading, backgroundState } from "./BackgroundNotice.tsx";
 
-vi.mock(import("../app/services.tsx"), async (importOriginal) => ({
-  ...(await importOriginal()),
+vi.mock("../app/services.tsx", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useServices: () => ({ client: { get: vi.fn() } }),
 }));
 

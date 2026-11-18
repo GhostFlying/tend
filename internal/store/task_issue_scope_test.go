@@ -201,6 +201,7 @@ func TestCanonicalPrimaryContextMigrationPreservesExistingProvenance(t *testing.
 		t.Fatal(err)
 	}
 	defer current.Close()
+	issue.ShortCode = "T1"
 	if !reflect.DeepEqual(readCanonicalFixture(t, current, issue.IssueID, 1), issue) {
 		t.Fatal("migration rewrote issue history")
 	}

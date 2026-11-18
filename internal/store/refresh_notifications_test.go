@@ -221,6 +221,11 @@ func TestRefreshMigrationRetainsExactReasonsAndUnmatchedInboxFacts(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The original migration assertions above intentionally read schema 121.
+	// Mutate the retained Issue with the current writer on the current schema.
+	if err := s.migrate(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
 	issue.Revision, issue.UpdatedAt = 2, 2
 	saveCanonicalFixture(t, s, issue, 1)
 	if err := s.Read(ctx, func(tx *ReadTx) error {

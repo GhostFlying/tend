@@ -55,6 +55,9 @@ func TestIssueShortNumberMigrationAndRollback(t *testing.T) {
 		if view.ShortCode != "T1" || view.Title != legacy.Title {
 			t.Errorf("legacy view = %+v", view)
 		}
+		if _, err := IssueIdentity(ctx, tx.Q(), legacy.WorkItemID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("legacy-only work item has a canonical link: %v", err)
+		}
 		history, err := GetCanonicalIssueRevision(ctx, tx.Q(), closed.IssueID, 1)
 		if err != nil {
 			return err
