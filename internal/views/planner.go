@@ -37,9 +37,30 @@ func Deadlines(ctx context.Context, q store.Querier, issue string) ([]protocol.I
 	}
 	return out, nil
 }
+
+const (
+	plannerAttentionJoinSQL = ` LEFT JOIN attentions a ON a.attention_id=json_extract(p.body_json,'$.attention_id')
+ LEFT JOIN attention_responsibilities r ON r.attention_id=a.attention_id`
+	ownerPlannerRecipientSQL = `(CASE WHEN a.attention_id IS NULL
+ THEN json_extract(p.body_json,'$.responsible') IN ('owner', ?)
+ ELSE ` + ownerAttentionRecipientSQL + ` END)`
+)
+
 func NextActions(ctx context.Context, q store.Querier, kind, issue string) (protocol.NextActionPage, error) {
+	return OwnerNextActions(ctx, q, kind, issue, "")
+}
+
+func OwnerNextActions(ctx context.Context, q store.Querier, kind, issue, owner string) (protocol.NextActionPage, error) {
 	out := protocol.NextActionPage{Items: []protocol.PlannerEntry{}, Deadlines: []protocol.IssueDeadline{}}
-	rows, err := q.QueryContext(ctx, `SELECT body_json FROM planner_entries WHERE (?='' OR kind=?) AND (?='' OR issue_id=?) AND NOT EXISTS(SELECT 1 FROM attention_responsibilities r WHERE r.attention_id=json_extract(planner_entries.body_json,'$.attention_id') AND r.recipient_kind<>'owner' AND planner_entries.kind='user_action') ORDER BY kind,rank=0,rank,entry_id`, kind, kind, issue, issue)
+	query := `SELECT p.body_json FROM planner_entries p` + plannerAttentionJoinSQL + `
+ WHERE (?='' OR p.kind=?) AND (?='' OR p.issue_id=?)
+ AND (p.kind<>'user_action' OR COALESCE(r.recipient_kind,'owner')='owner')`
+	args := []any{kind, kind, issue, issue}
+	if owner != "" {
+		query += ` AND (p.kind<>'user_action' OR ` + ownerPlannerRecipientSQL + `)`
+		args = append(args, owner, owner)
+	}
+	rows, err := q.QueryContext(ctx, query+` ORDER BY p.kind,p.rank=0,p.rank,p.entry_id`, args...)
 	if err != nil {
 		return out, err
 	}

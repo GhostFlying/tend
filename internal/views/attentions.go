@@ -10,6 +10,7 @@ import (
 type AttentionFilter struct {
 	IssueID, Kind, Status, After  string
 	Recipient, ResponsibleIssueID string
+	OwnerSubject                  string
 	IncludeArchived               bool
 	ActionableOnly                bool
 	Limit                         int
@@ -19,6 +20,11 @@ type AttentionFilter struct {
 // records without a route fall back to their immutable origin Issue.
 const responsibleAttentionIDsSQL = `SELECT r.attention_id FROM attention_responsibilities r WHERE r.recipient_kind IN ('owner','agent','main') AND r.issue_id=?
  UNION ALL SELECT a.attention_id FROM attentions a WHERE a.issue_id=? AND NOT EXISTS(SELECT 1 FROM attention_responsibilities r WHERE r.attention_id=a.attention_id)`
+
+const (
+	actionableAttentionSQL     = `a.kind IN ('decision','action')`
+	ownerAttentionRecipientSQL = `COALESCE(r.recipient_kind,'owner')='owner' AND COALESCE(r.recipient_ref,'') IN ('', ?)`
+)
 
 func Attention(ctx context.Context, q store.Querier, id string) (protocol.AttentionView, error) {
 	return (&attentionReader{}).read(ctx, q, id)
@@ -123,13 +129,20 @@ func (reader *attentionReader) list(ctx context.Context, q store.Querier, f Atte
 	if f.Limit < 1 || f.Limit > 100 {
 		f.Limit = 50
 	}
-	query := `SELECT attention_id FROM attentions WHERE (?='' OR issue_id=?) AND (?='' OR kind=?) AND (?='' OR status=?) AND attention_id>? AND (? OR COALESCE(json_extract(body_json,'$.archived_at'),0)=0) AND (NOT ? OR kind IN ('decision','action')) AND (?='' OR ?='all' OR COALESCE((SELECT recipient_kind FROM attention_responsibilities r WHERE r.attention_id=attentions.attention_id),'owner')=?)`
+	query := `SELECT a.attention_id FROM attentions a LEFT JOIN attention_responsibilities r USING(attention_id)
+ WHERE (?='' OR a.issue_id=?) AND (?='' OR a.kind=?) AND (?='' OR a.status=?) AND a.attention_id>?
+ AND (? OR COALESCE(json_extract(a.body_json,'$.archived_at'),0)=0) AND (NOT ? OR ` + actionableAttentionSQL + `)
+ AND (?='' OR ?='all' OR COALESCE(r.recipient_kind,'owner')=?)`
 	args := []any{f.IssueID, f.IssueID, f.Kind, f.Kind, f.Status, f.Status, f.After, f.IncludeArchived, f.ActionableOnly, f.Recipient, f.Recipient, f.Recipient}
+	if f.OwnerSubject != "" {
+		query += ` AND ` + ownerAttentionRecipientSQL
+		args = append(args, f.OwnerSubject)
+	}
 	if f.ResponsibleIssueID != "" {
-		query += ` AND attention_id IN (` + responsibleAttentionIDsSQL + `)`
+		query += ` AND a.attention_id IN (` + responsibleAttentionIDsSQL + `)`
 		args = append(args, f.ResponsibleIssueID, f.ResponsibleIssueID)
 	}
-	query += ` ORDER BY attention_id LIMIT ?`
+	query += ` ORDER BY a.attention_id LIMIT ?`
 	args = append(args, f.Limit+1)
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {

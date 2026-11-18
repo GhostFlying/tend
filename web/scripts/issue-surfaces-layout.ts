@@ -1,3 +1,4 @@
+import { checkIssueOwnerActionLayout } from "./issue-owner-action-layout.ts";
 import { navigate, fixtureRoot, editIssueFilters } from "./navigation.ts";
 import { issueBoardFixture } from "./issue-fixture.ts";
 import { captureChildTitleLayout, longChildTitles } from "./child-title-layout.ts";
@@ -2334,12 +2335,17 @@ async function checkNavigation() {
 
 try {
   const tourOnly = childProgressOnly || process.argv.includes("--s4-tour-only");
-  if (childTitleOnly) await captureLongChildren();
-  else if (copyOnly) await captureS5();
-  else if (tourOnly || !process.argv.includes("--navigation-only")) await captureS4();
+  const ownerActionOnly = process.argv.includes("--owner-action-only");
   const navigationOnly = process.argv.includes("--navigation-only");
+  if (ownerActionOnly || (!navigationOnly && !tourOnly && !copyOnly && !childTitleOnly))
+    await checkIssueOwnerActionLayout(browser, `http://127.0.0.1:${address.port}`, output, publish);
+  if (!ownerActionOnly) {
+    if (childTitleOnly) await captureLongChildren();
+    else if (copyOnly) await captureS5();
+    else if (tourOnly || !navigationOnly) await captureS4();
+  }
   if (navigationOnly) await checkNavigation();
-  for (const viewport of navigationOnly || tourOnly || copyOnly || childTitleOnly
+  for (const viewport of ownerActionOnly || navigationOnly || tourOnly || copyOnly || childTitleOnly
     ? []
     : [
         { width: 1440, height: 1000 },

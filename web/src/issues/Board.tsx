@@ -81,6 +81,7 @@ export function IssueBoard({
   const project = filters.project ?? "";
   const assigneeKey = filters.assignee ?? "";
   const closed = filters.closed ?? true;
+  const waitingOnMe = filters.waitingOnMe ?? false;
   const changeFilter = (patch: IssueFilters) =>
     navigate({ ...filters, ...patch }, { replace: true });
   const setView = (view: "board" | "tree") => changeFilter({ view });
@@ -246,8 +247,9 @@ export function IssueBoard({
       ...(project ? { project } : {}),
       ...(assignee ? { assignee } : {}),
       includeClosed: closed,
+      waitingOnMe,
     };
-  }, [project, assigneeKey, closed]);
+  }, [project, assigneeKey, closed, waitingOnMe]);
   useEffect(() => {
     if (active && !creating) {
       if (view === "board") board.open(filter);
@@ -285,6 +287,14 @@ export function IssueBoard({
       onSelect(blocker.object_id);
     else if (blockedItem) onSelect(blockedItem.issue_id);
   };
+  const waitingOnMeControl = view === "board" && (
+    <Checkbox
+      className={styles.waitingOnMe}
+      label="等我处理"
+      checked={waitingOnMe}
+      onChange={(event) => changeFilter({ waitingOnMe: event.target.checked })}
+    />
+  );
   const filterControls = (
     <>
       <SegmentedControl
@@ -362,9 +372,13 @@ export function IssueBoard({
           筛选
         </Button>
       </PageHeader>
-      <div className={styles.toolbar}>{!filterOpen && filterControls}</div>
+      <div className={styles.toolbar}>
+        {!filterOpen && filterControls}
+        {waitingOnMeControl}
+      </div>
       <div className={styles.mobileFilter}>
         <span>{view === "board" ? "看板" : "层级"} · 仅顶层 Issue</span>
+        {waitingOnMeControl}
       </div>
       {filterOpen && (
         <Sheet open title="筛选 Issue" onClose={() => setFilterOpen(false)}>
@@ -386,6 +400,11 @@ export function IssueBoard({
       )}
       {view === "board" ? (
         <>
+          {waitingOnMe && total === 0 && (
+            <p className={styles.notice} role="status">
+              暂无等你处理的 Issue。
+            </p>
+          )}
           <div ref={mobileTabs} className={styles.mobileTabs}>
             <Tabs<IssueWorkStatus>
               label="工作状态"

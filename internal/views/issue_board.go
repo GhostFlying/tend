@@ -60,6 +60,10 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		base += ` AND c.assignee_kind=? AND c.assignee_ref=?`
 		args = append(args, f.AssigneeKind, f.AssigneeRef)
 	}
+	if f.WaitingOnOwner != "" {
+		base += ` AND c.issue_id IN (` + ownerActionIssueIDsSQL + `)`
+		args = append(args, f.WaitingOnOwner, f.WaitingOnOwner, f.WaitingOnOwner)
+	}
 	rows, err = q.QueryContext(ctx, `SELECT `+issueBoardStatusSQL+`,COUNT(*)`+base+` GROUP BY `+issueBoardStatusSQL, args...)
 	if err != nil {
 		return out, err
@@ -117,6 +121,16 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 	}
 	return out, nil
 }
+
+// Use the original Issue association shown by Inbox. UNION collapses both
+// multiple items and the planner entry for the same original Attention.
+const ownerActionIssueIDsSQL = `
+ SELECT a.issue_id FROM attentions a LEFT JOIN attention_responsibilities r USING(attention_id)
+ WHERE a.issue_id IS NOT NULL AND a.status='open' AND ` + actionableAttentionSQL + ` AND ` + ownerAttentionRecipientSQL + `
+ UNION
+ SELECT p.issue_id FROM planner_entries p` + plannerAttentionJoinSQL + `
+ WHERE p.issue_id IS NOT NULL AND p.kind='user_action' AND json_extract(p.body_json,'$.status') IN ('open','blocked')
+ AND (a.attention_id IS NULL OR a.status='open') AND ` + ownerPlannerRecipientSQL
 
 func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, facts executionFacts) (protocol.IssueBoardCard, error) {
 	card := protocol.IssueBoardCard{Status: issue.BoardStatus()}

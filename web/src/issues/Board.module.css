@@ -26,11 +26,17 @@
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   flex: none;
   gap: var(--space-3);
   padding: 0 var(--space-5) var(--space-3);
   border-bottom: 1px solid var(--border-soft);
+}
+.waitingOnMe {
+  flex: none;
+  min-height: var(--control-touch);
+  white-space: nowrap;
 }
 .projectFilter {
   width: 160px;

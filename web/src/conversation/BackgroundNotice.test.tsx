@@ -38,7 +38,7 @@ function item(status = "started"): IssueConversationItem {
             seq: 2,
             message_id: "source-two",
             kind: "issue.status_changed",
-            summary: "Issue 工作状态调整为待检查。",
+            summary: "Issue 工作状态调整为审阅中。",
             object_type: "issue",
             object_id: "issue-original",
           },

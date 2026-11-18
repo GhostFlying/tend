@@ -33,7 +33,14 @@ func (s *Server) issues(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Limit = value
 	}
-	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+	if raw := query.Get("waiting_on_me"); query.Has("waiting_on_me") && (raw != "false" && raw != "true" || raw == "true" && !filter.Board) {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "waiting_on_me must be a boolean and requires board=true when enabled"))
+		return
+	}
+	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
+		if query.Get("waiting_on_me") == "true" {
+			filter.WaitingOnOwner = p.Subject
+		}
 		return views.CanonicalIssues(r.Context(), q, filter)
 	})
 }

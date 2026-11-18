@@ -2657,7 +2657,7 @@ try {
     await deliveries.getByText("发布与回滚清单", { exact: true }).waitFor();
     await deliveries.getByRole("button", { name: /^关闭/ }).first().click();
     const side = await issueSidebar(page);
-    await side.getByText("待检查", { exact: true }).waitFor();
+    await side.getByText("审阅中", { exact: true }).waitFor();
     assert.equal(
       await side.getByRole("button", { name: /发布与回滚清单/ }).count(),
       0,

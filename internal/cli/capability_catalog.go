@@ -233,7 +233,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("POST /api/v1/session", "login", "--server", "{server}"),
 		binding("POST /api/v1/ops", "issue create", "--data", `{}`),
 		binding("GET /api/v1/snapshot", "status", "--json"),
-		binding("GET /api/v1/issues", "issue list", "--json"),
+		binding("GET /api/v1/issues", "issue list", "--board", "--waiting-on-me", "--json"),
 		binding("GET /api/v1/issues/{id}", "issue show", "sample", "--json"),
 		binding("GET /api/v1/issues/{id}/activity", "issue activity", "sample"),
 		binding("GET /api/v1/issues/{id}/activity/{position}/notification", "issue activity", "sample", "--notification", "42"),
