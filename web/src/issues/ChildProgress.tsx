@@ -1,12 +1,19 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId } from "react";
 import type { ExecutionCounts, IssueChildProgress, IssuePage } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
-import { useStore } from "../state/store.ts";
+import { Store, useStore } from "../state/store.ts";
 import { Button } from "../ui/index.ts";
-import { WorkItemRead } from "../workitems/live.ts";
+import { WorkItemRead, type ReadState } from "../workitems/live.ts";
 import { issuePagePath } from "./data.ts";
 import { workStatus, workStatusLabel } from "./boardModel.ts";
 import styles from "./Board.module.css";
+
+export type ExpandedChildView = {
+  read: WorkItemRead<IssuePage>;
+  cursors: string[];
+};
+
+const collapsedChildPage = new Store<ReadState<IssuePage>>({ value: null, loading: false });
 
 export function childExecutionLabel(counts?: ExecutionCounts): string | undefined {
   if (!counts) return undefined;
@@ -25,31 +32,33 @@ export function childExecutionLabel(counts?: ExecutionCounts): string | undefine
 export function ChildProgress({
   id,
   summary,
+  view,
+  onViewChange,
   onSelect,
 }: {
   id: string;
   summary: IssueChildProgress;
+  view: ExpandedChildView | undefined;
+  onViewChange(view: ExpandedChildView | undefined): void;
   onSelect(id: string): void;
 }) {
   const { client, live } = useServices();
-  const read = useMemo(() => new WorkItemRead<IssuePage>(client), [client]);
-  const state = useStore(read.state);
-  const [expanded, setExpanded] = useState(false);
-  const [cursors, setCursors] = useState<string[]>([""]);
-  const after = cursors.at(-1)!;
+  const read = view?.read;
+  const state = useStore(read?.state ?? collapsedChildPage);
+  const after = view?.cursors.at(-1) ?? "";
   const listID = useId();
   useEffect(() => {
-    if (!expanded) return;
+    if (!read) return;
     void read.open(issuePagePath({ parentID: id, includeClosed: true, after }));
     const stop = live.subscribeEvents(() => void read.refresh());
     const reset = live.snapshot.subscribe(() => void read.refresh());
     return () => {
       stop();
       reset();
-      read.close();
+      read.pause();
     };
-  }, [read, live, id, expanded, after]);
-  const items = expanded
+  }, [read, live, id, after]);
+  const items = view
     ? (state.value?.items ?? []).map((item) => ({
         issue_id: item.issue_id,
         title: item.title,
@@ -88,26 +97,34 @@ export function ChildProgress({
             </Button>
           );
         })}
-        {expanded && state.loading && <p role="status">正在读取子 Issue…</p>}
-        {expanded && state.error && (
-          <Button variant="link" onClick={() => void read.refresh()}>
+        {view && state.loading && <p role="status">正在读取子 Issue…</p>}
+        {view && state.error && (
+          <Button
+            variant="link"
+            data-board-focus={`${id}:children-retry`}
+            onClick={() => void view.read.refresh()}
+          >
             子 Issue 读取失败 · 重试
           </Button>
         )}
-        {expanded && cursors.length > 1 && (
+        {view && view.cursors.length > 1 && (
           <Button
             variant="link"
             disabled={state.loading}
-            onClick={() => setCursors(cursors.slice(0, -1))}
+            data-board-focus={`${id}:children-previous`}
+            onClick={() => onViewChange({ ...view, cursors: view.cursors.slice(0, -1) })}
           >
             上一页
           </Button>
         )}
-        {expanded && state.value?.more && (
+        {view && state.value?.more && (
           <Button
             variant="link"
             disabled={state.loading}
-            onClick={() => setCursors([...cursors, state.value!.next!])}
+            data-board-focus={`${id}:children-next`}
+            onClick={() =>
+              onViewChange({ ...view, cursors: [...view.cursors, state.value!.next!] })
+            }
           >
             下一页
           </Button>
@@ -118,14 +135,13 @@ export function ChildProgress({
           variant="link"
           className={styles.childMore}
           data-board-focus={`${id}:children`}
-          aria-expanded={expanded}
+          aria-expanded={!!view}
           aria-controls={listID}
-          onClick={() => {
-            setExpanded(!expanded);
-            setCursors([""]);
-          }}
+          onClick={() =>
+            onViewChange(view ? undefined : { read: new WorkItemRead(client), cursors: [""] })
+          }
         >
-          {expanded ? "收起子 Issue ↑" : `查看全部 ${summary.total} 个子 Issue ↓`}
+          {view ? "收起子 Issue ↑" : `查看全部 ${summary.total} 个子 Issue ↓`}
         </Button>
       )}
     </section>

@@ -1514,7 +1514,27 @@ async function captureS4() {
       await page.screenshot({ path: join(output, `child-progress-${viewport.width}.png`) });
       await card.getByRole("button", { name: "查看全部 3 个子 Issue ↓", exact: true }).click();
       await card.getByRole("button", { name: "下一页", exact: true }).click();
-      await card.getByRole("button", { name: /核对独立验收/ }).waitFor();
+      const lastChild = card.getByRole("button", { name: /核对独立验收/ });
+      await lastChild.waitFor();
+      if (viewport.width === 390) {
+        await lastChild.focus();
+        for (const size of [{ width: 844, height: 390 }, viewport]) {
+          await page.setViewportSize(size);
+          await page.waitForFunction(
+            (desktop) =>
+              document.querySelector('[aria-label="看板列"]')!.hasAttribute("tabindex") === desktop,
+            size.width > 760,
+          );
+          const expanded = card.getByRole("button", { name: "收起子 Issue ↑", exact: true });
+          assert(await expanded.isVisible(), `child list stays expanded at ${size.width}px`);
+          assert(await lastChild.isVisible(), `child list keeps page two at ${size.width}px`);
+          assert(
+            await lastChild.evaluate((button) => button === document.activeElement),
+            `child button retains focus at ${size.width}px`,
+          );
+          await page.screenshot({ path: join(output, `child-page-breakpoint-${size.width}.png`) });
+        }
+      }
       await card.getByRole("button", { name: "上一页", exact: true }).click();
       await card.getByRole("button", { name: /补齐回滚文档/ }).waitFor();
       await card.getByRole("button", { name: "收起子 Issue ↑", exact: true }).click();
