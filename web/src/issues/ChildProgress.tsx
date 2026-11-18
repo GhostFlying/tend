@@ -110,9 +110,12 @@ export function ChildProgress({
         {view && view.cursors.length > 1 && (
           <Button
             variant="link"
-            disabled={state.loading}
+            aria-disabled={state.loading}
             data-board-focus={`${id}:children-previous`}
-            onClick={() => onViewChange({ ...view, cursors: view.cursors.slice(0, -1) })}
+            onClick={() => {
+              if (!view.read.state.get().loading)
+                onViewChange({ ...view, cursors: view.cursors.slice(0, -1) });
+            }}
           >
             上一页
           </Button>
@@ -120,11 +123,13 @@ export function ChildProgress({
         {view && state.value?.more && (
           <Button
             variant="link"
-            disabled={state.loading}
+            aria-disabled={state.loading}
             data-board-focus={`${id}:children-next`}
-            onClick={() =>
-              onViewChange({ ...view, cursors: [...view.cursors, state.value!.next!] })
-            }
+            onClick={() => {
+              const current = view.read.state.get();
+              if (!current.loading && current.value?.next)
+                onViewChange({ ...view, cursors: [...view.cursors, current.value.next] });
+            }}
           >
             下一页
           </Button>

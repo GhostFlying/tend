@@ -26,6 +26,7 @@ const childProgressOnly = process.argv.includes("--child-progress-only");
 let hostedUnconfigured = false;
 let holdTaskFeed = false;
 let childProgressFixture = false;
+let childPageTwoGate: Promise<void> | undefined;
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set an isolated screenshot output directory");
 await mkdir(output, { recursive: true });
@@ -585,15 +586,19 @@ const server = createServer(async (req, res) => {
     u.searchParams.get("parent_id") === "issue-root"
   ) {
     const items = issueRows.filter((row) => row.parent_issue_id === "issue-root");
-    return json(
-      u.searchParams.get("after")
-        ? { items: items.slice(2), more: false }
-        : {
-            items: items.slice(0, 2),
-            more: items.length > 2,
-            ...(items.length > 2 ? { next: "child-page-2" } : {}),
-          },
-    );
+    if (u.searchParams.get("after")) {
+      const nextPage = { items: items.slice(2), more: false };
+      if (!childPageTwoGate) return json(nextPage);
+      void childPageTwoGate.then(() => {
+        if (!res.destroyed) json(nextPage);
+      });
+      return;
+    }
+    return json({
+      items: items.slice(0, 2),
+      more: items.length > 2,
+      ...(items.length > 2 ? { next: "child-page-2" } : {}),
+    });
   }
   if (p === "/api/v1/issues")
     return json({
@@ -1534,6 +1539,39 @@ async function captureS4() {
           );
           await page.screenshot({ path: join(output, `child-page-breakpoint-${size.width}.png`) });
         }
+        const previousPage = card.getByRole("button", { name: "上一页", exact: true });
+        const loading = card.getByRole("status").filter({ hasText: "正在读取子 Issue…" });
+        const pagerHasFocus = () =>
+          previousPage.evaluate((button) => button === document.activeElement);
+        for (const size of [{ width: 844, height: 390 }, viewport]) {
+          await lastChild.focus();
+          await page.keyboard.press("Tab");
+          assert(await pagerHasFocus(), "Tab reaches the page control");
+          let releaseRefresh!: () => void;
+          childPageTwoGate = new Promise<void>((resolve) => {
+            releaseRefresh = resolve;
+          });
+          try {
+            await page.setViewportSize(size);
+            await loading.waitFor();
+            assert(
+              await pagerHasFocus(),
+              `the page control keeps focus during refresh at ${size.width}px`,
+            );
+            assert.equal(await previousPage.getAttribute("aria-disabled"), "true");
+            await page.keyboard.press("Enter");
+            assert(await lastChild.isVisible(), "a pending refresh prevents changing the page");
+          } finally {
+            childPageTwoGate = undefined;
+            releaseRefresh();
+          }
+          await loading.waitFor({ state: "hidden" });
+          assert(
+            await pagerHasFocus(),
+            `the page control keeps focus after refresh at ${size.width}px`,
+          );
+          await page.screenshot({ path: join(output, `child-pager-focus-${size.width}.png`) });
+        }
       }
       await card.getByRole("button", { name: "上一页", exact: true }).click();
       await card.getByRole("button", { name: /补齐回滚文档/ }).waitFor();
@@ -1799,16 +1837,20 @@ async function checkBoardColumnWidths() {
             width > 760,
           );
         };
-        const waitForHorizontalScrollToSettle = () =>
-          board.evaluate(async (element) => {
-            let lastOffset = element.scrollLeft;
+        const waitForScrollToSettle = (container = board) =>
+          container.evaluate(async (element) => {
+            let lastLeft = element.scrollLeft;
+            let lastTop = element.scrollTop;
             let stableFrames = 0;
             for (let frame = 0; frame < 120; frame++) {
               await new Promise(requestAnimationFrame);
-              const offset = element.scrollLeft;
-              stableFrames = offset === lastOffset ? stableFrames + 1 : 0;
+              stableFrames =
+                element.scrollLeft === lastLeft && element.scrollTop === lastTop
+                  ? stableFrames + 1
+                  : 0;
               if (stableFrames === 12) return;
-              lastOffset = offset;
+              lastLeft = element.scrollLeft;
+              lastTop = element.scrollTop;
             }
             throw new Error("The board did not finish scrolling");
           });
@@ -1840,6 +1882,22 @@ async function checkBoardColumnWidths() {
         await page.waitForFunction(
           () => document.querySelector('[aria-label="进行中列"]')!.scrollTop > 0,
         );
+        await waitForScrollToSettle(ongoingColumn);
+        const readingTop = await ongoingColumn.evaluate((column) => column.scrollTop);
+        assert(readingTop > 0, "the mobile column is scrolled vertically");
+        assert(
+          await ongoingColumn.evaluate((column) => !column.contains(document.activeElement)),
+          "reading position is independent of a focused card",
+        );
+        await resizeBoard(844, 390);
+        await resizeBoard(width, 844);
+        await waitForScrollToSettle(ongoingColumn);
+        assert.equal(
+          await ongoingColumn.evaluate((column) => column.scrollTop),
+          readingTop,
+          "the mobile column keeps its vertical reading position after rotation",
+        );
+        await page.screenshot({ path: join(output, "board-reading-position-390.png") });
         await activeTab.focus();
         await swipe(350, 350, -320, 0);
         const reviewTab = page.getByRole("tab", { name: /^待检查/, selected: true });
@@ -1865,7 +1923,7 @@ async function checkBoardColumnWidths() {
         await waitForCardInViewport("done");
         await resizeBoard(844, 390);
         await resizeBoard(width, 844);
-        await waitForHorizontalScrollToSettle();
+        await waitForScrollToSettle();
         await waitForCardInViewport("done");
         assert(await doneTab.isVisible(), "the selected status survives rotating the viewport");
         assert(
@@ -1875,7 +1933,7 @@ async function checkBoardColumnWidths() {
         await page.screenshot({ path: join(output, "board-rotation-390.png") });
         await swipe(40, 350, 320, 0);
         await reviewTab.waitFor();
-        await waitForHorizontalScrollToSettle();
+        await waitForScrollToSettle();
         await waitForCardInViewport("in_review");
         assert(
           await reviewTab.isVisible(),
@@ -1905,7 +1963,7 @@ async function checkBoardColumnWidths() {
           { width, height: 844 },
         ]) {
           await resizeBoard(viewport.width, viewport.height);
-          await waitForHorizontalScrollToSettle();
+          await waitForScrollToSettle();
           assert(await cardHasFocus(), `the card retains focus at ${viewport.width}px`);
           await waitForCardInViewport("backlog");
         }
