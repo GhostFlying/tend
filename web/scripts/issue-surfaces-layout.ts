@@ -1799,14 +1799,28 @@ async function checkBoardColumnWidths() {
         await page.waitForFunction(
           () => document.querySelector('[aria-label="进行中列"]')!.scrollTop > 0,
         );
+        await activeTab.focus();
         await swipe(350, 350, -320, 0);
-        await page.getByRole("tab", { name: /^待检查/, selected: true }).waitFor();
+        const reviewTab = page.getByRole("tab", { name: /^待检查/, selected: true });
+        await reviewTab.waitFor();
         assert(
           await ongoingColumn.evaluate((column) => (column as HTMLElement).inert),
           "offscreen columns leave keyboard navigation",
         );
         await waitForCardInViewport("in_review");
+        assert(
+          await reviewTab.evaluate((tab) => document.activeElement === tab),
+          "the selected tab retains visible keyboard focus after a swipe",
+        );
+        const tabBox = await reviewTab.boundingBox();
+        assert(
+          tabBox && tabBox.x >= 0 && tabBox.x + tabBox.width <= width,
+          `the focused tab fits within the viewport: ${JSON.stringify(tabBox)}`,
+        );
         await page.screenshot({ path: join(output, "board-touch-390.png") });
+        await page.keyboard.press("ArrowRight");
+        await page.getByRole("tab", { name: /^已完成/, selected: true }).waitFor();
+        await waitForCardInViewport("done");
         await page.getByRole("tab", { name: /^已取消/ }).click();
         await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
         await waitForCardInViewport("cancelled");
