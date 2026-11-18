@@ -293,7 +293,15 @@ func (a *App) ConsumeIssueOwnerSteer(ctx context.Context, conversation, thread, 
 				return err
 			}
 		}
-		return recordMessageState(ctx, tx, a.ids, source, protocol.MessageConsumed, now)
+		// Refresh the original from its versioned receipt. Ordinary message
+		// states belong to their own execution and must survive a late receipt.
+		body, err := json.Marshal(map[string]string{"receipt_message_id": message})
+		if err != nil {
+			return err
+		}
+		_, err = tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread",
+			ObjectType: "message", ObjectID: source, Kind: "conversation.urgent_consumed", BodyJSON: string(body), CreatedAt: now})
+		return err
 	})
 	if err == nil {
 		a.notifyChange()

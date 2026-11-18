@@ -134,7 +134,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 						continue
 					}
 					kind = "messaging.associations_changed"
-				} else if kind == "conversation.message_state" || kind == "conversation.turn_reviewed" || strings.HasPrefix(kind, "conversation.processing_") || strings.HasPrefix(kind, "conversation.clarification_") {
+				} else if kind == "conversation.message_state" || kind == "conversation.urgent_consumed" || kind == "conversation.turn_reviewed" || strings.HasPrefix(kind, "conversation.processing_") || strings.HasPrefix(kind, "conversation.clarification_") {
 					message, err := s.app.MessagingMessage(ctx, ev.ObjectID)
 					if err != nil || message.Direction != "input" {
 						continue

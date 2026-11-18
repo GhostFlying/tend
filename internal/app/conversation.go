@@ -698,8 +698,8 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			// Urgent consumption may arrive after claim but before native admission.
 			// A known-unsent attempt can return to pending as usual. The queue
 			// will skip this version and still allow a different version through.
-			var consumed bool
-			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=? AND `+store.IssueOwnerConsumptionMatchesOutbox+`)`, m.RequestID).Scan(&consumed); err != nil {
+			consumed, err := store.IssueOwnerInputConsumedForRequest(ctx, tx.Q(), m.RequestID)
+			if err != nil {
 				return err
 			}
 			if consumed {
@@ -791,6 +791,19 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 				state = turnStates[businessStatus]
 			}
 			return a.insertMessageState(ctx, tx, m.MessageID, state, now)
+		}
+		if m.Status == store.TurnRejected && prev.Status == store.TurnStarting && m.TurnID == "" && prev.TurnID == "" {
+			consumed, err := store.IssueOwnerInputConsumedForRequest(ctx, tx.Q(), m.RequestID)
+			if err != nil {
+				return err
+			}
+			if consumed {
+				// The ordinary successor can already have adopted a recovery in
+				// TurnStarting. Its definite no-start receipt closes that path.
+				if err := a.restoreDisplacedRecovery(ctx, tx, m.MessageID, "was delivered urgently", now); err != nil {
+					return err
+				}
+			}
 		}
 		if m.Status == store.TurnCompleted || m.Status == store.TurnInterrupted || m.Status == store.TurnFailed {
 			if _, err := tx.Exec(ctx, `UPDATE outbox SET status='delivered',updated_at=? WHERE request_id=? AND (status='unknown' OR (? AND status='sending'))`, now, m.RequestID, m.NativeReconciled); err != nil {

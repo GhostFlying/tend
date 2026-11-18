@@ -104,6 +104,14 @@ func TestIssueOwnerUrgentConsumptionSatisfiesOrdinaryQueueAndDispatch(t *testing
 		if page.Total != 2 || page.Items[0].Item.MessageID != original || page.Items[0].Status != "queued" || !page.Items[0].CanWithdraw {
 			t.Fatal(page)
 		}
+		if err := f.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			if err := requireHostedSourceAdmitted(t.Context(), tx.Q(), original); protocol.CodeOf(err) != protocol.CodeForbidden {
+				t.Fatalf("unconfirmed source admitted: %v", err)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	assertPending()
 	d := f.claim(t, notice.MessageID)
@@ -131,7 +139,26 @@ func TestIssueOwnerUrgentConsumptionSatisfiesOrdinaryQueueAndDispatch(t *testing
 			r.RunID != f.assignment.RunID || r.NativeItemID != "observed-native-user-item" || r.Status != "consumed" {
 			t.Fatal(item)
 		}
+		if err := requireHostedSourceAdmitted(t.Context(), tx.Q(), original); err != nil {
+			return err
+		}
+		if err := store.HideUndeliveredOwner(t.Context(), tx.Q(), &item); err != nil || item.Body != body {
+			t.Fatal(item, err)
+		}
 		return communicationSourceAllowed(t.Context(), tx.Q(), f.turn.RequestID, f.conversation, notice.MessageID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	source := f.associations(original)
+	review := hostedReviewPayload(t, f.harness, f.issue)
+	review.Sources = []protocol.LogicalTurnReview{{MessageID: original, ContentRevision: source.ContentRevision, AssociationRevision: source.Revision}}
+	manager := protocol.Principal{Kind: protocol.PrincipalRun, Subject: f.assignment.RunID,
+		Role: protocol.RoleIssueManager, Thread: f.turn.ThreadID, ConversationID: f.conversation}
+	if op := hostedEffect(t, f.harness, manager, f.turn, 1, protocol.Target{Type: "issue", ID: f.issue.IssueID}, nil, review, ReviewHostedIssueContext{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := f.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		return communicationSourceAllowed(t.Context(), tx.Q(), f.turn.RequestID, f.conversation, original)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +210,16 @@ func TestIssueOwnerUrgentQueueLateConsumptionFencesClaimedOrdinaryStart(t *testi
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if page := f.queue(t); page.Total != 1 || !page.Items[0].CanWithdraw || page.Items[0].Item.ConsumedIssueOwnerSteer != nil {
+	if page := f.queue(t); page.Total != 1 || !page.Items[0].CanWithdraw || page.Items[0].Item.State != protocol.MessageQueued || page.Items[0].Item.ConsumedIssueOwnerSteer != nil {
 		t.Fatal("older receipt overrode a new source version", page)
+	}
+	if err := f.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		if err := requireHostedSourceAdmitted(t.Context(), tx.Q(), original); protocol.CodeOf(err) != protocol.CodeForbidden {
+			t.Fatalf("an earlier receipt admitted the new version: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	newVersion := f.next(t, original)
 	if newVersion.RequestID != ordinary.RequestID || newVersion.Attempt != ordinary.Attempt+1 {
@@ -231,14 +266,35 @@ func TestIssueOwnerUrgentQueueFencesOnlyUnreleasedManagerNativeTurn(t *testing.T
 	for _, test := range []struct {
 		name     string
 		released bool
-	}{{"pending", false}, {"released", true}} {
+		adopted  bool
+	}{{name: "pending"}, {name: "released", released: true}, {name: "adopted", adopted: true}} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newUrgentQueueFixture(t)
 			ctx := t.Context()
 			original := f.submit(t, "An urgent receipt can arrive while the next native turn is queued")
 			notice := f.steer(t, original)
 			urgent := f.claim(t, notice.MessageID)
-			finishHostedReview(t, f.harness, f.turn)
+			if test.adopted {
+				original := f.turn
+				original.Status = store.TurnFailed
+				original.Failure = &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}
+				if err := f.app.PutMainTurn(ctx, original); err != nil {
+					t.Fatal(err)
+				}
+				inflight, err := f.app.InFlightDeliveries(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, d := range inflight {
+					if d.RequestID == original.RequestID {
+						if err := f.app.FinishDelivery(ctx, d, DeliveryResult{Outcome: Delivered}); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+			} else {
+				finishHostedReview(t, f.harness, f.turn)
+			}
 			delivery := f.next(t, original)
 			selected, named, err := f.app.NamedHostedSelection(ctx, f.conversation)
 			if err != nil || !named {
@@ -274,6 +330,67 @@ func TestIssueOwnerUrgentQueueFencesOnlyUnreleasedManagerNativeTurn(t *testing.T
 			if err != nil || (test.released && (ready || got.ID != request)) || (!test.released && (got.ID != "" || !ready || !reply.Rejected)) {
 				t.Fatal(got, reply, ready, err)
 			}
+			if test.adopted {
+				starting.Status = store.TurnRejected
+				if err := f.app.PutMainTurn(ctx, starting); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.app.FinishDelivery(ctx, delivery, DeliveryResult{Outcome: Retry}); err != nil {
+					t.Fatal(err)
+				}
+				r, found, err := f.app.AgentRecovery(ctx, f.turn.RequestID)
+				if err != nil || !found || r.Status != "blocked" || r.Reason == "" {
+					t.Fatal(r, found, err)
+				}
+				if err := f.store.Read(ctx, func(tx *store.ReadTx) error {
+					for _, id := range []string{f.turn.RequestID, starting.RequestID} {
+						state, err := store.LogicalTurn(ctx, tx.Q(), id)
+						if err != nil || state.Status != "needs_review" {
+							t.Fatal(state, err)
+						}
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				followup := f.submit(t, "Continue the retained work")
+				followupTurn := startHostedReview(t, f.harness, f.conversation, f.next(t, followup))
+				if err := f.store.Read(ctx, func(tx *store.ReadTx) error {
+					var inherited bool
+					err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE e.request_id=? AND m.message_id=?)`, followupTurn.RequestID, f.turn.MessageID).Scan(&inherited)
+					if err != nil || !inherited {
+						t.Fatal("the follow-up could not inherit the retained source", err)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				finishHostedReview(t, f.harness, followupTurn)
+			}
 		})
+	}
+}
+
+func TestIssueOwnerUrgentReceiptPreservesOrdinaryReplyState(t *testing.T) {
+	f := newUrgentQueueFixture(t)
+	original := f.submit(t, "Finish the ordinary reply before the urgent receipt arrives")
+	notice := f.steer(t, original)
+	urgent := f.claim(t, notice.MessageID)
+	finishHostedReview(t, f.harness, f.turn)
+	ordinary := startHostedReview(t, f.harness, f.conversation, f.next(t, original))
+	finishHostedReview(t, f.harness, ordinary)
+	f.consume(t, urgent)
+	if err := f.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		block, err := views.TranscriptBlock(t.Context(), tx.Q(), original, 0, 50)
+		if err != nil {
+			return err
+		}
+		item := block.Trigger
+		if item.State != protocol.MessageReplied || item.ConsumedIssueOwnerSteer == nil || item.ConsumedIssueOwnerSteer.MessageID != notice.MessageID {
+			t.Fatal(item)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
