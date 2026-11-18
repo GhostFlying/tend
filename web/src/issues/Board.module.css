@@ -51,14 +51,28 @@
   width: 100%;
 }
 .columns {
+  --column-min-width: 256px;
+  --columns-inline-padding: var(--space-5);
+  --cancelled-column-width: 44px;
+  position: relative;
   display: grid;
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  grid-template-columns: repeat(5, minmax(180px, 1fr)) 44px;
+  grid-template-columns: repeat(5, minmax(var(--column-min-width), 1fr)) var(
+      --cancelled-column-width
+    );
   gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--columns-inline-padding);
   overflow: auto;
+  overscroll-behavior-inline: contain;
   align-items: start;
+}
+.columns[data-cancelled-expanded="true"] {
+  --cancelled-column-width: minmax(var(--column-min-width), 1fr);
+}
+.columns:focus-visible {
+  outline-offset: -2px;
 }
 .column {
   min-width: 0;
@@ -436,9 +450,6 @@
   overflow: hidden;
   clip-path: inset(50%);
 }
-.columns[data-cancelled-expanded="true"] {
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
-}
 .column[data-collapsed="true"] h2 {
   flex-direction: column;
   margin: 0;
@@ -480,6 +491,7 @@
     display: block;
     flex: none;
     overflow-x: auto;
+    overscroll-behavior-inline: contain;
     padding: 0 var(--space-4);
     scrollbar-width: none;
   }
@@ -498,30 +510,23 @@
   .mobileTabs small {
     font-size: var(--text-caption);
   }
-  .column[data-collapsed="true"] h2 {
-    flex-direction: row;
-  }
-  .column[data-collapsed="true"] .columnToggle {
-    flex-direction: row;
-    min-height: 44px;
-  }
-  .column[data-collapsed="true"] .cardList {
-    display: flex;
-  }
   .columns {
-    display: flex;
-    padding: 14px var(--space-4) var(--space-5);
+    --columns-inline-padding: var(--space-3);
+    grid-template-columns: repeat(6, max(var(--column-min-width), 100%));
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+    padding-block: 0;
+    overflow-y: hidden;
+    scroll-padding-inline: var(--columns-inline-padding);
+    scroll-snap-type: x mandatory;
   }
   .column {
-    display: none;
-    padding: 0;
+    padding: 14px var(--space-1) var(--space-5);
     border: none;
-    width: 100%;
-    min-height: 0;
     background: transparent;
-  }
-  .column[data-mobile="true"] {
-    display: block;
+    overflow-y: auto;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
   .column h2 {
     margin: 0 0 var(--space-3);
