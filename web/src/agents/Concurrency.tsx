@@ -250,8 +250,8 @@ export function ConcurrencyDirectory({ refreshVersion = 0 }: { refreshVersion?: 
         </Button>
       </div>
       <p className={styles.muted}>
-        分组由 CLI 管理。预算约束 Tend 托管执行；稳定升档要求观察 30 分钟、累计满载至少 15
-        分钟，且仍有执行等待容量。
+        分组由 CLI 管理。预算约束 Tend 托管执行；稳定升档要求连续健康观察 15 分钟、累计确认满载至少
+        8 分钟、有成功 turn，且仍有可领取的执行因容量不足而等待。
       </p>
       {groupState.error && <p role="status">无法读取分组，保留上次结果：{groupState.error}</p>}
       <div className={styles.groups}>
@@ -314,7 +314,7 @@ export function ConcurrencyDirectory({ refreshVersion = 0 }: { refreshVersion?: 
             <dt>有效观察开始</dt>
             <dd>{time(selected.observation_since)}</dd>
             <dt>最近窗口满载</dt>
-            <dd>{minutes(selected.saturated_ms)} / 至少 15 分钟</dd>
+            <dd>{minutes(selected.saturated_ms)} / 至少 8 分钟</dd>
             <dt>成功 turn</dt>
             <dd>{selected.successful_turns}</dd>
             <dt>反馈状态</dt>

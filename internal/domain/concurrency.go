@@ -8,8 +8,8 @@ import (
 
 const (
 	ConcurrencySamplePeriod = 30 * time.Second
-	ConcurrencyWindow       = 30 * time.Minute
-	ConcurrencySaturation   = 15 * time.Minute
+	ConcurrencyWindow       = 15 * time.Minute
+	ConcurrencySaturation   = 8 * time.Minute
 	ConcurrencyCooldown     = 30 * time.Second
 )
 

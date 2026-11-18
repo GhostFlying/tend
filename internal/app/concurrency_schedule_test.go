@@ -144,21 +144,21 @@ func TestConcurrencyIdleReadExpiresWindowWithoutSamplingOrWriting(t *testing.T) 
 		if err != nil {
 			return err
 		}
-		state.Group.ObservationSince = now - domain.ConcurrencyWindow.Milliseconds()
-		state.Group.SaturatedMillis = domain.ConcurrencySaturation.Milliseconds()
+		state.Group.ObservationSince = now - (15 * time.Minute).Milliseconds()
+		state.Group.SaturatedMillis = (8 * time.Minute).Milliseconds()
 		state.Group.SuccessfulTurns = 1
-		state.Intervals = []domain.ConcurrencyInterval{{Start: now - domain.ConcurrencySaturation.Milliseconds(), End: now}}
+		state.Intervals = []domain.ConcurrencyInterval{{Start: now - (8 * time.Minute).Milliseconds(), End: now}}
 		state.Successes = []int64{now}
 		return saveConcurrency(t.Context(), tx, state)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	h.clock.Advance(20 * time.Minute)
+	h.clock.Advance(11 * time.Minute)
 	group, err := h.app.ConcurrencyGroup(t.Context(), "shared")
-	if err != nil || group.SaturatedMillis != (10*time.Minute).Milliseconds() || group.SuccessfulTurns != 1 {
+	if err != nil || group.ObservationSince != now-(4*time.Minute).Milliseconds() || group.SaturatedMillis != (4*time.Minute).Milliseconds() || group.SuccessfulTurns != 1 {
 		t.Fatal("window was not clipped", group, err)
 	}
-	h.clock.Advance(10*time.Minute + time.Millisecond)
+	h.clock.Advance(4*time.Minute + time.Millisecond)
 	group, err = h.app.ConcurrencyGroup(t.Context(), "shared")
 	if err != nil || group.SaturatedMillis != 0 || group.SuccessfulTurns != 0 {
 		t.Fatal("expired idle evidence remained current", group, err)
@@ -169,7 +169,7 @@ func TestConcurrencyIdleReadExpiresWindowWithoutSamplingOrWriting(t *testing.T) 
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		state, err := concurrencyState(t.Context(), tx.Q(), "shared")
-		if err == nil && (state.Group.SaturatedMillis != domain.ConcurrencySaturation.Milliseconds() || len(state.Successes) != 1) {
+		if err == nil && (state.Group.SaturatedMillis != (8*time.Minute).Milliseconds() || len(state.Successes) != 1) {
 			t.Fatal("read rewrote stored observations", state)
 		}
 		return err

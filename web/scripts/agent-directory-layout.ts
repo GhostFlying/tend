@@ -319,7 +319,7 @@ const server = createServer(async (req, res) => {
             waiting: 2,
             cooldown_until: 0,
             observation_since: Date.now() - 1800000,
-            saturated_ms: 1080000,
+            saturated_ms: 360000,
             successful_turns: 12,
             feedback_healthy: true,
             bindings: [{ environment_id: "host-a", runtime_id: "codex", group_id: "shared-codex" }],
@@ -973,6 +973,8 @@ try {
       await concurrency.getByRole("button", { name: /共享 Codex/ }).click();
       await concurrency.getByRole("heading", { name: "共享 Codex", exact: true }).waitFor();
       assert(new URL(page.url()).searchParams.get("group") === "shared-codex");
+      await concurrency.getByText(/连续健康观察 15 分钟、累计确认满载至少 8 分钟/).waitFor();
+      await concurrency.getByText("6 分钟 / 至少 8 分钟", { exact: true }).waitFor();
       await concurrency.locator("summary").filter({ hasText: "拥塞退避" }).click();
       await concurrency.getByText("native-login", { exact: true }).waitFor();
       await concurrency.getByRole("button", { name: "修复登录", exact: true }).waitFor();
@@ -991,7 +993,7 @@ try {
       await page.reload();
       await page.getByRole("heading", { name: "共享 Codex", exact: true }).waitFor();
       assert.equal(await concurrency.getByRole("button", { name: /共享 Codex/ }).count(), 0);
-      await concurrency.getByText("18 分钟 / 至少 15 分钟", { exact: true }).waitFor();
+      await concurrency.getByText("6 分钟 / 至少 8 分钟", { exact: true }).waitFor();
       hideConcurrencyList = false;
       assert.deepEqual(errors, []);
       assert.deepEqual(writes, []);

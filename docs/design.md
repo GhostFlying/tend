@@ -173,7 +173,7 @@ D225 修订 D11 的通用请求持久化方式，其他未另行修订的基线�
 | D150 | 问题沿 Issue 责任链处理：执行问题先交所属 Issue owner，负责 Agent 无法解决时逐级交父 Issue owner、唯一主协调 Agent；只有人工 owner 或主协调无法解决时形成用户待办。沿原 Attention/Decision 记录版本、assignment epoch、逐跳原因和 Agent 回答来源，不伪造用户授权，不改变独立验收及 unknown 对账。新执行协商 supervisor-questions-v1，历史执行保留原答复合同，wire 保持 2/1。CLI 与具名工具支持原问题读取、回答、上报及恢复；新协商执行提问后结束本轮、释放 slot，父 Issue owner 答复后创建保持原尝试代次的接续 Run，无额外协调容量。见 docs/plans/issue-responsibility-routing.md 与 docs/plans/issue-run-handoffs.md。 | 已实现，未发布 |
 | D151 | 完整 race 检查继续以 Go 动态发现的所有根测试、Example 和 Fuzz seed 为覆盖来源，固定实测成本仅用于分片放置和重包优先调度，新测试自动纳入。高容量本地机器按总测试进程预算选择最多八个 App 分片、每包最多四个 API/mainthread/E2E 分片及最多六个其他包并行；小机器保留 E2E 独立阶段和顺序回退，CI 保持原分组与容量约束。可选 TEST_REPORT_DIR 输出本轮私有原生 JSON 耗时报告，默认保留 Go 原生缓存。E2E、handoff、contextbuilder、runnerapi、tools、dispatch、views及消息通道的普通空库fixture复用不可变模板；模板字节复制机制不依赖store，供Store包内普通事务/投影测试共用。迁移及历史升级测试保留真实建库，显式路径重开继续通过真实Open；App索引重建对照仅复用初始当前schema空库。批量读取规模测试从一次真实创建的合法投影在独立事务内准备数据，创建/Issue流程仍由专门业务测试覆盖；复用变体不重复完整reload/restart合同。见 docs/plans/race-tail-latency.md 与 docs/plans/test-setup-deduplication.md。 | 已实现 |
 | D152 | 验收后持久保留独立交付核对责任，具体 PR/head/base/验证/部署范围通过原 taskless versioned Attention 确认，候选或观测失效持久撤销旧授权；owner 重开原子恢复新协调代次，保留 terminal task 和 unknown。API/CLI 同步，runner 2/1。见 docs/plans/delivery-responsibility.md。 | 已实现，待验收 |
-| D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，30 分钟稳定且累计满载 15 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
+| D153 | runtime 通过 CLI 绑定服务端自适应并发分组，所有托管执行共享预算；明确拥塞减 1，30 秒合并/冷却，连续健康 15 分钟且累计确认满载至少 8 分钟、有成功 turn 和等待需求才加 1。Web 只读，CLI 全能力；七天历史保留 Issue/session 归因和升档依据，unknown 保留占用。见 docs/plans/adaptive-concurrency.md。 | 已实现，待验收 |
 | D155 | 已提交 server 通过独立本机窗口引导 updater，再以实际归档/host 维护确认前滚；保留 unknown run、旧收据及父失败，限定失败候选可独立后继，CLI 提供完整引导、取消、对账及释放。 | 已实现，待验收 |
 | D156 | 正常维护之外提供显式 receipt-recovery crash stop：真实未知生命周期不冒充排空，完整 Run 库存及原 lease 持久保护先于新服务入口，保留物理停止事实与业务未知，prelink 延迟原生执行。 | 已确认 |
 | D157 | Manager delivery 先去重旧 logical responsibility 再查未决投递；Token 重叠查询按 native identity 与 current fact 索引关联。只改善查询规模，不改变 blocker、冲突、未知或计量语义，追加迁移83。 | 已实现，待验证 |
@@ -719,8 +719,8 @@ CLI 管理，不增加配置文件；已有执行在绑定变更时转移占用�
 负责人代理不重复计数；未知执行沿原 fencing 和对账，不按时间假设释放。
 
 每组 min/initial/max，拥塞每次减一，三十秒内合并，最后拥塞后冷却三十秒。
-升档按同组全部受管 session 的已知反馈判断：完整三十分钟无临时 429/overload、
-累计十五分钟达到当前上限、有成功 turn 且仍有容量等待才加一。升降档、配置或
+升档按同组全部受管 session 的已知反馈判断：连续十五分钟反馈健康且无临时 429/overload、
+累计确认运行数达到当前上限至少八分钟、有成功 turn 且仍有可领取的等待需求才加一。升降档、配置或
 成员变化、重启、反馈失联后重建观察，不把停机或无反馈当成成功。原生重试不
 重复触发，同 turn 的故障与最终回执合并；不接管原 session 重试。
 
