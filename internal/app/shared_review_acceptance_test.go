@@ -88,6 +88,23 @@ func TestAcceptanceSharedReviewPrebindUsesActualRoleAndVerdict(t *testing.T) {
 			if op := h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: verdict, Evidence: acceptanceSharedReviewEvidence(r, findings)}, SubmitAcceptance{}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				deliveries, err := views.CanonicalIssueDeliveries(t.Context(), tx.Q(), issue.IssueID)
+				if err != nil {
+					return err
+				}
+				actual := string(verdict)
+				if verdict == protocol.VerdictChangesRequired {
+					actual = "changes_requested"
+				}
+				if progress := deliveries.Items[0].Review; progress == nil || progress.Recorded ||
+					progress.Valid || progress.Verdict != actual || progress.HeadSHA != r.HeadSHA || progress.BaseSHA != r.BaseSHA {
+					t.Fatal("actual bound acceptance is missing from default progress", progress)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
 			r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
 			last := r.Rounds[0]
 			if last.AcceptanceID == "" || last.AcceptanceVerdict != verdict || last.RunID != accept.RunID {

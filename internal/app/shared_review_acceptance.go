@@ -2,16 +2,11 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
-
-var errAcceptanceReviewEvidence = errors.New("actual acceptance needs original-reviewer whole-PR evidence")
 
 // Acceptance prebinding names an already selected real reviewer, not the source
 // task's implementer. The exact artifact and actual execution profile are frozen.
@@ -26,7 +21,7 @@ func bindSharedAcceptanceReview(ctx context.Context, q store.Querier, r protocol
 			return out, err
 		}
 		out.ReviewerRole, out.ReviewerProfile = protocol.RoleAccept, &pin.Profile
-		if err := acceptanceArtifactMatches(ctx, q, out.ArtifactID, r.HeadSHA); err != nil {
+		if err := store.SharedAcceptanceArtifactMatches(ctx, q, out.ArtifactID, r.HeadSHA); err != nil {
 			return out, err
 		}
 		return out, nil
@@ -47,7 +42,7 @@ func bindSharedAcceptanceReview(ctx context.Context, q store.Querier, r protocol
 	if len(runs) == 0 {
 		return out, protocol.Errorf(protocol.CodeInvalidTransition, "acceptance reviewer has not yet been selected for this exact task, spec and artifact")
 	}
-	if err := acceptanceArtifactMatches(ctx, q, out.ArtifactID, r.HeadSHA); err != nil {
+	if err := store.SharedAcceptanceArtifactMatches(ctx, q, out.ArtifactID, r.HeadSHA); err != nil {
 		return out, err
 	}
 	out.RunID = runs[0]
@@ -100,104 +95,3 @@ func bindSharedAcceptanceReview(ctx context.Context, q store.Querier, r protocol
 
 // Read only immutable acceptance facts for the frozen artifact. Current task
 // lifecycle/spec can have moved after a real changes_required result.
-func readSharedAcceptanceResult(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, round *protocol.SharedDeliveryReviewRound) (*protocol.SharedReviewResult, string, string, error) {
-	if err := acceptanceArtifactMatches(ctx, q, round.ArtifactID, round.HeadSHA); err != nil {
-		return nil, "", "", err
-	}
-	rows, err := store.ListAcceptances(ctx, q, round.TaskID, round.ArtifactID)
-	if err != nil {
-		return nil, "", "", err
-	}
-	for _, v := range rows {
-		if v.SpecVersion != round.SpecVersion || round.AcceptanceID != "" && v.AcceptanceID != round.AcceptanceID {
-			continue
-		}
-		// A new round cannot import an older attempt on the same artifact.
-		// A later continuation of the preflight Run remains eligible, but its
-		// actual role, artifact, reviewer and frozen profile are still checked.
-		var currentAttempt bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs actual JOIN runs frozen ON frozen.run_id=? WHERE actual.run_id=? AND actual.rowid>=frozen.rowid)`, round.RunID, v.RunID).Scan(&currentAttempt); err != nil {
-			return nil, "", "", err
-		}
-		if !currentAttempt {
-			continue
-		}
-		reused := false
-		for _, previous := range r.Rounds {
-			if previous.Number < round.Number && (previous.RunID == v.RunID || previous.AcceptanceID == v.AcceptanceID) {
-				reused = true
-			}
-		}
-		if reused {
-			continue
-		}
-		run, err := store.GetRun(ctx, q, v.RunID)
-		if err != nil {
-			return nil, "", "", err
-		}
-		action, err := store.GetAction(ctx, q, run.ActionID)
-		if err != nil {
-			return nil, "", "", err
-		}
-		if run.Role != protocol.RoleAccept || run.TaskID != round.TaskID || action.TargetSpecVersion != round.SpecVersion || action.TargetArtifactID != round.ArtifactID {
-			return nil, "", "", protocol.Errorf(protocol.CodeForbidden, "acceptance must originate from the frozen task, spec, artifact and acceptance role")
-		}
-		pin, err := store.GetRunExecution(ctx, q, v.RunID)
-		if err != nil {
-			return nil, "", "", err
-		}
-		if round.Reviewer != pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID {
-			return nil, "", "", protocol.Errorf(protocol.CodeForbidden, "acceptance was produced by a different reviewer")
-		}
-		round.AcceptanceID, round.AcceptanceVerdict = v.AcceptanceID, v.Verdict
-		var evidence struct {
-			DeliveryReview *protocol.SharedReviewEvidence `json:"delivery_review"`
-		}
-		evidenceErr := json.Unmarshal([]byte(v.EvidenceJSON), &evidence)
-		original := evidence.DeliveryReview
-		result := &protocol.SharedReviewResult{ReviewID: r.ReviewID, HeadSHA: round.HeadSHA, BaseSHA: round.BaseSHA, RequirementsDigest: round.Requirements, Verdict: string(v.Verdict)}
-		if v.Verdict == protocol.VerdictPassed || v.Verdict == protocol.VerdictChangesRequired {
-			if evidenceErr != nil || original == nil || original.Provider != r.Provider || original.Repository != r.Repository || original.Number != r.Number || original.HeadSHA != round.HeadSHA || original.BaseSHA != round.BaseSHA || original.RequirementsDigest != round.Requirements || strings.TrimSpace(original.RepositoryCheck) == "" {
-				return nil, v.RunID, v.ArtifactID, errAcceptanceReviewEvidence
-			}
-			result.RepositoryCheck, result.Findings = original.RepositoryCheck, original.Findings
-			if v.Verdict == protocol.VerdictPassed {
-				result.Verdict = "passed"
-			} else {
-				result.Verdict = "changes_requested"
-				if len(result.Findings) == 0 {
-					var issues []string
-					if err := json.Unmarshal([]byte(v.IssuesJSON), &issues); err == nil {
-						for n, body := range issues {
-							result.Findings = append(result.Findings, protocol.SharedReviewFinding{ID: fmt.Sprintf("%s-%d", v.AcceptanceID, n+1), Body: body})
-						}
-					}
-				}
-			}
-			if err := validateSharedReviewResult(result, r, *round); err != nil {
-				return nil, v.RunID, v.ArtifactID, fmt.Errorf("%w: %v", errAcceptanceReviewEvidence, err)
-			}
-		} else if v.Verdict != protocol.VerdictBlocked && v.Verdict != protocol.VerdictInconclusive {
-			return nil, "", "", protocol.Errorf(protocol.CodeInvalidRequest, "actual acceptance verdict is unknown")
-		}
-		return result, v.RunID, v.ArtifactID, nil
-	}
-	return nil, "", "", protocol.Errorf(protocol.CodeInvalidTransition, "await the original reviewer's actual acceptance for the frozen artifact; a preflight or ended run is not a verdict")
-}
-
-func acceptanceArtifactMatches(ctx context.Context, q store.Querier, artifact, head string) error {
-	a, err := store.GetArtifact(ctx, q, artifact)
-	if err != nil {
-		return err
-	}
-	var payload protocol.ArtifactPayload
-	if err := json.Unmarshal([]byte(a.RefJSON), &payload); err != nil {
-		return err
-	}
-	for _, m := range payload.Mounts {
-		if m.CommitSHA == head && m.SnapshotSHA == "" {
-			return nil
-		}
-	}
-	return protocol.Errorf(protocol.CodeInvalidRequest, "acceptance artifact does not match the frozen PR candidate")
-}

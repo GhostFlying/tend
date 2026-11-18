@@ -112,7 +112,11 @@ export class LiveData {
     api = issueConversationReader(api, conversationID);
     this.api = api;
     this.usage = new UsageData(api);
-    this.queueView = new ConversationQueue(api, (item) => this.currentChoices(item));
+    this.queueView = new ConversationQueue(
+      api,
+      (item) => this.currentChoices(item),
+      conversationID.startsWith("issue:") ? ["owner", "withdrawn"] : undefined,
+    );
     this.settings = new ConversationSettings(api, conversationID);
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);

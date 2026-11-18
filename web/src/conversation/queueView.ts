@@ -43,6 +43,7 @@ export class ConversationQueue {
   constructor(
     private api: Reader,
     private currentItem: (item: ConversationItem) => ConversationItem = (item) => item,
+    private categories: readonly Category[] = ["owner", "background", "withdrawn"],
   ) {}
   refreshChoices(): void {
     this.publish(this.state.get());
@@ -147,7 +148,7 @@ export class ConversationQueue {
         const controller = this.controller;
         try {
           const pages: Partial<Record<Category, ConversationQueuePage>> = {};
-          for (const category of ["owner", "background", "withdrawn"] as const) {
+          for (const category of this.categories) {
             let page = await this.api.get<ConversationQueuePage>(
               `/api/v1/conversation/queue?category=${category}`,
               controller.signal,

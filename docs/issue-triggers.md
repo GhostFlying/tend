@@ -18,6 +18,7 @@ owner API 使用 `GET /api/v1/issues/{id}/context?view=incremental&limit=50`，�
 tend issue
 tend issue show "$ISSUE_ID" --json
 tend issue activity "$ISSUE_ID"
+tend issue activity "$ISSUE_ID" --notification "$EVENT_POSITION"
 tend issue results "$ISSUE_ID"
 tend issue context "$ISSUE_ID"
 tend issue context "$ISSUE_ID" --view incremental --limit 50 --json
@@ -44,6 +45,11 @@ tend event sources "$EVENT_ID" --after-source 0 --json
 tend event watch --issue "$ISSUE_ID" --json
 tend schedule show "$RULE_ID" --json
 ```
+
+`--notification` 使用活动条目的 `position` 查询交付观察或共享审阅事件关联的通知。
+输出包含原始事件 ID、已有批次、接收与开始证据、结算及记录的等待原因。
+合并窗口使用该事件的显式关联。缺少关联或回执时显示未知。
+使用 `--after <next>` 翻阅同一事件的通知记录。
 
 `rule.json` 是 FollowupSpec。例如每天当地 09:00 检查，时区明确、期限由 owner 指定：
 

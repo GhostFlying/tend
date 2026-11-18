@@ -30,7 +30,7 @@ func ConversationQueue(ctx context.Context, q store.Querier, category string, af
 		}
 		out.Items = append(out.Items, entry)
 	}
-	active, err := store.ConversationActive(ctx, q, session...)
+	active, err := store.ConversationActive(ctx, q, category, session...)
 	if err != nil {
 		return out, err
 	}

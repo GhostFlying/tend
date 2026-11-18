@@ -4,6 +4,7 @@ import {
   conflictActionLabel,
   DeliveryProgress,
 } from "./DeliveryProgress.tsx";
+import { EventNotification } from "./EventNotification.tsx";
 import { MessageReceipts } from "./MessageReceipts.tsx";
 import { ExternalSourceMessage } from "../conversation/SourceDetails.tsx";
 import { useEntryState } from "../app/router.ts";
@@ -755,6 +756,11 @@ function Milestone({
         <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
       </span>
       {entry.delivery ? <DeliveryProgress item={entry.delivery} historical /> : null}
+      {entry.issue_id &&
+      (entry.kind === "issue.delivery_review_changed" ||
+        entry.kind === "work_item.delivery_changed") ? (
+        <EventNotification issueID={entry.issue_id} position={entry.position} />
+      ) : null}
       {entry.progress && (
         <details>
           <summary>

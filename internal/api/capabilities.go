@@ -100,6 +100,7 @@ func (s *Server) ownerRoutes() []ownerRoute {
 		{"GET /api/v1/issue-notification-settings", s.issueNotificationSettings},
 		{"GET /api/v1/issues/{id}", s.issue},
 		{"GET /api/v1/issues/{id}/activity", s.issueActivity},
+		{"GET /api/v1/issues/{id}/activity/{position}/notification", s.issueActivityNotification},
 		{"GET /api/v1/issues/{id}/results", s.issueResults},
 		{"GET /api/v1/issues/{id}/reuse-status", s.issueReuseStatus},
 		{"GET /api/v1/issues/{id}/context", s.issueContext},

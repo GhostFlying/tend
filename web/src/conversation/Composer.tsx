@@ -66,17 +66,25 @@ export function Composer({
   const blocked = queue === null || connection.status === "not-owner" || !loaded;
   const body = draft.trim();
   const reply = latestReply(conversation.items);
-  const active = queueState.pages.owner?.active;
+  const owner = queueState.pages.owner;
+  const issueComposer = presentation === "issue";
+  const pages = issueComposer ? [owner] : Object.values(queueState.pages);
+  const active = owner?.active;
   const busy =
-    active?.status === "processing"
+    active?.status === "processing" && (!issueComposer || active.item.author === "owner")
       ? active.item
       : queueState.supported
-        ? Object.values(queueState.pages)
-            .flatMap((p) => p.items ?? [])
-            .find((e) => e.status === "processing")?.item
-        : processing(conversation.items);
+        ? pages
+            .flatMap((p) => p?.items ?? [])
+            .find((e) => e.status === "processing" && (!issueComposer || e.item.author === "owner"))
+            ?.item
+        : processing(
+            issueComposer
+              ? conversation.items.filter((item) => item.author === "owner")
+              : conversation.items,
+          );
 
-  const queued = !!queueState.pages.owner?.total || !!queueState.pages.background?.total;
+  const queued = !!owner?.total || (!issueComposer && !!queueState.pages.background?.total);
 
   useEffect(() => {
     interrupt.observe(conversation.items);

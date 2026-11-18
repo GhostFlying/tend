@@ -182,7 +182,9 @@ var issueActivityTitles = map[string]string{
 	"issue.status_changed": "更新了工作状态",
 	"issue.closed":         "关闭了 Issue", "issue.cancelled": "取消了 Issue", "issue.cancelling": "正在取消 Issue", "issue.reopened": "重新打开了 Issue", "issue.reparented": "调整了上级 Issue",
 	"run.unknown": "执行结果未知，待核实", "run.lost": "执行连接已丢失，待核实", "run.recovery": "更新了执行恢复状态", "run.failed": "执行失败", "run.reconciled": "执行结果已对账", "task.cancelled": "取消了任务", "task.taken_over": "任务已由用户接管",
-	"attention.changed": "更新了待处理事项",
+	"attention.changed":             "更新了待处理事项",
+	"issue.delivery_review_changed": "更新了 PR 审阅",
+	"work_item.delivery_changed":    "更新了交付观察",
 }
 
 // IssueActivity merges existing transcript blocks and selected immutable facts
@@ -205,7 +207,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	kinds := []string{"artifact.submitted", "work_item.delivery_changed"}
+	kinds := []string{"artifact.submitted"}
 	for kind := range issueActivityTitles {
 		kinds = append(kinds, kind)
 	}
@@ -226,7 +228,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  SELECT e.event_seq,e.kind,e.object_id,e.created_at FROM events e
  WHERE e.kind IN (SELECT value FROM json_each(?)) AND (
  (e.object_type='issue' AND e.object_id=?)
- OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=? AND json_type(e.body_json,'$.delivery_progress')='object')
+ OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=?)
  OR (e.kind='task.manager_requested' AND e.object_id IN (SELECT task_id FROM manager_tasks))
  OR (e.object_id IN (SELECT task_id FROM primary_tasks))
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))

@@ -1,4 +1,8 @@
-import type { IssueDeliveryProgress, IssueDeliveryView } from "../api/generated/api.ts";
+import type {
+  IssueDeliveryProgress,
+  IssueDeliveryReviewProgress,
+  IssueDeliveryView,
+} from "../api/generated/api.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
 import styles from "./DetailPage.module.css";
 
@@ -50,6 +54,27 @@ export function CandidateIdentity({
   );
 }
 
+const verdictLabels: Record<string, string> = {
+  passed: "通过",
+  changes_requested: "需要修改",
+  blocked: "审阅受阻",
+  inconclusive: "结论不明确",
+};
+
+function ReviewProgress({ review }: { review: IssueDeliveryReviewProgress }) {
+  return (
+    <p>
+      <strong>独立审阅已返回 · {verdictLabels[review.verdict] ?? review.verdict}</strong>
+      {" · "}第 {review.round} 轮 · <CandidateIdentity candidate={review} />
+      {!review.recorded
+        ? " · 待记录到共享审阅"
+        : review.verdict === "passed" && !review.valid
+          ? " · 当前适用性待核对"
+          : ""}
+    </p>
+  );
+}
+
 export function DeliveryProgress({
   item,
   historical = false,
@@ -57,10 +82,21 @@ export function DeliveryProgress({
   item: IssueDeliveryView;
   historical?: boolean;
 }) {
-  const { delivery, observation: o, conflict_progress: response } = item;
+  const { delivery, observation: o, conflict_progress: response, review } = item;
   const c = o.last_conflict;
   const head = o.head_sha;
-  if (!head || !o.checked_at) return null;
+  const reviewProgress = review ? (
+    <ReviewProgress review={review} />
+  ) : item.review_unavailable ? (
+    <p className={styles.muted}>暂时无法读取审阅记录</p>
+  ) : null;
+  if (!head || !o.checked_at)
+    return reviewProgress ? (
+      <div className={styles.deliveryProgress} data-delivery-progress={delivery.delivery_id}>
+        <p>{candidateLabel(delivery)}</p>
+        {reviewProgress}
+      </div>
+    ) : null;
   const conflict = o.state === "open" && o.mergeability === "conflicting";
   const sameConflict =
     c && c.head_sha === head && c.base_sha === o.base_sha && c.target_sha === o.target_sha;
@@ -117,6 +153,7 @@ export function DeliveryProgress({
           此前冲突 · <CandidateIdentity candidate={earlierConflict} />
         </p>
       ) : null}
+      {reviewProgress}
       {ci ? (
         <p>
           {historical ? "当时 CI" : "当前候选的提交 CI"} ·{" "}
