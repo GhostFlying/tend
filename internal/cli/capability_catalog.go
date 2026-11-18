@@ -361,6 +361,9 @@ func commandUsage(prefix []string) string {
 	if name == "upgrade" || name == "upgrade recover" {
 		out.WriteString("\nIndependent local recovery: tend upgrade recover --release <complete-bundle> --config <fixed-updater-config> --force [--unit <service>] [--request-id <original-id>]. Uses the selected release's installer and does not require the old service or updater socket. --status reads the same durable recovery record; --dry-run prints the pinned invocation. Keep identical release, config and request identity after an interrupted reply.\n")
 	}
+	if name == "message" || name == "message associate" {
+		out.WriteString("\nUse message associate <original-owner-message-id> --revision <association-revision> --data <json> with disposition, content_revision and issue_ids. To request one report when selected linked Issues all reach completed closures, also set completion_report_issue_ids to that exact list. Omit it to retain the agreement, or supply [] to cancel a pending report. Read message associations for the current members and published_message_id. After an unknown receipt read the original message before retrying.\n")
+	}
 	if name == "issue update-task" {
 		out.WriteString("\nThe responsible Agent may change independent_acceptance: {required: false, reason: <text>} on an active Task using its current revision and Issue epoch. Explicit human requirements remain binding. Withdrawal retains the original artifact and does not create a passing verdict.\n")
 	}

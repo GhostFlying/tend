@@ -4298,6 +4298,7 @@ export interface IssueConversationItem {
  * via the `definition` "IssueMessageAssociations".
  */
 export interface IssueMessageAssociations {
+  completion_report?: IssueCompletionReport;
   content_revision: number;
   disposition: string;
   facts_reviewed: boolean;
@@ -4306,6 +4307,15 @@ export interface IssueMessageAssociations {
   owner_locked: boolean;
   processing?: MessageProcessingState;
   revision: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueCompletionReport".
+ */
+export interface IssueCompletionReport {
+  content_revision: number;
+  issue_ids: string[] | null;
+  published_message_id?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5824,6 +5834,7 @@ export interface IssueReuseResult {
  * via the `definition` "MessageAssociations".
  */
 export interface MessageAssociations {
+  completion_report?: IssueCompletionReport;
   content_revision: number;
   disposition: string;
   facts_reviewed: boolean;
@@ -6158,6 +6169,7 @@ export interface MessagingPublication1 {
   body?: string;
   issue_ids?: string[];
   message_id: string;
+  notification_basis?: string;
   purpose?: string;
   reason?: string;
   reply_to?: string;
@@ -7068,6 +7080,7 @@ export interface SetIssueDependenciesPayload {
  * via the `definition` "SetIssueMessageAssociationsPayload".
  */
 export interface SetIssueMessageAssociationsPayload {
+  completion_report_issue_ids?: string[];
   content_revision: number;
   disposition: string;
   issue_ids: string[] | null;

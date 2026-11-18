@@ -127,7 +127,7 @@ func (ReuseIssue) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	inner.Env = &env
 	env.Target = protocol.Target{Type: "message", ID: p.SourceMessageID}
 	env.ExpectedControlRevision = p.ExpectedAssociationRevision
-	association, err := applyMessageAssociationsWithRetainedLinks(ctx, &inner, tx, protocol.SetMessageAssociationsPayload{Disposition: "linked", ContentRevision: *p.ExpectedSourceRevision, WorkItemIDs: ids}, true, true)
+	association, err := applyMessageAssociationsWithRetainedLinks(ctx, &inner, tx, protocol.SetMessageAssociationsPayload{Disposition: "linked", ContentRevision: *p.ExpectedSourceRevision, WorkItemIDs: ids}, true, true, nil)
 	if err != nil {
 		return Outcome{}, err
 	}

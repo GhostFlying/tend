@@ -509,6 +509,11 @@ func (a *App) persistOutcome(ctx context.Context, x *Exec, tx *store.Tx, out Out
 				return err
 			}
 		}
+		if e.Kind == "issue.closed" {
+			if err := completeMessageReports(ctx, x, tx, e.ObjectID); err != nil {
+				return err
+			}
+		}
 		if e.Kind == "issue.closed" || e.Kind == "issue.cancelled" {
 			if err := recordCanonicalParentResult(ctx, x, tx, e, eventID); err != nil {
 				return err

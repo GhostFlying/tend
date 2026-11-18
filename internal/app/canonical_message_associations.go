@@ -37,7 +37,10 @@ func (SetIssueMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store
 		return Outcome{}, err
 	}
 	if !ownReply {
-		return applyMessageAssociations(ctx, x, tx, protocol.SetMessageAssociationsPayload{WorkItemIDs: p.IssueIDs, Disposition: p.Disposition, ContentRevision: p.ContentRevision}, true)
+		return applyMessageAssociationsWithRetainedLinks(ctx, x, tx, protocol.SetMessageAssociationsPayload{WorkItemIDs: p.IssueIDs, Disposition: p.Disposition, ContentRevision: p.ContentRevision}, true, false, p.CompletionReportIssueIDs)
+	}
+	if p.CompletionReportIssueIDs != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "completion report requires the original owner message")
 	}
 	// Association triggers predate the planner/manager split. Retain this
 	// exact narration's preexisting duties, but do not create a technical

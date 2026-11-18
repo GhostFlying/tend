@@ -172,6 +172,56 @@ func TestIMTelegramCallbackUpdatesWebAndAuthenticatesQuestion(t *testing.T) {
 		}
 	}
 }
+
+func TestIMCandidateApprovalUpdatesOriginalTelegramCard(t *testing.T) {
+	h, _, issue, task, candidate, acceptance := sharedReviewFixture(t)
+	importSharedReviewForTest(t, h, issue, task, acceptance)
+	bindIMTelegram(t, h)
+	setPRPolicyForTest(t, h, issue.IssueID, "manual")
+	duty := prepareDeliveryForTest(t, h, issue.IssueID, task, candidate)
+	decision := deliveryDecisionForTest(t, h, duty)
+	card := imQuestion(t, h, decision.DecisionID)
+	if card.Interaction.Options[0].ID != "approve" {
+		t.Fatal(card.Interaction.Options)
+	}
+	delivery, _, ok, err := h.app.NextDelivery(t.Context(), MessagingDestination)
+	var part MessagingPart
+	if err != nil || !ok || json.Unmarshal(delivery.Payload, &part) != nil || part.MessageID != card.MessageID {
+		t.Fatal("candidate card was not queued", delivery, err)
+	}
+	if err = h.app.FinishDelivery(t.Context(), delivery, DeliveryResult{Outcome: Delivered, ExternalMessageID: 99}); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.app.PersistTelegramBatch(t.Context(), 123, []TelegramInbox{{UpdateID: 2, Payload: json.RawMessage(`{"update_id":2}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	u, ok, err := h.app.PendingTelegram(t.Context(), 123)
+	if err != nil || !ok {
+		t.Fatal("callback missing", err)
+	}
+	op, err := h.app.RespondTelegramInteraction(t.Context(), u, 456, 456, 99, "t:"+card.Interaction.ID+":0")
+	if err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal(op, err)
+	}
+	updated, err := h.app.MessagingMessage(t.Context(), card.MessageID)
+	if err != nil || updated.Interaction == nil || updated.Interaction.State != "answered" || updated.Interaction.HandledChannel != "telegram" || updated.Interaction.AnswerSummary != card.Interaction.Options[0].Label {
+		t.Fatal("approval missing from original card", updated, err)
+	}
+	if d, _, ok, err := h.app.NextDelivery(t.Context(), MessagingDestination); err != nil || ok {
+		t.Fatal("extra confirmation queued after approval", d, err)
+	}
+	edit, _, ok, err := h.app.NextDelivery(t.Context(), MessagingInteractionDestination)
+	if err != nil || !ok || json.Unmarshal(edit.Payload, &part) != nil || part.MessageID != card.MessageID || part.ReplyExternalID != 99 {
+		t.Fatal("original card edit missing", edit, err)
+	}
+	if err := h.app.FinishDelivery(t.Context(), edit, DeliveryResult{Outcome: Failed, Reason: "interaction_edit_unavailable"}); err != nil {
+		t.Fatal(err)
+	}
+	fallback, _, ok, err := h.app.NextDelivery(t.Context(), MessagingDestination)
+	if err != nil || !ok || json.Unmarshal(fallback.Payload, &part) != nil || part.MessageID != card.MessageID || !strings.Contains(part.Body, updated.Interaction.AnswerSummary) {
+		t.Fatal("uneditable card lost the recorded approval", fallback, err)
+	}
+}
 func TestIMHumanActionReadIsNotCompletion(t *testing.T) {
 	h := newHarness(t)
 	a := attentionForTest(t, h, protocol.CreateAttentionPayload{Kind: "action", Title: "检查报告"})

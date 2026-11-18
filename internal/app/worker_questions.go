@@ -264,8 +264,8 @@ func cancelObsoleteQuestions(ctx context.Context, x *Exec, tx *store.Tx, out *Ou
 	return nil
 }
 
-// recordWorkerAnswerSource preserves direct panel answers in chat without
-// queuing another owner turn; the decision event performs the coordination.
+// recordDecisionAnswerSource retains the answer and its authority. The
+// decision event coordinates the work without queuing another owner turn.
 func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRow, p *protocol.AnswerDecisionPayload) ([]Event, error) {
 	if d.Worker != nil {
 		rc, err := loadRun(ctx, tx.Q(), d.Worker.RunID)
@@ -320,7 +320,7 @@ func recordDecisionAnswerSource(ctx context.Context, x *Exec, tx *store.Tx, d st
 	if err := x.recordMessageAuthority(ctx, tx, id); err != nil {
 		return nil, err
 	}
-	if err := registerInteractionAnswerInput(ctx, x, tx, id, d.AskedMessageID); err != nil {
+	if err := registerDecisionAnswerInput(ctx, x, tx, d, id); err != nil {
 		return nil, err
 	}
 	if err := tx.BindMessage(ctx, id, "decision", d.DecisionID, "answers"); err != nil {

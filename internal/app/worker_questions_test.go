@@ -56,6 +56,103 @@ func answerQuestion(t *testing.T, h *harness, q protocol.WorkerQuestion, option,
 	return h.exec(owner, h.env("decisions.respond", protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.AnswerDecisionPayload{Version: q.Version, Option: option, Text: text}, nil), AnswerDecision{})
 }
 
+func TestWorkerQuestionPanelAnswerKeepsOriginalAudience(t *testing.T) {
+	for _, tc := range []struct {
+		name, recipient string
+		delegated       bool
+		wantPublic      bool
+	}{
+		{"delegated main answer", "main", true, false},
+		{"delegated issue answer", "agent", true, false},
+		{"delegated answer to public question", "owner", true, true},
+		{"human answer to internal question", "agent", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			mainContext, _ := mainOwnerExecutionFixture(t, h)
+			bindIMTelegram(t, h)
+			issue := createCanonicalOwnerTestIssue(t, h)
+			if tc.recipient != "owner" {
+				issue = assignHostedManager(t, h, issue)
+			}
+			runtime := testRuntime("audience-runner")
+			runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions)
+			if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			createCanonicalTaskForTest(t, h, issue)
+			as, ok := h.claimInputRun(runtime)
+			if !ok {
+				t.Fatal("worker did not claim its task")
+			}
+			if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			q := askQuestion(t, h, as, scopeQuestion)
+			var attention protocol.Attention
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				attention, _, err = attentionForDecision(t.Context(), tx.Q(), q.DecisionID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.recipient == "main" {
+				if op := supervisorHandle(t, h, issue, attention, true, ""); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				attention = readAttentionForTest(t, h, attention.AttentionID)
+			}
+			if attention.Responsibility == nil || attention.Responsibility.RecipientKind != tc.recipient {
+				t.Fatalf("unexpected question audience: %+v", attention)
+			}
+
+			ctx, author := t.Context(), "owner"
+			if tc.delegated {
+				ctx, author = mainContext, "agent"
+			}
+			const answer = "Continue with the original scope."
+			env := h.env("decisions.respond", protocol.Target{Type: "decision", ID: q.DecisionID}, protocol.AnswerDecisionPayload{Version: q.Version, Text: answer}, nil)
+			op, err := h.app.Execute(ctx, owner, env, AnswerDecision{})
+			if err != nil || op.Status != protocol.OpSucceeded {
+				t.Fatal(op, err)
+			}
+			got, err := h.app.WorkerQuestion(t.Context(), runPrincipal(as.RunID, as.Role), q.DecisionID)
+			var receipt decisionAnswer
+			if err != nil || got.Status != store.DecisionAnswered || got.QuestionMessageID != q.QuestionMessageID || got.ActionID != as.ActionID || json.Unmarshal(got.Answer, &receipt) != nil || receipt.Text != answer {
+				t.Fatal("worker lost its original answer", got, err)
+			}
+			if tc.delegated && (receipt.Actor == nil || receipt.Actor.Kind != protocol.PrincipalMainAgent || receipt.OwnerSubject != owner.Subject) {
+				t.Fatal("missing delegated authority", receipt)
+			}
+			source := readTaskDecision(t, h, q.DecisionID).AnsweredMessageID
+			original, err := h.app.Message(t.Context(), source)
+			if err != nil || original.Author != author || original.ReplyTo != q.QuestionMessageID || original.Body != answer {
+				t.Fatal("incorrect answer source", original, err)
+			}
+			if authorized, err := h.app.OwnerMessageAuthority(t.Context(), source); err != nil || !authorized {
+				t.Fatal("answer lost its recorded authority", err)
+			}
+			m, err := h.app.MessagingMessage(t.Context(), source)
+			if tc.wantPublic {
+				if err != nil || m.Direction != "input" || m.Author != author || m.ChannelID != "web" || m.ReplyTo != q.QuestionMessageID {
+					t.Fatal("public answer missing its origin", m, err)
+				}
+				return
+			}
+			if protocol.CodeOf(err) != protocol.CodeNotFound {
+				t.Fatal("internal answer entered chat", m, err)
+			}
+			if n := h.countWhere(`SELECT count(*) FROM messaging_deliveries WHERE message_id=? OR message_id IN (SELECT message_id FROM messaging_messages WHERE reply_to=?)`, source, source); n != 0 {
+				t.Fatal("internal answer produced channel deliveries", n)
+			}
+			if n := h.countWhere(`SELECT count(*) FROM background_sources s JOIN conversation_bindings b USING(message_id) WHERE s.kind='decision.answered' AND b.object_type='attention' AND b.object_id=?`, attention.AttentionID); n != 1 {
+				t.Fatal("the originating Issue did not receive its resolution", n)
+			}
+		})
+	}
+}
+
 func TestWorkerQuestionsKeepRunAndExposeProvenance(t *testing.T) {
 	for _, role := range []protocol.RunRole{protocol.RoleImplement, protocol.RoleAccept} {
 		t.Run(string(role), func(t *testing.T) {

@@ -8576,6 +8576,36 @@
       "title": "IssueClosureKind",
       "type": "string"
     },
+    "IssueCompletionReport": {
+      "additionalProperties": false,
+      "properties": {
+        "content_revision": {
+          "type": "integer"
+        },
+        "issue_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "published_message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_ids",
+        "content_revision"
+      ],
+      "title": "IssueCompletionReport",
+      "type": "object"
+    },
     "IssueContextChange": {
       "additionalProperties": false,
       "properties": {
@@ -10927,6 +10957,9 @@
     "IssueMessageAssociations": {
       "additionalProperties": false,
       "properties": {
+        "completion_report": {
+          "$ref": "#/definitions/IssueCompletionReport"
+        },
         "content_revision": {
           "type": "integer"
         },
@@ -12714,6 +12747,9 @@
     "MessageAssociations": {
       "additionalProperties": false,
       "properties": {
+        "completion_report": {
+          "$ref": "#/definitions/IssueCompletionReport"
+        },
         "content_revision": {
           "type": "integer"
         },
@@ -13332,6 +13368,9 @@
           "type": "array"
         },
         "message_id": {
+          "type": "string"
+        },
+        "notification_basis": {
           "type": "string"
         },
         "purpose": {
@@ -17855,6 +17894,12 @@
     "SetIssueMessageAssociationsPayload": {
       "additionalProperties": false,
       "properties": {
+        "completion_report_issue_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "content_revision": {
           "type": "integer"
         },

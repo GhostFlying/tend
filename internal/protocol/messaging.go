@@ -24,14 +24,15 @@ type MessagingInput struct {
 
 // MessagingPublication deliberately has no channel or recipient-address fields.
 type MessagingPublication struct {
-	MessageID        string   `json:"message_id"`
-	SourceMessageIDs []string `json:"source_message_ids,omitempty"`
-	IssueIDs         []string `json:"issue_ids,omitempty"`
-	Body             string   `json:"body,omitempty"`
-	Attachments      []string `json:"attachments,omitempty"`
-	ReplyTo          string   `json:"reply_to,omitempty"`
-	Purpose          string   `json:"purpose,omitempty"`
-	Reason           string   `json:"reason,omitempty"`
+	NotificationBasis string   `json:"notification_basis,omitempty"`
+	MessageID         string   `json:"message_id"`
+	SourceMessageIDs  []string `json:"source_message_ids,omitempty"`
+	IssueIDs          []string `json:"issue_ids,omitempty"`
+	Body              string   `json:"body,omitempty"`
+	Attachments       []string `json:"attachments,omitempty"`
+	ReplyTo           string   `json:"reply_to,omitempty"`
+	Purpose           string   `json:"purpose,omitempty"`
+	Reason            string   `json:"reason,omitempty"`
 }
 
 type BindTelegram struct {
