@@ -2,8 +2,9 @@ package maintenance
 
 import (
 	"fmt"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"testing"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func TestFault_MaintenanceAuditConsumesOnlyCompletedFrozenPage(t *testing.T) {
@@ -55,6 +56,39 @@ func TestFault_MaintenanceAuditConsumesOnlyCompletedFrozenPage(t *testing.T) {
 	next := restarted.Status().Active.Audit
 	if len(next.Changes) != 2 || next.More || next.Changes[1].IssueID != "issue-0" || next.Changes[1].Revision != 2 {
 		t.Fatal(next)
+	}
+}
+
+func TestMaintenanceAuditAdvancesWhenEveryPendingIssueChanges(t *testing.T) {
+	c, n, _, _ := fixture(t)
+	changes := make([]protocol.MaintenanceChange, auditPageSize+1)
+	for i := range changes {
+		changes[i] = protocol.MaintenanceChange{IssueID: fmt.Sprintf("issue-%02d", i), State: "active", Revision: 1}
+	}
+	c.recordChanges(changes)
+	launch(t, c)
+	first := c.Status().Active.Audit
+	if !first.More || len(first.Changes) != auditPageSize {
+		t.Fatal(first)
+	}
+	for i := range changes {
+		changes[i].Revision++
+	}
+	c.recordChanges(changes)
+	n.complete, n.busy, n.outcome = true, false, "completed"
+	step(t, c)
+	for i := range changes {
+		changes[i].Revision++
+	}
+	c.recordChanges(changes)
+	launch(t, c)
+	next := c.Status().Active.Audit
+	last := changes[auditPageSize]
+	if !next.More || len(next.Changes) != auditPageSize || next.Changes[0].IssueID != last.IssueID || next.Changes[0].Revision != last.Revision {
+		t.Fatalf("next audit did not lead with the latest revision of the waiting Issue: %+v", next)
+	}
+	if next.Changes[1].IssueID != changes[0].IssueID || next.Changes[1].Revision != changes[0].Revision {
+		t.Fatalf("change after the first page was frozen was lost: %+v", next)
 	}
 }
 

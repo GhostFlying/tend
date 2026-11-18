@@ -29,9 +29,7 @@ func (c *Controller) recordChanges(changes []protocol.MaintenanceChange) {
 			}
 			continue
 		}
-		c.state.ChangeSequence++
-		v.Sequence = c.state.ChangeSequence
-		c.state.Changes[v.IssueID] = v
+		c.recordChange(v)
 	}
 	// The default Issue list omits closed/cancelled objects. Disappearance from a
 	// complete successful snapshot proves only that it left this probe's scope.
@@ -45,10 +43,22 @@ func (c *Controller) recordChanges(changes []protocol.MaintenanceChange) {
 			}
 			continue
 		}
-		c.state.ChangeSequence++
-		c.state.Changes[id] = protocol.MaintenanceChange{IssueID: id, Sequence: c.state.ChangeSequence, State: "out_of_scope"}
+		c.recordChange(protocol.MaintenanceChange{IssueID: id, Sequence: old.Sequence, State: "out_of_scope"})
 	}
+}
 
+// A pending Issue keeps its place as observations coalesce. A change already
+// covered by a completed or frozen page belongs to a later page.
+func (c *Controller) recordChange(v protocol.MaintenanceChange) {
+	through := c.state.AuditedThrough
+	if active := c.state.Active; active != nil && active.Audit != nil {
+		through = max(through, active.Audit.Through)
+	}
+	if v.Sequence <= through {
+		c.state.ChangeSequence++
+		v.Sequence = c.state.ChangeSequence
+	}
+	c.state.Changes[v.IssueID] = v
 }
 
 func (c *Controller) auditChanges() *protocol.MaintenanceAudit {
