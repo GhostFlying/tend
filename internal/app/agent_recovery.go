@@ -518,7 +518,7 @@ func (a *App) RejectAgentRecovery(ctx context.Context, request, reason string) e
 
 func newerRecoveryOwner(ctx context.Context, q store.Querier, message, request string) (string, error) {
 	var successor string
-	err := q.QueryRowContext(ctx, `WITH RECURSIVE chain(request_id) AS (SELECT ? UNION SELECT r.source_request_id FROM agent_recovery_attempts r JOIN chain c ON c.request_id=r.request_id) SELECT n.message_id FROM conversation_messages n JOIN conversation_messages original ON original.message_id=? WHERE n.conversation_id=original.conversation_id AND n.author='owner' AND n.seq>original.seq AND EXISTS(SELECT 1 FROM outbox o WHERE o.operation='main_thread.handle_message' AND o.status='pending' AND json_extract(o.payload_json,'$.message_id')=n.message_id) AND NOT EXISTS(SELECT 1 FROM chain c JOIN main_turns t ON t.request_id=c.request_id JOIN main_steers s ON s.thread_id=t.thread_id AND s.turn_id=t.turn_id WHERE s.message_id=n.message_id AND s.native_item_id<>'') AND NOT EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=n.message_id AND c.withdrawn_at<>0) ORDER BY n.seq LIMIT 1`, request, message).Scan(&successor)
+	err := q.QueryRowContext(ctx, `WITH RECURSIVE chain(request_id) AS (SELECT ? UNION SELECT r.source_request_id FROM agent_recovery_attempts r JOIN chain c ON c.request_id=r.request_id) SELECT n.message_id FROM conversation_messages n JOIN conversation_messages original ON original.message_id=? WHERE n.conversation_id=original.conversation_id AND n.author='owner' AND n.seq>original.seq AND EXISTS(SELECT 1 FROM outbox o WHERE o.operation='main_thread.handle_message' AND o.status='pending' AND json_extract(o.payload_json,'$.message_id')=n.message_id AND NOT `+store.IssueOwnerConsumptionMatchesOutbox+`) AND NOT EXISTS(SELECT 1 FROM chain c JOIN main_turns t ON t.request_id=c.request_id JOIN main_steers s ON s.thread_id=t.thread_id AND s.turn_id=t.turn_id WHERE s.message_id=n.message_id AND s.native_item_id<>'') AND NOT EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=n.message_id AND c.withdrawn_at<>0) ORDER BY n.seq LIMIT 1`, request, message).Scan(&successor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -555,15 +555,14 @@ func (a *App) DeferAgentReceiptRead(ctx context.Context, conversation string) (b
 	return pending, err
 }
 
-// restoreWithdrawnRecovery restores only a definitely unstarted candidate. A
+// restoreDisplacedRecovery restores only a definitely unstarted candidate. A
 // prepared successor that already adopted work remains explicitly reviewable.
-func restoreWithdrawnRecovery(ctx context.Context, x *Exec, tx *store.Tx, message string) error {
+func (a *App) restoreDisplacedRecovery(ctx context.Context, tx *store.Tx, message, successorDisposition string, now int64) error {
 	roots, err := store.FollowupIDs(ctx, tx.Q(), `SELECT root_request_id FROM agent_recoveries WHERE status='cancelled' AND successor_message_id=? AND NOT EXISTS(SELECT 1 FROM agent_recovery_stops s WHERE s.message_id=agent_recoveries.message_id)`, message)
 	if err != nil {
 		return err
 	}
-	now := x.Now.UnixMilli()
-	a := App{ids: x.IDs, followupsEnabled: x.FollowupsEnabled}
+	reason := "Queued successor " + successorDisposition
 	for _, root := range roots {
 		r, err := store.RecoveryForRequest(ctx, tx.Q(), root)
 		if err != nil {
@@ -574,10 +573,10 @@ func restoreWithdrawnRecovery(ctx context.Context, x *Exec, tx *store.Tx, messag
 			return err
 		}
 		if adopted || unsafe {
-			if _, err := tx.Exec(ctx, `WITH RECURSIVE chain(id) AS (SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=? UNION SELECT l.resumed_by FROM logical_turns l JOIN chain c ON c.id=l.logical_turn_id WHERE l.resumed_by IS NOT NULL) UPDATE logical_turns SET status='needs_review',reason='Queued successor was withdrawn; retained responsibility needs review.',updated_at=? WHERE logical_turn_id IN (SELECT id FROM chain) AND status NOT IN ('completed','stopped')`, root, now); err != nil {
+			if _, err := tx.Exec(ctx, `WITH RECURSIVE chain(id) AS (SELECT logical_turn_id FROM logical_turn_executions WHERE request_id=? UNION SELECT l.resumed_by FROM logical_turns l JOIN chain c ON c.id=l.logical_turn_id WHERE l.resumed_by IS NOT NULL) UPDATE logical_turns SET status='needs_review',reason=?,updated_at=? WHERE logical_turn_id IN (SELECT id FROM chain) AND status NOT IN ('completed','stopped')`, root, reason+"; retained responsibility needs review.", now); err != nil {
 				return err
 			}
-			if err := a.endAgentRecovery(ctx, tx, r, "blocked", "Queued successor was withdrawn after responsibility preparation; review retained work.", now); err != nil {
+			if err := a.endAgentRecovery(ctx, tx, r, "blocked", reason+" after responsibility preparation; review retained work.", now); err != nil {
 				return err
 			}
 			continue
@@ -593,16 +592,16 @@ func restoreWithdrawnRecovery(ctx context.Context, x *Exec, tx *store.Tx, messag
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_recoveries SET status='waiting',successor_message_id='',next_attempt_at=?,reason='Queued replacement withdrawn; continuing retained work.',updated_at=? WHERE root_request_id=?`, due, now, root); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agent_recoveries SET status='waiting',successor_message_id='',next_attempt_at=?,reason=?,updated_at=? WHERE root_request_id=?`, due, reason+"; continuing retained work.", now, root); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE outbox SET status='pending',updated_at=? WHERE request_id=? AND operation=? AND status='failed'`, now, r.ActiveRequestID, OpRecoverAgent); err != nil {
 			return err
 		}
-		if err := recordMessageState(ctx, tx, x.IDs, r.MessageID, protocol.MessageProcessing, now); err != nil {
+		if err := recordMessageState(ctx, tx, a.ids, r.MessageID, protocol.MessageProcessing, now); err != nil {
 			return err
 		}
-		if err := a.recoveryEvent(ctx, tx, r, now, "waiting", "Queued replacement withdrawn; retained candidate restored without resetting its budget."); err != nil {
+		if err := a.recoveryEvent(ctx, tx, r, now, "waiting", reason+"; retained candidate restored without resetting its budget."); err != nil {
 			return err
 		}
 	}

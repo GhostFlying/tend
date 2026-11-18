@@ -477,7 +477,7 @@ func externalWaitOwnerInputReady(ctx context.Context, q store.Querier, task stri
 	err = q.QueryRowContext(ctx, `WITH pending_inputs(request_id,message_id) AS (
  SELECT o.request_id,json_extract(o.payload_json,'$.message_id') FROM outbox o
  WHERE o.status='pending' AND o.operation='main_thread.handle_message'
- AND o.destination=?
+ AND o.destination=? AND NOT `+store.IssueOwnerConsumptionMatchesOutbox+`
  UNION ALL
  SELECT o.request_id,s.message_id FROM outbox o
  JOIN background_batches b ON b.message_id=json_extract(o.payload_json,'$.message_id')

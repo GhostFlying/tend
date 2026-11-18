@@ -39,6 +39,10 @@
   color: var(--warn-text);
 }
 
+.steerReceipt {
+  overflow-wrap: anywhere;
+}
+
 /* the main agent's turn: tool rows and replies, no bubble */
 .agent {
   font-size: var(--text-body-lg);

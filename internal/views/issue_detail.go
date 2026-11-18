@@ -207,7 +207,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	kinds := []string{"artifact.submitted", "task.completed"}
+	kinds := []string{"artifact.submitted"}
 	for kind := range issueActivityTitles {
 		kinds = append(kinds, kind)
 	}
@@ -230,14 +230,18 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  (e.object_type='issue' AND e.object_id=?)
  OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=?)
  OR (e.kind='task.manager_requested' AND e.object_id IN (SELECT task_id FROM manager_tasks))
- OR (e.kind<>'task.completed' AND e.object_id IN (SELECT task_id FROM primary_tasks))
- OR (`+issueCompletionNotice+`)
+ OR (e.object_id IN (SELECT task_id FROM primary_tasks))
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='artifact' AND e.object_id IN (SELECT artifact_id FROM artifacts WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='attention' AND e.object_id IN (SELECT attention_id FROM attentions WHERE issue_id=?))
  OR (e.object_type='issue' AND EXISTS (SELECT 1 FROM issue_control_revisions c WHERE c.issue_id=e.object_id AND c.revision=e.object_version AND json_extract(c.snapshot_json,'$.control.parent_issue_id')=?) AND
  (e.kind IN ('issue.closed','issue.cancelled','issue.assigned','issue.manager_claimed','issue.manager_migration_cancelled') OR (e.kind='issue.status_changed' AND json_extract(e.body_json,'$.state') IN ('closed','cancelled'))))
  )
+ UNION ALL
+ SELECT e.event_seq,e.kind,e.object_id,e.created_at
+ FROM (SELECT DISTINCT s.event_id FROM background_batches b JOIN background_sources s USING(batch_id) WHERE b.work_item_id=?) linked
+ CROSS JOIN events e ON e.event_id=linked.event_id
+ WHERE e.object_type='task' AND e.kind='task.completed'
  UNION ALL
  SELECT e.event_seq,e.kind,h.delivery_id,e.created_at FROM issue_delivery_candidate_history h
  JOIN events e ON e.event_seq=h.event_seq WHERE h.issue_id=?

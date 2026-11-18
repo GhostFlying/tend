@@ -29,6 +29,7 @@ export function splitTaskIds(text: string): (string | { taskId: string })[] {
 export const messageStateLabels: Record<MessageState, string> = {
   queued: "等待处理",
   accepted: "已送入当前回合，等待安全边界",
+  consumed: "负责人已在原生回合读取急件",
   processed: "已处理，本回合未生成回复",
   processing: "正在处理",
   replied: "已回复",

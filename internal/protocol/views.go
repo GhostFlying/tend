@@ -327,6 +327,8 @@ type ConversationContent struct {
 	Steer *MainSteerView `json:"steer,omitempty"`
 	// IssueOwnerSteer is the separately authorized urgent delivery receipt.
 	IssueOwnerSteer *IssueOwnerSteerView `json:"issue_owner_steer,omitempty"`
+	// ConsumedIssueOwnerSteer links an original owner input to its witnessed urgent receipt.
+	ConsumedIssueOwnerSteer *IssueOwnerSteerView `json:"consumed_issue_owner_steer,omitempty"`
 	// ReplySources are owner messages consumed before this assistant item began.
 	ReplySources []string `json:"reply_sources,omitempty"`
 	// AssistantState is set on a streamed main-agent message (D74).

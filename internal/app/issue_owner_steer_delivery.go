@@ -267,7 +267,33 @@ func (a *App) ConsumeIssueOwnerSteer(ctx context.Context, conversation, thread, 
 		if err != nil || updated == 0 {
 			return err
 		}
-		return writeIssueSteerState(ctx, tx, a.ids, message, "consumed", "", a.now().UnixMilli())
+		now := a.now().UnixMilli()
+		if err := writeIssueSteerState(ctx, tx, a.ids, message, "consumed", "", now); err != nil {
+			return err
+		}
+		var source string
+		err = tx.Q().QueryRowContext(ctx, `SELECT source_message_id FROM issue_owner_consumed_inputs WHERE receipt_message_id=?`, message).Scan(&source)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO conversation_blocks(message_id) VALUES(?)`, source); err != nil {
+			return err
+		}
+		var unstarted bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o
+ WHERE o.status IN ('pending','sending') AND json_extract(o.payload_json,'$.message_id')=? AND `+store.IssueOwnerConsumptionMatchesOutbox+`
+ AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status<>'rejected'))`, source).Scan(&unstarted); err != nil {
+			return err
+		}
+		if unstarted {
+			if err := a.restoreDisplacedRecovery(ctx, tx, source, "was delivered urgently", now); err != nil {
+				return err
+			}
+		}
+		return recordMessageState(ctx, tx, a.ids, source, protocol.MessageConsumed, now)
 	})
 	if err == nil {
 		a.notifyChange()

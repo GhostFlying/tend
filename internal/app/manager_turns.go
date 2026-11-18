@@ -173,7 +173,7 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 			continue
 		}
 		var pending, queued bool
-		if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox WHERE destination=? AND status='pending' AND next_attempt_at<=?),EXISTS(SELECT 1 FROM plan_actions WHERE task_id=? AND kind='coordinate' AND status IN ('pending','dispatched'))`, "background_thread:"+m.ConversationID, x.Now.UnixMilli(), id).Scan(&pending, &queued); err != nil {
+		if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o WHERE destination=? AND status='pending' AND next_attempt_at<=? AND `+store.PendingOutboxServiceable+`),EXISTS(SELECT 1 FROM plan_actions WHERE task_id=? AND kind='coordinate' AND status IN ('pending','dispatched'))`, "background_thread:"+m.ConversationID, x.Now.UnixMilli(), id).Scan(&pending, &queued); err != nil {
 			return err
 		}
 		if !pending || queued {

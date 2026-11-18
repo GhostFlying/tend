@@ -205,6 +205,11 @@ func TestIssueOwnerSteerAuthorizationAndUnknownRecovery(t *testing.T) {
 	if r := replay("consumed"); r.NativeItemID != "retained-item" || r.AcceptedAt == 0 {
 		t.Fatal(r)
 	}
+	if page := readMessageQueue(t, h, "owner"); !slices.ContainsFunc(page.Items, func(entry protocol.ConversationQueueEntry) bool {
+		return entry.Item.MessageID == original && entry.Status == "queued" && entry.CanWithdraw && entry.Item.ConsumedIssueOwnerSteer == nil
+	}) {
+		t.Fatal("a receipt for a linked Issue changed the original Main delivery", page)
+	}
 }
 
 func TestIssueOwnerSteerRetainsDelegatedMainSender(t *testing.T) {

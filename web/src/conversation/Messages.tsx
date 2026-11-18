@@ -43,6 +43,7 @@ export function OwnerMessage({
 }) {
   const state = item.state ?? "queued";
   const notice = steerNotice(item.steer);
+  const urgentReceipt = item.consumed_issue_owner_steer;
   return (
     <div className={styles.user} data-layout={presentation} data-scroll-id={item.message_id}>
       {item.attachments?.length ? (
@@ -59,10 +60,26 @@ export function OwnerMessage({
       )}
       <div className={styles.state} data-state={state}>
         {item.control?.withdrawn_at ? "已撤回" : messageStateLabels[state]}
+        {urgentReceipt && state !== "consumed" && <span> · {messageStateLabels.consumed}</span>}
         {presentation === "chat" && " · "}
         {presentation === "chat" && clock(Date.parse(item.created_at))}
         {notice && <span> · {notice}</span>}
       </div>
+      {urgentReceipt && (
+        <details className={`${styles.state} ${styles.steerReceipt}`}>
+          <summary>急件回执</summary>
+          <div>内容版本 {urgentReceipt.source_revision}</div>
+          <div>
+            回执消息 <code>{urgentReceipt.message_id}</code>
+          </div>
+          <div>
+            运行 <code>{urgentReceipt.run_id}</code>
+          </div>
+          <div>
+            原生消息 <code>{urgentReceipt.native_item_id}</code>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

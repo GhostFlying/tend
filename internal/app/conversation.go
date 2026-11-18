@@ -695,6 +695,16 @@ func (a *App) PutMainTurn(ctx context.Context, m store.MainTurn) error {
 			if c.WithdrawnAt != 0 {
 				return protocol.Errorf(protocol.CodeInvalidTransition, "message was withdrawn")
 			}
+			// Urgent consumption may arrive after claim but before native admission.
+			// A known-unsent attempt can return to pending as usual. The queue
+			// will skip this version and still allow a different version through.
+			var consumed bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=? AND `+store.IssueOwnerConsumptionMatchesOutbox+`)`, m.RequestID).Scan(&consumed); err != nil {
+				return err
+			}
+			if consumed {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "this Issue input version was already consumed through urgent delivery")
+			}
 			paused, err := upgradePausesMain(ctx, tx.Q())
 			if err != nil {
 				return err

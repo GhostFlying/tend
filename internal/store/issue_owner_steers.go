@@ -15,6 +15,20 @@ type IssueOwnerSteer struct {
 	InputSHA256   string
 }
 
+// IssueOwnerConsumptionMatchesOutbox matches only the ordinary delivery of
+// the witnessed original into the same Issue. The caller aliases outbox as o.
+const IssueOwnerConsumptionMatchesOutbox = `(o.operation='main_thread.handle_message' AND EXISTS(
+ SELECT 1 FROM issue_owner_consumed_inputs i WHERE i.source_message_id=json_extract(o.payload_json,'$.message_id')
+ AND o.destination='background_thread:'||i.conversation_id))`
+
+func ConsumedIssueOwnerInput(ctx context.Context, q Querier, source string) (IssueOwnerSteer, error) {
+	var message string
+	if err := q.QueryRowContext(ctx, `SELECT receipt_message_id FROM issue_owner_consumed_inputs WHERE source_message_id=?`, source).Scan(&message); err != nil {
+		return IssueOwnerSteer{}, notFound(err, "consumed Issue owner input")
+	}
+	return GetIssueOwnerSteer(ctx, q, message)
+}
+
 func GetIssueOwnerSteer(ctx context.Context, q Querier, message string) (IssueOwnerSteer, error) {
 	var s IssueOwnerSteer
 	var sender string
