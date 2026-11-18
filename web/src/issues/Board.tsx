@@ -98,6 +98,7 @@ export function IssueBoard({
   });
   const mobileTabs = useRef<HTMLDivElement>(null);
   const columns = useRef<HTMLDivElement>(null);
+  const focusBeforeLayoutChange = useRef<string | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
   const [startItem, setStartItem] = useState<IssueSummary | null>(null);
@@ -125,12 +126,38 @@ export function IssueBoard({
   const restoreMobileColumn = useEffectEvent(() => scrollToColumn(mobileColumn));
   useLayoutEffect(() => {
     const media = window.matchMedia(mobileBoardQuery);
-    const update = () => setMobile(media.matches);
+    const update = () => {
+      const focused = document.activeElement;
+      focusBeforeLayoutChange.current =
+        focused && columns.current?.contains(focused)
+          ? (focused.getAttribute("data-board-focus") ?? "")
+          : null;
+      setMobile(media.matches);
+    };
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
   useLayoutEffect(() => {
-    if (active && mobile && view === "board") restoreMobileColumn();
+    const previousFocus = focusBeforeLayoutChange.current;
+    focusBeforeLayoutChange.current = null;
+    if (!active || view !== "board") return;
+    if (mobile) restoreMobileColumn();
+    const scroller = columns.current;
+    if (!scroller || previousFocus === null || document.activeElement !== document.body) return;
+    const control = previousFocus
+      ? scroller.querySelector<HTMLButtonElement>(
+          `[data-board-focus="${CSS.escape(previousFocus)}"]:enabled`,
+        )
+      : null;
+    if (control && !control.closest("[inert]") && control.getClientRects().length) {
+      control.focus();
+    } else if (mobile) {
+      mobileTabs.current
+        ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+        ?.focus({ preventScroll: true });
+    } else {
+      scroller.focus({ preventScroll: true });
+    }
   }, [active, mobile, view]);
   useLayoutEffect(() => {
     const tabStrip = mobileTabs.current;
@@ -690,13 +717,19 @@ const BoardCard = memo(function BoardCard({
         <Button
           variant="ghost"
           aria-label={`修改工作状态：${item.title}`}
+          data-board-focus={`${item.issue_id}:status`}
           disabled={disabled}
           onClick={() => onMenu(item)}
         >
           ···
         </Button>
       </div>
-      <Button variant="ghost" className={styles.cardTitle} onClick={() => onSelect(item.issue_id)}>
+      <Button
+        variant="ghost"
+        className={styles.cardTitle}
+        data-board-focus={`${item.issue_id}:title`}
+        onClick={() => onSelect(item.issue_id)}
+      >
         {item.title}
       </Button>
       <div className={styles.cardFooter}>
@@ -747,7 +780,11 @@ const BoardCard = memo(function BoardCard({
       {state === "saving" ? (
         <p className={styles.pending}>正在保存状态…</p>
       ) : state === "unknown" ? (
-        <Button className={styles.reconcile} onClick={onReconcile}>
+        <Button
+          className={styles.reconcile}
+          data-board-focus={`${item.issue_id}:reconcile`}
+          onClick={onReconcile}
+        >
           结果待确认 · 核对原操作
         </Button>
       ) : (

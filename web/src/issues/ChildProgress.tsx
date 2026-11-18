@@ -79,6 +79,7 @@ export function ChildProgress({
               variant="ghost"
               className={styles.child}
               data-active={!!activity}
+              data-board-focus={`${id}:child:${item.issue_id}`}
               onClick={() => onSelect(item.issue_id)}
             >
               <span aria-hidden>{item.status === "done" ? "✓" : activity ? "◉" : "○"}</span>
@@ -116,6 +117,7 @@ export function ChildProgress({
         <Button
           variant="link"
           className={styles.childMore}
+          data-board-focus={`${id}:children`}
           aria-expanded={expanded}
           aria-controls={listID}
           onClick={() => {
