@@ -8628,6 +8628,12 @@
         "retained_execution": {
           "type": "boolean"
         },
+        "stage_entered_at": {
+          "type": "integer"
+        },
+        "stage_entry_basis": {
+          "type": "string"
+        },
         "stage_title": {
           "type": "string"
         },

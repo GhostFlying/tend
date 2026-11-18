@@ -900,8 +900,14 @@ const BoardCard = memo(function BoardCard({
           onSelect={onSelect}
         />
       )}
-      {(item.state === "paused" || item.state === "cancelling" || !!b?.attention_count) && (
+      {(item.state === "paused" ||
+        item.state === "cancelling" ||
+        !!b?.attention_count ||
+        b?.stage_entry_basis === "creation_fallback") && (
         <div className={styles.flags}>
+          {b?.stage_entry_basis === "creation_fallback" && (
+            <Badge title="缺少可信的阶段进入记录">按 Issue 创建时间排序</Badge>
+          )}
           {item.state === "paused" && <Badge tone="warn">暂停新执行</Badge>}
           {item.state === "cancelling" && <Badge tone="warn">取消收尾中</Badge>}
           {!!b?.attention_count && <Badge tone="warn">{b.attention_count} 项待处理</Badge>}

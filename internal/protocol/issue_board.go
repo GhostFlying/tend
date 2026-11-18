@@ -57,8 +57,19 @@ type IssueBoardPullRequest struct {
 	Status     IssueBoardPRStatus `json:"status"`
 }
 
+// IssueStageEntryBasis identifies the durable evidence for the board order.
+type IssueStageEntryBasis string
+
+const (
+	IssueStageEntryCreation         IssueStageEntryBasis = "creation"
+	IssueStageEntryTransition       IssueStageEntryBasis = "transition"
+	IssueStageEntryCreationFallback IssueStageEntryBasis = "creation_fallback"
+)
+
 type IssueBoardCard struct {
 	PullRequests             []IssueBoardPullRequest `json:"pull_requests,omitempty"`
+	StageEnteredAt           int64                   `json:"stage_entered_at,omitempty"`
+	StageEntryBasis          IssueStageEntryBasis    `json:"stage_entry_basis,omitempty"`
 	RetainedExecution        bool                    `json:"retained_execution,omitempty"`
 	QueueReason              *QueueWaitReason        `json:"queue_reason,omitempty"`
 	Pause                    *IssuePauseProgress     `json:"pause,omitempty"`

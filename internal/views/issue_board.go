@@ -3,10 +3,18 @@ package views
 import (
 	"context"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+type issueBoardEntry struct {
+	id        string
+	enteredAt int64
+	basis     protocol.IssueStageEntryBasis
+}
 
 const issueBoardStatusSQL = `CASE c.state WHEN 'closed' THEN 'done' WHEN 'cancelled' THEN 'cancelled' ELSE COALESCE(NULLIF(c.work_status,''),'todo') END`
 
@@ -15,12 +23,12 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 	if f.BoardStatus != "" && !slices.Contains(protocol.IssueWorkStatusValues(), f.BoardStatus) {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid board status")
 	}
-	statusSQL := issueBoardStatusSQL
+	stageTable := "issue_board_stage_entries"
 	if f.GroupReview {
 		if f.BoardStatus == protocol.IssueInReview {
 			return out, protocol.Errorf(protocol.CodeInvalidRequest, "in_review is included in the in_progress display column")
 		}
-		statusSQL = `CASE (` + issueBoardStatusSQL + `) WHEN 'in_review' THEN 'in_progress' ELSE (` + issueBoardStatusSQL + `) END`
+		stageTable = "issue_board_grouped_stage_entries"
 	}
 	for _, status := range protocol.IssueWorkStatusValues() {
 		if !f.GroupReview || status != protocol.IssueInReview {
@@ -31,7 +39,8 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "assignee kind is required")
 	}
 	// Board scope always means roots, even when another filter is present.
-	base := ` FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id JOIN issue_short_numbers n ON n.issue_id=c.issue_id WHERE c.parent_issue_id IS NULL`
+	base := ` FROM issue_controls c JOIN work_items w ON w.work_item_id=c.issue_id JOIN issue_short_numbers n ON n.issue_id=c.issue_id JOIN ` +
+		stageTable + ` b ON b.issue_id=c.issue_id WHERE c.parent_issue_id IS NULL`
 	searchSQL, args := issueSearch(f.Search)
 	base += searchSQL
 	if f.ReadRoot != "" {
@@ -74,7 +83,7 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		base += ` AND c.issue_id IN (` + ownerActionIssueIDsSQL + `)`
 		args = append(args, f.WaitingOnOwner, f.WaitingOnOwner, f.WaitingOnOwner)
 	}
-	rows, err = q.QueryContext(ctx, `SELECT `+statusSQL+`,COUNT(*)`+base+` GROUP BY `+statusSQL, args...)
+	rows, err = q.QueryContext(ctx, `SELECT b.status,COUNT(*)`+base+` GROUP BY b.status`, args...)
 	if err != nil {
 		return out, err
 	}
@@ -93,37 +102,64 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		return out, err
 	}
 	if f.BoardStatus != "" {
-		base += ` AND ` + statusSQL + `=?`
+		base += ` AND b.status=?`
 		args = append(args, f.BoardStatus)
 	}
-	base += ` AND c.issue_id>? ORDER BY c.issue_id LIMIT ?`
-	args = append(args, f.After, f.Limit+1)
-	ids, err := store.FollowupIDs(ctx, q, `SELECT c.issue_id`+base, args...)
+	if f.After != "" {
+		stamp, id, _ := strings.Cut(f.After, "/")
+		enteredAt, err := strconv.ParseInt(stamp, 10, 64)
+		if err != nil || !protocol.ValidID(protocol.PrefixWorkItem, id) {
+			return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid board cursor; start from the first page and use its next cursor")
+		}
+		base += ` AND (b.entered_at<? OR (b.entered_at=? AND b.issue_id>?))`
+		args = append(args, enteredAt, enteredAt, id)
+	}
+	args = append(args, f.Limit+1)
+	rows, err = q.QueryContext(ctx, `SELECT b.issue_id,b.entered_at,b.basis`+base+` ORDER BY b.entered_at DESC,b.issue_id LIMIT ?`, args...)
 	if err != nil {
 		return out, err
 	}
-	if len(ids) > f.Limit {
+	var entries []issueBoardEntry
+	for rows.Next() {
+		var entry issueBoardEntry
+		if err = rows.Scan(&entry.id, &entry.enteredAt, &entry.basis); err != nil {
+			rows.Close()
+			return out, err
+		}
+		entries = append(entries, entry)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return out, err
+	}
+	if len(entries) > f.Limit {
 		out.More = true
-		ids = ids[:f.Limit]
-		out.Next = ids[len(ids)-1]
+		entries = entries[:f.Limit]
+		last := entries[len(entries)-1]
+		out.Next = strconv.FormatInt(last.enteredAt, 10) + "/" + last.id
 	}
 	out.FactsSeq, err = store.LatestEventSeq(ctx, q)
 	if err != nil {
 		return out, err
 	}
-	if len(ids) == 0 {
+	if len(entries) == 0 {
 		return out, nil
 	}
 	facts, err := readExecutionFacts(ctx, q)
 	if err != nil {
 		return out, err
 	}
+	ids := make([]string, len(entries))
+	for i, entry := range entries {
+		ids[i] = entry.id
+	}
 	pullRequests, err := readBoardPullRequests(ctx, q, ids)
 	if err != nil {
 		return out, err
 	}
-	for _, id := range ids {
-		issue, err := store.GetCanonicalIssue(ctx, q, id)
+	for _, entry := range entries {
+		issue, err := store.GetCanonicalIssue(ctx, q, entry.id)
 		if err != nil {
 			return out, err
 		}
@@ -131,7 +167,8 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		if err != nil {
 			return out, err
 		}
-		card.PullRequests = boardPullRequests(issue.Plan.Deliveries, pullRequests[id])
+		card.PullRequests = boardPullRequests(issue.Plan.Deliveries, pullRequests[entry.id])
+		card.StageEnteredAt, card.StageEntryBasis = entry.enteredAt, entry.basis
 		out.Items = append(out.Items, protocol.IssueSummary{ShortCode: issue.ShortCode, EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
 	}
 	return out, nil

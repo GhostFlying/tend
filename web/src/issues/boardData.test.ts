@@ -61,9 +61,9 @@ test("column pagination appends the loaded prefix, counts remain server totals, 
   const board = new IssueBoardData(api);
   board.open({});
   await api.answer("todo", {
-    items: [item("a")],
+    items: [item("recent")],
     more: true,
-    next: "a",
+    next: "200/wi_00000000000000000000000003",
     counts: { todo: 3 },
     facts_seq: 2,
   });
@@ -71,27 +71,38 @@ test("column pagination appends the loaded prefix, counts remain server totals, 
   const column = board.columns.get("todo")!;
   void column.more();
   await api.answer("todo", {
-    items: [item("a")],
+    items: [item("recent")],
     more: true,
-    next: "a",
+    next: "200/wi_00000000000000000000000003",
     counts: { todo: 3 },
     facts_seq: 2,
   });
   const next = await api.answer("todo", {
-    items: [item("b"), item("c")],
+    items: [item("older"), item("oldest")],
     more: false,
     counts: { todo: 3 },
     facts_seq: 2,
   });
-  expect(new URL(next.path, "https://tend.invalid").searchParams.get("after")).toBe("a");
-  expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["a", "b", "c"]);
+  expect(new URL(next.path, "https://tend.invalid").searchParams.get("after")).toBe(
+    "200/wi_00000000000000000000000003",
+  );
+  expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual([
+    "recent",
+    "older",
+    "oldest",
+  ]);
   expect(board.summary.get().counts?.todo).toBe(3);
   void column.read.refresh();
-  await api.answer("todo", { items: [item("c")], more: false, counts: { todo: 1 }, facts_seq: 3 });
-  expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["c"]);
+  await api.answer("todo", {
+    items: [item("oldest")],
+    more: false,
+    counts: { todo: 1 },
+    facts_seq: 3,
+  });
+  expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["oldest"]);
   void column.read.refresh();
   await api.answer("todo", { items: [item("a")], more: false, counts: { todo: 3 }, facts_seq: 2 });
-  expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["c"]);
+  expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["oldest"]);
   expect(board.summary.get().counts?.todo).toBe(1);
   board.close();
 });
