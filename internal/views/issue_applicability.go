@@ -35,8 +35,38 @@ func issueProgressProjection(ctx context.Context, q store.Querier, issue protoco
 			p.HistoricalReason = "issue_reopened"
 		}
 	}
+	if p.HistoricalReason == "" && p.Delivery != nil {
+		p.HistoricalReason, err = progressDeliveryApplicability(ctx, q, issue, *p.Delivery)
+		if err != nil {
+			return nil, err
+		}
+	}
 	p.Historical = p.HistoricalReason != ""
 	return p, nil
+}
+
+func progressDeliveryApplicability(ctx context.Context, q store.Querier, issue protocol.Issue, candidate protocol.IssueDeliveryProgress) (string, error) {
+	for _, d := range issue.Plan.Deliveries {
+		if d.DeliveryID != candidate.DeliveryID {
+			continue
+		}
+		row, err := store.GetDeliveryObservation(ctx, q, issue.IssueID, d.DeliveryID)
+		if errors.Is(err, store.ErrNotFound) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if candidate.Matches(d, row.Observation) {
+			if c := row.Observation.CurrentConflict(); candidate.ConflictAction != "" &&
+				(c == nil || c.Revision != candidate.ConflictRevision) {
+				return "delivery_conflict_changed", nil
+			}
+			return "", nil
+		}
+		break
+	}
+	return "delivery_candidate_changed", nil
 }
 
 func attentionApplicability(ctx context.Context, q store.Querier, v *protocol.AttentionView) error {

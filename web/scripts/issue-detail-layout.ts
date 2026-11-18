@@ -13,6 +13,7 @@ import type {
   BackgroundSourcePreview,
   IssueView,
   IssueActivityPage,
+  IssueDeliveryView,
   IssueTranscriptBlock,
   IssueResultPage,
   AttentionView,
@@ -189,10 +190,10 @@ const activity: IssueActivityPage = {
     },
   ],
 };
-const publish = () => {
+const publish = (kind = "issue.progress_updated") => {
   for (const s of streams)
     s.write(
-      `id: ${++seq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: seq, object_type: "issue", object_id: issue.issue_id, kind: "issue.progress_updated", created_at: new Date().toISOString() })}\n\n`,
+      `id: ${++seq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: seq, object_type: kind.startsWith("work_item.") ? "work_item" : "issue", object_id: issue.issue_id, kind, created_at: new Date().toISOString() })}\n\n`,
     );
 };
 const server = createServer(async (req, res) => {
@@ -591,6 +592,134 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  for (const width of [1440, 390]) {
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    try {
+      const head = "a".repeat(40);
+      const next = "b".repeat(40);
+      const base = "c".repeat(40);
+      const target = "d".repeat(40);
+      const ref = {
+        delivery_id: "conflict-pr",
+        provider: "github",
+        repository: "sample/repo",
+        number: 343,
+      } as const;
+      const original: IssueDeliveryView = {
+        delivery: ref,
+        observation: {
+          issue_id: issue.issue_id,
+          delivery_id: ref.delivery_id,
+          state: "open",
+          head_sha: head,
+          base_sha: base,
+          target_sha: target,
+          mergeability: "conflicting",
+          observer: "server",
+          generation: 1,
+          checked_at: now,
+          ci: { head_sha: head, state: "pending", checks: [] },
+          last_conflict: {
+            head_sha: head,
+            base_sha: base,
+            target_sha: target,
+            observer: "server",
+            revision: 3,
+            checked_at: now,
+          },
+        },
+      };
+      let current = original;
+      await page.route(`**/api/v1/issues/${issue.issue_id}/deliveries`, (route) =>
+        route.fulfill({ json: { issue_id: issue.issue_id, items: [current] } }),
+      );
+      await page.route(`**/api/v1/issues/${issue.issue_id}/activity`, (route) =>
+        route.fulfill({
+          json: {
+            ...activity,
+            event_seq: seq,
+            items: [
+              ...activity.items!,
+              {
+                id: "old-pr-checks",
+                position: 4,
+                kind: "work_item.delivery_changed",
+                author: "tend",
+                title: "记录了交付候选观察",
+                created_at: now,
+                delivery: original,
+              },
+            ],
+          },
+        }),
+      );
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
+      const progress = page.locator("[data-issue-progress]");
+      await progress.getByText("检测到合并冲突", { exact: false }).waitFor();
+      await progress.getByText("GitHub · 服务端观察", { exact: false }).waitFor();
+      await progress.locator(`code[title="${target}"]`).waitFor();
+      assert.equal(await progress.getByText("已看到冲突", { exact: false }).count(), 0);
+      assert.equal(await page.locator("vite-error-overlay").count(), 0);
+      await progress.screenshot({ path: join(output, `delivery-conflict-${width}.png`) });
+
+      for (const [action, label] of [
+        ["seen", "已看到冲突"],
+        ["working", "已开始处理"],
+      ]) {
+        current = {
+          ...original,
+          conflict_progress: {
+            ...issue.progress!,
+            delivery: {
+              ...ref,
+              head_sha: head,
+              base_sha: base,
+              target_sha: target,
+              conflict_revision: 3,
+              conflict_action: action!,
+            },
+          },
+        };
+        publish();
+        await progress.getByText(label!, { exact: false }).waitFor();
+      }
+      current = {
+        ...original,
+        observation: {
+          ...original.observation,
+          head_sha: next,
+          base_sha: target,
+          mergeability: "mergeable",
+          ci: { head_sha: next, state: "running", checks: [] },
+        },
+      };
+      publish("work_item.delivery_changed");
+      await progress.getByText("已推送新候选", { exact: false }).waitFor();
+      await progress.locator(`code[title="${next}"]`).waitFor();
+      await progress.getByText("当前候选的提交 CI · 检查进行中").waitFor();
+      assert.equal(await progress.getByText("已开始处理", { exact: false }).count(), 0);
+      await page
+        .locator('[data-scroll-id="old-pr-checks"]')
+        .getByText("当时 CI · 等待检查")
+        .waitFor();
+      await progress.screenshot({ path: join(output, `delivery-candidate-${width}.png`) });
+      assert.deepEqual(errors, []);
+      console.log(`PASS Issue conflict, public actions and candidate history ${width}`);
+    } finally {
+      await context.close();
+    }
+  }
+
   // Read summaries as summaries, then fetch the full report and its original bytes on demand.
   for (const width of [1440, 390]) {
     for (const indexTiming of ["index-first", "historical-first", "while-reading"] as const) {

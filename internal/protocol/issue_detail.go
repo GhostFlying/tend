@@ -1,20 +1,41 @@
 package protocol
 
+// IssueDeliveryProgress binds public progress to an observed PR candidate.
+// ConflictRevision identifies the observed conflict episode for an explicit owner action.
+type IssueDeliveryProgress struct {
+	DeliveryID       string                `json:"delivery_id"`
+	Provider         IssueDeliveryProvider `json:"provider"`
+	Repository       string                `json:"repository"`
+	Number           int64                 `json:"number"`
+	HeadSHA          string                `json:"head_sha"`
+	BaseSHA          string                `json:"base_sha,omitempty"`
+	TargetSHA        string                `json:"target_sha,omitempty"`
+	ConflictRevision int64                 `json:"conflict_revision,omitempty"`
+	ConflictAction   string                `json:"conflict_action,omitempty"`
+}
+
+func (p IssueDeliveryProgress) Matches(d IssueDelivery, o DeliveryObservation) bool {
+	return p.DeliveryID == d.DeliveryID && p.Provider == d.Provider && p.Repository == d.Repository && p.Number == d.Number &&
+		p.HeadSHA == o.HeadSHA && p.BaseSHA == o.BaseSHA && p.TargetSHA == o.TargetSHA
+}
+
 // IssueProgress is a manager's assessment, separate from execution facts.
 type IssueProgress struct {
-	Historical       bool          `json:"historical,omitempty"`
-	HistoricalReason string        `json:"historical_reason,omitempty"`
-	Summary          string        `json:"summary"`
-	NextStep         string        `json:"next_step"`
-	IssueRevision    int64         `json:"issue_revision"`
-	UpdatedAt        int64         `json:"updated_at"`
-	UpdatedBy        IssueAssignee `json:"updated_by"`
+	Delivery         *IssueDeliveryProgress `json:"delivery,omitempty"`
+	Historical       bool                   `json:"historical,omitempty"`
+	HistoricalReason string                 `json:"historical_reason,omitempty"`
+	Summary          string                 `json:"summary"`
+	NextStep         string                 `json:"next_step"`
+	IssueRevision    int64                  `json:"issue_revision"`
+	UpdatedAt        int64                  `json:"updated_at"`
+	UpdatedBy        IssueAssignee          `json:"updated_by"`
 }
 
 type UpdateIssueProgressPayload struct {
-	ExpectedAssignmentEpoch int64  `json:"expected_assignment_epoch"`
-	Summary                 string `json:"summary"`
-	NextStep                string `json:"next_step"`
+	Delivery                *IssueDeliveryProgress `json:"delivery,omitempty"`
+	ExpectedAssignmentEpoch int64                  `json:"expected_assignment_epoch"`
+	Summary                 string                 `json:"summary"`
+	NextStep                string                 `json:"next_step"`
 }
 
 // IssueConversationBinding is read-only; reading it never opens a conversation.
@@ -32,6 +53,7 @@ type IssueAncestor struct {
 
 // IssueActivityEntry keeps stable ledger order while its transcript streams.
 type IssueActivityEntry struct {
+	Delivery   *IssueDeliveryView    `json:"delivery,omitempty"`
 	Progress   *IssueProgress        `json:"progress,omitempty"`
 	ID         string                `json:"id"`
 	Position   int64                 `json:"position"`

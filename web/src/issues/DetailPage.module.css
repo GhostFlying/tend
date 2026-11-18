@@ -751,3 +751,10 @@
 .drawer .sectionHead h2 {
   margin: 0;
 }
+
+.deliveryProgress {
+  border-inline-start: 2px solid var(--border-soft);
+  padding-inline-start: 10px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

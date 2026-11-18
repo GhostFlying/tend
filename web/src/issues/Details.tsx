@@ -33,6 +33,7 @@ import { IssueHistory } from "./History.tsx";
 import { IssueFollowupsDelivery } from "./FollowupsDelivery.tsx";
 import { CreateIssueTask } from "./CreateTask.tsx";
 import { IssueActivity } from "./Activity.tsx";
+import { CandidateIdentity, candidateLabel, DeliveryProgress } from "./DeliveryProgress.tsx";
 import { ProgressEditor, IssueControlEditor } from "./Progress.tsx";
 import { IssueResultsList } from "./Results.tsx";
 import { TaskRunStatus } from "../rollout/RunRollout.tsx";
@@ -578,7 +579,7 @@ export function IssueDetails({
                     data-expanded={progressExpanded || !issue.progress?.summary}
                   >
                     <div className={styles.sectionHead}>
-                      <h2>{issue.progress?.historical ? "历史进展" : "当前进展"}</h2>
+                      <h2>{issue.progress?.historical && ended ? "历史进展" : "当前进展"}</h2>
                       <Button
                         variant="link"
                         disabled={!editable}
@@ -587,6 +588,16 @@ export function IssueDetails({
                         编辑
                       </Button>
                     </div>
+                    {deliveries.value?.items?.map((item) => (
+                      <DeliveryProgress key={item.delivery.delivery_id} item={item} />
+                    ))}
+                    {issue.progress?.delivery ? (
+                      <p className={styles.muted}>
+                        {issue.progress.historical ? "历史进展" : "负责人进展"} ·{" "}
+                        {candidateLabel(issue.progress.delivery)} ·{" "}
+                        <CandidateIdentity candidate={issue.progress.delivery} />
+                      </p>
+                    ) : null}
                     {issue.progress?.summary ? (
                       <Expandable
                         text={issue.progress.summary}
@@ -610,8 +621,12 @@ export function IssueDetails({
                     <div className={styles.progressDetails}>
                       {issue.progress?.historical && (
                         <p className={styles.muted}>
-                          此记录属于先前责任或状态，当前 Issue 状态以页首为准。记录版本：
-                          {issue.progress.issue_revision}。
+                          {issue.progress.historical_reason === "delivery_candidate_changed"
+                            ? "此进展对应先前交付候选。"
+                            : issue.progress.historical_reason === "delivery_conflict_changed"
+                              ? "此进展对应先前的冲突观察。"
+                              : "此进展对应先前的责任或 Issue 状态。"}
+                          记录版本 {issue.progress.issue_revision}。
                         </p>
                       )}
                       {issue.progress?.historical && issue.progress.next_step && (
@@ -837,7 +852,13 @@ export function IssueDetails({
             {panel === "handoff" && (
               <IssueHandoff issue={issue} onBack={close} onChanged={() => void reads.open(id)} />
             )}
-            {panel === "progress" && <ProgressEditor issue={issue} onSaved={() => saved()} />}
+            {panel === "progress" && (
+              <ProgressEditor
+                issue={issue}
+                deliveries={deliveries.value?.items}
+                onSaved={() => saved()}
+              />
+            )}
             {(panel === "reopen" || panel === "pause" || panel === "resume") && (
               <IssueControlEditor issue={issue} action={panel} onSaved={() => saved()} />
             )}

@@ -2614,3 +2614,7 @@ owner source 为输入。当前回合经 runner 的原生 steer 入口接收，�
 接收、消费及未知回执。明确撤销在待发紧急通知中优先，保留原授权及已发送尝试。
 投递不变更领域权限，不启动新回合，不打断执行中的工具，不重发未知调用。
 见 [Issue owner urgent delivery](plans/issue-owner-urgent.md)。
+
+### D246 补充：默认进展中的交付候选
+
+Issue 默认进展直接显示已登记交付的提供方观察及候选身份。冲突的来源和观察时间随事实保存。负责人通过原进展操作显式记录针对该候选的处理事实，系统用当前指派和观察校验其适用范围。候选推进后，原观察和候选进展继续可从活动历史读取。详见 [Issue 默认进展中的 PR 冲突与候选](plans/issue-delivery-conflict-progress.md)。

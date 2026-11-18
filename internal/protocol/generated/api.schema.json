@@ -5615,6 +5615,37 @@
       "title": "DeliveryCheck",
       "type": "object"
     },
+    "DeliveryConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "checked_at": {
+          "type": "integer"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "observer": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "target_sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "head_sha",
+        "checked_at",
+        "observer",
+        "revision"
+      ],
+      "title": "DeliveryConflict",
+      "type": "object"
+    },
     "DeliveryExecutionAuthority": {
       "additionalProperties": false,
       "properties": {
@@ -5793,6 +5824,9 @@
         },
         "head_sha": {
           "type": "string"
+        },
+        "last_conflict": {
+          "$ref": "#/definitions/DeliveryConflict"
         },
         "lineage_error_kind": {
           "type": "string"
@@ -8090,6 +8124,9 @@
         "created_at": {
           "type": "integer"
         },
+        "delivery": {
+          "$ref": "#/definitions/IssueDeliveryView"
+        },
         "id": {
           "type": "string"
         },
@@ -9587,6 +9624,9 @@
         "issue_id": {
           "type": "string"
         },
+        "last_conflict": {
+          "$ref": "#/definitions/DeliveryConflict"
+        },
         "lineage_error_kind": {
           "type": "string"
         },
@@ -9666,6 +9706,47 @@
       "title": "IssueDeliveryPage",
       "type": "object"
     },
+    "IssueDeliveryProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "conflict_action": {
+          "type": "string"
+        },
+        "conflict_revision": {
+          "type": "integer"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "target_sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "provider",
+        "repository",
+        "number",
+        "head_sha"
+      ],
+      "title": "IssueDeliveryProgress",
+      "type": "object"
+    },
     "IssueDeliveryProvider": {
       "enum": [
         "github",
@@ -9697,6 +9778,9 @@
     "IssueDeliveryView": {
       "additionalProperties": false,
       "properties": {
+        "conflict_progress": {
+          "$ref": "#/definitions/IssueProgress"
+        },
         "delivery": {
           "$ref": "#/definitions/IssueDelivery"
         },
@@ -11076,6 +11160,9 @@
     "IssueProgress": {
       "additionalProperties": false,
       "properties": {
+        "delivery": {
+          "$ref": "#/definitions/IssueDeliveryProgress"
+        },
         "historical": {
           "type": "boolean"
         },
@@ -20542,6 +20629,9 @@
         }
       ],
       "properties": {
+        "delivery": {
+          "$ref": "#/definitions/IssueDeliveryProgress"
+        },
         "expected_assignment_epoch": {
           "type": "integer"
         },
