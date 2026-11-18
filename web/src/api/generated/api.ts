@@ -387,6 +387,7 @@ export interface TendAPI {
   BoundedMaintenanceState?: BoundedMaintenanceState;
   BoundedRunnerAdmissionRelease?: BoundedRunnerAdmissionRelease;
   BoundedRunnerMaintenanceGrant?: BoundedRunnerMaintenanceGrant;
+  CIContinuation?: CIContinuation;
   CancelIssueDeadlinePayload?: CancelIssueDeadlinePayload;
   CapabilityDefinition?: CapabilityDefinition;
   CapabilityPage?: CapabilityPage;
@@ -3112,6 +3113,25 @@ export interface CommittedRetainedRun {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "CIContinuation".
+ */
+export interface CIContinuation {
+  base?: string;
+  delivery_id: string;
+  head: string;
+  issue_id: string;
+  owner_turn?: string;
+  result: string;
+  run_id: string;
+  source_event?: string;
+  source_message?: string;
+  state: string;
+  target?: string;
+  task_id: string;
+  wait_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "CancelIssueDeadlinePayload".
  */
 export interface CancelIssueDeadlinePayload {
@@ -3975,13 +3995,17 @@ export interface ExternalWait {
   issue_id?: string;
   kind: string;
   next_reminder_at_ms: number;
+  observed_base?: string;
   observed_head?: string;
   observed_revision?: number;
   observed_state?: string;
+  observed_target?: string;
   reason: string;
   recovery: string;
   resume_reason?: string;
   run_id: string;
+  source_event?: string;
+  source_message?: string;
   status: string;
   stopped: boolean;
   successor_run_id?: string;
@@ -5984,6 +6008,7 @@ export interface MaintenanceOverview {
   configured: boolean;
   error?: string;
   last_audit?: number;
+  last_audit_completed?: number;
   last_check?: number;
   observed_at: number;
   open_cases: number;
@@ -6684,6 +6709,7 @@ export interface ResumeDecisionContinuationPayload {
  */
 export interface ResumeExternalWaitPayload {
   reason: string;
+  restore_ci_notice?: boolean;
   wait_id: string;
 }
 /**

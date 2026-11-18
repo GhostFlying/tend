@@ -3493,6 +3493,62 @@
       "title": "BoundedUpdaterTarget",
       "type": "object"
     },
+    "CIContinuation": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "owner_turn": {
+          "type": "string"
+        },
+        "result": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_event": {
+          "type": "string"
+        },
+        "source_message": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "wait_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id",
+        "task_id",
+        "run_id",
+        "wait_id",
+        "delivery_id",
+        "head",
+        "result",
+        "state"
+      ],
+      "title": "CIContinuation",
+      "type": "object"
+    },
     "CancelIssueDeadlinePayload": {
       "additionalProperties": false,
       "properties": {
@@ -7334,6 +7390,9 @@
         "next_reminder_at_ms": {
           "type": "integer"
         },
+        "observed_base": {
+          "type": "string"
+        },
         "observed_head": {
           "type": "string"
         },
@@ -7341,6 +7400,9 @@
           "type": "integer"
         },
         "observed_state": {
+          "type": "string"
+        },
+        "observed_target": {
           "type": "string"
         },
         "reason": {
@@ -7353,6 +7415,12 @@
           "type": "string"
         },
         "run_id": {
+          "type": "string"
+        },
+        "source_event": {
+          "type": "string"
+        },
+        "source_message": {
           "type": "string"
         },
         "status": {
@@ -12473,6 +12541,9 @@
         "last_audit": {
           "type": "integer"
         },
+        "last_audit_completed": {
+          "type": "integer"
+        },
         "last_check": {
           "type": "integer"
         },
@@ -16289,6 +16360,9 @@
       "properties": {
         "reason": {
           "type": "string"
+        },
+        "restore_ci_notice": {
+          "type": "boolean"
         },
         "wait_id": {
           "type": "string"
@@ -22919,6 +22993,9 @@
     },
     "BoundedRunnerMaintenanceGrant": {
       "$ref": "#/definitions/BoundedRunnerMaintenanceGrant"
+    },
+    "CIContinuation": {
+      "$ref": "#/definitions/CIContinuation"
     },
     "CancelIssueDeadlinePayload": {
       "$ref": "#/definitions/CancelIssueDeadlinePayload"

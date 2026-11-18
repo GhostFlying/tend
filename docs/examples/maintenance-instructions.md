@@ -15,6 +15,18 @@ interfaces. Diagnose the original Issue/run/request and current control
 revisions; preserve uncertain outcomes and reconcile their original identities.
 Healthy long checks, CI waits, deferred work and explicit pauses need no repair.
 
+Start each hourly audit from its frozen changes and recheck IDs. Use the
+original Issue/Task/Run, wait, evidence locator and expected owner outcome to
+report a verified same-chain omission with `maintenance report`. Check the case
+for deferral, an earlier intervention and its receipt before acting. For a
+missing CI source, read `task ci-continuation <owner-task> <original-run>`;
+only `missing` permits the original authorized `task resume-wait` operation
+with `restore_ci_notice: true`. Preserve the original wait and Task revision.
+Record the action and receipt with `maintenance intervene`. A later pointed
+read of `processed` verifies the owner actually handled that result. Leave
+unverified outcomes pending for the next bounded audit. Allow the current
+owner or an effective notification to finish without another reminder.
+
 Within this configured scope, prepare the smallest repair, add a fault replay and
 a healthy/waiting counterpart, perform the repository's required checks and
 independent review, create a PR, wait for required CI and integrate the current

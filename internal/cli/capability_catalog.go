@@ -48,8 +48,14 @@ func CapabilityBindings() []CapabilityBinding {
 	for _, action := range []string{"show", "request"} {
 		out = append(out, binding("local GET /maintenance/"+action+"/{id}", "maintenance "+action, "--socket", "{socket}", "--id", "sample", "--json"))
 	}
-	for _, action := range []string{"check", "audit", "pause", "resume", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
+	for _, action := range []string{"check", "audit", "pause", "resume", "report", "intervene", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
 		args := []string{"--socket", "{socket}", "--revision", "2", "--request-id", "{request}", "--json"}
+		if action == "report" {
+			args = append(args, "--id", "ci", "--reason", "Verified diagnosis", "--data", `{"issue_id":"issue","task_id":"task","run_id":"run","evidence":"input","expected":"processed"}`)
+		}
+		if action == "intervene" {
+			args = append(args, "--id", "sample", "--reason", "original operation")
+		}
 		if action == "defer" || action == "resolve" {
 			args = append(args, "--id", "sample", "--reason", "Reviewed original evidence", "--until", "9999999999")
 		}
@@ -489,7 +495,7 @@ func commandUsage(prefix []string) string {
 	if name == "task" || name == "task continue" {
 		out.WriteString("\nTask continuation: task continue <id> --revision <current> --data '{\"reason\":\"Continue the same goal\"}' appends a new Run for the unchanged goal, preserving historical spec/results and acceptance. Use a new Task only for an independent goal. --dry-run saves the original Envelope; unknown retries keep request ID and payload. Read task show and issue materials for prior results and unresolved operations.\n")
 	}
-	if name == "task" || name == "task waits" || name == "task resume-wait" {
+	if name == "task" || name == "task ci-continuation" || name == "task waits" || name == "task resume-wait" {
 		out.WriteString("\nExternal waits: task waits <id> reads the recorded condition, physical-stop status and recovery action. task resume-wait <id> --revision <current> --data '{\"wait_id\":\"<original wait>\",\"reason\":\"Inspect the existing outcome\"}' resumes judgment without repeating the external operation. Actual stop still precedes slot release. Keep the original Envelope/request ID for an unknown response.\n")
 	}
 	if name == "task" || name == "task show" || name == "observation show" {
@@ -517,8 +523,12 @@ func commandUsage(prefix []string) string {
 		out.WriteString("takeover additionally binds updater_source (PID, start_ticks, launch_id and sha256) plus updater_lock (device/inode); data_identity binds the original ledger or journal separately. Those exact local identities are checked by the installer, not inferred from a server summary.\n")
 		out.WriteString("--dry-run exports the exact installer arguments and typed inputs without executing. status/reconcile require only the fixed configuration and optionally --request-id to inspect the original request; their command timeout defaults to 10s. Other installer commands default to a 370s outer wait via --timeout. A mutation timeout reports unknown and prints the original request/CAS plus the next reconcile command. Keep the original plan, authorization and request; reconcile before repeating exact bytes. Installer termination does not prove that its managed service or native workers exited. Installed, healthy, linked and restored remain separate durable facts.\n")
 	}
+	if name == "task ci-continuation" || name == "task resume-wait" {
+		out.WriteString("\nRead task ci-continuation <owner-task> <original-run|latest> for the original CI wake. Only a proved missing source can use task resume-wait with restore_ci_notice=true, its original wait ID and Task revision. Verify processed on the same original run.\n")
+	}
 	if name == "maintenance" || strings.HasPrefix(name, "maintenance ") {
 		out.WriteString("\nStandalone maintenance control uses --socket <absolute-control-socket> or TEND_MAINTENANCE_SOCKET; overview reads the configured owner API. Save --dry-run output before mutations; identical retries retain --request-id, --revision and the full input. Unknown native creation requires reconcile --session-id <original-native-id> --reason <evidence> before backend adoption.\n")
+		out.WriteString("Use report --id <diagnostic-code> --reason <diagnosis> --file <subject.json> with issue_id, task_id, run_id, optional wait_id, evidence and expected business recovery. intervene --id <case> --reason <original action receipt> records intervention pending verification. resolve --id <case> --reason <diagnosis> --verification <readback> records verified recovery. Audit input and completed cursor are reported separately.\n")
 		out.WriteString("Failed or manually interrupted turns retain their original input, turn and triggers in status.failure and history. Program checks do not retry the model; audit, resume or explicit config permits another attempt. Existing manual pause still requires resume. Only a confirmed interrupt switch adds a predecessor index. Persistence faults appear in read-only status and cause supervised process recovery.\n")
 	}
 	if name == "host authorize-bounded-maintenance" {

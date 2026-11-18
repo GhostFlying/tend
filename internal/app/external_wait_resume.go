@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // ResumeExternalWait requests another judgment in the original Task. Physical
@@ -61,6 +63,33 @@ func (ResumeExternalWait) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	v, err := store.GetExternalWait(ctx, tx.Q(), runID)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if p.RestoreNotice {
+		fact, err := views.OwnerCIContinuation(ctx, tx.Q(), task.TaskID, runID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if fact.State == "notified" || fact.State == "processed" {
+			return Outcome{Result: fact}, nil
+		}
+		if fact.State != "missing" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "original CI source is not eligible for recovery")
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if err = appendBackgroundSource(ctx, x, tx, "work_item:"+fact.IssueID, fact.IssueID, fact.SourceMessage, fact.SourceEvent, "task.external_wait_ready", raw); err != nil {
+			return Outcome{}, err
+		}
+		fact, err = views.OwnerCIContinuation(ctx, tx.Q(), task.TaskID, runID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if fact.State != "notified" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "original owner notice was not accepted")
+		}
+		return Outcome{Result: fact}, nil
 	}
 	if v.Status != "stopping" && v.Status != "waiting" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "external wait already settled")
