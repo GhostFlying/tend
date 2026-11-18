@@ -178,7 +178,14 @@ func TestEndToEndIssueOwnerSteerSameNativeTurn(t *testing.T) {
 
 func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archiveMode string) {
 	urgent := archiveMode == "urgent"
-	s := newServerWithOptions(t, time.Second*10, time.Now, app.WithFollowups(true))
+	var recoveryPausedAt atomic.Int64
+	now := func() time.Time {
+		if frozen := recoveryPausedAt.Load(); frozen != 0 {
+			return time.Unix(0, frozen)
+		}
+		return time.Now()
+	}
+	s := newServerWithOptions(t, time.Second*10, now, app.WithFollowups(true))
 	archiveFault := archiveMode == "foreign" || archiveMode == "receipt"
 	externalWait := archiveMode == "external_wait" || archiveMode == "external_wait_migrated"
 	var migration sync.Once
@@ -496,6 +503,8 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 
 		if recoverRate && !input.Repair && rateFailed.CompareAndSwap(false, true) {
+			// Keep the real backoff window open until the owner has read it.
+			recoveryPausedAt.Store(time.Now().UnixNano())
 			th.Emit(harness.Event{Kind: harness.EventTurnError, TurnID: turn, Failure: &protocol.AgentFailure{Code: "rate_limit_exceeded", HTTPStatus: 429}})
 			return "failed"
 		}
@@ -707,22 +716,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 		cli := newOwnerCLI(t, filepath.Join(t.TempDir(), "tend"))
 		cli.run("", "login", "--server", s.startAPI())
-		board := func() protocol.IssueBoardCard {
-			t.Helper()
-			var page protocol.IssuePage
-			raw := cli.run("", "issue", "list", "--board", "--board-status", "in_progress", "--json")
-			if err := json.Unmarshal([]byte(raw), &page); err != nil {
-				t.Fatal(err)
-			}
-			for _, item := range page.Items {
-				if item.IssueID == issue.IssueID && item.Board != nil {
-					return *item.Board
-				}
-			}
-			t.Fatal("missing Issue from normal board route", raw)
-			return protocol.IssueBoardCard{}
-		}
-		if card := board(); card.Execution.Running != 1 || card.Execution.Queued != 0 {
+		if card := managerBoardCard(cli, issue.IssueID); card.Execution.Running != 1 || card.Execution.Queued != 0 {
 			t.Fatal("CLI did not see the active owner carrier", card)
 		}
 		if text := cli.run("", "issue", "list", "--board"); !strings.Contains(text, "Execution: 1 running") {
@@ -741,7 +735,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				s.count(`SELECT COUNT(*) FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN outbox o ON o.request_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.status='interrupted' AND o.status='delivered'`, original) == 1 &&
 				s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) == 0
 		})
-		if card := board(); card.Execution.Running != 0 || card.Execution.WaitingExternal != 1 || card.Execution.Completed != 0 {
+		if card := managerBoardCard(cli, issue.IssueID); card.Execution.Running != 0 || card.Execution.WaitingExternal != 1 || card.Execution.Completed != 0 {
 			t.Fatal("CLI lost the original stopped wait or counted history", card)
 		}
 		if text := cli.run("", "issue", "list", "--board"); !strings.Contains(text, "Execution: 1 waiting for external conditions") {
@@ -878,6 +872,35 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			return err == nil && state.Pending == nil && state.Cursor.Offset == int64(len(originalBody))
 		})
 	}
+	var recoveryCLI *ownerCLI
+	if recoverRate {
+		defer recoveryPausedAt.Store(0)
+		waitBusinessContinuity(t, "the original manager enters rate-limit backoff", func() bool {
+			select {
+			case failure := <-failures:
+				t.Fatal(failure)
+			default:
+			}
+			return s.count(`SELECT COUNT(*) FROM agent_recoveries WHERE status='waiting'`) == 1
+		})
+		recoveryCLI = newOwnerCLI(t, filepath.Join(t.TempDir(), "tend"))
+		recoveryCLI.run("", "login", "--server", s.startAPI())
+		var detail protocol.IssueView
+		raw := recoveryCLI.run("", "issue", "show", issue.IssueID, "--json")
+		if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+			t.Fatal(err)
+		}
+		if detail.Manager == nil || detail.Manager.RunID == "" || detail.Manager.Recovery == nil || detail.Manager.Recovery.Status != "waiting" {
+			t.Fatalf("Issue detail lost the active manager recovery: %+v", detail.Manager)
+		}
+		if card := managerBoardCard(recoveryCLI, issue.IssueID); card.Execution.Recovering != 1 || card.Execution.Running != 0 {
+			t.Fatalf("board did not count the manager's recovery: %+v", card.Execution)
+		}
+		if out := recoveryCLI.run("", "issue", "list", "--board"); !strings.Contains(out, "Execution: 1 recovering") {
+			t.Fatal("CLI omitted the manager's recovery", out)
+		}
+		recoveryPausedAt.Store(0)
+	}
 	deadline := time.NewTimer(90 * time.Second)
 	defer deadline.Stop()
 	for {
@@ -928,8 +951,13 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	if archiveMode != "" && (s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 || s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager'`) != 1) {
 		t.Fatal("archive recovery replaced or repeated the original manager responsibility")
 	}
-	if recoverRate && (continuations.Load() != 1 || attempts.Load() < 2 || fake.Resumed() == 0 || s.count(`SELECT COUNT(*) FROM agent_recoveries WHERE status='completed'`) != 1) {
-		t.Fatal("rate limit continuation did not retain its original session and budget")
+	if recoverRate {
+		if continuations.Load() != 1 || attempts.Load() < 2 || fake.Resumed() == 0 || s.count(`SELECT COUNT(*) FROM agent_recoveries WHERE status='completed'`) != 1 {
+			t.Fatal("rate limit continuation did not retain its original session and budget")
+		}
+		if card := managerBoardCard(recoveryCLI, issue.IssueID); card.Execution.Recovering != 0 || card.Execution.Running != 0 || card.Execution.Completed != 0 {
+			t.Fatalf("board counted the finished manager recovery: %+v", card.Execution)
+		}
 	}
 	if loseStart {
 		for _, input := range fake.Starts()[1:] {
@@ -968,4 +996,20 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	if !delivery && !recoverRate && !loseStart && archiveMode == "" && s.count(`SELECT COUNT(*) FROM manager_native_events WHERE body_json LIKE '%tend:inline-image-url:sha256:%' AND length(body_json)<2048`) == 0 {
 		t.Fatal("large native image evidence did not cross the authenticated runner RPC")
 	}
+}
+
+func managerBoardCard(cli *ownerCLI, issueID string) protocol.IssueBoardCard {
+	cli.t.Helper()
+	var page protocol.IssuePage
+	raw := cli.run("", "issue", "list", "--board", "--board-status", "in_progress", "--json")
+	if err := json.Unmarshal([]byte(raw), &page); err != nil {
+		cli.t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.IssueID == issueID && item.Board != nil {
+			return *item.Board
+		}
+	}
+	cli.t.Fatal("missing Issue from normal board route", raw)
+	return protocol.IssueBoardCard{}
 }
