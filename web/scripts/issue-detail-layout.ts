@@ -42,6 +42,7 @@ let pagedRevision = 0;
 let pagedChildren = false;
 let pagedActivity = false;
 let shortNumbers = false;
+let shortIdentityOutage: { failed: boolean; recovery: Promise<void> } | undefined;
 const historicalMessageID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const historicalReplyID = "msg_01ARZ3NDEKTSV4RRFFQ69G5FAY";
 let sharedReviews: SharedDeliveryReviewPage = { items: [], more: false };
@@ -356,12 +357,20 @@ const server = createServer(async (req, res) => {
     });
   if (p.startsWith("/api/v1/issues/")) {
     const current = p.includes(child.issue_id) ? child : issue;
-    if (shortNumbers && u.searchParams.get("projection") === "identity")
+    if (shortNumbers && u.searchParams.get("projection") === "identity") {
+      if (shortIdentityOutage) {
+        if (p === "/api/v1/issues/T123" && !shortIdentityOutage.failed) {
+          shortIdentityOutage.failed = true;
+          return json({ error: { code: "internal", message: "Temporarily unavailable" } }, 503);
+        }
+        await shortIdentityOutage.recovery;
+      }
       return json({
         issue_id: current.issue_id,
         short_code: current.short_code,
         title: current.plan.title,
       });
+    }
     if (p.endsWith("/delivery-reviews")) return json(sharedReviews);
     if (p.endsWith("/activity")) {
       if (shortNumbers) {
@@ -716,17 +725,21 @@ async function verifyShortNumbers() {
         page.setDefaultTimeout(10_000);
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        await page.route(
-          "**/api/v1/issues/T123?projection=identity",
-          (route) =>
-            route.fulfill({
-              status: 503,
-              json: { error: { code: "internal", message: "Temporarily unavailable" } },
-            }),
-          { times: 1 },
-        );
-        await page.goto(`${base}/issues/t123?retry=1`);
-        await page.getByRole("heading", { name: "暂时无法读取 Issue，正在重试" }).waitFor();
+        let restoreIdentity = () => {};
+        shortIdentityOutage = {
+          failed: false,
+          recovery: new Promise<void>((resolve) => {
+            restoreIdentity = resolve;
+          }),
+        };
+        try {
+          await page.goto(`${base}/issues/t123?retry=1`);
+          await page.getByRole("heading", { name: "暂时无法读取 Issue，正在重试" }).waitFor();
+          assert(shortIdentityOutage.failed);
+        } finally {
+          restoreIdentity();
+          shortIdentityOutage = undefined;
+        }
         await page.getByRole("region", { name: "Issue 详情" }).waitFor();
         assert.equal(new URL(page.url()).pathname, "/issues/T123");
         await page.goto(
