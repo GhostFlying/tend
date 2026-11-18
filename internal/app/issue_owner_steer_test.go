@@ -293,3 +293,122 @@ func TestIssueOwnerSteerRejectsMediaAndEmptyText(t *testing.T) {
 		t.Fatal("unsupported source produced an urgent queue entry")
 	}
 }
+
+func TestIssueOwnerSteerFormalReplyRequiresWitnessedTurn(t *testing.T) {
+	for _, sender := range []string{"operator", "main"} {
+		t.Run(sender, func(t *testing.T) {
+			ctx := t.Context()
+			h, _, issue, assignment, source := reviewManagerAssignment(t)
+			if sender == "main" {
+				inventoryCategory(t, h, "planner", 0, "active")
+				accepted, prepared := acceptHostedFixture(t, h, hostedConfigurationFixture(), 0)
+				if accepted.Status != protocol.OpSucceeded {
+					t.Fatal(accepted)
+				}
+				h.app = New(h.store, h.ids, h.clock.Now, WithHostedConfiguration(prepared), WithMainOwner(owner.Subject))
+			}
+			turn, _ := startHostedIssueReview(t, h, issue)
+			senderContext := ctx
+			if sender == "main" {
+				delivery, _, ok, err := h.app.NextDelivery(ctx, MainThreadDestination)
+				if err != nil || !ok {
+					t.Fatal("owner input not admitted to Main", ok, err)
+				}
+				main := startHostedReview(t, h, "main", delivery)
+				source = main.MessageID
+				senderContext = WithOwnerExecution(ctx, &OwnerExecution{
+					Actor: mainAgent, ExecutionID: main.RequestID, CallID: "route-urgent", EffectSeq: 1,
+				})
+			}
+			linkIssueSteerSource(t, h, issue.IssueID, source)
+			env := urgentTestEnvelope(t, h, issue.IssueID, assignment.RunID, source, "")
+			op, err := h.app.Execute(senderContext, owner, env, SteerIssueOwner{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			notice := steerOperation(t, op, "queued")
+
+			conversation := assignment.Manager.ConversationID
+			principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: assignment.RunID,
+				Role: protocol.RoleIssueManager, Thread: turn.ThreadID, ConversationID: conversation}
+			publish := func(effect int64) (protocol.Operation, error) {
+				t.Helper()
+				var command Command = PublishCommunication{}
+				var payload any = protocol.MessagingPublication{ReplyTo: notice.MessageID, Body: "The urgent input was read."}
+				if sender == "main" {
+					command = CoordinationReply{}
+					payload = protocol.CoordinationReply{ReplyTo: notice.MessageID, Body: "The urgent input was read."}
+				}
+				env := h.env(command.Operation(), protocol.Target{Type: "logical_turn", ID: turn.RequestID}, payload, nil)
+				return h.app.Execute(ctx, principal, env, HostedCoordinationCommand{Command: command, ExecutionID: turn.RequestID, EffectSeq: effect})
+			}
+			requireForbidden := func(op protocol.Operation, err error) {
+				t.Helper()
+				if protocol.CodeOf(err) != protocol.CodeForbidden && (op.Error == nil || op.Error.Code != protocol.CodeForbidden) {
+					t.Fatal("input outside the witnessed turn was allowed", op, err)
+				}
+			}
+			before := h.count("messaging_messages")
+			requireForbidden(publish(1))
+			dispatch, err := h.app.ClaimIssueOwnerSteer(ctx, turn.RequestID, assignment.RunID, turn.ThreadID, turn.TurnID, true)
+			if err != nil || dispatch.MessageID != notice.MessageID {
+				t.Fatal(dispatch, err)
+			}
+			if err := h.app.RecordIssueOwnerSteerAnswer(ctx, notice.MessageID, "accepted", "waiting_safe_boundary"); err != nil {
+				t.Fatal(err)
+			}
+			requireForbidden(publish(2))
+			if h.count("messaging_messages") != before {
+				t.Fatal("an unconsumed urgent input created a fallback publication")
+			}
+			if err := h.app.ConsumeIssueOwnerSteer(ctx, conversation, turn.ThreadID, turn.TurnID, dispatch.Text, "witnessed-user-item"); err != nil {
+				t.Fatal(err)
+			}
+			op, err = publish(3)
+			if err != nil || op.Error != nil {
+				t.Fatal(op, err)
+			}
+			replyID := messageID(t, op)
+			published, err := h.app.MessagingMessage(ctx, replyID)
+			if err != nil || published.Direction != "publication" || published.ChannelID != "web" || published.ReplyTo != notice.MessageID {
+				t.Fatal("no exact Web reply to the urgent notice", published, err)
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				requireForbidden(protocol.Operation{}, communicationSourceAllowed(ctx, tx.Q(), turn.RequestID, "main", notice.MessageID))
+				requireForbidden(protocol.Operation{}, communicationSourceAllowed(ctx, tx.Q(), turn.RequestID+"-other", conversation, notice.MessageID))
+				activity, err := views.IssueActivity(ctx, tx.Q(), issue.IssueID, 0)
+				if err != nil {
+					return err
+				}
+				for _, entry := range activity.Items {
+					if entry.Block == nil || entry.Block.Trigger.MessageID != notice.MessageID {
+						continue
+					}
+					if entry.Block.Trigger.IssueOwnerSteer == nil || entry.Block.Trigger.IssueOwnerSteer.Status != "consumed" {
+						t.Fatal("the activity lost its consumption receipt", entry)
+					}
+					for _, item := range entry.Block.Items {
+						if item.MessageID == replyID && item.ReplyTo == notice.MessageID {
+							return nil
+						}
+					}
+					t.Fatal("the page did not project the real reply under its urgent source", entry)
+				}
+				t.Fatal("the page did not project the urgent source")
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			turn.Status = store.TurnCompleted
+			if err := h.app.PutMainTurn(ctx, turn); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				requireForbidden(protocol.Operation{}, communicationSourceAllowed(ctx, tx.Q(), turn.RequestID, conversation, notice.MessageID))
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
