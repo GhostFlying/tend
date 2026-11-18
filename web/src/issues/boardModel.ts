@@ -30,6 +30,8 @@ export function boardColumnStatus(item: Parameters<typeof workStatus>[0]): Issue
   return status === "in_review" ? "in_progress" : status;
 }
 
+export const waitingExternalLabel = "等待外部条件";
+
 export function executionLabel(counts?: ExecutionCounts): string {
   if (!counts) return "暂无执行";
   if (counts.unknown) return "执行待核对";
@@ -38,7 +40,7 @@ export function executionLabel(counts?: ExecutionCounts): string {
   if (counts.running) return `${counts.running} 项运行中`;
   if (counts.accepting) return "独立验收中";
   if (counts.recovering || counts.starting) return "执行准备中";
-  if (counts.waiting_external) return "等待外部条件";
+  if (counts.waiting_external) return waitingExternalLabel;
   if (counts.queued) return "任务排队中";
   if (counts.paused) return "执行已暂停";
   if (counts.idle) return "任务待安排";
