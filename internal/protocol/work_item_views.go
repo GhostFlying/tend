@@ -27,7 +27,7 @@ type StageExecutionView struct {
 	Execution ExecutionCounts `json:"execution"`
 }
 
-// ExecutionCounts counts distinct linked tasks, including mixed execution states.
+// ExecutionCounts counts distinct execution facts, including mixed execution states.
 type ExecutionCounts struct {
 	Starting          int `json:"starting,omitempty"`
 	Recovering        int `json:"recovering,omitempty"`
@@ -36,6 +36,7 @@ type ExecutionCounts struct {
 	Accepting         int `json:"accepting"`
 	WaitingOwner      int `json:"waiting_owner"`
 	WaitingSupervisor int `json:"waiting_supervisor,omitempty"`
+	WaitingExternal   int `json:"waiting_external,omitempty"`
 	Paused            int `json:"paused"`
 	Unknown           int `json:"unknown"`
 	Completed         int `json:"completed"`

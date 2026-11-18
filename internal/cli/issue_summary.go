@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -16,6 +17,13 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 	fmt.Fprintln(w, "ISSUE\tTITLE\tSTATE\tOWNER")
 	for _, v := range p.Items {
 		fmt.Fprintf(w, "%s\t%s\t%s / %s\t%s\n", v.IssueID, v.Title, v.State, v.BoardStatus(), v.Assignee.Ref)
+		execution := v.Execution
+		if v.Board != nil {
+			execution = &v.Board.Execution
+		}
+		if execution != nil {
+			printIssueExecution(w, *execution)
+		}
 		if v.Board != nil {
 			fmt.Fprintf(w, "  Current responsibility: %d open actions; %d need the human owner\n", v.Board.AttentionCount, v.Board.OwnerAttentionCount)
 			if v.Board.Progress != nil && v.Board.Progress.NextStep != "" {
@@ -38,6 +46,32 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 	}
 	return w.Flush()
 }
+func printIssueExecution(out io.Writer, counts protocol.ExecutionCounts) {
+	var states []string
+	for _, state := range []struct {
+		count int
+		label string
+	}{
+		{counts.Running, "running"},
+		{counts.Accepting, "accepting"},
+		{counts.Starting, "starting"},
+		{counts.Recovering, "recovering"},
+		{counts.Queued, "queued"},
+		{counts.WaitingExternal, "waiting for external conditions"},
+		{counts.WaitingOwner, "waiting for the owner"},
+		{counts.WaitingSupervisor, "waiting for the supervisor"},
+		{counts.Paused, "paused"},
+		{counts.Unknown, "unknown"},
+	} {
+		if state.count > 0 {
+			states = append(states, fmt.Sprintf("%d %s", state.count, state.label))
+		}
+	}
+	if len(states) > 0 {
+		fmt.Fprintf(out, "  Execution: %s\n", strings.Join(states, "; "))
+	}
+}
+
 func printIssueView(e *Env, v protocol.IssueView) error {
 	out := e.Stdout
 	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", v.IssueID, v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)

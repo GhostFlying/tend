@@ -6293,6 +6293,9 @@
         "unknown": {
           "type": "integer"
         },
+        "waiting_external": {
+          "type": "integer"
+        },
         "waiting_owner": {
           "type": "integer"
         },
@@ -6428,6 +6431,7 @@
         "accepting",
         "waiting_owner",
         "waiting_supervisor",
+        "waiting_external",
         "paused",
         "unknown",
         "completed",

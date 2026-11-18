@@ -48,6 +48,7 @@ export type ExecutionState =
   | "accepting"
   | "waiting_owner"
   | "waiting_supervisor"
+  | "waiting_external"
   | "paused"
   | "unknown"
   | "completed"
@@ -1093,6 +1094,7 @@ export interface ExecutionCounts {
   running: number;
   starting?: number;
   unknown: number;
+  waiting_external?: number;
   waiting_owner: number;
   waiting_supervisor?: number;
 }

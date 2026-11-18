@@ -180,7 +180,7 @@ func issueBoardCard(ctx context.Context, q store.Querier, issue protocol.Issue, 
 	if err != nil {
 		return card, err
 	}
-	card.Execution, err = facts.issueCounts(ctx, q, issue.IssueID)
+	card.Execution, err = facts.issueCounts(ctx, q, issue)
 	if err != nil {
 		return card, err
 	}

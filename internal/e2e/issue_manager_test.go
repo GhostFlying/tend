@@ -262,6 +262,8 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 	}
 	waitOriginal := make(chan string, 1)
+	waitOwnerRunning := make(chan string, 1)
+	allowWait := make(chan struct{})
 	managerReady := make(chan string, 1)
 	var readyOnce sync.Once
 	waitFile := make(chan protocol.ArtifactFile, 1)
@@ -335,6 +337,12 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			return "failed"
 		}
 		if externalWait {
+			waitOwnerRunning <- item.IssueID
+			select {
+			case <-allowWait:
+			case <-ctx.Done():
+				return "interrupted"
+			}
 			var task, run string
 			if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 				return tx.Q().QueryRowContext(ctx, `SELECT r.task_id,r.run_id FROM issue_manager_tasks m JOIN runs r USING(task_id) WHERE m.issue_id=? AND r.observed_state IN ('starting','running') ORDER BY r.created_at DESC LIMIT 1`, item.IssueID).Scan(&task, &run)
@@ -694,6 +702,33 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			return value
 		}
 		await("manager migration and native turn ready", 5*time.Minute, managerReady)
+		if active := await("owner running before requesting wait", 2*time.Minute, waitOwnerRunning); active != issue.IssueID {
+			t.Fatal("unexpected owner Issue", active)
+		}
+		cli := newOwnerCLI(t, filepath.Join(t.TempDir(), "tend"))
+		cli.run("", "login", "--server", s.startAPI())
+		board := func() protocol.IssueBoardCard {
+			t.Helper()
+			var page protocol.IssuePage
+			raw := cli.run("", "issue", "list", "--board", "--board-status", "in_progress", "--json")
+			if err := json.Unmarshal([]byte(raw), &page); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range page.Items {
+				if item.IssueID == issue.IssueID && item.Board != nil {
+					return *item.Board
+				}
+			}
+			t.Fatal("missing Issue from normal board route", raw)
+			return protocol.IssueBoardCard{}
+		}
+		if card := board(); card.Execution.Running != 1 || card.Execution.Queued != 0 {
+			t.Fatal("CLI did not see the active owner carrier", card)
+		}
+		if text := cli.run("", "issue", "list", "--board"); !strings.Contains(text, "Execution: 1 running") {
+			t.Fatal("CLI omitted the running count", text)
+		}
+		close(allowWait)
 		original := await("original external wait committed", 2*time.Minute, waitOriginal)
 		waitBusinessContinuity(t, "physical yield and history settle the original request", func() bool {
 			select {
@@ -706,6 +741,12 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				s.count(`SELECT COUNT(*) FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN outbox o ON o.request_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.status='interrupted' AND o.status='delivered'`, original) == 1 &&
 				s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) == 0
 		})
+		if card := board(); card.Execution.Running != 0 || card.Execution.WaitingExternal != 1 || card.Execution.Completed != 0 {
+			t.Fatal("CLI lost the original stopped wait or counted history", card)
+		}
+		if text := cli.run("", "issue", "list", "--board"); !strings.Contains(text, "Execution: 1 waiting for external conditions") {
+			t.Fatal("CLI omitted the stopped wait", text)
+		}
 		if fake.HistoryReads() == 0 || len(fake.Starts()) != 1 || s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 {
 			t.Fatal("physical wait replayed business instead of handing off original history", fake.HistoryReads(), len(fake.Starts()))
 		}

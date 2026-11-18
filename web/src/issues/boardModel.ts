@@ -38,6 +38,7 @@ export function executionLabel(counts?: ExecutionCounts): string {
   if (counts.running) return `${counts.running} 项运行中`;
   if (counts.accepting) return "独立验收中";
   if (counts.recovering || counts.starting) return "执行准备中";
+  if (counts.waiting_external) return "等待外部条件";
   if (counts.queued) return "任务排队中";
   if (counts.paused) return "执行已暂停";
   if (counts.idle) return "任务待安排";
@@ -51,9 +52,12 @@ export function responsibilityLabel(item: IssueSummary): string {
   if (item.state === "cancelling") return "取消收尾中";
   if (item.assignment_state !== "active") return "Agent 交接中";
   const board = item.board;
-  if (board?.execution.unknown) return "执行结果待核对";
-  if (board?.owner_attention_count || board?.execution.waiting_owner) return "等待你处理";
-  if (board?.attention_count || board?.execution.waiting_supervisor) return "等待 Agent 处理";
+  const counts = board?.execution;
+  const withRunning = (label: string) =>
+    counts?.running ? `${label} · ${counts.running} 项运行中` : label;
+  if (counts?.unknown) return withRunning("执行结果待核对");
+  if (board?.owner_attention_count || counts?.waiting_owner) return withRunning("等待你处理");
+  if (board?.attention_count || counts?.waiting_supervisor) return withRunning("等待 Agent 处理");
   const execution = executionLabel(board?.execution);
   if (execution !== "暂无执行") return execution;
   if (item.state === "paused") return "Issue 已暂停";
