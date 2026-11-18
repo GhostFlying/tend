@@ -121,6 +121,9 @@ func (CoordinationReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		}
 		replyTo = p.ReplyTo
 	}
+	if err := checkCompletionReportPublication(ctx, tx.Q(), p.WorkItemIDs, turn.MessageID, protocol.MessagingPublication{ReplyTo: replyTo}); err != nil {
+		return Outcome{}, err
+	}
 	env.Payload, _ = json.Marshal(recordAgentMessagePayload{MessageID: p.MessageID, Body: p.Body, ReplyTo: replyTo, ReplySources: sources, TurnID: turn.TurnID, ItemID: "reply:" + p.MessageID})
 	// This is explicit publication; ordinary native background prose may buffer.
 	out, err := recordVisibleAgentMessageWithFiles(ctx, &child, tx, p.Attachments)

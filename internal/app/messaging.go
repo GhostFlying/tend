@@ -42,6 +42,15 @@ func (c MessagingCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			return Outcome{}, err
 		}
 		p.ReplyTo = ""
+		if x.ownerExecutionID != "" {
+			turn, err := store.GetMainTurn(ctx, tx.Q(), x.ownerExecutionID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if err := checkCompletionReportPublication(ctx, tx.Q(), p.IssueIDs, turn.MessageID, p); err != nil {
+				return Outcome{}, err
+			}
+		}
 		return publishCommunication(ctx, x, tx, p, x.ownerExecutionID, "main", x.messageAuthor())
 	case "read":
 		var p protocol.MessagingReadPayload
@@ -104,9 +113,17 @@ func communicationRoute(ctx context.Context, x *Exec, tx *store.Tx, reply string
 	}
 	q := tx.Q()
 	var conversation string
-	err := q.QueryRowContext(ctx, `SELECT c.conversation_id FROM messaging_messages m JOIN conversation_messages c USING(message_id) WHERE m.message_id=?`, reply).Scan(&conversation)
+	var completionReport bool
+	err := q.QueryRowContext(ctx, `SELECT c.conversation_id, EXISTS(SELECT 1 FROM issue_completion_reports
+		WHERE source_message_id=m.message_id OR published_message_id=m.message_id)
+		FROM messaging_messages m JOIN conversation_messages c USING(message_id) WHERE m.message_id=?`, reply).Scan(&conversation, &completionReport)
 	if err != nil {
 		return "", errNotFound(err, "reply target is not a communication message")
+	}
+	// One coordinator handles questions about the original agreement or its
+	// combined result, including after the user narrows it to one Issue.
+	if completionReport {
+		return "main", nil
 	}
 	// Business ownership follows the current Issue, not the original executor.
 	issues, err := communicationIssues(ctx, q, reply)
@@ -562,6 +579,13 @@ func (c PublishCommunication) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	}
 	if x.coordinationExecution != nil && x.coordinationExecution.Selection.Purpose == agentconfig.Consultation && len(p.IssueIDs) != 0 {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "consultation notifications grant no Issue authority")
+	}
+	scope := p.IssueIDs
+	if issuePublication {
+		scope = []string{x.coordinationExecution.IssueID}
+	}
+	if err := checkCompletionReportPublication(ctx, tx.Q(), scope, turn.MessageID, p); err != nil {
+		return Outcome{}, err
 	}
 	out, err := publishCommunication(ctx, x, tx, p, execution, conversation, "main_agent")
 	if err != nil {

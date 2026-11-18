@@ -45,14 +45,23 @@ type MessageAssociations struct {
 
 // MessageAssociationState is shared owner metadata; responsibility identity is projected by its caller.
 type MessageAssociationState struct {
-	Processing      *MessageProcessingState `json:"processing,omitempty"`
-	Disposition     string                  `json:"disposition"`
-	ContentRevision int64                   `json:"content_revision"`
-	FactsReviewed   bool                    `json:"facts_reviewed"`
-	OwnerLocked     bool                    `json:"owner_locked"`
-	MessageID       string                  `json:"message_id"`
-	Revision        int64                   `json:"revision"`
+	CompletionReport *IssueCompletionReport  `json:"completion_report,omitempty"`
+	Processing       *MessageProcessingState `json:"processing,omitempty"`
+	Disposition      string                  `json:"disposition"`
+	ContentRevision  int64                   `json:"content_revision"`
+	FactsReviewed    bool                    `json:"facts_reviewed"`
+	OwnerLocked      bool                    `json:"owner_locked"`
+	MessageID        string                  `json:"message_id"`
+	Revision         int64                   `json:"revision"`
 }
+
+// IssueCompletionReport is the owner message’s agreement and its original publication receipt.
+type IssueCompletionReport struct {
+	IssueIDs           []string `json:"issue_ids"`
+	ContentRevision    int64    `json:"content_revision"`
+	PublishedMessageID string   `json:"published_message_id,omitempty"`
+}
+
 type SetMessageAssociationsPayload struct {
 	Disposition     string   `json:"disposition"`
 	ContentRevision int64    `json:"content_revision"`

@@ -396,6 +396,17 @@ func respondMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, id 
 	out.Result = map[string]any{"interaction": i, "message_id": message}
 	out.Events = append(out.Events, Event{ObjectType: "message", ObjectID: message, Kind: "conversation.message_state", Body: map[string]any{"state": "replied", "interaction_id": i.ID}})
 	out.Notify = true
+	// Web and Telegram show the candidate decision on the original card.
+	// The Telegram edit has its own delivery and fallback for uneditable cards.
+	if i.ObjectType == "decision" && i.State == "answered" && i.Effect == nil && oneOf(origin.Channel, "web", "telegram") {
+		var candidateAnswer bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_delivery_answers WHERE decision_id=? AND message_id=?)`, i.ObjectID, message).Scan(&candidateAnswer); err != nil {
+			return Outcome{}, err
+		}
+		if candidateAnswer {
+			return out, nil
+		}
+	}
 	// A formal reply is delivered only to the channel where this answer originated.
 	summary := splitCommunication(i.AnswerSummary, 1200)
 	answer := ""
@@ -851,6 +862,18 @@ func (a *App) RespondTelegramInteraction(ctx context.Context, u TelegramInbox, u
 	payload, _ := json.Marshal(map[string]any{"user": user, "chat": chat, "message": external, "data": data})
 	env := &protocol.Envelope{RequestID: u.RequestID, Operation: "messaging.telegram_interaction", Target: protocol.Target{Type: "message"}, Payload: payload}
 	return a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalOwner, Subject: b.Owner, Client: "telegram"}, env, telegramInteraction{Inbox: u, User: user, Chat: chat, External: external, Data: data})
+}
+
+func registerDecisionAnswerInput(ctx context.Context, x *Exec, tx *store.Tx, d store.DecisionRow, id string) error {
+	// A delegated panel call has owner authority but no incoming channel.
+	// Use the original decision's current recipient for its chat audience.
+	if x.interactionOrigin == nil && x.ActualPrincipal().Kind != protocol.PrincipalOwner {
+		human, err := store.HumanProblem(ctx, tx.Q(), "decision", d.DecisionID)
+		if err != nil || !human {
+			return err
+		}
+	}
+	return registerInteractionAnswerInput(ctx, x, tx, id, d.AskedMessageID)
 }
 
 func registerInteractionAnswerInput(ctx context.Context, x *Exec, tx *store.Tx, id, reply string) error {

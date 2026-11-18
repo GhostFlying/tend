@@ -230,6 +230,8 @@ type FeishuPart struct {
 	Body       string `json:"body"`
 }
 
+const feishuTextPartLimit = 1000
+
 func queueFeishuCommunication(ctx context.Context, x *Exec, tx *store.Tx, id string, p protocol.MessagingPublication) error {
 	b, err := readFeishuBinding(ctx, tx.Q())
 	if err != nil {
@@ -262,7 +264,7 @@ func queueFeishuCommunication(ctx context.Context, x *Exec, tx *store.Tx, id str
 			body = p.Body + "\n\n" + body
 		}
 	}
-	parts := splitCommunication(body, 1000)
+	parts := splitCommunication(body, feishuTextPartLimit)
 	for n, body := range parts {
 		state := "queued"
 		if !b.Enabled || b.RuntimeHealth == "disabled" || !sourceCurrent {

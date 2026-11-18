@@ -28,11 +28,11 @@ func (SetMessageAssociations) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 }
 
 func applyMessageAssociations(ctx context.Context, x *Exec, tx *store.Tx, p protocol.SetMessageAssociationsPayload, canonical bool) (Outcome, error) {
-	return applyMessageAssociationsWithRetainedLinks(ctx, x, tx, p, canonical, false)
+	return applyMessageAssociationsWithRetainedLinks(ctx, x, tx, p, canonical, false, nil)
 }
 
 // Explicit reuse preserves existing display links without granting them control authority.
-func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx *store.Tx, p protocol.SetMessageAssociationsPayload, canonical, preserveRetained bool) (Outcome, error) {
+func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx *store.Tx, p protocol.SetMessageAssociationsPayload, canonical, preserveRetained bool, completionMembers *[]string) (Outcome, error) {
 	if len(p.WorkItemIDs) > 50 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "at most 50 associations")
 	}
@@ -83,7 +83,11 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 	for _, item := range old.Items {
 		same = same && desired[item.WorkItemID]
 	}
-	if same && (!classificationOwner || old.OwnerLocked) {
+	reportChanged, err := completionReportChange(ctx, tx.Q(), old, desired, completionMembers)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if same && !reportChanged && (!classificationOwner || old.OwnerLocked) {
 		if err := attachAssociationReviewSource(ctx, x, tx, old.MessageID, canonical); err != nil {
 			return Outcome{}, err
 		}
@@ -126,6 +130,11 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO message_dispositions(message_id,content_revision,disposition,classified_revision,owner_locked,source,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET disposition=excluded.disposition,classified_revision=excluded.classified_revision,facts_revision=0,owner_locked=MAX(owner_locked,excluded.owner_locked),source=excluded.source,updated_at=excluded.updated_at`, old.MessageID, p.ContentRevision, p.Disposition, p.ContentRevision, owner, source, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
+	}
+	if reportChanged {
+		if err := setCompletionReport(ctx, x, tx, old.MessageID, p.ContentRevision, *completionMembers); err != nil {
+			return Outcome{}, err
+		}
 	}
 	updated, err := store.MessageAssociations(ctx, tx.Q(), old.MessageID)
 	if err != nil {
