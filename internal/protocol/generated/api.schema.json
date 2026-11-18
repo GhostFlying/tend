@@ -5846,6 +5846,9 @@
         "observer": {
           "type": "string"
         },
+        "previous_head_sha": {
+          "type": "string"
+        },
         "provider_updated_at": {
           "type": "string"
         },
@@ -9643,6 +9646,9 @@
           "$ref": "#/definitions/DeliveryActor"
         },
         "observer": {
+          "type": "string"
+        },
+        "previous_head_sha": {
           "type": "string"
         },
         "provider_updated_at": {

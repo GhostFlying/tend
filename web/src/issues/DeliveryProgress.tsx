@@ -67,7 +67,8 @@ export function DeliveryProgress({
   const currentConflict = conflict && sameConflict ? c : undefined;
   const conflictUnknown =
     o.state === "open" && sameConflict && (!o.mergeability || o.mergeability === "unknown");
-  const replaced = c && c.head_sha !== head;
+  const earlierConflict = c && c.head_sha !== head ? c : undefined;
+  const replaced = o.previous_head_sha && o.previous_head_sha !== head;
   const ci = o.ci?.head_sha === head ? o.ci : undefined;
   const time = currentConflict?.checked_at ?? o.checked_at;
   const observer = currentConflict?.observer ?? o.observer;
@@ -111,9 +112,9 @@ export function DeliveryProgress({
           </time>
         </p>
       ) : null}
-      {replaced ? (
+      {earlierConflict ? (
         <p className={styles.muted}>
-          此前冲突 · <CandidateIdentity candidate={c} />
+          此前冲突 · <CandidateIdentity candidate={earlierConflict} />
         </p>
       ) : null}
       {ci ? (

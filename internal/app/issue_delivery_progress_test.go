@@ -119,12 +119,25 @@ func TestIssueDeliveryProgressFollowsObservedCandidate(t *testing.T) {
 		t.Fatalf("returning to an earlier baseline revived the previous action: %+v", delivery)
 	}
 
-	snapshot.HeadSHA, snapshot.BaseSHA, snapshot.Mergeability = "new", "tip", "mergeable"
+	episodeBeforeEnd := delivery.Observation.LastConflict.Revision
+	snapshot.Mergeability = "mergeable"
+	record(snapshot, "")
+	snapshot.Mergeability = "unknown"
+	record(snapshot, "")
+	snapshot.Mergeability = "conflicting"
+	record(snapshot, "")
+	delivery, _, _ = read()
+	if delivery.Observation.LastConflict.Revision == episodeBeforeEnd || delivery.ConflictProgress != nil {
+		t.Fatalf("unknown observation revived an ended conflict: %+v", delivery)
+	}
+
+	snapshot.HeadSHA, snapshot.BaseSHA = "new", "tip"
 	snapshot.CI = &protocol.DeliveryCI{HeadSHA: "new", State: "pending"}
 	record(snapshot, "")
 	delivery, progress, history := read()
 	if delivery.Observation.HeadSHA != "new" || delivery.Observation.CI.HeadSHA != "new" ||
-		delivery.Observation.LastConflict.HeadSHA != "old" || delivery.ConflictProgress != nil {
+		delivery.Observation.LastConflict.HeadSHA != "new" ||
+		delivery.Observation.PreviousHeadSHA != "old" || delivery.ConflictProgress != nil {
 		t.Fatalf("current and previous candidates were mixed: %+v", delivery)
 	}
 	if progress == nil || !progress.Historical || progress.HistoricalReason != "delivery_candidate_changed" {
@@ -161,5 +174,67 @@ func TestIssueDeliveryProgressFollowsObservedCandidate(t *testing.T) {
 	_, edited, _ := read()
 	if !edited.Historical || edited.Delivery.HeadSHA != "old" {
 		t.Fatalf("editing historical progress reinterpreted it as current: %+v", edited)
+	}
+}
+
+func TestIssueCandidateHistorySurvivesOverlappingRefreshes(t *testing.T) {
+	h := newHarness(t)
+	h.app.serverDeliveryObservations = true
+	ref := protocol.IssueDelivery{DeliveryID: "pr", Provider: "github", Repository: "example/project", Number: 343}
+	plan := protocol.IssuePlan{Title: "Candidate history", Project: DefaultProject, Intent: "Preserve replaced CI", Deliveries: []protocol.IssueDelivery{ref}}
+	created := h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, canonicalOwnerIssueCreate{Plan: plan}, nil), historicalAdmittedIssueFixture{})
+	var issue protocol.Issue
+	if created.Status != protocol.OpSucceeded || json.Unmarshal(created.Result, &issue) != nil {
+		t.Fatal(created)
+	}
+	claim := func() *ServerDeliveryQuery {
+		t.Helper()
+		query, err := h.app.ClaimServerDelivery(t.Context())
+		if err != nil || query == nil {
+			t.Fatal(query, err)
+		}
+		return query
+	}
+	record := func(query *ServerDeliveryQuery, head string) {
+		t.Helper()
+		snapshot := &protocol.DeliverySnapshot{
+			State: "open", HeadSHA: head, BaseSHA: "base", TargetSHA: "tip",
+			CI: &protocol.DeliveryCI{HeadSHA: head, State: "running"},
+		}
+		if err := h.app.RecordServerDelivery(t.Context(), query.ID, snapshot, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(claim(), "first")
+	h.clock.Advance(6 * time.Minute)
+	second := claim()
+	refresh := protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, DeliveryID: ref.DeliveryID}
+	if op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: issue.IssueID}, refresh, rev(issue.Revision)), IssueRefreshDelivery{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	record(second, "second")
+	h.clock.Advance(6 * time.Minute)
+	record(claim(), "third")
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		activity, err := views.IssueActivity(t.Context(), tx.Q(), issue.IssueID, 0)
+		if err != nil {
+			return err
+		}
+		retired := map[string]int{}
+		for _, item := range activity.Items {
+			if item.Kind == "work_item.delivery_candidate_retired" && item.Delivery != nil {
+				o := item.Delivery.Observation
+				if o.IssueID != issue.IssueID || o.DeliveryID != ref.DeliveryID || o.CI == nil || o.CI.HeadSHA != o.HeadSHA {
+					t.Fatalf("bad original evidence: %+v", o)
+				}
+				retired[o.HeadSHA]++
+			}
+		}
+		if retired["first"] != 1 || retired["second"] != 1 || retired["third"] != 0 {
+			t.Fatalf("lost or duplicated a displaced candidate: %v", retired)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

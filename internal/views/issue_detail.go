@@ -205,7 +205,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	kinds := []string{"artifact.submitted", "work_item.delivery_changed", "work_item.delivery_candidate_retired"}
+	kinds := []string{"artifact.submitted", "work_item.delivery_changed"}
 	for kind := range issueActivityTitles {
 		kinds = append(kinds, kind)
 	}
@@ -226,7 +226,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  SELECT e.event_seq,e.kind,e.object_id,e.created_at FROM events e
  WHERE e.kind IN (SELECT value FROM json_each(?)) AND (
  (e.object_type='issue' AND e.object_id=?)
- OR (e.kind IN ('work_item.delivery_changed','work_item.delivery_candidate_retired') AND e.object_type='work_item' AND e.object_id=? AND json_type(e.body_json,'$.delivery_progress')='object')
+ OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=? AND json_type(e.body_json,'$.delivery_progress')='object')
  OR (e.kind='task.manager_requested' AND e.object_id IN (SELECT task_id FROM manager_tasks))
  OR (e.object_id IN (SELECT task_id FROM primary_tasks))
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))
@@ -234,8 +234,12 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  OR (e.object_type='attention' AND e.object_id IN (SELECT attention_id FROM attentions WHERE issue_id=?))
  OR (e.object_type='issue' AND EXISTS (SELECT 1 FROM issue_control_revisions c WHERE c.issue_id=e.object_id AND c.revision=e.object_version AND json_extract(c.snapshot_json,'$.control.parent_issue_id')=?) AND
  (e.kind IN ('issue.closed','issue.cancelled','issue.assigned','issue.manager_claimed','issue.manager_migration_cancelled') OR (e.kind='issue.status_changed' AND json_extract(e.body_json,'$.state') IN ('closed','cancelled'))))
- ))
- SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, id, out.EventSeq, before, before)
+ )
+ UNION ALL
+ SELECT e.event_seq,e.kind,h.delivery_id,e.created_at FROM issue_delivery_candidate_history h
+ JOIN events e ON e.event_seq=h.event_seq WHERE h.issue_id=?
+ )
+ SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, id, id, out.EventSeq, before, before)
 	if err != nil {
 		return out, fmt.Errorf("views: issue activity: %w", err)
 	}
@@ -309,6 +313,11 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			case "work_item.delivery_changed":
 				entry.Delivery, entry.Title = facts.Delivery, "记录了交付候选观察"
 			case "work_item.delivery_candidate_retired":
+				if facts.Delivery != nil {
+					facts.Delivery.Delivery.DeliveryID = r.id
+					facts.Delivery.Observation.IssueID = id
+					facts.Delivery.Observation.DeliveryID = r.id
+				}
 				entry.Delivery, entry.Title = facts.Delivery, "保留了被替换的候选观察"
 			}
 			if r.kind == "issue.progress_updated" {

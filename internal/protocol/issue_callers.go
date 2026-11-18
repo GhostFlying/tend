@@ -89,6 +89,7 @@ type IssueFollowupHistory struct {
 
 type IssueDeliveryObservation struct {
 	DeliverySnapshot
+	PreviousHeadSHA         string            `json:"previous_head_sha,omitempty"`
 	LastConflict            *DeliveryConflict `json:"last_conflict,omitempty"`
 	Observer                string            `json:"observer,omitempty"`
 	RetryCount              int               `json:"retry_count,omitempty"`
@@ -127,5 +128,5 @@ func CanonicalFollowupOccurrence(o FollowupOccurrence) IssueFollowupOccurrence {
 	return IssueFollowupOccurrence{IssueID: o.WorkItemID, BackgroundMessageID: o.BackgroundMessageID, Checkin: o.Checkin, OccurrenceID: o.OccurrenceID, RuleID: o.RuleID, Revision: o.Revision, MessageID: o.MessageID, Reason: o.Reason, Status: o.Status, Evidence: o.Evidence, CreatedAt: o.CreatedAt}
 }
 func CanonicalDeliveryObservation(o DeliveryObservation) IssueDeliveryObservation {
-	return IssueDeliveryObservation{LastConflict: o.LastConflict, Observer: o.Observer, RetryCount: o.RetryCount, RetryAt: o.RetryAt, ErrorMessage: o.ErrorMessage, BaselineUpgradeID: o.BaselineUpgradeID, BaselineUpgradeRevision: o.BaselineUpgradeRevision, DeliverySnapshot: o.DeliverySnapshot, IssueID: o.WorkItemID, DeliveryID: o.DeliveryID, Generation: o.Generation, CheckedAt: o.CheckedAt, AttemptedAt: o.AttemptedAt, ErrorKind: o.ErrorKind, RefreshPending: o.RefreshPending}
+	return IssueDeliveryObservation{PreviousHeadSHA: o.PreviousHeadSHA, LastConflict: o.LastConflict, Observer: o.Observer, RetryCount: o.RetryCount, RetryAt: o.RetryAt, ErrorMessage: o.ErrorMessage, BaselineUpgradeID: o.BaselineUpgradeID, BaselineUpgradeRevision: o.BaselineUpgradeRevision, DeliverySnapshot: o.DeliverySnapshot, IssueID: o.WorkItemID, DeliveryID: o.DeliveryID, Generation: o.Generation, CheckedAt: o.CheckedAt, AttemptedAt: o.AttemptedAt, ErrorKind: o.ErrorKind, RefreshPending: o.RefreshPending}
 }

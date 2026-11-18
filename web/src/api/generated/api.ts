@@ -1138,6 +1138,7 @@ export interface DeliveryObservation {
   merged_at?: string;
   merged_by?: DeliveryActor;
   observer?: string;
+  previous_head_sha?: string;
   provider_updated_at?: string;
   refresh_pending?: boolean;
   retry_at?: number;
@@ -4467,6 +4468,7 @@ export interface IssueDeliveryObservation {
   merged_at?: string;
   merged_by?: DeliveryActor;
   observer?: string;
+  previous_head_sha?: string;
   provider_updated_at?: string;
   refresh_pending?: boolean;
   retry_at?: number;
