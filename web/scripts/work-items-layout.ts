@@ -597,8 +597,12 @@ try {
     await editIssueFilters(page, () => filter.fill("docs"));
     await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await board.getByRole("button", { name: "持续跟进目标 9", exact: true }).click();
+    await detail
+      .getByRole("region", { name: "收尾结论" })
+      .getByText("当前收尾依据V2", { exact: true })
+      .waitFor();
     await openIssueDefinition(page);
-    await detail.getByText("当前收尾依据V2", { exact: true }).waitFor();
+    assert.equal(await detail.getByText("当前收尾依据V2", { exact: true }).count(), 1);
     await detail
       .locator("summary")
       .filter({ hasText: /^留存依据/ })

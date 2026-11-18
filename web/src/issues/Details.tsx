@@ -25,7 +25,7 @@ import { WorkItemRead } from "../workitems/live.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
 import { issueStateLabel } from "./Hierarchy.tsx";
 import { workStatus, workStatusLabel } from "./boardModel.ts";
-import { IssueEvidenceRead, IssuePlanRead } from "./PlanRead.tsx";
+import { IssueClosureRead, IssuePlanRead } from "./PlanRead.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
 import { ManagerStatus } from "./ManagerStatus.tsx";
@@ -502,10 +502,7 @@ export function IssueDetails({
                     {issue.state === "cancelled" ? (
                       <Markdown text={issue.cancellation_reason || "该次取消没有留存原因。"} />
                     ) : issue.closure ? (
-                      <>
-                        <Markdown text={issue.closure.reason} />
-                        <IssueEvidenceRead items={issue.closure.evidence} />
-                      </>
+                      <IssueClosureRead closure={issue.closure} />
                     ) : (
                       <p className={styles.muted}>该次关闭没有留存收尾说明。</p>
                     )}
@@ -641,7 +638,7 @@ export function IssueDetails({
                 )}
                 <details className={styles.definition}>
                   <summary>目标与完成条件</summary>
-                  <IssuePlanRead issue={issue} />
+                  <IssuePlanRead issue={issue} showClosure={!ended} />
                   <Button
                     variant="link"
                     disabled={!editable}
