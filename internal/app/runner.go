@@ -459,7 +459,8 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 		ContinuationsSupported: runtimeSupportsAgentContinuation(p.Runtime), Continuations: continuations, Executors: executors,
 	}
-	if err := concurrencyClaimHost(ctx, tx, &schedulingHost, p.Runtime, x.Now.UnixMilli()); err != nil {
+	concurrencyNow := x.clock().UnixMilli()
+	if err := concurrencyClaimHost(ctx, tx, &schedulingHost, p.Runtime, concurrencyNow); err != nil {
 		return Outcome{}, err
 	}
 	pick, ok := scheduler.Pick(schedulingHost, candidates, scheduler.Order{Now: x.Now.UnixMilli(), WaitPerHour: x.WaitPerHour})
@@ -551,7 +552,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if err := putConcurrencyExecution(ctx, tx, source, "reserved", now); err != nil {
+		if err := putConcurrencyExecution(ctx, tx, source, "reserved", concurrencyNow); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -1332,9 +1333,9 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 	}
 	ctx = staged
 
-	now := a.now().UnixMilli()
 	changed, wakeQueued := false, false
 	err = a.write(ctx, func(tx *store.Tx) error {
+		now := a.now().UnixMilli()
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
 			return errNotFound(err, "run %s does not exist", runID)
