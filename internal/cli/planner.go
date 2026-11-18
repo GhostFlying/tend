@@ -35,7 +35,7 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 	kind := fs.String("kind", "", "user_action or issue_priority")
 	var ownerOnly *bool
 	if !deadline && action == "list" {
-		ownerOnly = fs.Bool("owner-only", false, "only personal actions routed to your owner identity")
+		ownerOnly = fs.Bool("owner-only", false, "scope personal actions to your owner identity while retaining Issue priorities")
 	}
 	pos, err := parse(fs, args[1:])
 	if err != nil {

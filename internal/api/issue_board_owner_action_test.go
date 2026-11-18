@@ -74,7 +74,7 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	putPlanner(running.IssueID, first.AttentionID, ownerLogin, "user_action", "open")
 	putPlanner(review.IssueID, "", ownerLogin, "user_action", "blocked")
 	putPlanner(system.IssueID, internal.AttentionID, ownerLogin, "user_action", "open")
-	putPlanner(system.IssueID, "", ownerLogin, "issue_priority", "open")
+	blockedPriority := putPlanner(system.IssueID, "", otherLogin, "issue_priority", "blocked")
 	legacyAction := putPlanner(system.IssueID, "", "本人", "user_action", "open")
 	linkedOther := putPlanner(system.IssueID, notice.AttentionID, otherLogin, "user_action", "open")
 	putPlanner(outsider.IssueID, "", otherLogin, "user_action", "open")
@@ -113,6 +113,10 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	}
 	if code := e.do("GET", actionsPath+system.IssueID+"&owner_only=true", token, nil, &listing); code != http.StatusOK || len(listing.Items) != 0 {
 		t.Fatal("an informational link must not infer owner responsibility", code, listing)
+	}
+	if code := e.do("GET", "/api/v1/next-actions?owner_only=true&issue_id="+system.IssueID, token, nil, &listing); code != http.StatusOK ||
+		len(listing.Items) != 1 || listing.Items[0].EntryID != blockedPriority.EntryID || listing.Items[0].Status != "blocked" {
+		t.Fatal("scoping personal actions must retain blocked Issue priorities", code, listing)
 	}
 	e.peer.set(netx.Identity{User: otherLogin})
 	if code := e.do("GET", actionsPath+system.IssueID+"&owner_only=true", otherSession.Token, nil, &listing); code != http.StatusOK ||

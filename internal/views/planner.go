@@ -58,7 +58,7 @@ func OwnerNextActions(ctx context.Context, q store.Querier, kind, issue, owner s
  AND (p.kind<>'user_action' OR COALESCE(r.recipient_kind,'owner')='owner')`
 	args := []any{kind, kind, issue, issue}
 	if owner != "" {
-		query += ` AND p.kind='user_action' AND ` + ownerPlannerRecipientSQL
+		query += ` AND (p.kind<>'user_action' OR ` + ownerPlannerRecipientSQL + `)`
 		args = append(args, owner, owner)
 	}
 	rows, err := q.QueryContext(ctx, query+` ORDER BY p.kind,p.rank=0,p.rank,p.entry_id`, args...)

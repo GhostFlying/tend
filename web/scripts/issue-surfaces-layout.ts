@@ -18,6 +18,7 @@ import type {
   IssuePlan,
   TaskDetail,
   IssueResult,
+  PlannerEntry,
 } from "../src/api/generated/api.ts";
 const copyOnly = process.argv.includes("--s5-copy-only");
 const childTitleOnly = process.argv.includes("--child-title-layout-only");
@@ -689,38 +690,58 @@ const server = createServer(async (req, res) => {
             },
           },
     );
-  if (p === "/api/v1/next-actions")
+  if (p === "/api/v1/next-actions") {
+    const items: PlannerEntry[] = [
+      {
+        entry_id: "next-decision",
+        revision: 1,
+        kind: "user_action",
+        issue_id: issue.issue_id,
+        attention_id: decision.attention_id,
+        title: decision.title,
+        responsible: "owner",
+        rank: 1,
+        status: decision.status === "open" ? "open" : "done",
+        reason: "发布前确认",
+        expected_at: now + 3600_000,
+        updated_at: now,
+      },
+      {
+        entry_id: "risk",
+        revision: 1,
+        kind: "issue_priority",
+        issue_id: issue.issue_id,
+        title: "验收等待实施交付",
+        responsible: "qingzhu",
+        rank: 2,
+        status: "blocked",
+        reason: "等待实施证据",
+        updated_at: now,
+      },
+      {
+        entry_id: "other-owner",
+        revision: 1,
+        kind: "user_action",
+        issue_id: issue.issue_id,
+        title: "其他 owner 的待办",
+        responsible: "other-owner",
+        rank: 3,
+        status: "blocked",
+        reason: "按明确身份处理",
+        updated_at: now,
+      },
+    ];
+    const kind = u.searchParams.get("kind");
+    const ownerOnly = u.searchParams.get("owner_only") === "true";
     return json({
-      items: [
-        {
-          entry_id: "next-decision",
-          revision: 1,
-          kind: "user_action",
-          issue_id: issue.issue_id,
-          attention_id: decision.attention_id,
-          title: decision.title,
-          responsible: "owner",
-          rank: 1,
-          status: decision.status === "open" ? "open" : "done",
-          reason: "发布前确认",
-          expected_at: now + 3600_000,
-          updated_at: now,
-        },
-        {
-          entry_id: "risk",
-          revision: 1,
-          kind: "issue_priority",
-          issue_id: issue.issue_id,
-          title: "验收等待实施交付",
-          responsible: "qingzhu",
-          rank: 2,
-          status: "blocked",
-          reason: "等待实施证据",
-          updated_at: now,
-        },
-      ],
+      items: items.filter(
+        (item) =>
+          (!kind || item.kind === kind) &&
+          (!ownerOnly || item.kind !== "user_action" || item.responsible === "owner"),
+      ),
       deadlines: [],
     });
+  }
   if (p === "/api/v1/inbox") {
     if (copyOnly && u.searchParams.get("status") === "open")
       return json({ items: [], more: false });
@@ -2654,6 +2675,9 @@ try {
     await page.getByRole("button", { name: "稍后处理", exact: true }).click();
     await page.waitForURL((url) => url.pathname === "/inbox");
     assert.equal(new URL(page.url()).pathname, "/inbox");
+    await page.getByText("近期风险", { exact: true }).waitFor();
+    await page.getByText("验收等待实施交付", { exact: true }).waitFor();
+    assert.equal(await page.getByText("其他 owner 的待办", { exact: true }).count(), 0);
     await page.getByRole("tab", { name: "通知", exact: true }).click();
     await page
       .getByRole("region", { name: "待处理事项", exact: true })
