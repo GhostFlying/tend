@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -233,6 +234,56 @@ func TestCombinedIssueReportContinuedDiscussionRoutesToMain(t *testing.T) {
 	notice := protocol.MessagingPublication{Body: "Two other responsibilities to consider.", SourceMessageIDs: []string{report}, IssueIDs: ids}
 	op := h.exec(owner, h.env("messaging.notify", protocol.Target{Type: "message"}, notice, nil), MessagingCommand{Action: "notify"})
 	expectWorkCode(t, ask(messageID(t, op)), protocol.CodeInvalidRequest)
+}
+
+func TestCombinedIssueReportPreservesOwnerClassification(t *testing.T) {
+	h := hostedManagerHarness(t)
+	a, b := createCanonicalOwnerTestIssue(t, h), createCanonicalOwnerTestIssue(t, h)
+	source, delivery := h.say("Report A and B together once they are done.")
+	main := startHostedReview(t, h, "main", delivery)
+	ids := []string{a.IssueID, b.IssueID}
+	if op := h.associate(owner, source, ids...); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	prior := h.associations(source)
+	review := protocol.LogicalTurnCommit{Messages: []protocol.LogicalTurnReview{{MessageID: source, ContentRevision: prior.ContentRevision, AssociationRevision: prior.Revision}}}
+	cmd := CommitLogicalTurn{RequestID: main.RequestID}
+	if op := h.exec(mainAgent, h.env(cmd.Operation(), protocol.Target{Type: "logical_turn", ID: main.RequestID}, review, nil), cmd); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	locked := h.associations(source)
+	if !locked.OwnerLocked || !locked.FactsReviewed {
+		t.Fatal("expected the owner's locked, reviewed classification", locked)
+	}
+	history := h.countWhere(`SELECT COUNT(*) FROM message_disposition_history WHERE message_id=?`, source)
+	update := func(seq, revision int64, links, members []string) protocol.Operation {
+		t.Helper()
+		p := protocol.SetIssueMessageAssociationsPayload{Disposition: "linked", ContentRevision: locked.ContentRevision, IssueIDs: links, CompletionReportIssueIDs: &members}
+		return hostedEffect(t, h, mainAgent, main, seq, protocol.Target{Type: "message", ID: source}, rev(revision), p, SetIssueMessageAssociations{})
+	}
+	for i, members := range [][]string{ids, ids[:1], {}} {
+		seq := int64(i + 1)
+		before := h.associations(source)
+		expectWorkCode(t, update(seq, before.Revision, ids[:1], ids[:1]), protocol.CodeInvalidRequest)
+		if op := update(seq, before.Revision, ids, members); op.Status != protocol.OpSucceeded {
+			t.Fatal("Main could not change the report agreement", op)
+		}
+		current := h.associations(source)
+		if current.Revision <= before.Revision || !current.FactsReviewed || !current.OwnerLocked || current.Disposition != locked.Disposition || !slices.Equal(current.Items, locked.Items) {
+			t.Fatal("report update changed the owner's classification or fact review", current)
+		}
+		if len(members) == 0 {
+			if current.CompletionReport != nil {
+				t.Fatal("agreement was not cancelled", current)
+			}
+		} else if current.CompletionReport == nil || !slices.Equal(current.CompletionReport.IssueIDs, members) {
+			t.Fatal("agreement did not retain the requested members", current)
+		}
+		expectWorkCode(t, update(seq+1, before.Revision, ids, members), protocol.CodeStaleRevision)
+	}
+	if n := h.countWhere(`SELECT COUNT(*) FROM message_disposition_history WHERE message_id=?`, source); n != history {
+		t.Fatalf("report changes created %d classification history entries", n-history)
+	}
 }
 
 func TestCombinedIssueReportChangesAndNoncompletion(t *testing.T) {

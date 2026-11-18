@@ -87,9 +87,24 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if same && !reportChanged && (!classificationOwner || old.OwnerLocked) {
+	if same && (!classificationOwner || old.OwnerLocked) {
 		if err := attachAssociationReviewSource(ctx, x, tx, old.MessageID, canonical); err != nil {
 			return Outcome{}, err
+		}
+		if reportChanged {
+			// A report agreement shares the association CAS but does not classify
+			// the source again or invalidate the review of its existing facts.
+			if err := setCompletionReport(ctx, x, tx, old.MessageID, p.ContentRevision, *completionMembers); err != nil {
+				return Outcome{}, err
+			}
+			revision, err := advanceMessageAssociationRevision(ctx, tx, old.MessageID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			return Outcome{Result: map[string]any{"revision": revision}, Notify: true, Events: []Event{{
+				ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed",
+				Body: map[string]any{"completion_report_issue_ids": *completionMembers},
+			}}}, nil
 		}
 		return Outcome{Result: map[string]any{"revision": old.Revision}}, nil
 	}
@@ -125,7 +140,8 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 			return Outcome{}, err
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO message_association_revisions(message_id,revision) VALUES(?,1) ON CONFLICT(message_id) DO UPDATE SET revision=revision+1`, old.MessageID); err != nil {
+	revision, err := advanceMessageAssociationRevision(ctx, tx, old.MessageID)
+	if err != nil {
 		return Outcome{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO message_dispositions(message_id,content_revision,disposition,classified_revision,owner_locked,source,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET disposition=excluded.disposition,classified_revision=excluded.classified_revision,facts_revision=0,owner_locked=MAX(owner_locked,excluded.owner_locked),source=excluded.source,updated_at=excluded.updated_at`, old.MessageID, p.ContentRevision, p.Disposition, p.ContentRevision, owner, source, x.Now.UnixMilli()); err != nil {
@@ -136,23 +152,19 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 			return Outcome{}, err
 		}
 	}
-	updated, err := store.MessageAssociations(ctx, tx.Q(), old.MessageID)
-	if err != nil {
-		return Outcome{}, err
-	}
 	before, _ := json.Marshal(old.Items)
 	after, _ := json.Marshal(p.WorkItemIDs)
 	actor, _ := json.Marshal(x.ActualPrincipal())
-	if _, err := tx.Exec(ctx, `INSERT INTO message_association_history(message_id,revision,actor,before_json,after_json,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, updated.Revision, string(actor), string(before), string(after), x.Now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO message_association_history(message_id,revision,actor,before_json,after_json,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, revision, string(actor), string(before), string(after), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO message_disposition_history(message_id,content_revision,association_revision,disposition,actor,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, p.ContentRevision, updated.Revision, p.Disposition, string(actor), x.Now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO message_disposition_history(message_id,content_revision,association_revision,disposition,actor,created_at) VALUES(?,?,?,?,?,?)`, old.MessageID, p.ContentRevision, revision, p.Disposition, string(actor), x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	if err := attachAssociationReviewSource(ctx, x, tx, old.MessageID, canonical); err != nil {
 		return Outcome{}, err
 	}
-	out := Outcome{Result: map[string]any{"revision": updated.Revision}, Events: []Event{{ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed"}}}
+	out := Outcome{Result: map[string]any{"revision": revision}, Events: []Event{{ObjectType: "message", ObjectID: old.MessageID, Kind: "conversation.associations_changed"}}}
 	if owner && x.ActualPrincipal().Kind != protocol.PrincipalMainAgent {
 		if err := queueCoordinationNotice(ctx, x, tx, "Message associations were corrected by the owner. Re-read this message and reconcile derived facts; this does not undo prior execution.", old.MessageID, "main"); err != nil {
 			return Outcome{}, err
@@ -165,6 +177,13 @@ func applyMessageAssociationsWithRetainedLinks(ctx context.Context, x *Exec, tx 
 	}
 	out.Notify = out.Notify || notified
 	return out, nil
+}
+
+func advanceMessageAssociationRevision(ctx context.Context, tx *store.Tx, message string) (int64, error) {
+	var revision int64
+	err := tx.Q().QueryRowContext(ctx, `INSERT INTO message_association_revisions(message_id,revision) VALUES(?,1)
+		ON CONFLICT(message_id) DO UPDATE SET revision=revision+1 RETURNING revision`, message).Scan(&revision)
+	return revision, err
 }
 
 // ContextCommand persists sourced facts and baseline coverage without inventing authority.
