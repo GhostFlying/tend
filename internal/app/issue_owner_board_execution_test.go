@@ -109,6 +109,17 @@ func TestIssueBoardProjectsCurrentOwnerExecutionAcrossPhysicalWait(t *testing.T)
 		t.Fatal(err)
 	}
 	check("original wait requeued", protocol.ExecutionCounts{Queued: 1, Running: 1}, "task.external_wait_ready")
+	setMode := func(mode protocol.ControlMode) {
+		t.Helper()
+		op := h.exec(owner, h.env("control.set_mode", taskTarget(as.TaskID), protocol.SetControlModePayload{Mode: mode}, rev(h.task(as.TaskID).ControlRevision)), SetControlMode{})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	setMode(protocol.ControlPaused)
+	check("paused owner action cannot be claimed", protocol.ExecutionCounts{Paused: 1, Running: 1}, "")
+	setMode(protocol.ControlManaged)
+	check("owner action can be claimed again", protocol.ExecutionCounts{Queued: 1, Running: 1}, "")
 	next := ownerClaim(t, h, runtime)
 	if next.RunID == as.RunID || next.TaskID != as.TaskID || next.ExternalWaitContinuation == nil || next.ExternalWaitContinuation.WaitID != wait.WaitID {
 		t.Fatal("wrong owner successor", next)

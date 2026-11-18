@@ -17,7 +17,7 @@ import (
 type executionFacts struct {
 	candidates   map[string]scheduler.Candidate
 	issues       map[string]scheduler.Candidate
-	ownerActions map[string]bool
+	ownerActions map[string]protocol.ExecutionState
 	hosts        []executionHost
 }
 
@@ -90,7 +90,7 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 }
 
 func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, error) {
-	facts := executionFacts{issues: map[string]scheduler.Candidate{}, candidates: map[string]scheduler.Candidate{}, ownerActions: map[string]bool{}}
+	facts := executionFacts{issues: map[string]scheduler.Candidate{}, candidates: map[string]scheduler.Candidate{}, ownerActions: map[string]protocol.ExecutionState{}}
 	rows, err := store.ListClaimCandidates(ctx, q)
 	if err != nil {
 		return facts, err
@@ -115,8 +115,12 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		if c.TargetSpecVersion != c.SpecVersion || c.Kind == protocol.ActionImplement && c.Generation != c.ImplementGeneration || c.Kind == protocol.ActionAccept && (c.Lifecycle != protocol.TaskAwaitingAcceptance || c.TargetArtifactID != c.CurrentArtifactID) {
 			continue
 		}
-		if c.Manager != nil && !c.Manager.ReceiptOnly && !c.ManagerAuthorizationInvalid {
-			facts.ownerActions[c.TaskID] = true
+		if c.Manager != nil && !c.Manager.ReceiptOnly && !c.ManagerAuthorizationInvalid && !c.Lifecycle.Terminal() {
+			state := protocol.ExecutionQueued
+			if c.Control != protocol.ControlManaged {
+				state = protocol.ExecutionPaused
+			}
+			facts.ownerActions[c.TaskID] = state
 		}
 		facts.candidates[c.TaskID] = c
 	}

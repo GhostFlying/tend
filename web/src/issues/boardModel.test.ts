@@ -87,6 +87,7 @@ test("terminal and reopened projections preserve historical next steps without m
 test("running and external waiting come from execution even when review is queued", () => {
   const item = issue({ work_status: "in_review" });
   const board = item.board!;
+  board.status = "in_review";
   board.execution.queued = 1;
   expect(responsibilityLabel(item)).toBe("任务排队中");
   board.execution.running = 1;
