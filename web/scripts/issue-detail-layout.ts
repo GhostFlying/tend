@@ -644,7 +644,7 @@ try {
       };
       let current = original;
       let ownerItems: IssueConversationQueueEntry[] = [];
-      let urgentOriginal: IssueTranscriptBlock | undefined;
+      const activityState: { urgentOriginal?: IssueTranscriptBlock } = {};
       let backgroundRequested = false;
       let interruptedMessage: string | undefined;
       const issueConversation = issue.conversation!.conversation_id!;
@@ -766,14 +766,14 @@ try {
                 created_at: now,
                 delivery: original,
               },
-              ...(urgentOriginal
+              ...(activityState.urgentOriginal
                 ? [
                     {
                       id: "urgent-original",
                       position: 1100,
                       kind: "conversation",
                       created_at: now,
-                      block: urgentOriginal,
+                      block: activityState.urgentOriginal,
                     },
                   ]
                 : []),
@@ -897,7 +897,7 @@ try {
       publish();
       await ownerQueue.getByText("待处理 · 2", { exact: true }).waitFor();
       assert.equal(await ownerQueue.getByRole("button", { name: "撤回" }).count(), 2);
-      urgentOriginal = {
+      const urgentOriginal: IssueTranscriptBlock = {
         position: 5,
         more: false,
         trigger: {
@@ -920,6 +920,7 @@ try {
         },
         items: [],
       };
+      activityState.urgentOriginal = urgentOriginal;
       ownerItems = [ordinary];
       publish("conversation.message_state", urgentOriginal.trigger);
       await ownerQueue.getByText("待处理 · 1", { exact: true }).waitFor();
