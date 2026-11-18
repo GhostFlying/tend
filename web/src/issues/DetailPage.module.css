@@ -334,6 +334,9 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.assigneeLink {
+  text-align: start;
+}
 .managerStatus {
   display: grid;
   gap: var(--space-1);

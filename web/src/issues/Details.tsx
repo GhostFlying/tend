@@ -196,6 +196,7 @@ export function IssueDetails({
           <dt>负责人</dt>
           <dd>
             <Button
+              className={styles.assigneeLink}
               variant="link"
               aria-label="交接负责人"
               onClick={() => {
