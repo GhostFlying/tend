@@ -1771,6 +1771,19 @@ async function checkBoardColumnWidths() {
         assert(box && box.width >= 238, `${status} card width at ${width}px`);
       };
       if (mobile) {
+        const waitForHorizontalScrollToSettle = () =>
+          board.evaluate(async (element) => {
+            let lastOffset = element.scrollLeft;
+            let stableFrames = 0;
+            for (let frame = 0; frame < 120; frame++) {
+              await new Promise(requestAnimationFrame);
+              const offset = element.scrollLeft;
+              stableFrames = offset === lastOffset ? stableFrames + 1 : 0;
+              if (stableFrames === 12) return;
+              lastOffset = offset;
+            }
+            throw new Error("The board did not finish scrolling");
+          });
         const waitForCardInViewport = (status: string) =>
           page.waitForFunction((status) => {
             const rect = document
@@ -1830,13 +1843,22 @@ async function checkBoardColumnWidths() {
         await page.waitForFunction(
           () => !document.querySelector('[aria-label="看板列"]')!.hasAttribute("tabindex"),
         );
-        assert(await doneTab.isVisible(), "the selected status survives rotating the viewport");
+        await waitForHorizontalScrollToSettle();
         await waitForCardInViewport("done");
+        assert(await doneTab.isVisible(), "the selected status survives rotating the viewport");
         assert(
           !(await card("done").evaluate((element) => element.closest("[inert]"))),
           "the restored column is accessible",
         );
         await page.screenshot({ path: join(output, "board-rotation-390.png") });
+        await swipe(40, 350, 320, 0);
+        await reviewTab.waitFor();
+        await waitForHorizontalScrollToSettle();
+        await waitForCardInViewport("in_review");
+        assert(
+          await reviewTab.isVisible(),
+          "swiping still changes the selected column after rotation",
+        );
         await page.getByRole("tab", { name: /^已取消/ }).click();
         await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
         await waitForCardInViewport("cancelled");
