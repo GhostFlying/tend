@@ -457,6 +457,7 @@ export interface TendAPI {
   IssueDeadline?: IssueDeadline;
   IssueDeliveryPage?: IssueDeliveryPage;
   IssueEndpointPayload?: IssueEndpointPayload;
+  IssueEventNotificationPage?: IssueEventNotificationPage;
   IssueFollowupHistory?: IssueFollowupHistory;
   IssueFollowupPage?: IssueFollowupPage;
   IssueFollowupPayload?: IssueFollowupPayload;
@@ -4441,6 +4442,8 @@ export interface IssueDeliveryView {
   conflict_progress?: IssueProgress;
   delivery: IssueDelivery;
   observation: IssueDeliveryObservation;
+  review?: IssueDeliveryReviewProgress;
+  review_unavailable?: boolean;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4477,6 +4480,18 @@ export interface IssueDeliveryObservation {
   target_contains_merge?: boolean;
   target_sha?: string;
   url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryReviewProgress".
+ */
+export interface IssueDeliveryReviewProgress {
+  base_sha: string;
+  head_sha: string;
+  recorded: boolean;
+  round: number;
+  valid: boolean;
+  verdict: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4823,6 +4838,32 @@ export interface IssueSourceDisposition {
   content_revision: number;
   message_id: string;
   reason: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueEventNotificationPage".
+ */
+export interface IssueEventNotificationPage {
+  coalescing_until?: number;
+  event_id: string;
+  next?: number;
+  notifications: IssueEventNotification[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueEventNotification".
+ */
+export interface IssueEventNotification {
+  batch_id: string;
+  batch_status: string;
+  delivery: string;
+  message_id: string;
+  native_status?: string;
+  position: number;
+  reason?: string;
+  settlement: string;
+  source: string;
+  started_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

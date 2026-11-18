@@ -96,6 +96,10 @@ func runIssueReadDetail(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "issue "+args[0])
 	after := fs.String("after", "", "result cursor")
 	before := fs.Int64("before", 0, "activity cursor")
+	var notification *int64
+	if args[0] == "activity" {
+		notification = fs.Int64("notification", 0, "read notification evidence for an activity event position; --after continues its pages")
+	}
 	fs.Bool("json", true, "print complete structured output")
 	pos, err := parse(fs, args[1:])
 	if err != nil {
@@ -109,5 +113,13 @@ func runIssueReadDetail(ctx context.Context, e *Env, args []string) error {
 		return err
 	}
 	query := url.Values{"after": {*after}, "before": {strconv.FormatInt(*before, 10)}}
-	return readOwnerJSON(ctx, owner{e: e, c: c, json: true}, "/api/v1/issues/"+url.PathEscape(pos[0])+"/"+args[0]+"?"+query.Encode())
+	path := "/api/v1/issues/" + url.PathEscape(pos[0]) + "/" + args[0]
+	if notification != nil && *notification != 0 {
+		if *notification < 0 || *before != 0 {
+			return usagef("--notification requires a positive event position and cannot be combined with --before")
+		}
+		path += "/" + strconv.FormatInt(*notification, 10) + "/notification"
+		query.Del("before")
+	}
+	return readOwnerJSON(ctx, owner{e: e, c: c, json: true}, path+"?"+query.Encode())
 }

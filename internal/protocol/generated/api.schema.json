@@ -9781,6 +9781,39 @@
       "title": "IssueDeliveryReconciliation",
       "type": "object"
     },
+    "IssueDeliveryReviewProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "recorded": {
+          "type": "boolean"
+        },
+        "round": {
+          "type": "integer"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "round",
+        "head_sha",
+        "base_sha",
+        "verdict",
+        "recorded",
+        "valid"
+      ],
+      "title": "IssueDeliveryReviewProgress",
+      "type": "object"
+    },
     "IssueDeliveryView": {
       "additionalProperties": false,
       "properties": {
@@ -9792,6 +9825,12 @@
         },
         "observation": {
           "$ref": "#/definitions/IssueDeliveryObservation"
+        },
+        "review": {
+          "$ref": "#/definitions/IssueDeliveryReviewProgress"
+        },
+        "review_unavailable": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -9872,6 +9911,85 @@
         "expected_assignment_epoch"
       ],
       "title": "IssueEndpointPayload",
+      "type": "object"
+    },
+    "IssueEventNotification": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "batch_status": {
+          "type": "string"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "native_status": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "settlement": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "position",
+        "batch_id",
+        "message_id",
+        "batch_status",
+        "delivery",
+        "source",
+        "settlement"
+      ],
+      "title": "IssueEventNotification",
+      "type": "object"
+    },
+    "IssueEventNotificationPage": {
+      "additionalProperties": false,
+      "properties": {
+        "coalescing_until": {
+          "type": "integer"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "next": {
+          "type": "integer"
+        },
+        "notifications": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/IssueEventNotification"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event_id",
+        "notifications"
+      ],
+      "title": "IssueEventNotificationPage",
       "type": "object"
     },
     "IssueEvidence": {
@@ -22959,6 +23077,9 @@
     },
     "IssueEndpointPayload": {
       "$ref": "#/definitions/IssueEndpointPayload"
+    },
+    "IssueEventNotificationPage": {
+      "$ref": "#/definitions/IssueEventNotificationPage"
     },
     "IssueFollowupHistory": {
       "$ref": "#/definitions/IssueFollowupHistory"

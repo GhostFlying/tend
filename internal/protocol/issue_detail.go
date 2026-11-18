@@ -89,3 +89,24 @@ type IssueResultPage struct {
 	More  bool          `json:"more"`
 	Next  string        `json:"next,omitempty"`
 }
+
+// IssueEventNotification describes original notice evidence for one activity event.
+type IssueEventNotification struct {
+	Position     int64  `json:"position"`
+	BatchID      string `json:"batch_id"`
+	MessageID    string `json:"message_id"`
+	BatchStatus  string `json:"batch_status"`
+	Delivery     string `json:"delivery"`
+	Source       string `json:"source"`
+	StartedAt    int64  `json:"started_at,omitempty"`
+	NativeStatus string `json:"native_status,omitempty"`
+	Settlement   string `json:"settlement"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type IssueEventNotificationPage struct {
+	EventID         string                   `json:"event_id"`
+	CoalescingUntil int64                    `json:"coalescing_until,omitempty"`
+	Notifications   []IssueEventNotification `json:"notifications"`
+	Next            int64                    `json:"next,omitempty"`
+}

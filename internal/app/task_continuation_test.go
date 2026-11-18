@@ -91,7 +91,7 @@ func TestSharedReviewContinuesSameTaskAcrossCandidateChanges(t *testing.T) {
 		// A replacement native session receives the same durable context and can
 		// recover the old immutable result while the same Task is now queued.
 		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-			result, run, artifact, err := readSharedReviewResult(t.Context(), tx.Q(), r, original)
+			result, run, artifact, err := store.ReadSharedReviewResult(t.Context(), tx.Q(), r, original)
 			if err != nil {
 				return err
 			}

@@ -14,6 +14,8 @@ import type {
   IssueView,
   IssueActivityPage,
   IssueDeliveryView,
+  IssueConversationQueueEntry,
+  IssueEventNotificationPage,
   IssueTranscriptBlock,
   IssueResultPage,
   AttentionView,
@@ -640,6 +642,70 @@ try {
         },
       };
       let current = original;
+      let ownerItems: IssueConversationQueueEntry[] = [];
+      let backgroundRequested = false;
+      const issueConversation = issue.conversation!.conversation_id!;
+      const backgroundItems: IssueConversationQueueEntry[] = ["processing", "queued", "queued"].map(
+        (status, index) => ({
+          status,
+          position: index + 1,
+          revision: 0,
+          can_withdraw: false,
+          item: {
+            message_id: `20-44-background-${index}`,
+            seq: index + 1,
+            kind: "message",
+            author: "system",
+            conversation_id: issueConversation,
+            body: "后台合并通知",
+            notice_type: "background_batch",
+            created_at: new Date(now).toISOString(),
+          },
+        }),
+      );
+      await page.route("**/api/v1/conversation/queue?*", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.searchParams.get("conversation_id") !== issueConversation) {
+          await route.continue();
+          return;
+        }
+        const category = url.searchParams.get("category");
+        if (category === "background") backgroundRequested = true;
+        const items =
+          category === "owner" ? ownerItems : category === "background" ? backgroundItems : [];
+        // Older backends also put the busy background turn in owner.active.
+        await route.fulfill({
+          json: {
+            items,
+            total: items.length,
+            active: backgroundItems[0],
+            event_seq: seq,
+            enabled: true,
+          },
+        });
+      });
+      const diagnostics: IssueEventNotificationPage = {
+        event_id: "review-queue-event",
+        notifications: [
+          {
+            position: 1,
+            batch_id: "review-batch",
+            message_id: backgroundItems[0]!.item.message_id,
+            batch_status: "frozen",
+            delivery: "received",
+            source: "read",
+            started_at: now,
+            native_status: "started",
+            settlement: "awaiting_clarification",
+            reason: "等待原审阅报告关联",
+          },
+        ],
+      };
+      let diagnosticsReads = 0;
+      await page.route(`**/api/v1/issues/${issue.issue_id}/activity/3/notification`, (route) => {
+        diagnosticsReads++;
+        return route.fulfill({ json: diagnostics });
+      });
       const originalBinding = { ...ref, head_sha: head, base_sha: base, target_sha: target };
       let issueView = {
         ...issue,
@@ -672,6 +738,15 @@ try {
             event_seq: seq,
             items: [
               ...activity.items!,
+              {
+                id: "review-queue-event",
+                position: 3,
+                kind: "issue.delivery_review_changed",
+                author: "tend",
+                title: "更新了 PR 审阅",
+                created_at: now,
+                issue_id: issue.issue_id,
+              },
               {
                 id: "old-pr-checks",
                 position: 4,
@@ -715,6 +790,75 @@ try {
       assert.equal(await progress.getByText("已看到冲突", { exact: false }).count(), 0);
       assert.equal(await page.locator("vite-error-overlay").count(), 0);
       await progress.screenshot({ path: join(output, `delivery-conflict-${width}.png`) });
+
+      const composer = page.locator('[data-presentation="issue"]');
+      await composer.getByRole("textbox", { name: "消息", exact: true }).waitFor();
+      await composer.getByRole("button", { name: "发送", exact: true }).waitFor();
+      assert.equal(await composer.getByText(/加入队列/).count(), 0);
+      assert.equal(await page.getByText(/后台事项 · 3/).count(), 0);
+      assert.equal(backgroundRequested, false);
+      await composer.screenshot({ path: join(output, `owner-queue-background-only-${width}.png`) });
+
+      current = {
+        ...original,
+        observation: {
+          ...original.observation,
+          ci: { head_sha: head, state: "failure", checks: [] },
+        },
+        review: {
+          round: 1,
+          head_sha: head,
+          base_sha: base,
+          verdict: "changes_requested",
+          recorded: false,
+          valid: false,
+        },
+      };
+      publish("work_item.delivery_changed");
+      await progress.getByText("独立审阅已返回 · 需要修改", { exact: true }).waitFor();
+      await progress.getByText("当前候选的提交 CI · 检查失败", { exact: true }).waitFor();
+      await progress.getByText("检测到合并冲突", { exact: false }).waitFor();
+      await progress.screenshot({
+        path: join(output, `owner-queue-default-progress-${width}.png`),
+      });
+      assert.equal(diagnosticsReads, 0, "notification reads should be on demand");
+      const event = page.locator('[data-scroll-id="review-queue-event"]');
+      if ((await event.locator("summary").first().textContent()) !== "查看这条事件的通知诊断")
+        await event.locator("summary").first().click();
+      const readNotice = event.getByText("查看这条事件的通知诊断", { exact: true });
+      await readNotice.click();
+      await event.getByText("送达 · Agent 已接收通知", { exact: true }).waitFor();
+      await event.getByText("等待原因 · 等待原审阅报告关联", { exact: true }).waitFor();
+      await event.getByText("结算 · 等待澄清", { exact: true }).waitFor();
+      await event.screenshot({ path: join(output, `owner-queue-event-notification-${width}.png`) });
+
+      ownerItems = [
+        {
+          position: 4,
+          revision: 1,
+          status: "queued",
+          can_withdraw: true,
+          item: {
+            message_id: "20-44-user-followup",
+            seq: 4,
+            kind: "message",
+            author: "owner",
+            conversation_id: issueConversation,
+            body: "一条真实用户消息",
+            created_at: new Date(now).toISOString(),
+          },
+        },
+      ];
+      publish();
+      const ownerQueue = page.getByRole("region", { name: "待处理队列", exact: true });
+      await ownerQueue.getByText("待处理 · 1", { exact: true }).waitFor();
+      await ownerQueue.locator("summary").filter({ hasText: "一条真实用户消息" }).waitFor();
+      await ownerQueue.getByText(/等待处理 ·/).waitFor();
+      assert(await ownerQueue.getByRole("button", { name: "撤回" }).isEnabled());
+      await composer.getByRole("button", { name: "加入队列", exact: true }).waitFor();
+      await ownerQueue.screenshot({ path: join(output, `owner-queue-mixed-${width}.png`) });
+      assert.equal(await page.getByText(/后台事项 · 3/).count(), 0);
+      console.log(`PASS 20:44 owner-only queue, current progress and event diagnostics ${width}`);
 
       for (const [action, label] of [
         ["seen", "已看到冲突"],

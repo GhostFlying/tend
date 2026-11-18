@@ -106,10 +106,23 @@ type IssueDeliveryObservation struct {
 	RefreshPending          bool              `json:"refresh_pending,omitempty"`
 }
 
+// IssueDeliveryReviewProgress is the review record or a verified returned
+// verdict from the bound execution, before shared review settlement.
+type IssueDeliveryReviewProgress struct {
+	Round    int    `json:"round"`
+	HeadSHA  string `json:"head_sha"`
+	BaseSHA  string `json:"base_sha"`
+	Verdict  string `json:"verdict"`
+	Recorded bool   `json:"recorded"`
+	Valid    bool   `json:"valid"`
+}
+
 type IssueDeliveryView struct {
-	ConflictProgress *IssueProgress           `json:"conflict_progress,omitempty"`
-	Delivery         IssueDelivery            `json:"delivery"`
-	Observation      IssueDeliveryObservation `json:"observation"`
+	ReviewUnavailable bool                         `json:"review_unavailable,omitempty"`
+	ConflictProgress  *IssueProgress               `json:"conflict_progress,omitempty"`
+	Review            *IssueDeliveryReviewProgress `json:"review,omitempty"`
+	Delivery          IssueDelivery                `json:"delivery"`
+	Observation       IssueDeliveryObservation     `json:"observation"`
 }
 type IssueDeliveryPage struct {
 	IssueID string              `json:"issue_id"`

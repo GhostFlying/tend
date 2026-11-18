@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -67,7 +68,8 @@ func ConversationQueue(ctx context.Context, q Querier, category string, after in
 	if category != "withdrawn" {
 		filter += ` AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status IN ('completed','interrupted','failed','unknown'))`
 	}
-	filter += ` AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?)`
+	author := issueQueueAuthor(id, category)
+	filter += ` AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?` + author + `)`
 	var count int64
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox o WHERE `+filter, id).Scan(&count); err != nil {
 		return nil, 0, fmt.Errorf("store: queue count: %w", err)
@@ -193,16 +195,26 @@ func HideUndeliveredOwner(ctx context.Context, q Querier, it *protocol.Conversat
 	return nil
 }
 
-// ConversationActive is independent of queue category and pagination.
-func ConversationActive(ctx context.Context, q Querier, session ...string) (*ConversationQueueRow, error) {
+// The Issue input queue represents actual user-authored messages. Retain
+// the unfiltered active turn for the explicit background diagnostic view.
+func issueQueueAuthor(conversation, category string) string {
+	if strings.HasPrefix(conversation, "issue:") && category != "background" {
+		return " AND cm.author='owner'"
+	}
+	return ""
+}
+
+// ConversationActive is independent of queue pagination.
+func ConversationActive(ctx context.Context, q Querier, category string, session ...string) (*ConversationQueueRow, error) {
 	id := "main"
 	if len(session) > 0 {
 		id = ConversationID(session[0])
 	}
+	author := issueQueueAuthor(id, category)
 	var r ConversationQueueRow
-	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?) ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
+	err := q.QueryRowContext(ctx, `SELECT json_extract(o.payload_json,'$.message_id'),o.seq,o.status,COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),COALESCE(t.status,'') FROM outbox o LEFT JOIN conversation_message_controls c ON c.message_id=json_extract(o.payload_json,'$.message_id') LEFT JOIN main_turns t ON t.request_id=o.request_id WHERE (o.destination='main_thread' OR o.destination LIKE 'background_thread:%') AND o.operation IN ('main_thread.handle_message','main_thread.handle_event','conversation.repair_turn','conversation.recover_agent') AND o.status='sending' AND COALESCE(t.status,'') NOT IN ('completed','interrupted','failed','unknown') AND EXISTS(SELECT 1 FROM conversation_messages cm WHERE cm.message_id=json_extract(o.payload_json,'$.message_id') AND cm.conversation_id=?`+author+`) ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
 	if err == sql.ErrNoRows {
-		err = q.QueryRowContext(ctx, `SELECT r.message_id,o.seq,'sending',COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),'started' FROM agent_recoveries r JOIN outbox o ON o.request_id=r.active_request_id LEFT JOIN conversation_message_controls c ON c.message_id=r.message_id WHERE r.conversation_id=? AND r.status IN ('waiting','starting','running') AND o.status IN ('pending','sending') ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
+		err = q.QueryRowContext(ctx, `SELECT r.message_id,o.seq,'sending',COALESCE(c.revision,0),COALESCE(c.withdrawn_at,0),'started' FROM agent_recoveries r JOIN conversation_messages cm ON cm.message_id=r.message_id JOIN outbox o ON o.request_id=r.active_request_id LEFT JOIN conversation_message_controls c ON c.message_id=r.message_id WHERE r.conversation_id=? AND r.status IN ('waiting','starting','running') AND o.status IN ('pending','sending')`+author+` ORDER BY o.seq LIMIT 1`, id).Scan(&r.ID, &r.Position, &r.Status, &r.Revision, &r.WithdrawnAt, &r.Turn)
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

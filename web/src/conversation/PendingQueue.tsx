@@ -80,7 +80,7 @@ export function PendingQueue({
   const mainConversation = !conversation || conversation.id === "main";
   const owner = state.pages.owner;
   const waiting = owner?.items?.filter((it) => it.status !== "processing") ?? [];
-  const background = state.pages.background;
+  const background = conversation?.kind === "consultation" ? state.pages.background : undefined;
   const withdrawn = state.pages.withdrawn;
   const localPending = local.filter((m) => m.state !== "sent");
   const render = (entry: ConversationQueueEntry, canAct: boolean) => (
@@ -182,7 +182,7 @@ export function PendingQueue({
           {owner?.next && <button onClick={() => more("owner")}>加载更多待处理消息</button>}
         </>
       )}
-      {conversation?.id !== "main" && !!background?.total && (
+      {!!background?.total && (
         <details>
           <summary>
             后台事项 · {background.total}

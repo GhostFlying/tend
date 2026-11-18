@@ -125,6 +125,11 @@ func CanonicalIssueDeliveries(ctx context.Context, q store.Querier, id string) (
 				return out, err
 			}
 		}
+		item.Review, err = issueDeliveryReviewProgress(ctx, q, id, d)
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+		item.ReviewUnavailable = err != nil
 		out.Items = append(out.Items, item)
 	}
 	return out, nil

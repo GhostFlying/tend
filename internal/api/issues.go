@@ -69,6 +69,19 @@ func (s *Server) issueActivity(w http.ResponseWriter, r *http.Request) {
 		return views.IssueActivity(r.Context(), q, r.PathValue("id"), before)
 	})
 }
+func (s *Server) issueActivityNotification(w http.ResponseWriter, r *http.Request) {
+	position, positionErr := intParam(r.PathValue("position"))
+	after, afterErr := intParam(r.URL.Query().Get("after"))
+	if positionErr != nil || position <= 0 || afterErr != nil || after < 0 {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid activity position or notification cursor"))
+		return
+	}
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		out, err := views.IssueEventNotification(r.Context(), q, r.PathValue("id"), position, after)
+		return out, notFound(err)
+	})
+}
+
 func (s *Server) issueResults(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
 		return views.IssueResults(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("after"))

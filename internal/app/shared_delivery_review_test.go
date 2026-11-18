@@ -345,6 +345,24 @@ func TestSharedDeliveryReviewFocusedRecheckRetainsResponsibleFindings(t *testing
 			first := createSharedReviewerTaskForTest(t, h, i.IssueID)
 			r := sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: first}))
 			executeSharedReviewForTest(t, h, runtime, r, first, "changes_requested")
+			before := h.count("shared_delivery_review_history")
+			if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				deliveries, err := views.CanonicalIssueDeliveries(t.Context(), tx.Q(), i.IssueID)
+				if err != nil {
+					return err
+				}
+				progress := deliveries.Items[0].Review
+				if progress == nil || progress.Recorded || progress.Valid || progress.Round != 1 ||
+					progress.Verdict != "changes_requested" || progress.HeadSHA != r.HeadSHA || progress.BaseSHA != r.BaseSHA {
+					t.Fatal("completed review was not read from its bound result before owner record", progress)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if h.count("shared_delivery_review_history") != before {
+				t.Fatal("reading review progress changed formal review history")
+			}
 			r = sharedReviewResult(t, sharedReviewAction(t, h, i.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
 			if r.Status != "changes_requested" || len(r.Rounds) != 1 {
 				t.Fatal(r)

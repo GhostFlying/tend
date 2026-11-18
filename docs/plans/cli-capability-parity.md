@@ -76,6 +76,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/issues` | `issue list` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}` | `issue show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/activity` | `issue activity` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/issues/{id}/activity/{position}/notification` | `issue activity --notification` | Issue 与活动位置；可用 `--after` 分页 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/context` | `issue context` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/deliveries` | `issue deliveries` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/followups` | `issue followups` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
