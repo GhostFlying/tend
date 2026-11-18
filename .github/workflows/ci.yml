@@ -17,6 +17,7 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
+      runner_compatibility: ${{ steps.select.outputs.runner_compatibility }}
       race: ${{ steps.select.outputs.race }}
       groups: ${{ steps.select.outputs.groups }}
       web: ${{ steps.select.outputs.web }}
@@ -77,6 +78,23 @@ jobs:
         with:
           path: ${{ steps.go.outputs.build-path }}
           key: ${{ steps.go.outputs.build-key }}
+
+  runner-compatibility:
+    needs: plan
+    if: ${{ needs.plan.outputs.runner_compatibility == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        with:
+          role: quality
+      - name: exercise published runner across server cutover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/released-runner.sh
 
   race:
     name: race (${{ matrix.group }})
@@ -270,7 +288,7 @@ jobs:
   # Required jobs must succeed; only the immutable plan may exclude a job.
   check:
     if: ${{ always() }}
-    needs: [plan, quality, race, web, layout, cross, release-build, release-assemble]
+    needs: [plan, quality, runner-compatibility, race, web, layout, cross, release-build, release-assemble]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

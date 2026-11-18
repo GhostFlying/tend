@@ -218,6 +218,11 @@ func explain(p Plan) Plan {
 		"release-build":    "excluded: PR does not change a fleet-wide release contract; main/release retain full coverage",
 		"release-assemble": "excluded: no complete distribution build is required",
 	}
+	if p.testReleasedRunner() {
+		p.Decisions["runner-compatibility"] = "selected: released runner against the candidate server"
+	} else {
+		p.Decisions["runner-compatibility"] = "excluded: candidate server and historical fixture unaffected"
+	}
 	if len(p.Groups) > 0 {
 		p.Decisions["race"] = "selected: all discovered roots in affected packages and reverse production/test dependencies"
 	}
@@ -239,14 +244,18 @@ func explain(p Plan) Plan {
 	return p
 }
 
+func (p Plan) testReleasedRunner() bool {
+	return p.Full || slices.Contains(p.Packages, module+"cmd/tend-server")
+}
+
 // Required maps stable aggregate job names to the current plan's requirements.
 func (p Plan) Required() map[string]bool {
-	return map[string]bool{"quality": true, "race": len(p.Groups) > 0, "web": p.Web || p.Cross || p.Release, "layout": p.Layout, "cross": p.Cross, "release-build": p.Release, "release-assemble": p.Release}
+	return map[string]bool{"runner-compatibility": p.testReleasedRunner(), "quality": true, "race": len(p.Groups) > 0, "web": p.Web || p.Cross || p.Release, "layout": p.Layout, "cross": p.Cross, "release-build": p.Release, "release-assemble": p.Release}
 }
 
 // VerifyResults distinguishes planned exclusions from missing or failed work.
 func (p Plan) VerifyResults(results map[string]string) error {
-	for _, job := range []string{"quality", "race", "web", "layout", "cross", "release-build", "release-assemble"} {
+	for _, job := range []string{"quality", "runner-compatibility", "race", "web", "layout", "cross", "release-build", "release-assemble"} {
 		result, exists := results[job]
 		if !exists {
 			return fmt.Errorf("missing validation job %s", job)
