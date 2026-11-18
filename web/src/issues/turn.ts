@@ -26,7 +26,11 @@ export class IssueTurnRead {
         let processAfter = block.process?.next ?? 0;
         let loadedPages = 1;
         while (!signal?.aborted) {
-          const findingMessage = throughMessage && block.more && !items.has(throughMessage);
+          const findingMessage =
+            throughMessage &&
+            (block.more || block.process?.more) &&
+            !items.has(throughMessage) &&
+            !processItems.has(throughMessage);
           const readingMore =
             loadedPages < Math.max(this.pages, this.loadedPages) &&
             (block.more || block.process?.more);

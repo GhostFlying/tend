@@ -53,6 +53,31 @@ test("manual continuation starts after the anchor pages for the current turn", a
   read.close();
 });
 
+test("a process anchor follows the process cursor after reply pagination ends", async () => {
+  const read = new IssueTurnRead({
+    get: async <T>(path: string) => {
+      const after = Number(new URL(path, "https://example.test").searchParams.get("process_after"));
+      return {
+        items: [],
+        more: false,
+        process: {
+          items: [{ message_id: `tool-${after}` }],
+          more: after < 120,
+          next: after + 40,
+        },
+      } as T;
+    },
+  });
+  await read.open("trigger", 2, "tool-80");
+  expect(read.state.get().value?.process?.items?.map((item) => item.message_id)).toEqual([
+    "tool-0",
+    "tool-40",
+    "tool-80",
+  ]);
+  expect(read.nextDepth(2)).toBe(4);
+  read.close();
+});
+
 test("process arrival pagination is independent of reply seq and rereads mutable steps", async () => {
   const calls: string[] = [];
   let status = "running";

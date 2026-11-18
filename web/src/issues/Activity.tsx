@@ -523,10 +523,12 @@ export function IssueActivity({
     }
     if (located.current === targetMessage) return;
     const root = scroll.current;
-    const target = root?.querySelector<HTMLElement>(`[data-scroll-id="${targetMessage}"]`);
+    const target = root?.querySelector<HTMLElement>(
+      `[data-scroll-id="${CSS.escape(targetMessage)}"]`,
+    );
     if (target && root) {
       const frame = requestAnimationFrame(() => {
-        if (!target.isConnected) return;
+        if (!target.isConnected || !target.getClientRects().length) return;
         located.current = targetMessage;
         reading.pauseFollowing();
         following.current = false;
@@ -619,6 +621,7 @@ export function IssueActivity({
             targetMessage={
               entry.block.trigger.message_id === scopedAnchor?.reply_to ? targetMessage : undefined
             }
+            scrollTarget={targetMessage}
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
@@ -711,6 +714,7 @@ class ProcessLayout extends Component<ProcessLayoutProps> {
 function ActivityBlock({
   entry,
   targetMessage,
+  scrollTarget,
   rows,
   onContinuation,
   onPagination,
@@ -725,6 +729,7 @@ function ActivityBlock({
   entry: IssueActivityEntry;
   processReads?: IssueProcessReads | undefined;
   targetMessage?: string | undefined;
+  scrollTarget?: string | undefined;
   currentIssueId: string;
   rows: TranscriptEntry[];
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
@@ -826,7 +831,7 @@ function ActivityBlock({
       ? extra.value
       : block;
   useEffect(() => {
-    if (opened || (targetMessage && block.more))
+    if (opened || (targetMessage && (block.more || block.process?.more)))
       void continuation.open(block.trigger.message_id, depth, targetMessage);
   }, [opened, block, continuation, depth, targetMessage]);
   useEffect(
@@ -985,6 +990,7 @@ function ActivityBlock({
                 </div>
                 <AgentTurn
                   entry={row}
+                  targetMessage={scrollTarget}
                   processUnavailable={!!processBlock.process?.error}
                   process={
                     readable && row === firstReply
