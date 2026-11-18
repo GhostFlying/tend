@@ -113,7 +113,10 @@ export function groupActivityEvents(rows: readonly IssueActivityEntry[]): IssueA
     const background = (entry: IssueActivityEntry) =>
       !entry.block &&
       !entry.artifact_id &&
-      !/attention|decision|failed|failure|acceptance|delivery/.test(entry.kind);
+      ["issue.created", "issue.updated", "issue.progress_updated", "issue.status_changed"].includes(
+        entry.kind,
+      ) &&
+      !entry.progress;
     if (
       previous &&
       background(previous) &&

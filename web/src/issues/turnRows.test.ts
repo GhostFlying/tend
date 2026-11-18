@@ -108,3 +108,20 @@ test("earlier deferred tools keep arrival order ahead of later callback transcri
     "callback",
   ]);
 });
+
+test("external trigger stands apart from the Agent and its public process", () => {
+  const source = {
+    ...block,
+    trigger: { ...trigger, author: "external" },
+    items: [{ ...first, kind: "tool_use" }],
+  };
+  const rows = activityTurnRows(buildTranscriptEntries([source]), source);
+  expect(rows.filter((row) => row.kind === "source").map((row) => row.item.message_id)).toEqual([
+    trigger.message_id,
+  ]);
+  expect(
+    rows
+      .filter((row) => row.kind === "agent")
+      .flatMap((row) => row.items.map((item) => item.message_id)),
+  ).toEqual([first.message_id]);
+});

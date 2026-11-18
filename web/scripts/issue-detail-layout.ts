@@ -2127,7 +2127,7 @@ try {
     assert.equal(await detail.getByRole("textbox", { name: "消息", exact: true }).inputValue(), "");
     await detail.getByRole("textbox", { name: "消息", exact: true }).fill("子项的消息");
     await detail.getByRole("button", { name: "发送", exact: true }).click();
-    await page.waitForFunction(() => document.body.textContent?.includes("已送达"));
+    await page.waitForFunction(() => document.body.textContent?.includes("已入账"));
     const send = writes.findLast((w) => w.operation === "conversation.submit_message")!;
     assert.equal(
       (send.payload as { conversation_id: string }).conversation_id,

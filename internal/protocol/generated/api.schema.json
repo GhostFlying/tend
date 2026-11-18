@@ -8099,6 +8099,9 @@
         "position": {
           "type": "integer"
         },
+        "progress": {
+          "$ref": "#/definitions/IssueProgress"
+        },
         "task_id": {
           "type": "string"
         },
@@ -11636,6 +11639,9 @@
         },
         "attentions": {
           "$ref": "#/definitions/AttentionPage"
+        },
+        "cancellation_reason": {
+          "type": "string"
         },
         "children": {
           "$ref": "#/definitions/IssueChildProgress"

@@ -46,6 +46,7 @@ type IssueSourceReview struct {
 }
 
 type IssueView struct {
+	CancellationReason  string                    `json:"cancellation_reason,omitempty"`
 	EffectiveWorkStatus IssueWorkStatus           `json:"effective_work_status,omitempty"`
 	QueueReason         *QueueWaitReason          `json:"queue_reason,omitempty"`
 	Pause               *IssuePauseProgress       `json:"pause,omitempty"`

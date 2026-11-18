@@ -1,3 +1,5 @@
+import { MessageReceipts } from "./MessageReceipts.tsx";
+import { ExternalSourceMessage } from "../conversation/SourceDetails.tsx";
 import { useEntryState } from "../app/router.ts";
 import {
   useCallback,
@@ -500,6 +502,7 @@ function ActivityBlock({
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const [depth, setDepth] = useEntryState(`activity-depth:${entry.id}`, 2);
   const block = entry.block!;
+  const triggerNode = useRef<HTMLDivElement>(null);
   const processBlock = opened && extra.value && !extra.error ? extra.value : block;
   useEffect(() => {
     if (opened) void continuation.open(block.trigger.message_id, depth);
@@ -556,9 +559,21 @@ function ActivityBlock({
       )}
       {activityTurnRows(rows, processBlock).map((row) => {
         switch (row.kind) {
+          case "source":
+            return (
+              <div key={row.key} tabIndex={-1} ref={triggerNode}>
+                <ExternalSourceMessage item={row.item} />
+                <MessageReceipts item={row.item} />
+              </div>
+            );
           case "owner":
             return (
-              <div key={row.key} className={styles.owner}>
+              <div
+                key={row.key}
+                ref={row.item.message_id === block.trigger.message_id ? triggerNode : undefined}
+                tabIndex={-1}
+                className={styles.owner}
+              >
                 <div className={styles.author}>
                   <span className={styles.avatar} aria-hidden="true">
                     你
@@ -572,6 +587,7 @@ function ActivityBlock({
                   </time>
                 </div>
                 <OwnerMessage item={row.item} presentation="issue" />
+                <MessageReceipts item={row.item} />
               </div>
             );
           case "agent":
@@ -591,6 +607,29 @@ function ActivityBlock({
                     {Array.from(entry.author || "Agent")[0]}
                   </span>
                   {entry.author || "Agent 身份未记录"}
+                  {["owner", "external", "system"].includes(block.trigger.author) &&
+                    row.items.some(
+                      (item) =>
+                        item.kind === "message" &&
+                        item.author === "main_agent" &&
+                        item.reply_to === block.trigger.message_id,
+                    ) && (
+                      <button
+                        type="button"
+                        className={styles.textLink}
+                        onClick={() => {
+                          triggerNode.current?.focus({ preventScroll: true });
+                          triggerNode.current?.scrollIntoView({ block: "center" });
+                        }}
+                      >
+                        {block.trigger.author === "owner"
+                          ? "回复你的消息"
+                          : block.trigger.author === "external"
+                            ? "回应来源消息"
+                            : "回应系统通知"}{" "}
+                        #{block.trigger.seq}
+                      </button>
+                    )}
                   <time dateTime={row.items[0]?.created_at} title={row.items[0]?.created_at}>
                     {clock(Date.parse(row.items[0]?.created_at ?? block.trigger.created_at))}
                   </time>
@@ -613,7 +652,15 @@ function ActivityBlock({
               </div>
             );
           case "system":
-            return <SystemMessage key={row.key} item={row.item} presentation="issue" />;
+            return (
+              <div
+                key={row.key}
+                ref={row.item.message_id === block.trigger.message_id ? triggerNode : undefined}
+                tabIndex={-1}
+              >
+                <SystemMessage item={row.item} presentation="issue" />
+              </div>
+            );
           case "block-more":
             return (
               <button key={row.key} onClick={(event) => void more(event.currentTarget)}>
@@ -676,6 +723,15 @@ function Milestone({
         <span>{entry.author || "tend"}</span> <span>{entry.title}</span>
         <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
       </span>
+      {entry.progress && (
+        <details>
+          <summary>
+            {entry.progress.summary || (entry.progress.next_step ? "更新了下一步" : "清除了进展")}
+          </summary>
+          <p>记录版本：{entry.progress.issue_revision}</p>
+          {entry.progress.next_step && <p>当时下一步：{entry.progress.next_step}</p>}
+        </details>
+      )}
       {entry.task_id ? (
         <button className={styles.textLink} onClick={() => onTask(entry.task_id!)}>
           查看 →
@@ -705,7 +761,8 @@ function EventGroup({
     <details className={styles.eventGroup} data-event-group data-scroll-id={first.id}>
       <summary>
         <span>
-          {first.author || "tend"} {[...new Set(entries.map((entry) => entry.title))].join("、")}
+          {first.author || "tend"} · {entries.length} 项活动 ·{" "}
+          {[...new Set(entries.map((entry) => entry.title))].join("、")}
           <time title={new Date(first.created_at).toISOString()}> · {clock(first.created_at)}</time>
         </span>
         <Chevron />

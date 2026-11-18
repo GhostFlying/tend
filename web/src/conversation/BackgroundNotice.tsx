@@ -131,6 +131,10 @@ export function BackgroundNotice({
       pending.current?.abort();
     };
   }, [open, metadata, load]);
+  const attentionState =
+    ["unknown", "rejected", "interrupted", "failed"].includes(
+      item.background?.presentation?.recipient?.status ?? "",
+    ) || !!item.recovery;
   const icon = (
     <span className={styles.backgroundIcon} aria-hidden="true">
       <Chevron />
@@ -150,6 +154,7 @@ export function BackgroundNotice({
         {presentation === "chat" && icon}
         <span>
           {backgroundHeading(item)}
+          {presentation === "issue" && attentionState && ` · ${backgroundState(item)}`}
           {!!kinds.length && `：${kinds.join("、")}`}{" "}
           <time title={item.created_at}>· {clock(Date.parse(item.created_at))}</time>
         </span>

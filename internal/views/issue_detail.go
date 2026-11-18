@@ -20,6 +20,20 @@ func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.Iss
 		return err
 	}
 	out.Progress = p
+	if out.State == protocol.IssueCancelling || out.State == protocol.IssueCancelled {
+		// Read the intent that began this cancellation, including a direct settled
+		// cancellation. Later settlement and older responsibility cycles have their own reasons.
+		err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(c.reason_json,'$.reason'),'')
+ FROM issue_control_revisions c JOIN issue_control_revisions prev
+ ON prev.issue_id=c.issue_id AND prev.revision=c.revision-1
+ WHERE c.issue_id=? AND c.revision<=?
+ AND json_extract(c.snapshot_json,'$.control.state') IN ('cancelling','cancelled')
+ AND json_extract(prev.snapshot_json,'$.control.state') NOT IN ('cancelling','cancelled')
+ ORDER BY c.revision DESC LIMIT 1`, out.IssueID, out.Revision).Scan(&out.CancellationReason)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("views: read issue cancellation reason: %w", err)
+		}
+	}
 	if out.Historical {
 		return nil
 	}
@@ -267,7 +281,8 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			}
 		} else {
 			var body, actor string
-			if err := q.QueryRowContext(ctx, `SELECT body_json,COALESCE(actor_json,'') FROM events WHERE event_seq=?`, r.seq).Scan(&body, &actor); err != nil {
+			var revision int64
+			if err := q.QueryRowContext(ctx, `SELECT body_json,COALESCE(actor_json,''),COALESCE(object_version,0) FROM events WHERE event_seq=?`, r.seq).Scan(&body, &actor, &revision); err != nil {
 				return out, err
 			}
 			entry.Author, err = issueActivityAuthor(ctx, q, actor, r.at)
@@ -283,6 +298,15 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			}
 			if err := json.Unmarshal([]byte(body), &facts); err != nil {
 				return out, err
+			}
+			if r.kind == "issue.progress_updated" {
+				p, err := store.IssueProgress(ctx, q, r.id, revision)
+				if err != nil {
+					return out, err
+				}
+				if p != nil && p.IssueRevision == revision {
+					entry.Progress = p
+				}
 			}
 			if r.kind == "issue.manager_claimed" {
 				var task string

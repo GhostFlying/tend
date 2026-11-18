@@ -965,6 +965,7 @@ export interface IssueView {
   assignment_epoch: number;
   assignment_state: string;
   attentions?: AttentionPage;
+  cancellation_reason?: string;
   children?: IssueChildProgress;
   closure?: IssueClosure;
   context_revision?: number;
@@ -4207,6 +4208,7 @@ export interface IssueActivityEntry {
   issue_id?: string;
   kind: string;
   position: number;
+  progress?: IssueProgress;
   task_id?: string;
   title?: string;
 }

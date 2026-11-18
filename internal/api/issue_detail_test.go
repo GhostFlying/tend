@@ -85,6 +85,11 @@ func TestIssueProgressHTTPHistoryReplayAndActivity(t *testing.T) {
 	if code := e.do("GET", path+"/activity", token, nil, &first); code != http.StatusOK || len(first.Items) != 20 || !first.More {
 		t.Fatal(code, first)
 	}
+	for i, entry := range first.Items {
+		if entry.Kind != "issue.progress_updated" || entry.Progress == nil || entry.Progress.Summary != fmt.Sprintf("Progress %d", i+3) {
+			t.Fatalf("activity lost its matching assessment: %#v", entry)
+		}
+	}
 	// Inserting after the first page must not move the earlier-page cursor.
 	view = issueDetailHTTP(t, e, token, issue.IssueID)
 	e.op(token, e.envelope(env.Operation, env.Target, &view.Revision, protocol.UpdateIssueProgressPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Summary: "Newer"}))
@@ -110,6 +115,25 @@ func TestIssueProgressHTTPHistoryReplayAndActivity(t *testing.T) {
 	}
 	if e.do("GET", path+"/activity", "", nil, nil) != http.StatusUnauthorized {
 		t.Fatal("activity is not owner-only")
+	}
+}
+
+func TestIssueCancellationReadUsesOriginalIntent(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	target := protocol.Target{Type: "issue", ID: issue.IssueID}
+	for _, reason := range []string{"First cancellation", "Second cancellation"} {
+		issue = issueHTTP(t, e, token, e.envelope("issues.cancel", target, &issue.Revision, protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: reason}))
+		view := issueDetailHTTP(t, e, token, issue.IssueID)
+		if view.State != protocol.IssueCancelled || view.CancellationReason != reason {
+			t.Fatal(view)
+		}
+		issue = issueHTTP(t, e, token, e.envelope("issues.reopen", target, &issue.Revision, protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Resume work"}))
+		if got := issueDetailHTTP(t, e, token, issue.IssueID).CancellationReason; got != "" {
+			t.Fatal(got)
+		}
 	}
 }
 

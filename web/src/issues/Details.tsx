@@ -25,7 +25,7 @@ import { WorkItemRead } from "../workitems/live.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
 import { issueStateLabel } from "./Hierarchy.tsx";
 import { workStatus, workStatusLabel } from "./boardModel.ts";
-import { IssuePlanRead } from "./PlanRead.tsx";
+import { IssueEvidenceRead, IssuePlanRead } from "./PlanRead.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
 import { ManagerStatus } from "./ManagerStatus.tsx";
@@ -496,6 +496,21 @@ export function IssueDetails({
                   </time>
                 </p>
                 <p className={styles.intent}>{issue.plan.intent}</p>
+                {ended && (
+                  <section className={styles.progress} aria-label="收尾结论">
+                    <h2>{issue.state === "cancelled" ? "取消原因" : "收尾结论"}</h2>
+                    {issue.state === "cancelled" ? (
+                      <Markdown text={issue.cancellation_reason || "该次取消没有留存原因。"} />
+                    ) : issue.closure ? (
+                      <>
+                        <Markdown text={issue.closure.reason} />
+                        <IssueEvidenceRead items={issue.closure.evidence} />
+                      </>
+                    ) : (
+                      <p className={styles.muted}>该次关闭没有留存收尾说明。</p>
+                    )}
+                  </section>
+                )}
                 {issue.queue_reason && <p role="status">等待领取：{issue.queue_reason.message}</p>}
                 {issue.pause && (
                   <p role="status">
@@ -559,54 +574,71 @@ export function IssueDetails({
                     {attentionState.loading ? "正在读取待办…" : "加载更多当前责任待办"}
                   </Button>
                 )}
-                <section
-                  data-issue-progress
-                  className={styles.progress}
-                  data-expanded={progressExpanded || !issue.progress?.summary}
-                >
-                  <div className={styles.sectionHead}>
-                    <h2>{issue.progress?.historical ? "历史进展" : "当前进展"}</h2>
-                    <Button
-                      variant="link"
-                      disabled={!editable}
-                      onClick={() => setPanel("progress")}
-                    >
-                      编辑
-                    </Button>
-                  </div>
-                  {issue.progress?.summary ? (
-                    <Expandable text={issue.progress.summary} onOpenChange={setProgressExpanded} />
-                  ) : (
-                    <p className={styles.muted}>负责人尚未更新进展</p>
-                  )}
-                  <div className={styles.progressDetails}>
-                    {issue.progress?.historical && (
-                      <p className={styles.muted}>
-                        此记录属于先前责任或状态，当前 Issue 状态以页首为准。记录版本：
-                        {issue.progress.issue_revision}。
-                      </p>
+                {(!ended || issue.progress) && (
+                  <section
+                    data-issue-progress
+                    className={styles.progress}
+                    data-expanded={progressExpanded || !issue.progress?.summary}
+                  >
+                    <div className={styles.sectionHead}>
+                      <h2>{issue.progress?.historical ? "历史进展" : "当前进展"}</h2>
+                      <Button
+                        variant="link"
+                        disabled={!editable}
+                        onClick={() => setPanel("progress")}
+                      >
+                        编辑
+                      </Button>
+                    </div>
+                    {issue.progress?.summary ? (
+                      <Expandable
+                        text={issue.progress.summary}
+                        onOpenChange={setProgressExpanded}
+                      />
+                    ) : (
+                      <p className={styles.muted}>负责人尚未更新进展</p>
                     )}
-                    {issue.progress?.next_step && (
+                    {!ended && !issue.progress?.historical && issue.progress?.next_step && (
+                      <p>下一步：{issue.progress.next_step}</p>
+                    )}
+                    {!ended && issue.plan.stages?.some((stage) => stage.status === "active") && (
                       <p>
-                        {issue.progress.historical ? "当时下一步" : "下一步"}：
-                        {issue.progress.next_step}
+                        进行中阶段：
+                        {issue.plan.stages
+                          .filter((stage) => stage.status === "active")
+                          .map((stage) => stage.title)
+                          .join("、")}
                       </p>
                     )}
-                    <p className={styles.muted}>
-                      {execution}
-                      {issue.progress && (
-                        <>
-                          {" "}
-                          · 由 <AssigneeName assignee={issue.progress.updated_by} /> 更新 ·{" "}
-                          {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
-                        </>
+                    <div className={styles.progressDetails}>
+                      {issue.progress?.historical && (
+                        <p className={styles.muted}>
+                          此记录属于先前责任或状态，当前 Issue 状态以页首为准。记录版本：
+                          {issue.progress.issue_revision}。
+                        </p>
                       )}
-                    </p>
-                  </div>
-                  {issue.assignment_state !== "active" && (
-                    <p role="status">正在交接负责人，当前执行事实仍予保留。</p>
-                  )}
-                </section>
+                      {issue.progress?.historical && issue.progress.next_step && (
+                        <p>
+                          当时下一步：
+                          {issue.progress.next_step}
+                        </p>
+                      )}
+                      <p className={styles.muted}>
+                        {execution}
+                        {issue.progress && (
+                          <>
+                            {" "}
+                            · 由 <AssigneeName assignee={issue.progress.updated_by} /> 更新 ·{" "}
+                            {new Date(issue.progress.updated_at).toLocaleString("zh-CN")}
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    {issue.assignment_state !== "active" && (
+                      <p role="status">正在交接负责人，当前执行事实仍予保留。</p>
+                    )}
+                  </section>
+                )}
                 <details className={styles.definition}>
                   <summary>目标与完成条件</summary>
                   <IssuePlanRead issue={issue} />

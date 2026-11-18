@@ -1,17 +1,31 @@
-import type { IssueTranscriptBlock } from "../api/generated/api.ts";
+import type { IssueConversationItem, IssueTranscriptBlock } from "../api/generated/api.ts";
 import type { TranscriptEntry } from "../conversation/transcriptBlocks.ts";
+
+type ActivityRow = TranscriptEntry | { kind: "source"; key: string; item: IssueConversationItem };
 
 /** Keep the first reply mounted when a processing trigger gains its first item. */
 export function activityTurnRows(
   rows: readonly TranscriptEntry[],
   block: IssueTranscriptBlock,
-): TranscriptEntry[] {
+): ActivityRow[] {
   const key = `${block.position}:reply:${block.trigger.message_id}`;
   // Only this consumer reads and renders the independent process cursor.
-  const entries: readonly TranscriptEntry[] =
-    block.process?.more && !rows.some((row) => row.kind === "block-more")
-      ? [...rows, { kind: "block-more", key: `${block.position}:more`, block }]
-      : rows;
+  const publicRows: ActivityRow[] = [];
+  for (const row of rows) {
+    if (
+      row.kind === "agent" &&
+      block.trigger.author === "external" &&
+      row.items.some((item) => item.message_id === block.trigger.message_id)
+    ) {
+      publicRows.push({ kind: "source", key: row.key + ":source", item: block.trigger });
+      const remaining = row.items.filter((item) => item.message_id !== block.trigger.message_id);
+      if (remaining.length) publicRows.push({ ...row, items: remaining });
+    } else publicRows.push(row);
+  }
+  const entries: readonly ActivityRow[] =
+    block.process?.more && !publicRows.some((row) => row.kind === "block-more")
+      ? [...publicRows, { kind: "block-more", key: `${block.position}:more`, block }]
+      : publicRows;
   const withProcess = (row: Extract<TranscriptEntry, { kind: "agent" }>) => {
     // Process sequence is its own arrival order. Starting with transcript
     // callbacks would move later callbacks ahead of earlier deferred tools.
