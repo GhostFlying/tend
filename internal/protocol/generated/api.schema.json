@@ -9251,6 +9251,9 @@
         "event_seq": {
           "type": "integer"
         },
+        "interruptible_message_id": {
+          "type": "string"
+        },
         "items": {
           "anyOf": [
             {

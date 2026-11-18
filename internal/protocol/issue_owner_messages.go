@@ -53,12 +53,13 @@ type IssueConversationQueueEntry struct {
 	CanWithdraw bool                  `json:"can_withdraw"`
 }
 type IssueConversationQueuePage struct {
-	Active   *IssueConversationQueueEntry  `json:"active,omitempty"`
-	Enabled  bool                          `json:"enabled"`
-	EventSeq int64                         `json:"event_seq"`
-	Items    []IssueConversationQueueEntry `json:"items"`
-	Total    int64                         `json:"total"`
-	Next     int64                         `json:"next,omitempty"`
+	InterruptibleMessageID string                        `json:"interruptible_message_id,omitempty"`
+	Active                 *IssueConversationQueueEntry  `json:"active,omitempty"`
+	Enabled                bool                          `json:"enabled"`
+	EventSeq               int64                         `json:"event_seq"`
+	Items                  []IssueConversationQueueEntry `json:"items"`
+	Total                  int64                         `json:"total"`
+	Next                   int64                         `json:"next,omitempty"`
 }
 
 // IssueTurnProcess is a read-only public tool projection. Its cursor belongs to

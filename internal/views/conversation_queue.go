@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -40,6 +41,16 @@ func ConversationQueue(ctx context.Context, q store.Querier, category string, af
 			return out, err
 		}
 		out.Active = &entry
+	}
+	if category == "owner" && len(session) > 0 && strings.HasPrefix(session[0], "issue:") {
+		// The native stop target is independent of the owner input queue.
+		turn, err := store.ConversationActive(ctx, q, "background", session...)
+		if err != nil {
+			return out, err
+		}
+		if turn != nil && turn.Turn == store.TurnStarted {
+			out.InterruptibleMessageID = turn.ID
+		}
 	}
 	out.EventSeq, err = store.LatestEventSeq(ctx, q)
 	return out, err

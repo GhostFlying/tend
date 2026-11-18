@@ -46,7 +46,7 @@ tend event watch --issue "$ISSUE_ID" --json
 tend schedule show "$RULE_ID" --json
 ```
 
-`--notification` 使用活动条目的 `position` 查询交付观察或共享审阅事件关联的通知。
+`--notification` 使用活动条目的 `position` 查询交付观察、共享审阅或任务完成事件关联的通知。
 输出包含原始事件 ID、已有批次、接收与开始证据、结算及记录的等待原因。
 合并窗口使用该事件的显式关联。缺少关联或回执时显示未知。
 使用 `--after <next>` 翻阅同一事件的通知记录。

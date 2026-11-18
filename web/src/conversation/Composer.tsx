@@ -84,6 +84,12 @@ export function Composer({
               : conversation.items,
           );
 
+  const stopMessageID = issueComposer
+    ? (owner?.interruptible_message_id ??
+      (active?.status === "processing" ? active.item.message_id : undefined) ??
+      busy?.message_id ??
+      (!queueState.supported ? processing(conversation.items)?.message_id : undefined))
+    : busy?.message_id;
   const queued = !!owner?.total || (!issueComposer && !!queueState.pages.background?.total);
 
   useEffect(() => {
@@ -170,10 +176,10 @@ export function Composer({
   };
 
   const stopping =
-    pending !== null && pending.messageId === busy?.message_id && pending.phase !== "failed";
+    pending !== null && pending.messageId === stopMessageID && pending.phase !== "failed";
   const stop = async () => {
-    if (!busy || stopping) return;
-    await interrupt.start(busy.message_id);
+    if (!stopMessageID || stopping) return;
+    await interrupt.start(stopMessageID);
     void live.reload();
   };
 
@@ -188,7 +194,7 @@ export function Composer({
   let hint = touch ? "" : "Enter 发送 · Shift+Enter 换行";
   if (queue === null) {
     hint = "这个浏览器不能保存待发送的消息，暂时不能发送";
-  } else if (busy && stopping) {
+  } else if (stopMessageID && stopping) {
     hint =
       pending?.phase === "unknown"
         ? "停止结果未知，等待消息的最终状态"
@@ -203,7 +209,12 @@ export function Composer({
       : `回复 ${clock(Date.parse(reply.created_at))} 的消息`;
   }
 
-  const showStop = busy !== undefined && body === "" && !files.length && !attachments.length;
+  const showStop =
+    busy !== undefined &&
+    stopMessageID === busy.message_id &&
+    body === "" &&
+    !files.length &&
+    !attachments.length;
   return (
     <div
       className={styles.composer}
@@ -324,7 +335,7 @@ export function Composer({
             </div>
           </details>
         )}
-        {busy && !showStop && (
+        {stopMessageID && !showStop && (
           <button
             type="button"
             className={styles.attach}

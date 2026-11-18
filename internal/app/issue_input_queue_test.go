@@ -93,7 +93,7 @@ func TestIssueInputQueueKeepsBackgroundOutOfOwnerProjection(t *testing.T) {
 		page.Items[1].Status != "queued" || page.Items[2].Status != "queued" {
 		t.Fatal("background fixture must include one processing and two queued", page)
 	}
-	if page := readQueue("owner"); page.Total != 0 || page.Active != nil || len(page.Items) != 0 {
+	if page := readQueue("owner"); page.Total != 0 || page.Active != nil || len(page.Items) != 0 || page.InterruptibleMessageID != turn.MessageID {
 		t.Fatal("background turn leaked into the real owner input view", page)
 	}
 	if notice := readNotice(); notice.MessageID != turn.MessageID || notice.Delivery != "received" ||
@@ -138,6 +138,33 @@ func TestIssueInputQueueKeepsBackgroundOutOfOwnerProjection(t *testing.T) {
 	}
 	if notice := readNotice(); notice.BatchStatus != "completed" || notice.Source != "read" || notice.NativeStatus != "completed" {
 		t.Fatal("the actual terminal receipt did not settle the original batch", notice)
+	}
+
+	// Inject a retained adoption chain after exercising the original notification.
+	// Its successor carries handling state only. It must not replace native receipt evidence.
+	original := readNotice()
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		var parent string
+		if err := tx.Q().QueryRowContext(ctx, `SELECT logical_turn_id FROM logical_turns WHERE message_id=?`, turn.MessageID).Scan(&parent); err != nil {
+			return err
+		}
+		for _, successor := range []string{"adopted-once", "adopted-twice"} {
+			if _, err := tx.Exec(ctx, `INSERT INTO logical_turns (logical_turn_id,message_id,status,reason,updated_at)
+ VALUES(?,?,'awaiting_clarification','Waiting for the original report',?)`, successor, sent.MessageID, h.clock.Now().UnixMilli()); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='awaiting_completion',resumed_by=? WHERE logical_turn_id=?`, successor, parent); err != nil {
+				return err
+			}
+			parent = successor
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if adopted := readNotice(); adopted.Settlement != "awaiting_clarification" || adopted.Reason != "Waiting for the original report" ||
+		adopted.StartedAt != original.StartedAt || adopted.Source != original.Source || adopted.NativeStatus != original.NativeStatus {
+		t.Fatal("adoption lost the current wait reason or changed original notification facts", adopted)
 	}
 	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
 		page, err := views.IssueActivity(ctx, tx.Q(), issue.IssueID, 0)
