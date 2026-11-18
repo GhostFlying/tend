@@ -283,3 +283,72 @@ func TestIssueEventNotificationShowsRetainedRateLimitWait(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIssueEventNotificationUsesReconciledNativeDelivery(t *testing.T) {
+	f := newUrgentQueueFixture(t)
+	ctx := t.Context()
+	finishHostedReview(t, f.harness, f.turn)
+	var position int64
+	if err := f.store.Write(ctx, func(tx *store.Tx) error {
+		x := &Exec{IDs: f.ids, Now: f.clock.Now(), Env: &protocol.Envelope{}}
+		id, source := f.ids.New(protocol.PrefixEvent), f.ids.New(protocol.PrefixMessage)
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: source, ConversationID: f.conversation, Author: "system", Body: "Review returned while reconnecting", CreatedAt: x.Now.UnixMilli()}); err != nil {
+			return err
+		}
+		var err error
+		position, err = tx.InsertEvent(ctx, store.EventRow{EventID: id, Source: "test", ObjectType: "issue", ObjectID: f.issue.IssueID, Kind: "issue.delivery_review_changed", BodyJSON: `{}`, CreatedAt: x.Now.UnixMilli()})
+		if err != nil {
+			return err
+		}
+		return appendBackgroundSource(ctx, x, tx, "reconnected-review", f.issue.IssueID, source, id, "issue.delivery_review_changed", nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertDiagnosis := func(delivery, native string) {
+		t.Helper()
+		if err := f.store.Read(ctx, func(tx *store.ReadTx) error {
+			page, err := views.IssueEventNotification(ctx, tx.Q(), f.issue.IssueID, position, 0)
+			if err != nil || len(page.Notifications) != 1 {
+				t.Fatal(page, err)
+			}
+			item := page.Notifications[0]
+			if item.Delivery != delivery || item.NativeStatus != native || item.StartedAt != 0 || item.Source != "unknown" {
+				t.Fatalf("delivery %q native %q, want %q / %q without assumed start or source read: %+v", item.Delivery, item.NativeStatus, delivery, native, item)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertDiagnosis("unknown", "")
+	d, _, claimed, err := f.app.NextDelivery(ctx, store.ConversationDestination(f.conversation))
+	if err != nil || !claimed || d.Operation != OpHandleEvent {
+		t.Fatal(d, claimed, err)
+	}
+	var p HandleMessage
+	if err := json.Unmarshal(d.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	selected, named, err := f.app.NamedHostedSelection(ctx, f.conversation)
+	if err != nil || !named {
+		t.Fatal(selected, named, err)
+	}
+	turn := store.MainTurn{RequestID: d.RequestID, MessageID: p.MessageID, ThreadID: f.turn.ThreadID, Status: store.TurnStarting, Hosted: &selected}
+	if err := f.app.PutMainTurn(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.app.RecordRolloutEvent(ctx, f.conversation, turn.ThreadID, "other-native-turn", "", "native_terminal", json.RawMessage(`{"status":"completed"}`)); err != nil {
+		t.Fatal(err)
+	}
+	assertDiagnosis("unknown", store.TurnStarting)
+	turn.TurnID, turn.Status = "reconnected-native-turn", store.TurnCompleted
+	if err := f.app.ObserveNativeTurnTerminal(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	assertDiagnosis("received", store.TurnCompleted)
+	turn.NativeReconciled = true
+	if err := f.app.PutMainTurn(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	assertDiagnosis("received", store.TurnCompleted)
+}

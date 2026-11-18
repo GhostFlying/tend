@@ -49,6 +49,15 @@ func IssueEventNotification(ctx context.Context, q store.Querier, issue string, 
  COALESCE((SELECT MIN(e.created_at) FROM events e
    WHERE e.object_type='message' AND e.object_id=m.message_id AND e.kind='conversation.message_state'
    AND json_extract(e.body_json,'$.state')='processing'),0),
+ EXISTS(SELECT 1 FROM main_turns n
+   JOIN conversation_messages original ON original.message_id=n.message_id
+   LEFT JOIN hosted_executions h ON h.execution_id=n.request_id
+   LEFT JOIN agent_turn_contexts c ON c.request_id=n.request_id
+   JOIN agent_rollout_events receipt ON receipt.conversation_id=COALESCE(h.conversation_id,c.conversation_id,original.conversation_id)
+     AND receipt.thread_id=n.thread_id AND receipt.turn_id=n.turn_id
+   WHERE n.message_id=m.message_id AND n.turn_id<>'' AND receipt.kind IN ('native_terminal','native_receipt')
+   AND NOT EXISTS(SELECT 1 FROM logical_turn_executions e WHERE e.request_id=n.request_id AND e.repair=1)
+   AND NOT EXISTS(SELECT 1 FROM agent_recovery_attempts a WHERE a.request_id=n.request_id)),
  COALESCE(t.status,''),COALESCE(l.status,''),COALESCE(NULLIF(l.reason,''),(
    SELECT r.reason FROM logical_turn_executions e JOIN agent_recoveries r ON r.root_request_id=e.request_id
    WHERE e.logical_turn_id=l.logical_turn_id AND r.status='waiting' AND r.reason<>''
@@ -72,9 +81,9 @@ func IssueEventNotification(ctx context.Context, q store.Querier, issue string, 
 	defer rows.Close()
 	for rows.Next() {
 		var item protocol.IssueEventNotification
-		var active, read bool
+		var active, read, terminalReceipt bool
 		if err := rows.Scan(&item.Position, &item.BatchID, &item.MessageID, &item.BatchStatus,
-			&active, &read, &item.StartedAt, &item.NativeStatus, &item.Settlement, &item.Reason); err != nil {
+			&active, &read, &item.StartedAt, &terminalReceipt, &item.NativeStatus, &item.Settlement, &item.Reason); err != nil {
 			return out, err
 		}
 		item.Delivery = "unknown"
@@ -85,7 +94,7 @@ func IssueEventNotification(ctx context.Context, q store.Querier, issue string, 
 		case !active:
 			item.Source = "cancelled"
 		}
-		if item.StartedAt > 0 || read {
+		if item.StartedAt > 0 || read || terminalReceipt {
 			item.Delivery = "received"
 		}
 		if item.Settlement == "" {
