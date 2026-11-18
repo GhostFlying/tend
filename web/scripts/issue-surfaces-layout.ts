@@ -1976,7 +1976,10 @@ async function checkBoardColumnWidths() {
         await waitForCardInViewport("in_review");
         await board.evaluate((element, left) => (element.scrollLeft = left), doneOffset);
         await waitForScrollToSettle();
-        assert(await activeTab.isVisible(), "a delayed swipe offset cannot override the tab choice");
+        assert(
+          await activeTab.isVisible(),
+          "a delayed swipe offset cannot override the tab choice",
+        );
         await waitForCardInViewport("in_review");
         await activeTab.press("ArrowRight");
         await doneTab.waitFor();
