@@ -4,6 +4,7 @@ import { navigate, useRoute, type IssueFilters } from "../app/router.ts";
 import {
   memo,
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useMemo,
@@ -46,6 +47,13 @@ import {
 import styles from "./Board.module.css";
 
 const cancelledPreferenceKey = "tend.board.cancelled-expanded.v2";
+const mobileBoardQuery = "(max-width: 760px)";
+
+function columnOffset(scroller: HTMLDivElement, index: number): number {
+  const first = scroller.children[0] as HTMLElement;
+  const column = scroller.children[index] as HTMLElement;
+  return column.offsetLeft - first.offsetLeft;
+}
 
 export function IssueBoard({
   onSelect,
@@ -89,6 +97,8 @@ export function IssueBoard({
     }
   });
   const mobileTabs = useRef<HTMLDivElement>(null);
+  const columns = useRef<HTMLDivElement>(null);
+  const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
   const [startItem, setStartItem] = useState<IssueSummary | null>(null);
   const [startCategory, setStartCategory] = useState("");
@@ -105,11 +115,28 @@ export function IssueBoard({
       /* Keep the session preference when storage is unavailable. */
     }
   };
+  const scrollToColumn = (status: IssueWorkStatus) => {
+    const scroller = columns.current;
+    if (scroller) {
+      const index = boardColumns.findIndex(({ id }) => id === status);
+      scroller.scrollLeft = columnOffset(scroller, index);
+    }
+  };
+  const restoreMobileColumn = useEffectEvent(() => scrollToColumn(mobileColumn));
+  useLayoutEffect(() => {
+    const media = window.matchMedia(mobileBoardQuery);
+    const update = () => setMobile(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useLayoutEffect(() => {
+    if (active && mobile && view === "board") restoreMobileColumn();
+  }, [active, mobile, view]);
   useLayoutEffect(() => {
     mobileTabs.current
       ?.querySelector('[aria-selected="true"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [mobileColumn]);
+  }, [active, mobile, mobileColumn, view]);
   const actions = useBoardActions();
   const move = (item: IssueSummary, status: IssueWorkStatus) => {
     if (status === "todo" && !item.owner_selection && !item.board?.retained_execution) {
@@ -283,7 +310,10 @@ export function IssueBoard({
             <Tabs<IssueWorkStatus>
               label="工作状态"
               value={mobileColumn}
-              onChange={setMobileColumn}
+              onChange={(status) => {
+                scrollToColumn(status);
+                setMobileColumn(status);
+              }}
               items={boardColumns.map(({ id, label }) => ({
                 value: id,
                 label: (
@@ -296,18 +326,35 @@ export function IssueBoard({
               }))}
             />
           </div>
-          <div className={styles.columns} data-cancelled-expanded={cancelledExpanded}>
+          <div
+            ref={columns}
+            className={styles.columns}
+            data-cancelled-expanded={cancelledExpanded}
+            role="region"
+            aria-label="看板列"
+            tabIndex={mobile ? undefined : 0}
+            onScroll={
+              mobile
+                ? ({ currentTarget }) => {
+                    const stride = columnOffset(currentTarget, 1);
+                    const index = Math.round(currentTarget.scrollLeft / stride);
+                    const status = boardColumns[index]?.id;
+                    if (status) setMobileColumn(status);
+                  }
+                : undefined
+            }
+          >
             {boardColumns.map(({ id, label }) => (
               <BoardColumn
                 key={id}
                 status={id}
                 label={label}
                 count={counts?.[id]}
-                mobile={mobileColumn === id}
+                inert={mobile && mobileColumn !== id}
                 over={over === id}
                 closed={closed}
-                collapsed={id === "cancelled" && !cancelledExpanded}
-                onToggle={id === "cancelled" ? toggleCancelled : undefined}
+                collapsed={!mobile && id === "cancelled" && !cancelledExpanded}
+                onToggle={!mobile && id === "cancelled" ? toggleCancelled : undefined}
                 onDragOver={(event) => {
                   if (dragged.current && online) {
                     event.preventDefault();
@@ -520,7 +567,7 @@ function BoardColumn({
   status,
   label,
   count,
-  mobile,
+  inert,
   over,
   closed,
   collapsed,
@@ -531,7 +578,7 @@ function BoardColumn({
   status: IssueWorkStatus;
   label: string;
   count?: number | undefined;
-  mobile: boolean;
+  inert: boolean;
   over: boolean;
   closed: boolean;
   collapsed: boolean;
@@ -547,7 +594,7 @@ function BoardColumn({
   return (
     <section
       className={styles.column}
-      data-mobile={mobile}
+      inert={inert}
       data-collapsed={collapsed}
       data-over={over}
       aria-label={`${label}列`}

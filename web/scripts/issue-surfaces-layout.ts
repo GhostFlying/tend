@@ -1536,6 +1536,7 @@ async function captureS4() {
     delete issueRows[1]!.execution;
   }
   if (childProgressOnly) return;
+  await checkBoardColumnWidths();
   for (const viewport of [
     { width: 1440, height: 900 },
     { width: 390, height: 844 },
@@ -1632,26 +1633,14 @@ async function captureS4() {
             "board has no horizontal page overflow",
           );
           if (viewport.width === 1440) {
-            const last = await page
-              .getByRole("region", { name: "已取消列", exact: true })
-              .boundingBox();
-            assert(
-              last && last.x + last.width <= viewport.width,
-              "last board column is fully visible",
-            );
+            const last = page.getByRole("region", { name: "已取消列", exact: true });
+            await last.scrollIntoViewIfNeeded();
             const toggle = page.getByRole("button", { name: /已取消/ }).filter({ visible: true });
             assert.equal(await toggle.getAttribute("aria-expanded"), "true");
             assert.equal(
               await page.evaluate(() => localStorage.getItem("tend.board.cancelled-expanded")),
               "false",
               "ambiguous legacy preference remains unchanged",
-            );
-            const expanded = await page
-              .getByRole("region", { name: "已取消列", exact: true })
-              .boundingBox();
-            assert(
-              expanded && expanded.x + expanded.width <= viewport.width,
-              "expanded last column is fully visible",
             );
             await page.screenshot({
               path: join(output, `board-expanded-${viewport.width}-${colorScheme}.png`),
@@ -1721,6 +1710,155 @@ async function captureS4() {
     await context.close();
   }
   issue.state = "active";
+}
+
+async function checkBoardColumnWidths() {
+  assert(output);
+  assert(address && typeof address !== "string");
+  const originalLength = issueRows.length;
+  const samples = [
+    ["backlog", "待安排", "整理旧候选的测试与验收历史"],
+    ["todo", "待推进", "核对生产发布范围和可回滚版本"],
+    ["in_progress", "进行中", "在 Issue 进展中及时显示 PR 冲突及负责人的实际处理状态"],
+    ["in_review", "待检查", "审阅当前候选的独立浏览器验证证据"],
+    ["done", "已完成", "为发布流程补齐启动验证与回滚文档"],
+    ["cancelled", "已取消", "修复旧候选验证记录在 Issue 进展中丢失的问题"],
+  ] as const;
+  const active = issueRows[0]!.board!;
+  for (const [status, , title] of samples) {
+    issueRows.push({
+      ...summary(`board-${status}`, title),
+      project: "workspace-validation",
+      state: status === "cancelled" ? "cancelled" : status === "done" ? "closed" : "active",
+      board: {
+        ...active,
+        status,
+        stages_done: 2,
+        stages_total: 4,
+        attention_count: 1,
+        execution: { ...active.execution, running: 1 },
+      },
+    });
+  }
+  const ongoing = issueRows.find((row) => row.issue_id === "board-in_progress")!;
+  for (let i = 0; i < 8; i++) {
+    issueRows.push({ ...ongoing, issue_id: `board-ongoing-${i}` });
+  }
+  try {
+    for (const width of [900, 1920, 390]) {
+      const mobile = width === 390;
+      const context = await browser.newContext({
+        viewport: { width, height: 844 },
+        isMobile: mobile,
+        hasTouch: mobile,
+        serviceWorkers: "block",
+      });
+      if (mobile) {
+        await context.addInitScript(() =>
+          localStorage.setItem("tend.board.cancelled-expanded.v2", "false"),
+        );
+      }
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(`http://127.0.0.1:${address.port}/issues`);
+      const board = page.getByRole("region", { name: "看板列", exact: true });
+      const card = (status: string) => board.locator(`[data-issue-id="board-${status}"]`);
+      await card("in_progress").waitFor();
+      const boardFits = () => board.evaluate((el) => el.scrollWidth === el.clientWidth);
+      const minimumWidth = async (status: string) => {
+        const box = await card(status).boundingBox();
+        assert(box && box.width >= 238, `${status} card width at ${width}px`);
+      };
+      if (mobile) {
+        const waitForCardInViewport = (status: string) =>
+          page.waitForFunction((status) => {
+            const rect = document
+              .querySelector(`[data-issue-id="board-${status}"]`)
+              ?.getBoundingClientRect();
+            return rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth;
+          }, status);
+        const activeTab = page.getByRole("tab", { name: /^进行中/, selected: true });
+        await activeTab.waitFor();
+        const ongoingColumn = board.getByRole("region", { name: "进行中列", exact: true });
+        const cdp = await context.newCDPSession(page);
+        const swipe = async (x: number, y: number, dx: number, dy: number) => {
+          await cdp.send("Input.dispatchTouchEvent", {
+            type: "touchStart",
+            touchPoints: [{ x, y }],
+          });
+          for (let step = 1; step <= 15; step++) {
+            await cdp.send("Input.dispatchTouchEvent", {
+              type: "touchMove",
+              touchPoints: [{ x: x + (dx * step) / 15, y: y + (dy * step) / 15 }],
+            });
+          }
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        };
+        await swipe(195, 560, 0, -280);
+        await page.waitForFunction(
+          () => document.querySelector('[aria-label="进行中列"]')!.scrollTop > 0,
+        );
+        await swipe(350, 350, -320, 0);
+        await page.getByRole("tab", { name: /^待检查/, selected: true }).waitFor();
+        assert(
+          await ongoingColumn.evaluate((column) => (column as HTMLElement).inert),
+          "offscreen columns leave keyboard navigation",
+        );
+        await waitForCardInViewport("in_review");
+        await page.screenshot({ path: join(output, "board-touch-390.png") });
+        await page.getByRole("tab", { name: /^已取消/ }).click();
+        await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
+        await waitForCardInViewport("cancelled");
+        await minimumWidth("cancelled");
+      } else {
+        for (const [status] of samples) {
+          await card(status).waitFor();
+          await minimumWidth(status);
+        }
+        assert.equal(await boardFits(), width === 1920);
+        if (width === 1920) {
+          const box = (await card("cancelled").boundingBox())!;
+          assert(box.x + box.width <= width);
+          const columnWidths = await board.evaluate((el) =>
+            Array.from(el.children, (child) => child.getBoundingClientRect().width),
+          );
+          assert(
+            columnWidths.every((column) => column > 256 && Math.abs(column - columnWidths[0]!) < 1),
+          );
+        } else {
+          await board.hover();
+          await page.mouse.wheel(400, 0);
+          await page.waitForFunction(
+            () => document.querySelector('[aria-label="看板列"]')!.scrollLeft > 0,
+          );
+          const toggle = board.getByRole("button", { name: /^已取消/ });
+          await toggle.click();
+          assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+          assert.equal(await card("cancelled").isVisible(), false);
+          await minimumWidth("in_progress");
+          await toggle.click();
+          await minimumWidth("cancelled");
+        }
+      }
+      assert.deepEqual(errors, []);
+      assert(
+        await page.evaluate(() => {
+          const main = document.querySelector("main")!;
+          return (
+            document.documentElement.scrollWidth === innerWidth &&
+            main.scrollWidth === main.clientWidth
+          );
+        }),
+        "horizontal overflow is confined to the board",
+      );
+      await page.screenshot({ path: join(output, `board-width-${width}.png`) });
+      await context.close();
+      console.log(`PASS Issue board column width and navigation ${width}px`);
+    }
+  } finally {
+    issueRows.length = originalLength;
+  }
 }
 
 async function checkNavigation() {
