@@ -191,6 +191,57 @@ func TestGroupedIssueOwnerProgressAndRequestedExceptions(t *testing.T) {
 	}
 }
 
+func TestCombinedIssueReportRepliesToConsumedInput(t *testing.T) {
+	h := hostedManagerHarness(t)
+	a := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
+	b := createCanonicalOwnerTestIssue(t, h)
+	_, delivery := h.say("Start this discussion.")
+	turn := startHostedReview(t, h, "main", delivery)
+	source := consumedSteerFixture(t, h, delivery)
+	ids := []string{a.IssueID, b.IssueID}
+	setReportForTest(t, h, source, ids, ids)
+	p := protocol.CoordinationReply{ReplyTo: source, Body: "Yes, I will report both results together.", WorkItemIDs: ids}
+	op := hostedEffect(t, h, mainAgent, turn, 1, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, p, CoordinationReply{})
+	answer, err := h.app.MessagingMessage(t.Context(), messageID(t, op))
+	if err != nil || answer.ReplyTo != source || answer.ConversationID != "main" || len(answer.IssueIDs) != 2 {
+		t.Fatal(answer, err)
+	}
+
+	// The same input reaches A's manager as historical context in a background
+	// batch. It may inform progress but is not a new question to that manager.
+	conversation := "issue:" + a.IssueID
+	background, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
+	if err != nil || !ok || background.Operation != OpHandleEvent {
+		t.Fatal(background, ok, err)
+	}
+	manager := startHostedReview(t, h, conversation, background)
+	principal := protocol.Principal{Kind: protocol.PrincipalBackgroundAgent, Subject: "manager", Thread: manager.ThreadID, ConversationID: conversation}
+	reply := protocol.MessagingPublication{ReplyTo: source, Body: "A is still in progress."}
+	op = hostedEffect(t, h, principal, manager, 1, protocol.Target{Type: "logical_turn", ID: manager.RequestID}, nil, reply, PublishCommunication{})
+	expectWorkCode(t, op, protocol.CodeInvalidTransition)
+}
+
+func TestCombinedIssueReportNotificationScope(t *testing.T) {
+	h := hostedManagerHarness(t)
+	a, b, c := createCanonicalOwnerTestIssue(t, h), createCanonicalOwnerTestIssue(t, h), createCanonicalOwnerTestIssue(t, h)
+	source, delivery := h.say("Report A and B together, and give me C separately.")
+	turn := startHostedReview(t, h, "main", delivery)
+	ids := []string{a.IssueID, b.IssueID, c.IssueID}
+	setReportForTest(t, h, source, ids, ids[:2])
+	notify := func(seq int64, scope []string) protocol.Operation {
+		t.Helper()
+		p := protocol.MessagingPublication{Body: "The requested result is ready.", IssueIDs: scope}
+		return hostedEffect(t, h, mainAgent, turn, seq, protocol.Target{Type: "logical_turn", ID: turn.RequestID}, nil, p, PublishCommunication{Notify: true})
+	}
+	for _, scope := range [][]string{nil, {a.IssueID}, {b.IssueID, c.IssueID}} {
+		expectWorkCode(t, notify(1, scope), protocol.CodeInvalidTransition)
+	}
+	published, err := h.app.MessagingMessage(t.Context(), messageID(t, notify(1, []string{c.IssueID})))
+	if err != nil || len(published.IssueIDs) != 1 || published.IssueIDs[0] != c.IssueID {
+		t.Fatal(published, err)
+	}
+}
+
 func TestPRIntegrationPublishesOriginalCardAndObservedResult(t *testing.T) {
 	for _, mode := range []string{"auto", "manual"} {
 		t.Run(mode, func(t *testing.T) {

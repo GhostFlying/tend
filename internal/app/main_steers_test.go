@@ -184,8 +184,12 @@ func TestExecutionScopeKeepsEventReviewWithHistoricalAuditParent(t *testing.T) {
 
 func consumedSteerFixture(t *testing.T, h *harness, active Delivery) string {
 	t.Helper()
+	turn, found, err := h.app.MainTurn(t.Context(), active.RequestID)
+	if err != nil || !found {
+		t.Fatal(found, err)
+	}
 	id := queueMessage(t, h, "supplement needing formal review")
-	d, ok, err := h.app.ClaimMainSteer(t.Context(), active.RequestID, "native", "turn")
+	d, ok, err := h.app.ClaimMainSteer(t.Context(), active.RequestID, turn.ThreadID, turn.TurnID)
 	if err != nil || !ok {
 		t.Fatal(d, ok, err)
 	}
@@ -197,7 +201,7 @@ func consumedSteerFixture(t *testing.T, h *harness, active Delivery) string {
 	if err := h.app.UpdateMainSteer(t.Context(), m); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := h.app.ConsumeMainSteer(t.Context(), "native", "turn", m.InputText, "native-user-item"); err != nil || !ok {
+	if _, ok, err := h.app.ConsumeMainSteer(t.Context(), turn.ThreadID, turn.TurnID, m.InputText, "native-user-item"); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
 	if err := h.app.FinishDelivery(t.Context(), d, DeliveryResult{Outcome: Delivered}); err != nil {

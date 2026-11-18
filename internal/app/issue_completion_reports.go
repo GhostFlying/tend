@@ -142,7 +142,7 @@ func reportExcerpt(s string, limit int) string {
 // A grouped result belongs to the original request. An admitted user question,
 // a separately requested update and a material change to the promise can still
 // be communicated by any responsible member. No prose or stage label is parsed.
-func checkCompletionReportPublication(ctx context.Context, q store.Querier, issues []string, trigger string, p protocol.MessagingPublication) error {
+func checkCompletionReportPublication(ctx context.Context, q store.Querier, issues []string, turn store.MainTurn, p protocol.MessagingPublication) error {
 	if p.NotificationBasis != "" {
 		if (p.NotificationBasis != "requested_update" && p.NotificationBasis != "commitment_changed") || strings.TrimSpace(p.Reason) == "" {
 			return protocol.Errorf(protocol.CodeInvalidRequest, "notification_basis requires requested_update or commitment_changed and its reason")
@@ -150,12 +150,28 @@ func checkCompletionReportPublication(ctx context.Context, q store.Querier, issu
 		return nil
 	}
 	if p.ReplyTo != "" {
-		var user bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messaging_messages WHERE message_id=? AND direction='input' AND (message_id=? OR NOT EXISTS(SELECT 1 FROM issue_completion_reports WHERE source_message_id=messaging_messages.message_id)))`, p.ReplyTo, trigger).Scan(&user); err != nil {
+		var input, agreement bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messaging_messages WHERE message_id=?1 AND direction='input'),
+			EXISTS(SELECT 1 FROM issue_completion_reports WHERE source_message_id=?1)`, p.ReplyTo).Scan(&input, &agreement); err != nil {
 			return err
 		}
-		if user {
-			return nil
+		if input {
+			if !agreement {
+				return nil
+			}
+			// The original agreement can be a fresh question for this execution
+			// or historical material in another Issue's background batch.
+			if admitted, err := mainExecutionSourceAdmitted(ctx, q, turn.RequestID, p.ReplyTo); err != nil || admitted {
+				return err
+			}
+		}
+	}
+	if len(issues) == 0 {
+		var err error
+		issues, err = store.FollowupIDs(ctx, q, `SELECT work_item_id FROM message_work_items WHERE message_id=?1 AND active=1
+			UNION SELECT work_item_id FROM background_batches WHERE message_id=?1 AND work_item_id<>''`, turn.MessageID)
+		if err != nil || len(issues) == 0 {
+			return err
 		}
 	}
 	raw, err := json.Marshal(issues)
@@ -163,13 +179,11 @@ func checkCompletionReportPublication(ctx context.Context, q store.Querier, issu
 		return err
 	}
 	var grouped bool
-	if err := q.QueryRowContext(ctx, `WITH scope(id) AS (
-		SELECT value FROM json_each(?) UNION SELECT work_item_id FROM message_work_items WHERE message_id=? AND active=1
-		UNION SELECT work_item_id FROM background_batches WHERE message_id=? AND work_item_id<>'')
-		SELECT EXISTS(SELECT 1 FROM scope JOIN message_work_items a ON a.work_item_id=scope.id AND a.active=1
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM json_each(?) scope
+		JOIN message_work_items a ON a.work_item_id=scope.value AND a.active=1
 		JOIN issue_completion_reports r ON r.source_message_id=a.message_id
-		JOIN issue_controls c ON c.issue_id=scope.id
-		WHERE (r.published_message_id IS NULL OR c.state='closed') AND scope.id IN (SELECT value FROM json_each(r.issue_ids_json)))`, string(raw), trigger, trigger).Scan(&grouped); err != nil {
+		JOIN issue_controls c ON c.issue_id=scope.value
+		WHERE (r.published_message_id IS NULL OR c.state='closed') AND scope.value IN (SELECT value FROM json_each(r.issue_ids_json)))`, string(raw)).Scan(&grouped); err != nil {
 		return err
 	}
 	if grouped {

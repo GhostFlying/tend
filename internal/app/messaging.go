@@ -47,7 +47,7 @@ func (c MessagingCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			if err != nil {
 				return Outcome{}, err
 			}
-			if err := checkCompletionReportPublication(ctx, tx.Q(), p.IssueIDs, turn.MessageID, p); err != nil {
+			if err := checkCompletionReportPublication(ctx, tx.Q(), p.IssueIDs, turn, p); err != nil {
 				return Outcome{}, err
 			}
 		}
@@ -593,7 +593,7 @@ func (c PublishCommunication) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if issuePublication {
 		scope = []string{x.coordinationExecution.IssueID}
 	}
-	if err := checkCompletionReportPublication(ctx, tx.Q(), scope, turn.MessageID, p); err != nil {
+	if err := checkCompletionReportPublication(ctx, tx.Q(), scope, turn, p); err != nil {
 		return Outcome{}, err
 	}
 	out, err := publishCommunication(ctx, x, tx, p, execution, conversation, "main_agent")
