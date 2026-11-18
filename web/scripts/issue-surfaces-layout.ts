@@ -1953,31 +1953,33 @@ async function checkBoardColumnWidths() {
         await page.screenshot({ path: join(output, "board-focused-reading-position-390.png") });
         await activeTab.focus();
         await swipe(350, 350, -320, 0);
-        const reviewTab = page.getByRole("tab", { name: /^待检查/, selected: true });
-        await reviewTab.waitFor();
+        const doneTab = page.getByRole("tab", { name: /^已完成/, selected: true });
+        await doneTab.waitFor();
         assert(
           await ongoingColumn.evaluate((column) => (column as HTMLElement).inert),
           "offscreen columns leave keyboard navigation",
         );
-        await waitForCardInViewport("in_review");
+        await waitForCardInViewport("done");
         assert(
-          await reviewTab.evaluate((tab) => document.activeElement === tab),
+          await doneTab.evaluate((tab) => document.activeElement === tab),
           "the selected tab retains visible keyboard focus after a swipe",
         );
-        const tabBox = await reviewTab.boundingBox();
+        const tabBox = await doneTab.boundingBox();
         assert(
           tabBox && tabBox.x >= 0 && tabBox.x + tabBox.width <= width,
           `the focused tab fits within the viewport: ${JSON.stringify(tabBox)}`,
         );
         await page.screenshot({ path: join(output, "board-touch-390.png") });
-        const reviewOffset = await board.evaluate((element) => element.scrollLeft);
-        await page.keyboard.press("ArrowRight");
-        const doneTab = page.getByRole("tab", { name: /^已完成/, selected: true });
-        await doneTab.waitFor();
-        await waitForCardInViewport("done");
-        await board.evaluate((element, left) => (element.scrollLeft = left), reviewOffset);
+        const doneOffset = await board.evaluate((element) => element.scrollLeft);
+        await doneTab.press("ArrowLeft");
+        await activeTab.waitFor();
+        await waitForCardInViewport("in_review");
+        await board.evaluate((element, left) => (element.scrollLeft = left), doneOffset);
         await waitForScrollToSettle();
-        assert(await doneTab.isVisible(), "a delayed swipe offset cannot override the tab choice");
+        assert(await activeTab.isVisible(), "a delayed swipe offset cannot override the tab choice");
+        await waitForCardInViewport("in_review");
+        await activeTab.press("ArrowRight");
+        await doneTab.waitFor();
         await waitForCardInViewport("done");
         await resizeBoard(844, 390);
         await resizeBoard(width, 844);
@@ -2020,11 +2022,11 @@ async function checkBoardColumnWidths() {
         }
         await doneTab.focus();
         await swipe(40, 350, 320, 0);
-        await reviewTab.waitFor();
+        await activeTab.waitFor();
         await waitForScrollToSettle();
         await waitForCardInViewport("in_review");
         assert(
-          await reviewTab.isVisible(),
+          await activeTab.isVisible(),
           "swiping still changes the selected column after rotation",
         );
         await page.getByRole("tab", { name: /^已取消/ }).click();
