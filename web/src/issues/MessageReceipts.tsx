@@ -8,7 +8,7 @@ import { WorkItemRead } from "../workitems/live.ts";
 export function MessageReceipts({ item }: { item: IssueConversationItem }) {
   const { client } = useServices();
   const read = useMemo(() => new WorkItemRead<MessagingReceipts>(client), [client]);
-  const { value, error } = useStore(read.state);
+  const { value, error, loading } = useStore(read.state);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (open)
@@ -30,7 +30,12 @@ export function MessageReceipts({ item }: { item: IssueConversationItem }) {
             <>
               {(value.reads ?? []).map((receipt) => (
                 <p
-                  key={JSON.stringify([receipt.reader, receipt.content_revision, receipt.read_at])}
+                  key={JSON.stringify([
+                    receipt.reader,
+                    receipt.endpoint,
+                    receipt.content_revision,
+                    receipt.read_at,
+                  ])}
                 >
                   {receipt.endpoint === "agent" && receipt.evidence.startsWith("native_input:")
                     ? "Agent 已接收原生输入"
@@ -45,6 +50,11 @@ export function MessageReceipts({ item }: { item: IssueConversationItem }) {
                 <DeliveryReceipt key={receipt.delivery_id} receipt={receipt} />
               ))}
               {!value.deliveries?.length && <p>暂无外部渠道投递记录。</p>}
+              {!error && (
+                <button type="button" disabled={loading} onClick={() => void read.refresh()}>
+                  刷新回执
+                </button>
+              )}
             </>
           )}
         </>

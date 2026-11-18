@@ -528,7 +528,7 @@ function ActivityBlock({
     row.kind === "agent" ? row.items : row.kind === "system" ? [row.item] : [],
   );
   const [expanded, setExpanded] = useEntryState(`activity-expanded:${entry.id}`, false);
-  const long = items.some((item) => (item.body?.length ?? 0) > 400);
+  const long = items.some((item) => item.author === "main_agent" && (item.body?.length ?? 0) > 400);
   const more = (control?: HTMLButtonElement) => {
     if (control) {
       explicit.current = true;
@@ -561,7 +561,12 @@ function ActivityBlock({
         switch (row.kind) {
           case "source":
             return (
-              <div key={row.key} tabIndex={-1} ref={triggerNode}>
+              <div
+                key={row.key}
+                data-scroll-id={row.item.message_id}
+                tabIndex={-1}
+                ref={triggerNode}
+              >
                 <ExternalSourceMessage item={row.item} />
                 <MessageReceipts item={row.item} />
               </div>
@@ -611,6 +616,7 @@ function ActivityBlock({
                     row.items.some(
                       (item) =>
                         item.kind === "message" &&
+                        !item.tool &&
                         item.author === "main_agent" &&
                         item.reply_to === block.trigger.message_id,
                     ) && (
