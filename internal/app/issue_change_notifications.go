@@ -25,9 +25,9 @@ func recordIssueChangeEvent(ctx context.Context, x *Exec, tx *store.Tx, event Ev
 	if event.ObjectType != "issue" && event.ObjectType != "work_item" {
 		return nil
 	}
-	if event.Kind == "work_item.delivery_checked" {
-		// An unchanged provider snapshot advances observation time only. It is
-		// not a new Issue fact and must not keep resetting the owner's window.
+	if event.Kind == "work_item.delivery_checked" || event.Kind == "work_item.delivery_candidate_retired" {
+		// The retired snapshot accompanies the candidate change. Unchanged
+		// observations and historical snapshots do not need a separate wake.
 		return nil
 	}
 	var canonical bool

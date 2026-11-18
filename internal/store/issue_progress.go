@@ -57,8 +57,11 @@ func IssueConflictProgress(ctx context.Context, q Querier, issue protocol.Issue,
  AND json_extract(p.delivery_json,'$.repository')=? AND json_extract(p.delivery_json,'$.number')=?
  AND json_extract(p.delivery_json,'$.conflict_revision')=?
  AND json_extract(p.delivery_json,'$.conflict_action') IN ('seen','working')
+ AND NOT EXISTS(SELECT 1 FROM issue_control_revisions ended WHERE ended.issue_id=p.issue_id
+   AND ended.revision>=p.revision AND ended.revision<?
+   AND json_extract(ended.snapshot_json,'$.control.state') IN ('closed','cancelled'))
  ORDER BY json_extract(p.delivery_json,'$.conflict_action')='working' DESC,p.revision DESC LIMIT 1`,
-		issue.IssueID, issue.Revision, issue.AssignmentEpoch, d.DeliveryID, d.Provider, d.Repository, d.Number, c.Revision).Scan(&revision)
+		issue.IssueID, issue.Revision, issue.AssignmentEpoch, d.DeliveryID, d.Provider, d.Repository, d.Number, c.Revision, issue.Revision).Scan(&revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

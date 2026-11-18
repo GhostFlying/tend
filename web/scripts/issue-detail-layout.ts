@@ -19,6 +19,7 @@ import type {
   AttentionView,
   SharedDeliveryReviewPage,
   UpdateIssuePayload,
+  UpdateIssueProgressPayload,
 } from "../src/api/generated/api.ts";
 const output = process.env.TEND_LAYOUT_OUTPUT;
 assert(output, "Set TEND_LAYOUT_OUTPUT");
@@ -639,6 +640,23 @@ try {
         },
       };
       let current = original;
+      const originalBinding = { ...ref, head_sha: head, base_sha: base, target_sha: target };
+      let issueView = {
+        ...issue,
+        progress: { ...issue.progress!, delivery: originalBinding },
+      } as IssueView;
+      let savedProgress: UpdateIssueProgressPayload | undefined;
+      await page.route(`**/api/v1/issues/${issue.issue_id}`, (route) =>
+        route.fulfill({ json: issueView }),
+      );
+      await page.route("**/api/v1/ops", (route) => {
+        const envelope = route.request().postDataJSON() as Envelope;
+        assert.equal(envelope.operation, "issues.update_progress");
+        savedProgress = envelope.payload as UpdateIssueProgressPayload;
+        return route.fulfill({
+          json: { operation: { status: "succeeded", result: issueView.progress } },
+        });
+      });
       await page.route(`**/api/v1/issues/${issue.issue_id}/deliveries`, (route) =>
         route.fulfill({ json: { issue_id: issue.issue_id, items: [current] } }),
       );
@@ -652,9 +670,9 @@ try {
               {
                 id: "old-pr-checks",
                 position: 4,
-                kind: "work_item.delivery_changed",
+                kind: "work_item.delivery_candidate_retired",
                 author: "tend",
-                title: "记录了交付候选观察",
+                title: "保留了被替换的候选观察",
                 created_at: now,
                 delivery: original,
               },
@@ -667,10 +685,21 @@ try {
       const progress = page.locator("[data-issue-progress]");
       await progress.getByText("检测到合并冲突", { exact: false }).waitFor();
       await progress.getByText("GitHub · 服务端观察", { exact: false }).waitFor();
-      await progress.locator(`code[title="${target}"]`).waitFor();
+      await progress
+        .locator("[data-delivery-progress]")
+        .locator(`code[title="${target}"]`)
+        .waitFor();
       assert.equal(await progress.getByText("已看到冲突", { exact: false }).count(), 0);
       assert.equal(await page.locator("vite-error-overlay").count(), 0);
       await progress.screenshot({ path: join(output, `delivery-conflict-${width}.png`) });
+
+      await progress.getByRole("button", { name: "编辑", exact: true }).click();
+      const editor = page.getByRole("dialog", { name: "编辑当前进展", exact: true });
+      assert.equal(await editor.getByLabel("关联候选").inputValue(), "original");
+      await editor.getByRole("textbox", { name: "下一步", exact: true }).fill("继续验证原候选");
+      await editor.getByRole("button", { name: "保存进展", exact: true }).click();
+      await editor.waitFor({ state: "hidden" });
+      assert.deepEqual(savedProgress?.delivery, originalBinding);
 
       for (const [action, label] of [
         ["seen", "已看到冲突"],
@@ -703,7 +732,12 @@ try {
           ci: { head_sha: next, state: "running", checks: [] },
         },
       };
+      issueView = {
+        ...issue,
+        progress: { ...issue.progress!, historical: true, historical_reason: "issue_reopened" },
+      };
       publish("work_item.delivery_changed");
+      await progress.getByText("历史进展", { exact: true }).waitFor();
       await progress.getByText("已推送新候选", { exact: false }).waitFor();
       await progress.locator(`code[title="${next}"]`).waitFor();
       await progress.getByText("当前候选的提交 CI · 检查进行中").waitFor();

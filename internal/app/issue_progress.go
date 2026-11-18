@@ -59,14 +59,14 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	} else if x.Actor != nil && x.actorAgent != nil {
 		author = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: x.actorAgent.ExecutionEnvironmentID + "/" + x.actorAgent.LocalID}
 	}
-	if candidate := p.Delivery; candidate != nil {
-		if err := validateIssueProgressDelivery(ctx, tx.Q(), issue, author, *candidate); err != nil {
-			return Outcome{}, err
-		}
-	}
 	prior, err := store.IssueProgress(ctx, tx.Q(), issue.IssueID, issue.Revision)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if candidate := p.Delivery; candidate != nil && !retainsProgressCandidate(prior, *candidate) {
+		if err := validateIssueProgressDelivery(ctx, tx.Q(), issue, author, *candidate); err != nil {
+			return Outcome{}, err
+		}
 	}
 	// An intervening Issue revision can reopen or transfer responsibility.
 	// Preserve that fresh assessment even when its words and author repeat.
@@ -87,6 +87,17 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	}
 	out.Result = progress
 	return out, nil
+}
+
+// Editing the existing assessment may retain its exact historical reference.
+// An explicit conflict action always needs validation against the live conflict.
+func retainsProgressCandidate(prior *protocol.IssueProgress, candidate protocol.IssueDeliveryProgress) bool {
+	if prior == nil || prior.Delivery == nil || candidate.ConflictAction != "" {
+		return false
+	}
+	original := *prior.Delivery
+	original.ConflictAction, original.ConflictRevision = "", 0
+	return original == candidate
 }
 
 func validateIssueProgressDelivery(ctx context.Context, q store.Querier, issue protocol.Issue, author protocol.IssueAssignee, candidate protocol.IssueDeliveryProgress) error {

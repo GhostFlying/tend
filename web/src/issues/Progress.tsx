@@ -12,6 +12,13 @@ import { candidateLabel } from "./DeliveryProgress.tsx";
 import { issueCommand } from "./actions.ts";
 import styles from "./DetailPage.module.css";
 
+function retainCandidate(delivery: IssueDeliveryProgress): IssueDeliveryProgress {
+  const candidate = { ...delivery };
+  delete candidate.conflict_action;
+  delete candidate.conflict_revision;
+  return candidate;
+}
+
 export function ProgressEditor({
   issue,
   deliveries,
@@ -30,9 +37,12 @@ export function ProgressEditor({
         o.state === "open" && o.head_sha && o.checked_at && (o.base_sha || o.target_sha),
     ),
   );
-  const [deliveryID, setDeliveryID] = useState("");
+  const retained = baseline.progress?.delivery;
+  const [candidateChoice, setCandidateChoice] = useState(retained ? "original" : "");
   const [action, setAction] = useState("");
-  const selection = candidates.find(({ delivery }) => delivery.delivery_id === deliveryID);
+  const selection = candidates.find(
+    ({ delivery }) => `current:${delivery.delivery_id}` === candidateChoice,
+  );
   const conflict =
     selection?.observation.mergeability === "conflicting"
       ? selection.observation.last_conflict
@@ -53,7 +63,9 @@ export function ProgressEditor({
           ? { conflict_revision: conflict.revision, conflict_action: action }
           : {}),
       }
-    : undefined;
+    : candidateChoice === "original" && retained
+      ? retainCandidate(retained)
+      : undefined;
   const original = operation.original?.payload as UpdateIssueProgressPayload | undefined;
   const [summary, setSummary] = useState(issue.progress?.summary ?? "");
   const [next, setNext] = useState(issue.progress?.next_step ?? "");
@@ -122,20 +134,25 @@ export function ProgressEditor({
           readOnly={operation.pending || operation.busy}
         />
       </label>
-      {candidates.length > 0 && !original ? (
+      {(retained || candidates.length > 0) && !original ? (
         <label>
           关联候选
           <select
-            value={deliveryID}
+            value={candidateChoice}
             disabled={operation.busy}
             onChange={(e) => {
-              setDeliveryID(e.target.value);
+              setCandidateChoice(e.target.value);
               setAction("");
             }}
           >
             <option value="">Issue 整体进展</option>
+            {retained ? (
+              <option value="original">
+                保留原候选 · {candidateLabel(retained)} · {retained.head_sha.slice(0, 12)}
+              </option>
+            ) : null}
             {candidates.map(({ delivery, observation }) => (
-              <option value={delivery.delivery_id} key={delivery.delivery_id}>
+              <option value={`current:${delivery.delivery_id}`} key={delivery.delivery_id}>
                 {candidateLabel(delivery)} · {observation.head_sha?.slice(0, 12)}
               </option>
             ))}

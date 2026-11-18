@@ -15,7 +15,7 @@ import (
 
 func issueDetailMetadata(ctx context.Context, q store.Querier, out *protocol.IssueView, facts executionFacts) error {
 	out.EffectiveWorkStatus = out.BoardStatus()
-	p, err := issueProgressProjection(ctx, q, out.Issue)
+	p, err := issueProgressProjection(ctx, q, out.Issue, !out.Historical)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	kinds := []string{"artifact.submitted", "work_item.delivery_changed"}
+	kinds := []string{"artifact.submitted", "work_item.delivery_changed", "work_item.delivery_candidate_retired"}
 	for kind := range issueActivityTitles {
 		kinds = append(kinds, kind)
 	}
@@ -226,7 +226,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  SELECT e.event_seq,e.kind,e.object_id,e.created_at FROM events e
  WHERE e.kind IN (SELECT value FROM json_each(?)) AND (
  (e.object_type='issue' AND e.object_id=?)
- OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=? AND json_type(e.body_json,'$.delivery_progress')='object')
+ OR (e.kind IN ('work_item.delivery_changed','work_item.delivery_candidate_retired') AND e.object_type='work_item' AND e.object_id=? AND json_type(e.body_json,'$.delivery_progress')='object')
  OR (e.kind='task.manager_requested' AND e.object_id IN (SELECT task_id FROM manager_tasks))
  OR (e.object_id IN (SELECT task_id FROM primary_tasks))
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))
@@ -305,9 +305,11 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			if err := json.Unmarshal([]byte(body), &facts); err != nil {
 				return out, err
 			}
-			if r.kind == "work_item.delivery_changed" {
-				entry.Delivery = facts.Delivery
-				entry.Title = "记录了交付候选观察"
+			switch r.kind {
+			case "work_item.delivery_changed":
+				entry.Delivery, entry.Title = facts.Delivery, "记录了交付候选观察"
+			case "work_item.delivery_candidate_retired":
+				entry.Delivery, entry.Title = facts.Delivery, "保留了被替换的候选观察"
 			}
 			if r.kind == "issue.progress_updated" {
 				p, err := store.IssueProgress(ctx, q, r.id, revision)

@@ -287,6 +287,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 	}
 	previous := row.Observation
+	observedRevision := row.ObservedRevision
 	manualRefresh := row.RefreshRequested
 	row.Observation.AttemptedAt = x.Now.UnixMilli()
 	row.Observation.Observer = "runner"
@@ -356,6 +357,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	events := []Event{}
 	if !row.Observation.RefreshPending && (changed || manualRefresh) {
+		events = appendRetiredDeliveryCandidate(events, item, row.Observation, fact.RetiredSince(observedRevision))
 		event := deliveryChanged(item, row.Observation)
 		event.Body["previous_state"] = fact.PreviousState
 		event.Body["previous_error_kind"] = fact.PreviousErrorKind
@@ -534,6 +536,7 @@ func fanoutDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *protoc
 			}
 			continue
 		}
+		events = appendRetiredDeliveryCandidate(events, item, row.Observation, fact.RetiredSince(row.ObservedRevision))
 		row.ObservedRevision = fact.FactRevision
 		row.NotificationPending = false
 		if row.Nonce == "" && !row.RefreshRequested {
@@ -571,6 +574,19 @@ func deliveryChanged(item protocol.WorkItem, o protocol.DeliveryObservation) Eve
 		body["delivery_progress"] = protocol.IssueDeliveryView{Delivery: d, Observation: protocol.CanonicalDeliveryObservation(o)}
 	}
 	return Event{ObjectType: "work_item", ObjectID: item.WorkItemID, ObjectVersion: item.Revision, Kind: "work_item.delivery_changed", Body: body}
+}
+
+// appendRetiredDeliveryCandidate publishes the displaced observation using the
+// current Issue reference and the historical provider facts.
+func appendRetiredDeliveryCandidate(events []Event, item protocol.WorkItem, current protocol.DeliveryObservation, retired *protocol.DeliveryObservation) []Event {
+	if retired == nil {
+		return events
+	}
+	previous := *retired
+	previous.WorkItemID, previous.DeliveryID = current.WorkItemID, current.DeliveryID
+	event := deliveryChanged(item, previous)
+	event.Kind = "work_item.delivery_candidate_retired"
+	return append(events, event)
 }
 
 // RefreshDelivery invalidates an older query and requests one fresh read. It

@@ -11,7 +11,7 @@ import (
 
 // Applicability is derived from the same ledger snapshot as the original data.
 // It never resolves an Attention or revises a completed business object.
-func issueProgressProjection(ctx context.Context, q store.Querier, issue protocol.Issue) (*protocol.IssueProgress, error) {
+func issueProgressProjection(ctx context.Context, q store.Querier, issue protocol.Issue, currentDelivery bool) (*protocol.IssueProgress, error) {
 	p, err := store.IssueProgress(ctx, q, issue.IssueID, issue.Revision)
 	if err != nil || p == nil {
 		return p, err
@@ -35,7 +35,7 @@ func issueProgressProjection(ctx context.Context, q store.Querier, issue protoco
 			p.HistoricalReason = "issue_reopened"
 		}
 	}
-	if p.HistoricalReason == "" && p.Delivery != nil {
+	if currentDelivery && p.HistoricalReason == "" && p.Delivery != nil {
 		p.HistoricalReason, err = progressDeliveryApplicability(ctx, q, issue, *p.Delivery)
 		if err != nil {
 			return nil, err
