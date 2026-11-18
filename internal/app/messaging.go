@@ -267,7 +267,7 @@ func registerCommunicationPublication(ctx context.Context, x *Exec, tx *store.Tx
 		direction = "publication"
 		err := tx.Q().QueryRowContext(ctx, `SELECT channel_id,bot_id,chat_id,external_id FROM messaging_messages WHERE message_id=?`, p.ReplyTo).Scan(&channel, &bot, &chat, &external)
 		if errors.Is(err, sql.ErrNoRows) {
-			// A legacy input has no external endpoint. It can only receive a Web reply.
+			// An admitted input without an external endpoint receives a Web reply.
 			var author string
 			if err = tx.Q().QueryRowContext(ctx, `SELECT author FROM conversation_messages WHERE message_id=?`, p.ReplyTo).Scan(&author); err != nil {
 				return err
@@ -588,14 +588,17 @@ func communicationReplyInput(ctx context.Context, q store.Querier, id string) er
 	var direction string
 	err := q.QueryRowContext(ctx, `SELECT direction FROM messaging_messages WHERE message_id=?`, id).Scan(&direction)
 	if errors.Is(err, sql.ErrNoRows) {
-		// A business batch is a real admitted trigger without an external
-		// communication endpoint. Its reply uses the existing Web fallback;
-		// communicationSourceAllowed still checks the exact execution/scope.
-		var batch bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM background_batches b JOIN conversation_messages m USING(message_id) WHERE b.message_id=? AND m.author='system')`, id).Scan(&batch); err != nil {
+		// Batches and routed urgent notices have no external endpoint. Classify
+		// the input here so an unconsumed notice cannot fall back to a generic
+		// notification. communicationSourceAllowed checks actual admission.
+		var webInput bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM background_batches b JOIN conversation_messages m USING(message_id)
+ WHERE b.message_id=?1 AND m.author='system'
+ ) OR EXISTS(SELECT 1 FROM issue_owner_steers WHERE message_id=?1)`, id).Scan(&webInput); err != nil {
 			return err
 		}
-		if batch {
+		if webInput {
 			return nil
 		}
 		return protocol.Errorf(protocol.CodeNotFound, "reply input is unavailable")
@@ -621,7 +624,25 @@ func communicationSourceAllowed(ctx context.Context, q store.Querier, execution,
 		return err
 	}
 	var admitted bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=? AND t.message_id=?) OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE e.request_id=? AND m.message_id=?) OR EXISTS(SELECT 1 FROM main_turns t JOIN background_batches b ON b.message_id=t.message_id JOIN background_sources s USING(batch_id) WHERE t.request_id=? AND s.message_id=? AND s.cancelled_at=0)`, execution, id, execution, id, execution, id).Scan(&admitted)
+	// A routed notice can only be a source for the active execution that
+	// witnessed its native input. Association alone cannot admit it.
+	err := q.QueryRowContext(ctx, `SELECT CASE
+ WHEN EXISTS(SELECT 1 FROM issue_owner_steers WHERE message_id=?2) THEN EXISTS(
+  SELECT 1 FROM issue_owner_steers s
+  JOIN main_turns t ON t.request_id=s.execution_id AND t.thread_id=s.thread_id AND t.turn_id=s.turn_id
+  JOIN hosted_executions h ON h.execution_id=s.execution_id AND h.role='issue_manager'
+   AND h.issue_id=s.issue_id AND h.assignment_epoch=s.assignment_epoch
+   AND json_extract(h.private_snapshot,'$.runner_run_id')=s.run_id
+  JOIN conversation_messages m ON m.message_id=s.message_id
+  WHERE s.execution_id=?1 AND s.message_id=?2 AND h.conversation_id=?3 AND m.conversation_id=?3
+   AND t.status='started' AND s.status='consumed' AND s.native_item_id<>''
+ )
+ ELSE EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=?1 AND t.message_id=?2)
+  OR EXISTS(SELECT 1 FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id)
+   WHERE e.request_id=?1 AND m.message_id=?2)
+  OR EXISTS(SELECT 1 FROM main_turns t JOIN background_batches b ON b.message_id=t.message_id
+   JOIN background_sources s USING(batch_id) WHERE t.request_id=?1 AND s.message_id=?2 AND s.cancelled_at=0)
+ END`, execution, id, conversation).Scan(&admitted)
 	if err != nil {
 		return err
 	}

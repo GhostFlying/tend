@@ -508,7 +508,14 @@ function ActivityBlock({
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const [depth, setDepth] = useEntryState(`activity-depth:${entry.id}`, 2);
   const block = entry.block!;
-  const replyAuthor = block.trigger.issue_owner_steer ? undefined : entry.author;
+  const urgent = Boolean(block.trigger.issue_owner_steer);
+  const replyAuthor = urgent ? undefined : entry.author;
+  const replySourceLabel =
+    urgent || block.trigger.author === "external"
+      ? "回应来源消息"
+      : block.trigger.author === "owner"
+        ? "回复你的消息"
+        : "回应系统通知";
   const triggerNode = useRef<HTMLDivElement>(null);
   const processBlock = opened && extra.value && !extra.error ? extra.value : block;
   useEffect(() => {
@@ -629,7 +636,7 @@ function ActivityBlock({
                     {Array.from(replyAuthor || "Agent")[0]}
                   </span>
                   {replyAuthor || "Agent 身份未记录"}
-                  {["owner", "external", "system"].includes(block.trigger.author) &&
+                  {(urgent || ["owner", "external", "system"].includes(block.trigger.author)) &&
                     row.items.some(
                       (item) =>
                         item.kind === "message" &&
@@ -645,12 +652,7 @@ function ActivityBlock({
                           triggerNode.current?.scrollIntoView({ block: "center" });
                         }}
                       >
-                        {block.trigger.author === "owner"
-                          ? "回复你的消息"
-                          : block.trigger.author === "external"
-                            ? "回应来源消息"
-                            : "回应系统通知"}{" "}
-                        #{block.trigger.seq}
+                        {replySourceLabel} #{block.trigger.seq}
                       </button>
                     )}
                   <time dateTime={row.items[0]?.created_at} title={row.items[0]?.created_at}>

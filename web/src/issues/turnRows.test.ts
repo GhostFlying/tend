@@ -131,7 +131,7 @@ test("an urgent receipt stays separate from the public process and keeps actual 
     ...block,
     trigger: {
       ...trigger,
-      author: "external",
+      author: "agent",
       issue_owner_steer: {
         assignment_epoch: 1,
         issue_id: "issue",
