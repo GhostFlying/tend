@@ -27,7 +27,7 @@ const issue: IssueView = {
   updated_at: now,
   plan: { title: "已完成的发布", project: "sample", intent: "完成既定发布", stages: [] },
   tasks: [],
-  closure: { kind: "completed", reason: "源码已合入。生产部署由另一责任承接。" },
+  closure: { kind: "completed", evidence: [], reason: "源码已合入。生产部署由另一责任承接。" },
   progress: {
     summary: "尚未安装所选版本。".repeat(20),
     next_step: "安装先前选定的版本",

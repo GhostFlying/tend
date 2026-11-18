@@ -1109,7 +1109,7 @@ try {
         ...["更新了当前进展", "更新了工作状态"].map((title, index) => ({
           id: `hierarchy-event-${index}`,
           position: 1003 + index,
-          kind: index ? "issue.work_status_updated" : "issue.progress_updated",
+          kind: index ? "issue.status_changed" : "issue.progress_updated",
           created_at: now + index,
           author: "青竹",
           title,
@@ -1215,6 +1215,38 @@ try {
       );
       const owner = detail.locator('[data-scroll-id="owner-one"]');
       const reply = detail.locator('[data-scroll-id="reply-one"]');
+      const discussion = owner.locator("xpath=ancestor::article[1]");
+      await discussion.getByRole("button", { name: /回复你的消息 #/ }).click();
+      assert(await owner.evaluate((node) => document.activeElement?.contains(node)));
+      let receiptReads = 0;
+      await page.route("**/api/v1/messaging/messages/owner-one/receipts", async (route) => {
+        receiptReads++;
+        await route.fulfill({
+          json: {
+            reads: [
+              {
+                message_id: "owner-one",
+                content_revision: 1,
+                reader: "agent:issue:fixture",
+                endpoint: "agent",
+                evidence: "native_input:fixture",
+                read_at: now,
+              },
+            ],
+            deliveries: [],
+            user_read_capability: "explicit_web_only",
+          },
+        });
+      });
+      const receipts = discussion
+        .locator("details")
+        .filter({ has: page.locator("summary", { hasText: "接收与投递记录" }) });
+      assert.equal(receiptReads, 0);
+      await receipts.locator("summary").click();
+      await receipts.getByText(/Agent 已接收原生输入/).waitFor();
+      await receipts.getByText("暂无外部渠道投递记录。", { exact: true }).waitFor();
+      await receipts.locator("summary").click();
+      assert.equal(receiptReads, 1);
       const alignment = await detail.evaluate((node) => {
         const x = (selector: string) => node.querySelector(selector)!.getBoundingClientRect().left;
         return {
