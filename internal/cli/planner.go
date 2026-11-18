@@ -33,6 +33,10 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 	reason := fs.String("reason", "", "control reason")
 	issue := fs.String("issue", "", "Issue filter")
 	kind := fs.String("kind", "", "user_action or issue_priority")
+	var ownerOnly *bool
+	if !deadline && action == "list" {
+		ownerOnly = fs.Bool("owner-only", false, "only personal actions routed to your owner identity")
+	}
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
@@ -44,6 +48,9 @@ func runPlanningRecord(ctx context.Context, e *Env, args []string, deadline bool
 	o := owner{e: e, c: c, json: true}
 	if action == "list" {
 		query := url.Values{"issue_id": {*issue}, "kind": {*kind}}
+		if ownerOnly != nil && *ownerOnly {
+			query.Set("owner_only", "true")
+		}
 		list := "/api/v1/next-actions"
 		if deadline {
 			list = "/api/v1/deadlines"

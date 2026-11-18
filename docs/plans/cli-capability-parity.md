@@ -241,6 +241,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 tend help conversation
 tend issue list --board --board-status in_progress --json
 tend issue list --board --group-review --waiting-on-me --limit 50 --json
+tend next-action list --owner-only
 tend issue set-status "$ISSUE_ID" --data '{"status":"in_review"}'
 tend issue notifications set --data '{"delay_minutes":5}' --dry-run > original.json
 tend request replay --file original.json
