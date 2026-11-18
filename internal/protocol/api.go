@@ -10,7 +10,7 @@ func APITypes() []any {
 		NativeRolloutChunk{}, NativeRolloutArchiveReceipt{}, OriginalMigration{}, OriginalImport{}, OriginalStorageStatus{}, OriginalMigrationResult{}, OriginalImportResult{}, OriginalVerification{},
 		MessageProcessingReceipt{}, LogicalTurnState{}, ContinueTaskPayload{}, TaskExecutionContext{}, TaskResultReference{}, TaskReviewTarget{}, ResumeExternalWaitPayload{}, WaitExternalPayload{}, ExternalWait{}, YieldExternalWaitPayload{}, SessionStopPayload{}, SessionContinuation{},
 		UsageCollectionObservation{}, UsageCollectionPage{}, UsageCollectionSource{}, UsageCollectionCommand{}, UsageCollectionControl{},
-		MaintenanceOverview{},
+		MaintenanceOverview{}, CIContinuation{},
 		ExtensionImport{}, ExtensionPackage{}, ExtensionStageRequest{}, ExtensionState{}, ExtensionPlan{}, ExtensionCombination{}, ExtensionPublishPayload{}, ExtensionEditPayload{}, ExtensionResourcePage{}, ExtensionBindingPage{}, ExtensionReleasePage{}, ExtensionStatus{}, ExtensionHostStatus{}, ExtensionTarget{},
 		ObservedDeployment{}, IssueMaterialsQuery{}, IssueMaterialFile{}, IssueMaterials{}, RunContext{},
 		DecisionContinuationView{}, ResumeDecisionContinuationPayload{},

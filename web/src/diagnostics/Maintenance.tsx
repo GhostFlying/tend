@@ -28,7 +28,8 @@ export function Maintenance() {
       <h2>自维护</h2>
       <p>{value.available ? (value.paused ? "已暂停新维护会话" : "监测中") : "维护服务不可达"}</p>
       <p>
-        最近检测：{time(value.last_check)} · 最近审计：{time(value.last_audit)}
+        最近检测：{time(value.last_check)} · 审计请求：{time(value.last_audit)} · 已完成审计：
+        {time(value.last_audit_completed)}
       </p>
       <p>
         待诊断问题 {value.open_cases} · 待处理线索 {value.pending}

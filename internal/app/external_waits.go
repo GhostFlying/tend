@@ -210,6 +210,7 @@ func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.Exter
 		oldHead := v.ObservedHead
 		v.ObservedRevision = row.FactRevision
 		v.ObservedHead = o.HeadSHA
+		v.ObservedBase, v.ObservedTarget = o.BaseSHA, o.TargetSHA
 		v.ObservedState = o.State
 		if oldHead != "" && o.HeadSHA != "" && oldHead != o.HeadSHA {
 			return true, "candidate_changed", nil
@@ -447,6 +448,9 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx) (bo
 		v.Status = "continued"
 		changed = true
 		v.WakeReason = reason
+		if err := recordExternalWaitWake(ctx, x, tx, r, v); err != nil {
+			return false, err
+		}
 		if err := tx.PutExternalWait(ctx, *v, now); err != nil {
 			return false, err
 		}
@@ -454,9 +458,6 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx) (bo
 			return false, err
 		}
 		if err := tx.SetActionStatus(ctx, original, protocol.ActionDone, now); err != nil {
-			return false, err
-		}
-		if err := recordExternalWaitWake(ctx, x, tx, r, *v); err != nil {
 			return false, err
 		}
 	}
@@ -612,7 +613,7 @@ func (RecordSessionStop) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	return Outcome{Result: p, Events: []Event{{ObjectType: "run", ObjectID: r.RunID, Kind: "run.session_stopped", Body: map[string]any{"recorded": true}}}}, nil
 }
 
-func recordExternalWaitWake(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, v protocol.ExternalWait) error {
+func recordExternalWaitWake(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, v *protocol.ExternalWait) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -635,6 +636,9 @@ func recordExternalWaitWake(ctx context.Context, x *Exec, tx *store.Tx, r store.
 	}
 	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: m.ConversationID, Author: "system", Body: body, CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return err
+	}
+	if v.Kind == "checks" && strings.HasPrefix(v.WakeReason, "checks_") {
+		v.SourceEvent, v.SourceMessage = event, message
 	}
 	return appendBackgroundSource(ctx, x, tx, "work_item:"+m.IssueID, m.IssueID, message, event, "task.external_wait_ready", raw)
 }

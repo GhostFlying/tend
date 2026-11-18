@@ -76,9 +76,10 @@ func DetectIssue(v protocol.IssueView) []protocol.MaintenanceCase {
 	return found
 }
 
-func (p Probe) Collect(ctx context.Context) ([]protocol.MaintenanceCase, error) {
+func (p Probe) Collect(ctx context.Context) ([]protocol.MaintenanceCase, []protocol.MaintenanceChange, error) {
+	var changes []protocol.MaintenanceChange
 	if err := p.get(ctx, "/healthz", nil); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var found []protocol.MaintenanceCase
 	after := ""
@@ -86,23 +87,39 @@ func (p Probe) Collect(ctx context.Context) ([]protocol.MaintenanceCase, error) 
 	for {
 		var page protocol.IssuePage
 		if err := p.get(ctx, "/api/v1/issues?limit=100&after="+url.QueryEscape(after), &page); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, v := range page.Items {
+			change := protocol.MaintenanceChange{IssueID: v.IssueID, Revision: v.Revision, State: string(v.State)}
 			if v.State != protocol.IssueActive {
+				changes = append(changes, change)
 				continue
 			}
 			var detail protocol.IssueView
 			if err := p.get(ctx, "/api/v1/issues/"+url.PathEscape(v.IssueID), &detail); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+			if detail.Manager != nil {
+				change.TaskID = detail.Manager.TaskID
+				change.OwnerRunID = detail.Manager.RunID
+				change.OwnerState = string(detail.Manager.State)
+			}
+			change.ContextRevision = detail.ContextRevision
+			change.WorkStatus = string(detail.EffectiveWorkStatus)
+			change.TaskCount = len(detail.Tasks)
+			change.Fingerprint = digest(struct {
+				Context int64
+				Duties  []protocol.IssueDeliveryDuty
+				Tasks   []protocol.IssueTaskSummary
+			}{detail.ContextRevision, detail.DeliveryDuties, detail.Tasks})
+			changes = append(changes, change)
 			found = append(found, DetectIssue(detail)...)
 		}
 		if !page.More {
-			return found, nil
+			return found, changes, nil
 		}
 		if page.Next == "" || seen[page.Next] {
-			return nil, errors.New("maintenance: non-progressing issue cursor")
+			return nil, nil, errors.New("maintenance: non-progressing issue cursor")
 		}
 		seen[page.Next] = true
 		after = page.Next
@@ -112,13 +129,26 @@ func (p Probe) Collect(ctx context.Context) ([]protocol.MaintenanceCase, error) 
 func (c *Controller) Check(ctx context.Context, p Probe) error {
 	c.mu.Lock()
 	frozen := c.frozen()
+	cursor := c.state.CICursor
+	checkCI := c.state.LastCICheck == 0 || c.state.CheckRequested || c.opts.Now().Unix()-c.state.LastCICheck >= int64(c.cfg.CheckSeconds)
+	var rechecks []protocol.MaintenanceSubject
+	for _, v := range c.state.Cases {
+		if v.Code == ciCaseCode && v.Subject != nil && v.Status != "resolved" {
+			rechecks = append(rechecks, *v.Subject)
+		}
+	}
 	c.mu.Unlock()
 	if frozen {
 		return nil
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	candidates, err := p.Collect(probeCtx)
+	candidates, changes, err := p.Collect(probeCtx)
+	var ci []protocol.CIContinuation
+	var ciErr error
+	if err == nil && checkCI {
+		ci, cursor, ciErr = p.ciFacts(probeCtx, changes, rechecks, cursor)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.fault != nil {
@@ -137,11 +167,31 @@ func (c *Controller) Check(ctx context.Context, p Probe) error {
 			c.upsert(protocol.MaintenanceCase{ID: "owner-api", Source: "owner-api", Code: "observation_unavailable", Evidence: "tend doctor", Fingerprint: digest(err.Error())}, now)
 		}
 	} else {
+		c.recordChanges(changes)
+		c.state.CICursor = cursor
+		if checkCI {
+			c.state.LastCICheck = now
+			c.state.CIError = ""
+			if ciErr != nil {
+				c.state.CIError = ciErr.Error()
+			}
+		}
+		for _, f := range ci {
+			c.observeCI(f, now)
+		}
 		c.state.HealthFailures = 0
 		c.state.LastError = ""
 		for i := range c.state.Cases {
 			v := &c.state.Cases[i]
-			if !slices.ContainsFunc(candidates, func(candidate protocol.MaintenanceCase) bool { return candidate.ID == v.ID }) {
+			if v.Subject != nil && v.Code != ciCaseCode && v.Status == "deferred" && v.DeferUntil <= now {
+				if v.Intervention != "" {
+					v.Status = "awaiting_verification"
+				} else {
+					v.Status = "open"
+					c.enqueue("case " + v.ID)
+				}
+			}
+			if v.Subject == nil && !slices.ContainsFunc(candidates, func(candidate protocol.MaintenanceCase) bool { return candidate.ID == v.ID }) {
 				v.Observed = false
 				if v.Status == "open" {
 					v.Status = "not_observed"
@@ -235,4 +285,48 @@ func eventLoop(ctx context.Context, p Probe, wake chan<- struct{}) {
 		case <-t.C:
 		}
 	}
+}
+
+// Rotate through a fixed number of pointed reads. A failed secondary read never
+// clears an existing case or discards the primary probe's successful evidence.
+func (p Probe) ciFacts(ctx context.Context, changes []protocol.MaintenanceChange, rechecks []protocol.MaintenanceSubject, cursor string) ([]protocol.CIContinuation, string, error) {
+	targets := map[string]protocol.MaintenanceSubject{}
+	for _, v := range changes {
+		if v.TaskID != "" {
+			key := url.PathEscape(v.TaskID) + "/ci-continuation/latest"
+			targets[key] = protocol.MaintenanceSubject{TaskID: v.TaskID, IssueID: v.IssueID}
+		}
+	}
+	for _, v := range rechecks {
+		key := url.PathEscape(v.TaskID) + "/ci-continuation/" + url.PathEscape(v.RunID)
+		targets[key] = v
+	}
+	keys := make([]string, 0, len(targets))
+	for k := range targets {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	if len(keys) == 0 {
+		return nil, "", nil
+	}
+	start, found := slices.BinarySearch(keys, cursor)
+	if found {
+		start++
+	}
+	var out []protocol.CIContinuation
+	var lastErr error
+	for i := 0; i < min(8, len(keys)); i++ {
+		key := keys[(start+i)%len(keys)]
+		var v protocol.CIContinuation
+		want := targets[key]
+		if err := p.get(ctx, "/api/v1/tasks/"+key, &v); err != nil {
+			lastErr = err
+		} else if v.TaskID == want.TaskID && ((v.State == "unverified" && v.RunID == "") || (v.IssueID == want.IssueID && (want.RunID == "" || (v.RunID == want.RunID && v.WaitID == want.WaitID)))) {
+			out = append(out, v)
+		} else {
+			lastErr = errors.New("maintenance: CI continuation identity mismatch")
+		}
+		cursor = key
+	}
+	return out, cursor, lastErr
 }

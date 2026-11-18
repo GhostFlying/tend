@@ -34,6 +34,7 @@ type capabilityCommand struct {
 
 var capabilityCommands = []capabilityCommand{
 	{Name: "task resume-wait", Operation: protocol.OpTasksResumeWait, Target: "task", RevisionRoute: "-", JSONDefault: true},
+	{Name: "task ci-continuation", Route: "/api/v1/tasks/{id}/ci-continuation/{run}", JSONDefault: true},
 	{Name: "task waits", Route: "/api/v1/tasks/{id}/external-waits", JSONDefault: true},
 	{Name: "maintenance overview", Route: "/api/v1/maintenance", JSONDefault: true},
 	{Name: "capability list", Route: "/api/v1/capabilities", Queries: "state search after limit", JSONDefault: true},

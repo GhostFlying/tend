@@ -21,6 +21,8 @@ type WaitExternalPayload struct {
 
 // ExternalWait keeps machine waiting separate from unknown physical execution.
 type ExternalWait struct {
+	SourceEvent   string `json:"source_event,omitempty"`
+	SourceMessage string `json:"source_message,omitempty"`
 	WaitExternalPayload
 	WaitID               string `json:"wait_id"`
 	RunID                string `json:"run_id"`
@@ -33,17 +35,37 @@ type ExternalWait struct {
 	InputEventWatermark  int64  `json:"input_event_watermark,omitempty"`
 	ObservedRevision     int64  `json:"observed_revision,omitempty"`
 	ObservedState        string `json:"observed_state,omitempty"`
+	ObservedBase         string `json:"observed_base,omitempty"`
+	ObservedTarget       string `json:"observed_target,omitempty"`
 	ObservedHead         string `json:"observed_head,omitempty"`
 	WakeReason           string `json:"wake_reason,omitempty"`
 	ResumeReason         string `json:"resume_reason,omitempty"`
 	SuccessorRunID       string `json:"successor_run_id,omitempty"`
 }
 
+// CIContinuation describes a single original Issue-owner wait and the source of its wake.
+type CIContinuation struct {
+	IssueID       string `json:"issue_id"`
+	TaskID        string `json:"task_id"`
+	RunID         string `json:"run_id"`
+	WaitID        string `json:"wait_id"`
+	DeliveryID    string `json:"delivery_id"`
+	Head          string `json:"head"`
+	Base          string `json:"base,omitempty"`
+	Target        string `json:"target,omitempty"`
+	Result        string `json:"result"`
+	SourceEvent   string `json:"source_event,omitempty"`
+	SourceMessage string `json:"source_message,omitempty"`
+	OwnerTurn     string `json:"owner_turn,omitempty"`
+	State         string `json:"state"`
+}
+
 // ResumeExternalWaitPayload resumes judgment from the original wait. It does
 // not approve or retry the external operation recorded by that wait.
 type ResumeExternalWaitPayload struct {
-	WaitID string `json:"wait_id"`
-	Reason string `json:"reason"`
+	RestoreNotice bool   `json:"restore_ci_notice,omitempty"`
+	WaitID        string `json:"wait_id"`
+	Reason        string `json:"reason"`
 }
 
 type YieldExternalWaitPayload struct {

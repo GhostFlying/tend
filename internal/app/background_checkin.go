@@ -14,7 +14,14 @@ import (
 type BackgroundCommand struct{ Action, MessageID, TurnID, DeliveryID string }
 
 func (c BackgroundCommand) Operation() string { return "background." + c.Action }
-func (c BackgroundCommand) Authorize(_ context.Context, x *Exec, _ store.Querier) error {
+func (c BackgroundCommand) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
+	if x.Principal.Kind == protocol.PrincipalRun && c.Action == "sources" && c.MessageID != "" && c.TurnID != "" && c.DeliveryID != "" {
+		execution, err := store.GetHostedExecution(ctx, q, c.DeliveryID)
+		if err != nil {
+			return err
+		}
+		return authorizeRunnerCoordination(ctx, q, x.Principal, execution, true, x.Now.UnixMilli(), c.Operation())
+	}
 	if (x.Principal.Kind != protocol.PrincipalMainAgent && x.Principal.Kind != protocol.PrincipalBackgroundAgent) || c.TurnID == "" || c.MessageID == "" || c.DeliveryID == "" {
 		return protocol.Errorf(protocol.CodeForbidden, "current hosted background turn required")
 	}
@@ -35,7 +42,7 @@ func (c BackgroundCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if batch.Status != "frozen" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "background batch is not frozen")
 	}
-	if x.Principal.Kind == protocol.PrincipalBackgroundAgent {
+	if x.Principal.Kind == protocol.PrincipalBackgroundAgent || x.Principal.Kind == protocol.PrincipalRun {
 		conv, err := store.AgentConversation(ctx, tx.Q(), x.Principal.ConversationID)
 		if err != nil {
 			return Outcome{}, err

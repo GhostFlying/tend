@@ -26,6 +26,7 @@ func (c *Controller) Handler(wake chan<- struct{}) http.Handler {
 	}
 	mux.HandleFunc("GET /maintenance/status", func(w http.ResponseWriter, _ *http.Request) {
 		s := c.Status()
+		s.Changes = nil
 		s.Cases = nil
 		s.History = nil
 		write(w, s)
@@ -76,7 +77,7 @@ func (c *Controller) Handler(wake chan<- struct{}) http.Handler {
 		}
 		write(w, v)
 	})
-	for _, action := range []string{"check", "audit", "pause", "resume", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
+	for _, action := range []string{"check", "audit", "pause", "resume", "report", "intervene", "defer", "resolve", "config", "reconcile", "review", "upgrade-plan", "upgrade-apply"} {
 		mux.HandleFunc("POST /maintenance/"+action, func(w http.ResponseWriter, r *http.Request) {
 			var req protocol.MaintenanceRequest
 			d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))

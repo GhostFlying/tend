@@ -36,7 +36,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		if oldHash != hash {
 			return protocol.MaintenanceReceipt{}, protocol.Errorf(protocol.CodeConflictPayload, "request identity conflicts with original input")
 		}
-		return protocol.MaintenanceReceipt{RequestID: req.RequestID, Revision: revision}, nil
+		return commandReceipt(action, req, revision), nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return protocol.MaintenanceReceipt{}, err
@@ -93,7 +93,11 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		c.state.PendingBackend = &backend
 		c.state.SwitchMode = req.Mode
 		c.state.Failure = nil
-	case "resolve", "defer":
+	case "report", "intervene", "resolve", "defer":
+		if action == "report" {
+			err = c.report(req)
+			break
+		}
 		if req.Reason == "" {
 			err = protocol.Errorf(protocol.CodeInvalidRequest, "case disposition requires a reason")
 			break
@@ -108,6 +112,34 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 			break
 		}
 		v := &c.state.Cases[i]
+		if action == "intervene" {
+			if c.state.Paused || v.Subject == nil || v.Status == "resolved" || v.Status == "deferred" {
+				err = protocol.Errorf(protocol.CodeInvalidTransition, "case is not available for intervention")
+				break
+			}
+			if v.Intervention != "" && v.Intervention != req.Reason {
+				err = protocol.Errorf(protocol.CodeConflictPayload, "reconcile the original intervention")
+				break
+			}
+			c.consumeCaseNotice(v.ID)
+			v.Intervention = req.Reason
+			v.Status = "awaiting_verification"
+			break
+		}
+		if action == "resolve" && v.Subject != nil {
+			if strings.TrimSpace(req.Verification) == "" {
+				err = protocol.Errorf(protocol.CodeInvalidRequest, "provide original work verification")
+				break
+			}
+			if v.Code == ciCaseCode && v.Verification == "" {
+				err = protocol.Errorf(protocol.CodeInvalidTransition, "original CI source consumption is unverified")
+				break
+			}
+			if v.Code != ciCaseCode {
+				v.Verification = req.Verification
+			}
+		}
+		c.consumeCaseNotice(v.ID)
 		v.Reason = req.Reason
 		v.Status = "resolved"
 		if action == "defer" {
@@ -190,7 +222,15 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		c.fault = err
 		return protocol.MaintenanceReceipt{}, err
 	}
-	return protocol.MaintenanceReceipt{RequestID: req.RequestID, Revision: c.state.Revision}, nil
+	return commandReceipt(action, req, c.state.Revision), nil
+}
+
+func commandReceipt(action string, req protocol.MaintenanceRequest, revision int64) protocol.MaintenanceReceipt {
+	v := protocol.MaintenanceReceipt{RequestID: req.RequestID, Revision: revision}
+	if action == "report" && req.Subject != nil {
+		v.CaseID = subjectID(req.CaseID, *req.Subject)
+	}
+	return v
 }
 
 func (c *Controller) Receipt(ctx context.Context, id string) (protocol.MaintenanceReceipt, error) {
@@ -205,6 +245,7 @@ func (c *Controller) Receipt(ctx context.Context, id string) (protocol.Maintenan
 			Request protocol.MaintenanceRequest
 		}
 		err = json.Unmarshal(raw, &original)
+		v.CaseID = commandReceipt(original.Action, original.Request, v.Revision).CaseID
 		v.Action = original.Action
 		v.Request = &original.Request
 	}
@@ -346,11 +387,22 @@ func (c *Controller) Step(ctx context.Context) error {
 				return c.save(ctx)
 			}
 		}
+		if a.Audit != nil && outcome == "completed" {
+			c.state.AuditedThrough = max(c.state.AuditedThrough, a.Audit.Through)
+			c.state.LastAuditCompleted = c.opts.Now().Unix()
+			c.state.CompletedAudit = a.Audit
+			if n := len(a.Audit.Recheck); n > 0 {
+				c.state.RecheckedAfter = a.Audit.Recheck[n-1]
+			}
+		} else if a.Audit != nil && interrupted {
+			c.enqueue("audit")
+		}
 		if c.state.PendingBackend != nil {
 			c.finish(interrupted)
 			return c.save(ctx)
 		}
 		if a.InputID != "" {
+			a.Audit = nil
 			a.InputID = ""
 			a.TurnID = ""
 			a.Prompt = ""
@@ -408,6 +460,11 @@ func (c *Controller) Step(ctx context.Context) error {
 	a.InputReasons = slices.Clone(c.state.Pending)
 	a.Phase = "sending"
 	a.Prompt = fmt.Sprintf("Maintain Tend within the configured instructions. Triggers: %s. Read current evidence with `tend maintenance status --socket %s`, `tend maintenance cases --socket %s` and the configured Tend owner CLI. Diagnose before changing business state; healthy waits need no intervention. Repair detector omissions and add fault/healthy regressions. Resolve or defer diagnosed cases through the CLI. This is one bounded inspection; finish when no actionable work remains. Do not create another maintenance session.", strings.Join(c.state.Pending, ", "), shellArg(c.cfg.ControlSocket), shellArg(c.cfg.ControlSocket))
+	if slices.Contains(a.InputReasons, "audit") {
+		a.Audit = c.auditChanges()
+		raw, _ := json.Marshal(a.Audit)
+		a.Prompt += "\nInspect this bounded list of changes since the last completed audit and recheck the listed interventions against their original business evidence: " + string(raw)
+	}
 	if a.Predecessor != nil {
 		a.Prompt += fmt.Sprintf(" Previous agent: %s; session ID: %s.", a.Predecessor.Agent, a.Predecessor.SessionID)
 	}
@@ -418,6 +475,7 @@ func (c *Controller) Step(ctx context.Context) error {
 	id, err := c.opts.Native.Start(ctx, a.Backend, nativeThread(a), a.InputID, a.Prompt)
 	if err != nil {
 		if errors.Is(err, ErrNotSent) {
+			a.Audit = nil
 			for _, reason := range a.InputReasons {
 				c.enqueue(reason)
 			}

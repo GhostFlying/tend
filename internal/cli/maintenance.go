@@ -31,6 +31,7 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	limit := fs.Int("limit", 50, "page size, 1..100")
 	revision := fs.Int64("revision", -1, "original expected control revision; required for retry")
 	request := fs.String("request-id", "", "stable request identity for identical retry")
+	verification := fs.String("verification", "", "original business evidence for a verified recovery")
 	reason := fs.String("reason", "", "diagnosis or reconciliation evidence")
 	until := fs.Int64("until", 0, "defer until Unix seconds")
 	mode := fs.String("mode", "", "backend adoption: when-idle or interrupt")
@@ -40,8 +41,8 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	head := fs.String("head", "", "exact candidate commit for independent review")
 	releaseDir := fs.String("release", "", "verified standalone component directory")
 	upgradeID := fs.String("upgrade-id", "", "original planned component upgrade ID")
-	data := fs.String("data", "", "complete backend JSON for config adoption")
-	file := fs.String("file", "", "backend JSON file, or - for stdin")
+	data := fs.String("data", "", "backend JSON for config or original Issue/Task/Run and evidence JSON for report")
+	file := fs.String("file", "", "backend or reported subject JSON file, or - for stdin")
 	dry := fs.Bool("dry-run", false, "print the complete command for review and replay")
 	asJSON := fs.Bool("json", true, "print full structured output")
 	pos, err := parse(fs, args[1:])
@@ -57,7 +58,7 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	read := slices.Contains([]string{"status", "cases", "show", "history", "session", "request", "upgrade-status"}, action) || action == "config" && *data == "" && *file == ""
 	path := "/maintenance/" + action
 	if read {
-		if *request != "" || *revision != -1 || *reason != "" || *until != 0 || *mode != "" || *session != "" || *turn != "" || *base != "" || *head != "" || *data != "" || *file != "" || *dry || *releaseDir != "" || *upgradeID != "" {
+		if *request != "" || *revision != -1 || *verification != "" || *reason != "" || *until != 0 || *mode != "" || *session != "" || *turn != "" || *base != "" || *head != "" || *data != "" || *file != "" || *dry || *releaseDir != "" || *upgradeID != "" {
 			return usagef("read-only maintenance commands take no mutation input")
 		}
 		if action == "show" || action == "request" {
@@ -78,7 +79,7 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 		}
 		return printCapabilityValue(e, value, *asJSON)
 	}
-	input := protocol.MaintenanceRequest{RequestID: *request, ExpectedRevision: *revision, CaseID: *id, Reason: *reason, Until: *until, Mode: *mode, SessionID: *session}
+	input := protocol.MaintenanceRequest{RequestID: *request, ExpectedRevision: *revision, CaseID: *id, Reason: *reason, Verification: *verification, Until: *until, Mode: *mode, SessionID: *session}
 	input.ReleaseDir = *releaseDir
 	if input.ReleaseDir != "" {
 		input.ReleaseDir, err = filepath.Abs(input.ReleaseDir)
@@ -90,18 +91,22 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	input.TurnID = *turn
 	input.Base = *base
 	input.Head = *head
-	if action == "config" {
+	if action == "config" || action == "report" {
 		raw, err := issueInput(e, *data, *file)
 		if err != nil {
 			return err
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
-		if err := d.Decode(&input.Backend); err != nil {
-			return usagef("invalid backend JSON: %v", err)
+		var dst any = &input.Backend
+		if action == "report" {
+			dst = &input.Subject
 		}
-		if d.Decode(new(any)) != io.EOF || input.Backend == nil {
-			return usagef("backend must be one complete JSON object")
+		if err := d.Decode(dst); err != nil {
+			return usagef("invalid maintenance JSON: %v", err)
+		}
+		if d.Decode(new(any)) != io.EOF || (input.Backend == nil && input.Subject == nil) {
+			return usagef("input must be one complete JSON object")
 		}
 	}
 	if input.RequestID != "" && input.ExpectedRevision < 0 {

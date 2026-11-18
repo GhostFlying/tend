@@ -34,7 +34,7 @@ func maintenanceReader(socket string) func(context.Context) (protocol.Maintenanc
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&s); err != nil {
 			return protocol.MaintenanceOverview{}, err
 		}
-		v := protocol.MaintenanceOverview{Configured: true, Available: true, LastCheck: s.LastCheck, LastAudit: s.LastAudit, Paused: s.Paused, OpenCases: s.OpenCases, Pending: len(s.Pending), Agent: s.Backend.Agent, Error: s.LastError}
+		v := protocol.MaintenanceOverview{Configured: true, Available: true, LastCheck: s.LastCheck, LastAudit: s.LastAudit, LastAuditCompleted: s.LastAuditCompleted, Paused: s.Paused, OpenCases: s.OpenCases, Pending: len(s.Pending), Agent: s.Backend.Agent, Error: s.LastError}
 		if s.NativeError != "" {
 			v.Error = s.NativeError
 		}
