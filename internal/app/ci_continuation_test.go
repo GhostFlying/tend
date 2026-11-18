@@ -19,7 +19,7 @@ import (
 )
 
 func TestFault_CIWaitRestoresOriginalOwnerSourceAndVerifiesProcessing(t *testing.T) {
-	for _, mode := range []string{"reply-source", "reply-batch", "notify-source", "notify-unrelated"} {
+	for _, mode := range []string{"reply-source", "reply-batch", "notify-source", "notify-unrelated", "parent-paused"} {
 		t.Run(mode, func(t *testing.T) { testOwnerCIContinuation(t, mode) })
 	}
 }
@@ -29,6 +29,15 @@ func testOwnerCIContinuation(t *testing.T, mode string) {
 	ref := protocol.IssueDelivery{DeliveryID: "delivery-1", Provider: "github", Repository: "example/project", Number: 7}
 	payload := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Wait for CI", Project: "default", Intent: "Decide on the current candidate", Deliveries: []protocol.IssueDelivery{ref}}}
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, payload, nil), historicalAdmittedIssueFixture{}))
+	if mode == "parent-paused" {
+		parent := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Parent responsibility", Project: "default", Intent: "Own the child scope"}}
+		root := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, parent, nil), historicalAdmittedIssueFixture{}))
+		reparent := protocol.ReparentIssuePayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch}, ParentIssueID: root.IssueID, ExpectedParentRevision: rev(root.Revision)}
+		issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "reparent", reparent))
+		if issue.ParentIssueID != root.IssueID {
+			t.Fatal("parent relation missing")
+		}
+	}
 	op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Track the candidate"}, rev(issue.Revision)), RequestIssueManager{})
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -186,6 +195,28 @@ func testOwnerCIContinuation(t *testing.T, mode string) {
 	if f.State != "missing" {
 		t.Fatalf("original wake is missing: %+v", f)
 	}
+	if mode == "parent-paused" {
+		parent := admissionCurrent(t, h, issue.ParentIssueID)
+		pause := protocol.IssueControlPayload{ExpectedAssignmentEpoch: parent.AssignmentEpoch, Reason: "Hold this responsibility"}
+		op := h.exec(owner, h.env("issues.pause", protocol.Target{Type: "issue", ID: parent.IssueID}, pause, rev(parent.Revision)), CanonicalOwnerIssueCommand{Action: "pause"})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if v := read(); v.State != "unverified" {
+			t.Fatal("parent hold allowed repair", v)
+		}
+		check()
+		if len(controller.Status().Cases) != 0 {
+			t.Fatal("parent hold opened a case")
+		}
+		return
+	}
+	// A subsequent, settled non-CI wait carries a different obligation.
+	later := protocol.ExternalWait{WaitExternalPayload: protocol.WaitExternalPayload{Kind: "answer", WaitKey: "answer"}, WaitID: "later-answer-wait", RunID: next.RunID, TaskID: as.TaskID, Status: "continued", Stopped: true, WakeReason: "answer_closed"}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutExternalWait(t.Context(), later, h.clock.Now().UnixMilli()) }); err != nil {
+		t.Fatal(err)
+	}
+
 	// A settled report on this Issue with no PR candidate is independent of this CI wait.
 	rollbackReport := errors.New("restore prior reports")
 	err = h.store.Write(t.Context(), func(tx *store.Tx) error {
@@ -202,6 +233,23 @@ func testOwnerCIContinuation(t *testing.T, mode string) {
 		if got.State != "missing" {
 			t.Errorf("unrelated historical report suppressed missing CI: %+v", got)
 		}
+		// The PR can also have an ended duty for a different candidate.
+		for _, candidate := range []struct{ head, base, target, want string }{
+			{"old-head", f.Base, f.Target, "missing"}, {f.Head, "old-base", f.Target, "missing"},
+			{f.Head, f.Base, "old-target", "missing"}, {f.Head, f.Base, f.Target, "unverified"},
+		} {
+			if _, err := tx.Exec(t.Context(), `UPDATE issue_delivery_duties SET status='ended',body_json=json_object('candidate',json_object('delivery_id',?,'head_sha',?,'base_sha',?,'target_sha',?)) WHERE issue_id=? AND task_id=?`, ref.DeliveryID, candidate.head, candidate.base, candidate.target, issue.IssueID, as.TaskID); err != nil {
+				return err
+			}
+			got, err = views.OwnerCIContinuation(t.Context(), tx.Q(), as.TaskID, as.RunID)
+			if err != nil {
+				return err
+			}
+			if got.State != candidate.want {
+				t.Errorf("ended duty %v gave %s", candidate, got.State)
+			}
+		}
+
 		return rollbackReport
 	})
 	if !errors.Is(err, rollbackReport) {
