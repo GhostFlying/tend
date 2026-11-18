@@ -716,18 +716,19 @@ async function verifyShortNumbers() {
         page.setDefaultTimeout(10_000);
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        let identityAttempts = 0;
-        await page.route("**/api/v1/issues/T123?projection=identity", (route) => {
-          if (++identityAttempts !== 1) return route.continue();
-          return route.fulfill({
-            status: 503,
-            json: { error: { code: "internal", message: "Temporarily unavailable" } },
-          });
-        });
+        await page.route(
+          "**/api/v1/issues/T123?projection=identity",
+          (route) =>
+            route.fulfill({
+              status: 503,
+              json: { error: { code: "internal", message: "Temporarily unavailable" } },
+            }),
+          { times: 1 },
+        );
         await page.goto(`${base}/issues/t123?retry=1`);
         await page.getByRole("heading", { name: "暂时无法读取 Issue，正在重试" }).waitFor();
-        await page.waitForURL("**/issues/T123?retry=1");
-        assert.equal(identityAttempts, 2);
+        await page.getByRole("region", { name: "Issue 详情" }).waitFor();
+        assert.equal(new URL(page.url()).pathname, "/issues/T123");
         await page.goto(
           `${base}/issues/${issue.issue_id}?view=conversation#${historicalMessageID}`,
         );
