@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -30,8 +31,13 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 		return move(admitOwnerIssueHTTP(t, e, token, createOwnerIssueHTTP(t, e, token, "")), protocol.IssueInProgress)
 	}
 	running := active()
-	review := move(active(), protocol.IssueInReview)
+	e.clock.Advance(time.Minute)
+	review := active()
+	reviewEnteredAt := review.UpdatedAt
+	e.clock.Advance(time.Minute)
 	later := active()
+	e.clock.Advance(time.Minute)
+	review = move(review, protocol.IssueInReview)
 	system := active()
 	e.peer.set(netx.Identity{User: otherLogin})
 	outsider := createOwnerIssueHTTP(t, e, otherSession.Token, "")
@@ -149,18 +155,18 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 		t.Fatal(code, inbox)
 	}
 	firstPage := page(token, "&board_status=in_progress&limit=1")
-	if !slices.Equal(ids(firstPage), []string{running.IssueID}) || !firstPage.More || firstPage.Next != running.IssueID ||
+	if !slices.Equal(ids(firstPage), []string{later.IssueID}) || !firstPage.More || firstPage.Next == "" ||
 		firstPage.Counts[protocol.IssueInProgress] != 2 || firstPage.Counts[protocol.IssueInReview] != 1 {
 		t.Fatalf("first page must count distinct Issues across statuses: %+v", firstPage)
 	}
-	if next := page(token, "&board_status=in_progress&limit=1&after="+firstPage.Next); next.More || !slices.Equal(ids(next), []string{later.IssueID}) {
+	if next := page(token, "&board_status=in_progress&limit=1&after="+firstPage.Next); next.More || !slices.Equal(ids(next), []string{running.IssueID}) {
 		t.Fatal("second page lost a match", next)
 	}
 	const groupedColumn = "&group_review=true&board_status=in_progress&limit=1"
 	wanted := []struct {
 		id     string
 		status protocol.IssueWorkStatus
-	}{{running.IssueID, protocol.IssueInProgress}, {review.IssueID, protocol.IssueInReview}, {later.IssueID, protocol.IssueInProgress}}
+	}{{later.IssueID, protocol.IssueInProgress}, {review.IssueID, protocol.IssueInReview}, {running.IssueID, protocol.IssueInProgress}}
 	cursor := ""
 	for index, expected := range wanted {
 		grouped := page(token, groupedColumn+cursor)
@@ -169,6 +175,9 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 		}
 		if item := grouped.Items[0]; item.EffectiveWorkStatus != expected.status || item.Board == nil || item.Board.Status != expected.status {
 			t.Fatal("grouped display rewrote the persisted status", item)
+		}
+		if item := grouped.Items[0]; item.IssueID == review.IssueID && item.Board.StageEnteredAt != reviewEnteredAt {
+			t.Fatal("a grouped review transition reset the visible entry time", item)
 		}
 		if grouped.More != (index < len(wanted)-1) {
 			t.Fatal("grouped continuation is incomplete", grouped)
@@ -201,7 +210,7 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 	if got := page(token, "&board_status=in_progress"); !slices.Equal(ids(got), []string{later.IssueID}) || got.Counts[protocol.IssueInProgress] != 1 {
 		t.Fatal("completed actions kept their former Issue, including a planner duplicate", got)
 	}
-	if got := page(token, "&group_review=true&board_status=in_progress"); !slices.Equal(ids(got), []string{review.IssueID, later.IssueID}) {
+	if got := page(token, "&group_review=true&board_status=in_progress"); !slices.Equal(ids(got), []string{later.IssueID, review.IssueID}) {
 		t.Fatal("grouped refresh retained a completed action or lost a genuine review card", got)
 	}
 	if got := page(token, "&project=missing"); len(got.Items) != 0 || got.More || got.Counts[protocol.IssueInReview] != 0 {
