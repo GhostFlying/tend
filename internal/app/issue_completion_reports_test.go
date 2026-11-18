@@ -195,9 +195,12 @@ func TestCombinedIssueReportRepliesToConsumedInput(t *testing.T) {
 	h := hostedManagerHarness(t)
 	a := assignHostedManager(t, h, createCanonicalOwnerTestIssue(t, h))
 	b := createCanonicalOwnerTestIssue(t, h)
-	_, delivery := h.say("Start this discussion.")
+	original, delivery := h.say("Start work on A.")
 	turn := startHostedReview(t, h, "main", delivery)
 	source := consumedSteerFixture(t, h, delivery)
+	if op := h.associate(owner, original, a.IssueID); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
 	ids := []string{a.IssueID, b.IssueID}
 	setReportForTest(t, h, source, ids, ids)
 	p := protocol.CoordinationReply{ReplyTo: source, Body: "Yes, I will report both results together.", WorkItemIDs: ids}
@@ -207,8 +210,8 @@ func TestCombinedIssueReportRepliesToConsumedInput(t *testing.T) {
 		t.Fatal(answer, err)
 	}
 
-	// The same input reaches A's manager as historical context in a background
-	// batch. It may inform progress but is not a new question to that manager.
+	// Both the original task and the later agreement reach A's manager as
+	// historical material. Neither is a fresh question to that manager.
 	conversation := "issue:" + a.IssueID
 	background, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+conversation)
 	if err != nil || !ok || background.Operation != OpHandleEvent {
@@ -216,9 +219,15 @@ func TestCombinedIssueReportRepliesToConsumedInput(t *testing.T) {
 	}
 	manager := startHostedReview(t, h, conversation, background)
 	principal := protocol.Principal{Kind: protocol.PrincipalBackgroundAgent, Subject: "manager", Thread: manager.ThreadID, ConversationID: conversation}
-	reply := protocol.MessagingPublication{ReplyTo: source, Body: "A is still in progress."}
-	op = hostedEffect(t, h, principal, manager, 1, protocol.Target{Type: "logical_turn", ID: manager.RequestID}, nil, reply, PublishCommunication{})
-	expectWorkCode(t, op, protocol.CodeInvalidTransition)
+	before := h.count("messaging_messages")
+	for _, historical := range []string{source, original} {
+		reply := protocol.MessagingPublication{ReplyTo: historical, Body: "A is still in progress."}
+		op = hostedEffect(t, h, principal, manager, 1, protocol.Target{Type: "logical_turn", ID: manager.RequestID}, nil, reply, PublishCommunication{})
+		expectWorkCode(t, op, protocol.CodeInvalidTransition)
+	}
+	if after := h.count("messaging_messages"); after != before {
+		t.Fatalf("historical inputs published %d extra messages", after-before)
+	}
 }
 
 func TestCombinedIssueReportNotificationScope(t *testing.T) {

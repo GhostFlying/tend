@@ -333,6 +333,14 @@ func TestIssueOwnerSteerFormalReplyRequiresWitnessedTurn(t *testing.T) {
 			}
 			notice := steerOperation(t, op, "queued")
 
+			if sender == "main" {
+				// The owner can ask a new urgent question about grouped work.
+				// Acknowledging its dispatch alone still cannot open a reply.
+				agreement := queueMessage(t, h, "Report the two Issues together when complete.")
+				other := createCanonicalOwnerTestIssue(t, h)
+				ids := []string{issue.IssueID, other.IssueID}
+				setReportForTest(t, h, agreement, ids, ids)
+			}
 			conversation := assignment.Manager.ConversationID
 			principal := protocol.Principal{Kind: protocol.PrincipalRun, Subject: assignment.RunID,
 				Role: protocol.RoleIssueManager, Thread: turn.ThreadID, ConversationID: conversation}
