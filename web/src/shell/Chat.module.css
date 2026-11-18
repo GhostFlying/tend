@@ -1,4 +1,5 @@
 .head {
+  position: relative;
   height: var(--head-height);
   display: flex;
   align-items: center;

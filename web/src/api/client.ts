@@ -20,7 +20,7 @@ export type BusinessMessage = IssueConversationItem;
 export type Connection =
   | { status: "connecting" }
   | { status: "online"; login: string }
-  | { status: "offline"; reason: string }
+  | { status: "offline"; reason: string | undefined }
   | { status: "not-owner"; reason: string };
 
 /** A request that reached tend and was refused. */

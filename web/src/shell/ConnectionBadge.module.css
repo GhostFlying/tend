@@ -14,3 +14,57 @@
   overflow: hidden;
   clip-path: inset(50%);
 }
+
+.anchor {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.trigger {
+  min-width: 28px;
+  min-height: 28px;
+  justify-content: center;
+  border-radius: var(--radius-s);
+}
+
+.panelPosition {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  z-index: var(--z-dropdown);
+  padding-block-start: var(--space-1);
+  width: max-content;
+  max-width: 240px;
+}
+
+.panel {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--bg-l1);
+  box-shadow: var(--shadow-2);
+  color: var(--label);
+  font-size: var(--text-caption);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .anchor {
+    position: static;
+  }
+
+  .trigger {
+    min-width: var(--control-touch);
+    min-height: var(--control-touch);
+  }
+
+  .panelPosition {
+    inset-block-start: calc(100% - var(--space-1));
+    inset-inline: var(--space-4);
+    width: auto;
+    max-width: none;
+  }
+}

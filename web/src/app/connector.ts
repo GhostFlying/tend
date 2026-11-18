@@ -15,6 +15,7 @@ export interface Link {
 }
 
 export function startConnector(client: ApiClient, live: LiveData, onOnline: () => void): Link {
+  let streamLoss: string | undefined;
   const stream = new EventStream({
     open: (after, signal) =>
       client.openStream(
@@ -22,11 +23,15 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
         signal,
       ),
     onStart: () => {
+      streamLoss = undefined;
       void live.reload();
     },
     onEvent: (event) => live.apply(event),
     onAlive: () => client.noteAlive(),
-    onLost: (reason) => client.markOffline(reason),
+    onLost: (reason) => {
+      streamLoss = reason;
+      client.markOffline(reason);
+    },
   });
 
   const shown = new Store<Connection>({ status: "connecting" });
@@ -40,7 +45,8 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
     } else if (!everLive) {
       shown.set(shown.get().status === "connecting" ? shown.get() : { status: "connecting" });
     } else {
-      const reason = c.status === "offline" ? c.reason : "事件流断开";
+      const reason =
+        (s === "live" ? undefined : streamLoss) ?? (c.status === "offline" ? c.reason : undefined);
       const now = shown.get();
       if (now.status !== "offline" || now.reason !== reason) {
         shown.set({ status: "offline", reason });

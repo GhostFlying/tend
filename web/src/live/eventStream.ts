@@ -141,10 +141,12 @@ export class EventStream {
         ctrl.abort();
       }, this.silenceMs);
     };
+    let opened = false;
     let started = false;
     arm();
     try {
       const res = await this.options.open(this.cursorSeq, ctrl.signal);
+      opened = true;
       if (!res.body) {
         return { kind: "lost", reason: "事件流没有内容", started };
       }
@@ -154,7 +156,7 @@ export class EventStream {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) {
-          return { kind: "lost", reason: "tend 结束了事件流", started };
+          return { kind: "lost", reason: "事件流已结束", started };
         }
         arm();
         this.call(() => this.options.onAlive?.());
@@ -193,7 +195,7 @@ export class EventStream {
       if (err instanceof ApiError) {
         return { kind: "lost", reason: err.message, started };
       }
-      return { kind: "lost", reason: "连不上 tend", started };
+      return { kind: "lost", reason: opened ? "未能读取事件流" : "未能打开事件流", started };
     } finally {
       clearTimeout(timer);
       ctrl.abort();
