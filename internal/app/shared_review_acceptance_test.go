@@ -215,6 +215,19 @@ func TestAcceptanceSharedReviewKeepsNarrowVerdictAndOriginalReviewerSupplement(t
 	supplement := createSharedReviewerTaskForTest(t, h, issue.IssueID)
 	r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "supplement", DeliveryID: "pr", ReviewerTaskID: supplement}))
 	executeSharedReviewForTest(t, h, rt, r, supplement, "passed")
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		deliveries, err := views.CanonicalIssueDeliveries(t.Context(), tx.Q(), issue.IssueID)
+		if err != nil {
+			return err
+		}
+		progress := deliveries.Items[0].Review
+		if progress == nil || progress.Recorded || progress.Valid || progress.Verdict != "passed" || progress.HeadSHA != r.HeadSHA {
+			t.Fatal("returned supplement did not appear before owner record", progress)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	r = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
 	if !r.Valid || len(r.Rounds) != 1 || r.Rounds[0].AcceptanceID != original || r.Rounds[0].SupplementTaskID != supplement || r.Rounds[0].SupplementRunID == "" {
 		t.Fatal("legitimate same-round evidence recovery lost", r)

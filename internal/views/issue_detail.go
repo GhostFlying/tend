@@ -207,7 +207,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}
-	kinds := []string{"artifact.submitted"}
+	kinds := []string{"artifact.submitted", "task.completed"}
 	for kind := range issueActivityTitles {
 		kinds = append(kinds, kind)
 	}
@@ -230,7 +230,8 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  (e.object_type='issue' AND e.object_id=?)
  OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=?)
  OR (e.kind='task.manager_requested' AND e.object_id IN (SELECT task_id FROM manager_tasks))
- OR (e.object_id IN (SELECT task_id FROM primary_tasks))
+ OR (e.kind<>'task.completed' AND e.object_id IN (SELECT task_id FROM primary_tasks))
+ OR (`+issueCompletionNotice+`)
  OR (e.object_type='run' AND e.object_id IN (SELECT run_id FROM runs WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='artifact' AND e.object_id IN (SELECT artifact_id FROM artifacts WHERE task_id IN (SELECT task_id FROM primary_tasks)))
  OR (e.object_type='attention' AND e.object_id IN (SELECT attention_id FROM attentions WHERE issue_id=?))
@@ -241,7 +242,7 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  SELECT e.event_seq,e.kind,h.delivery_id,e.created_at FROM issue_delivery_candidate_history h
  JOIN events e ON e.event_seq=h.event_seq WHERE h.issue_id=?
  )
- SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, id, id, out.EventSeq, before, before)
+ SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, id, id, id, out.EventSeq, before, before)
 	if err != nil {
 		return out, fmt.Errorf("views: issue activity: %w", err)
 	}
@@ -361,6 +362,11 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				case "cancelled":
 					entry.Title = "取消了 Issue"
 				}
+			}
+			if r.kind == "task.completed" {
+				entry.IssueID, entry.TaskID, entry.Title = id, r.id, "任务结果已返回"
+				out.Items = append(out.Items, entry)
+				continue
 			}
 			if r.id == issue.IssueID {
 				entry.IssueID = id

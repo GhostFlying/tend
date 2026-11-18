@@ -228,7 +228,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			last := &r.Rounds[len(r.Rounds)-1]
 			previousAcceptance, previousVerdict := last.AcceptanceID, last.AcceptanceVerdict
-			inputRound := sharedReviewInputRound(*last)
+			inputRound := protocol.SharedReviewInputRound(*last)
 			var result *protocol.SharedReviewResult
 			var run, artifact string
 			if inputRound.ReviewerRole == protocol.RoleAccept {
@@ -271,7 +271,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if r.Status != "reviewing" || len(r.Rounds) == 0 || r.Rounds[len(r.Rounds)-1].Result != nil {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "wait requires an unresolved frozen review without a quality conclusion")
 			}
-			last := sharedReviewInputRound(r.Rounds[len(r.Rounds)-1])
+			last := protocol.SharedReviewInputRound(r.Rounds[len(r.Rounds)-1])
 			if err := stoppedTaskRecoveryReady(ctx, tx.Q(), last.TaskID, false); err != nil {
 				return Outcome{}, err
 			}
@@ -469,18 +469,6 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 
 func sharedReviewRoundLimit(r protocol.SharedDeliveryReview) int {
 	return 2 + len(r.BudgetAuthorizations)
-}
-
-// Coordination and recording must inspect the same actual result source while
-// the original acceptance provenance remains on the persisted round.
-func sharedReviewInputRound(round protocol.SharedDeliveryReviewRound) protocol.SharedDeliveryReviewRound {
-	if round.SupplementTaskID != "" {
-		round.TaskID, round.SpecVersion = round.SupplementTaskID, round.SupplementSpecVersion
-		round.ImplementGeneration = round.SupplementGeneration
-		round.RunID, round.ArtifactID = round.SupplementRunID, round.SupplementArtifactID
-		round.AcceptanceID, round.AcceptanceVerdict, round.ReviewerRole = "", "", ""
-	}
-	return round
 }
 
 func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, task, acceptance string, frozenRequirements ...*protocol.SharedReviewExecutionRequirements) (protocol.SharedDeliveryReviewRound, error) {

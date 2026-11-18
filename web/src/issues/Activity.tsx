@@ -772,7 +772,8 @@ function Milestone({
       {entry.delivery ? <DeliveryProgress item={entry.delivery} historical /> : null}
       {entry.issue_id &&
       (entry.kind === "issue.delivery_review_changed" ||
-        entry.kind === "work_item.delivery_changed") ? (
+        entry.kind === "work_item.delivery_changed" ||
+        entry.kind === "task.completed") ? (
         <EventNotification issueID={entry.issue_id} position={entry.position} />
       ) : null}
       {entry.progress && (

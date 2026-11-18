@@ -32,10 +32,11 @@ func issueDeliveryReviewProgress(ctx context.Context, q store.Querier, issue str
 	}
 	recorded := result != nil
 	if !recorded && (review.Status == "reviewing" || review.Status == "waiting") {
-		if round.ReviewerRole == protocol.RoleAccept {
-			result, _, _, err = store.ReadSharedAcceptanceResult(ctx, q, review, &round)
+		input := protocol.SharedReviewInputRound(round)
+		if input.ReviewerRole == protocol.RoleAccept {
+			result, _, _, err = store.ReadSharedAcceptanceResult(ctx, q, review, &input)
 		} else {
-			result, _, _, err = store.ReadSharedReviewResult(ctx, q, review, round)
+			result, _, _, err = store.ReadSharedReviewResult(ctx, q, review, input)
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) ||

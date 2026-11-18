@@ -4774,6 +4774,7 @@ export interface IssueConversationQueuePage {
   active?: IssueConversationQueueEntry;
   enabled: boolean;
   event_seq: number;
+  interruptible_message_id?: string;
   items: IssueConversationQueueEntry[] | null;
   next?: number;
   total: number;

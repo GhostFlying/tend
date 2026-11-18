@@ -9,14 +9,18 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
+const issueCompletionNotice = `e.object_type='task' AND e.kind='task.completed' AND EXISTS (
+ SELECT 1 FROM background_sources s JOIN background_batches b USING(batch_id)
+ WHERE s.event_id=e.event_id AND b.work_item_id=?)`
+
 // IssueEventNotification reads exact links recorded by the notification writer.
 // An event sequence inside a coalescing window does not prove batch membership.
 func IssueEventNotification(ctx context.Context, q store.Querier, issue string, position, after int64) (protocol.IssueEventNotificationPage, error) {
 	out := protocol.IssueEventNotificationPage{Notifications: []protocol.IssueEventNotification{}}
-	err := q.QueryRowContext(ctx, `SELECT event_id FROM events
- WHERE event_seq=? AND object_id=? AND (
- (object_type='issue' AND kind='issue.delivery_review_changed')
- OR (object_type='work_item' AND kind='work_item.delivery_changed'))`, position, issue).Scan(&out.EventID)
+	err := q.QueryRowContext(ctx, `SELECT e.event_id FROM events e WHERE e.event_seq=? AND (
+ (e.object_id=? AND ((e.object_type='issue' AND e.kind='issue.delivery_review_changed')
+ OR (e.object_type='work_item' AND e.kind='work_item.delivery_changed')))
+ OR (`+issueCompletionNotice+`))`, position, issue, issue).Scan(&out.EventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, store.ErrNotFound
 	}
@@ -49,8 +53,15 @@ func IssueEventNotification(ctx context.Context, q store.Querier, issue string, 
  FROM matches m
  LEFT JOIN main_turns t ON t.request_id=(SELECT n.request_id FROM main_turns n
    WHERE n.message_id=m.message_id ORDER BY n.created_at DESC,n.rowid DESC LIMIT 1)
- LEFT JOIN logical_turns l ON l.logical_turn_id=(SELECT n.logical_turn_id FROM logical_turns n
-   WHERE n.message_id=m.message_id ORDER BY n.updated_at DESC,n.rowid DESC LIMIT 1)
+ LEFT JOIN logical_turns l ON l.logical_turn_id=(
+   WITH RECURSIVE responsibility(id, successor) AS (
+     SELECT n.logical_turn_id,n.resumed_by FROM logical_turns n
+     WHERE n.logical_turn_id=(SELECT orig.logical_turn_id FROM logical_turns orig
+       WHERE orig.message_id=m.message_id ORDER BY orig.updated_at DESC,orig.rowid DESC LIMIT 1)
+     UNION
+     SELECT n.logical_turn_id,n.resumed_by FROM logical_turns n JOIN responsibility r ON n.logical_turn_id=r.successor
+   )
+   SELECT id FROM responsibility WHERE successor IS NULL)
  ORDER BY m.position`, out.EventID, out.EventID, issue, after)
 	if err != nil {
 		return out, err

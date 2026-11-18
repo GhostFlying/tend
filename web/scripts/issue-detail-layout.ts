@@ -644,6 +644,7 @@ try {
       let current = original;
       let ownerItems: IssueConversationQueueEntry[] = [];
       let backgroundRequested = false;
+      let interruptedMessage: string | undefined;
       const issueConversation = issue.conversation!.conversation_id!;
       const backgroundItems: IssueConversationQueueEntry[] = ["processing", "queued", "queued"].map(
         (status, index) => ({
@@ -673,12 +674,14 @@ try {
         if (category === "background") backgroundRequested = true;
         const items =
           category === "owner" ? ownerItems : category === "background" ? backgroundItems : [];
-        // Older backends also put the busy background turn in owner.active.
         await route.fulfill({
           json: {
             items,
             total: items.length,
-            active: backgroundItems[0],
+            interruptible_message_id:
+              category === "owner" && !interruptedMessage
+                ? backgroundItems[0]!.item.message_id
+                : undefined,
             event_seq: seq,
             enabled: true,
           },
@@ -717,6 +720,10 @@ try {
       );
       await page.route("**/api/v1/ops", (route) => {
         const envelope = route.request().postDataJSON() as Envelope;
+        if (envelope.operation === "conversation.interrupt_reply") {
+          interruptedMessage = envelope.target.id;
+          return route.fulfill({ json: { operation: { status: "succeeded" } } });
+        }
         assert.equal(envelope.operation, "issues.update_progress");
         savedProgress = envelope.payload as UpdateIssueProgressPayload;
         return route.fulfill({
@@ -741,9 +748,10 @@ try {
               {
                 id: "review-queue-event",
                 position: 3,
-                kind: "issue.delivery_review_changed",
+                kind: "task.completed",
                 author: "tend",
-                title: "更新了 PR 审阅",
+                title: "任务结果已返回",
+                task_id: "reviewer-task",
                 created_at: now,
                 issue_id: issue.issue_id,
               },
@@ -797,6 +805,8 @@ try {
       assert.equal(await composer.getByText(/加入队列/).count(), 0);
       assert.equal(await page.getByText(/后台事项 · 3/).count(), 0);
       assert.equal(backgroundRequested, false);
+      const stop = composer.getByRole("button", { name: "停止当前回复", exact: true });
+      await stop.waitFor();
       await composer.screenshot({ path: join(output, `owner-queue-background-only-${width}.png`) });
 
       current = {
@@ -862,7 +872,12 @@ try {
       await composer.getByRole("button", { name: "加入队列", exact: true }).waitFor();
       await ownerQueue.screenshot({ path: join(output, `owner-queue-mixed-${width}.png`) });
       assert.equal(await page.getByText(/后台事项 · 3/).count(), 0);
-      console.log(`PASS 20:44 owner-only queue, current progress and event diagnostics ${width}`);
+      await stop.click();
+      await stop.waitFor({ state: "hidden" });
+      assert.equal(interruptedMessage, backgroundItems[0]!.item.message_id);
+      console.log(
+        `PASS 20:44 owner-only queue, current progress, event diagnostics and background stop ${width}`,
+      );
 
       for (const [action, label] of [
         ["seen", "已看到冲突"],

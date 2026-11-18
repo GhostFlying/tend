@@ -16,12 +16,13 @@ type ConversationQueueEntry struct {
 }
 
 type ConversationQueuePage struct {
-	Active   *ConversationQueueEntry  `json:"active,omitempty"`
-	Enabled  bool                     `json:"enabled"`
-	EventSeq int64                    `json:"event_seq"`
-	Items    []ConversationQueueEntry `json:"items"`
-	Total    int64                    `json:"total"`
-	Next     int64                    `json:"next,omitempty"`
+	InterruptibleMessageID string                   `json:"interruptible_message_id,omitempty"`
+	Active                 *ConversationQueueEntry  `json:"active,omitempty"`
+	Enabled                bool                     `json:"enabled"`
+	EventSeq               int64                    `json:"event_seq"`
+	Items                  []ConversationQueueEntry `json:"items"`
+	Total                  int64                    `json:"total"`
+	Next                   int64                    `json:"next,omitempty"`
 }
 
 type WithdrawMessagePayload struct{}

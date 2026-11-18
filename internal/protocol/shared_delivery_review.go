@@ -230,3 +230,15 @@ type UpdateSharedDeliveryReviewPayload struct {
 	AcceptanceID               string                    `json:"acceptance_id,omitempty"`
 	Dispositions               []SharedReviewDisposition `json:"dispositions,omitempty"`
 }
+
+// Coordination and recording must inspect the same actual result source while
+// the original acceptance provenance remains on the persisted round.
+func SharedReviewInputRound(round SharedDeliveryReviewRound) SharedDeliveryReviewRound {
+	if round.SupplementTaskID != "" {
+		round.TaskID, round.SpecVersion = round.SupplementTaskID, round.SupplementSpecVersion
+		round.ImplementGeneration = round.SupplementGeneration
+		round.RunID, round.ArtifactID = round.SupplementRunID, round.SupplementArtifactID
+		round.AcceptanceID, round.AcceptanceVerdict, round.ReviewerRole = "", "", ""
+	}
+	return round
+}
