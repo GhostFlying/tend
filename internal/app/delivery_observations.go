@@ -327,6 +327,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	row.Observation.RefreshPending = fact.Observation.RefreshPending
+	row.Observation.LastConflict = fact.Observation.LastConflict
 	if !row.Observation.RefreshPending {
 		row.ObservedRevision = fact.FactRevision
 		row.NotificationPending = false
@@ -565,7 +566,11 @@ func findDelivery(item protocol.WorkItem, id string) (protocol.IssueDelivery, bo
 	return protocol.IssueDelivery{}, false
 }
 func deliveryChanged(item protocol.WorkItem, o protocol.DeliveryObservation) Event {
-	return Event{ObjectType: "work_item", ObjectID: item.WorkItemID, ObjectVersion: item.Revision, Kind: "work_item.delivery_changed", Body: map[string]any{"delivery_id": o.DeliveryID, "state": o.State, "previous_state": "", "error_kind": o.ErrorKind, "checked_at": o.CheckedAt, "generation": o.Generation, "refresh_pending": o.RefreshPending}}
+	body := map[string]any{"delivery_id": o.DeliveryID, "state": o.State, "previous_state": "", "error_kind": o.ErrorKind, "checked_at": o.CheckedAt, "generation": o.Generation, "refresh_pending": o.RefreshPending}
+	if d, ok := findDelivery(item, o.DeliveryID); ok && o.CheckedAt > 0 && o.HeadSHA != "" && o.ErrorKind == "" && !o.RefreshPending {
+		body["delivery_progress"] = protocol.IssueDeliveryView{Delivery: d, Observation: protocol.CanonicalDeliveryObservation(o)}
+	}
+	return Event{ObjectType: "work_item", ObjectID: item.WorkItemID, ObjectVersion: item.Revision, Kind: "work_item.delivery_changed", Body: body}
 }
 
 // RefreshDelivery invalidates an older query and requests one fresh read. It

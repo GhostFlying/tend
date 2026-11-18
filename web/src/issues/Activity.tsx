@@ -1,3 +1,9 @@
+import {
+  CandidateIdentity,
+  candidateLabel,
+  conflictActionLabel,
+  DeliveryProgress,
+} from "./DeliveryProgress.tsx";
 import { MessageReceipts } from "./MessageReceipts.tsx";
 import { ExternalSourceMessage } from "../conversation/SourceDetails.tsx";
 import { useEntryState } from "../app/router.ts";
@@ -748,11 +754,24 @@ function Milestone({
         <span>{entry.author || "tend"}</span> <span>{entry.title}</span>
         <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
       </span>
+      {entry.delivery ? <DeliveryProgress item={entry.delivery} historical /> : null}
       {entry.progress && (
         <details>
           <summary>
-            {entry.progress.summary || (entry.progress.next_step ? "更新了下一步" : "清除了进展")}
+            {entry.progress.delivery?.conflict_action
+              ? conflictActionLabel(entry.progress.delivery.conflict_action)
+              : entry.progress.summary ||
+                (entry.progress.next_step ? "更新了下一步" : "清除了进展")}
           </summary>
+          {entry.progress.delivery ? (
+            <p>
+              {candidateLabel(entry.progress.delivery)} ·{" "}
+              <CandidateIdentity candidate={entry.progress.delivery} />
+            </p>
+          ) : null}
+          {entry.progress.delivery?.conflict_action && entry.progress.summary ? (
+            <p>{entry.progress.summary}</p>
+          ) : null}
           <p>记录版本：{entry.progress.issue_revision}</p>
           {entry.progress.next_step && <p>当时下一步：{entry.progress.next_step}</p>}
         </details>

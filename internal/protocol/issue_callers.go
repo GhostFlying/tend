@@ -89,24 +89,26 @@ type IssueFollowupHistory struct {
 
 type IssueDeliveryObservation struct {
 	DeliverySnapshot
-	Observer                string `json:"observer,omitempty"`
-	RetryCount              int    `json:"retry_count,omitempty"`
-	RetryAt                 int64  `json:"retry_at,omitempty"`
-	ErrorMessage            string `json:"error_message,omitempty"`
-	BaselineUpgradeID       string `json:"baseline_upgrade_id,omitempty"`
-	BaselineUpgradeRevision int64  `json:"baseline_upgrade_revision,omitempty"`
-	IssueID                 string `json:"issue_id"`
-	DeliveryID              string `json:"delivery_id"`
-	Generation              int64  `json:"generation"`
-	CheckedAt               int64  `json:"checked_at,omitempty"`
-	AttemptedAt             int64  `json:"attempted_at,omitempty"`
-	ErrorKind               string `json:"error_kind,omitempty"`
-	RefreshPending          bool   `json:"refresh_pending,omitempty"`
+	LastConflict            *DeliveryConflict `json:"last_conflict,omitempty"`
+	Observer                string            `json:"observer,omitempty"`
+	RetryCount              int               `json:"retry_count,omitempty"`
+	RetryAt                 int64             `json:"retry_at,omitempty"`
+	ErrorMessage            string            `json:"error_message,omitempty"`
+	BaselineUpgradeID       string            `json:"baseline_upgrade_id,omitempty"`
+	BaselineUpgradeRevision int64             `json:"baseline_upgrade_revision,omitempty"`
+	IssueID                 string            `json:"issue_id"`
+	DeliveryID              string            `json:"delivery_id"`
+	Generation              int64             `json:"generation"`
+	CheckedAt               int64             `json:"checked_at,omitempty"`
+	AttemptedAt             int64             `json:"attempted_at,omitempty"`
+	ErrorKind               string            `json:"error_kind,omitempty"`
+	RefreshPending          bool              `json:"refresh_pending,omitempty"`
 }
 
 type IssueDeliveryView struct {
-	Delivery    IssueDelivery            `json:"delivery"`
-	Observation IssueDeliveryObservation `json:"observation"`
+	ConflictProgress *IssueProgress           `json:"conflict_progress,omitempty"`
+	Delivery         IssueDelivery            `json:"delivery"`
+	Observation      IssueDeliveryObservation `json:"observation"`
 }
 type IssueDeliveryPage struct {
 	IssueID string              `json:"issue_id"`
@@ -125,5 +127,5 @@ func CanonicalFollowupOccurrence(o FollowupOccurrence) IssueFollowupOccurrence {
 	return IssueFollowupOccurrence{IssueID: o.WorkItemID, BackgroundMessageID: o.BackgroundMessageID, Checkin: o.Checkin, OccurrenceID: o.OccurrenceID, RuleID: o.RuleID, Revision: o.Revision, MessageID: o.MessageID, Reason: o.Reason, Status: o.Status, Evidence: o.Evidence, CreatedAt: o.CreatedAt}
 }
 func CanonicalDeliveryObservation(o DeliveryObservation) IssueDeliveryObservation {
-	return IssueDeliveryObservation{Observer: o.Observer, RetryCount: o.RetryCount, RetryAt: o.RetryAt, ErrorMessage: o.ErrorMessage, BaselineUpgradeID: o.BaselineUpgradeID, BaselineUpgradeRevision: o.BaselineUpgradeRevision, DeliverySnapshot: o.DeliverySnapshot, IssueID: o.WorkItemID, DeliveryID: o.DeliveryID, Generation: o.Generation, CheckedAt: o.CheckedAt, AttemptedAt: o.AttemptedAt, ErrorKind: o.ErrorKind, RefreshPending: o.RefreshPending}
+	return IssueDeliveryObservation{LastConflict: o.LastConflict, Observer: o.Observer, RetryCount: o.RetryCount, RetryAt: o.RetryAt, ErrorMessage: o.ErrorMessage, BaselineUpgradeID: o.BaselineUpgradeID, BaselineUpgradeRevision: o.BaselineUpgradeRevision, DeliverySnapshot: o.DeliverySnapshot, IssueID: o.WorkItemID, DeliveryID: o.DeliveryID, Generation: o.Generation, CheckedAt: o.CheckedAt, AttemptedAt: o.AttemptedAt, ErrorKind: o.ErrorKind, RefreshPending: o.RefreshPending}
 }

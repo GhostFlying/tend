@@ -1,18 +1,59 @@
 import { useState } from "react";
 import type {
   IssueView,
+  IssueDeliveryProgress,
+  IssueDeliveryView,
   UpdateIssueProgressPayload,
   IssueControlPayload,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
+import { candidateLabel } from "./DeliveryProgress.tsx";
 import { issueCommand } from "./actions.ts";
 import styles from "./DetailPage.module.css";
 
-export function ProgressEditor({ issue, onSaved }: { issue: IssueView; onSaved(): void }) {
+export function ProgressEditor({
+  issue,
+  deliveries,
+  onSaved,
+}: {
+  issue: IssueView;
+  deliveries: IssueDeliveryView[] | null | undefined;
+  onSaved(): void;
+}) {
   const { client } = useServices();
   const operation = useDurableOp(client, `issue-progress:${issue.issue_id}`);
   const [baseline, setBaseline] = useState(issue);
+  const [candidates] = useState(() =>
+    (deliveries ?? []).filter(
+      ({ observation: o }) =>
+        o.state === "open" && o.head_sha && o.checked_at && (o.base_sha || o.target_sha),
+    ),
+  );
+  const [deliveryID, setDeliveryID] = useState("");
+  const [action, setAction] = useState("");
+  const selection = candidates.find(({ delivery }) => delivery.delivery_id === deliveryID);
+  const conflict =
+    selection?.observation.mergeability === "conflicting"
+      ? selection.observation.last_conflict
+      : undefined;
+  const canRecordAction = issue.assignee.kind === "owner" && conflict;
+  const candidate: IssueDeliveryProgress | undefined = selection
+    ? {
+        delivery_id: selection.delivery.delivery_id,
+        provider: selection.delivery.provider,
+        repository: selection.delivery.repository,
+        number: selection.delivery.number,
+        head_sha: selection.observation.head_sha!,
+        ...(selection.observation.base_sha ? { base_sha: selection.observation.base_sha } : {}),
+        ...(selection.observation.target_sha
+          ? { target_sha: selection.observation.target_sha }
+          : {}),
+        ...(canRecordAction && action
+          ? { conflict_revision: conflict.revision, conflict_action: action }
+          : {}),
+      }
+    : undefined;
   const original = operation.original?.payload as UpdateIssueProgressPayload | undefined;
   const [summary, setSummary] = useState(issue.progress?.summary ?? "");
   const [next, setNext] = useState(issue.progress?.next_step ?? "");
@@ -33,7 +74,11 @@ export function ProgressEditor({ issue, onSaved }: { issue: IssueView; onSaved()
       const result = await operation.execute(
         operation.pending
           ? undefined
-          : issueCommand(baseline, "update_progress", { summary, next_step: next }),
+          : issueCommand(baseline, "update_progress", {
+              summary,
+              next_step: next,
+              ...(candidate ? { delivery: candidate } : {}),
+            }),
       );
       if (result.kind === "done") onSaved();
       else
@@ -77,6 +122,45 @@ export function ProgressEditor({ issue, onSaved }: { issue: IssueView; onSaved()
           readOnly={operation.pending || operation.busy}
         />
       </label>
+      {candidates.length > 0 && !original ? (
+        <label>
+          关联候选
+          <select
+            value={deliveryID}
+            disabled={operation.busy}
+            onChange={(e) => {
+              setDeliveryID(e.target.value);
+              setAction("");
+            }}
+          >
+            <option value="">Issue 整体进展</option>
+            {candidates.map(({ delivery, observation }) => (
+              <option value={delivery.delivery_id} key={delivery.delivery_id}>
+                {candidateLabel(delivery)} · {observation.head_sha?.slice(0, 12)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {canRecordAction && !original ? (
+        <label>
+          冲突处理
+          <select
+            value={action}
+            disabled={operation.busy}
+            onChange={(e) => setAction(e.target.value)}
+          >
+            <option value="">仅更新进展</option>
+            <option value="seen">已看到冲突</option>
+            <option value="working">已开始处理</option>
+          </select>
+        </label>
+      ) : null}
+      {original?.delivery ? (
+        <p>
+          原请求候选 {candidateLabel(original.delivery)} · {original.delivery.head_sha.slice(0, 12)}
+        </p>
+      ) : null}
       <p className={styles.muted}>负责人总结与系统执行、验收事实分别保留。两项留空可清除总结。</p>
       {(error || operation.storageError) && <p role="status">{error || operation.storageError}</p>}
       <button className={styles.primary} disabled={operation.busy || !!operation.storageError}>

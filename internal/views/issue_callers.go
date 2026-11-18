@@ -117,7 +117,15 @@ func CanonicalIssueDeliveries(ctx context.Context, q store.Querier, id string) (
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return out, err
 		}
-		out.Items = append(out.Items, protocol.IssueDeliveryView{Delivery: d, Observation: protocol.CanonicalDeliveryObservation(o)})
+		item := protocol.IssueDeliveryView{Delivery: d, Observation: protocol.CanonicalDeliveryObservation(o)}
+		if c := o.CurrentConflict(); c != nil && issue.AssignmentState == "active" &&
+			(issue.State == protocol.IssueActive || issue.State == protocol.IssuePaused) {
+			item.ConflictProgress, err = store.IssueConflictProgress(ctx, q, issue, d, *c)
+			if err != nil {
+				return out, err
+			}
+		}
+		out.Items = append(out.Items, item)
 	}
 	return out, nil
 }

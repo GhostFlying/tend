@@ -51,22 +51,47 @@ type DeliveryCheck struct {
 	URL        string `json:"url,omitempty"`
 }
 
+// DeliveryConflict is the first observation of a conflict for this candidate
+// and baseline, retained when the provider subsequently reports a new head.
+type DeliveryConflict struct {
+	HeadSHA   string `json:"head_sha"`
+	BaseSHA   string `json:"base_sha,omitempty"`
+	TargetSHA string `json:"target_sha,omitempty"`
+	CheckedAt int64  `json:"checked_at"`
+	Observer  string `json:"observer"`
+	Revision  int64  `json:"revision"`
+}
+
+func (c DeliveryConflict) Matches(o DeliveryObservation) bool {
+	return c.HeadSHA == o.HeadSHA && c.BaseSHA == o.BaseSHA && c.TargetSHA == o.TargetSHA
+}
+
 // DeliveryObservation is independent of the work item's planning revision.
 type DeliveryObservation struct {
 	DeliverySnapshot
-	Observer                string `json:"observer,omitempty"`
-	RetryCount              int    `json:"retry_count,omitempty"`
-	RetryAt                 int64  `json:"retry_at,omitempty"`
-	ErrorMessage            string `json:"error_message,omitempty"`
-	BaselineUpgradeID       string `json:"baseline_upgrade_id,omitempty"`
-	BaselineUpgradeRevision int64  `json:"baseline_upgrade_revision,omitempty"`
-	WorkItemID              string `json:"work_item_id"`
-	DeliveryID              string `json:"delivery_id"`
-	Generation              int64  `json:"generation"`
-	CheckedAt               int64  `json:"checked_at,omitempty"`
-	AttemptedAt             int64  `json:"attempted_at,omitempty"`
-	ErrorKind               string `json:"error_kind,omitempty"`
-	RefreshPending          bool   `json:"refresh_pending,omitempty"`
+	LastConflict            *DeliveryConflict `json:"last_conflict,omitempty"`
+	Observer                string            `json:"observer,omitempty"`
+	RetryCount              int               `json:"retry_count,omitempty"`
+	RetryAt                 int64             `json:"retry_at,omitempty"`
+	ErrorMessage            string            `json:"error_message,omitempty"`
+	BaselineUpgradeID       string            `json:"baseline_upgrade_id,omitempty"`
+	BaselineUpgradeRevision int64             `json:"baseline_upgrade_revision,omitempty"`
+	WorkItemID              string            `json:"work_item_id"`
+	DeliveryID              string            `json:"delivery_id"`
+	Generation              int64             `json:"generation"`
+	CheckedAt               int64             `json:"checked_at,omitempty"`
+	AttemptedAt             int64             `json:"attempted_at,omitempty"`
+	ErrorKind               string            `json:"error_kind,omitempty"`
+	RefreshPending          bool              `json:"refresh_pending,omitempty"`
+}
+
+// CurrentConflict returns the retained conflict only while it applies to the
+// PR observation being projected.
+func (o DeliveryObservation) CurrentConflict() *DeliveryConflict {
+	if c := o.LastConflict; c != nil && c.Matches(o) && o.State == "open" && o.Mergeability == "conflicting" {
+		return c
+	}
+	return nil
 }
 
 type DeliveryPollPayload struct {

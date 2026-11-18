@@ -160,6 +160,15 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 	if observation.State == "" {
 		observation.State = "unknown"
 	}
+	observation.LastConflict = prior.Observation.LastConflict
+	if observation.ErrorKind == "" && observation.State == "open" && observation.Mergeability == "conflicting" &&
+		observation.CheckedAt > 0 && observation.HeadSHA != "" && (observation.BaseSHA != "" || observation.TargetSHA != "") &&
+		(observation.LastConflict == nil || !observation.LastConflict.Matches(observation) || prior.Observation.Mergeability == "mergeable") {
+		observation.LastConflict = &protocol.DeliveryConflict{
+			HeadSHA: observation.HeadSHA, BaseSHA: observation.BaseSHA, TargetSHA: observation.TargetSHA,
+			Observer: observation.Observer, CheckedAt: observation.CheckedAt, Revision: prior.FactRevision + 1,
+		}
+	}
 	fact := DeliveryObservationFactRow{Observation: observation, FactRevision: prior.FactRevision + 1, ChangedRevision: prior.ChangedRevision, PreviousState: prior.PreviousState, PreviousErrorKind: prior.PreviousErrorKind}
 	if !reflect.DeepEqual(prior.Observation.DeliverySnapshot, observation.DeliverySnapshot) || prior.Observation.ErrorKind != observation.ErrorKind || prior.Observation.RetryAt > 0 && observation.RetryAt == 0 {
 		fact.ChangedRevision = fact.FactRevision

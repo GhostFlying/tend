@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -57,18 +59,23 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	} else if x.Actor != nil && x.actorAgent != nil {
 		author = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: x.actorAgent.ExecutionEnvironmentID + "/" + x.actorAgent.LocalID}
 	}
+	if candidate := p.Delivery; candidate != nil {
+		if err := validateIssueProgressDelivery(ctx, tx.Q(), issue, author, *candidate); err != nil {
+			return Outcome{}, err
+		}
+	}
 	prior, err := store.IssueProgress(ctx, tx.Q(), issue.IssueID, issue.Revision)
 	if err != nil {
 		return Outcome{}, err
 	}
 	// An intervening Issue revision can reopen or transfer responsibility.
 	// Preserve that fresh assessment even when its words and author repeat.
-	if prior != nil && prior.IssueRevision == issue.Revision && prior.Summary == strings.TrimSpace(p.Summary) && prior.NextStep == strings.TrimSpace(p.NextStep) && prior.UpdatedBy == author {
+	if prior != nil && prior.IssueRevision == issue.Revision && prior.Summary == strings.TrimSpace(p.Summary) && prior.NextStep == strings.TrimSpace(p.NextStep) && prior.UpdatedBy == author && reflect.DeepEqual(prior.Delivery, p.Delivery) {
 		return Outcome{NoEffect: true, Result: *prior}, nil
 	}
 	issue.Revision++
 	issue.UpdatedAt = x.Now.UnixMilli()
-	progress := protocol.IssueProgress{Summary: strings.TrimSpace(p.Summary), NextStep: strings.TrimSpace(p.NextStep), IssueRevision: issue.Revision, UpdatedAt: issue.UpdatedAt, UpdatedBy: author}
+	progress := protocol.IssueProgress{Delivery: p.Delivery, Summary: strings.TrimSpace(p.Summary), NextStep: strings.TrimSpace(p.NextStep), IssueRevision: issue.Revision, UpdatedAt: issue.UpdatedAt, UpdatedBy: author}
 	// The deferred snapshot FK keeps this assessment atomic with the aggregate
 	// save, and lets its context trigger distinguish assessment-only revisions.
 	if err := tx.InsertIssueProgress(ctx, issue.IssueID, progress); err != nil {
@@ -80,4 +87,34 @@ func (UpdateIssueProgress) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	}
 	out.Result = progress
 	return out, nil
+}
+
+func validateIssueProgressDelivery(ctx context.Context, q store.Querier, issue protocol.Issue, author protocol.IssueAssignee, candidate protocol.IssueDeliveryProgress) error {
+	if candidate.ConflictAction != "" && author != issue.Assignee {
+		return protocol.Errorf(protocol.CodeForbidden, "only the current Issue assignee can record their conflict action")
+	}
+	for _, d := range issue.Plan.Deliveries {
+		if d.DeliveryID != candidate.DeliveryID {
+			continue
+		}
+		row, err := store.GetDeliveryObservation(ctx, q, issue.IssueID, d.DeliveryID)
+		if errors.Is(err, store.ErrNotFound) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		o := row.Observation
+		if o.CheckedAt == 0 || o.State != "open" || !candidate.Matches(d, o) {
+			break
+		}
+		if candidate.ConflictAction == "" {
+			return nil
+		}
+		if c := o.CurrentConflict(); c != nil && c.Revision == candidate.ConflictRevision {
+			return nil
+		}
+		break
+	}
+	return protocol.Errorf(protocol.CodeStaleRevision, "delivery candidate or conflict changed; read the Issue deliveries before updating progress")
 }

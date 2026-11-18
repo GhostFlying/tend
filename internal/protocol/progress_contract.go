@@ -30,6 +30,25 @@ func (p UpdateIssueProgressPayload) ValidateInput() error {
 			return pe
 		}
 	}
+	if d := p.Delivery; d != nil {
+		if d.DeliveryID == "" || d.Repository == "" || d.Number <= 0 ||
+			(d.Provider != "github" && d.Provider != "codebase") ||
+			d.HeadSHA == "" || (d.BaseSHA == "" && d.TargetSHA == "") {
+			return Errorf(CodeInvalidRequest, "delivery must identify the observed PR candidate and baseline")
+		}
+		switch d.ConflictAction {
+		case "":
+			if d.ConflictRevision != 0 {
+				return Errorf(CodeInvalidRequest, "conflict_revision requires a conflict_action")
+			}
+		case "seen", "working":
+			if d.ConflictRevision < 1 {
+				return Errorf(CodeInvalidRequest, "conflict_action requires the original conflict_revision")
+			}
+		default:
+			return Errorf(CodeInvalidRequest, "conflict_action must be seen or working")
+		}
+	}
 	return nil
 }
 

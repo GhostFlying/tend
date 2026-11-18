@@ -1131,6 +1131,7 @@ export interface DeliveryObservation {
   error_message?: string;
   generation: number;
   head_sha?: string;
+  last_conflict?: DeliveryConflict;
   lineage_error_kind?: string;
   merge_sha?: string;
   mergeability?: string;
@@ -1175,6 +1176,18 @@ export interface DeliveryCheck {
 export interface DeliveryActor {
   id?: string;
   login?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DeliveryConflict".
+ */
+export interface DeliveryConflict {
+  base_sha?: string;
+  checked_at: number;
+  head_sha: string;
+  observer: string;
+  revision: number;
+  target_sha?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1539,6 +1552,7 @@ export interface IssueStage {
  * via the `definition` "IssueProgress".
  */
 export interface IssueProgress {
+  delivery?: IssueDeliveryProgress;
   historical?: boolean;
   historical_reason?: string;
   issue_revision: number;
@@ -1546,6 +1560,21 @@ export interface IssueProgress {
   summary: string;
   updated_at: number;
   updated_by: IssueAssignee;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryProgress".
+ */
+export interface IssueDeliveryProgress {
+  base_sha?: string;
+  conflict_action?: string;
+  conflict_revision?: number;
+  delivery_id: string;
+  head_sha: string;
+  number: number;
+  provider: IssueDeliveryProvider;
+  repository: string;
+  target_sha?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4204,6 +4233,7 @@ export interface IssueActivityEntry {
   author: string;
   block?: IssueTranscriptBlock;
   created_at: number;
+  delivery?: IssueDeliveryView;
   id: string;
   issue_id?: string;
   kind: string;
@@ -4404,6 +4434,50 @@ export interface IssueTurnProcess {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryView".
+ */
+export interface IssueDeliveryView {
+  conflict_progress?: IssueProgress;
+  delivery: IssueDelivery;
+  observation: IssueDeliveryObservation;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryObservation".
+ */
+export interface IssueDeliveryObservation {
+  attempted_at?: number;
+  base_sha?: string;
+  baseline_upgrade_id?: string;
+  baseline_upgrade_revision?: number;
+  checked_at?: number;
+  ci?: DeliveryCI;
+  closed_at?: string;
+  closed_by?: DeliveryActor;
+  delivery_id: string;
+  error_kind?: string;
+  error_message?: string;
+  generation: number;
+  head_sha?: string;
+  issue_id: string;
+  last_conflict?: DeliveryConflict;
+  lineage_error_kind?: string;
+  merge_sha?: string;
+  mergeability?: string;
+  merged_at?: string;
+  merged_by?: DeliveryActor;
+  observer?: string;
+  provider_updated_at?: string;
+  refresh_pending?: boolean;
+  retry_at?: number;
+  retry_count?: number;
+  state: string;
+  target_contains_merge?: boolean;
+  target_sha?: string;
+  url?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueAgentConversation".
  */
 export interface IssueAgentConversation {
@@ -4512,48 +4586,6 @@ export interface IssueMaterialFact {
   source_message_id: string;
   superseded: boolean;
   supersedes?: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueDeliveryView".
- */
-export interface IssueDeliveryView {
-  delivery: IssueDelivery;
-  observation: IssueDeliveryObservation;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueDeliveryObservation".
- */
-export interface IssueDeliveryObservation {
-  attempted_at?: number;
-  base_sha?: string;
-  baseline_upgrade_id?: string;
-  baseline_upgrade_revision?: number;
-  checked_at?: number;
-  ci?: DeliveryCI;
-  closed_at?: string;
-  closed_by?: DeliveryActor;
-  delivery_id: string;
-  error_kind?: string;
-  error_message?: string;
-  generation: number;
-  head_sha?: string;
-  issue_id: string;
-  lineage_error_kind?: string;
-  merge_sha?: string;
-  mergeability?: string;
-  merged_at?: string;
-  merged_by?: DeliveryActor;
-  observer?: string;
-  provider_updated_at?: string;
-  refresh_pending?: boolean;
-  retry_at?: number;
-  retry_count?: number;
-  state: string;
-  target_contains_merge?: boolean;
-  target_sha?: string;
-  url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -7580,6 +7612,7 @@ export interface IssueTaskDisposition {
   task_id: string;
 }
 export interface UpdateIssueProgressPayload1 {
+  delivery?: IssueDeliveryProgress;
   expected_assignment_epoch: number;
   next_step: string;
   summary: string;

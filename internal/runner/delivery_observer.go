@@ -69,6 +69,7 @@ func (r *Runner) observeDelivery(ctx context.Context) error {
 			}
 			if assignment.CandidateIdentity {
 				report.Snapshot.BaseSHA = observed.BaseSHA
+				report.Snapshot.Mergeability = observed.Mergeability
 			}
 		} else {
 			report.ErrorKind = "query_failed"

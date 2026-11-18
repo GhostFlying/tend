@@ -151,7 +151,7 @@ func commandError(err error) error {
 
 const githubChecksQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid baseRef{target{oid}} mergeable mergeStateStatus commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount nodes{... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
-const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid baseRef{target{oid}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid baseRef{target{oid}} mergeable updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
 func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	parts := strings.Split(ref.Repository, "/")
