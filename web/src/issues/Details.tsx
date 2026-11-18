@@ -24,7 +24,7 @@ import { Issues } from "./data.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 import { AssigneeName } from "./AssigneeName.tsx";
 import { issueStateLabel } from "./Hierarchy.tsx";
-import { workStatus, workStatusLabel } from "./boardModel.ts";
+import { waitingExternalLabel, workStatus, workStatusLabel } from "./boardModel.ts";
 import { IssueClosureRead, IssuePlanRead } from "./PlanRead.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHandoff } from "./Handoff.tsx";
@@ -1099,7 +1099,11 @@ function ChildIssues({
             <span className={styles.muted}>
               <AssigneeName assignee={child.assignee} />
             </span>
-            <Badge>{issueStateLabel[child.state]}</Badge>
+            <Badge>
+              {child.execution?.waiting_external
+                ? waitingExternalLabel
+                : issueStateLabel[child.state]}
+            </Badge>
           </Button>
         ))}
       </div>

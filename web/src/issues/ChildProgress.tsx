@@ -5,7 +5,7 @@ import { Store, useStore } from "../state/store.ts";
 import { Button } from "../ui/index.ts";
 import { WorkItemRead, type ReadState } from "../workitems/live.ts";
 import { issuePagePath } from "./data.ts";
-import { workStatus, workStatusLabel } from "./boardModel.ts";
+import { waitingExternalLabel, workStatus, workStatusLabel } from "./boardModel.ts";
 import styles from "./Board.module.css";
 
 export type ExpandedChildView = {
@@ -24,6 +24,7 @@ export function childExecutionLabel(counts?: ExecutionCounts): string | undefine
   if (counts.running) return "执行中";
   if (counts.recovering) return "恢复中";
   if (counts.starting) return "准备中";
+  if (counts.waiting_external) return waitingExternalLabel;
   if (counts.queued) return "排队中";
   if (counts.paused) return "已暂停";
   return undefined;

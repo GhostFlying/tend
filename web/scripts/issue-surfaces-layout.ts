@@ -1435,13 +1435,16 @@ async function captureS4() {
         issue_id: "issue-child-next",
         title: "核对发布步骤",
         status: "todo",
-        execution: { ...parent.board!.execution },
+        execution: { ...parent.board!.execution, waiting_external: 1 },
       },
     ],
   };
   const originalLength = issueRows.length;
   issueRows.push(
-    summary("issue-child-next", "核对发布步骤", "issue-root"),
+    {
+      ...summary("issue-child-next", "核对发布步骤", "issue-root"),
+      execution: { ...parent.board!.execution, waiting_external: 1 },
+    },
     summary("issue-child-last", "核对独立验收", "issue-root"),
     summary("issue-no-children", "没有子 Issue 的独立工作"),
   );
@@ -1503,6 +1506,8 @@ async function captureS4() {
           assert.equal(await card.getByText("0/0", { exact: false }).count(), 0);
         }
         if (total === 1) {
+          const previousExecution = selected[0]!.execution;
+          selected[0]!.execution = { ...parent.board!.execution, waiting_external: 1 };
           await page
             .locator('[data-issue-id="issue-root"]')
             .getByRole("button", { name: parent.title, exact: true })
@@ -1511,6 +1516,8 @@ async function captureS4() {
           await children.waitFor();
           const section = children.locator("..").locator("..");
           assert.equal(await section.getByText(selected[0]!.title, { exact: true }).count(), 1);
+          await section.getByText("等待外部条件", { exact: true }).waitFor();
+          selected[0]!.execution = previousExecution!;
           assert.equal(
             await section.getByText(directChildren[1]!.title, { exact: true }).count(),
             0,
@@ -1531,6 +1538,8 @@ async function captureS4() {
       const card = page.locator('[data-issue-id="issue-root"]');
       await card.getByText("子 Issue · 0/3 已完成", { exact: true }).waitFor();
       await card.getByText("1 项执行中", { exact: true }).waitFor();
+      const waitingChild = card.getByRole("button", { name: /核对发布步骤/ });
+      await waitingChild.getByText("等待外部条件", { exact: true }).waitFor();
       assert.equal(
         await page
           .locator('[data-issue-id="issue-no-children"]')
@@ -1540,6 +1549,7 @@ async function captureS4() {
       );
       await page.screenshot({ path: join(output, `child-progress-${viewport.width}.png`) });
       await card.getByRole("button", { name: "查看全部 3 个子 Issue ↓", exact: true }).click();
+      await waitingChild.getByText("等待外部条件", { exact: true }).waitFor();
       await card.getByRole("button", { name: "下一页", exact: true }).click();
       const lastChild = card.getByRole("button", { name: /核对独立验收/ });
       await lastChild.waitFor();
