@@ -31,6 +31,28 @@ test("loaded continuation replies refresh and expose newly appended pages", asyn
   read.close();
 });
 
+test("manual continuation starts after the anchor pages for the current turn", async () => {
+  const read = new IssueTurnRead({
+    get: async <T>(path: string) => {
+      const after = Number(new URL(path, "https://example.test").searchParams.get("after"));
+      return {
+        items: [{ message_id: `reply-${after}` }],
+        more: after < 150,
+        next_seq: after + 50,
+      } as T;
+    },
+  });
+  await read.open("first-turn", 2, "reply-100");
+  expect(read.state.get().value?.items).toHaveLength(3);
+  expect(read.nextDepth(2)).toBe(4);
+  await read.more();
+  expect(read.state.get().value?.items?.at(-1)?.message_id).toBe("reply-150");
+  await read.open("second-turn");
+  expect(read.state.get().value?.items).toHaveLength(2);
+  expect(read.nextDepth(2)).toBe(3);
+  read.close();
+});
+
 test("process arrival pagination is independent of reply seq and rereads mutable steps", async () => {
   const calls: string[] = [];
   let status = "running";

@@ -860,9 +860,12 @@ function ActivityBlock({
         items.map((item) => item.message_id),
       );
     }
+    if (extra.error && opened) {
+      void continuation.refresh();
+      return;
+    }
+    setDepth(continuation.nextDepth(opened ? depth + 1 : depth));
     if (!opened) setOpened(true);
-    else if (extra.error) void continuation.refresh();
-    else setDepth(depth + 1);
   };
   const displayRows = activityTurnRows(rows, processBlock, readable);
   const firstReply = displayRows.find((row) => row.kind === "agent");
