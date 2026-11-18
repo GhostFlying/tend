@@ -25,7 +25,7 @@ import { Close } from "../shell/icons.tsx";
 import { IssueDefinition } from "./Definition.tsx";
 import { IssueHierarchy } from "./Hierarchy.tsx";
 import { AssigneeName } from "./AssigneeName.tsx";
-import { ChildProgress } from "./ChildProgress.tsx";
+import { ChildProgress, type ExpandedChildView } from "./ChildProgress.tsx";
 import {
   boardColumns,
   blockerLabels,
@@ -101,6 +101,14 @@ export function IssueBoard({
   const focusBeforeLayoutChange = useRef<string | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
   const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
+  const [childViews, setChildViews] = useState(() => new Map<string, ExpandedChildView>());
+  const setChildView = (id: string, view: ExpandedChildView | undefined) =>
+    setChildViews((current) => {
+      const next = new Map(current);
+      if (view) next.set(id, view);
+      else next.delete(id);
+      return next;
+    });
   const [startItem, setStartItem] = useState<IssueSummary | null>(null);
   const [startCategory, setStartCategory] = useState("");
   const categories = useStore(live.agents.categories.state);
@@ -409,6 +417,8 @@ export function IssueBoard({
                   <BoardCard
                     key={item.issue_id}
                     item={item}
+                    childView={childViews.get(item.issue_id)}
+                    onChildViewChange={(view) => setChildView(item.issue_id, view)}
                     state={actions.states[item.issue_id]}
                     disabled={
                       !online ||
@@ -685,6 +695,8 @@ function BoardColumn({
 
 const BoardCard = memo(function BoardCard({
   item,
+  childView,
+  onChildViewChange,
   state,
   disabled,
   onSelect,
@@ -694,6 +706,8 @@ const BoardCard = memo(function BoardCard({
   onDragEnd,
 }: {
   item: IssueSummary;
+  childView: ExpandedChildView | undefined;
+  onChildViewChange(view: ExpandedChildView | undefined): void;
   state?: "saving" | "unknown" | undefined;
   disabled: boolean;
   onSelect(id: string): void;
@@ -768,7 +782,13 @@ const BoardCard = memo(function BoardCard({
           </p>
         )}
       {!!b?.children?.total && (
-        <ChildProgress id={item.issue_id} summary={b.children} onSelect={onSelect} />
+        <ChildProgress
+          id={item.issue_id}
+          summary={b.children}
+          view={childView}
+          onViewChange={onChildViewChange}
+          onSelect={onSelect}
+        />
       )}
       {(item.state === "paused" || item.state === "cancelling" || !!b?.attention_count) && (
         <div className={styles.flags}>
