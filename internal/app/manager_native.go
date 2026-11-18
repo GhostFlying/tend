@@ -478,7 +478,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			}
 			if f.Kind != "" {
 				body, _ := json.Marshal(f)
-				if err := concurrencyRunFeedback(ctx, tx, r, protocol.RunEvent{Kind: "worker.concurrency", Body: body}, x.Now.UnixMilli()); err != nil {
+				if err := concurrencyRunFeedback(ctx, tx, r, protocol.RunEvent{Kind: "worker.concurrency", Body: body}, x.clock().UnixMilli()); err != nil {
 					return Outcome{}, err
 				}
 			}

@@ -126,7 +126,7 @@ func (c ConfigureConcurrency) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if *x.Env.ExpectedControlRevision != s.Group.Revision {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "concurrency configuration changed")
 	}
-	now := x.Now.UnixMilli()
+	now := max(x.clock().UnixMilli(), s.LastSample)
 	before := s.Group.Current
 	if c.Action == "create" {
 		if !missing {
@@ -180,8 +180,7 @@ func (c ConfigureConcurrency) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			previous.Group.Revision++
-			previous.Reset(max(now, previous.Group.CooldownUntil))
-			previous.LastSample = now
+			previous.Reset(now)
 			if err := saveConcurrency(ctx, tx, previous); err != nil {
 				return Outcome{}, err
 			}
@@ -212,8 +211,7 @@ func (c ConfigureConcurrency) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown concurrency operation")
 	}
 	s.Group.Revision++
-	s.Reset(max(now, s.Group.CooldownUntil))
-	s.LastSample = now
+	s.Reset(now)
 	if err := saveConcurrency(ctx, tx, s); err != nil {
 		return Outcome{}, err
 	}
@@ -540,7 +538,7 @@ func putConcurrencyExecutionSampled(ctx context.Context, tx *store.Tx, source pr
 	sameLoad := false
 	if samples != nil && sameFacts {
 		unhealthy := func(seen int64) bool {
-			return state == "unknown" || state == "running" && source.NativeSessionID == "" || now-seen > RunnerOfflineAfter.Milliseconds()
+			return state == "unknown" || now-seen > RunnerOfflineAfter.Milliseconds()
 		}
 		sameLoad = state == "stopped" || unhealthy(previousSeen) == unhealthy(max(previousSeen, lastSeen))
 	}
@@ -560,25 +558,41 @@ func concurrencyAvailable(ctx context.Context, q store.Querier, env, runtime, ex
 	return views.RuntimeConcurrencyAvailable(ctx, q, env, runtime, execution, now)
 }
 func refreshConcurrencyLoad(ctx context.Context, tx *store.Tx, s *domain.ConcurrencyState, now int64) error {
-	rows, err := tx.Q().QueryContext(ctx, `SELECT e.state,e.last_seen,COALESCE(json_extract(e.source_json,'$.native_session_id'),'') FROM concurrency_executions e JOIN concurrency_bindings b USING(environment_id,runtime_id) WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurrency_executions child WHERE child.parent_execution_id=e.execution_id AND child.state<>'stopped')`, s.Group.ID)
+	now = max(now, s.LastSample)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT e.state,e.last_seen,COALESCE(json_extract(e.source_json,'$.native_session_id'),''),
+       CASE WHEN r.observed_state='running' THEN COALESCE(r.last_confirmed_at,0) ELSE 0 END,
+       COALESCE(h.online,1),COALESCE(h.last_heartbeat_at,0)
+FROM concurrency_executions e JOIN concurrency_bindings b USING(environment_id,runtime_id)
+LEFT JOIN runs r ON r.run_id=substr(e.execution_id,5) AND substr(e.execution_id,1,4)='run:'
+LEFT JOIN host_runtime h ON h.host_id=r.host_id
+WHERE b.group_id=? AND e.state<>'stopped' AND NOT EXISTS(SELECT 1 FROM concurrency_executions child WHERE child.parent_execution_id=e.execution_id AND child.state<>'stopped')`, s.Group.ID)
 	if err != nil {
 		return err
 	}
 	occupied, running := int64(0), int64(0)
-	healthy := true
+	health := domain.ConcurrencyHealthy
 	for rows.Next() {
 		var state, native string
-		var last int64
-		if err := rows.Scan(&state, &last, &native); err != nil {
+		var lastSeen, runningSince, heartbeat int64
+		var online bool
+		if err := rows.Scan(&state, &lastSeen, &native, &runningSince, &online, &heartbeat); err != nil {
 			rows.Close()
 			return err
 		}
 		occupied++
-		if state == "running" {
+		if state == "running" && native != "" {
 			running++
 		}
-		if state == "unknown" || (state == "running" && native == "") || now-last > RunnerOfflineAfter.Milliseconds() {
-			healthy = false
+		switch {
+		case state == "unknown" || !online || now-lastSeen > RunnerOfflineAfter.Milliseconds():
+			health = domain.ConcurrencyUnhealthy
+		case native == "" && (state == "running" || runningSince > 0):
+			if runningSince > 0 && now-runningSince <= RunnerOfflineAfter.Milliseconds() &&
+				heartbeat > 0 && now-heartbeat <= RunnerOfflineAfter.Milliseconds() {
+				health = max(health, domain.ConcurrencyBindingPending)
+			} else {
+				health = domain.ConcurrencyUnhealthy
+			}
 		}
 	}
 	err = rows.Err()
@@ -590,7 +604,7 @@ func refreshConcurrencyLoad(ctx context.Context, tx *store.Tx, s *domain.Concurr
 	if err != nil {
 		return err
 	}
-	s.Sample(now, occupied, running, s.Group.Waiting, healthy)
+	s.Sample(now, occupied, running, s.Group.Waiting, health)
 	return nil
 }
 
@@ -656,6 +670,9 @@ func recordConcurrencyFeedback(ctx context.Context, tx *store.Tx, source protoco
 	if err := refreshConcurrencyLoad(ctx, tx, &s, now); err != nil {
 		return err
 	}
+	// Preserve the raw receipt in feedback history. The controller applies
+	// this new fact at its monotonic sample cursor inside the transaction.
+	now = s.LastSample
 	if source.Kind == "success" {
 		s.Successes = append(s.Successes, now)
 		s.Group.SuccessfulTurns = int64(len(s.Successes))
@@ -694,8 +711,11 @@ func (a *App) runConcurrency(ctx context.Context, log *slog.Logger, wait func(co
 			if err != nil {
 				return err
 			}
-			s.Reset(max(a.now().UnixMilli(), s.Group.CooldownUntil))
-			s.LastSample = a.now().UnixMilli()
+			// Older versions stored the cooldown deadline as LastSample
+			// immediately after congestion. A fresh observation starts now.
+			now := a.now().UnixMilli()
+			s.LastSample = now
+			s.Reset(now)
 			if err := saveConcurrency(ctx, tx, s); err != nil {
 				return err
 			}
@@ -749,9 +769,9 @@ func (a *App) tickConcurrency(ctx context.Context) error {
 	}); err != nil || !groups {
 		return err
 	}
-	now := a.now().UnixMilli()
 	notify := false
 	err := a.write(ctx, func(tx *store.Tx) error {
+		now := a.now().UnixMilli()
 		var count int
 		if err := tx.Q().QueryRowContext(ctx, `SELECT count(*) FROM concurrency_groups`).Scan(&count); err != nil {
 			return err

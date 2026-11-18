@@ -13,6 +13,14 @@ const (
 	ConcurrencyCooldown     = 30 * time.Second
 )
 
+type ConcurrencyHealth int
+
+const (
+	ConcurrencyHealthy ConcurrencyHealth = iota
+	ConcurrencyBindingPending
+	ConcurrencyUnhealthy
+)
+
 type ConcurrencyInterval struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
@@ -20,29 +28,45 @@ type ConcurrencyInterval struct {
 
 // ConcurrencyState is a deterministic controller; all time and load are inputs.
 type ConcurrencyState struct {
-	Group        protocol.ConcurrencyGroup `json:"group"`
-	LastSample   int64                     `json:"last_sample"`
-	LastRunning  int64                     `json:"last_running"`
-	LastHealthy  bool                      `json:"last_healthy"`
-	LastDecrease int64                     `json:"last_decrease"`
-	LastChangeID int64                     `json:"last_change_id"`
-	Successes    []int64                   `json:"successes"`
-	Intervals    []ConcurrencyInterval     `json:"intervals"`
+	Group              protocol.ConcurrencyGroup `json:"group"`
+	LastSample         int64                     `json:"last_sample"`
+	LastRunning        int64                     `json:"last_running"`
+	LastHealthy        bool                      `json:"last_healthy"`
+	LastBindingPending bool                      `json:"last_binding_pending,omitempty"`
+	// ObservationReadyAt excludes unconfirmed time from the healthy duration.
+	// The saturation intervals still expire against the rolling window.
+	ObservationReadyAt int64                 `json:"observation_ready_at,omitempty"`
+	LastDecrease       int64                 `json:"last_decrease"`
+	LastChangeID       int64                 `json:"last_change_id"`
+	Successes          []int64               `json:"successes"`
+	Intervals          []ConcurrencyInterval `json:"intervals"`
 }
 
 func (s *ConcurrencyState) Reset(now int64) {
-	s.Group.ObservationSince = now
+	now = max(now, s.LastSample)
+	s.Group.ObservationSince = max(now, s.Group.CooldownUntil)
+	s.ObservationReadyAt = 0
 	s.Group.SaturatedMillis, s.Group.SuccessfulTurns = 0, 0
 	s.Intervals, s.Successes = nil, nil
 	s.LastSample = now
 }
 
 // Sample integrates confirmed load; a missing controller tick invalidates proof.
-func (s *ConcurrencyState) Sample(now, occupied, running, waiting int64, healthy bool) {
+func (s *ConcurrencyState) Sample(now, occupied, running, waiting int64, health ConcurrencyHealth) {
+	// Facts are applied in transaction order. An older clock reading can
+	// change the current load at the cursor without counting any time twice.
+	now = max(now, s.LastSample)
 	g := &s.Group
-	if s.LastSample == 0 || now < s.LastSample || now-s.LastSample > (2*ConcurrencySamplePeriod).Milliseconds() || !healthy || !s.LastHealthy {
-		s.Reset(max(now, g.CooldownUntil))
-		s.LastSample = now
+	healthy := health == ConcurrencyHealthy
+	if s.LastSample == 0 || now-s.LastSample > (2*ConcurrencySamplePeriod).Milliseconds() || health == ConcurrencyUnhealthy || !s.LastHealthy && !s.LastBindingPending {
+		s.Reset(now)
+	} else if !healthy || !s.LastHealthy {
+		if elapsed := now - max(s.LastSample, g.CooldownUntil); elapsed > 0 {
+			if s.ObservationReadyAt == 0 {
+				s.ObservationReadyAt = g.ObservationSince + ConcurrencyWindow.Milliseconds()
+			}
+			s.ObservationReadyAt += elapsed
+		}
 	} else if s.LastRunning == g.Current && s.LastSample >= g.CooldownUntil && now > s.LastSample {
 		n := len(s.Intervals)
 		if n > 0 && s.Intervals[n-1].End == s.LastSample {
@@ -52,6 +76,7 @@ func (s *ConcurrencyState) Sample(now, occupied, running, waiting int64, healthy
 		}
 	}
 	s.LastSample, s.LastRunning, s.LastHealthy = now, running, healthy
+	s.LastBindingPending = health == ConcurrencyBindingPending
 	g.Occupied, g.Running, g.Waiting, g.FeedbackHealthy = occupied, running, waiting, healthy
 	s.RefreshWindow(now)
 }
@@ -84,8 +109,9 @@ func (s *ConcurrencyState) RefreshWindow(now int64) {
 
 func (s *ConcurrencyState) Congested(now int64) bool {
 	g := &s.Group
+	now = max(now, s.LastSample)
 	g.CooldownUntil = now + ConcurrencyCooldown.Milliseconds()
-	s.Reset(g.CooldownUntil)
+	s.Reset(now)
 	if s.LastDecrease != 0 && now-s.LastDecrease < ConcurrencyCooldown.Milliseconds() {
 		return false
 	}
@@ -96,7 +122,7 @@ func (s *ConcurrencyState) Congested(now int64) bool {
 
 func (s *ConcurrencyState) Increase(now int64) bool {
 	g := &s.Group
-	if !g.FeedbackHealthy || g.Current >= g.Max || now < g.CooldownUntil || now-g.ObservationSince < ConcurrencyWindow.Milliseconds() || g.SaturatedMillis < ConcurrencySaturation.Milliseconds() || g.SuccessfulTurns == 0 || g.Waiting == 0 {
+	if !g.FeedbackHealthy || g.Current >= g.Max || now < g.CooldownUntil || now < s.ObservationReadyAt || now-g.ObservationSince < ConcurrencyWindow.Milliseconds() || g.SaturatedMillis < ConcurrencySaturation.Milliseconds() || g.SuccessfulTurns == 0 || g.Waiting == 0 {
 		return false
 	}
 	g.Current++

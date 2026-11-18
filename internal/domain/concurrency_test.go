@@ -26,13 +26,13 @@ func TestConcurrencyIncreaseAtObservationBoundaries(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			const start int64 = 100000
 			s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Min: 1, Initial: 4, Max: 8, Current: 4}}
-			s.Sample(start, 4, 4, 1, true)
+			s.Sample(start, 4, 4, 1, ConcurrencyHealthy)
 			sampleUntil := func(end time.Duration, nextRunning int64) {
 				at := start + end.Milliseconds()
 				for s.LastSample+samplePeriod.Milliseconds() < at {
-					s.Sample(s.LastSample+samplePeriod.Milliseconds(), 4, s.LastRunning, 1, true)
+					s.Sample(s.LastSample+samplePeriod.Milliseconds(), 4, s.LastRunning, 1, ConcurrencyHealthy)
 				}
-				s.Sample(at, 4, nextRunning, 1, true)
+				s.Sample(at, 4, nextRunning, 1, ConcurrencyHealthy)
 			}
 
 			// Occupancy stays at the cap throughout. Only the two intervals of
@@ -120,26 +120,26 @@ func TestConcurrencyCongestionCoalescesAndMinimumStillCools(t *testing.T) {
 }
 func TestConcurrencyMissingFeedbackInvalidatesProof(t *testing.T) {
 	s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Min: 1, Current: 2, Max: 4}}
-	s.Sample(100000, 2, 2, 1, true)
-	s.Sample(101000, 2, 2, 1, true)
+	s.Sample(100000, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(101000, 2, 2, 1, ConcurrencyHealthy)
 	if s.Group.SaturatedMillis != 1000 {
 		t.Fatal(s)
 	}
-	s.Sample(162000, 2, 2, 1, true)
+	s.Sample(162000, 2, 2, 1, ConcurrencyHealthy)
 	if s.Group.SaturatedMillis != 0 || s.Group.ObservationSince != 162000 {
 		t.Fatal("gap counted as healthy", s)
 	}
-	s.Sample(163000, 2, 2, 1, false)
+	s.Sample(163000, 2, 2, 1, ConcurrencyUnhealthy)
 	if s.Group.FeedbackHealthy || s.Group.SaturatedMillis != 0 {
 		t.Fatal(s)
 	}
-	s.Sample(164000, 2, 2, 1, true)
+	s.Sample(164000, 2, 2, 1, ConcurrencyHealthy)
 	if s.Group.SaturatedMillis != 0 {
 		t.Fatal("unhealthy interval counted")
 	}
 	s.Group.Current = 1
-	s.Sample(165000, 2, 2, 1, true)
-	s.Sample(166000, 2, 2, 1, true)
+	s.Sample(165000, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(166000, 2, 2, 1, ConcurrencyHealthy)
 	if s.Group.SaturatedMillis != 0 {
 		t.Fatal("drain above budget counted")
 	}
@@ -159,13 +159,54 @@ func TestConcurrencyPermanentQuotaOverrides429(t *testing.T) {
 
 func TestConcurrencyThirtySecondSamplingKeepsOnlyObservedProof(t *testing.T) {
 	s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Min: 1, Current: 2, Max: 4}}
-	s.Sample(100000, 2, 2, 1, true)
-	s.Sample(130000, 2, 2, 1, true)
+	s.Sample(100000, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(130000, 2, 2, 1, ConcurrencyHealthy)
 	if s.Group.SaturatedMillis != 30000 {
 		t.Fatal("normal sample lost proof", s)
 	}
-	s.Sample(190001, 2, 2, 1, true)
+	s.Sample(190001, 2, 2, 1, ConcurrencyHealthy)
 	if s.Group.SaturatedMillis != 0 {
 		t.Fatal("missed samples fabricated proof", s)
+	}
+}
+
+func TestConcurrencyLateSamplesApplyLoadWithoutReplayingTime(t *testing.T) {
+	const start int64 = 100000
+	s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Current: 2, Max: 4}}
+	s.Sample(start, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(start+30000, 2, 2, 1, ConcurrencyHealthy)
+
+	// Apply a load transition whose timestamp was taken before the latest
+	// committed sample. That sample's confirmed load remains accounted for.
+	s.Sample(start+29257, 2, 1, 1, ConcurrencyHealthy)
+	if s.LastSample != start+30000 || s.Group.ObservationSince != start || s.Group.SaturatedMillis != 30000 || s.Group.Running != 1 {
+		t.Fatalf("late transition rewrote evidence or dropped the new load: %+v", s)
+	}
+	s.Sample(start+29257, 2, 1, 1, ConcurrencyHealthy)
+	s.Sample(start+60000, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(start+90000, 2, 2, 1, ConcurrencyHealthy)
+	if s.Group.SaturatedMillis != 60000 || len(s.Intervals) != 2 {
+		t.Fatalf("late or repeated sample counted twice: %+v", s)
+	}
+
+	s.Sample(start+89999, 2, 0, 1, ConcurrencyUnhealthy)
+	if s.LastSample != start+90000 || s.Group.ObservationSince != start+90000 || s.Group.SaturatedMillis != 0 || s.Group.FeedbackHealthy {
+		t.Fatalf("late confirmed feedback loss must still invalidate the observation: %+v", s)
+	}
+}
+
+func TestConcurrencyPendingBindingCannotBridgeSamplingGap(t *testing.T) {
+	const start int64 = 100000
+	s := ConcurrencyState{Group: protocol.ConcurrencyGroup{Current: 2, Max: 4}}
+	s.Sample(start, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(start+30000, 2, 2, 1, ConcurrencyHealthy)
+	s.Sample(start+30000, 2, 1, 1, ConcurrencyBindingPending)
+	if s.Group.ObservationSince != start || s.Group.SaturatedMillis != 30000 || s.Group.FeedbackHealthy {
+		t.Fatalf("pending binding should keep existing evidence: %+v", s)
+	}
+
+	s.Sample(start+90001, 2, 1, 1, ConcurrencyBindingPending)
+	if s.Group.ObservationSince != start+90001 || s.Group.SaturatedMillis != 0 || s.Group.FeedbackHealthy {
+		t.Fatalf("pending binding masked an actual sampling gap: %+v", s)
 	}
 }

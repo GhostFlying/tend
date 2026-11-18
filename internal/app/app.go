@@ -38,6 +38,7 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	clock                         func() time.Time // Read again for observations made after acquiring the writer.
 	diagnosticEvents              []Event
 	repeatedPhysicalStop          bool
 	configuredOwner               string
@@ -218,7 +219,7 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		return protocol.Operation{}, protocol.Errorf(protocol.CodeInvalidRequest, "operation %q is not handled here", env.Operation)
 	}
 	domain := p.DedupDomain()
-	x := &Exec{configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, shuffleExecutors: a.shuffleExecutors, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
+	x := &Exec{clock: a.now, configuredOwner: a.mainOwner, managedHostedRuntimes: a.managedHostedRuntimes, serverDeliveryObservations: a.serverDeliveryObservations, webhookKeys: a.webhookKeys, hostedConfiguration: a.hostedConfiguration, FollowupsEnabled: a.followupsEnabled, Env: env, Principal: p, TraceID: env.TraceID, Now: a.now(), IDs: a.ids, shuffleExecutors: a.shuffleExecutors, LeaseTTL: a.leaseTTL, WaitPerHour: a.waitPer, HostLostAfter: a.hostLost}
 	x.requestDomain = domain
 	if delegated, ok := cmd.(ownerExecutionCommand); ok {
 		x = delegated.adapted(x)
