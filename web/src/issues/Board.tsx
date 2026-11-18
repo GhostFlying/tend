@@ -340,6 +340,8 @@ export function IssueBoard({
             onScroll={
               mobile
                 ? ({ currentTarget }) => {
+                    // The desktop grid can scroll before React sees the breakpoint change.
+                    if (!window.matchMedia(mobileBoardQuery).matches) return;
                     const stride = columnOffset(currentTarget, 1);
                     const index = Math.round(currentTarget.scrollLeft / stride);
                     const status = boardColumns[index]?.id;

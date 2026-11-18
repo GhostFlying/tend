@@ -1819,8 +1819,24 @@ async function checkBoardColumnWidths() {
         );
         await page.screenshot({ path: join(output, "board-touch-390.png") });
         await page.keyboard.press("ArrowRight");
-        await page.getByRole("tab", { name: /^已完成/, selected: true }).waitFor();
+        const doneTab = page.getByRole("tab", { name: /^已完成/, selected: true });
+        await doneTab.waitFor();
         await waitForCardInViewport("done");
+        await page.setViewportSize({ width: 844, height: 390 });
+        await page.waitForFunction(
+          () => document.querySelector('[aria-label="看板列"]')!.getAttribute("tabindex") === "0",
+        );
+        await page.setViewportSize({ width, height: 844 });
+        await page.waitForFunction(
+          () => !document.querySelector('[aria-label="看板列"]')!.hasAttribute("tabindex"),
+        );
+        assert(await doneTab.isVisible(), "the selected status survives rotating the viewport");
+        await waitForCardInViewport("done");
+        assert(
+          !(await card("done").evaluate((element) => element.closest("[inert]"))),
+          "the restored column is accessible",
+        );
+        await page.screenshot({ path: join(output, "board-rotation-390.png") });
         await page.getByRole("tab", { name: /^已取消/ }).click();
         await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
         await waitForCardInViewport("cancelled");
