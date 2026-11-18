@@ -37,6 +37,8 @@ export interface StreamOptions {
   onAlive?(): void;
   /** The connection was lost; it reconnects by itself. */
   onLost?(reason: string): void;
+  /** A cursor-free reconnect was requested, with any reported detail. */
+  onReset?(reason: string | undefined): void;
   /** How long a silent stream counts as alive. Default 45 seconds, three heartbeats. */
   silenceMs?: number;
   /** The pause before the given reconnection attempt, from 0. */
@@ -45,7 +47,9 @@ export interface StreamOptions {
 
 /** How one connection ended. */
 type Ending =
-  { kind: "lost"; reason: string; started: boolean } | { kind: "reset" } | { kind: "stopped" };
+  | { kind: "lost"; reason: string; started: boolean }
+  | { kind: "reset"; reason?: string }
+  | { kind: "stopped" };
 
 const defaultBackoff = (attempt: number): number => Math.min(1_000 * 2 ** attempt, 30_000);
 
@@ -109,6 +113,7 @@ export class EventStream {
       let pause: number;
       if (ending.kind === "reset") {
         this.cursorSeq = undefined;
+        this.call(() => this.options.onReset?.(ending.reason));
         // Straight back, unless tend keeps refusing.
         pause = resets === 0 ? 0 : this.backoffMs(resets - 1);
         resets++;
@@ -187,7 +192,7 @@ export class EventStream {
         return { kind: "stopped" };
       }
       if (err instanceof ApiError && refusesCursor(err.status)) {
-        return { kind: "reset" };
+        return { kind: "reset", reason: err.message };
       }
       if (silent) {
         return { kind: "lost", reason: "事件流太久没有消息", started };

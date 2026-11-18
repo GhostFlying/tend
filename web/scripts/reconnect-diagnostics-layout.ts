@@ -14,6 +14,8 @@ await mkdir(output, { recursive: true });
 
 let stream: ServerResponse | undefined;
 let allowStart = true;
+let cursorRefusal: Promise<void> | undefined;
+const cursorError = "refresh cursor expired; reload authoritative views and connect without after";
 const cursors: (string | null)[] = [];
 function start(response: ServerResponse) {
   response.write('event: start\ndata: {"event_seq":1}\n\n');
@@ -21,20 +23,26 @@ function start(response: ServerResponse) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url!, "http://localhost");
   const path = url.pathname;
-  const json = (value: unknown) => {
-    res.setHeader("Content-Type", "application/json");
+  const json = (value: unknown, status = 200) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
   if (path === "/api/v1/session") {
     return json({ token: "fixture", login: "Example owner", deployment_id: "reconnect-fixture" });
   }
   if (path === "/api/v1/events" || path === "/api/v1/messaging/events") {
-    res.setHeader("Content-Type", "text/event-stream");
     if (path === "/api/v1/messaging/events") {
+      res.setHeader("Content-Type", "text/event-stream");
       start(res);
       return;
     }
-    cursors.push(url.searchParams.get("after"));
+    const after = url.searchParams.get("after");
+    cursors.push(after);
+    if (cursorRefusal && after !== null) {
+      await cursorRefusal;
+      return json({ error: { code: "stale_revision", message: cursorError } }, 409);
+    }
+    res.setHeader("Content-Type", "text/event-stream");
     stream = res;
     res.on("close", () => {
       if (stream === res) stream = undefined;
@@ -116,6 +124,13 @@ try {
             message.text() === "Service Worker registration blocked by Playwright"
           )
             return;
+          if (
+            cursorRefusal &&
+            message.type() === "error" &&
+            message.location().url === origin + "/api/v1/events?after=1" &&
+            message.text().includes("409")
+          )
+            return;
           if (["error", "warning"].includes(message.type())) errors.push(message.text());
         });
         await page.goto(origin + path);
@@ -126,6 +141,7 @@ try {
         const online = page.getByRole("status", { name: "已连接", exact: true });
         const button = page.getByRole("button", { name: "正在重连", exact: true });
         await online.waitFor();
+        const initialStatus = await online.elementHandle();
 
         const reconnectResponse = page.waitForResponse(
           (res) => new URL(res.url()).pathname === "/api/v1/events",
@@ -134,9 +150,12 @@ try {
         interrupt();
         await button.waitFor();
         assert.equal((await button.innerText()).trim(), compact ? "" : "正在重连");
+        const offline = page.getByRole("status", { name: "正在重连", exact: true });
+        assert(await offline.evaluate((node, original) => node === original, initialStatus));
+        assert.equal(await offline.textContent(), "正在重连");
         const panel = button.locator("..").locator("[id]");
         const show = async (text = "浏览器观察：事件流已结束") => {
-          await panel.waitFor();
+          await panel.getByText(text, { exact: true }).waitFor();
           assert.equal(await panel.innerText(), text);
           assert.equal(await panel.getAttribute("id"), await button.getAttribute("aria-controls"));
           assert.equal(await button.getAttribute("aria-expanded"), "true");
@@ -179,7 +198,7 @@ try {
           }
           assert(await button.evaluate((el) => el === document.activeElement));
           await show();
-          await page.keyboard.press("Escape");
+          await page.keyboard.press("Space");
           await hidden();
           assert(await button.evaluate((el) => el === document.activeElement));
           await page.keyboard.press("Space");
@@ -202,10 +221,34 @@ try {
 
         recover();
         await online.waitFor();
+        assert(await online.evaluate((node, original) => node === original, initialStatus));
+        assert.equal(await online.textContent(), "已连接");
         await button.waitFor({ state: "hidden" });
         await panel.waitFor({ state: "hidden" });
 
         if (name === "desktop") {
+          const refusal = Promise.withResolvers<void>();
+          cursorRefusal = refusal.promise;
+          const fresh = page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return url.pathname === "/api/v1/events" && !url.searchParams.has("after");
+          });
+          void fresh.catch(() => {});
+          try {
+            interrupt();
+            await button.hover();
+            await show();
+          } finally {
+            refusal.resolve();
+          }
+          await fresh;
+          await show(`浏览器观察：${cursorError}`);
+          await page.screenshot({ path: join(output, "desktop-cursor-rejected.png") });
+          assert.deepEqual(cursors, [null, "1", "1", null]);
+          recover();
+          await online.waitFor();
+          cursorRefusal = undefined;
+
           interrupt(true);
           await button.waitFor();
           await page.mouse.move(width - 10, 210);
@@ -221,6 +264,7 @@ try {
           `${name} ${width}×844 ${path}: connection, diagnostic, dismissal and recovery passed`,
         );
       } finally {
+        cursorRefusal = undefined;
         recover();
         await context.tracing.stop({ path: join(output, `${name}-trace.zip`) });
         await context.close();

@@ -29,15 +29,21 @@ export function ConnectionBadge({
   connection: Connection;
   compact?: boolean;
 }) {
-  if (connection.status === "offline") {
-    return <ReconnectBadge reason={connection.reason} compact={compact} />;
-  }
   const { tone, label } = look[connection.status];
+  const offline = connection.status === "offline";
   return (
-    <span className={styles.badge} title={describe(connection)} role="status" aria-label={label}>
-      <StatusDot tone={tone} />
-      {compact ? <span className={styles.hidden}>{label}</span> : label}
-    </span>
+    <>
+      <span
+        className={offline ? styles.hidden : styles.badge}
+        title={offline ? undefined : describe(connection)}
+        role="status"
+        aria-label={label}
+      >
+        {offline ? null : <StatusDot tone={tone} />}
+        {compact && !offline ? <span className={styles.hidden}>{label}</span> : label}
+      </span>
+      {offline ? <ReconnectBadge reason={connection.reason} compact={compact} /> : null}
+    </>
   );
 }
 
@@ -91,7 +97,7 @@ function ReconnectBadge({ reason, compact }: { reason: string | undefined; compa
           if (event.currentTarget.matches(":focus-visible")) setOpenBy("focus");
         }}
         onBlur={() => setOpenBy((current) => (current === "hover" ? current : null))}
-        onClick={() => setOpenBy((current) => (current === "activation" ? null : "activation"))}
+        onClick={() => setOpenBy((current) => (current === null ? "activation" : null))}
       >
         <StatusDot tone={tone} />
         {compact ? null : label}
