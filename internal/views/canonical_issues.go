@@ -153,6 +153,7 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 type CanonicalIssueFilter struct {
 	Board          bool
 	BoardStatus    protocol.IssueWorkStatus
+	GroupReview    bool
 	WaitingOnOwner string
 	AssigneeKind   protocol.IssueAssigneeKind
 	AssigneeRef    string

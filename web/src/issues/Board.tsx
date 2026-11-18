@@ -29,6 +29,9 @@ import { AssigneeName } from "./AssigneeName.tsx";
 import { ChildProgress, type ExpandedChildView } from "./ChildProgress.tsx";
 import {
   boardColumns,
+  boardColumnStatus,
+  issueWorkStatuses,
+  workStatusLabel,
   blockerLabels,
   responsibilityLabel,
   notificationLabel,
@@ -497,7 +500,7 @@ export function IssueBoard({
                   const item = dragged.current;
                   dragged.current = null;
                   setOver(null);
-                  if (item && workStatus(item) !== id) move(item, id);
+                  if (item && boardColumnStatus(item) !== id) move(item, id);
                 }}
               >
                 {(item) => (
@@ -572,7 +575,7 @@ export function IssueBoard({
         <BoardDialog title="修改工作状态" onClose={() => setMenu(null)}>
           <p className={styles.dialogSubtitle}>{menu.title}</p>
           <div className={styles.statusOptions}>
-            {boardColumns.map(({ id, label }) => (
+            {issueWorkStatuses.map(({ id, label }) => (
               <Button
                 key={id}
                 disabled={
@@ -860,6 +863,7 @@ const BoardCard = memo(function BoardCard({
         >
           {responsibilityLabel(item)}
         </Badge>
+        {workStatus(item) === "in_review" && <Badge>{workStatusLabel("in_review")}</Badge>}
       </div>
       {!["closed", "cancelled"].includes(item.state) &&
         !b?.progress?.historical &&
