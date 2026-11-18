@@ -83,3 +83,22 @@ test("terminal and reopened projections preserve historical next steps without m
   item.board!.execution.unknown = 1;
   expect(responsibilityLabel(item)).toBe("执行结果待核对");
 });
+
+test("running and external waiting come from execution even when review is queued", () => {
+  const item = issue({ work_status: "in_review" });
+  const board = item.board!;
+  board.execution.queued = 1;
+  expect(responsibilityLabel(item)).toBe("任务排队中");
+  board.execution.running = 1;
+  expect(responsibilityLabel(item)).toBe("1 项运行中");
+  board.owner_attention_count = 1;
+  expect(responsibilityLabel(item)).toBe("等待你处理 · 1 项运行中");
+  board.owner_attention_count = 0;
+  board.execution.running = 0;
+  board.execution.waiting_external = 1;
+  expect(responsibilityLabel(item)).toBe("等待外部条件");
+  board.execution.waiting_external = 0;
+  board.execution.queued = 2;
+  expect(responsibilityLabel(item)).toBe("任务排队中");
+  expect(workStatus(item)).toBe("in_review");
+});

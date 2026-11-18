@@ -155,6 +155,15 @@ func TestManagerHandoffWaitsForOldProcessAndRetainsConversation(t *testing.T) {
 	if got := claim(); got != nil {
 		t.Fatal("replacement started before old process exit", got)
 	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		page, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true, ReadRoot: issue.IssueID})
+		if err == nil && (len(page.Items) != 1 || page.Items[0].Board.Execution.Starting != 0 || page.Items[0].Board.Execution.Running != 0) {
+			t.Errorf("board counted a previous assignment while its Run was still open: %+v", page.Items)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	stop := h.runAs(*old, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Confirmed local process exit", LastSequence: 0}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
 	if stop.Status != protocol.OpSucceeded {
 		t.Fatal(stop)

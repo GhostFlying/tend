@@ -10,8 +10,19 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func (facts executionFacts) issueCounts(ctx context.Context, q store.Querier, id string) (protocol.ExecutionCounts, error) {
+func (facts executionFacts) issueCounts(ctx context.Context, q store.Querier, issue protocol.Issue) (protocol.ExecutionCounts, error) {
+	id := issue.IssueID
 	var counts protocol.ExecutionCounts
+	seenRuns := map[string]bool{}
+	count := func(execution *protocol.TaskExecutionView) {
+		if execution.RunID != "" {
+			if seenRuns[execution.RunID] {
+				return
+			}
+			seenRuns[execution.RunID] = true
+		}
+		countExecution(&counts, execution)
+	}
 	rows, err := q.QueryContext(ctx, `WITH related(task_id) AS (
  SELECT task_id FROM task_work_item_owners WHERE work_item_id=?
  UNION SELECT task_id FROM task_execution_contracts WHERE review_issue_id=?
@@ -65,8 +76,15 @@ func (facts executionFacts) issueCounts(ctx context.Context, q store.Querier, id
 			}
 		}
 		if responsible == id {
-			countExecution(&counts, execution)
+			count(execution)
 		}
+	}
+	owner, err := facts.issueOwnerExecution(ctx, q, issue)
+	if err != nil {
+		return counts, err
+	}
+	if owner != nil {
+		count(owner)
 	}
 	return counts, nil
 }
@@ -95,7 +113,11 @@ func issueChildren(ctx context.Context, q store.Querier, parent string, facts ex
 	out := &protocol.IssueChildProgress{Total: len(items)}
 	for i := range items {
 		item := &items[i]
-		item.Execution, err = facts.issueCounts(ctx, q, item.IssueID)
+		issue, err := store.GetCanonicalIssue(ctx, q, item.IssueID)
+		if err != nil {
+			return nil, err
+		}
+		item.Execution, err = facts.issueCounts(ctx, q, issue)
 		if err != nil {
 			return nil, err
 		}

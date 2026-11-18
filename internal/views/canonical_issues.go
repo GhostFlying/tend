@@ -225,7 +225,7 @@ func CanonicalIssues(ctx context.Context, q store.Querier, f CanonicalIssueFilte
 		if err != nil {
 			return out, err
 		}
-		counts, err := facts.issueCounts(ctx, q, id)
+		counts, err := facts.issueCounts(ctx, q, issue)
 		if err != nil {
 			return out, err
 		}

@@ -223,8 +223,12 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				changed = true
 				continue
 			}
-			if _, err := tx.Exec(ctx, `UPDATE runs SET observed_state='running' WHERE run_id=? AND observed_state='starting'`, run); err != nil {
-				return Outcome{}, err
+			out := Outcome{Result: p}
+			if r.ObservedState == protocol.RunStarting {
+				if _, err := tx.Exec(ctx, `UPDATE runs SET observed_state='running' WHERE run_id=?`, run); err != nil {
+					return Outcome{}, err
+				}
+				out.Events = []Event{{ObjectType: "run", ObjectID: run, Kind: "run.manager_started", Body: map[string]any{"task_id": r.TaskID}}}
 			}
 			if p.Method != "close" {
 				if _, err := tx.Exec(ctx, `UPDATE runs SET native_activity=native_activity+1 WHERE run_id=?`, run); err != nil {
@@ -232,7 +236,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				}
 			}
 			_, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='started' WHERE request_id=? AND status='pending'`, p.ID)
-			return Outcome{Result: p}, err
+			return out, err
 		}
 	case protocol.OpManagerNativeReply:
 		var p protocol.ManagerNativeReply

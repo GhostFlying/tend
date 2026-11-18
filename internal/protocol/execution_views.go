@@ -11,6 +11,7 @@ const (
 	ExecutionRecovering        ExecutionState = "recovering"
 	ExecutionAccepting         ExecutionState = "accepting"
 	ExecutionWaitingOwner      ExecutionState = "waiting_owner"
+	ExecutionWaitingExternal   ExecutionState = "waiting_external"
 	ExecutionWaitingSupervisor ExecutionState = "waiting_supervisor"
 	ExecutionPaused            ExecutionState = "paused"
 	ExecutionUnknown           ExecutionState = "unknown"
@@ -19,7 +20,7 @@ const (
 )
 
 func ExecutionStateValues() []ExecutionState {
-	return []ExecutionState{ExecutionIdle, ExecutionQueued, ExecutionStarting, ExecutionRunning, ExecutionRecovering, ExecutionAccepting, ExecutionWaitingOwner, ExecutionWaitingSupervisor, ExecutionPaused, ExecutionUnknown, ExecutionCompleted, ExecutionCancelled}
+	return []ExecutionState{ExecutionIdle, ExecutionQueued, ExecutionStarting, ExecutionRunning, ExecutionRecovering, ExecutionAccepting, ExecutionWaitingOwner, ExecutionWaitingSupervisor, ExecutionWaitingExternal, ExecutionPaused, ExecutionUnknown, ExecutionCompleted, ExecutionCancelled}
 }
 
 // QueueWaitCode identifies the scheduling constraint without changing BlockReason.

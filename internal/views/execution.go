@@ -15,9 +15,10 @@ import (
 )
 
 type executionFacts struct {
-	candidates map[string]scheduler.Candidate
-	issues     map[string]scheduler.Candidate
-	hosts      []executionHost
+	candidates   map[string]scheduler.Candidate
+	issues       map[string]scheduler.Candidate
+	ownerActions map[string]bool
+	hosts        []executionHost
 }
 
 type executionHost struct {
@@ -89,7 +90,7 @@ func (facts executionFacts) summaries(ctx context.Context, q store.Querier, rows
 }
 
 func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, error) {
-	facts := executionFacts{issues: map[string]scheduler.Candidate{}, candidates: map[string]scheduler.Candidate{}}
+	facts := executionFacts{issues: map[string]scheduler.Candidate{}, candidates: map[string]scheduler.Candidate{}, ownerActions: map[string]bool{}}
 	rows, err := store.ListClaimCandidates(ctx, q)
 	if err != nil {
 		return facts, err
@@ -113,6 +114,9 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		}
 		if c.TargetSpecVersion != c.SpecVersion || c.Kind == protocol.ActionImplement && c.Generation != c.ImplementGeneration || c.Kind == protocol.ActionAccept && (c.Lifecycle != protocol.TaskAwaitingAcceptance || c.TargetArtifactID != c.CurrentArtifactID) {
 			continue
+		}
+		if c.Manager != nil && !c.Manager.ReceiptOnly && !c.ManagerAuthorizationInvalid {
+			facts.ownerActions[c.TaskID] = true
 		}
 		facts.candidates[c.TaskID] = c
 	}
@@ -485,6 +489,8 @@ func countExecution(counts *protocol.ExecutionCounts, execution *protocol.TaskEx
 		counts.Starting++
 	case protocol.ExecutionWaitingSupervisor:
 		counts.WaitingSupervisor++
+	case protocol.ExecutionWaitingExternal:
+		counts.WaitingExternal++
 	case protocol.ExecutionWaitingOwner:
 		counts.WaitingOwner++
 	case protocol.ExecutionPaused:
