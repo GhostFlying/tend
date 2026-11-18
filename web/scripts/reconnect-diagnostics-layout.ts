@@ -227,8 +227,10 @@ try {
         await panel.waitFor({ state: "hidden" });
 
         if (name === "desktop") {
-          const refusal = Promise.withResolvers<void>();
-          cursorRefusal = refusal.promise;
+          let releaseRefusal!: () => void;
+          cursorRefusal = new Promise<void>((resolve) => {
+            releaseRefusal = resolve;
+          });
           const fresh = page.waitForResponse((response) => {
             const url = new URL(response.url());
             return url.pathname === "/api/v1/events" && !url.searchParams.has("after");
@@ -239,7 +241,7 @@ try {
             await button.hover();
             await show();
           } finally {
-            refusal.resolve();
+            releaseRefusal();
           }
           await fresh;
           await show(`浏览器观察：${cursorError}`);
