@@ -751,10 +751,24 @@ function Milestone({
       data-tone={/failed|failure/.test(entry.kind) ? "error" : undefined}
       data-scroll-id={groupedFirst ? undefined : entry.id}
     >
-      <span>
-        <span>{entry.author || "tend"}</span> <span>{entry.title}</span>
-        <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
-      </span>
+      <div className={styles.milestoneLine} data-activity-event-heading>
+        <span>
+          <span>{entry.author || "tend"}</span> <span>{entry.title}</span>
+          <time title={new Date(entry.created_at).toISOString()}> · {clock(entry.created_at)}</time>
+        </span>
+        {entry.task_id ? (
+          <button className={styles.textLink} onClick={() => onTask(entry.task_id!)}>
+            查看 →
+          </button>
+        ) : entry.issue_id &&
+          entry.kind !== "issue.progress_updated" &&
+          entry.kind !== "issue.delivery_review_changed" &&
+          entry.kind !== "work_item.delivery_changed" ? (
+          <button className={styles.textLink} onClick={() => onIssue(entry.issue_id!)}>
+            查看 →
+          </button>
+        ) : null}
+      </div>
       {entry.delivery ? <DeliveryProgress item={entry.delivery} historical /> : null}
       {entry.issue_id &&
       (entry.kind === "issue.delivery_review_changed" ||
@@ -782,15 +796,6 @@ function Milestone({
           {entry.progress.next_step && <p>当时下一步：{entry.progress.next_step}</p>}
         </details>
       )}
-      {entry.task_id ? (
-        <button className={styles.textLink} onClick={() => onTask(entry.task_id!)}>
-          查看 →
-        </button>
-      ) : entry.issue_id && entry.kind !== "issue.progress_updated" ? (
-        <button className={styles.textLink} onClick={() => onIssue(entry.issue_id!)}>
-          查看 →
-        </button>
-      ) : null}
     </div>
   );
 }
