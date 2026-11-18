@@ -114,6 +114,32 @@ describe("EventStream", () => {
     expect(events).toEqual([6]);
     expect(stream.cursor).toBe(10);
   });
+  test("a failed event handler recovers from source without skipping the event on resume", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    stream = new EventStream({
+      open: tend.open,
+      onStart: (seq, fresh) => starts.push([seq, fresh]),
+      onEvent: () => {
+        throw new Error("view update failed");
+      },
+    });
+    try {
+      stream.start();
+      await tick();
+      tend.last.push(start(5) + ledger(6));
+      await tick();
+      expect(tend.opens.map((o) => o.after)).toEqual([undefined, undefined]);
+      tend.last.push(start(6));
+      await tick();
+      expect(starts).toEqual([
+        [5, true],
+        [6, true],
+      ]);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test("a first connection has no cursor and starts fresh", async () => {
     stream.start();
     await tick();

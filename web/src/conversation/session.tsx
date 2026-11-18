@@ -90,9 +90,9 @@ export class ConversationSessions {
     const stop = root.subscribeEvents((event) => {
       for (const session of this.sessions.values()) if (session.active) session.live.apply(event);
     });
-    const refresh = root.subscribeReload(() => {
+    const refresh = root.subscribeReload((mode) => {
       for (const session of this.sessions.values()) {
-        if (session.active) void session.live.reload();
+        if (session.active) void session.live.reload(mode);
         void session.queue.get()?.resume();
       }
     });

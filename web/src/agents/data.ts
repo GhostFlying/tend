@@ -111,7 +111,12 @@ export class AgentCatalog {
 
   refresh(): void {
     void this.categories.refresh();
-    for (const read of [this.hosted, this.runner, ...this.runners.values()]) void read.refresh();
+    void this.hosted.refresh();
+    this.refreshRunners();
+  }
+
+  refreshRunners(): void {
+    for (const read of [this.runner, ...this.runners.values()]) void read.refresh();
   }
 
   stop(): void {
