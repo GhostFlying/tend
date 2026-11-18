@@ -37,6 +37,7 @@ type managerTestResolver struct {
 	pin       protocol.RunExecutionPin
 	native    *testkit.Harness
 	lostStart *atomic.Bool
+	steer     func(context.Context, *testkit.FakeThread, string, harness.TurnInput) error
 }
 
 func (m *managerTestResolver) Refresh(context.Context) error { return nil }
@@ -59,18 +60,27 @@ func (m *managerTestResolver) ResolveManager(_ context.Context, p protocol.RunEx
 		if err != nil {
 			return nil, err
 		}
-		return managerPermissionSession{FakeSession: s.(*testkit.FakeSession), lostStart: m.lostStart}, nil
+		return managerPermissionSession{FakeSession: s.(*testkit.FakeSession), lostStart: m.lostStart, steer: m.steer}, nil
 	}}, nil
 }
 
 type managerPermissionSession struct {
 	*testkit.FakeSession
 	lostStart *atomic.Bool
+	steer     func(context.Context, *testkit.FakeThread, string, harness.TurnInput) error
 }
 type managerPermissionThread struct {
 	*testkit.FakeThread
 	events    <-chan harness.Event
 	lostStart *atomic.Bool
+	steer     func(context.Context, *testkit.FakeThread, string, harness.TurnInput) error
+}
+
+func (t managerPermissionThread) SteerTurn(ctx context.Context, turn string, input harness.TurnInput) error {
+	if t.steer == nil {
+		return harness.ErrSteerUnsupported
+	}
+	return t.steer(ctx, t.FakeThread, turn, input)
 }
 
 func (t managerPermissionThread) Events() <-chan harness.Event { return t.events }
@@ -117,7 +127,7 @@ func (s managerPermissionSession) StartThread(ctx context.Context, c harness.Thr
 		return nil, err
 	}
 	thread := managerThreadWithClosingUsage(ctx, t.(*testkit.FakeThread))
-	thread.lostStart = s.lostStart
+	thread.lostStart, thread.steer = s.lostStart, s.steer
 	return thread, nil
 }
 func (s managerPermissionSession) ResumeThread(ctx context.Context, id string, c harness.ThreadConfig) (harness.Thread, error) {
@@ -126,7 +136,7 @@ func (s managerPermissionSession) ResumeThread(ctx context.Context, id string, c
 		return nil, err
 	}
 	thread := managerThreadWithClosingUsage(ctx, t.(*testkit.FakeThread))
-	thread.lostStart = s.lostStart
+	thread.lostStart, thread.steer = s.lostStart, s.steer
 	return thread, nil
 }
 
@@ -162,7 +172,12 @@ func TestFault_CompletedManagerEventFailureReportsStoppedOriginalRun(t *testing.
 	runRunnerManager(t, false, false, false, "completion")
 }
 
+func TestEndToEndIssueOwnerSteerSameNativeTurn(t *testing.T) {
+	runRunnerManager(t, false, false, false, "urgent")
+}
+
 func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archiveMode string) {
+	urgent := archiveMode == "urgent"
 	s := newServerWithOptions(t, time.Second*10, time.Now, app.WithFollowups(true))
 	archiveFault := archiveMode == "foreign" || archiveMode == "receipt"
 	externalWait := archiveMode == "external_wait" || archiveMode == "external_wait_migrated"
@@ -254,8 +269,24 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	var recoveredWaitFiles atomic.Int64
 	var attempts, continuations, effects atomic.Int64
 	var rateFailed atomic.Bool
+	type nativeSteer struct {
+		thread *testkit.FakeThread
+		turn   string
+		text   string
+	}
+	activeSteer := make(chan nativeSteer, 1)
+	arrivedSteer := make(chan nativeSteer, 1)
+	releaseUrgent := make(chan struct{})
 	fake.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
 		attempts.Add(1)
+		if urgent && attempts.Load() == 1 {
+			activeSteer <- nativeSteer{thread: th, turn: turn}
+			select {
+			case <-releaseUrgent:
+			case <-ctx.Done():
+			}
+			return "completed"
+		}
 		readyOnce.Do(func() { managerReady <- th.ID() })
 		if loseStart && input.Repair && s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending`) != 0 {
 			failures <- "metadata repair started before original native receipts reconciled"
@@ -470,6 +501,16 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	}
 	defer func() { cancel(); wg.Wait(); j.Close() }()
 	resolver := &managerTestResolver{pin: pin, native: fake}
+	if urgent {
+		resolver.steer = func(_ context.Context, thread *testkit.FakeThread, turn string, in harness.TurnInput) error {
+			select {
+			case arrivedSteer <- nativeSteer{thread: thread, turn: turn, text: in.Text}:
+				return nil
+			default:
+				return errors.New("duplicate native steer")
+			}
+		}
+	}
 	if loseStart {
 		resolver.lostStart = &atomic.Bool{}
 	}
@@ -551,6 +592,96 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	admitted := execute("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
 	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
 		t.Fatal(err)
+	}
+	if urgent {
+		defer close(releaseUrgent)
+		watch, stop := context.WithTimeout(ctx, 15*time.Second)
+		defer stop()
+		var original nativeSteer
+		select {
+		case original = <-activeSteer:
+		case <-watch.Done():
+			t.Fatal("original native turn did not start")
+		}
+		waitFor := func(check func() bool) error {
+			for {
+				wake := s.app.Changes().Wait()
+				if check() {
+					return nil
+				}
+				select {
+				case <-wake:
+				case <-watch.Done():
+					return watch.Err()
+				}
+			}
+		}
+		var run string
+		var revision, epoch int64
+		if err := waitFor(func() bool {
+			return s.store.Read(watch, func(tx *store.ReadTx) error {
+				current, err := store.GetCanonicalIssue(watch, tx.Q(), issue.IssueID)
+				if err != nil {
+					return err
+				}
+				epoch, revision = current.AssignmentEpoch, current.Revision
+				return tx.Q().QueryRowContext(watch, `SELECT r.run_id
+ FROM issue_manager_tasks m JOIN runs r USING(task_id)
+ JOIN hosted_executions h ON json_extract(h.private_snapshot,'$.runner_run_id')=r.run_id
+ JOIN main_turns t ON t.request_id=h.execution_id WHERE m.issue_id=? AND t.status='started' AND t.turn_id=?`,
+					issue.IssueID, original.turn).Scan(&run)
+			}) == nil
+		}); err != nil {
+			t.Fatal("original native turn not durably admitted:", err)
+		}
+
+		body := "Revoke approval for the original deployment"
+		source := s.ids.New(protocol.PrefixMessage)
+		sourceRaw, _ := json.Marshal(protocol.SubmitMessagePayload{MessageID: source, Body: body})
+		if op, err := s.app.Execute(watch, owner, &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: "conversation.submit_message", Target: protocol.Target{Type: "message"}, Payload: sourceRaw}, app.SubmitMessage{}); err != nil || op.Status != protocol.OpAccepted {
+			t.Fatal(op, err)
+		}
+		var association protocol.MessageAssociations
+		if err := s.store.Read(watch, func(tx *store.ReadTx) error {
+			var err error
+			association, err = store.MessageAssociations(watch, tx.Q(), source)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		execute("conversation.set_issue_associations", protocol.Target{Type: "message", ID: source},
+			protocol.SetIssueMessageAssociationsPayload{Disposition: "linked", ContentRevision: association.ContentRevision, IssueIDs: []string{issue.IssueID}},
+			&association.Revision, app.SetIssueMessageAssociations{})
+		notice := s.ids.New(protocol.PrefixMessage)
+		payload, _ := json.Marshal(protocol.IssueOwnerSteerPayload{MessageID: notice, SourceMessageID: source, RunID: run, ExpectedAssignmentEpoch: epoch, ExpectedSourceRevision: association.ContentRevision})
+		env := &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpIssueOwnerSteer, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &revision, Payload: payload}
+		if op, err := s.app.Execute(watch, owner, env, app.SteerIssueOwner{}); err != nil || op.Status != protocol.OpAccepted {
+			t.Fatal(op, err)
+		}
+		var arrived nativeSteer
+		select {
+		case arrived = <-arrivedSteer:
+		case <-watch.Done():
+			t.Fatal("urgent input did not reach native adapter")
+		}
+		if arrived.thread != original.thread || arrived.turn != original.turn || !strings.Contains(arrived.text, body) {
+			t.Fatal("urgent input did not reach the original native turn", arrived)
+		}
+		waitState := func(state, item string) {
+			t.Helper()
+			if err := waitFor(func() bool {
+				return s.count(`SELECT COUNT(*) FROM issue_owner_steers WHERE message_id=? AND status=? AND native_item_id=? AND native_request_id IS NOT NULL`, notice, state, item) == 1
+			}); err != nil {
+				t.Fatalf("urgent input did not reach %s: %v", state, err)
+			}
+		}
+		waitState("accepted", "")
+		arrived.thread.Emit(harness.Event{Kind: harness.EventItemCompleted, ItemType: harness.ItemUserMessage, ItemID: "steered-original", TurnID: arrived.turn, Text: arrived.text})
+		waitState("consumed", "steered-original")
+		if s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager'`) != 1 || attempts.Load() != 1 {
+			t.Fatal("urgent delivery replaced the active Run or turn")
+		}
+		return
 	}
 	if externalWait {
 		// Admission starts real migration, thread recovery and runner routing.

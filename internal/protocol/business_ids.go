@@ -35,7 +35,7 @@ func NativePayloadIdentities(operation string) map[string]Prefix {
 		return map[string]Prefix{"task_id": PrefixTask}
 	case "issues.followups_create", "work_items.followups_create":
 		return map[string]Prefix{"rule_id": Prefix("followup")}
-	case "conversation.submit_message", "conversation.inject_source", "messaging.input", "messaging.send", "messaging.reply", "messaging.notify", "messaging.respond", "conversation.reply", "conversation.publish", "conversation.notify", "runs.send_message":
+	case OpIssueOwnerSteer, "conversation.submit_message", "conversation.inject_source", "messaging.input", "messaging.send", "messaging.reply", "messaging.notify", "messaging.respond", "conversation.reply", "conversation.publish", "conversation.notify", "runs.send_message":
 		return map[string]Prefix{"message_id": PrefixMessage}
 	default:
 		return nil

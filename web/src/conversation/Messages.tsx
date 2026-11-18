@@ -26,7 +26,7 @@ import { MessageImages, OutgoingImages } from "./Images.tsx";
 import { MessageAttachments, OutgoingAttachments } from "./Attachments.tsx";
 import { outgoingImages } from "./images.ts";
 import { recoveryNotice } from "./recovery.ts";
-import { steerNotice } from "./steer.ts";
+import { issueOwnerSteerNotice, steerNotice } from "./steer.ts";
 import { groupedProcessing } from "./processing.ts";
 import { BackgroundNotice } from "./BackgroundNotice.tsx";
 
@@ -281,6 +281,18 @@ const AgentItem = memo(function AgentItem({
   onToolOpenChange(id: string, open: boolean): void;
 }) {
   const status = item.assistant_state;
+  if (item.issue_owner_steer) {
+    return (
+      <section id={id} hidden={hidden} data-scroll-id={item.message_id} aria-label="紧急投递">
+        <p className={styles.state} role="status">
+          {issueOwnerSteerNotice(item.issue_owner_steer)}
+        </p>
+        <div className={proseClassName}>
+          <Markdown text={item.body ?? ""} />
+        </div>
+      </section>
+    );
+  }
   if (item.author === "external")
     return (
       <div

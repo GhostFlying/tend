@@ -286,6 +286,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("conversation.consult", "conversation consult", "--data", `{}`),
 		binding("conversation.promote", "conversation promote", "sample", "--data", `{}`),
 		binding("conversation.submit_message", "conversation send", "sample", "--data", `{"body":"hello"}`),
+		binding(protocol.OpIssueOwnerSteer, "conversation steer-owner", "sample", "--revision", "2", "--data", `{"expected_assignment_epoch":2,"run_id":"sample-run","source_message_id":"sample-source","expected_source_revision":1}`),
 		binding("conversation.inject_source", "source inject", "sample", "--data", `{"text":"source"}`),
 		binding("runs.send_message", "run message", "sample", "--revision", "2", "--data", `{}`),
 		binding("planner.entries_put", "next-action put", "--data", `{}`),
@@ -361,6 +362,9 @@ func commandUsage(prefix []string) string {
 	}
 	if name == "issue update-task" {
 		out.WriteString("\nThe responsible Agent may change independent_acceptance: {required: false, reason: <text>} on an active Task using its current revision and Issue epoch. Explicit human requirements remain binding. Withdrawal retains the original artifact and does not create a passing verdict.\n")
+	}
+	if name == "conversation" || name == "conversation steer-owner" {
+		out.WriteString("\nIssue owner steer: provide the Issue ID and --revision. Use --data or --file for run_id, expected_assignment_epoch, source_message_id, expected_source_revision and optional revokes_source_message_id. The source must be a linked owner original. Keep message_id from the first --dry-run. Read tend message original <message_id> after a lost response. A native acknowledgement waits for an exact user-item receipt. No automatic retry or ordinary queue fallback occurs.\n")
 	}
 	if name == "conversation" || name == "conversation promote" {
 		out.WriteString("\nConsultation promotion: for a new Issue, provide manager: {category_id: <work-category>, reason: <text>} with the plan and exact source_message_id/expected_source_revision. Ordinary work selects a category without a concrete Agent; the compatible manager key does not require a special issue-manager category. With existing_issue_id, retain its existing responsibility and supply its current revision/assignment epoch and selected sources. The complete authenticated owner JSON still accepts legacy manager.agent_id and assignee; no valid wire fields are discarded.\n")

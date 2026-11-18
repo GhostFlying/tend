@@ -121,6 +121,9 @@ func (t *runnerTransport) awaitReply(ctx context.Context, method, id string, out
 		}
 		if ready {
 			if reply.Error != "" {
+				if method == "steer" && reply.Rejected && reply.Error == harness.ErrSteerUnsupported.Error() {
+					return harness.ErrSteerUnsupported
+				}
 				if reply.Rejected {
 					return fmt.Errorf("%w: %s", harness.ErrRejected, reply.Error)
 				}

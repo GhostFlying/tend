@@ -738,6 +738,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		if s, ok := t.(harness.TurnSteerer); ok {
 			return nil, s.SteerTurn(ctx, r.TurnID, r.Input)
 		}
+		return nil, harness.ErrSteerUnsupported
 	case "usage":
 		if s, ok := t.(harness.ContextManager); ok {
 			return s.ContextUsage(ctx)

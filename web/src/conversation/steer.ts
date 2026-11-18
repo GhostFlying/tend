@@ -1,4 +1,4 @@
-import type { MainSteerView } from "../api/generated/api.ts";
+import type { IssueOwnerSteerView, MainSteerView } from "../api/generated/api.ts";
 
 export function steerNotice(steer: MainSteerView | undefined): string | undefined {
   if (!steer) return undefined;
@@ -25,5 +25,35 @@ export function steerNotice(steer: MainSteerView | undefined): string | undefine
       return "补充消息已进入原生会话，当前回合随后停止。";
     default:
       return undefined;
+  }
+}
+
+export function issueOwnerSteerNotice(steer: IssueOwnerSteerView): string {
+  switch (steer.status) {
+    case "queued":
+      return "紧急投递已排队，等待当前回合接收。";
+    case "sending":
+      return "正在将紧急通知送入当前回合。";
+    case "accepted":
+      return "原生回合已接收紧急通知，等待安全边界，尚未确认负责人读取。";
+    case "consumed":
+      return "当前负责人已在原生回合读取紧急通知。";
+    case "unsupported":
+      return "当前执行器不支持紧急投递，原文已保留。";
+    case "rejected":
+      switch (steer.reason) {
+        case "source_revoked":
+          return "原始授权已撤销，这条通知未送出。";
+        case "source_changed":
+          return "原始来源已更改或撤回，这条通知未送出。";
+        case "turn_ended":
+          return "原回合已结束，紧急通知未送出。";
+        default:
+          return "当前回合拒绝了紧急通知，原文已保留。";
+      }
+    case "unknown":
+      return "紧急通知的消费结果未知，原文已保留，系统不会自动重发。";
+    default:
+      return "紧急投递状态待确认。";
   }
 }
