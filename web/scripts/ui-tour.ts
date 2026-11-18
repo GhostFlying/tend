@@ -12,6 +12,7 @@ import type {
   TaskDetail,
   AttentionView,
   MessagingMessage,
+  MessagingReceipts,
   HostedAgentInventory,
   ConversationHandoffView,
 } from "../src/api/generated/api.ts";
@@ -301,6 +302,12 @@ const server = createServer(async (req, res) => {
   if (p === "/api/v1/messaging/messages")
     return json({ items: imHideQuestion ? [] : [imQuestion], next: 1, more: false });
   if (p === "/api/v1/messaging/messages/message-im-question") return json(imQuestion);
+  if (p === `/api/v1/messaging/messages/${trigger.message_id}/receipts`)
+    return json({
+      reads: [],
+      deliveries: [],
+      user_read_capability: "explicit_web_only",
+    } satisfies MessagingReceipts);
   if (p === "/api/v1/conversation") return json({ items: [trigger, reply], more: false });
   if (p.endsWith("/transcript"))
     return json({
