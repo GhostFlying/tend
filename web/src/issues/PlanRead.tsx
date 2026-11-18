@@ -17,9 +17,11 @@ import styles from "./Issues.module.css";
 export function IssuePlanRead({
   issue,
   showIntent = false,
+  showClosure = true,
 }: {
   issue: IssueView;
   showIntent?: boolean;
+  showClosure?: boolean;
 }) {
   const { openTask } = useServices();
   const plan = issue.plan;
@@ -118,15 +120,17 @@ export function IssuePlanRead({
         </section>
       ))}
       {!plan.follow_ons?.length && <p className={styles.muted}>该版本未记录后续事项。</p>}
-      <h3>收尾记录</h3>
-      {issue.closure ? (
+      {showClosure && (
         <>
-          <p>{closureLabels[issue.closure.kind] ?? issue.closure.kind}</p>
-          <Markdown text={issue.closure.reason} />
-          <IssueEvidenceRead items={issue.closure.evidence} />
+          <h3>{issue.state === "cancelled" ? "取消原因" : "收尾记录"}</h3>
+          {issue.state === "cancelled" ? (
+            <Markdown text={issue.cancellation_reason || "该次取消没有留存原因。"} />
+          ) : issue.closure ? (
+            <IssueClosureRead closure={issue.closure} />
+          ) : (
+            <p className={styles.muted}>该版本未记录收尾。</p>
+          )}
         </>
-      ) : (
-        <p className={styles.muted}>该版本未记录收尾。</p>
       )}
       <h3>默认工作区来源任务</h3>
       {plan.default_workspace_task_id ? (
@@ -136,6 +140,16 @@ export function IssuePlanRead({
       ) : (
         <p className={styles.muted}>该版本未记录来源任务。</p>
       )}
+    </>
+  );
+}
+
+export function IssueClosureRead({ closure }: { closure: NonNullable<IssueView["closure"]> }) {
+  return (
+    <>
+      <p>{closureLabels[closure.kind] ?? closure.kind}</p>
+      <Markdown text={closure.reason} />
+      <IssueEvidenceRead items={closure.evidence} />
     </>
   );
 }
