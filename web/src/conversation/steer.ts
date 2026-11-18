@@ -52,7 +52,9 @@ export function issueOwnerSteerNotice(steer: IssueOwnerSteerView): string {
           return "当前回合拒绝了紧急通知，原文已保留。";
       }
     case "unknown":
-      return "紧急通知的消费结果未知，原文已保留，系统不会自动重发。";
+      return steer.accepted_at
+        ? "原生回合已接收紧急通知，消费结果未知。"
+        : "紧急通知的原生接收结果未知，原文已保留，系统不会自动重发。";
     default:
       return "紧急投递状态待确认。";
   }

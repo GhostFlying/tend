@@ -185,16 +185,30 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{NoEffect: !changed, Result: p}, nil
 			}
 
+			var rejection, steerReason string
 			if !allowed && !managerNativeReceiptMethod(p.Method) {
-				raw, err := json.Marshal(protocol.ManagerNativeReply{ID: p.ID, Error: "Manager was fenced before native execution", Rejected: true})
+				rejection, steerReason = "Manager was fenced before native execution", "owner_fenced"
+			} else if p.Method == "steer" {
+				// Binding a native request only queues it. Recheck the urgent
+				// input in the pending-to-started transaction before releasing it.
+				steerReason, err = issueSteerNativeClaimBlocked(ctx, tx.Q(), run, p.ID, x.Now.UnixMilli())
 				if err != nil {
 					return Outcome{}, err
 				}
-				if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error='Manager was fenced before native execution',completion_rejected=1,runner_acked=1 WHERE request_id=?`, string(raw), p.ID); err != nil {
+				if steerReason != "" {
+					rejection = "Urgent message was fenced before native execution"
+				}
+			}
+			if rejection != "" {
+				raw, err := json.Marshal(protocol.ManagerNativeReply{ID: p.ID, Error: rejection, Rejected: true})
+				if err != nil {
+					return Outcome{}, err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error=?,completion_rejected=1,runner_acked=1 WHERE request_id=?`, string(raw), rejection, p.ID); err != nil {
 					return Outcome{}, err
 				}
 				if p.Method == "steer" {
-					if err := recordIssueOwnerSteerRPC(ctx, tx, x.IDs, run, p.ID, "rejected", "owner_fenced", x.Now.UnixMilli()); err != nil {
+					if err := recordIssueOwnerSteerRPC(ctx, tx, x.IDs, run, p.ID, "rejected", steerReason, x.Now.UnixMilli()); err != nil {
 						return Outcome{}, err
 					}
 				}

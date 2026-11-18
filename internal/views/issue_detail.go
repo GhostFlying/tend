@@ -275,9 +275,13 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			}
 			entry.ID = "block:" + r.id
 			entry.Block = &projected
-			entry.Author, err = issueConversationAuthor(ctx, q, r.id)
-			if err != nil {
-				return out, err
+			if steer := projected.Trigger.IssueOwnerSteer; steer != nil {
+				entry.Author = issueSteerSender(steer.Sender)
+			} else {
+				entry.Author, err = issueConversationAuthor(ctx, q, r.id)
+				if err != nil {
+					return out, err
+				}
 			}
 		} else {
 			var body, actor string

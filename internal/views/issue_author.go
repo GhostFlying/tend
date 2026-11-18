@@ -5,8 +5,16 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func issueSteerSender(sender protocol.Principal) string {
+	if sender.Kind == protocol.PrincipalMainAgent {
+		return namedExecutionAuthor("主 Agent", sender.Subject)
+	}
+	return namedExecutionAuthor("操作员", sender.Subject)
+}
 
 // A runner manager selection reconstructs execution fields without copying the
 // display name. Resolve its original Run's inventory, never today's assignee.

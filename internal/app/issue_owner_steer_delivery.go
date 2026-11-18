@@ -90,11 +90,11 @@ func issueSteerClaimBlocked(ctx context.Context, q store.Querier, s store.IssueO
 		}
 		return "", err
 	}
-	t, err := store.GetMainTurn(ctx, q, s.ExecutionID)
+	active, err := issueSteerTurnActive(ctx, q, s)
 	if err != nil {
 		return "", err
 	}
-	if t.Status != store.TurnStarted || t.ThreadID != s.ThreadID || t.TurnID != s.TurnID {
+	if !active {
 		return "turn_ended", nil
 	}
 	if ok, err := issueSteerTurnAdmitted(ctx, q, s.ExecutionID); err != nil {
@@ -113,6 +113,13 @@ func issueSteerClaimBlocked(ctx context.Context, q store.Querier, s store.IssueO
 	if revision != s.SourceRevision || withdrawn || issueSteerInputDigest(s.InputHeader+source.Body) != s.InputSHA256 {
 		return "source_changed", nil
 	}
+	textOnly, err := isIssueSteerTextSource(ctx, q, source)
+	if err != nil {
+		return "", err
+	}
+	if !textOnly {
+		return "source_changed", nil
+	}
 	var revoked bool
 	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_owner_steers
  WHERE issue_id=? AND revokes_source_message_id=?)`, s.IssueID, s.SourceMessageID).Scan(&revoked)
@@ -120,6 +127,14 @@ func issueSteerClaimBlocked(ctx context.Context, q store.Querier, s store.IssueO
 		return "source_revoked", err
 	}
 	return "", err
+}
+
+func issueSteerTurnActive(ctx context.Context, q store.Querier, s store.IssueOwnerSteer) (bool, error) {
+	t, err := store.GetMainTurn(ctx, q, s.ExecutionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil && t.Status == store.TurnStarted && t.ThreadID == s.ThreadID && t.TurnID == s.TurnID, err
 }
 
 // RecordIssueOwnerSteerAnswer retains the original attempt even when a native
@@ -164,30 +179,62 @@ func bindIssueOwnerSteerRequest(ctx context.Context, tx *store.Tx, run string, r
 	return err
 }
 
-func recordIssueOwnerSteerRPC(ctx context.Context, tx *store.Tx, ids protocol.IDGen, run, request, status, reason string, now int64) error {
+func issueSteerByNativeRequest(ctx context.Context, q store.Querier, run, request string) (store.IssueOwnerSteer, bool, error) {
 	var message string
-	err := tx.Q().QueryRowContext(ctx, `SELECT message_id FROM issue_owner_steers
+	err := q.QueryRowContext(ctx, `SELECT message_id FROM issue_owner_steers
  WHERE native_request_id=? AND run_id=?`, request, run).Scan(&message)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return store.IssueOwnerSteer{}, false, nil
 	}
 	if err != nil {
-		return err
+		return store.IssueOwnerSteer{}, false, err
 	}
-	s, err := store.GetIssueOwnerSteer(ctx, tx.Q(), message)
-	if err != nil {
+	s, err := store.GetIssueOwnerSteer(ctx, q, message)
+	return s, true, err
+}
+
+func issueSteerNativeClaimBlocked(ctx context.Context, q store.Querier, run, request string, now int64) (string, error) {
+	s, found, err := issueSteerByNativeRequest(ctx, q, run, request)
+	if err != nil || !found {
+		return "", err
+	}
+	return issueSteerClaimBlocked(ctx, q, s, now)
+}
+
+func recordIssueOwnerSteerRPC(ctx context.Context, tx *store.Tx, ids protocol.IDGen, run, request, status, reason string, now int64) error {
+	s, found, err := issueSteerByNativeRequest(ctx, tx.Q(), run, request)
+	if err != nil || !found {
 		return err
 	}
 	return recordIssueOwnerSteerAnswer(ctx, tx, ids, s, status, reason, now)
 }
 
 func recordIssueOwnerSteerAnswer(ctx context.Context, tx *store.Tx, ids protocol.IDGen, s store.IssueOwnerSteer, status, reason string, now int64) error {
-	if status == "accepted" && s.AcceptedAt == 0 {
+	acceptedNow := status == "accepted" && s.AcceptedAt == 0
+	if acceptedNow {
 		if _, err := tx.Exec(ctx, `UPDATE issue_owner_steers SET accepted_at=? WHERE message_id=?`, now, s.MessageID); err != nil {
 			return err
 		}
 	}
-	if s.Status == "sending" || s.Status == "unknown" && status != "accepted" && (s.Status != status || s.Reason != reason) {
+	if s.Status != "sending" && s.Status != "unknown" {
+		if acceptedNow {
+			return recordMessageState(ctx, tx, ids, s.MessageID, steerState(s.Status), now)
+		}
+		return nil
+	}
+	if status == "accepted" {
+		active, err := issueSteerTurnActive(ctx, tx.Q(), s)
+		if err != nil {
+			return err
+		}
+		if !active || s.Reason == "no_consumption_receipt" {
+			status, reason = "unknown", "no_consumption_receipt"
+		}
+	} else if s.AcceptedAt != 0 {
+		// A coordinator timeout cannot override a confirmed native reply.
+		return nil
+	}
+	if s.Status != status || s.Reason != reason || acceptedNow {
 		return writeIssueSteerState(ctx, tx, ids, s.MessageID, status, reason, now)
 	}
 	return nil
