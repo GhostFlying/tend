@@ -82,10 +82,36 @@ func ownerCarrierRun(ctx context.Context, q store.Querier, issue protocol.Issue,
 		v.State = protocol.ExecutionRunning
 	}
 	if v.State == protocol.ExecutionStarting || v.State == protocol.ExecutionRunning {
-		v.Recovery, err = executionRecovery(ctx, q, v.RunID)
+		v.Recovery, err = issueOwnerRunRecovery(ctx, q, issue, v.RunID)
 		if v.Recovery != nil {
 			v.State = protocol.ExecutionRecovering
 		}
 	}
 	return &v, err
+}
+
+func issueOwnerRunRecovery(ctx context.Context, q store.Querier, issue protocol.Issue, runID string) (*protocol.ExecutionRecovery, error) {
+	// Until the scheduled attempt has a native execution, its source still
+	// identifies the Run retaining the recovery.
+	var recovery protocol.ExecutionRecovery
+	err := q.QueryRowContext(ctx, `SELECT r.status,r.attempts
+ FROM runner_coordination_executions original
+ JOIN agent_recoveries r ON r.root_request_id=original.execution_id
+ LEFT JOIN agent_recovery_attempts attempt ON attempt.request_id=r.active_request_id
+ LEFT JOIN runner_coordination_executions resumed ON resumed.execution_id=r.active_request_id
+ JOIN runner_coordination_executions current
+   ON current.execution_id=COALESCE(resumed.execution_id,attempt.source_request_id,original.execution_id)
+ WHERE original.issue_id=? AND original.assignment_epoch=? AND original.agent_ref=?
+ AND current.issue_id=original.issue_id AND current.assignment_epoch=original.assignment_epoch
+ AND current.agent_ref=original.agent_ref AND current.conversation_id=r.conversation_id
+ AND json_extract(current.private_snapshot,'$.runner_run_id')=?
+ AND r.status IN ('waiting','starting','running','unknown','blocked','exhausted')
+ ORDER BY r.updated_at DESC,r.root_request_id DESC LIMIT 1`, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, runID).Scan(&recovery.Phase, &recovery.Attempts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &recovery, nil
 }
