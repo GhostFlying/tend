@@ -468,12 +468,12 @@ const server = createServer(async (req, res) => {
         },
       },
     });
-  if (p.startsWith("/api/v1/tasks/task_")) {
+  if (p === "/api/v1/tasks/task-manager" || p.startsWith("/api/v1/tasks/task_")) {
     const id = p.split("/").at(-1)!;
     const second = id.endsWith("FAW");
     const base = {
       task_id: id,
-      title: second ? "关联任务 B" : "执行任务 A",
+      title: id === "task-manager" ? "负责人执行" : second ? "关联任务 B" : "执行任务 A",
       project: "sample",
       lifecycle: "queued",
       control_mode: "managed",
@@ -596,6 +596,85 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  for (const width of [1440, 320]) {
+    const context = await browser.newContext({ viewport: { width, height: 844 } });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      page.on("console", (message) => {
+        if (message.type() === "error" || message.type() === "warning") errors.push(message.text());
+      });
+      const displayName = width === 320 ? "River Frontend Implementer" : "River";
+      await page.route("**/api/v1/hosted-agents", (route) =>
+        route.fulfill({
+          json: {
+            configured: true,
+            projection: {
+              agents: [
+                {
+                  identity: { execution_environment_id: "hosted", local_id: "qingzhu" },
+                  display_name: displayName,
+                  purposes: ["issue_manager"],
+                  enabled: true,
+                },
+              ],
+              runtimes: [],
+            },
+          },
+        }),
+      );
+      const path = `/issues/${issue.issue_id}`;
+      await page.goto(`http://127.0.0.1:${address.port}${path}`);
+      assert.equal(new URL(page.url()).pathname, path);
+      assert.equal(await page.title(), "tend");
+      const properties = (await issueSidebar(page)).locator("section").filter({
+        has: page.getByRole("heading", { name: "属性", exact: true }),
+      });
+      const assignee = properties
+        .getByRole("button", { name: "交接负责人", exact: true })
+        .getByText(`${displayName} · ${issue.assignee.ref}`, { exact: true });
+      const runDetails = properties.getByRole("button", { name: "查看运行详情", exact: true });
+      const left = await assignee.evaluate(
+        (node) => node.closest("dd")!.getBoundingClientRect().left,
+      );
+      await properties.screenshot({ path: join(output, `issue-properties-${width}.png`) });
+      for (const value of [
+        assignee,
+        properties.getByText("负责人会话运行中", { exact: true }),
+        runDetails,
+        properties.locator("[data-issue-status]"),
+        properties.getByText(issue.plan.project, { exact: true }),
+      ]) {
+        const offsets = await value.evaluate((node, left) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return Array.from(range.getClientRects(), (rect) => rect.left - left);
+        }, left);
+        const label = await value.innerText();
+        assert(offsets.length > 0, `${label} must have rendered text`);
+        if (value === assignee && width === 320) {
+          assert(offsets.length > 1, "the narrow drawer must wrap the assignee text");
+        }
+        assert(
+          offsets.every((offset) => Math.abs(offset) <= 1),
+          `${label}: offsets ${offsets}`,
+        );
+        console.log(
+          `Issue properties ${width}px: ${label.replaceAll("\n", " ")} offsets ${offsets}`,
+        );
+      }
+      await runDetails.click();
+      await page.waitForURL((url) => url.pathname === `/tasks/${issue.manager!.task_id}`);
+      const task = page.getByRole("region", { name: "任务详情", exact: true });
+      await task.getByText("负责人执行", { exact: true }).waitFor();
+      await task.screenshot({ path: join(output, `issue-manager-details-${width}.png`) });
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
+
   for (const width of [1440, 390]) {
     const context = await browser.newContext({
       viewport: { width, height: 844 },
