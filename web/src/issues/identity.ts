@@ -46,7 +46,10 @@ function rememberIssueIdentity(client: ApiClient, issue: IssueIdentity) {
   }
 }
 
-export function useIssueIdentity(input: string) {
+export function useIssueIdentity(
+  input: string,
+  { recheckMissing = false }: { recheckMissing?: boolean } = {},
+) {
   const client = useContext(ServicesContext)?.client;
   const code = shortIssueCode(input);
   const id = code || input;
@@ -57,7 +60,8 @@ export function useIssueIdentity(input: string) {
     if (!entry) return;
     const { read } = entry;
     const value = read.state.get().value;
-    if (++entry.users === 1 && !value)
+    const firstUser = ++entry.users === 1;
+    if ((firstUser && !value) || (recheckMissing && value === "missing"))
       void read.open(`/api/v1/issues/${encodeURIComponent(id)}?projection=identity`);
     return () => {
       if (--entry.users !== 0) return;
@@ -65,6 +69,6 @@ export function useIssueIdentity(input: string) {
       if (last && last !== "missing") read.pause();
       else read.close();
     };
-  }, [entry, id]);
+  }, [entry, id, recheckMissing]);
   return state;
 }
