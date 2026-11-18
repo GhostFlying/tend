@@ -11,6 +11,52 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
+// OwnerIssueAnchor resolves a message within its discussion. Deferred public
+// tools only expose the metadata needed to open their original process block.
+func OwnerIssueAnchor(ctx context.Context, q store.Querier, conversation, id string) (protocol.IssueConversationItem, error) {
+	item, err := OwnerIssueMessage(ctx, q, id)
+	if err == nil {
+		if item.ConversationID != conversation || item.Control != nil && item.Control.WithdrawnAt != 0 {
+			return protocol.IssueConversationItem{}, store.ErrNotFound
+		}
+		return item, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return protocol.IssueConversationItem{}, err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT r.seq,r.created_at,r.thread_id,r.turn_id,r.item_id,b.message_id
+ FROM conversation_messages m JOIN background_batches b ON b.message_id=m.message_id
+ JOIN background_replies r USING(batch_id)
+ WHERE m.conversation_id=? AND r.kind='tool_use' AND r.published=0
+ AND NOT (b.status='cancelled' AND b.frozen_at=0)
+ AND NOT EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=m.message_id AND c.withdrawn_at<>0)
+ AND EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id)`, conversation)
+	if err != nil {
+		return protocol.IssueConversationItem{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq, created int64
+		var thread, turn, tool, trigger string
+		if err := rows.Scan(&seq, &created, &thread, &turn, &tool, &trigger); err != nil {
+			return protocol.IssueConversationItem{}, err
+		}
+		if id == publicProcessToolID(thread, turn, tool) {
+			return protocol.IssueConversationItem{ConversationID: conversation, ConversationContent: protocol.ConversationContent{
+				Seq: seq, MessageID: id, Kind: store.KindToolUse, Author: "main_agent", ReplyTo: trigger, CreatedAt: time.UnixMilli(created).UTC(),
+			}}, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return protocol.IssueConversationItem{}, err
+	}
+	return protocol.IssueConversationItem{}, store.ErrNotFound
+}
+
+func publicProcessToolID(thread, turn, item string) string {
+	return protocol.NativeObjectID(protocol.PrefixMessage, "native-tool:"+thread, turn+"/"+item)
+}
+
 // IssuePublicProcess reads only public tool records from the original background
 // producer. It never publishes deferred text, executes tools or reads reasoning.
 func IssuePublicProcess(ctx context.Context, q store.Querier, message string, after int64, limit int) (*protocol.IssueTurnProcess, error) {
@@ -142,7 +188,7 @@ func issuePublicProcess(ctx context.Context, q store.Querier, message string, af
 				return nil, err
 			}
 		}
-		id := protocol.NativeObjectID(protocol.PrefixMessage, "native-tool:"+r.thread, r.turn+"/"+r.item)
+		id := publicProcessToolID(r.thread, r.turn, r.item)
 		updated := r.created
 		u, err := store.GetToolUse(ctx, q, r.turn, r.item)
 		if err == nil {
