@@ -922,7 +922,7 @@ try {
       };
       activityState.urgentOriginal = urgentOriginal;
       ownerItems = [ordinary];
-      publish("conversation.message_state", urgentOriginal.trigger);
+      publish("conversation.urgent_consumed", urgentOriginal.trigger);
       await ownerQueue.getByText("待处理 · 1", { exact: true }).waitFor();
       assert.equal(await ownerQueue.getByRole("button", { name: "撤回" }).count(), 1);
       assert.equal(await ownerQueue.getByText(urgentInput.body, { exact: true }).count(), 0);

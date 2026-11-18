@@ -21,6 +21,12 @@ const IssueOwnerConsumptionMatchesOutbox = `(o.operation='main_thread.handle_mes
  SELECT 1 FROM issue_owner_consumed_inputs i WHERE i.source_message_id=json_extract(o.payload_json,'$.message_id')
  AND o.destination='background_thread:'||i.conversation_id))`
 
+func IssueOwnerInputConsumedForRequest(ctx context.Context, q Querier, request string) (bool, error) {
+	var consumed bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.request_id=? AND `+IssueOwnerConsumptionMatchesOutbox+`)`, request).Scan(&consumed)
+	return consumed, err
+}
+
 func ConsumedIssueOwnerInput(ctx context.Context, q Querier, source string) (IssueOwnerSteer, error) {
 	var message string
 	if err := q.QueryRowContext(ctx, `SELECT receipt_message_id FROM issue_owner_consumed_inputs WHERE source_message_id=?`, source).Scan(&message); err != nil {

@@ -486,7 +486,7 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 			if err == nil {
 				it.ConsumedIssueOwnerSteer = &receipt.IssueOwnerSteerView
 				switch it.State {
-				case protocol.MessageQueued, protocol.MessageAccepted, protocol.MessageFailed, protocol.MessageUnknown:
+				case protocol.MessageQueued, protocol.MessageAccepted:
 					it.State = protocol.MessageConsumed
 				}
 			}
