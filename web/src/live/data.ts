@@ -64,6 +64,8 @@ export interface DetailState {
 /** A task looked up for a reference outside the snapshot; null if tend has none. */
 export type TaskLookup = ReadonlyMap<string, TaskSummary | null>;
 
+type RefreshMode = "all" | "resume";
+
 const pageSize = 50;
 const noProcessing: ReadonlyMap<string, number> = new Map();
 
@@ -90,7 +92,9 @@ export class LiveData {
   private readonly detailStore = new Store<DetailState | null>(null);
   private readonly lookupStore = new Store<TaskLookup>(new Map());
   private readonly lookingUp = new Set<string>();
+  private readonly failedLookups = new Set<string>();
   private readonly dirtyLookups = new Set<string>();
+  private resumeGeneration = 0;
   private historyGeneration = 0;
   private readonly choiceVersions = new Map<string, WorkItemChoice>();
   private readonly choiceReads = new Map<string, WorkItemRead<WorkItemChoice>>();
@@ -146,8 +150,8 @@ export class LiveData {
     return this.lookupStore;
   }
 
-  private readonly reloadListeners = new Set<() => void>();
-  subscribeReload(listener: () => void): () => void {
+  private readonly reloadListeners = new Set<(mode: RefreshMode) => void>();
+  subscribeReload(listener: (mode: RefreshMode) => void): () => void {
     this.reloadListeners.add(listener);
     return () => this.reloadListeners.delete(listener);
   }
@@ -162,18 +166,31 @@ export class LiveData {
     void this.reload();
   }
 
-  /** Reads every view again, as after a fresh start of the event stream. */
-  async reload(): Promise<void> {
-    this.usage.refresh();
-    for (const listener of this.reloadListeners) listener();
-    void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
-    void this.repos.refresh();
+  /** A resumed cursor delivers missed ledger events through apply(). Runtime
+   * observations and failed reads still need their own recovery path. */
+  async reload(mode: RefreshMode = "all"): Promise<void> {
+    for (const listener of this.reloadListeners) listener(mode);
+    this.resumeGeneration++;
+    for (const id of this.failedLookups) void this.lookUp(id, true);
+    this.directChats.refresh();
     void this.settings.refresh();
     void this.handoff.refresh();
+    if (mode === "resume") {
+      // Snapshots include heartbeat times and live delivery observer status.
+      // Runner catalogs also evaluate online status at read time.
+      this.agents.refreshRunners();
+      if (this.queueView.state.get().error)
+        void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
+      this.tasks.retryFailed();
+      await this.refreshSnapshot();
+      return;
+    }
+    this.usage.refresh();
+    void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
+    void this.repos.refresh();
     this.tasks.refresh();
     this.issues.refresh();
     this.attention.refresh();
-    this.directChats.refresh();
     this.agents.refresh();
     for (const read of this.choiceReads.values()) void read.refresh();
     this.detailController?.abort();
@@ -254,8 +271,13 @@ export class LiveData {
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
     if (event.kind === "token_usage.changed") this.usage.refresh();
+    if (event.object_type === "repo" || event.object_type === "config") void this.repos.refresh();
     for (const listener of this.eventListeners) listener(event);
-    if (["category", "host", "hosted_configuration", "run", "task"].includes(event.object_type))
+    if (
+      ["category", "concurrency", "config", "host", "hosted_configuration", "run", "task"].includes(
+        event.object_type,
+      )
+    )
       this.agents.refresh();
     // Global responsibility views must not inherit the selected chat filter.
     if (
@@ -264,6 +286,8 @@ export class LiveData {
         "work_item",
         "task",
         "context_fact",
+        "artifact",
+        "concurrency",
         "attention",
         "deadline",
         "planner_entry",
@@ -278,7 +302,12 @@ export class LiveData {
     }
     // Execution and resource facts can change primary-task summaries without a
     // task event (for example lease expiry). Hidden reads stay lazy.
-    if (["run", "host", "workspace"].includes(event.object_type)) {
+    if (
+      event.kind === "extensions.published" ||
+      ["run", "host", "workspace", "category", "config", "repo", "upgrade"].includes(
+        event.object_type,
+      )
+    ) {
       this.issues.refresh();
       this.attention.refresh();
     }
@@ -328,6 +357,7 @@ export class LiveData {
       void this.handoff.refresh();
       return;
     }
+    if (event.kind === "conversation.category") void this.settings.refresh();
     if (event.kind === "conversation.settings") {
       void this.settings.refresh();
       return;
@@ -436,14 +466,17 @@ export class LiveData {
     }
     if (!again && this.lookupStore.get().has(taskId)) return;
     this.lookingUp.add(taskId);
+    const generation = this.resumeGeneration;
     try {
       const t = await this.api.get<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
       if (!this.stopped) this.remember(taskId, summary(t));
     } catch (err) {
       if (err instanceof ApiError && err.code === "not_found") {
         this.remember(taskId, null);
+      } else if (!this.stopped) {
+        this.failedLookups.add(taskId);
+        if (generation !== this.resumeGeneration) this.dirtyLookups.add(taskId);
       }
-      // Otherwise it stays unknown and is tried again when shown again.
     } finally {
       this.lookingUp.delete(taskId);
       if (this.dirtyLookups.delete(taskId) && !this.stopped) void this.lookUp(taskId, true);
@@ -451,6 +484,7 @@ export class LiveData {
   }
 
   private remember(taskId: string, task: TaskSummary | null): void {
+    this.failedLookups.delete(taskId);
     const next = new Map(this.lookupStore.get());
     next.set(taskId, task);
     this.lookupStore.set(next);
@@ -587,6 +621,7 @@ export class LiveData {
     this.stopped = true;
     this.usage.stop();
     this.queueView.stop();
+    this.failedLookups.clear();
     this.dirtyLookups.clear();
     this.repos.stop();
     this.issues.stop();

@@ -16,15 +16,19 @@ export interface Link {
 
 export function startConnector(client: ApiClient, live: LiveData, onOnline: () => void): Link {
   let interruption: { reason: string | undefined } | undefined;
+  let owner: string | undefined;
   const stream = new EventStream({
     open: (after, signal) =>
       client.openStream(
         after === undefined ? "/api/v1/events" : `/api/v1/events?after=${after}`,
         signal,
       ),
-    onStart: () => {
+    onStart: (_seq, fresh) => {
       interruption = undefined;
-      void live.reload();
+      const connection = client.connection.get();
+      const login = connection.status === "online" ? connection.login : undefined;
+      void live.reload(!fresh && login !== undefined && login === owner ? "resume" : "all");
+      owner = login;
     },
     onEvent: (event) => live.apply(event),
     onAlive: () => client.noteAlive(),
@@ -63,6 +67,7 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
   let last = client.connection.get().status;
   const unsubscribeClient = client.connection.subscribe(() => {
     const now = client.connection.get().status;
+    if (now === "not-owner") owner = undefined;
     if (now === "online" && last !== "online") {
       onOnline();
       stream.wake();

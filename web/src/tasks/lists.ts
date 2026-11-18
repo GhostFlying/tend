@@ -68,6 +68,11 @@ export class TaskFeed {
   refresh(): Promise<void> {
     return this.read(false);
   }
+  async retryFailed(): Promise<void> {
+    const generation = this.generation;
+    await this.running;
+    if (generation === this.generation && this.state.get().error) await this.refresh();
+  }
   more(): Promise<void> {
     const state = this.state.get();
     if (!state.next || state.loading || state.paging || state.error) return Promise.resolve();
@@ -198,6 +203,9 @@ export class TaskLists {
     this.timer = undefined;
     for (const column of this.feeds) void column.refresh();
     void this.recent.refresh();
+  }
+  retryFailed(): void {
+    for (const feed of [...this.feeds, this.recent]) void feed.retryFailed();
   }
   changed(): void {
     if (this.timer === undefined) this.timer = setTimeout(() => this.refresh(), 100);

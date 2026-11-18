@@ -176,14 +176,16 @@ export class EventStream {
             this.cursorSeq = start.event_seq;
             started = true;
             this.status.set("live");
-            this.call(() => this.options.onStart(start.event_seq, fresh));
+            if (!this.call(() => this.options.onStart(start.event_seq, fresh)))
+              return { kind: "reset" };
           } else if (m.event === "ledger") {
             const event = JSON.parse(m.data) as LedgerEvent;
             if (this.cursorSeq !== undefined && event.event_seq <= this.cursorSeq) {
               continue;
             }
+            // A receiver that failed to apply an event cannot resume from it.
+            if (!this.call(() => this.options.onEvent(event))) return { kind: "reset" };
             this.cursorSeq = event.event_seq;
-            this.call(() => this.options.onEvent(event));
           }
         }
       }
@@ -225,12 +227,14 @@ export class EventStream {
     });
   }
 
-  /** Runs a callback; a failing view must not take the stream down. */
-  private call(fn: () => void): void {
+  /** Keep callback failures separate from transport errors. */
+  private call(fn: () => void): boolean {
     try {
       fn();
+      return true;
     } catch (err) {
       console.error("tend: an event handler failed", err);
+      return false;
     }
   }
 }

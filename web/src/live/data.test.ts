@@ -1214,3 +1214,73 @@ test("Run changes refresh Agent task activity independently of the selected conv
   }
   live.stop();
 });
+
+test("a resumed cursor recovers failed task reads including a reference still in flight", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  try {
+    live.tasks.open();
+    void live.lookUp("late-reference");
+    const resumed = live.reload("resume");
+    await api.answer("/api/v1/tasks?all=", new Error("task page offline"));
+    await api.answer("/api/v1/tasks/late-reference", new Error("reference offline"));
+    await api.answer("/api/v1/snapshot", snapshot);
+    await resumed;
+    await api.answer("/api/v1/tasks?all=", { tasks: [], next: "" });
+    await api.answer("/api/v1/tasks/late-reference", { task_id: "late-reference", title: "Found" });
+    expect(live.tasks.feeds[0]!.state.get().pages).toBe(1);
+    expect(live.tasks.feeds[0]!.state.get().error).toBeUndefined();
+    expect(live.lookups.get().get("late-reference")?.title).toBe("Found");
+    expect(api.pending()).toEqual([]);
+  } finally {
+    await live.stop();
+  }
+});
+
+test.each([
+  ["category", "manager", "category.updated", "Selected category is inactive"],
+  ["extensions", "catalog", "extensions.published", "Waiting for a matching executor"],
+])(
+  "replayed %s changes update a board card's queue reason",
+  async (type, id, kind, updatedReason) => {
+    let queueReason = "Waiting for owner";
+    const live = new LiveData({
+      async get<T>(path: string): Promise<T> {
+        const items =
+          new URL(path, "https://tend.invalid").searchParams.get("board_status") === "todo"
+            ? [
+                {
+                  issue_id: "pending",
+                  board: {
+                    queue_reason: {
+                      message: queueReason,
+                    },
+                  },
+                },
+              ]
+            : [];
+        return { items } as T;
+      },
+    });
+    try {
+      live.issues.board.open({});
+      const column = live.issues.board.columns.get("todo")!.read.state;
+      const reason = () => column.get().value?.items?.[0]?.board?.queue_reason?.message;
+      await settle();
+      expect(reason()).toBe("Waiting for owner");
+      queueReason = updatedReason;
+      await live.reload("resume");
+      live.apply({
+        event_seq: 2,
+        object_type: type,
+        object_id: id,
+        kind,
+        created_at: "2026-01-01T00:00:00Z",
+      });
+      await settle();
+      expect(reason()).toBe(updatedReason);
+    } finally {
+      await live.stop();
+    }
+  },
+);

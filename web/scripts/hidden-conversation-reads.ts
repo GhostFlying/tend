@@ -13,6 +13,10 @@ assert(output, "Set an isolated fixture output directory");
 await mkdir(output, { recursive: true });
 const calls: string[] = [];
 const streams = new Set<ServerResponse>();
+let ledgerSeq = 1;
+let issueTitle = "Initial board state";
+const missedEvent = () =>
+  `id: ${ledgerSeq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: ledgerSeq, object_type: "issue", object_id: "reconnect", kind: "issue.updated", created_at: "2026-01-01T00:00:00Z" })}\n\n`;
 let holdUsage = false;
 let ordinaryMore = false;
 const backgroundBlock = {
@@ -69,13 +73,40 @@ const server = createServer(async (req, res) => {
     return json({ login: "Fixture owner", scope: "owner", deployment_id: "visibility" });
   if (path === "/api/v1/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
-    res.write('event: start\ndata: {"event_seq":1}\n\n');
+    const after = Number(url.searchParams.get("after") ?? ledgerSeq);
+    res.write(`event: start\ndata: {"event_seq":${after}}\n\n`);
+    if (after < ledgerSeq) res.write(missedEvent());
     streams.add(res);
     res.on("close", () => streams.delete(res));
     return;
   }
+  if (path === "/api/v1/issues" && url.searchParams.has("board_status")) {
+    const items =
+      url.searchParams.get("board_status") === "backlog"
+        ? [
+            {
+              issue_id: "reconnect",
+              title: issueTitle,
+              project: "fixture",
+              state: "active",
+              assignee: { kind: "owner", ref: "owner" },
+              assignment_epoch: 1,
+              assignment_state: "active",
+              revision: ledgerSeq,
+            },
+          ]
+        : [];
+    return json({ items, facts_seq: ledgerSeq, more: false });
+  }
   if (path === "/api/v1/snapshot")
-    return json({ event_seq: 1, tasks: [], projects: [], hosts: [], queue: [], decisions: [] });
+    return json({
+      event_seq: ledgerSeq,
+      tasks: [],
+      projects: [],
+      hosts: [],
+      queue: [],
+      decisions: [],
+    });
   if (path === "/api/v1/inbox")
     return json({
       items: [{ attention_id: "attention", kind: "action", status: "open", title: "Fixture" }],
@@ -156,6 +187,48 @@ try {
   assert(count("/api/v1/events") > 0, "global ledger stream remains active");
   assert(count("/api/v1/snapshot") > 0, "global host/project summary remains active");
   assert(count("/api/v1/inbox") > 0 && count("/api/v1/next-actions") > 0);
+
+  const board = page.locator('[data-issue-id="reconnect"]');
+  await board.getByRole("button", { name: issueTitle, exact: true }).waitFor();
+  const boardPath = "/api/v1/issues?board=true";
+  const historyPath = "/api/v1/conversation?limit=";
+  const quietReads = [count(boardPath), count(historyPath)] as const;
+  assert(
+    quietReads.every((n) => n > 0),
+    "fresh connection reads board and conversation",
+  );
+  const disconnect = async (change?: string) => {
+    const requestedAfter = ledgerSeq;
+    const resumed = page.waitForResponse(origin + `/api/v1/events?after=${requestedAfter}`);
+    const snapshot = page.waitForResponse(origin + "/api/v1/snapshot");
+    assert.equal(streams.size, 1);
+    for (const stream of streams) stream.end();
+    if (change) {
+      ledgerSeq++;
+      issueTitle = change;
+    }
+    await resumed;
+    await snapshot;
+  };
+  await disconnect();
+  assert.deepEqual(
+    [count(boardPath), count(historyPath)],
+    quietReads,
+    "quiet resume reuses ledger views",
+  );
+
+  await disconnect("Issue updated during disconnection");
+  await board.getByRole("button", { name: issueTitle, exact: true }).waitFor();
+  assert.equal(count(historyPath), quietReads[1], "issue replay leaves unrelated history alone");
+
+  // Expired coalesced notifications require a new, cursor-free baseline.
+  ledgerSeq++;
+  issueTitle = "Issue rebuilt after reset";
+  const fresh = page.waitForResponse(origin + "/api/v1/events");
+  for (const stream of streams) stream.end(`event: reset\ndata: {"event_seq":${ledgerSeq}}\n\n`);
+  await fresh;
+  await board.getByRole("button", { name: issueTitle, exact: true }).waitFor();
+  assert(count(historyPath) > quietReads[1], "reset rebuilds the conversation from its source");
 
   await navigate(page, "/diagnostics/main");
   const input = page.getByRole("textbox", { name: "消息", exact: true });
