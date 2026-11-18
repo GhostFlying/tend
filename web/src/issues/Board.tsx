@@ -171,7 +171,7 @@ export function IssueBoard({
         )
       : null;
     if (control && !control.closest("[inert]") && control.getClientRects().length) {
-      control.focus();
+      control.focus({ preventScroll: true });
     } else if (mobile) {
       mobileTabs.current
         ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')

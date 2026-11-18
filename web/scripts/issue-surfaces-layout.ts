@@ -1898,6 +1898,37 @@ async function checkBoardColumnWidths() {
           "the mobile column keeps its vertical reading position after rotation",
         );
         await page.screenshot({ path: join(output, "board-reading-position-390.png") });
+        const firstOngoingTitle = ongoingColumn.locator('[data-board-focus$=":title"]').first();
+        await firstOngoingTitle.focus();
+        await swipe(195, 560, 0, -280);
+        await page.waitForFunction(() => {
+          const title = document.activeElement;
+          const column = title?.closest('[aria-label="进行中列"]');
+          return (
+            title &&
+            column &&
+            title.getBoundingClientRect().bottom <= column.getBoundingClientRect().top
+          );
+        });
+        await waitForScrollToSettle(ongoingColumn);
+        const focusedReadingTop = await ongoingColumn.evaluate((column) => column.scrollTop);
+        for (const viewport of [
+          { width: 844, height: 390 },
+          { width, height: 844 },
+        ]) {
+          await resizeBoard(viewport.width, viewport.height);
+          assert(
+            await firstOngoingTitle.evaluate((button) => button === document.activeElement),
+            `the offscreen card keeps its logical focus at ${viewport.width}px`,
+          );
+        }
+        await waitForScrollToSettle(ongoingColumn);
+        assert.equal(
+          await ongoingColumn.evaluate((column) => column.scrollTop),
+          focusedReadingTop,
+          "restoring the focused card does not move the reader back to it",
+        );
+        await page.screenshot({ path: join(output, "board-focused-reading-position-390.png") });
         await activeTab.focus();
         await swipe(350, 350, -320, 0);
         const reviewTab = page.getByRole("tab", { name: /^待检查/, selected: true });
