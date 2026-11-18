@@ -95,7 +95,7 @@ tend agents concurrency history --issue issue-example --session native-session-e
 绑定；`delete` 要求组中已没有绑定。未绑定的 runtime 保持原准入行为。
 
 组内明确的临时 429/overload 每次减一，三十秒内合并降档，最后拥塞后冷却
-三十秒。最近三十分钟的有效观察中无拥塞、累计满载十五分钟、有成功 turn，
+三十秒。最近十五分钟的有效健康观察中无拥塞、累计确认满载至少八分钟、有成功 turn，
 并且仍有执行只因容量不足而等待，才加一。空闲、失联和停机不累计健康证明。
 修改参数保留学习值，仅按新的上下限截断；initial 不用于重置已有学习值。
 
