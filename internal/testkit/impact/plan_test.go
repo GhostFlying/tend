@@ -189,3 +189,22 @@ func TestGoExecutableChangeBuildsWebWithoutUnrelatedFrontendTests(t *testing.T) 
 		t.Fatal("missing embedded build accepted")
 	}
 }
+
+func TestReleasedRunnerFollowsServerAndFixtureChanges(t *testing.T) {
+	packages := append(dependencyFixture(), Package{ImportPath: module + "cmd/tend-server", Dir: "cmd/tend-server", Imports: []string{module + "internal/app"}})
+	for _, tc := range []struct {
+		file string
+		want bool
+	}{
+		{"internal/leaf/handler.go", true},
+		{"internal/e2e/testdata/rolling/model.py", true},
+		{"internal/protocol/request.go", true},
+		{"internal/leaf/handler_test.go", false},
+		{"docs/example.md", false},
+	} {
+		p := Select([]string{tc.file}, packages, false)
+		if got := p.Required()["runner-compatibility"]; got != tc.want {
+			t.Errorf("%s: released runner required=%t, want %t", tc.file, got, tc.want)
+		}
+	}
+}
