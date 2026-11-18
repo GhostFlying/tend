@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"time"
@@ -287,7 +289,6 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 	}
 	previous := row.Observation
-	observedRevision := row.ObservedRevision
 	manualRefresh := row.RefreshRequested
 	row.Observation.AttemptedAt = x.Now.UnixMilli()
 	row.Observation.Observer = "runner"
@@ -310,7 +311,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		interval = time.Hour
 	}
 	row.NextCheckAt = x.Now.Add(interval).UnixMilli()
-	fact, err := tx.PutDeliveryObservationFact(ctx, delivery, row.Observation)
+	fact, err := persistDeliveryObservation(ctx, x, tx, delivery, row.Observation)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -329,6 +330,7 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	row.Observation.RefreshPending = fact.Observation.RefreshPending
 	row.Observation.LastConflict = fact.Observation.LastConflict
+	row.Observation.PreviousHeadSHA = fact.Observation.PreviousHeadSHA
 	if !row.Observation.RefreshPending {
 		row.ObservedRevision = fact.FactRevision
 		row.NotificationPending = false
@@ -357,7 +359,6 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	events := []Event{}
 	if !row.Observation.RefreshPending && (changed || manualRefresh) {
-		events = appendRetiredDeliveryCandidate(events, item, row.Observation, fact.RetiredSince(observedRevision))
 		event := deliveryChanged(item, row.Observation)
 		event.Body["previous_state"] = fact.PreviousState
 		event.Body["previous_error_kind"] = fact.PreviousErrorKind
@@ -536,7 +537,6 @@ func fanoutDeliveryFacts(ctx context.Context, x *Exec, tx *store.Tx, ref *protoc
 			}
 			continue
 		}
-		events = appendRetiredDeliveryCandidate(events, item, row.Observation, fact.RetiredSince(row.ObservedRevision))
 		row.ObservedRevision = fact.FactRevision
 		row.NotificationPending = false
 		if row.Nonce == "" && !row.RefreshRequested {
@@ -576,17 +576,30 @@ func deliveryChanged(item protocol.WorkItem, o protocol.DeliveryObservation) Eve
 	return Event{ObjectType: "work_item", ObjectID: item.WorkItemID, ObjectVersion: item.Revision, Kind: "work_item.delivery_changed", Body: body}
 }
 
-// appendRetiredDeliveryCandidate publishes the displaced observation using the
-// current Issue reference and the historical provider facts.
-func appendRetiredDeliveryCandidate(events []Event, item protocol.WorkItem, current protocol.DeliveryObservation, retired *protocol.DeliveryObservation) []Event {
-	if retired == nil {
-		return events
+// persistDeliveryObservation keeps every displaced snapshot in the same
+// transaction as the provider result. Member generations only gate notices.
+func persistDeliveryObservation(ctx context.Context, x *Exec, tx *store.Tx, ref protocol.IssueDelivery, current protocol.DeliveryObservation) (store.DeliveryObservationFactRow, error) {
+	fact, err := tx.PutDeliveryObservationFact(ctx, ref, current)
+	if err != nil || fact.RetiredCandidate == nil {
+		return fact, err
 	}
-	previous := *retired
-	previous.WorkItemID, previous.DeliveryID = current.WorkItemID, current.DeliveryID
-	event := deliveryChanged(item, previous)
-	event.Kind = "work_item.delivery_candidate_retired"
-	return append(events, event)
+	history := protocol.IssueDeliveryView{
+		Delivery: ref, Observation: protocol.CanonicalDeliveryObservation(*fact.RetiredCandidate),
+	}
+	body, err := json.Marshal(map[string]any{"delivery_progress": history})
+	if err != nil {
+		return fact, err
+	}
+	seq, err := tx.InsertEvent(ctx, store.EventRow{
+		EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "delivery",
+		ObjectID:      fmt.Sprintf("%s:%s:%d", ref.Provider, ref.Repository, ref.Number),
+		ObjectVersion: fact.FactRevision, Kind: "work_item.delivery_candidate_retired",
+		BodyJSON: string(body), RequestID: x.Env.RequestID, TraceID: x.TraceID, CreatedAt: x.Now.UnixMilli(),
+	})
+	if err != nil {
+		return fact, err
+	}
+	return fact, tx.IndexRetiredDeliveryCandidate(ctx, ref, seq)
 }
 
 // RefreshDelivery invalidates an older query and requests one fresh read. It

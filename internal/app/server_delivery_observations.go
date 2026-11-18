@@ -402,7 +402,7 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	ref := protocol.IssueDelivery{Provider: protocol.IssueDeliveryProvider(provider), Repository: repo, Number: number}
 	var fact store.DeliveryObservationFactRow
 	if cached == nil {
-		fact, err = tx.PutDeliveryObservationFact(ctx, ref, shared)
+		fact, err = persistDeliveryObservation(ctx, x, tx, ref, shared)
 	} else {
 		fact, err = store.GetDeliveryObservationFact(ctx, tx.Q(), ref)
 	}
@@ -451,8 +451,7 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 			continue
 		}
 		manual := row.RefreshRequested
-		observedRevision := row.ObservedRevision
-		changed := observedRevision < fact.ChangedRevision
+		changed := row.ObservedRevision < fact.ChangedRevision
 		row.Observation = shared
 		row.Observation.WorkItemID = m.issue
 		row.Observation.DeliveryID = m.delivery
@@ -483,7 +482,6 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		if _, err = tx.Exec(ctx, `UPDATE observation_jobs SET status='finished',updated_at=? WHERE issue_id=? AND delivery_id=?`, now, m.issue, m.delivery); err != nil {
 			return Outcome{}, err
 		}
-		events = appendRetiredDeliveryCandidate(events, item, row.Observation, fact.RetiredSince(observedRevision))
 		event := deliveryChanged(item, row.Observation)
 		event.Body["previous_state"] = fact.PreviousState
 		event.Body["previous_error_kind"] = fact.PreviousErrorKind

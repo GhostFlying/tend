@@ -69,6 +69,7 @@ func (c DeliveryConflict) Matches(o DeliveryObservation) bool {
 // DeliveryObservation is independent of the work item's planning revision.
 type DeliveryObservation struct {
 	DeliverySnapshot
+	PreviousHeadSHA         string            `json:"previous_head_sha,omitempty"`
 	LastConflict            *DeliveryConflict `json:"last_conflict,omitempty"`
 	Observer                string            `json:"observer,omitempty"`
 	RetryCount              int               `json:"retry_count,omitempty"`

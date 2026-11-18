@@ -33,30 +33,17 @@ type DeliveryObservationFactRow struct {
 	FactRevision, ChangedRevision int64
 	PreviousState                 string
 	PreviousErrorKind             string
-	RetiredCandidate              *retiredDeliveryCandidate
+	ConflictEnded                 bool
+	RetiredCandidate              *protocol.DeliveryObservation
 }
 
 // The transition belongs to ChangedRevision and survives later checked-only
 // observations so every bounded notification batch sees the same predecessor.
 type deliveryObservationFactJSON struct {
 	protocol.DeliveryObservation
-	PreviousState     string                    `json:"previous_state,omitempty"`
-	PreviousErrorKind string                    `json:"previous_error_kind,omitempty"`
-	RetiredCandidate  *retiredDeliveryCandidate `json:"retired_candidate,omitempty"`
-}
-
-// retiredDeliveryCandidate is the last observed candidate displaced by this
-// provider fact. Keep it across checked-only reads until each Issue catches up.
-type retiredDeliveryCandidate struct {
-	Revision    int64                        `json:"revision"`
-	Observation protocol.DeliveryObservation `json:"observation"`
-}
-
-func (row DeliveryObservationFactRow) RetiredSince(revision int64) *protocol.DeliveryObservation {
-	if retired := row.RetiredCandidate; retired != nil && retired.Revision > revision {
-		return &retired.Observation
-	}
-	return nil
+	PreviousState     string `json:"previous_state,omitempty"`
+	PreviousErrorKind string `json:"previous_error_kind,omitempty"`
+	ConflictEnded     bool   `json:"conflict_ended,omitempty"`
 }
 
 type deliveryObservationQuery struct {
@@ -139,7 +126,7 @@ func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.Iss
 	}
 	fact.Observation = stored.DeliveryObservation
 	fact.PreviousState, fact.PreviousErrorKind = stored.PreviousState, stored.PreviousErrorKind
-	fact.RetiredCandidate = stored.RetiredCandidate
+	fact.ConflictEnded = stored.ConflictEnded
 	fact.Observation.WorkItemID, fact.Observation.DeliveryID, fact.Observation.Generation = "", "", 0
 	fact.Observation.RefreshPending = pending
 	if fact.Observation.State == "" {
@@ -177,32 +164,44 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 	if observation.State == "" {
 		observation.State = "unknown"
 	}
-	observation.LastConflict = prior.Observation.LastConflict
-	if observation.ErrorKind == "" && observation.State == "open" && observation.Mergeability == "conflicting" &&
-		observation.CheckedAt > 0 && observation.HeadSHA != "" && (observation.BaseSHA != "" || observation.TargetSHA != "") &&
-		(observation.LastConflict == nil || !observation.LastConflict.Matches(prior.Observation) || prior.Observation.State != "open" ||
-			!observation.LastConflict.Matches(observation) || prior.Observation.Mergeability == "mergeable") {
-		observation.LastConflict = &protocol.DeliveryConflict{
-			HeadSHA: observation.HeadSHA, BaseSHA: observation.BaseSHA, TargetSHA: observation.TargetSHA,
-			Observer: observation.Observer, CheckedAt: observation.CheckedAt, Revision: prior.FactRevision + 1,
+	previous := prior.Observation
+	replaced := observation.ErrorKind == "" && deliveryCandidateMoved(previous, observation)
+	fact := DeliveryObservationFactRow{
+		FactRevision: prior.FactRevision + 1, ChangedRevision: prior.ChangedRevision,
+		PreviousState: prior.PreviousState, PreviousErrorKind: prior.PreviousErrorKind,
+		ConflictEnded: prior.ConflictEnded,
+	}
+	observation.PreviousHeadSHA = previous.PreviousHeadSHA
+	if previous.HeadSHA != observation.HeadSHA {
+		observation.PreviousHeadSHA = ""
+		if replaced {
+			observation.PreviousHeadSHA = previous.HeadSHA
 		}
 	}
-	fact := DeliveryObservationFactRow{Observation: observation, FactRevision: prior.FactRevision + 1, ChangedRevision: prior.ChangedRevision, PreviousState: prior.PreviousState, PreviousErrorKind: prior.PreviousErrorKind, RetiredCandidate: prior.RetiredCandidate}
-	if !reflect.DeepEqual(prior.Observation.DeliverySnapshot, observation.DeliverySnapshot) || prior.Observation.ErrorKind != observation.ErrorKind || prior.Observation.RetryAt > 0 && observation.RetryAt == 0 {
+	observation.LastConflict = previous.LastConflict
+	if observation.ErrorKind == "" && (replaced || observation.State == "closed" ||
+		observation.State == "merged" || observation.Mergeability == "mergeable") {
+		fact.ConflictEnded = true
+	}
+	if observation.ErrorKind == "" && observation.State == "open" && observation.Mergeability == "conflicting" &&
+		observation.CheckedAt > 0 && observation.HeadSHA != "" && (observation.BaseSHA != "" || observation.TargetSHA != "") &&
+		(fact.ConflictEnded || observation.LastConflict == nil || !observation.LastConflict.Matches(observation)) {
+		observation.LastConflict = &protocol.DeliveryConflict{
+			HeadSHA: observation.HeadSHA, BaseSHA: observation.BaseSHA, TargetSHA: observation.TargetSHA,
+			Observer: observation.Observer, CheckedAt: observation.CheckedAt, Revision: fact.FactRevision,
+		}
+		fact.ConflictEnded = false
+	}
+	if replaced && previous.CheckedAt > 0 {
+		previous.RefreshPending = false
+		fact.RetiredCandidate = &previous
+	}
+	if !reflect.DeepEqual(previous.DeliverySnapshot, observation.DeliverySnapshot) || previous.ErrorKind != observation.ErrorKind || previous.RetryAt > 0 && observation.RetryAt == 0 {
 		fact.ChangedRevision = fact.FactRevision
-		fact.PreviousState, fact.PreviousErrorKind = prior.Observation.State, prior.Observation.ErrorKind
+		fact.PreviousState, fact.PreviousErrorKind = previous.State, previous.ErrorKind
 	}
-	previous := prior.Observation
-	if observation.ErrorKind == "" && observation.HeadSHA != "" && previous.HeadSHA != "" &&
-		previous.CheckedAt > 0 && (observation.HeadSHA != previous.HeadSHA ||
-		observation.BaseSHA != previous.BaseSHA || observation.TargetSHA != previous.TargetSHA) {
-		// Keep the last successful snapshot and its original observation time.
-		// A later failed attempt cannot turn the prior CI into a failed check.
-		previous.RefreshPending, previous.ErrorKind = false, ""
-		previous.ErrorMessage = ""
-		fact.RetiredCandidate = &retiredDeliveryCandidate{Revision: fact.FactRevision, Observation: previous}
-	}
-	raw, err := json.Marshal(deliveryObservationFactJSON{DeliveryObservation: observation, PreviousState: fact.PreviousState, PreviousErrorKind: fact.PreviousErrorKind, RetiredCandidate: fact.RetiredCandidate})
+	fact.Observation = observation
+	raw, err := json.Marshal(deliveryObservationFactJSON{DeliveryObservation: observation, PreviousState: fact.PreviousState, PreviousErrorKind: fact.PreviousErrorKind, ConflictEnded: fact.ConflictEnded})
 	if err != nil {
 		return fact, err
 	}
@@ -222,6 +221,22 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		return fact, fmt.Errorf("store: put delivery fact: %w", err)
 	}
 	return fact, nil
+}
+
+func deliveryCandidateMoved(previous, current protocol.DeliveryObservation) bool {
+	return previous.HeadSHA != "" && current.HeadSHA != "" &&
+		(previous.HeadSHA != current.HeadSHA ||
+			previous.BaseSHA != "" && current.BaseSHA != "" && previous.BaseSHA != current.BaseSHA ||
+			previous.TargetSHA != "" && current.TargetSHA != "" && previous.TargetSHA != current.TargetSHA)
+}
+
+// IndexRetiredDeliveryCandidate links the shared provider event to the Issues
+// that referenced this PR when the replacement was recorded.
+func (t *Tx) IndexRetiredDeliveryCandidate(ctx context.Context, ref protocol.IssueDelivery, seq int64) error {
+	_, err := t.Exec(ctx, `INSERT INTO issue_delivery_candidate_history(issue_id,event_seq,delivery_id)
+ SELECT issue_id,?,MIN(delivery_id) FROM server_delivery_references
+ WHERE provider=? AND repository=? AND number=? GROUP BY issue_id`, seq, ref.Provider, ref.Repository, ref.Number)
+	return err
 }
 
 // ListDeliveryObservations projects only currently registered references.

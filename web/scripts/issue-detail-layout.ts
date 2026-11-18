@@ -657,9 +657,14 @@ try {
           json: { operation: { status: "succeeded", result: issueView.progress } },
         });
       });
-      await page.route(`**/api/v1/issues/${issue.issue_id}/deliveries`, (route) =>
-        route.fulfill({ json: { issue_id: issue.issue_id, items: [current] } }),
-      );
+      let releaseDelivery = () => {};
+      const delayedDelivery = new Promise<void>((resolve) => {
+        releaseDelivery = resolve;
+      });
+      await page.route(`**/api/v1/issues/${issue.issue_id}/deliveries`, async (route) => {
+        await delayedDelivery;
+        await route.fulfill({ json: { issue_id: issue.issue_id, items: [current] } });
+      });
       await page.route(`**/api/v1/issues/${issue.issue_id}/activity`, (route) =>
         route.fulfill({
           json: {
@@ -683,6 +688,24 @@ try {
       await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
       assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
       const progress = page.locator("[data-issue-progress]");
+      await progress.getByRole("button", { name: "编辑", exact: true }).click();
+      const editor = page.getByRole("dialog", { name: "编辑当前进展", exact: true });
+      const chooser = editor.getByLabel("关联候选");
+      const firstCandidate = chooser.getByRole("option", {
+        name: `sample/repo #343 · ${head.slice(0, 12)}`,
+        exact: true,
+      });
+      const nextStep = editor.getByRole("textbox", { name: "下一步", exact: true });
+      assert.equal(await firstCandidate.count(), 0);
+      await nextStep.fill("继续验证原候选");
+      releaseDelivery();
+      await firstCandidate.waitFor({ state: "attached" });
+      assert.equal(await chooser.inputValue(), "original");
+      assert.equal(await nextStep.inputValue(), "继续验证原候选");
+      await editor.getByRole("button", { name: "保存进展", exact: true }).click();
+      await editor.waitFor({ state: "hidden" });
+      assert.deepEqual(savedProgress?.delivery, originalBinding);
+
       await progress.getByText("检测到合并冲突", { exact: false }).waitFor();
       await progress.getByText("GitHub · 服务端观察", { exact: false }).waitFor();
       await progress
@@ -692,14 +715,6 @@ try {
       assert.equal(await progress.getByText("已看到冲突", { exact: false }).count(), 0);
       assert.equal(await page.locator("vite-error-overlay").count(), 0);
       await progress.screenshot({ path: join(output, `delivery-conflict-${width}.png`) });
-
-      await progress.getByRole("button", { name: "编辑", exact: true }).click();
-      const editor = page.getByRole("dialog", { name: "编辑当前进展", exact: true });
-      assert.equal(await editor.getByLabel("关联候选").inputValue(), "original");
-      await editor.getByRole("textbox", { name: "下一步", exact: true }).fill("继续验证原候选");
-      await editor.getByRole("button", { name: "保存进展", exact: true }).click();
-      await editor.waitFor({ state: "hidden" });
-      assert.deepEqual(savedProgress?.delivery, originalBinding);
 
       for (const [action, label] of [
         ["seen", "已看到冲突"],
@@ -728,7 +743,16 @@ try {
           ...original.observation,
           head_sha: next,
           base_sha: target,
-          mergeability: "mergeable",
+          mergeability: "conflicting",
+          previous_head_sha: head,
+          last_conflict: {
+            head_sha: next,
+            base_sha: target,
+            target_sha: target,
+            observer: "server",
+            revision: 4,
+            checked_at: now,
+          },
           ci: { head_sha: next, state: "running", checks: [] },
         },
       };
@@ -740,6 +764,7 @@ try {
       await progress.getByText("历史进展", { exact: true }).waitFor();
       await progress.getByText("已推送新候选", { exact: false }).waitFor();
       await progress.locator(`code[title="${next}"]`).waitFor();
+      await progress.getByText("检测到合并冲突", { exact: false }).waitFor();
       await progress.getByText("当前候选的提交 CI · 检查进行中").waitFor();
       assert.equal(await progress.getByText("已开始处理", { exact: false }).count(), 0);
       await page

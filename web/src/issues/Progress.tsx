@@ -19,6 +19,19 @@ function retainCandidate(delivery: IssueDeliveryProgress): IssueDeliveryProgress
   return candidate;
 }
 
+function candidateKey({ delivery, observation }: IssueDeliveryView) {
+  return JSON.stringify([
+    delivery.delivery_id,
+    delivery.provider,
+    delivery.repository,
+    delivery.number,
+    observation.head_sha,
+    observation.base_sha,
+    observation.target_sha,
+    observation.mergeability === "conflicting" ? observation.last_conflict?.revision : undefined,
+  ]);
+}
+
 export function ProgressEditor({
   issue,
   deliveries,
@@ -31,18 +44,22 @@ export function ProgressEditor({
   const { client } = useServices();
   const operation = useDurableOp(client, `issue-progress:${issue.issue_id}`);
   const [baseline, setBaseline] = useState(issue);
-  const [candidates] = useState(() =>
-    (deliveries ?? []).filter(
-      ({ observation: o }) =>
-        o.state === "open" && o.head_sha && o.checked_at && (o.base_sha || o.target_sha),
-    ),
+  const candidates = (deliveries ?? []).filter(
+    ({ observation: o }) =>
+      o.state === "open" && o.head_sha && o.checked_at && (o.base_sha || o.target_sha),
   );
   const retained = baseline.progress?.delivery;
-  const [candidateChoice, setCandidateChoice] = useState(retained ? "original" : "");
+  const [selection, setSelection] = useState<IssueDeliveryView | null>();
   const [action, setAction] = useState("");
-  const selection = candidates.find(
-    ({ delivery }) => `current:${delivery.delivery_id}` === candidateChoice,
-  );
+  const candidateChoice = selection
+    ? candidateKey(selection)
+    : selection === null || !retained
+      ? ""
+      : "original";
+  const options =
+    selection && !candidates.some((item) => candidateKey(item) === candidateChoice)
+      ? [...candidates, selection]
+      : candidates;
   const conflict =
     selection?.observation.mergeability === "conflicting"
       ? selection.observation.last_conflict
@@ -134,14 +151,19 @@ export function ProgressEditor({
           readOnly={operation.pending || operation.busy}
         />
       </label>
-      {(retained || candidates.length > 0) && !original ? (
+      {(retained || options.length > 0) && !original ? (
         <label>
           关联候选
           <select
             value={candidateChoice}
             disabled={operation.busy}
             onChange={(e) => {
-              setCandidateChoice(e.target.value);
+              const value = e.target.value;
+              setSelection(
+                value === "original"
+                  ? undefined
+                  : (options.find((item) => candidateKey(item) === value) ?? null),
+              );
               setAction("");
             }}
           >
@@ -151,9 +173,9 @@ export function ProgressEditor({
                 保留原候选 · {candidateLabel(retained)} · {retained.head_sha.slice(0, 12)}
               </option>
             ) : null}
-            {candidates.map(({ delivery, observation }) => (
-              <option value={`current:${delivery.delivery_id}`} key={delivery.delivery_id}>
-                {candidateLabel(delivery)} · {observation.head_sha?.slice(0, 12)}
+            {options.map((item) => (
+              <option value={candidateKey(item)} key={candidateKey(item)}>
+                {candidateLabel(item.delivery)} · {item.observation.head_sha?.slice(0, 12)}
               </option>
             ))}
           </select>
