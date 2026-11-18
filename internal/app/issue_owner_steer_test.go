@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,6 +72,20 @@ func TestIssueOwnerSteerRevocationAndReceipt(t *testing.T) {
 		t.Helper()
 		var receipt protocol.IssueOwnerSteerView
 		if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+			activity, err := views.IssueActivity(ctx, tx.Q(), issue.IssueID, 0)
+			if err != nil {
+				return err
+			}
+			offset := slices.IndexFunc(activity.Items, func(entry protocol.IssueActivityEntry) bool {
+				return entry.Block != nil && entry.Block.Trigger.MessageID == id
+			})
+			if offset < 0 {
+				t.Fatalf("missing urgent activity for %s", id)
+			}
+			entry := activity.Items[offset]
+			if entry.Author != "操作员 · "+owner.Subject || entry.Block.Trigger.IssueOwnerSteer == nil || entry.Block.Trigger.IssueOwnerSteer.Status != want {
+				t.Fatalf("urgent activity author or receipt mismatch: %+v", entry)
+			}
 			public, err := views.OwnerIssueMessage(ctx, tx.Q(), id)
 			if err != nil {
 				return err
@@ -85,6 +100,7 @@ func TestIssueOwnerSteerRevocationAndReceipt(t *testing.T) {
 		}
 		return receipt
 	}
+	read(receipt.MessageID, "queued")
 	claim := func(supported bool) IssueOwnerSteerDispatch {
 		t.Helper()
 		d, err := h.app.ClaimIssueOwnerSteer(ctx, turn.RequestID, as.RunID, turn.ThreadID, turn.TurnID, supported)
@@ -171,6 +187,12 @@ func TestIssueOwnerSteerAuthorizationAndUnknownRecovery(t *testing.T) {
 	if r := replay("unknown"); r.Reason != "no_consumption_receipt" || r.NativeItemID != "" {
 		t.Fatal(r)
 	}
+	if err := h.app.RecordIssueOwnerSteerAnswer(ctx, receipt.MessageID, "accepted", "waiting_safe_boundary"); err != nil {
+		t.Fatal(err)
+	}
+	if r := replay("unknown"); r.Reason != "no_consumption_receipt" || r.AcceptedAt == 0 || r.NativeItemID != "" {
+		t.Fatal("late acknowledgement must remain distinct from consumption after the turn ends", r)
+	}
 	if again, err := h.app.ClaimIssueOwnerSteer(ctx, turn.RequestID, as.RunID, turn.ThreadID, turn.TurnID, true); err != nil || again.MessageID != "" {
 		t.Fatal("uncertain input was offered again", again, err)
 	}
@@ -226,5 +248,48 @@ func TestIssueOwnerSteerRetainsDelegatedMainSender(t *testing.T) {
 	}
 	if allowed, err := h.app.OwnerMessageAuthority(ctx, receipt.MessageID); err != nil || allowed {
 		t.Fatal("routed notice gained independent owner authority", allowed, err)
+	}
+}
+
+func TestIssueOwnerSteerRejectsMediaAndEmptyText(t *testing.T) {
+	ctx := t.Context()
+	h, _, issue, as, _ := reviewManagerAssignment(t)
+	startHostedIssueReview(t, h, issue)
+	uploaded, err := h.app.UploadConversationAttachment(ctx, owner, h.ids.New(protocol.PrefixRequest), "limits.txt", "text/plain", strings.NewReader("Release constraints"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file protocol.ConversationAttachment
+	if err := json.Unmarshal(uploaded.Result, &file); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		payload protocol.SubmitMessagePayload
+	}{
+		{"image only", protocol.SubmitMessagePayload{Images: []protocol.ConversationImageInput{testConversationImage(t)}}},
+		{"text and attachment", protocol.SubmitMessagePayload{Body: "See the attached limits", Attachments: []string{file.FileID}}},
+		{"blank text", protocol.SubmitMessagePayload{Body: "  \n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op := h.exec(owner, h.env("conversation.submit_message", protocol.Target{Type: "conversation"}, tc.payload, nil), SubmitMessage{})
+			if op.Status != protocol.OpAccepted {
+				t.Fatal(op)
+			}
+			var message struct {
+				ID string `json:"message_id"`
+			}
+			if err := json.Unmarshal(op.Result, &message); err != nil {
+				t.Fatal(err)
+			}
+			linkIssueSteerSource(t, h, issue.IssueID, message.ID)
+			env := urgentTestEnvelope(t, h, issue.IssueID, as.RunID, message.ID, "")
+			if op, err := h.app.Execute(ctx, owner, env, SteerIssueOwner{}); err != nil || op.Error == nil || op.Error.Code != protocol.CodeInvalidRequest {
+				t.Fatal("partial urgent content was accepted", op, err)
+			}
+		})
+	}
+	if h.count("issue_owner_steers") != 0 || h.count("manager_native_requests") != 0 {
+		t.Fatal("unsupported source produced an urgent queue entry")
 	}
 }

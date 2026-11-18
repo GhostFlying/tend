@@ -136,6 +136,22 @@ export function OutgoingRow({
   );
 }
 
+export function UrgentMessage({ item, author }: { item: ConversationItem; author?: string }) {
+  const steer = item.issue_owner_steer;
+  if (!steer) return null;
+  const sender = steer.sender.kind === "main_agent" ? "主 Agent" : "操作员";
+  const subject = steer.sender.subject;
+  return (
+    <section data-scroll-id={item.message_id} aria-label="紧急投递">
+      <div className={styles.state}>{author ?? (subject ? `${sender} · ${subject}` : sender)}</div>
+      <p className={styles.state} role="status">
+        {issueOwnerSteerNotice(steer)}
+      </p>
+      <Markdown text={item.body ?? ""} />
+    </section>
+  );
+}
+
 export function AgentTurn({
   entry,
   proseClassName,
@@ -281,18 +297,6 @@ const AgentItem = memo(function AgentItem({
   onToolOpenChange(id: string, open: boolean): void;
 }) {
   const status = item.assistant_state;
-  if (item.issue_owner_steer) {
-    return (
-      <section id={id} hidden={hidden} data-scroll-id={item.message_id} aria-label="紧急投递">
-        <p className={styles.state} role="status">
-          {issueOwnerSteerNotice(item.issue_owner_steer)}
-        </p>
-        <div className={proseClassName}>
-          <Markdown text={item.body ?? ""} />
-        </div>
-      </section>
-    );
-  }
   if (item.author === "external")
     return (
       <div

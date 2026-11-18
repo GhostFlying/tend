@@ -11,7 +11,14 @@ import { ArrowDown } from "../shell/icons.tsx";
 import { LiveStatus } from "../ui/LiveStatus.tsx";
 import { conversationStatus } from "../ui/activityStatus.ts";
 import { useStore } from "../state/store.ts";
-import { AgentTurn, Divider, OutgoingRow, OwnerMessage, SystemMessage } from "./Messages.tsx";
+import {
+  AgentTurn,
+  Divider,
+  OutgoingRow,
+  OwnerMessage,
+  UrgentMessage,
+  SystemMessage,
+} from "./Messages.tsx";
 import { buildEntries, processing } from "./model.ts";
 import styles from "./Transcript.module.css";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
@@ -235,6 +242,8 @@ export function Transcript({ visible }: { visible: boolean }) {
                 return <SystemMessage key={e.key} item={e.item} scrollID={e.key} />;
               case "owner":
                 return <OwnerMessage key={e.key} item={e.item} />;
+              case "urgent":
+                return <UrgentMessage key={e.key} item={e.item} />;
               case "outgoing":
                 return <OutgoingRow key={e.key} message={e.message} queue={queue} />;
               case "agent":

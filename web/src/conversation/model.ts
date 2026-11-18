@@ -42,6 +42,7 @@ export type Entry =
   | { kind: "divider"; key: string; at: number }
   | { kind: "system"; key: string; item: ConversationItem }
   | { kind: "owner"; key: string; item: ConversationItem }
+  | { kind: "urgent"; key: string; item: ConversationItem }
   /** A message of this device that tend has not shown in the conversation yet. */
   | { kind: "outgoing"; key: string; message: OutgoingMessage }
   /** What the main agent did for one owner message or ledger event: tool uses and replies. */
@@ -76,6 +77,11 @@ export function buildEntries(
   for (const it of items) {
     const at = Date.parse(it.created_at);
     if (it.control) triggers.set(it.message_id, it);
+    if (it.issue_owner_steer) {
+      stamp(at, it.message_id);
+      entries.push({ kind: "urgent", key: it.message_id, item: it });
+      continue;
+    }
     if (it.author === "system") {
       triggers.set(it.message_id, it);
       stamp(at, it.message_id);

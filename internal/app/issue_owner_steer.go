@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -51,6 +52,13 @@ func (SteerIssueOwner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	}
 	if sourceRevision != p.ExpectedSourceRevision || withdrawn {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "urgent source changed or was withdrawn")
+	}
+	textOnly, err := isIssueSteerTextSource(ctx, tx.Q(), source)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !textOnly {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "urgent delivery requires a nonempty text-only original without images or attachments")
 	}
 	if sender.Kind == protocol.PrincipalMainAgent {
 		admitted, err := mainExecutionSourceAdmitted(ctx, tx.Q(), x.ownerExecutionID, source.MessageID)
@@ -196,6 +204,16 @@ func issueSteerSource(ctx context.Context, q store.Querier, issue, id string) (s
 	}
 	msg, err := store.GetMessage(ctx, q, id)
 	return msg, revision, withdrawn, err
+}
+
+func isIssueSteerTextSource(ctx context.Context, q store.Querier, source store.MessageView) (bool, error) {
+	if strings.TrimSpace(source.Body) == "" {
+		return false, nil
+	}
+	var media bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_images WHERE message_id=?)
+ OR EXISTS(SELECT 1 FROM conversation_message_attachments WHERE message_id=?)`, source.MessageID, source.MessageID).Scan(&media)
+	return !media, err
 }
 
 func issueSteerRunPrincipal(e store.HostedExecution) protocol.Principal {

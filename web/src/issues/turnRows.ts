@@ -8,6 +8,7 @@ export function activityTurnRows(
   rows: readonly TranscriptEntry[],
   block: IssueTranscriptBlock,
 ): ActivityRow[] {
+  if (block.trigger.issue_owner_steer) return [...rows];
   const key = `${block.position}:reply:${block.trigger.message_id}`;
   // Only this consumer reads and renders the independent process cursor.
   const publicRows: ActivityRow[] = [];

@@ -19,7 +19,13 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
 import { noOutbox } from "../queue/sendQueue.ts";
-import { AgentTurn, OwnerMessage, OutgoingRow, SystemMessage } from "../conversation/Messages.tsx";
+import {
+  AgentTurn,
+  OwnerMessage,
+  UrgentMessage,
+  OutgoingRow,
+  SystemMessage,
+} from "../conversation/Messages.tsx";
 import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/transcriptBlocks.ts";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
 import { Chevron } from "../shell/icons.tsx";
@@ -502,6 +508,7 @@ function ActivityBlock({
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
   const [depth, setDepth] = useEntryState(`activity-depth:${entry.id}`, 2);
   const block = entry.block!;
+  const replyAuthor = block.trigger.issue_owner_steer ? undefined : entry.author;
   const triggerNode = useRef<HTMLDivElement>(null);
   const processBlock = opened && extra.value && !extra.error ? extra.value : block;
   useEffect(() => {
@@ -595,6 +602,16 @@ function ActivityBlock({
                 <MessageReceipts item={row.item} />
               </div>
             );
+          case "urgent":
+            return (
+              <div
+                key={row.key}
+                ref={row.item.message_id === block.trigger.message_id ? triggerNode : undefined}
+                tabIndex={-1}
+              >
+                <UrgentMessage item={row.item} author={entry.author} />
+              </div>
+            );
           case "agent":
             return (
               <div
@@ -609,9 +626,9 @@ function ActivityBlock({
               >
                 <div className={styles.author}>
                   <span className={styles.avatar} aria-hidden="true">
-                    {Array.from(entry.author || "Agent")[0]}
+                    {Array.from(replyAuthor || "Agent")[0]}
                   </span>
-                  {entry.author || "Agent 身份未记录"}
+                  {replyAuthor || "Agent 身份未记录"}
                   {["owner", "external", "system"].includes(block.trigger.author) &&
                     row.items.some(
                       (item) =>

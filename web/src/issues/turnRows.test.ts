@@ -125,3 +125,43 @@ test("external trigger stands apart from the Agent and its public process", () =
       .flatMap((row) => row.items.map((item) => item.message_id)),
   ).toEqual([first.message_id]);
 });
+
+test("an urgent receipt stays separate from the public process and keeps actual replies", () => {
+  const value: IssueTranscriptBlock = {
+    ...block,
+    trigger: {
+      ...trigger,
+      author: "external",
+      issue_owner_steer: {
+        assignment_epoch: 1,
+        issue_id: "issue",
+        message_id: trigger.message_id,
+        run_id: "owner-run",
+        sender: { kind: "main_agent", subject: "main" },
+        source_message_id: "owner-original",
+        source_revision: 1,
+        status: "accepted",
+        task_id: "owner-task",
+        thread_id: "owner-thread",
+        turn_id: "owner-turn",
+      },
+    },
+    process: { items: [first], more: false },
+  };
+  const receipt = activityTurnRows(buildTranscriptEntries([value]), value);
+  expect(receipt.map((row) => row.kind)).toEqual(["divider", "urgent"]);
+
+  const reply = {
+    seq: 3,
+    message_id: "public-reply",
+    author: "main_agent",
+    kind: "message",
+    created_at: trigger.created_at,
+    reply_to: trigger.message_id,
+    body: "Public reply",
+  };
+  const replied = { ...value, items: [reply] };
+  const rows = activityTurnRows(buildTranscriptEntries([replied]), replied);
+  expect(rows.map((row) => row.kind)).toEqual(["divider", "urgent", "agent"]);
+  expect(rows.find((row) => row.kind === "agent")?.items).toEqual([reply]);
+});

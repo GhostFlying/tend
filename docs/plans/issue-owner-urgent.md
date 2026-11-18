@@ -28,3 +28,10 @@ queued ordinary original and the formal operation that revokes a business
 permission keep their own identities. An executor can consume a steer only
 at its safe input boundary. The receipt retains the native request
 identity and the matching user item when available.
+
+## Independent review follow-up
+
+1. Apply the exact source and turn checks in the transaction where the runner first claims a pending native request. Keep the original request and record a definite rejection when the fence closes before that claim. A started request retains its original reconciliation path.
+2. Record a positive native reply for the original request even after a caller timeout. A live matching turn returns to accepted. An ended turn retains an unknown consumption result and the confirmed acceptance.
+3. Accept only a complete nonempty text source. Return a clear error before queueing a source whose image or attachment would be omitted.
+4. Display the stored sender and steer receipt directly in the Issue activity and transcript. Recheck the reviewer’s native claim and late reply cases, the server activity projection and both browser widths.
