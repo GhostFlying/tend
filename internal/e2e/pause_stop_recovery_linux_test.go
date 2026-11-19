@@ -78,7 +78,7 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 
 	var mu sync.Mutex
 	var envelopes []protocol.Envelope
-	var holdReplay atomic.Bool
+	var holdReplay, failNextEventUpload, eventUploadFailed atomic.Bool
 	holdReplay.Store(restart)
 	net := &network{before: func(req *http.Request) error {
 		if req.Body == nil {
@@ -93,6 +93,10 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		var env protocol.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return err
+		}
+		if env.Operation == protocol.OpRunnerEvents && failNextEventUpload.CompareAndSwap(true, false) {
+			eventUploadFailed.Store(true)
+			return errors.New("injected disconnect while flushing original Run events")
 		}
 		if env.Operation == protocol.OpRunsYieldPause {
 			mu.Lock()
@@ -222,6 +226,41 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		t.Error("sent physical stop while the original child was alive", envelopes)
 	}
 	mu.Unlock()
+	if !restart {
+		setControl := func(mode protocol.ControlMode) {
+			t.Helper()
+			task := srv.task(taskID)
+			raw, err := json.Marshal(protocol.SetControlModePayload{Mode: mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: "control.set_mode", Target: protocol.Target{Type: "task", ID: taskID}, Payload: raw, ExpectedControlRevision: &task.ControlRevision}
+			if op, err := srv.app.Execute(ctx, owner, env, app.SetControlMode{}); err != nil || op.Status != protocol.OpSucceeded {
+				t.Fatal(op, err)
+			}
+		}
+		setControl(protocol.ControlHumanControl)
+		eventually(t, "pause reconciliation sees the owner's hold", func() bool {
+			clock.Advance(25 * time.Millisecond)
+			return workerQuestionLease(t, srv, as.RunID).Status == store.LeaseActive
+		})
+		observed := workers.present.Load()
+		// Keep the hold beyond the prior retry and permit more Hello cycles.
+		// During the hold none of them may run the stop observer.
+		heldUntil := time.Now().Add(500 * time.Millisecond)
+		eventually(t, "owner control stays in force across the pause retry", func() bool {
+			clock.Advance(25 * time.Millisecond)
+			return time.Now().After(heldUntil)
+		})
+		if workers.present.Load() != observed {
+			t.Fatal("pause observer ran during owner control")
+		}
+		setControl(protocol.ControlManaged)
+	}
+	if err := activeJournal.AppendEvent(ctx, as.RunID, protocol.RunEvent{Kind: "worker.observed", Body: json.RawMessage(`{"source":"pause-recovery-test"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	failNextEventUpload.Store(true)
 	var status unix.WaitStatus
 	if reaped, err := unix.Wait4(pid, &status, unix.WNOHANG, nil); err != nil || reaped != 0 {
 		t.Fatalf("original detached child was not reparented alive: %d %v", reaped, err)
@@ -232,6 +271,10 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 	eventually(t, "the real detached child exits and is reaped", func() bool {
 		reaped, err := unix.Wait4(pid, &status, unix.WNOHANG, nil)
 		return err == nil && reaped == pid
+	})
+	eventually(t, "the first event upload fails after physical closure", func() bool {
+		clock.Advance(25 * time.Millisecond)
+		return eventUploadFailed.Load()
 	})
 	if restart {
 		eventually(t, "server commits the pause before the interrupted runner acknowledges it", func() bool {

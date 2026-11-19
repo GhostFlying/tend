@@ -15,8 +15,8 @@ type pauseYield struct{}
 
 func (*pauseYield) Error() string { return "yield execution for Issue pause" }
 
-// pauseStopPending keeps the original attempt in PhasePausing. Only a
-// positively observed, still-present process set earns an automatic retry.
+// pauseStopPending retains the original Run while stop evidence or a durably
+// recorded pause receipt awaits reconciliation.
 type pauseStopPending struct{ err error }
 
 func (e *pauseStopPending) Error() string { return e.err.Error() }
@@ -24,8 +24,8 @@ func (e *pauseStopPending) Unwrap() error { return e.err }
 
 func (r *Runner) deferOwnedPauseStop(ctx context.Context, a *active, run journal.Run, stopErr error) error {
 	as := run.Assignment
-	if !as.PauseHandoffs || run.Held || run.Phase != journal.PhaseStarted ||
-		!errors.Is(stopErr, harness.ErrOwnedWorkerUnconfirmed) || !r.pauseStopAuthorized(a) {
+	if !as.PauseHandoffs || run.Held || run.Phase != journal.PhaseStarted || run.Attempts == 0 ||
+		!errors.Is(stopErr, harness.ErrOwnedWorkerUnconfirmed) || r.pauseStopDesired(a) != protocol.DesiredPaused {
 		return nil
 	}
 	if p, err := r.cfg.Journal.Pause(ctx, as.RunID); err != nil {
@@ -33,15 +33,23 @@ func (r *Runner) deferOwnedPauseStop(ctx context.Context, a *active, run journal
 	} else if p == nil {
 		return nil
 	}
-	if err := r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhasePausing); err != nil {
+	parked, err := r.cfg.Journal.TryBeginPauseStop(ctx, as.RunID, run.Attempts)
+	if err != nil {
 		return errors.Join(stopErr, err)
+	}
+	if !parked {
+		return nil
 	}
 	return &pauseStopPending{stopErr}
 }
 
 func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Run) error {
 	as := run.Assignment
-	if !r.pauseStopAuthorized(a) || run.Held || !as.PauseHandoffs || as.Role == protocol.RoleIssueManager ||
+	desired := r.pauseStopDesired(a)
+	if desired == protocol.DesiredHeld {
+		return &pauseStopPending{errHeld}
+	}
+	if desired != protocol.DesiredPaused || !as.PauseHandoffs || as.Role == protocol.RoleIssueManager ||
 		run.Attempts == 0 || assignmentWorker(as, r.cfg.Worker) != protocol.WorkerAppServer {
 		return &pauseStopPending{errors.New("runner: original app-server pause authority is unavailable")}
 	}
@@ -64,8 +72,19 @@ func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Ru
 			return &pauseStopPending{err}
 		}
 	}
-	if !r.pauseStopAuthorized(a) {
+	switch r.pauseStopDesired(a) {
+	case protocol.DesiredPaused:
+	case protocol.DesiredHeld:
+		return &pauseStopPending{errHeld}
+	default:
 		return nil
+	}
+	if run.Held {
+		// A fresh DesiredPaused after owner control is the explicit handback.
+		// Clear the local hold only once the original process is proven stopped.
+		if err := r.cfg.Journal.SetHeld(ctx, as.RunID, false); err != nil {
+			return err
+		}
 	}
 	if wait, err := r.cfg.Journal.ExternalWait(ctx, as.RunID); err != nil {
 		return err
@@ -75,10 +94,13 @@ func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Ru
 	return r.finishPause(ctx, as)
 }
 
-func (r *Runner) pauseStopAuthorized(a *active) bool {
+func (r *Runner) pauseStopDesired(a *active) protocol.RunDesired {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return a.desired == protocol.DesiredPaused && !a.retained
+	if a.retained {
+		return ""
+	}
+	return a.desired
 }
 
 type pauseRetry struct {
@@ -93,13 +115,23 @@ func (r *Runner) deferPauseRetry(runID string, pending *pauseStopPending) {
 		delete(r.pauseRetries, runID)
 		return
 	}
-	retry := r.pauseRetries[runID]
-	if errors.Is(pending, harness.ErrOwnedWorkerStillPresent) {
-		retry.delay = min(max(r.cfg.RetryDelay, 2*retry.delay), 30*time.Second)
-		retry.due = r.cfg.Now().Add(retry.delay)
+	if errors.Is(pending, harness.ErrOwnedWorkerStillPresent) || errors.Is(pending, errHeld) || isRetryable(pending) {
+		r.schedulePauseRetry(runID)
 	} else {
-		retry = pauseRetry{blocked: true}
+		r.pauseRetries[runID] = pauseRetry{blocked: true}
 	}
+}
+
+// schedulePauseRetry runs with r.mu held. A Hello observing owner control
+// must preserve a future check, even if its timer was just consumed.
+func (r *Runner) schedulePauseRetry(runID string) {
+	retry := r.pauseRetries[runID]
+	now := r.cfg.Now()
+	if retry.blocked || retry.due.After(now) {
+		return
+	}
+	retry.delay = min(max(r.cfg.RetryDelay, 2*retry.delay), 30*time.Second)
+	retry.due = now.Add(retry.delay)
 	r.pauseRetries[runID] = retry
 	select {
 	case r.pauseWake <- struct{}{}:
@@ -176,18 +208,16 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 	if pause == nil {
 		return errors.New("runner: original pause receipt unavailable")
 	}
+	flush := r.flushEvents
 	if as.Manager != nil {
-		if err := r.flushManagerEvents(ctx, as); err != nil {
-			return &completionPending{err}
-		}
-	} else {
-		if err := r.flushEvents(ctx, as); err != nil {
-			return &completionPending{err}
-		}
+		flush = r.flushManagerEvents
 	}
-	op, err := r.send(ctx, runCredential(as), &pause.Envelope)
+	if err := flush(ctx, as); err != nil {
+		return pauseReceiptError(err)
+	}
+	op, err := r.sendOnce(ctx, runCredential(as), &pause.Envelope)
 	if err != nil || op.Status != protocol.OpSucceeded {
-		return &completionPending{errors.Join(err, errors.New("runner: pause receipt awaits settlement"))}
+		return pauseReceiptError(errors.Join(err, errors.New("runner: pause receipt awaits settlement")))
 	}
 	if as.Manager != nil {
 		for _, p := range requests {
@@ -206,6 +236,13 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 		return &completionPending{err}
 	}
 	return r.finishJournal(ctx, as.RunID)
+}
+
+func pauseReceiptError(err error) error {
+	if isRetryable(err) {
+		return &pauseStopPending{err}
+	}
+	return &completionPending{err}
 }
 
 func (r *Runner) pauseReceiptReady(ctx context.Context, run journal.Run) (bool, error) {

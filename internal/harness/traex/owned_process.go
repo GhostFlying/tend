@@ -60,11 +60,8 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 		// reusing the PID must neither invalidate it nor receive a signal.
 		return nil
 	}
-	if closed, err := verifyExternalOwnedClose(ctx, spec, record); err != nil {
+	if closed, err := recordExternalOwnedClose(ctx, spec, record); err != nil || closed {
 		return err
-	} else if closed {
-		record.ReconciledCloseScope = externalExecutionBoundary
-		return saveOwnedWorkerProcess(spec, record)
 	}
 	if err := confirmDetachedProcessesStopped(record.Detached); err != nil {
 		return err
@@ -100,8 +97,17 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 	return saveOwnedWorkerProcess(spec, record)
 }
 
-// ObserveOwnedWorkerStop checks only the recorded process identities. After an
-// uncertain close an empty detached snapshot does not prove what was observed.
+func recordExternalOwnedClose(ctx context.Context, spec harness.WorkerSpec, record ownedWorkerProcess) (bool, error) {
+	closed, err := verifyExternalOwnedClose(ctx, spec, record)
+	if err != nil || !closed {
+		return closed, err
+	}
+	record.ReconciledCloseScope = externalExecutionBoundary
+	return true, saveOwnedWorkerProcess(spec, record)
+}
+
+// ObserveOwnedWorkerStop accepts verified external closure or checks the
+// recorded process set. An empty detached snapshot alone is insufficient.
 func (ws *Workers) ObserveOwnedWorkerStop(ctx context.Context, spec harness.WorkerSpec) error {
 	record, err := ws.ownedWorkerProcess(spec)
 	if err != nil {
@@ -115,7 +121,14 @@ func (ws *Workers) ObserveOwnedWorkerStop(ctx context.Context, spec harness.Work
 	if spec.Thread == "" || spec.Thread != record.ThreadID {
 		return errors.New("traex: original app-server thread identity is unavailable or changed")
 	}
-	if !record.closed() {
+	if record.closed() {
+		return codexenv.ConfirmExecutionClosed(ctx, spec.StateDir, "run:"+spec.RunID)
+	}
+	closed, err := recordExternalOwnedClose(ctx, spec, record)
+	if err != nil {
+		return err
+	}
+	if !closed {
 		if len(record.Detached) == 0 {
 			return errors.New("traex: original detached process set is unavailable")
 		}

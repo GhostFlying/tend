@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/GhostFlying/tend/internal/harness"
-	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/runner/journal"
-	"github.com/GhostFlying/tend/internal/testkit"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +12,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/harness"
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
+	"github.com/GhostFlying/tend/internal/testkit"
 )
 
 type pauseWorkers struct {
@@ -178,6 +179,45 @@ func TestPauseHandoffPreservesAlreadyCompletedResultWithoutRestartingWorker(t *t
 	}
 	if results.Load() != 1 || workers.starts.Load() != 0 {
 		t.Fatal("known outcome was lost or rerun", results.Load(), workers.starts.Load())
+	}
+}
+
+func TestPauseHandoffCannotReplaceResultSavedAfterStartSnapshot(t *testing.T) {
+	ctx := t.Context()
+	clock := testkit.NewClock()
+	j, err := journal.Open(ctx, filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	as := protocol.Assignment{RunID: "original", TaskID: "task", Role: protocol.RoleImplement, PauseHandoffs: true}
+	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.NextAttempt(ctx, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	started, err := j.Run(ctx, as.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.RecordPause(ctx, as.RunID, &protocol.PauseHandoff{RequestID: "pause", IssueID: "issue", IssueRevision: 3, ControlRevision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	result := json.RawMessage(`{"result":{"report":{"body":"verified work"}}}`)
+	if err := j.WorkerDone(ctx, as.RunID, result); err != nil {
+		t.Fatal(err)
+	}
+	r := New(Config{Journal: j, Now: clock.Now})
+	if err := r.deferOwnedPauseStop(ctx, &active{desired: protocol.DesiredPaused}, started, harness.ErrOwnedWorkerUnconfirmed); err != nil {
+		t.Fatalf("completed Run entered pause recovery: %v", err)
+	}
+	got, err := j.Run(ctx, as.RunID)
+	if err != nil || got.Phase != journal.PhaseWorkerDone || string(got.WorkerResult) != string(result) {
+		t.Fatalf("completed result changed: phase=%s result=%s err=%v", got.Phase, got.WorkerResult, err)
 	}
 }
 
