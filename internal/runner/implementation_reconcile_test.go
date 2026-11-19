@@ -65,7 +65,7 @@ func submittedImplementationResult() harness.WorkerResult {
 	return harness.WorkerResult{Result: artifact, Summary: "original final summary"}
 }
 
-func implementationReconcileFixture(t *testing.T) (*Runner, protocol.Assignment, *implementationReconcileWorkers, *implementationReconcileSpaces, string) {
+func implementationReconcileFixture(t *testing.T, spec ...json.RawMessage) (*Runner, protocol.Assignment, *implementationReconcileWorkers, *implementationReconcileSpaces, string) {
 	t.Helper()
 	clock := testkit.NewClock()
 	path := filepath.Join(t.TempDir(), "journal.db")
@@ -75,6 +75,9 @@ func implementationReconcileFixture(t *testing.T) (*Runner, protocol.Assignment,
 	}
 	t.Cleanup(func() { _ = j.Close() })
 	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "original-result-run", LeaseID: "original-result-lease", TaskID: "original-result-task", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, PauseHandoffs: true, Spec: json.RawMessage(`{"deliverables":["report","files"]}`)}
+	if len(spec) != 0 {
+		as.Spec = spec[0]
+	}
 	if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +220,148 @@ func TestPauseSettlesOriginalImplementationResultAfterPhysicalStop(t *testing.T)
 			if env.Operation != protocol.OpRunsSubmitArtifact || env.Target.ID != as.RunID ||
 				json.Unmarshal(env.Payload, &artifact) != nil || !reflect.DeepEqual(&artifact, workers.result.Result) {
 				t.Fatal("physical pause discarded or changed the original result", env, artifact)
+			}
+		})
+	}
+}
+
+type pauseCollectionSpaces struct {
+	*implementationReconcileSpaces
+	entered  chan struct{}
+	canceled chan error
+}
+
+func (s *pauseCollectionSpaces) Collect(ctx context.Context, _ protocol.Assignment) (protocol.ArtifactPayload, error) {
+	s.entered <- struct{}{}
+	<-ctx.Done()
+	s.canceled <- context.Cause(ctx)
+	return protocol.ArtifactPayload{}, ctx.Err()
+}
+
+func TestRecoveredPauseCollectionReestablishesOriginalLease(t *testing.T) {
+	for _, control := range []protocol.RunDesired{protocol.DesiredStopped, protocol.DesiredHeld} {
+		t.Run(string(control), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			r, as, workers, spaces, _ := implementationReconcileFixture(t, json.RawMessage(`{"deliverables":["commit"]}`))
+			t.Cleanup(func() {
+				cancel()
+				r.wg.Wait()
+			})
+			pause := &protocol.PauseHandoff{RequestID: "original-pause", IssueID: "issue", IssueRevision: 2, ControlRevision: 1}
+			if err := r.cfg.Journal.RecordPause(ctx, as.RunID, pause); err != nil {
+				t.Fatal(err)
+			}
+			if parked, err := r.cfg.Journal.TryBeginPauseStop(ctx, as.RunID, 1); err != nil || !parked {
+				t.Fatal(parked, err)
+			}
+			mutable := &pauseCollectionSpaces{
+				implementationReconcileSpaces: spaces,
+				entered:                       make(chan struct{}, 2), canceled: make(chan error, 2),
+			}
+			r.cfg.Workspaces = mutable
+			observations := make(chan protocol.RunObserved, 3)
+			finals := make(chan string, 3)
+			desired := make(chan protocol.RunDesired, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				var env protocol.Envelope
+				if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+					t.Error(err)
+					return
+				}
+				var result any
+				switch env.Operation {
+				case protocol.OpRunnerHello:
+					var hello protocol.HelloPayload
+					if err := json.Unmarshal(env.Payload, &hello); err != nil || len(hello.Held) != 1 ||
+						hello.Held[0].RunID != as.RunID || hello.Held[0].LeaseID != as.LeaseID {
+						t.Error("Hello lost original lease identity", hello.Held, err)
+						return
+					}
+					observations <- hello.Held[0].Observed
+					result = protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{
+						{RunID: as.RunID, Verdict: protocol.VerdictContinue, Desired: protocol.DesiredPaused, PauseHandoff: pause},
+					}}
+				case protocol.OpRunnerHeartbeat:
+					var hb protocol.HeartbeatPayload
+					if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
+						hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+						t.Error("collection heartbeat did not track the original lease", hb.Runs, err)
+						return
+					}
+					d := <-desired
+					result = protocol.HeartbeatResult{LeaseTTLMillis: 60000, Runs: []protocol.LeaseState{
+						{RunID: as.RunID, Renewed: d == protocol.DesiredHeld, Desired: d, PauseHandoff: pause},
+					}}
+				default:
+					finals <- env.Operation
+				}
+				raw, _ := json.Marshal(result)
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: raw}})
+			}))
+			defer server.Close()
+			r.c.base, r.c.http = server.URL, server.Client()
+
+			if err := r.hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.wg.Wait()
+			saved, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+			if <-observations != protocol.RunUnknown || readErr != nil || saved.Phase != journal.PhaseWorkerDone ||
+				!saved.StoppedConfirmed || len(saved.WorkerResult) == 0 || len(mutable.entered) != 0 || len(finals) != 0 {
+				t.Fatal("pause observation performed workspace work or lost the result", saved, readErr)
+			}
+			select {
+			case <-r.reconcile:
+			default:
+				t.Fatal("stopped executor did not request fresh control for collection")
+			}
+			// Simulate a reply in flight from another read-only pause observation.
+			paused := as
+			paused.Desired = protocol.DesiredPaused
+			r.startWithControl(ctx, paused, r.cfg.Now(), true)
+			if r.lookup(as.RunID) != nil {
+				t.Fatal("read-only pause reply granted workspace execution")
+			}
+
+			if err := r.hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if <-observations != protocol.RunWaiting {
+				t.Fatal("collection renewal did not identify the stopped, waiting Run")
+			}
+			select {
+			case <-mutable.entered:
+			case <-ctx.Done():
+				t.Fatal("collection did not start under fresh control")
+			}
+			a := r.lookup(as.RunID)
+			r.mu.Lock()
+			tracked := a != nil && !a.pauseOnly && !a.reporting && r.cfg.Now().Before(a.deadline)
+			r.mu.Unlock()
+			if !tracked {
+				t.Fatal("collection is outside the normal lease watchdog")
+			}
+			desired <- control
+			r.heartbeat(ctx)
+			select {
+			case cause := <-mutable.canceled:
+				want := errStopped
+				if control == protocol.DesiredHeld {
+					want = errHeld
+				}
+				if !errors.Is(cause, want) {
+					t.Fatal("collection missed authoritative control", cause)
+				}
+			case <-ctx.Done():
+				t.Fatal("collection survived authoritative control")
+			}
+			if control == protocol.DesiredHeld {
+				desired <- protocol.DesiredStopped
+				r.heartbeat(ctx)
+			}
+			r.wg.Wait()
+			if workers.starts != 0 || len(finals) != 1 || <-finals != protocol.OpRunsRelease {
+				t.Fatal("collection after pause ran native work or replaced the original stopped path")
 			}
 		})
 	}

@@ -195,4 +195,22 @@ func TestPauseControlHelloPreservesLapsedLease(t *testing.T) {
 			t.Fatalf("control-only Hello changed the original lease or Run: lease=%+v, want=%+v, observed=%s", got, original, h.run(as.RunID).ObservedState)
 		}
 	}
+
+	// The stopped result has been recovered and needs workspace collection.
+	// Its fresh Hello may renew only the existing lease and preserve pause intent.
+	runtime.Sequence++
+	actions := h.count("plan_actions")
+	p := protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1, Held: []protocol.HeldRun{
+		{RunID: as.RunID, LeaseID: as.LeaseID, Observed: protocol.RunWaiting},
+	}}
+	op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, p, nil), Hello{})
+	var reply protocol.HelloResult
+	renewed := h.lease(as.RunID)
+	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &reply) != nil ||
+		len(reply.Runs) != 1 || reply.Runs[0].Verdict != protocol.VerdictContinue ||
+		reply.Runs[0].Desired != protocol.DesiredPaused || renewed.LeaseID != original.LeaseID ||
+		renewed.Status != store.LeaseActive || renewed.ExpiresAt <= original.ExpiresAt ||
+		h.run(as.RunID).ObservedState != protocol.RunWaiting || h.count("plan_actions") != actions {
+		t.Fatal("fresh collection control did not preserve the original paused Run", reply, renewed)
+	}
 }

@@ -159,6 +159,8 @@ type active struct {
 	// stopAttempt stops the current worker attempt, for example to pause
 	// the run; nil while no worker runs.
 	stopAttempt context.CancelCauseFunc
+	// stopCollection interrupts final workspace writes on owner takeover.
+	stopCollection context.CancelCauseFunc
 	// reporting marks a run that only sends its final report. It no
 	// longer writes to the workspace, so it is not fenced.
 	reporting bool
@@ -166,7 +168,7 @@ type active struct {
 	pauseOnly bool
 	// retained prevents local settlement from discarding reconciliation facts.
 	retained bool
-	// reconcileOnExit follows an authoritative control that superseded retention.
+	// reconcileOnExit asks Hello to recheck control after this executor exits.
 	reconcileOnExit bool
 	settlement      chan struct{}
 }
@@ -625,6 +627,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	}
 	held := make([]protocol.HeldRun, 0, len(runs))
 	byID := map[string]journal.Run{}
+	pauseObservations := map[string]bool{}
 	for _, run := range runs {
 		if run.Assignment.Manager != nil && protocol.RunnerProtocolSupported(run.Assignment.Protocol) {
 			r.controlMu.Lock()
@@ -637,6 +640,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		}
 		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: observed})
 		byID[run.Assignment.RunID] = run
+		pauseObservations[run.Assignment.RunID] = observed == protocol.RunUnknown
 	}
 	runtime, err := r.runtimeObservation(ctx)
 	if err != nil {
@@ -803,7 +807,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
 				return err
 			}
-			r.start(ctx, as, sent)
+			r.startWithControl(ctx, as, sent, pauseObservations[v.RunID])
 		case v.Verdict == protocol.VerdictStop:
 			if err := r.authorizeRetainedControl(ctx, v.RunID, false, func() error {
 				return r.cfg.Journal.AuthorizeRetainedStop(ctx, v.RunID, env.RequestID)
@@ -862,6 +866,9 @@ func (r *Runner) observed(ctx context.Context, run journal.Run) (protocol.RunObs
 	if run.Fenced {
 		return protocol.RunInterrupted, nil
 	}
+	if run.Phase == journal.PhaseWorkerDone && run.StoppedConfirmed && needsWorkspaceCollection(run.Assignment) {
+		return protocol.RunWaiting, nil
+	}
 	return protocol.RunRunning, nil
 }
 
@@ -893,6 +900,10 @@ func (r *Runner) lookup(runID string) *active {
 
 // start launches the executor of a journaled run unless one is running.
 func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt time.Time) {
+	r.startWithControl(ctx, as, renewedAt, false)
+}
+
+func (r *Runner) startWithControl(ctx context.Context, as protocol.Assignment, observedAt time.Time, pauseObservation bool) {
 	runID := as.RunID
 	if err := r.cfg.Journal.RecordExternalWait(ctx, as.RunID, as.ExternalWait); err != nil {
 		r.cfg.Log.ErrorContext(ctx, "external wait assignment not journaled", "run_id", as.RunID, "err", err)
@@ -912,7 +923,7 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		r.cfg.Log.ErrorContext(ctx, "run protocol unsupported; preserving assignment", "run_id", as.RunID, "protocol", as.Protocol)
 		return
 	}
-	deadline := r.authorizedDeadline(as.RunID, r.fenceDeadline(renewedAt))
+	deadline := r.authorizedDeadline(as.RunID, r.fenceDeadline(observedAt))
 	if !r.cfg.Now().Before(deadline) {
 		// The renewal is already too old to write on; reconcile first.
 		r.cfg.Log.WarnContext(ctx, "lease too old to start a run; reconciling", "run_id", runID)
@@ -929,21 +940,7 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		}
 		return
 	}
-	if a, ok := r.active[runID]; ok {
-		a.deadline = deadline
-		r.mu.Unlock()
-		if as.Desired != "" {
-			r.applyDesired(ctx, a, as.Desired, renewedAt)
-		}
-		return
-	}
 	pausing := journaled.Phase == journal.PhasePausing
-	retry := r.pauseRetries[runID]
-	if pausing && (retry.blocked || as.Desired != protocol.DesiredPaused) ||
-		as.Desired != protocol.DesiredStopped && retry.due.After(r.cfg.Now()) {
-		r.mu.Unlock()
-		return
-	}
 	pauseReceipt, err := r.pauseReceiptReady(ctx, journaled)
 	if err != nil {
 		r.mu.Unlock()
@@ -952,6 +949,29 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		return
 	}
 	pauseOnly := pausing || pauseReceipt
+	if pauseObservation && !pauseOnly {
+		// This Hello was sent for the previous journal phase. Its control
+		// response does not renew the original lease for workspace work.
+		r.mu.Unlock()
+		r.requestReconcile()
+		return
+	}
+	if a, ok := r.active[runID]; ok {
+		if !pauseObservation {
+			a.deadline = deadline
+		}
+		r.mu.Unlock()
+		if as.Desired != "" {
+			r.applyDesired(ctx, a, as.Desired, observedAt)
+		}
+		return
+	}
+	retry := r.pauseRetries[runID]
+	if pausing && (retry.blocked || as.Desired != protocol.DesiredPaused) ||
+		as.Desired != protocol.DesiredStopped && retry.due.After(r.cfg.Now()) {
+		r.mu.Unlock()
+		return
+	}
 	runCtx, cancel := context.WithCancelCause(ctx)
 	desired := as.Desired
 	if desired == "" {
@@ -1030,6 +1050,7 @@ func (r *Runner) applyDesired(ctx context.Context, a *active, desired protocol.R
 	prev := a.desired
 	a.desired = desired
 	stopAttempt := a.stopAttempt
+	stopCollection := a.stopCollection
 	r.mu.Unlock()
 	if desired == protocol.DesiredHeld && prev != desired {
 		// Journaled as soon as it is seen: the owner may hand the run
@@ -1051,8 +1072,13 @@ func (r *Runner) applyDesired(ctx context.Context, a *active, desired protocol.R
 		a.cancel(errStopped)
 	case desired == protocol.DesiredPaused && stopAttempt != nil:
 		stopAttempt(errPaused)
-	case desired == protocol.DesiredHeld && stopAttempt != nil:
-		stopAttempt(errHeld)
+	case desired == protocol.DesiredHeld:
+		if stopAttempt != nil {
+			stopAttempt(errHeld)
+		}
+		if stopCollection != nil {
+			stopCollection(errHeld)
+		}
 	}
 }
 
