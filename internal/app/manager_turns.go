@@ -78,6 +78,9 @@ func refreshManagerTasks(ctx context.Context, x *Exec, tx *store.Tx) error {
 }
 
 func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue string) error {
+	end := tx.ObserveCountedPhase(store.WriteIssueManagerRefresh)
+	count := 0
+	defer func() { end(count) }()
 	parked, err := store.ManagerUpgradeParked(ctx, tx.Q())
 	if err != nil {
 		return err
@@ -90,6 +93,7 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 	}
 	query += ` ORDER BY task_id`
 	ids, err := store.FollowupIDs(ctx, tx.Q(), query, args...)
+	count = len(ids)
 	if err != nil {
 		return err
 	}

@@ -132,9 +132,36 @@ func TestSettledTurnInterruptsItsMessage(t *testing.T) {
 	if err := h.app.PutMainTurn(ctx, store.MainTurn{RequestID: d.RequestID, MessageID: id, ThreadID: "th-1", TurnID: "turn-1", Status: store.TurnStarted}); err != nil {
 		t.Fatal(err)
 	}
+	var observation store.WriteObservation
+	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) { observation = o })(h.store)
 	changed := h.app.Changes().Wait()
 	if err := h.app.SettleOpenTurns(ctx, "th-1"); err != nil {
 		t.Fatal(err)
+	}
+	if observation.Source.Operation != "mainthread.settle_open_turns" {
+		t.Fatalf("settlement write source = %q", observation.Source.Operation)
+	}
+	wantItems := map[store.WritePhase]int{
+		store.WriteSettleTurns: 1, store.WriteSettleTools: 0,
+		store.WriteSettleMessages: 0, store.WriteSettleLogicalTurns: 0,
+	}
+	sawReceipts := false
+	t.Logf("settlement writer wait=%s callback=%s", observation.ConnectionWait, observation.Callback)
+	for _, phase := range observation.Phases {
+		if phase.Phase == store.WriteSettleNativeReceipts {
+			sawReceipts = true
+			t.Logf("%s duration=%s", phase.Phase, phase.Duration)
+		}
+		if expected, ok := wantItems[phase.Phase]; ok {
+			if phase.Items == nil || *phase.Items != expected {
+				t.Fatalf("write phase %s = %+v, want %d items", phase.Phase, phase, expected)
+			}
+			t.Logf("%s selected=%d duration=%s", phase.Phase, *phase.Items, phase.Duration)
+			delete(wantItems, phase.Phase)
+		}
+	}
+	if !sawReceipts || len(wantItems) != 0 {
+		t.Fatalf("settlement phases missing: receipts=%v counted=%v", sawReceipts, wantItems)
 	}
 	if got := h.messageStates(id); len(got) != 2 || got[1] != "interrupted" {
 		t.Errorf("states = %v, want processing then interrupted", got)

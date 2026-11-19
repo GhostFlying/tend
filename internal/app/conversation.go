@@ -919,13 +919,19 @@ func (a *App) TurnDelivery(ctx context.Context, threadID, turnID string) (store.
 // SettleOpenTurns marks a thread's running turns, and the tool uses still
 // running in its turns, as interrupted after its harness went away.
 func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
+	ctx = store.WithWriteOperation(ctx, "mainthread.settle_open_turns")
 	now := a.now().UnixMilli()
 	settled := 0
 	err := a.write(ctx, func(tx *store.Tx) error {
-		if err := markNativeReceiptsPending(ctx, tx, threadID, now); err != nil {
+		endReceipts := tx.ObservePhase(store.WriteSettleNativeReceipts)
+		err := markNativeReceiptsPending(ctx, tx, threadID, now)
+		endReceipts()
+		if err != nil {
 			return err
 		}
+		endTurns := tx.ObserveCountedPhase(store.WriteSettleTurns)
 		ids, err := tx.SettleOpenTurns(ctx, threadID, now)
+		defer endTurns(len(ids))
 		if err != nil {
 			return err
 		}
@@ -958,7 +964,10 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 				return err
 			}
 		}
+		endTurns(len(ids))
+		endTools := tx.ObserveCountedPhase(store.WriteSettleTools)
 		uses, err := tx.SettleToolUses(ctx, threadID, now)
+		defer endTools(len(uses))
 		if err != nil {
 			return err
 		}
@@ -967,7 +976,10 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 				return err
 			}
 		}
+		endTools(len(uses))
+		endMessages := tx.ObserveCountedPhase(store.WriteSettleMessages)
 		messages, err := tx.SettleAgentMessages(ctx, threadID)
+		defer endMessages(len(messages))
 		if err != nil {
 			return err
 		}
@@ -980,7 +992,10 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 				return err
 			}
 		}
+		endMessages(len(messages))
+		endLogicalTurns := tx.ObserveCountedPhase(store.WriteSettleLogicalTurns)
 		requests, err := store.FollowupIDs(ctx, tx.Q(), `SELECT e.request_id FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE t.thread_id=? AND t.status='interrupted' AND l.status IN ('processing','recovering') AND e.settled=0 AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)`, threadID)
+		defer endLogicalTurns(len(requests))
 		if err != nil {
 			return err
 		}
@@ -994,6 +1009,7 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 				return err
 			}
 		}
+		endLogicalTurns(len(requests))
 		settled = len(ids) + len(uses) + len(messages)
 		return nil
 	})
