@@ -74,6 +74,14 @@ const (
 	WriteManagerRefresh       WritePhase = "manager_refresh"
 	WriteMaintenance          WritePhase = "maintenance_settlement"
 	WriteClaimRefresh         WritePhase = "claim_manager_refresh"
+	WritePauseContinuations   WritePhase = "pause_continuations"
+	WriteExternalWaitRefresh  WritePhase = "external_wait_refresh"
+	WriteIssueManagerRefresh  WritePhase = "issue_manager_refresh"
+	WriteSettleNativeReceipts WritePhase = "settle_native_receipts"
+	WriteSettleTurns          WritePhase = "settle_open_turns"
+	WriteSettleTools          WritePhase = "settle_open_tools"
+	WriteSettleMessages       WritePhase = "settle_agent_messages"
+	WriteSettleLogicalTurns   WritePhase = "settle_logical_turns"
 	WriteClaimCandidates      WritePhase = "claim_candidates"
 	WriteClaimSelection       WritePhase = "claim_selection"
 	WriteClaimCandidateQuery  WritePhase = "claim_candidate_query"
@@ -88,6 +96,7 @@ const (
 type WritePhaseDuration struct {
 	Phase    WritePhase    `json:"phase"`
 	Duration time.Duration `json:"duration_ns"`
+	Items    *int          `json:"items,omitempty"`
 }
 
 // WriteObservation is emitted only after the transaction and connection end.
@@ -346,29 +355,61 @@ func WithWriteObserver(now func() time.Time, slow time.Duration, observe func(Wr
 // ObservePhase ends an inclusive fixed stage. Calling the returned function
 // more than once has no effect. A Tx is used by its callback sequentially.
 func (t *Tx) ObservePhase(phase WritePhase) func() {
-	c := t.observation
-	if c == nil {
+	if t.observation == nil {
 		return func() {}
 	}
+	end := t.observePhase(phase)
+	return func() { end(-1) }
+}
+
+// ObserveCountedPhase also records the number of items selected for the stage.
+// Selection can include items that need no change or were not reached on error.
+func (t *Tx) ObserveCountedPhase(phase WritePhase) func(int) {
+	return t.observePhase(phase)
+}
+
+func (t *Tx) observePhase(phase WritePhase) func(int) {
+	c := t.observation
+	if c == nil {
+		return func(int) {}
+	}
 	switch phase {
-	case WriteUsageQuotes, WriteUsageProjection, WriteReviewedContext, WriteApply, WritePersistOutcome, WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteClaimRefresh, WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan, WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
+	case WriteUsageQuotes, WriteUsageProjection, WriteReviewedContext, WriteApply, WritePersistOutcome,
+		WriteAttention, WriteFollowup, WriteManagerRefresh, WriteMaintenance, WriteClaimRefresh,
+		WritePauseContinuations, WriteExternalWaitRefresh, WriteIssueManagerRefresh,
+		WriteSettleNativeReceipts, WriteSettleTurns, WriteSettleTools, WriteSettleMessages, WriteSettleLogicalTurns,
+		WriteClaimCandidates, WriteClaimSelection, WriteClaimCandidateQuery, WriteClaimCandidateScan,
+		WriteClaimCandidateDecode, WriteClaimManagerQuery, WriteClaimManagerScan, WriteClaimManagerBuild:
 	default:
-		return func() {}
+		return func(int) {}
 	}
 	started := c.observer.now()
 	ended := false
-	return func() {
+	return func(items int) {
 		if ended {
 			return
 		}
 		ended = true
 		d := c.observer.now().Sub(started)
 		for i := range c.observation.Phases {
-			if c.observation.Phases[i].Phase == phase {
-				c.observation.Phases[i].Duration += d
-				return
+			p := &c.observation.Phases[i]
+			if p.Phase != phase {
+				continue
 			}
+			p.Duration += d
+			if items >= 0 {
+				if p.Items == nil {
+					p.Items = &items
+				} else {
+					*p.Items += items
+				}
+			}
+			return
 		}
-		c.observation.Phases = append(c.observation.Phases, WritePhaseDuration{Phase: phase, Duration: d})
+		p := WritePhaseDuration{Phase: phase, Duration: d}
+		if items >= 0 {
+			p.Items = &items
+		}
+		c.observation.Phases = append(c.observation.Phases, p)
 	}
 }

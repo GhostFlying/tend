@@ -18,7 +18,11 @@ func TestWriteObservationLogFields(t *testing.T) {
 		Source: store.WriteSource{Operation: "test.operation", RequestID: "test-request", TraceID: "test-trace"},
 		Stage:  "callback", Outcome: "error", Total: 2 * time.Second, Callback: time.Second,
 		ReaderPool: sql.DBStats{MaxOpenConnections: 8, OpenConnections: 6, InUse: 4, Idle: 2, WaitCount: 3, WaitDuration: time.Second, MaxIdleClosed: 5},
-		Phases:     []store.WritePhaseDuration{{Phase: store.WritePersistOutcome, Duration: time.Second}, {Phase: store.WriteAttention, Duration: 900 * time.Millisecond}},
+		Phases: []store.WritePhaseDuration{
+			{Phase: store.WritePersistOutcome, Duration: time.Second},
+			{Phase: store.WriteAttention, Duration: 900 * time.Millisecond},
+			{Phase: store.WriteExternalWaitRefresh, Duration: 125 * time.Millisecond, Items: new(0)},
+		},
 	})
 	var decoded map[string]json.RawMessage
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
@@ -32,12 +36,16 @@ func TestWriteObservationLogFields(t *testing.T) {
 	var phases []struct {
 		Phase    string `json:"phase"`
 		Duration int64  `json:"duration_ns"`
+		Items    *int   `json:"items"`
 	}
 	if err := json.Unmarshal(decoded["phases_inclusive"], &phases); err != nil {
 		t.Fatal(err)
 	}
-	if len(phases) != 2 || phases[0].Phase != "persist_outcome" || phases[0].Duration != int64(time.Second) || phases[1].Duration != int64(900*time.Millisecond) {
-		t.Errorf("phases = %+v", phases)
+	if len(phases) != 3 || phases[0].Phase != "persist_outcome" || phases[0].Duration != int64(time.Second) || phases[1].Duration != int64(900*time.Millisecond) {
+		t.Fatalf("phases = %+v", phases)
+	}
+	if phases[0].Items != nil || phases[2].Phase != "external_wait_refresh" || phases[2].Items == nil || *phases[2].Items != 0 {
+		t.Errorf("phase item counts = %+v", phases)
 	}
 	t.Log(output.String())
 }

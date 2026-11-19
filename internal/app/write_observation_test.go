@@ -134,8 +134,15 @@ func TestClaimWriteObservationIncludesFixedStages(t *testing.T) {
 		phases := map[store.WritePhase]time.Duration{}
 		for _, p := range o.Phases {
 			phases[p.Phase] = p.Duration
+			switch p.Phase {
+			case store.WritePauseContinuations, store.WriteExternalWaitRefresh, store.WriteIssueManagerRefresh:
+				if p.Items == nil || *p.Items != 0 {
+					t.Fatalf("empty claim did not record zero selected items for %s: %+v", p.Phase, p)
+				}
+				t.Logf("%s selected=%d duration=%s", p.Phase, *p.Items, p.Duration)
+			}
 		}
-		for _, phase := range []store.WritePhase{store.WriteClaimRefresh, store.WriteClaimCandidates, store.WriteClaimSelection} {
+		for _, phase := range []store.WritePhase{store.WriteClaimRefresh, store.WriteClaimCandidates, store.WriteClaimSelection, store.WritePauseContinuations, store.WriteExternalWaitRefresh, store.WriteIssueManagerRefresh} {
 			if phases[phase] <= 0 {
 				t.Fatalf("missing fixed claim stage %s: %+v", phase, o)
 			}
@@ -150,4 +157,43 @@ func TestClaimWriteObservationIncludesFixedStages(t *testing.T) {
 	if claims != 2 {
 		t.Fatalf("got %d claim observations, want both real applications", claims)
 	}
+}
+
+func TestClaimWriteObservationCountsOnlyDueStoppedExternalWait(t *testing.T) {
+	h, runtime, as, other := externalWaitFixture(t)
+	wait := waitForTask(t, h, as, other, 0)
+	var claim store.WriteObservation
+	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) {
+		if o.Source.Operation == protocol.OpRunnerClaim {
+			claim = o
+		}
+	})(h.store)
+	checkCount := func(want int) {
+		t.Helper()
+		for _, p := range claim.Phases {
+			if p.Phase != store.WriteExternalWaitRefresh || p.Items == nil {
+				continue
+			}
+			if *p.Items != want {
+				t.Fatalf("selected waits = %d, want %d", *p.Items, want)
+			}
+			t.Logf("claim wait=%s callback=%s, external wait selected=%d duration=%s", claim.ConnectionWait, claim.Callback, *p.Items, p.Duration)
+			return
+		}
+		t.Fatal("missing external wait phase")
+	}
+
+	next, ok := h.claimInputRun(runtime)
+	if !ok || next.TaskID != other || h.lease(as.RunID).Status != store.LeaseActive {
+		t.Fatal("unsettled wait changed claim or released its original lease", next)
+	}
+	checkCount(0)
+	if op := h.runAs(as, protocol.OpRunsYieldExternalWait, protocol.YieldExternalWaitPayload{WaitID: wait.WaitID}, YieldExternalWait{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	h.clock.Advance(5 * time.Second)
+	if assignment, ok := h.claimInputRun(runtime); ok || h.lease(as.RunID).Status != store.LeaseReleased {
+		t.Fatal("unfinished target resumed the stopped work", assignment)
+	}
+	checkCount(1)
 }
