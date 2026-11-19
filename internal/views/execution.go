@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
@@ -402,12 +403,24 @@ func (f executionFacts) waitReason(c scheduler.Candidate) *protocol.QueueWaitRea
 	}
 	// Check host compatibility with a free slot before capacity: a full but
 	// incompatible host is not evidence that freeing a slot can run this task.
+	var agentID, agentHost string
+	if c.Manager != nil && !c.Manager.ReceiptOnly {
+		agentID = c.Manager.AgentID
+		if c.ManagerPin != nil {
+			agentID = c.ManagerPin.Identity.ExecutionEnvironmentID + "/" + c.ManagerPin.Identity.LocalID
+		}
+		agentHost, _, _ = strings.Cut(agentID, "/")
+	}
 	var capacity, unavailable, mismatch *protocol.QueueWaitReason
 	for _, host := range f.hosts {
+		if agentHost != "" && agentHost != host.ID {
+			continue
+		}
 		free := host.Host
 		free.Busy = 0
 		free.Slots = max(free.Slots, 1)
 		if reason := scheduler.SkipReason(free, c); reason != nil {
+			reason.HostID = host.ID
 			mismatch = reason
 			continue
 		}
@@ -421,6 +434,15 @@ func (f executionFacts) waitReason(c scheduler.Candidate) *protocol.QueueWaitRea
 			continue
 		}
 		return &protocol.QueueWaitReason{Code: protocol.QueueReady, Message: "waiting for a runner to claim the queued action"}
+	}
+	if agentID != "" {
+		for _, reason := range []*protocol.QueueWaitReason{capacity, unavailable, mismatch} {
+			if reason != nil {
+				reason.Message = "Waiting for Issue owner " + agentID + ": " + reason.Message
+				return reason
+			}
+		}
+		return &protocol.QueueWaitReason{Code: protocol.QueueHostUnavailable, Message: "Waiting for Issue owner " + agentID + ": assigned runner is not active", HostID: agentHost}
 	}
 	if capacity != nil {
 		return capacity

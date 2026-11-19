@@ -79,9 +79,18 @@ func (a *App) preflightClaim(ctx context.Context, p protocol.Principal, env *pro
 // admitted definition. It never skips maintenance for a materialized manager,
 // allocates resources, or carries this observation into the claim transaction.
 func (a *App) initialOwnerClaimPossible(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) (bool, error) {
-	raw, err := store.FollowupIDs(ctx, q, `SELECT DISTINCT i.owner_selection_json FROM issue_controls i WHERE i.state='active' AND i.assignment_state='active' AND i.work_status IN ('todo','in_progress','in_review') AND i.owner_selection_json<>'' AND NOT EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=i.issue_id AND m.state IN ('pending','assigned'))`)
-	if err != nil || len(raw) == 0 {
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT i.owner_selection_json,i.assignee_kind,
+ CASE WHEN i.assignee_kind='agent' THEN i.assignee_ref ELSE '' END,
+ CASE WHEN i.assignee_kind='agent' THEN i.issue_id ELSE '' END,
+ CASE WHEN i.assignee_kind='agent' THEN i.assignment_epoch ELSE 0 END
+ FROM issue_controls i WHERE i.state='active' AND i.assignment_state='active' AND i.work_status IN ('todo','in_progress','in_review')
+ AND i.owner_selection_json<>'' AND NOT EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.issue_id=i.issue_id AND m.state IN ('pending','assigned'))`)
+	if err != nil {
 		return false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return false, rows.Err()
 	}
 	if !runtimeSupportsAgentExecution(runtime) || !slices.Contains(runtime.Capabilities, protocol.CapabilityIssueManager) {
 		return true, nil
@@ -106,15 +115,26 @@ func (a *App) initialOwnerClaimPossible(ctx context.Context, q store.Querier, ho
 		return false, err
 	}
 	h := scheduler.Host{ID: host, Executors: executors, IssueOwners: slices.Contains(runtime.Capabilities, protocol.CapabilityIssueOwner)}
-	for _, body := range raw {
+	for {
+		var body string
+		var issue protocol.IssueControl
+		if err := rows.Scan(&body, &issue.Assignee.Kind, &issue.Assignee.Ref, &issue.IssueID, &issue.AssignmentEpoch); err != nil {
+			return false, err
+		}
 		var selection *protocol.IssueOwnerSelection
 		if json.Unmarshal([]byte(body), &selection) != nil || selection == nil {
 			return true, nil
 		}
-		c := scheduler.Candidate{Manager: &protocol.IssueManagerSpec{CategoryID: selection.CategoryID, AgentID: selection.AgentID, OwnershipPolicy: selection.OwnershipPolicy}}
+		agentID, err := store.IssueOwnerAgentID(ctx, q, issue, selection.AgentID)
+		if err != nil {
+			return false, err
+		}
+		c := scheduler.Candidate{Manager: &protocol.IssueManagerSpec{CategoryID: selection.CategoryID, AgentID: agentID, OwnershipPolicy: selection.OwnershipPolicy}}
 		if pin, _ := scheduler.SelectExecution(h, c); pin != nil {
 			return true, nil
 		}
+		if !rows.Next() {
+			return false, rows.Err()
+		}
 	}
-	return false, nil
 }

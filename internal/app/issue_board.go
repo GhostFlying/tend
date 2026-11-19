@@ -112,6 +112,24 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 		if err := validateIssueOwnerSelection(ctx, tx.Q(), choice); err != nil {
 			return Outcome{}, err
 		}
+		if current.Assignee.Kind == protocol.IssueAssigneeAgent {
+			agentID := current.Assignee.Ref
+			if next.OwnerSelection != nil {
+				var err error
+				agentID, err = store.IssueOwnerAgentID(ctx, tx.Q(), current.IssueControl, next.OwnerSelection.AgentID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if next.OwnerSelection.CategoryID != choice.CategoryID {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace the existing owner explicitly before changing execution selection")
+				}
+				choice.OwnershipPolicy = next.OwnerSelection.OwnershipPolicy
+			}
+			if choice.AgentID != "" && choice.AgentID != agentID {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace the existing owner explicitly before changing execution selection")
+			}
+			choice.AgentID = agentID
+		}
 		if manager, err := store.CurrentIssueManagerTask(ctx, tx.Q(), current.IssueID); err == nil {
 			raw, err := store.GetSpec(ctx, tx.Q(), manager.TaskID, 1)
 			if err != nil {
@@ -121,7 +139,11 @@ func setCanonicalIssueStatus(ctx context.Context, x *Exec, tx *store.Tx, current
 			if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 				return Outcome{}, err
 			}
-			if spec.CategoryID != choice.CategoryID || spec.AgentID != choice.AgentID || spec.OwnershipPolicy != choice.OwnershipPolicy {
+			agentID := spec.AgentID
+			if manager.Pin != nil {
+				agentID = manager.Pin.Identity.ExecutionEnvironmentID + "/" + manager.Pin.Identity.LocalID
+			}
+			if spec.CategoryID != choice.CategoryID || agentID != choice.AgentID || spec.OwnershipPolicy != choice.OwnershipPolicy {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace the existing owner explicitly before changing execution selection")
 			}
 		} else if !errors.Is(err, store.ErrNotFound) {

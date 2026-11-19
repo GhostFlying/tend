@@ -70,7 +70,14 @@ func IssueManagerAuthorizationValid(ctx context.Context, q Querier, task string)
 			return false, err
 		}
 		selection := issue.OwnerSelection
-		return issue.State == protocol.IssueActive && issue.BoardStatus() != protocol.IssueBacklog && selection != nil && selection.CategoryID == spec.CategoryID && selection.AgentID == spec.AgentID && selection.OwnershipPolicy == spec.OwnershipPolicy && issue.AssignmentEpoch == spec.ExpectedAssignmentEpoch, nil
+		if issue.State != protocol.IssueActive || issue.BoardStatus() == protocol.IssueBacklog || selection == nil || selection.CategoryID != spec.CategoryID || selection.OwnershipPolicy != spec.OwnershipPolicy || issue.AssignmentEpoch != spec.ExpectedAssignmentEpoch {
+			return false, nil
+		}
+		if selection.AgentID == spec.AgentID {
+			return true, nil
+		}
+		agentID, err := IssueOwnerAgentID(ctx, q, issue.IssueControl, selection.AgentID)
+		return agentID == spec.AgentID, err
 	}
 	if spec.SourceMessageID == "" {
 		return true, nil
@@ -103,4 +110,33 @@ func IssueNeedsHostedMigration(ctx context.Context, q Querier, i protocol.Issue)
 	var backed bool
 	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_owner_migrations WHERE issue_id=? AND assignment_epoch=?)`, i.IssueID, i.AssignmentEpoch).Scan(&backed)
 	return !backed, err
+}
+
+// IssueOwnerAgentID resolves the identity allowed to claim a new coordination
+// Task. Older Issues may still carry a category-only selection after a claim.
+func IssueOwnerAgentID(ctx context.Context, q Querier, i protocol.IssueControl, requested string) (string, error) {
+	if i.Assignee.Kind != protocol.IssueAssigneeAgent || i.Assignee.Ref == requested {
+		return requested, nil
+	}
+	if requested == "" {
+		// The backed-up hosted migration is an explicit transport handoff.
+		var migration bool
+		err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_owner_migrations WHERE issue_id=? AND assignment_epoch=?)`, i.IssueID, i.AssignmentEpoch).Scan(&migration)
+		if migration || err != nil {
+			return "", err
+		}
+		return i.Assignee.Ref, nil
+	}
+	// A different name must be supported by an explicit replacement for this
+	// epoch. A saved board selection alone does not authorize a handoff.
+	var replaced bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_control_revisions
+ WHERE issue_id=? AND operation IN ('issues.request_owner','issues.request_manager')
+ AND json_extract(reason_json,'$.replace')=1 AND json_extract(reason_json,'$.agent_id')=?
+ AND json_extract(snapshot_json,'$.control.assignment_epoch')=? AND json_extract(reason_json,'$.expected_assignment_epoch')=?)
+ `, i.IssueID, requested, i.AssignmentEpoch, i.AssignmentEpoch-1).Scan(&replaced)
+	if replaced || err != nil {
+		return requested, err
+	}
+	return i.Assignee.Ref, nil
 }
