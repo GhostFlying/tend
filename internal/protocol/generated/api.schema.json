@@ -2580,6 +2580,9 @@
         "incompatible_schema": {
           "type": "boolean"
         },
+        "journal_id": {
+          "type": "string"
+        },
         "manifest_sha256": {
           "type": "string"
         },

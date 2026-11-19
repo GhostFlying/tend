@@ -359,6 +359,7 @@ func TestRolloutArchiveBindsResumedRunWithoutCopyingOriginal(t *testing.T) {
 func TestAcceptingRunnerDeliversRetiredJournalsOriginalArchiveRequest(t *testing.T) {
 	r, as, root, f := archiveRunner(t)
 	current := r.cfg.Journal
+	r.cfg.JournalID = "accepting"
 	r.cfg.JournalRoot = t.TempDir()
 	old, err := journal.Open(t.Context(), filepath.Join(r.cfg.JournalRoot, "journal.db"), r.cfg.Now)
 	if err != nil {

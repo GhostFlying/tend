@@ -1,8 +1,11 @@
 package runner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +18,16 @@ import (
 )
 
 func TestManagerHistoryReadNeedsNeitherRunSlotNorModel(t *testing.T) {
+	for _, retired := range []bool{false, true} {
+		name := "current"
+		if retired {
+			name = "retired"
+		}
+		t.Run(name, func(t *testing.T) { testManagerHistoryRead(t, retired) })
+	}
+}
+
+func testManagerHistoryRead(t *testing.T, retired bool) {
 	j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +38,20 @@ func TestManagerHistoryReadNeedsNeitherRunSlotNorModel(t *testing.T) {
 	resolver := &receiptBridgeResolver{native: native, pin: pin}
 	r := New(Config{HostID: "host", Journal: j, Executions: resolver, Now: time.Now, RequestTimeout: time.Second, Log: slog.New(slog.DiscardHandler)})
 	read := protocol.ManagerHistoryRead{ID: "original-observation", RunID: "original-run", ConversationID: "original-conversation", Execution: pin, ThreadID: "original-thread", MessageID: "original-repair", TurnID: "original-turn"}
+	if retired {
+		r.cfg.JournalRoot, r.cfg.JournalID = t.TempDir(), "accepting"
+		original := ""
+		read.RetiredJournal = &original
+		key := sha256.Sum256([]byte(read.ConversationID))
+		if err := os.MkdirAll(filepath.Join(r.cfg.JournalRoot, "manager-sessions", hex.EncodeToString(key[:])), 0700); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if _, err := os.Stat(filepath.Join(j.Directory(), "manager-sessions")); !os.IsNotExist(err) {
+				t.Fatal("retired history touched the accepting journal", err)
+			}
+		})
+	}
 	r.acceptHistoryReads(t.Context(), []protocol.ManagerHistoryRead{read}, nil)
 	r.wg.Wait()
 	replies := r.historyReplies()

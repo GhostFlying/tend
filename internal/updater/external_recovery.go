@@ -47,6 +47,41 @@ type externalRecoveryManager interface {
 	Start(context.Context, externalRecoveryUnit, string) error
 }
 
+// A whole-unit force stop cannot preserve unrelated draining workers. For a
+// settled generation, reconstruct only the ownership needed by the new writer.
+func externalRecoverySource(cfg Config, path string, target Version) (State, error) {
+	old, err := readState(path)
+	if cfg.Role == "runner" {
+		_, markerErr := os.Lstat(filepath.Join(cfg.StateDir, rollingOwnershipMarker))
+		if markerErr != nil && !os.IsNotExist(markerErr) {
+			return State{}, markerErr
+		}
+		if markerErr == nil && (err != nil || old.Format != rollingStateFormat || old.InstanceID != cfg.InstanceID) {
+			return State{}, errors.New("updater: rolling journal ownership unavailable for external recovery")
+		}
+	}
+	if err != nil || old.InstanceID != cfg.InstanceID {
+		return State{}, nil // Legacy recovery snapshots unknown installed data.
+	}
+	if cfg.Role == "runner" && old.Format >= rollingStateFormat {
+		if old.Format != rollingStateFormat || old.CurrentJournal != "" && !release.ValidID(old.CurrentJournal) || old.UpdaterEpoch == "" || old.Generation == 0 {
+			return State{}, errors.New("updater: invalid rolling journal ownership")
+		}
+		if target.Protocol < 6 {
+			return State{}, errors.New("updater: recovery target cannot use an independent runner journal")
+		}
+		if len(old.DrainingProcesses) != 0 || old.Operation != nil && old.Operation.Rolling != nil && !done(old.Operation) {
+			return State{}, errors.New("updater: whole-unit recovery would stop an unresolved rolling handoff")
+		}
+		for _, id := range old.RetiredJournals {
+			if id != "" && !release.ValidID(id) || id == old.CurrentJournal {
+				return State{}, errors.New("updater: invalid retired journal ownership")
+			}
+		}
+	}
+	return old, nil
+}
+
 func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryRequest, manager externalRecoveryManager) (ExternalRecoveryRecord, error) {
 	var record ExternalRecoveryRecord
 	if err := validateServiceConfig(cfg); err != nil {
@@ -147,10 +182,11 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 	if record.Phase == "prepared" {
 		// The bootstrap config is not the installed schema. When the old state
 		// is unreadable, retain selected data and let the candidate verify it.
-		storage := int64(0)
-		if old, err := readState(filepath.Join(cfg.StateDir, "state.json")); err == nil && old.InstanceID == cfg.InstanceID {
-			storage = old.Current.StorageVersion
+		old, err := externalRecoverySource(cfg, filepath.Join(cfg.StateDir, "state.json"), record.Target)
+		if err != nil {
+			return record, err
 		}
+		storage := old.Current.StorageVersion
 		readable := bundle.Manifest.Storage.ServerSchema
 		if cfg.Role == "runner" {
 			readable = bundle.Manifest.Storage.RunnerJournal
@@ -164,6 +200,9 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 	}
 	if record.Phase == "stopping" {
 		if err := verifyConfig(); err != nil {
+			return record, err
+		}
+		if _, err := externalRecoverySource(cfg, filepath.Join(cfg.StateDir, "state.json"), record.Target); err != nil {
 			return record, err
 		}
 		if err := manager.Stop(ctx, record.Unit, request.ConfigFile); err != nil {
@@ -203,10 +242,11 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 		if err := archiveRecoveryStartupJournals(cfg, record.Archive); err != nil {
 			return record, err
 		}
-		storage := int64(0)
-		if old, err := readState(archive); err == nil && old.InstanceID == cfg.InstanceID {
-			storage = old.Current.StorageVersion
+		old, err := externalRecoverySource(cfg, archive, record.Target)
+		if err != nil {
+			return record, err
 		}
+		storage := old.Current.StorageVersion
 		range_ := bundle.Manifest.Storage.ServerSchema
 		if cfg.Role == "runner" {
 			range_ = bundle.Manifest.Storage.RunnerJournal
@@ -218,7 +258,7 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 		op.Binding = Binding{UpgradeID: record.RequestID, InstanceID: cfg.InstanceID, ProcessInstanceID: record.LaunchID, ReleaseID: record.Target.ReleaseID, ManifestSHA256: record.Target.ManifestSHA256, ArtifactSHA256: artifact.SHA256}
 		if storage != record.Target.StorageVersion {
 			op.BackupDir = filepath.Join(cfg.StateDir, "backups", record.RequestID)
-			if err := backupDataContext(ctx, cfg, op); err != nil {
+			if err := backupDataContext(ctx, dataConfigForJournal(cfg, old.CurrentJournal), op); err != nil {
 				return record, err
 			}
 			record.BackupDir = op.BackupDir
@@ -226,6 +266,10 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 		// The ordinary supervisor launch, process discovery, readiness and durable
 		// commit path owns the candidate from this point onward.
 		state := State{Format: 1, InstanceID: cfg.InstanceID, Current: record.Target, Operation: op}
+		if cfg.Role == "runner" && old.Format == rollingStateFormat {
+			state.Format, state.Generation, state.UpdaterEpoch, state.UpdaterBootID = old.Format, old.Generation, old.UpdaterEpoch, old.UpdaterBootID
+			state.CurrentJournal, state.RetiredJournals = old.CurrentJournal, old.RetiredJournals
+		}
 		if err := writeJSON(statePath, state); err != nil {
 			return record, err
 		}

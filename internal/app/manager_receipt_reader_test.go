@@ -271,3 +271,86 @@ func TestManagerHistoryReadsUseOriginalRunAcrossLostReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRetiredJournalKeepsManagerHistoryReachable(t *testing.T) {
+	h, original, pending := stoppedRetainedManager(t)
+	p := receiptReaderPayload(t, h, original)
+	if op := h.exec(owner, h.env(protocol.OpReconcileManagerRun, taskTarget(original.TaskID), p, rev(h.task(original.TaskID).ControlRevision)), ReconcileManagerRun{}); op.Error != nil {
+		t.Fatal(op)
+	}
+	var turn store.MainTurn
+	var current protocol.RunnerRuntime
+	process := protocol.RecoveryIdentity{PID: 123, StartTicks: 456, LaunchID: "history-predecessor"}
+	const upgrade = "history-upgrade"
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		var err error
+		turn, err = store.GetMainTurn(t.Context(), tx.Q(), pending)
+		if err != nil {
+			return err
+		}
+		row, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+		if err != nil {
+			return err
+		}
+		batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: upgrade, ReleaseID: "history-release", Revision: 1, Status: "completed", Phase: "completed", CreatedAt: h.clock.Now(), UpdatedAt: h.clock.Now()}, Hosts: []store.UpgradeHost{{HostID: "linux-1", RollingProcess: process, Committed: &protocol.UpdaterReceipt{}}}}
+		if err := tx.PutUpgrade(t.Context(), batch); err != nil {
+			return err
+		}
+		prior := row
+		prior.Runtime.InstanceID = process.LaunchID
+		prior.Runtime.Mode = protocol.RunnerReady
+		prior.Runtime.AppliedControlRevision = 1
+		prior.Runtime.PendingClaims = 0
+		prior.Runtime.PendingOperations = 0
+		prior.Runtime.Blockers = nil
+		if err := tx.PreserveDrainingRunner(t.Context(), "linux-1", upgrade, prior, protocol.RunnerControl{Revision: 1, Mode: protocol.RunnerMaintenance}); err != nil {
+			return err
+		}
+		row.Runtime.InstanceID, row.Runtime.JournalID = "history-successor", "history-successor"
+		current = row.Runtime
+		return tx.PutHostRuntime(t.Context(), "linux-1", row)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	identity := turn.MessageID
+	if repair, err := h.app.IsRepairExecution(t.Context(), pending); err != nil {
+		t.Fatal(err)
+	} else if repair {
+		identity = pending
+	}
+	input, _ := json.Marshal(map[string]string{"thread_id": turn.ThreadID, "message_id": identity, "turn_id": turn.TurnID})
+	id, err := h.app.QueueManagerNative(t.Context(), original.RunID, "find", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := protocol.RunnerRetirement{UpgradeID: upgrade, Process: process}
+	op := h.exec(runner("linux-1"), h.env("runner.rolling_retire", protocol.Target{Type: "host", ID: "linux-1"}, req, nil), RetireRollingRunner{})
+	var result protocol.RunnerRetirementResult
+	if op.Error != nil || json.Unmarshal(op.Result, &result) != nil || !result.Allowed {
+		t.Fatal(op, result)
+	}
+	req.AuthorizationID = result.AuthorizationID
+	op = h.exec(runner("linux-1"), h.env("runner.rolling_retire", protocol.Target{Type: "host", ID: "linux-1"}, req, nil), RetireRollingRunner{})
+	if op.Error != nil || json.Unmarshal(op.Result, &result) != nil || !result.Confirmed {
+		t.Fatal(op, result)
+	}
+	current.Sequence++
+	response, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.HistoryReads) != 1 || response.HistoryReads[0].ID != id || response.HistoryReads[0].RetiredJournal == nil || *response.HistoryReads[0].RetiredJournal != "" {
+		t.Fatalf("retirement confirmed with original pending receipt, but successor cannot read it: reads=%+v retired_work=%+v pending=%s", response.HistoryReads, response.RetiredWork, pending)
+	}
+	current.Sequence++
+	resultJSON := json.RawMessage(`{"Found":false}`)
+	response, err = h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &current, HistoryReplies: []protocol.ManagerHistoryReply{{ID: id, Result: resultJSON}}})
+	if err != nil || len(response.HistoryAcknowledged) != 1 || response.HistoryAcknowledged[0] != id {
+		t.Fatal(response, err)
+	}
+	reply, ready, err := h.app.ManagerNativeResult(t.Context(), original.RunID, id)
+	if err != nil || !ready || string(reply.Result) != string(resultJSON) {
+		t.Fatal(reply, ready, err)
+	}
+
+}

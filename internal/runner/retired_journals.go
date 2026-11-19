@@ -103,13 +103,24 @@ func (r *Runner) serviceRetiredJournal(ctx context.Context, id string, c retired
 	return c, errors.Join(failures...)
 }
 
-func (r *Runner) openRetiredJournal(ctx context.Context, id string) (*journal.Journal, error) {
+func (r *Runner) retiredJournalDir(id string) (string, error) {
 	dir := r.cfg.JournalRoot
+	if dir == "" || id == r.cfg.JournalID {
+		return "", errors.New("retained journal root or predecessor identity missing")
+	}
 	if id != "" {
 		if !release.ValidID(id) {
-			return nil, errors.New("invalid retained journal identity")
+			return "", errors.New("invalid retained journal identity")
 		}
 		dir = filepath.Join(dir, "generations", id)
+	}
+	return dir, nil
+}
+
+func (r *Runner) openRetiredJournal(ctx context.Context, id string) (*journal.Journal, error) {
+	dir, err := r.retiredJournalDir(id)
+	if err != nil {
+		return nil, err
 	}
 	path := filepath.Join(dir, "journal.db")
 	info, err := os.Lstat(path)

@@ -20,6 +20,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/blobstore"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
 )
 
 const backupMetadataName = "checkpoint.json"
@@ -102,7 +103,7 @@ func writeBackupMetadata(cfg Config, op *Operation) error {
 		}
 		created = info.ModTime().UnixMilli()
 	}
-	record := protocol.BackupCheckpoint{ID: id, Directory: op.BackupDir, CreatedAtMillis: created, ManifestSHA256: manifest, Class: "checkpoint", Unknown: true}
+	record := protocol.BackupCheckpoint{JournalID: cfg.journalID, ID: id, Directory: op.BackupDir, CreatedAtMillis: created, ManifestSHA256: manifest, Class: "checkpoint", Unknown: true}
 	return writeJSON(path, backupMetadata{Format: backupManifestFormat(op.Backups), InstanceID: cfg.InstanceID, Configuration: cfg, Source: op.Previous, Checkpoint: record})
 }
 
@@ -160,6 +161,11 @@ func readCheckpoint(cfg Config, dir string) (protocol.BackupCheckpoint, error) {
 		if err = json.Unmarshal(metadata, &saved); err != nil {
 			return record, err
 		}
+		idJournal := saved.Checkpoint.JournalID
+		if (idJournal != "" && (cfg.Role != "runner" || !release.ValidID(idJournal))) || (cfg.journalID != "" && cfg.journalID != idJournal) {
+			return record, errors.New("updater: checkpoint journal identity differs")
+		}
+		cfg = dataConfigForJournal(cfg, idJournal)
 		if (saved.Format != 1 && saved.Format != 2) || saved.Format < backupManifestFormat(record.Files) || saved.InstanceID != cfg.InstanceID || saved.Checkpoint.ID != id || saved.Checkpoint.ManifestSHA256 != record.ManifestSHA256 || digest(saved.Configuration.DataFiles) != digest(cfg.DataFiles) {
 			return record, errors.New("updater: checkpoint metadata identity differs")
 		}
@@ -481,7 +487,7 @@ func (s *Supervisor) VerifyBackup(ctx context.Context, input protocol.BackupVeri
 	if err = ctx.Err(); err != nil {
 		return record, err
 	}
-	if err = verifyBackupFiles(s.cfg, dir, record.Files); err != nil {
+	if err = verifyBackupFiles(dataConfigForJournal(s.cfg, record.JournalID), dir, record.Files); err != nil {
 		return record, err
 	}
 	record.VerifiedAtMillis = s.opts.Now().UnixMilli()
@@ -533,10 +539,10 @@ func (s *Supervisor) VerifyBackup(ctx context.Context, input protocol.BackupVeri
 			if err != nil {
 				return record, err
 			}
-			if !cover.Recoverable || cover.Unknown || cover.VerifiedAtMillis == 0 {
+			if cover.JournalID != record.JournalID || !cover.Recoverable || cover.Unknown || cover.VerifiedAtMillis == 0 {
 				return record, errors.New("updater: failed drill has no verified covering checkpoint")
 			}
-			if err = verifyBackupFiles(s.cfg, coverDir, cover.Files); err != nil {
+			if err = verifyBackupFiles(dataConfigForJournal(s.cfg, cover.JournalID), coverDir, cover.Files); err != nil {
 				return record, err
 			}
 			if !filepath.IsAbs(proof.UniqueEvidencePath) {
@@ -679,7 +685,7 @@ func (s *Supervisor) PruneBackups(ctx context.Context, input protocol.BackupPrun
 	// damaged. Verify every retained recovery checkpoint before deleting any.
 	for _, r := range fresh.Checkpoints {
 		if backupMutation && r.Decision != "delete" && r.Recoverable && !r.Unknown {
-			if err = verifyBackupFiles(s.cfg, r.Directory, r.Files); err != nil {
+			if err = verifyBackupFiles(dataConfigForJournal(s.cfg, r.JournalID), r.Directory, r.Files); err != nil {
 				return fail(err)
 			}
 		}
@@ -704,7 +710,7 @@ func (s *Supervisor) PruneBackups(ctx context.Context, input protocol.BackupPrun
 			return fail(err)
 		}
 		if state.InFlight != r.ID {
-			if err = verifyBackupFiles(s.cfg, dir, r.Files); err != nil {
+			if err = verifyBackupFiles(dataConfigForJournal(s.cfg, actual.JournalID), dir, r.Files); err != nil {
 				return fail(err)
 			}
 			state.InFlight = r.ID

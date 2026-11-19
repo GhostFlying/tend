@@ -16,10 +16,10 @@ import (
 	"github.com/GhostFlying/tend/internal/release"
 )
 
-type externalTestAuthority struct{}
+type externalTestAuthority struct{ version int64 }
 
 func (a *externalTestAuthority) InstallationReadiness(_ context.Context, binding Binding) (protocol.InstallationReadiness, error) {
-	return protocol.InstallationReadiness{Binding: binding, Ready: true, Protocol: 2, StorageVersion: 9}, nil
+	return protocol.InstallationReadiness{Binding: binding, Ready: true, Protocol: a.version, StorageVersion: 9}, nil
 }
 
 type restartingExternalManager struct{ *externalTestManager }
@@ -61,6 +61,7 @@ func (*externalTestAuthority) Health(context.Context, Binding) (Health, error) {
 }
 
 type externalTestManager struct {
+	version             int64
 	h                   *harness
 	unit                externalRecoveryUnit
 	stops, starts       int
@@ -84,7 +85,7 @@ func (m *externalTestManager) Start(ctx context.Context, _ externalRecoveryUnit,
 		return nil
 	} // systemd start is idempotent for an active unit.
 	m.starts++
-	m.h.opts.Authority = &externalTestAuthority{}
+	m.h.opts.Authority = &externalTestAuthority{version: m.version}
 	supervisor, err := Open(m.h.cfg, m.h.opts)
 	if err != nil {
 		return err
@@ -115,6 +116,10 @@ func (m *externalTestManager) Start(ctx context.Context, _ externalRecoveryUnit,
 
 func externalFixture(t *testing.T) (*harness, ExternalRecoveryRequest, *externalTestManager) {
 	t.Helper()
+	return externalFixtureProtocol(t, 2)
+}
+func externalFixtureProtocol(t *testing.T, version int64) (*harness, ExternalRecoveryRequest, *externalTestManager) {
+	t.Helper()
 	h := newHarness(t)
 	h.cfg.AuthoritySocket = filepath.Join(t.TempDir(), "unavailable-old-service.sock")
 	h.cfg.StorageVersion = 9
@@ -127,6 +132,7 @@ func externalFixture(t *testing.T) (*harness, ExternalRecoveryRequest, *external
 		t.Fatal(err)
 	}
 	m := bundle.Manifest
+	m.Protocol.Max = version
 	artifacts := append([]release.Artifact{}, m.Artifacts...)
 	for _, role := range []string{"server", "updater", "cli"} {
 		a := m.Artifacts[0]
@@ -150,7 +156,7 @@ func externalFixture(t *testing.T) (*harness, ExternalRecoveryRequest, *external
 	if err := writeJSON(filepath.Join(h.bundle, "release-set.json"), set); err != nil {
 		t.Fatal(err)
 	}
-	manager := &externalTestManager{h: h, unit: externalRecoveryUnit{Name: "fixture.service", Binary: filepath.Join(t.TempDir(), "updater"), Digest: strings.Repeat("b", 64)}}
+	manager := &externalTestManager{version: version, h: h, unit: externalRecoveryUnit{Name: "fixture.service", Binary: filepath.Join(t.TempDir(), "updater"), Digest: strings.Repeat("b", 64)}}
 	request := ExternalRecoveryRequest{Release: h.bundle, ConfigFile: config, Force: true, RequestID: "external-fixture"}
 	return h, request, manager
 }
@@ -279,6 +285,57 @@ func TestExternalRecoveryUsesInstalledStorageInsteadOfBootstrapConfig(t *testing
 			}
 			if (record.BackupDir == "") != (storage == 9) {
 				t.Fatal("snapshot choice did not preserve unknown installed storage", record)
+			}
+		})
+	}
+}
+
+func TestExternalRecoveryPreservesRollingJournal(t *testing.T) {
+	h, request, manager := externalFixtureProtocol(t, 6)
+	auth := &retirementAuthority{fakeAuthority: h.a, ready: map[string]bool{}, confirmed: map[string]int{}}
+	h.opts.RollingAuthority, h.s.opts.RollingAuthority = auth, auth
+	if err := h.s.criticalState(); err != nil {
+		t.Fatal(err)
+	}
+	h.s.state.Format = rollingStateFormat
+	h.s.state.CurrentJournal = "original-accepting-generation"
+	h.s.state.RetiredJournals = []string{""}
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	record, err := externalRecovery(ctx, h.cfg, request, manager)
+	if err != nil {
+		t.Fatal(record, err)
+	}
+	if len(h.s.Status().RetiredJournals) != 1 || h.s.Status().RetiredJournals[0] != "" || h.s.Status().CurrentJournal != "original-accepting-generation" || len(h.p.journalIDs) != 1 || h.p.journalIDs[0] != "original-accepting-generation" {
+		t.Fatalf("external recovery silently discarded generation ownership: phase=%s journal=%q launch_journals=%q retired=%q", record.Phase, h.s.Status().CurrentJournal, h.p.journalIDs, h.s.Status().RetiredJournals)
+	}
+}
+
+func TestExternalRecoveryProtectsUnresolvedRollingOwnershipBeforeStop(t *testing.T) {
+	for _, scenario := range []string{"draining", "unreadable"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, request, manager := externalFixtureProtocol(t, 6)
+			if err := h.s.criticalState(); err != nil {
+				t.Fatal(err)
+			}
+			h.s.state.Format, h.s.state.CurrentJournal = rollingStateFormat, "accepting"
+			h.s.state.DrainingProcesses = map[string]DrainingProcess{"old": {Process: h.s.state.Process}}
+			if err := h.s.save(); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "unreadable" {
+				if err := atomicWrite(filepath.Join(h.cfg.StateDir, rollingOwnershipMarker), []byte("1\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := atomicWrite(h.s.statePath(), []byte("{"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := externalRecovery(t.Context(), h.cfg, request, manager); err == nil || manager.stops != 0 {
+				t.Fatal("unresolved writer ownership permitted a whole-unit stop", err, manager.stops)
 			}
 		})
 	}
