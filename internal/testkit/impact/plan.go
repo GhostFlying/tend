@@ -37,7 +37,7 @@ const module = "github.com/GhostFlying/tend/"
 // Groups returns the complete partition used by local and Actions race checks.
 // Heavy integration packages run independently instead of serializing other.
 func Groups() []string {
-	return []string{"app", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other"}
+	return []string{"app", "store", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other"}
 }
 
 // Group is the same partition used by racecheck and the Actions matrix.

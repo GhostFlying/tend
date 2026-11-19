@@ -1,6 +1,6 @@
 // Cache retention owns only these main-branch namespaces. PR and legacy caches
 // are deliberately outside its authority.
-const roles = ["quality", "app", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other", "cross"];
+const roles = ["quality", "app", "store", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other", "cross"];
 
 function planPrune(caches, mainSha) {
   const groups = new Map();

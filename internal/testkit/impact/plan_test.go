@@ -8,7 +8,7 @@ import (
 )
 
 func TestFullGroupsIsolateHeavyPackagesWithoutReducingCoverage(t *testing.T) {
-	want := []string{"app", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other"}
+	want := []string{"app", "store", "api", "mainthread", "e2e", "serverkit", "sandbox", "runner", "other"}
 	plan := Select(nil, nil, true)
 	if !slices.Equal(plan.Groups, want) {
 		t.Fatalf("full plan lost independent heavy groups: %v", plan.Groups)

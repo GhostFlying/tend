@@ -4,7 +4,7 @@ const { planPrune } = require("./go-cache.cjs");
 const cache = (id, key, ref = "refs/heads/main") => ({ id, key, ref, created_at: `2026-11-${String(id).padStart(2, "0")}T00:00:00Z` });
 
 test("independent heavy groups keep only their current main snapshot", () => {
-  for (const role of ["serverkit", "sandbox", "runner"]) {
+  for (const role of ["store", "serverkit", "sandbox", "runner"]) {
     assert.deepEqual(planPrune([
       cache(1, `go-build-v2-${role}-Linux-X64-go-deps-current`),
       cache(2, `go-build-v2-${role}-Linux-X64-go-deps-old`),
