@@ -161,4 +161,22 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Seed a confirmed physical retirement to cover dispatch of a late command.
+	// Process stop and acknowledgement are exercised by the three-process fixture.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json,confirmed_at) VALUES(?,?,?,?,?,?,1)`, host, old.InstanceID, batch.View.UpgradeID, old.JournalID, "retired-grant", "{}"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `DELETE FROM draining_runners WHERE host_id=? AND instance_id=?`, host, old.InstanceID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	candidate.Sequence++
+	hb, err = h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: candidate})
+	retired := hb.RetiredWork[old.JournalID]
+	if err != nil || hb.Control == nil || len(hb.Control.UsageCollectionCommands) != 0 || len(retired.Usage) != 1 || retired.Usage[0].RequestID != command.RequestID {
+		t.Fatal("late command did not retain its journal and request", hb, err)
+	}
+
 }

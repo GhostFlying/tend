@@ -380,10 +380,12 @@ func TestAcceptingRunnerDeliversRetiredJournalsOriginalArchiveRequest(t *testing
 		t.Fatal(err)
 	}
 	r.cfg.Journal = current
-	if _, done, err := r.continueRetiredArchive(t.Context(), "", ""); err != nil || done {
+	c, err := r.serviceRetiredJournal(t.Context(), "", retiredCursor{}, protocol.RetiredJournalWork{})
+	if done := c.archiveDone; err != nil || done {
 		t.Fatal(done, err)
 	}
-	if _, done, err := r.continueRetiredArchive(t.Context(), "", ""); err != nil || !done {
+	c, err = r.serviceRetiredJournal(t.Context(), "", retiredCursor{}, protocol.RetiredJournalWork{})
+	if done := c.archiveDone; err != nil || !done {
 		t.Fatal("retained archive still pending", done, err)
 	}
 	if len(f.requests) != 2 || f.requests[0].RequestID != f.requests[1].RequestID || !bytes.Equal(f.requests[0].Payload, f.requests[1].Payload) {

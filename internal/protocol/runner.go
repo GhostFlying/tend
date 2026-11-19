@@ -215,13 +215,18 @@ type LeaseRef struct {
 
 // HeartbeatResult reports, per run, whether the lease was renewed and what
 // tend wants the run to do.
+type RetiredJournalWork struct {
+	Workspace bool                     `json:"workspace,omitempty"`
+	Usage     []UsageCollectionCommand `json:"usage,omitempty"`
+}
 type HeartbeatResult struct {
-	HistoryReads        []ManagerHistoryRead `json:"history_reads,omitempty"`
-	HistoryAcknowledged []string             `json:"history_acknowledged,omitempty"`
-	RetainedExecutions  []RunExecutionPin    `json:"retained_executions,omitempty"`
-	Control             *RunnerControl       `json:"control,omitempty"`
-	LeaseTTLMillis      int64                `json:"lease_ttl_ms"`
-	Runs                []LeaseState         `json:"runs"`
+	RetiredWork         map[string]RetiredJournalWork `json:"retired_work,omitempty"`
+	HistoryReads        []ManagerHistoryRead          `json:"history_reads,omitempty"`
+	HistoryAcknowledged []string                      `json:"history_acknowledged,omitempty"`
+	RetainedExecutions  []RunExecutionPin             `json:"retained_executions,omitempty"`
+	Control             *RunnerControl                `json:"control,omitempty"`
+	LeaseTTLMillis      int64                         `json:"lease_ttl_ms"`
+	Runs                []LeaseState                  `json:"runs"`
 }
 
 // LeaseState is the outcome of renewing one lease. A lease that is no

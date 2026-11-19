@@ -122,7 +122,13 @@ func usageSourceRuntime(ctx context.Context, q store.Querier, host, run string) 
 	err = q.QueryRowContext(ctx, `SELECT d.runtime_json FROM draining_runners d WHERE d.host_id=? AND d.journal_id=?
  AND NOT EXISTS(SELECT 1 FROM runner_retirements r WHERE r.host_id=d.host_id AND r.instance_id=d.instance_id)`, host, journal).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
-		return runtime, nil
+		var confirmed bool
+		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runner_retirements WHERE host_id=? AND journal_id=? AND confirmed_at IS NOT NULL)`, host, journal).Scan(&confirmed)
+		if confirmed {
+			runtime = current.Runtime
+			runtime.JournalID = journal
+		}
+		return runtime, err
 	}
 	if err != nil {
 		return runtime, err
