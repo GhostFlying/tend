@@ -22,6 +22,8 @@ type pauseStopPending struct{ err error }
 func (e *pauseStopPending) Error() string { return e.err.Error() }
 func (e *pauseStopPending) Unwrap() error { return e.err }
 
+var errPauseResultTimeout = errors.New("runner: paused result reconciliation timed out")
+
 func (r *Runner) deferOwnedPauseStop(ctx context.Context, a *active, run journal.Run, stopErr error) error {
 	as := run.Assignment
 	if !as.PauseHandoffs || run.Held || run.Phase != journal.PhaseStarted || run.Attempts == 0 ||
@@ -43,7 +45,7 @@ func (r *Runner) deferOwnedPauseStop(ctx context.Context, a *active, run journal
 	return &pauseStopPending{stopErr}
 }
 
-func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Run) (bool, error) {
+func (r *Runner) recoverPauseStop(ctx, runCtx context.Context, a *active, run journal.Run) (bool, error) {
 	as := run.Assignment
 	desired := r.pauseStopDesired(a)
 	if desired == protocol.DesiredHeld {
@@ -93,12 +95,23 @@ func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Ru
 	}
 	// A native result may already be durable even though closure previously
 	// prevented it from entering worker_done. Settle it before yielding.
-	recovered, err := r.reconcileAcceptanceVerdict(ctx, as)
+	// Stop can interrupt result reconciliation without cancelling the
+	// physical-stop checkpoint above or the eventual terminal receipt.
+	// Pause observers do not renew leases, so bound this attempt separately.
+	resultCtx, cancel := context.WithTimeoutCause(runCtx, r.cfg.RequestTimeout, errPauseResultTimeout)
+	defer cancel()
+	recovered, err := r.reconcileAcceptanceVerdict(resultCtx, as)
 	if !recovered {
-		recovered, err = r.reconcileImplementationResult(ctx, as)
+		recovered, err = r.reconcileImplementationResult(resultCtx, as)
 	}
 	if recovered && err == nil {
 		return true, nil
+	}
+	if r.stopRequested(runCtx, a) {
+		return false, nil
+	}
+	if errors.Is(context.Cause(resultCtx), errPauseResultTimeout) {
+		return false, &pauseStopPending{errPauseResultTimeout}
 	}
 	if err != nil {
 		if _, failedTurn := errors.AsType[*stepError](err); !failedTurn {
@@ -131,7 +144,8 @@ func (r *Runner) deferPauseRetry(runID string, pending *pauseStopPending) {
 		delete(r.pauseRetries, runID)
 		return
 	}
-	if errors.Is(pending, harness.ErrOwnedWorkerStillPresent) || errors.Is(pending, errHeld) || isRetryable(pending) {
+	if errors.Is(pending, harness.ErrOwnedWorkerStillPresent) || errors.Is(pending, errHeld) ||
+		errors.Is(pending, errPauseResultTimeout) || isRetryable(pending) {
 		r.schedulePauseRetry(runID)
 	} else {
 		r.pauseRetries[runID] = pauseRetry{blocked: true}
