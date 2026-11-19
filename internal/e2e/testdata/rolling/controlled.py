@@ -13,7 +13,7 @@ def write_private(path, content):
     path.chmod(0o600)
 
 
-def prepare(root, bundle, initial, server_config, env, stack):
+def prepare(root, bundle, initial, server_config, env, stack, *, drain_timeout=None):
     # The hosted job creates this account on a fresh VM. Refuse a developer's
     # service manager even if this module is invoked directly.
     if pwd.getpwuid(os.getuid()).pw_name != "tend-wire-fixture":
@@ -25,6 +25,8 @@ def prepare(root, bundle, initial, server_config, env, stack):
     server = json.loads(server_config.read_text())
     server["upgrades"] = {"instance": "fixture", "updater_socket": str(state / "control.sock"),
                           "control_socket": str(control), "release_dir": str(root / "releases")}
+    if drain_timeout:
+        server["upgrades"]["drain_timeout"] = drain_timeout
     write_private(server_config, json.dumps(server))
     server_env = root / "server.env"
     write_private(server_env, "".join(f"{key}={env[key]}\n" for key in

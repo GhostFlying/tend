@@ -65,6 +65,7 @@ for name in ("manifest.json", "release-set.json"):
         doc["manifest_sha256"] = hashlib.sha256((third / "manifest.json").read_bytes()).hexdigest()
     (third / name).write_text(json.dumps(doc))
 PYTHON
+python3 -B "$fixture/next_window.py" "$scratch/third" "$scratch/next-window"
 cp "$fixture/"{cross_version,model,controlled,generations}.py "$scratch/"
 account=tend-wire-fixture
 sudo useradd --create-home "$account"
@@ -84,3 +85,7 @@ sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_D
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed"
+
+sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed" "$scratch/next-window"

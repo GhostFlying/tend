@@ -125,6 +125,8 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 				t.Error("status mutated")
 			}
 			view.Phase = "server_updater"
+			view.ForceMaintenance = true
+			view.WindowStops = []protocol.UpgradeWindowStop{{HostID: "fixture-host", Process: protocol.RecoveryIdentity{PID: 127, LaunchID: "predecessor"}, Protocol: 5, State: "stopped", DrainUntil: 3000, Runs: []protocol.LeaseRef{{RunID: "long-run", LeaseID: "original-lease"}}, UnknownRuns: []string{"long-run"}}}
 			view.Hosts = []protocol.UpgradeHostView{
 				{HostID: "excluded", Status: "skipped", Phase: "skipped"},
 				{HostID: "updater-only", Status: "skipped", Phase: "verified", Updater: &protocol.UpdaterSelfObservation{Receipt: &protocol.UpdaterSelfReceipt{RequestID: "original-request"}}},
@@ -171,6 +173,11 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	if code := te.main("upgrade", "--server-only", "--runner-configurations", "unused"); code != exitUsage {
 		t.Fatal("accepted runner configuration in server scope", code)
 	}
+	for _, want := range []string{"fixture-host/predecessor", "pid 127", "stopped", "1970-01-01T00:00:03Z", "run long-run lease original-lease", "unknown result: long-run"} {
+		if !strings.Contains(te.out.String(), want) {
+			t.Fatalf("missing %q in %s", want, te.out)
+		}
+	}
 	if calls != 3 {
 		t.Fatal("unexpected automatic operation replay")
 	}
@@ -211,5 +218,26 @@ func TestLocalUpgradeLostAnswerNeverReplaysBlindly(t *testing.T) {
 	}
 	if len(calls) != 1 {
 		t.Fatal("unknown start was replayed")
+	}
+}
+
+func TestForceMaintenanceIsExplicitOnStart(t *testing.T) {
+	t.Run("request", func(t *testing.T) {
+		te := newTestEnv(t, "")
+		if code := te.main("upgrade", "start", "--force-maintenance", "--server-only", "--dry-run"); code != exitOK {
+			t.Fatal(code, te.errOut)
+		}
+		var sent struct {
+			Request protocol.UpgradeStartRequest `json:"request"`
+		}
+		if err := json.Unmarshal(te.out.Bytes(), &sent); err != nil || !sent.Request.ForceMaintenance || !sent.Request.ServerOnly {
+			t.Fatal(sent, err)
+		}
+	})
+	for _, args := range [][]string{{"upgrade", "retry", "--force-maintenance"}, {"upgrade", "start", "--force-maintenance", "--delivery-task", "approved"}} {
+		te := newTestEnv(t, "")
+		if code := te.main(args...); code != exitUsage {
+			t.Fatal(args, code)
+		}
 	}
 }

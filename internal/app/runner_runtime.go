@@ -75,7 +75,12 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 	if hello && r.Protocol < protocol.CurrentRunnerProtocol {
 		var blocked bool
 		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades
-			WHERE status IN ('running','attention') AND json_extract(state_json,'$.manifest.protocol.min')>?)`, r.Protocol).Scan(&blocked); err != nil {
+			WHERE status IN ('running','attention') AND json_extract(state_json,'$.manifest.protocol.min')>?
+			AND NOT EXISTS(SELECT 1 FROM json_each(state_json,'$.view.window_stops') s WHERE phase='window_maintenance'
+				AND json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.process.launch_id')=?
+				AND json_extract(s.value,'$.protocol')=? AND json_extract(s.value,'$.generation')=?
+				AND json_extract(s.value,'$.journal_id')=? AND json_extract(s.value,'$.process.pid')=?
+				AND json_extract(s.value,'$.process.sha256')=? AND json_extract(s.value,'$.state')!='stopped'))`, r.Protocol, host, r.InstanceID, r.Protocol, r.Generation, r.JournalID, r.Build.PID, r.Build.BinarySHA256).Scan(&blocked); err != nil {
 			return err
 		}
 		if blocked {

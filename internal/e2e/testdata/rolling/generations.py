@@ -88,7 +88,7 @@ ExecStartPost=/usr/bin/python3 {Path(__file__).with_name('controlled.py').resolv
     return state, initial
 
 
-def exercise(root, old, first, third, seed):
+def exercise(root, old, first, third, seed, next_window=None):
     assert pwd.getpwuid(os.getuid()).pw_name == "tend-wire-fixture"
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -141,7 +141,8 @@ def exercise(root, old, first, third, seed):
         stop(registration)
         tasks = run(seed, db, "rolling").decode().splitlines()
         assert len(tasks) == 4
-        prepare(root, first, first / "tend-server", server_config, env, stack)
+        prepare(root, first, first / "tend-server", server_config, env, stack,
+                drain_timeout="60s" if next_window else None)
         cli = first / "tend"
         run(cli, "login", "--server", "http://" + address)
         for task in tasks[1:]:
@@ -163,8 +164,8 @@ def exercise(root, old, first, third, seed):
         runner["side_channel"] = {"kind": "tailscaled", "socket": daemon_sock}
         write_private(runner_config, json.dumps(runner))
 
-        def start(bundle):
-            view = json.loads(run(cli, "upgrade", "start", "--socket", root / "server.sock", "--release", bundle, "--json"))
+        def start(bundle, *flags):
+            view = json.loads(run(cli, "upgrade", "start", "--socket", root / "server.sock", "--release", bundle, "--json", *flags))
             return view["upgrade_id"]
 
         batch = start(first)
@@ -196,7 +197,28 @@ def exercise(root, old, first, third, seed):
         assert rows("select journal_id from runner_journal_runs where run_id=?", (lease(tasks[2])[0][0],)) == [(current["current_journal"],)]
         run(cli, "resume", tasks[3])
         assert not lease(tasks[3])
-        for task, gate, pid in [(tasks[0], first_gate, oldpid), (tasks[1], middle_gate, middle["pid"])]:
+        finish = [(tasks[0], first_gate, oldpid), (tasks[1], middle_gate, middle["pid"])]
+        if next_window:
+            ordinary = subprocess.run([cli, "upgrade", "start", "--socket", root / "server.sock",
+                                       "--release", next_window, "--server-only"], env=env, capture_output=True, timeout=120)
+            assert ordinary.returncode != 0 and b"outside the target range" in ordinary.stderr, ordinary.stderr
+            batch = start(next_window, "--server-only", "--force-maintenance")
+            def status():
+                return json.loads(run(cli, "upgrade", "status", "--socket", root / "server.sock", "--json"))
+            window = status()
+            target, = window["window_stops"]
+            assert window["phase"] == "window_maintenance" and target["process"]["pid"] == oldpid
+            assert target["runs"] == [dict(run_id=original_lease[0], lease_id=original_lease[1])]
+            os.kill(oldpid, 0)
+            eventually("server upgrade after exact predecessor exit", lambda: batch_done(batch), [], timeout=210)
+            proof, = status()["window_stops"]
+            assert proof["state"] == "stopped" and proof["unknown_runs"] == [original_lease[0]], proof
+            assert not Path(f"/proc/{oldpid}").exists()
+            assert lease(tasks[0]) == [(original_lease[0], original_lease[1], "lapsed")]
+            assert rows("select observed_state from runs where run_id=?", (original_lease[0],)) == [("unknown",)]
+            assert lease(tasks[1]) == [middle_lease] and read_state()["process"] == current["process"]
+            finish = finish[1:]
+        for task, gate, pid in finish:
             with os.fdopen(os.open(gate, os.O_WRONLY | os.O_NONBLOCK), "w") as f:
                 print("complete", file=f)
             eventually("original report committed", lambda: rows("select count(*) from artifacts where run_id=?", (lease(task)[0][0],)) == [(1,)], [])

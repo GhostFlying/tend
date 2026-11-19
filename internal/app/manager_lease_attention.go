@@ -11,7 +11,7 @@ import (
 
 // recordManagerLeaseProblem reports a proved transport failure to the manager's
 // supervisor without settling or replaying any original business operation.
-func (a *App) recordManagerLeaseProblem(ctx context.Context, tx *store.Tx, run store.RunRow, leaseID string, now time.Time) (bool, error) {
+func recordManagerLeaseProblem(ctx context.Context, tx *store.Tx, ids protocol.IDGen, run store.RunRow, leaseID string, now time.Time) (bool, error) {
 	if run.Role != protocol.RoleIssueManager {
 		return false, nil
 	}
@@ -28,9 +28,9 @@ func (a *App) recordManagerLeaseProblem(ctx context.Context, tx *store.Tx, run s
 	if err != nil || exists {
 		return false, err
 	}
-	x := &Exec{Env: &protocol.Envelope{RequestID: a.ids.New(protocol.PrefixRequest)}, Principal: protocol.Principal{Kind: protocol.PrincipalSystem}, Now: now, IDs: a.ids}
+	x := &Exec{Env: &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest)}, Principal: protocol.Principal{Kind: protocol.PrincipalSystem}, Now: now, IDs: ids}
 	title := fmt.Sprintf("Manager lease expired; reconcile the original execution: run %s, lease %s. The run remains unknown; preserve pending requests and frozen execution, and do not restart or replay business operations.", run.RunID, leaseID)
-	source := a.ids.New(protocol.PrefixMessage)
+	source := ids.New(protocol.PrefixMessage)
 	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: source, ConversationID: m.ConversationID, Author: "system", Body: title, CreatedAt: now.UnixMilli()}); err != nil {
 		return false, err
 	}
@@ -52,7 +52,7 @@ func (a *App) recordManagerLeaseProblem(ctx context.Context, tx *store.Tx, run s
 			return false, err
 		}
 	}
-	attention := protocol.Attention{AttentionID: a.ids.New(protocol.Prefix("attn")), IssueID: m.IssueID, TaskID: run.TaskID, Kind: "action", Title: title, Status: "open", SourceMessageID: source, RaisedBy: x.Principal, Responsibility: r, CreatedAt: now.UnixMilli()}
+	attention := protocol.Attention{AttentionID: ids.New(protocol.Prefix("attn")), IssueID: m.IssueID, TaskID: run.TaskID, Kind: "action", Title: title, Status: "open", SourceMessageID: source, RaisedBy: x.Principal, Responsibility: r, CreatedAt: now.UnixMilli()}
 	if err := saveAttention(ctx, x, tx, &attention, 0); err != nil {
 		return false, err
 	}

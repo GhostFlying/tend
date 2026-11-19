@@ -1,0 +1,208 @@
+package app
+
+import (
+	"encoding/json"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/store"
+)
+
+// Only the earlier, already committed supervisor handoff is supplied by the
+// fixture. The Run, maintenance request, retirement grant, acknowledgement and
+// install phase all pass through the ordinary business entry points.
+func TestUpgradeWindowMaintenance(t *testing.T) {
+	for _, scenario := range []string{"work_finishes", "deadline", "cancel", "receipt_after_expiry"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, c := selfUpgradeFixture(t)
+			selfUpgradeHosts(t, h, true)
+			ctx := t.Context()
+			const host = "linux-1"
+			target := protocol.Target{Type: "host", ID: host}
+			old := upgradeAck(h, host, protocol.RunnerNormal)
+			old.Build.PID = 84
+			old.Sequence++
+			old.Protocol, old.ProtocolMin, old.ProtocolMax = protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol
+			if op := h.versionedHello(host, &old); op.Error != nil {
+				t.Fatal(op)
+			}
+			_, task := h.createTask(owner, createTaskPayload{Title: "original long run", Spec: testSpec})
+			as, ok := h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: &old}, nil))
+			if !ok {
+				t.Fatal("old runner did not claim")
+			}
+			if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Error != nil {
+				t.Fatal(op)
+			}
+			process := protocol.RecoveryIdentity{PID: 84, StartTicks: 1701, SHA256: old.Build.BinarySHA256, LaunchID: old.InstanceID}
+			req := protocol.RunnerRetirement{UpgradeID: "handoff", Process: process}
+			current := old
+			current.InstanceID, current.JournalID, current.Generation = "compatible", "compatible", 2
+			current.Protocol, current.ProtocolMin, current.ProtocolMax = protocol.CurrentRunnerProtocol, protocol.MinimumRunnerProtocol, protocol.CurrentRunnerProtocol
+			current.Build.PID = 85
+			old.Mode = protocol.RunnerMaintenance
+			if err := h.store.Write(ctx, func(tx *store.Tx) error {
+				source := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: req.UpgradeID, Status: "completed", ReleaseID: "before", CreatedAt: h.clock.Now().Add(-time.Hour)}, Hosts: []store.UpgradeHost{{HostID: host, RollingFrom: old.InstanceID, RollingProcess: process, Committed: &protocol.UpdaterReceipt{CommittedConfirmed: true}}}}
+				if err := tx.PutUpgrade(ctx, source); err != nil {
+					return err
+				}
+				row, err := store.GetHostRuntime(ctx, tx.Q(), host)
+				if err != nil {
+					return err
+				}
+				row.Runtime = old
+				if err := tx.PreserveDrainingRunner(ctx, host, req.UpgradeID, row, protocol.RunnerControl{Mode: protocol.RunnerMaintenance, Revision: old.AppliedControlRevision}); err != nil {
+					return err
+				}
+				row.Runtime = current
+				return tx.PutHostRuntime(ctx, host, row)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			c.Manifest.Protocol = release.Range{Min: protocol.CurrentRunnerProtocol, Max: protocol.CurrentRunnerProtocol + 1}
+			c.ServerOnly, c.ServerUpdaterSupported = true, true
+			c.ServerCapabilities = []string{release.ServerCapabilityRunnerJournals, release.ServerCapabilityIndependentServerUpgrade, release.ServerCapabilityWindowMaintenance}
+			c.DrainMillis = 5000
+			if op := startTestUpgrade(h, "ordinary", c); op.Error == nil {
+				t.Fatal("ordinary upgrade passed incompatible predecessor")
+			}
+			c.ForceMaintenance = true
+			env := h.env(c.Operation(), protocol.Target{Type: "upgrade", ID: "window"}, map[string]bool{"force_maintenance": true}, rev(0))
+			system := protocol.Principal{Kind: protocol.PrincipalSystem}
+			if op := h.exec(system, env, c); op.Error != nil {
+				t.Fatal(op)
+			}
+			batch := upgradeRead(h)
+			ref := protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}
+			if batch.View.Phase != windowMaintenance || len(batch.View.WindowStops) != 1 || batch.View.WindowStops[0].Process != process || !slices.Equal(batch.View.WindowStops[0].Runs, []protocol.LeaseRef{ref}) {
+				t.Fatal(batch.View)
+			}
+			if op := h.exec(system, env, c); op.Error != nil {
+				t.Fatal(op)
+			}
+			normal := c
+			normal.ForceMaintenance = false
+			if _, err := h.app.CheckUpgradeStart(ctx, env, normal); err == nil {
+				t.Fatal("force reused as ordinary")
+			}
+			old.Sequence++
+			if op := h.exec(runner(host), h.env(protocol.OpRunnerHello, target, protocol.HelloPayload{Runtime: &old, Worker: h.worker(host), WorkspaceProtocol: 1, Held: []protocol.HeldRun{{RunID: as.RunID, LeaseID: as.LeaseID, Observed: protocol.RunRunning}}}, nil), Hello{}); op.Error != nil {
+				t.Fatal("pinned old runner cannot reconnect", op)
+			}
+			foreign := old
+			foreign.InstanceID = "different-old"
+			if op := h.versionedHello(host, &foreign); op.Error == nil {
+				t.Fatal("foreign incompatible runner admitted")
+			}
+			old.Sequence++
+			hb, err := h.app.RuntimeHeartbeat(ctx, runner(host), protocol.HeartbeatPayload{Runtime: &old, Runs: []protocol.LeaseRef{ref}})
+			if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed {
+				t.Fatal(hb, err)
+			}
+			retire := func(r protocol.RunnerRetirement) protocol.RunnerRetirementResult {
+				t.Helper()
+				op := h.exec(runner(host), h.env("runner.rolling_retire", target, r, nil), RetireRollingRunner{})
+				var result protocol.RunnerRetirementResult
+				if op.Error != nil || json.Unmarshal(op.Result, &result) != nil {
+					t.Fatal(op)
+				}
+				return result
+			}
+			control := func(act string) error {
+				row := upgradeRead(h)
+				op, err := h.app.Execute(ctx, owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: row.View.UpgradeID}, protocol.UpgradeControlPayload{Action: act}, rev(row.View.Revision)), ControlUpgrade{})
+				if err != nil {
+					return err
+				}
+				if op.Error != nil {
+					return op.Error
+				}
+				return nil
+			}
+			if r := retire(req); r.Allowed {
+				t.Fatal("early stop", r)
+			}
+			if v := upgradeTick(h, ServerObservation{MainDrained: true}); v.Phase != windowMaintenance {
+				t.Fatal("premature install", v)
+			}
+			if scenario == "cancel" {
+				if op := control("cancel"); op != nil {
+					t.Fatal(op)
+				}
+				h.clock.Advance(6 * time.Second)
+				if r := retire(req); r.Allowed {
+					t.Fatal("cancelled authority", r)
+				}
+				return
+			}
+			if scenario == "work_finishes" {
+				if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{}); op.Error != nil {
+					t.Fatal(op)
+				}
+				old.Sequence++
+				old.Mode = protocol.RunnerReady
+				if _, err := h.app.RuntimeHeartbeat(ctx, runner(host), protocol.HeartbeatPayload{Runtime: &old}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				h.clock.Advance(5 * time.Second)
+			}
+			wrong := req
+			wrong.Process.StartTicks++
+			if result := retire(wrong); result.Allowed {
+				t.Fatal("different process authorized")
+			}
+			grant := retire(req)
+			if !grant.Allowed || grant.AuthorizationID == "" || retire(req).AuthorizationID != grant.AuthorizationID {
+				t.Fatal("missing original permission", grant)
+			}
+			if v := upgradeTick(h, ServerObservation{MainDrained: true}); v.Phase != windowMaintenance || v.WindowStops[0].State != "stop_authorized" {
+				t.Fatal("grant treated as exit", v)
+			}
+			if op := control("cancel"); op == nil {
+				t.Fatal("dropped unresolved stop")
+			}
+			if scenario == "receipt_after_expiry" {
+				h.clock.Advance(21 * time.Minute)
+				if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
+					t.Fatal(v)
+				}
+			}
+			req.AuthorizationID = grant.AuthorizationID
+			if !retire(req).Confirmed || !retire(req).Confirmed {
+				t.Fatal("lost receipt could not reconcile")
+			}
+			stopped := upgradeRead(h).View.WindowStops[0]
+			if stopped.State != "stopped" {
+				t.Fatal(stopped)
+			}
+			if scenario != "work_finishes" {
+				if !slices.Equal(stopped.UnknownRuns, []string{as.RunID}) || h.run(as.RunID).ObservedState != protocol.RunUnknown || h.lease(as.RunID).Status != store.LeaseLapsed || h.lease(as.RunID).LeaseID != as.LeaseID {
+					t.Fatal("original work lost", stopped, h.run(as.RunID), h.lease(as.RunID))
+				}
+				if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+					ok, err := previouslyStoppedRun(ctx, tx.Q(), host, as.RunID)
+					if !ok {
+						t.Error("original retirement proof lost")
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			} else if len(stopped.UnknownRuns) > 0 || h.run(as.RunID).ObservedState != protocol.RunFinished {
+				t.Fatal("completed result overwritten", stopped, h.run(as.RunID))
+			}
+			v := upgradeTick(h, ServerObservation{})
+			if scenario == "receipt_after_expiry" {
+				if v.Status != "attention" {
+					t.Fatal("expired batch resumed", v)
+				}
+			} else if v.Phase != "preparing" || upgradeTick(h, ServerObservation{}).Phase != "server_updater" {
+				t.Fatal("receipt did not release installation", v)
+			}
+		})
+	}
+}

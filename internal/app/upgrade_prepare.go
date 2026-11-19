@@ -47,6 +47,15 @@ func prepareUpgradeHosts(ctx context.Context, x *Exec, tx *store.Tx, batch *stor
 }
 
 func advanceUpgradePreparation(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow) (bool, error) {
+	if batch.View.Phase == windowMaintenance {
+		for _, stop := range batch.View.WindowStops {
+			if stop.State != "stopped" {
+				return false, nil
+			}
+		}
+		batch.View.Phase = "preparing"
+		return false, prepareUpgradeHosts(ctx, x, tx, batch)
+	}
 	if batch.View.Phase != "preparing" {
 		return true, nil
 	}

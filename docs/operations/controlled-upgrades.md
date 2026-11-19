@@ -408,3 +408,13 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 旧进程确认退出后，当前 runner 使用旧 journal 中的请求、上传游标和本机停止证明继续处理未完的归档、用量和工作区对账。可通过当前 runner 的日志查看重试原因。
 
 整机紧急恢复会停止服务单元内的全部进程。存在收尾实例或归属尚未确认的交接时，`upgrade recover --force` 会在停机前返回冲突。收尾完成后，恢复沿用接单代的 journal 和已退役目录。各代的备份可通过检查点的 journal ID 核对。
+
+### 目标协议窗口之外的收尾实例
+
+先用普通 `tend upgrade start` 检查目标窗口。明确需要结束旧 runner 的本机操作员可以用同一完整包执行
+`tend upgrade start --release <完整包目录> --force-maintenance --server-only`；
+省略 `--server-only` 时执行完整 fleet 升级。已有兼容接单实例的主机会继续工作。接受新任务的实例本身越窗时，应先在当前 server 支持的窗口内完成该主机的 runner 交接。
+
+`tend upgrade status --json` 的 `window_stops` 列出受影响的 host、journal、进程、原 Run/lease 和固定截止时间。批次在 `window_maintenance` 阶段等待。每个实例从 `draining` 进入 `stop_authorized`，本机监督器确认该进程退出并提交回执后显示 `stopped`。此时 `unknown_runs` 列出需要查询原工作目录和外部操作的 Run。
+
+收到超时或响应中断时，用原升级 ID 和 request ID 核对状态。原停止授权尚待确认时先恢复与对应 updater 的通信。已过整体期限的批次可以接收停止回执；确认后取消原批次，需要继续发布时再显式发起新批次。

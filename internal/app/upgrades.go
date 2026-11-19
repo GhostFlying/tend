@@ -19,6 +19,7 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
+	ForceMaintenance       bool
 	ServerOnly             bool
 	ServerUpdaterSupported bool
 	ReleaseSet             *release.Set
@@ -47,7 +48,7 @@ func (StartUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 }
 func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	if prior, err := store.GetUpgrade(ctx, tx.Q(), x.Env.Target.ID); err == nil {
-		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID || prior.View.ServerOnly != c.ServerOnly {
+		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID || prior.View.ServerOnly != c.ServerOnly || prior.View.ForceMaintenance != c.ForceMaintenance {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "upgrade identity belongs to another admitted installation")
 		}
 		return Outcome{NoEffect: true, Result: prior.View}, nil
@@ -75,6 +76,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	if c.ServerOnly && (c.ReleaseSet == nil || c.ReleaseSet.Format != 2 || len(c.RunnerConfigurations) > 0 || !slices.Contains(c.ServerCapabilities, release.ServerCapabilityIndependentServerUpgrade)) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "server-only installation requires a capable complete release and no runner configuration changes")
+	}
+	if c.ForceMaintenance && (c.ReleaseSet == nil || c.ReleaseSet.Format != 2 || len(c.RunnerConfigurations) > 0 || c.DeliveryTaskID != "" || !slices.Contains(c.ServerCapabilities, release.ServerCapabilityWindowMaintenance)) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "forced maintenance requires a capable complete release and an explicit local upgrade")
 	}
 	if c.ParkIdleManagers && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityManagerPark) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "candidate does not support manager park")
@@ -132,8 +136,10 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "target server cannot route independent runner journals")
 		}
 	}
-	if err := checkDrainingWindow(ctx, tx.Q(), c.Manifest.Protocol); err != nil {
-		return Outcome{}, err
+	if !c.ForceMaintenance {
+		if err := checkDrainingWindow(ctx, tx.Q(), c.Manifest.Protocol); err != nil {
+			return Outcome{}, err
+		}
 	}
 	retiredRuns, err := store.CountOpenRunsOnRetiredHosts(ctx, tx.Q())
 	if err != nil {
@@ -159,7 +165,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
 		sourceCommit = source.Commit
 	}
-	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{ServerOnly: c.ServerOnly, SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{ForceMaintenance: c.ForceMaintenance, ServerOnly: c.ServerOnly, SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	r.Deadline = capUpgradeDeadline(&r, r.Deadline)
 	r.ReleaseSet, r.ReleaseSetSHA256, r.ReleaseSetSize = c.ReleaseSet, c.ReleaseSetSHA256, c.ReleaseSetSize
 	if needsSelfUpdate(r) {
@@ -187,6 +193,20 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	for _, artifact := range artifacts {
 		totalBytes += artifact.Size
 	}
+	if c.ForceMaintenance {
+		affectedHosts, err := store.FollowupIDs(ctx, tx.Q(), `SELECT DISTINCT host_id FROM draining_runners WHERE json_extract(runtime_json,'$.protocol') NOT BETWEEN ? AND ? ORDER BY host_id`, c.Manifest.Protocol.Min, c.Manifest.Protocol.Max)
+		if err != nil {
+			return Outcome{}, err
+		}
+		for _, host := range affectedHosts {
+			if _, active := busy[host]; !active {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "inactive host %s must reconcile its incompatible runner", host)
+			}
+			if err := captureWindowStops(ctx, tx.Q(), &r, host); err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
 	for _, h := range hosts {
 		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 		if err != nil {
@@ -200,6 +220,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, err
 		}
 		if !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) {
+			if c.ForceMaintenance {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s accepting runner %s requires a compatible handoff before forced retirement", h.HostID, rt.Runtime.InstanceID)
+			}
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s runner %s uses protocol %d outside the target range [%d,%d]", h.HostID, rt.Runtime.InstanceID, rt.Runtime.Protocol, c.Manifest.Protocol.Min, c.Manifest.Protocol.Max)
 		}
 		if !c.ServerOnly && (rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater)) {
@@ -227,7 +250,16 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, err
 		}
 		for _, run := range runs {
-			if !c.Manifest.Protocol.Contains(run.Protocol) {
+			if !c.Manifest.Protocol.Contains(run.Protocol) && !windowOwnsRun(r.View.WindowStops, h.HostID, run.RunID) {
+				if run.ObservedState == protocol.RunUnknown {
+					proved, err := previouslyStoppedRun(ctx, tx.Q(), h.HostID, run.RunID)
+					if err != nil {
+						return Outcome{}, err
+					}
+					if proved {
+						continue
+					}
+				}
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "unfinished run %s requires a retired protocol", run.RunID)
 			}
 		}
@@ -292,14 +324,19 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	r.ParkIdleManagers = c.ParkIdleManagers
 	r.InstallPhase, r.View.Phase = r.View.Phase, "preparing"
-	if err := prepareUpgradeHosts(ctx, x, tx, &r); err != nil {
+	if len(r.View.WindowStops) > 0 {
+		r.View.Phase = windowMaintenance
+		r.Deadline = r.View.OverallDeadlineMillis
+	} else if err := prepareUpgradeHosts(ctx, x, tx, &r); err != nil {
 		return Outcome{}, err
 	}
 	if err := tx.PutUpgrade(ctx, r); err != nil {
 		return Outcome{}, err
 	}
 	notice := fmt.Sprintf("准备升级至 `%s`。先下发并校验发布包，原本正常的主机准备期间继续接单，临时维护主机保持停止接单。", r.View.ReleaseID)
-	if c.ServerOnly {
+	if len(r.View.WindowStops) > 0 {
+		notice = fmt.Sprintf("升级 %s 正等待 %d 个越窗 runner 的退出回执。", r.View.ReleaseID, len(r.View.WindowStops))
+	} else if c.ServerOnly {
 		notice = fmt.Sprintf("准备单独升级 server 至 `%s`，原 runner 继续执行已领取的任务。", r.View.ReleaseID)
 	}
 	if len(c.RunnerConfigurations) > 0 {
@@ -845,7 +882,7 @@ func upgradePausesMain(ctx context.Context, q store.Querier) (bool, error) {
 	if r.View.Status == "attention" && (r.ServerProcess == "" || r.ServerRollback != nil) {
 		return false, nil
 	}
-	return (r.View.Status == "running" || r.View.Status == "attention") && r.View.Phase != "runners" && r.View.Phase != "preparing", nil
+	return (r.View.Status == "running" || r.View.Status == "attention") && r.View.Phase != "runners" && r.View.Phase != "preparing" && r.View.Phase != windowMaintenance, nil
 }
 
 func (a *App) CurrentUpgrade(ctx context.Context) (protocol.UpgradeView, error) {
