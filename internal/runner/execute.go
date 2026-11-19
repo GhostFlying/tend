@@ -80,6 +80,9 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			}
 			return err
 		case journal.PhaseWorkerDone:
+			if needsWorkspaceCollection(as) && !r.stopRequested(runCtx, a) && r.deferPauseCollection(a) {
+				return nil
+			}
 			r.flushFinalEvents(ctx, as)
 			if r.stopRequested(runCtx, a) {
 				// The saved outcome remains available for reconciliation, but
@@ -763,6 +766,22 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	return nil
 }
 
+func needsWorkspaceCollection(as protocol.Assignment) bool {
+	return as.Role == protocol.RoleImplement && (requiresDelivery(as, "commit") || len(as.Workspace.Mounts) > 0)
+}
+
+// The result stays in worker_done while a fresh Hello establishes the
+// original lease for collection. The executor for the read-only pause
+// phase must exit first so a renewal cannot reuse its receipt-only flags.
+func (r *Runner) deferPauseCollection(a *active) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a.pauseOnly {
+		a.reconcileOnExit = true
+	}
+	return a.pauseOnly
+}
+
 // completeWork resumes a known outcome after the owner returns control.
 func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignment, a *active, body json.RawMessage) error {
 	execution, resolveErr := r.resolveExecution(ctx, as)
@@ -794,6 +813,26 @@ func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignmen
 		}
 		return r.finish(ctx, as, journal.PhaseSubmitting, protocol.OpAcceptancesSubmit, verdict)
 	}
+	if needsWorkspaceCollection(as) {
+		collectCtx, cancel := context.WithCancelCause(runCtx)
+		defer func() {
+			cancel(nil)
+			r.mu.Lock()
+			a.stopCollection = nil
+			r.mu.Unlock()
+		}()
+		r.mu.Lock()
+		a.stopCollection = cancel
+		held := a.desired == protocol.DesiredHeld
+		r.mu.Unlock()
+		if held {
+			return errHeld
+		}
+		if cause := context.Cause(collectCtx); cause != nil {
+			return cause
+		}
+		runCtx = collectCtx
+	}
 	artifact := protocol.ArtifactPayload{}
 	if res.Result != nil {
 		artifact = *res.Result
@@ -824,6 +863,9 @@ func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignmen
 			}
 			artifact.Mounts = git.Mounts
 		}
+	}
+	if cause := context.Cause(runCtx); cause != nil {
+		return cause
 	}
 	if requiresDelivery(as, "report") && (artifact.Report == nil || strings.TrimSpace(artifact.Report.Body) == "") {
 		return failed("missing_report", errors.New("worker did not submit the required report"))
