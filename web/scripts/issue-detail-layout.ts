@@ -749,13 +749,48 @@ try {
       await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor();
       assert.equal(detailRequests, 1, "opening must reuse the held detail prefetch");
       const paragraph = page.getByText("继续阅读 3", { exact: true });
-      await paragraph.evaluate((node) => node.scrollIntoView({ block: "center" }));
+      await page.exposeBinding("releaseActivityDetail", () => release());
+      const lastTool = firstTools.at(-1)!.message_id;
+      const readingPositions = await paragraph.evaluateHandle(
+        (target, toolID) =>
+          new Promise<{ stop(): { originalTop: number; positions: number[] } }>((done) => {
+            requestAnimationFrame(() => {
+              const scrollport = target.closest("[data-issue-scroll]")!;
+              const selector = `[data-tool-item="${CSS.escape(toolID)}"]`;
+              const positions: number[] = [];
+              const capture = () => {
+                if (scrollport.querySelector(selector)?.checkVisibility())
+                  positions.push(target.getBoundingClientRect().top);
+              };
+              scrollport.addEventListener("scroll", capture);
+              target.scrollIntoView({ block: "center" });
+              const originalTop = target.getBoundingClientRect().top;
+              // Deliver the response before the next scroll event can update the Issue.
+              void (
+                window as unknown as { releaseActivityDetail(): Promise<void> }
+              ).releaseActivityDetail();
+              done({
+                stop() {
+                  scrollport.removeEventListener("scroll", capture);
+                  return { originalTop, positions };
+                },
+              });
+            });
+          }),
+        lastTool,
+      );
+      await discussion.locator(`[data-tool-item="${lastTool}"]`).waitFor();
       await page.evaluate(() => new Promise(requestAnimationFrame));
-      const originalTop = (await paragraph.boundingBox())!.y;
-      release();
-      await discussion.locator(`[data-tool-item="${firstTools.at(-1)!.message_id}"]`).waitFor();
-      await page.evaluate(() => new Promise(requestAnimationFrame));
-      assert(Math.abs((await paragraph.boundingBox())!.y - originalTop) <= 2);
+      const { originalTop, positions } = await readingPositions.evaluate((recorder) =>
+        recorder.stop(),
+      );
+      await readingPositions.dispose();
+      positions.push((await paragraph.boundingBox())!.y);
+      assert(
+        positions.every((top) => Math.abs(top - originalTop) <= 2),
+        `process rendering moved the reading anchor from ${originalTop} to ${positions.join(", ")}`,
+      );
+      assert.equal(await discussion.locator("[data-tool-item]:visible").count(), 12);
       assert.equal(detailRequests, 1);
       await discussion.getByText(prose, { exact: true }).waitFor();
       await discussion.getByRole("button", { name: "继续读取公开过程" }).click();
@@ -799,6 +834,8 @@ try {
       await trigger.click();
       await discussion.getByRole("button", { name: "继续读取公开过程" }).waitFor();
       assert.equal(detailRequests, 7, "a new navigation entry starts with only the first page");
+      await discussion.getByRole("button", { name: "显示更早 2 步", exact: true }).click();
+      assert.equal(await discussion.locator("[data-tool-item]:visible").count(), 14);
       console.log(
         "PASS readable detail reuse, anchor, streamed updates, and navigation page depth",
       );
