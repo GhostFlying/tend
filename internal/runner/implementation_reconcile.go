@@ -22,7 +22,11 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if err != nil {
 		return true, err
 	}
-	if run.Phase != journal.PhaseStarted || run.Attempts == 0 || run.Thread == "" || run.Held {
+	stoppedForPause := run.Phase == journal.PhasePausing && run.StoppedConfirmed
+	if stoppedForPause && run.Held {
+		return true, errHeld
+	}
+	if (run.Phase != journal.PhaseStarted && !stoppedForPause) || run.Attempts == 0 || run.Thread == "" || run.Held {
 		return false, nil
 	}
 	if err := r.checkRunWorker(run); err != nil {
@@ -35,6 +39,9 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if strictResume != nil {
 		// This optional shortcut does not replace an explicitly authorized
 		// retained continuation and its existing recovery/control checks.
+		if stoppedForPause {
+			return true, harness.ErrRetainedResumePending
+		}
 		return false, nil
 	}
 	execution, err := r.resolveExecution(ctx, as)
