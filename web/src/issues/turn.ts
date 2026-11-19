@@ -7,7 +7,10 @@ export class IssueTurnRead {
   private pages = 2;
   readonly read: WorkItemRead<IssueTranscriptBlock>;
   readonly state: WorkItemRead<IssueTranscriptBlock>["state"];
-  constructor(api: Reader) {
+  constructor(
+    api: Reader,
+    private readonly readable = false,
+  ) {
     this.read = new WorkItemRead({
       get: async <T>(path: string, signal?: AbortSignal) => {
         let block = await api.get<IssueTranscriptBlock>(path, signal);
@@ -45,7 +48,7 @@ export class IssueTurnRead {
   open(trigger: string, pages = 2): Promise<void> {
     this.pages = pages;
     return this.read.open(
-      `/api/v1/conversation/blocks/${encodeURIComponent(trigger)}?projection=issues`,
+      `/api/v1/conversation/blocks/${encodeURIComponent(trigger)}?projection=${this.readable ? "readable" : "issues"}`,
     );
   }
   more(): Promise<void> {

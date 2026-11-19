@@ -18,6 +18,9 @@ owner API 使用 `GET /api/v1/issues/{id}/context?view=incremental&limit=50`，�
 tend issue
 tend issue show "$ISSUE_ID" --json
 tend issue activity "$ISSUE_ID"
+tend issue activity "$ISSUE_ID" --view readable
+tend issue activity "$ISSUE_ID" --view readable --since "$EVENT_SEQ" --from "$OLDEST_POSITION"
+tend conversation block "$TRIGGER_MESSAGE_ID" --projection readable --after "$REPLY_SEQ"
 tend issue activity "$ISSUE_ID" --notification "$EVENT_POSITION"
 tend issue results "$ISSUE_ID"
 tend issue context "$ISSUE_ID"

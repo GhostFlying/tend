@@ -7,7 +7,7 @@ export class IssueActivityRead {
   private id = "";
   private older = new Map<string, IssueActivityEntry>();
   private generation = 0;
-  private fetching = false;
+  private earlierRead: Promise<void> | null = null;
   private controller: AbortController | undefined;
   readonly read: WorkItemRead<IssueActivityPage>;
   readonly state: WorkItemRead<IssueActivityPage>["state"];
@@ -15,8 +15,18 @@ export class IssueActivityRead {
     this.read = new WorkItemRead({
       get: async <T>(path: string, signal?: AbortSignal) => {
         const generation = this.generation;
+        await this.earlierRead?.catch(() => {});
+        if (signal?.aborted) throw signal.reason;
+        const current = this.state.get().value;
+        if (current?.readable && current.event_seq > 0) {
+          return (await this.changes(path, current, signal)) as T;
+        }
         let page = await this.api.get<IssueActivityPage>(path, signal);
         const head = page;
+        if (page.readable) {
+          if (!signal?.aborted && generation === this.generation) this.merge(page);
+          return { ...page, items: this.items() } as T;
+        }
         const items = [...(page.items ?? [])];
         // Admission can reveal an older owner block. Revalidate the retained
         // range rather than stopping at the first overlapping head entry.
@@ -25,7 +35,7 @@ export class IssueActivityRead {
           : 0;
         while (retainedFrom && page.more && (page.next_before ?? 0) > retainedFrom) {
           page = await this.api.get<IssueActivityPage>(
-            `${path}?before=${page.next_before}`,
+            `${path}&before=${page.next_before}`,
             signal,
           );
           items.push(...(page.items ?? []));
@@ -44,7 +54,7 @@ export class IssueActivityRead {
         }
         return {
           ...head,
-          items: [...this.older.values()].sort((a, b) => a.position - b.position),
+          items: this.items(),
           more: page.more,
           next_before: page.next_before,
         } as T;
@@ -57,47 +67,93 @@ export class IssueActivityRead {
       this.close();
       this.id = id;
     }
-    const pending = this.read.open(`/api/v1/issues/${encodeURIComponent(id)}/activity`);
+    const pending = this.read.open(`${this.path()}?view=readable`);
     if (retained && !this.state.get().value) {
       for (const item of retained.items ?? []) this.older.set(item.id, item);
       this.state.set({ ...this.state.get(), value: retained });
     }
     return pending;
   }
-  async earlier(): Promise<void> {
+  earlier(): Promise<void> {
     const current = this.state.get().value;
-    if (!current?.more || this.fetching) return;
+    if (!current?.more || this.earlierRead) return Promise.resolve();
     const generation = this.generation;
-    this.fetching = true;
     const controller = new AbortController();
     this.controller = controller;
-    try {
+    const pending = (async () => {
       const page = await this.api.get<IssueActivityPage>(
-        `/api/v1/issues/${encodeURIComponent(this.id)}/activity?before=${current.next_before}`,
+        `${this.path()}?view=readable&before=${current.next_before}`,
         controller.signal,
       );
       if (generation !== this.generation) return;
-      for (const item of page.items ?? []) this.older.set(item.id, item);
+      this.merge(page);
       this.state.set({
         ...this.state.get(),
         value: {
           ...(this.state.get().value ?? current),
+          items: this.items(),
           more: page.more,
           next_before: page.next_before ?? 0,
+          event_seq: Math.min(current.event_seq, page.event_seq),
         },
       });
-      await this.read.refresh();
-    } finally {
-      if (generation === this.generation) this.fetching = false;
-    }
+    })().finally(() => {
+      if (this.earlierRead === pending) this.earlierRead = null;
+    });
+    this.earlierRead = pending;
+    return pending.then(() => {
+      if (generation === this.generation) return this.read.refresh();
+    });
   }
+
+  private path() {
+    return `/api/v1/issues/${encodeURIComponent(this.id)}/activity`;
+  }
+
+  private items() {
+    return [...this.older.values()].sort((a, b) => a.position - b.position);
+  }
+
+  private merge(page: IssueActivityPage) {
+    for (const id of page.removed ?? []) this.older.delete(id);
+    for (const item of page.items ?? []) this.older.set(item.id, item);
+  }
+
+  private async changes(path: string, current: IssueActivityPage, signal?: AbortSignal) {
+    const from = current.more ? (current.next_before ?? 0) : 0;
+    const query = `${path}&since=${current.event_seq}&from=${from}`;
+    const head = await this.api.get<IssueActivityPage>(query, signal);
+    const pages = [head];
+    let page = head;
+    while (page.more && page.next_before && !signal?.aborted) {
+      page = await this.api.get<IssueActivityPage>(
+        `${query}&through=${head.event_seq}&before=${page.next_before}`,
+        signal,
+      );
+      pages.push(page);
+    }
+    if (signal?.aborted) return current;
+    for (const changed of pages) this.merge(changed);
+    // Reading history can advance the range while the delta is in flight.
+    // earlier() then refreshes using its own page's coverage.
+    const latest = this.state.get().value ?? current;
+    return {
+      ...latest,
+      items: this.items(),
+      event_seq:
+        latest.next_before === current.next_before && latest.more === current.more
+          ? head.event_seq
+          : latest.event_seq,
+    };
+  }
+
   refresh(): Promise<void> {
     return this.read.refresh();
   }
   close(): void {
     this.generation++;
     this.controller?.abort();
-    this.fetching = false;
+    this.earlierRead = null;
     this.id = "";
     this.older.clear();
     this.read.close();

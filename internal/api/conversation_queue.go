@@ -48,7 +48,7 @@ func (s *Server) conversationTranscript(w http.ResponseWriter, r *http.Request) 
 	})
 }
 func (s *Server) conversationBlock(w http.ResponseWriter, r *http.Request) {
-	if !s.validConversationProjection(w, r) {
+	if r.URL.Query().Get("projection") != "readable" && !s.validConversationProjection(w, r) {
 		return
 	}
 	after, err := intParam(r.URL.Query().Get("after"))
@@ -62,15 +62,7 @@ func (s *Server) conversationBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		out, err := views.TranscriptBlock(r.Context(), q, r.PathValue("id"), after, 50)
-		if err != nil {
-			return out, err
-		}
-		projected, err := views.OwnerIssueTranscriptBlock(r.Context(), q, out)
-		if err == nil && processAfter > 0 && !out.NoticeOnly {
-			projected.Process, err = views.IssuePublicProcess(r.Context(), q, out.Trigger.MessageID, processAfter, 50)
-		}
-		return projected, err
+		return views.IssueBlock(r.Context(), q, r.PathValue("id"), after, processAfter, r.URL.Query().Get("projection") == "readable")
 	})
 }
 

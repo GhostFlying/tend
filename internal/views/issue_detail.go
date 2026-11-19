@@ -187,10 +187,22 @@ var issueActivityTitles = map[string]string{
 	"work_item.delivery_changed":    "更新了交付观察",
 }
 
+type IssueActivityQuery struct {
+	Readable bool
+	Before   int64
+	Since    int64
+	Through  int64
+	From     int64
+}
+
 // IssueActivity merges existing transcript blocks and selected immutable facts
 // on their creation event. Streaming updates never move a block's position.
 func IssueActivity(ctx context.Context, q store.Querier, id string, before int64) (protocol.IssueActivityPage, error) {
-	out := protocol.IssueActivityPage{Items: []protocol.IssueActivityEntry{}}
+	return ReadIssueActivity(ctx, q, id, IssueActivityQuery{Before: before})
+}
+
+func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query IssueActivityQuery) (protocol.IssueActivityPage, error) {
+	out := protocol.IssueActivityPage{Items: []protocol.IssueActivityEntry{}, Readable: query.Readable}
 	issue, err := store.GetCanonicalIssue(ctx, q, id)
 	if err != nil {
 		return out, err
@@ -199,8 +211,17 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil {
 		return out, err
 	}
-	if before < 0 {
+	if query.Before < 0 || query.Since < 0 || query.From < 0 || query.Through < 0 ||
+		(query.Since == 0 && (query.From != 0 || query.Through != 0)) ||
+		(query.Since > 0 && !query.Readable) || query.Since > out.EventSeq ||
+		(query.Through > 0 && (query.Through < query.Since || query.Through > out.EventSeq)) {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid activity cursor")
+	}
+	if query.Through > 0 {
+		out.EventSeq = query.Through
+	}
+	if query.Since > 0 && query.Since == out.EventSeq {
+		return out, nil
 	}
 	conversation := ""
 	err = q.QueryRowContext(ctx, `SELECT conversation_id FROM agent_conversations WHERE work_item_id=?`, id).Scan(&conversation)
@@ -214,19 +235,42 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	rawKinds, _ := json.Marshal(kinds)
 	// Each union branch has a durable global event position. No timestamp-only
 	// cursor or synthesized child transcript is used.
-	rows, err := q.QueryContext(ctx, `WITH primary_tasks AS (SELECT o.task_id FROM task_work_item_owners o JOIN tasks t USING(task_id) WHERE o.work_item_id=? AND t.kind<>'issue_manager'),
+	limit := 20
+	if query.Readable {
+		limit = 50
+	}
+	rows, err := q.QueryContext(ctx, `WITH
+ query(readable,since,through) AS (VALUES(?,?,?)),
+ primary_tasks AS (SELECT o.task_id FROM task_work_item_owners o JOIN tasks t USING(task_id) WHERE o.work_item_id=? AND t.kind<>'issue_manager'),
  manager_tasks AS (SELECT task_id FROM issue_manager_tasks WHERE issue_id=?),
+ changed_messages AS MATERIALIZED (
+  SELECT DISTINCT m.message_id, m.reply_to
+  FROM query, events e JOIN conversation_messages m ON m.message_id=CASE
+   WHEN e.object_type='message' THEN e.object_id ELSE json_extract(e.body_json,'$.message_id') END
+  WHERE query.since>0 AND e.event_seq>query.since AND e.event_seq<=query.through
+   AND (e.object_type='message' OR e.object_type='work_item_choice')
+ ),
+ changed_blocks(id) AS MATERIALIZED (
+  SELECT message_id FROM changed_messages
+  UNION SELECT reply_to FROM changed_messages WHERE reply_to<>''
+  UNION SELECT s.source_id FROM changed_messages m JOIN conversation_reply_sources s ON s.reply_id=m.message_id
+ ),
+ conversation_entries AS (
+ SELECT e.event_seq AS position, m.message_id AS object_id, m.created_at,
+  (EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=m.message_id AND c.withdrawn_at<>0)
+   OR EXISTS(SELECT 1 FROM background_batches bg WHERE bg.message_id=m.message_id AND bg.status='completed' AND bg.checkin_json<>'')) AS removed
+ FROM query, conversation_messages m JOIN conversation_blocks b ON b.message_id=m.message_id AND b.notice_only=0
+ JOIN events e ON e.event_seq=(SELECT MIN(created.event_seq) FROM events created
+  WHERE created.object_type='message' AND created.object_id=m.message_id AND created.kind='conversation.message')
+ WHERE m.conversation_id=? AND (NOT query.readable OR m.kind<>'tool_use')
+ AND (query.since=0 OR e.event_seq>query.since OR m.message_id IN (SELECT id FROM changed_blocks))
+ ),
  entries AS (
- SELECT MIN(e.event_seq) AS position,'conversation' AS kind,m.message_id AS object_id,m.created_at AS created_at
- FROM conversation_blocks b JOIN conversation_messages m ON m.message_id=b.message_id
- JOIN events e ON e.object_type='message' AND e.object_id=m.message_id AND e.kind='conversation.message'
- WHERE m.conversation_id=? AND b.notice_only=0
- AND NOT EXISTS(SELECT 1 FROM conversation_message_controls c WHERE c.message_id=m.message_id AND c.withdrawn_at<>0)
- AND NOT EXISTS(SELECT 1 FROM background_batches bg WHERE bg.message_id=m.message_id AND bg.status='completed' AND bg.checkin_json<>'')
- GROUP BY m.message_id
+ SELECT position, CASE WHEN removed THEN 'removed' ELSE 'conversation' END AS kind, object_id, created_at
+ FROM conversation_entries WHERE NOT removed OR (SELECT since FROM query)>0
  UNION ALL
  SELECT e.event_seq,e.kind,e.object_id,e.created_at FROM events e
- WHERE e.kind IN (SELECT value FROM json_each(?)) AND (
+ WHERE e.event_seq>(SELECT since FROM query) AND e.kind IN (SELECT value FROM json_each(?)) AND (
  (e.object_type='issue' AND e.object_id=?)
  OR (e.kind='work_item.delivery_changed' AND e.object_type='work_item' AND e.object_id=?)
  OR (e.kind='task.manager_requested' AND e.object_id IN (SELECT task_id FROM manager_tasks))
@@ -242,11 +286,17 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
  FROM (SELECT DISTINCT s.event_id FROM background_batches b JOIN background_sources s USING(batch_id) WHERE b.work_item_id=?) linked
  CROSS JOIN events e ON e.event_id=linked.event_id
  WHERE e.object_type='task' AND e.kind='task.completed'
+ AND ((SELECT since FROM query)=0 OR e.event_seq>(SELECT since FROM query)
+  OR EXISTS(SELECT 1 FROM background_sources s JOIN background_batches b USING(batch_id)
+    WHERE s.event_id=linked.event_id AND b.work_item_id=? AND b.message_id IN (SELECT id FROM changed_blocks)))
  UNION ALL
  SELECT e.event_seq,e.kind,h.delivery_id,e.created_at FROM issue_delivery_candidate_history h
- JOIN events e ON e.event_seq=h.event_seq WHERE h.issue_id=?
+ JOIN events e ON e.event_seq=h.event_seq WHERE h.issue_id=? AND e.event_seq>(SELECT since FROM query)
  )
- SELECT position,kind,object_id,created_at FROM entries WHERE position<=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT 21`, id, id, conversation, string(rawKinds), id, id, id, id, id, id, out.EventSeq, before, before)
+ SELECT position,kind,object_id,created_at FROM entries
+ WHERE position<=? AND position>=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT ?`,
+		query.Readable, query.Since, out.EventSeq, id, id, conversation, string(rawKinds), id, id, id, id, id, id, id,
+		out.EventSeq, query.From, query.Before, query.Before, limit+1)
 	if err != nil {
 		return out, fmt.Errorf("views: issue activity: %w", err)
 	}
@@ -269,19 +319,26 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 	if err != nil {
 		return out, err
 	}
-	if len(refs) > 20 {
+	if len(refs) > limit {
 		out.More = true
-		refs = refs[:20]
-		out.NextBefore = refs[len(refs)-1].seq
+		refs = refs[:limit]
 	}
+	const readableBudget = 512 * 1024
+	size := 0
+	var lastPosition int64
 	for _, r := range refs {
+		if r.kind == "removed" {
+			out.Removed = append(out.Removed, "block:"+r.id)
+			lastPosition = r.seq
+			continue
+		}
 		entry := protocol.IssueActivityEntry{ID: fmt.Sprintf("event:%d", r.seq), Position: r.seq, Kind: r.kind, CreatedAt: r.at, Author: "tend", Title: issueActivityTitles[r.kind]}
 		if r.kind == "conversation" {
-			block, err := TranscriptBlock(ctx, q, r.id, 0, 50)
+			block, err := transcriptBlock(ctx, q, r.id, 0, 50, query.Readable)
 			if err != nil {
 				return out, err
 			}
-			projected, err := OwnerIssueTranscriptBlock(ctx, q, block)
+			projected, err := ownerIssueTranscriptBlock(ctx, q, block, 0, query.Readable)
 			if err != nil {
 				return out, err
 			}
@@ -369,8 +426,6 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 			}
 			if r.kind == "task.completed" {
 				entry.IssueID, entry.TaskID, entry.Title = id, r.id, "任务结果已返回"
-				out.Items = append(out.Items, entry)
-				continue
 			}
 			if r.id == issue.IssueID {
 				entry.IssueID = id
@@ -422,7 +477,22 @@ func IssueActivity(ctx context.Context, q store.Querier, id string, before int64
 				entry.ID = "result:" + entry.ArtifactID
 			}
 		}
+		if query.Readable {
+			raw, err := json.Marshal(entry)
+			if err != nil {
+				return out, err
+			}
+			if len(out.Items) > 0 && size+len(raw)+1 > readableBudget {
+				out.More = true
+				break
+			}
+			size += len(raw) + 1
+		}
 		out.Items = append(out.Items, entry)
+		lastPosition = r.seq
+	}
+	if out.More {
+		out.NextBefore = lastPosition
 	}
 	slices.Reverse(out.Items)
 	return out, nil

@@ -8311,6 +8311,15 @@
         },
         "next_before": {
           "type": "integer"
+        },
+        "readable": {
+          "type": "boolean"
+        },
+        "removed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -12034,6 +12043,9 @@
         },
         "error": {
           "type": "string"
+        },
+        "has_tools": {
+          "type": "boolean"
         },
         "items": {
           "anyOf": [

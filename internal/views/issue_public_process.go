@@ -14,7 +14,11 @@ import (
 // IssuePublicProcess reads only public tool records from the original background
 // producer. It never publishes deferred text, executes tools or reads reasoning.
 func IssuePublicProcess(ctx context.Context, q store.Querier, message string, after int64, limit int) (*protocol.IssueTurnProcess, error) {
-	out, err := issuePublicProcess(ctx, q, message, after, limit)
+	return issueProcessProjection(ctx, q, message, after, limit, false)
+}
+
+func issueProcessProjection(ctx context.Context, q store.Querier, message string, after int64, limit int, readable bool) (*protocol.IssueTurnProcess, error) {
+	out, err := issuePublicProcess(ctx, q, message, after, limit, readable)
 	if err != nil {
 		// Process originals are auxiliary to the readable discussion. Keep a visible
 		// failure and retry path without turning it into empty successful history.
@@ -23,7 +27,7 @@ func IssuePublicProcess(ctx context.Context, q store.Querier, message string, af
 	return out, nil
 }
 
-func issuePublicProcess(ctx context.Context, q store.Querier, message string, after int64, limit int) (*protocol.IssueTurnProcess, error) {
+func issuePublicProcess(ctx context.Context, q store.Querier, message string, after int64, limit int, readable bool) (*protocol.IssueTurnProcess, error) {
 	out := &protocol.IssueTurnProcess{Items: []protocol.IssueConversationItem{}}
 	var start sql.NullInt64
 	var active int
@@ -52,11 +56,21 @@ func issuePublicProcess(ctx context.Context, q store.Querier, message string, af
 			out.EndedAt = end.Int64
 		}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT r.seq,r.thread_id,r.turn_id,r.item_id,r.tool_json,r.status,r.created_at,b.status
- FROM background_replies r JOIN background_batches b USING(batch_id)
- WHERE b.message_id=? AND r.kind='tool_use' AND r.seq>?
- AND EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id)
- ORDER BY r.seq LIMIT ?`, message, after, limit+1)
+	const publicTools = ` FROM background_replies r JOIN background_batches b USING(batch_id)
+ WHERE b.message_id=? AND r.kind='tool_use'
+ AND EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id)`
+	if readable {
+		err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1`+publicTools+`)
+ OR EXISTS(SELECT 1 FROM conversation_messages WHERE reply_to=? AND kind='tool_use')
+ OR EXISTS(SELECT 1 FROM conversation_reply_sources s JOIN conversation_messages m ON m.message_id=s.reply_id
+ WHERE s.source_id=? AND m.kind='tool_use')`, message, message, message).Scan(&out.HasTools)
+		if err != nil || (!start.Valid && !out.HasTools) {
+			return nil, err
+		}
+		return out, nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT r.seq,r.thread_id,r.turn_id,r.item_id,r.tool_json,r.status,r.created_at,b.status`+publicTools+`
+ AND r.seq>? ORDER BY r.seq LIMIT ?`, message, after, limit+1)
 	if err != nil {
 		return nil, err
 	}

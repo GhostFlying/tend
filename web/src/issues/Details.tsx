@@ -91,6 +91,9 @@ export function IssueDetails({
   const conversationState = useStore(conversationRead.state);
   useEffect(() => {
     void reads.open(id);
+    void reads.activity.open(id, reading.activity);
+    const remember = () => reading.saveActivity(reads.activity.state.get().value);
+    const stopActivity = reads.activity.state.subscribe(remember);
     void reads.attentions.open(id);
     reads.children(id, reading.childCursor(), true);
     void reads.openResults(id);
@@ -105,6 +108,8 @@ export function IssueDetails({
     return () => {
       stop();
       reset();
+      remember();
+      stopActivity();
       reads.stop();
     };
   }, [reads, live, id, reading]);

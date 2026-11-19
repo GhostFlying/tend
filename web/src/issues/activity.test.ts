@@ -311,3 +311,57 @@ test.each([
   const rows = [entry("before", 1), { ...entry("incident", 2), kind }, entry("after", 3)];
   expect(groupActivityEvents(rows)).toEqual(rows.map((row) => [row]));
 });
+
+test("readable refresh merges deltas without rereading retained pages", async () => {
+  const requested: URL[] = [];
+  const readable = (items: IssueActivityEntry[], more = false, before = 0, seq = 20) => ({
+    ...page(items, more, before),
+    readable: true,
+    event_seq: seq,
+  });
+  const read = new IssueActivityRead({
+    get: async <T>(path: string) => {
+      const url = new URL(path, "https://example.test");
+      requested.push(url);
+      const since = url.searchParams.get("since");
+      const before = url.searchParams.get("before");
+      if (!since && !before) return readable([entry("newer", 3)], true, 3) as T;
+      if (!since) return readable([entry("old", 1), entry("withdraw", 2)]) as T;
+      if (since === "20") return readable([]) as T;
+      if (before)
+        return {
+          ...readable([entry("old", 1, "updated reply")], false, 0, 22),
+          removed: ["withdraw"],
+        } as T;
+      return readable([entry("new", 4)], true, 4, 22) as T;
+    },
+  });
+  await read.open("issue");
+  await read.earlier();
+  // Advance the mock head through one empty observation.
+  read.state.set({ value: { ...read.state.get().value!, event_seq: 21 }, loading: false });
+  requested.length = 0;
+  await read.refresh();
+  expect(requested.map((url) => [...url.searchParams])).toEqual([
+    [
+      ["view", "readable"],
+      ["since", "21"],
+      ["from", "0"],
+    ],
+    [
+      ["view", "readable"],
+      ["since", "21"],
+      ["from", "0"],
+      ["through", "22"],
+      ["before", "4"],
+    ],
+  ]);
+  expect(read.state.get().value?.items?.map(({ id, title }) => [id, title])).toEqual([
+    ["old", "updated reply"],
+    ["newer", "newer"],
+    ["new", "new"],
+  ]);
+  expect(read.state.get().value?.more).toBe(false);
+  expect(read.state.get().value?.event_seq).toBe(22);
+  read.close();
+});

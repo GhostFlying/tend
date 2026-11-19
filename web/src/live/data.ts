@@ -32,7 +32,7 @@ import { Store, type Readable } from "../state/store.ts";
 
 /** The part of the API client the views read with. */
 export interface Reader {
-  get<T>(path: string, signal?: AbortSignal): Promise<T>;
+  get<T>(path: string, signal?: AbortSignal, priority?: RequestPriority): Promise<T>;
 }
 
 export interface ConversationState {
