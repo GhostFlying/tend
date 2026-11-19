@@ -56,7 +56,7 @@ export function Hosts({
           data-expanded={expanded || undefined}
           key={h.host_id}
           aria-label={`主机详情：${h.host_id}`}
-          title={`槽位占用：${h.open_runs} / ${h.slots} · ${h.os} / ${h.arch} · ${h.worker}`}
+          title={`槽位占用：${h.occupied_slots ?? h.open_runs} / ${h.slots} · ${h.os} / ${h.arch} · ${h.worker}`}
           onClick={(event) => {
             returnFocus.current = event.currentTarget;
             setSelected(h.host_id);
@@ -71,8 +71,12 @@ export function Hosts({
               <span className={styles.maintenance}>{hostMaintenanceLabel(h)}</span>
             )}
             <span>
-              {h.online === true && !waiting ? (h.open_runs > 0 ? "执行中" : "空闲") : "记录占用"} ·{" "}
-              {h.open_runs} / {h.slots} 槽位
+              {h.online === true && !waiting
+                ? (h.occupied_slots ?? h.open_runs) > 0
+                  ? "执行中"
+                  : "空闲"
+                : "记录占用"}{" "}
+              · {h.occupied_slots ?? h.open_runs} / {h.slots} 槽位
             </span>
           </span>
         </Button>
@@ -130,7 +134,7 @@ function HostDetails({
         </dd>
         <dt>槽位占用</dt>
         <dd>
-          {host.open_runs} / {host.slots}
+          {host.occupied_slots ?? host.open_runs} / {host.slots}
         </dd>
         <dt>最后心跳</dt>
         <dd>

@@ -34,6 +34,15 @@ func issueJournalCoverage(ctx context.Context, x *Exec, tx *store.Tx, batch *sto
 	coverage := min(batch.GrantMillis+batch.RestartMillis, (15 * time.Minute).Milliseconds())
 	grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(batch, now+coverage), RunIDs: []string{}}
 	for _, run := range runs {
+		if run.ObservedState == protocol.RunUnknown {
+			released, err := store.WindowRunStopped(ctx, tx.Q(), host, run.RunID)
+			if err != nil {
+				return nil, err
+			}
+			if released {
+				continue
+			}
+		}
 		lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
 		if err != nil {
 			return nil, err

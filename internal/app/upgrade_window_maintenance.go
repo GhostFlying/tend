@@ -62,6 +62,15 @@ func captureWindowStops(ctx context.Context, q store.Querier, batch *store.Upgra
 			return err
 		}
 		for _, run := range runs {
+			if run.ObservedState == protocol.RunUnknown {
+				released, err := store.WindowRunStopped(ctx, q, host, run.RunID)
+				if err != nil {
+					return err
+				}
+				if released {
+					continue
+				}
+			}
 			lease, err := store.GetLeaseByRun(ctx, q, run.RunID)
 			if err != nil {
 				return err
@@ -80,19 +89,6 @@ func windowOwnsRun(stops []protocol.UpgradeWindowStop, host, run string) bool {
 		}
 	}
 	return false
-}
-
-// A physically retired Run can still have unresolved external effects. Only
-// its recorded unknown outcome and original lapsed lease may cross the window.
-func previouslyStoppedRun(ctx context.Context, q store.Querier, host, run string) (bool, error) {
-	var proved bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM leases l JOIN runs r USING(run_id)
-		JOIN upgrades u JOIN json_each(u.state_json,'$.view.window_stops') s
-		JOIN json_each(s.value,'$.runs') ref JOIN json_each(s.value,'$.unknown_runs') unknown
-		WHERE l.run_id=? AND l.host_id=? AND l.status='lapsed' AND r.observed_state='unknown'
-		AND json_extract(s.value,'$.state')='stopped' AND json_extract(s.value,'$.host_id')=l.host_id
-		AND unknown.value=l.run_id AND json_extract(ref.value,'$.run_id')=l.run_id AND json_extract(ref.value,'$.lease_id')=l.lease_id)`, run, host).Scan(&proved)
-	return proved, err
 }
 
 // Only the batch that pinned this exact handoff may change its retirement.
@@ -125,7 +121,7 @@ func windowForRetirement(ctx context.Context, q store.Querier, host string, inpu
 
 // A confirmed exit proves loss of execution, never the result of a business
 // action. Preserve its original lease and all evidence for late reconciliation.
-func confirmWindowStop(ctx context.Context, x *Exec, tx *store.Tx, stop *protocol.UpgradeWindowStop) ([]Event, error) {
+func confirmWindowStop(ctx context.Context, x *Exec, tx *store.Tx, stop *protocol.UpgradeWindowStop, auth string) ([]Event, error) {
 	var events []Event
 	for _, ref := range stop.Runs {
 		run, err := store.GetRun(ctx, tx.Q(), ref.RunID)
@@ -160,6 +156,9 @@ func confirmWindowStop(ctx context.Context, x *Exec, tx *store.Tx, stop *protoco
 				return nil, err
 			}
 			x.FollowupQueued = x.FollowupQueued || wake
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO runner_window_released_leases(run_id,lease_id,authorization_id) VALUES(?,?,?)`, run.RunID, ref.LeaseID, auth); err != nil {
+			return nil, err
 		}
 		stop.UnknownRuns = append(stop.UnknownRuns, run.RunID)
 	}

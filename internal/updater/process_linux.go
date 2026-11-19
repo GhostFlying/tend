@@ -442,16 +442,22 @@ func (r launchContextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Duration) error {
-	return p.signalExact(ctx, id, timeout, syscall.SIGTERM)
+	return p.signalExact(ctx, id, timeout, syscall.SIGTERM, nil)
+}
+
+// StopIf validates a fixed authority after the expensive executable and pidfd
+// identity checks, at the signal dispatch boundary.
+func (p LinuxProcess) StopIf(ctx context.Context, id Identity, timeout time.Duration, beforeSignal func() error) error {
+	return p.signalExact(ctx, id, timeout, syscall.SIGTERM, beforeSignal)
 }
 
 // Crash is limited to the exact reviewed parent process. It never signals a
 // process group or invokes a graceful native/business close path.
 func (p LinuxProcess) Crash(ctx context.Context, id Identity, timeout time.Duration) error {
-	return p.signalExact(ctx, id, timeout, syscall.SIGKILL)
+	return p.signalExact(ctx, id, timeout, syscall.SIGKILL, nil)
 }
 
-func (p LinuxProcess) signalExact(ctx context.Context, id Identity, timeout time.Duration, signal syscall.Signal) error {
+func (p LinuxProcess) signalExact(ctx context.Context, id Identity, timeout time.Duration, signal syscall.Signal, beforeSignal func() error) error {
 	current, err := p.Inspect(ctx, id.PID)
 	if errors.Is(err, ErrNotRunning) {
 		return nil
@@ -478,6 +484,11 @@ func (p LinuxProcess) signalExact(ctx context.Context, id Identity, timeout time
 	}
 	if current != id {
 		return ErrUnknown
+	}
+	if beforeSignal != nil {
+		if err := beforeSignal(); err != nil {
+			return err
+		}
 	}
 	_, _, errno = syscall.Syscall6(424, fd, uintptr(signal), 0, 0, 0, 0) // pidfd_send_signal.
 	if errno != 0 && errno != syscall.ESRCH {

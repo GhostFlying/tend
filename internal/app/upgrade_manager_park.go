@@ -21,7 +21,7 @@ func captureUpgradeManagers(ctx context.Context, x *Exec, tx *store.Tx, batch *s
 				continue
 			}
 			if run.ObservedState == protocol.RunUnknown {
-				stopped, err := previouslyStoppedRun(ctx, tx.Q(), host.HostID, run.RunID)
+				stopped, err := store.WindowRunStopped(ctx, tx.Q(), host.HostID, run.RunID)
 				if err != nil {
 					return err
 				}

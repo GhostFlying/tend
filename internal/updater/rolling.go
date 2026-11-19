@@ -219,16 +219,36 @@ func (s *Supervisor) retirePredecessor(ctx context.Context, drain DrainingProces
 			if err := s.savePredecessor(drain); err != nil {
 				return err
 			}
-			if valid, e := s.stopGrantValid(drain); e != nil {
-				return e
-			} else if !valid {
-				drain.StopRequested = previouslyRequested
-				if err := s.savePredecessor(drain); err != nil {
-					return err
+			timeout := time.Duration(s.cfg.StopTimeoutSeconds) * time.Second
+			if drain.WindowID == "" {
+				err = s.opts.Process.Stop(ctx, drain.Process, timeout)
+			} else {
+				guarded, ok := s.opts.Process.(interface {
+					StopIf(context.Context, Identity, time.Duration, func() error) error
+				})
+				if !ok {
+					return errors.New("updater: process driver cannot enforce a bounded stop")
 				}
-				return s.declineUnusedStop(ctx, req, drain)
+				expired := errors.New("stop expired before signal")
+				err = guarded.StopIf(ctx, drain.Process, timeout, func() error {
+					valid, err := s.stopGrantValid(drain)
+					if err != nil {
+						return err
+					}
+					if !valid {
+						return expired
+					}
+					return ctx.Err()
+				})
+				if errors.Is(err, expired) {
+					drain.StopRequested = previouslyRequested
+					if err := s.savePredecessor(drain); err != nil {
+						return err
+					}
+					return s.declineUnusedStop(ctx, req, drain)
+				}
 			}
-			if err = s.opts.Process.Stop(ctx, drain.Process, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second); err == nil {
+			if err == nil {
 				got, err = s.opts.Process.Inspect(ctx, drain.Process.PID)
 			}
 		}

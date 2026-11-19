@@ -252,7 +252,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		for _, run := range runs {
 			if !c.Manifest.Protocol.Contains(run.Protocol) && !windowOwnsRun(r.View.WindowStops, h.HostID, run.RunID) {
 				if run.ObservedState == protocol.RunUnknown {
-					proved, err := previouslyStoppedRun(ctx, tx.Q(), h.HostID, run.RunID)
+					proved, err := store.WindowRunStopped(ctx, tx.Q(), h.HostID, run.RunID)
 					if err != nil {
 						return Outcome{}, err
 					}

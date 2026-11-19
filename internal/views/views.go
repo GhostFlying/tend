@@ -623,11 +623,14 @@ func Hosts(ctx context.Context, q store.Querier) ([]protocol.HostView, error) {
 	}
 	result := make([]protocol.HostView, 0, len(hosts))
 	for _, h := range hosts {
-		n, err := store.CountOpenRuns(ctx, q, h.HostID)
+		n, occupied, err := store.HostSlotCounts(ctx, q, h.HostID)
 		if err != nil {
 			return nil, err
 		}
 		hv := protocol.HostView{HostID: h.HostID, OS: h.OS, Arch: h.Arch, Labels: h.Labels, Slots: h.Slots, Worker: h.Worker, WorkspaceProtocol: h.WorkspaceProtocol, OpenRuns: n}
+		if occupied != n {
+			hv.OccupiedSlots = &occupied
+		}
 		rt, err := store.GetHostRuntime(ctx, q, h.HostID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err

@@ -7241,6 +7241,7 @@ export interface HostView {
   labels: string[] | null;
   last_heartbeat_at?: string;
   maintenance?: HostMaintenanceView;
+  occupied_slots?: number;
   online?: boolean;
   open_runs: number;
   os: string;

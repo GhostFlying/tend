@@ -168,6 +168,24 @@ func CountOpenRuns(ctx context.Context, q Querier, hostID string) (int64, error)
 	return n, nil
 }
 
+// A confirmed exit releases physical capacity even when the original Run
+// remains unknown. Losing a heartbeat or a lease alone never releases a slot.
+const confirmedWindowExit = `r.observed_state='unknown' AND EXISTS (
+	SELECT 1 FROM runner_window_released_leases w JOIN leases l USING(lease_id)
+	WHERE w.run_id=r.run_id AND l.run_id=r.run_id AND l.host_id=r.host_id AND l.status='lapsed')`
+
+func WindowRunStopped(ctx context.Context, q Querier, host, run string) (bool, error) {
+	var stopped bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r WHERE r.host_id=? AND r.run_id=? AND `+confirmedWindowExit+`)`, host, run).Scan(&stopped)
+	return stopped, err
+}
+
+func HostSlotCounts(ctx context.Context, q Querier, host string) (open, occupied int64, err error) {
+	err = q.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(*) FILTER (WHERE NOT (`+confirmedWindowExit+`))
+		FROM runs r WHERE r.host_id=? AND r.observed_state IN `+openRunStates, host).Scan(&open, &occupied)
+	return open, occupied, err
+}
+
 // CountOpenRunsByProject counts, by project, the runs that may still be
 // working.
 func CountOpenRunsByProject(ctx context.Context, q Querier) (map[string]int64, error) {

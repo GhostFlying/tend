@@ -97,7 +97,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		result.Confirmed = true
 		events := []Event{{ObjectType: "host", ObjectID: host, Kind: "runner.retired"}}
 		if stop != nil {
-			runEvents, err := confirmWindowStop(ctx, x, tx, stop)
+			runEvents, err := confirmWindowStop(ctx, x, tx, stop, auth)
 			if err != nil {
 				return Outcome{}, err
 			}
