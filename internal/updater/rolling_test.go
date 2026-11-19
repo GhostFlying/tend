@@ -112,3 +112,74 @@ func TestRollingRetirementResumesLostAckWithoutStoppingAnotherProcess(t *testing
 		t.Fatal("PID reuse affected another process")
 	}
 }
+
+type windowStopAuthority struct {
+	*retirementAuthority
+	afterGrant func()
+	declines   int
+}
+
+func (a *windowStopAuthority) Retire(ctx context.Context, journal string, in protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {
+	if in.WindowID == "" {
+		result := protocol.RunnerRetirementResult{RunnerRetirement: in}
+		result.WindowID = "window"
+		return result, nil
+	}
+	if in.Unused {
+		a.declines++
+		result := protocol.RunnerRetirementResult{RunnerRetirement: in}
+		if a.declines == 1 {
+			return result, errors.New("lost unused receipt")
+		}
+		return result, nil
+	}
+	result, err := a.retirementAuthority.Retire(ctx, journal, in)
+	if in.AuthorizationID == "" {
+		result.RemainingMillis = 500
+		if a.afterGrant != nil {
+			a.afterGrant()
+		}
+	}
+	return result, err
+}
+
+func TestRollingWindowGrantUsesOriginalDispatchCutoff(t *testing.T) {
+	for _, delayed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "response_after_deadline", false: "dispatch_before_deadline"}[delayed], func(t *testing.T) {
+			h := newHarness(t)
+			id := Identity{PID: 11, StartTicks: 101, LaunchID: "first", SHA256: h.s.state.Process.SHA256}
+			auth := &windowStopAuthority{retirementAuthority: &retirementAuthority{fakeAuthority: h.a, ready: map[string]bool{id.LaunchID: true}, confirmed: map[string]int{}}}
+			if delayed {
+				auth.afterGrant = func() { h.boot += 501 }
+			}
+			h.opts.RollingAuthority = auth
+			h.s.opts.RollingAuthority = auth
+			h.s.state.Format = 6
+			h.s.state.CurrentJournal = "current"
+			h.s.state.DrainingProcesses = map[string]DrainingProcess{id.LaunchID: {Process: id, UpgradeID: "handoff"}}
+			h.p.live[id.PID] = id
+			if err := h.s.criticalState(); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.s.save(); err != nil {
+				t.Fatal(err)
+			}
+			if !delayed {
+				h.step(t)
+				if h.p.stops != 1 || len(h.s.Status().DrainingProcesses) != 0 || auth.confirmed[id.LaunchID] != 1 {
+					t.Fatal(h.s.Status())
+				}
+				return
+			}
+			if err := h.s.Step(t.Context()); err == nil {
+				t.Fatal("missing unused receipt")
+			}
+			h.reopen(t)
+			h.step(t)
+			record := h.s.Status().DrainingProcesses[id.LaunchID]
+			if h.p.stops != 0 || auth.declines != 2 || record.Process != id || record.StopRequested || record.AuthorizationID != "" {
+				t.Fatal("late grant stopped original process", record)
+			}
+		})
+	}
+}

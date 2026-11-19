@@ -20,6 +20,15 @@ func captureUpgradeManagers(ctx context.Context, x *Exec, tx *store.Tx, batch *s
 			if run.Role != protocol.RoleIssueManager {
 				continue
 			}
+			if run.ObservedState == protocol.RunUnknown {
+				stopped, err := previouslyStoppedRun(ctx, tx.Q(), host.HostID, run.RunID)
+				if err != nil {
+					return err
+				}
+				if stopped {
+					continue
+				}
+			}
 			lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
 			if err != nil {
 				return err

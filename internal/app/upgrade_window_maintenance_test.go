@@ -15,7 +15,7 @@ import (
 // fixture. The Run, maintenance request, retirement grant, acknowledgement and
 // install phase all pass through the ordinary business entry points.
 func TestUpgradeWindowMaintenance(t *testing.T) {
-	for _, scenario := range []string{"work_finishes", "deadline", "cancel", "receipt_after_expiry"} {
+	for _, scenario := range []string{"work_finishes", "deadline", "cancel", "receipt_after_expiry", "unused_after_expiry"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, c := selfUpgradeFixture(t)
 			selfUpgradeHosts(t, h, true)
@@ -155,6 +155,13 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 			if result := retire(wrong); result.Allowed {
 				t.Fatal("different process authorized")
 			}
+			if scenario != "work_finishes" {
+				offer := retire(req)
+				if offer.Allowed || offer.WindowID != batch.View.UpgradeID {
+					t.Fatal("historical supervisor received an unbounded grant", offer)
+				}
+				req.WindowID = offer.WindowID
+			}
 			grant := retire(req)
 			if !grant.Allowed || grant.AuthorizationID == "" || retire(req).AuthorizationID != grant.AuthorizationID {
 				t.Fatal("missing original permission", grant)
@@ -165,13 +172,31 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 			if op := control("cancel"); op == nil {
 				t.Fatal("dropped unresolved stop")
 			}
-			if scenario == "receipt_after_expiry" {
+			if scenario == "receipt_after_expiry" || scenario == "unused_after_expiry" {
 				h.clock.Advance(21 * time.Minute)
 				if v := upgradeTick(h, ServerObservation{}); v.Status != "attention" {
 					t.Fatal(v)
 				}
+				if retire(req).Allowed {
+					t.Fatal("expired stop was reissued")
+				}
 			}
 			req.AuthorizationID = grant.AuthorizationID
+			if scenario == "unused_after_expiry" {
+				req.Unused = true
+				for range 2 {
+					if res := retire(req); res.Allowed || res.Confirmed || !res.Unused {
+						t.Fatal("unused grant became an exit receipt", res)
+					}
+				}
+				if v := upgradeRead(h).View; v.WindowStops[0].State != "not_stopped" || h.lease(as.RunID).Status != store.LeaseActive {
+					t.Fatal(v)
+				}
+				if err := control("cancel"); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
 			for attempt := 1; attempt <= 2; attempt++ {
 				if !retire(req).Confirmed {
 					t.Fatalf("original stop receipt was unconfirmed on attempt %d", attempt)
@@ -206,5 +231,37 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				t.Fatal("receipt did not release installation", v)
 			}
 		})
+	}
+}
+
+func TestManagerParkingAfterConfirmedWindowStop(t *testing.T) {
+	h, _, assignment, _ := parkUpgradeFixture(t)
+	ctx := t.Context()
+	h.clock.Advance(2 * time.Minute)
+	if _, err := h.app.ExpireLeases(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h.run(assignment.RunID).ObservedState != protocol.RunUnknown {
+		t.Fatal("expected original lapsed manager")
+	}
+	// Supply only the earlier physical exit receipt. The subsequent batch must
+	// still park an unknown manager whose lease was not covered by that receipt.
+	now := h.clock.Now()
+	batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "park", ReleaseID: "next", CreatedAt: now}, Hosts: []store.UpgradeHost{{HostID: "linux-1"}}}
+	for _, lease := range []string{"different-lease", assignment.LeaseID} {
+		err := h.store.Write(ctx, func(tx *store.Tx) error {
+			history := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "older", ReleaseID: "old", CreatedAt: now.Add(-time.Hour), Status: "completed", ForceMaintenance: true, WindowStops: []protocol.UpgradeWindowStop{{State: "stopped", HostID: "linux-1", Runs: []protocol.LeaseRef{{RunID: assignment.RunID, LeaseID: lease}}, UnknownRuns: []string{assignment.RunID}}}}}
+			if err := tx.PutUpgrade(ctx, history); err != nil {
+				return err
+			}
+			batch.ManagerParks = nil
+			return captureUpgradeManagers(ctx, &Exec{Now: now, IDs: h.ids}, tx, &batch)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (len(batch.ManagerParks) == 0) != (lease == assignment.LeaseID) {
+			t.Fatal(lease, batch.ManagerParks)
+		}
 	}
 }

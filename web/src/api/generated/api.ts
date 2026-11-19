@@ -3115,6 +3115,7 @@ export interface UpgradeManagerParkView {
  */
 export interface UpgradeWindowStop {
   drain_until_ms: number;
+  forced?: boolean;
   generation: number;
   host_id: string;
   journal_id: string;

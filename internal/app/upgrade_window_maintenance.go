@@ -101,9 +101,9 @@ func windowForRetirement(ctx context.Context, q store.Querier, host string, inpu
 	err := q.QueryRowContext(ctx, `SELECT u.upgrade_id FROM upgrades u JOIN json_each(u.state_json,'$.view.window_stops') s
 		WHERE json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.source_upgrade_id')=?
 		AND json_extract(s.value,'$.process.launch_id')=? AND (
-			json_extract(s.value,'$.state')='stop_authorized' OR
+			json_extract(s.value,'$.state')='stop_authorized' OR (json_extract(s.value,'$.state')='not_stopped' AND u.upgrade_id=?) OR
 			(u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.state')='draining'))
-		ORDER BY u.created_at,u.rowid LIMIT 1`, host, input.UpgradeID, input.Process.LaunchID).Scan(&id)
+		ORDER BY u.created_at,u.rowid LIMIT 1`, host, input.UpgradeID, input.Process.LaunchID, input.WindowID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.UpgradeRow{}, nil, nil
 	}

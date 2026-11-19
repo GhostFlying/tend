@@ -22,13 +22,16 @@ type RollingLaunch struct {
 }
 
 type DrainingProcess struct {
-	AuthorizationID string   `json:"authorization_id,omitempty"`
-	StopSequence    int64    `json:"stop_sequence,omitempty"`
-	StopRequested   bool     `json:"stop_requested,omitempty"`
-	Stopped         bool     `json:"stopped,omitempty"`
-	Process         Identity `json:"process"`
-	JournalID       string   `json:"journal_id"`
-	UpgradeID       string   `json:"upgrade_id"`
+	WindowID            string   `json:"window_id,omitempty"`
+	GrantBootID         string   `json:"grant_boot_id,omitempty"`
+	GrantDeadlineMillis int64    `json:"grant_deadline_millis,omitempty"`
+	AuthorizationID     string   `json:"authorization_id,omitempty"`
+	StopSequence        int64    `json:"stop_sequence,omitempty"`
+	StopRequested       bool     `json:"stop_requested,omitempty"`
+	Stopped             bool     `json:"stopped,omitempty"`
+	Process             Identity `json:"process"`
+	JournalID           string   `json:"journal_id"`
+	UpgradeID           string   `json:"upgrade_id"`
 }
 
 type RollingAuthority interface {
@@ -97,83 +100,149 @@ func (a journalAuthority) Retire(ctx context.Context, journal string, req protoc
 	return result, err
 }
 
-// Retire only processes for which the server has observed an empty journal.
-// Persist permission before signalling and persist exit before acknowledging it.
+// Each retirement reconciles independently. A persistence error stops the
+// entire pass before another local side effect can be attempted.
 func (s *Supervisor) retireDrained(ctx context.Context) error {
 	var failures []error
 	for key, drain := range s.state.DrainingProcesses {
 		if key == s.state.Process.LaunchID || drain.Process.LaunchID != key || s.state.CurrentJournal == "" {
 			continue
 		}
-		req := protocol.RunnerRetirement{UpgradeID: drain.UpgradeID, Process: drain.Process}
-		if drain.AuthorizationID == "" {
-			result, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
-			if err != nil {
-				failures = append(failures, err)
-				continue
+		if err := s.retirePredecessor(ctx, drain); err != nil {
+			if persist := s.durabilityError(); persist != nil {
+				return errors.Join(err, persist)
 			}
-			if !result.Allowed {
-				continue
-			}
-			drain.AuthorizationID = result.AuthorizationID
-			drain.StopSequence = result.ReadySequence
-			s.state.DrainingProcesses[key] = drain
-			if err := s.save(); err != nil {
-				return err
-			}
-		}
-		if !drain.Stopped {
-			got, err := s.opts.Process.Inspect(ctx, drain.Process.PID)
-			if err == nil && got == drain.Process && drain.StopRequested {
-				// A lost acknowledgement alone cannot repeat a signal. A newer
-				// ready heartbeat and the same exact live process reconcile an
-				// interrupted attempt, including a crash before signal dispatch.
-				observed, e := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
-				if e != nil {
-					failures = append(failures, e)
-					continue
-				}
-				if !observed.Allowed || observed.AuthorizationID != drain.AuthorizationID || observed.ReadySequence <= drain.StopSequence {
-					failures = append(failures, ErrUnknown)
-					continue
-				}
-				drain.StopSequence = observed.ReadySequence
-			}
-			if err == nil && got == drain.Process {
-				drain.StopRequested = true
-				s.state.DrainingProcesses[key] = drain
-				if err := s.save(); err != nil {
-					return err
-				}
-
-				if err = s.opts.Process.Stop(ctx, drain.Process, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second); err == nil {
-					got, err = s.opts.Process.Inspect(ctx, drain.Process.PID)
-				}
-			}
-			if !errors.Is(err, ErrNotRunning) && !(err == nil && got.StartTicks != 0 && got.StartTicks != drain.Process.StartTicks) {
-				failures = append(failures, errors.Join(ErrUnknown, err))
-				continue
-			}
-			drain.Stopped = true
-			s.state.DrainingProcesses[key] = drain
-			if err := s.save(); err != nil {
-				return err
-			}
-		}
-		req.AuthorizationID = drain.AuthorizationID
-		result, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
-		if err != nil {
 			failures = append(failures, err)
-			continue
-		}
-		if !result.Confirmed {
-			continue
-		}
-		s.state.RetiredJournals = append(s.state.RetiredJournals, drain.JournalID)
-		delete(s.state.DrainingProcesses, key)
-		if err := s.save(); err != nil {
-			return err
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *Supervisor) savePredecessor(drain DrainingProcess) error {
+	s.state.DrainingProcesses[drain.Process.LaunchID] = drain
+	return s.save()
+}
+
+// Natural retirement uses the original wire request. A server can offer a
+// bounded, forced stop; only its affirmative echo can authorize that operation.
+func (s *Supervisor) requestRetirement(ctx context.Context, req protocol.RunnerRetirement, drain *DrainingProcess) (bool, error) {
+	result, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+	if err != nil {
+		return false, err
+	}
+	if result.WindowID != "" && !result.Allowed {
+		req.WindowID = result.WindowID
+		boot, start, err := s.opts.BootClock()
+		if err != nil {
+			return false, err
+		}
+		result, err = s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+		if err != nil {
+			return false, err
+		}
+		if result.WindowID != req.WindowID || result.AuthorizationID == "" {
+			return false, nil
+		}
+		drain.WindowID = req.WindowID
+		drain.GrantBootID = boot
+		drain.GrantDeadlineMillis = start
+		if result.Allowed && result.RemainingMillis > 0 && result.RemainingMillis <= 30*60*1000 {
+			drain.GrantDeadlineMillis += result.RemainingMillis
+		}
+	} else if !result.Allowed {
+		return false, nil
+	}
+	drain.AuthorizationID = result.AuthorizationID
+	drain.StopSequence = result.ReadySequence
+	return true, s.savePredecessor(*drain)
+}
+
+func (s *Supervisor) stopGrantValid(drain DrainingProcess) (bool, error) {
+	if drain.WindowID == "" {
+		return true, nil
+	}
+	boot, now, err := s.opts.BootClock()
+	return boot == drain.GrantBootID && now < drain.GrantDeadlineMillis, err
+}
+
+func (s *Supervisor) declineUnusedStop(ctx context.Context, req protocol.RunnerRetirement, drain DrainingProcess) error {
+	if drain.StopRequested {
+		return ErrUnknown
+	}
+	req.AuthorizationID, req.Unused = drain.AuthorizationID, true
+	ack, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+	if err != nil {
+		return err
+	}
+	if !ack.Unused || ack.Allowed || ack.AuthorizationID != drain.AuthorizationID {
+		return ErrUnknown
+	}
+	drain.WindowID, drain.AuthorizationID, drain.GrantBootID = "", "", ""
+	drain.GrantDeadlineMillis = 0
+	return s.savePredecessor(drain)
+}
+
+func (s *Supervisor) retirePredecessor(ctx context.Context, drain DrainingProcess) error {
+	req := protocol.RunnerRetirement{UpgradeID: drain.UpgradeID, Process: drain.Process}
+	if drain.AuthorizationID == "" {
+		authorized, err := s.requestRetirement(ctx, req, &drain)
+		if err != nil || !authorized {
+			return err
+		}
+	}
+	req.WindowID = drain.WindowID
+	if !drain.Stopped {
+		got, err := s.opts.Process.Inspect(ctx, drain.Process.PID)
+		if err == nil && got == drain.Process {
+			if valid, e := s.stopGrantValid(drain); e != nil {
+				return e
+			} else if !valid {
+				return s.declineUnusedStop(ctx, req, drain)
+			}
+			previouslyRequested := drain.StopRequested
+			if previouslyRequested {
+				// Repeating a signal requires a newer heartbeat of the same
+				// exact process in addition to the original grant.
+				observed, e := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+				if e != nil {
+					return e
+				}
+				if !observed.Allowed || observed.AuthorizationID != drain.AuthorizationID || observed.ReadySequence <= drain.StopSequence {
+					return ErrUnknown
+				}
+				drain.StopSequence = observed.ReadySequence
+			}
+			drain.StopRequested = true
+			if err := s.savePredecessor(drain); err != nil {
+				return err
+			}
+			if valid, e := s.stopGrantValid(drain); e != nil {
+				return e
+			} else if !valid {
+				drain.StopRequested = previouslyRequested
+				if err := s.savePredecessor(drain); err != nil {
+					return err
+				}
+				return s.declineUnusedStop(ctx, req, drain)
+			}
+			if err = s.opts.Process.Stop(ctx, drain.Process, time.Duration(s.cfg.StopTimeoutSeconds)*time.Second); err == nil {
+				got, err = s.opts.Process.Inspect(ctx, drain.Process.PID)
+			}
+		}
+		if !errors.Is(err, ErrNotRunning) && !(err == nil && got.StartTicks != 0 && got.StartTicks != drain.Process.StartTicks) {
+			return errors.Join(ErrUnknown, err)
+		}
+		drain.Stopped = true
+		if err := s.savePredecessor(drain); err != nil {
+			return err
+		}
+	}
+	req.AuthorizationID = drain.AuthorizationID
+	result, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+	if err != nil || !result.Confirmed {
+		return err
+	}
+	s.state.RetiredJournals = append(s.state.RetiredJournals, drain.JournalID)
+	delete(s.state.DrainingProcesses, drain.Process.LaunchID)
+	return s.save()
 }

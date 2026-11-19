@@ -25,6 +25,9 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	}
 	host := x.Principal.Subject
 	process := input.Process
+	if input.Unused && (input.WindowID == "" || input.AuthorizationID == "") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unused stop receipt requires the original window and authorization")
+	}
 	if x.Env.Target.Type != "host" || x.Env.Target.ID != host || process.LaunchID == "" || process.StartTicks == 0 || process.PID <= 1 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "exact retirement identity required")
 	}
@@ -45,12 +48,36 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "retirement identity changed")
 		}
 		result.AuthorizationID, result.Allowed, result.Confirmed = auth, true, confirmed.Valid
+		if stop != nil && stop.Forced && !confirmed.Valid {
+			result.WindowID = window.View.UpgradeID
+			result.RemainingMillis = max(0, window.View.OverallDeadlineMillis-x.Now.UnixMilli())
+			live := window.View.Status == "running" && result.RemainingMillis > 0
+			if input.Unused {
+				if live || input.AuthorizationID != auth || input.WindowID != window.View.UpgradeID {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "cannot abandon a live or unrelated stop")
+				}
+				// The supervisor has inspected the same live process and retained
+				// a durable record that no signal was requested.
+				if _, err := tx.Exec(ctx, `DELETE FROM runner_retirements WHERE host_id=? AND instance_id=? AND authorization_id=? AND confirmed_at IS NULL`, host, process.LaunchID, auth); err != nil {
+					return Outcome{}, err
+				}
+				stop.State = "not_stopped"
+				event, err := persistWindowChange(ctx, x, tx, &window)
+				result.Allowed = false
+				return Outcome{Result: result, Events: []Event{event}}, err
+			}
+			if input.AuthorizationID == "" {
+				result.Allowed = live && input.WindowID == result.WindowID
+			}
+		} else if input.Unused {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "no matching unused forced stop")
+		}
 		if !confirmed.Valid && input.AuthorizationID == "" {
 			drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
 			if err != nil {
 				return Outcome{}, err
 			}
-			if retirementReady(drain, x.Now.UnixMilli()) || stop != nil && stop.State == "stop_authorized" && window.View.Status == "running" && !upgradeBatchExpired(window, x.Now.UnixMilli()) && x.Now.UnixMilli() >= stop.DrainUntil {
+			if retirementReady(drain, x.Now.UnixMilli()) || stop != nil && stop.Forced && result.Allowed {
 				result.ReadySequence = drain.Runtime.Sequence
 			}
 		}
@@ -85,6 +112,9 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{}, err
 	}
 	if input.AuthorizationID != "" {
+		if input.Unused && stop != nil && stop.State == "not_stopped" && input.WindowID == window.View.UpgradeID {
+			return Outcome{NoEffect: true, Result: result}, nil
+		}
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "stop acknowledgement has no original authorization")
 	}
 	drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
@@ -104,10 +134,8 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		rt := drain.Runtime
 		force := stop != nil && window.View.Status == "running" && !upgradeBatchExpired(window, x.Now.UnixMilli()) && x.Now.UnixMilli() >= stop.DrainUntil
-		if !force {
-			if !retirementReady(drain, x.Now.UnixMilli()) {
-				break
-			}
+		ready := retirementReady(drain, x.Now.UnixMilli())
+		if ready {
 			n, err := store.CountJournalRuns(ctx, tx.Q(), host, rt.JournalID)
 			if err != nil {
 				return Outcome{}, err
@@ -116,9 +144,20 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
-			if n != 0 || len(pending) > 0 {
+			ready = n == 0 && len(pending) == 0
+		}
+		if !ready {
+			if !force {
 				break
 			}
+			// Older supervisors can still retire naturally. Only an updater that
+			// echoed this offer can enforce the dispatch cutoff across a restart.
+			result.WindowID = window.View.UpgradeID
+			if input.WindowID != result.WindowID {
+				break
+			}
+			stop.Forced = true
+			result.RemainingMillis = window.View.OverallDeadlineMillis - x.Now.UnixMilli()
 		}
 		result.AuthorizationID = x.IDs.New(protocol.PrefixRequest)
 		result.Allowed = true

@@ -20,6 +20,7 @@ type UpgradeHostView struct {
 // UpgradeWindowStop pins an incompatible writer and the leases it owned at
 // admission. Its deadline and process identity survive retries and lost replies.
 type UpgradeWindowStop struct {
+	Forced          bool             `json:"forced,omitempty"`
 	HostID          string           `json:"host_id"`
 	JournalID       string           `json:"journal_id"`
 	Process         RecoveryIdentity `json:"process"`
@@ -116,12 +117,16 @@ type RollingRunnerGrantRequest struct {
 
 // RunnerRetirement binds the stop and its acknowledgement to one predecessor.
 type RunnerRetirement struct {
+	// Echoed only after the server offers bounded maintenance on this process.
+	WindowID        string           `json:"window_id,omitempty"`
+	Unused          bool             `json:"unused,omitempty"`
 	UpgradeID       string           `json:"upgrade_id"`
 	Process         RecoveryIdentity `json:"process"`
 	AuthorizationID string           `json:"authorization_id,omitempty"`
 }
 
 type RunnerRetirementResult struct {
+	RemainingMillis int64 `json:"remaining_ms,omitempty"`
 	RunnerRetirement
 	ReadySequence int64 `json:"ready_sequence,omitempty"`
 	Allowed       bool  `json:"allowed"`
