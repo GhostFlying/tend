@@ -117,6 +117,10 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 	if err != nil {
 		return out, err
 	}
+	pullRequests, err := readBoardPullRequests(ctx, q, ids)
+	if err != nil {
+		return out, err
+	}
 	for _, id := range ids {
 		issue, err := store.GetCanonicalIssue(ctx, q, id)
 		if err != nil {
@@ -126,6 +130,7 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		if err != nil {
 			return out, err
 		}
+		card.PullRequests = boardPullRequests(issue.Plan.Deliveries, pullRequests[id])
 		out.Items = append(out.Items, protocol.IssueSummary{EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
 	}
 	return out, nil

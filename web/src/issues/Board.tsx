@@ -37,6 +37,7 @@ import {
   notificationLabel,
   workStatus,
 } from "./boardModel.ts";
+import { BoardPullRequests } from "./BoardPullRequests.tsx";
 import { useBoardActions } from "./useBoardActions.ts";
 import {
   Button,
@@ -196,8 +197,8 @@ export function IssueBoard({
     }
     if (previousFocus === null || document.activeElement !== document.body) return;
     const control = previousFocus.key
-      ? scroller.querySelector<HTMLButtonElement>(
-          `[data-board-focus="${CSS.escape(previousFocus.key)}"]:enabled`,
+      ? scroller.querySelector<HTMLElement>(
+          `[data-board-focus="${CSS.escape(previousFocus.key)}"]:not(:disabled)`,
         )
       : null;
     if (control && !control.closest("[inert]") && control.getClientRects().length) {
@@ -507,6 +508,7 @@ export function IssueBoard({
                   <BoardCard
                     key={item.issue_id}
                     item={item}
+                    online={online}
                     childView={childViews.get(item.issue_id)}
                     onChildViewChange={(view) => setChildView(item.issue_id, view)}
                     state={actions.states[item.issue_id]}
@@ -788,6 +790,7 @@ function BoardColumn({
 
 const BoardCard = memo(function BoardCard({
   item,
+  online,
   childView,
   onChildViewChange,
   state,
@@ -799,6 +802,7 @@ const BoardCard = memo(function BoardCard({
   onDragEnd,
 }: {
   item: IssueSummary;
+  online: boolean;
   childView: ExpandedChildView | undefined;
   onChildViewChange(view: ExpandedChildView | undefined): void;
   state?: "saving" | "unknown" | undefined;
@@ -821,6 +825,13 @@ const BoardCard = memo(function BoardCard({
     >
       <div className={styles.cardHead}>
         <span title={item.project}>{item.project || "未分组"}</span>
+        {b?.pull_requests?.length ? (
+          <BoardPullRequests
+            issueID={item.issue_id}
+            pullRequests={b.pull_requests}
+            online={online}
+          />
+        ) : null}
         <Button
           variant="ghost"
           aria-label={`修改工作状态：${item.title}`}

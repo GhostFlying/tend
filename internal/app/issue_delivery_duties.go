@@ -90,11 +90,14 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if issue.AssignmentEpoch != p.ExpectedAssignmentEpoch || issue.AssignmentState != "active" {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue assignment changed")
 	}
-	if issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused && !(issue.State == protocol.IssueCancelling && p.Action != "prepare" && p.Action != "resume" && p.Action != "bind") {
+	if issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused && !(issue.State == protocol.IssueCancelling && p.Action != "prepare" && p.Action != "resume" && p.Action != "bind" && p.Action != "register_pr") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reopen responsibility before updating delivery")
 	}
 	if strings.TrimSpace(p.Reason) == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery reason is required")
+	}
+	if p.Action == "register_pr" {
+		return registerIssuePullRequest(ctx, x, tx, issue, p)
 	}
 	if p.Action == "submit_result" {
 		return submitIssueOwnerResult(ctx, x, tx, issue, p)

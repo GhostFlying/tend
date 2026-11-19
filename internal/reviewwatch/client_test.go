@@ -26,6 +26,12 @@ func TestGitHubObservationAndCloseAttribution(t *testing.T) {
 					t.Fatalf("unexpected command: %s %v", bin, args)
 				}
 				pr := map[string]any{"number": 9, "state": test.state, "url": "https://example.invalid/review/9", "headRefOid": "head", "baseRefOid": "base", "mergeCommit": map[string]any{"oid": "merge"}, "mergedBy": map[string]any{"id": "actor-id", "login": "merger"}, "closedAt": test.closedAt, "timelineItems": map[string]any{"nodes": []any{map[string]any{"createdAt": test.eventAt, "actor": map[string]any{"id": "closer-id", "login": "closer"}}}}}
+				if test.state == "OPEN" {
+					if !strings.Contains(args[3], " isDraft ") {
+						t.Fatal("query omitted GitHub's draft field")
+					}
+					pr["isDraft"] = true
+				}
 				return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}})
 			}})
 			got, err := cli.Observe(t.Context(), Ref{Provider: GitHub, Repository: "example/project", Number: 9})
@@ -34,6 +40,9 @@ func TestGitHubObservationAndCloseAttribution(t *testing.T) {
 			}
 			if got.State != strings.ToLower(test.state) || got.HeadSHA != "head" || got.BaseSHA != "base" || got.MergeSHA != "merge" || got.MergedBy.Login != "merger" {
 				t.Fatalf("lost facts: %+v", got)
+			}
+			if test.state == "OPEN" && (got.Draft == nil || !*got.Draft) || test.state != "OPEN" && got.Draft != nil {
+				t.Fatalf("lost optional draft fact: %+v", got.Draft)
 			}
 			if (got.ClosedBy != nil) != test.actor {
 				t.Fatalf("close attribution: %+v", got)

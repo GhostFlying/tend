@@ -1,0 +1,106 @@
+.controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+  gap: var(--space-1);
+}
+
+.link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  padding: 0 var(--space-1);
+  color: var(--label-2);
+  border-radius: var(--radius-s);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.link:hover {
+  background: var(--hover);
+}
+
+.icon {
+  flex: none;
+  color: var(--primer-pr-draft);
+}
+
+.icon[data-status="open"] {
+  color: var(--primer-pr-open);
+}
+
+.icon[data-status="merged"] {
+  color: var(--primer-pr-merged);
+}
+
+.icon[data-status="closed"] {
+  color: var(--primer-pr-closed);
+}
+
+.tooltip {
+  display: none;
+  position: absolute;
+  z-index: 2;
+  inset: 100% 0 auto auto;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 32px));
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--label);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.link:is(:hover, :focus-visible) > .tooltip {
+  display: block;
+}
+
+.more {
+  min-width: 32px;
+  min-height: 28px;
+  padding: 0 var(--space-1);
+  color: var(--label-2);
+  font-size: var(--text-caption);
+}
+
+.list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.list .link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+}
+
+.repository {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.status {
+  color: var(--label-2);
+  font-size: var(--text-caption);
+}
+
+@media (max-width: 760px) {
+  .controls .link,
+  .more {
+    min-height: 44px;
+  }
+
+  .more {
+    min-width: 44px;
+  }
+}

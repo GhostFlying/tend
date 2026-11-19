@@ -39,21 +39,40 @@ type IssuePauseProgress struct {
 	IssueRevision int64  `json:"issue_revision"`
 }
 
+type IssueBoardPRStatus string
+
+const (
+	IssueBoardPROpen    IssueBoardPRStatus = "open"
+	IssueBoardPRDraft   IssueBoardPRStatus = "draft"
+	IssueBoardPRMerged  IssueBoardPRStatus = "merged"
+	IssueBoardPRClosed  IssueBoardPRStatus = "closed"
+	IssueBoardPRUnknown IssueBoardPRStatus = "unknown"
+)
+
+// IssueBoardPullRequest contains the facts needed to render and open a PR link.
+type IssueBoardPullRequest struct {
+	Repository string             `json:"repository"`
+	Number     int64              `json:"number"`
+	URL        string             `json:"url"`
+	Status     IssueBoardPRStatus `json:"status"`
+}
+
 type IssueBoardCard struct {
-	RetainedExecution        bool                `json:"retained_execution,omitempty"`
-	QueueReason              *QueueWaitReason    `json:"queue_reason,omitempty"`
-	Pause                    *IssuePauseProgress `json:"pause,omitempty"`
-	Progress                 *IssueProgress      `json:"progress,omitempty"`
-	Children                 *IssueChildProgress `json:"children,omitempty"`
-	PendingManagerCategoryID string              `json:"pending_manager_category_id,omitempty"`
-	Status                   IssueWorkStatus     `json:"status"`
-	StageTitle               string              `json:"stage_title,omitempty"`
-	StagesTotal              int                 `json:"stages_total"`
-	StagesDone               int                 `json:"stages_done"`
-	Execution                ExecutionCounts     `json:"execution"`
-	AttentionCount           int                 `json:"attention_count"`
-	OwnerAttentionCount      int                 `json:"owner_attention_count,omitempty"`
-	NotificationDueAt        int64               `json:"notification_due_at,omitempty"`
+	PullRequests             []IssueBoardPullRequest `json:"pull_requests,omitempty"`
+	RetainedExecution        bool                    `json:"retained_execution,omitempty"`
+	QueueReason              *QueueWaitReason        `json:"queue_reason,omitempty"`
+	Pause                    *IssuePauseProgress     `json:"pause,omitempty"`
+	Progress                 *IssueProgress          `json:"progress,omitempty"`
+	Children                 *IssueChildProgress     `json:"children,omitempty"`
+	PendingManagerCategoryID string                  `json:"pending_manager_category_id,omitempty"`
+	Status                   IssueWorkStatus         `json:"status"`
+	StageTitle               string                  `json:"stage_title,omitempty"`
+	StagesTotal              int                     `json:"stages_total"`
+	StagesDone               int                     `json:"stages_done"`
+	Execution                ExecutionCounts         `json:"execution"`
+	AttentionCount           int                     `json:"attention_count"`
+	OwnerAttentionCount      int                     `json:"owner_attention_count,omitempty"`
+	NotificationDueAt        int64                   `json:"notification_due_at,omitempty"`
 }
 
 type SetIssueStatusPayload struct {

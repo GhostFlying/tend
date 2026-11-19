@@ -163,7 +163,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.cardHead button {
+.cardHead > button {
   width: 28px;
   min-height: 28px;
   flex: none;
@@ -550,7 +550,7 @@
   .card {
     padding: 10px 14px 14px;
   }
-  .cardHead button {
+  .cardHead > button {
     min-height: 44px;
     width: 44px;
     margin: -6px -7px -4px 0;
@@ -600,7 +600,7 @@
   }
 }
 
-.cardHead button {
+.cardHead > button {
   padding: 0;
   white-space: nowrap;
 }

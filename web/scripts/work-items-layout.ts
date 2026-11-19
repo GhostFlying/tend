@@ -22,6 +22,7 @@ import type {
   UpgradeView,
   IssueView,
   IssueSummary,
+  IssueBoardPullRequest,
   WorkItemChoice,
 } from "../src/api/generated/api.ts";
 
@@ -159,7 +160,25 @@ function initialItems(): IssueView[] {
     tasks: index === 5 ? [queuedTask] : [task],
   }));
 }
+const pullRequests: IssueBoardPullRequest[] = [
+  { repository: "example/app", number: 368, status: "open" },
+  { repository: "example/web", number: 347, status: "merged" },
+  { repository: "example/mobile", number: 371, status: "draft" },
+  { repository: "example/tools", number: 365, status: "closed" },
+  { repository: "example/unknown", number: 369, status: "unknown" },
+].map(({ repository, number, status }) => ({
+  repository,
+  number,
+  status: status as IssueBoardPullRequest["status"],
+  url: `https://github.com/${repository}/pull/${number}`,
+}));
 function summary(item: IssueView): IssueSummary {
+  const prs =
+    item.issue_id === id
+      ? pullRequests
+      : item.issue_id === items[1]?.issue_id
+        ? pullRequests.slice(1, 2)
+        : undefined;
   return {
     issue_id: item.issue_id,
     title: item.plan.title,
@@ -170,6 +189,28 @@ function summary(item: IssueView): IssueSummary {
     assignment_epoch: item.assignment_epoch,
     assignment_state: item.assignment_state,
     ...(item.parent_issue_id ? { parent_issue_id: item.parent_issue_id } : {}),
+    ...(prs
+      ? {
+          board: {
+            status: "in_progress",
+            attention_count: 0,
+            execution: {
+              accepting: 0,
+              cancelled: 0,
+              completed: 0,
+              idle: 0,
+              paused: 0,
+              queued: 0,
+              running: 0,
+              unknown: 0,
+              waiting_owner: 0,
+            },
+            stages_done: 0,
+            stages_total: 0,
+            pull_requests: prs,
+          },
+        }
+      : {}),
   };
 }
 function history(item: IssueView): IssueView {
@@ -456,6 +497,7 @@ try {
     planChoice.version = 1;
     const context = await browser.newContext({
       viewport: { width, height: 844 },
+      hasTouch: width <= 760,
       reducedMotion: "reduce",
       serviceWorkers: "block",
     });
@@ -473,6 +515,66 @@ try {
       else await page.getByRole("link", { name: "Issues", exact: true }).click();
     };
     await openBoard();
+    const multi = page.locator(`article[data-issue-id="${id}"]`);
+    const link = multi.getByRole("link", { name: "example/app #368 · 已打开" });
+    const more = multi.getByRole("button", { name: "查看关联 PR（另有 4 个）" });
+    await link.waitFor();
+    const single = page.locator(`article[data-issue-id="${items[1]!.issue_id}"]`);
+    await single.getByRole("link", { name: "example/web #347 · 已合入" }).waitFor();
+    assert.equal(await single.getByRole("button", { name: /查看关联 PR/ }).count(), 0);
+    const noPR = page.locator(`article[data-issue-id="${items[2]!.issue_id}"]`);
+    await noPR.waitFor();
+    assert.equal(await noPR.getByRole("link").count(), 0);
+    const menu = multi.getByRole("button", { name: /修改工作状态/ });
+    const [cardBounds, linkBounds, moreBounds, menuBounds] = await Promise.all(
+      [multi, link, more, menu].map((element) => element.boundingBox()),
+    );
+    assert(cardBounds && linkBounds && moreBounds && menuBounds);
+    assert(linkBounds.x >= cardBounds.x && linkBounds.x + linkBounds.width <= moreBounds.x);
+    assert(
+      moreBounds.x + moreBounds.width <= menuBounds.x &&
+        menuBounds.x + menuBounds.width <= cardBounds.x + cardBounds.width,
+    );
+    assert.equal(await link.getAttribute("href"), "https://github.com/example/app/pull/368");
+    if (width === 1280) {
+      await link.hover();
+      assert(await link.getByText("example/app #368 · 已打开").isVisible());
+      await page.mouse.move(0, 0);
+    }
+    await page.keyboard.press("Tab");
+    await link.focus();
+    await link.getByText("example/app #368 · 已打开").waitFor();
+    await page.screenshot({ path: join(output, `issue-pr-board-${width}.png`) });
+    if (width <= 760) await more.tap();
+    else await more.press("Enter");
+    const prDialog = page.getByRole("dialog", { name: "关联 PR" });
+    await prDialog.waitFor();
+    assert.equal(await prDialog.getByRole("link").count(), pullRequests.length);
+    for (const pr of pullRequests) {
+      const prLink = prDialog.getByRole("link", { name: new RegExp(`#${pr.number} ·`) });
+      assert.equal(await prLink.getAttribute("href"), pr.url);
+      assert.equal(await prLink.locator("svg").getAttribute("data-status"), pr.status);
+      assert(
+        await prLink.locator("svg").evaluate((icon) => icon.getBoundingClientRect().width === 16),
+      );
+    }
+    await page.screenshot({ path: join(output, `issue-pr-list-${width}.png`) });
+    if (width === 320) {
+      // Intercept the actual popup navigation to verify the clicked link,
+      // without letting the fixture send a request to an external repository.
+      await context.route("https://github.com/example/mobile/pull/371", (route) =>
+        route.fulfill({ body: "Fixture PR", contentType: "text/plain" }),
+      );
+      const newTab = context.waitForEvent("page");
+      await prDialog.getByRole("link", { name: "example/mobile #371 · 草稿" }).tap();
+      const destination = await newTab;
+      await destination.waitForLoadState();
+      assert.equal(destination.url(), "https://github.com/example/mobile/pull/371");
+      await destination.close();
+    }
+    await page.keyboard.press("Escape");
+    await prDialog.waitFor({ state: "hidden" });
+    assert(await more.evaluate((element) => element === document.activeElement));
     await editIssueFilters(page, () =>
       page.getByRole("radio", { name: "层级", exact: true }).click(),
     );

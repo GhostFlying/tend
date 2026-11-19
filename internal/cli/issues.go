@@ -70,7 +70,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "issue "+action)
 	if help := issueCommandHelp(action); help != "" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
-	} else if action == "create" || action == "set-acceptance-policy" || action == "create-task" || action == "update-task" || action == "request-owner" || action == "set-status" {
+	} else if action == "create" || action == "set-acceptance-policy" || action == "create-task" || action == "update-task" || action == "request-owner" || action == "set-status" || action == "update-delivery" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
 	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
@@ -80,6 +80,12 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	asJSON := fs.Bool("json", false, "print the complete structured result")
 	data := fs.String("data", "", "inline JSON payload; create-task includes task_id and spec.agent_selection category_id/required_capabilities for each role; explicit owner filters agent_id/runtime_id/model/effort and acceptance_execution remain supported; source_message_id is a citation, not human assignment authority")
 	file := fs.String("file", "", "JSON payload file; - reads stdin")
+	var prURL, fromTask, mount string
+	if action == "update-delivery" {
+		fs.StringVar(&prURL, "pr-url", "", "register a GitHub pull request by URL")
+		fs.StringVar(&fromTask, "from-task", "", "find a unique PR from a same-Issue task's original workspace branch")
+		fs.StringVar(&mount, "mount", "", "recorded logical mount path for --from-task")
+	}
 	request := fs.String("request-id", "", "reuse the original request identity with its original revision, epoch and payload")
 	revision := fs.Int64("revision", -1, "expected control revision; first requests may read the current value")
 	epoch := fs.Int64("epoch", -1, "expected assignment epoch; first requests may read the current value")
@@ -204,6 +210,25 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	}
 	if action == "update-task" {
 		target.Type = "task"
+	}
+	if prURL != "" || fromTask != "" || mount != "" {
+		if *data != "" || *file != "" || *reason == "" || (fromTask == "") != (mount == "") || prURL != "" && fromTask != "" {
+			return usagef("PR registration requires --reason and either --pr-url or --from-task with --mount")
+		}
+		if fromTask != "" {
+			if *request != "" {
+				return usagef("request recovery requires the original --pr-url and receipt coordinates; branch lookup is for new requests")
+			}
+			prURL, err = issuePullRequestFromTask(ctx, c, target.ID, fromTask, mount)
+			if err != nil {
+				return err
+			}
+		}
+		input, err := json.Marshal(map[string]string{"action": "register_pr", "pr_url": prURL, "reason": *reason})
+		if err != nil {
+			return err
+		}
+		*data = string(input)
 	}
 	body, err := issueInput(e, *data, *file)
 	if err != nil {
