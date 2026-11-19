@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -362,6 +363,133 @@ func TestRecoveredPauseCollectionReestablishesOriginalLease(t *testing.T) {
 			r.wg.Wait()
 			if workers.starts != 0 || len(finals) != 1 || <-finals != protocol.OpRunsRelease {
 				t.Fatal("collection after pause ran native work or replaced the original stopped path")
+			}
+		})
+	}
+}
+
+func TestRecoveredPauseReportObservesHandbackAndStop(t *testing.T) {
+	for _, afterHold := range []protocol.RunDesired{protocol.DesiredPaused, protocol.DesiredStopped} {
+		t.Run(string(afterHold), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			r, as, workers, _, _ := implementationReconcileFixture(t)
+			t.Cleanup(func() {
+				cancel()
+				r.wg.Wait()
+			})
+			pause := &protocol.PauseHandoff{RequestID: "original-pause", IssueID: "issue", IssueRevision: 2, ControlRevision: 1}
+			if err := r.cfg.Journal.RecordPause(ctx, as.RunID, pause); err != nil {
+				t.Fatal(err)
+			}
+			if parked, err := r.cfg.Journal.TryBeginPauseStop(ctx, as.RunID, 1); err != nil || !parked {
+				t.Fatal(parked, err)
+			}
+			entered, proceed := make(chan struct{}), make(chan struct{})
+			workers.onRecover = func() error {
+				close(entered)
+				select {
+				case <-proceed:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			var held atomic.Bool
+			finals := make(chan protocol.Envelope, 2)
+			observed := make(chan protocol.RunObserved, 4)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				var env protocol.Envelope
+				if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+					t.Error(err)
+					return
+				}
+				var result any
+				switch env.Operation {
+				case protocol.OpRunnerHello:
+					var hello protocol.HelloPayload
+					if err := json.Unmarshal(env.Payload, &hello); err != nil || len(hello.Held) != 1 ||
+						hello.Held[0].RunID != as.RunID || hello.Held[0].LeaseID != as.LeaseID {
+						t.Error("Hello lost the original Run or lease", hello.Held, err)
+						return
+					}
+					observed <- hello.Held[0].Observed
+					desired := protocol.DesiredPaused
+					if held.Load() {
+						desired = protocol.DesiredHeld
+					}
+					result = protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{
+						{RunID: as.RunID, Verdict: protocol.VerdictContinue, Desired: desired, PauseHandoff: pause},
+					}}
+				case protocol.OpRunnerHeartbeat:
+					var hb protocol.HeartbeatPayload
+					if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
+						hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+						t.Error("held result missed its original control channel", hb.Runs, err)
+						return
+					}
+					result = protocol.HeartbeatResult{LeaseTTLMillis: 60000, Runs: []protocol.LeaseState{
+						{RunID: as.RunID, Renewed: afterHold != protocol.DesiredStopped, Desired: afterHold, PauseHandoff: pause},
+					}}
+				case protocol.OpRunsSubmitArtifact, protocol.OpRunsRelease, protocol.OpRunsYieldPause:
+					finals <- env
+				}
+				raw, _ := json.Marshal(result)
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: raw}})
+			}))
+			defer server.Close()
+			r.c.base, r.c.http = server.URL, server.Client()
+
+			if err := r.hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal("original result recovery did not start")
+			}
+			held.Store(true)
+			if err := r.hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			close(proceed)
+			r.wg.Wait()
+			saved, err := r.cfg.Journal.Run(ctx, as.RunID)
+			if <-observed != protocol.RunUnknown || <-observed != protocol.RunUnknown ||
+				err != nil || !saved.Held || !saved.StoppedConfirmed || saved.Phase != journal.PhaseWorkerDone ||
+				len(saved.WorkerResult) == 0 || len(finals) != 0 {
+				t.Fatal("pause recovery lost the result or bypassed human control", saved, err)
+			}
+			select {
+			case <-r.reconcile:
+			default:
+				t.Fatal("held recovered report did not request ordinary control")
+			}
+			if err := r.hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if <-observed != protocol.RunWaiting || r.lookup(as.RunID) == nil || len(finals) != 0 {
+				t.Fatal("expected the stopped result to wait for owner control")
+			}
+			r.heartbeat(ctx)
+			r.wg.Wait()
+			if workers.starts != 0 || len(finals) != 1 {
+				t.Fatal("control did not settle exactly one request for the original result", workers.starts, len(finals))
+			}
+			env := <-finals
+			if env.Target.ID != as.RunID {
+				t.Fatal("final request lost the original Run", env)
+			}
+			if afterHold == protocol.DesiredStopped {
+				if env.Operation != protocol.OpRunsRelease {
+					t.Fatal("Stop did not use the original release path", env)
+				}
+				return
+			}
+			var artifact protocol.ArtifactPayload
+			if env.Operation != protocol.OpRunsSubmitArtifact || json.Unmarshal(env.Payload, &artifact) != nil ||
+				!reflect.DeepEqual(&artifact, workers.result.Result) {
+				t.Fatal("handback did not submit the original result", env, artifact)
 			}
 		})
 	}
