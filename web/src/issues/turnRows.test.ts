@@ -4,14 +4,14 @@ import { buildTranscriptEntries } from "../conversation/transcriptBlocks.ts";
 import { conversationStatus } from "../ui/activityStatus.ts";
 import { activityTurnRows } from "./turnRows.ts";
 
-const trigger = {
+const undecidedTrigger = {
   seq: 1,
   message_id: "original-trigger",
   author: "owner",
   kind: "message",
   created_at: "2026-01-01T00:00:00Z",
-  state: "processing" as const,
 };
+const trigger = { ...undecidedTrigger, state: "processing" as const };
 const block: IssueTranscriptBlock = { position: 1, trigger, items: [], more: false };
 const first = {
   seq: 2,
@@ -29,20 +29,19 @@ const first = {
 };
 
 test("readable tool metadata shows running or uncertain status without tool details", () => {
-  const { state: _state, ...undecided } = trigger;
   const process = { items: [], more: false, has_tools: true, started_at: 1000 };
   const collect = (value: IssueTranscriptBlock) =>
     activityTurnRows([], value, true).find((row) => row.kind === "agent")!;
   const running = collect({
     ...block,
-    trigger: undecided,
+    trigger: undecidedTrigger,
     process: { ...process, state: "processing", active_tool: "exec_command" },
   });
   expect(running.items).toEqual([]);
   expect(
     conversationStatus(running.items, running.state, running.startedAt, null, "exec_command"),
   ).toMatchObject({ active: true, label: "正在执行命令", startedAt: 1000 });
-  const unknown = collect({ ...block, trigger: undecided, process });
+  const unknown = collect({ ...block, trigger: undecidedTrigger, process });
   expect(conversationStatus(unknown.items, unknown.state)).toMatchObject({
     active: false,
     label: "结果待确认",
