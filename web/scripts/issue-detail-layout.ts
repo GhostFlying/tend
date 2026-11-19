@@ -596,6 +596,95 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    const row = activity.items![0]!;
+    const block = row.block!;
+    const prose = "首屏保留可读正文";
+    const tool = {
+      message_id: "readable-fixture-tool",
+      seq: 501,
+      author: "main_agent",
+      kind: "tool_use",
+      created_at: new Date(now).toISOString(),
+      tool: {
+        name: "fixture_tool",
+        input: "fixture input",
+        output: "fixture output",
+        status: "completed",
+        turn_id: "fixture-turn",
+        updated_at: new Date(now).toISOString(),
+      },
+    } satisfies IssueConversationItem;
+    const readableBlock = {
+      ...block,
+      items: [{ ...block.items![0]!, body: prose }],
+      process: { items: [], has_tools: true, more: false, started_at: now - 1000, ended_at: now },
+      more: false,
+    };
+    const activityPath = `/api/v1/issues/${issue.issue_id}/activity`;
+    const processPath = `/api/v1/conversation/blocks/${block.trigger.message_id}`;
+    let detailRequests = 0;
+    let starting = () => {};
+    let release = () => {};
+    const started = new Promise<void>((resolve) => {
+      starting = resolve;
+    });
+    const releaseDetail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (u) => u.pathname === activityPath,
+      (route) => {
+        const query = new URL(route.request().url()).searchParams;
+        assert.equal(query.get("view"), "readable");
+        return route.fulfill({
+          json: {
+            items: query.has("since") ? [] : [{ ...row, block: readableBlock }],
+            more: false,
+            readable: true,
+            event_seq: seq,
+          },
+        });
+      },
+    );
+    await page.route(
+      (u) => u.pathname === processPath,
+      async (route) => {
+        detailRequests++;
+        starting();
+        await releaseDetail;
+        await route.fulfill({
+          json: { ...readableBlock, process: { ...readableBlock.process, items: [tool] } },
+        });
+      },
+    );
+    try {
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      const discussion = page.locator(`article[data-scroll-id="${row.id}"]`);
+      await discussion.getByText(prose, { exact: true }).waitFor();
+      await started;
+      assert.equal(detailRequests, 1);
+      const trigger = discussion.getByRole("button", { name: /查看过程/ });
+      await trigger.click();
+      await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor();
+      assert.equal(detailRequests, 1, "opening must reuse the held detail prefetch");
+      release();
+      await discussion.locator('[data-tool-item="readable-fixture-tool"]').waitFor();
+      assert.equal(detailRequests, 1);
+      await discussion.getByText(prose, { exact: true }).waitFor();
+      await discussion.screenshot({ path: join(output, "issue-readable-process.png") });
+      console.log("PASS readable activity detail reuse");
+    } finally {
+      release();
+      await context.close();
+    }
+  }
+
   for (const width of [1440, 320]) {
     const context = await browser.newContext({ viewport: { width, height: 844 } });
     try {
@@ -819,46 +908,49 @@ try {
         await delayedDelivery;
         await route.fulfill({ json: { issue_id: issue.issue_id, items: [current] } });
       });
-      await page.route(`**/api/v1/issues/${issue.issue_id}/activity`, (route) =>
-        route.fulfill({
-          json: {
-            ...activity,
-            event_seq: seq,
-            items: [
-              ...activity.items!,
-              {
-                id: "review-queue-event",
-                position: 3,
-                kind: "task.completed",
-                author: "tend",
-                title: "任务结果已返回",
-                task_id: "reviewer-task",
-                created_at: now,
-                issue_id: issue.issue_id,
-              },
-              {
-                id: "old-pr-checks",
-                position: 4,
-                kind: "work_item.delivery_candidate_retired",
-                author: "tend",
-                title: "保留了被替换的候选观察",
-                created_at: now,
-                delivery: original,
-              },
-              ...(activityState.urgentOriginal
-                ? [
-                    {
-                      id: "urgent-original",
-                      position: 1100,
-                      kind: "conversation",
-                      created_at: now,
-                      block: activityState.urgentOriginal,
-                    },
-                  ]
-                : []),
-            ],
-          },
-        }),
+      const activityPath = `/api/v1/issues/${issue.issue_id}/activity`;
+      await page.route(
+        (url) => url.pathname === activityPath,
+        (route) =>
+          route.fulfill({
+            json: {
+              ...activity,
+              event_seq: seq,
+              items: [
+                ...activity.items!,
+                {
+                  id: "review-queue-event",
+                  position: 3,
+                  kind: "task.completed",
+                  author: "tend",
+                  title: "任务结果已返回",
+                  task_id: "reviewer-task",
+                  created_at: now,
+                  issue_id: issue.issue_id,
+                },
+                {
+                  id: "old-pr-checks",
+                  position: 4,
+                  kind: "work_item.delivery_candidate_retired",
+                  author: "tend",
+                  title: "保留了被替换的候选观察",
+                  created_at: now,
+                  delivery: original,
+                },
+                ...(activityState.urgentOriginal
+                  ? [
+                      {
+                        id: "urgent-original",
+                        position: 1100,
+                        kind: "conversation",
+                        created_at: now,
+                        block: activityState.urgentOriginal,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          }),
       );
       await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
       assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
@@ -2182,33 +2274,6 @@ try {
         const cursor = new URL(route.request().url()).searchParams.get("before");
         if (cursor === "2000") await secondHistory;
         if (cursor) earlierStage = cursor === "2050" ? 1 : 2;
-        const rows = [...boundaryEvents];
-        if (earlierStage >= 1)
-          rows.unshift({
-            ...boundaryEvents[0]!,
-            id: "boundary-0",
-            position: 2000,
-            title: "边界进展 0",
-            created_at: now,
-          });
-        if (earlierStage >= 2)
-          rows.unshift({
-            ...boundaryEvents[0]!,
-            id: "boundary-negative",
-            position: 1950,
-            title: "边界进展 更早",
-            created_at: now - 50000,
-          });
-        await route.fulfill({
-          json: {
-            event_seq: seq,
-            items: rows,
-            more: boundaryEnabled && earlierStage < 2,
-            next_before: earlierStage ? 2000 : 2050,
-          },
-        });
-      });
-      await page.route("**/api/v1/issues/*/activity", async (route) => {
         const rows = [...boundaryEvents];
         if (earlierStage >= 1)
           rows.unshift({
