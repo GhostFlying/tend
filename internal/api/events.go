@@ -42,11 +42,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "after must be an event_seq"))
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		s.writeError(w, r, fmt.Errorf("api: the response cannot stream"))
 		return
 	}
+	response := http.NewResponseController(w)
 	ctx := r.Context()
 	var latest int64
 	var expired bool
@@ -82,7 +83,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	if writeEvent(w, "start", 0, protocol.StreamStart{EventSeq: after}) != nil {
 		return
 	}
-	flusher.Flush()
+	if err := response.Flush(); err != nil {
+		return
+	}
 	httpdiag.Waiting(ctx)
 	heartbeat := time.NewTicker(s.cfg.Heartbeat)
 	defer heartbeat.Stop()
@@ -113,13 +116,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			// A resync is explicit even after response headers were committed.
 			// Older clients reconnect and receive the same expired-cursor error.
 			_ = writeEvent(w, "reset", 0, protocol.StreamStart{EventSeq: resetAt})
-			flusher.Flush()
+			_ = response.Flush()
 			return
 		}
-		refreshed := false
+		var refreshThrough int64
 		for _, ev := range batch {
 			after = ev.EventSeq
-			refreshed = refreshed || store.RefreshKind(ev.Kind)
+			if store.RefreshKind(ev.Kind) {
+				refreshThrough = ev.EventSeq
+			}
 			var payload any = ev
 			if strings.HasPrefix(r.URL.Path, "/api/v1/messaging/") {
 				kind := ev.Kind
@@ -153,11 +158,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(batch) > 0 {
-			flusher.Flush()
-			if refreshed {
-				if err := s.app.AcknowledgeRefreshes(ctx, after); err != nil {
-					return
-				}
+			if err := response.Flush(); err != nil {
+				return
+			}
+			if refreshThrough > 0 {
+				s.refreshAck.offer(refreshThrough)
 			}
 			if len(batch) == eventBatch {
 				continue
@@ -174,7 +179,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if _, err := io.WriteString(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
-			flusher.Flush()
+			if err := response.Flush(); err != nil {
+				return
+			}
 		}
 	}
 }

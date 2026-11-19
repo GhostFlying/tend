@@ -61,13 +61,19 @@ type Server struct {
 	cfg   Config
 	log   *slog.Logger
 	// ending is closed when the server shuts down, ending event streams.
-	ending    chan struct{}
-	endStream sync.Once
+	ending     chan struct{}
+	endStream  sync.Once
+	refreshAck *refreshAcks
 }
 
 // EndStreams ends event streams and re-readable owner waits on shutdown.
 // Accepted writes and original file transfers keep their request lifetime.
-func (s *Server) EndStreams() { s.endStream.Do(func() { close(s.ending) }) }
+func (s *Server) EndStreams() {
+	s.endStream.Do(func() {
+		close(s.ending)
+		s.refreshAck.stop()
+	})
+}
 
 // New returns a Server. The store is used for reads only; secret is the
 // server secret tokens are signed with.
@@ -81,7 +87,7 @@ func New(a *app.App, s *store.Store, whois netx.WhoIs, secret []byte, cfg Config
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Server{archives: archiveHandles(cfg.Archives), app: a, store: s, whois: whois, key: tokenKey(secret), cfg: cfg, log: log, ending: make(chan struct{})}
+	return &Server{archives: archiveHandles(cfg.Archives), app: a, store: s, whois: whois, key: tokenKey(secret), cfg: cfg, log: log, ending: make(chan struct{}), refreshAck: newRefreshAcks(a.AcknowledgeRefreshes, log)}
 }
 
 // Handler returns the API's routes, all under /api/v1/.

@@ -82,6 +82,7 @@ func newEnv(t *testing.T) *env {
 	e.server = New(a, s, e.peer, secret, Config{Owners: []string{ownerLogin, "other-owner@example.com"}, Now: clock.Now}, quiet())
 	hs := httptest.NewServer(e.server.Handler())
 	t.Cleanup(hs.Close)
+	t.Cleanup(e.server.EndStreams)
 	e.url = hs.URL
 	return e
 }
