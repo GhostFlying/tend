@@ -418,3 +418,5 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 `tend upgrade status --json` 的 `window_stops` 列出受影响的 host、journal、进程、原 Run/lease 和固定截止时间。批次在 `window_maintenance` 阶段等待。每个实例从 `draining` 进入 `stop_authorized`，本机监督器确认该进程退出并提交回执后显示 `stopped`。此时 `unknown_runs` 列出需要查询原工作目录和外部操作的 Run。
 
 收到超时或响应中断时，用原升级 ID 和 request ID 核对状态。原停止授权尚待确认时先恢复与对应 updater 的通信。已过整体期限的批次可以接收停止回执；确认后取消原批次，需要继续发布时再显式发起新批次。
+
+截止后的强制授权需要支持期限的 updater 和接单 runner。旧版本仍可以自然退役。升级主机上的这两个组件后可使用强制维护。监督器在发信号前按本机启动标识和单调时钟再验期限。若授权已过期且它确认尚未发信号，状态记为 `not_stopped`，可以取消批次。已发信号的进程仍须提交退出回执。

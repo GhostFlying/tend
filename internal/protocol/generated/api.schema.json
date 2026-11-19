@@ -21607,6 +21607,9 @@
         "drain_until_ms": {
           "type": "integer"
         },
+        "forced": {
+          "type": "boolean"
+        },
         "generation": {
           "type": "integer"
         },
