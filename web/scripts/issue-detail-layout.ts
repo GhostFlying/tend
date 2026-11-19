@@ -612,6 +612,7 @@ try {
         more: false,
         process: { items: [], more: false, error },
       } satisfies IssueTranscriptBlock;
+      let current: IssueTranscriptBlock = block;
       const cursors: (number | null)[] = [];
       const activityPath = `/api/v1/issues/${issue.issue_id}/activity`;
       const detailPath = `/api/v1/conversation/blocks/${block.trigger.message_id}`;
@@ -638,7 +639,7 @@ try {
                         block:
                           seq === 100
                             ? { ...block, trigger: { ...block.trigger, body: "恢复后的权威讨论" } }
-                            : block,
+                            : current,
                       },
                     ],
               readable: true,
@@ -649,11 +650,21 @@ try {
         },
       );
       let retries = 0;
+      const refreshError = "本次公开过程详情读取失败。";
       await page.route(
         (url) => url.pathname === detailPath,
         (route) => {
           retries++;
-          return route.fulfill({ json: { ...block, process: { items: [], more: false } } });
+          return route.fulfill({
+            json: {
+              ...current,
+              process: {
+                items: [],
+                more: false,
+                ...(retries === 2 ? { error: refreshError } : {}),
+              },
+            },
+          });
         },
       );
       const connected = page.waitForResponse(
@@ -669,6 +680,21 @@ try {
       await discussion.getByRole("button", { name: "重新读取公开过程", exact: true }).click();
       await notice.waitFor({ state: "hidden" });
       assert.equal(retries, 1);
+
+      current = { ...block, trigger: { ...block.trigger, body: "无公开回复的后续活动" } };
+      publish("conversation.message", {
+        ...current.trigger,
+        conversation_id: issue.conversation!.conversation_id!,
+      });
+      await discussion.getByText("无公开回复的后续活动", { exact: true }).waitFor();
+      const refreshedNotice = discussion.getByRole("status").filter({ hasText: refreshError });
+      await refreshedNotice.waitFor();
+      assert.equal(retries, 2);
+      await refreshedNotice.getByRole("button", { name: "重新读取公开过程", exact: true }).click();
+      await refreshedNotice.waitFor({ state: "hidden" });
+      await notice.waitFor({ state: "hidden" });
+      assert.equal(retries, 3);
+
       seq = 100;
       for (const stream of streams) stream.end(`event: reset\ndata: {"event_seq":${seq}}\n\n`);
       await page.getByText("恢复后的权威讨论", { exact: true }).waitFor();
@@ -682,6 +708,117 @@ try {
       seq = savedSeq;
     }
   }
+
+  {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    try {
+      const page = await context.newPage();
+      const row = activity.items![0]!;
+      const original = row.block!;
+      const { message_id, seq: triggerSeq, created_at } = original.trigger;
+      const tool = {
+        message_id: "urgent-exec-in-progress",
+        seq: triggerSeq + 1,
+        author: "main_agent",
+        kind: "tool_use",
+        created_at,
+        reply_to: message_id,
+        tool: {
+          name: "exec_command",
+          status: "running",
+          turn_id: "owner-turn",
+          updated_at: created_at,
+        },
+      } satisfies IssueConversationItem;
+      const block = {
+        ...original,
+        trigger: {
+          message_id,
+          seq: triggerSeq,
+          created_at,
+          kind: "message",
+          author: "external",
+          body: "检查当前进度",
+          issue_owner_steer: {
+            message_id,
+            issue_id: issue.issue_id,
+            assignment_epoch: 1,
+            task_id: "owner-task",
+            run_id: "owner-run",
+            thread_id: "owner-thread",
+            turn_id: "owner-turn",
+            source_message_id: "urgent-source",
+            source_revision: 1,
+            sender: { kind: "owner" },
+            status: "consumed",
+            native_item_id: "owner-native-input",
+          },
+        },
+        items: [{ ...original.items![0]!, seq: triggerSeq + 2, body: "已汇报第一步，仍在检查。" }],
+        process: {
+          items: [],
+          more: false,
+          has_tools: true,
+          started_at: now - 5_000,
+          state: "processing",
+          active_tool: "exec_command",
+        },
+      } satisfies IssueTranscriptBlock;
+      let current: IssueTranscriptBlock = block;
+      await page.route(
+        (url) => url.pathname === `/api/v1/issues/${issue.issue_id}/activity`,
+        (route) =>
+          route.fulfill({
+            json: {
+              items: [{ ...row, block: current }],
+              readable: true,
+              more: false,
+              event_seq: seq,
+            },
+          }),
+      );
+      await page.route(
+        (url) => url.pathname === `/api/v1/conversation/blocks/${message_id}`,
+        (route) => route.fulfill({ json: { ...block, process: { items: [tool], more: false } } }),
+      );
+      const connected = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/events",
+      );
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      await connected;
+      const discussion = page.locator(`article[data-scroll-id="${row.id}"]`);
+      await discussion.getByText("已汇报第一步，仍在检查。", { exact: true }).waitFor();
+      const stage = discussion.getByRole("status").filter({ hasText: /^正在执行命令$/ });
+      await stage.waitFor();
+      await discussion
+        .locator('[data-active="true"]')
+        .getByText(/^\d+:\d{2}$/)
+        .waitFor();
+      const trace = discussion.getByRole("button", { name: /查看过程/ });
+      await trace.click();
+      await discussion.locator(`[data-tool-item="${tool.message_id}"]`).waitFor();
+      assert(await stage.isVisible(), "opening tool details changed the active tool label");
+      await trace.click();
+      assert(await stage.isVisible(), "closing tool details changed the active tool label");
+
+      current = {
+        ...block,
+        process: { ...block.process, state: "replied", active_tool: "", ended_at: now },
+      };
+      publish("conversation.message", {
+        ...block.trigger,
+        conversation_id: issue.conversation!.conversation_id!,
+      });
+      await discussion
+        .getByRole("status")
+        .filter({ hasText: /^已完成$/ })
+        .waitFor();
+      console.log("PASS urgent process state remains accurate with public prose and loaded tools");
+    } finally {
+      await context.close();
+    }
+  }
+
   for (const followEnd of [true, false]) {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 844 },
@@ -764,6 +901,19 @@ try {
     const secondGate = new Promise<void>((resolve) => {
       releaseSecond = resolve;
     });
+    let releaseResults = () => {};
+    if (followEnd) {
+      const resultsGate = new Promise<void>((resolve) => {
+        releaseResults = resolve;
+      });
+      await page.route(
+        (url) => url.pathname === `/api/v1/issues/${issue.issue_id}/results`,
+        async (route) => {
+          await resultsGate;
+          await route.fallback();
+        },
+      );
+    }
     await page.route(
       (u) => u.pathname === activityPath,
       (route) => {
@@ -832,17 +982,47 @@ try {
       await started;
       assert.equal(detailRequests, 1);
       const trigger = discussion.getByRole("button", { name: /查看过程/ });
-      await trigger.click();
+      if (followEnd) {
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.evaluate(
+          (control) =>
+            new Promise<void>((resolve) => {
+              const node = control.closest("[data-issue-scroll]")!;
+              const panel = document.getElementById(control.getAttribute("aria-controls")!)!;
+              const observer = new MutationObserver(() => {
+                if (panel.hidden) return;
+                observer.disconnect();
+                node.scrollTop = node.scrollHeight;
+                resolve();
+              });
+              observer.observe(panel, { attributeFilter: ["hidden"] });
+              (control as HTMLButtonElement).click();
+            }),
+        );
+      } else await trigger.click();
       await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor();
       assert.equal(detailRequests, 1, "opening must reuse the held detail prefetch");
       const lastTool = firstTools.at(-1)!.message_id;
       const scrollport = page.locator("[data-issue-scroll]");
-      const initialHeight = await scrollport.evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
+      const initialHeight = await scrollport.evaluate((node, followingEnd) => {
+        if (!followingEnd) node.scrollTop = node.scrollHeight;
         return node.scrollHeight;
-      });
+      }, followEnd);
       await page.evaluate(() => new Promise(requestAnimationFrame));
       if (followEnd) {
+        const measureGap = () =>
+          scrollport.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight);
+        const gapAfterDisclosure = await measureGap();
+        assert(
+          gapAfterDisclosure <= 2,
+          `disclosure moved the reader ${gapAfterDisclosure} px from the end`,
+        );
+        const resultsCount = page.getByRole("button", { name: "查看全部交付 · 1+ 项 →" });
+        assert.equal(await resultsCount.count(), 0, "results must still be pending");
+        releaseResults();
+        await resultsCount.waitFor({ state: "attached" });
+        const gap = await measureGap();
+        assert(gap <= 2, `late results moved the reader ${gap} px from the end`);
         appended = trailing.slice(-4).map((entry, index) => {
           const id = `new-readable-tail-${index}`;
           const position = trailing.at(-1)!.position + index + 1;
@@ -894,7 +1074,7 @@ try {
         );
         assert.equal(detailRequests, 1);
         console.log(
-          `PASS following the end through activity updates and process details (${before.gap} → ${after.gap} px)`,
+          `PASS following the end through late results, activity updates, and process details (${gap} → ${before.gap} → ${after.gap} px)`,
         );
         continue;
       }
@@ -989,6 +1169,7 @@ try {
         "PASS readable detail reuse, anchor, streamed updates, and navigation page depth",
       );
     } finally {
+      releaseResults();
       releaseSecond();
       release();
       await context.close();

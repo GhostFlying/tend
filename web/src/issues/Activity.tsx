@@ -753,16 +753,17 @@ function ActivityBlock({
   };
   const displayRows = activityTurnRows(rows, processBlock, readable);
   const firstReply = displayRows.find((row) => row.kind === "agent");
-  const summaryError = !process.value ? processBlock.process?.error : undefined;
+  const summaryError = process.value?.source === block ? undefined : processBlock.process?.error;
+  const standaloneError = summaryError ?? (firstReply ? undefined : process.error);
   const discussion = (
     <article
       className={styles.discussion}
       data-scroll-id={entry.id}
       data-discussion-turn={entry.id}
     >
-      {summaryError && (
+      {standaloneError && (
         <p role="status" className={styles.error}>
-          {process.error ?? summaryError}
+          {process.error ?? standaloneError}
           <button
             disabled={readable && process.loading}
             onClick={() => {
@@ -873,7 +874,7 @@ function ActivityBlock({
                       ? {
                           open: traceOpen,
                           ready: !!process.value,
-                          activeTool: process.value ? undefined : block.process?.active_tool,
+                          activeTool: block.process?.active_tool,
                           toggle: () => {
                             if (!traceOpen) requestProcess();
                             setTraceOpen(!traceOpen);
