@@ -355,3 +355,38 @@ func TestRolloutArchiveBindsResumedRunWithoutCopyingOriginal(t *testing.T) {
 		t.Fatal("binding retry changed original identity or bytes", binding)
 	}
 }
+
+func TestAcceptingRunnerDeliversRetiredJournalsOriginalArchiveRequest(t *testing.T) {
+	r, as, root, f := archiveRunner(t)
+	current := r.cfg.Journal
+	r.cfg.JournalRoot = t.TempDir()
+	old, err := journal.Open(t.Context(), filepath.Join(r.cfg.JournalRoot, "journal.db"), r.cfg.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	r.cfg.Journal = old
+	if err := old.AcceptAssignment(t.Context(), as, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.registerRollout(t.Context(), as.RunID, protocol.RolloutPreviewSource{SessionID: "session", TurnID: "first", Path: filepath.Join(root, "rollout-session.jsonl")}); err != nil {
+		t.Fatal(err)
+	}
+	f.drop = true
+	if err := r.syncRolloutArchive(t.Context(), as); !isRetryable(err) {
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r.cfg.Journal = current
+	if _, done, err := r.continueRetiredArchive(t.Context(), "", ""); err != nil || done {
+		t.Fatal(done, err)
+	}
+	if _, done, err := r.continueRetiredArchive(t.Context(), "", ""); err != nil || !done {
+		t.Fatal("retained archive still pending", done, err)
+	}
+	if len(f.requests) != 2 || f.requests[0].RequestID != f.requests[1].RequestID || !bytes.Equal(f.requests[0].Payload, f.requests[1].Payload) {
+		t.Fatal("replaced original archive request", f.requests)
+	}
+}

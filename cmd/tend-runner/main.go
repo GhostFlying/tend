@@ -438,7 +438,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	r := runner.New(runner.Config{Extensions: cfg.extensionAgent,
 		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
-		JournalID: journalID, RolloutRoots: cfg.RolloutRoots, InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
+		JournalRoot: baseState, JournalID: journalID, RolloutRoots: cfg.RolloutRoots, InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,
 	})
 	if runtime.GOOS != "windows" {

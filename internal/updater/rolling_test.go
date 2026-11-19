@@ -80,7 +80,7 @@ func TestRollingRetirementResumesLostAckWithoutStoppingAnotherProcess(t *testing
 	}
 	h.reopen(t)
 	h.step(t)
-	if h.p.stops != 1 || len(h.s.Status().DrainingProcesses) != 1 || auth.confirmed["first"] != 2 {
+	if h.p.stops != 1 || len(h.s.Status().DrainingProcesses) != 1 || auth.confirmed["first"] != 2 || len(h.s.Status().RetiredJournals) != 1 || h.s.Status().RetiredJournals[0] != "" {
 		t.Fatal("stopped predecessor was not reconciled exactly once")
 	}
 	// A durable intent can precede signal dispatch. Reopening retains that

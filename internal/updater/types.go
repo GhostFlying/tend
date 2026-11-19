@@ -128,6 +128,7 @@ type CommittedProof struct {
 }
 type State struct {
 	CurrentJournal           string                                            `json:"current_journal,omitempty"`
+	RetiredJournals          []string                                          `json:"retired_journals,omitempty"`
 	DrainingProcesses        map[string]DrainingProcess                        `json:"draining_processes,omitempty"`
 	DiagnosticLogProtections map[string]string                                 `json:"diagnostic_log_protections,omitempty"`
 	BackupPrune              *protocol.BackupPruneState                        `json:"backup_prune,omitempty"`
