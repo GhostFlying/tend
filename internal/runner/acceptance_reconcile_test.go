@@ -443,8 +443,8 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 	defer cancelOriginal()
 	var confirmed, held, uploading atomic.Bool
 	var as protocol.Assignment
-	uploads := make(chan string, 4)
-	var uploadCount atomic.Int32
+	uploads := make(chan string, 8)
+	var recoveryUploads atomic.Int32
 	heartbeatSent, sendStop := make(chan struct{}), make(chan struct{})
 	uploadWaiting, uploadCanceled := make(chan struct{}), make(chan struct{})
 	finals := make(chan protocol.Envelope, 2)
@@ -515,9 +515,13 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &reply})
 			return
 		}
-		n := uploadCount.Add(1)
+		recovering := confirmed.Load()
+		var n int32
+		if recovering {
+			n = recoveryUploads.Add(1)
+		}
 		uploads <- q.URL.Query().Get("request_id")
-		if n == 2 && observeControl {
+		if n == 1 && observeControl {
 			var first [1]byte
 			if _, err := io.ReadFull(q.Body, first[:]); err != nil || first[0] != 'o' {
 				t.Error("could not read the first byte of the original upload", first, err)
@@ -535,7 +539,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 			return
 		}
 		body, readErr := io.ReadAll(q.Body)
-		if n == 2 && scenario == "stalled" {
+		if n == 1 && scenario == "stalled" {
 			if readErr == nil || string(body) != "o" {
 				t.Error("expected a single byte before the paused upload stalled", string(body), readErr)
 			}
@@ -545,11 +549,17 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 		if string(body) != "original selected bytes" {
 			t.Error("upload replaced the original bytes")
 		}
-		if !confirmed.Load() {
+		if !recovering {
+			if observeControl {
+				// Lose the original receipt without racing native Close
+				// during setup. The cancellation under test occurs on replay.
+				_, _ = w.Write([]byte("{"))
+				return
+			}
 			cancelOriginal()
 			return
 		}
-		if n == 2 {
+		if n == 1 {
 			switch scenario {
 			case "truncated":
 				_, _ = w.Write([]byte("{"))
@@ -628,7 +638,9 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	before, err := j.Run(ctx, as.RunID)
-	if err != nil || before.Attempts != 1 || before.Phase != journal.PhaseStarted || len(before.WorkerResult) != 0 || len(uploads) != 1 {
+	originalUploads := len(uploads)
+	if err != nil || before.Attempts != 1 || before.Phase != journal.PhaseStarted || len(before.WorkerResult) != 0 ||
+		originalUploads == 0 || !observeControl && originalUploads != 1 {
 		t.Fatal("upload cancellation changed original pending facts", before, err)
 	}
 	if err := os.WriteFile(filepath.Join(e.prepared.Dir, "check.log"), []byte("changed source"), 0o600); err != nil {
@@ -654,7 +666,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 		client := *cfg.HTTPClient
 		transport := client.Transport
 		client.Transport = uploadRoundTripper(func(q *http.Request) (*http.Response, error) {
-			if q.URL.Path == "/runner/v1/files" && uploadCount.Load() == 1 {
+			if q.URL.Path == "/runner/v1/files" && recoveryUploads.Load() == 0 {
 				q = q.Clone(q.Context())
 				q.Body = &pacedAcceptanceUpload{ReadCloser: q.Body, ctx: q.Context(), stall: scenario == "stalled"}
 			}
@@ -773,7 +785,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 	if paused && scenario != "progressing" && !observeStop {
 		saved, err := j.Run(ctx, as.RunID)
 		if err != nil || saved.Phase != journal.PhasePausing || !saved.StoppedConfirmed || len(saved.WorkerResult) != 0 ||
-			saved.Assignment.LeaseID != as.LeaseID || len(uploads) != 2 || len(finals) != 0 {
+			saved.Assignment.LeaseID != as.LeaseID || len(uploads) != originalUploads+1 || len(finals) != 0 {
 			t.Fatal("interrupted upload changed the original acceptance", saved, len(uploads), err)
 		}
 		if stopping {
@@ -790,7 +802,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 					t.Fatal(err)
 				}
 				r.wg.Wait()
-				if len(uploads) != 2 || len(finals) != 0 {
+				if len(uploads) != originalUploads+1 || len(finals) != 0 {
 					t.Fatal("takeover allowed another upload or result")
 				}
 				held.Store(false)
@@ -803,14 +815,14 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 		}
 		r.wg.Wait()
 		if stopping {
-			if len(finals) != 1 || len(uploads) != 2 {
+			if len(finals) != 1 || len(uploads) != originalUploads+1 {
 				t.Fatal("Stop did not settle once without another upload", len(finals), len(uploads))
 			}
 			env := <-finals
 			if env.Operation != protocol.OpRunsRelease || env.Target.ID != as.RunID {
 				t.Fatal("Stop did not release the original Run", env)
 			}
-		} else if len(uploads) != 3 {
+		} else if len(uploads) != originalUploads+2 {
 			t.Fatal("recovery did not reconcile the original upload", len(uploads))
 		}
 	}
@@ -824,7 +836,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 		if !errors.Is(err, journal.ErrNotFound) {
 			t.Fatal("Stop did not settle the original journal", result, err)
 		}
-		if observeStop && (len(finals) != 0 || len(uploads) != 2) {
+		if observeStop && (len(finals) != 0 || len(uploads) != originalUploads+1) {
 			t.Fatal("observed Stop repeated a settlement or upload", len(finals), len(uploads))
 		}
 	} else if err != nil || result.Attempts != 1 || result.Phase != journal.PhaseWorkerDone || !result.StoppedConfirmed {
@@ -833,7 +845,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 	if workers.starts != 1 || spaces.prepares != 1 {
 		t.Fatal("reconciliation started or prepared a replacement worker", workers.starts, spaces.prepares)
 	}
-	if scenario == "progressing" && len(uploads) != 2 {
+	if scenario == "progressing" && len(uploads) != originalUploads+1 {
 		t.Fatal("progressing upload did not complete on its first recovery request", len(uploads))
 	}
 	if paused && !stopping {
