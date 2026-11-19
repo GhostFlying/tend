@@ -216,6 +216,7 @@ type state struct {
 }
 
 type mountState struct {
+	OriginIdentity     string `json:"origin_identity,omitempty"`
 	TaskBase           string `json:"task_base,omitempty"`
 	BaselineTask       string `json:"baseline_task,omitempty"`
 	ProviderID         string `json:"provider_id,omitempty"`
@@ -509,7 +510,7 @@ func (w *Workspaces) Prepare(ctx context.Context, as protocol.Assignment) (runne
 		for _, m := range as.Workspace.Mounts {
 			ms := st.Mounts[m.Path]
 			p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{
-				Path: m.Path, Directory: ms.dir(home, m.Path), ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch,
+				Path: m.Path, Directory: ms.dir(home, m.Path), OriginIdentity: ms.OriginIdentity, ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch,
 			})
 		}
 	}
@@ -555,6 +556,7 @@ func (w *Workspaces) layoutImplementation(ctx context.Context, as protocol.Assig
 		if err != nil {
 			return err
 		}
+		ms.OriginIdentity = w.mountOriginIdentity(ctx, ms.dir(home, m.Path))
 		st.Mounts[m.Path] = ms
 		// Save each mount as it appears, so a later failure does not leave
 		// worktrees the next attempt cannot account for.
@@ -563,6 +565,20 @@ func (w *Workspaces) layoutImplementation(ctx context.Context, as protocol.Assig
 		}
 	}
 	return nil
+}
+
+// mountOriginIdentity captures only an unambiguous origin at mount creation.
+// An inaccessible or split read/push remote leaves the optional fact unknown.
+func (w *Workspaces) mountOriginIdentity(ctx context.Context, dir string) string {
+	origin, err := w.git.run(ctx, dir, "remote", "get-url", "--all", "origin")
+	if err != nil || origin == "" || strings.ContainsAny(origin, "\r\n") {
+		return ""
+	}
+	push, err := w.git.run(ctx, dir, "remote", "get-url", "--push", "--all", "origin")
+	if err != nil || push != origin {
+		return ""
+	}
+	return protocol.RepositoryRemoteKey(origin)
 }
 
 // addWorktree puts the task branch of repo at dir, creating the branch at

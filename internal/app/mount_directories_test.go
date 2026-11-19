@@ -23,8 +23,8 @@ func TestPhysicalMountDirectoryDoesNotInventLogicalSubdirectory(t *testing.T) {
 				t.Fatal(op)
 			}
 			as, ok, _ := h.claimDeliverableRun()
-			if !ok || !as.MountDirectories {
-				t.Fatal("assignment did not advertise directory reporting")
+			if !ok || !as.MountDirectories || !as.MountOriginIdentity {
+				t.Fatal("assignment did not advertise optional mount facts")
 			}
 			root := t.TempDir()
 			actual := root
@@ -32,7 +32,8 @@ func TestPhysicalMountDirectoryDoesNotInventLogicalSubdirectory(t *testing.T) {
 				actual = filepath.Join(root, "tend")
 			}
 			branch := "tend/" + h.task(task.TaskID).WorkspaceName
-			report := protocol.WorkspaceReport{Path: root, Mounts: []protocol.ResolvedMount{{Path: "tend", ResolvedBaseSHA: baseSHA, ResolvedFrom: "candidate:main", Branch: branch}}}
+			origin := protocol.RepositoryRemoteKey("https://github.com/acme/repo.git")
+			report := protocol.WorkspaceReport{Path: root, Mounts: []protocol.ResolvedMount{{Path: "tend", ResolvedBaseSHA: baseSHA, ResolvedFrom: "candidate:main", Branch: branch, OriginIdentity: origin}}}
 			send := func(as protocol.Assignment) {
 				t.Helper()
 				if op := h.runAs(as, protocol.OpRunsReportWorkspace, report, ReportWorkspace{}); op.Status != protocol.OpSucceeded {
@@ -46,7 +47,7 @@ func TestPhysicalMountDirectoryDoesNotInventLogicalSubdirectory(t *testing.T) {
 					t.Fatalf("workspace %+v", detail.WorkspaceState)
 				}
 				mount := detail.WorkspaceState.Mounts[0]
-				if mount.Path != "tend" || mount.Directory != want || detail.WorkspaceState.Path != root {
+				if mount.Path != "tend" || mount.Directory != want || mount.OriginIdentity != origin || detail.WorkspaceState.Path != root {
 					t.Fatalf("logical/physical locations conflated: %+v", detail.WorkspaceState)
 				}
 			}
@@ -55,7 +56,12 @@ func TestPhysicalMountDirectoryDoesNotInventLogicalSubdirectory(t *testing.T) {
 			report.Mounts[0].Directory = actual
 			send(as)
 			check(task.TaskID, actual)
-			// A retry from an older runner must retain the newer physical fact.
+			// A subsequent report cannot replace the origin captured at layout.
+			report.Mounts[0].OriginIdentity = protocol.RepositoryRemoteKey("https://github.com/acme/changed.git")
+			send(as)
+			check(task.TaskID, actual)
+			// An older runner may omit both optional facts.
+			report.Mounts[0].OriginIdentity = ""
 			report.Mounts[0].Directory = ""
 			send(as)
 			check(task.TaskID, actual)

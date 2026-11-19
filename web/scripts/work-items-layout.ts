@@ -160,8 +160,10 @@ function initialItems(): IssueView[] {
     tasks: index === 5 ? [queuedTask] : [task],
   }));
 }
+const longPRRepo = "example/this-is-a-long-repository-name-for-testing-board-focus-hints";
+const primaryPRLabel = `${longPRRepo} #368 · 已打开`;
 const pullRequests: IssueBoardPullRequest[] = [
-  { repository: "example/app", number: 368, status: "open" },
+  { repository: longPRRepo, number: 368, status: "open" },
   { repository: "example/web", number: 347, status: "merged" },
   { repository: "example/mobile", number: 371, status: "draft" },
   { repository: "example/tools", number: 365, status: "closed" },
@@ -516,7 +518,7 @@ try {
     };
     await openBoard();
     const multi = page.locator(`article[data-issue-id="${id}"]`);
-    const link = multi.getByRole("link", { name: "example/app #368 · 已打开" });
+    const link = multi.getByRole("link", { name: primaryPRLabel });
     const more = multi.getByRole("button", { name: "查看关联 PR（另有 4 个）" });
     await link.waitFor();
     const single = page.locator(`article[data-issue-id="${items[1]!.issue_id}"]`);
@@ -535,15 +537,20 @@ try {
       moreBounds.x + moreBounds.width <= menuBounds.x &&
         menuBounds.x + menuBounds.width <= cardBounds.x + cardBounds.width,
     );
-    assert.equal(await link.getAttribute("href"), "https://github.com/example/app/pull/368");
+    assert.equal(await link.getAttribute("href"), `https://github.com/${longPRRepo}/pull/368`);
     if (width === 1280) {
       await link.hover();
-      assert(await link.getByText("example/app #368 · 已打开").isVisible());
+      assert(await link.getByText(primaryPRLabel).isVisible());
       await page.mouse.move(0, 0);
     }
     await page.keyboard.press("Tab");
     await link.focus();
-    await link.getByText("example/app #368 · 已打开").waitFor();
+    const tooltip = link.getByText(primaryPRLabel);
+    await tooltip.waitFor();
+    const tooltipBounds = await tooltip.boundingBox();
+    assert(tooltipBounds && tooltipBounds.x >= cardBounds.x);
+    assert(tooltipBounds.x + tooltipBounds.width <= cardBounds.x + cardBounds.width + 0.5);
+    assert(await tooltip.evaluate((element) => element.scrollWidth <= element.clientWidth));
     await page.screenshot({ path: join(output, `issue-pr-board-${width}.png`) });
     if (width <= 760) await more.tap();
     else await more.press("Enter");

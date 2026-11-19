@@ -12,7 +12,7 @@ import (
 
 // issuePullRequestFromTask uses the workspace's first recorded branch. Its
 // repository and branch come from the ledger and never from the current HEAD.
-func issuePullRequestFromTask(ctx context.Context, c *client, issueID, taskID, mount string) (string, error) {
+func issuePullRequestFromTask(ctx context.Context, c *client, issueID, taskID, mount string, query func(context.Context, ...string) ([]byte, error)) (string, error) {
 	var task protocol.TaskDetail
 	if err := c.do(ctx, "GET", "/api/v1/tasks/"+url.PathEscape(taskID), nil, &task); err != nil {
 		return "", err
@@ -26,15 +26,21 @@ func issuePullRequestFromTask(ctx context.Context, c *client, issueID, taskID, m
 		return "", usagef("mount needs its original recorded workspace branch; use --pr-url otherwise")
 	}
 	source := ws.Mounts[index]
+	if source.OriginIdentity == "" {
+		return "", usagef("mount has no recorded Git origin identity; use --pr-url")
+	}
 	var repo protocol.RepositoryRegistration
 	if err := c.do(ctx, "GET", "/api/v1/repos/"+url.PathEscape(source.Repo), nil, &repo); err != nil {
 		return "", err
+	}
+	if source.OriginIdentity != protocol.RepositoryRemoteKey(repo.RemoteURL) {
+		return "", usagef("the recorded Git origin differs from the registered repository; use --pr-url")
 	}
 	repository := githubRepositoryFromRemote(repo.RemoteURL)
 	if repo.Retired || repository == "" || slices.Contains(repo.BaseCandidates, source.Branch) {
 		return "", usagef("mount needs a registered GitHub repository and its original work branch; use --pr-url otherwise")
 	}
-	link, err := findGitHubBranchPR(ctx, repository, source.Branch, runGitHubBranchQuery)
+	link, err := findGitHubBranchPR(ctx, repository, source.Branch, query)
 	if err != nil {
 		return "", fmt.Errorf("could not confirm a unique PR from the recorded branch, use --pr-url: %w", err)
 	}

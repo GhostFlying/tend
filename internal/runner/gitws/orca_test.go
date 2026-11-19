@@ -278,3 +278,20 @@ func TestFault_OrcaCreateReplyLost(t *testing.T) {
 		t.Errorf("prepare after the settle time = %+v after %d creates", p, o.creates)
 	}
 }
+
+func TestOrcaWorkspaceRetainsActualInitialGitOrigin(t *testing.T) {
+	f, o := newOrcaFixture(t)
+	as := f.implement()
+	as.Workspace.Mounts[0].RemoteURL = "https://github.com/registered/different.git"
+	p := f.prepare(as)
+	want := protocol.RepositoryRemoteKey(f.url)
+	if got := p.Report.Mounts[0].OriginIdentity; got != want {
+		t.Fatalf("origin fingerprint = %q, want actual Orca origin %q", got, want)
+	}
+
+	run(t, f.env, o.checkout, "remote", "set-url", "origin", "https://github.com/later/remote.git")
+	p = f.prepare(as)
+	if got := p.Report.Mounts[0].OriginIdentity; got != want {
+		t.Fatalf("later URL replaced the initial origin: %q", got)
+	}
+}

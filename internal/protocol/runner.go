@@ -131,8 +131,10 @@ type Assignment struct {
 	QuestionContinuation *QuestionContinuation `json:"question_continuation,omitempty"`
 	SupervisorQuestions  bool                  `json:"supervisor_questions,omitempty"`
 	Questions            []WorkerQuestion      `json:"questions,omitempty"`
+	// MountOriginIdentity permits reporting an optional digest of the first Git origin.
+	MountOriginIdentity bool `json:"mount_origin_identity,omitempty"`
 	// MountDirectories permits the optional physical-directory report field.
-	// Older servers omit this, so new runners retain their older request shape.
+	// Older servers omit these flags, so new runners retain their older request shape.
 	MountDirectories bool   `json:"mount_directories,omitempty"`
 	Protocol         int64  `json:"protocol,omitempty"`
 	RunID            string `json:"run_id"`
@@ -279,6 +281,7 @@ type WorkspaceReport struct {
 
 // ResolvedMount is the fact of where one mount started.
 type ResolvedMount struct {
+	OriginIdentity string `json:"origin_identity,omitempty"`
 	// Directory is the actual repository worktree location reported by the runner.
 	Directory       string `json:"directory,omitempty"`
 	Path            string `json:"path"`

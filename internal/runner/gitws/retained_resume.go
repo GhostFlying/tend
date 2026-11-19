@@ -89,7 +89,7 @@ func (w *Workspaces) reattach(ctx context.Context, as protocol.Assignment, orcaO
 			return runner.Prepared{}, err
 		}
 		p.Baseline = append(p.Baseline, harness.MountBaseline{Path: m.Path, StartHEAD: taskBase(as, ms), ResourceBase: ms.Base})
-		p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{Path: m.Path, Directory: ms.dir(home, m.Path), ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch})
+		p.Report.Mounts = append(p.Report.Mounts, protocol.ResolvedMount{Path: m.Path, Directory: ms.dir(home, m.Path), OriginIdentity: ms.OriginIdentity, ResolvedBaseSHA: ms.Base, ResolvedFrom: ms.From, Branch: ms.Branch})
 	}
 	for _, dir := range []string{p.Dir, p.ScratchDir} {
 		if err := retainedDirectory(dir); err != nil {

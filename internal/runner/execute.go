@@ -250,12 +250,17 @@ func (r *Runner) prepare(ctx context.Context, as protocol.Assignment) error {
 	cred := runCredential(as)
 	if as.Role == protocol.RoleImplement {
 		report := p.Report
-		if !as.MountDirectories {
+		if !as.MountDirectories || !as.MountOriginIdentity {
 			// Older servers decode reports strictly. Keep the local facts,
 			// but omit the extension unless this assignment negotiated it.
 			report.Mounts = slices.Clone(report.Mounts)
 			for i := range report.Mounts {
-				report.Mounts[i].Directory = ""
+				if !as.MountDirectories {
+					report.Mounts[i].Directory = ""
+				}
+				if !as.MountOriginIdentity {
+					report.Mounts[i].OriginIdentity = ""
+				}
 			}
 		}
 		env, err := r.newEnvelope(protocol.OpRunsReportWorkspace, runTarget(as), report)
