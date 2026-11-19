@@ -39,7 +39,9 @@ test("readable tool metadata shows running or uncertain status without tool deta
   });
   expect(running.items).toEqual([]);
   expect(
-    conversationStatus(running.items, running.state, running.startedAt, null, "exec_command"),
+    conversationStatus(running.items, running.state, running.startedAt, null, {
+      activeTool: "exec_command",
+    }),
   ).toMatchObject({ active: true, label: "正在执行命令", startedAt: 1000 });
   const unknown = collect({ ...block, trigger: undecidedTrigger, process });
   expect(conversationStatus(unknown.items, unknown.state)).toMatchObject({

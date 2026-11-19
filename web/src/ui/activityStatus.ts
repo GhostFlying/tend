@@ -11,6 +11,11 @@ export interface ActivityStatus {
   tone: "normal" | "error" | "warning";
 }
 
+interface ConversationPhase {
+  activeTool?: string | undefined;
+  latestActivity?: IssueConversationItem | null | undefined;
+}
+
 /** Labels describe the latest meaningful activity, never a fabricated tool. */
 export function stageLabel(type: string, name = ""): string {
   const key = name.replaceAll(".", "_").toLowerCase();
@@ -58,9 +63,9 @@ export function conversationStatus(
   state?: string,
   startedAt: number | null | undefined = undefined,
   endedAt: number | null = null,
-  activeTool?: string,
+  phase?: ConversationPhase,
 ): ActivityStatus {
-  const latest = items.at(-1);
+  const latest = phase?.latestActivity === undefined ? items.at(-1) : phase.latestActivity;
   const active =
     state === "processing" ||
     (!state &&
@@ -75,8 +80,8 @@ export function conversationStatus(
   return {
     active,
     label: active
-      ? activeTool
-        ? stageLabel("tool", activeTool)
+      ? phase?.activeTool
+        ? stageLabel("tool", phase.activeTool)
         : latest?.tool?.status === "running" || latest?.body
           ? stageLabel(latest.tool ? "tool" : "text", latest.tool?.name)
           : "处理中"

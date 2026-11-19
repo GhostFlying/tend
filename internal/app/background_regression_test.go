@@ -1,12 +1,60 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
+
+func TestBackgroundReadableProcessUsesBufferedRunningToolName(t *testing.T) {
+	h := newHarness(t)
+	w := h.createWork(workPlan())
+	h.followup(w, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli()})
+	_, turn := h.startBackground()
+	record := func(id, tool string, status protocol.ToolStatus) {
+		t.Helper()
+		payload := recordToolUsePayload{
+			ReplyTo: turn.MessageID, TurnID: turn.TurnID, ItemID: id,
+			Tool: tool, Input: "deferred input", Output: "deferred output", Status: status,
+		}
+		if op := h.exec(mainAgent, h.env("conversation.record_tool_use", protocol.Target{Type: "conversation"}, payload, nil), RecordToolUse{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	assertTool := func(want string) {
+		t.Helper()
+		err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			block, err := views.IssueBlock(t.Context(), tx.Q(), turn.MessageID, 0, 0, true)
+			if err != nil {
+				return err
+			}
+			p := block.Process
+			if p == nil || !p.HasTools || p.State != protocol.MessageProcessing || p.ActiveTool != want || len(p.Items) != 0 {
+				t.Errorf("buffered stage want %q, got %+v", want, p)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	record("first", "exec_command", protocol.ToolRunning)
+	assertTool("exec_command")
+	long := strings.Repeat("a", 150)
+	record("next", long, protocol.ToolRunning)
+	assertTool(long[:128])
+	record("next", long, protocol.ToolCompleted)
+	assertTool("exec_command")
+	record("first", "exec_command", protocol.ToolCompleted)
+	assertTool("")
+	if n := h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=? AND kind='tool_use'`, turn.MessageID); n != 0 {
+		t.Fatalf("buffered tools unexpectedly published: %d", n)
+	}
+}
 
 func TestBackgroundKeepsInterleavedOrder(t *testing.T) {
 	h := newHarness(t)

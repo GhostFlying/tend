@@ -765,6 +765,7 @@ try {
         },
       } satisfies IssueTranscriptBlock;
       let current: IssueTranscriptBlock = block;
+      let detailReads = 0;
       await page.route(
         (url) => url.pathname === `/api/v1/issues/${issue.issue_id}/activity`,
         (route) =>
@@ -779,7 +780,10 @@ try {
       );
       await page.route(
         (url) => url.pathname === `/api/v1/conversation/blocks/${message_id}`,
-        (route) => route.fulfill({ json: { ...block, process: { items: [tool], more: false } } }),
+        (route) => {
+          detailReads++;
+          return route.fulfill({ json: { ...block, process: { items: [tool], more: false } } });
+        },
       );
       const connected = page.waitForResponse(
         (response) => new URL(response.url()).pathname === "/api/v1/events",
@@ -801,6 +805,17 @@ try {
       await trace.click();
       assert(await stage.isVisible(), "closing tool details changed the active tool label");
 
+      current = { ...block, process: { ...block.process, active_tool: "" } };
+      publish("conversation.message", {
+        ...block.trigger,
+        conversation_id: issue.conversation!.conversation_id!,
+      });
+      await discussion
+        .getByRole("status")
+        .filter({ hasText: /^处理中$/ })
+        .waitFor();
+      assert.equal(detailReads, 1, "a closed view must clear the old tool without reading details");
+
       current = {
         ...block,
         process: { ...block.process, state: "replied", active_tool: "", ended_at: now },
@@ -815,6 +830,109 @@ try {
         .waitFor();
       console.log("PASS urgent process state remains accurate with public prose and loaded tools");
     } finally {
+      await context.close();
+    }
+  }
+
+  for (const readerMoves of [false, true]) {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 844 },
+      serviceWorkers: "block",
+    });
+    let releaseResults = () => {};
+    try {
+      const page = await context.newPage();
+      const row = activity.items![0]!;
+      const block = row.block!;
+      const items = Array.from({ length: 24 }, (_, index) => {
+        const id = `return-layout-${index}`;
+        const position = row.position + index + 1;
+        return {
+          ...row,
+          id,
+          position,
+          block: {
+            ...block,
+            position,
+            trigger: { ...block.trigger, message_id: id },
+            items: [
+              {
+                ...block.items![0]!,
+                message_id: `${id}-reply`,
+                reply_to: id,
+                body: `返回前读到 ${index}`,
+              },
+            ],
+          },
+        };
+      });
+      const issuePath = `/issues/${issue.issue_id}`;
+      const taskPath = `/tasks/${results.items![0]!.task_id}`;
+      let returning = false;
+      const hold = new Promise<void>((resolve) => {
+        releaseResults = resolve;
+      });
+      await page.route(
+        (u) => u.pathname === `/api/v1/issues/${issue.issue_id}/activity`,
+        (route) => route.fulfill({ json: { items, readable: true, more: false, event_seq: seq } }),
+      );
+      await page.route(
+        (u) => u.pathname === `/api/v1/issues/${issue.issue_id}/results`,
+        async (route) => {
+          if (returning) await hold;
+          await route.fallback();
+        },
+      );
+      const frame = () => page.evaluate(() => new Promise(requestAnimationFrame));
+      const scroller = page.locator("[data-issue-scroll]");
+      const ready = page.getByRole("button", { name: "查看全部交付 · 1+ 项 →" });
+      const position = () => scroller.evaluate((node) => node.scrollTop);
+      const move = (top: number) =>
+        scroller.evaluate((node, value) => {
+          node.scrollTop = value;
+        }, top);
+      const discussion = page.getByText("返回前读到 20", { exact: true });
+      await page.goto(`http://127.0.0.1:${address.port}${issuePath}`);
+      await ready.waitFor({ state: "attached" });
+      await discussion.waitFor({ state: "attached" });
+      await move(1200);
+      await frame();
+      assert.equal(await position(), 1200);
+      const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+      await navigate(page, taskPath);
+      await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
+      returning = true;
+      await page.goBack();
+      await page.waitForURL((u) => u.pathname === issuePath);
+      await discussion.waitFor({ state: "attached" });
+      assert.equal(await page.evaluate(() => performance.timeOrigin), timeOrigin);
+      assert.equal(await ready.count(), 0);
+      // A layout correction can move scrollTop without the reader touching the page.
+      await move(1360);
+      await frame();
+      let expected = 1200;
+      if (readerMoves) {
+        const bounds = (await scroller.boundingBox())!;
+        await page.mouse.move(bounds.x + 20, bounds.y + bounds.height / 2);
+        await page.mouse.wheel(0, 740);
+        await page.waitForFunction(
+          () => document.querySelector("[data-issue-scroll]")!.scrollTop > 2000,
+        );
+        expected = await position();
+      }
+      releaseResults();
+      await ready.waitFor({ state: "attached" });
+      await frame();
+      const actual = await position();
+      assert(
+        Math.abs(actual - expected) <= 2,
+        `return after late results: expected ${expected}, got ${actual}`,
+      );
+      console.log(
+        `PASS task return with delayed results, ${readerMoves ? "manual" : "layout"} scroll (${actual} px)`,
+      );
+    } finally {
+      releaseResults();
       await context.close();
     }
   }

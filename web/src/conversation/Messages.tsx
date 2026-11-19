@@ -181,6 +181,7 @@ export function AgentTurn({
         open: boolean;
         ready: boolean;
         activeTool?: string | undefined;
+        latestActivity?: ConversationItem | null | undefined;
         toggle(): void;
         footer: React.ReactNode;
       }
@@ -202,7 +203,7 @@ export function AgentTurn({
           entry.startedAt !== null
         ? entry.startedAt + entry.done.tookMs
         : null,
-    process?.activeTool,
+    process,
   );
   const tools = entry.items.filter((item) => item.tool);
   const processing = groupedProcessing(entry.items);

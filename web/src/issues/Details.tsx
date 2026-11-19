@@ -6,7 +6,7 @@ import { issueHandoffCommand } from "./actions.ts";
 import { navigate } from "../app/router.ts";
 import { Chevron, More } from "../shell/icons.tsx";
 import { PageHeader } from "../shell/PageHeader.tsx";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Connection } from "../api/client.ts";
 import type { AttentionView, IssueAgentConversation, IssueView } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -83,6 +83,11 @@ export function IssueDetails({
   const [progressExpanded, setProgressExpanded] = useState(false);
   const [side, setSide] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
+  const moveReadingPosition = useCallback(() => {
+    if (pendingScrollTop.current === null) return;
+    pendingScrollTop.current = null;
+    if (scroll.current) reading.saveTop(scroll.current.scrollTop);
+  }, [reading]);
   const conversationRead = useMemo(
     () => new WorkItemRead<IssueAgentConversation>(client),
     [client],
@@ -176,7 +181,7 @@ export function IssueDetails({
     const savedTop = pendingScrollTop.current;
     if (!loaded || !node || savedTop === null) return;
     pendingScrollTop.current = null;
-    if (node.scrollTop === 0) node.scrollTo({ top: savedTop });
+    node.scrollTo({ top: savedTop });
     reading.saveTop(node.scrollTop);
   }, [loaded, reading]);
   const editable =
@@ -191,6 +196,7 @@ export function IssueDetails({
     else void reads.open(id);
   };
   const jump = () => {
+    moveReadingPosition();
     reading.followLatest();
     scroll.current
       ?.querySelector("[data-activity-end]")
@@ -480,11 +486,39 @@ export function IssueDetails({
               ref={scroll}
               data-issue-scroll
               className={styles.scroll}
+              onWheelCapture={(event) => {
+                if (event.deltaY && !event.ctrlKey) moveReadingPosition();
+              }}
+              onTouchMoveCapture={moveReadingPosition}
+              onPointerDownCapture={(event) => {
+                const node = event.currentTarget;
+                const x = event.nativeEvent.offsetX;
+                if (
+                  event.button === 1 ||
+                  (event.target === node &&
+                    (x < node.clientLeft || x >= node.clientLeft + node.clientWidth))
+                )
+                  moveReadingPosition();
+              }}
+              onKeyDown={(event) => {
+                if (event.defaultPrevented || !(event.target instanceof Element)) return;
+                if (event.target.closest("input, textarea, select, [contenteditable='true']"))
+                  return;
+                const pageScroll = [
+                  "ArrowDown",
+                  "ArrowUp",
+                  "PageDown",
+                  "PageUp",
+                  "Home",
+                  "End",
+                ].includes(event.key);
+                const spaceScroll =
+                  event.key === " " && !event.target.closest("button, summary, [role='button']");
+                if (pageScroll || spaceScroll) moveReadingPosition();
+              }}
               onScroll={(event) => {
-                const top = event.currentTarget.scrollTop;
-                if (pendingScrollTop.current !== null && top === 0) return;
-                pendingScrollTop.current = null;
-                reading.saveTop(top);
+                if (pendingScrollTop.current === null)
+                  reading.saveTop(event.currentTarget.scrollTop);
               }}
             >
               <div className={styles.lane} data-issue-lane>
@@ -708,6 +742,7 @@ export function IssueDetails({
                     results={results.value?.items ?? []}
                     onIssue={onSelect}
                     onTask={onTask}
+                    onReadingMove={moveReadingPosition}
                     scroll={scroll}
                   />
                 </ConversationSessionProvider>
