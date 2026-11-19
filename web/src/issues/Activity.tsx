@@ -49,6 +49,7 @@ import type { Issues } from "./data.ts";
 import styles from "./DetailPage.module.css";
 
 const emptyEntries: IssueActivityEntry[] = [];
+type ProcessScrollPosition = ScrollAnchor | "end";
 
 export function IssueActivity({
   issue,
@@ -97,10 +98,10 @@ export function IssueActivity({
     ready: boolean;
   } | null>(null);
   const snapshotProcessLayout = useCallback(
-    (node: HTMLDivElement) => {
+    (node: HTMLDivElement): ProcessScrollPosition | null => {
       if (pagination.current?.ready) return null;
       if (following.current || reading.followsLatest()) {
-        if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) return null;
+        if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) return "end";
         following.current = false;
         reading.pauseFollowing();
       }
@@ -111,13 +112,16 @@ export function IssueActivity({
     [reading],
   );
   const restoreProcessLayout = useCallback(
-    (node: HTMLDivElement, anchor: ScrollAnchor) => {
-      correctScroll(node, () => restoreAnchor(node, anchor));
+    (node: HTMLDivElement, position: ProcessScrollPosition) => {
+      const restore = () => {
+        if (position === "end") node.scrollTop = node.scrollHeight;
+        else restoreAnchor(node, position);
+      };
+      correctScroll(node, restore);
       const restoredTop = node.scrollTop;
       cancelAnimationFrame(dataFrame.current);
       dataFrame.current = requestAnimationFrame(() => {
-        if (Math.abs(node.scrollTop - restoredTop) < 1)
-          correctScroll(node, () => restoreAnchor(node, anchor));
+        if (Math.abs(node.scrollTop - restoredTop) < 1) correctScroll(node, restore);
         readingAnchor.current = captureAnchor(node);
       });
     },
@@ -568,8 +572,8 @@ export function IssueActivity({
 interface ProcessLayoutProps {
   change: object | null;
   scroll: RefObject<HTMLDivElement | null>;
-  snapshot(node: HTMLDivElement): ScrollAnchor | null;
-  restore(node: HTMLDivElement, anchor: ScrollAnchor): void;
+  snapshot(node: HTMLDivElement): ProcessScrollPosition | null;
+  restore(node: HTMLDivElement, position: ProcessScrollPosition): void;
   children: ReactNode;
 }
 
@@ -585,10 +589,10 @@ class ProcessLayout extends Component<ProcessLayoutProps> {
   override componentDidUpdate(
     _previous: Readonly<ProcessLayoutProps>,
     _state: unknown,
-    anchor: ScrollAnchor | null,
+    position: ProcessScrollPosition | null,
   ) {
     const node = this.props.scroll.current;
-    if (node && anchor) this.props.restore(node, anchor);
+    if (node && position) this.props.restore(node, position);
   }
 
   override render() {
@@ -615,8 +619,8 @@ function ActivityBlock({
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
   onPaginationCancel(trigger: string): void;
-  onProcessSnapshot(node: HTMLDivElement): ScrollAnchor | null;
-  onProcessLayout(node: HTMLDivElement, anchor: ScrollAnchor): void;
+  onProcessSnapshot(node: HTMLDivElement): ProcessScrollPosition | null;
+  onProcessLayout(node: HTMLDivElement, position: ProcessScrollPosition): void;
   scroll: RefObject<HTMLDivElement | null>;
 }) {
   const { client } = useServices();
