@@ -77,8 +77,7 @@ export function IssueDetails({
   const activityState = useStore(reads.activity.state);
   const childRead = useMemo(() => reads.childReader(id, true), [reads, id]);
   const childState = useStore(childRead.state);
-  const restored = useRef(false);
-  const initialTop = useRef(reading.top);
+  const pendingScrollTop = useRef(reading.top > 0 ? reading.top : null);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [attention, setAttention] = useState("");
   const [progressExpanded, setProgressExpanded] = useState(false);
@@ -173,10 +172,12 @@ export function IssueDetails({
     !!(childState.value || childState.error) &&
     !!(results.value || results.error);
   useLayoutEffect(() => {
-    if (loaded && scroll.current && !restored.current) {
-      scroll.current.scrollTo({ top: initialTop.current });
-      restored.current = true;
-    }
+    const node = scroll.current;
+    const savedTop = pendingScrollTop.current;
+    if (!loaded || !node || savedTop === null) return;
+    pendingScrollTop.current = null;
+    if (node.scrollTop === 0) node.scrollTo({ top: savedTop });
+    reading.saveTop(node.scrollTop);
   }, [loaded, reading]);
   const editable =
     !!issue && ["active", "paused"].includes(issue.state) && issue.assignment_state === "active";
@@ -479,8 +480,11 @@ export function IssueDetails({
               ref={scroll}
               data-issue-scroll
               className={styles.scroll}
-              onScroll={() => {
-                if (scroll.current && restored.current) reading.saveTop(scroll.current.scrollTop);
+              onScroll={(event) => {
+                const top = event.currentTarget.scrollTop;
+                if (pendingScrollTop.current !== null && top === 0) return;
+                pendingScrollTop.current = null;
+                reading.saveTop(top);
               }}
             >
               <div className={styles.lane} data-issue-lane>

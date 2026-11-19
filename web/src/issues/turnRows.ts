@@ -39,10 +39,9 @@ export function activityTurnRows(
         items.set(item.message_id, { ...existing, choices: item.choices });
     }
     const state =
+      (readable ? block.process?.state : undefined) ??
       row.state ??
-      (readable && !items.size
-        ? (block.process?.state ?? (block.process?.has_tools ? "unknown" : undefined))
-        : undefined);
+      (readable && !items.size && block.process?.has_tools ? "unknown" : undefined);
     return {
       ...row,
       ...(state ? { state } : {}),
