@@ -115,6 +115,7 @@ func TestNativeUsageNegotiationAndUncertainReceiptKeepDurableUpload(t *testing.T
 
 func TestAcceptingRunnerReplaysRetiredUsageWithOriginalRequest(t *testing.T) {
 	r := controlRunner(t)
+	r.cfg.JournalID = "accepting"
 	r.cfg.JournalRoot = t.TempDir()
 	original, err := journal.Open(t.Context(), filepath.Join(r.cfg.JournalRoot, "journal.db"), r.cfg.Now)
 	if err != nil {

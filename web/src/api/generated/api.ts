@@ -2701,6 +2701,7 @@ export interface BackupCheckpoint {
   files?: BackupFile[];
   id: string;
   incompatible_schema?: boolean;
+  journal_id?: string;
   manifest_sha256: string;
   observation_completed_ms?: number;
   protected_reason?: string;

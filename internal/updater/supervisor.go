@@ -405,6 +405,11 @@ func (s *Supervisor) stageUpgrade(ctx context.Context, id, dir string, configura
 		if err := s.criticalState(); err != nil {
 			return err
 		}
+		if s.state.Format < rollingStateFormat {
+			if err := atomicWrite(filepath.Join(s.cfg.StateDir, rollingOwnershipMarker), []byte("1\n"), 0600); err != nil {
+				return err
+			}
+		}
 		s.state.Format = rollingStateFormat
 	}
 	s.state.Operation = &Operation{Rolling: rolling, Configuration: staged, ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}

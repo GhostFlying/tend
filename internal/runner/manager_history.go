@@ -75,8 +75,23 @@ func (r *Runner) readManagerHistory(ctx context.Context, read protocol.ManagerHi
 		return nil, err
 	}
 	key := sha256.Sum256([]byte(read.ConversationID))
-	dir := filepath.Join(r.cfg.Journal.Directory(), "manager-sessions", hex.EncodeToString(key[:]))
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	root := r.cfg.Journal.Directory()
+	if read.RetiredJournal != nil {
+		root, err = r.retiredJournalDir(*read.RetiredJournal)
+		if err != nil {
+			return nil, err
+		}
+	}
+	dir := filepath.Join(root, "manager-sessions", hex.EncodeToString(key[:]))
+	if read.RetiredJournal != nil {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			return nil, errors.New("original manager history directory missing")
+		}
+	} else if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
 	session, err := resolved.Open(ctx, dir)

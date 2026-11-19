@@ -5,6 +5,7 @@ import "encoding/json"
 // ManagerHistoryRead is a bounded observation of an original stopped Run, not a
 // scheduled action or authority to resume native execution.
 type ManagerHistoryRead struct {
+	RetiredJournal *string         `json:"retired_journal,omitempty"`
 	ID             string          `json:"id"`
 	RunID          string          `json:"run_id"`
 	ConversationID string          `json:"conversation_id"`

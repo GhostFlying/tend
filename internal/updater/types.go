@@ -24,6 +24,7 @@ type Authority interface {
 // Config contains paths and non-secret process arguments. Credentials remain in
 // existing environment files and are never copied into updater state or logs.
 type Config struct {
+	journalID string // Local projection of the fixed runner configuration.
 	// ServiceConfig is the single fixed file eligible for configuration maintenance.
 	ServiceConfig string   `json:"service_config,omitempty"`
 	InstanceID    string   `json:"instance_id"`

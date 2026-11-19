@@ -300,3 +300,30 @@ func TestBackupFailedExercisePreservesActualUniqueEvidenceAndCover(t *testing.T)
 		t.Fatal("failed exercise lost its actual recovery cover", coverDecision, failedDecision)
 	}
 }
+
+func TestVerifyCheckpointAfterSubsequentRunnerGeneration(t *testing.T) {
+	h := newHarness(t)
+	h.s.state.CurrentJournal = "current-generation"
+	original := filepath.Join(t.TempDir(), "runner", "journal.db")
+	current := filepath.Join(filepath.Dir(original), "generations", h.s.state.CurrentJournal, "journal.db")
+	if err := os.MkdirAll(filepath.Dir(current), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte("current data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.s.cfg.DataFiles = []string{original}
+	op := &Operation{BackupDir: filepath.Join(h.s.cfg.StateDir, "backups", "current-generation"), StartedAt: h.now, Previous: h.s.state.Current}
+	if err := backupDataContext(t.Context(), h.s.serviceDataConfig(), op); err != nil {
+		t.Fatal(err)
+	}
+	record, err := readCheckpoint(h.s.serviceDataConfig(), op.BackupDir)
+	if err != nil {
+		t.Fatal("snapshot itself unreadable", err)
+	}
+	h.s.state.CurrentJournal = "subsequent-generation"
+	_, err = h.s.VerifyBackup(t.Context(), protocol.BackupVerification{CheckpointID: record.ID, ExpectedGeneration: h.s.Status().Generation, ManifestSHA256: record.ManifestSHA256})
+	if err != nil {
+		t.Fatalf("supervisor rejects its own current-generation checkpoint before verification: %v", err)
+	}
+}

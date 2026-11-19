@@ -32,6 +32,7 @@ type BackupObjectPart struct {
 }
 
 type BackupCheckpoint struct {
+	JournalID                  string       `json:"journal_id,omitempty"`
 	ID                         string       `json:"id"`
 	Directory                  string       `json:"directory"`
 	CreatedAtMillis            int64        `json:"created_at_ms"`

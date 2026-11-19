@@ -12,6 +12,9 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
+// Remains independently readable if the owning supervisor state is damaged.
+const rollingOwnershipMarker = "rolling-journals"
+
 type RollingLaunch struct {
 	Predecessor Identity                        `json:"predecessor"`
 	Observation protocol.UpdaterSelfObservation `json:"observation"`
@@ -48,10 +51,10 @@ func (s *Supervisor) serviceDataConfig() Config {
 }
 
 func dataConfigForJournal(cfg Config, id string) Config {
-
-	if cfg.Role != "runner" || id == "" {
+	if cfg.Role != "runner" || id == "" || cfg.journalID == id {
 		return cfg
 	}
+	cfg.journalID = id
 	cfg.DataFiles = slices.Clone(cfg.DataFiles)
 	for i, path := range cfg.DataFiles {
 		name := filepath.Base(path)
