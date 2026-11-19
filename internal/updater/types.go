@@ -61,6 +61,7 @@ type Version struct {
 }
 type BackupFile = protocol.BackupFile
 type Operation struct {
+	Rolling               *RollingLaunch                     `json:"rolling,omitempty"`
 	SupersededUpgradeID   string                             `json:"superseded_upgrade_id,omitempty"`
 	PhaseTimings          []OperationPhaseTiming             `json:"phase_timings,omitempty"`
 	LastHealth            *protocol.UpgradeHealthDiagnostics `json:"last_health,omitempty"`
@@ -105,8 +106,9 @@ type OperationPhaseTiming struct {
 
 // TerminalReceipt fences delayed requests after the single active operation moves on.
 type TerminalReceipt struct {
-	Binding Binding `json:"binding"`
-	Phase   string  `json:"phase"`
+	RollingSetSHA256 string  `json:"rolling_set_sha256,omitempty"`
+	Binding          Binding `json:"binding"`
+	Phase            string  `json:"phase"`
 }
 
 // RollbackProof survives replacement of the active operation by crash recovery.
@@ -125,6 +127,8 @@ type CommittedProof struct {
 	Process             Identity `json:"process"`
 }
 type State struct {
+	CurrentJournal           string                                            `json:"current_journal,omitempty"`
+	DrainingProcesses        map[string]DrainingProcess                        `json:"draining_processes,omitempty"`
 	DiagnosticLogProtections map[string]string                                 `json:"diagnostic_log_protections,omitempty"`
 	BackupPrune              *protocol.BackupPruneState                        `json:"backup_prune,omitempty"`
 	OperationHistory         map[string]Operation                              `json:"operation_history,omitempty"`

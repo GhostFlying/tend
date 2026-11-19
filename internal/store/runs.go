@@ -192,8 +192,21 @@ func CountOpenRunsByProject(ctx context.Context, q Querier) (map[string]int64, e
 // ListOpenRunsOnHost returns the runs allocated to a host that may still be
 // working, oldest first.
 func ListOpenRunsOnHost(ctx context.Context, q Querier, hostID string) ([]RunRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+runColumns+` FROM runs
-		WHERE host_id = ? AND observed_state IN `+openRunStates+` ORDER BY created_at, run_id`, hostID)
+	return listOpenRuns(ctx, q, hostID, nil)
+}
+
+func ListOpenRunsInJournal(ctx context.Context, q Querier, host, journal string) ([]RunRow, error) {
+	return listOpenRuns(ctx, q, host, &journal)
+}
+
+func listOpenRuns(ctx context.Context, q Querier, host string, journal *string) ([]RunRow, error) {
+	query := `SELECT ` + runColumns + ` FROM runs WHERE host_id=? AND observed_state IN ` + openRunStates
+	args := []any{host}
+	if journal != nil {
+		query += ` AND COALESCE((SELECT journal_id FROM runner_journal_runs j WHERE j.run_id=runs.run_id),'')=?`
+		args = append(args, *journal)
+	}
+	rows, err := q.QueryContext(ctx, query+" ORDER BY created_at, run_id", args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list open runs: %w", err)
 	}

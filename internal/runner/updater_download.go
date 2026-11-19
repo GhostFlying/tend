@@ -36,7 +36,8 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	r.mu.Unlock()
 	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && (control.Mode == protocol.RunnerNormal || control.Mode == protocol.RunnerMaintenance)
 	ready := observation != nil && observation.Mode == protocol.RunnerReady && confirmed.Mode == protocol.RunnerReady
-	if err != nil || !preparing && !ready || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
+	rolling := control.Upgrade != nil && control.Upgrade.Rolling && r.cfg.JournalID != "" && control.Mode == protocol.RunnerMaintenance && confirmed.Mode != protocol.RunnerNormal
+	if err != nil || !preparing && !ready && !rolling || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
 		r.updaterMu.Unlock()
 		return
 	}
@@ -99,6 +100,16 @@ func (r *Runner) downloadAndSubmit(ctx context.Context, control protocol.RunnerC
 		}
 		bundle, err := release.Load(dir)
 		if err != nil {
+			return err
+		}
+		if target.Rolling {
+			if r.cfg.JournalID == "" || target.Configuration != nil || target.Updater == nil || target.ReleaseSet == nil || target.ReleaseSet.SHA256 != bundle.SetSHA256 {
+				return errors.New("runner: rolling candidate selection changed")
+			}
+			_, err := r.submitRolling(ctx, control.UpgradeID, dir, bundle.SetSHA256, protocol.RollingTarget{Revision: control.Revision, Updater: *target.Updater})
+			if err == nil {
+				r.updateUpgradeAttempt(control, func() { r.upgradePhase = "submitted" })
+			}
 			return err
 		}
 		if bundle.Set != nil && bundle.Set.Format >= 2 {

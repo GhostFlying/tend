@@ -57,7 +57,7 @@ func checkManagerReceiptReaderRecovery(ctx context.Context, q store.Querier, hos
 		return nil
 	}
 	var reader bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r JOIN plan_actions a USING(action_id) WHERE r.host_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'')`, host).Scan(&reader)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r JOIN plan_actions a USING(action_id) WHERE r.host_id=? AND COALESCE((SELECT journal_id FROM runner_journal_runs j WHERE j.run_id=r.run_id),'')=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND COALESCE(json_extract(a.trigger_json,'$.receipt_reader_request_id'),'')<>'')`, host, runtime.LocalJournal()).Scan(&reader)
 	if err != nil {
 		return err
 	}

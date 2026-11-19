@@ -63,6 +63,7 @@ type ReleaseSetTarget struct {
 }
 
 type RunnerUpgradeTarget struct {
+	Rolling          bool                 `json:"rolling,omitempty"`
 	PrepareOnly      bool                 `json:"prepare_only,omitempty"`
 	Updater          *UpdaterSelfTarget   `json:"updater,omitempty"`
 	ReleaseSet       *ReleaseSetTarget    `json:"release_set,omitempty"`
@@ -71,4 +72,40 @@ type RunnerUpgradeTarget struct {
 	ManifestSHA256   string               `json:"manifest_sha256"`
 	ManifestSize     int64                `json:"manifest_size"`
 	ArtifactBasePath string               `json:"artifact_base_path"`
+}
+
+type RollingAuthorization struct {
+	Revision int64                     `json:"revision"`
+	Request  RollingRunnerGrantRequest `json:"request"`
+}
+
+type RollingTargetRequest struct {
+	UpgradeID        string           `json:"upgrade_id"`
+	ManifestSHA256   string           `json:"manifest_sha256"`
+	ReleaseSetSHA256 string           `json:"release_set_sha256"`
+	Predecessor      RecoveryIdentity `json:"predecessor"`
+}
+type RollingTarget struct {
+	Revision int64             `json:"revision"`
+	Updater  UpdaterSelfTarget `json:"updater"`
+}
+
+// RollingRunnerGrantRequest is a request to launch another process alongside
+// the observed predecessor. It carries no authority to stop either process.
+type RollingRunnerGrantRequest struct {
+	Binding UpgradeBinding         `json:"binding"`
+	Updater UpdaterSelfObservation `json:"updater"`
+}
+
+// RunnerRetirement binds the stop and its acknowledgement to one predecessor.
+type RunnerRetirement struct {
+	UpgradeID       string           `json:"upgrade_id"`
+	Process         RecoveryIdentity `json:"process"`
+	AuthorizationID string           `json:"authorization_id,omitempty"`
+}
+
+type RunnerRetirementResult struct {
+	RunnerRetirement
+	Allowed   bool `json:"allowed"`
+	Confirmed bool `json:"confirmed"`
 }

@@ -19,7 +19,9 @@ func (ReconcileWorkspaces) Authorize(ctx context.Context, x *Exec, q store.Queri
 	return err
 }
 func (ReconcileWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
-	var payload struct{}
+	var payload struct {
+		JournalID string `json:"journal_id,omitempty"`
+	}
 	if len(x.Env.Payload) > 0 {
 		if err := decodePayload(x.Env, &payload); err != nil {
 			return Outcome{}, err
@@ -50,11 +52,18 @@ func (ReconcileWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: list workspace reconciliation: %w", err)
 	}
+	rolling, err := workspaceJournalsActive(ctx, tx, x.Principal.Subject)
+	if err != nil {
+		return Outcome{}, err
+	}
+	var events []Event
+	remaining := result.Workspaces[:0]
 	for i := range result.Workspaces {
 		item := &result.Workspaces[i]
 		item.RunIDs = []string{}
 		runs, err := tx.Q().QueryContext(ctx, `SELECT r.run_id,r.observed_state FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id
-   WHERE wr.workspace_id=? AND r.task_id=? AND r.host_id=? ORDER BY r.run_id`, item.WorkspaceID, item.TaskID, x.Principal.Subject)
+   LEFT JOIN runner_journal_runs j ON j.run_id=r.run_id
+        WHERE wr.workspace_id=? AND r.task_id=? AND r.host_id=? AND COALESCE(j.journal_id,'')=? ORDER BY r.run_id`, item.WorkspaceID, item.TaskID, x.Principal.Subject, payload.JournalID)
 		if err != nil {
 			return Outcome{}, fmt.Errorf("app: list workspace reconciliation runs: %w", err)
 		}
@@ -75,6 +84,24 @@ func (ReconcileWorkspaces) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err != nil {
 			return Outcome{}, fmt.Errorf("app: list reconciliation runs: %w", err)
 		}
+		if rolling {
+			pending, err := workspaceJournalOutstanding(ctx, tx, item.WorkspaceID, item.TaskID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if !pending {
+				if _, err := tx.Exec(ctx, `UPDATE workspaces SET occupied_by=NULL,status='retained',released_at=?,updated_at=? WHERE workspace_id=? AND occupied_by=?`, x.Now.UnixMilli(), x.Now.UnixMilli(), item.WorkspaceID, item.TaskID); err != nil {
+					return Outcome{}, err
+				}
+				events = append(events, Event{ObjectType: "workspace", ObjectID: item.WorkspaceID, Kind: "workspace.released", Body: map[string]any{"task_id": item.TaskID}})
+				continue
+			}
+			if len(item.RunIDs) == 0 {
+				continue
+			}
+		}
+		remaining = append(remaining, *item)
 	}
-	return Outcome{Result: result, NoEffect: true}, nil
+	result.Workspaces = remaining
+	return Outcome{Result: result, NoEffect: len(events) == 0, Events: events}, nil
 }

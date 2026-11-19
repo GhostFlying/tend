@@ -91,6 +91,7 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	JournalID    string
 	Extensions   *extensions.Agent
 	RolloutRoots []string
 
@@ -256,9 +257,15 @@ func New(cfg Config) *Runner {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
+	// A freshly authorized independent journal requires the server to route
+	// leases by journal. It must never register as a legacy single instance.
+	initialProtocol := protocol.MinimumRunnerProtocol
+	if cfg.JournalID != "" {
+		initialProtocol = max(initialProtocol, 6)
+	}
 	return &Runner{previewWake: make(chan struct{}, 1), archiveWake: make(chan struct{}, 1), archiveLocks: map[string]*archiveSourceLock{},
 		cfg:                  cfg,
-		runnerProtocol:       protocol.MinimumRunnerProtocol,
+		runnerProtocol:       initialProtocol,
 		bootstrapMaintenance: cfg.InitialMaintenance,
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},

@@ -16,6 +16,7 @@ import (
 )
 
 type ControlRequest struct {
+	Rolling                    *RollingLaunch                              `json:"rolling,omitempty"`
 	DiagnosticLogProtection    *protocol.DiagnosticLogProtection           `json:"diagnostic_log_protection,omitempty"`
 	BackupPolicy               *protocol.BackupPolicy                      `json:"backup_policy,omitempty"`
 	BackupVerification         *protocol.BackupVerification                `json:"backup_verification,omitempty"`
@@ -125,6 +126,12 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 		}
 		var err error
 		switch r.URL.Path {
+		case "/rolling/launch":
+			if req.Rolling == nil {
+				err = errors.New("updater: rolling launch required")
+			} else {
+				err = s.stageUpgrade(r.Context(), req.ID, req.Release, nil, req.Rolling)
+			}
 		case "/bounded/cancel":
 			if req.Maintenance == nil || req.BoundedAuthorization == nil {
 				err = errors.New("updater: bounded cancellation inputs required")

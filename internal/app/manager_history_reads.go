@@ -49,7 +49,7 @@ func (a *App) ManagerTransportEnded(ctx context.Context, run string) (bool, erro
 
 // Snapshot volatile read calls without holding the broker mutex during SQLite
 // reads. Repeating a history read is safe; the original native send is untouched.
-func (a *App) managerHistoryExchange(ctx context.Context, q store.Querier, host string, replies []protocol.ManagerHistoryReply) ([]protocol.ManagerHistoryRead, []string, error) {
+func (a *App) managerHistoryExchange(ctx context.Context, q store.Querier, host, journal string, replies []protocol.ManagerHistoryReply) ([]protocol.ManagerHistoryRead, []string, error) {
 	a.nativeCalls.mu.Lock()
 	a.nativeCalls.prune()
 	calls := make(map[string]nativePendingCall, len(a.nativeCalls.calls))
@@ -69,7 +69,11 @@ func (a *App) managerHistoryExchange(ctx context.Context, q store.Querier, host 
 		if err != nil {
 			return nil, nil, err
 		}
-		if r.HostID != host || call.request.Method != "find" {
+		owner, err := store.RunJournal(ctx, q, call.run)
+		if err != nil {
+			return nil, nil, err
+		}
+		if owner != journal || r.HostID != host || call.request.Method != "find" {
 			return nil, nil, protocol.Errorf(protocol.CodeForbidden, "receipt belongs to another host or operation")
 		}
 		a.nativeCalls.deliver(call.run, protocol.ManagerNativeReply{ID: reply.ID, Method: "find", Result: reply.Result, Error: reply.Error})
@@ -83,7 +87,11 @@ func (a *App) managerHistoryExchange(ctx context.Context, q store.Querier, host 
 		if err != nil {
 			return nil, nil, err
 		}
-		if r.HostID != host {
+		owner, err := store.RunJournal(ctx, q, call.run)
+		if err != nil {
+			return nil, nil, err
+		}
+		if owner != journal || r.HostID != host {
 			continue
 		}
 		active, err := managerHistoryActive(ctx, q, call.run)

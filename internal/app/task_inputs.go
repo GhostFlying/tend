@@ -148,7 +148,7 @@ func checkRunCapabilitiesRecovery(ctx context.Context, q store.Querier, host str
 	if runtimeSupportsTaskInputs(runtime) && runtimeSupportsObservation(runtime) && runtimeSupportsAcceptanceExecution(runtime) && runtimeSupportsAcceptanceEvidenceFiles(runtime) {
 		return nil
 	}
-	open, err := store.ListOpenRunsOnHost(ctx, q, host)
+	open, err := store.ListOpenRunsInJournal(ctx, q, host, runtime.LocalJournal())
 	if err != nil {
 		return err
 	}

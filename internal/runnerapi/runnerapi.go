@@ -419,8 +419,12 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			res.Reassigned[i].RunToken = RunToken(s.secret, res.Reassigned[i].LeaseID)
 		}
 		return withResult(op, res)
-	case "runner.upgrade_authorize":
-		op, err := s.app.Execute(ctx, p, env, app.AuthorizeRunnerUpgrade{})
+	case "runner.upgrade_authorize", "runner.rolling_authorize":
+		var command app.Command = app.AuthorizeRunnerUpgrade{}
+		if env.Operation == "runner.rolling_authorize" {
+			command = app.AuthorizeRollingRunner{}
+		}
+		op, err := s.app.Execute(ctx, p, env, command)
 		if err != nil || op.Status != protocol.OpSucceeded {
 			return op, err
 		}
@@ -429,6 +433,18 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			return op, err
 		}
 		return withResult(op, s.app.RefreshUpgradeGrant(grant))
+	case "runner.rolling_target":
+		var req protocol.RollingTargetRequest
+		if err := decodeStrict(env.Payload, &req); err != nil {
+			return protocol.Operation{}, err
+		}
+		result, err := s.app.RollingTarget(ctx, p, req)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, result)
+	case "runner.rolling_retire":
+		return s.app.Execute(ctx, p, env, app.RetireRollingRunner{})
 	case "runner.upgrade_health":
 		var b protocol.UpgradeBinding
 		if err := decodeStrict(env.Payload, &b); err != nil {

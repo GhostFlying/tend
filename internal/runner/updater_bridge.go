@@ -100,6 +100,20 @@ func (r *Runner) updaterHandler() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		if q.URL.Path == "/updater/rolling-retire" && r.cfg.JournalID != "" {
+			var req protocol.RunnerRetirement
+			if err := json.NewDecoder(io.LimitReader(q.Body, 16<<10)).Decode(&req); err != nil {
+				http.Error(w, "invalid retirement identity", http.StatusBadRequest)
+				return
+			}
+			var result protocol.RunnerRetirementResult
+			if err := r.rollingRPC(q.Context(), "runner.rolling_retire", req, nil, &result); err != nil {
+				http.Error(w, "retirement unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(result)
+			return
+		}
 		operation := ""
 		switch q.URL.Path {
 		case "/updater/authorize":

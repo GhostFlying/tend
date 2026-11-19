@@ -100,6 +100,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 				deferred = append(deferred, err)
 				continue
 			}
+			release.JournalID = "" // Workspace intents are local to this journal.
 			releaseIntents[release] = true
 			if reconcileErr != nil || blocked[release.WorkspaceID] {
 				continue
@@ -150,6 +151,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 		if active {
 			continue
 		}
+		p.JournalID = r.cfg.JournalID
 		env, err := r.newEnvelope(protocol.OpWorkspaceRelease, protocol.Target{Type: "host", ID: r.cfg.HostID}, p)
 		if err != nil {
 			deferred = append(deferred, err)

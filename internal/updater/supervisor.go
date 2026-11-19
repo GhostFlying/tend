@@ -21,6 +21,7 @@ type Options struct {
 	ValidateConfiguration func(context.Context, string, string, string) error
 	Process               Process
 	Authority             Authority
+	RollingAuthority      RollingAuthority
 	Now                   func() time.Time
 	NewID                 func() (string, error)
 	BootClock             func() (string, int64, error)
@@ -97,7 +98,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	} else if err != nil {
 		return fail(err)
 	}
-	if (state.Format < 1 || state.Format > 5) || state.InstanceID != cfg.InstanceID {
+	if (state.Format < 1 || state.Format > 6) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
 	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
@@ -109,7 +110,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	if state.Format == 4 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Bounded == nil && len(state.BoundedHistory) == 0 || state.Maintenance == nil && state.Operation == nil) {
 		return fail(errors.New("updater: incomplete bounded maintenance ownership"))
 	}
-	if state.Format == 5 && (state.Generation == 0 || state.UpdaterEpoch == "") {
+	if state.Format >= 5 && (state.Generation == 0 || state.UpdaterEpoch == "") {
 		return fail(errors.New("updater: incomplete critical operation ownership"))
 	}
 	if state.Format >= 2 {
@@ -129,6 +130,20 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 		return fail(err)
 	}
 	s.state = state
+	if _, ok := opts.Authority.(*HTTPAuthority); ok && cfg.Role == "runner" && cfg.AuthoritySocket != "" {
+		if opts.RollingAuthority == nil {
+			s.opts.RollingAuthority = journalAuthority{cfg}
+		}
+		if state.CurrentJournal != "" {
+			s.opts.Authority, err = (journalAuthority{cfg}).bridge(state.CurrentJournal)
+			if err != nil {
+				return fail(err)
+			}
+		}
+	}
+	if state.Format >= 6 && s.opts.RollingAuthority == nil {
+		return fail(errors.New("updater: rolling runner transport is required"))
+	}
 	s.durable = cloneState(state)
 	return s, nil
 }
@@ -163,6 +178,9 @@ func (s *Supervisor) save() error {
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
+	if s.durable.Format >= 6 {
+		s.state.Format = max(s.state.Format, s.durable.Format)
+	}
 	s.observeOperationPhase()
 	if receipt := operationRollbackReceipt(s.state); receipt != nil {
 		s.state.RollbackProof = &RollbackProof{Binding: receipt.Binding, Version: s.state.Current, Process: s.state.Process}
@@ -176,7 +194,11 @@ func (s *Supervisor) save() error {
 		if s.state.Terminals == nil {
 			s.state.Terminals = make(map[string]TerminalReceipt)
 		}
-		s.state.Terminals[op.ID] = TerminalReceipt{Binding: op.Binding, Phase: op.Phase}
+		receipt := TerminalReceipt{Binding: op.Binding, Phase: op.Phase}
+		if op.Rolling != nil && op.Rolling.Observation.Receipt != nil {
+			receipt.RollingSetSHA256 = op.Rolling.Observation.Receipt.ReleaseSetSHA256
+		}
+		s.state.Terminals[op.ID] = receipt
 	}
 	if s.state.Format >= 2 {
 		s.state.Generation++
@@ -271,6 +293,10 @@ func (s *Supervisor) Upgrade(ctx context.Context, id, dir string) error {
 }
 
 func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, configuration *protocol.RunnerConfiguration) error {
+	return s.stageUpgrade(ctx, id, dir, configuration, nil)
+}
+
+func (s *Supervisor) stageUpgrade(ctx context.Context, id, dir string, configuration *protocol.RunnerConfiguration, rolling *RollingLaunch) error {
 	if !release.ValidID(id) {
 		return errors.New("updater: invalid upgrade identity")
 	}
@@ -278,6 +304,9 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 	defer s.mu.Unlock()
 	if err := s.durabilityError(); err != nil {
 		return err
+	}
+	if rolling != nil && (s.cfg.Role != "runner" || s.opts.RollingAuthority == nil || rolling.Revision <= 0 || rolling.Predecessor.LaunchID == "") {
+		return errors.New("updater: rolling launch requires the exact supervised predecessor and host revision")
 	}
 	if !maintenanceTerminal(s.state.Maintenance) {
 		return errors.New("updater: committed maintenance owns this service")
@@ -306,6 +335,9 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 		if staged != nil && receipt.Binding.ManifestSHA256 != staged.ManifestSHA256 {
 			return errors.New("updater: configuration manifest conflict")
 		}
+		if (rolling != nil) != (receipt.RollingSetSHA256 != "") {
+			return errors.New("updater: installation scope differs from original operation")
+		}
 		if receipt.Phase == "cancelled" {
 			return errors.New("updater: operation was cancelled")
 		}
@@ -332,7 +364,7 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 		return errors.New("updater: configuration maintenance requires its pinned manifest and current binary")
 	}
 	if op := s.state.Operation; op != nil && op.ID == id {
-		if op.Candidate.ManifestSHA256 != candidate.ManifestSHA256 || op.Candidate.Artifact.SHA256 != candidate.Artifact.SHA256 {
+		if (op.Rolling == nil) != (rolling == nil) || rolling != nil && op.Rolling.Predecessor != rolling.Predecessor || op.Candidate.ManifestSHA256 != candidate.ManifestSHA256 || op.Candidate.Artifact.SHA256 != candidate.Artifact.SHA256 {
 			return errors.New("updater: upgrade identity conflicts with previous payload")
 		}
 		return nil
@@ -356,7 +388,23 @@ func (s *Supervisor) UpgradeConfigured(ctx context.Context, id, dir string, conf
 		s.state.Bounded = nil
 		s.state.BoundedRunnerGrant = nil
 	}
-	s.state.Operation = &Operation{Configuration: staged, ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}
+	if rolling != nil {
+		if rolling.Predecessor != s.state.Process || rolling.Observation.SupervisedProcess != s.state.Process || rolling.Observation.InstanceID != s.cfg.InstanceID || rolling.Observation.Receipt == nil || rolling.Observation.Receipt.RetainedProcess != s.state.Process || rolling.Observation.Receipt.UpgradeID != id {
+			return errors.New("updater: rolling submission differs from the retained supervisor receipt")
+		}
+		bundle, err := release.LoadService(dir, s.cfg.Role)
+		if err != nil {
+			return err
+		}
+		if bundle.Set == nil || bundle.Set.Format != 2 || bundle.SetSHA256 != rolling.Observation.Receipt.ReleaseSetSHA256 {
+			return errors.New("updater: rolling launch requires the selected complete release")
+		}
+		if err := s.criticalState(); err != nil {
+			return err
+		}
+		s.state.Format = 6
+	}
+	s.state.Operation = &Operation{Rolling: rolling, Configuration: staged, ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}
 	return s.save()
 }
 
@@ -457,7 +505,15 @@ func (s *Supervisor) authorize(ctx context.Context, op *Operation) error {
 	if err != nil {
 		return err
 	}
-	g, err := s.opts.Authority.Authorize(ctx, op.Binding)
+	var g Grant
+	if op.Rolling != nil {
+		if s.opts.RollingAuthority == nil {
+			return errors.New("updater: rolling authority unavailable")
+		}
+		g, err = s.opts.RollingAuthority.AuthorizeLaunch(ctx, op.Candidate, op.Binding, *op.Rolling)
+	} else {
+		g, err = s.opts.Authority.Authorize(ctx, op.Binding)
+	}
 	if err != nil {
 		return err
 	}
@@ -538,6 +594,9 @@ func (s *Supervisor) Step(ctx context.Context) error {
 	op := s.state.Operation
 	if done(op) {
 		err := s.monitor(ctx)
+		if err == nil && done(s.state.Operation) && len(s.state.DrainingProcesses) > 0 {
+			err = s.retireDrained(ctx)
+		}
 		message := ""
 		if err != nil {
 			message = err.Error()
@@ -569,6 +628,23 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		}
 		if err := s.authorize(ctx, op); err != nil {
 			return err
+		}
+		if op.Rolling != nil {
+			if err := s.grantValid(op); err != nil {
+				return err
+			}
+			if _, err := s.observeCurrent(ctx, op.PreviousProcess); err != nil {
+				return err
+			}
+			if s.state.DrainingProcesses == nil {
+				s.state.DrainingProcesses = map[string]DrainingProcess{}
+			}
+			s.state.DrainingProcesses[op.PreviousProcess.LaunchID] = DrainingProcess{Process: op.PreviousProcess, JournalID: s.state.CurrentJournal, UpgradeID: op.ID}
+			op.Phase = "starting"
+			if err := s.save(); err != nil {
+				return err
+			}
+			return s.start(ctx, op, false)
 		}
 		// Equal bytes skip process replacement; authorization is still checked and
 		// the manifest identity is preserved as the selected release.
@@ -724,6 +800,16 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 			}
 		}
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": op.LaunchID, "TEND_UPDATER_LAUNCH_ID": op.LaunchID, "TEND_RELEASE_SHA256": v.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": v.ReleaseID}
+		journal := s.state.CurrentJournal
+		if op.Rolling != nil {
+			journal = op.LaunchID
+		}
+		if journal != "" {
+			if s.opts.RollingAuthority == nil {
+				return errors.New("updater: rolling transport unavailable")
+			}
+			extra["TEND_RUNNER_JOURNAL_ID"] = journal
+		}
 		if op.Kind == "upgrade" {
 			extra["TEND_UPGRADE_ID"] = op.ID
 			extra["TEND_UPDATER_MAINTENANCE"] = "1"
@@ -740,6 +826,13 @@ func (s *Supervisor) start(ctx context.Context, op *Operation, recovering bool) 
 				if saveErr := s.save(); saveErr != nil {
 					return saveErr
 				}
+			}
+			if errors.Is(err, ErrNotStarted) && op.Rolling != nil {
+				op.Phase = "staged"
+				if saveErr := s.save(); saveErr != nil {
+					return saveErr
+				}
+				return err
 			}
 			if errors.Is(err, ErrNotStarted) {
 				if rollback {
@@ -839,7 +932,15 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 		return errors.New("updater: authority unavailable")
 	}
 	authorityAt := s.opts.Now()
-	h, err := s.opts.Authority.Health(ctx, op.Binding)
+	var h Health
+	if op.Rolling != nil {
+		if s.opts.RollingAuthority == nil {
+			return errors.New("updater: rolling authority unavailable")
+		}
+		h, err = s.opts.RollingAuthority.Health(ctx, op.Binding)
+	} else {
+		h, err = s.opts.Authority.Health(ctx, op.Binding)
+	}
 	facts.PhaseMillis["authority_read"] = max(0, s.opts.Now().Sub(authorityAt).Milliseconds())
 	if err != nil {
 		facts.Failures = append(facts.Failures, "authority_read_failed")
@@ -895,7 +996,7 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 		}
 	}
 	timedOut := s.opts.Now().Sub(op.HealthStartedAt) >= time.Duration(s.cfg.HealthTimeoutSeconds)*time.Second
-	if (!running || timedOut) && !op.Irreversible && validRollbackAuthorization(op, h) {
+	if (!running || timedOut) && op.Rolling == nil && !op.Irreversible && validRollbackAuthorization(op, h) {
 		authorization := h
 		op.RollbackAuthorization = &authorization
 		op.Phase = "rollback_stopping"
@@ -908,6 +1009,16 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 }
 
 func (s *Supervisor) commitCandidate(op *Operation) error {
+	if op.Rolling != nil {
+		s.state.CurrentJournal = op.LaunchID
+		if _, ok := s.opts.Authority.(*HTTPAuthority); ok {
+			authority, err := (journalAuthority{s.cfg}).bridge(op.LaunchID)
+			if err != nil {
+				return err
+			}
+			s.opts.Authority = authority
+		}
+	}
 	s.state.Current, s.state.Process = op.Candidate, op.CandidateProcess
 	op.Irreversible, op.Phase = true, "committed"
 	return s.save()

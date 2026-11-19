@@ -64,7 +64,7 @@ func runAgentsCommand(args []string, out, errout io.Writer) int {
 		fmt.Fprintln(errout, "runner home cannot be resolved")
 		return 1
 	}
-	socket, err := repositorySocketPath(home)
+	socket, err := currentRepositorySocket(home, cfg)
 	if err != nil {
 		fmt.Fprintln(errout, "local runner control is unavailable")
 		return 1

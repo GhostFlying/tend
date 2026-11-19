@@ -40,11 +40,31 @@ func (ReleaseWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if w.OccupiedBy != p.TaskID {
 		return Outcome{Result: protocol.WorkspaceReleaseResult{Released: true}, NoEffect: true}, nil
 	}
+	rolling, err := workspaceJournalsActive(ctx, tx, x.Principal.Subject)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if rolling {
+		_, err := tx.Exec(ctx, `INSERT INTO workspace_journal_releases(workspace_id,task_id,journal_id,run_count)
+        SELECT ?,?,?,COUNT(*) FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id LEFT JOIN runner_journal_runs j ON j.run_id=r.run_id
+        WHERE wr.workspace_id=? AND r.task_id=? AND COALESCE(j.journal_id,'')=?
+        HAVING COUNT(*)>0 AND COUNT(*) FILTER(WHERE r.observed_state IN ('starting','running','waiting','interrupted','unknown'))=0
+        ON CONFLICT(workspace_id,task_id,journal_id) DO UPDATE SET run_count=excluded.run_count`, p.WorkspaceID, p.TaskID, p.JournalID, p.WorkspaceID, p.TaskID, p.JournalID)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
 	var blocked bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT
 	 EXISTS(SELECT 1 FROM task_workspace_bindings b JOIN tasks t ON t.task_id=b.task_id WHERE b.workspace_id=? AND b.task_id=? AND t.lifecycle NOT IN ('completed','cancelled'))
 	 OR EXISTS(SELECT 1 FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id WHERE wr.workspace_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown'))`, w.WorkspaceID, p.TaskID, w.WorkspaceID).Scan(&blocked); err != nil {
 		return Outcome{}, fmt.Errorf("app: check workspace writers: %w", err)
+	}
+	if !blocked && rolling {
+		blocked, err = workspaceJournalOutstanding(ctx, tx, w.WorkspaceID, p.TaskID)
+		if err != nil {
+			return Outcome{}, err
+		}
 	}
 	if blocked {
 		return Outcome{Result: protocol.WorkspaceReleaseResult{}, NoEffect: true}, nil
@@ -163,4 +183,19 @@ func (CompleteWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		return Outcome{}, err
 	}
 	return Outcome{Result: map[string]bool{"removed": true}, Events: []Event{{ObjectType: "workspace", ObjectID: w.WorkspaceID, Kind: "workspace.removed", Body: map[string]any{"cleanup_id": p.CleanupID}}}}, nil
+}
+
+func workspaceJournalsActive(ctx context.Context, tx *store.Tx, host string) (bool, error) {
+	var active bool
+	err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM host_runtime WHERE host_id=? AND json_extract(runtime_json,'$.journal_id') IS NOT NULL)`, host).Scan(&active)
+	return active, err
+}
+
+func workspaceJournalOutstanding(ctx context.Context, tx *store.Tx, workspace, task string) (bool, error) {
+	var pending bool
+	err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id
+ LEFT JOIN runner_journal_runs j ON j.run_id=r.run_id
+ LEFT JOIN workspace_journal_releases p ON p.workspace_id=wr.workspace_id AND p.task_id=r.task_id AND p.journal_id=COALESCE(j.journal_id,'')
+ WHERE wr.workspace_id=? AND r.task_id=? GROUP BY COALESCE(j.journal_id,'') HAVING COUNT(*)>COALESCE(MAX(p.run_count),0))`, workspace, task).Scan(&pending)
+	return pending, err
 }

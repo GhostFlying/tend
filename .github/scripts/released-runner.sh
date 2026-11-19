@@ -24,7 +24,7 @@ if [[ $# == 0 ]]; then
 fi
 unset GH_TOKEN GITHUB_TOKEN
 echo "$archive_hash  $archive" | sha256sum --check --status
-tar -xzf "$archive" -C "$scratch/old" manifest.json release-set.json tend tend-server tend-runner
+tar -xzf "$archive" -C "$scratch/old" manifest.json release-set.json tend tend-server tend-runner tend-updater
 minimum=$(jq -er '.minimum' internal/protocol/runner_compat.json)
 jq -e --arg commit "$source_commit" '.format == 2 and .commit == $commit and .os == "linux" and .arch == "amd64"' "$scratch/old/release-set.json" >/dev/null
 jq -e --arg release "$release" --argjson minimum "$minimum" '.release_id == $release and .protocol.max == $minimum' "$scratch/old/manifest.json" >/dev/null
@@ -44,7 +44,28 @@ head=$(git rev-parse HEAD)
 go run ./internal/release/packagecmd -arch amd64 -commit "$head" -output "$scratch/packages"
 mkdir "$scratch/bundle"
 tar -xzf "$scratch/packages/tend-main-$head-linux-amd64.tar.gz" -C "$scratch/bundle"
-cp "$fixture/"{cross_version,model,controlled}.py "$scratch/"
+# Relink the same source with a distinct Go build ID to create a third real
+# runner artifact. Server, CLI, supervisor and recorded source commit are identical.
+mkdir "$scratch/third"
+cp -al "$scratch/bundle/." "$scratch/third/"
+rm "$scratch/third/tend-runner" "$scratch/third/manifest.json" "$scratch/third/release-set.json"
+CGO_ENABLED=0 go build -trimpath -buildvcs=true -ldflags=-buildid=tend-wire-third -o "$scratch/third/tend-runner" ./cmd/tend-runner
+python3 - "$scratch/bundle" "$scratch/third" <<'PYTHON'
+import hashlib, json, sys
+from pathlib import Path
+first, third = map(Path, sys.argv[1:])
+for name in ("manifest.json", "release-set.json"):
+    doc = json.loads((first / name).read_bytes())
+    doc["release_id"] += "-wire-third"
+    for artifact in doc["artifacts"]:
+        if artifact["role"] == "runner":
+            binary = third / artifact["path"]
+            artifact.update(sha256=hashlib.file_digest(binary.open("rb"), "sha256").hexdigest(), size=binary.stat().st_size)
+    if name == "release-set.json":
+        doc["manifest_sha256"] = hashlib.sha256((third / "manifest.json").read_bytes()).hexdigest()
+    (third / name).write_text(json.dumps(doc))
+PYTHON
+cp "$fixture/"{cross_version,model,controlled,generations}.py "$scratch/"
 account=tend-wire-fixture
 sudo useradd --create-home "$account"
 cleanup() {
@@ -60,3 +81,6 @@ sudo chown -R "$account:" "$scratch"
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/cross_version.py" "${args[@]}" --controlled-bundle "$scratch/bundle"
+sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed"

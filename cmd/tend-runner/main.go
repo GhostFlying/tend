@@ -31,6 +31,7 @@ import (
 	"github.com/GhostFlying/tend/internal/logging"
 	"github.com/GhostFlying/tend/internal/netx"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner"
 	"github.com/GhostFlying/tend/internal/runner/agentcontrol"
 	"github.com/GhostFlying/tend/internal/runner/gitws"
@@ -51,6 +52,7 @@ func (p profile) gitws() gitws.Profile {
 
 // config is the runner's configuration file.
 type config struct {
+	SideChannel       *sideChannelConfig        `json:"side_channel,omitempty"`
 	ManagedExtensions *extensions.Configuration `json:"managed_extensions,omitempty"`
 	extensionAgent    *extensions.Agent
 	CodexEnvironments *codexenv.Bindings     `json:"codex_environments,omitempty"`
@@ -108,6 +110,16 @@ func main() {
 		os.Exit(2)
 	}
 	slog.SetDefault(log)
+	if len(os.Args) > 1 && (os.Args[1] == "rolling-authorize" || os.Args[1] == "rolling-bootstrap") {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err := rollingCommand(ctx, os.Args[1], os.Args[2:], os.Stdin, os.Stdout)
+		cancel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "native-tui" {
 		fs := flag.NewFlagSet("native-tui", flag.ContinueOnError)
 		state := fs.String("state", "", "private run capability file")
@@ -224,16 +236,34 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	state := filepath.Join(home, "runner")
+	baseState := filepath.Join(home, "runner")
+	state := baseState
+	journalID := os.Getenv("TEND_RUNNER_JOURNAL_ID")
+	if journalID != "" {
+		if !release.ValidID(journalID) || os.Getenv("TEND_UPDATER_PROCESS_INSTANCE_ID") == "" {
+			return errors.New("independent runner journal requires a supervised process")
+		}
+		state = filepath.Join(state, "generations", journalID)
+	}
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		return err
 	}
 
 	client := http.DefaultClient
-	if cfg.Tailnet != nil {
+	if journalID != "" && cfg.SideChannel != nil {
+		client, err = cfg.SideChannel.client(cfg.ServerURL, cfg.SideChannel.daemon())
+		if err != nil {
+			return err
+		}
+		defer client.CloseIdleConnections()
+	} else if cfg.Tailnet != nil {
+		if journalID != "" {
+			return errors.New("rolling runner with embedded tailnet requires a configured side_channel")
+		}
 		tn, err := netx.JoinTailnet(ctx, netx.TailnetConfig{
-			Hostname: cfg.Tailnet.Hostname, Dir: filepath.Join(state, "tsnet"), AuthKey: os.Getenv("TS_AUTHKEY"),
-			Ephemeral: cfg.Tailnet.Ephemeral, Logf: func(f string, args ...any) { log.Info(fmt.Sprintf(f, args...)) },
+			Hostname: cfg.Tailnet.Hostname, Dir: filepath.Join(baseState, "tsnet"),
+			AuthKey: os.Getenv("TS_AUTHKEY"), Ephemeral: cfg.Tailnet.Ephemeral,
+			Logf: func(f string, args ...any) { log.Info(fmt.Sprintf(f, args...)) },
 		})
 		if err != nil {
 			return err
@@ -369,6 +399,9 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if (cfg.UpdaterSocket != "" || cfg.UpdaterControlSocket != "" || cfg.UpdaterBundleDir != "") && (cfg.UpdaterSocket == "" || cfg.UpdaterControlSocket == "" || cfg.UpdaterBundleDir == "") {
 		return errors.New("updater bridge, control socket and bundle directory must be configured together")
 	}
+	if journalID != "" && cfg.UpdaterSocket != "" {
+		cfg.UpdaterSocket = updater.JournalSocket(cfg.UpdaterSocket, journalID)
+	}
 	controlSocket := cfg.UpdaterSocket
 	if controlSocket == "" {
 		controlSocket = filepath.Join(state, "usage-control", "usage.sock")
@@ -403,7 +436,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	r := runner.New(runner.Config{Extensions: cfg.extensionAgent,
 		Executions: executions, AgentInventory: agentInventory, AgentChanges: agentChanges, RepositoryBindings: repositoryBindings, ConfigurationSHA256: configurationSHA, DeliveryObserver: observer, DeliveryProviders: providers,
 		ServerURL: cfg.ServerURL, HostID: cfg.HostID, HostToken: token, Version: version, HTTPClient: client, Journal: j,
-		RolloutRoots: cfg.RolloutRoots, InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
+		JournalID: journalID, RolloutRoots: cfg.RolloutRoots, InstanceID: instanceID, UpgradeID: upgradeID, InitialMaintenance: initialMaintenance, UpdaterInstanceID: updaterInstance, UpdaterSocket: controlSocket, UpdaterControlSocket: cfg.UpdaterControlSocket, UpdaterBundleDir: cfg.UpdaterBundleDir, Build: build, Worker: cfg.Worker.Kind, Workers: workers, Workspaces: workspaces,
 		Now: time.Now, IDs: ids, Log: log,
 	})
 	if runtime.GOOS != "windows" {
@@ -411,7 +444,11 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 		if agents != nil {
 			agentHandler = r.AgentInventoryHandler(agents.Handler())
 		}
-		closeRepositoryControl, err := startRepositoryControl(ctx, home, workspaces, agentHandler)
+		controlHome := home
+		if journalID != "" {
+			controlHome = state
+		}
+		closeRepositoryControl, err := startRepositoryControl(ctx, controlHome, workspaces, agentHandler)
 		if err != nil {
 			return err
 		}

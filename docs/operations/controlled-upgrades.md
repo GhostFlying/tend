@@ -396,3 +396,9 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 外部恢复的存储兼容性优先依据已安装状态，初始配置中的版本可能已经过时。旧状态
 不可解析时不以该初始值阻塞恢复：先保存配置指定的数据快照，再由新候选确认实际
 存储。只有已证实存储代次不变时才省略数据复制；配置检查在停止旧进程前完成。
+
+### 同机 runner 交接
+
+首次重叠交接使用候选完整包中的 CLI。等 fleet 批次进入该主机的 draining 阶段，在 runner 服务账号环境执行 `tend upgrade runner-handoff --release <完整包目录> --config <runner配置> --upgrade-id <原批次ID>`。该命令使用原 host 凭据，校验同一发布集，更新并保留正在工作的前驱。输出中的 staged 表示本机受理；批次状态和 updater status 分别显示是否提交及哪些进程仍在收尾。回执丢失时沿原批次和包查询。
+
+使用内嵌 tsnet 的主机先在提供给后继的 runner 配置中设置 `"side_channel":{"kind":"tailscaled"}`。原进程继续使用已打开的节点身份。新连接的节点名或 tag 须命中 host 的 nodes。可用 socket 字段指向自选 LocalAPI Unix socket。使用直接连接的主机可沿用 server_url。完成首次交接后，由接单 runner 自动提交后续完整包；旧 journal 中的任务结束、待提交回执清空并确认进程退出后分别退役。操作命令的环境需要与服务配置使用同一 TEND_HOST_TOKEN。
