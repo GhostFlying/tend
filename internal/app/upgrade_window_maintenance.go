@@ -124,7 +124,7 @@ func windowForRetirement(ctx context.Context, q store.Querier, host string, inpu
 		WHERE json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.source_upgrade_id')=?
 		AND json_extract(s.value,'$.process.launch_id')=? AND (
 			json_extract(s.value,'$.state')='stop_authorized' OR (json_extract(s.value,'$.state')='not_stopped' AND u.upgrade_id=?) OR
-			(u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.state')='pending_stop'))
+			(u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.state') IN ('draining','pending_stop')))
 		ORDER BY u.created_at,u.rowid LIMIT 1`, host, input.UpgradeID, input.Process.LaunchID, input.WindowID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.UpgradeRow{}, nil, nil
@@ -237,7 +237,7 @@ func (a *App) PrimaryWindowTarget(ctx context.Context, p protocol.Principal, pro
           WHERE u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.primary')=1
           AND json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.process.launch_id')=?
           AND json_extract(s.value,'$.process.pid')=? AND json_extract(s.value,'$.process.sha256')=?
-          AND json_extract(s.value,'$.process.start_ticks') IN (0,?) AND json_extract(s.value,'$.state') IN ('pending_stop','stop_authorized') LIMIT 1`, p.Subject, process.LaunchID, process.PID, process.SHA256, process.StartTicks).Scan(&id)
+          AND json_extract(s.value,'$.process.start_ticks') IN (0,?) AND json_extract(s.value,'$.state') IN ('draining','pending_stop','stop_authorized') LIMIT 1`, p.Subject, process.LaunchID, process.PID, process.SHA256, process.StartTicks).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -266,4 +266,18 @@ func checkWindowRunOwnership(ctx context.Context, q store.Querier, r store.Upgra
 		}
 	}
 	return nil
+}
+
+// A supervisor may have persisted a stop intent before dispatch. Preserve the
+// exact runner heartbeat sequence so it can reconcile that original grant.
+func primaryStopSequence(ctx context.Context, q store.Querier, stop protocol.UpgradeWindowStop) (int64, error) {
+	row, err := store.GetHostRuntime(ctx, q, stop.HostID)
+	if err != nil {
+		return 0, err
+	}
+	rt := row.Runtime
+	if rt.InstanceID != stop.Process.LaunchID || rt.Build.PID != int64(stop.Process.PID) || rt.Build.BinarySHA256 != stop.Process.SHA256 || rt.Generation != stop.Generation || rt.JournalID != stop.JournalID || rt.Protocol != stop.Protocol {
+		return 0, protocol.Errorf(protocol.CodeConflictPayload, "accepting process changed during emergency maintenance")
+	}
+	return rt.Sequence, nil
 }

@@ -355,7 +355,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 	case "cancel":
 		for i, stop := range r.View.WindowStops {
-			if stop.State == "pending_stop" {
+			if stop.State == "pending_stop" || stop.State == "draining" {
 				r.View.WindowStops[i].State = "not_stopped"
 			}
 			if stop.State == "stop_authorized" {

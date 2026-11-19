@@ -73,7 +73,12 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		} else if input.Unused {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "no matching unused forced stop")
 		}
-		if !confirmed.Valid && input.AuthorizationID == "" && (stop == nil || !stop.Primary) {
+		if !confirmed.Valid && input.AuthorizationID == "" && stop != nil && stop.Primary {
+			result.ReadySequence, err = primaryStopSequence(ctx, tx.Q(), *stop)
+			if err != nil {
+				return Outcome{}, err
+			}
+		} else if !confirmed.Valid && input.AuthorizationID == "" {
 			drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
 			if err != nil {
 				return Outcome{}, err
@@ -160,6 +165,10 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		stop.Forced = true
 		result.RemainingMillis = window.View.OverallDeadlineMillis - x.Now.UnixMilli()
 
+		result.ReadySequence, err = primaryStopSequence(ctx, tx.Q(), *stop)
+		if err != nil {
+			return Outcome{}, err
+		}
 		return grantRetirement(ctx, x, tx, result, stop.JournalID, raw, &window, stop)
 	}
 	drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
