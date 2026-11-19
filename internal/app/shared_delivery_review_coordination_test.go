@@ -63,7 +63,14 @@ func TestSharedDeliveryReviewAssessmentDoesNotCrossCandidates(t *testing.T) {
 	issue = setPRPolicyForTest(t, h, issue.IssueID, "manual")
 	issue.Plan.Scope = "Requirement B assessed for the original candidate only"
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "update", protocol.UpdateIssuePayload{Plan: issue.Plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
-	r := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "assess", DeliveryID: "pr"}))
+	view := sharedReviewViewForTest(t, h, issue.Plan.Deliveries[0])
+	r := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{
+		Action: "assess", DeliveryID: "pr", ExpectedHeadSHA: view.HeadSHA, ExpectedBaseSHA: view.BaseSHA,
+		ExpectedRequirementsDigest: view.CurrentCandidate.RequirementsDigest,
+	}))
+	if !r.Valid || r.AssessedRequirementsDigest == "" {
+		t.Fatal("the original same-candidate assess payload no longer works", r)
+	}
 	originalAssessment := r.AssessedRequirementsDigest
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	issue.Plan.Scope = "Requirement C reviewed against the new candidate"

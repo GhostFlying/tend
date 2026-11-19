@@ -134,6 +134,12 @@ func TestSharedReviewCandidateAssessmentContinuesDelivery(t *testing.T) {
 	payload.ExpectedReviewRevision = rev(r.Revision)
 	expectWorkCode(t, assess(5, payload), protocol.CodeStaleRevision)
 
+	payload.ExpectedCandidateRevision = rev(r.CurrentCandidate.Revision)
+	r = sharedReviewResult(t, assess(6, payload))
+	if !r.Valid || r.Assessment == nil || !readAuthority().Valid {
+		t.Fatal("a fresh judgment could not cover the returned candidate", r)
+	}
+
 	reviewer := createSharedReviewerTaskForTest(t, h, issue.IssueID)
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	recheck := protocol.UpdateSharedDeliveryReviewPayload{
@@ -141,10 +147,13 @@ func TestSharedReviewCandidateAssessmentContinuesDelivery(t *testing.T) {
 		ExpectedHeadSHA: r.CurrentCandidate.HeadSHA, ExpectedBaseSHA: r.CurrentCandidate.BaseSHA, ExpectedRequirementsDigest: r.CurrentCandidate.RequirementsDigest,
 		IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Ask the original reviewer to inspect the relevant upstream change"},
 	}
-	r = sharedReviewResult(t, assess(6, recheck))
+	r = sharedReviewResult(t, assess(7, recheck))
+	if r.Status != "reviewing" || r.Assessment != nil || len(r.Rounds) != 2 || readAuthority().Valid {
+		t.Fatal("an applicable judgment blocked the original reviewer's explicit recheck", r)
+	}
 	executeSharedReviewForTest(t, h, runtime, r, reviewer, "passed")
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
-	r = sharedReviewResult(t, assess(7, protocol.UpdateSharedDeliveryReviewPayload{
+	r = sharedReviewResult(t, assess(8, protocol.UpdateSharedDeliveryReviewPayload{
 		Action: "record", DeliveryID: ref.DeliveryID,
 		IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Record the original reviewer's focused result"},
 	}))
