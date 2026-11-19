@@ -64,7 +64,7 @@ func externalRecoverySource(cfg Config, path string, target Version) (State, err
 		return State{}, nil // Legacy recovery snapshots unknown installed data.
 	}
 	if cfg.Role == "runner" && old.Format >= rollingStateFormat {
-		if (old.Format < rollingStateFormat || old.Format > emergencyStateFormat) || old.CurrentJournal != "" && !release.ValidID(old.CurrentJournal) || old.UpdaterEpoch == "" || old.Generation == 0 {
+		if old.Format > emergencyStateFormat || old.CurrentJournal != "" && !release.ValidID(old.CurrentJournal) || old.UpdaterEpoch == "" || old.Generation == 0 {
 			return State{}, errors.New("updater: invalid rolling journal ownership")
 		}
 		if stop := old.EmergencyPrimary; stop != nil && (!stop.Confirmed || target.Artifact.SHA256 == stop.Process.SHA256) {

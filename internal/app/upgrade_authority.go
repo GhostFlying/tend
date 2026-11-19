@@ -354,7 +354,10 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			r.Deadline = r.View.OverallDeadlineMillis
 		}
 	case "cancel":
-		for _, stop := range r.View.WindowStops {
+		for i, stop := range r.View.WindowStops {
+			if stop.State == "pending_stop" {
+				r.View.WindowStops[i].State = "not_stopped"
+			}
 			if stop.State == "stop_authorized" {
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "wait for the original stop receipt from %s/%s before cancellation", stop.HostID, stop.Process.LaunchID)
 			}
@@ -366,8 +369,11 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server replacement must reconcile before cancellation")
 		}
 
-		for _, h := range r.Hosts {
+		for i, h := range r.Hosts {
 			if h.PrimaryOffline {
+				if r.View.Hosts[i].Phase == "stopping" {
+					r.View.Hosts[i].Phase = "retained"
+				}
 				if err := cancelPrimaryFence(ctx, x, tx, r, h); err != nil {
 					return Outcome{}, err
 				}

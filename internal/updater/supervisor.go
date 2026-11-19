@@ -354,6 +354,9 @@ func (s *Supervisor) stageUpgrade(ctx context.Context, id, dir string, configura
 		}
 		return nil
 	}
+	if s.state.EmergencyPrimary != nil && s.state.EmergencyPrimary.Process == s.state.Process {
+		return errors.New("updater: emergency maintenance owns this process; recover a compatible release after confirmed exit")
+	}
 	if s.selfUpdating {
 		return ErrUnknown
 	}
@@ -610,8 +613,8 @@ func (s *Supervisor) Step(ctx context.Context) error {
 		} else {
 			err = s.monitor(ctx)
 		}
-		if err == nil && done(s.state.Operation) && len(s.state.DrainingProcesses) > 0 {
-			err = s.retireDrained(ctx)
+		if (err == nil || s.state.EmergencyPrimary != nil && s.durabilityError() == nil) && done(s.state.Operation) && len(s.state.DrainingProcesses) > 0 {
+			err = errors.Join(err, s.retireDrained(ctx))
 		}
 		message := ""
 		if err != nil {

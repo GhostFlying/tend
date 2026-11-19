@@ -340,3 +340,23 @@ func TestExternalRecoveryProtectsUnresolvedRollingOwnershipBeforeStop(t *testing
 		})
 	}
 }
+
+func TestEmergencyPrimaryRecoversCompatibleReleaseAfterConfirmedExit(t *testing.T) {
+	h, request, manager := externalFixtureProtocol(t, 6)
+	original := h.s.Status().Process
+	h.s.state.EmergencyPrimary = &DrainingProcess{WindowID: "window", Process: original, Stopped: true, AuthorizationID: "stop"}
+	if err := h.s.savePredecessor(*h.s.state.EmergencyPrimary); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := externalRecovery(t.Context(), h.cfg, request, manager); err == nil || manager.stops != 0 {
+		t.Fatal("recovery passed an unconfirmed exit", err)
+	}
+	h.s.state.EmergencyPrimary.Confirmed = true
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	record, err := externalRecovery(t.Context(), h.cfg, request, manager)
+	if err != nil || record.Phase != "complete" || h.s.Status().Process == original || h.s.Status().EmergencyPrimary != nil {
+		t.Fatal(record, err)
+	}
+}

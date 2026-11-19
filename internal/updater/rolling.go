@@ -124,6 +124,11 @@ func (s *Supervisor) savePredecessor(drain DrainingProcess) error {
 		if err := s.criticalState(); err != nil {
 			return err
 		}
+		if s.state.Format < rollingStateFormat {
+			if err := atomicWrite(filepath.Join(s.cfg.StateDir, rollingOwnershipMarker), []byte("1\n"), 0600); err != nil {
+				return err
+			}
+		}
 		s.state.Format = max(s.state.Format, emergencyStateFormat)
 		s.state.EmergencyPrimary = &drain
 	} else {
@@ -133,8 +138,13 @@ func (s *Supervisor) savePredecessor(drain DrainingProcess) error {
 }
 
 func (s *Supervisor) retirementRPC(ctx context.Context, req protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {
-	if s.opts.WindowAuthority != nil && s.state.EmergencyPrimary != nil {
-		return s.opts.WindowAuthority.Retire(ctx, req)
+	if a := s.opts.WindowAuthority; a != nil {
+		result, err := a.Retire(ctx, req)
+		if err == nil || s.state.EmergencyPrimary != nil || s.opts.RollingAuthority == nil || req.WindowID != "" {
+			return result, err
+		}
+		// A running generation can still relay the original retirement on
+		// hosts whose independent transport is temporarily unavailable.
 	}
 	if s.opts.RollingAuthority == nil {
 		return protocol.RunnerRetirementResult{}, errors.New("updater: retirement authority unavailable")
@@ -227,13 +237,14 @@ func (s *Supervisor) retirePredecessor(ctx context.Context, drain DrainingProces
 			}
 			previouslyRequested := drain.StopRequested
 			if previouslyRequested {
-				// Repeating a signal requires a newer heartbeat of the same
-				// exact process in addition to the original grant.
+				// Natural retirement needs newer readiness. Emergency termination
+				// is idempotent on the observed live pidfd identity under the
+				// original bounded grant, even when this runner is wedged.
 				observed, e := s.retirementRPC(ctx, req)
 				if e != nil {
 					return e
 				}
-				if !observed.Allowed || observed.AuthorizationID != drain.AuthorizationID || observed.ReadySequence <= drain.StopSequence {
+				if !observed.Allowed || observed.AuthorizationID != drain.AuthorizationID || drain.WindowID == "" && observed.ReadySequence <= drain.StopSequence || drain.WindowID != "" && observed.WindowID != drain.WindowID {
 					return ErrUnknown
 				}
 				drain.StopSequence = observed.ReadySequence

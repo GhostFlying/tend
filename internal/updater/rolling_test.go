@@ -239,3 +239,22 @@ func TestEmergencyPrimaryReopensWithoutRespawningAfterLostExitReceipt(t *testing
 		t.Fatal("lost original physical exit", h.s.Status())
 	}
 }
+
+func TestEmergencyDrainerUsesIndependentHostConnection(t *testing.T) {
+	h := newHarness(t)
+	current := h.s.Status().Process
+	old := Identity{PID: 11, StartTicks: 101, LaunchID: "old", SHA256: current.SHA256}
+	h.p.live[old.PID] = old
+	auth := &windowStopAuthority{retirementAuthority: &retirementAuthority{fakeAuthority: h.a, ready: map[string]bool{old.LaunchID: true}, confirmed: map[string]int{}}}
+	h.s.opts.WindowAuthority = primaryWindowAuthority{auth}
+	// The accepting runner has no rolling bridge. Its independent supervisor
+	// can nevertheless retire the incompatible predecessor.
+	h.s.state.DrainingProcesses = map[string]DrainingProcess{old.LaunchID: {Process: old, UpgradeID: "handoff"}}
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	h.step(t)
+	if h.p.stops != 1 || h.p.live[current.PID] != current || len(h.s.Status().DrainingProcesses) != 0 || auth.confirmed[old.LaunchID] != 1 {
+		t.Fatal(h.s.Status())
+	}
+}
