@@ -21414,6 +21414,9 @@
         "revision": {
           "type": "integer"
         },
+        "server_only": {
+          "type": "boolean"
+        },
         "server_updater": {
           "$ref": "#/definitions/UpdaterSelfObservation"
         },

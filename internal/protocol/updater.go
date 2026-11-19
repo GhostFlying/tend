@@ -67,6 +67,7 @@ type UpgradeHealthComponent struct {
 
 // UpgradeStartRequest is accepted only over the service user's local control socket.
 type UpgradeStartRequest struct {
+	ServerOnly bool `json:"server_only,omitempty"`
 	// ExecutionRequestID is supplied only by the admitted in-process main tool.
 	ExecutionRequestID   string                         `json:"-"`
 	ParkIdleManagers     bool                           `json:"park_idle_managers,omitempty"`

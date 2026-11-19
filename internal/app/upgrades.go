@@ -19,6 +19,7 @@ const capabilityUpdater = "runner-updater-v1"
 // StartUpgrade receives an already verified immutable local bundle from the
 // local control service. The remotely supplied payload cannot choose binaries.
 type StartUpgrade struct {
+	ServerOnly             bool
 	ServerUpdaterSupported bool
 	ReleaseSet             *release.Set
 	ReleaseSetSHA256       string
@@ -46,7 +47,7 @@ func (StartUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 }
 func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	if prior, err := store.GetUpgrade(ctx, tx.Q(), x.Env.Target.ID); err == nil {
-		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID {
+		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID || prior.View.ServerOnly != c.ServerOnly {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "upgrade identity belongs to another admitted installation")
 		}
 		return Outcome{NoEffect: true, Result: prior.View}, nil
@@ -71,6 +72,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	if c.ReleaseSet != nil && c.ReleaseSet.Format >= 2 && !c.ServerUpdaterSupported {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "server updater requires standalone supervisor-first bootstrap")
+	}
+	if c.ServerOnly && (c.ReleaseSet == nil || c.ReleaseSet.Format != 2 || len(c.RunnerConfigurations) > 0 || !slices.Contains(c.ServerCapabilities, release.ServerCapabilityIndependentServerUpgrade)) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "server-only installation requires a capable complete release and no runner configuration changes")
 	}
 	if c.ParkIdleManagers && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityManagerPark) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "candidate does not support manager park")
@@ -143,7 +147,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
 		sourceCommit = source.Commit
 	}
-	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{ServerOnly: c.ServerOnly, SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	r.Deadline = capUpgradeDeadline(&r, r.Deadline)
 	r.ReleaseSet, r.ReleaseSetSHA256, r.ReleaseSetSize = c.ReleaseSet, c.ReleaseSetSHA256, c.ReleaseSetSize
 	if needsSelfUpdate(r) {
@@ -183,7 +187,13 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if err != nil {
 			return Outcome{}, err
 		}
-		if !rt.Online || rt.LastHeartbeatAt <= x.Now.Add(-RunnerOfflineAfter).UnixMilli() || !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) || rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater) || !upgradeStartAdmission(control, rt.Runtime) || rt.Runtime.AppliedControlRevision != control.Revision || rt.Runtime.ConfirmedCancelledUpgradeID != control.CancelledUpgradeID || h.Slots <= 0 {
+		if !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s runner %s uses protocol %d outside the target range [%d,%d]", h.HostID, rt.Runtime.InstanceID, rt.Runtime.Protocol, c.Manifest.Protocol.Min, c.Manifest.Protocol.Max)
+		}
+		if !c.ServerOnly && (rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater)) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s cannot install the runner release", h.HostID)
+		}
+		if !rt.Online || rt.LastHeartbeatAt <= x.Now.Add(-RunnerOfflineAfter).UnixMilli() || !upgradeStartAdmission(control, rt.Runtime) || rt.Runtime.AppliedControlRevision != control.Revision || rt.Runtime.ConfirmedCancelledUpgradeID != control.CancelledUpgradeID || h.Slots <= 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s is offline, incompatible, or unavailable for rolling upgrade", h.HostID)
 		}
 		if control.Mode == protocol.RunnerMaintenance && !slices.Contains(c.ServerCapabilities, release.ServerCapabilityMaintenanceHandoff) {
@@ -191,13 +201,13 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 		artifact, ok := releaseArtifact(c.Manifest, "runner", h.OS, h.Arch)
 		_, configurationTarget := c.RunnerConfigurations[h.HostID]
-		if needsSelfUpdate(r) && (!r.SupervisorThenRunners || configurationTarget) && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {
+		if !c.ServerOnly && needsSelfUpdate(r) && (!r.SupervisorThenRunners || configurationTarget) && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityUpdaterSelfUpdate) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s requires supervisor-first bootstrap", h.HostID)
 		}
-		if c.ReleaseSet != nil && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityCompleteReleaseSet) {
+		if !c.ServerOnly && c.ReleaseSet != nil && !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityCompleteReleaseSet) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s requires complete release set bootstrap", h.HostID)
 		}
-		if !ok {
+		if !ok && !c.ServerOnly {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release lacks runner for host %s", h.HostID)
 		}
 		runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), h.HostID)
@@ -221,6 +231,14 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 				configuration = &target
 			}
 		}
+		if c.ServerOnly {
+			if !slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunnerMaintenance) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s cannot acknowledge restart coverage", h.HostID)
+			}
+			r.Hosts = append(r.Hosts, store.UpgradeHost{HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256})
+			r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "skipped", Phase: "retained", CurrentVersion: rt.Runtime.Build.Version, ProtocolVersion: rt.Runtime.Protocol})
+			continue
+		}
 		r.Hosts = append(r.Hosts, store.UpgradeHost{MaintenanceHandoff: control.Mode == protocol.RunnerMaintenance && (len(c.RunnerConfigurations) == 0 || configurationTarget), Configuration: configuration, HostID: h.HostID, PreviousHash: rt.Runtime.Build.BinarySHA256, TargetHash: artifact.SHA256})
 		r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "queued", Phase: "queued", CurrentVersion: rt.Runtime.Build.Version, TargetVersion: c.Manifest.ReleaseID, ProtocolVersion: rt.Runtime.Protocol, TotalBytes: totalBytes})
 	}
@@ -241,7 +259,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	if approved != nil {
 		hosts := make([]string, 0, len(r.Hosts))
-		for _, host := range r.Hosts {
+		for _, host := range r.InstallationHosts() {
 			hosts = append(hosts, host.HostID)
 			if host.TargetHash != host.PreviousHash {
 				source, ok := c.ArtifactSources[host.TargetHash]
@@ -269,6 +287,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	notice := fmt.Sprintf("准备升级至 `%s`。先下发并校验发布包，原本正常的主机准备期间继续接单，临时维护主机保持停止接单。", r.View.ReleaseID)
+	if c.ServerOnly {
+		notice = fmt.Sprintf("准备单独升级 server 至 `%s`，原 runner 继续执行已领取的任务。", r.View.ReleaseID)
+	}
 	if len(c.RunnerConfigurations) > 0 {
 		notice = "正在向目标主机准备配置更新；准备完成后进入短维护窗口。"
 	}
@@ -482,10 +503,16 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						break
 					}
 					r.ServerPreviousHash = c.Observation.BinarySHA256
-					for _, h := range r.Hosts {
+					for i := range r.Hosts {
+						h := &r.Hosts[i]
 						ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 						if err != nil {
 							return Outcome{}, err
+						}
+						// A retained host stays owner-controlled throughout preparation.
+						// Capture its actual mode when acquiring the restart fence.
+						if r.View.ServerOnly && ctl.UpgradeID != r.View.UpgradeID {
+							h.MaintenanceHandoff = ctl.Mode == protocol.RunnerMaintenance
 						}
 						runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), h.HostID)
 						if err != nil {
@@ -752,7 +779,11 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 	r.View.Status = "completed"
 	r.View.Phase = "completed"
 	r.Deadline = 0
-	return upgradeNotice(ctx, x, tx, *r, "upgrade_completed", "", fmt.Sprintf("升级 `%s` 已完成，所有执行主机恢复服务。", r.View.ReleaseID))
+	message := fmt.Sprintf("升级 `%s` 已完成，所有执行主机恢复服务。", r.View.ReleaseID)
+	if r.View.ServerOnly {
+		message = fmt.Sprintf("server 升级至 `%s` 已完成，runner 保留原版本。", r.View.ReleaseID)
+	}
+	return upgradeNotice(ctx, x, tx, *r, "upgrade_completed", "", message)
 }
 
 func awaitingServerReconnect(r store.UpgradeRow, h store.UpgradeHost, ctl protocol.RunnerControl, rt protocol.RunnerRuntime) bool {
@@ -848,6 +879,9 @@ func restoreUnchangedHosts(ctx context.Context, x *Exec, tx *store.Tx, r store.U
 		}
 		ctl.Revision++
 		ctl.Mode = protocol.RunnerNormal
+		if r.View.ServerOnly && h.MaintenanceHandoff {
+			ctl.Mode = protocol.RunnerMaintenance
+		}
 		ctl.Upgrade = nil
 		ctl.UpgradeID = ""
 		ctl.ReleaseID = ""

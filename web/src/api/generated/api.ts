@@ -3070,6 +3070,7 @@ export interface UpgradeView {
   reason?: string;
   release_id: string;
   revision: number;
+  server_only?: boolean;
   server_updater?: UpdaterSelfObservation;
   source_commit?: string;
   status: string;

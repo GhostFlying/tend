@@ -29,7 +29,7 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	if upgradeBatchExpired(r, x.Now.UnixMilli()) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "upgrade batch deadline expired; reconcile or cancel this batch")
 	}
-	if b.InstanceID != x.Principal.Subject || !bindingMatches(r, b) || r.View.Status != "running" || r.View.Phase != "runners" || b.ProcessInstanceID == "" {
+	if r.View.ServerOnly || b.InstanceID != x.Principal.Subject || !bindingMatches(r, b) || r.View.Status != "running" || r.View.Phase != "runners" || b.ProcessInstanceID == "" {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "runner upgrade is not authorized")
 	}
 	for i := range r.Hosts {
@@ -367,7 +367,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "runner supervisor handoff must reconcile before cancellation")
 			}
 			if ctl.UpgradeID != r.View.UpgradeID {
-				if ctl.UpgradeID == "" {
+				if ctl.UpgradeID == "" && !r.View.ServerOnly {
 					// A prior attention transition may already have released this
 					// unchanged host while its local supervisor remains staged.
 					ctl.Revision++
@@ -386,11 +386,16 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			}
 			ctl.Revision++
 			ctl.Mode = protocol.RunnerNormal
+			if r.View.ServerOnly && h.MaintenanceHandoff {
+				ctl.Mode = protocol.RunnerMaintenance
+			}
 			ctl.Upgrade = nil
 			ctl.Authorization = nil
 			ctl.UpgradeID = ""
 			ctl.ReleaseID = ""
-			ctl.CancelledUpgradeID = r.View.UpgradeID
+			if !r.View.ServerOnly {
+				ctl.CancelledUpgradeID = r.View.UpgradeID
+			}
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, x.Now.UnixMilli()); err != nil {
 				return Outcome{}, err
 			}

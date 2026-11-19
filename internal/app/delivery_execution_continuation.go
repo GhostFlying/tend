@@ -53,7 +53,7 @@ func archiveTaskDeliveryForContinuation(ctx context.Context, x *Exec, tx *store.
 			failure := protocol.Errorf(protocol.CodeUnknownOutcome, "reconcile the original controlled upgrade before continuing the Task")
 			if batch.View.Status == "cancelled" {
 				pending := []string{}
-				for _, host := range batch.Hosts {
+				for _, host := range batch.InstallationHosts() {
 					if !host.CancellationConfirmed {
 						pending = append(pending, host.HostID)
 					}
@@ -91,7 +91,7 @@ func settledDeliveryUpgrade(batch store.UpgradeRow) bool {
 	if batch.View.Status != "cancelled" || !batch.ServerCancellationConfirmed {
 		return false
 	}
-	for _, host := range batch.Hosts {
+	for _, host := range batch.InstallationHosts() {
 		if !host.CancellationConfirmed {
 			return false
 		}

@@ -53,6 +53,14 @@ type UpgradeRow struct {
 	Hosts                       []UpgradeHost            `json:"hosts"`
 }
 
+// InstallationHosts excludes hosts participating only in server restart coverage.
+func (r UpgradeRow) InstallationHosts() []UpgradeHost {
+	if r.View.ServerOnly {
+		return nil
+	}
+	return r.Hosts
+}
+
 type UpgradeHost struct {
 	MaintenanceHandoff    bool                          `json:"maintenance_handoff,omitempty"`
 	CancellationConfirmed bool                          `json:"cancellation_confirmed,omitempty"`

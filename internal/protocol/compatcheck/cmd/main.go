@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	if err := compatcheck.Check(".", protocol.CurrentRunnerProtocol); err != nil {
+	if err := compatcheck.Check(".", protocol.CurrentRunnerProtocol, protocol.MinimumRunnerProtocol); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

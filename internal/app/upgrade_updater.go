@@ -74,7 +74,7 @@ func runnerSelfMatches(r store.UpgradeRow, h store.UpgradeHost, rt protocol.Runn
 }
 
 func hostNeedsSelfUpdate(r store.UpgradeRow, h store.UpgradeHost) bool {
-	return needsSelfUpdate(r) && (!r.SupervisorThenRunners || h.Configuration != nil)
+	return !r.View.ServerOnly && needsSelfUpdate(r) && (!r.SupervisorThenRunners || h.Configuration != nil)
 }
 
 func selfUpdateRejected(r store.UpgradeRow, instance string, o *protocol.UpdaterSelfObservation) bool {

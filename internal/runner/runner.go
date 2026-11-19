@@ -608,9 +608,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	held := make([]protocol.HeldRun, 0, len(runs))
 	byID := map[string]journal.Run{}
 	for _, run := range runs {
-		if run.Assignment.Manager != nil {
+		if run.Assignment.Manager != nil && protocol.RunnerProtocolSupported(run.Assignment.Protocol) {
 			r.controlMu.Lock()
-			r.runnerProtocol = protocol.CurrentRunnerProtocol
+			r.runnerProtocol = max(r.runnerProtocol, run.Assignment.Protocol)
 			r.controlMu.Unlock()
 		}
 		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: r.observed(run)})
@@ -621,6 +621,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 		return err
 	}
 	runtime.Updater = nil
+	runtime.ProtocolMax = protocol.CurrentRunnerProtocol
 	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
 	if err != nil {
 		return err
