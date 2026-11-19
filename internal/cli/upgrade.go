@@ -45,6 +45,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "upgrade "+action)
 	dry := fs.Bool("dry-run", false, "print the local control request without executing it")
 	configPlan := fs.String("runner-configurations", "", "private JSON metadata for a single runner configuration maintenance")
+	forceMaintenance := fs.Bool("force-maintenance", false, "drain incompatible runner instances until their fixed deadline, then stop those exact processes")
 	serverOnly := fs.Bool("server-only", false, "install the server while keeping compatible runners on their current binaries")
 	park := fs.Bool("park-idle-managers", false, "park idle managers through confirmed native close; preserve logical responsibility for a new run after this window")
 	bundle := fs.String("release", "", "local format 2 complete release directory (default: latest official main fleet)")
@@ -69,6 +70,9 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	})
 	if emptyFlag != "" {
 		return usagef("upgrade --%s must not be explicitly empty", emptyFlag)
+	}
+	if *forceMaintenance && (action != "start" || *configPlan != "" || *deliveryTask != "") {
+		return usagef("upgrade --force-maintenance requires start without runner configurations or delivery task")
 	}
 	if *serverOnly && (*configPlan != "" || action != "start") {
 		return usagef("upgrade --server-only requires start without runner-configurations")
@@ -130,7 +134,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 				return usagef("configuration metadata must select exactly one host")
 			}
 		}
-		input = protocol.UpgradeStartRequest{ServerOnly: *serverOnly, ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: selected, RunnerConfigurations: configurations}
+		input = protocol.UpgradeStartRequest{ForceMaintenance: *forceMaintenance, ServerOnly: *serverOnly, ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: selected, RunnerConfigurations: configurations}
 	case "status":
 		if *bundle != "" || *upgradeID != "" || *requestID != "" || *revision != 0 {
 			return usagef("upgrade status takes no release, ID or revision")
@@ -171,6 +175,18 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	fmt.Fprintf(e.Stdout, "Upgrade %s: %s / %s (revision %d)\n", view.UpgradeID, view.Status, view.Phase, view.Revision)
 	if view.ServerOnly {
 		fmt.Fprintln(e.Stdout, "Scope: server only")
+	}
+	if view.ForceMaintenance {
+		fmt.Fprintln(e.Stdout, "Forced maintenance of incompatible runners")
+		for _, stop := range view.WindowStops {
+			fmt.Fprintf(e.Stdout, "  %s/%s: protocol %d, pid %d, %s, drain until %s\n", stop.HostID, stop.Process.LaunchID, stop.Protocol, stop.Process.PID, stop.State, time.UnixMilli(stop.DrainUntil).UTC().Format(time.RFC3339))
+			for _, run := range stop.Runs {
+				fmt.Fprintf(e.Stdout, "    run %s lease %s\n", run.RunID, run.LeaseID)
+			}
+			for _, run := range stop.UnknownRuns {
+				fmt.Fprintf(e.Stdout, "    unknown result: %s\n", run)
+			}
+		}
 	}
 	if view.Reason != "" {
 		fmt.Fprintln(e.Stdout, view.Reason)

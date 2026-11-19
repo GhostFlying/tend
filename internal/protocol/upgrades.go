@@ -17,6 +17,21 @@ type UpgradeHostView struct {
 	Reason          string                  `json:"reason,omitempty"`
 }
 
+// UpgradeWindowStop pins an incompatible writer and the leases it owned at
+// admission. Its deadline and process identity survive retries and lost replies.
+type UpgradeWindowStop struct {
+	HostID          string           `json:"host_id"`
+	JournalID       string           `json:"journal_id"`
+	Process         RecoveryIdentity `json:"process"`
+	Protocol        int64            `json:"protocol"`
+	Generation      int64            `json:"generation"`
+	SourceUpgradeID string           `json:"source_upgrade_id,omitempty"`
+	DrainUntil      int64            `json:"drain_until_ms"`
+	Runs            []LeaseRef       `json:"runs"`
+	State           string           `json:"state"`
+	UnknownRuns     []string         `json:"unknown_runs,omitempty"`
+}
+
 type UpgradeManagerParkView struct {
 	TaskID string `json:"task_id"`
 	RunID  string `json:"run_id"`
@@ -26,6 +41,8 @@ type UpgradeManagerParkView struct {
 
 // UpgradeView remains visible after completion until the next batch starts.
 type UpgradeView struct {
+	ForceMaintenance      bool                     `json:"force_maintenance,omitempty"`
+	WindowStops           []UpgradeWindowStop      `json:"window_stops,omitempty"`
 	ServerOnly            bool                     `json:"server_only,omitempty"`
 	ServerUpdater         *UpdaterSelfObservation  `json:"server_updater,omitempty"`
 	OverallDeadlineMillis int64                    `json:"overall_deadline_millis,omitempty"`

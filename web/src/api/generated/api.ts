@@ -3066,6 +3066,7 @@ export interface MaintenanceLaunchExitProof {
  */
 export interface UpgradeView {
   created_at: string;
+  force_maintenance?: boolean;
   hosts: UpgradeHostView[] | null;
   manager_parks?: UpgradeManagerParkView[];
   overall_deadline_millis?: number;
@@ -3079,6 +3080,7 @@ export interface UpgradeView {
   status: string;
   updated_at: string;
   upgrade_id: string;
+  window_stops?: UpgradeWindowStop[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3106,6 +3108,30 @@ export interface UpgradeManagerParkView {
   reason?: string;
   run_id: string;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "UpgradeWindowStop".
+ */
+export interface UpgradeWindowStop {
+  drain_until_ms: number;
+  generation: number;
+  host_id: string;
+  journal_id: string;
+  process: RecoveryIdentity;
+  protocol: number;
+  runs: LeaseRef[] | null;
+  source_upgrade_id?: string;
+  state: string;
+  unknown_runs?: string[];
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "LeaseRef".
+ */
+export interface LeaseRef {
+  lease_id: string;
+  run_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

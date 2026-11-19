@@ -12238,6 +12238,23 @@
       "title": "IssueWorkStatus",
       "type": "string"
     },
+    "LeaseRef": {
+      "additionalProperties": false,
+      "properties": {
+        "lease_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "lease_id"
+      ],
+      "title": "LeaseRef",
+      "type": "object"
+    },
     "LedgerEvent": {
       "additionalProperties": false,
       "properties": {
@@ -21508,6 +21525,9 @@
           "format": "date-time",
           "type": "string"
         },
+        "force_maintenance": {
+          "type": "boolean"
+        },
         "hosts": {
           "anyOf": [
             {
@@ -21560,6 +21580,12 @@
         },
         "upgrade_id": {
           "type": "string"
+        },
+        "window_stops": {
+          "items": {
+            "$ref": "#/definitions/UpgradeWindowStop"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -21573,6 +21599,66 @@
         "hosts"
       ],
       "title": "UpgradeView",
+      "type": "object"
+    },
+    "UpgradeWindowStop": {
+      "additionalProperties": false,
+      "properties": {
+        "drain_until_ms": {
+          "type": "integer"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "journal_id": {
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/definitions/RecoveryIdentity"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "runs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/LeaseRef"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_upgrade_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "unknown_runs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "host_id",
+        "journal_id",
+        "process",
+        "protocol",
+        "generation",
+        "drain_until_ms",
+        "runs",
+        "state"
+      ],
+      "title": "UpgradeWindowStop",
       "type": "object"
     },
     "UsageAttribution": {

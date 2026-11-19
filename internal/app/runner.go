@@ -1552,7 +1552,7 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 			}); err != nil {
 				return err
 			}
-			queued, err := a.recordManagerLeaseProblem(ctx, tx, run, l.LeaseID, time.UnixMilli(now))
+			queued, err := recordManagerLeaseProblem(ctx, tx, a.ids, run, l.LeaseID, time.UnixMilli(now))
 			if err != nil {
 				return err
 			}

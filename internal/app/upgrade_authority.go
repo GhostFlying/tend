@@ -319,7 +319,7 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if r.ServerGrantDeadline > 0 && r.View.Phase != "runners" && r.ServerGrantDeadline <= x.Now.UnixMilli() {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "expired server authorization requires reconciliation")
 		}
-		if r.ServerProcess == "" && r.View.Phase != "runners" && r.View.Phase != "server_updater" {
+		if r.ServerProcess == "" && r.View.Phase != windowMaintenance && r.View.Phase != "runners" && r.View.Phase != "server_updater" {
 			r.View.Phase = "server_draining"
 		}
 		if r.View.Phase == "runners" {
@@ -347,7 +347,15 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		r.View.Status = "running"
 		r.View.Reason = ""
 		r.Deadline = capUpgradeDeadline(&r, x.Now.UnixMilli()+r.DrainMillis)
+		if r.View.Phase == windowMaintenance {
+			r.Deadline = r.View.OverallDeadlineMillis
+		}
 	case "cancel":
+		for _, stop := range r.View.WindowStops {
+			if stop.State == "stop_authorized" {
+				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "wait for the original stop receipt from %s/%s before cancellation", stop.HostID, stop.Process.LaunchID)
+			}
+		}
 		if r.ServerUpdaterAuthorized && !selfUpdateMatches(r, r.ServerHash, r.View.ServerUpdater) && !selfUpdateRejected(r, r.ServerInstance, r.View.ServerUpdater) {
 			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "server supervisor handoff must reconcile before cancellation")
 		}
