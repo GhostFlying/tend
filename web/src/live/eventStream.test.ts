@@ -182,7 +182,7 @@ describe("EventStream", () => {
     expect(lost).toHaveLength(1);
   });
 
-  test("a refused cursor drops it and reconnects at once without one", async () => {
+  test.each([400, 409])("a refused cursor (%s) reconnects at once without one", async (status) => {
     stream.start();
     await tick();
     tend.last.push(start(9));
@@ -190,7 +190,10 @@ describe("EventStream", () => {
     tend.refuse = (after) =>
       after === undefined
         ? undefined
-        : new ApiError(400, { code: "invalid_request", message: "after 9 is past the ledger" });
+        : new ApiError(status, {
+            code: status === 409 ? "stale_revision" : "invalid_request",
+            message: "refresh cursor refused",
+          });
     tend.last.end();
     const t0 = Date.now();
     await tick(1_000);
@@ -207,6 +210,30 @@ describe("EventStream", () => {
       [9, true],
       [2, true],
     ]);
+  });
+
+  test("a rate-limited reconnect retries the same cursor after backoff", async () => {
+    stream.start();
+    await tick();
+    tend.last.push(start(5) + ledger(6));
+    await tick();
+    tend.last.end();
+    tend.refuse = () => new ApiError(429, { code: "internal", message: "rate limited" });
+    await tick(1_000);
+    expect(tend.attempts.map((a) => a.after)).toEqual([undefined, 6]);
+
+    tend.refuse = () => undefined;
+    await tick(1_999);
+    expect(tend.opens).toHaveLength(1);
+    await tick(1);
+    expect(tend.last.after).toBe(6);
+    tend.last.push(start(6) + ledger(6) + ledger(7));
+    await tick();
+    expect(starts).toEqual([
+      [5, true],
+      [6, false],
+    ]);
+    expect(events).toEqual([6, 7]);
   });
 
   test("the pause grows while tend cannot be reached and resets after a start", async () => {

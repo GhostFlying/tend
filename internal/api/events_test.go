@@ -50,7 +50,11 @@ func openStream(t *testing.T, base, token, query string) *stream {
 			switch {
 			case line == "":
 				if cur != (sse{}) {
-					s.events <- cur
+					select {
+					case s.events <- cur:
+					case <-ctx.Done():
+						return
+					}
 				}
 				cur = sse{}
 			case strings.HasPrefix(line, ":"):

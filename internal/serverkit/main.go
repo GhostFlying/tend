@@ -603,6 +603,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 		ownerConfig.ConversationHandoff = front.HandoffStatus
 	}
 	owner := api.New(a, s, whois, secret, ownerConfig, log)
+	defer owner.EndStreams()
 	if cfg.MainAgent != nil {
 		ts.SetOwnerTools(owner.MainOwnerTools())
 	}
