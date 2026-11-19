@@ -28,20 +28,30 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessAt(t, filepath.Join(t.TempDir(), "tend.db"))
+}
+
+func newHarnessAt(t *testing.T, path string) *harness {
+	t.Helper()
 	clock := testkit.NewClock()
-	s, err := openAppFixture(context.Background(), filepath.Join(t.TempDir(), "tend.db"), clock.Now)
+	s, err := openAppFixture(context.Background(), path, clock.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
-	ids := testkit.NewIDGen(clock, 42)
-	h := &harness{t: t, app: New(s, ids, clock.Now, WithExecutorShuffle(func(int, func(int, int)) {})), store: s, clock: clock, ids: ids}
+	h := harnessWithStore(t, s, clock)
 	h.syncConfig(testConfig())
 	h.seeded = map[string]int{}
 	for _, table := range []string{"events", "inbox", "outbox", "tasks", "plan_actions", "runs"} {
 		h.seeded[table] = h.count(table)
 	}
 	return h
+}
+
+func harnessWithStore(t *testing.T, s *store.Store, clock *testkit.Clock) *harness {
+	t.Helper()
+	t.Cleanup(func() { s.Close() })
+	ids := testkit.NewIDGen(clock, 42)
+	return &harness{t: t, app: New(s, ids, clock.Now, WithExecutorShuffle(func(int, func(int, int)) {})), store: s, clock: clock, ids: ids}
 }
 
 func testConfig() ConfigPayload {
