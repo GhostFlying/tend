@@ -74,7 +74,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 		case journal.PhaseStarted:
 			err = r.work(ctx, runCtx, as, a)
 		case journal.PhasePausing:
-			recovered, err := r.recoverPauseStop(ctx, a, run)
+			recovered, err := r.recoverPauseStop(ctx, runCtx, a, run)
 			if recovered {
 				continue
 			}

@@ -619,7 +619,7 @@ func TestBlockedPauseObservationAllowsAuthoritativeStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := r.recoverPauseStop(ctx, &active{desired: protocol.DesiredPaused}, run)
+	recovered, err := r.recoverPauseStop(ctx, ctx, &active{desired: protocol.DesiredPaused}, run)
 	pending, ok := errors.AsType[*pauseStopPending](err)
 	if recovered || !ok || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)

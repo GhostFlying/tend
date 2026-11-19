@@ -369,22 +369,39 @@ func TestAcceptanceEvidenceNoCandidateDoesNotRequireCreatedResultDirectory(t *te
 }
 
 func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *testing.T) {
-	testAcceptanceEvidenceCanceledUpload(t, false)
+	testAcceptanceEvidenceCanceledUpload(t, "")
 }
 
 func TestPauseRetriesTruncatedAcceptanceUpload(t *testing.T) {
-	testAcceptanceEvidenceCanceledUpload(t, true)
+	testAcceptanceEvidenceCanceledUpload(t, "truncated")
 }
 
-func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
+func TestPauseRetriesTimedOutAcceptanceUpload(t *testing.T) {
+	testAcceptanceEvidenceCanceledUpload(t, "timeout")
+}
+
+func TestPauseStopCancelsRecoveredAcceptanceUpload(t *testing.T) {
+	for _, source := range []string{"heartbeat", "hello"} {
+		t.Run(source, func(t *testing.T) {
+			testAcceptanceEvidenceCanceledUpload(t, source)
+		})
+	}
+}
+
+func testAcceptanceEvidenceCanceledUpload(t *testing.T, scenario string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+	paused := scenario != ""
+	stopping := scenario == "heartbeat" || scenario == "hello"
+	ctx, cancel := context.WithTimeout(t.Context(), 16*time.Second)
 	defer cancel()
 	originalCtx, cancelOriginal := context.WithCancel(ctx)
 	defer cancelOriginal()
 	var confirmed atomic.Bool
 	var as protocol.Assignment
-	var requestIDs []string
+	uploads := make(chan string, 4)
+	var uploadCount atomic.Int32
+	heartbeatSent, sendStop := make(chan struct{}), make(chan struct{})
+	uploadWaiting, uploadCanceled := make(chan struct{}), make(chan struct{})
 	finals := make(chan protocol.Envelope, 2)
 	pause := &protocol.PauseHandoff{RequestID: "pause", IssueID: "issue", IssueRevision: 2, ControlRevision: 1}
 	e, cfg := acceptanceEvidenceFixture(t, func(w http.ResponseWriter, q *http.Request) {
@@ -395,12 +412,31 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
 				return
 			}
 			reply := protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}
-			if env.Operation == protocol.OpRunnerHello {
-				reply.Result, _ = json.Marshal(protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{
-					{RunID: as.RunID, Verdict: protocol.VerdictContinue, Desired: protocol.DesiredPaused, PauseHandoff: pause},
+			switch env.Operation {
+			case protocol.OpRunnerHello:
+				verdict := protocol.RunVerdict{RunID: as.RunID, Verdict: protocol.VerdictContinue, Desired: protocol.DesiredPaused, PauseHandoff: pause}
+				select {
+				case <-sendStop:
+					verdict = protocol.RunVerdict{RunID: as.RunID, Verdict: protocol.VerdictStop, Desired: protocol.DesiredStopped, PauseHandoff: pause}
+				default:
+				}
+				reply.Result, _ = json.Marshal(protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{verdict}})
+			case protocol.OpRunnerHeartbeat:
+				var hb protocol.HeartbeatPayload
+				if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
+					hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+					t.Error("previous executor heartbeat lost the original lease", hb.Runs, err)
+				}
+				close(heartbeatSent)
+				select {
+				case <-sendStop:
+				case <-q.Context().Done():
+					return
+				}
+				reply.Result, _ = json.Marshal(protocol.HeartbeatResult{LeaseTTLMillis: 60000, Runs: []protocol.LeaseState{
+					{RunID: as.RunID, Desired: protocol.DesiredStopped, PauseHandoff: pause},
 				}})
-			}
-			if env.Operation == protocol.OpAcceptancesSubmit || env.Operation == protocol.OpRunsYieldPause {
+			case protocol.OpAcceptancesSubmit, protocol.OpRunsYieldPause, protocol.OpRunsRelease:
 				finals <- env
 			}
 			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &reply})
@@ -410,14 +446,23 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
 		if string(body) != "original selected bytes" {
 			t.Error("upload replaced the original bytes")
 		}
-		requestIDs = append(requestIDs, q.URL.Query().Get("request_id"))
+		n := uploadCount.Add(1)
+		uploads <- q.URL.Query().Get("request_id")
 		if !confirmed.Load() {
 			cancelOriginal()
 			return
 		}
-		if paused && len(requestIDs) == 2 {
-			_, _ = w.Write([]byte("{"))
-			return
+		if n == 2 {
+			switch scenario {
+			case "truncated":
+				_, _ = w.Write([]byte("{"))
+				return
+			case "timeout", "heartbeat", "hello":
+				close(uploadWaiting)
+				<-q.Context().Done()
+				close(uploadCanceled)
+				return
+			}
 		}
 		replyEvidence(w, "check.log", body)
 	})
@@ -486,7 +531,7 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
 		t.Fatal(err)
 	}
 	before, err := j.Run(ctx, as.RunID)
-	if err != nil || before.Attempts != 1 || before.Phase != journal.PhaseStarted || len(before.WorkerResult) != 0 || len(requestIDs) == 0 {
+	if err != nil || before.Attempts != 1 || before.Phase != journal.PhaseStarted || len(before.WorkerResult) != 0 || len(uploads) != 1 {
 		t.Fatal("upload cancellation changed original pending facts", before, err)
 	}
 	if err := os.WriteFile(filepath.Join(e.prepared.Dir, "check.log"), []byte("changed source"), 0o600); err != nil {
@@ -500,9 +545,24 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
 		t.Fatal(err)
 	}
 	cfg.Journal, cfg.Now = j, clock.Now
+	if scenario == "timeout" {
+		cfg.RequestTimeout = 500 * time.Millisecond
+	}
 	confirmed.Store(true)
 	workers.inner = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: filepath.Join(t.TempDir(), "forbidden-native")}})
 	r := New(cfg)
+	defer func() {
+		cancel()
+		r.wg.Wait()
+	}()
+	waitSignal := func(ch <-chan struct{}, reason string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(3 * time.Second):
+			t.Fatal(reason)
+		}
+	}
 	if paused {
 		if err := j.RecordPause(ctx, as.RunID, pause); err != nil {
 			t.Fatal(err)
@@ -513,32 +573,84 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
 		if parked, err := j.TryBeginPauseStop(ctx, as.RunID, before.Attempts); err != nil || !parked {
 			t.Fatal("could not park the original stopped acceptance", parked, err)
 		}
+		if scenario == "heartbeat" {
+			// The heartbeat was in flight before the pause observer took
+			// over. A pause-only executor does not normally emit one.
+			r.active[as.RunID] = &active{as: as}
+			heartbeatDone := make(chan struct{})
+			go func() {
+				defer close(heartbeatDone)
+				r.heartbeat(ctx)
+			}()
+			defer func() {
+				cancel()
+				<-heartbeatDone
+			}()
+			waitSignal(heartbeatSent, "original heartbeat was not sent")
+			r.mu.Lock()
+			delete(r.active, as.RunID)
+			r.mu.Unlock()
+		}
 		if err := r.hello(ctx); err != nil {
 			t.Fatal(err)
+		}
+		if stopping {
+			waitSignal(uploadWaiting, "pause executor did not reconcile the original upload")
+			close(sendStop)
+			if scenario == "hello" {
+				if err := r.hello(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if scenario != "truncated" {
+			waitSignal(uploadCanceled, "paused upload did not cancel")
 		}
 		r.wg.Wait()
 		saved, err := j.Run(ctx, as.RunID)
-		if err != nil || saved.Phase != journal.PhasePausing || !saved.StoppedConfirmed ||
-			r.nextPauseRetry() == nil || len(requestIDs) != 2 || len(finals) != 0 {
-			t.Fatal("truncated response lost retry or changed the original acceptance", saved, requestIDs, err)
+		if err != nil || saved.Phase != journal.PhasePausing || !saved.StoppedConfirmed || len(saved.WorkerResult) != 0 ||
+			saved.Assignment.LeaseID != as.LeaseID || len(uploads) != 2 || len(finals) != 0 {
+			t.Fatal("interrupted upload changed the original acceptance", saved, len(uploads), err)
 		}
-		clock.Advance(time.Minute)
-		r.consumePauseRetries()
+		if stopping {
+			waitSignal(r.reconcile, "Stop did not wake reconciliation after cancellation")
+		} else {
+			if r.nextPauseRetry() == nil {
+				t.Fatal("unconfirmed response lost retry")
+			}
+			clock.Advance(time.Minute)
+			r.consumePauseRetries()
+		}
 		if err := r.hello(ctx); err != nil {
 			t.Fatal(err)
 		}
 		r.wg.Wait()
-		if len(requestIDs) != 3 {
-			t.Fatal("recovery did not reconcile the original upload", requestIDs)
+		if stopping {
+			if len(finals) != 1 || len(uploads) != 2 {
+				t.Fatal("Stop did not settle once without another upload", len(finals), len(uploads))
+			}
+			env := <-finals
+			if env.Operation != protocol.OpRunsRelease || env.Target.ID != as.RunID {
+				t.Fatal("Stop did not release the original Run", env)
+			}
+		} else if len(uploads) != 3 {
+			t.Fatal("recovery did not reconcile the original upload", len(uploads))
 		}
 	} else if err := r.work(ctx, ctx, as, a); err != nil {
 		t.Fatal("original canceled upload could not reconcile after real Close", err)
 	}
 	result, err := j.Run(ctx, as.RunID)
-	if err != nil || result.Attempts != 1 || result.Phase != journal.PhaseWorkerDone || !result.StoppedConfirmed || workers.starts != 1 || spaces.prepares != 1 {
+	if stopping {
+		if !errors.Is(err, journal.ErrNotFound) {
+			t.Fatal("Stop did not settle the original journal", result, err)
+		}
+	} else if err != nil || result.Attempts != 1 || result.Phase != journal.PhaseWorkerDone || !result.StoppedConfirmed {
 		t.Fatal("canceled original restarted native work", result, err)
 	}
-	if paused {
+	if workers.starts != 1 || spaces.prepares != 1 {
+		t.Fatal("reconciliation started or prepared a replacement worker", workers.starts, spaces.prepares)
+	}
+	if paused && !stopping {
 		if err := r.hello(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -554,9 +666,10 @@ func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
 			t.Fatal("pause recovery changed the original verdict or sealed evidence", env, verdict)
 		}
 	}
-	for _, id := range requestIDs {
-		if id == "" || id != requestIDs[0] {
-			t.Fatal("cancellation lost the original upload request identity", requestIDs)
+	originalRequest := <-uploads
+	for len(uploads) > 0 {
+		if id := <-uploads; id == "" || id != originalRequest {
+			t.Fatal("cancellation lost the original upload request identity", originalRequest, id)
 		}
 	}
 	if after, _ := os.ReadFile(closePath); !bytes.Equal(after, closeBytes) {
