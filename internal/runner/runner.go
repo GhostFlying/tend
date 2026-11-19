@@ -866,8 +866,14 @@ func (r *Runner) observed(ctx context.Context, run journal.Run) (protocol.RunObs
 	if run.Fenced {
 		return protocol.RunInterrupted, nil
 	}
-	if run.Phase == journal.PhaseWorkerDone && run.StoppedConfirmed && needsWorkspaceCollection(run.Assignment) {
-		return protocol.RunWaiting, nil
+	if run.Phase == journal.PhaseWorkerDone && run.StoppedConfirmed && run.Assignment.PauseHandoffs {
+		pause, err := r.cfg.Journal.Pause(ctx, run.Assignment.RunID)
+		if err != nil {
+			return "", err
+		}
+		if pause != nil {
+			return protocol.RunWaiting, nil
+		}
 	}
 	return protocol.RunRunning, nil
 }

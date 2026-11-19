@@ -80,7 +80,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			}
 			return err
 		case journal.PhaseWorkerDone:
-			if needsWorkspaceCollection(as) && !r.stopRequested(runCtx, a) && r.deferPauseCollection(a) {
+			if !r.stopRequested(runCtx, a) && r.deferPauseCompletion(a) {
 				return nil
 			}
 			r.flushFinalEvents(ctx, as)
@@ -770,10 +770,9 @@ func needsWorkspaceCollection(as protocol.Assignment) bool {
 	return as.Role == protocol.RoleImplement && (requiresDelivery(as, "commit") || len(as.Workspace.Mounts) > 0)
 }
 
-// The result stays in worker_done while a fresh Hello establishes the
-// original lease for collection. The executor for the read-only pause
-// phase must exit first so a renewal cannot reuse its receipt-only flags.
-func (r *Runner) deferPauseCollection(a *active) bool {
+// The saved result needs fresh control before finalization. Exit the
+// read-only pause executor so Hello can restore ordinary control tracking.
+func (r *Runner) deferPauseCompletion(a *active) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if a.pauseOnly {
