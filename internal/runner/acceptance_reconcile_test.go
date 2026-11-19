@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -368,15 +369,41 @@ func TestAcceptanceEvidenceNoCandidateDoesNotRequireCreatedResultDirectory(t *te
 }
 
 func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *testing.T) {
+	testAcceptanceEvidenceCanceledUpload(t, false)
+}
+
+func TestPauseRetriesTruncatedAcceptanceUpload(t *testing.T) {
+	testAcceptanceEvidenceCanceledUpload(t, true)
+}
+
+func testAcceptanceEvidenceCanceledUpload(t *testing.T, paused bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 	defer cancel()
 	originalCtx, cancelOriginal := context.WithCancel(ctx)
 	defer cancelOriginal()
-	confirmed := false
+	var confirmed atomic.Bool
+	var as protocol.Assignment
 	var requestIDs []string
+	finals := make(chan protocol.Envelope, 2)
+	pause := &protocol.PauseHandoff{RequestID: "pause", IssueID: "issue", IssueRevision: 2, ControlRevision: 1}
 	e, cfg := acceptanceEvidenceFixture(t, func(w http.ResponseWriter, q *http.Request) {
 		if q.URL.Query().Get("name") == "" {
-			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
+			var env protocol.Envelope
+			if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
+				t.Error(err)
+				return
+			}
+			reply := protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}
+			if env.Operation == protocol.OpRunnerHello {
+				reply.Result, _ = json.Marshal(protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{
+					{RunID: as.RunID, Verdict: protocol.VerdictContinue, Desired: protocol.DesiredPaused, PauseHandoff: pause},
+				}})
+			}
+			if env.Operation == protocol.OpAcceptancesSubmit || env.Operation == protocol.OpRunsYieldPause {
+				finals <- env
+			}
+			_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &reply})
 			return
 		}
 		body, _ := io.ReadAll(q.Body)
@@ -384,8 +411,12 @@ func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *tes
 			t.Error("upload replaced the original bytes")
 		}
 		requestIDs = append(requestIDs, q.URL.Query().Get("request_id"))
-		if !confirmed {
+		if !confirmed.Load() {
 			cancelOriginal()
+			return
+		}
+		if paused && len(requestIDs) == 2 {
+			_, _ = w.Write([]byte("{"))
 			return
 		}
 		replyEvidence(w, "check.log", body)
@@ -400,8 +431,11 @@ func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = j.Close() })
-	as := e.as
+	as = e.as
 	as.Desired = protocol.DesiredRun
+	as.Protocol = protocol.CurrentRunnerProtocol
+	as.PauseHandoffs = paused
+	as.LeaseID = "original-lease"
 	if err := j.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}
@@ -465,15 +499,60 @@ func TestAcceptanceEvidenceCanceledUploadKeepsActualOwnedCloseForRecovery(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Journal = j
-	confirmed = true
+	cfg.Journal, cfg.Now = j, clock.Now
+	confirmed.Store(true)
 	workers.inner = traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: filepath.Join(t.TempDir(), "forbidden-native")}})
-	if err := New(cfg).work(ctx, ctx, as, a); err != nil {
+	r := New(cfg)
+	if paused {
+		if err := j.RecordPause(ctx, as.RunID, pause); err != nil {
+			t.Fatal(err)
+		}
+		if err := j.ConfirmStopped(ctx, as.RunID); err != nil {
+			t.Fatal(err)
+		}
+		if parked, err := j.TryBeginPauseStop(ctx, as.RunID, before.Attempts); err != nil || !parked {
+			t.Fatal("could not park the original stopped acceptance", parked, err)
+		}
+		if err := r.hello(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r.wg.Wait()
+		saved, err := j.Run(ctx, as.RunID)
+		if err != nil || saved.Phase != journal.PhasePausing || !saved.StoppedConfirmed ||
+			r.nextPauseRetry() == nil || len(requestIDs) != 2 || len(finals) != 0 {
+			t.Fatal("truncated response lost retry or changed the original acceptance", saved, requestIDs, err)
+		}
+		clock.Advance(time.Minute)
+		r.consumePauseRetries()
+		if err := r.hello(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r.wg.Wait()
+		if len(requestIDs) != 3 {
+			t.Fatal("recovery did not reconcile the original upload", requestIDs)
+		}
+	} else if err := r.work(ctx, ctx, as, a); err != nil {
 		t.Fatal("original canceled upload could not reconcile after real Close", err)
 	}
 	result, err := j.Run(ctx, as.RunID)
 	if err != nil || result.Attempts != 1 || result.Phase != journal.PhaseWorkerDone || !result.StoppedConfirmed || workers.starts != 1 || spaces.prepares != 1 {
 		t.Fatal("canceled original restarted native work", result, err)
+	}
+	if paused {
+		if err := r.hello(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r.wg.Wait()
+		if len(finals) != 1 {
+			t.Fatal("expected one original verdict after upload recovery", len(finals))
+		}
+		env := <-finals
+		var verdict protocol.VerdictPayload
+		if env.Operation != protocol.OpAcceptancesSubmit || env.Target.ID != as.RunID ||
+			json.Unmarshal(env.Payload, &verdict) != nil || verdict.Verdict != protocol.VerdictBlocked ||
+			len(verdict.Files) != 1 || verdict.Files[0].SHA256 != evidenceDigest([]byte("original selected bytes")) {
+			t.Fatal("pause recovery changed the original verdict or sealed evidence", env, verdict)
+		}
 	}
 	for _, id := range requestIDs {
 		if id == "" || id != requestIDs[0] {

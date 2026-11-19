@@ -92,27 +92,21 @@ func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepa
 	req.ContentLength = st.Size()
 	resp, err := r.c.http.Do(req)
 	if err != nil {
-		return protocol.ArtifactFile{}, err
+		return protocol.ArtifactFile{}, &transportError{err}
 	}
 	defer resp.Body.Close()
-	var out rpcResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	op, err := decodeRPCResponse(resp)
+	if err != nil {
 		return protocol.ArtifactFile{}, err
 	}
-	if out.Error != nil {
-		return protocol.ArtifactFile{}, out.Error
+	if op.Error != nil {
+		return protocol.ArtifactFile{}, op.Error
 	}
-	if out.Operation == nil {
-		return protocol.ArtifactFile{}, errors.New("missing upload result")
-	}
-	if out.Operation.Error != nil {
-		return protocol.ArtifactFile{}, out.Operation.Error
-	}
-	if out.Operation.Status != protocol.OpSucceeded {
+	if op.Status != protocol.OpSucceeded {
 		return protocol.ArtifactFile{}, errors.New("file upload is not confirmed; reconcile the original request")
 	}
 	var file protocol.ArtifactFile
-	if err := json.Unmarshal(out.Operation.Result, &file); err != nil {
+	if err := json.Unmarshal(op.Result, &file); err != nil {
 		return file, err
 	}
 	if file.FileID == "" || file.Name != name || file.SHA256 != digest || file.Size != st.Size() {
