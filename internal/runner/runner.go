@@ -159,7 +159,7 @@ type active struct {
 	// stopAttempt stops the current worker attempt, for example to pause
 	// the run; nil while no worker runs.
 	stopAttempt context.CancelCauseFunc
-	// stopCollection interrupts final workspace writes on owner takeover.
+	// stopCollection interrupts result recovery or final workspace writes on owner takeover.
 	stopCollection context.CancelCauseFunc
 	// reporting marks a run that only sends its final report. It no
 	// longer writes to the workspace, so it is not fenced.
