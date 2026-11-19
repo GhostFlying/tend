@@ -87,6 +87,9 @@ def exercise(root, old, first, third, seed):
     token = secrets.token_hex(32)
     env = dict(PATH=os.defpath, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), TEND_CONFIG_DIR=str(root / "config"),
                TEND_COMPAT_BARRIER=str(root), TEND_SERVER_SECRET=secrets.token_hex(32), TEND_HOST_TOKEN=token)
+    # The local bootstrap queries the disposable user's existing service manager.
+    for key in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+        env[key] = os.environ[key]
     rc = root / "host"
     rc.mkdir(mode=0o700)
     runner_config = rc / "runner.json"
