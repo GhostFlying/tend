@@ -35,15 +35,24 @@ type DeliveryObservationFactRow struct {
 	PreviousErrorKind             string
 	ConflictEnded                 bool
 	RetiredCandidate              *protocol.DeliveryObservation
+	reviewCandidate               reviewCandidateIdentity
+}
+
+// Preserve the last known head/base across partial or failed observations.
+type reviewCandidateIdentity struct {
+	HeadSHA  string `json:"head_sha"`
+	BaseSHA  string `json:"base_sha"`
+	Revision int64  `json:"revision"`
 }
 
 // The transition belongs to ChangedRevision and survives later checked-only
 // observations so every bounded notification batch sees the same predecessor.
 type deliveryObservationFactJSON struct {
 	protocol.DeliveryObservation
-	PreviousState     string `json:"previous_state,omitempty"`
-	PreviousErrorKind string `json:"previous_error_kind,omitempty"`
-	ConflictEnded     bool   `json:"conflict_ended,omitempty"`
+	PreviousState     string                   `json:"previous_state,omitempty"`
+	PreviousErrorKind string                   `json:"previous_error_kind,omitempty"`
+	ConflictEnded     bool                     `json:"conflict_ended,omitempty"`
+	ReviewCandidate   *reviewCandidateIdentity `json:"review_candidate,omitempty"`
 }
 
 type deliveryObservationQuery struct {
@@ -127,6 +136,12 @@ func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.Iss
 	fact.Observation = stored.DeliveryObservation
 	fact.PreviousState, fact.PreviousErrorKind = stored.PreviousState, stored.PreviousErrorKind
 	fact.ConflictEnded = stored.ConflictEnded
+	if stored.ReviewCandidate != nil {
+		fact.reviewCandidate = *stored.ReviewCandidate
+	} else if fact.Observation.HeadSHA != "" || fact.Observation.BaseSHA != "" {
+		// Existing provider rows acquire a stable revision until the next change.
+		fact.reviewCandidate = reviewCandidateIdentity{fact.Observation.HeadSHA, fact.Observation.BaseSHA, fact.FactRevision}
+	}
 	fact.Observation.WorkItemID, fact.Observation.DeliveryID, fact.Observation.Generation = "", "", 0
 	fact.Observation.RefreshPending = pending
 	if fact.Observation.State == "" {
@@ -173,6 +188,15 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		PreviousState: prior.PreviousState, PreviousErrorKind: prior.PreviousErrorKind,
 		ConflictEnded: prior.ConflictEnded,
 	}
+	fact.reviewCandidate = prior.reviewCandidate
+	if observation.HeadSHA != "" && observation.HeadSHA != fact.reviewCandidate.HeadSHA {
+		fact.reviewCandidate.HeadSHA = observation.HeadSHA
+		fact.reviewCandidate.Revision = fact.FactRevision
+	}
+	if observation.BaseSHA != "" && observation.BaseSHA != fact.reviewCandidate.BaseSHA {
+		fact.reviewCandidate.BaseSHA = observation.BaseSHA
+		fact.reviewCandidate.Revision = fact.FactRevision
+	}
 	observation.PreviousHeadSHA = previous.PreviousHeadSHA
 	if previous.HeadSHA != observation.HeadSHA {
 		observation.PreviousHeadSHA = ""
@@ -203,7 +227,7 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		fact.PreviousState, fact.PreviousErrorKind = previous.State, previous.ErrorKind
 	}
 	fact.Observation = observation
-	raw, err := json.Marshal(deliveryObservationFactJSON{DeliveryObservation: observation, PreviousState: fact.PreviousState, PreviousErrorKind: fact.PreviousErrorKind, ConflictEnded: fact.ConflictEnded})
+	raw, err := json.Marshal(deliveryObservationFactJSON{DeliveryObservation: observation, PreviousState: fact.PreviousState, PreviousErrorKind: fact.PreviousErrorKind, ConflictEnded: fact.ConflictEnded, ReviewCandidate: &fact.reviewCandidate})
 	if err != nil {
 		return fact, err
 	}

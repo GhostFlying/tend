@@ -38,6 +38,7 @@ func SharedDeliveryReviewForTarget(ctx context.Context, q Querier, ref protocol.
 }
 
 func (t *Tx) PutSharedDeliveryReview(ctx context.Context, r protocol.SharedDeliveryReview, request string) error {
+	r.CurrentCandidate = nil
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -168,16 +169,11 @@ func SharedDeliveryReviewCurrent(ctx context.Context, q Querier, r *protocol.Sha
 func SharedDeliveryReviewChanged(ctx context.Context, q Querier, r *protocol.SharedDeliveryReview) (bool, error) {
 	r.Valid = false
 	r.InvalidReason = "formal review has not passed"
-	if r.Status != "passed" {
-		return false, nil
-	}
-	digest, err := SharedReviewRequirements(ctx, q, *r)
-	if err != nil {
+	if err := projectSharedReviewCandidate(ctx, q, r); err != nil {
 		return false, err
 	}
-	if digest != r.RequirementsDigest && digest != r.AssessedRequirementsDigest {
-		r.InvalidReason = "linked delivery requirements changed"
-		return true, nil
+	if r.Status != "passed" {
+		return false, nil
 	}
 	profileCurrent, err := sharedReviewExecutionCurrent(ctx, q, *r)
 	if err != nil {
@@ -202,23 +198,51 @@ func SharedDeliveryReviewChanged(ctx context.Context, q Querier, r *protocol.Sha
 		}
 	}
 	if len(r.Links) > 0 {
-		fact, err := GetDeliveryObservationFact(ctx, q, protocol.IssueDelivery{Provider: r.Provider, Repository: r.Repository, Number: r.Number})
-		if err != nil {
-			return false, err
-		}
-		observation := fact.Observation
-		if observation.ErrorKind != "" || observation.RefreshPending || observation.HeadSHA == "" || observation.BaseSHA == "" {
+		candidate := r.CurrentCandidate
+		if candidate == nil {
 			r.InvalidReason = "current provider candidate is unavailable; await the bounded provider observation"
 			return false, nil
 		}
-		if observation.HeadSHA != r.HeadSHA || observation.BaseSHA != r.BaseSHA {
-			r.InvalidReason = "provider candidate changed"
-			return true, nil
+		assessment := r.Assessment
+		assessed := assessment != nil && assessment.Candidate == *candidate && len(r.Rounds) > 0 &&
+			assessment.Round == r.Rounds[len(r.Rounds)-1].Number
+		if !assessed {
+			if candidate.HeadSHA != r.HeadSHA || candidate.BaseSHA != r.BaseSHA {
+				r.InvalidReason = "provider candidate changed"
+				return true, nil
+			}
+			if candidate.RequirementsDigest != r.RequirementsDigest && candidate.RequirementsDigest != r.AssessedRequirementsDigest {
+				r.InvalidReason = "linked delivery requirements changed"
+				return true, nil
+			}
 		}
 	}
 	r.Valid = true
 	r.InvalidReason = ""
 	return false, nil
+}
+
+func projectSharedReviewCandidate(ctx context.Context, q Querier, r *protocol.SharedDeliveryReview) error {
+	r.CurrentCandidate = nil
+	if len(r.Links) == 0 {
+		return nil
+	}
+	fact, err := GetDeliveryObservationFact(ctx, q, protocol.IssueDelivery{Provider: r.Provider, Repository: r.Repository, Number: r.Number})
+	if err != nil {
+		return err
+	}
+	o := fact.Observation
+	if o.ErrorKind != "" || o.RefreshPending || o.HeadSHA == "" || o.BaseSHA == "" {
+		return nil
+	}
+	digest, err := SharedReviewRequirements(ctx, q, *r)
+	if err != nil {
+		return err
+	}
+	r.CurrentCandidate = &protocol.SharedReviewCandidate{
+		HeadSHA: o.HeadSHA, BaseSHA: o.BaseSHA, RequirementsDigest: digest, Revision: fact.reviewCandidate.Revision,
+	}
+	return nil
 }
 
 func RequireSharedDeliveryReview(ctx context.Context, q Querier, i protocol.Issue, c protocol.IssueDeliveryCandidate) error {
@@ -243,7 +267,7 @@ func RequireSharedDeliveryReview(ctx context.Context, q Querier, i protocol.Issu
 	if err := SharedDeliveryReviewCurrent(ctx, q, &r); err != nil {
 		return err
 	}
-	if !r.Valid || r.HeadSHA != c.HeadSHA || r.BaseSHA != c.BaseSHA {
+	if !r.CoversCandidate(c.HeadSHA, c.BaseSHA) {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "shared PR review is incomplete or no longer matches this candidate")
 	}
 	return nil

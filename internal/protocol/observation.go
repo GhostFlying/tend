@@ -127,6 +127,8 @@ type ObservedDeliveryProvider struct {
 // ObservedDeliveryReview omits unrelated Issue links and finding bodies. Its
 // optional round preserves the actual formal result's immutable provenance.
 type ObservedDeliveryReview struct {
+	CurrentCandidate           *SharedReviewCandidate       `json:"current_candidate,omitempty"`
+	Assessment                 *SharedReviewAssessment      `json:"assessment,omitempty"`
 	SuggestedRounds            int                          `json:"suggested_rounds,omitempty"`
 	RoundLimit                 int                          `json:"round_limit,omitempty"`
 	RoundsUsed                 int                          `json:"rounds_used,omitempty"`

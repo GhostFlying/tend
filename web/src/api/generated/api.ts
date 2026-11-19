@@ -5206,7 +5206,9 @@ export interface DeliverySettlementAuthority {
  */
 export interface ObservedDeliveryReview {
   assessed_requirements_digest?: string;
+  assessment?: SharedReviewAssessment;
   base_sha: string;
+  current_candidate?: SharedReviewCandidate;
   head_sha: string;
   invalid_reason?: string;
   number?: number;
@@ -5223,6 +5225,29 @@ export interface ObservedDeliveryReview {
   status: string;
   suggested_rounds?: number;
   valid: boolean;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewAssessment".
+ */
+export interface SharedReviewAssessment {
+  assessor: IssueAssignee;
+  assignment_epoch: number;
+  candidate: SharedReviewCandidate;
+  issue_id: string;
+  reason: string;
+  review_revision: number;
+  round: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewCandidate".
+ */
+export interface SharedReviewCandidate {
+  base_sha: string;
+  head_sha: string;
+  requirements_digest: string;
+  revision: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5542,9 +5567,11 @@ export interface SharedReviewReportReference {
  */
 export interface SharedDeliveryReview {
   assessed_requirements_digest?: string;
+  assessment?: SharedReviewAssessment;
   assessment_reason?: string;
   base_sha: string;
   budget_authorizations?: SharedReviewBudgetAuthorization[];
+  current_candidate?: SharedReviewCandidate;
   dispositions?: SharedReviewDisposition[];
   escalation_issue_id?: string;
   head_sha: string;
@@ -7728,6 +7755,7 @@ export interface UpdateSharedDeliveryReviewPayload {
   dispositions?: SharedReviewDisposition[];
   expected_assignment_epoch: number;
   expected_base_sha?: string;
+  expected_candidate_revision?: number;
   expected_head_sha?: string;
   expected_requirements_digest?: string;
   expected_review_revision?: number;
