@@ -43,55 +43,71 @@ func (r *Runner) deferOwnedPauseStop(ctx context.Context, a *active, run journal
 	return &pauseStopPending{stopErr}
 }
 
-func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Run) error {
+func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Run) (bool, error) {
 	as := run.Assignment
 	desired := r.pauseStopDesired(a)
 	if desired == protocol.DesiredHeld {
-		return &pauseStopPending{errHeld}
+		return false, &pauseStopPending{errHeld}
 	}
 	if desired != protocol.DesiredPaused || !as.PauseHandoffs || as.Role == protocol.RoleIssueManager ||
 		run.Attempts == 0 || assignmentWorker(as, r.cfg.Worker) != protocol.WorkerAppServer {
-		return &pauseStopPending{errors.New("runner: original app-server pause authority is unavailable")}
+		return false, &pauseStopPending{errors.New("runner: original app-server pause authority is unavailable")}
 	}
 	if err := r.checkRunWorker(run); err != nil {
-		return &pauseStopPending{err}
+		return false, &pauseStopPending{err}
 	}
 	if !run.StoppedConfirmed {
 		execution, err := r.resolveExecution(ctx, as)
 		if err != nil {
-			return &pauseStopPending{err}
+			return false, &pauseStopPending{err}
 		}
 		observer, ok := execution.Workers.(harness.OwnedWorkerStopObserver)
 		if !ok {
-			return &pauseStopPending{errors.New("runner: original app-server stop observer is unavailable")}
+			return false, &pauseStopPending{errors.New("runner: original app-server stop observer is unavailable")}
 		}
 		if err := r.withOwnedAppServer(ctx, as, run, execution, observer.ObserveOwnedWorkerStop); err != nil {
-			return &pauseStopPending{err}
+			return false, &pauseStopPending{err}
 		}
 		if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
-			return &pauseStopPending{err}
+			return false, &pauseStopPending{err}
 		}
 	}
 	switch r.pauseStopDesired(a) {
 	case protocol.DesiredPaused:
 	case protocol.DesiredHeld:
-		return &pauseStopPending{errHeld}
+		return false, &pauseStopPending{errHeld}
 	default:
-		return nil
+		return false, nil
 	}
 	if run.Held {
 		// A fresh DesiredPaused after owner control is the explicit handback.
 		// Clear the local hold only once the original process is proven stopped.
 		if err := r.cfg.Journal.SetHeld(ctx, as.RunID, false); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if wait, err := r.cfg.Journal.ExternalWait(ctx, as.RunID); err != nil {
-		return err
+		return false, err
 	} else if wait != nil {
-		return r.finishExternalWait(ctx, as)
+		return false, r.finishExternalWait(ctx, as)
 	}
-	return r.finishPause(ctx, as, a)
+	// A native result may already be durable even though closure previously
+	// prevented it from entering worker_done. Settle it before yielding.
+	recovered, err := r.reconcileAcceptanceVerdict(ctx, as)
+	if !recovered {
+		recovered, err = r.reconcileImplementationResult(ctx, as)
+	}
+	if recovered && err == nil {
+		return true, nil
+	}
+	if err != nil {
+		if _, failedTurn := errors.AsType[*stepError](err); !failedTurn {
+			return false, &pauseStopPending{err}
+		}
+		// A submitted file from a known failed native turn is not a
+		// completed result. The physical pause can still be acknowledged.
+	}
+	return false, r.finishPause(ctx, as, a)
 }
 
 func (r *Runner) pauseStopDesired(a *active) protocol.RunDesired {

@@ -22,7 +22,11 @@ func (r *Runner) reconcileAcceptanceVerdict(ctx context.Context, as protocol.Ass
 	if err != nil {
 		return true, err
 	}
-	if run.Phase != journal.PhaseStarted || run.Attempts == 0 || run.Thread == "" || run.Held {
+	stoppedForPause := run.Phase == journal.PhasePausing && run.StoppedConfirmed
+	if stoppedForPause && run.Held {
+		return true, errHeld
+	}
+	if (run.Phase != journal.PhaseStarted && !stoppedForPause) || run.Attempts == 0 || run.Thread == "" || run.Held {
 		return false, nil
 	}
 	if err := r.checkRunWorker(run); err != nil {

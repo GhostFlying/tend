@@ -74,7 +74,11 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 		case journal.PhaseStarted:
 			err = r.work(ctx, runCtx, as, a)
 		case journal.PhasePausing:
-			return r.recoverPauseStop(ctx, a, run)
+			recovered, err := r.recoverPauseStop(ctx, a, run)
+			if recovered {
+				continue
+			}
+			return err
 		case journal.PhaseWorkerDone:
 			r.flushFinalEvents(ctx, as)
 			if r.stopRequested(runCtx, a) {
@@ -192,6 +196,15 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 					if latest.Phase == journal.PhaseWorkerDone && len(latest.WorkerResult) > 0 {
 						continue
 					}
+				}
+				if latest.Phase == journal.PhaseStarted && latest.Attempts > 0 &&
+					assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
+					if _, err := r.cfg.Journal.TryBeginPauseStop(ctx, as.RunID, latest.Attempts); err != nil {
+						return err
+					}
+					// Reread the phase so a concurrently saved result or hold
+					// retains its own settlement path.
+					continue
 				}
 				return r.finishPause(ctx, as, a)
 			}

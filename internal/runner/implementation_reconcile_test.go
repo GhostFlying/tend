@@ -27,11 +27,21 @@ type implementationReconcileWorkers struct {
 	result      harness.WorkerResult
 	recoveryErr error
 	seen        []harness.WorkerSpec
+	onRecover   func() error
+	observed    []harness.WorkerSpec
 }
 
 func (w *implementationReconcileWorkers) ReconcileImplementationResult(_ context.Context, spec harness.WorkerSpec) (harness.WorkerResult, error) {
 	w.seen = append(w.seen, spec)
+	if w.onRecover != nil {
+		return w.result, w.onRecover()
+	}
 	return w.result, w.recoveryErr
+}
+
+func (w *implementationReconcileWorkers) ObserveOwnedWorkerStop(_ context.Context, spec harness.WorkerSpec) error {
+	w.observed = append(w.observed, spec)
+	return nil
 }
 
 type implementationReconcileSpaces struct {
@@ -64,7 +74,7 @@ func implementationReconcileFixture(t *testing.T) (*Runner, protocol.Assignment,
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = j.Close() })
-	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "original-result-run", LeaseID: "original-result-lease", TaskID: "original-result-task", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, Spec: json.RawMessage(`{"deliverables":["report","files"]}`)}
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "original-result-run", LeaseID: "original-result-lease", TaskID: "original-result-task", Role: protocol.RoleImplement, Desired: protocol.DesiredRun, PauseHandoffs: true, Spec: json.RawMessage(`{"deliverables":["report","files"]}`)}
 	if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerAppServer); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +134,91 @@ func TestImplementationResultRecoverySubmitsOriginalFilesWithoutNativeWork(t *te
 	var artifact protocol.ArtifactPayload
 	if len(final) != 1 || final[0].Operation != protocol.OpRunsSubmitArtifact || json.Unmarshal(final[0].Payload, &artifact) != nil || !reflect.DeepEqual(&artifact, workers.result.Result) || len(artifact.Files) != 13 || workers.starts != 0 || len(workers.seen) != 1 || spaces.finishes != 1 {
 		t.Fatal("recovery failed to submit exactly the original artifact once", final, artifact, workers, spaces)
+	}
+}
+
+func TestPauseSettlesOriginalImplementationResultAfterPhysicalStop(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		park bool
+		err  error
+	}{
+		{name: "stop verified immediately"},
+		{name: "stop verified after parking", park: true},
+		{name: "original result cannot be verified", park: true, err: harness.ErrRetainedResumePending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			r, as, workers, spaces, _ := implementationReconcileFixture(t)
+			a := &active{as: as, desired: protocol.DesiredRun}
+			handoff := &protocol.PauseHandoff{RequestID: "original-pause", IssueID: "issue", IssueRevision: 2, ControlRevision: 1}
+			pause := func() {
+				t.Helper()
+				if err := r.cfg.Journal.RecordPause(ctx, as.RunID, handoff); err != nil {
+					t.Fatal(err)
+				}
+				r.applyDesired(ctx, a, protocol.DesiredPaused, r.cfg.Now())
+			}
+			final := make(chan protocol.Envelope, 4)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+				var env protocol.Envelope
+				if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
+					t.Error(err)
+				}
+				saved, err := r.cfg.Journal.Run(q.Context(), as.RunID)
+				if err != nil || !saved.StoppedConfirmed || saved.Attempts != 1 || saved.Thread != "original-result-thread" {
+					t.Error("sent a result without the original physical stop proof", saved, err)
+				}
+				select {
+				case final <- env:
+				default:
+					t.Error("unexpected repeated business request", env)
+				}
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
+			}))
+			defer srv.Close()
+			r.c.base, r.c.http = srv.URL, srv.Client()
+
+			workers.recoveryErr = tc.err
+			if tc.park {
+				workers.onRecover = func() error {
+					pause()
+					return harness.ErrOwnedWorkerUnconfirmed
+				}
+				err := r.execute(ctx, ctx, as.RunID, a)
+				saved, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+				if _, ok := errors.AsType[*pauseStopPending](err); !ok || readErr != nil ||
+					saved.Phase != journal.PhasePausing || saved.StoppedConfirmed || len(final) != 0 {
+					t.Fatal("failed closure did not park the original attempt", saved, err, readErr)
+				}
+				workers.onRecover = nil
+			} else {
+				pause()
+			}
+
+			err := r.execute(ctx, ctx, as.RunID, a)
+			if workers.starts != 0 || spaces.mutations != 0 || tc.park && len(workers.observed) != 1 {
+				t.Fatal("pause recovery did new work or skipped observation", workers, spaces)
+			}
+			saved, readErr := r.cfg.Journal.Run(ctx, as.RunID)
+			if tc.err != nil {
+				if _, ok := errors.AsType[*pauseStopPending](err); !ok || !errors.Is(err, tc.err) || readErr != nil ||
+					saved.Phase != journal.PhasePausing || saved.Assignment.RunID != as.RunID || saved.Assignment.LeaseID != as.LeaseID ||
+					!saved.StoppedConfirmed || len(final) != 0 || saved.Thread != "original-result-thread" || saved.Attempts != 1 {
+					t.Fatal("uncertain result or original stopped attempt was lost", saved, err, readErr)
+				}
+				return
+			}
+			if err != nil || !errors.Is(readErr, journal.ErrNotFound) || spaces.finishes != 1 || len(final) != 1 {
+				t.Fatal("expected exactly one final request after closure", saved, err, readErr, len(final))
+			}
+			env := <-final
+			var artifact protocol.ArtifactPayload
+			if env.Operation != protocol.OpRunsSubmitArtifact || env.Target.ID != as.RunID ||
+				json.Unmarshal(env.Payload, &artifact) != nil || !reflect.DeepEqual(&artifact, workers.result.Result) {
+				t.Fatal("physical pause discarded or changed the original result", env, artifact)
+			}
+		})
 	}
 }
 

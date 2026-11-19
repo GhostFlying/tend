@@ -1,8 +1,9 @@
 package protocol
 
 const (
-	CapabilityPauseHandoffs = "run-pause-handoff-v1"
-	OpRunsYieldPause        = "runs.yield_pause"
+	CapabilityPauseHandoffs        = "run-pause-handoff-v1"
+	CapabilityPauseReceiptDeferral = "run-pause-receipt-deferral-v1"
+	OpRunsYieldPause               = "runs.yield_pause"
 )
 
 // PauseHandoff identifies the original Issue instruction and frozen Task control.

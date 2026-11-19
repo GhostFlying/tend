@@ -61,10 +61,16 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if expected == nil || *expected != p.PauseHandoff {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run has no matching negotiated pause handoff")
 	}
-	// Serialize the first stop receipt with takeover. The committed receipt
-	// path above remains available after its lease has already been released.
+	// Runners that negotiated deferral can hold the original receipt until
+	// handback. Older runners still submit the physical fact under v1.
 	if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredHeld {
-		return Outcome{}, commandDiagnostic(protocol.CodeInvalidTransition, "pause receipt awaits the owner's handback", map[string]any{"desired_state": protocol.DesiredHeld})
+		deferReceipt, err := pauseReceiptDeferralSupported(ctx, tx.Q(), rc.run)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if deferReceipt {
+			return Outcome{}, commandDiagnostic(protocol.CodeInvalidTransition, "pause receipt awaits the owner's handback", map[string]any{"desired_state": protocol.DesiredHeld})
+		}
 	}
 	if err := endRun(ctx, x, tx, rc.run, protocol.RunFinished); err != nil {
 		return Outcome{}, err
@@ -114,6 +120,25 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 		return Outcome{}, err
 	}
 	return Outcome{Result: map[string]any{"run_id": rc.run.RunID, "observed": protocol.RunFinished, "pause_request_id": p.RequestID}, Events: []Event{{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.pause_yielded", Body: map[string]any{"pause": p.PauseHandoff}}}}, nil
+}
+
+// The source journal may still belong to a draining runner after a rolling
+// upgrade. Capabilities from a different journal cannot change this receipt.
+func pauseReceiptDeferralSupported(ctx context.Context, q store.Querier, run store.RunRow) (bool, error) {
+	journal, err := store.RunJournal(ctx, q, run.RunID)
+	if err != nil {
+		return false, err
+	}
+	var supported bool
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM host_runtime h, json_each(h.runtime_json, '$.capabilities') c
+		WHERE h.host_id=? AND COALESCE(json_extract(h.runtime_json, '$.journal_id'),'')=? AND c.value=?
+		UNION ALL
+		SELECT 1 FROM draining_runners d, json_each(d.runtime_json, '$.capabilities') c
+		WHERE d.host_id=? AND d.journal_id=? AND c.value=?
+	)`, run.HostID, journal, protocol.CapabilityPauseReceiptDeferral,
+		run.HostID, journal, protocol.CapabilityPauseReceiptDeferral).Scan(&supported)
+	return supported, err
 }
 
 func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx, end func(int)) error {
