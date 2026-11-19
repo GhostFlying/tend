@@ -229,3 +229,24 @@ func TestUpdaterBridgeDeniedAndUncertainRequestsAcrossNewControlAndRestart(t *te
 		})
 	}
 }
+
+func TestRollingCandidateObservesItsOwnInstallationWithoutResubmission(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.InitialMaintenance = true
+	r.cfg.JournalID = "next"
+	r.cfg.UpgradeID = "batch"
+	r.cfg.UpdaterSocket = "unused"
+	r.cfg.UpdaterControlSocket = "unused"
+	r.cfg.UpdaterBundleDir = t.TempDir()
+	control := protocol.RunnerControl{Revision: 2, Mode: protocol.RunnerMaintenance, UpgradeID: "batch", Upgrade: &protocol.RunnerUpgradeTarget{Rolling: true}}
+	if err := r.applyControl(t.Context(), &control, r.cfg.Now(), true); err != nil {
+		t.Fatal(err)
+	}
+	r.confirmedRuntime = protocol.RunnerRuntime{Mode: protocol.RunnerReady, UpgradeID: "batch", AppliedControlRevision: 2}
+	r.resourceReconciled = true
+	r.maybeUpgrade(t.Context())
+	r.wg.Wait()
+	if r.upgradePhase != "" || r.upgradeError != "" {
+		t.Fatal("candidate resubmitted its own install", r.upgradePhase, r.upgradeError)
+	}
+}
