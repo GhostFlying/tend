@@ -217,6 +217,8 @@ def exercise(root, old, first, third, seed, next_window=None):
             assert lease(tasks[0]) == [(original_lease[0], original_lease[1], "lapsed")]
             assert rows("select observed_state from runs where run_id=?", (original_lease[0],)) == [("unknown",)]
             assert lease(tasks[1]) == [middle_lease] and read_state()["process"] == current["process"]
+            eventually("unrelated queued work obtains the released physical slot", lambda: lease(tasks[3]), [])
+            assert rows("select journal_id from runner_journal_runs where run_id=?", (lease(tasks[3])[0][0],)) == [(current["current_journal"],)]
             finish = finish[1:]
         for task, gate, pid in finish:
             with os.fdopen(os.open(gate, os.O_WRONLY | os.O_NONBLOCK), "w") as f:

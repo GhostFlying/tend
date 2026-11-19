@@ -223,7 +223,7 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 					t.Fatal("original work lost", stopped, h.run(as.RunID), h.lease(as.RunID))
 				}
 				if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
-					ok, err := previouslyStoppedRun(ctx, tx.Q(), host, as.RunID)
+					ok, err := store.WindowRunStopped(ctx, tx.Q(), host, as.RunID)
 					if !ok {
 						t.Error("original retirement proof lost")
 					}
@@ -233,6 +233,12 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				}
 			} else if len(stopped.UnknownRuns) > 0 || h.run(as.RunID).ObservedState != protocol.RunFinished {
 				t.Fatal("completed result overwritten", stopped, h.run(as.RunID))
+			}
+			if scenario == "deadline" {
+				h.createTask(owner, createTaskPayload{Title: "available physical slot", Spec: testSpec})
+				if next, ok := h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: &current}, nil)); !ok || next.RunID == as.RunID {
+					t.Fatal("compatible runner could not use the released physical slot", next)
+				}
 			}
 			v := upgradeTick(h, ServerObservation{})
 			if scenario == "receipt_after_expiry" {
@@ -260,11 +266,19 @@ func TestManagerParkingAfterConfirmedWindowStop(t *testing.T) {
 	// still park an unknown manager whose lease was not covered by that receipt.
 	now := h.clock.Now()
 	batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "park", ReleaseID: "next", CreatedAt: now}, Hosts: []store.UpgradeHost{{HostID: "linux-1"}}}
-	for _, lease := range []string{"different-lease", assignment.LeaseID} {
+	for _, proved := range []bool{false, true} {
 		err := h.store.Write(ctx, func(tx *store.Tx) error {
-			history := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "older", ReleaseID: "old", CreatedAt: now.Add(-time.Hour), Status: "completed", ForceMaintenance: true, WindowStops: []protocol.UpgradeWindowStop{{State: "stopped", HostID: "linux-1", Runs: []protocol.LeaseRef{{RunID: assignment.RunID, LeaseID: lease}}, UnknownRuns: []string{assignment.RunID}}}}}
-			if err := tx.PutUpgrade(ctx, history); err != nil {
-				return err
+			if proved {
+				source := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "handoff", ReleaseID: "old", CreatedAt: now, Status: "completed"}}
+				if err := tx.PutUpgrade(ctx, source); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json,confirmed_at) VALUES('linux-1','old','handoff','','original-stop','{}',?)`, now.UnixMilli()); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO runner_window_released_leases VALUES(?,?,'original-stop')`, assignment.RunID, assignment.LeaseID); err != nil {
+					return err
+				}
 			}
 			batch.ManagerParks = nil
 			return captureUpgradeManagers(ctx, &Exec{Now: now, IDs: h.ids}, tx, &batch)
@@ -272,8 +286,8 @@ func TestManagerParkingAfterConfirmedWindowStop(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if (len(batch.ManagerParks) == 0) != (lease == assignment.LeaseID) {
-			t.Fatal(lease, batch.ManagerParks)
+		if (len(batch.ManagerParks) == 0) != proved {
+			t.Fatal(proved, batch.ManagerParks)
 		}
 	}
 }

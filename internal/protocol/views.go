@@ -187,6 +187,8 @@ type DrainingRunnerView struct {
 
 // HostView is an active execution host.
 type HostView struct {
+	// OccupiedSlots is present when open business Runs outlive their physical executor.
+	OccupiedSlots     *int64               `json:"occupied_slots,omitempty"`
 	InstanceID        string               `json:"instance_id,omitempty"`
 	DrainingRunners   []DrainingRunnerView `json:"draining_runners,omitempty"`
 	ControlRevision   int64                `json:"control_revision,omitempty"`

@@ -43,7 +43,7 @@ func (a *App) preflightClaim(ctx context.Context, p protocol.Principal, env *pro
 		if host.WorkspaceProtocol != payload.WorkspaceProtocol {
 			return nil // A changed report must invalidate baselines in the writer.
 		}
-		busy, err := store.CountOpenRuns(ctx, q, p.Subject)
+		_, busy, err := store.HostSlotCounts(ctx, q, p.Subject)
 		if err != nil {
 			return err
 		}

@@ -121,7 +121,7 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 		return facts, err
 	}
 	for _, h := range hosts {
-		busy, err := store.CountOpenRuns(ctx, q, h.HostID)
+		_, busy, err := store.HostSlotCounts(ctx, q, h.HostID)
 		if err != nil {
 			return facts, err
 		}

@@ -394,7 +394,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			return Outcome{}, err
 		}
 	}
-	busy, err := store.CountOpenRuns(ctx, q, host.HostID)
+	_, busy, err := store.HostSlotCounts(ctx, q, host.HostID)
 	if err != nil {
 		return Outcome{}, err
 	}

@@ -68,7 +68,7 @@ func RunJournal(ctx context.Context, q Querier, run string) (string, error) {
 func CountJournalRuns(ctx context.Context, q Querier, host, journal string) (int64, error) {
 	var count int64
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs r WHERE r.host_id=? AND r.observed_state IN `+openRunStates+
-		` AND COALESCE((SELECT journal_id FROM runner_journal_runs j WHERE j.run_id=r.run_id),'')=?`, host, journal).Scan(&count)
+		` AND COALESCE((SELECT journal_id FROM runner_journal_runs j WHERE j.run_id=r.run_id),'')=? AND NOT (`+confirmedWindowExit+`)`, host, journal).Scan(&count)
 	return count, err
 }
 

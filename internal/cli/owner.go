@@ -249,7 +249,11 @@ func (o owner) status(ctx context.Context, project string) error {
 			if h.Worker != "" {
 				worker = ", " + string(h.Worker)
 			}
-			fmt.Fprintf(out, "  %s (%s/%s%s): %d of %d slots busy\n", h.HostID, h.OS, h.Arch, worker, h.OpenRuns, h.Slots)
+			occupied := h.OpenRuns
+			if h.OccupiedSlots != nil {
+				occupied = *h.OccupiedSlots
+			}
+			fmt.Fprintf(out, "  %s (%s/%s%s): %d of %d slots busy\n", h.HostID, h.OS, h.Arch, worker, occupied, h.Slots)
 		}
 	}
 	return nil

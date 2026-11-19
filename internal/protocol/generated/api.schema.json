@@ -7980,6 +7980,9 @@
         "maintenance": {
           "$ref": "#/definitions/HostMaintenanceView"
         },
+        "occupied_slots": {
+          "type": "integer"
+        },
         "online": {
           "type": "boolean"
         },

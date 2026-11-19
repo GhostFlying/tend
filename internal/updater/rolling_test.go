@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -113,6 +114,24 @@ func TestRollingRetirementResumesLostAckWithoutStoppingAnotherProcess(t *testing
 	}
 }
 
+// The fake signal immediately follows its final grant check.
+func (p *fakeProcess) StopIf(ctx context.Context, id Identity, timeout time.Duration, check func() error) error {
+	if err := check(); err != nil {
+		return err
+	}
+	return p.Stop(ctx, id, timeout)
+}
+
+type slowPinnedProcess struct {
+	*fakeProcess
+	pin func()
+}
+
+func (p slowPinnedProcess) StopIf(ctx context.Context, id Identity, timeout time.Duration, check func() error) error {
+	p.pin()
+	return p.fakeProcess.StopIf(ctx, id, timeout, check)
+}
+
 type windowStopAuthority struct {
 	*retirementAuthority
 	afterGrant func()
@@ -144,12 +163,16 @@ func (a *windowStopAuthority) Retire(ctx context.Context, journal string, in pro
 }
 
 func TestRollingWindowGrantUsesOriginalDispatchCutoff(t *testing.T) {
-	for _, delayed := range []bool{true, false} {
-		t.Run(map[bool]string{true: "response_after_deadline", false: "dispatch_before_deadline"}[delayed], func(t *testing.T) {
+	for _, stage := range []string{"response_after_deadline", "pin_after_deadline", "dispatch_before_deadline"} {
+		t.Run(stage, func(t *testing.T) {
 			h := newHarness(t)
 			id := Identity{PID: 11, StartTicks: 101, LaunchID: "first", SHA256: h.s.state.Process.SHA256}
 			auth := &windowStopAuthority{retirementAuthority: &retirementAuthority{fakeAuthority: h.a, ready: map[string]bool{id.LaunchID: true}, confirmed: map[string]int{}}}
-			if delayed {
+			if stage == "pin_after_deadline" {
+				h.opts.Process = slowPinnedProcess{h.p, func() { h.boot += 501 }}
+				h.s.opts.Process = h.opts.Process
+			}
+			if stage == "response_after_deadline" {
 				auth.afterGrant = func() { h.boot += 501 }
 			}
 			h.opts.RollingAuthority = auth
@@ -164,7 +187,7 @@ func TestRollingWindowGrantUsesOriginalDispatchCutoff(t *testing.T) {
 			if err := h.s.save(); err != nil {
 				t.Fatal(err)
 			}
-			if !delayed {
+			if stage == "dispatch_before_deadline" {
 				h.step(t)
 				if h.p.stops != 1 || len(h.s.Status().DrainingProcesses) != 0 || auth.confirmed[id.LaunchID] != 1 {
 					t.Fatal(h.s.Status())
