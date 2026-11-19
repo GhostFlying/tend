@@ -118,10 +118,13 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				if err != nil {
 					return Outcome{}, err
 				}
-				if current.Valid {
+				// An applicable assessment can be superseded by a real review.
+				// Keep the existing deduplication for a directly applicable round.
+				if current.Valid && (current.Assessment == nil ||
+					(current.CoversCandidate(r.HeadSHA, r.BaseSHA) && current.CurrentCandidate.RequirementsDigest == r.RequirementsDigest)) {
 					return Outcome{Result: current}, nil
 				}
-				if !changed {
+				if !current.Valid && !changed {
 					return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "await the current bounded server observation; temporary provider uncertainty retains the actual passed review and its original budget")
 				}
 			}
@@ -471,13 +474,11 @@ func assessSharedReview(ctx context.Context, x *Exec, q store.Querier, issue pro
 	if candidate == nil {
 		return protocol.Errorf(protocol.CodeStaleRevision, "observe the current review candidate before assessing applicability")
 	}
-	if p.ExpectedCandidateRevision == nil && p.ExpectedHeadSHA == "" && p.ExpectedBaseSHA == "" && p.ExpectedRequirementsDigest == "" {
-		// Preserve the existing same-candidate requirements assessment.
+	if p.ExpectedCandidateRevision == nil {
+		// The original contract accepted optional fields used by other
+		// actions. It only assesses requirements on the already reviewed pair.
 		if candidate.HeadSHA != r.HeadSHA || candidate.BaseSHA != r.BaseSHA {
 			return protocol.Errorf(protocol.CodeStaleRevision, "read the current candidate and bind the applicability assessment or arrange a focused recheck")
-		}
-		if p.ExpectedReviewRevision != nil && *p.ExpectedReviewRevision != r.Revision {
-			return protocol.Errorf(protocol.CodeStaleRevision, "the original shared review changed")
 		}
 		r.Assessment = nil
 		r.AssessedRequirementsDigest, r.AssessmentReason = candidate.RequirementsDigest, p.Reason
@@ -488,7 +489,7 @@ func assessSharedReview(ctx context.Context, x *Exec, q store.Querier, issue pro
 	if x.coordinationExecution == nil && issue.Assignee != (protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}) {
 		return protocol.Errorf(protocol.CodeForbidden, "the current named Issue owner must assess a changed review candidate")
 	}
-	if p.ExpectedReviewRevision == nil || p.ExpectedCandidateRevision == nil || !validDeliverySHA(p.ExpectedHeadSHA) ||
+	if p.ExpectedReviewRevision == nil || !validDeliverySHA(p.ExpectedHeadSHA) ||
 		!validDeliverySHA(p.ExpectedBaseSHA) || p.ExpectedRequirementsDigest == "" {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "assessment requires the review revision, candidate revision, head, base and requirements digest")
 	}
