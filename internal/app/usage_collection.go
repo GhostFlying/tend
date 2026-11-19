@@ -103,9 +103,32 @@ func UsageCollections(ctx context.Context, q store.Querier, f protocol.UsageColl
 	return out, nil
 }
 
-func usageCollectionEnabled(ctx context.Context, q store.Querier, host string) bool {
-	runtime, err := store.GetHostRuntime(ctx, q, host)
-	return err == nil && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityUsageCollection)
+func usageSourceRuntime(ctx context.Context, q store.Querier, host, run string) (protocol.RunnerRuntime, error) {
+	var runtime protocol.RunnerRuntime
+	journal, err := store.RunJournal(ctx, q, run)
+	if err != nil {
+		return runtime, err
+	}
+	current, err := store.GetHostRuntime(ctx, q, host)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return runtime, err
+	}
+	if current.Runtime.JournalID == journal {
+		return current.Runtime, nil
+	}
+	// Stop authorization fences new commands even if its physical acknowledgement
+	// has not arrived yet. Existing commands must settle before that grant.
+	var data string
+	err = q.QueryRowContext(ctx, `SELECT d.runtime_json FROM draining_runners d WHERE d.host_id=? AND d.journal_id=?
+ AND NOT EXISTS(SELECT 1 FROM runner_retirements r WHERE r.host_id=d.host_id AND r.instance_id=d.instance_id)`, host, journal).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtime, nil
+	}
+	if err != nil {
+		return runtime, err
+	}
+	err = json.Unmarshal([]byte(data), &runtime)
+	return runtime, err
 }
 
 type ControlUsageCollection struct{ Resume bool }
@@ -161,15 +184,15 @@ func (c ControlUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		}
 		return Outcome{Result: s.Collection}, nil
 	}
-	if !usageCollectionEnabled(ctx, tx.Q(), source.HostID) || source.Collection.Epoch == 0 {
+	runtime, err := usageSourceRuntime(ctx, tx.Q(), source.HostID, source.RunID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !slices.Contains(runtime.Capabilities, protocol.CapabilityUsageCollection) || source.Collection.Epoch == 0 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host collection capability and observation required")
 	}
 	if c.Resume && input.Rescan {
-		runtime, err := store.GetHostRuntime(ctx, tx.Q(), source.HostID)
-		if err != nil {
-			return Outcome{}, err
-		}
-		if runtime.Runtime.Protocol < 3 {
+		if runtime.Protocol < 3 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "full usage rescan requires runner protocol 3; legacy resume retains the saved cursor")
 		}
 	}
@@ -206,7 +229,7 @@ type ObserveUsageCollection struct{}
 
 func (ObserveUsageCollection) Operation() string { return protocol.OpRunnerUsageCollection }
 func (ObserveUsageCollection) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
-	if x.Principal.Kind != protocol.PrincipalRunner || x.Env.Target.Type != "host" || x.Env.Target.ID != x.Principal.Subject || !usageCollectionEnabled(ctx, q, x.Principal.Subject) {
+	if x.Principal.Kind != protocol.PrincipalRunner || x.Env.Target.Type != "host" || x.Env.Target.ID != x.Principal.Subject {
 		return protocol.Errorf(protocol.CodeForbidden, "negotiated host collection required")
 	}
 	var p protocol.UsageCollectionObservation
@@ -219,6 +242,13 @@ func (ObserveUsageCollection) Authorize(ctx context.Context, x *Exec, q store.Qu
 	}
 	if run.HostID != x.Principal.Subject {
 		return protocol.Errorf(protocol.CodeForbidden, "usage run belongs to another host")
+	}
+	runtime, err := usageSourceRuntime(ctx, q, run.HostID, run.RunID)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(runtime.Capabilities, protocol.CapabilityUsageCollection) {
+		return protocol.Errorf(protocol.CodeForbidden, "negotiated journal collection required")
 	}
 	return nil
 }
@@ -302,11 +332,14 @@ func (ObserveUsageCollection) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	return Outcome{Result: map[string]bool{"accepted": true}}, nil
 }
 
-func usageCollectionCommands(ctx context.Context, q store.Querier, host string) ([]protocol.UsageCollectionCommand, error) {
-	if !usageCollectionEnabled(ctx, q, host) {
+func usageCollectionCommands(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime) ([]protocol.UsageCollectionCommand, error) {
+	if !slices.Contains(runtime.Capabilities, protocol.CapabilityUsageCollection) {
 		return nil, nil
 	}
-	rows, err := q.QueryContext(ctx, `SELECT command_json FROM token_usage_collection_commands WHERE host_id=? AND status='pending' ORDER BY created_at,request_id LIMIT 64`, host)
+	rows, err := q.QueryContext(ctx, `SELECT c.command_json FROM token_usage_collection_commands c
+ JOIN token_usage_sources s ON s.source_key=c.source_key AND s.host_id=c.host_id
+ LEFT JOIN runner_journal_runs j ON j.run_id=s.run_id
+ WHERE c.host_id=? AND c.status='pending' AND COALESCE(j.journal_id,'')=? ORDER BY c.created_at,c.request_id LIMIT 64`, host, runtime.JournalID)
 	if err != nil {
 		return nil, err
 	}

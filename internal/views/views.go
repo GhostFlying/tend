@@ -634,6 +634,24 @@ func Hosts(ctx context.Context, q store.Querier) ([]protocol.HostView, error) {
 		}
 		if err == nil {
 			stamp := time.UnixMilli(rt.LastHeartbeatAt)
+			hv.InstanceID = rt.Runtime.InstanceID
+			if rt.Runtime.JournalID != "" {
+				ids, err := store.DrainingInstances(ctx, q, h.HostID)
+				if err != nil {
+					return nil, err
+				}
+				for _, id := range ids {
+					drain, err := store.GetDrainingRunner(ctx, q, h.HostID, id)
+					if err != nil {
+						return nil, err
+					}
+					runs, err := store.CountJournalRuns(ctx, q, h.HostID, drain.Runtime.JournalID)
+					if err != nil {
+						return nil, err
+					}
+					hv.DrainingRunners = append(hv.DrainingRunners, protocol.DrainingRunnerView{InstanceID: id, Protocol: drain.Runtime.Protocol, Version: drain.Runtime.Build.Version, OpenRuns: runs, LastHeartbeatAt: time.UnixMilli(drain.LastHeartbeatAt), UpgradeID: drain.UpgradeID})
+				}
+			}
 			hv.Online = &rt.Online
 			hv.LastHeartbeatAt = &stamp
 			hv.BuildVersion = rt.Runtime.Build.Version

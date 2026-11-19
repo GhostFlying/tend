@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -65,7 +67,47 @@ func (j *Journal) HistoricalRolloutThread(ctx context.Context, run string) (stri
 // ProtectRollouts prevents Tend cleanup from removing registered originals or
 // their native artifact directories, including originals inside a workspace.
 func (j *Journal) ProtectRollouts(ctx context.Context, directory string) error {
-	rows, err := j.db.QueryContext(ctx, `SELECT DISTINCT path FROM rollout_sources WHERE path<>''`)
+	return protectRollouts(ctx, j.db, directory)
+}
+
+// ProtectHostRollouts checks retained and live journals without acquiring another
+// process's writer lock or migrating a historical database.
+func (j *Journal) ProtectHostRollouts(ctx context.Context, base, directory string) error {
+	if err := j.ProtectRollouts(ctx, directory); err != nil {
+		return err
+	}
+	generations, err := os.ReadDir(filepath.Join(base, "generations"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	paths := []string{filepath.Join(base, "journal.db")}
+	for _, generation := range generations {
+		if !generation.IsDir() {
+			return errors.New("journal: unexpected generation entry")
+		}
+		paths = append(paths, filepath.Join(base, "generations", generation.Name(), "journal.db"))
+	}
+	for _, path := range paths {
+		if path == j.path {
+			continue
+		}
+		db, err := sql.Open("sqlite", sqliteFileURI(path, url.Values{"mode": {"ro"}}))
+		if err != nil {
+			return err
+		}
+		err = protectRollouts(ctx, db, directory)
+		if err = errors.Join(err, db.Close()); err != nil {
+			return fmt.Errorf("journal: check retained rollouts: %w", err)
+		}
+	}
+	return nil
+}
+
+func protectRollouts(ctx context.Context, db *sql.DB, directory string) error {
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT path FROM rollout_sources WHERE path<>''`)
 	if err != nil {
 		return err
 	}

@@ -6152,6 +6152,39 @@
       "title": "DownloadURLResponse",
       "type": "object"
     },
+    "DrainingRunnerView": {
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string"
+        },
+        "last_heartbeat_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "open_runs": {
+          "type": "integer"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "upgrade_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "protocol",
+        "open_runs",
+        "last_heartbeat_at",
+        "upgrade_id"
+      ],
+      "title": "DrainingRunnerView",
+      "type": "object"
+    },
     "EffectResult": {
       "additionalProperties": false,
       "properties": {
@@ -7912,7 +7945,16 @@
         "control_revision": {
           "type": "integer"
         },
+        "draining_runners": {
+          "items": {
+            "$ref": "#/definitions/DrainingRunnerView"
+          },
+          "type": "array"
+        },
         "host_id": {
+          "type": "string"
+        },
+        "instance_id": {
           "type": "string"
         },
         "labels": {

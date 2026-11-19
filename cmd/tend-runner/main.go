@@ -322,7 +322,9 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 	if err = resolveRolloutRoots(&cfg, home); err != nil {
 		return err
 	}
-	wsCfg := gitws.Config{ProtectPath: j.ProtectRollouts, Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
+	wsCfg := gitws.Config{ProtectPath: func(ctx context.Context, directory string) error {
+		return j.ProtectHostRollouts(ctx, baseState, directory)
+	}, Home: home, ServerURL: cfg.ServerURL, Git: cfg.Git.Bin, Env: cfg.Git.Env, Repos: repos, Profiles: profiles, Log: log}
 	var (
 		workers    harness.Workers
 		workspaces *gitws.Workspaces

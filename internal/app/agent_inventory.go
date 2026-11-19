@@ -54,6 +54,9 @@ func authorizeInventory(ctx context.Context, q store.Querier, p protocol.Princip
 	if err != nil {
 		return err
 	}
+	if current.Runtime.InstanceID != r.InstanceID {
+		return protocol.Errorf(protocol.CodeConflictPayload, "host inventory belongs to the current runner")
+	}
 	if !slices.Contains(current.Runtime.Capabilities, protocol.CapabilityAgentInventory) {
 		return protocol.Errorf(protocol.CodeForbidden, "agent inventory was not negotiated")
 	}

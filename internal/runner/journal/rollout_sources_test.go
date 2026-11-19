@@ -3,6 +3,7 @@ package journal
 import (
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -120,5 +121,34 @@ func TestRolloutMigrationPreservesVersion14NativeUsage(t *testing.T) {
 	retained, err := j.RolloutSources(t.Context(), "deployment", "run")
 	if err != nil || len(retained) != 1 || retained[0].SessionID != "session" {
 		t.Fatal(retained, err)
+	}
+}
+
+func TestRetainedGenerationProtectsRolloutsAcrossRetirement(t *testing.T) {
+	base := t.TempDir()
+	older := open(t, filepath.Join(base, "journal.db"))
+	defer older.Close()
+	state := filepath.Join(base, "generations", "next")
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	next := open(t, filepath.Join(state, "journal.db"))
+	defer next.Close()
+	dir := t.TempDir()
+	if err := older.RegisterRollout(t.Context(), "deploy", "run", protocol.RolloutPreviewSource{SessionID: "thread", Path: filepath.Join(dir, "original.jsonl")}); err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []bool{false, true} {
+		if retired {
+			if err := older.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := next.ProtectHostRollouts(t.Context(), base, dir); err == nil {
+			t.Fatal("lost predecessor protection", retired)
+		}
+		if err := next.ProtectHostRollouts(t.Context(), base, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

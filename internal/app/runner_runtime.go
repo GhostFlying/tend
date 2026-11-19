@@ -149,7 +149,8 @@ func instanceControl(ctx context.Context, q store.Querier, host string, runtime 
 			if control.Authorization != nil {
 				control.Authorization.RemainingMillis = max(0, control.Authorization.DeadlineMillis-now)
 			}
-			return control, nil
+			control.UsageCollectionCommands, err = usageCollectionCommands(ctx, q, host, &drain.Runtime)
+			return control, err
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return protocol.RunnerControl{}, err
@@ -170,7 +171,11 @@ func runnerControl(ctx context.Context, q store.Querier, host string, now int64)
 	if c.Authorization != nil {
 		c.Authorization.RemainingMillis = max(0, c.Authorization.DeadlineMillis-now)
 	}
-	c.UsageCollectionCommands, err = usageCollectionCommands(ctx, q, host)
+	primary, err := store.GetHostRuntime(ctx, q, host)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return c, err
+	}
+	c.UsageCollectionCommands, err = usageCollectionCommands(ctx, q, host, &primary.Runtime)
 	if err != nil {
 		return c, err
 	}
