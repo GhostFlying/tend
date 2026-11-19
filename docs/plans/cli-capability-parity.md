@@ -134,7 +134,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `conversation.submit_message` | `conversation send` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.withdraw_message` | `message withdraw` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `decisions.respond` | `decide` | 完整 JSON；原 request_id | Web | CLI 分发与 Envelope |
-| `hosts.maintenance` | `host maintenance` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
+| `hosts.maintenance` | `host set-maintenance`（兼容 `host maintenance`） | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `issues.assign` | `issue assign` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `issues.cancel` | `issue cancel` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `issues.close` | `issue close` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
@@ -142,7 +142,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `issues.create_task` | `issue create-task` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `issues.deadlines_cancel` | `issue deadline cancel` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `issues.deadlines_put` | `issue deadline put` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
-| `issues.dependencies` | `issue dependencies` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
+| `issues.dependencies` | `issue set-dependencies`（兼容 `issue dependencies`） | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `issues.finish_assignment` | `issue finish-assignment` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `issues.finish_cancel` | `issue finish-cancel` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `issues.followups_cancel` | `issue followup cancel` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
@@ -257,7 +257,7 @@ tend artifact show "$ARTIFACT_ID" --json
 tend archive records history message --limit 20 --after "$CURSOR" --json
 tend usage --window 7d --json
 tend doctor --json
-tend host maintenance "$HOST_ID" --data '{"mode":"maintenance"}' --dry-run
+tend host set-maintenance "$HOST_ID" --data '{"mode":"maintenance"}' --dry-run
 tend agents local reload --socket "$RUNNER_CONTROL_SOCKET" --dry-run
 ```
 

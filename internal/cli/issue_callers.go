@@ -23,7 +23,9 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 		tail = tail[1:]
 	}
 	fs := newFlags(e, "issue "+action)
-	if action == "context" {
+	if help := issueCommandHelp(action); help != "" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
+	} else if action == "context" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, commandUsage([]string{"issue", action})); fs.PrintDefaults() }
 	}
 	fs.Bool("json", true, "print the complete structured result")
