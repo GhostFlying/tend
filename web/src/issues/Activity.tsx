@@ -58,6 +58,7 @@ export function IssueActivity({
   results,
   onIssue,
   onTask,
+  onReadingMove,
   scroll,
 }: {
   issue: IssueView;
@@ -66,6 +67,7 @@ export function IssueActivity({
   results: IssueResult[];
   onIssue(id: string): void;
   onTask(id: string): void;
+  onReadingMove(): void;
   scroll: RefObject<HTMLDivElement | null>;
 }) {
   const { client, queue, conversation, live } = useServices();
@@ -269,6 +271,7 @@ export function IssueActivity({
   }, [activityGroups]);
   const beginContinuation = useCallback(
     (trigger: string, control: HTMLButtonElement, ids: string[]) => {
+      onReadingMove();
       cancelAnimationFrame(dataFrame.current);
       following.current = false;
       reading.pauseFollowing();
@@ -280,7 +283,7 @@ export function IssueActivity({
       };
       setNewItems(false);
     },
-    [reading],
+    [reading, onReadingMove],
   );
   const cancelContinuation = useCallback((trigger: string) => {
     if (pagination.current?.trigger === trigger) pagination.current = null;
@@ -478,6 +481,7 @@ export function IssueActivity({
     earlier,
   ]);
   const jump = () => {
+    onReadingMove();
     reading.followLatest();
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
     setNewItems(false);
@@ -535,6 +539,7 @@ export function IssueActivity({
             onPaginationCancel={cancelContinuation}
             onProcessSnapshot={snapshotProcessLayout}
             onProcessLayout={restoreProcessLayout}
+            onReadingMove={onReadingMove}
             scroll={scroll}
             currentIssueId={issue.issue_id}
           />
@@ -608,6 +613,7 @@ function ActivityBlock({
   onPaginationCancel,
   onProcessSnapshot,
   onProcessLayout,
+  onReadingMove,
   scroll,
   currentIssueId,
   processReads,
@@ -621,6 +627,7 @@ function ActivityBlock({
   onPaginationCancel(trigger: string): void;
   onProcessSnapshot(node: HTMLDivElement): ProcessScrollPosition | null;
   onProcessLayout(node: HTMLDivElement, position: ProcessScrollPosition): void;
+  onReadingMove(): void;
   scroll: RefObject<HTMLDivElement | null>;
 }) {
   const { client } = useServices();
@@ -855,6 +862,7 @@ function ActivityBlock({
                         type="button"
                         className={styles.textLink}
                         onClick={() => {
+                          onReadingMove();
                           triggerNode.current?.focus({ preventScroll: true });
                           triggerNode.current?.scrollIntoView({ block: "center" });
                         }}
@@ -875,6 +883,11 @@ function ActivityBlock({
                           open: traceOpen,
                           ready: !!process.value,
                           activeTool: block.process?.active_tool,
+                          latestActivity: block.process?.state
+                            ? (block.items?.findLast(
+                                (item) => item.assistant_state === "streaming",
+                              ) ?? null)
+                            : undefined,
                           toggle: () => {
                             if (!traceOpen) requestProcess();
                             setTraceOpen(!traceOpen);

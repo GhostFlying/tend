@@ -56,9 +56,10 @@ func issuePublicProcess(ctx context.Context, q store.Querier, message string, af
 			out.EndedAt = end.Int64
 		}
 	}
-	const publicTools = ` FROM background_replies r JOIN background_batches b USING(batch_id)
- WHERE b.message_id=? AND r.kind='tool_use'
+	const backgroundTools = ` FROM background_replies r JOIN background_batches b USING(batch_id)`
+	const publicToolScope = ` WHERE b.message_id=? AND r.kind='tool_use'
  AND EXISTS(SELECT 1 FROM main_turns t WHERE t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id)`
+	const publicTools = backgroundTools + publicToolScope
 	if readable {
 		var running bool
 		var toolStart sql.NullInt64
@@ -66,15 +67,23 @@ func issuePublicProcess(ctx context.Context, q store.Querier, message string, af
  SELECT message_id,created_at FROM conversation_messages WHERE reply_to=? AND kind='tool_use'
  UNION SELECT m.message_id,m.created_at FROM conversation_reply_sources s JOIN conversation_messages m ON m.message_id=s.reply_id
  WHERE s.source_id=? AND m.kind='tool_use'
- ), running(tool, updated, id) AS MATERIALIZED (
- SELECT substr(t.tool,1,128),t.updated_at,t.message_id FROM linked l JOIN conversation_tool_uses t ON t.message_id=l.id
+ ), buffered(tool, updated, id, background_seq) AS MATERIALIZED (
+ SELECT NULLIF(t.tool,''),COALESCE(t.updated_at,r.created_at),r.item_id,r.seq`+backgroundTools+`
+ LEFT JOIN conversation_tool_uses t ON t.thread_id=r.thread_id AND t.turn_id=r.turn_id AND t.item_id=r.item_id`+publicToolScope+`
+ AND b.status IN ('pending','frozen') AND COALESCE(NULLIF(t.status,''),r.status)='running'
+ ORDER BY COALESCE(t.updated_at,r.created_at) DESC,r.seq DESC LIMIT 1
+ ), running(tool, updated, id, background_seq) AS MATERIALIZED (
+ SELECT t.tool,t.updated_at,t.message_id,NULL FROM linked l JOIN conversation_tool_uses t ON t.message_id=l.id
  WHERE t.status='running'
+ UNION ALL SELECT tool,updated,id,background_seq FROM buffered
+ ), latest AS (
+ SELECT tool,background_seq FROM running ORDER BY updated DESC,background_seq IS NULL DESC,id DESC LIMIT 1
  )
  SELECT EXISTS(SELECT 1 FROM linked) OR EXISTS(SELECT 1`+publicTools+`),
- EXISTS(SELECT 1 FROM running) OR EXISTS(SELECT 1`+publicTools+`
- AND b.status IN ('pending','frozen') AND COALESCE((SELECT NULLIF(t.status,'') FROM conversation_tool_uses t
- WHERE t.thread_id=r.thread_id AND t.turn_id=r.turn_id AND t.item_id=r.item_id),r.status)='running'),
- COALESCE((SELECT tool FROM running ORDER BY updated DESC,id DESC LIMIT 1),''),
+ EXISTS(SELECT 1 FROM latest),
+ COALESCE((SELECT substr(COALESCE(tool,(SELECT CASE WHEN json_valid(r.tool_json) THEN
+  CASE WHEN json_type(r.tool_json,'$.tool')='text' THEN json_extract(r.tool_json,'$.tool') END END
+  FROM background_replies r WHERE r.seq=latest.background_seq)),1,128) FROM latest),''),
  (SELECT MIN(created_at) FROM linked)`, message, message, message, message).
 			Scan(&out.HasTools, &running, &out.ActiveTool, &toolStart)
 		if err != nil || (!start.Valid && !out.HasTools) {
