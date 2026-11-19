@@ -497,3 +497,92 @@ func TestIssueActivityReadableReadsCoalescedPublicProcessChanges(t *testing.T) {
 		t.Fatal("updated process detail failed", status, detail)
 	}
 }
+
+func TestIssueActivityReadableRefreshesBothTurnsAfterToolRebind(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	conversation := issueDetailHTTP(t, e, token, issue.IssueID).Conversation.ConversationID
+	const previous = "review-previous-turn"
+	const current = "review-corrected-turn"
+	const native = "review-native-callback"
+	ctx := t.Context()
+	now := e.clock.Now().UnixMilli()
+	record := store.ToolUseRow{
+		ThreadID: "review-thread", TurnID: "review-turn", ItemID: "review-item",
+		Tool: "tasks_read", Input: "{}", Status: "running", UpdatedAt: now,
+	}
+	event := func(tx *store.Tx, id, kind, body string) error {
+		_, err := tx.InsertEvent(ctx, store.EventRow{EventID: e.ids.New(protocol.PrefixEvent),
+			Source: "review-fixture", ObjectType: "message", ObjectID: id, Kind: kind, BodyJSON: body, CreatedAt: now})
+		return err
+	}
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		for _, id := range []string{previous, current} {
+			if _, err := tx.InsertMessage(ctx, store.MessageRow{ConversationID: conversation, MessageID: id, Author: "owner", Body: id, CreatedAt: now}); err != nil {
+				return err
+			}
+			if err := event(tx, id, "conversation.message", "{}"); err != nil {
+				return err
+			}
+			if err := event(tx, id, "conversation.message_state", `{"state":"processing"}`); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	args := map[string]string{
+		"turn_id": record.TurnID, "item_id": record.ItemID, "reply_to": previous,
+		"tool": record.Tool, "input": record.Input, "status": "running",
+	}
+	envelope := e.envelope("conversation.record_tool_use", protocol.Target{Type: "conversation"}, nil, args)
+	principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "review-harness", Thread: record.ThreadID}
+	if result, err := e.app.Execute(ctx, principal, &envelope, app.RecordToolUse{}); err != nil || result.Status != protocol.OpSucceeded {
+		t.Fatalf("actual RecordToolUse: result=%+v err=%v", result, err)
+	}
+	activity := func(since int64) protocol.IssueActivityPage {
+		t.Helper()
+		var page protocol.IssueActivityPage
+		path := fmt.Sprintf("/api/v1/issues/%s/activity?view=readable&since=%d", issue.IssueID, since)
+		if code := e.do("GET", path, token, nil, &page); code != http.StatusOK {
+			t.Fatal(code)
+		}
+		return page
+	}
+	projections := func(p protocol.IssueActivityPage) map[string]bool {
+		items := make(map[string]bool)
+		for _, entry := range p.Items {
+			if b := entry.Block; b != nil {
+				items[b.Trigger.MessageID] = b.Process != nil && b.Process.HasTools
+			}
+		}
+		return items
+	}
+	first := activity(0)
+	before := projections(first)
+	if !before[previous] || before[current] {
+		t.Fatalf("invalid precondition: %v", before)
+	}
+	bound, _, err := e.app.BindMainToolSource(ctx, native, current, "review-new-request", record)
+	if err != nil || bound != current {
+		t.Fatalf("actual BindMainToolSource: source=%q err=%v", bound, err)
+	}
+	full := projections(activity(0))
+	changed := activity(first.EventSeq)
+	delta := projections(changed)
+	if full[previous] || !full[current] || !delta[current] {
+		t.Fatalf("invalid updated source fixture: full=%v delta=%v", full, delta)
+	}
+	if old, included := delta[previous]; !included || old {
+		t.Fatalf("the prior turn must be invalidated with empty tools; delta=%v", delta)
+	}
+
+	replayed, _, err := e.app.BindMainToolSource(ctx, native, previous, "replayed-request", record)
+	if err != nil || replayed != current || len(activity(changed.EventSeq).Items) != 0 {
+		t.Fatalf("native replay changed the original binding: source=%q err=%v", replayed, err)
+	}
+}

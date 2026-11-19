@@ -587,50 +587,68 @@ function ActivityBlock({
         : "回应系统通知";
   const triggerNode = useRef<HTMLDivElement>(null);
   const [traceOpen, setTraceOpen] = useEntryState(`activity-process-open:${entry.id}`, false);
+  const [savedProcessDepth, saveProcessDepth] = useEntryState(
+    `activity-process-depth:${entry.id}`,
+    1,
+  );
   const [process, setProcess] = useState<{
     value?: ProcessDetails;
     loading: boolean;
     error?: string;
   }>({ loading: false });
-  const processVersion = useRef(0);
-  const loadedProcess = useRef<{ block: IssueTranscriptBlock; depth: number } | null>(null);
-  const requestedProcessDepth = useRef(1);
+  const pendingProcess = useRef<Promise<ProcessDetails> | null>(null);
+  const loadedProcess = useRef<ProcessDetails | null>(null);
+  const requestedProcessDepth = useRef(savedProcessDepth);
   const requestProcess = useCallback(
     (depth = requestedProcessDepth.current) => {
       if (!processReads) return;
       const wanted = Math.max(depth, requestedProcessDepth.current);
       requestedProcessDepth.current = wanted;
-      if (loadedProcess.current?.block === block && loadedProcess.current.depth >= wanted) return;
-      const revision = ++processVersion.current;
+      const loaded = loadedProcess.current;
+      if (
+        pendingProcess.current ||
+        (loaded?.source === block && (loaded.depth >= wanted || !loaded.more))
+      )
+        return;
       setProcess((state) => ({ ...(state.value ? { value: state.value } : {}), loading: true }));
       const pending = processReads.load(block, "high", wanted);
+      pendingProcess.current = pending;
       void pending.then(
         (value) => {
-          if (processVersion.current === revision) {
-            loadedProcess.current = { block, depth: value.depth };
-            requestedProcessDepth.current = value.depth;
+          if (pendingProcess.current === pending) {
+            pendingProcess.current = null;
+            loadedProcess.current = value;
             setProcess({ value, loading: false });
           }
         },
         (error: unknown) => {
-          if (processVersion.current === revision)
+          if (pendingProcess.current === pending) {
+            pendingProcess.current = null;
             setProcess((state) => ({
               ...state,
               loading: false,
               error: error instanceof Error ? error.message : String(error),
             }));
+          }
         },
       );
     },
     [block, processReads],
   );
-  const invalidateProcess = useCallback(() => {
-    processVersion.current++;
-  }, []);
+  useEffect(
+    () => () => {
+      pendingProcess.current = null;
+      loadedProcess.current = null;
+    },
+    [processReads],
+  );
   useEffect(() => {
     if (traceOpen) requestProcess();
-    return invalidateProcess;
-  }, [invalidateProcess, requestProcess, traceOpen]);
+  }, [process.value, requestProcess, traceOpen]);
+  useEffect(() => {
+    if (process.value && process.value.depth > savedProcessDepth)
+      saveProcessDepth(process.value.depth);
+  }, [process.value, savedProcessDepth, saveProcessDepth]);
   useLayoutEffect(() => {
     const node = scroll.current;
     if (node && traceOpen && !process.loading && (process.value || process.error))

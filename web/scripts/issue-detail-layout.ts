@@ -659,6 +659,7 @@ try {
     const processPath = `/api/v1/conversation/blocks/${block.trigger.message_id}`;
     let detailRequests = 0;
     let changedAt = 0;
+    let currentProse = prose;
     let starting = () => {};
     let release = () => {};
     const started = new Promise<void>((resolve) => {
@@ -685,7 +686,15 @@ try {
           json: {
             items: query.has("since")
               ? Number(query.get("since")) < changedAt
-                ? [{ ...row, block: readableBlock }]
+                ? [
+                    {
+                      ...row,
+                      block: {
+                        ...readableBlock,
+                        items: [{ ...readableBlock.items[0]!, body: currentProse }],
+                      },
+                    },
+                  ]
                 : []
               : [{ ...row, block: readableBlock }, ...trailing],
             more: false,
@@ -696,13 +705,14 @@ try {
       },
     );
     await page.route(
-      (u) => u.pathname === processPath,
+      (u) => u.pathname === processPath && !u.searchParams.has("conversation_id"),
       async (route) => {
         detailRequests++;
         starting();
         await releaseDetail;
         const second = new URL(route.request().url()).searchParams.has("process_after");
-        if (second && !heldSecond) {
+        const priorSecond = second && !heldSecond;
+        if (priorSecond) {
           heldSecond = true;
           signalSecond();
           await secondGate;
@@ -713,7 +723,13 @@ try {
             process: {
               ...readableBlock.process,
               items: second
-                ? [{ ...tool, message_id: "readable-second-tool", seq: processCursor + 1 }]
+                ? [
+                    {
+                      ...tool,
+                      message_id: priorSecond ? "readable-second-tool" : "readable-renewed-tool",
+                      seq: processCursor + 1,
+                    },
+                  ]
                 : firstTools,
               more: !second,
               ...(second ? {} : { next: processCursor }),
@@ -744,22 +760,47 @@ try {
       await discussion.getByText(prose, { exact: true }).waitFor();
       await discussion.getByRole("button", { name: "继续读取公开过程" }).click();
       await secondStarted;
-      const refreshedFirst = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return url.pathname === processPath && !url.searchParams.has("process_after");
-      });
-      changedAt = seq + 1;
-      publish("conversation.process_changed", {
-        ...block.trigger,
-        conversation_id: issue.conversation!.conversation_id!,
-      });
-      await refreshedFirst;
+      for (let update = 1; update <= 3; update++) {
+        currentProse = `继续流式回复 ${update}`;
+        changedAt = seq + 1;
+        publish("conversation.message", {
+          ...readableBlock.items[0]!,
+          body: currentProse,
+          conversation_id: issue.conversation!.conversation_id!,
+        });
+        await discussion.getByText(currentProse, { exact: true }).waitFor();
+        assert.equal(detailRequests, 2, "the disclosed page must finish through prose updates");
+      }
       releaseSecond();
-      await discussion.locator('[data-tool-item="readable-second-tool"]').waitFor();
+      const renewed = discussion.locator('[data-tool-item="readable-renewed-tool"]');
+      await renewed.waitFor();
+      assert.equal(detailRequests, 4, "one refresh must load through the disclosed page");
       assert.equal(await trigger.getAttribute("aria-expanded"), "true");
       await discussion.screenshot({ path: join(output, "issue-readable-process.png") });
+
+      const taskPath = `/tasks/${results.items![0]!.task_id}`;
+      const issuePath = `/issues/${issue.issue_id}`;
+      const documentStart = await page.evaluate(() => performance.timeOrigin);
+      await navigate(page, taskPath);
+      await page.getByRole("region", { name: "任务详情", exact: true }).waitFor();
+      await discussion.waitFor({ state: "detached" });
+      await page.goBack();
+      await page.waitForURL((url) => url.pathname === issuePath);
+      await renewed.waitFor();
+      assert.equal(detailRequests, 6, "returning must restore both pages on the earlier entry");
+      assert.equal(await trigger.getAttribute("aria-expanded"), "true");
+      assert.equal(await page.evaluate(() => performance.timeOrigin), documentStart);
+
+      await navigate(page, taskPath);
+      await discussion.waitFor({ state: "detached" });
+      await navigate(page, issuePath);
+      await trigger.waitFor();
+      assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+      await trigger.click();
+      await discussion.getByRole("button", { name: "继续读取公开过程" }).waitFor();
+      assert.equal(detailRequests, 7, "a new navigation entry starts with only the first page");
       console.log(
-        "PASS readable activity detail reuse, scroll anchor and in-flight page retention",
+        "PASS readable detail reuse, anchor, streamed updates, and navigation page depth",
       );
     } finally {
       releaseSecond();

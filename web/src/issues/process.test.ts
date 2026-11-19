@@ -91,6 +91,33 @@ test("a revised turn reloads all disclosed pages and shares the depth read", asy
   reader.close();
 });
 
+test("revised turns share a pending read and can refresh the latest revision after it settles", async () => {
+  const turn = block("streaming");
+  const revisions = Array.from({ length: 4 }, () => ({ ...turn, items: [] }));
+  const requests: { signal?: AbortSignal; finish(value: IssueTranscriptBlock): void }[] = [];
+  const reader = new IssueProcessReads({
+    get: <T>(_path: string, signal?: AbortSignal) =>
+      new Promise<T>((resolve) =>
+        requests.push({ ...(signal ? { signal } : {}), finish: (value) => resolve(value as T) }),
+      ),
+  });
+
+  const first = reader.load(turn, "low");
+  for (const revision of revisions) expect(reader.load(revision)).toBe(first);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.signal?.aborted).toBe(false);
+  requests[0]!.finish(turn);
+  expect((await first).source).toBe(turn);
+
+  const latest = revisions.at(-1)!;
+  const refresh = reader.load(latest);
+  expect(requests).toHaveLength(2);
+  requests[1]!.finish(latest);
+  expect((await refresh).source).toBe(latest);
+  expect(reader.load(latest)).toBe(refresh);
+  reader.close();
+});
+
 test("public process pages order records whose transcript callbacks arrived early", async () => {
   const turn = block("ordered");
   const tools = Array.from({ length: 3 }, (_, i) => ({
