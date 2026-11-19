@@ -217,6 +217,7 @@ export function groupActivityEvents(rows: readonly IssueActivityEntry[]): IssueA
     const previous = group?.at(-1);
     const background = (entry: IssueActivityEntry) =>
       !entry.block &&
+      !entry.admission &&
       !entry.artifact_id &&
       ["issue.created", "issue.updated", "issue.progress_updated", "issue.status_changed"].includes(
         entry.kind,

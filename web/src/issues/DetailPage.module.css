@@ -574,10 +574,15 @@
   color: var(--danger);
 }
 .milestone,
+.admission,
 .eventGroup {
   position: relative;
   color: var(--label-3);
   font-size: var(--text-caption);
+}
+.admission > summary {
+  cursor: pointer;
+  padding-block: var(--space-2);
 }
 .eventGroup summary,
 .runList summary {

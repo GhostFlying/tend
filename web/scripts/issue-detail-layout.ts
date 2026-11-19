@@ -2310,14 +2310,18 @@ try {
   }
   // S11 hierarchy uses the same real read, pagination and tool controls as other scenarios.
   for (const width of [1440, 390]) {
+    const touch = width === 390;
     const original = structuredClone(activity.items);
     const originalPlan = { ...issue.plan };
     const originalProgress = issue.progress!.summary;
     const context = await browser.newContext({
       viewport: { width, height: 844 },
+      hasTouch: touch,
       serviceWorkers: "block",
     });
     const page = await context.newPage();
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     try {
       issue.plan.title = "创建 多轮故事：手机布局从需求澄清到独立验收";
       issue.plan.intent = "使用独立沙盒数据验证真实界面与交互";
@@ -2363,6 +2367,45 @@ try {
             output: "原始输出",
           },
         })),
+      );
+      activity.items!.push(
+        {
+          id: "main-admits-issue",
+          position: 996,
+          kind: "issue.status_changed",
+          created_at: now - 4,
+          author: "主 Agent",
+          title: "将工作状态从「待安排」移到「待推进」",
+          issue_id: issue.issue_id,
+          admission: true,
+        },
+        {
+          id: "pine-claims-issue",
+          position: 997,
+          kind: "issue.manager_claimed",
+          created_at: now - 3,
+          author: "Pine",
+          title: "Pine 已接手",
+          issue_id: issue.issue_id,
+        },
+        {
+          id: "manager-start-failed",
+          position: 998,
+          kind: "run.failed",
+          created_at: now - 2,
+          author: "主 Agent",
+          title: "启动失败",
+          issue_id: issue.issue_id,
+        },
+        {
+          id: "manager-reassigned",
+          position: 999,
+          kind: "issue.assigned",
+          created_at: now - 1,
+          author: "主 Agent",
+          title: "变更了 Issue 负责人",
+          issue_id: issue.issue_id,
+        },
       );
       activity.items!.push(
         ...["更新了当前进展", "更新了工作状态"].map((title, index) => ({
@@ -2424,6 +2467,25 @@ try {
       });
       await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
       const detail = page.getByRole("region", { name: "Issue 详情", exact: true });
+      assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
+      const admission = detail.locator('[data-scroll-id="main-admits-issue"]');
+      const transition = admission.getByText("将工作状态从「待安排」移到「待推进」", {
+        exact: true,
+      });
+      await detail.getByText("Pine 已接手", { exact: true }).waitFor();
+      await detail.getByText("启动失败", { exact: true }).waitFor();
+      await detail.getByText("变更了 Issue 负责人", { exact: true }).waitFor();
+      assert.equal(await admission.getAttribute("open"), null);
+      assert.equal(await transition.isVisible(), false);
+      assert.equal(await admission.getByText("主 Agent", { exact: true }).isVisible(), false);
+      const admissionSummary = admission.locator("summary", { hasText: "接收与投递记录" });
+      if (touch) await admissionSummary.tap();
+      else await admissionSummary.press("Enter");
+      await transition.waitFor();
+      await admission.getByText("主 Agent", { exact: true }).waitFor();
+      await admission.screenshot({ path: join(output, `admission-expanded-${width}.png`) });
+      await admissionSummary.click();
+      console.log(`PASS admission, claim and failure records ${width}`);
       const trigger = detail.locator("[data-trace-trigger]");
       await trigger.waitFor();
       assert.equal(await trigger.count(), 1, "single status-row trace trigger");
@@ -2643,11 +2705,11 @@ try {
       await page.screenshot({ path: join(output, `issue-alignment-${width}.png`) });
       assert.equal(await trigger.getAttribute("aria-expanded"), "false");
       assert.equal(await detail.locator("[data-tool-item]:visible").count(), 0);
-      assert.equal(await detail.getByRole("button", { name: "当前 Issue 自引用" }).count(), 0);
+      assert.equal(await reply.getByText("当前 Issue 自引用").count(), 0);
       const tags = detail.locator('[data-issue-context="true"]').first();
       const tagBounds = await tags.boundingBox();
       const associationBounds = await tags
-        .getByRole("button", { name: "修改 Issue 关联", exact: true })
+        .getByRole("button", { name: "消息操作", exact: true })
         .boundingBox();
       assert(tagBounds && associationBounds);
       assert(
@@ -2766,45 +2828,70 @@ try {
         .waitFor({ state: "hidden" });
       console.log(`PASS continuous empty → running tool → public reply ${width}`);
       await emptyProcess.click();
-      block.items = publicReplies;
+      const crossReply: IssueConversationItem = {
+        ...publicReplies![0]!,
+        message_id: "reply-cross-issue",
+        seq: 99,
+        body: "第二条普通回复，关联了另一条 Issue。",
+        associations: {
+          ...publicReplies![0]!.associations!,
+          message_id: "reply-cross-issue",
+          items: [
+            {
+              issue_id: child.issue_id,
+              title: child.plan.title,
+              source: "owner",
+              owner_locked: false,
+            },
+          ],
+        },
+      };
+      block.items = [...publicReplies!, crossReply];
       delete block.process;
       if (previousState === undefined) delete block.trigger.state;
       else block.trigger.state = previousState;
       publish();
       const associationItem = block.items![0]!;
-      await page.route("**/api/v1/messages/*/associations?*", (route) =>
-        route.fulfill({ json: associationItem.associations }),
-      );
-      const associationControl = detail
-        .locator(`[data-scroll-id="${associationItem.message_id}"]`)
-        .getByRole("button", { name: "修改 Issue 关联", exact: true });
-      await associationControl.scrollIntoViewIfNeeded();
-      assert.match(await associationControl.innerText(), /关联 Issue/);
-      const associationGeometry = await associationControl.evaluate((node) => {
-        const icon = node.querySelector("svg")!.getBoundingClientRect();
-        const button = node.getBoundingClientRect();
-        return {
-          icon: { width: icon.width, height: icon.height },
-          button: { width: button.width, height: button.height },
-          display: getComputedStyle(node).display,
-          direction: getComputedStyle(node).flexDirection,
-          alignment: getComputedStyle(node).alignItems,
-        };
+      const crossRow = detail.locator('[data-scroll-id="reply-cross-issue"]');
+      await crossRow.getByText(crossReply.body!, { exact: true }).waitFor();
+      const link = crossRow.getByRole("link", { name: child.plan.title, exact: true });
+      assert.equal(await link.getAttribute("href"), `/issues/${child.issue_id}`);
+      for (const row of [reply, crossRow]) {
+        assert.equal(
+          await row.getByRole("button", { name: "修改 Issue 关联", exact: true }).count(),
+          0,
+        );
+        const trigger = row.getByRole("button", { name: "消息操作", exact: true });
+        assert.equal(await trigger.getAttribute("aria-haspopup"), "menu");
+      }
+      let associationReads = 0;
+      await page.route("**/api/v1/messages/*/associations?*", (route) => {
+        associationReads++;
+        return route.fulfill({
+          json:
+            associationReads === 1
+              ? associationItem.associations
+              : {
+                  ...associationItem.associations,
+                  disposition: "unassigned",
+                  items: [],
+                  revision: 2,
+                  owner_locked: true,
+                },
+        });
       });
-      await writeFile(
-        join(output, `association-geometry-${width}.json`),
-        JSON.stringify(associationGeometry, null, 2),
-      );
-      assert.equal(associationGeometry.icon.width, 14);
-      assert.equal(associationGeometry.icon.height, 14);
-      assert(associationGeometry.button.height <= 36, "association action remains compact");
-      assert(associationGeometry.button.width < 140, "association action is horizontal");
-      assert(["flex", "inline-flex"].includes(associationGeometry.display));
-      assert.equal(associationGeometry.direction, "row");
-      assert.equal(associationGeometry.alignment, "center");
+      const associationControl = reply.getByRole("button", { name: "消息操作", exact: true });
       await associationControl.scrollIntoViewIfNeeded();
       await page.screenshot({ path: join(output, `association-trigger-${width}.png`) });
-      await associationControl.click();
+      if (touch) await associationControl.tap();
+      else await associationControl.press("ArrowDown");
+      const menuEntry = reply.getByRole("menuitem", { name: "修改 Issue 关联", exact: true });
+      await menuEntry.waitFor();
+      if (touch) await menuEntry.tap();
+      else {
+        assert(await menuEntry.evaluate((node) => node === document.activeElement));
+        await page.keyboard.press("Enter");
+      }
       const associationDialog = page.getByRole("dialog", { name: "修改 Issue 关联", exact: true });
       await associationDialog.getByText(/你保存的归属会锁定/).waitFor();
       await associationDialog.getByRole("checkbox", { name: "明确不属于任何 Issue" }).check();
@@ -2818,7 +2905,14 @@ try {
       assert.equal(correction.target.id, associationItem.message_id);
       assert.equal(correction.expected_control_revision, 1);
       assert.equal((correction.payload as { disposition: string }).disposition, "unassigned");
+      assert.equal(associationReads, 2, "saving refreshes the recorded associations");
       await page.unroute("**/api/v1/messages/*/associations?*");
+      if (touch) await link.tap();
+      else await link.press("Enter");
+      await page.waitForURL((url) => url.pathname === `/issues/${child.issue_id}`);
+      await page.getByRole("heading", { name: child.plan.title, exact: true }).waitFor();
+      await page.goBack();
+      await detail.getByText("Pine 已接手", { exact: true }).waitFor();
       block.items = savedTools;
       publish();
       console.log(`PASS public process and explicit association ${width}`);
@@ -3065,6 +3159,17 @@ try {
       await page.waitForURL((url) => url.pathname === "/diagnostics");
       assert.equal(new URL(page.url()).searchParams.get("issue"), issue.issue_id);
       assert.equal(new URL(page.url()).searchParams.get("tab"), "events");
+      assert.deepEqual(pageErrors, []);
+      await page.route("**/api/v1/conversation/transcript?*", (route) =>
+        route.fulfill({
+          json: { blocks: [{ ...block, items: [associationItem, crossReply] }], more: false },
+        }),
+      );
+      await navigate(page, "/diagnostics/main");
+      await page
+        .locator('[data-scroll-id="reply-cross-issue"]')
+        .getByRole("button", { name: "修改 Issue 关联", exact: true })
+        .waitFor();
       console.log(
         `PASS S11 hierarchy ${width}: aligned full-width discussion, background disclosure, scoped diagnostics, collapsed trace and stable event history`,
       );

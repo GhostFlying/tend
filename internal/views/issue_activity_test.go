@@ -2,7 +2,10 @@ package views
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 func TestIssueActivityAuthor(t *testing.T) {
@@ -46,7 +49,13 @@ func TestIssueActivityAuthor(t *testing.T) {
 		{"runner", `{"kind":"runner","subject":"host"}`, "host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := issueActivityAuthor(t.Context(), db, tc.actor, 20)
+			var actor protocol.Principal
+			if tc.actor != "" {
+				if err := json.Unmarshal([]byte(tc.actor), &actor); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := issueActivityAuthor(t.Context(), db, actor, 20)
 			if err != nil || got != tc.want {
 				t.Fatalf("author=%q, err=%v, want %q", got, err, tc.want)
 			}

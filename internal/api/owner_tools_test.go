@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -115,21 +116,44 @@ func TestMainOwnerUsesRealOwnerCommandsAndRetainsActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, _ := json.Marshal(protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo, Owner: &protocol.IssueOwnerRequest{CategoryID: "planner", Reason: "Explicit immediate execution"}})
-	response, err = ownerToolInvoke(t, e, protocol.OwnerToolCall{Actor: call.Actor, ExecutionID: call.ExecutionID}, "issues.set_status", protocol.OwnerToolArguments{EffectSeq: 2, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: status})
-	if err != nil {
-		t.Fatal(response, err)
-	}
-	if err := json.Unmarshal(response.Operation.Result, &issue); err != nil {
-		t.Fatal(err)
+	for index, workStatus := range []protocol.IssueWorkStatus{protocol.IssueTodo, protocol.IssueInReview, protocol.IssueTodo} {
+		payload := protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: workStatus}
+		if index == 0 {
+			payload.Owner = &protocol.IssueOwnerRequest{CategoryID: "planner", Reason: "Explicit immediate execution"}
+		}
+		status, _ := json.Marshal(payload)
+		response, err = ownerToolInvoke(t, e, protocol.OwnerToolCall{Actor: call.Actor, ExecutionID: call.ExecutionID}, "issues.set_status", protocol.OwnerToolArguments{EffectSeq: int64(index) + 2, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: status})
+		if err != nil || response.Operation == nil || response.Operation.Error != nil {
+			t.Fatal(response, err)
+		}
+		if err := json.Unmarshal(response.Operation.Result, &issue); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cancel, _ := json.Marshal(protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner requests cancellation"})
-	response, err = ownerToolInvoke(t, e, protocol.OwnerToolCall{Actor: call.Actor, ExecutionID: call.ExecutionID}, "issues.cancel", protocol.OwnerToolArguments{EffectSeq: 3, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: cancel})
+	response, err = ownerToolInvoke(t, e, protocol.OwnerToolCall{Actor: call.Actor, ExecutionID: call.ExecutionID}, "issues.cancel", protocol.OwnerToolArguments{EffectSeq: 5, Target: protocol.Target{Type: "issue", ID: issue.IssueID}, ExpectedControlRevision: &issue.Revision, Payload: cancel})
 	if err != nil {
 		t.Fatal(response, err)
 	}
 	if err := json.Unmarshal(response.Operation.Result, &issue); err != nil || issue.State != protocol.IssueCancelled {
 		t.Fatal(issue, err)
+	}
+	var activity protocol.IssueActivityPage
+	token := e.login(protocol.ScopeOwner)
+	if status := e.do("GET", "/api/v1/issues/"+issue.IssueID+"/activity", token, nil, &activity); status != http.StatusOK {
+		t.Fatal(status)
+	}
+	var statusEvents []protocol.IssueActivityEntry
+	for _, entry := range activity.Items {
+		if entry.Kind == "issue.status_changed" {
+			statusEvents = append(statusEvents, entry)
+		}
+	}
+	if len(statusEvents) != 3 || !statusEvents[0].Admission || statusEvents[1].Admission || statusEvents[2].Admission {
+		t.Fatalf("only the backlog to todo transition should be admission: %+v", statusEvents)
+	}
+	if first := statusEvents[0]; first.Author != "主 Agent" || first.Title != "将工作状态从「待安排」移到「待推进」" {
+		t.Fatalf("admission lost its actor or transition: %+v", first)
 	}
 }
 

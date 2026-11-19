@@ -359,10 +359,16 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
 				}
 			}
 		} else {
-			var body, actor string
+			var body, rawActor string
 			var revision int64
-			if err := q.QueryRowContext(ctx, `SELECT body_json,COALESCE(actor_json,''),COALESCE(object_version,0) FROM events WHERE event_seq=?`, r.seq).Scan(&body, &actor, &revision); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT body_json,COALESCE(actor_json,''),COALESCE(object_version,0) FROM events WHERE event_seq=?`, r.seq).Scan(&body, &rawActor, &revision); err != nil {
 				return out, err
+			}
+			var actor protocol.Principal
+			if rawActor != "" {
+				if err := json.Unmarshal([]byte(rawActor), &actor); err != nil {
+					return out, err
+				}
 			}
 			entry.Author, err = issueActivityAuthor(ctx, q, actor, r.at)
 			if err != nil {
@@ -431,6 +437,16 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
 						entry.Title = "关闭了 Issue"
 					case "cancelled":
 						entry.Title = "取消了 Issue"
+					case "active":
+						if actor.Kind == protocol.PrincipalMainAgent {
+							entry.Admission, err = mainIssueAdmission(ctx, q, r.id, revision)
+							if err != nil {
+								return out, err
+							}
+							if entry.Admission {
+								entry.Title = "将工作状态从「待安排」移到「待推进」"
+							}
+						}
 					}
 				}
 				if r.id == issue.IssueID {
@@ -539,13 +555,33 @@ func recoveryActivityTitle(kind string) string {
 
 // Attribution comes from the immutable request principal, not the current Issue
 // assignee. Frozen selections keep old activity correct after a handoff.
-func issueActivityAuthor(ctx context.Context, q store.Querier, raw string, at int64) (string, error) {
-	var actor protocol.Principal
-	if raw != "" {
-		if err := json.Unmarshal([]byte(raw), &actor); err != nil {
-			return "", err
-		}
+// Match only admission, using the original control revisions even after later moves.
+func mainIssueAdmission(ctx context.Context, q store.Querier, id string, revision int64) (bool, error) {
+	var beforeJSON, afterJSON string
+	err := q.QueryRowContext(ctx, `SELECT json_extract(prev.snapshot_json,'$.control'),json_extract(cur.snapshot_json,'$.control')
+ FROM issue_control_revisions cur JOIN issue_control_revisions prev
+ ON prev.issue_id=cur.issue_id AND prev.revision=cur.revision-1
+ WHERE cur.issue_id=? AND cur.revision=?`, id, revision).Scan(&beforeJSON, &afterJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
+	if err != nil {
+		return false, fmt.Errorf("views: read issue admission revisions: %w", err)
+	}
+	var before, after protocol.IssueControl
+	if err := json.Unmarshal([]byte(beforeJSON), &before); err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal([]byte(afterJSON), &after); err != nil {
+		return false, err
+	}
+	return before.WorkStatus == protocol.IssueBacklog && after.WorkStatus == protocol.IssueTodo &&
+		before.State == protocol.IssueActive && after.State == protocol.IssueActive &&
+		before.Assignee == after.Assignee && before.AssignmentEpoch == after.AssignmentEpoch &&
+		before.AssignmentState == after.AssignmentState, nil
+}
+
+func issueActivityAuthor(ctx context.Context, q store.Querier, actor protocol.Principal, at int64) (string, error) {
 	switch actor.Kind {
 	case protocol.PrincipalOwner:
 		return "你", nil

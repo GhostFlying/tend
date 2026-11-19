@@ -65,6 +65,7 @@ type IssueActivityEntry struct {
 	TaskID     string                `json:"task_id,omitempty"`
 	ArtifactID string                `json:"artifact_id,omitempty"`
 	Block      *IssueTranscriptBlock `json:"block,omitempty"`
+	Admission  bool                  `json:"admission,omitempty"`
 }
 
 type IssueActivityPage struct {

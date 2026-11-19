@@ -8,8 +8,10 @@ import type {
   MessageProcessingState,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
+import { Link } from "../app/router.ts";
 import { useDurableOp } from "../app/useDurableOp.ts";
-import { Tag, ExternalLink } from "../shell/icons.tsx";
+import { Tag, ExternalLink, More } from "../shell/icons.tsx";
+import { Menu } from "../ui/Menu.tsx";
 import styles from "./Agents.module.css";
 
 export function MessageTags({
@@ -117,6 +119,11 @@ export function MessageTags({
   };
   const links = (value?.items ?? []).filter((link) => link.issue_id !== currentIssueId);
   const processing = groupProcessing === undefined ? value?.processing : groupProcessing;
+  const editAssociations = () => {
+    setError("");
+    setEditRevision(null);
+    setOpen(true);
+  };
   return (
     <>
       <div className={styles.tags} data-issue-context={!!currentIssueId}>
@@ -160,42 +167,73 @@ export function MessageTags({
             )}
           </span>
         )}
-        {value?.disposition === "unassigned" && <span className={styles.tag}>无 Issue</span>}
-        {(!value || value.disposition === "pending") &&
-          (item.author === "owner" || !!processing) && (
-            <span className={styles.tag}>关联处理中</span>
-          )}
-        {value?.disposition === "linked" && !value.items?.length && (
-          <span className={styles.tag}>历史分类</span>
+        {!currentIssueId && (
+          <>
+            {value?.disposition === "unassigned" && <span className={styles.tag}>无 Issue</span>}
+            {(!value || value.disposition === "pending") &&
+              (item.author === "owner" || !!processing) && (
+                <span className={styles.tag}>关联处理中</span>
+              )}
+            {value?.disposition === "linked" && !value.items?.length && (
+              <span className={styles.tag}>历史分类</span>
+            )}
+          </>
         )}
-        {(expanded ? links : links.slice(0, 2)).map((link) => (
-          <button
-            key={link.issue_id}
-            className={styles.tag}
-            title={`${link.title} · ${link.source === "owner" ? "用户关联" : "Agent / 明确来源关联"}`}
-            onClick={() => openIssue(link.issue_id)}
-          >
-            <Tag />
-            <span>{link.title}</span>
-          </button>
-        ))}
+        {(expanded ? links : links.slice(0, 2)).map((link) => {
+          const title = `${link.title} · ${link.source === "owner" ? "用户关联" : "Agent / 明确来源关联"}`;
+          const content = (
+            <>
+              <Tag />
+              <span>{link.title}</span>
+            </>
+          );
+          return currentIssueId ? (
+            <Link
+              key={link.issue_id}
+              className={styles.tag}
+              title={title}
+              to={{ page: "issue", id: link.issue_id }}
+            >
+              {content}
+            </Link>
+          ) : (
+            <button
+              key={link.issue_id}
+              className={styles.tag}
+              title={title}
+              onClick={() => openIssue(link.issue_id)}
+            >
+              {content}
+            </button>
+          );
+        })}
         {links.length > 2 && (
           <button className={styles.tag} onClick={() => setExpanded(!expanded)}>
             {expanded ? "收起" : `+${links.length - 2}`}
           </button>
         )}
-        <button
-          className={styles.menu}
-          title="修改 Issue 关联"
-          aria-label="修改 Issue 关联"
-          onClick={() => {
-            setError("");
-            setEditRevision(null);
-            setOpen(true);
-          }}
-        >
-          <Tag /> 关联 Issue
-        </button>
+        {currentIssueId ? (
+          <Menu
+            label="消息操作"
+            align="end"
+            className={styles.issueMenu}
+            variant="ghost"
+            size="s"
+            icon
+            items={[{ id: "associate", label: "修改 Issue 关联", onSelect: editAssociations }]}
+          >
+            <More />
+          </Menu>
+        ) : (
+          <button
+            className={styles.menu}
+            title="修改 Issue 关联"
+            aria-label="修改 Issue 关联"
+            onClick={editAssociations}
+          >
+            <Tag /> 关联 Issue
+          </button>
+        )}
         {item.return_link && (
           <button
             className={styles.returnLink}

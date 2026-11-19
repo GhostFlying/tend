@@ -1,9 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentPropsWithoutRef } from "react";
 import type { IssueConversationItem, MessagingReceipts } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { DeliveryReceipt } from "../messaging/Messaging.tsx";
 import { useStore } from "../state/store.ts";
 import { WorkItemRead } from "../workitems/live.ts";
+
+export function ReceiptDetails({ children, ...props }: ComponentPropsWithoutRef<"details">) {
+  return (
+    <details {...props}>
+      <summary>接收与投递记录</summary>
+      {children}
+    </details>
+  );
+}
 
 export function MessageReceipts({ item }: { item: IssueConversationItem }) {
   const { client } = useServices();
@@ -16,8 +25,7 @@ export function MessageReceipts({ item }: { item: IssueConversationItem }) {
     return () => read.close();
   }, [open, read, item.message_id, item.state]);
   return (
-    <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>接收与投递记录</summary>
+    <ReceiptDetails onToggle={(event) => setOpen(event.currentTarget.open)}>
       {open && (
         <>
           {error && (
@@ -59,6 +67,6 @@ export function MessageReceipts({ item }: { item: IssueConversationItem }) {
           )}
         </>
       )}
-    </details>
+    </ReceiptDetails>
   );
 }
