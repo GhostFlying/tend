@@ -18,7 +18,7 @@ const hostFileLocks = true
 // Keep lock files in place. Unlinking after unlock could give a waiter and a
 // new arrival different inodes for the same physical resource.
 func lockHostResource(ctx context.Context, home, key string) (func(), error) {
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	dir := filepath.Join(home, "locks", "workspaces")
